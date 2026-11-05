@@ -258,4 +258,5 @@ opt-level = 1
 opt-level = 3
 
 [profile.release]
+lto = "fat"
 debug = "line-tables-only"
