@@ -305,14 +305,13 @@ pub fn frame_presented(sample: &PresentSample) -> Result<Presented, Error> {
         s.hold.store(o.hold, Ordering::Relaxed);
         s.cap.store(o.cap, Ordering::Relaxed);
     }
-    let hold = u32::try_from(s.hold.load(Ordering::Relaxed)).unwrap_or(0);
     let limits = match s
         .limits
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_mut()
     {
-        Some(l) => l.tick(hold)?,
+        Some(l) => l.tick()?,
         None => Vec::new(),
     };
     Ok(Presented { outcome, limits })

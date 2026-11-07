@@ -28,8 +28,9 @@ pub use catalog::{Catalog, FamilyFrom, Resolved};
 pub use evidence::{Evidence, Fact};
 pub use facts::{Match, TitleFacts};
 pub use hooks::{
-    BuildHooks, Need, PaceProfile, Pacing, PresentInterval, RuntimeHooks, Seed, ShaderRole,
-    ShaderStage, ShaderView, Upscaler,
+    BuildHooks, LimitKind, LimitRow, LimitRule, LimitSite, Need, PaceProfile, Pacing,
+    PresentInterval, ReflectLayout, ReflectedLimit, RuntimeHooks, Seed, ShaderRole, ShaderStage,
+    ShaderView, Upscaler,
 };
 
 pub use nxb_model::TitleId;

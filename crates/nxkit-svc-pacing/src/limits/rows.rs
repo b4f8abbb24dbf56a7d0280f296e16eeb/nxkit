@@ -1,10 +1,11 @@
 //! The rows of frame limits that the host writes: one value in the game's memory each.
 //!
-//! A row names a value of an engine's frame limiter, and how it holds the target frame rate. The host writes the wanted
-//! value each frame that the current one differs, because the game may set it again (Unity sets 30 when it enters the
-//! field). A value that is not in the range of a frame rate is left alone. It is not set yet.
+//! A row names a value of a game's frame limiter, and how it holds the target frame rate. The title module gives the rows
+//! as data. The host writes the wanted value each frame that the current one differs, because the game may set it again.
+//! A value that is not in the range of a frame rate is left alone. It is not set yet.
 //!
-//! Source: the `lock_t` rows and the tick loop of `dm/host/hle_fpslock.c` of nxnative, read on 2026-11-07 at `88c7e03f`.
+//! Source: the tick loop of `dm/host/hle_fpslock.c` of nxnative, read on 2026-11-07 at `88c7e03f`. The value kinds and the
+//! ranges are nxnative's. The rows are not, they are in the title modules.
 
 use nxkit_abi::guest::{self, Fault};
 
@@ -36,13 +37,29 @@ pub enum Kind {
     ModeU32,
     /// A double of the frame rate. `copies` of them follow each other.
     FpsF64,
+    /// An unsigned int of the present interval in vsyncs minus one, 0 or 1.
+    IntervalMinusOneU32,
+    /// A word that the game presets and the host replaces, at any target. Written `to` when it holds `from`.
+    PinU32 {
+        /// The value that the game presets.
+        from: u32,
+        /// The value that the host writes.
+        to: u32,
+    },
+}
+
+impl Kind {
+    /// Whether the value depends on the target. A pinned word does not, so it is written while the game's limit stays.
+    pub fn needs_target(self) -> bool {
+        !matches!(self, Self::PinU32 { .. })
+    }
 }
 
 /// A frame limit in the memory of the game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     /// What it is, for the log.
-    pub what: String,
+    pub what: &'static str,
     /// The offset in the main module of a pointer to the object. 0 when the field sits in the module itself.
     pub ptr_off: u64,
     /// The offset of the field in the object or the module.
@@ -57,9 +74,9 @@ pub struct Row {
 
 impl Row {
     /// A row.
-    pub fn new(what: impl Into<String>, ptr_off: u64, field: u64, kind: Kind, copies: u32) -> Self {
+    pub fn new(what: &'static str, ptr_off: u64, field: u64, kind: Kind, copies: u32) -> Self {
         Self {
-            what: what.into(),
+            what,
             ptr_off,
             field,
             kind,
@@ -150,14 +167,40 @@ pub fn change32(kind: Kind, target: u32, cur: u32) -> Option<(u32, String, Strin
             let unit = if fps { "fps" } else { "vsyncs" };
             Some((want, cur.to_string(), format!("{want} {unit}")))
         }
+        Kind::IntervalMinusOneU32 => {
+            let want = if target > 60 { 0 } else { 60 / target - 1 };
+            if cur == want || cur > 1 {
+                return None;
+            }
+            Some((want, cur.to_string(), format!("{want} ({target} fps)")))
+        }
+        Kind::PinU32 { from, to } => (cur == from && cur != to)
+            .then(|| (to, format!("{cur:#x}"), format!("{to:#x} (pinned)"))),
         Kind::FpsF64 => None,
     }
 }
 
 impl Row {
-    /// Writes the target where the value differs and is set.
+    /// The name of copy `c` for the log.
+    fn label(&self, c: u64) -> String {
+        if self.copies <= 1 {
+            return self.what.to_string();
+        }
+        let which = match (self.kind, c) {
+            (Kind::FpsF64, 0) => " (target)",
+            (Kind::FpsF64, _) => " (reported rate)",
+            (_, 0) => " (game thread)",
+            _ => " (render thread)",
+        };
+        format!("{}{which}", self.what)
+    }
+
+    /// Writes the target where the value differs and is set. Nothing is allocated unless a value changes and is logged.
     pub fn tick(&mut self, base: u64, target: u32) -> Result<Vec<Changed>, Fault> {
         let mut out = Vec::new();
+        if target == 0 && self.kind.needs_target() {
+            return Ok(out);
+        }
         let obj = if self.ptr_off != 0 {
             match guest::read_u64(base + self.ptr_off) {
                 Ok(o) if o != 0 => o,
@@ -167,7 +210,7 @@ impl Row {
                     if !self.warned {
                         self.warned = true;
                         out.push(Changed {
-                            what: self.what.clone(),
+                            what: self.what.to_string(),
                             was: "unreadable".to_string(),
                             now: "left as it is".to_string(),
                         });
@@ -184,17 +227,6 @@ impl Row {
             if a < LOW {
                 break;
             }
-            let what = if self.copies > 1 {
-                let which = match (self.kind, c) {
-                    (Kind::FpsF64, 0) => " (target)",
-                    (Kind::FpsF64, _) => " (reported rate)",
-                    (_, 0) => " (game thread)",
-                    _ => " (render thread)",
-                };
-                format!("{}{which}", self.what)
-            } else {
-                self.what.clone()
-            };
             let change = if self.kind == Kind::FpsF64 {
                 let Ok(cur) = guest::read_u64(a).map(f64::from_bits) else {
                     break;
@@ -218,7 +250,7 @@ impl Row {
             if self.logged < LOG_LIMIT {
                 self.logged += 1;
                 out.push(Changed {
-                    what,
+                    what: self.label(c),
                     was: change.0,
                     now: change.1,
                 });
@@ -334,5 +366,24 @@ mod tests {
             Some(0f64.to_bits()),
             "not set yet"
         );
+    }
+
+    #[test]
+    fn an_interval_minus_one_and_a_pinned_word_follow_their_rules() {
+        assert_eq!(
+            change32(Kind::IntervalMinusOneU32, 30, 0).map(|c| c.0),
+            Some(1)
+        );
+        assert_eq!(
+            change32(Kind::IntervalMinusOneU32, 60, 1).map(|c| c.0),
+            Some(0)
+        );
+        assert_eq!(change32(Kind::IntervalMinusOneU32, 60, 0), None);
+        assert_eq!(change32(Kind::IntervalMinusOneU32, 60, 7), None);
+        let pin = Kind::PinU32 { from: 7, to: 9 };
+        assert_eq!(change32(pin, 0, 7).map(|c| c.0), Some(9));
+        assert_eq!(change32(pin, 0, 8), None);
+        assert_eq!(change32(pin, 0, 9), None);
+        assert!(!pin.needs_target() && Kind::FpsI32.needs_target());
     }
 }

@@ -100,7 +100,7 @@ published under the MIT licence, Copyright (c) 2026 seedds. The full notice is i
 | `crates/nxkit-svc-pacing/src/fstep.rs` and `fstep/tests.rs` | `dm/gfx/nvn/nvn_fstep.h` (`nvn_fstep_next`, `nvn_fgpu`) and the cases of `dm/gfx/tests/t_fstep.c` |
 | `crates/nxkit-svc-pacing/src/load.rs`, `load/` and `watch.rs` | `fstep_tick`, `fps_step_cap`, `thermal_capped` and `fstep_cpu_slowed` of `dm/gfx/nvn/hle_nvn.c` |
 | `crates/nxkit-svc-pacing/src/interval.rs` | `fps_high`, `present_itv` and `rt_period_ns` of `dm/gfx/nvn/hle_nvn.c` and the target checks of `dm/games/game.py` |
-| `crates/nxkit-svc-pacing/src/limits.rs` and `limits/` | `dm/host/hle_fpslock.c` (limiter rows, NieR:Automata, Frostbite, Unreal). The rows for Monster Hunter Rise and Need for Speed come from nxnative's notes on masagrator's FPSLocker-Warehouse |
+| `crates/nxkit-svc-pacing/src/limits.rs` and `limits/` | `lock_find`, `dm_fps_lock_engine` and `dm_fps_lock_tick` of `dm/host/hle_fpslock.c` (the mechanism only, no per-game data) |
 | `titles/games/01007EF00011E000/rules/01007EF00011E000.toml` | `dm/games/01007EF00011E000/patches.py` (`CUTS` and `FRAME_STEP`), made by `tools/gen_botw_rules.py` |
 
 `tools/gen_botw_rules.py` records the stubs the way `tools/gen_rewrite_patches.py` does and writes one rule file for one game. The rule

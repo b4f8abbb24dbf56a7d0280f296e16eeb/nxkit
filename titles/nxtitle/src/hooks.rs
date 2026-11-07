@@ -115,6 +115,114 @@ pub struct PaceProfile {
     pub present_interval: PresentInterval,
 }
 
+/// How a value in the game's memory holds the frame rate, for [`LimitRow`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LimitKind {
+    /// A float of the frame rate.
+    FpsF32,
+    /// An int of the present interval in vsyncs, 1 to 4.
+    VsyncsI32,
+    /// A float of the milliseconds of a frame, 1000 / fps, half a millisecond less at 60.
+    MsF32,
+    /// An int of the frame rate.
+    FpsI32,
+    /// An unsigned int of system ticks for a frame, `scale / fps`.
+    TicksU32 {
+        /// The ticks of a second.
+        scale: u32,
+    },
+    /// A float of the seconds of a frame.
+    SecsF32,
+    /// A switch that an engine reads before it takes the other fields. Written 1 at any target when it is 0.
+    ModeU32,
+    /// A double of the frame rate. `copies` of them follow each other.
+    FpsF64,
+    /// An unsigned int of the present interval in vsyncs minus one, 0 or 1.
+    IntervalMinusOneU32,
+    /// A word that the game presets and the host replaces, whatever the target is. Written `to` when it holds `from`.
+    PinU32 {
+        /// The value that the game presets.
+        from: u32,
+        /// The value that the host writes.
+        to: u32,
+    },
+}
+
+/// Where a limiter value sits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LimitSite {
+    /// An offset in the main module of one build. `ptr_off` is the offset of a pointer to the object, 0 when the field is in
+    /// the module itself.
+    Fixed {
+        /// The offset of the pointer to the object, or 0.
+        ptr_off: u64,
+        /// The offset of the field in the object or the module.
+        field: u64,
+    },
+    /// An offset that the rewriter finds by a name (`key`, for example the name of a console variable). The host adds `add`
+    /// to it and reads the object pointer there.
+    Found {
+        /// The name that the rewriter reports.
+        key: &'static str,
+        /// Added to the found offset.
+        add: u64,
+    },
+}
+
+/// One value in the game's memory that holds the frame limit. The host writes the target into it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimitRow {
+    /// What it is, for the log.
+    pub what: &'static str,
+    /// The build id (32 hex digits) of the main module that the offsets are for. `None` for a [`LimitSite::Found`] row,
+    /// which holds for every build.
+    pub build: Option<&'static str>,
+    /// Where it sits.
+    pub site: LimitSite,
+    /// How it holds the rate.
+    pub kind: LimitKind,
+    /// The copies of the value that follow each other.
+    pub copies: u32,
+}
+
+/// How a reflection record of the engine is laid out in the module. All offsets are in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReflectLayout {
+    /// The size of a class record. The first word is the pointer to the class name.
+    pub record_size: u64,
+    /// The offset in a class record of the pointer to its field list.
+    pub fields_at: u64,
+    /// The size of one field record. Its first word is the pointer to the field name.
+    pub field_stride: u64,
+    /// The offset in a field record of the field's offset in the instance.
+    pub field_offset_at: u64,
+    /// The offset in an instance of the pointer to its type info.
+    pub instance_type_at: u64,
+}
+
+/// A frame limit that the host finds by the name of a reflected class: an int field with the rate and a float field with
+/// the same rate. The host writes both into the first instance that exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReflectedLimit {
+    /// The class name.
+    pub class: &'static str,
+    /// The name of the int field.
+    pub int_field: &'static str,
+    /// The name of the float field.
+    pub float_field: &'static str,
+    /// The layout of the records.
+    pub layout: ReflectLayout,
+}
+
+/// A way to make a game follow a frame limit that the host sets (no frame step patch).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LimitRule {
+    /// A value at a known place.
+    Row(LimitRow),
+    /// A reflected class.
+    Reflected(ReflectedLimit),
+}
+
 /// Questions of the build: shaders, preparation and rewriter rules.
 pub trait BuildHooks: Sync {
     /// The role of a shader, when this layer knows it.
@@ -149,6 +257,11 @@ pub trait RuntimeHooks: Sync {
     /// plain case: no cap, a hold of the game's interval, no snapshots.
     fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
         None
+    }
+    /// The values that the host writes the target frame rate into, for a game that has no frame step patch. Lists of all
+    /// layers add up.
+    fn limits(&self) -> &'static [Fact<LimitRule>] {
+        &[]
     }
     /// The engine that runs a service for this game. `None` leaves it to the next layer, and the core default is
     /// [`Runtime::Nxnative`].
