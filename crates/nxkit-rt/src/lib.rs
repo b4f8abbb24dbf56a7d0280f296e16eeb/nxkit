@@ -23,7 +23,6 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod kernel;
-mod offline;
 
 pub use kernel::{
     NxkitKernelConfig, NxkitRoleRule, NxkitThreadEntry, nxkit_kernel_dump_stats, nxkit_kernel_init,
@@ -92,7 +91,21 @@ pub struct Entry {
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
 pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
-    TABLE.get_or_init(offline::entries)
+    TABLE.get_or_init(|| {
+        let mut table = Vec::new();
+        table.extend(mapped(nxkit_svc_fs::exports(), Service::Fs));
+        table.extend(mapped(nxkit_svc_offline::exports(), Service::Offline));
+        table
+    })
+}
+
+/// The exports of one service crate as entries of `service`.
+fn mapped(exports: Vec<nxkit_abi::export::Export>, service: Service) -> impl Iterator<Item = Entry> {
+    exports.into_iter().map(move |e| Entry {
+        name: e.name,
+        service,
+        addr: e.addr,
+    })
 }
 
 /// The mask of enabled services. Zero before init.
