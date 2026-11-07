@@ -319,12 +319,16 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let shapes: Vec<layout::Shape> = built.iter().map(|m| m.shape.clone()).collect();
     let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(layout::bases(&shapes)).collect();
     stage(p, "manifest", "game.json", || {
+        if !t.services.contains(&"kernel") {
+            return Err(format!("the title module of {:016X} does not list the kernel service, which the host needs", t.id));
+        }
         let npdm_bytes = std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
         let main_thread = npdm::main_thread(&npdm_bytes)?;
         let m = manifest::Manifest {
             title_id: t.id,
             name: t.name,
             version,
+            version_name: shown_version(&t),
             modules: &mods,
             services: t.services.clone(),
             nvn_functions: manifest::nvn_list(t.st.nvn_functions.value),
@@ -360,12 +364,11 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
 
 fn plist(a: &Args, t: &Game) -> String {
     let id = a.bundle_id.clone().unwrap_or_else(|| bundle::default_bundle_id(t.id));
-    let shown = t
-        .st
-        .settings
-        .value
-        .display_versions
-        .first()
-        .map_or_else(|| t.st.version.to_string(), |v| v.1.to_string());
+    let shown = shown_version(t);
     bundle::info_plist(&bundle::file_name(a.app_name.as_deref().unwrap_or(t.name)), &id, &shown)
+}
+
+/// The version as the game shows it: the display version of the title module, else the number of the update.
+fn shown_version(t: &Game) -> String {
+    t.st.settings.value.display_versions.first().map_or_else(|| t.st.version.to_string(), |v| v.1.to_string())
 }

@@ -24,8 +24,10 @@ pub struct Manifest<'a> {
     pub title_id: u64,
     /// The game's name.
     pub name: &'a str,
-    /// The version the app is built from.
+    /// The version the app is built from, as the number of the update.
     pub version: u32,
+    /// The version as the game shows it (`1.6.0`).
+    pub version_name: String,
     /// The rewritten modules in load order, with their bases.
     pub modules: &'a [(Built, u64)],
     /// The `Service::id` of every service nxkit runs.
@@ -73,8 +75,8 @@ fn memory(m: &nxtitle::Memory) -> Value {
         ("alias", n(m.alias)),
         ("stack", n(m.stack)),
         ("app_pool", n(m.app_pool)),
-        ("used", n(m.used)),
-        ("system_resource", n(m.system_resource)),
+        ("mem_used", n(m.used)),
+        ("sys_resource", n(m.system_resource)),
         ("map_limit", flag(m.map_limit)),
         ("stdalloc_cap", n(m.stdalloc_cap)),
         ("alloc_big_align", flag(m.alloc_big_align)),
@@ -149,6 +151,19 @@ fn segment(g: &Segment) -> Value {
     ])
 }
 
+/// The data area, widened down to the start of its segment: the host wants the offset on a 16K page, and the data
+/// of an NSO starts on a 4K page.
+fn data_range(b: &Built) -> Value {
+    let (off, size) = b.parts[2];
+    let start = b
+        .shape
+        .segments
+        .iter()
+        .find(|g| g.kind == "DATA")
+        .map_or(off, |g| usize::try_from(g.offset).unwrap_or(off));
+    range((start, (off + size).saturating_sub(start)))
+}
+
 fn module(b: &Built, base: u64) -> Value {
     let mut f = vec![
         ("name", s(&b.name)),
@@ -156,7 +171,7 @@ fn module(b: &Built, base: u64) -> Value {
         ("size", n(b.shape.extent().1)),
         ("text", range(b.parts[0])),
         ("rodata", range(b.parts[1])),
-        ("data", range(b.parts[2])),
+        ("data", data_range(b)),
         ("bss_size", n(b.bss)),
         ("image", s(&format!("modules/{}.bin", b.name))),
         ("imports", s(&format!("modules/{}.imports.json", b.name))),
@@ -171,10 +186,7 @@ fn module(b: &Built, base: u64) -> Value {
         "patch",
         obj(vec![("offset", n(b.shape.patch.0)), ("size", n(b.shape.patch.1))]),
     ));
-    f.push((
-        "key_page",
-        obj(vec![("offset", n(b.shape.key_page.0)), ("size", n(b.shape.key_page.1))]),
-    ));
+    f.push(("key_page", n(b.shape.key_page.0)));
     f.push(("fixups", s(&format!("modules/{}.fixups.tsv", b.name))));
     f.push(("gates", s(&format!("modules/{}.gates.tsv", b.name))));
     obj(f)
@@ -185,7 +197,8 @@ pub fn game_json(m: &Manifest) -> String {
     let mut f = vec![
         ("title_id", s(&format!("{:016X}", m.title_id))),
         ("name", s(m.name)),
-        ("version", n(m.version)),
+        ("version", s(&m.version_name)),
+        ("version_number", n(m.version)),
         (
             "modules",
             Value::List(m.modules.iter().map(|(b, base)| module(b, *base)).collect()),
@@ -271,6 +284,7 @@ mod tests {
         let text = nxb_pyjson::dumps(&v);
         assert!(text.contains(r#""app_pool": 3444572160"#), "{text}");
         assert!(text.contains(r#""map_limit": false"#));
+        assert!(text.contains(r#""mem_used": "#) && text.contains(r#""sys_resource": "#), "{text}");
     }
 
     #[test]

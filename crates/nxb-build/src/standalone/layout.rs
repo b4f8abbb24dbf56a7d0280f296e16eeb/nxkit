@@ -199,13 +199,8 @@ impl Shape {
     /// The lowest and the highest offset the module maps: `(low <= 0, high > 0)`.
     pub fn extent(&self) -> (i64, u64) {
         let lo = self.segments.iter().map(|s| s.offset).min().unwrap_or(0).min(0);
-        let hi = self
-            .segments
-            .iter()
-            .map(|s| (s.offset + s.mem_size as i64) as u64)
-            .max()
-            .unwrap_or(0);
-        (lo, hi)
+        let hi = self.segments.iter().map(|s| s.offset + s.mem_size as i64).max().unwrap_or(0).max(0);
+        (lo, hi as u64)
     }
 }
 
@@ -269,7 +264,7 @@ mod tests {
     #[test]
     fn data_inside_the_last_code_page_is_refused() {
         let f = Fixups::parse(
-            "# PATCH_OFF\t0x60000\n# KEY_PAGE_OFF\t0x40000\n# KEY_PAGE_SIZE\t0x4000\n# TEXT_END\t0x1f000\n# RO_OFF\t0x1f000\n# DATA_OFF\t0x20000\n",
+            "# PATCH_OFF\t0x60000\n# KEY_PAGE_OFF\t0x40000\n# KEY_PAGE_SIZE\t0x4000\n# TEXT_END\t0x1f800\n# RO_OFF\t0x1f800\n# DATA_OFF\t0x1f800\n",
         );
         assert!(shape("rtld", 0, 0x70000, &f).is_err());
     }
