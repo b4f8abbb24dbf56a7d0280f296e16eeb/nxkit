@@ -1,0 +1,31 @@
+[package]
+name = "nxkit-svc-system"
+description = "The Horizon system services of the nxkit host: settings, time, account, applet, performance, parental controls, network and logging"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L0"
+in_v = false
+
+[dependencies]
+nxkit-abi = { workspace = true }
+
+# Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which holds the libc calls
+# for the clock and the time zone.
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
