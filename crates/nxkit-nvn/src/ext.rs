@@ -92,11 +92,11 @@ pub enum ExtCode {
     SignalEvent,
     /// `WaitSync`. Words: sync address (2).
     WaitSync,
-    /// `ReportValue`. Words: value, address (2).
+    /// `ReportValue`. Words: value, address (2), timestamp (2). The timestamp is the host clock at the recording.
     ReportValue,
     /// `ResetCounter`. Words: counter type.
     ResetCounter,
-    /// `ReportCounter`. Words: counter type, address (2).
+    /// `ReportCounter`. Words: counter type, address (2), timestamp (2). The timestamp is the host clock at the recording.
     ReportCounter,
     /// `BindTransformFeedbackBuffer`. The argument is the index. Words: address (2), size (2).
     TransformFeedbackBuffer,

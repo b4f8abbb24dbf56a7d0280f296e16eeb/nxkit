@@ -37,6 +37,7 @@ pub(crate) mod sync;
 pub(crate) mod texture;
 pub(crate) mod window;
 
+pub use cmdbuf::{CommandSettings, set_command_settings};
 pub use ctx::{InstallError, Settings, install};
 
 use std::collections::{HashMap, HashSet};
@@ -255,7 +256,7 @@ mod tests {
 
     #[test]
     fn every_group_that_has_a_row_exports_exactly_that_row() {
-        let groups: [(&str, Vec<(&str, usize)>); 8] = [
+        let groups: [(&str, Vec<(&str, usize)>); 9] = [
             ("device", device::procs()),
             ("queue", queue::procs()),
             ("sync", sync::procs()),
@@ -264,6 +265,7 @@ mod tests {
             ("window", window::procs()),
             ("event", event::procs()),
             ("program", program::procs()),
+            ("cmdbuf", cmdbuf::procs()),
         ];
         for (group, got) in groups {
             let mut got: Vec<&str> = got.iter().map(|(n, _)| *n).collect();
@@ -280,7 +282,7 @@ mod tests {
 
     #[test]
     fn a_known_name_without_a_group_gets_a_stub_and_an_unknown_name_gets_null() {
-        let stub_addr = lookup("nvnCommandBufferDrawArrays");
+        let stub_addr = lookup("nvnCommandBufferEvaluateDlss");
         assert_ne!(stub_addr, 0);
         assert_eq!(lookup("nvnNoSuchFunction"), 0);
         assert_eq!(
