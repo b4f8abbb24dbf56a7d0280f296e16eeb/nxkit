@@ -8,14 +8,17 @@ license.workspace = true
 publish.workspace = true
 
 [package.metadata.nxb]
-layer = "L0"
+layer = "L1"
 in_v = false
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+nxb-model = { workspace = true }
+nxkit-abi = { workspace = true }
 nxkit-hos = { workspace = true }
+nxkit-nvn = { workspace = true }
 
 [dev-dependencies]
 nxtitle = { workspace = true }

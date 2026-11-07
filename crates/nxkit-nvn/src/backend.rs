@@ -81,6 +81,32 @@ pub struct Present {
     pub crop: Rect,
 }
 
+/// The key of one shader stage: the first 8 bytes of `sha256(control section key bytes || code)`.
+/// It is the key of the shader in the `_b.json` of the shader step, as 16 lower-case hex digits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ShaderKey(pub [u8; 8]);
+
+impl ShaderKey {
+    /// The 16 hex digits that name the shader in `_b.json`.
+    pub fn to_hex(self) -> String {
+        self.0.iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+/// One stage of a program (`NVNshaderData`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StageKey {
+    /// The position of the stage in the array that the game gave `nvnProgramSetShaders`.
+    pub index: u8,
+    /// The key of the stage. None when the code area did not lie in guest memory at the call, as when a game sets a
+    /// program before it fills the memory. The host computes the key at the first use of the program.
+    pub key: Option<ShaderKey>,
+    /// The host address of the code area (`NVNshaderData::data`).
+    pub code: u64,
+    /// The length of the code area in bytes.
+    pub code_len: u32,
+}
+
 /// The result of a wait on a fence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitResult {
@@ -124,6 +150,14 @@ pub trait Backend: Send + Sync {
 
     /// Waits until the GPU has finished everything that was flushed (`nvnQueueFinish`).
     fn wait_idle(&self);
+
+    /// The game gave a program its stages (`nvnProgramSetShaders`). `program` is the guest address of the `NVNprogram`.
+    /// The backend may start to load the Metal functions of the keys. A later call for the same program replaces the
+    /// earlier one. The default does nothing.
+    fn program_set(&self, _program: u64, _stages: &[StageKey]) {}
+
+    /// A program was finalised (`nvnProgramFinalize`). The default does nothing.
+    fn program_released(&self, _program: u64) {}
 
     /// A texture was created in guest memory (`nvnTextureInitialize`).
     fn texture_created(&self, record: &TextureRecord);
