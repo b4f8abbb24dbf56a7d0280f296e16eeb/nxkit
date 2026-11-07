@@ -64,6 +64,6 @@ mod tests {
         let keys: Vec<_> = r.needs().iter().map(|n| n.value.capability).collect();
         assert!(!keys.contains(&"render_cond") && !keys.contains(&"tex_flush_upload"));
         assert_eq!(keys.len(), 5);
-        assert!(r.nxkit_services().is_empty());
+        assert_eq!(r.nxkit_services(), [nxtitle::Service::Offline]);
     }
 }

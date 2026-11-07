@@ -75,6 +75,12 @@ SOFTWARE.
 `nxb rewrite` reads these files by default. It checks the SHA-256 of the engine files that the rules come from
 and refuses to run (exit code 4) when they differ. The same notice is in `data/rewrite-rules/NOTICE`.
 
+## Runtime services ported from nxnative
+
+The `offline` service of `nxkit-rt` (`crates/nxkit-rt/src/offline/`) is a Rust port of the entries of `dm/host/hle_offline.c`
+and `dm/host/hle_net.c` of the nxnative engine that need no state of the host. The nxnative engine is published under the MIT
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
 ## Tools that nxkit starts and does not contain
 
 | tool | licence | use |

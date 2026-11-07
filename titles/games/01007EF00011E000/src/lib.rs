@@ -15,7 +15,7 @@
 //!
 //! nxnative runs every service of the game. This module moves a service to nxkit once the nxkit runtime has it.
 
-use nxtitle::{BuildHooks, Evidence, Fact, Need, RuntimeHooks, Title, TitleId};
+use nxtitle::{BuildHooks, Evidence, Fact, Need, Runtime, RuntimeHooks, Service, Title, TitleId};
 
 /// The title module.
 pub struct Botw;
@@ -78,9 +78,22 @@ const NEEDS: &[Fact<Need>] = &[
 
 impl BuildHooks for Botw {}
 
+/// The services nxkit runs for Breath of the Wild. The rest stay on nxnative.
+const OFFLINE: Fact<Runtime> = Fact::new(
+    Runtime::Nxkit,
+    Evidence::Unverified {
+        note: "nxkit-rt answers the offline entries as hle_offline.c and hle_net.c do (nxkit_rt::offline tests). \
+              A play of the fixed route on the Mac checks it.",
+    },
+);
+
 impl RuntimeHooks for Botw {
     fn needs(&self) -> &'static [Fact<Need>] {
         NEEDS
+    }
+
+    fn runtime(&self, service: Service) -> Option<Fact<Runtime>> {
+        (service == Service::Offline).then_some(OFFLINE)
     }
 }
 
@@ -106,7 +119,6 @@ impl Title for Botw {
 mod tests {
     use super::*;
     use nxb_profile::Profile;
-    use nxtitle::{Runtime, Service};
 
     #[test]
     fn profile_matches_the_module() {
@@ -123,12 +135,11 @@ mod tests {
     }
 
     #[test]
-    fn nxnative_runs_every_service() {
-        assert!(
-            Service::ALL
-                .iter()
-                .all(|s| BOTW.runtime(*s).map_or(Runtime::Nxnative, |f| f.value)
-                    == Runtime::Nxnative)
-        );
+    fn nxkit_runs_only_offline() {
+        let on: Vec<Service> = Service::ALL
+            .into_iter()
+            .filter(|s| BOTW.runtime(*s).map(|f| f.value) == Some(Runtime::Nxkit))
+            .collect();
+        assert_eq!(on, [Service::Offline]);
     }
 }

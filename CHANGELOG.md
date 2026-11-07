@@ -7,6 +7,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Added
 
 - The crate `nxkit-rt` builds `libnxkit_rt.a` for the host, for `aarch64-apple-darwin` and `aarch64-apple-ios`. It exports `nxkit_init` and `nxkit_hle_find` (header `crates/nxkit-rt/include/nxkit_rt.h`). It implements no service yet, so every lookup gives NULL. Refer to `docs/plans/runtime-hooks.md`.
+- `nxkit-rt` also builds `libnxkit_rt.dylib`, which the Mac host loads at run time. It answers the `offline` service, ported from nxnative. `nxb build --platform mac` puts `DM_NXKIT_SERVICES` and `DM_NXKIT_LIB` into the run command.
+- `nxgame-botw` runs the `offline` service on nxkit.
 
 ### Changed
 
