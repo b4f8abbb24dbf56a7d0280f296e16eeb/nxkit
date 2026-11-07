@@ -100,8 +100,6 @@ pub struct EncodeStats {
     pub swizzle_ignored: u32,
     /// Textures that are scaled and had guest data that is not copied into them.
     pub scaled_upload_lost: u32,
-    /// Bytes the scratch buffers took.
-    pub scratch_bytes: u64,
     /// Nanoseconds of CPU time that the encode took, from the start of `encode_frame` to the submit.
     pub encode_ns: u64,
 }
@@ -139,7 +137,6 @@ impl EncodeStats {
         self.copybacks += o.copybacks;
         self.swizzle_ignored += o.swizzle_ignored;
         self.scaled_upload_lost += o.scaled_upload_lost;
-        self.scratch_bytes += o.scratch_bytes;
         self.encode_ns += o.encode_ns;
     }
 }

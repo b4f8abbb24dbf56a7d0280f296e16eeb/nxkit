@@ -71,6 +71,8 @@ pub(crate) struct Shared<'a> {
     pub(crate) run_at: &'a HashMap<u32, RecordingRun>,
     pub(crate) barriers: &'a BarrierPlan,
     pub(crate) transfer: &'a Transfer,
+    /// The index of the first pass of the frame that writes a texture.
+    pub(crate) first_write: &'a HashMap<TexId, usize>,
     pub(crate) scale: f32,
 }
 
