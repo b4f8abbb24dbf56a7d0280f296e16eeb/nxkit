@@ -207,6 +207,15 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.buffer(cb).add_command_memory(host, len)
     }
 
+    /// `nvnCommandBufferFinalize`. The command buffer `cb` loses its memory blocks, its recording state and its
+    /// callback, so the number can name another command buffer later.
+    pub fn release_command_buffer(&mut self, cb: usize) {
+        if let Some(b) = self.buffers.get_mut(cb) {
+            *b = CommandBuffer::new();
+        }
+        self.callbacks.remove(&cb);
+    }
+
     /// `nvnCommandBufferBeginRecording`.
     pub fn begin_recording(&mut self, cb: usize) -> Result<()> {
         self.buffer(cb).begin_recording()
