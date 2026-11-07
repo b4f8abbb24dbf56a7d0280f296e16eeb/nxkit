@@ -92,7 +92,15 @@ pub struct Entry {
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
 pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
-    TABLE.get_or_init(offline::entries)
+    TABLE.get_or_init(|| {
+        let mut table = offline::entries();
+        table.extend(nxkit_svc_pacing::exports().into_iter().map(|e| Entry {
+            name: e.name,
+            service: Service::Pacing,
+            addr: e.addr,
+        }));
+        table
+    })
 }
 
 /// The mask of enabled services. Zero before init.
@@ -168,6 +176,21 @@ mod tests {
                 addr: probe_addr() + 4,
             },
         ]
+    }
+
+    #[test]
+    fn the_pacing_exports_are_in_the_table_under_the_pacing_service() {
+        let name = nxkit_svc_pacing::VSYNC_EVENT;
+        assert!(
+            entries()
+                .iter()
+                .any(|e| e.name == name && e.service == Service::Pacing)
+        );
+        assert_eq!(
+            find_in(entries(), Service::Offline.bit(), name.as_bytes()),
+            None
+        );
+        assert!(find_in(entries(), Service::Pacing.bit(), name.as_bytes()).is_some());
     }
 
     #[test]

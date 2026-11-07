@@ -30,7 +30,11 @@ macro_rules! each {
 
 #[test]
 fn names_are_unique_and_belong_to_the_offline_service() {
-    let all = entries();
+    let all: Vec<_> = entries()
+        .iter()
+        .filter(|e| e.service == Service::Offline)
+        .copied()
+        .collect();
     assert_eq!(all.len(), NAMES.len());
     let mut names: Vec<&str> = all.iter().map(|e| e.name).collect();
     names.sort_unstable();
