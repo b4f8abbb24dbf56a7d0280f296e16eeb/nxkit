@@ -88,12 +88,17 @@ The part of H3 that does not need the frame format exists in `nxkit-metal`:
 - The device, the Metal 4 command queue, three command allocators for the frames in flight and a residency set.
 - Guest memory as one no-copy `MTLBuffer`, with the mapping from a host address to a GPU address.
 - Shader libraries from a `.metallib` file or from source, pipeline states from `MTL4Compiler`, and a pipeline cache under a hash from the caller, with an optional binary archive on disk.
-- A `CAMetalLayer` drawable path and the hooks for frame pacing. The window belongs to `nxkit-host`.
+- A `CAMetalLayer` drawable path, and a `CAMetalDisplayLink` driver at 60 or 120 Hz that calls `FrameHooks::display_tick`. The window belongs to `nxkit-host`.
 - CPU encode time and GPU time of every command buffer.
-- A block-linear deswizzle compute kernel from guest memory into a texture.
+- Full render pipeline state: blend per attachment, depth and stencil, vertex layout, topology, cull, winding, fill, depth bias and sample count.
+- Textures with mip levels, array layers, 3D and cube kinds and views.
+- Block-linear deswizzle and swizzle compute kernels for mips, layers and depth slices, and copy-back of a sub-rectangle. The layout rules follow deko3d.
+- A public residency API for resources made outside the crate.
+- A barrier API with explicit stages, for use between passes, inside a pass and towards later passes.
+- Indirect command buffers with per-state inherit flags. The module docs of `icb.rs` list what an ICB can hold on the Xcode 27.1 SDK.
 - A data-driven encoding API for render passes and compute passes. The frame encoder will call it from a loop over the recorded commands.
 
-What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, depth and blend state, the vertex layout, and `CADisplayLink`.
+What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, compute ICBs, and the tuning of frame latency on real hardware.
 
 The route is one save and one path through the game: the title screen, loading the save, the Great Plateau outdoors, a shrine, the menus and a cutscene.
 

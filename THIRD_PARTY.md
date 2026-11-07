@@ -21,6 +21,7 @@ taken from other implementations.
 | SHA-1, SHA-256 | `nxb-model`, `nxb-sys` | FIPS 180-4. The test vectors are the published ones |
 | AArch64 decoding and patching | `nxb-a64`, `nxb-rewrite` | the Arm Architecture Reference Manual |
 | Property lists (XML and binary) | `nxb-plist`, `nxb-pack` | public Apple documentation and observed output |
+| Block-linear texture layout (mip block height, layer stride) | `nxkit-metal` | the layout rules of deko3d (`dk_image.cpp`) as used in nxnative. The code is written anew and no source is copied |
 
 ## Shader translator ported from Ryujinx
 
