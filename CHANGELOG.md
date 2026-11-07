@@ -6,6 +6,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- `nxkit-host` wires its seams to the kernel and the service crates: the kernel registration, the memory profile and the main thread of the NPDM, the IPC server, the big-stack exports, the start of every selected service, one symbol lookup of the game for all service crates, and the focus. A guest thread gets its thread-local regions from the kernel. The main stack lies at the start of the stack region and a shared memory area follows the thread blocks.
+- `nxkit-rt` has `kernel()` and `attach_main_thread()` for the host. `nxkit-hos` has `Config.on_close`, which tells the system service about a closed handle, and `Kernel::system_event_writable_handle`. `nxkit-svc-input` has `Config.pad_layout` and `set_focus`.
+- `game.json` has the optional settings `shared_font_decode` and `sf_services`.
+
 - The crate `nxkit-ipc` is the IPC server of the nxkit host. It parses HIPC and CMIF, keeps sessions and domains, serves `sm:`, counts every command and stops the game on an unknown service or command. It has no global lock.
 - The crate `nxkit-svc-fs` is the `fs` service. It has the `nn::fs` functions of nxnative at SDK level (`exports()` and `big_stack_exports()`) and `fsp-srv` over IPC. The romfs is mapped, and the saves have the nxnative layout. `nxkit-rt` exports `nxkit_hle_find_big` for the functions that need the big host stack.
 - The service `offline` moved from `nxkit-rt` into the crate `nxkit-svc-offline`.
@@ -43,6 +47,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
+- The host resolves the names of the big-stack exports to their stubs. Before, the loader looked up the plain entries only, so no big-stack export reached the game.
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
 - A QoS lend no longer reads a `pthread_t` of an owner that may have exited. The lend table lives in the owner's thread record (R31).
 - `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as nxnative's record, and R10, R17 and R19 replace some of them.
