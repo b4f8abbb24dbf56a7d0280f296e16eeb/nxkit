@@ -74,7 +74,7 @@ The title module and its family module answer the settings through their `nxtitl
 
 Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode`, `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vconv_range`, `gpu_ts_segment`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
-Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`) and `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them. Any other import that nothing provides stops the load.
+Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
 Any other key goes unread, in order, to the service that the title module addressed. The core has no name for it. An engine setting is one example.
 
@@ -91,10 +91,10 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 One reservation holds all guest memory. It is the guest range of `nxkit_abi::guest` and the no-copy buffer of R3. In address order it holds:
 
 1. The modules, at their real addresses. A far layout starts at the patch segment below `base`.
-2. The stack of the main thread, with a guard page at the low end.
-3. The thread blocks: 1024 blocks of 0x4000 bytes, one for each guest thread that runs at the same time.
+2. The thread blocks: 1024 blocks of 0x4000 bytes, one for each guest thread that runs at the same time. The kernel hands them out as the thread-local regions.
+3. The shared memory area, 64 MiB, which backs the shared memory of the services.
 4. The heap, aligned to 2 MiB.
-5. The stack region, aligned to 2 MiB.
+5. The stack region, aligned to 2 MiB. The stack of the main thread is at its start, with a guard page at the low end.
 6. The alias region, aligned to 2 MiB.
 
 The host regions start behind the highest module. When dyld mapped the library, they start behind the `__LINKEDIT` segment, which lies behind the last module.
@@ -115,7 +115,7 @@ Every key is required. Numbers are JSON numbers or strings with a decimal or `0x
 | `stdalloc_cap` | The largest block that the standard allocator of the guest hands out. 0 means no cap. |
 | `alloc_big_align` | Whether the allocator of the guest aligns big blocks to 2 MiB. |
 
-The host gives these numbers and the region ranges to the kernel at start (`configure_kernel`).
+The host gives these numbers and the region ranges to the kernel when it starts it (`sys::kernel_init`), together with the modules, the thread-local area, the shared memory area, the main stack and the main thread of the NPDM. `settings.core_preempt` turns the core rules of the kernel on.
 
 ## The loader
 
@@ -149,8 +149,8 @@ The key page has four 8-byte entries. Entry `i` is `8 * key` of a pthread key, s
 | entry | value on a guest thread |
 |---|---|
 | `K18` | The saved value of `x18`. It starts as 0. |
-| `KTLS` | The ELF thread-local block, 8 KiB. |
-| `KTLR` | The Horizon thread-local region, 0x200 bytes. The thread object follows at 0x200. |
+| `KTLS` | The ELF thread-local block. The kernel makes it (`nxkit_kernel_thread_tls`). |
+| `KTLR` | The Horizon thread-local region. The kernel makes it and its IPC buffer. |
 | `KGATE` | The address of the gate stub of the thread. |
 
 Each guest thread owns a slot `k` in a pool of 1024. The host takes a free slot with one atomic operation and holds no lock. Slot `k` is a 0x4000 byte block in the reservation, a gate stub and a gate stack of 1 MiB. The stub loads the top of the gate stack, saves the registers `x0` to `x30`, calls the kernel's svc table with the number and `x0` to `x7`, writes the results back and returns to the guest. The gate runs on its own stack, so a guest stack of a few KiB is enough.
@@ -169,9 +169,9 @@ AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` 
 
 1. Read `game.json`.
 2. Place the modules and call `nxkit_abi::guest::set_range`.
-3. Start the kernel and the services that `game.json` names.
-4. Register the kernel and the IPC server with `nxkit_abi::kernel`.
-5. Finish the load: relocations, imports and gates.
+3. Start the kernel with the regions, the memory profile and the main thread. It registers itself with `nxkit_abi::kernel`.
+4. Register the IPC server and start the services that `game.json` names.
+5. Finish the load: relocations, imports and gates. Then set the symbol lookup of the game.
 6. Open the window and the display link.
 7. Start the main guest thread and run the loop.
 
@@ -188,15 +188,26 @@ AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` 
 
 ## Seams
 
-`src/seams.rs` holds the places where the host calls another crate's API. Each is a function with one job. A seam that has no counterpart returns `HostError::Unwired` and stops the host at start (R15).
+`src/seams.rs` holds the places where the host calls another crate's API. Each is a function with one job. A seam that has no counterpart returns `HostError::Unwired` and stops the host at start (R15). A hook of a service crate that the host cannot answer yet stops the game with the name of the hook.
 
 | function | job |
 |---|---|
-| `register_kernel` | Registers the kernel with `nxkit_abi::kernel::set_kernel`. |
-| `configure_kernel` | Gives the kernel the heap, the stack region, the alias region, the memory profile and `settings.core_preempt`. |
-| `attach_main_thread` | Attaches the `guest-main` thread with the NPDM priority and core. |
-| `big_stack_exports` | Collects the names from `big_stack_exports()` of the service crates. |
-| `register_server` | Builds the IPC server from all `services()` and registers it with `set_server`. |
-| `init_services` | Calls the `init` of each enabled service crate with the settings, the aoc folders (`Config.aoc` of fs) and `settings.extra`. |
+| `register_kernel` | Checks that `nxkit_kernel_init` registered the kernel with `nxkit_abi::kernel::set_kernel`. |
+| `attach_main_thread` | Attaches the `guest-main` thread with the NPDM priority and core, which the kernel got at its start. |
+| `big_stack_exports` | Collects the names of the big-stack entries of the enabled services from `nxkit_rt::entries()`. |
+| `register_server` | Builds the IPC server from the `services()` of the enabled service crates and registers it with `set_server`. |
+| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders and the DLC folder for fs, the console facts and the font facts for system, the pad layout for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
 | `focus_changed` | Tells the `system` and `input` services about the focus of the window. |
+
+### The symbol lookup
+
+`guestsym.rs` holds the game's own symbols: every export of every module, by Switch mangled name, with the address of the SDK's definition. It is never the take-over export. The loader fills it after the load. The kernel, fs, system, audio and video each have their own seam for it, and all of them read this table.
+
+### The hooks of the system service
+
+`wire.rs` holds the adapters. System events bind and signal through the kernel. The guest threads of the audio service and of the video service come from `nxkit_hos::GuestThread`. The system hooks `text_input`, `nro_load`, `nro_unload` and `nro_symbol` stop the game with their name. `quit` asks the host to stop.
+
+### The display tick
+
+The hooks of the display link call `nxkit_svc_input::tick()` and `nxkit_svc_pacing::on_display_tick()` on each tick.
 | `frame_hooks` | Gives the display link the hooks that encode and present a frame, with the pacing and encoder settings. |

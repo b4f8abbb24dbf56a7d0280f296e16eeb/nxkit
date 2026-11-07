@@ -21,6 +21,8 @@ pub mod bigstack;
 #[allow(unsafe_code)]
 pub mod gate;
 #[cfg(target_os = "macos")]
+pub mod guestsym;
+#[cfg(target_os = "macos")]
 pub mod loader;
 #[cfg(target_os = "macos")]
 pub mod memory;
@@ -32,6 +34,8 @@ pub mod probe;
 pub mod run;
 #[cfg(target_os = "macos")]
 pub mod seams;
+#[cfg(target_os = "macos")]
+pub mod wire;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod sys;

@@ -15,7 +15,7 @@ use nxkit_metal::Context;
 use crate::error::{HostError, Result};
 use crate::sys::appkit::{self, AppEvents, WindowConfig};
 use crate::manifest::Game;
-use crate::{loader, place, seams, stop, sys, thread};
+use crate::{guestsym, loader, place, seams, stop, sys, thread};
 
 /// What the command line asks for.
 #[derive(Debug, Clone)]
@@ -54,16 +54,15 @@ pub fn run(opts: &Options) -> Result<()> {
     check_kernel_service(mask)?;
     let placed = place::place(&game)?;
     let mem = placed.mem;
-    let (layout, memory, settings) = (mem.layout, placed.game.memory, placed.game.settings.clone());
+    let (layout, settings) = (mem.layout, placed.game.settings.clone());
 
     nxkit_rt::nxkit_init(mask);
-    sys::kernel_init(thread::guest_thread_entry)?;
+    sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
     seams::register_kernel()?;
-    seams::configure_kernel(&layout, &memory, &settings)?;
-    seams::register_server(&placed.game)?;
-    seams::init_services(&placed.game)?;
+    seams::register_server(mask)?;
+    seams::init_services(&placed.game, mask)?;
 
-    let loaded = loader::load(placed, mask)?;
+    let mut loaded = loader::load(placed, mask)?;
     eprintln!(
         "nxkit-host: {} modules loaded ({:?}), entry {:#x}, {} exports",
         loaded.game.modules.len(),
@@ -71,6 +70,7 @@ pub fn run(opts: &Options) -> Result<()> {
         loaded.entry,
         loaded.exports.len()
     );
+    guestsym::set(std::mem::take(&mut loaded.exports));
 
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     let gpu_memory = Arc::new(mem.res.as_guest_memory(&ctx)?);
@@ -80,9 +80,9 @@ pub fn run(opts: &Options) -> Result<()> {
         size: None,
         fullscreen: opts.fullscreen,
     };
-    let (entry, stack_top, spec) = (loaded.entry, layout.main_stack.end(), loaded.game.main_thread);
+    let (entry, stack_top) = (loaded.entry, layout.main_stack.end());
     let result = appkit::run(&window, &ctx, hooks, Arc::new(Events), stop::flag(), move || {
-        thread::start_main(entry, stack_top, spec)
+        thread::start_main(entry, stack_top)
     });
     drop(loaded);
     result

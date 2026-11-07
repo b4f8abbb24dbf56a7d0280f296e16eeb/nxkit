@@ -22,6 +22,15 @@ path = "src/main.rs"
 [dependencies]
 nxkit-abi = { workspace = true }
 nxkit-rt = { path = "../nxkit-rt" }
+nxkit-hos = { workspace = true }
+nxkit-ipc = { workspace = true }
+nxkit-svc-fs = { workspace = true }
+nxkit-svc-offline = { workspace = true }
+nxkit-svc-input = { workspace = true }
+nxkit-svc-video = { workspace = true }
+nxkit-svc-audio = { workspace = true }
+nxkit-svc-pacing = { workspace = true }
+nxkit-svc-system = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nxkit-metal = { path = "../nxkit-metal" }

@@ -720,8 +720,17 @@ name = "nxkit-host"
 version = "0.9.2"
 dependencies = [
  "nxkit-abi",
+ "nxkit-hos",
+ "nxkit-ipc",
  "nxkit-metal",
  "nxkit-rt",
+ "nxkit-svc-audio",
+ "nxkit-svc-fs",
+ "nxkit-svc-input",
+ "nxkit-svc-offline",
+ "nxkit-svc-pacing",
+ "nxkit-svc-system",
+ "nxkit-svc-video",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",

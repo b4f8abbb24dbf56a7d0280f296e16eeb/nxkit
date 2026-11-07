@@ -35,7 +35,7 @@ pub use guestos::{
     nxkit_kernel_set_deterministic, nxkit_kernel_set_guest_sym,
 };
 pub use kernel::{
-    NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRoleRule, NxkitThreadEntry,
+    attach_main_thread, kernel, NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRoleRule, NxkitThreadEntry,
     nxkit_kernel_dump_stats, nxkit_kernel_init, nxkit_kernel_set_thread_name,
     nxkit_kernel_thread_tls, nxkit_svc,
 };

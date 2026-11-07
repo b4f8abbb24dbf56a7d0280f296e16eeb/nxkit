@@ -24,6 +24,8 @@ pub struct Config {
     pub motion_acc_flip: bool,
     /// Keyboard and mouse through `GCKeyboard` and `GCMouse`.
     pub keyboard: bool,
+    /// The pad layout of the title: `simple`, `full` or `touch`. The service keeps it for the controller front end.
+    pub pad_layout: String,
 }
 
 impl Default for Config {
@@ -38,6 +40,7 @@ impl Default for Config {
             motion_axes: "x,y,z".to_owned(),
             motion_acc_flip: false,
             keyboard: true,
+            pad_layout: "simple".to_owned(),
         }
     }
 }

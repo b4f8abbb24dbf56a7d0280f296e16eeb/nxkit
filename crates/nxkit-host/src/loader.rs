@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use nxkit_rt::{entries, find_in};
+use nxkit_rt::{entries, find_big_in, find_in};
 
 use crate::bigstack;
 use crate::error::{HostError, Result};
@@ -86,11 +86,13 @@ struct Resolver<'a> {
 impl Resolver<'_> {
     /// The function of a service. One that is in `big` is reached through a big-stack stub.
     fn service(&self, name: &str) -> Result<Option<u64>> {
-        let Some(a) = find_in(entries(), self.mask, name.as_bytes()) else {
-            return Ok(None);
-        };
-        let a = a as u64;
-        if self.big.contains(name) { bigstack::wrap(a).map(Some) } else { Ok(Some(a)) }
+        if self.big.contains(name) {
+            return match find_big_in(entries(), self.mask, name.as_bytes()) {
+                Some(a) => bigstack::wrap(a as u64).map(Some),
+                None => Ok(None),
+            };
+        }
+        Ok(find_in(entries(), self.mask, name.as_bytes()).map(|a| a as u64))
     }
 
     /// A service function, or else an export of a module.
@@ -233,7 +235,7 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     let keys = thread::create_keys()?;
     let lists = read_lists(&game)?;
     let exports = collect_exports(&game, &lists);
-    let big = seams::big_stack_exports();
+    let big = seams::big_stack_exports(mask);
     let resolver = Resolver {
         mask,
         exports: &exports,

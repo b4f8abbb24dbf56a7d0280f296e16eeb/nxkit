@@ -1,6 +1,6 @@
 //! The reservation of guest memory (R18, R3).
 //!
-//! One mapping holds the modules, the main stack, the thread-local blocks, the heap, the stack region and the alias region. The range
+//! One mapping holds the modules, the thread-local blocks, the shared memory area, the heap, the stack region with the main stack and the alias region. The range
 //! is the guest range of `nxkit_abi::guest`, and the whole of it is the no-copy buffer that the GPU backend wraps.
 
 use std::sync::OnceLock;
@@ -32,7 +32,7 @@ pub fn get() -> Result<&'static GuestMemory> {
 /// `res` is the one reservation, which `place` made. The modules are in it already. The lowest page of the main stack
 /// is a guard page.
 pub fn init(layout: Layout, res: Reservation) -> Result<&'static GuestMemory> {
-    let rw = [layout.main_stack, layout.tls, layout.heap, layout.stack, layout.alias];
+    let rw = [layout.tls, layout.shared, layout.heap, layout.stack, layout.alias];
     for r in rw {
         res.protect(r.start, r.len, PROT_RW)?;
     }

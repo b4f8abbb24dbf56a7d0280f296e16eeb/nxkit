@@ -198,6 +198,7 @@ pub unsafe extern "C" fn nxkit_kernel_init(config: *const NxkitKernelConfig) -> 
     let mut cfg = Config {
         roles: RoleTable::new(&rules),
         core_rules: c.core_rules != 0,
+        on_close: Some(nxkit_svc_system::on_handle_closed),
         ..Config::default()
     };
     if let Some(entry) = c.thread_entry {
@@ -256,6 +257,25 @@ pub unsafe extern "C" fn nxkit_kernel_init(config: *const NxkitKernelConfig) -> 
         );
     }
     0
+}
+
+/// The kernel that [`nxkit_kernel_init`] made, or `None` before it ran. The host Rust code uses it for the seams of the
+/// services.
+pub fn kernel() -> Option<&'static Arc<Kernel>> {
+    KERNEL.get()
+}
+
+/// Attaches the calling host thread as the main guest thread, with the priority, core and stack size of the NPDM that
+/// [`nxkit_kernel_init`] got. The host calls it on the thread that runs the game, before guest code. Gives the
+/// reason when the kernel is missing or has no main thread.
+pub fn attach_main_thread() -> Result<(), String> {
+    let kernel = KERNEL
+        .get()
+        .ok_or_else(|| "the kernel is not started".to_owned())?;
+    kernel
+        .attach_main_thread("")
+        .map(|_| ())
+        .map_err(|e| format!("the main thread did not attach: {e:?}"))
 }
 
 /// The process exit hook of the host.
