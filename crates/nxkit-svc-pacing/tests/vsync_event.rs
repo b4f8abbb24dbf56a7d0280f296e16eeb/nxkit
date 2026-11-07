@@ -66,6 +66,8 @@ fn a_game_at_60_hz_gets_an_event_on_every_second_tick_of_120_hz() {
         display_hz: 120.0,
         vsync_hz: 60.0,
         step: StepMode::Own,
+        limits: None,
+        display_mode: false,
     };
     assert!(init(&config).is_ok());
     assert!(init(&config).is_err());

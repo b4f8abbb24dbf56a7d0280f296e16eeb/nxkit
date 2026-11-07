@@ -7,11 +7,19 @@
 //!   second tick, so it steps its logic once per frame and runs at the speed of the Switch.
 //! - It writes the step of each frame into the state page of a game that has frame step data (see [`state`] and
 //!   [`mode`]). A game with such data runs at 120 fps and still steps right.
+//! - It decides how long each frame stays on screen when the load of the frames asks for it (the port of nxnative's
+//!   `fstep_tick` in [`load`] and [`fstep`], R30a), and it writes the target frame rate into the frame limiter of an engine
+//!   that has no frame step ([`limits`], the port of `hle_fpslock.c`).
 //! - It counts what it did ([`snapshot`]), as part of the measurement of R16.
+//!
+//! `hle_fpslock.c` of nxnative exports no SDK function. It only writes the guest's memory, so [`exports`] has the vsync
+//! event alone.
 //!
 //! What the host does. It calls [`init`] before the game starts. It calls [`on_display_tick`] from the sink that it gave
 //! to the `Pacer` of `nxkit-metal` on every tick of the display link. It calls [`frame_started`] when the game starts a
-//! frame, and [`set_rates`] when the plan of `nxkit-metal` changes.
+//! frame, and [`set_rates`] when the plan of `nxkit-metal` changes. When the title asks for a load-driven step or has an
+//! engine limiter, it calls [`frame_presented`] once for each presented frame, and reads [`hold`], [`present_vsyncs`] and
+//! [`deadline_vsyncs`] to pace the presents.
 //!
 //! The binding of the game's `SystemEventType` to a kernel event has to run SDK code of the game
 //! (`nn::os::CreateSystemEvent`), because the game's structure is the SDK's own. `nxkit-abi` has no call into the
@@ -20,7 +28,7 @@
 //! because the game destroyed it. A handle number that the game reuses before the next tick would be signalled by
 //! mistake. nxnative closes that gap with a binding identity. This service does not and takes the gap as open.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
 
@@ -29,12 +37,22 @@ use nxkit_abi::guest::Fault;
 use nxkit_abi::ipc::Named;
 use nxkit_abi::kernel::kernel;
 
+pub mod fstep;
+pub mod interval;
+pub mod limits;
+pub mod load;
 pub mod mode;
+pub mod notice;
 pub mod state;
 pub mod vstep;
 pub mod vsync;
+pub mod watch;
 
+pub use interval::PresentRule;
+pub use limits::{LimitEvent, Limits, LimitsConfig};
+pub use load::{LoadConfig, LoadStats, Outcome, PresentSample};
 pub use mode::{BadTarget, MAX_VARIABLE_FPS, StepMode, Stepper};
+pub use notice::Notice;
 pub use state::StatePage;
 pub use vstep::{STEP_MAX, STEP_MIN, VariableStep};
 pub use vsync::ticks_per_vsync;
@@ -63,8 +81,13 @@ pub struct Config {
     pub display_hz: f32,
     /// The vsync rate of the game in Hz. A Switch game has 60.
     pub vsync_hz: f32,
-    /// Who decides the step of a frame. It needs a state page unless it is [`StepMode::Own`].
+    /// Who decides the step of a frame. It needs a state page unless it is [`StepMode::Own`] or [`StepMode::Load`].
     pub step: StepMode,
+    /// The engine limiters of the main module, for a game that has no frame step. The host builds it from the loader's
+    /// facts and the title's profile.
+    pub limits: Option<LimitsConfig>,
+    /// `present_interval` of the title is `display`: with no cap, one frame for each tick of the link.
+    pub display_mode: bool,
 }
 
 /// A failure of the service.
@@ -78,6 +101,8 @@ pub enum Error {
     NoStatePage,
     /// A rate is zero, negative or not a number.
     BadRate,
+    /// A load-driven step at 120 fps counts ticks of 1/120 s and has no state page, and the config or the call gave one.
+    PageAt120,
     /// The state page is outside guest memory.
     Guest(Fault),
 }
@@ -89,6 +114,9 @@ impl std::fmt::Display for Error {
             Self::NotInitialised => f.write_str("the pacing service is not initialised"),
             Self::NoStatePage => f.write_str("the step mode needs a frame step state page"),
             Self::BadRate => f.write_str("a rate of the pacing service must be a positive number"),
+            Self::PageAt120 => {
+                f.write_str("a load-driven step at 120 fps has no frame step state page")
+            }
             Self::Guest(e) => write!(f, "the frame step state page: {e}"),
         }
     }
@@ -115,6 +143,10 @@ pub struct Snapshot {
     pub events: u32,
     /// Ticks of the display link that make one vsync of the game.
     pub ticks_per_vsync: u32,
+    /// The vsyncs that the last presented frame stays on screen, 0 before the first present or without a load-driven step.
+    pub hold: i32,
+    /// The cap in fps that the presents follow, 0 for none.
+    pub cap: u32,
 }
 
 struct Shared {
@@ -125,6 +157,13 @@ struct Shared {
     signalled: AtomicU64,
     self_clocked: AtomicU64,
     stepper: Mutex<Option<Stepper>>,
+    limits: Mutex<Option<Limits>>,
+    hold: AtomicI32,
+    cap: AtomicU32,
+    load: bool,
+    step_hz: u32,
+    display_mode: bool,
+    notices: Vec<Notice>,
 }
 
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
@@ -144,8 +183,24 @@ pub fn init(config: &Config) -> Result<(), Error> {
     let stepper = match (config.state_page, config.step) {
         (Some(base), mode) => Some(Stepper::new(StatePage::new(base)?, mode)?),
         (None, StepMode::Own) => None,
+        (None, StepMode::Load(c)) => Some(Stepper::without_page(c)),
         (None, _) => return Err(Error::NoStatePage),
     };
+    let mut notices = Vec::new();
+    let limits = config.limits.as_ref().map(|c| {
+        let (l, mut n) = Limits::new(c);
+        notices.append(&mut n);
+        l
+    });
+    let (load, step_hz, mut cap) = match config.step {
+        StepMode::Load(c) => (true, if c.at_120() { 120 } else { 60 }, c.target),
+        _ => (false, 60, 0),
+    };
+    if !load && let Some(l) = &limits {
+        let (c, notice) = interval::engine_present_cap(l.target(), l.has_engine());
+        notices.extend(notice);
+        cap = c;
+    }
     let shared = Arc::new(Shared {
         bind: config.bind_system_event,
         clock: TickClock::default(),
@@ -154,6 +209,13 @@ pub fn init(config: &Config) -> Result<(), Error> {
         signalled: AtomicU64::new(0),
         self_clocked: AtomicU64::new(0),
         stepper: Mutex::new(stepper),
+        limits: Mutex::new(limits),
+        hold: AtomicI32::new(0),
+        cap: AtomicU32::new(cap),
+        load,
+        step_hz,
+        display_mode: config.display_mode,
+        notices,
     });
     SHARED.set(shared).map_err(|_| Error::AlreadyInitialised)
 }
@@ -177,14 +239,15 @@ pub fn set_rates(display_hz: f32, vsync_hz: f32) -> Result<(), Error> {
     Ok(())
 }
 
-/// Changes who decides the step of a frame. It needs a state page.
+/// Changes who decides the step of a frame. It needs a state page, except for the game's own step
+/// and a load-driven step.
 pub fn set_step_mode(mode: StepMode) -> Result<(), Error> {
     let mut g = shared()?
         .stepper
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     match g.as_mut() {
-        Some(s) => Ok(s.set_mode(mode)?),
+        Some(s) => s.set_mode(mode),
         None if mode == StepMode::Own => Ok(()),
         None => Err(Error::NoStatePage),
     }
@@ -203,6 +266,128 @@ pub fn frame_started(start_ns: u64) -> Result<(), Error> {
     }
 }
 
+/// The game starts a frame at `start_ns`. The first acquire of the frame waited `wait_ns` for the pacing, and the
+/// load-driven step takes that wait off the cost of the frame.
+pub fn frame_started_waited(start_ns: u64, wait_ns: u64) -> Result<(), Error> {
+    let mut g = shared()?
+        .stepper
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    match g.as_mut() {
+        Some(s) => Ok(s.frame_started_waited(start_ns, wait_ns)?),
+        None => Ok(()),
+    }
+}
+
+/// What a present decided.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Presented {
+    /// The load-driven step's decision. `None` in the other modes.
+    pub outcome: Option<Outcome>,
+    /// What the host wrote into the engine limiters, for the log.
+    pub limits: Vec<LimitEvent>,
+}
+
+/// A frame is presented. The host calls it once for each present, before it takes the period of the frame. It runs the
+/// load-driven step (which writes the step into the state page) and then writes the target into the engine limiters.
+pub fn frame_presented(sample: &PresentSample) -> Result<Presented, Error> {
+    let s = shared()?;
+    let outcome = match s
+        .stepper
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
+    {
+        Some(st) => st.present(sample)?,
+        None => None,
+    };
+    if let Some(o) = &outcome {
+        s.hold.store(o.hold, Ordering::Relaxed);
+        s.cap.store(o.cap, Ordering::Relaxed);
+    }
+    let hold = u32::try_from(s.hold.load(Ordering::Relaxed)).unwrap_or(0);
+    let limits = match s
+        .limits
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
+    {
+        Some(l) => l.tick(hold)?,
+        None => Vec::new(),
+    };
+    Ok(Presented { outcome, limits })
+}
+
+/// The vsyncs that the last presented frame stays on screen, 0 before the first present or without a load-driven step.
+/// The unit is 1/60 s, or 1/120 s at 120 fps. The `Pacer` of `nxkit-metal` shows a frame for `hold` times the ticks of the
+/// link that make one vsync of that unit.
+pub fn hold() -> Result<i32, Error> {
+    Ok(shared()?.hold.load(Ordering::Relaxed))
+}
+
+/// The frame rate that the engine limiters take now at a target of 120: 120 while the hold is one tick, else 60.
+pub fn fps_high_now() -> Result<u32, Error> {
+    Ok(interval::high_target_now(
+        u32::try_from(hold()?).unwrap_or(0),
+    ))
+}
+
+/// Whether the host writes the target into an engine limiter of the game. Without one and without a state page nothing
+/// makes the game follow a cap.
+pub fn engine_limiter() -> Result<bool, Error> {
+    Ok(shared()?
+        .limits
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(Limits::has_engine))
+}
+
+/// The notices that [`init`] made, for the log. They carry the refused targets and the limiters that were not found.
+pub fn notices() -> Result<Vec<Notice>, Error> {
+    Ok(shared()?.notices.clone())
+}
+
+fn rule(s: &Shared) -> PresentRule {
+    PresentRule {
+        cap: s.cap.load(Ordering::Relaxed),
+        hold: u32::try_from(s.hold.load(Ordering::Relaxed)).unwrap_or(0),
+        step_on: s.load,
+        step_hz: s.step_hz,
+        display_mode: s.display_mode,
+    }
+}
+
+/// The vsyncs that a frame stays on screen (`present_itv` of nxnative). `game_interval` is the present interval that the
+/// game set, 0 when it set none. The unit is the one of [`hold`].
+pub fn present_vsyncs(game_interval: u32) -> Result<u32, Error> {
+    Ok(rule(shared()?).vsyncs(game_interval))
+}
+
+/// The vsyncs that the thread of the acquire declares to the scheduler as its deadline. A hold that late frames raised does
+/// not move the deadline, so the performance controller keeps the game on the fast cores.
+pub fn deadline_vsyncs(game_interval: u32) -> Result<u32, Error> {
+    let s = shared()?;
+    let fixes = s
+        .stepper
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map_or(Ok(false), Stepper::game_fixes_step)?;
+    Ok(rule(s).deadline_vsyncs(game_interval, fixes))
+}
+
+/// What the load-driven step counted so far. `None` in the other modes.
+pub fn load_stats() -> Result<Option<LoadStats>, Error> {
+    Ok(shared()?
+        .stepper
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(Stepper::load)
+        .map(load::LoadStepper::stats))
+}
+
 /// What the service counted so far.
 pub fn snapshot() -> Result<Snapshot, Error> {
     let s = shared()?;
@@ -218,6 +403,8 @@ pub fn snapshot() -> Result<Snapshot, Error> {
         )
         .unwrap_or(u32::MAX),
         ticks_per_vsync: s.rates.ticks_per_vsync(),
+        hold: s.hold.load(Ordering::Relaxed),
+        cap: s.cap.load(Ordering::Relaxed),
     })
 }
 
@@ -317,6 +504,8 @@ mod tests {
             display_hz: 0.0,
             vsync_hz: 60.0,
             step: StepMode::Own,
+            limits: None,
+            display_mode: false,
         };
         assert_eq!(init(&c), Err(Error::BadRate));
         let c = Config {
