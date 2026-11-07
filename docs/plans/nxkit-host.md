@@ -23,8 +23,8 @@ The host follows the layers of the workspace and the title layer.
 
 | crate | function |
 |---|---|
-| `nxkit-rt` | the guest ABI, the entry points the host calls, the only crate with `unsafe` besides `nxb-sys` |
-| `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads |
+| `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys` and the module `sys` of `nxkit-hos` |
+| `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. The svc entry points for the host are in `Kernel::dispatch_svc`, and `nxkit-rt` does not call them yet |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline` |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame |

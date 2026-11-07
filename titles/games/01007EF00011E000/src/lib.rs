@@ -15,6 +15,7 @@
 //!
 //! nxnative runs every service of the game. This module moves a service to nxkit once the nxkit runtime has it.
 
+use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
 use nxtitle::{BuildHooks, Evidence, Fact, Need, Runtime, RuntimeHooks, Service, Title, TitleId};
 
 /// The title module.
@@ -78,6 +79,34 @@ const NEEDS: &[Fact<Need>] = &[
 
 impl BuildHooks for Botw {}
 
+const THREAD_NOTE: &str = "the thread names and priorities are guesses from the engine's usual layout and are not \
+                           read from the game. A thread dump of a run (nxkit-hos `dump_stats`) checks them.";
+
+/// The roles of the game's threads. Every entry is unverified.
+pub const THREAD_ROLES: &[Fact<RoleRule>] = &[
+    Fact::new(
+        RoleRule::named(NameMatch::Contains("Render"), ThreadRole::Render),
+        Evidence::Unverified { note: THREAD_NOTE },
+    ),
+    Fact::new(
+        RoleRule::named(NameMatch::Contains("Audio"), ThreadRole::Audio),
+        Evidence::Unverified { note: THREAD_NOTE },
+    ),
+    Fact::new(
+        RoleRule::named(NameMatch::Contains("Load"), ThreadRole::Loading),
+        Evidence::Unverified { note: THREAD_NOTE },
+    ),
+    Fact::new(
+        RoleRule::named(NameMatch::Contains("Stream"), ThreadRole::Streaming),
+        Evidence::Unverified { note: THREAD_NOTE },
+    ),
+];
+
+/// The table the kernel takes for this title. A thread no entry matches keeps the default role.
+pub fn role_table() -> RoleTable {
+    RoleTable::new(&THREAD_ROLES.iter().map(|f| f.value).collect::<Vec<_>>())
+}
+
 /// The services nxkit runs for Breath of the Wild. The rest stay on nxnative.
 const OFFLINE: Fact<Runtime> = Fact::new(
     Runtime::Nxkit,
@@ -126,6 +155,17 @@ mod tests {
         assert_eq!(p.title_id.as_deref(), Some(BOTW.id().to_string().as_str()));
         assert_eq!(p.declared.title.as_deref(), Some(BOTW.name()));
         assert_eq!(p.problems(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn thread_roles_are_marked_unverified() {
+        assert!(THREAD_ROLES.iter().all(|r| !r.evidence.is_checked()));
+        let info = nxkit_hos::ThreadInfo {
+            name: "AudioMain",
+            priority: 20,
+            entry: 0,
+        };
+        assert_eq!(role_table().classify(&info), Some(ThreadRole::Audio));
     }
 
     #[test]
