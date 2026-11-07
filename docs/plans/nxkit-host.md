@@ -27,6 +27,7 @@ The host follows the layers of the workspace and the title layer.
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline` |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
+| `nxkit-gpu` | the frame encoder: it turns a held `nxkit-nvn` frame into Metal 4 work with `nxkit-metal`. It has no `unsafe` code and no game knowledge. Refer to [nxkit-gpu.md](../nxkit-gpu.md) |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
 
@@ -102,7 +103,9 @@ The part of H3 that does not need the frame format exists in `nxkit-metal`:
 - Indirect command buffers with per-state inherit flags. The module docs of `icb.rs` list what an ICB can hold on the Xcode 27.1 SDK.
 - A data-driven encoding API for render passes and compute passes. The frame encoder will call it from a loop over the recorded commands.
 
-What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, compute ICBs, and the tuning of frame latency on real hardware.
+The encoder that reads the frame format of `nxkit-nvn` is the crate `nxkit-gpu`. Compute ICBs and indirect execution ranges are wrapped in `nxkit-metal` (`compute_icb.rs`).
+
+What is still open: the recorder that fills `FrameDetail` and calls `Gpu::encode_frame` from the NVN functions, the first build and run of `nxkit-gpu`, and the tuning of frame latency on real hardware.
 
 The route is one save and one path through the game: the title screen, loading the save, the Great Plateau outdoors, a shrine, the menus and a cutscene.
 
