@@ -19,9 +19,9 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 ```mermaid
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
-  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host)"]
+  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-rt (unsafe code, the C ABI of the host)"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
@@ -65,6 +65,8 @@ The rules:
 | nxb-cli | nxb-stages | the shader step of `nxb shaders build` |
 | nxb-build | nxb-stages | the shader step in the build graph (W19) |
 | nxtitles | nxtitle | the registry builds the catalog of the title API |
+| nxkit-hos, nxkit-ipc, nxkit-svc-* | nxkit-abi | the guest ABI that the kernel, the IPC server and the services share |
+| nxkit-rt | nxkit-nvn | the NVN C functions over the front end |
 
 ## Crates
 
@@ -94,7 +96,7 @@ The rules:
 | nxkit-svc-input | L0 | no | impl | the `input` service: controllers, GameController and Core Haptics through `objc2`. `unsafe` only in `sys` |
 | nxkit-svc-audio | L0 | no | impl | the audio service of the nxkit host: SDK take-overs, `audout:u`, `audren:u`, `IAudioDevice`, and a mixer in the AUHAL callback (R41, R42). It is not compiled or tested yet |
 | nxkit-svc-pacing | L0 | no | impl | the `pacing` service: the `Pacer` for present intervals and the frame pace profile |
-| nxkit-host | L0 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
+| nxkit-host | L2 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
 | nxkit-svc-system | L0 | no | impl | the system services as `Service` objects: `set`, `set:sys`, `apm`, `time:*`, `acc:*`, `appletOE`, `appletAE`, `pctl*`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u` (R37), and the SDK exports of the nxnative take-overs (R38a). The module `sys` holds the clock, time zone and guest call functions |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
 | nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |

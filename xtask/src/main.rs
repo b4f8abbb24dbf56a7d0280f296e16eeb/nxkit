@@ -48,6 +48,18 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxb-build", "nxb-pack"),
     ("nxb-build", "nxb-archive"),
     ("nxb-build", "nxb-stages"),
+    // The nxkit host: the services and the kernel use the guest ABI of `nxkit-abi`, and `nxkit-rt` puts the NVN C
+    // functions over the front end of `nxkit-nvn`.
+    ("nxkit-hos", "nxkit-abi"),
+    ("nxkit-ipc", "nxkit-abi"),
+    ("nxkit-svc-audio", "nxkit-abi"),
+    ("nxkit-svc-fs", "nxkit-abi"),
+    ("nxkit-svc-input", "nxkit-abi"),
+    ("nxkit-svc-offline", "nxkit-abi"),
+    ("nxkit-svc-pacing", "nxkit-abi"),
+    ("nxkit-svc-system", "nxkit-abi"),
+    ("nxkit-svc-video", "nxkit-abi"),
+    ("nxkit-rt", "nxkit-nvn"),
 ];
 
 /// Edges from a crate in V to a crate outside V that are output-neutral by contract (ADR W17: hardware SHA-256 gives
