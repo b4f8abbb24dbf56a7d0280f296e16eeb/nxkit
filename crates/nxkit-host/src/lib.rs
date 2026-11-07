@@ -9,6 +9,9 @@ pub mod json;
 pub mod layout;
 pub mod macho;
 pub mod manifest;
+pub mod module;
+pub mod reloc;
+pub mod settings;
 pub mod stop;
 
 #[cfg(target_os = "macos")]
@@ -21,6 +24,8 @@ pub mod gate;
 pub mod loader;
 #[cfg(target_os = "macos")]
 pub mod memory;
+#[cfg(target_os = "macos")]
+pub mod place;
 #[cfg(target_os = "macos")]
 pub mod probe;
 #[cfg(target_os = "macos")]

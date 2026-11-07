@@ -15,7 +15,6 @@ use nxkit_metal::Context;
 
 use crate::error::{HostError, Result};
 use crate::layout::{self, Layout};
-use crate::loader::DYLIB_NAME;
 use crate::macho;
 use crate::manifest::Game;
 use crate::memory;
@@ -30,7 +29,7 @@ fn ms(d: Duration) -> f64 {
 fn named_ranges(game: &Game, layout: &Layout) -> Vec<(String, u64, u64)> {
     let mut out = vec![("all guest memory".to_string(), layout.all.start, layout.all.len)];
     for m in &game.modules {
-        out.push((format!("module {}", m.name), m.base, m.size));
+        out.push((format!("module {}", m.name), m.start(), m.end() - m.start()));
     }
     out.push(("main stack".into(), layout.main_stack.start, layout.main_stack.len));
     out.push(("thread-local blocks".into(), layout.tls.start, layout.tls.len));
@@ -91,7 +90,8 @@ fn fixed_calls(ranges: &[(String, u64, u64)], free: &[bool]) {
 fn copy_cost(game: &Game) -> Result<()> {
     println!("3. Cost of the copy fallback (map, copy, mprotect to r-x), {COPY_RUNS} runs per module:");
     for m in &game.modules {
-        let len = m.size as usize;
+        let span = m.end() - m.start();
+        let len = span as usize;
         let source = vec![0xA5u8; len];
         let mut totals = Vec::new();
         for _ in 0..COPY_RUNS {
@@ -109,7 +109,7 @@ fn copy_cost(game: &Game) -> Result<()> {
         println!(
             "   module {}: {:#x} bytes, median copy {:.2} ms, median with mprotect {:.2} ms",
             m.name,
-            m.size,
+            span,
             ms(copy),
             ms(all)
         );
@@ -117,35 +117,31 @@ fn copy_cost(game: &Game) -> Result<()> {
     Ok(())
 }
 
-/// Measurement 4: where does dyld put the segments of `nxgame.dylib` in a fresh process?
+/// Measurement 4: where does dyld put the segments of `nxgame.dylib` in a fresh process? The build asks for the
+/// preferred addresses of `game.json`. dyld may slide the library, and the host handles both (R48).
 fn dyld_placement(game: &Game) {
-    println!("4. Where does dyld put the segments of {DYLIB_NAME}?");
-    let path = game.path(Path::new(DYLIB_NAME));
+    println!("4. Where does dyld put the segments of {}?", game.dylib.display());
+    let path = game.path(&game.dylib);
     if !path.exists() {
         println!("   {} does not exist, skipped", path.display());
         return;
     }
     let result = Dylib::open(&path).and_then(|lib| {
-        let read = lib.header().and_then(|(head, bytes)| Ok((head, macho::segments(&bytes)?)));
+        let read = lib.image().and_then(|img| Ok((img, macho::segments(&img.commands()?)?)));
         lib.close();
         read
     });
-    let (head, segs) = match result {
+    let (img, segs) = match result {
         Ok(r) => r,
         Err(e) => {
             println!("   failed: {e}");
             return;
         }
     };
-    let Some(first) = segs.iter().find(|s| s.fileoff == 0 && s.filesize > 0) else {
-        println!("   no segment holds the header");
-        return;
-    };
-    let slide = head.wrapping_sub(first.vmaddr);
-    println!("   header at {head:#x}, slide {slide:#x}");
+    println!("   header at {:#x}, slide {:#x}", img.header, img.slide);
     for s in segs.iter().filter(|s| s.name.starts_with("__NX_")) {
-        let at = s.vmaddr.wrapping_add(slide);
-        let verdict = if slide == 0 { "at the preferred address" } else { "moved" };
+        let at = s.vmaddr.wrapping_add_signed(img.slide);
+        let verdict = if img.slide == 0 { "at the preferred address" } else { "moved" };
         println!("   {}: preferred {:#x}, loaded {at:#x}, {verdict}", s.name, s.vmaddr);
     }
 }
@@ -180,7 +176,8 @@ fn mib(bytes: u64) -> f64 {
 fn buffer_and_residency(layout: Layout) -> Result<()> {
     println!("5. No-copy buffer over the reservation, and 6. wired memory:");
     let before = wired_bytes()?;
-    let mem = memory::init(layout)?;
+    let res = sys::reserve(layout.all.start, layout.all.len)?;
+    let mem = memory::init(layout, res)?;
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     println!(
         "   device {}, maxBufferLength {:.2} GiB, reservation {:.2} GiB",
@@ -208,7 +205,7 @@ fn buffer_and_residency(layout: Layout) -> Result<()> {
 /// Runs the probe for the game in `root` and prints the results.
 pub fn run(root: &Path) -> Result<()> {
     let game = Game::read(root)?;
-    let layout = layout::plan(&game)?;
+    let layout = layout::plan(&game, 0)?;
     println!("nxkit-host probe for {}", root.display());
     let ranges = named_ranges(&game, &layout);
     let free = free_in_fresh_process(&ranges);

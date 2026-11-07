@@ -60,14 +60,17 @@ fn overflow() -> HostError {
     HostError::Memory("the guest address map overflows 64 bits".into())
 }
 
-/// Plans the reservation for a game.
-pub fn plan(game: &Game) -> Result<Layout> {
-    let lo = game.modules.iter().map(|m| m.base).min().ok_or_else(overflow)?;
+/// Plans the reservation for a game whose modules sit where `game` says.
+///
+/// The host regions start at `floor` or behind the highest module, whichever is higher. When dyld mapped the
+/// library, `floor` is the end of everything that dyld mapped, which is a bit behind the last module.
+pub fn plan(game: &Game, floor: u64) -> Result<Layout> {
+    let lo = game.modules.iter().map(|m| m.start()).min().ok_or_else(overflow)?;
     let hi = game.modules.iter().map(|m| m.end()).max().ok_or_else(overflow)?;
     let stack_len = align_up(game.main_thread.stack_size, PAGE)
         .and_then(|s| s.checked_add(PAGE))
         .ok_or_else(overflow)?;
-    let stack_start = align_up(hi, PAGE).ok_or_else(overflow)?;
+    let stack_start = align_up(hi.max(floor), PAGE).ok_or_else(overflow)?;
     let tls_start = stack_start.checked_add(stack_len).ok_or_else(overflow)?;
     let tls_len = TLS_SLOTS * TLS_SLOT_SIZE;
     let heap_start = align_up(tls_start + tls_len, REGION_ALIGN).ok_or_else(overflow)?;
@@ -91,27 +94,20 @@ pub fn plan(game: &Game) -> Result<Layout> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest::sample;
+    use crate::module::samples::{FAR, NEAR};
     use std::path::Path;
 
-    fn game(stack: u64) -> Option<Game> {
-        let src = format!(
-            r#"{{"title_id": "1", "services": [], "romfs": "r",
-            "main_thread": {{"priority": 44, "core": 0, "stack_size": {stack}}},
-            "memory": {{"heap": "0x40000000", "alias": "0x20000000"}},
-            "modules": [{{"name": "main", "base": "0x100000000", "size": "0x20000",
-              "text": {{"offset": 0, "size": 16384}}, "rodata": {{"offset": 16384, "size": 16384}},
-              "data": {{"offset": 49152, "size": 16384}}, "bss_size": 16384, "image": "i", "imports": "a",
-              "exports": "b", "entry": 0, "key_page": 114688, "gates": "g"}}]}}"#
-        );
-        Game::parse(Path::new("/x"), &src).ok()
+    fn game(module: &str) -> Option<Game> {
+        Game::parse(Path::new("/x"), &sample("", module)).ok()
     }
 
     #[test]
     fn regions_follow_the_modules_without_overlap() {
-        let g = game(0x10_0000);
+        let g = game(NEAR);
         assert!(g.is_some());
         let Some(g) = g else { return };
-        let l = plan(&g);
+        let l = plan(&g, 0);
         assert!(l.is_ok());
         let Ok(l) = l else { return };
         assert_eq!(l.all.start, 0x1_0000_0000);
@@ -123,5 +119,27 @@ mod tests {
         assert_eq!(l.stack.start, l.heap.end());
         assert_eq!(l.alias.start, l.stack.end());
         assert_eq!(l.all.end(), l.alias.end());
+    }
+
+    #[test]
+    fn a_far_module_starts_at_its_patch_area() {
+        let g = game(FAR);
+        assert!(g.is_some());
+        let Some(g) = g else { return };
+        let l = plan(&g, 0);
+        assert!(l.is_ok());
+        let Ok(l) = l else { return };
+        assert_eq!(l.all.start, 0x100_0004_0000 - 0x2_0000);
+    }
+
+    #[test]
+    fn the_floor_moves_the_host_regions_up() {
+        let g = game(NEAR);
+        assert!(g.is_some());
+        let Some(g) = g else { return };
+        let l = plan(&g, 0x1_0010_0000);
+        assert!(l.is_ok());
+        let Ok(l) = l else { return };
+        assert_eq!(l.main_stack.start, 0x1_0010_0000);
     }
 }

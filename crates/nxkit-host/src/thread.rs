@@ -10,7 +10,8 @@
 //! block lies inside the reservation, because the kernel reads the IPC message from the region.
 
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{HostError, Result};
 use crate::gate::{self, GATE_SLOTS, GATE_STACK_SIZE};
@@ -74,19 +75,27 @@ fn keys() -> Result<Keys> {
         .ok_or_else(|| HostError::Load("the thread keys are not created yet".into()))
 }
 
-fn free_slots() -> &'static Mutex<Vec<usize>> {
-    static FREE: OnceLock<Mutex<Vec<usize>>> = OnceLock::new();
-    FREE.get_or_init(|| Mutex::new((0..GATE_SLOTS).rev().collect()))
-}
+/// One bit per gate slot. A set bit means that a guest thread uses the slot. Taking and giving a slot is lock free (R7).
+static USED: [AtomicU64; GATE_SLOTS / 64] = [const { AtomicU64::new(0) }; GATE_SLOTS / 64];
 
 fn take_slot() -> Result<usize> {
-    let mut g = free_slots().lock().unwrap_or_else(|e| e.into_inner());
-    g.pop()
-        .ok_or_else(|| HostError::Memory(format!("more than {GATE_SLOTS} guest threads at the same time")))
+    for (w, word) in USED.iter().enumerate() {
+        let mut cur = word.load(Ordering::Relaxed);
+        while cur != u64::MAX {
+            let bit = (!cur).trailing_zeros();
+            match word.compare_exchange_weak(cur, cur | (1 << bit), Ordering::AcqRel, Ordering::Relaxed) {
+                Ok(_) => return Ok(w * 64 + bit as usize),
+                Err(now) => cur = now,
+            }
+        }
+    }
+    Err(HostError::Memory(format!("more than {GATE_SLOTS} guest threads at the same time")))
 }
 
 fn give_slot(k: usize) {
-    free_slots().lock().unwrap_or_else(|e| e.into_inner()).push(k);
+    if let Some(word) = USED.get(k / 64) {
+        word.fetch_and(!(1 << (k % 64)), Ordering::AcqRel);
+    }
 }
 
 /// The state of one guest thread. It belongs to the host thread that created it.

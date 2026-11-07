@@ -6,7 +6,7 @@
 pub mod appkit;
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
 use crate::error::{HostError, Result};
@@ -34,9 +34,12 @@ unsafe extern "C" {
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
     fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
     fn dlerror() -> *const c_char;
+    fn _dyld_image_count() -> u32;
+    fn _dyld_get_image_name(index: u32) -> *const c_char;
+    fn _dyld_get_image_header(index: u32) -> *const c_void;
+    fn _dyld_get_image_vmaddr_slide(index: u32) -> isize;
     fn pthread_key_create(key: *mut usize, destructor: Option<extern "C" fn(*mut c_void)>) -> c_int;
     fn pthread_setspecific(key: usize, value: *const c_void) -> c_int;
     fn pthread_getspecific(key: usize) -> *mut c_void;
@@ -171,6 +174,30 @@ impl Reservation {
     }
 }
 
+/// Reserves `[tail_start, end)` as address space with no access, behind an image that dyld mapped, and returns a view
+/// over `[view_start, end)`. The part `[view_start, tail_start)` is what dyld mapped. The view lets the host protect
+/// and fill those pages. The call fails when the tail is not free.
+pub fn reserve_tail(view_start: u64, tail_start: u64, end: u64) -> Result<Reservation> {
+    if view_start > tail_start || tail_start >= end {
+        return Err(HostError::Memory(format!(
+            "the tail {tail_start:#x}..{end:#x} does not follow the view start {view_start:#x}"
+        )));
+    }
+    let len = end - tail_start;
+    let got = map_hint(tail_start, len, PROT_NONE)?;
+    if got != tail_start {
+        // SAFETY: `got` was just mapped here with `len` bytes.
+        unsafe { munmap(got as usize as *mut c_void, len as usize) };
+        return Err(HostError::Memory(format!(
+            "the guest range {tail_start:#x} + {len:#x} behind the library is not free, the system gave {got:#x}"
+        )));
+    }
+    Ok(Reservation {
+        base: view_start,
+        len: end - view_start,
+    })
+}
+
 /// Reserves `[start, start + len)` as address space with no access and no commit. The call fails when the system
 /// gives another address, because the guest needs exactly this one (R18).
 pub fn reserve(start: u64, len: u64) -> Result<Reservation> {
@@ -281,6 +308,7 @@ pub fn map_stack(len: u64, guard: u64) -> Result<u64> {
 /// A library that `dlopen` loaded. It is never unloaded, except by `close`.
 pub struct Dylib {
     handle: *mut c_void,
+    path: PathBuf,
 }
 
 // SAFETY: a `dlopen` handle is a plain token that dyld accepts from any thread.
@@ -299,8 +327,9 @@ fn dl_message() -> String {
 }
 
 impl Dylib {
-    /// Loads a library.
+    /// Loads a library. The path is made absolute first, so that the image can be found by it afterwards.
     pub fn open(path: &Path) -> Result<Dylib> {
+        let path = std::fs::canonicalize(path).map_err(|e| HostError::io(path, &e))?;
         let c = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|_| HostError::Load(format!("{} has a nul byte", path.display())))?;
         // SAFETY: `c` is a valid C string.
@@ -308,36 +337,67 @@ impl Dylib {
         if handle.is_null() {
             return Err(HostError::Load(format!("dlopen {}: {}", path.display(), dl_message())));
         }
-        Ok(Dylib { handle })
+        Ok(Dylib { handle, path })
     }
 
-    /// The address of a symbol, without the leading underscore that C adds.
-    pub fn symbol(&self, name: &str) -> Option<u64> {
-        let c = CString::new(name).ok()?;
-        // SAFETY: the handle is live and `c` is a valid C string.
-        let p = unsafe { dlsym(self.handle, c.as_ptr()) };
-        (!p.is_null()).then_some(p as usize as u64)
-    }
-
-    /// The Mach-O header of the library as dyld mapped it, and the address of it.
-    pub fn header(&self) -> Result<(u64, Vec<u8>)> {
-        let addr = self
-            .symbol("_mh_dylib_header")
-            .ok_or_else(|| HostError::Load("the library has no _mh_dylib_header".into()))?;
-        let mut head = [0u8; macho::HEADER_SIZE];
-        // SAFETY: dyld mapped the header at `addr`, it is readable for the life of the handle.
-        unsafe { std::ptr::copy_nonoverlapping(addr as usize as *const u8, head.as_mut_ptr(), head.len()) };
-        let total = macho::commands_end(&head)?;
-        let mut all = vec![0u8; total];
-        // SAFETY: the load commands directly follow the header in the same mapped segment.
-        unsafe { std::ptr::copy_nonoverlapping(addr as usize as *const u8, all.as_mut_ptr(), total) };
-        Ok((addr, all))
+    /// The Mach-O image that `dlopen` of this library mapped: its header address and its slide.
+    ///
+    /// The library has no symbols, so the image is found by its path among the images of dyld. The load commands are
+    /// read from the mapped header.
+    pub fn image(&self) -> Result<Image> {
+        // SAFETY: `_dyld_image_count` has no preconditions.
+        let count = unsafe { _dyld_image_count() };
+        for i in 0..count {
+            // SAFETY: `i` is below the count. The name is a C string that lives as long as the image.
+            let name = unsafe { _dyld_get_image_name(i) };
+            if name.is_null() {
+                continue;
+            }
+            // SAFETY: `name` is not null and is a C string, see above.
+            let name = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+            if std::fs::canonicalize(&*name).ok().as_deref() != Some(self.path.as_path()) {
+                continue;
+            }
+            // SAFETY: `i` is below the count.
+            let (head, slide) = unsafe { (_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i)) };
+            if head.is_null() {
+                return Err(HostError::Load("dyld gave no header for the library".into()));
+            }
+            return Ok(Image {
+                header: head as usize as u64,
+                slide: slide as i64,
+            });
+        }
+        Err(HostError::Load(format!("dyld does not list {} as a loaded image", self.path.display())))
     }
 
     /// Unloads the library.
     pub fn close(self) {
         // SAFETY: the handle is live and `self` is consumed.
         unsafe { dlclose(self.handle) };
+    }
+}
+
+/// A Mach-O image that dyld mapped.
+#[derive(Debug, Clone, Copy)]
+pub struct Image {
+    /// The address of the Mach-O header.
+    pub header: u64,
+    /// How far dyld moved the image from its preferred addresses.
+    pub slide: i64,
+}
+
+impl Image {
+    /// The header and the load commands, copied out of the mapping.
+    pub fn commands(&self) -> Result<Vec<u8>> {
+        let mut head = [0u8; macho::HEADER_SIZE];
+        // SAFETY: dyld mapped the header at this address, it is readable for the life of the image.
+        unsafe { std::ptr::copy_nonoverlapping(self.header as usize as *const u8, head.as_mut_ptr(), head.len()) };
+        let total = macho::commands_end(&head)?;
+        let mut all = vec![0u8; total];
+        // SAFETY: the load commands directly follow the header in the same mapped segment.
+        unsafe { std::ptr::copy_nonoverlapping(self.header as usize as *const u8, all.as_mut_ptr(), total) };
+        Ok(all)
     }
 }
 

@@ -4,58 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{HostError, Result};
 use crate::json::{self, Value};
+use crate::module::{self, Module};
+use crate::settings::{self, Aoc, Settings};
 
-/// An area of a module, as an offset from the module base and a size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Region {
-    /// Offset from the module base.
-    pub offset: u64,
-    /// Size in bytes.
-    pub size: u64,
-}
-
-/// One module of the game.
-#[derive(Debug, Clone)]
-pub struct Module {
-    /// `rtld`, `main`, `subsdk0` and so on, and `sdk`.
-    pub name: String,
-    /// The fixed guest address.
-    pub base: u64,
-    /// The size of the module from `base`, in bytes. It includes the key page and the bss.
-    pub size: u64,
-    /// The code.
-    pub text: Region,
-    /// The read-only data.
-    pub rodata: Region,
-    /// The data. The bss follows it.
-    pub data: Region,
-    /// The size of the bss, which starts at the end of `data`.
-    pub bss_size: u64,
-    /// The rewritten flat image, relative to the run folder. The copy fallback reads it.
-    pub image: PathBuf,
-    /// The import list, relative to the run folder.
-    pub imports: PathBuf,
-    /// The export list, relative to the run folder.
-    pub exports: PathBuf,
-    /// The offset of the entry point. Only `main` has one.
-    pub entry: Option<u64>,
-    /// The offset of the key page, which is 0x4000 bytes (`KEY_PAGE_OFF` of the rewriter).
-    pub key_page: u64,
-    /// The gate list of the rewriter (`<name>.gates.tsv`), relative to the run folder.
-    pub gates: PathBuf,
-}
-
-impl Module {
-    /// The first byte after the module. `size` includes the bss.
-    pub fn end(&self) -> u64 {
-        self.base.saturating_add(self.size)
-    }
-
-    /// The offset where the bss starts, right after the data.
-    pub fn bss_offset(&self) -> u64 {
-        self.data.offset.saturating_add(self.data.size)
-    }
-}
+/// The page size that the build wrote the segments for.
+const PAGE: u64 = 0x4000;
 
 /// The main thread of the game, from its NPDM.
 #[derive(Debug, Clone, Copy)]
@@ -69,8 +22,8 @@ pub struct MainThread {
 }
 
 /// The memory profile of the game: the sizes of the regions that the host reserves beyond the modules, and the
-/// numbers the kernel reports to the game with `GetInfo`. The keys have the meaning of the nxnative game profile
-/// (`mem_reserve`, `mem_alias`, `mem_stack`, `app_pool`, `mem_used`, `sys_resource`, `mem_map_limit`).
+/// numbers the kernel reports to the game with `GetInfo`. The build writes them from the title module. The host has
+/// no defaults (R2).
 #[derive(Debug, Clone, Copy)]
 pub struct Memory {
     /// The heap region of `SetHeapSize`, in bytes.
@@ -87,24 +40,15 @@ pub struct Memory {
     pub sys_resource: u64,
     /// Whether `MapPhysicalMemory` fails when it would take the process past the application pool.
     pub map_limit: bool,
+    /// The largest block that the standard allocator of the guest may hand out, in bytes. 0 means no cap.
+    pub stdalloc_cap: u64,
+    /// Whether the allocator of the guest aligns big blocks to 2 MiB.
+    pub alloc_big_align: bool,
 }
 
-/// The space in front of the heap in `reserve`, as in nxnative: 256 MiB for what the Horizon layout keeps below the heap.
+/// The space that `reserve` keeps below the heap for the Horizon layout of a process, 256 MiB. `reserve` is the whole
+/// range that the game gets, so the heap is what is left after the front space, the stack region and the alias region.
 const RESERVE_FRONT: u64 = 0x1000_0000;
-
-impl Default for Memory {
-    fn default() -> Self {
-        Memory {
-            heap: 0x1_4000_0000,
-            alias: 0x8000_0000,
-            stack: 0x1000_0000,
-            app_pool: 0xcd50_0000,
-            mem_used: 0x400_0000,
-            sys_resource: 0x200_0000,
-            map_limit: false,
-        }
-    }
-}
 
 /// `game.json`.
 #[derive(Debug, Clone)]
@@ -113,11 +57,15 @@ pub struct Game {
     pub root: PathBuf,
     /// The title ID as a hex string.
     pub title_id: String,
-    /// The game version.
+    /// The name of the game.
+    pub name: String,
+    /// The version as the game shows it, for example `1.6.0`.
     pub version: String,
+    /// The version as the number of the update.
+    pub version_number: u32,
     /// The modules, in load order.
     pub modules: Vec<Module>,
-    /// The names of the enabled services, as `nxtitle::Service` names.
+    /// The names of the enabled services, as `nxtitle::Service::id` values.
     pub services: Vec<String>,
     /// The romfs folder.
     pub romfs: PathBuf,
@@ -129,6 +77,12 @@ pub struct Game {
     pub memory: Memory,
     /// The raw `main.npdm`.
     pub npdm: Option<PathBuf>,
+    /// The library with the module segments, relative to the run folder.
+    pub dylib: PathBuf,
+    /// The run settings of the title module.
+    pub settings: Settings,
+    /// The DLC folders.
+    pub aoc: Vec<Aoc>,
 }
 
 /// One entry of an import or export list.
@@ -140,98 +94,68 @@ pub struct Slot {
     pub slot: u64,
 }
 
-fn bad(m: impl Into<String>) -> HostError {
+pub(crate) fn bad(m: impl Into<String>) -> HostError {
     HostError::Manifest(m.into())
 }
 
-fn field<'a>(v: &'a Value, key: &str, ctx: &str) -> Result<&'a Value> {
+pub(crate) fn field<'a>(v: &'a Value, key: &str, ctx: &str) -> Result<&'a Value> {
     v.get(key).ok_or_else(|| bad(format!("{ctx}: missing \"{key}\"")))
 }
 
-fn num(v: &Value, key: &str, ctx: &str) -> Result<u64> {
+pub(crate) fn num(v: &Value, key: &str, ctx: &str) -> Result<u64> {
     field(v, key, ctx)?
         .as_u64()
         .ok_or_else(|| bad(format!("{ctx}: \"{key}\" is not a number")))
 }
 
-fn text(v: &Value, key: &str, ctx: &str) -> Result<String> {
+pub(crate) fn text(v: &Value, key: &str, ctx: &str) -> Result<String> {
     field(v, key, ctx)?
         .as_str()
         .map(str::to_owned)
         .ok_or_else(|| bad(format!("{ctx}: \"{key}\" is not a string")))
 }
 
-fn region(v: &Value, key: &str, ctx: &str) -> Result<Region> {
-    let r = field(v, key, ctx)?;
-    let c = format!("{ctx}.{key}");
-    Ok(Region {
-        offset: num(r, "offset", &c)?,
-        size: num(r, "size", &c)?,
-    })
-}
-
-fn module(v: &Value, i: usize) -> Result<Module> {
-    let name = text(v, "name", &format!("modules[{i}]"))?;
-    let ctx = format!("module {name}");
-    let entry = match v.get("entry") {
-        None | Some(Value::Null) => None,
-        Some(e) => Some(e.as_u64().ok_or_else(|| bad(format!("{ctx}: \"entry\" is not a number")))?),
-    };
-    Ok(Module {
-        base: num(v, "base", &ctx)?,
-        size: num(v, "size", &ctx)?,
-        text: region(v, "text", &ctx)?,
-        rodata: region(v, "rodata", &ctx)?,
-        data: region(v, "data", &ctx)?,
-        bss_size: num(v, "bss_size", &ctx)?,
-        image: PathBuf::from(text(v, "image", &ctx)?),
-        imports: PathBuf::from(text(v, "imports", &ctx)?),
-        exports: PathBuf::from(text(v, "exports", &ctx)?),
-        entry,
-        key_page: num(v, "key_page", &ctx)?,
-        gates: PathBuf::from(text(v, "gates", &ctx)?),
-        name,
-    })
-}
-
+/// Reads `memory`. Every key is required: the host holds no numbers of any game (R2), so a missing key is an error.
 fn memory(v: &Value) -> Result<Memory> {
-    let mut m = Memory::default();
-    let Some(block) = v.get("memory") else {
-        return Ok(m);
+    let block = field(v, "memory", "game.json")?;
+    let n = |key: &str| num(block, key, "memory");
+    let flag = |key: &str| -> Result<bool> {
+        field(block, key, "memory")?
+            .as_bool()
+            .ok_or_else(|| bad(format!("memory.{key} is not a boolean")))
     };
-    let read = |key: &str| -> Result<Option<u64>> {
-        block
-            .get(key)
-            .map(|x| x.as_u64().ok_or_else(|| bad(format!("memory.{key} is not a number"))))
-            .transpose()
+    let (reserve, alias, stack) = (n("reserve")?, n("alias")?, n("stack")?);
+    // The heap is the part of `reserve` that the front space, the stack region and the alias region leave.
+    let heap = reserve
+        .checked_sub(alias)
+        .and_then(|r| r.checked_sub(stack))
+        .and_then(|r| r.checked_sub(RESERVE_FRONT))
+        .ok_or_else(|| bad("memory.reserve is smaller than alias, stack and 0x10000000"))?;
+    Ok(Memory {
+        heap,
+        alias,
+        stack,
+        app_pool: n("app_pool")?,
+        mem_used: n("mem_used")?,
+        sys_resource: n("sys_resource")?,
+        map_limit: flag("map_limit")?,
+        stdalloc_cap: n("stdalloc_cap")?,
+        alloc_big_align: flag("alloc_big_align")?,
+    })
+}
+
+fn main_thread(v: &Value) -> Result<MainThread> {
+    let int = |key: &str| -> Result<i32> {
+        let n = field(v, key, "main_thread")?
+            .as_i64()
+            .ok_or_else(|| bad(format!("main_thread.{key} is not a number")))?;
+        i32::try_from(n).map_err(|_| bad(format!("main_thread.{key} is out of range")))
     };
-    for (key, slot) in [
-        ("alias", &mut m.alias),
-        ("stack", &mut m.stack),
-        ("app_pool", &mut m.app_pool),
-        ("mem_used", &mut m.mem_used),
-        ("sys_resource", &mut m.sys_resource),
-    ] {
-        if let Some(x) = read(key)? {
-            *slot = x;
-        }
-    }
-    // The heap is the part of `reserve` that the alias region, the stack region and the front space leave.
-    match (read("heap")?, read("reserve")?) {
-        (Some(heap), _) => m.heap = heap,
-        (None, Some(reserve)) => {
-            m.heap = reserve
-                .checked_sub(m.alias)
-                .and_then(|r| r.checked_sub(m.stack))
-                .and_then(|r| r.checked_sub(RESERVE_FRONT))
-                .ok_or_else(|| bad("memory.reserve is smaller than alias, stack and 0x10000000"))?;
-        }
-        (None, None) => {}
-    }
-    if let Some(flag) = block.get("map_limit") {
-        m.map_limit = flag.as_bool().ok_or_else(|| bad("memory.map_limit is not a boolean"))?;
-    }
-    Ok(m)
+    Ok(MainThread {
+        priority: int("priority")?,
+        core: int("core")?,
+        stack_size: num(v, "stack_size", "main_thread")?,
+    })
 }
 
 impl Game {
@@ -242,22 +166,18 @@ impl Game {
         Game::parse(root, &src)
     }
 
-    /// Parses the text of a `game.json`.
+    /// Parses the text of a `game.json`. Keys that the host does not use are ignored: `nvn_functions` (the GPU
+    /// service has its own table of NVN names) and, per module, `fixups` is kept but never read.
     pub fn parse(root: &Path, src: &str) -> Result<Game> {
         let v = json::parse(src)?;
         let ctx = "game.json";
-        let mods = field(&v, "modules", ctx)?
+        let modules = field(&v, "modules", ctx)?
             .as_array()
-            .ok_or_else(|| bad("\"modules\" is not an array"))?;
-        let modules = mods
+            .ok_or_else(|| bad("\"modules\" is not an array"))?
             .iter()
             .enumerate()
-            .map(|(i, m)| module(m, i))
+            .map(|(i, m)| module::parse(m, i))
             .collect::<Result<Vec<_>>>()?;
-        if modules.is_empty() {
-            return Err(bad("\"modules\" is empty"));
-        }
-        let mt = field(&v, "main_thread", ctx)?;
         let services = field(&v, "services", ctx)?
             .as_array()
             .ok_or_else(|| bad("\"services\" is not an array"))?
@@ -272,29 +192,25 @@ impl Game {
         let game = Game {
             root: root.to_path_buf(),
             title_id: text(&v, "title_id", ctx)?,
-            version: v.get("version").and_then(Value::as_str).unwrap_or("").to_owned(),
+            name: text(&v, "name", ctx)?,
+            version: text(&v, "version", ctx)?,
+            version_number: u32::try_from(num(&v, "version_number", ctx)?)
+                .map_err(|_| bad("\"version_number\" is out of range"))?,
             modules,
             services,
             romfs: PathBuf::from(text(&v, "romfs", ctx)?),
             patches: opt_path("patches"),
-            main_thread: MainThread {
-                priority: i32::try_from(
-                    field(mt, "priority", "main_thread")?
-                        .as_i64()
-                        .ok_or_else(|| bad("main_thread.priority is not a number"))?,
-                )
-                .map_err(|_| bad("main_thread.priority is out of range"))?,
-                core: i32::try_from(
-                    field(mt, "core", "main_thread")?
-                        .as_i64()
-                        .ok_or_else(|| bad("main_thread.core is not a number"))?,
-                )
-                .map_err(|_| bad("main_thread.core is out of range"))?,
-                stack_size: num(mt, "stack_size", "main_thread")?,
-            },
+            main_thread: main_thread(field(&v, "main_thread", ctx)?)?,
             memory: memory(&v)?,
             npdm: opt_path("npdm"),
+            dylib: PathBuf::from(text(&v, "dylib", ctx)?),
+            settings: Settings::parse(field(&v, "settings", ctx)?)?,
+            aoc: settings::parse_aoc(v.get("aoc"))?,
         };
+        let page = num(&v, "page_size", ctx)?;
+        if page != PAGE {
+            return Err(bad(format!("\"page_size\" is {page:#x}, this host runs with {PAGE:#x}")));
+        }
         game.check()?;
         Ok(game)
     }
@@ -307,28 +223,32 @@ impl Game {
             .ok_or_else(|| bad("no module has an \"entry\""))
     }
 
-    /// Checks what the loader relies on: page alignment, no overlap, areas inside the image.
+    /// The game with every module moved by `delta`. dyld slides the library, so the modules sit at the preferred
+    /// address plus the slide.
+    pub fn moved(&self, delta: i64) -> Result<Game> {
+        let modules = self
+            .modules
+            .iter()
+            .map(|m| {
+                m.moved(delta)
+                    .ok_or_else(|| bad(format!("module {} leaves the address space when moved by {delta:#x}", m.name)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Game {
+            modules,
+            ..self.clone()
+        })
+    }
+
+    /// Checks what the loader relies on: the segments of each module, no overlap between modules and one entry.
     fn check(&self) -> Result<()> {
-        const PAGE: u64 = 0x4000;
         for m in &self.modules {
-            let n = &m.name;
-            if m.base % PAGE != 0 || m.size == 0 {
-                return Err(bad(format!("module {n}: base {:#x} is not page aligned or size is 0", m.base)));
-            }
-            if m.data.offset % PAGE != 0 {
-                return Err(bad(format!("module {n}: data offset {:#x} is not page aligned", m.data.offset)));
-            }
-            if m.bss_offset().saturating_add(m.bss_size) > m.size {
-                return Err(bad(format!("module {n}: data and bss lie outside the image")));
-            }
-            if m.key_page % PAGE != 0 || m.key_page.saturating_add(PAGE) > m.size {
-                return Err(bad(format!("module {n}: key page {:#x} is not aligned or outside the image", m.key_page)));
-            }
-            if m.entry.is_some_and(|e| e >= m.size) {
-                return Err(bad(format!("module {n}: entry is outside the image")));
-            }
+            m.check()?;
         }
-        let mut spans: Vec<(u64, u64, &str)> = self.modules.iter().map(|m| (m.base, m.end(), m.name.as_str())).collect();
+        if self.modules.is_empty() {
+            return Err(bad("\"modules\" is empty"));
+        }
+        let mut spans: Vec<(u64, u64, &str)> = self.modules.iter().map(|m| (m.start(), m.end(), m.name.as_str())).collect();
         spans.sort_unstable();
         for w in spans.windows(2) {
             if w[0].1 > w[1].0 {
@@ -344,6 +264,11 @@ impl Game {
     /// The path of a file named in `game.json`.
     pub fn path(&self, rel: &Path) -> PathBuf {
         self.root.join(rel)
+    }
+
+    /// The DLC folders as `(index, absolute path)`, in the order of `game.json`.
+    pub fn aoc_dirs(&self) -> Vec<(u32, PathBuf)> {
+        self.aoc.iter().map(|a| (a.index, self.path(&a.path))).collect()
     }
 }
 
@@ -367,56 +292,93 @@ pub fn parse_slots(src: &str) -> Result<Vec<Slot>> {
         .collect()
 }
 
+/// A complete `game.json` for the tests of this crate. `modules` is the text of the array.
+#[cfg(test)]
+pub(crate) fn sample(extra: &str, modules: &str) -> String {
+    format!(
+        r#"{{"title_id": "01007EF00011E000", "name": "Zelda", "version": "1.6.0", "version_number": 1114112,
+        "services": ["kernel", "offline"], "romfs": "romfs", "dylib": "nxgame.dylib", "page_size": 16384,
+        "main_thread": {{"priority": 44, "core": 0, "stack_size": "0x100000"}},
+        "memory": {{"reserve": 4294967296, "alias": 268435456, "stack": 268435456, "app_pool": 3444572160,
+          "mem_used": 67108864, "sys_resource": 33554432, "map_limit": true, "stdalloc_cap": 5, "alloc_big_align": true}},
+        "settings": {}, "nvn_functions": ["nvnDeviceInitialize"], {extra}
+        "modules": [{modules}]}}"#,
+        crate::settings::samples::SETTINGS
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::samples::NEAR;
 
-    const SAMPLE: &str = r#"{
-        "title_id": "01007EF00011E000", "version": "1.6.0", "services": ["kernel", "offline"],
-        "romfs": "romfs", "main_thread": {"priority": 44, "core": 0, "stack_size": "0x100000"},
-        "modules": [
-          {"name": "main", "base": "0x100000000", "size": "0x20000", "text": {"offset": 0, "size": "0x8000"},
-           "rodata": {"offset": "0x8000", "size": "0x4000"}, "data": {"offset": "0xc000", "size": "0x4000"},
-           "bss_size": "0x4000", "image": "main.bin", "imports": "main.imports.json", "exports": "main.exports.json",
-           "entry": "0x100", "key_page": "0x1c000", "gates": "main.gates.tsv"}
-        ]}"#;
+    fn parse(extra: &str) -> Result<Game> {
+        Game::parse(Path::new("/x"), &sample(extra, NEAR))
+    }
 
     #[test]
     fn parses_a_sample() {
-        let r = Game::parse(Path::new("/x"), SAMPLE);
+        let r = parse("");
         assert!(r.is_ok(), "{:?}", r.as_ref().err());
         let Ok(g) = r else { return };
         assert_eq!(g.modules[0].base, 0x1_0000_0000);
         assert_eq!(g.modules[0].end(), 0x1_0002_0000);
         assert_eq!(g.main_thread.stack_size, 0x10_0000);
+        assert_eq!((g.version.as_str(), g.version_number), ("1.6.0", 1_114_112));
+        assert_eq!(g.settings.fps_target, 30);
         assert_eq!(g.main_module().map(|m| m.name.as_str()).ok(), Some("main"));
     }
 
     #[test]
     fn the_heap_follows_from_reserve() {
-        let s = SAMPLE.replace(
-            "\"modules\"",
-            "\"memory\": {\"reserve\": \"0x100000000\", \"alias\": \"0x10000000\", \"stack\": \"0x10000000\", \"app_pool\": \"0xcd500000\", \"map_limit\": true}, \"modules\"",
-        );
-        let r = Game::parse(Path::new("/x"), &s);
+        let r = parse("");
         assert!(r.is_ok(), "{:?}", r.as_ref().err());
         let Ok(g) = r else { return };
         assert_eq!(g.memory.heap, 0xd000_0000);
         assert_eq!(g.memory.app_pool, 0xcd50_0000);
-        assert!(g.memory.map_limit);
+        assert!(g.memory.map_limit && g.memory.alloc_big_align);
+        assert_eq!(g.memory.stdalloc_cap, 5);
         assert_eq!(g.memory.mem_used, 0x400_0000);
     }
 
     #[test]
     fn refuses_a_reserve_that_is_too_small() {
-        let s = SAMPLE.replace("\"modules\"", "\"memory\": {\"reserve\": \"0x1000\"}, \"modules\"");
+        let s = sample("", NEAR).replace("\"reserve\": 4294967296", "\"reserve\": \"0x1000\"");
         assert!(Game::parse(Path::new("/x"), &s).is_err());
     }
 
     #[test]
-    fn refuses_a_missing_key_page() {
-        let s = SAMPLE.replace("\"key_page\": \"0x1c000\",", "");
+    fn refuses_a_missing_memory_key() {
+        let s = sample("", NEAR).replace("\"app_pool\": 3444572160,", "");
         assert!(Game::parse(Path::new("/x"), &s).is_err());
+    }
+
+    #[test]
+    fn refuses_another_page_size() {
+        let s = sample("", NEAR).replace("\"page_size\": 16384", "\"page_size\": 4096");
+        assert!(Game::parse(Path::new("/x"), &s).is_err());
+    }
+
+    #[test]
+    fn refuses_a_missing_segment_list() {
+        let s = sample("", &NEAR.replace("\"segments\"", "\"parts\""));
+        assert!(Game::parse(Path::new("/x"), &s).is_err());
+    }
+
+    #[test]
+    fn moves_every_module() {
+        let g = parse("").and_then(|g| g.moved(0x8000));
+        assert!(g.is_ok());
+        let Ok(g) = g else { return };
+        assert_eq!(g.modules[0].base, 0x1_0000_8000);
+    }
+
+    #[test]
+    fn reads_the_aoc_folders() {
+        let r = parse("\"aoc\": [{\"index\": 1, \"title_id\": \"01007EF00011F001\", \"version\": 196608, \"path\": \"aoc/1\"}],");
+        assert!(r.is_ok(), "{:?}", r.as_ref().err());
+        let Ok(g) = r else { return };
+        assert_eq!(g.aoc_dirs(), vec![(1, PathBuf::from("/x/aoc/1"))]);
     }
 
     #[test]

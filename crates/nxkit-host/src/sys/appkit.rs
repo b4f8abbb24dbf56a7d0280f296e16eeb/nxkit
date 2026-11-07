@@ -14,8 +14,8 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSView, NSWindow,
-    NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSScreen, NSView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
@@ -36,12 +36,33 @@ pub trait AppEvents: Send + Sync {
 pub struct WindowConfig {
     /// The title.
     pub title: String,
-    /// The width of the content area in points.
-    pub width: f64,
-    /// The height of the content area in points.
-    pub height: f64,
+    /// The size of the content area in points. `None` takes the visible area of the main screen, so that the layer
+    /// has the pixels of the display and the game renders at its native size.
+    pub size: Option<(f64, f64)>,
     /// Enter full screen at start.
     pub fullscreen: bool,
+}
+
+/// The display link rate that the main screen supports. The game's own pacing (the title's frame step) picks the
+/// frames it renders. The link never asks for less than the screen can show.
+fn screen_interval(mtm: MainThreadMarker) -> FrameInterval {
+    match NSScreen::mainScreen(mtm) {
+        Some(s) if s.maximumFramesPerSecond() >= 120 => FrameInterval::Hz120,
+        _ => FrameInterval::Hz60,
+    }
+}
+
+fn content_size(mtm: MainThreadMarker, size: Option<(f64, f64)>) -> (f64, f64) {
+    if let Some(s) = size {
+        return s;
+    }
+    match NSScreen::mainScreen(mtm) {
+        Some(s) => {
+            let f = s.visibleFrame();
+            (f.size.width, f.size.height)
+        }
+        None => (1280.0, 720.0),
+    }
 }
 
 fn drawable_size(window: &NSWindow, view: &NSView) -> (u32, u32) {
@@ -166,7 +187,8 @@ pub fn run(
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 
-    let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(cfg.width, cfg.height));
+    let (width, height) = content_size(mtm, cfg.size);
+    let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height));
     let style = NSWindowStyleMask::Titled
         | NSWindowStyleMask::Closable
         | NSWindowStyleMask::Miniaturizable
@@ -213,7 +235,7 @@ pub fn run(
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks { inner: hooks, stop });
-    let _link = DisplayLink::new(mtm, &presenter, FrameInterval::Hz60, link_hooks);
+    let _link = DisplayLink::new(mtm, &presenter, screen_interval(mtm), link_hooks);
 
     window.center();
     window.makeKeyAndOrderFront(None);

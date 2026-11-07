@@ -1,19 +1,15 @@
-//! The loader (R18). It puts the rewritten modules at their fixed addresses inside the reservation.
+//! The loader (R18). It finishes what `place` started: the bss, the key pages, the relocations, the import slots and
+//! the gates.
 //!
-//! The first way is `dlopen` of `nxgame.dylib`. The build gives every module two segments, `__NX_<NAME>_TEXT` and
-//! `__NX_<NAME>_DATA`, with the preferred addresses of `game.json`. The module ranges are handed back to the system
-//! before `dlopen`, so dyld can map the segments there. The loader then checks where they landed.
+//! Every address here is the real one. `place` moved the modules by the slide of dyld, when there was one.
 //!
-//! The second way is the copy fallback. When a segment is elsewhere, the loader closes the library and maps the
-//! module ranges itself from the flat `image` files. This is the same as nxnative does: it copies code into anonymous
-//! memory and uses `mprotect` to make it executable. It uses no `MAP_JIT` and signs nothing. That works while the
-//! process has no hardened runtime. A hardened runtime needs the entitlement
-//! `com.apple.security.cs.allow-unsigned-executable-memory`, and the build of the host must add it then.
-//!
-//! The loader then zeroes the bss, fills the key page, fills the import slots and installs the gates.
+//! The order per module: the file-backed part of the bss is zeroed, the key page is filled, the relocations of the NSO
+//! image are applied for the real base (`reloc.rs`), the import slots are filled and the key page becomes read only.
+//! The functions of the services come first for both relocations and imports, so that a service replaces an SDK
+//! function of the same name (R14). An import that nothing provides stops the load with its name (R15), unless the title
+//! lists it in `settings.optional_imports`. Then the thread-specific data is checked and the gates are installed.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
 use nxkit_rt::{entries, find_in};
 
@@ -22,30 +18,23 @@ use crate::error::{HostError, Result};
 use crate::gate;
 use crate::gates::{self, GateTable};
 use crate::layout::PAGE;
-use crate::macho::{self, Segment};
-use crate::manifest::{self, Game, Module, Slot};
+use crate::manifest::{self, Game, Slot};
 use crate::memory::GuestMemory;
+use crate::module::Module;
+use crate::place::{Placed, Placement};
+use crate::reloc;
 use crate::seams;
-use crate::sys::{self, Dylib, PROT_NONE, PROT_R, PROT_RW, PROT_RX};
+use crate::sys::{self, Dylib, PROT_R};
 use crate::thread::{self, Keys};
 
-/// The name of the library in the run folder.
-pub const DYLIB_NAME: &str = "nxgame.dylib";
 /// The value that the check of the thread-specific data layout stores and reads back.
 const TSD_PROBE: u64 = 0x1234;
-
-/// How the modules came to their addresses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Placement {
-    /// dyld mapped the segments at the preferred addresses.
-    Dylib,
-    /// The loader copied the images.
-    Copy,
-}
 
 /// The result of the load.
 #[derive(Debug)]
 pub struct Loaded {
+    /// The game with the real addresses.
+    pub game: Game,
     /// How the modules were placed.
     pub placement: Placement,
     /// The address of the entry point of the main module.
@@ -59,10 +48,6 @@ pub struct Loaded {
 struct Lists {
     imports: Vec<Slot>,
     exports: Vec<Slot>,
-}
-
-fn span(m: &Module) -> u64 {
-    (m.size + PAGE - 1) & !(PAGE - 1)
 }
 
 fn read_lists(game: &Game) -> Result<Vec<Lists>> {
@@ -87,9 +72,7 @@ fn collect_exports(game: &Game, lists: &[Lists]) -> HashMap<String, u64> {
     out
 }
 
-/// Finds what an import needs. The functions of the services come first, so that a service replaces an SDK function
-/// of the same name (R14). The exports of the modules come next. A service function that is in `big` is reached
-/// through a big-stack stub.
+/// Finds what an import or a relocation needs.
 struct Resolver<'a> {
     mask: u64,
     exports: &'a HashMap<String, u64>,
@@ -97,12 +80,21 @@ struct Resolver<'a> {
 }
 
 impl Resolver<'_> {
+    /// The function of a service. One that is in `big` is reached through a big-stack stub.
+    fn service(&self, name: &str) -> Result<Option<u64>> {
+        let Some(a) = find_in(entries(), self.mask, name.as_bytes()) else {
+            return Ok(None);
+        };
+        let a = a as u64;
+        if self.big.contains(name) { bigstack::wrap(a).map(Some) } else { Ok(Some(a)) }
+    }
+
+    /// A service function, or else an export of a module.
     fn find(&self, name: &str) -> Result<Option<u64>> {
-        if let Some(a) = find_in(entries(), self.mask, name.as_bytes()) {
-            let a = a as u64;
-            return if self.big.contains(name) { bigstack::wrap(a).map(Some) } else { Ok(Some(a)) };
+        match self.service(name)? {
+            Some(a) => Ok(Some(a)),
+            None => Ok(self.exports.get(name).copied()),
         }
-        Ok(self.exports.get(name).copied())
     }
 }
 
@@ -121,68 +113,22 @@ pub fn service_mask(names: &[String]) -> Result<u64> {
     Ok(mask)
 }
 
-fn find_segment<'a>(segs: &'a [Segment], name: &str) -> Result<&'a Segment> {
-    segs.iter()
-        .find(|s| s.name == name)
-        .ok_or_else(|| HostError::Load(format!("{DYLIB_NAME} has no segment {name}")))
-}
-
-/// The two ranges of a module as dyld mapped them, or `None` when they are not at the base of the module.
-fn dyld_ranges(segs: &[Segment], slide: u64, m: &Module) -> Result<Option<[(u64, u64); 2]>> {
-    let t = find_segment(segs, &macho::text_segment(&m.name))?;
-    let d = find_segment(segs, &macho::data_segment(&m.name))?;
-    if d.initprot & (macho::PROT_READ | macho::PROT_WRITE) != macho::PROT_READ | macho::PROT_WRITE {
-        return Err(HostError::Load(format!("segment {} is not readable and writable", d.name)));
-    }
-    if t.initprot & macho::PROT_EXEC == 0 || t.initprot & macho::PROT_WRITE != 0 {
-        return Err(HostError::Load(format!("segment {} is not read and execute only", t.name)));
-    }
-    let t_at = t.vmaddr.wrapping_add(slide);
-    let d_at = d.vmaddr.wrapping_add(slide);
-    if t_at != m.base || d_at != m.base + m.data.offset {
-        return Ok(None);
-    }
-    Ok(Some([(t_at, t_at + t.vmsize), (d_at, d_at + d.vmsize)]))
-}
-
-fn slide_of(head: u64, segs: &[Segment]) -> Result<u64> {
-    let first = segs
-        .iter()
-        .find(|s| s.fileoff == 0 && s.filesize > 0)
-        .ok_or_else(|| HostError::Load("no segment holds the Mach-O header".into()))?;
-    Ok(head.wrapping_sub(first.vmaddr))
-}
-
-/// Maps anonymous memory over the parts of a module that dyld did not cover. These are the gap between the two
-/// segments and the tail after the data, which holds the bss and the key page.
-fn fill_holes(mem: &GuestMemory, m: &Module, covered: &[(u64, u64); 2]) -> Result<()> {
-    let end = m.base + span(m);
-    let mut cur = m.base;
-    for &(s, e) in covered {
-        if s > cur {
-            mem.res.map_anon(cur, s - cur, PROT_RW)?;
-        }
-        cur = cur.max(e);
-    }
-    if cur < end {
-        mem.res.map_anon(cur, end - cur, PROT_RW)?;
+/// Zeroes the part of the bss that shares file-backed pages with the data. The pages behind it come zeroed from the
+/// system, in both ways of placement, so the rest is not touched and costs no memory.
+fn zero_bss(mem: &GuestMemory, m: &Module) -> Result<()> {
+    let start = m.bss_offset();
+    let Some(seg) = m.segment_at(start) else {
+        return Err(HostError::Load(format!("module {}: the bss is in no segment", m.name)));
+    };
+    let file_end = seg.offset.saturating_add_unsigned(seg.file_size.div_ceil(PAGE) * PAGE);
+    let end = i64::try_from(start.saturating_add(m.bss_size)).unwrap_or(i64::MAX).min(file_end);
+    let Ok(start_i) = i64::try_from(start) else {
+        return Ok(());
+    };
+    if end > start_i {
+        mem.res.zero(m.base + start, end.abs_diff(start_i))?;
     }
     Ok(())
-}
-
-fn copy_module(game: &Game, mem: &GuestMemory, m: &Module) -> Result<()> {
-    let path = game.path(&m.image);
-    let bytes = std::fs::read(&path).map_err(|e| HostError::io(&path, &e))?;
-    if bytes.len() as u64 > span(m) {
-        return Err(HostError::Load(format!(
-            "image of module {} has {:#x} bytes and the module has {:#x}",
-            m.name,
-            bytes.len(),
-            m.size
-        )));
-    }
-    mem.res.map_anon(m.base, span(m), PROT_RW)?;
-    mem.res.copy_in(m.base, &bytes)
 }
 
 fn fill_key_page(mem: &GuestMemory, m: &Module, keys: &Keys) -> Result<()> {
@@ -194,33 +140,39 @@ fn fill_key_page(mem: &GuestMemory, m: &Module, keys: &Keys) -> Result<()> {
     Ok(())
 }
 
-fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Slot], r: &Resolver) -> Result<()> {
+fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) -> Result<()> {
+    let plan = reloc::plan(m, image, &mut |name| r.service(name))?;
+    for w in &plan.writes {
+        mem.res.write_u64(m.base + w.offset, w.value)?;
+    }
+    eprintln!(
+        "nxkit-host: module {}: {} relative, {} relr, {} symbol relocations, {} left to the imports",
+        m.name, plan.counts.relative, plan.counts.relr, plan.counts.symbols, plan.counts.undefined
+    );
+    Ok(())
+}
+
+fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Slot], r: &Resolver, optional: &[String]) -> Result<()> {
     for s in imports {
-        if s.slot < m.data.offset || s.slot % 8 != 0 || s.slot + 8 > m.size {
+        if s.slot % 8 != 0 || !m.writable(s.slot, 8) {
             return Err(HostError::Load(format!(
-                "module {}: the import slot of {} at {:#x} is not in the data of the module",
+                "module {}: the import slot of {} at {:#x} is not in a writable segment",
                 m.name, s.name, s.slot
             )));
         }
-        let Some(addr) = r.find(&s.name)? else {
-            return Err(HostError::MissingImport {
-                module: m.name.clone(),
-                name: s.name.clone(),
-            });
+        let addr = match r.find(&s.name)? {
+            Some(a) => a,
+            None if optional.iter().any(|o| *o == s.name) => 0,
+            None => {
+                return Err(HostError::MissingImport {
+                    module: m.name.clone(),
+                    name: s.name.clone(),
+                });
+            }
         };
         mem.res.write_u64(m.base + s.slot, addr)?;
     }
     Ok(())
-}
-
-fn finish(mem: &GuestMemory, m: &Module, keys: &Keys, imports: &[Slot], r: &Resolver, copied: bool) -> Result<()> {
-    mem.res.zero(m.base + m.bss_offset(), m.bss_size)?;
-    fill_key_page(mem, m, keys)?;
-    fill_imports(mem, m, imports, r)?;
-    if copied {
-        mem.res.protect(m.base, m.data.offset, PROT_RX)?;
-    }
-    mem.res.protect(m.base + m.key_page, PAGE, PROT_R)
 }
 
 /// Checks that the thread-specific data of this host thread has the layout that the key page assumes.
@@ -237,20 +189,6 @@ fn tsd_check(mem: &GuestMemory, m: &Module, keys: &Keys) -> Result<()> {
     Ok(())
 }
 
-/// Gives the gaps between the modules back to the reservation as ranges without access.
-fn seal_gaps(mem: &GuestMemory, game: &Game) -> Result<()> {
-    let mut spans: Vec<(u64, u64)> = game.modules.iter().map(|m| (m.base, m.base + span(m))).collect();
-    spans.sort_unstable();
-    let mut cur = mem.layout.modules.start;
-    for (s, e) in spans {
-        if s > cur {
-            mem.res.map_anon(cur, s - cur, PROT_NONE)?;
-        }
-        cur = cur.max(e);
-    }
-    Ok(())
-}
-
 fn load_gates(game: &Game) -> Result<GateTable> {
     let mut all = Vec::new();
     for m in &game.modules {
@@ -261,72 +199,46 @@ fn load_gates(game: &Game) -> Result<GateTable> {
     GateTable::build(&all)
 }
 
-/// Loads every module of the game, fills the imports and installs the gates.
+/// Finishes the load of every module, fills the imports and installs the gates.
 ///
-/// `mask` is the set of enabled services. The reservation must exist.
-pub fn load(game: &Game, mem: &GuestMemory, mask: u64) -> Result<Loaded> {
+/// `mask` is the set of enabled services.
+pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
+    let Placed {
+        game,
+        placement,
+        dylib,
+        mem,
+        images,
+    } = placed;
     let keys = thread::create_keys()?;
-    let lists = read_lists(game)?;
-    let exports = collect_exports(game, &lists);
+    let lists = read_lists(&game)?;
+    let exports = collect_exports(&game, &lists);
     let big = seams::big_stack_exports();
     let resolver = Resolver {
         mask,
         exports: &exports,
         big: &big,
     };
-    for m in &game.modules {
-        mem.res.unmap(m.base, span(m))?;
+    for ((m, l), image) in game.modules.iter().zip(&lists).zip(&images) {
+        zero_bss(mem, m)?;
+        fill_key_page(mem, m, &keys)?;
+        apply_relocations(mem, m, image, &resolver)?;
+        fill_imports(mem, m, &l.imports, &resolver, &game.settings.optional_imports)?;
+        mem.res.protect(m.base + m.key_page, PAGE, PROT_R)?;
     }
-    let dylib = Dylib::open(&game.path(Path::new(DYLIB_NAME)))?;
-    let (head, bytes) = dylib.header()?;
-    let segs = macho::segments(&bytes)?;
-    let slide = slide_of(head, &segs)?;
-    let mut covered = Vec::new();
-    for m in &game.modules {
-        covered.push(dyld_ranges(&segs, slide, m)?);
-    }
-    let placed = covered.iter().all(Option::is_some);
-    let (placement, dylib) = if placed {
-        for (m, c) in game.modules.iter().zip(&covered) {
-            if let Some(c) = c {
-                fill_holes(mem, m, c)?;
-            }
-        }
-        (Placement::Dylib, Some(dylib))
-    } else {
-        let wrong: Vec<&str> = game
-            .modules
-            .iter()
-            .zip(&covered)
-            .filter(|(_, c)| c.is_none())
-            .map(|(m, _)| m.name.as_str())
-            .collect();
-        eprintln!(
-            "nxkit-host: dyld did not map the segments of {} at their addresses, copying the images instead",
-            wrong.join(", ")
-        );
-        dylib.close();
-        for m in &game.modules {
-            copy_module(game, mem, m)?;
-        }
-        (Placement::Copy, None)
-    };
-    let copied = placement == Placement::Copy;
-    for (m, l) in game.modules.iter().zip(&lists) {
-        finish(mem, m, &keys, &l.imports, &resolver, copied)?;
-    }
-    seal_gaps(mem, game)?;
+    drop(images);
     let main = game.main_module()?;
     tsd_check(mem, main, &keys)?;
-    gate::install(load_gates(game)?)?;
+    gate::install(load_gates(&game)?)?;
     let Some(offset) = main.entry else {
         return Err(HostError::Manifest(format!("module {} has no entry", main.name)));
     };
     let entry = main.base + offset;
     Ok(Loaded {
-        placement,
         entry,
         exports,
+        placement,
         dylib,
+        game,
     })
 }

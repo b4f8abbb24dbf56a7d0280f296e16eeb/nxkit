@@ -14,7 +14,7 @@
 //! The assembly follows `dm/host/hle_bigstack.c` of nxnative (see THIRD_PARTY.md).
 
 use std::cell::Cell;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::error::{HostError, Result};
 use crate::sys;
@@ -139,27 +139,31 @@ extern "C" fn nxkit_bigstack_top(sp: u64) -> u64 {
         .unwrap_or(0)
 }
 
-/// The targets that have a stub, and the stub of each. The index is the stub number.
-static WRAPPED: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+/// The number of stubs in use. Only the loader thread calls `wrap`, before any guest thread runs, so the counter is
+/// the only state and no lock stands in the way of a call through a stub.
+static USED: AtomicUsize = AtomicUsize::new(0);
 
-/// The address of a stub that runs `target` on the big stack. The same target gets the same stub.
+/// The address of a stub that runs `target` on the big stack. The same target gets the same stub. Call it from the
+/// loader thread only.
 pub fn wrap(target: u64) -> Result<u64> {
-    let mut list = WRAPPED
-        .lock()
-        .map_err(|_| HostError::Load("the big-stack table is poisoned".into()))?;
-    if let Some((_, stub)) = list.iter().find(|(t, _)| *t == target) {
-        return Ok(*stub);
+    let k = USED.load(Ordering::Acquire);
+    for i in 0..k {
+        // SAFETY: `i` is below the number of stubs in use, so word `i` was written and is not written again.
+        let t = unsafe { std::ptr::addr_of!(TABLE).cast::<u64>().add(i).read_volatile() };
+        if t == target {
+            return Ok(stubs as usize as u64 + 16 * i as u64);
+        }
     }
-    let k = list.len();
     if k >= STUBS {
         return Err(HostError::Load(format!(
             "more than {STUBS} exports ask for the big stack, the host has no stub for {target:#x}"
         )));
     }
-    // SAFETY: `k` is below the table length, the table is written here only and under the lock, and the stub that
-    // reads word `k` is not reachable before the stub address is returned.
+    // SAFETY: `k` is below the table length. Word `k` is not in use, and the stub that reads it is not reachable
+    // before the stub address is returned.
     unsafe { std::ptr::addr_of_mut!(TABLE).cast::<u64>().add(k).write_volatile(target) };
-    let stub = stubs as usize as u64 + 16 * k as u64;
-    list.push((target, stub));
-    Ok(stub)
+    if USED.compare_exchange(k, k + 1, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return Err(HostError::Load("two threads wrap big-stack exports at the same time".into()));
+    }
+    Ok(stubs as usize as u64 + 16 * k as u64)
 }

@@ -13,6 +13,7 @@ use nxkit_metal::{Context, DisplayTick, FrameHooks, GuestMemory};
 use crate::error::{HostError, Result};
 use crate::layout::Layout;
 use crate::manifest::{Game, MainThread, Memory};
+use crate::settings::Settings;
 
 /// Registers the kernel with `nxkit_abi::kernel::set_kernel`, so that the services can ask for the current thread, wait
 /// and signal.
@@ -28,13 +29,13 @@ pub fn register_kernel() -> Result<()> {
 /// Gives the kernel the regions of the reservation and the memory profile of the game. The heap is for
 /// `SetHeapSize`, the alias region for `MapMemory`, and the stack region is the destination of `MapMemory` for
 /// stacks. `memory` has the application pool, the used memory, the system resource size and the map limit that
-/// `GetInfo` and the memory svcs use.
+/// `GetInfo` and the memory svcs use. `settings.core_preempt` says whether the scheduler preempts threads of one core.
 ///
-/// Needs: a kernel call that takes the ranges of `layout` and the numbers of `memory`.
-pub fn configure_kernel(layout: &Layout, memory: &Memory) -> Result<()> {
-    let _ = (layout, memory);
+/// Needs: a kernel call that takes the ranges of `layout`, the numbers of `memory` and `core_preempt`.
+pub fn configure_kernel(layout: &Layout, memory: &Memory, settings: &Settings) -> Result<()> {
+    let _ = (layout, memory, settings);
     Err(HostError::Unwired(
-        "the kernel's memory regions and profile (a kernel call that takes the heap, alias and stack ranges, the application pool, the used memory, the system resource size and the map limit)",
+        "the kernel's memory regions and profile (a kernel call that takes the heap, alias and stack ranges, the application pool, the used memory, the system resource size, the map limit and core_preempt)",
     ))
 }
 
@@ -72,6 +73,13 @@ pub fn big_stack_exports() -> HashSet<String> {
 
 /// Starts the service crates with the configuration of the game. The services are the names in `game.services`.
 ///
+/// The fs service gets `game.aoc_dirs()` for its `Config.aoc` and the romfs folder. The applet service gets
+/// `settings.launch_param`, `args`, `env`, `op_mode`, `perf_boost` and `display_versions`. The input service gets
+/// `pad_layout`. The video and pacing services get `fps_*`, `present_*` and `screen_aspect`. The gpu service gets the
+/// `tex_*`, `render_cond`, `vconv_range`, `gpu_ts_segment`, `draw_barriers_game`, `shader_key_skip`, `upscaler_keys`,
+/// `pso_mtl4`, `enc_thread` and `nvn_api` keys. The keys in `settings.extra` go unread to the service that the title
+/// module addressed, through its `nxtitle` runtime hook.
+///
 /// No service crate has an `init` at this commit, so there is nothing to call. The integration calls the `init`
 /// of each service here.
 pub fn init_services(game: &Game) -> Result<()> {
@@ -103,11 +111,12 @@ impl FrameHooks for DropFrames {
 }
 
 /// The hooks that the display link calls. They connect the encoder of `nxkit-gpu` and the pacing of `nxkit-metal`
-/// to the window: on each display tick they present the frame that the guest finished.
+/// to the window: on each display tick they present the frame that the guest finished. `settings` has the pacing and
+/// encoder keys (`fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread` and the `tex_*` keys).
 ///
 /// Needs: the encoder (`nxkit-gpu`) over `memory`, which is the reservation as the GPU buffer, and the pacing
 /// service.
-pub fn frame_hooks(ctx: &Context, memory: &Arc<GuestMemory>) -> Result<Arc<dyn FrameHooks>> {
-    let _ = (ctx, memory);
+pub fn frame_hooks(ctx: &Context, memory: &Arc<GuestMemory>, settings: &Settings) -> Result<Arc<dyn FrameHooks>> {
+    let _ = (ctx, memory, settings);
     Ok(Arc::new(DropFrames::default()))
 }
