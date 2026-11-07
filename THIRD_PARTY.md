@@ -86,6 +86,22 @@ The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for Ar
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
 
+## Pacing ported from nxnative
+
+The crate `nxkit-svc-pacing` (`crates/nxkit-svc-pacing/`) and the Breath of the Wild rules ported logic and data from the nxnative
+engine at the head of pull request 76 (`0f2a772c13e2caed2959d1d1a93f8fe57f44c754`), read on 2026-11-07. The nxnative engine is
+published under the MIT licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-svc-pacing/src/vstep.rs` | `dm/gfx/nvn/nvn_fstep.h` (`nvn_vstep_next`, the variable step) |
+| `crates/nxkit-svc-pacing/src/state.rs` | `dm/host/loader.c` and the stubs of `dm/games/01007EF00011E000/patches.py` (layout of the frame step state page, pool factor, extra memory, output size) |
+| `crates/nxkit-svc-pacing/src/vsync.rs` | the vsync thread and the `nn::vi` display vsync event of `dm/host/` |
+| `titles/games/01007EF00011E000/rules/01007EF00011E000.toml` | `dm/games/01007EF00011E000/patches.py` (`CUTS` and `FRAME_STEP`), made by `tools/gen_botw_rules.py` |
+
+`tools/gen_botw_rules.py` records the stubs the way `tools/gen_rewrite_patches.py` does and writes one rule file for one game. The rule
+file holds instruction words of game code. Each rule names its source file, commit and read date in its `evidence` key.
+
 ## NVN front end ported from nxnative
 
 The crate `nxkit-nvn` (`crates/nxkit-nvn/`) ports logic and data from the nxnative engine. The nxnative engine is published under the MIT
