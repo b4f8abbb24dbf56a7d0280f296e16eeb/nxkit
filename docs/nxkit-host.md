@@ -43,11 +43,13 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `name` | `rtld`, `main`, `subsdk0` and so on, and `sdk`. |
 | `base` | The preferred guest address of offset 0. It is a multiple of 0x4000. dyld may slide the library, so the real address can differ (R47a). |
 | `size` | The offset after the last byte of the highest segment, counted from `base`. A far layout has a patch segment below `base` that `size` does not count. |
+| `low` | The offset of the first byte of the lowest segment. It is 0 or negative. |
+| `span` | The memory the module maps, `size - low`. The host reserves `[base + low, base + low + span)` for the module, and it stops if `low` and `span` do not fit the segments. |
 | `text`, `rodata`, `data` | `{ "offset", "size" }` relative to `base`. The offset of `data` is a multiple of 0x4000. |
 | `bss_size` | The size of the bss. It starts at the end of `data`. |
 | `image` | The rewritten flat image. Byte 0 belongs to `base`. The copy path and the relocation step read it. |
-| `imports` | A JSON list of `{ "name", "slot" }`. `slot` is the offset from `base` of an 8-byte slot in a writable segment. |
-| `exports` | The same form. `slot` is the offset of the symbol. |
+| `imports` | A JSON list of `{ "name", "slot", "addend", "weak" }`, one entry for each relocation of an undefined symbol in the image, in the order of the relocation tables. `slot` is the offset from `base` of an 8-byte slot in a writable segment. The host stores the address of the name plus `addend`. `addend` is 0 for a `JUMP_SLOT`. `weak` is `true` for a weak undefined symbol. The host stops if the image has another number of undefined relocations than the list has entries. |
+| `exports` | A JSON list of `{ "name", "slot" }`. `slot` is the offset of the symbol. Only global and weak symbols that the module defines and that are not hidden are listed. |
 | `entry` | The offset of the entry point. Exactly one module has it. |
 | `key_page` | The offset of the key page. The page is 0x4000 bytes (`KEY_PAGE_OFF` of the rewriter). |
 | `gates` | The gate list of the rewriter for this module (`<name>.gates.tsv`). |
@@ -56,9 +58,11 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `build_id` | The build ID of the module as 64 hex digits. The host reads it and keeps it. |
 | `fixups` | The path of `<name>.fixups.tsv`. It holds header comments of the rewriter. The host does not read the file, and it is not a relocation table. |
 
+The relocations are not in `game.json`. The host reads `RELATIVE`, `RELR`, `ABS64`, `GLOB_DAT` and `JUMP_SLOT` from the dynamic section of the `image` file (through MOD0) and applies them at the real base. The build lists only what the image cannot say, the undefined symbols, in `imports`. A relocation of a symbol that the module defines binds to a service, else to the export of the first module that has the name, else to the module itself.
+
 ### nxgame.dylib
 
-The Mach-O library of all modules. Each module has three segments: `__NX_<NAME>_TEXT` (r-x) at `base`, `__NX_<NAME>_DATA` (rw-) at `base + data.offset`, and `__NX_<NAME>_PATCH` (r-x) for the patch area. In a near layout the patch segment lies behind the data. In a far layout it lies below `base`. `<NAME>` is the module name in upper case. The library has a header segment below the first module segment and an empty `__LINKEDIT` behind the highest. It has no symbols and no rebase information. The pages that no segment covers are mapped by the host.
+The Mach-O library of all modules. Each module has three segments: `__NX_<NAME>_TEXT` (r-x) at `base`, `__NX_<NAME>_DATA` (rw-) at `base + data.offset`, and `__NX_<NAME>_PATCH` (r-x) for the patch area. In a near layout the patch segment lies behind the data. In a far layout it lies below `base`. `<NAME>` is the module name in upper case. The library has a header segment (`__TEXT`, one page) below the first module segment and an `__LINKEDIT` of one page behind the highest. It has no symbols and no rebase information, so dyld only maps it and slides it. The header page lies below the start of the first module and is never part of the guest range. The host starts its own regions behind `__LINKEDIT` and reserves the rest of the range behind it. The pages inside the module range that no segment covers are mapped by the host with no access. In a near layout this includes the zero bytes between the key page and the patch area, which the rewriter aligns to 64K.
 
 ### The gate list
 
@@ -101,7 +105,7 @@ Every key is required. Numbers are JSON numbers or strings with a decimal or `0x
 
 | key | meaning |
 |---|---|
-| `reserve` | The total that the game gets, as nxnative counts it. The heap is `reserve - alias - stack - 0x10000000`. |
+| `reserve` | The total that the game gets, as nxnative counts it. The heap is `reserve - alias - stack - 0x10000000`. The host derives it, and the build writes no `heap` key (checked in `dm/host/hle_svc.c` of nxnative on 2026-11-07). |
 | `alias` | Size of the alias region. The host does not widen it. |
 | `stack` | Size of the stack region. `MapMemory` takes its destination from it. |
 | `app_pool` | The application memory pool. `SetHeapSize` and `MapPhysicalMemory` fail beyond it. `GetInfo` reports it as total memory. |
