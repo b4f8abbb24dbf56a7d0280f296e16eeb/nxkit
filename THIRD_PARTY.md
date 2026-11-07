@@ -96,7 +96,7 @@ published under the MIT licence, Copyright (c) 2026 seedds. The full notice is i
 |---|---|
 | `crates/nxkit-svc-pacing/src/vstep.rs` | `dm/gfx/nvn/nvn_fstep.h` (`nvn_vstep_next`, the variable step) |
 | `crates/nxkit-svc-pacing/src/state.rs` | `dm/host/loader.c` and the stubs of `dm/games/01007EF00011E000/patches.py` (layout of the frame step state page, pool factor, extra memory, output size) |
-| `crates/nxkit-svc-pacing/src/vsync.rs` | the vsync thread and the `nn::vi` display vsync event of `dm/host/` |
+| `crates/nxkit-svc-pacing/src/vsync.rs` | `vsync_thread` and the display vsync event of `dm/host/hle_sdk16.c` |
 | `titles/games/01007EF00011E000/rules/01007EF00011E000.toml` | `dm/games/01007EF00011E000/patches.py` (`CUTS` and `FRAME_STEP`), made by `tools/gen_botw_rules.py` |
 
 `tools/gen_botw_rules.py` records the stubs the way `tools/gen_rewrite_patches.py` does and writes one rule file for one game. The rule
