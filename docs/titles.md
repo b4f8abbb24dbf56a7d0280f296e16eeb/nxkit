@@ -92,7 +92,7 @@ Open questions:
 The Nintendo Switch game on NVN, update 1.9.0 (v1114112), family `agl`. The records are in `seedds/nxnative` `dm/games/01007EF00011E000/`.
 
 - The title states `gpu_timestamps segment`, `fps_target 60`, `present_snap`, `pso_mtl4` and `screen_aspect`.
-- `fps_target 60` needs the `FRAME_STEP` stubs of the game's `patches.py`. `nxb` applies them from `data/rewrite-rules`.
+- `fps_target 60` needs the frame-step stubs. They are the 168 steps of `rules/01007EF00011E000.toml` in the title module, which `rewrite_rules()` gives to the build. No file in `data/rewrite-rules` holds rules of this game. These steps have the variable step, the render pool, the heap growth and the output size. The screen shape, layout and FOV stubs of nxnative main (about 2900 more steps) are not part of the file. They use the same sites and state page offsets as the variable step, so they need their own state page layout and host support first, and `screen_aspect` does nothing until then.
 - The settings are nxnative's values. R19 sets the target to 120 fps through the same frame step stubs, so `fps_target 60` is a record and not a cap. R10 and R17 replace `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys. The host reader reads no `settings` object yet.
 - `Settings` names no engine. An engine with a texture pool or a frame rate variable uses `texture_pool_mb` and `fps_cvar`. nxnative has two games with these values. No Unreal family exists in nxkit yet, so those two games are not taken along.
 - The game is the pilot for the nxkit runtime. nxnative runs every service of it.

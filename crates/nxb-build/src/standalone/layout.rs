@@ -153,6 +153,9 @@ pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Sh
     let patch_size;
     match far {
         None => {
+            // The rewriter puts the patch area at the next 64K border after the image, and the key page at the next 16K
+            // border. The bytes between the key page and the patch area are zero and nothing points there. No segment
+            // covers them, so the host maps them with no access.
             let key_end = key_off + key_size;
             if patch_off < 0 || (patch_off as u64) < up(key_end) {
                 return Err(bad(format!(

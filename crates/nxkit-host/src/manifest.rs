@@ -85,13 +85,26 @@ pub struct Game {
     pub aoc: Vec<Aoc>,
 }
 
-/// One entry of an import or export list.
+/// One entry of an export list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slot {
     /// The Switch mangled name.
     pub name: String,
-    /// The offset from the module base. For an import it is the slot to fill. For an export it is the symbol.
+    /// The offset from the module base of the symbol.
     pub slot: u64,
+}
+
+/// One entry of an import list: one slot of the module that an undefined symbol fills.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// The Switch mangled name.
+    pub name: String,
+    /// The offset from the module base of the slot to fill.
+    pub slot: u64,
+    /// What the relocation adds to the address. It is 0 for a `JUMP_SLOT`.
+    pub addend: i64,
+    /// Whether the symbol is weak. A weak symbol that nothing provides is stored as 0.
+    pub weak: bool,
 }
 
 pub(crate) fn bad(m: impl Into<String>) -> HostError {
@@ -272,10 +285,16 @@ impl Game {
     }
 }
 
-/// Reads an import or export list: a JSON array of `{ "name", "slot" }`.
+/// Reads an export list: a JSON array of `{ "name", "slot" }`.
 pub fn read_slots(path: &Path) -> Result<Vec<Slot>> {
     let src = std::fs::read_to_string(path).map_err(|e| HostError::io(path, &e))?;
     parse_slots(&src).map_err(|e| bad(format!("{}: {e}", path.display())))
+}
+
+/// Reads an import list: a JSON array of `{ "name", "slot", "addend", "weak" }`.
+pub fn read_imports(path: &Path) -> Result<Vec<Import>> {
+    let src = std::fs::read_to_string(path).map_err(|e| HostError::io(path, &e))?;
+    parse_imports(&src).map_err(|e| bad(format!("{}: {e}", path.display())))
 }
 
 /// Parses the text of a list file.
@@ -287,6 +306,26 @@ pub fn parse_slots(src: &str) -> Result<Vec<Slot>> {
             Ok(Slot {
                 name: text(e, "name", "list entry")?,
                 slot: num(e, "slot", "list entry")?,
+            })
+        })
+        .collect()
+}
+
+/// Parses the text of an import list file.
+pub fn parse_imports(src: &str) -> Result<Vec<Import>> {
+    let v = json::parse(src)?;
+    let a = v.as_array().ok_or_else(|| bad("the list is not an array"))?;
+    a.iter()
+        .map(|e| {
+            Ok(Import {
+                name: text(e, "name", "import entry")?,
+                slot: num(e, "slot", "import entry")?,
+                addend: field(e, "addend", "import entry")?
+                    .as_i64()
+                    .ok_or_else(|| bad("import entry: \"addend\" is not a number"))?,
+                weak: field(e, "weak", "import entry")?
+                    .as_bool()
+                    .ok_or_else(|| bad("import entry: \"weak\" is not a boolean"))?,
             })
         })
         .collect()
@@ -385,5 +424,12 @@ mod tests {
     fn reads_a_list() {
         let l = parse_slots(r#"[{"name": "_ZN2nn2os5SleepE", "slot": "0x40"}]"#).unwrap_or_default();
         assert_eq!(l, vec![Slot { name: "_ZN2nn2os5SleepE".into(), slot: 0x40 }]);
+    }
+
+    #[test]
+    fn reads_an_import_list_with_addend_and_weak() {
+        let l = parse_imports(r#"[{"name": "f", "slot": "0x40", "addend": -8, "weak": true}]"#).unwrap_or_default();
+        assert_eq!(l, vec![Import { name: "f".into(), slot: 0x40, addend: -8, weak: true }]);
+        assert!(parse_imports(r#"[{"name": "f", "slot": 64}]"#).is_err());
     }
 }

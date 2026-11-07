@@ -6,8 +6,12 @@
 //! The order per module: the file-backed part of the bss is zeroed, the key page is filled, the relocations of the NSO
 //! image are applied for the real base (`reloc.rs`), the import slots are filled and the key page becomes read only.
 //! The functions of the services come first for both relocations and imports, so that a service replaces an SDK
-//! function of the same name (R14). An import that nothing provides stops the load with its name (R15), unless the title
-//! lists it in `settings.optional_imports`. Then the thread-specific data is checked and the gates are installed.
+//! function of the same name (R14). A relocation of a symbol that the module defines binds to a service, else to the
+//! export of the first module in load order that has the name, else to the module's own definition. An import that
+//! nothing provides stops the load with its name (R15), unless it is weak, which stores 0 and is logged, or the title
+//! lists it in `settings.optional_imports`. The slot of an import gets the address plus the addend. The relocation
+//! plan and the import list must cover the same slots: a count that differs stops the load. Then the thread-specific
+//! data is checked and the gates are installed.
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,7 +22,7 @@ use crate::error::{HostError, Result};
 use crate::gate;
 use crate::gates::{self, GateTable};
 use crate::layout::PAGE;
-use crate::manifest::{self, Game, Slot};
+use crate::manifest::{self, Game, Import, Slot};
 use crate::memory::GuestMemory;
 use crate::module::Module;
 use crate::place::{Placed, Placement};
@@ -46,7 +50,7 @@ pub struct Loaded {
 }
 
 struct Lists {
-    imports: Vec<Slot>,
+    imports: Vec<Import>,
     exports: Vec<Slot>,
 }
 
@@ -55,7 +59,7 @@ fn read_lists(game: &Game) -> Result<Vec<Lists>> {
         .iter()
         .map(|m| {
             Ok(Lists {
-                imports: manifest::read_slots(&game.path(&m.imports))?,
+                imports: manifest::read_imports(&game.path(&m.imports))?,
                 exports: manifest::read_slots(&game.path(&m.exports))?,
             })
         })
@@ -140,8 +144,9 @@ fn fill_key_page(mem: &GuestMemory, m: &Module, keys: &Keys) -> Result<()> {
     Ok(())
 }
 
-fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) -> Result<()> {
-    let plan = reloc::plan(m, image, &mut |name| r.service(name))?;
+/// Applies the relocations of the image and returns how many of them name an undefined symbol.
+fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) -> Result<usize> {
+    let plan = reloc::plan(m, image, &mut |name| r.find(name))?;
     for w in &plan.writes {
         mem.res.write_u64(m.base + w.offset, w.value)?;
     }
@@ -149,10 +154,11 @@ fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) 
         "nxkit-host: module {}: {} relative, {} relr, {} symbol relocations, {} left to the imports",
         m.name, plan.counts.relative, plan.counts.relr, plan.counts.symbols, plan.counts.undefined
     );
-    Ok(())
+    Ok(plan.counts.undefined)
 }
 
-fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Slot], r: &Resolver, optional: &[String]) -> Result<()> {
+fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Import], r: &Resolver, optional: &[String]) -> Result<()> {
+    let mut weak_missing: Vec<&str> = Vec::new();
     for s in imports {
         if s.slot % 8 != 0 || !m.writable(s.slot, 8) {
             return Err(HostError::Load(format!(
@@ -161,7 +167,11 @@ fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Slot], r: &Resolver, o
             )));
         }
         let addr = match r.find(&s.name)? {
-            Some(a) => a,
+            Some(a) => a.wrapping_add_signed(s.addend),
+            None if s.weak => {
+                weak_missing.push(&s.name);
+                0
+            }
             None if optional.iter().any(|o| *o == s.name) => 0,
             None => {
                 return Err(HostError::MissingImport {
@@ -171,6 +181,16 @@ fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Slot], r: &Resolver, o
             }
         };
         mem.res.write_u64(m.base + s.slot, addr)?;
+    }
+    if !weak_missing.is_empty() {
+        weak_missing.dedup();
+        let shown = weak_missing.iter().take(8).copied().collect::<Vec<_>>().join(", ");
+        eprintln!(
+            "nxkit-host: module {}: {} weak imports have no provider and are 0: {shown}{}",
+            m.name,
+            weak_missing.len(),
+            if weak_missing.len() > 8 { ", ..." } else { "" }
+        );
     }
     Ok(())
 }
@@ -222,7 +242,14 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     for ((m, l), image) in game.modules.iter().zip(&lists).zip(&images) {
         zero_bss(mem, m)?;
         fill_key_page(mem, m, &keys)?;
-        apply_relocations(mem, m, image, &resolver)?;
+        let undefined = apply_relocations(mem, m, image, &resolver)?;
+        if undefined != l.imports.len() {
+            return Err(HostError::Load(format!(
+                "module {}: the image has {undefined} relocations of undefined symbols and the import list has {} slots",
+                m.name,
+                l.imports.len()
+            )));
+        }
         fill_imports(mem, m, &l.imports, &resolver, &game.settings.optional_imports)?;
         mem.res.protect(m.base + m.key_page, PAGE, PROT_R)?;
     }

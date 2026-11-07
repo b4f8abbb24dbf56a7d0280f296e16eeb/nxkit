@@ -80,7 +80,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 
 1. Extract. The packages become `RomFS.img`, `ExeFS` and the shader split. The update layers on top of the base game.
 2. Romfs. The files of `RomFS.img` go to `romfs/`. The build checks that `romfs/Pack/Bootup_Graphics.pack` exists. Each DLC goes to its own folder `aoc/<index>/`. The Master Trials is `aoc/1` and The Champions' Ballad is `aoc/2`. The DLC is not merged into `romfs/`. Refer to R50 in [decisions.md](decisions.md).
-3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports, and applies the patch rules of the title module.
+3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports, and applies the patch rules of the title module (`rewrite_rules()` of `nxgame-botw`, one file `rules/01007EF00011E000.toml`). `data/rewrite-rules` has no file for this game.
 4. Manifest. `game.json` gets the modules, the NVN function list, the services, the main thread from `main.npdm`, the memory layout and the run settings.
 5. Link. `nxgame.dylib` holds the modules at their fixed addresses. `codesign` signs it ad hoc. Refer to R48.
 6. Shaders. The build compiles the shaders into `shaders/` and makes `pipelines.mtl4archive` for the GPU of this Mac. `--gpu none` skips the archive.
@@ -92,5 +92,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 - `--platform ios` is not supported for this game. The build stops with exit code 4. Options of the old path (for example `--shaders`, `--companion-app` and `--dump`) stop the build with exit code 4 and name the option.
 - A missing pipeline archive is a `[RED]` warning. The game then compiles its pipelines while it runs.
 - The bundle is not sealed. Whether macOS starts it without a seal is not tested.
+- The rules of the title module are the 168 frame-step steps of nxnative PR 76. The screen shape, layout and FOV stubs of nxnative main are not in them. Without them the game keeps its own aspect and field of view.
+- The relocations come from the NSO itself and the import list has an entry for each undefined symbol, with addend and weak flag. This was written and unit tested but never checked against the real NSOs. TLS relocations stop the host with their type number. The dyld slide and the tail reservation are not tested on the game.
 - The NVN function list has 197 names from one run of nxnative. It can be too short.
 - Without `nxkit-host` beside `nxb` and without `NXB_NXKIT_HOST`, the build stops.

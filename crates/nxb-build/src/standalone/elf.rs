@@ -2,7 +2,8 @@
 //!
 //! An NSO is a shared object linked at address 0. Its text starts with a branch and the offset of the `MOD0` header at
 //! +4. `MOD0` holds the offset of the dynamic section (an i32 from `MOD0`). The slots are the `r_offset` of the
-//! relocations (`DT_JMPREL` and `DT_RELA`) that name an undefined symbol. The exports are the defined global symbols.
+//! relocations (`DT_JMPREL` and `DT_RELA`) that name an undefined symbol. Weak undefined symbols are imports too, with
+//! the weak flag set. The exports are the defined global symbols of default visibility.
 //! This is the ELF64 AArch64 layout: 16-byte dynamic entries, 24-byte symbols and 24-byte `Rela` entries. Not yet
 //! checked against a real NSO.
 
@@ -15,11 +16,24 @@ pub struct Sym {
     pub slot: u64,
 }
 
+/// One slot that the loader fills with the address of an undefined symbol.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Import {
+    /// The symbol's name.
+    pub name: String,
+    /// The offset from the base of the slot.
+    pub slot: u64,
+    /// The addend of the relocation. A `JUMP_SLOT` has 0, because the loader stores the address alone.
+    pub addend: i64,
+    /// Whether the symbol is weak. A weak symbol that nothing provides is stored as 0.
+    pub weak: bool,
+}
+
 /// The dynamic symbols of one module.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Symbols {
     /// Symbols the module needs, one entry for each slot, in slot order.
-    pub imports: Vec<Sym>,
+    pub imports: Vec<Import>,
     /// Symbols the module defines.
     pub exports: Vec<Sym>,
 }
@@ -32,6 +46,9 @@ const DT_SYMTAB: u64 = 6;
 const DT_RELA: u64 = 7;
 const DT_RELASZ: u64 = 8;
 const DT_JMPREL: u64 = 23;
+const R_NONE: u64 = 0;
+const R_JUMP_SLOT: u64 = 1026;
+const STB_WEAK: u8 = 2;
 const DT_GNU_HASH: u64 = 0x6fff_fef5;
 const MAX_SYMBOLS: usize = 1 << 20;
 
@@ -119,7 +136,7 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
         strtab,
     )?
     .min(MAX_SYMBOLS);
-    // (name, defined, value, global) per symbol
+    // (name, defined, value, binding, hidden) per symbol
     let mut syms = Vec::with_capacity(count);
     for i in 0..count {
         let o = symtab + i * 24;
@@ -129,12 +146,13 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
             .get(o + 6..o + 8)
             .map(|s| u16::from_le_bytes([s[0], s[1]]))
             .ok_or("symbol table: outside the image")?;
+        let other = *image.get(o + 5).ok_or("symbol table: outside the image")?;
         let value = u64at(image, o + 8)?;
-        syms.push((cstr(image, strtab + name)?, shndx != 0, value, matches!(info >> 4, 1 | 2)));
+        syms.push((cstr(image, strtab + name)?, shndx != 0, value, info >> 4, other & 3 != 0));
     }
     let mut out = Symbols::default();
-    for (name, defined, value, global) in syms.iter().skip(1) {
-        if *defined && *global && *value != 0 && !name.is_empty() {
+    for (name, defined, value, bind, hidden) in syms.iter().skip(1) {
+        if *defined && matches!(*bind, 1 | 2) && !*hidden && *value != 0 && !name.is_empty() {
             out.exports.push(Sym {
                 name: name.clone(),
                 slot: *value,
@@ -147,14 +165,19 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
         };
         for i in 0..len / 24 {
             let o = start + i * 24;
-            let (slot, info) = (u64at(image, o)?, u64at(image, o + 8)?);
-            let sym = (info >> 32) as usize;
-            if let Some((name, false, _, _)) = syms.get(sym).filter(|_| sym != 0)
+            let (slot, info, addend) = (u64at(image, o)?, u64at(image, o + 8)?, u64at(image, o + 16)?);
+            let (sym, kind) = ((info >> 32) as usize, info & 0xffff_ffff);
+            if kind == R_NONE {
+                continue;
+            }
+            if let Some((name, false, _, bind, _)) = syms.get(sym).filter(|_| sym != 0)
                 && !name.is_empty()
             {
-                out.imports.push(Sym {
+                out.imports.push(Import {
                     name: name.clone(),
                     slot,
+                    addend: if kind == R_JUMP_SLOT { 0 } else { addend as i64 },
+                    weak: *bind == STB_WEAK,
                 });
             }
         }
@@ -212,9 +235,11 @@ mod tests {
         let s = symbols(&module()).unwrap();
         assert_eq!(
             s.imports,
-            [Sym {
+            [Import {
                 name: "nnFoo".into(),
-                slot: 0x300
+                slot: 0x300,
+                addend: 0,
+                weak: false
             }]
         );
         assert_eq!(
@@ -224,6 +249,26 @@ mod tests {
                 slot: 0x40
             }]
         );
+    }
+
+    #[test]
+    fn a_weak_import_keeps_its_addend_and_a_hidden_symbol_is_not_exported() {
+        let mut d = module();
+        d[0x120 + 24 + 4] = 0x22; // nnFoo is weak
+        d[0x120 + 48 + 5] = 2; // nnBar is hidden
+        put32(&mut d, 0x1c8, 1025); // GLOB_DAT
+        put64(&mut d, 0x1d0, 0x18);
+        let s = symbols(&d).unwrap();
+        assert_eq!(
+            s.imports,
+            [Import {
+                name: "nnFoo".into(),
+                slot: 0x300,
+                addend: 0x18,
+                weak: true
+            }]
+        );
+        assert!(s.exports.is_empty());
     }
 
     #[test]

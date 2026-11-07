@@ -44,6 +44,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
+- `imports.json` has `addend` and `weak` for every undefined-symbol relocation, and `exports.json` lists only global, non-hidden symbols. The host adds the addend, stores 0 for a weak import with no provider and stops if the image and the list disagree on the number of slots. A relocation of a defined symbol binds to a service, then to the first export in load order.
+- Each module in `game.json` has `low` and `span`, so the part below `base` of a far layout counts in the host's address map.
+- The rules of Breath of the Wild live only in its title module. `data/rewrite-rules/01007EF00011E000.toml` and its rows in `snapshot.tsv` and `files.toml` are gone, and `tools/gen_rewrite_patches.py` skips games that have a title module.
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
 - A QoS lend no longer reads a `pthread_t` of an owner that may have exited. The lend table lives in the owner's thread record (R31).
 - `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as nxnative's record, and R10, R17 and R19 replace some of them.
