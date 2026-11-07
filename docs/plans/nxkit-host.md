@@ -26,7 +26,8 @@ The host follows the layers of the workspace and the title layer.
 | `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys`, `nxkit-metal` and the module `sys` of `nxkit-hos` |
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline` |
-| `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
+| `nxkit-nvn` | the NVN front: the objects in guest memory, the recording into a frame format, and the `Backend` trait that the GPU backend implements |
+| `nxkit-rt` (module `nvn`) | the NVN C functions. A game gets them by name from `nvnBootstrapLoader`. The modules device, queue, sync, pool, buffer, window, event and program hold the objects without a recording. The modules texture, sampler, state and cmdbuf hold the texture, sampler, state and command buffer functions |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
 
