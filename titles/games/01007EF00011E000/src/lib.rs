@@ -222,6 +222,11 @@ const NXKIT: Fact<Runtime> = Fact::new(
     },
 );
 
+const SHARED_FONT: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/host/hle_sdk16.c (font_skip comment) at f25fa956",
+    read: "2026-11-07",
+};
+
 impl RuntimeHooks for Botw {
     fn needs(&self) -> &'static [Fact<Need>] {
         NEEDS
@@ -237,6 +242,10 @@ impl RuntimeHooks for Botw {
 
     fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
         Some(PACE_PROFILE)
+    }
+
+    fn shared_font_decode(&self) -> Option<Fact<bool>> {
+        Some(Fact::new(true, SHARED_FONT))
     }
 }
 

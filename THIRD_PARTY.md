@@ -157,6 +157,31 @@ The title module of Breath of the Wild (`titles/games/01007EF00011E000/`) carrie
 - `shader_facts.tsv`: the `shader_facts_manual` rows of nxnative for the game.
 - `SETTINGS` in `src/lib.rs` and the defaults in `titles/nxtitle/src/settings.rs`: the values of `dm/games/01007EF00011E000/game.tsv` and the defaults of `dm/games/game.py`, with the key names of `game_profile.h`.
 - `crates/nxb-build/src/standalone/` follows what `dm/host/hle_fs.c` and `dm/host/hle_misc.c` do for DLC (index, mount and list), as a description of behaviour and not as code.
+The crate `nxkit-svc-system` (`crates/nxkit-svc-system/`) takes values and data from the nxnative engine. It uses the same licence
+notice as above. The command IDs and layouts of the services are from libnx (ISC licence, `switch/services/*.c` and `*.h`) and from the
+switchbrew wiki, and no code is copied from them.
+
+| nxkit file | nxnative source |
+|---|---|
+| `src/acc.rs` | `dm/host/hle_account.c`: the user ID, the nickname rule and the 670 bytes of the profile JPEG |
+| `src/applet.rs`, `src/applet_ifaces.rs`, `src/state.rs`, `src/apm.rs` | `dm/host/hle_oe.c`: the applet messages, the focus modes, the performance configurations, the pseudo device ID, the display size and the CPU overclock state |
+| `src/time.rs`, `src/tz.rs` | `dm/host/hle_time.c`: the user clock context rule and the conversion with the local time of the host |
+| `src/set.rs` | `dm/host/hle_oe.c` (language) and `dm/host/hle_sdk16.c` (location name and display version) |
+| `src/pctl.rs` | `dm/host/hle_misc.c`: the `nn::pctl` answers |
+| `src/nifm.rs`, `src/ssl.rs` | `dm/host/hle_net.c`: the offline network request and the TLS context |
+| `src/friend.rs`, `src/lm.rs` (prepo), `src/bcat.rs` | `dm/host/hle_offline.c` and `dm/host/hle_friends.c`: the offline friends, telemetry and BCAT answers |
+| `src/bcat.rs` (aoc) | `dm/host/hle_fs.c`: the add-on content mount |
+| `src/event.rs`, `src/seams.rs`, `src/sdk/mod.rs` | `dm/host/hle.h`, `dm/host/hle_sdk16.c`: the calling convention of a take-over, the guest event creation and the guest symbol lookup |
+| `src/sdk/init.rs` | `dm/host/hle_sdkinit.c`: the SDK module init |
+| `src/sdk/oe.rs`, `src/sdk/oe_state.rs`, `src/sdk/sdk16.rs`, `src/sdk/settings.rs`, `src/sdk/diag.rs`, `src/sdk/nfp.rs`, `src/sdk/font.rs` | `dm/host/hle_oe.c` and `dm/host/hle_sdk16.c`: the `nn::oe` functions, the message queue, the settings, the diag log, the NFC library and the shared font |
+| `src/sdk/account.rs`, `src/sdk/time.rs`, `src/sdk/friends.rs` | `dm/host/hle_account.c`, `dm/host/hle_time.c`, `dm/host/hle_friends.c` |
+| `src/sdk/mii.rs`, `src/sdk/swkbd.rs`, `src/sdk/web.rs` | `dm/host/hle_mii.c`, `dm/host/hle_swkbd.c`, `dm/host/hle_web.c` |
+| `src/sdk/misc.rs`, `src/sdk/aoc.rs`, `src/sdk/shop.rs`, `src/sdk/ngc.rs`, `src/sdk/stpl.rs`, `src/sdk/chat.rs` | `dm/host/hle_misc.c`: the add-on content, the shop, the error applet, the word filter, the nsd, the pctl and the GameChat answers |
+| `src/sdk/net.rs`, `src/sdk/socket.rs` | `dm/host/hle_net.c`: the names that `nxkit-rt` offline does not list, and the event file descriptors |
+| `src/sdk/ro.rs`, `src/sdk/sf.rs`, `src/sdk/nvdrv.rs`, `src/sdk/codec.rs` | `dm/host/hle_ro.c`, `dm/host/hle_sf.c`, `dm/host/hle_nvdrv.c`, `dm/host/hle_codec.c` |
+| `src/sdk/lifecycle.rs` | `dm/host/hle_lifecycle.c`: the graceful exit |
+
+The title modules `nxgame-botw` and `nxgame-acnh` hold two facts from `dm/host/hle_sdk16.c` and `dm/host/hle_sf.c`: the shared font form and the `nn::sf::hipc` service names.
 
 ## NVN front end ported from nxnative
 

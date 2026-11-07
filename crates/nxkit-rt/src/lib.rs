@@ -116,6 +116,8 @@ pub fn entries() -> &'static [Entry] {
         table.extend(mapped(nxkit_svc_audio::exports(), Service::Audio, false));
         table.extend(mapped(nxkit_svc_audio::big_stack_exports(), Service::Audio, true));
         table.extend(mapped(nxkit_svc_pacing::exports(), Service::Pacing, false));
+        table.extend(mapped(nxkit_svc_system::exports(), Service::System, false));
+        table.extend(mapped(nxkit_svc_system::big_stack_exports(), Service::System, true));
         table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,

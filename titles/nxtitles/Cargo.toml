@@ -12,16 +12,18 @@ layer = "L1"
 in_v = false
 
 [features]
-default = ["agl", "oot", "botw"]
+default = ["agl", "oot", "botw", "acnh"]
 agl = ["dep:nxfamily-agl"]
 oot = ["dep:nxgame-oot"]
 botw = ["dep:nxgame-botw"]
+acnh = ["dep:nxgame-acnh"]
 
 [dependencies]
 nxtitle.workspace = true
 nxfamily-agl = { workspace = true, optional = true }
 nxgame-oot = { workspace = true, optional = true }
 nxgame-botw = { workspace = true, optional = true }
+nxgame-acnh = { workspace = true, optional = true }
 
 [lints]
 workspace = true
