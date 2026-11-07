@@ -8,7 +8,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 - The repository is one Cargo workspace. The crates of the build are in `crates/`. The families and title modules are in `titles/` (refer to [titles.md](titles.md)). The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
 - `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `rewrite`, `profile`, `rewrite-rules`, `nro`, `shaders`, `app`, `ipa`, `sign`, `pso`, `archive`, `ios` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
-- The workspace uses the standard library only. At this time, it has no external crates.
+- The workspace uses the standard library only, with one exception. `nxkit-metal` uses the `objc2` family of crates to bind Metal on macOS. `deps.toml` lists them.
 
 ## Layers
 
@@ -21,7 +21,7 @@ flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys)"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
@@ -37,7 +37,7 @@ The rules:
 2. L1 does no I/O. Its crates are pure functions over bytes and text that return `Result`. L1 can call `nxb-sys` only for pure calculations.
 3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends. `nxb-nro` collects the NRO files of a game.
 4. L2 does not make output bytes of the shader step.
-5. Only `nxb-sys`, `nxkit-rt` and the module `sys` of `nxkit-hos` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
+5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal` and the module `sys` of `nxkit-hos` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.

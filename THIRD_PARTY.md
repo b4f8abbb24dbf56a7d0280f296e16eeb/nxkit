@@ -1,6 +1,6 @@
 # Third-party notes
 
-This repository has no external Rust dependencies. `Cargo.lock` lists only the crates of the workspace.
+The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
 
@@ -21,6 +21,7 @@ taken from other implementations.
 | SHA-1, SHA-256 | `nxb-model`, `nxb-sys` | FIPS 180-4. The test vectors are the published ones |
 | AArch64 decoding and patching | `nxb-a64`, `nxb-rewrite` | the Arm Architecture Reference Manual |
 | Property lists (XML and binary) | `nxb-plist`, `nxb-pack` | public Apple documentation and observed output |
+| Block-linear texture layout (mip block height, layer stride) | `nxkit-metal` | the layout rules of deko3d (`dk_image.cpp`) as used in nxnative. The code is written anew and no source is copied |
 
 ## Shader translator ported from Ryujinx
 

@@ -23,11 +23,11 @@ The host follows the layers of the workspace and the title layer.
 
 | crate | function |
 |---|---|
-| `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys` and the module `sys` of `nxkit-hos` |
+| `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys`, `nxkit-metal` and the module `sys` of `nxkit-hos` |
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline` |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
-| `nxkit-metal` | the Metal 4 backend: it runs a recorded frame |
+| `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
 
 ### Core, family and title
@@ -86,6 +86,23 @@ The core rules of Horizon are off by default (R9). When a title turns them on, `
 | H4 | `pacing` on nxkit | the game holds 60 and 120 fps on a 120 Hz display at the right game speed |
 | H5 | `kernel` and the `nxkit-host` program | the game starts from `nxkit-host` without `dmhost` |
 | H6 | nxnative is off | `nxb build --platform mac` for Breath of the Wild has no nxnative stage, and the route runs |
+
+The part of H3 that does not need the frame format exists in `nxkit-metal`:
+
+- The device, the Metal 4 command queue, three command allocators for the frames in flight and a residency set.
+- Guest memory as one no-copy `MTLBuffer`, with the mapping from a host address to a GPU address.
+- Shader libraries from a `.metallib` file or from source, pipeline states from `MTL4Compiler`, and a pipeline cache under a hash from the caller, with an optional binary archive on disk.
+- A `CAMetalLayer` drawable path, and a `CAMetalDisplayLink` driver at 60 or 120 Hz that calls `FrameHooks::display_tick`. The window belongs to `nxkit-host`.
+- CPU encode time and GPU time of every command buffer.
+- Full render pipeline state: blend per attachment, depth and stencil, vertex layout, topology, cull, winding, fill, depth bias and sample count.
+- Textures with mip levels, array layers, 3D and cube kinds and views.
+- Block-linear deswizzle and swizzle compute kernels for mips, layers and depth slices, and copy-back of a sub-rectangle. The layout rules follow deko3d.
+- A public residency API for resources made outside the crate.
+- A barrier API with explicit stages, for use between passes, inside a pass and towards later passes.
+- Indirect command buffers with per-state inherit flags. The module docs of `icb.rs` list what an ICB can hold on the Xcode 27.1 SDK.
+- A data-driven encoding API for render passes and compute passes. The frame encoder will call it from a loop over the recorded commands.
+
+What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, compute ICBs, and the tuning of frame latency on real hardware.
 
 The route is one save and one path through the game: the title screen, loading the save, the Great Plateau outdoors, a shrine, the menus and a cutscene.
 
