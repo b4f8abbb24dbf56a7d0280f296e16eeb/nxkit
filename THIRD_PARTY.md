@@ -198,6 +198,7 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 | `crates/nxkit-rt/src/nvn/device.rs` | the device info table (`g_devinfo`) and the device functions of `dm/gfx/nvn/hle_nvn.c` |
 | `crates/nxkit-rt/src/nvn/program.rs` | the shader key of a program stage (the control section, the skip range and the code), from `nvnProgramSetShaders` of `dm/gfx/nvn/hle_nvn.c` |
 | `crates/nxkit-rt/src/nvn/{pool,buffer,event,sync,queue,window}.rs` | the behaviour of the matching functions of `dm/gfx/nvn/hle_nvn.c` and the object structs of `dm/gfx/nvn/nvn_obj.h` |
+| `crates/nxkit-rt/src/nvn/{texture,sampler,state}.rs` and the modules below them | the behaviour of the `nvnTexture*`, `nvnSampler*` and state functions of `dm/gfx/nvn/hle_nvn.c`, the view and builder fields of `dm/gfx/nvn/nvn_obj.h` and the size rules of `dm/gfx/nvn/nvn_tex.c` (checked on 2026-11-07). The guest layouts and the code are written anew |
 
 `nvn_tex.c` credits other work. The layout algorithm comes from deko3d, `source/dk_image.cpp`. The notice of deko3d follows.
 Its source is under the zlib licence.

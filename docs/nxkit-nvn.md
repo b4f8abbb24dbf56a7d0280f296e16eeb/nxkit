@@ -135,6 +135,17 @@ The C functions are in `nxkit-rt`, module `nvn` (R22 to R24). A game gets them b
 - A sync that a queue fenced signals when the GPU finished the work submitted until then. A sync that a window acquire fenced is signalled at once, because `Backend::acquire` blocks until the image is free.
 - `nvnDeviceGetInteger` has the table of nxnative. The values of the API version and of the GPU code come from `Settings`.
 
+### Textures, samplers and state objects
+
+Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below it, `sampler` is `sampler.rs`, and `state` is `state.rs` with `state/read.rs`.
+
+- An `NVNtexture` holds the id, the GPU address, the host address of the storage and the description in its first 0x5C bytes. A getter reads the object and takes no lock. The layout is in the doc comment of `texture.rs`.
+- A texture builder is 0x80 bytes and a texture view is 16 bytes. Their layouts are in `texture/builder.rs` and `texture/view.rs`. The view sets only what the game set. The rest comes from the texture when it is registered.
+- A texture pool and a sampler pool are 0x20 bytes: the memory pool at 0, the offset at 8, the count at 0x10, a magic at 0x18 and the first descriptor id at 0x1C. The code is in `texture/pool.rs`. An id is at most 4095 for a sampler, so a sampler pool must lie below that.
+- `nvnTexturePoolRegisterTexture` and `nvnSamplerPoolRegisterSampler` write the 32-byte header into the pool memory of the game. The front end only builds the header.
+- `nvnTextureWriteTexels` and `nvnTextureReadTexels` work in place in the storage of the texture (R52). A linear texture has one level and one layer. The GOB order is always the one of the Tegra X1.
+- The state objects have the sizes of the NVN headers. The readers for the command buffer are `state::blend`, `state::color`, `state::channel_mask`, `state::depth_stencil`, `state::multisample`, `state::polygon`, `state::vertex_attrib` and `state::vertex_stream`. The command buffer also uses `texture::pool_base`, `sampler::pool_base` and `texture::id_of`.
+
 ## Limits
 
 - The crate takes typed values. The raw guest arguments of an NVN call are read in `nxkit-rt`.
@@ -150,7 +161,11 @@ The C functions are in `nxkit-rt`, module `nvn` (R22 to R24). A game gets them b
 - A texture in a record is named by its GPU address. When two textures start at the same address, the newest one wins.
 - A callee that sets state is assumed to leave it set for the caller, as nxnative does.
 - A recording that overwrites the memory of another recording while it is still being written is found at its end, not before.
-- Sparse textures are not supported.
+- Sparse textures are not supported. A sparse texture stops the game at `nvnTextureInitialize`.
+- A stencil view or a stencil texture is registered as its depth view, because `TextureView` has no depth-stencil mode. The first one is logged.
+- `nvnTextureReadTexels` of a texture that the GPU wrote last stops the game, because `Backend` has no readback.
+- `nvnMultisampleStateSetSampleLocations` ignores the positions and logs the first call. The host does not use custom sample locations.
+- A pool range that is initialised again with another size or address keeps its old ids reserved. The ids of a pool are never given back.
 - The analysis counts a texture as one unit. It does not track mip levels or layers separately.
 - The memory callback of a command buffer runs under the lock of the front end. It must not call a function of `ctx::Gpu` that takes the lock.
 
