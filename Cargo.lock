@@ -651,6 +651,7 @@ name = "nxgame-botw"
 version = "0.9.2"
 dependencies = [
  "nxb-profile",
+ "nxkit-hos",
  "nxtitle",
 ]
 
@@ -661,6 +662,10 @@ dependencies = [
  "nxb-profile",
  "nxtitle",
 ]
+
+[[package]]
+name = "nxkit-hos"
+version = "0.9.2"
 
 [[package]]
 name = "nxkit-rt"
