@@ -8,7 +8,9 @@
 //!   [`guest::set_range`]. Every access outside that range is a [`guest::Fault`].
 //! - [`export`]: one function that a service gives the game in place of an SDK function (R14).
 //! - [`ipc`]: the trait of a service that answers Horizon IPC requests, and the request and response types (R14, R15).
+//! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
 
 pub mod export;
 pub mod guest;
 pub mod ipc;
+pub mod kernel;
