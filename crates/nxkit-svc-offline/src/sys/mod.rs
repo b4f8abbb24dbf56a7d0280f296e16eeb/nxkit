@@ -12,6 +12,8 @@
 //! thread (`sk_fail`, `GetLastError`, `GetHostEnt*`, `SetLastErrno`, `Close`), the variadic `Fcntl` and the naked
 //! assembly `PlayReport::Send`.
 
+#![allow(unsafe_code)]
+
 mod table;
 
 use std::ffi::{c_char, c_void};

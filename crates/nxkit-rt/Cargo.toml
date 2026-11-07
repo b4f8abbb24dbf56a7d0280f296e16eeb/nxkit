@@ -19,6 +19,8 @@ nxb-model = { workspace = true }
 nxkit-abi = { workspace = true }
 nxkit-hos = { workspace = true }
 nxkit-nvn = { workspace = true }
+nxkit-svc-fs = { workspace = true }
+nxkit-svc-offline = { workspace = true }
 
 [dev-dependencies]
 nxtitle = { workspace = true }

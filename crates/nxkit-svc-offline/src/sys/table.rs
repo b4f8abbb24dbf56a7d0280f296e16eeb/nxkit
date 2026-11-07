@@ -2,17 +2,13 @@
 //! function that `dm/host/hle_offline.c` or `dm/host/hle_net.c` registers with `HLE_FORCE`.
 
 use super::*;
-use crate::{Entry, Service};
+use nxkit_abi::export::Export;
 
 macro_rules! offline {
     ($($name:literal => $f:ident,)*) => {
         /// The entries of the service.
-        pub(crate) fn entries() -> Vec<Entry> {
-            vec![$(Entry {
-                name: $name,
-                service: Service::Offline,
-                addr: $f as *const () as usize,
-            }),*]
+        pub(crate) fn entries() -> Vec<Export> {
+            vec![$(Export::new($name, $f as *const () as usize)),*]
         }
 
         /// The names with the function that answers each, for the tests.

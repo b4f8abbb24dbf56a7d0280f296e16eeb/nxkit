@@ -1,7 +1,11 @@
 use super::table::NAMES;
 use super::*;
-use crate::{Service, find_in};
+use nxkit_abi::export::Export;
 use std::ffi::CStr;
+
+fn find(all: &[Export], name: &[u8]) -> Option<usize> {
+    all.iter().find(|e| e.name.as_bytes() == name).map(|e| e.addr)
+}
 
 fn entries_with(f: &str) -> Vec<usize> {
     let all = entries();
@@ -9,7 +13,7 @@ fn entries_with(f: &str) -> Vec<usize> {
         .iter()
         .filter(|(_, id)| *id == f)
         .map(|(n, _)| {
-            find_in(&all, Service::Offline.bit(), n.as_bytes())
+            find(&all, n.as_bytes())
                 .unwrap_or_else(|| panic!("{n} is not in the table"))
         })
         .collect()
@@ -29,20 +33,19 @@ macro_rules! each {
 }
 
 #[test]
-fn names_are_unique_and_belong_to_the_offline_service() {
+fn names_are_unique_and_are_switch_names() {
     let all = entries();
     assert_eq!(all.len(), NAMES.len());
     let mut names: Vec<&str> = all.iter().map(|e| e.name).collect();
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), all.len());
-    assert!(all.iter().all(|e| e.service == Service::Offline));
     assert!(
         names.iter().all(|n| n.starts_with("_ZN2nn")
             || n.starts_with("nnssl")
             || n.starts_with("nnsocket"))
     );
-    assert_eq!(find_in(&all, Service::Fs.bit(), names[0].as_bytes()), None);
+    assert_eq!(find(&all, b"_ZN2nn2fs8MountRomEPKcPvm"), None);
 }
 
 #[test]

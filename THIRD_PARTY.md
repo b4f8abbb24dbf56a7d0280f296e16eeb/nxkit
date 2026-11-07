@@ -78,9 +78,13 @@ and refuses to run (exit code 4) when they differ. The same notice is in `data/r
 
 ## Runtime services ported from nxnative
 
-The `offline` service of `nxkit-rt` (`crates/nxkit-rt/src/offline/`) is a Rust port of the entries of `dm/host/hle_offline.c`
+The crate `nxkit-svc-offline` (`crates/nxkit-svc-offline/src/sys/`) is a Rust port of the entries of `dm/host/hle_offline.c`
 and `dm/host/hle_net.c` of the nxnative engine that need no state of the host. The nxnative engine is published under the MIT
 licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+The crate `nxkit-svc-fs` (`crates/nxkit-svc-fs/`) is a Rust port of the `nn::fs` take-overs of `dm/host/hle_fs.c`. It keeps the mangled names,
+the sizes and result codes, the save layout (committed folder, `.work` and `.new` folders, commit by clone and swap) and the
+handling of case collisions. The IPC server `nxkit-ipc` follows the message layout of `dm/host/hle_sf.c`. Both use the same licence notice as above.
 
 The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for ArbitrateLock, ArbitrateUnlock, WaitProcessWideKeyAtomic,
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the

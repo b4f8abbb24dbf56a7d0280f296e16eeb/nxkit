@@ -26,6 +26,9 @@ nxb-model = { path = "crates/nxb-model" }
 nxkit-abi = { path = "crates/nxkit-abi" }
 nxkit-hos = { path = "crates/nxkit-hos" }
 nxkit-nvn = { path = "crates/nxkit-nvn" }
+nxkit-ipc = { path = "crates/nxkit-ipc" }
+nxkit-svc-fs = { path = "crates/nxkit-svc-fs" }
+nxkit-svc-offline = { path = "crates/nxkit-svc-offline" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }
