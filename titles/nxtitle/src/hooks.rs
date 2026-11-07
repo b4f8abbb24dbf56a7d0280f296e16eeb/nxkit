@@ -223,8 +223,34 @@ pub enum LimitRule {
     Reflected(ReflectedLimit),
 }
 
+/// The data `nxb build` needs to make a game without nxnative: no engine folder, no Python and no `dmhost`.
+#[derive(Clone, Copy, Debug)]
+pub struct Standalone {
+    /// The packed version the data was made for (`1114112` for v1114112). A build of another version is refused.
+    pub version: u32,
+    /// The game's modules in load order (`main`, `subsdk0`, `sdk`), each with the build ID of that version (the
+    /// first 16 bytes of the NSO's build ID as 32 hex digits). A module of another build is refused.
+    pub modules: &'static [(&'static str, &'static str)],
+    /// The NVN functions the game fetches through the NVN loader, one name per line. The NVN layer answers these.
+    pub nvn_functions: Fact<&'static str>,
+    /// The shader groups of the shader split (`shader_groups` of a `game.tsv`: `<path part>=<group>` pairs).
+    pub shader_groups: &'static str,
+    /// The line the shader split prints for the kind of shaders (`shader_note`).
+    pub shader_note: &'static str,
+    /// Hand-written shader facts, merged over the generated rows (`shader_facts_manual.tsv`).
+    pub shader_facts: Option<&'static str>,
+    /// A path of the base game's romfs that every version has. The build refuses a romfs without it.
+    pub romfs_marker: &'static str,
+    /// The memory layout and the other run settings of the game, which the host reads from `game.json`.
+    pub settings: Fact<crate::Settings>,
+}
+
 /// Questions of the build: shaders, preparation and rewriter rules.
 pub trait BuildHooks: Sync {
+    /// What a build without nxnative needs. `None`: the title still builds through nxnative.
+    fn standalone(&self) -> Option<Standalone> {
+        None
+    }
     /// The role of a shader, when this layer knows it.
     fn shader_role(&self, _shader: &ShaderView<'_>) -> Option<Fact<ShaderRole>> {
         None

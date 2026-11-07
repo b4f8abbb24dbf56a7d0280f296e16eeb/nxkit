@@ -106,6 +106,23 @@ pub fn version(engine: &Path) -> Result<String, String> {
     Ok(nxb_model::to_hex(&h.finalize().0)[..12].to_string())
 }
 
+/// The chain's own revision for a build without an engine folder. Raise it with every change of the translation that
+/// the crate version does not carry.
+const STANDALONE_REVISION: &str = "nxkit-chain-1";
+
+/// V for a build without nxnative (R49): the shader step is this workspace's code, so the version is a hash of
+/// [`STANDALONE_REVISION`], this crate's version and the translation options. The engine's `dm/gfx` files do not
+/// enter it, as the build does not run them. A changed translator that keeps the crate version needs a new revision.
+pub fn standalone_version() -> String {
+    let mut h = nxb_model::Sha256::new();
+    h.update(STANDALONE_REVISION.as_bytes());
+    h.update(&[0]);
+    h.update(env!("CARGO_PKG_VERSION").as_bytes());
+    h.update(&[0]);
+    h.update(OPTIONS.as_bytes());
+    nxb_model::to_hex(&h.finalize().0)[..12].to_string()
+}
+
 /// `dmsh_chain.profile_rows`: the profile's `nvn_*` / `shader_*` rows of `game.tsv`, tab-joined.
 pub fn profile_rows(game_tsv: &str) -> String {
     let mut s = String::new();
@@ -179,6 +196,14 @@ mod tests {
         );
         assert_eq!(input_tables(&d).unwrap(), ["t.tsv"]);
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_standalone_version_is_twelve_hex_digits_and_stable() {
+        let v = standalone_version();
+        assert_eq!(v.len(), 12);
+        assert!(v.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(v, standalone_version());
     }
 
     #[test]

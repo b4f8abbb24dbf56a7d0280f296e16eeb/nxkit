@@ -2,7 +2,7 @@
 
 use crate::{
     BuildHooks, Fact, Family, LimitRule, Match, Need, PaceProfile, Pacing, Runtime, RuntimeHooks,
-    Seed, Service, ShaderRole, ShaderView, Title, TitleFacts, Upscaler,
+    Seed, Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -152,6 +152,18 @@ impl Resolved {
             .rev()
             .flat_map(|h| h.seeds().iter().copied())
             .collect()
+    }
+
+    /// The data of a build without nxnative: the title's, then the family's.
+    pub fn standalone(&self) -> Option<Standalone> {
+        self.build_hooks().find_map(|h| h.standalone())
+    }
+
+    /// The title's own rewriter rules (the family's are not in it), as TOML text.
+    pub fn title_rules(&self) -> Option<&'static str> {
+        self.title
+            .map(|t| t as &'static dyn BuildHooks)
+            .and_then(|h| h.rewrite_rules())
     }
 
     /// The rewriter rules of the family, then the title's.

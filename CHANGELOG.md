@@ -9,6 +9,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The crate `nxkit-ipc` is the IPC server of the nxkit host. It parses HIPC and CMIF, keeps sessions and domains, serves `sm:`, counts every command and stops the game on an unknown service or command. It has no global lock.
 - The crate `nxkit-svc-fs` is the `fs` service. It has the `nn::fs` functions of nxnative at SDK level (`exports()` and `big_stack_exports()`) and `fsp-srv` over IPC. The romfs is mapped, and the saves have the nxnative layout. `nxkit-rt` exports `nxkit_hle_find_big` for the functions that need the big host stack.
 - The service `offline` moved from `nxkit-rt` into the crate `nxkit-svc-offline`.
+- `nxb build` makes the app of a game with a title module without nxnative (R48 to R50). The stages are extract, romfs, rewrite, manifest, link, shaders and bundle. The app has `nxkit-host` as its program and `Contents/Resources/nxkit/` with `game.json`, `nxgame.dylib`, `romfs/`, `shaders/` and `pipelines.mtl4archive`. `nxb` writes `nxgame.dylib` as a Mach-O file with each module at its fixed address and signs it ad hoc. `--engine` has no use for such a game and stops the build with exit code 4. A game without a title module keeps the old path. Refer to `docs/build-botw.md`. The code was not compiled or run on game files when it was written.
+- The title hook `standalone` of `nxtitle` carries the NVN function list, the shader facts, the run settings and the memory layout of a game. `nxgame-botw` fills it from nxnative.
+- `nxb build` unpacks DLC into `aoc/<index>/` in the run folder and lists it in `game.json`.
 - The crate `nxkit-rt` builds `libnxkit_rt.a` for the host, for `aarch64-apple-darwin` and `aarch64-apple-ios`. It exports `nxkit_init` and `nxkit_hle_find` (header `crates/nxkit-rt/include/nxkit_rt.h`). It implements no service yet, so every lookup gives NULL. Refer to `docs/plans/runtime-hooks.md`.
 - `nxkit-rt` also builds `libnxkit_rt.dylib`, which the Mac host loads at run time. It answers the `offline` service, ported from nxnative. `nxb build --platform mac` puts `DM_NXKIT_SERVICES` and `DM_NXKIT_LIB` into the run command.
 - `nxgame-botw` runs the `offline` service on nxkit.
@@ -38,6 +41,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
 - A QoS lend no longer reads a `pthread_t` of an owner that may have exited. The lend table lives in the owner's thread record (R31).
+- `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as nxnative's record, and R10, R17 and R19 replace some of them.
 - nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and nxnative keeps its MIT notice in `THIRD_PARTY.md`.
 
 ## 0.9.2 - 2026-11-07

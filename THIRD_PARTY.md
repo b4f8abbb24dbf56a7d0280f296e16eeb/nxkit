@@ -149,6 +149,14 @@ published under the MIT licence, Copyright (c) 2026 seedds. The full notice is i
 
 `tools/gen_botw_rules.py` records the stubs the way `tools/gen_rewrite_patches.py` does and writes one rule file for one game. The rule
 file holds instruction words of game code. Each rule names its source file, commit and read date in its `evidence` key.
+## Title module data ported from nxnative
+
+The title module of Breath of the Wild (`titles/games/01007EF00011E000/`) carries facts that nxnative keeps for the same game. They were read on 2026-11-07 and entered as data. No code was copied. The nxnative engine is published under the MIT licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+- `nvn_functions.txt`: the 197 NVN function names of the usage list `usage.tsv` of nxnative.
+- `shader_facts.tsv`: the `shader_facts_manual` rows of nxnative for the game.
+- `SETTINGS` in `src/lib.rs` and the defaults in `titles/nxtitle/src/settings.rs`: the values of `dm/games/01007EF00011E000/game.tsv` and the defaults of `dm/games/game.py`, with the key names of `game_profile.h`.
+- `crates/nxb-build/src/standalone/` follows what `dm/host/hle_fs.c` and `dm/host/hle_misc.c` do for DLC (index, mount and list), as a description of behaviour and not as code.
 
 ## NVN front end ported from nxnative
 

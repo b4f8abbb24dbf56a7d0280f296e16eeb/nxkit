@@ -15,8 +15,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// The shader step's configuration from the build's plan: the chain version
 /// and the profile's inputs digest computed as `dmsh_chain.py` does, outputs in `<work>/shader/cache/b-<V>`.
 pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
-    let chain = nxb_shader::chain::version(&b.engine)?;
-    let inputs = nxb_shader::chain::inputs_of(&b.engine, &b.profile.0)?;
+    // a build without an engine folder (the standalone one, R49) has its own chain version
+    let (chain, inputs) = if b.engine.as_os_str().is_empty() {
+        (
+            nxb_shader::chain::standalone_version(),
+            nxb_shader::chain::inputs(&b.profile.0)?,
+        )
+    } else {
+        (
+            nxb_shader::chain::version(&b.engine)?,
+            nxb_shader::chain::inputs_of(&b.engine, &b.profile.0)?,
+        )
+    };
     let sh = b.work.join("shader");
     let manifest = match &a.manifest {
         Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),

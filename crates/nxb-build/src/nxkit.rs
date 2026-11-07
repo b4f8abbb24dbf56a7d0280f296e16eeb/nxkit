@@ -107,8 +107,8 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        // BotW runs the offline service on nxkit
-        assert_eq!(module_services("01007EF00011E000").unwrap(), ["offline"]);
+        // BotW runs every service on nxkit
+        assert_eq!(module_services("01007EF00011E000").unwrap().len(), 9);
         assert!(run_env("0100000000000000", None).unwrap().is_empty());
     }
 

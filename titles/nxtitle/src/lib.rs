@@ -23,6 +23,7 @@ mod evidence;
 mod facts;
 mod hooks;
 mod runtime;
+mod settings;
 
 pub use catalog::{Catalog, FamilyFrom, Resolved};
 pub use evidence::{Evidence, Fact};
@@ -30,11 +31,12 @@ pub use facts::{Match, TitleFacts};
 pub use hooks::{
     BuildHooks, LimitKind, LimitRow, LimitRule, LimitSite, Need, PaceProfile, Pacing,
     PresentInterval, ReflectLayout, ReflectedLimit, RuntimeHooks, Seed, ShaderRole, ShaderStage,
-    ShaderView, Upscaler,
+    ShaderView, Standalone, Upscaler,
 };
 
 pub use nxb_model::TitleId;
 pub use runtime::{Runtime, Service};
+pub use settings::{Memory, Settings};
 
 /// An engine family: the facts and hooks that hold for every game of one engine.
 pub trait Family: BuildHooks + RuntimeHooks {

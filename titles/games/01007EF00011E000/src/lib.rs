@@ -7,6 +7,10 @@
 //! The game does not need `tex_flush_upload`, `render_cond` or `tex_dirty_upload`. The game's README in
 //! nxnative says so for `tex_flush_upload`, and its `game.tsv` sets none of the three.
 //!
+//! The game builds without nxnative ([`BuildHooks::standalone`]): the module holds the NVN function list, the
+//! shader split settings, the two hand-written shader facts and the rewriter rules (`rewrite_rules`). All nine
+//! services run on nxkit.
+//!
 //! The rewrite rules are data in `rules/01007EF00011E000.toml`: the seven interval controller cuts, the frame step
 //! stubs, the render scale, render pool and output size stubs. Each rule names its source file, commit and read
 //! date in its `evidence` key. The rules are the ones of `patches.py` at pull request 76 of `seedds/nxnative`.
@@ -15,17 +19,11 @@
 //!
 //! The pacing keys of the game's profile (`fps_target`, `fps_hold`, `present_snap`, `present_interval`) are the fact
 //! `PaceProfile`, with their evidence.
-//!
-//! This part is in `seedds/nxnative` `dm/games/01007EF00011E000/` and not in this module:
-//!
-//! - `shader_facts_manual.tsv`: two shaders with integer outputs from agl's BC4 encoder.
-//!
-//! nxnative runs every service of the game. This module moves a service to nxkit once the nxkit runtime has it.
 
 use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks,
-    Service, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks,
+    Service, Settings, Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -38,6 +36,36 @@ const GAME_TSV: Evidence = Evidence::Recorded {
     source: "seedds/nxnative dm/games/01007EF00011E000/game.tsv at f25fa956",
     read: "2026-11-07",
 };
+
+/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The generated
+/// `game_profile.h` (`python3 dm/games/game.py header 01007EF00011E000 <out.h>`, read 2026-11-07) shows each result.
+/// `render_base` (1600x900 docked, 1280x720 handheld) has no field: the host's resolution is its own business.
+///
+/// These are nxnative's values, kept as the record of the game. nxkit's goals override some of them. R19 sets the
+/// target to 120 fps through the frame step patch in the rewrite rules, so `fps_target 60` and `fps_max 60` do not cap
+/// nxkit. `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys describe nxnative's
+/// translator. R10 and R17 replace them (encoding on its own thread, a whole frame, barriers only where data flows).
+/// The host reader of `game.json` (`nxkit-host`) reads no `settings` object yet, checked on 2026-11-07.
+const SETTINGS: Fact<Settings> = Fact::new(
+    Settings {
+        memory: Memory {
+            reserve: 0x1_0000_0000,
+            alias: 0x1000_0000,
+            stack: 0x1000_0000,
+            app_pool: 0xCD50_0000,
+            ..Settings::DEFAULT.memory
+        },
+        display_versions: &[("cd57b23fa4bbad65803d9788c01821ee", "1.9.0")],
+        fps_target: 60,
+        present_snap: true,
+        pso_mtl4: true,
+        screen_aspect: true,
+        pad_layout: "full",
+        gpu_ts_segment: true,
+        ..Settings::DEFAULT
+    },
+    GAME_TSV,
+);
 
 const NEEDS: &[Fact<Need>] = &[
     Fact::new(
@@ -87,6 +115,16 @@ const NEEDS: &[Fact<Need>] = &[
     ),
 ];
 
+const USAGE: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/01007EF00011E000/usage.tsv at 88c7e03f (the nvn rows, route smoke.tsv quick, 70 s)",
+    read: "2026-11-07",
+};
+
+/// The NVN functions of one 70 s route are a lower bound. A function the route did not reach is missing. Two of the
+/// names (`nvnCommandBufferSetDepthBounds` and `nvnCommandBufferSetShaderScratchMemory`) are not in nxnative's
+/// implemented list.
+const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(include_str!("../nvn_functions.txt"), USAGE);
+
 const PATCHES_PY: Evidence = Evidence::Recorded {
     source: "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head \
              0f2a772c13e2caed2959d1d1a93f8fe57f44c754",
@@ -121,6 +159,23 @@ const PACE_PROFILE: Fact<PaceProfile> = Fact::new(
 );
 
 impl BuildHooks for Botw {
+    fn standalone(&self) -> Option<Standalone> {
+        Some(Standalone {
+            version: 1_114_112,
+            modules: &[
+                ("main", "cd57b23fa4bbad65803d9788c01821ee"),
+                ("subsdk0", "f39f4c431234c72eb520cfdd1001bbcf"),
+                ("sdk", "574284b40c06cf1821a44857939083be"),
+            ],
+            nvn_functions: NVN_FUNCTIONS,
+            shader_groups: "/Shader/=shader /Effect/=effect /Layout/=layout /System/=gsys /Terrain/=terrain",
+            shader_note: "Breath of the Wild shaders",
+            shader_facts: Some(include_str!("../shader_facts.tsv")),
+            romfs_marker: "/Pack/Bootup_Graphics.pack",
+            settings: SETTINGS,
+        })
+    }
+
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01007EF00011E000.toml"))
     }
@@ -157,12 +212,13 @@ pub fn role_table() -> RoleTable {
     RoleTable::new(&THREAD_ROLES.iter().map(|f| f.value).collect::<Vec<_>>())
 }
 
-/// The services nxkit runs for Breath of the Wild. The rest stay on nxnative.
-const OFFLINE: Fact<Runtime> = Fact::new(
+/// The game builds without nxnative, so nxkit runs every service. The services' answers follow nxnative's
+/// (`dm/host/hle_*.c`). The nvn rows and the hle rows of `usage.tsv` list what the game calls.
+const NXKIT: Fact<Runtime> = Fact::new(
     Runtime::Nxkit,
     Evidence::Unverified {
-        note: "nxkit-rt answers the offline entries as hle_offline.c and hle_net.c do (nxkit_rt::offline tests). \
-              A play of the fixed route on the Mac checks it.",
+        note: "the game has no nxnative path in a standalone build. A play of the fixed route on the Mac checks \
+              each service.",
     },
 );
 
@@ -171,8 +227,8 @@ impl RuntimeHooks for Botw {
         NEEDS
     }
 
-    fn runtime(&self, service: Service) -> Option<Fact<Runtime>> {
-        (service == Service::Offline).then_some(OFFLINE)
+    fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
+        Some(NXKIT)
     }
 
     fn pacing(&self) -> Option<Fact<Pacing>> {
@@ -254,11 +310,24 @@ mod tests {
     }
 
     #[test]
-    fn nxkit_runs_only_offline() {
+    fn nxkit_runs_every_service() {
         let on: Vec<Service> = Service::ALL
             .into_iter()
             .filter(|s| BOTW.runtime(*s).map(|f| f.value) == Some(Runtime::Nxkit))
             .collect();
-        assert_eq!(on, [Service::Offline]);
+        assert_eq!(on, Service::ALL);
+    }
+
+    #[test]
+    fn standalone_data_is_complete() {
+        let s = BOTW.standalone().unwrap();
+        let names: Vec<&str> = s.nvn_functions.value.lines().collect();
+        assert_eq!(names.len(), 197);
+        assert!(names.iter().all(|n| n.starts_with("nvn")));
+        assert!(names.contains(&"nvnDeviceInitialize"));
+        assert_eq!(s.modules.len(), 3);
+        assert!(s.modules.iter().all(|(_, id)| id.len() == 32));
+        assert!(s.nvn_functions.evidence.is_checked());
+        assert!(BOTW.rewrite_rules().unwrap().contains("scope = \"01007EF00011E000\""));
     }
 }

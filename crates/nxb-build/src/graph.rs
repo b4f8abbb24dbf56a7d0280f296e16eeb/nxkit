@@ -413,6 +413,10 @@ pub fn describe(b: &Build) -> String {
 /// Runs the build (`crate::stages::run_nodes`. The events stay those of a run one after another). A multi-program
 /// application builds its other programs too (`crate::programs`), a Mac-only build ends with the run command.
 pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
+    // a title with a title module builds without the engine folder (R49)
+    if crate::standalone::run(a, p)? {
+        return Ok(());
+    }
     let mut b = plan(a)?;
     if a.dry_run {
         print!("{}", describe(&b));
