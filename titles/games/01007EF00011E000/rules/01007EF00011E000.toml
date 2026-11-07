@@ -1,0 +1,885 @@
+# nxb rewrite rules (generated from the engine's patch files). Private data: instruction words of game code.
+
+scope = "01007EF00011E000"
+
+[[build]]
+row = ["build", "v1114112", "1.9.0", "main=cd57b23fa4bbad65803d9788c01821ee", "subsdk0=f39f4c431234c72eb520cfdd1001bbcf", "sdk=574284b40c06cf1821a44857939083be"]
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983244
+old = "6041201e"
+new = "4041201e"
+why = "lower bound of the candidate interval: fmov s0,s11 (2.0) → fmov s0,s10 (1.0)"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983248
+old = "7f0b0071"
+new = "7f070071"
+why = "lower bound of the candidate interval: cmp w27,#2 → cmp w27,#1"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983068
+old = "78008052"
+new = "58008052"
+why = "step-down target recorded when stepping up, max(candidate, w24) − 1: mov w24,#3 → mov w24,#2"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983304
+old = "1f0d0071"
+new = "1f090071"
+why = "step-down target recorded when stepping up: cmp w8,#3 → cmp w8,#2"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983380
+old = "3f0d0071"
+new = "3f090071"
+why = "stepping down stops at < 3 → at < 2: cmp w9,#3 → cmp w9,#2"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983772
+old = "c00000b4"
+new = "03000014"
+why = "interval controller always takes the GPU time path (CPU span timing): cbz x0,#0x1126934 → b #0x1126928"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983860
+old = "c00000b4"
+new = "03000014"
+why = "interval controller always takes the GPU time path (takes max(CPU span, GPU time)): cbz x0,#0x112698c → b #0x1126980"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule]]
+binding = "build"
+kind = "frame-step"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+why = "frame step stub of the build"
+evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+
+[[rule.step]]
+op = "label"
+n = 0
+
+[[rule.step]]
+op = "site"
+at = 17983928
+original = "fd7bbea9"
+
+[[rule.step]]
+op = "site"
+at = 22139856
+original = "fd7bbea9"
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+0"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107979793
+
+[[rule.step]]
+op = "word"
+word = 872415697
+
+[[rule.step]]
+op = "word"
+word = 3108000273
+
+[[rule.step]]
+op = "word"
+word = 3103806993
+
+[[rule.step]]
+op = "adrp"
+reg = 17
+pc = "L0+20"
+target = "32061584"
+
+[[rule.step]]
+op = "word"
+word = 4182002225
+
+[[rule.step]]
+op = "word"
+word = 3019899185
+
+[[rule.step]]
+op = "word"
+word = 960538161
+
+[[rule.step]]
+op = "word"
+word = 889192689
+
+[[rule.step]]
+op = "word"
+word = 3107987985
+
+[[rule.step]]
+op = "word"
+word = 872415409
+
+[[rule.step]]
+op = "word"
+word = 705758177
+
+[[rule.step]]
+op = "word"
+word = 4181727761
+
+[[rule.step]]
+op = "word"
+word = 2334212657
+
+[[rule.step]]
+op = "word"
+word = 4177533457
+
+[[rule.step]]
+op = "word"
+word = 2847833085
+
+[[rule.step]]
+op = "b"
+from = "L0+68"
+to = "17983932"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 17983928
+why = "setWaitVsyncInterval: the host's step unless the VFR override is set (state page target fps; 0 = the game's interval); latches the variable step"
+items = ["b:17983928:L0+0:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+72"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107979793
+
+[[rule.step]]
+op = "word"
+word = 872415409
+
+[[rule.step]]
+op = "word"
+word = 960537617
+
+[[rule.step]]
+op = "word"
+word = 872415313
+
+[[rule.step]]
+op = "word"
+word = 3107990545
+
+[[rule.step]]
+op = "word"
+word = 3103794705
+
+[[rule.step]]
+op = "word"
+word = 2847833085
+
+[[rule.step]]
+op = "b"
+from = "L0+104"
+to = "22139860"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 22139856
+why = "VFR::updateInterval: its own override published for the host (state page target fps; 0 = original)"
+items = ["b:22139856:L0+72:0"]
+
+[[rule.step]]
+op = "site"
+at = 15404928
+original = "08f144f9"
+
+[[rule.step]]
+op = "site"
+at = 15404936
+original = "080140bd"
+
+[[rule.step]]
+op = "word"
+word = 3175088392
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+112"
+target = "32061584"
+
+[[rule.step]]
+op = "word"
+word = 4182001928
+
+[[rule.step]]
+op = "word"
+word = 3019899048
+
+[[rule.step]]
+op = "word"
+word = 3175103744
+
+[[rule.step]]
+op = "word"
+word = 505421832
+
+[[rule.step]]
+op = "word"
+word = 1409286221
+
+[[rule.step]]
+op = "word"
+word = 505430024
+
+[[rule.step]]
+op = "b"
+from = "L0+140"
+to = "15404940"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 15404936
+why = "held-button counts step by the VFR ratio (menu repeat in game time at any frame step)"
+items = ["b:15404936:L0+108:0"]
+
+[[rule.step]]
+op = "site"
+at = 22140036
+original = "2020201e"
+
+[[rule.step]]
+op = "adrp"
+reg = 9
+pc = "L0+144"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 960538218
+
+[[rule.step]]
+op = "word"
+word = 889192618
+
+[[rule.step]]
+op = "word"
+word = 3175109922
+
+[[rule.step]]
+op = "word"
+word = 505421896
+
+[[rule.step]]
+op = "word"
+word = 1409286221
+
+[[rule.step]]
+op = "word"
+word = 505430081
+
+[[rule.step]]
+op = "word"
+word = 505421856
+
+[[rule.step]]
+op = "b"
+from = "L0+176"
+to = "22140040"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 22140036
+why = "VFR::updateInterval: the published frame ratio is the host's variable step (state page +0x54, latched) when set, unless the game overrides its interval"
+items = ["b:22140036:L0+144:0"]
+
+[[rule.step]]
+op = "site"
+at = 19402444
+original = "0000231e"
+
+[[rule.step]]
+op = "adrp"
+reg = 9
+pc = "L0+180"
+target = "32061584"
+
+[[rule.step]]
+op = "word"
+word = 4182001961
+
+[[rule.step]]
+op = "word"
+word = 3175103776
+
+[[rule.step]]
+op = "word"
+word = 505423872
+
+[[rule.step]]
+op = "b"
+from = "L0+196"
+to = "19402448"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19402444
+why = "interval step: the VFR's frame ratio × 2 in place of max(interval, 1) (UI animation / fade)"
+items = ["b:19402444:L0+180:0"]
+
+[[rule.step]]
+op = "site"
+at = 19263768
+original = "0000231e"
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+200"
+target = "32061584"
+
+[[rule.step]]
+op = "word"
+word = 4182001928
+
+[[rule.step]]
+op = "word"
+word = 3175103744
+
+[[rule.step]]
+op = "word"
+word = 505423872
+
+[[rule.step]]
+op = "b"
+from = "L0+216"
+to = "19263772"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19263768
+why = "interval step: the VFR's frame ratio × 2 in place of max(interval, 1) (UI animation / fade)"
+items = ["b:19263768:L0+200:0"]
+
+[[rule.step]]
+op = "site"
+at = 19402860
+original = "0940201e"
+
+[[rule.step]]
+op = "word"
+word = 506204169
+
+[[rule.step]]
+op = "word"
+word = 506021897
+
+[[rule.step]]
+op = "b"
+from = "L0+228"
+to = "19402864"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19402860
+why = "physics step ratio at least 0.5 (three substeps)"
+items = ["b:19402860:L0+220:0"]
+
+[[rule.step]]
+op = "site"
+at = 17224488
+original = "686e42f9"
+
+[[rule.step]]
+op = "adrp"
+reg = 10
+pc = "L0+232"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107999051
+
+[[rule.step]]
+op = "word"
+word = 4181880424
+
+[[rule.step]]
+op = "word"
+word = 872415307
+
+[[rule.step]]
+op = "word"
+word = 2601221384
+
+[[rule.step]]
+op = "b"
+from = "L0+252"
+to = "17224492"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 17224488
+why = "render buffer pool size × the host factor (state page +0x4c; 0 = the game's 115 MB)"
+items = ["b:17224488:L0+232:0"]
+
+[[rule.step]]
+op = "site"
+at = 1820
+original = "0060b852"
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+256"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181732880
+
+[[rule.step]]
+op = "word"
+word = 1387814912
+
+[[rule.step]]
+op = "word"
+word = 2333081600
+
+[[rule.step]]
+op = "b"
+from = "L0+272"
+to = "1824"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 1820
+why = "nninitStartup heap size = the game's + the host's added bytes (state page +0x58)"
+items = ["b:1820:L0+256:0"]
+
+[[rule.step]]
+op = "site"
+at = 12982208
+original = "0820b852"
+
+[[rule.step]]
+op = "adrp"
+reg = 9
+pc = "L0+276"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181732649
+
+[[rule.step]]
+op = "word"
+word = 1387798536
+
+[[rule.step]]
+op = "word"
+word = 2332623112
+
+[[rule.step]]
+op = "b"
+from = "L0+292"
+to = "12982212"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 12982208
+why = "RootHeap size = the game's + the host's added bytes (state page +0x58)"
+items = ["b:12982208:L0+276:0"]
+
+[[rule.step]]
+op = "site"
+at = 12984052
+original = "0987c0f2"
+
+[[rule.step]]
+op = "adrp"
+reg = 9
+pc = "L0+296"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181729577
+
+[[rule.step]]
+op = "word"
+word = 3036676201
+
+[[rule.step]]
+op = "word"
+word = 3531665417
+
+[[rule.step]]
+op = "word"
+word = 4072703753
+
+[[rule.step]]
+op = "b"
+from = "L0+316"
+to = "12984056"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 12984052
+why = "output size global = the host's (state page +0x40; 0 = 1920x1080)"
+items = ["b:12984052:L0+296:0"]
+
+[[rule.step]]
+op = "site"
+at = 12984104
+original = "0987c0f2"
+
+[[rule.step]]
+op = "adrp"
+reg = 9
+pc = "L0+320"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181729577
+
+[[rule.step]]
+op = "word"
+word = 3036676201
+
+[[rule.step]]
+op = "word"
+word = 3531665417
+
+[[rule.step]]
+op = "word"
+word = 4072703753
+
+[[rule.step]]
+op = "b"
+from = "L0+340"
+to = "12984108"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 12984104
+why = "output size global = the host's (state page +0x40; 0 = 1920x1080)"
+items = ["b:12984104:L0+320:0"]
+
+[[rule.step]]
+op = "site"
+at = 19273924
+original = "0987c0f2"
+
+[[rule.step]]
+op = "adrp"
+reg = 9
+pc = "L0+344"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181729577
+
+[[rule.step]]
+op = "word"
+word = 3036676201
+
+[[rule.step]]
+op = "word"
+word = 3531665417
+
+[[rule.step]]
+op = "word"
+word = 4072703753
+
+[[rule.step]]
+op = "b"
+from = "L0+364"
+to = "19273928"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19273924
+why = "output size global = the host's (state page +0x40; 0 = 1920x1080)"
+items = ["b:19273924:L0+344:0"]
+
+[[rule.step]]
+op = "site"
+at = 19292364
+original = "680a09f9"
+
+[[rule.step]]
+op = "site"
+at = 19292372
+original = "0887c0f2"
+
+[[rule.step]]
+op = "site"
+at = 19292420
+original = "03f08052"
+
+[[rule.step]]
+op = "word"
+word = 4178119272
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+372"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107997960
+
+[[rule.step]]
+op = "word"
+word = 872415304
+
+[[rule.step]]
+op = "word"
+word = 3104969320
+
+[[rule.step]]
+op = "b"
+from = "L0+388"
+to = "19292368"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19292364
+why = "docked output width = the host's (state page +0x48; 0 = 1920.0)"
+items = ["b:19292364:L0+368:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+392"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181729544
+
+[[rule.step]]
+op = "word"
+word = 3036676200
+
+[[rule.step]]
+op = "word"
+word = 3531665416
+
+[[rule.step]]
+op = "word"
+word = 4072703752
+
+[[rule.step]]
+op = "b"
+from = "L0+412"
+to = "19292376"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19292372
+why = "docked render size = the host's output size"
+items = ["b:19292372:L0+392:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 3
+pc = "L0+416"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 4181729379
+
+[[rule.step]]
+op = "word"
+word = 3019899011
+
+[[rule.step]]
+op = "word"
+word = 3546348644
+
+[[rule.step]]
+op = "word"
+word = 704840675
+
+[[rule.step]]
+op = "b"
+from = "L0+436"
+to = "19292424"
+mask = 0
+
+[[rule.step]]
+op = "word"
+word = 1384181763
+
+[[rule.step]]
+op = "b"
+from = "L0+444"
+to = "19292424"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19292420
+why = "docked window crop = the host's output size"
+items = ["b:19292420:L0+416:0"]
+
+[[rule.step]]
+op = "site"
+at = 19294336
+original = "88ae40f9"
+
+[[rule.step]]
+op = "site"
+at = 19294316
+original = "39000014"
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+448"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3175092480
+
+[[rule.step]]
+op = "word"
+word = 505421832
+
+[[rule.step]]
+op = "word"
+word = 1409286317
+
+[[rule.step]]
+op = "word"
+word = 506335233
+
+[[rule.step]]
+op = "word"
+word = 505487360
+
+[[rule.step]]
+op = "word"
+word = 1409286208
+
+[[rule.step]]
+op = "word"
+word = 505430024
+
+[[rule.step]]
+op = "word"
+word = 4181765768
+
+[[rule.step]]
+op = "b"
+from = "L0+484"
+to = "19294340"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19294336
+why = "3D view scale = the host render scale (1.0 = the game's dynamic resolution)"
+items = ["b:19294336:L0+448:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+488"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107983624
+
+[[rule.step]]
+op = "word"
+word = 872415368
+
+[[rule.step]]
+op = "word"
+word = 1376327944
+
+[[rule.step]]
+op = "word"
+word = 872415304
+
+[[rule.step]]
+op = "b"
+from = "L0+508"
+to = "19294336"
+mask = 0
+
+[[rule.step]]
+op = "b"
+from = "L0+512"
+to = "19294544"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19294316
+why = "scale apply block taken every frame when the host render scale is not 1.0"
+items = ["b:19294316:L0+488:0"]
+
+[[rule.step]]
+op = "scale"

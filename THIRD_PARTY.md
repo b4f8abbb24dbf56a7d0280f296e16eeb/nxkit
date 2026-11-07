@@ -130,6 +130,25 @@ The crate `nxkit-svc-audio` (`crates/nxkit-svc-audio/`) follows `dm/host/hle_aud
 SDK functions that are taken over, the SDK layouts of the audio renderer (the work buffer, the command list, the DeviceSink command)
 and the prologue scan that finds them. It does not copy the global lock. The IPC layouts of `audout:u`, `audren:u` and `IAudioDevice`
 come from the public Switchbrew documentation. It uses the same licence notice as above.
+## Pacing ported from nxnative
+
+The crate `nxkit-svc-pacing` (`crates/nxkit-svc-pacing/`) and the Breath of the Wild rules ported logic and data from the nxnative
+engine at the head of pull request 76 (`0f2a772c13e2caed2959d1d1a93f8fe57f44c754`) and at `88c7e03f` of the default branch, read on 2026-11-07. The nxnative engine is
+published under the MIT licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-svc-pacing/src/vstep.rs` | `dm/gfx/nvn/nvn_fstep.h` (`nvn_vstep_next`, the variable step) |
+| `crates/nxkit-svc-pacing/src/state.rs` | `dm/host/loader.c` and the stubs of `dm/games/01007EF00011E000/patches.py` (layout of the frame step state page, pool factor, extra memory, output size) |
+| `crates/nxkit-svc-pacing/src/vsync.rs` | `vsync_thread` and the display vsync event of `dm/host/hle_sdk16.c` |
+| `crates/nxkit-svc-pacing/src/fstep.rs` and `fstep/tests.rs` | `dm/gfx/nvn/nvn_fstep.h` (`nvn_fstep_next`, `nvn_fgpu`) and the cases of `dm/gfx/tests/t_fstep.c` |
+| `crates/nxkit-svc-pacing/src/load.rs`, `load/` and `watch.rs` | `fstep_tick`, `fps_step_cap`, `thermal_capped` and `fstep_cpu_slowed` of `dm/gfx/nvn/hle_nvn.c` |
+| `crates/nxkit-svc-pacing/src/interval.rs` | `fps_high`, `present_itv` and `rt_period_ns` of `dm/gfx/nvn/hle_nvn.c` and the target checks of `dm/games/game.py` |
+| `crates/nxkit-svc-pacing/src/limits.rs` and `limits/` | `lock_find`, `dm_fps_lock_engine` and `dm_fps_lock_tick` of `dm/host/hle_fpslock.c` (the mechanism only, no per-game data) |
+| `titles/games/01007EF00011E000/rules/01007EF00011E000.toml` | `dm/games/01007EF00011E000/patches.py` (`CUTS` and `FRAME_STEP`), made by `tools/gen_botw_rules.py` |
+
+`tools/gen_botw_rules.py` records the stubs the way `tools/gen_rewrite_patches.py` does and writes one rule file for one game. The rule
+file holds instruction words of game code. Each rule names its source file, commit and read date in its `evidence` key.
 
 ## NVN front end ported from nxnative
 

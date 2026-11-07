@@ -7,16 +7,26 @@
 //! The game does not need `tex_flush_upload`, `render_cond` or `tex_dirty_upload`. The game's README in
 //! nxnative says so for `tex_flush_upload`, and its `game.tsv` sets none of the three.
 //!
-//! These parts are in `seedds/nxnative` `dm/games/01007EF00011E000/` and not in this module:
+//! The rewrite rules are data in `rules/01007EF00011E000.toml`: the seven interval controller cuts, the frame step
+//! stubs, the render scale, render pool and output size stubs. Each rule names its source file, commit and read
+//! date in its `evidence` key. The rules are the ones of `patches.py` at pull request 76 of `seedds/nxnative`.
+//! They describe the build `cd57b23fa4bbad65803d9788c01821ee` of `main` and no other. The frame step protocol
+//! (the state page the stubs read) is in `nxkit-svc-pacing`.
 //!
-//! - `patches.py`: the `FRAME_STEP` stubs for `fps_target`, the interval controller cuts (`CUTS`) and the render
-//!   scale stubs.
+//! The pacing keys of the game's profile (`fps_target`, `fps_hold`, `present_snap`, `present_interval`) are the fact
+//! `PaceProfile`, with their evidence.
+//!
+//! This part is in `seedds/nxnative` `dm/games/01007EF00011E000/` and not in this module:
+//!
 //! - `shader_facts_manual.tsv`: two shaders with integer outputs from agl's BC4 encoder.
 //!
 //! nxnative runs every service of the game. This module moves a service to nxkit once the nxkit runtime has it.
 
 use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
-use nxtitle::{BuildHooks, Evidence, Fact, Need, Runtime, RuntimeHooks, Service, Title, TitleId};
+use nxtitle::{
+    BuildHooks, Evidence, Fact, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks,
+    Service, Title, TitleId,
+};
 
 /// The title module.
 pub struct Botw;
@@ -44,7 +54,7 @@ const NEEDS: &[Fact<Need>] = &[
             capability: "fps_target",
             setting: "60",
             why: "the host picks each frame's step in whole vsyncs, so the game runs at 60 fps (30 on the Switch). \
-                  This needs the FRAME_STEP stubs from patches.py.",
+                  This needs the frame step stubs in rules/01007EF00011E000.toml.",
         },
         GAME_TSV,
     ),
@@ -77,7 +87,44 @@ const NEEDS: &[Fact<Need>] = &[
     ),
 ];
 
-impl BuildHooks for Botw {}
+const PATCHES_PY: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head \
+             0f2a772c13e2caed2959d1d1a93f8fe57f44c754",
+    read: "2026-11-07",
+};
+
+/// The game steps its logic once per interval of the framework, and the frame step stubs let the host choose the
+/// interval. With them the game runs at the display's rate. The record is the pull request's own description.
+const PACING: Fact<Pacing> = Fact::new(Pacing::Display, PATCHES_PY);
+
+const PROFILE: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/01007EF00011E000/game.tsv, dm/games/game.py (defaults) and \
+             dm/host/gen/01007EF00011E000/game_profile.h at 88c7e03f",
+    read: "2026-11-07",
+};
+
+/// The keys of the game's profile in nxnative that steer the frame step and the presents. `game.tsv` sets `fps_target 60`
+/// and `present_snap on`. `fps_hold` (on) and `present_interval` (game) are the defaults of `game.py`, and
+/// `game_profile.h` has them as `DM_GAME_FPS_HOLD 1` and `DM_GAME_PRESENT_DISPLAY 0`.
+///
+/// With the frame step the hold of each frame overrides `present_interval`, so `Game` only decides a frame that no cap
+/// covers. The generated header of that checkout has no `fps_max` line, so the maximum stays at the default of 60 and
+/// this game never runs above 60 through the limiter path.
+const PACE_PROFILE: Fact<PaceProfile> = Fact::new(
+    PaceProfile {
+        fps_target: 60,
+        fps_hold: true,
+        present_snap: true,
+        present_interval: PresentInterval::Game,
+    },
+    PROFILE,
+);
+
+impl BuildHooks for Botw {
+    fn rewrite_rules(&self) -> Option<&'static str> {
+        Some(include_str!("../rules/01007EF00011E000.toml"))
+    }
+}
 
 const THREAD_NOTE: &str = "the thread names and priorities are guesses from the engine's usual layout and are not \
                            read from the game. Checked on 2026-11-07 and nothing found: /Volumes/NX holds NSPs and no \
@@ -127,6 +174,14 @@ impl RuntimeHooks for Botw {
     fn runtime(&self, service: Service) -> Option<Fact<Runtime>> {
         (service == Service::Offline).then_some(OFFLINE)
     }
+
+    fn pacing(&self) -> Option<Fact<Pacing>> {
+        Some(PACING)
+    }
+
+    fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
+        Some(PACE_PROFILE)
+    }
 }
 
 impl Title for Botw {
@@ -174,7 +229,28 @@ mod tests {
     #[test]
     fn every_need_has_a_record() {
         assert!(BOTW.needs().iter().all(|n| n.evidence.is_checked()));
-        assert!(BOTW.upscaler().is_none() && BOTW.pacing().is_none());
+        assert!(BOTW.upscaler().is_none());
+        assert!(BOTW.pacing().is_some_and(|p| p.evidence.is_checked()));
+    }
+
+    #[test]
+    fn the_pace_profile_is_the_one_of_the_nxnative_profile() {
+        let Some(p) = BOTW.pace_profile() else {
+            return;
+        };
+        assert!(p.evidence.is_checked());
+        assert_eq!(p.value.fps_target, 60);
+        assert!(p.value.fps_hold && p.value.present_snap);
+        assert_eq!(p.value.present_interval, PresentInterval::Game);
+    }
+
+    #[test]
+    fn every_rewrite_rule_names_its_evidence() {
+        let text = BOTW.rewrite_rules().unwrap_or_default();
+        let rules = text.matches("[[rule]]").count();
+        assert_eq!(rules, 8);
+        assert_eq!(text.matches("evidence = \"seedds/nxnative ").count(), rules);
+        assert!(text.contains("read 2026-11-07"));
     }
 
     #[test]

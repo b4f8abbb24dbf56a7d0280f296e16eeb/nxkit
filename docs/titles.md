@@ -33,6 +33,8 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting |
 | `upscaler` | `RuntimeHooks` | keep the game's upscaler, render at the output size, or use MetalFX |
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
+| `pace_profile` | `RuntimeHooks` | the keys that steer the frame step and the presents |
+| `limits` | `RuntimeHooks` | where the game's own frame limit sits, so that the host can write the target into it |
 | `runtime` | `RuntimeHooks` | whether nxnative or nxkit runs one service of the game |
 
 A role names what a shader does. The core decides what to do with it. A title module does not change the core's code path for a shader.

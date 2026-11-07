@@ -34,6 +34,30 @@ impl RuntimeHooks for Fam {
     fn pacing(&self) -> Option<Fact<Pacing>> {
         Some(Fact::new(Pacing::Display, REC))
     }
+    fn limits(&self) -> &'static [Fact<LimitRule>] {
+        const L: &[Fact<LimitRule>] = &[Fact::new(
+            LimitRule::Row(LimitRow {
+                what: "family",
+                build: None,
+                site: LimitSite::Found { key: "k", add: 0 },
+                kind: LimitKind::FpsF32,
+                copies: 1,
+            }),
+            REC,
+        )];
+        L
+    }
+    fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
+        Some(Fact::new(
+            PaceProfile {
+                fps_target: 30,
+                fps_hold: false,
+                present_snap: false,
+                present_interval: PresentInterval::Display,
+            },
+            REC,
+        ))
+    }
     fn runtime(&self, s: Service) -> Option<Fact<Runtime>> {
         matches!(s, Service::Audio | Service::Fs).then_some(Fact::new(Runtime::Nxkit, REC))
     }
@@ -73,6 +97,22 @@ impl BuildHooks for Game {
     }
 }
 impl RuntimeHooks for Game {
+    fn limits(&self) -> &'static [Fact<LimitRule>] {
+        const L: &[Fact<LimitRule>] = &[Fact::new(
+            LimitRule::Row(LimitRow {
+                what: "title",
+                build: Some("00"),
+                site: LimitSite::Fixed {
+                    ptr_off: 0,
+                    field: 8,
+                },
+                kind: LimitKind::FpsI32,
+                copies: 1,
+            }),
+            REC,
+        )];
+        L
+    }
     fn upscaler(&self) -> Option<Fact<Upscaler>> {
         Some(Fact::new(Upscaler::Native, REC))
     }
@@ -112,9 +152,19 @@ fn title_wins_then_family_then_core() {
     assert_eq!(r.family_from, FamilyFrom::Declared);
     assert_eq!(r.upscaler().map(|f| f.value), Some(Upscaler::Native));
     assert_eq!(r.pacing().map(|f| f.value), Some(Pacing::Display));
+    assert_eq!(r.pace_profile().map(|f| f.value.fps_target), Some(30));
     let keys: Vec<_> = r.seeds().iter().map(|s| s.key).collect();
     assert_eq!(keys, ["f", "t1", "t2"]);
     assert_eq!(r.rewrite_rules(), ["family"]);
+    let whats: Vec<_> = r
+        .limits()
+        .iter()
+        .filter_map(|f| match f.value {
+            LimitRule::Row(row) => Some(row.what),
+            LimitRule::Reflected(_) => None,
+        })
+        .collect();
+    assert_eq!(whats, ["family", "title"]);
     assert_eq!(r.needs().len(), 1);
     let up = ShaderView {
         key: "0",
@@ -130,6 +180,7 @@ fn family_by_detection_or_none() {
     let mut facts = TitleFacts::new(TitleId(2));
     assert_eq!(c.resolve(&facts).family_from, FamilyFrom::None);
     assert!(c.resolve(&facts).pacing().is_none());
+    assert!(c.resolve(&facts).pace_profile().is_none());
     facts.libraries.push("famlib".into());
     let r = c.resolve(&facts);
     assert_eq!(r.family_from, FamilyFrom::Detected);

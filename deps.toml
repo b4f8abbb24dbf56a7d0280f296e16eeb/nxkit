@@ -155,6 +155,14 @@ licence = "part of macOS (system library)"
 unsafe = "a few functions, in the module sys of nxkit-svc-audio"
 owner = "project team"
 used_by = ["nxkit-svc-audio"]
+[objc2-metal-fx]
+reason = "MetalFX spatial upscaling and frame interpolation of the present path"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
 
 [block2]
 reason = "Objective-C blocks, for the MTL4 commit feedback handler"

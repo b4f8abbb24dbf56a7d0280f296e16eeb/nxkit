@@ -115,6 +115,7 @@ pub fn entries() -> &'static [Entry] {
         table.extend(mapped(nxkit_svc_video::exports(), Service::Video, false));
         table.extend(mapped(nxkit_svc_audio::exports(), Service::Audio, false));
         table.extend(mapped(nxkit_svc_audio::big_stack_exports(), Service::Audio, true));
+        table.extend(mapped(nxkit_svc_pacing::exports(), Service::Pacing, false));
         table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,
@@ -246,6 +247,21 @@ mod tests {
                 big_stack: false,
             },
         ]
+    }
+
+    #[test]
+    fn the_pacing_exports_are_in_the_table_under_the_pacing_service() {
+        let name = nxkit_svc_pacing::VSYNC_EVENT;
+        assert!(
+            entries()
+                .iter()
+                .any(|e| e.name == name && e.service == Service::Pacing)
+        );
+        assert_eq!(
+            find_in(entries(), Service::Offline.bit(), name.as_bytes()),
+            None
+        );
+        assert!(find_in(entries(), Service::Pacing.bit(), name.as_bytes()).is_some());
     }
 
     #[test]

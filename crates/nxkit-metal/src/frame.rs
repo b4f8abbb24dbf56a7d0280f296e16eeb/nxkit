@@ -1,7 +1,8 @@
 //! Frames in flight. Each slot has its own command allocator and scratch buffer.
 //!
 //! `FrameRing::begin` waits until the GPU is done with the slot's last frame, resets the allocator and starts a
-//! command buffer. `Frame::submit` ends it, commits it and records the CPU and GPU time.
+//! command buffer. `Frame::submit` ends it, commits it and records the CPU and GPU time. A frame presents its
+//! drawable at once (`Frame::present`) or at the target time of a display tick (`Frame::present_at`).
 
 use std::any::Any;
 use std::ptr::NonNull;
@@ -21,10 +22,11 @@ use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::metrics::{CommandBufferStats, FrameHooks, Metrics};
 use crate::scratch::Scratch;
+use crate::stats::PacingStats;
 use crate::table::Keep;
 
-/// The number of frames the CPU can run ahead of the GPU.
-pub const FRAMES_IN_FLIGHT: usize = 3;
+/// The number of frames the CPU can run ahead of the GPU. It is two (R19): a third frame only adds latency.
+pub const FRAMES_IN_FLIGHT: usize = 2;
 
 /// The size of the scratch buffer of each slot.
 pub const SCRATCH_BYTES: u64 = 4 * 1024 * 1024;
@@ -84,6 +86,7 @@ pub struct FrameRing {
     next: u64,
     metrics: Arc<Metrics>,
     hooks: Option<Arc<dyn FrameHooks>>,
+    pacing: Option<Arc<PacingStats>>,
 }
 
 impl FrameRing {
@@ -111,7 +114,13 @@ impl FrameRing {
             next: 0,
             metrics: Arc::new(Metrics::default()),
             hooks: None,
+            pacing: None,
         })
+    }
+
+    /// Sets the pacing counters. Each presented drawable then reports when the display showed it.
+    pub fn set_pacing_stats(&mut self, stats: Arc<PacingStats>) {
+        self.pacing = Some(stats);
     }
 
     /// Sets the pacing hooks.
@@ -151,6 +160,7 @@ impl FrameRing {
             ctx: self.ctx.clone(),
             metrics: self.metrics.clone(),
             hooks: self.hooks.clone(),
+            pacing: self.pacing.clone(),
             t0,
             drawable: None,
         })
@@ -161,10 +171,15 @@ impl FrameRing {
 pub(crate) struct PendingPresent {
     pub(crate) drawable: Retained<ProtocolObject<dyn MTLDrawable>>,
     pub(crate) keep: Box<dyn Any>,
+    /// The time the display should show the frame, in seconds on the `CACurrentMediaTime` clock.
+    pub(crate) at: Option<f64>,
 }
 
 type FeedbackBlock =
     RcBlock<'static, fn(NonNull<ProtocolObject<dyn MTL4CommitFeedback>>), dyn Send + Sync>;
+
+type PresentedBlock =
+    RcBlock<'static, fn(NonNull<ProtocolObject<dyn MTLDrawable>>), dyn Send + Sync>;
 
 /// One frame being encoded.
 pub struct Frame {
@@ -175,6 +190,7 @@ pub struct Frame {
     ctx: Context,
     metrics: Arc<Metrics>,
     hooks: Option<Arc<dyn FrameHooks>>,
+    pacing: Option<Arc<PacingStats>>,
     t0: Instant,
     drawable: Option<PendingPresent>,
 }
@@ -269,7 +285,20 @@ impl Frame {
         unsafe { queue.commit_count_options(NonNull::from(&list[0]), 1, &opts) };
         if let Some(p) = self.drawable.take() {
             queue.signalDrawable(&p.drawable);
-            p.drawable.present();
+            if let Some(stats) = &self.pacing {
+                let (stats, at) = (stats.clone(), p.at);
+                let presented: PresentedBlock =
+                    RcBlock::new(move |d: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                        // SAFETY: Metal passes a valid drawable that lives for the call.
+                        let shown = unsafe { d.as_ref() }.presentedTime();
+                        stats.record_presented(at, shown);
+                    });
+                p.drawable.addPresentedHandler(&presented);
+            }
+            match p.at {
+                Some(at) => p.drawable.presentAtTime(at),
+                None => p.drawable.present(),
+            }
             drop(p.keep);
         }
         Ok(Submitted {
