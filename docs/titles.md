@@ -27,6 +27,7 @@ A family and a title answer questions through hooks. `None` means no opinion.
 
 | hook | trait | answer |
 |---|---|---|
+| `standalone` | `BuildHooks` | what `nxb build` needs to make the game without nxnative: the version, the modules with their build IDs, the NVN function list, the shader split settings and a romfs marker. A title that answers it builds without `--engine` |
 | `shader_role` | `BuildHooks` | what a shader does for the frame, for example the game's own upscaler |
 | `seeds` | `BuildHooks` | shaders to prepare before the first frame |
 | `rewrite_rules` | `BuildHooks` | rewriter rules as TOML text |
