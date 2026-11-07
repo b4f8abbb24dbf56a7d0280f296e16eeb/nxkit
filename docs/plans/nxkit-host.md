@@ -47,7 +47,7 @@ The host follows the layers of the workspace and the title layer.
 A service answers at the level of the SDK functions, and only falls back to Horizon's IPC.
 
 - The loader writes the address of the nxkit function into the import table of the game's module. A call of the game is a plain branch, with no lookup at call time.
-- The work inside a function avoids copies. The romfs is mapped with `mmap`. The input thread writes into the shared memory the game reads. Audio goes through a ring buffer without locks. The svc gates call the kernel code directly.
+- The work inside a function avoids copies. The romfs is mapped with `mmap`. Input is read from the controller when the game calls the function, with no thread and no queue (R39). Audio goes through a ring buffer without locks. The svc gates call the kernel code directly.
 - A function that nxkit does not replace runs in the game's SDK. Its IPC request reaches an IPC server in nxkit. The server counts each command. A command that is called often becomes a function of the fast path.
 - Nothing falls back in silence. A command the IPC server does not know stops the game with its name, service and command ID.
 - The game's code is not changed for this. The binding is the loader's work.

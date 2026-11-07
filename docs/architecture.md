@@ -8,7 +8,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 - The repository is one Cargo workspace. The crates of the build are in `crates/`. The families and title modules are in `titles/` (refer to [titles.md](titles.md)). The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
 - `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `rewrite`, `profile`, `rewrite-rules`, `nro`, `shaders`, `app`, `ipa`, `sign`, `pso`, `archive`, `ios` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
-- The workspace uses the standard library only, with one exception. `nxkit-metal` uses the `objc2` family of crates to bind Metal on macOS. `deps.toml` lists them.
+- The workspace uses the standard library only, with one exception. `nxkit-metal` and `nxkit-svc-input` use the `objc2` family of crates to bind Metal, GameController and Core Haptics on macOS. `deps.toml` lists them.
 
 ## Layers
 
@@ -37,7 +37,7 @@ The rules:
 2. L1 does no I/O. Its crates are pure functions over bytes and text that return `Result`. L1 can call `nxb-sys` only for pure calculations.
 3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends. `nxb-nro` collects the NRO files of a game.
 4. L2 does not make output bytes of the shader step.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
+5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos`, the module `sys` of `nxkit-svc-input` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.

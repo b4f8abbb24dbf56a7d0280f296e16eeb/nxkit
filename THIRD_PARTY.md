@@ -1,6 +1,6 @@
 # Third-party notes
 
-The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
+The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-input` uses to bind GameController and Core Haptics on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
 
@@ -85,6 +85,23 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for ArbitrateLock, ArbitrateUnlock, WaitProcessWideKeyAtomic,
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
+
+## Input service ported from nxnative
+
+The crate `nxkit-svc-input` (`crates/nxkit-svc-input/`) ports logic and data from the nxnative engine. The nxnative engine is published under the MIT
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-svc-input/src/exports/` | the `nn::hid` entries and mangled names of `dm/host/hle_hid.c` |
+| `crates/nxkit-svc-input/src/touch.rs` | `dm/host/hle_touch.c` (touch screen and gestures) |
+| `crates/nxkit-svc-input/src/slots.rs` | `dm/host/pad_slots.h` (controller slots) |
+| `crates/nxkit-svc-input/src/npad.rs`, `sys/apple.rs` | the pad rules of `dm/host/hle_hid.c` and the button map of `dm/host/pad_apple.h` |
+| `crates/nxkit-svc-input/src/motion.rs` | `dm/host/motion_fusion.h` and the axis map of `dm/host/motion_apple.h` |
+| `crates/nxkit-svc-input/src/rumble.rs`, `sys/haptics.rs` | `dm/host/hle_haptics.c` and `haptics_apple.m` (haptic levels and engine) |
+| `crates/nxkit-svc-input/src/keys.rs` | the keyboard map for player 1 in `dm/host/front_mac.m` |
+
+`touch.rs` also follows the gesture rules of yuzu (`hid_core`, `gesture_handler.cpp`) as nxnative does. No yuzu code is copied.
 
 ## NVN front end ported from nxnative
 
