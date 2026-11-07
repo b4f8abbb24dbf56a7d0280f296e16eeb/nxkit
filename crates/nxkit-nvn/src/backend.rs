@@ -3,7 +3,8 @@
 //! `nxkit-gpu` implements [`Backend`]. The FFI layer in `nxkit-rt` calls it through one `Arc<dyn Backend>`.
 //! The trait uses only types of this crate, so the front end does not know Metal.
 //!
-//! The backend sees the work of the game at five points.
+//! The backend sees the work of the game at these points. The optional notices ([`Backend::device_modes`],
+//! [`Backend::acquire`], [`Backend::submit`], [`Backend::program_set`]) have empty defaults.
 //!
 //! - A memory pool appears or goes away ([`Backend::register_pool`], [`Backend::unregister_pool`]). The backend maps the
 //!   range as a Metal buffer without copies. The GPU address of the pool is then `gpu_base + (host - host_base)`.
@@ -19,6 +20,7 @@
 
 use std::fmt;
 
+use crate::cmdbuf::CommandHandle;
 use crate::frame::Frame;
 use crate::front::FlushReason;
 use crate::passes::PassPlan;
@@ -158,6 +160,19 @@ pub trait Backend: Send + Sync {
 
     /// A program was finalised (`nvnProgramFinalize`). The default does nothing.
     fn program_released(&self, _program: u64) {}
+
+    /// The game set the window origin or the depth mode of its device. The default does nothing.
+    fn device_modes(&self, _origin_lower_left: bool, _depth_zero_to_one: bool) {}
+
+    /// The game acquires the texture `index` of a window. The call may block until the display can take another frame
+    /// (vertical sync pacing). The default does not block.
+    fn acquire(&self, _window: u64, _index: u32) {}
+
+    /// The game submitted `handles` on `queue`, after the front end accepted them. `queue` is the guest address of the
+    /// `NVNqueue`. `origin_lower_left` is the window origin that the queue captured at its creation. The frame holds
+    /// the analysis of the commands, so the backend replays the recordings through these handles. The default does
+    /// nothing.
+    fn submit(&self, _queue: u64, _handles: &[CommandHandle], _origin_lower_left: bool) {}
 
     /// A texture was created in guest memory (`nvnTextureInitialize`).
     fn texture_created(&self, record: &TextureRecord);
