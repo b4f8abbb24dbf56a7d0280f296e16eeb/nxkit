@@ -86,6 +86,21 @@ The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for Ar
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
 
+The crate `nxkit-svc-system` (`crates/nxkit-svc-system/`) takes values and data from the nxnative engine. It uses the same licence
+notice as above. The command IDs and layouts of the services are from libnx (ISC licence, `switch/services/*.c` and `*.h`) and from the
+switchbrew wiki, and no code is copied from them.
+
+| nxkit file | nxnative source |
+|---|---|
+| `src/acc.rs` | `dm/host/hle_account.c`: the user ID, the nickname rule and the 670 bytes of the profile JPEG |
+| `src/applet.rs`, `src/applet_ifaces.rs`, `src/state.rs`, `src/apm.rs` | `dm/host/hle_oe.c`: the applet messages, the focus modes, the performance configurations, the pseudo device ID, the display size and the CPU overclock state |
+| `src/time.rs`, `src/tz.rs` | `dm/host/hle_time.c`: the user clock context rule and the conversion with the local time of the host |
+| `src/set.rs` | `dm/host/hle_oe.c` (language) and `dm/host/hle_sdk16.c` (location name and display version) |
+| `src/pctl.rs` | `dm/host/hle_misc.c`: the `nn::pctl` answers |
+| `src/nifm.rs`, `src/ssl.rs` | `dm/host/hle_net.c`: the offline network request and the TLS context |
+| `src/friend.rs`, `src/lm.rs` (prepo), `src/bcat.rs` | `dm/host/hle_offline.c` and `dm/host/hle_friends.c`: the offline friends, telemetry and BCAT answers |
+| `src/bcat.rs` (aoc) | `dm/host/hle_fs.c`: the add-on content mount |
+
 ## NVN front end ported from nxnative
 
 The crate `nxkit-nvn` (`crates/nxkit-nvn/`) ports logic and data from the nxnative engine. The nxnative engine is published under the MIT
