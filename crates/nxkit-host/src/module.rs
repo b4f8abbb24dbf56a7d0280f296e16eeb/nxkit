@@ -63,6 +63,10 @@ pub struct Module {
     pub base: u64,
     /// The offset after the last byte of the highest segment.
     pub size: u64,
+    /// The offset of the first byte of the lowest segment, 0 or less. It is below 0 for the patch area of a far layout.
+    pub low: i64,
+    /// The bytes from `low` to `size`: all the memory the module maps, which `size` alone leaves short by `-low`.
+    pub span: u64,
     /// The code.
     pub text: Region,
     /// The read-only data.
@@ -95,19 +99,14 @@ pub struct Module {
 }
 
 impl Module {
-    /// The lowest offset a segment has, 0 or less.
-    pub fn low(&self) -> i64 {
-        self.segments.iter().map(|s| s.offset).min().unwrap_or(0).min(0)
-    }
-
     /// The first byte of the module. The patch area of a far layout lies before `base`.
     pub fn start(&self) -> u64 {
-        self.base.saturating_add_signed(self.low())
+        self.base.saturating_add_signed(self.low)
     }
 
     /// The first byte after the module.
     pub fn end(&self) -> u64 {
-        self.base.saturating_add(self.size)
+        self.start().saturating_add(self.span)
     }
 
     /// The offset where the bss starts, right after the data.
@@ -167,6 +166,13 @@ impl Module {
         }
         if end != self.size as i64 {
             return Err(bad(format!("module {n}: size {:#x} is not the end of the last segment {end:#x}", self.size)));
+        }
+        let lowest = self.segments.iter().map(|s| s.offset).min().unwrap_or(0).min(0);
+        if self.low != lowest || self.span != self.size.wrapping_add_signed(self.low.wrapping_neg()) {
+            return Err(bad(format!(
+                "module {n}: low {:#x} and span {:#x} do not fit the segments (lowest offset {lowest:#x}, end {end:#x})",
+                self.low, self.span
+            )));
         }
         let bss_end = self.bss_offset().saturating_add(self.bss_size);
         if !self.writable(self.data.offset, bss_end.saturating_sub(self.data.offset)) {
@@ -243,6 +249,8 @@ pub fn parse(v: &Value, i: usize) -> Result<Module> {
     Ok(Module {
         base: num(v, "base", &ctx)?,
         size: num(v, "size", &ctx)?,
+        low: signed(v, "low", &ctx)?,
+        span: num(v, "span", &ctx)?,
         text: region(v, "text", &ctx)?,
         rodata: region(v, "rodata", &ctx)?,
         data: region(v, "data", &ctx)?,
@@ -268,7 +276,7 @@ pub fn parse(v: &Value, i: usize) -> Result<Module> {
 #[cfg(test)]
 pub(crate) mod samples {
     /// A near module: text, data and the patch area follow each other. It spans 0x100000000 to 0x100020000.
-    pub(crate) const NEAR: &str = r#"{"name": "main", "base": "0x100000000", "size": "0x20000",
+    pub(crate) const NEAR: &str = r#"{"name": "main", "base": "0x100000000", "size": "0x20000", "low": 0, "span": "0x20000",
         "text": {"offset": 0, "size": 16384}, "rodata": {"offset": 16384, "size": 16384},
         "data": {"offset": 32768, "size": 16384}, "bss_size": 8192, "image": "main.bin", "imports": "main.imports.json",
         "exports": "main.exports.json", "entry": 0, "build_id": "00", "fixups": "main.fixups.tsv", "key_page": 49152,
@@ -279,7 +287,7 @@ pub(crate) mod samples {
           {"name": "__NX_MAIN_PATCH", "offset": 65536, "size": 65536, "file_offset": 65536, "file_size": 8192, "prot": "r-x"}]}"#;
 
     /// A far module: the patch area lies before the base.
-    pub(crate) const FAR: &str = r#"{"name": "main", "base": "0x10000040000", "size": "0x44000",
+    pub(crate) const FAR: &str = r#"{"name": "main", "base": "0x10000040000", "size": "0x44000", "low": -131072, "span": "0x64000",
         "text": {"offset": 0, "size": 16384}, "rodata": {"offset": 16384, "size": 16384},
         "data": {"offset": 131072, "size": 16384}, "bss_size": 16384, "image": "i", "imports": "a", "exports": "b",
         "entry": 0, "build_id": "00", "fixups": "f", "key_page": 262144, "gates": "g",
@@ -305,7 +313,8 @@ mod tests {
         let m = far();
         assert!(m.is_some());
         let Some(m) = m else { return };
-        assert_eq!(m.low(), -131072);
+        assert_eq!(m.low, -131072);
+        assert_eq!(m.end() - m.start(), 0x64000);
         assert_eq!(m.start(), 0x1_0000_0400_00 - 0x2_0000);
         assert_eq!(m.end(), 0x1_0000_0400_00 + 0x44000);
         assert!(m.check().is_ok(), "{:?}", m.check().err());
@@ -313,6 +322,13 @@ mod tests {
         assert!(!m.writable(0x10, 0x10));
         assert!(!m.writable(0x20000, 0x40000));
         assert_eq!(m.segment_at(0).map(|s| s.name.as_str()), Some("__NX_MAIN_TEXT"));
+    }
+
+    #[test]
+    fn a_span_that_leaves_out_the_part_below_the_base_is_refused() {
+        let s = FAR.replace("\"span\": \"0x64000\"", "\"span\": \"0x44000\"");
+        let m = json::parse(&s).ok().and_then(|v| parse(&v, 0).ok());
+        assert!(m.is_some_and(|m| m.check().is_err()));
     }
 
     #[test]

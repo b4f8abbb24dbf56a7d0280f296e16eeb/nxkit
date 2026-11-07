@@ -1,6 +1,6 @@
 //! `game.json` and the files it points to (the run folder contract, R21 and R48).
 
-use super::elf::Sym;
+use super::elf::{Import, Sym};
 use super::layout::{PAGE, Segment};
 use super::modules::Built;
 use super::npdm::MainThread;
@@ -167,10 +167,13 @@ fn data_range(b: &Built) -> Value {
 }
 
 fn module(b: &Built, base: u64) -> Value {
+    let (low, high) = b.shape.extent();
     let mut f = vec![
         ("name", s(&b.name)),
         ("base", s(&format!("{base:#x}"))),
-        ("size", n(b.shape.extent().1)),
+        ("size", n(high)),
+        ("low", n(low)),
+        ("span", n(high.wrapping_add_signed(low.wrapping_neg()))),
         ("text", range(b.parts[0])),
         ("rodata", range(b.parts[1])),
         ("data", data_range(b)),
@@ -249,15 +252,31 @@ pub fn game_json(m: &Manifest) -> String {
     t
 }
 
-/// A list of `{ "name", "slot" }`: the form of the imports and exports files.
-pub fn symbols_json(v: &[Sym]) -> String {
-    let list = v
-        .iter()
-        .map(|x| obj(vec![("name", s(&x.name)), ("slot", n(x.slot))]))
-        .collect();
+fn list_json(list: Vec<Value>) -> String {
     let mut t = nxb_pyjson::dumps_indent(&Value::List(list), 1);
     t.push('\n');
     t
+}
+
+/// A list of `{ "name", "slot" }`: the form of the exports file.
+pub fn symbols_json(v: &[Sym]) -> String {
+    list_json(v.iter().map(|x| obj(vec![("name", s(&x.name)), ("slot", n(x.slot))])).collect())
+}
+
+/// A list of `{ "name", "slot", "addend", "weak" }`: the form of the imports file. One entry for each slot.
+pub fn imports_json(v: &[Import]) -> String {
+    list_json(
+        v.iter()
+            .map(|x| {
+                obj(vec![
+                    ("name", s(&x.name)),
+                    ("slot", n(x.slot)),
+                    ("addend", n(x.addend)),
+                    ("weak", flag(x.weak)),
+                ])
+            })
+            .collect(),
+    )
 }
 
 /// The names of the NVN list text (one a line).
@@ -297,5 +316,20 @@ mod tests {
         }]);
         let v = nxb_pyjson::parse(&t).unwrap();
         assert_eq!(nxb_pyjson::dumps(&v), r#"[{"name": "nnFoo", "slot": 768}]"#);
+    }
+
+    #[test]
+    fn imports_carry_the_addend_and_the_weak_flag() {
+        let t = imports_json(&[Import {
+            name: "nnFoo".into(),
+            slot: 768,
+            addend: 8,
+            weak: true,
+        }]);
+        let v = nxb_pyjson::parse(&t).unwrap();
+        assert_eq!(
+            nxb_pyjson::dumps(&v),
+            r#"[{"name": "nnFoo", "slot": 768, "addend": 8, "weak": true}]"#
+        );
     }
 }
