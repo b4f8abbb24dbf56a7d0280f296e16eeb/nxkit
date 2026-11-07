@@ -1,7 +1,8 @@
 //! The kernel service over the C ABI, with guest memory that is host memory. One test owns the global kernel.
 
 use nxkit_rt::{
-    NxkitKernelConfig, Service, nxkit_init, nxkit_kernel_dump_stats, nxkit_kernel_init, nxkit_svc,
+    NxkitKernelConfig, Service, nxkit_hle_find, nxkit_init, nxkit_kernel_dump_stats,
+    nxkit_kernel_init, nxkit_kernel_thread_tls, nxkit_svc,
 };
 use std::ptr::null_mut;
 
@@ -25,6 +26,12 @@ fn svc_calls_reach_the_kernel_only_when_the_service_is_on() {
         core_rules: 0,
         roles: std::ptr::null(),
         role_count: 0,
+        main_thread_priority: 44,
+        main_thread_core: 0,
+        main_thread_stack_size: 0x10_0000,
+        process_id: 0,
+        process_exit: None,
+        memory: std::ptr::null(),
     };
     assert_eq!(init(&cfg), 0);
     assert_eq!(init(&cfg), 1, "a second kernel is refused");
@@ -61,4 +68,22 @@ fn svc_calls_reach_the_kernel_only_when_the_service_is_on() {
     // SAFETY: `buf` has 512 writable bytes.
     let need = unsafe { nxkit_kernel_dump_stats(buf.as_mut_ptr(), buf.len()) };
     assert!(need > 0 && need < 512);
+
+    // The SDK take-overs belong to the kernel service.
+    let find = |name: &str| {
+        let c = std::ffi::CString::new(name).unwrap_or_default();
+        // SAFETY: `c` is a NUL-terminated string that lives during the call.
+        unsafe { nxkit_hle_find(c.as_ptr()) }
+    };
+    assert!(!find("getentropy").is_null());
+    nxkit_init(0);
+    assert!(find("getentropy").is_null(), "the service is off");
+    nxkit_init(Service::Kernel.bit());
+
+    // The main thread has no guest memory model here, so it has no thread-local region.
+    // SAFETY: both pointers are NULL.
+    assert_eq!(
+        unsafe { nxkit_kernel_thread_tls(std::ptr::null_mut(), std::ptr::null_mut()) },
+        -1
+    );
 }

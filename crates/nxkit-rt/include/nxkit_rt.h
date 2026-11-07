@@ -43,16 +43,53 @@ typedef struct nxkit_role_rule {
     uint32_t role;        /* 0 render, 1 audio, 2 main, 3 loading, 4 streaming, 5 worker */
 } nxkit_role_rule;
 
+typedef struct nxkit_module {
+    uint64_t base;   /* address of the text segment */
+    uint64_t text;
+    uint64_t rodata;
+    uint64_t data;
+    uint64_t bss;
+} nxkit_module;
+
+/* The guest's memory. Addresses are host addresses inside one reservation. */
+typedef struct nxkit_memory_config {
+    uint64_t base;            /* start of the reservation */
+    uint64_t size;            /* size of the reservation */
+    uint64_t front_size;      /* front region: modules, thread-local area, shared memory area */
+    uint64_t stack_size;      /* stack region */
+    uint64_t alias_size;      /* alias region, at the end of the reservation */
+    uint64_t app_pool;        /* memory pool of the application, bytes (GetInfo TotalMemorySize) */
+    uint64_t used_memory;     /* what the process uses besides its heap, bytes */
+    uint64_t system_resource; /* system resource size of the NPDM, or 0 */
+    uint64_t program_id;
+    uint64_t tls_addr;        /* thread-local area in the front region, readable and writable, 0x4000 aligned */
+    uint64_t tls_size;        /* the first 0x4000 bytes are the exception context, each thread takes 0x4000 */
+    uint64_t shared_addr;     /* area behind shared memory in the front region, readable and writable */
+    uint64_t shared_size;
+    uint64_t main_stack_addr; /* stack of the main thread inside the stack region */
+    uint64_t main_stack_size; /* 0 for none */
+    const nxkit_module *modules;
+    size_t module_count;
+    uint32_t map_limit;       /* non-zero: MapPhysicalMemory counts against the pool */
+} nxkit_memory_config;
+
 typedef struct nxkit_kernel_config {
     nxkit_thread_entry thread_entry; /* without it CreateThread is not answered */
     void *user;
     uint32_t core_rules;             /* non-zero turns the core rules of Horizon on */
     const nxkit_role_rule *roles;    /* the title's role rules, or NULL */
     size_t role_count;
+    int32_t main_thread_priority;    /* NPDM main_thread priority 0..63, or -1 when the host has none */
+    int32_t main_thread_core;        /* NPDM main_thread core 0..3, or -2 for the process default */
+    uint64_t main_thread_stack_size; /* NPDM main_thread stack size, bytes */
+    uint64_t process_id;             /* GetProcessId, 0 for the default 0x80 */
+    void (*process_exit)(uint32_t code); /* ends the process for ExitProcess and Break, or NULL for exit(code) */
+    const nxkit_memory_config *memory; /* NULL: no memory svc, GetInfo or IPC svc */
 } nxkit_kernel_config;
 
 /* Creates the process-wide kernel. 0 on success, 1 when it exists already, -1 for a bad configuration.
- * Guest addresses must be host addresses that stay mapped. */
+ * Guest addresses must be host addresses that stay mapped. The first svc of the main thread attaches it with the
+ * priority, core and stack size above, and without a priority (-1) it cannot attach. */
 int32_t nxkit_kernel_init(const nxkit_kernel_config *config);
 
 /* Runs svc `number` with x0 to x7 in regs (read and written). Returns 1 when nxkit answered and 0 when the host
@@ -64,6 +101,38 @@ uint32_t nxkit_kernel_set_thread_name(uint32_t handle, const char *name);
 
 /* Writes the per-thread counters as text. Returns the length the whole text needs, without the NUL. */
 size_t nxkit_kernel_dump_stats(char *buf, size_t capacity);
+
+/* The thread-local region (tpidrro_el0) and TLS block (tpidr_el0) of the calling guest thread. The host sets both
+ * registers from them before it runs guest code. 0 on success, -1 without a kernel, thread or memory model. */
+int32_t nxkit_kernel_thread_tls(uint64_t *tlr, uint64_t *tls);
+
+/* The SDK take-overs of the kernel service: getentropy, the csrng bytes, getenv and StandardAllocator::Allocate.
+ * They are found with nxkit_hle_find when the kernel service is on. The names from nxkit_kernel_forced_names must
+ * win over the SDK's own definition. */
+
+/* Finds a function of the game's own code by its Switch mangled name. It returns the SDK's definition and never
+ * the nxkit export of the same name. NULL means that the symbol does not exist. */
+typedef const void *(*nxkit_guest_sym)(const char *name);
+
+/* Sets the lookup. Once, before the game starts. 0 on success, 1 when it is set already. */
+int32_t nxkit_kernel_set_guest_sym(nxkit_guest_sym lookup);
+
+typedef struct nxkit_os_config {
+    const char *const *env_names;  /* what getenv answers, env_count names */
+    const char *const *env_values; /* and their values */
+    size_t env_count;
+    uint32_t alloc_big_align;      /* non-zero aligns StandardAllocator::Allocate of 64 KB or more to 64 KB */
+} nxkit_os_config;
+
+/* Sets the facts of the game. Once, before the game starts. 0 on success, 1 when set already, -1 when bad. */
+int32_t nxkit_kernel_os_init(const nxkit_os_config *config);
+
+/* Non-zero: getentropy, the csrng bytes and GetInfo type 11 give a fixed stream. Zero: random bytes. */
+void nxkit_kernel_set_deterministic(uint32_t on);
+
+/* The names that must win over the SDK's own definition. Writes up to capacity pointers to static strings into
+ * out and returns the number of names. */
+size_t nxkit_kernel_forced_names(const char **out, size_t capacity);
 
 #ifdef __cplusplus
 }
