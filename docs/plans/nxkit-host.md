@@ -54,7 +54,7 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-The decisions of the host and their causes are R1 to R21 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+The decisions of the host and their causes are R1 to R21 and R48 to R50 in [decisions.md](../decisions.md#part-3-runtime-decisions).
 
 ### Core rules act at svc boundaries only
 
@@ -73,6 +73,7 @@ The core rules of Horizon are off by default (R9). When a title turns them on, `
 
 - `nxb build --platform mac` builds the game's parts once: the extract, the rewritten modules, the shader libraries and the pipeline archive. Each stage has a content key and is reused.
 - The host is a separate program in the run folder. It reads the game's parts from there.
+- A game with a title module builds in seven stages: extract, romfs, rewrite, manifest, link, shaders and bundle. The manifest stage writes `game.json` from the NPDM and the title module. The link stage writes `nxgame.dylib` as a Mach-O file with each module at its fixed address and signs it ad hoc (R48). The stages need no nxnative and no `--engine` (R49). DLC goes into `aoc/<index>/` (R50).
 - While nxnative still runs services, `dmhost` loads `libnxkit_rt.dylib` with `dlopen`. `DM_NXKIT_SERVICES` picks the services for a test without a new build.
 - To change nxkit, run `cargo build --release -p nxkit-rt` and start the game again. The host and the game's parts stay as they are.
 
@@ -85,7 +86,7 @@ The core rules of Horizon are off by default (R9). When a title turns them on, `
 | H3 | `gpu` on nxkit for Breath of the Wild | the game's NVN function list is complete in nxkit, and the route runs with GPU time at or below nxnative |
 | H4 | `pacing` on nxkit | the game holds 60 and 120 fps on a 120 Hz display at the right game speed |
 | H5 | `kernel` and the `nxkit-host` program | the game starts from `nxkit-host` without `dmhost` |
-| H6 | nxnative is off | `nxb build --platform mac` for Breath of the Wild has no nxnative stage, and the route runs |
+| H6 | nxnative is off | `nxb build --platform mac` for Breath of the Wild has no nxnative stage, and the route runs. The build side is in `nxb-build` (`standalone/`, R48 to R50). The exact steps are in [build-botw.md](../build-botw.md) |
 
 The part of H3 that does not need the frame format exists in `nxkit-metal`:
 

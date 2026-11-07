@@ -209,9 +209,9 @@ Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs
 
 | option | meaning |
 |---|---|
-| `--platform mac\|mac-app\|ios` | the target. `mac` is the development build: it prints the command that runs the game. The default is `ios` |
+| `--platform mac\|mac-app\|ios` | the target. `mac` is the development build: it prints the command that runs the game. The default is `ios`. A game with a title module builds the app of `nxkit-host` for `mac` and `mac-app`, and `ios` is not supported for it |
 | `--program N` | one program of a multi-program application is a game of its own. Its title ID is the application's title ID + N |
-| `--engine DIR`, `-k KEYS`, `--work-dir D`, `-o OUT`, `--progress json` | the engine folder, the keys file, the work folder, the output and the NDJSON events |
+| `--engine DIR`, `-k KEYS`, `--work-dir D`, `-o OUT`, `--progress json` | the engine folder, the keys file, the work folder, the output and the NDJSON events. A game with a title module needs no engine. `--engine` stops such a build with exit code 4. Refer to [docs/build-botw.md](docs/build-botw.md) |
 | `--nup FILE`, `--dump FOLDER`, `--app ID`, `--title-id ID`, `--aoc PACKAGE` | the inputs: a Switch 2 package, a dump folder, a game in a merged package, DLC |
 | `--env-file`, `--motion`, `--no-motion`, `--seen-shaders`, `--romfs bundle\|separate`, `--keep-extracted`, `--show-fps` | the options of the reference script |
 | `--allow-damaged`, `--allow-other-metal`, `--allow-shader-regressions` | let the build go on after a damaged file or a newer Metal compiler. The last option has no effect |
