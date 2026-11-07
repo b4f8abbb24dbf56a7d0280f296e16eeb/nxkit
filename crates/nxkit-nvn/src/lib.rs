@@ -9,11 +9,14 @@
 //!   ([`decode`], [`cache`]), holds a whole frame ([`frame`]) and infers the render passes of Metal from it
 //!   ([`analyse`], [`passes`]). [`front::FrontEnd`] ties these parts together.
 //!
+//! [`backend::Backend`] is what the front end needs from the GPU backend.
+//!
 //! [`entries`] lists the NVN functions of nxnative and the ones that this crate handles.
 //! Refer to `docs/nxkit-nvn.md` for the design and its limits.
 
 pub(crate) mod actions;
 pub mod analyse;
+pub mod backend;
 pub mod cache;
 pub mod cmdbuf;
 pub mod decode;
@@ -34,6 +37,8 @@ pub mod tic;
 
 #[cfg(test)]
 mod analyse_tests;
+#[cfg(test)]
+mod front_state_tests;
 #[cfg(test)]
 mod front_tests;
 #[cfg(test)]

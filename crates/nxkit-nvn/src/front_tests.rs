@@ -11,14 +11,14 @@ use crate::resource::{Residency, TexId};
 use crate::space::LinearSpace;
 use crate::tic::{TextureView, Tsc};
 
-const HOST: u64 = 0x7000_0000;
-const GPU: u64 = 0x15_0400_8000;
+pub(crate) const HOST: u64 = 0x7000_0000;
+pub(crate) const GPU: u64 = 0x15_0400_8000;
 const SIZE: u64 = 16 << 20;
-const CMD: u64 = HOST + 0x80_0000;
+pub(crate) const CMD: u64 = HOST + 0x80_0000;
 
-type Fe = FrontEnd<LinearSpace, VecMem>;
+pub(crate) type Fe = FrontEnd<LinearSpace, VecMem>;
 
-fn fe() -> Fe {
+pub(crate) fn fe() -> Fe {
     FrontEnd::new(
         LinearSpace::new(HOST, GPU, SIZE).unwrap(),
         VecMem::new(HOST, SIZE as usize),
@@ -40,7 +40,7 @@ fn rgba() -> TextureDesc {
     }
 }
 
-fn targets(f: &Fe, color: &[TexId]) -> Record {
+pub(crate) fn targets(f: &Fe, color: &[TexId]) -> Record {
     let mut c = [0u64; MAX_COLOR];
     for (i, t) in color.iter().enumerate() {
         c[i] = f.texture_address(*t).unwrap();
@@ -49,7 +49,7 @@ fn targets(f: &Fe, color: &[TexId]) -> Record {
 }
 
 // Records the commands into the block at `at` and gives the handle.
-fn record(f: &mut Fe, at: u64, cmds: &[Record]) -> CommandHandle {
+pub(crate) fn record(f: &mut Fe, at: u64, cmds: &[Record]) -> CommandHandle {
     f.add_command_memory(0, at, 512).unwrap();
     f.begin_recording(0).unwrap();
     for c in cmds {
@@ -58,17 +58,17 @@ fn record(f: &mut Fe, at: u64, cmds: &[Record]) -> CommandHandle {
     f.end_recording(0).unwrap()
 }
 
-fn tex(f: &mut Fe, at: u64) -> TexId {
+pub(crate) fn tex(f: &mut Fe, at: u64) -> TexId {
     f.create_texture(rgba(), HOST + at).unwrap()
 }
 
-fn with_pools(f: &mut Fe) {
+pub(crate) fn with_pools(f: &mut Fe) {
     f.add_texture_pool(0, 16, HOST + 0x30_0000).unwrap();
     f.add_sampler_pool(0, 4, HOST + 0x31_0000).unwrap();
     f.register_sampler(0, Tsc::decode(&[0; 8])).unwrap();
 }
 
-fn bind(slot: u8, id: u32) -> Record {
+pub(crate) fn bind(slot: u8, id: u32) -> Record {
     Record::BindTexture {
         slot,
         handle: Descriptors::handle(id, 0),
