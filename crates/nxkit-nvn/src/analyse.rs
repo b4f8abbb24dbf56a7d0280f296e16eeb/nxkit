@@ -6,7 +6,7 @@
 //! - It notes for each attachment how the pass starts (a full clear, a discard, a read of the old contents).
 //! - It merges a pass into the pass before it when both have the same attachments, only a barrier separates them,
 //!   and the second pass does not sample an attachment of the first.
-//! - It hands the result to [`crate::actions`] that picks the load and store actions.
+//! - It hands the result to a second step that picks the load and store actions.
 //!
 //! A clear under a scissor is a partial clear. It does not cut the pass. The old contents stay in use.
 
@@ -127,7 +127,8 @@ impl Scan<'_> {
         }
         p.reads.extend_from_slice(reads);
         p.writes.extend_from_slice(writes);
-        let last = p.passes.last_mut().expect("a pass was pushed");
+        let n = p.passes.len() - 1;
+        let last = &mut p.passes[n];
         last.cmds.end = i + 1;
         last.reads.end = p.reads.len();
         last.writes.end = p.writes.len();
@@ -232,8 +233,9 @@ impl Scan<'_> {
 
     fn draw(&mut self, i: u32, st: DrawState, reads: Span) -> Result<()> {
         self.open_render(i)?;
-        let range = self.plan.passes.last().expect("open").attachments.clone();
-        for a in &mut self.plan.attachments[range] {
+        let cur = self.plan.passes.len() - 1;
+        let range = self.plan.passes[cur].attachments.clone();
+        for a in &mut self.plan.attachments[range.clone()] {
             let (used, reads_old) = match a.slot {
                 Slot::Color(n) => {
                     let w = st.color_write & (1 << n) != 0;
@@ -250,15 +252,14 @@ impl Scan<'_> {
                 a.discard_end = false;
             }
         }
-        let start = self.plan.passes.last().expect("open").reads.start;
+        let start = self.plan.passes[cur].reads.start;
         for &t in self.frame.list(reads) {
             if !self.plan.reads[start..].contains(&t) {
                 self.plan.reads.push(t);
             }
-            if let Some(a) = self.plan.attachments
-                [self.plan.passes.last().expect("open").attachments.clone()]
-            .iter_mut()
-            .find(|a| a.tex == t)
+            if let Some(a) = self.plan.attachments[range.clone()]
+                .iter_mut()
+                .find(|a| a.tex == t)
             {
                 a.sampled = true;
             }
@@ -325,7 +326,7 @@ fn merge(p: &mut PassPlan, a: usize, b: usize) {
         x.touched |= q.touched;
     }
     p.attachments.truncate(rb.start);
-    let q = p.passes.pop().expect("second pass");
+    let q = p.passes.swap_remove(b);
     p.passes[a].cmds.end = q.cmds.end;
     p.passes[a].reads.end = q.reads.end;
 }

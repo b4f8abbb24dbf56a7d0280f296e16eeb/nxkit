@@ -255,8 +255,8 @@ impl Tic {
 
 fn words_to_bytes(w: &[u32; 8]) -> [u8; HEADER_BYTES] {
     let mut out = [0u8; HEADER_BYTES];
-    for (chunk, word) in out.chunks_exact_mut(4).zip(w) {
-        chunk.copy_from_slice(&word.to_le_bytes());
+    for (i, word) in w.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_le_bytes());
     }
     out
 }
