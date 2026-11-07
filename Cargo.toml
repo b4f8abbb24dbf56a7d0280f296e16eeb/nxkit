@@ -23,6 +23,7 @@ todo = "deny"
 
 [workspace.dependencies]
 nxb-model = { path = "crates/nxb-model" }
+nxkit-hos = { path = "crates/nxkit-hos" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }
