@@ -69,10 +69,20 @@ pub struct ThreadSpec {
     pub priority: i32,
     /// The ideal core, or -2 for the process default.
     pub core: i32,
-    /// Not used yet. The guest code runs on its own stack and the host thread has a fixed 1 MiB stack.
+    /// The stack of the host thread in bytes. Zero takes the default of 1 MiB. The size is rounded up to whole pages
+    /// and is at least 64 KiB.
     pub stack_size: usize,
     /// Runs the guest code. It returns when the guest thread ends.
     pub body: Box<dyn FnOnce() + Send>,
+}
+
+/// The host stack for a requested size: the default for zero, otherwise at least 64 KiB in whole 16 KiB pages.
+fn stack_size(requested: usize) -> usize {
+    const PAGE: usize = 16 << 10;
+    match requested {
+        0 => 1 << 20,
+        n => n.max(64 << 10).div_ceil(PAGE).saturating_mul(PAGE),
+    }
 }
 
 thread_local! {
@@ -167,6 +177,7 @@ impl Kernel {
         };
         let t = self.new_thread(&spec, ThreadState::Started)?;
         CURRENT.with(|c| *c.borrow_mut() = Some(t.clone()));
+        t.host.store(sys::current_host_thread(), Ordering::Relaxed);
         self.apply_qos(&t);
         self.gates.enter(&t);
         Ok(t)
@@ -181,6 +192,7 @@ impl Kernel {
         };
         let t = self.new_thread(&spec, ThreadState::Created)?;
         *lock(&t.body) = Some(body);
+        t.stack_size.store(stack_size(spec.stack_size), Ordering::Relaxed);
         Ok(t.handle())
     }
 
@@ -203,10 +215,11 @@ impl Kernel {
             } else {
                 name
             })
-            .stack_size(1 << 20)
+            .stack_size(t.stack_size.load(Ordering::Relaxed))
             .spawn(move || {
                 CURRENT.with(|c| *c.borrow_mut() = Some(th.clone()));
                 let _exit = ExitGuard(kernel.clone(), th.clone());
+                th.host.store(sys::current_host_thread(), Ordering::Relaxed);
                 kernel.apply_qos(&th);
                 kernel.gates.enter(&th);
                 if let Some(body) = body {
@@ -264,6 +277,22 @@ impl Kernel {
         if t.applied_qos() != Some(want) && sys::set_current_qos(want) {
             t.qos_applied.store(want.to_u8(), Ordering::Relaxed);
         }
+    }
+
+    /// Lends the QoS class of `cur` to the owner of a lock while `cur` waits, when the owner has a lower class. The
+    /// Horizon kernel lends the waiter's priority the same way. nxnative does it in `dm/host/hle_thread.c`, case
+    /// 0x1A (ArbitrateLock), with `pthread_override_qos_class_start_np`. The returned value ends the override.
+    pub(crate) fn boost_owner(&self, cur: &Arc<Thread>, owner: u32) -> Option<sys::QosOverride> {
+        if !self.config.apply_qos {
+            return None;
+        }
+        let waiter = cur.applied_qos()?;
+        let owner = self.thread_by_handle(owner).ok()?;
+        let lower = owner.applied_qos().is_none_or(|q| q.raw() < waiter.raw());
+        if !lower || owner.state() != ThreadState::Started {
+            return None;
+        }
+        sys::QosOverride::start(owner.host.load(Ordering::Relaxed), waiter)
     }
 
     /// The start of every blocking call.
@@ -584,5 +613,18 @@ struct ExitGuard(Arc<Kernel>, Arc<Thread>);
 impl Drop for ExitGuard {
     fn drop(&mut self) {
         self.0.exit_thread(&self.1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stack_size;
+
+    #[test]
+    fn stack_sizes_are_defaulted_rounded_and_bounded_below() {
+        assert_eq!(stack_size(0), 1 << 20);
+        assert_eq!(stack_size(1), 64 << 10);
+        assert_eq!(stack_size((64 << 10) + 1), 80 << 10);
+        assert_eq!(stack_size(2 << 20), 2 << 20);
     }
 }

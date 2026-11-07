@@ -60,6 +60,12 @@ mod apple {
             relative_priority: *mut c_int,
         ) -> c_int;
         pub(super) fn pthread_self() -> *mut c_void;
+        pub(super) fn pthread_override_qos_class_start_np(
+            thread: *mut c_void,
+            qos: u32,
+            relative_priority: c_int,
+        ) -> *mut c_void;
+        pub(super) fn pthread_override_qos_class_end_np(over: *mut c_void) -> c_int;
     }
 }
 
@@ -217,6 +223,58 @@ pub fn current_qos() -> Option<Qos> {
     #[cfg(not(target_vendor = "apple"))]
     {
         None
+    }
+}
+
+/// The host id of the calling thread, for `QosOverride::start`. Zero when the platform has none.
+pub fn current_host_thread() -> usize {
+    #[cfg(target_vendor = "apple")]
+    {
+        // SAFETY: `pthread_self` has no preconditions.
+        unsafe { apple::pthread_self() as usize }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        0
+    }
+}
+
+/// A QoS class override of another thread. The thread runs at least at that class until the value is dropped.
+pub struct QosOverride(*mut std::ffi::c_void);
+
+impl QosOverride {
+    /// Starts an override of the host thread `host` (from `current_host_thread`). `None` when the platform has no
+    /// overrides or refuses it. The thread must still run, as the owner of a lock does.
+    pub fn start(host: usize, qos: Qos) -> Option<QosOverride> {
+        #[cfg(target_vendor = "apple")]
+        {
+            if host == 0 {
+                return None;
+            }
+            // SAFETY: `host` came from `pthread_self` of a thread that holds a lock and so still runs. The call
+            // allocates an override object that `Drop` hands back to `pthread_override_qos_class_end_np`.
+            let over = unsafe {
+                apple::pthread_override_qos_class_start_np(host as *mut _, qos.raw(), 0)
+            };
+            (!over.is_null()).then_some(QosOverride(over))
+        }
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            let _ = (host, qos);
+            None
+        }
+    }
+}
+
+impl Drop for QosOverride {
+    fn drop(&mut self) {
+        #[cfg(target_vendor = "apple")]
+        {
+            // SAFETY: the pointer is the live object that `start` returned. It is ended once, here.
+            unsafe {
+                apple::pthread_override_qos_class_end_np(self.0);
+            }
+        }
     }
 }
 

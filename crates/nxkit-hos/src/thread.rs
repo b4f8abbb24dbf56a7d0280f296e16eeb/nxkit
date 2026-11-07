@@ -4,7 +4,7 @@ use crate::result::KResult;
 use crate::role::{Qos, ThreadRole};
 use crate::stats::ThreadStats;
 use crate::sys::{self, WaitStatus};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -174,6 +174,8 @@ pub struct Thread {
     role: AtomicU8,
     pub(crate) qos_applied: AtomicU8,
     pub(crate) qos_pending: AtomicBool,
+    pub(crate) host: AtomicUsize,
+    pub(crate) stack_size: AtomicUsize,
     state: AtomicU8,
     pub(crate) exit: SyncObject,
     pub(crate) parker: Parker,
@@ -205,6 +207,8 @@ impl Thread {
             role: AtomicU8::new(ThreadRole::Unknown.to_u8()),
             qos_applied: AtomicU8::new(0),
             qos_pending: AtomicBool::new(false),
+            host: AtomicUsize::new(0),
+            stack_size: AtomicUsize::new(0),
             state: AtomicU8::new(state as u8),
             exit: SyncObject::default(),
             parker: Parker::new(),

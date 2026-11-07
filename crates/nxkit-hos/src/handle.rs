@@ -3,6 +3,7 @@
 
 use crate::result::{KResult, KResultOr};
 use crate::thread::{SyncObject, Thread, lock};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The pseudo handle of the calling thread.
@@ -32,57 +33,90 @@ struct Slot {
     object: Option<KObject>,
 }
 
-/// The table. Its lock is held only for one lookup, insert or removal.
+#[derive(Default)]
+struct Shard {
+    slots: Vec<Slot>,
+    free: Vec<usize>,
+}
+
+const SHARD_BITS: u32 = 4;
+const SHARDS: usize = 1 << SHARD_BITS;
+
+/// The table. The index of a handle holds its shard in the low bits, so a lookup locks one shard and the
+/// threads of a title rarely share one. A lock is held only for one lookup, insert or removal.
 pub(crate) struct HandleTable {
-    slots: Mutex<Vec<Slot>>,
+    shards: [Mutex<Shard>; SHARDS],
+    next: AtomicUsize,
+    used: AtomicUsize,
     capacity: usize,
 }
 
 impl HandleTable {
     pub(crate) fn new(capacity: usize) -> HandleTable {
         HandleTable {
-            slots: Mutex::new(Vec::new()),
-            capacity: capacity.min(INDEX_MASK as usize),
+            shards: std::array::from_fn(|_| Mutex::new(Shard::default())),
+            next: AtomicUsize::new(0),
+            used: AtomicUsize::new(0),
+            capacity: capacity.min(INDEX_MASK as usize + 1),
         }
     }
 
+    fn split(handle: u32) -> Option<(usize, usize, u32)> {
+        if handle >= CURRENT_THREAD {
+            return None;
+        }
+        let index = (handle & INDEX_MASK) as usize;
+        Some((index % SHARDS, index / SHARDS, handle >> INDEX_BITS))
+    }
+
     pub(crate) fn insert(&self, object: KObject) -> KResultOr<u32> {
-        let mut slots = lock(&self.slots);
-        let index = match slots.iter().position(|s| s.object.is_none()) {
-            Some(i) => i,
-            None if slots.len() < self.capacity => {
-                slots.push(Slot {
-                    generation: 0,
-                    object: None,
-                });
-                slots.len() - 1
-            }
-            None => return Err(KResult::OUT_OF_HANDLES),
-        };
-        let slot = &mut slots[index];
-        slot.generation = slot.generation % GEN_MASK + 1;
-        slot.object = Some(object);
-        Ok(index as u32 | slot.generation << INDEX_BITS)
+        if self.used.fetch_add(1, Ordering::AcqRel) >= self.capacity {
+            self.used.fetch_sub(1, Ordering::AcqRel);
+            return Err(KResult::OUT_OF_HANDLES);
+        }
+        let first = self.next.fetch_add(1, Ordering::Relaxed);
+        for n in 0..SHARDS {
+            let shard_no = (first + n) % SHARDS;
+            let mut shard = lock(&self.shards[shard_no]);
+            let local = match shard.free.pop() {
+                Some(i) => i,
+                None if (shard.slots.len() * SHARDS + shard_no) <= INDEX_MASK as usize => {
+                    shard.slots.push(Slot {
+                        generation: 0,
+                        object: None,
+                    });
+                    shard.slots.len() - 1
+                }
+                None => continue,
+            };
+            let slot = &mut shard.slots[local];
+            slot.generation = slot.generation % GEN_MASK + 1;
+            slot.object = Some(object);
+            let generation = slot.generation;
+            return Ok((local * SHARDS + shard_no) as u32 | generation << INDEX_BITS);
+        }
+        self.used.fetch_sub(1, Ordering::AcqRel);
+        Err(KResult::OUT_OF_HANDLES)
     }
 
     pub(crate) fn get(&self, handle: u32) -> Option<KObject> {
-        let slots = lock(&self.slots);
-        let slot = slots.get((handle & INDEX_MASK) as usize)?;
-        let generation = handle >> INDEX_BITS;
-        if handle >= CURRENT_THREAD || slot.generation != generation {
+        let (shard, local, generation) = Self::split(handle)?;
+        let shard = lock(&self.shards[shard]);
+        let slot = shard.slots.get(local)?;
+        if slot.generation != generation {
             return None;
         }
         slot.object.clone()
     }
 
     pub(crate) fn remove(&self, handle: u32) -> KResultOr<()> {
-        let mut slots = lock(&self.slots);
-        let generation = handle >> INDEX_BITS;
-        match slots.get_mut((handle & INDEX_MASK) as usize) {
-            Some(s)
-                if handle < CURRENT_THREAD && s.generation == generation && s.object.is_some() =>
-            {
+        let (shard_no, local, generation) = Self::split(handle).ok_or(KResult::INVALID_HANDLE)?;
+        let mut shard = lock(&self.shards[shard_no]);
+        match shard.slots.get_mut(local) {
+            Some(s) if s.generation == generation && s.object.is_some() => {
                 s.object = None;
+                shard.free.push(local);
+                self.used.fetch_sub(1, Ordering::AcqRel);
                 Ok(())
             }
             _ => Err(KResult::INVALID_HANDLE),

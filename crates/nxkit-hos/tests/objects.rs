@@ -285,3 +285,34 @@ fn dispatch_svc_answers_the_wait_and_event_calls() {
     regs[0] = 0x1_0000;
     assert!(!w.kernel.dispatch_svc(&w.main, 0x7777, &mut regs));
 }
+
+#[test]
+fn a_higher_class_waiter_can_block_on_a_lower_class_owner() {
+    let w = world_with(role_config());
+    let m = Arc::new(GuestMutex {
+        kernel: w.kernel.clone(),
+        mem: w.mem.clone(),
+        addr: w.addr(0),
+    });
+    let held = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let (m1, held1, rel1) = (m.clone(), held.clone(), release.clone());
+    let owner = w.spawn("Loader0", 40, 0, move |t| {
+        m1.lock(t);
+        held1.store(true, Ordering::SeqCst);
+        while !rel1.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        m1.unlock(t);
+    });
+    w.wait_until("owner holds", || held.load(Ordering::SeqCst));
+    let m2 = m.clone();
+    let waiter = w.spawn("RenderMain", 20, 1, move |t| {
+        m2.lock(t);
+        m2.unlock(t);
+    });
+    w.wait_until("waiter blocked", || w.blocked() >= 1);
+    release.store(true, Ordering::SeqCst);
+    w.join(&[owner, waiter]);
+    assert_eq!(w.load(0), 0);
+}

@@ -122,6 +122,7 @@ impl Kernel {
         g.push(addr, self.entry(&self.locks, cur, tag, addr));
         drop(g);
         cur.stats.contended_locks.fetch_add(1, Ordering::Relaxed);
+        let _boost = self.boost_owner(cur, owner);
         self.block_on(cur, Timeout::Infinite, || true);
         Ok(())
     }
