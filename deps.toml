@@ -1,6 +1,6 @@
 # External dependencies of the nxkit workspace (CONTRIBUTING.md "Dependencies").
 # One table per crate: reason, licence, version, unsafe count, owner, which workspace crates may use it.
-# A new entry is its own commit. Besides std, only the objc2 family (macOS Metal backend) is used.
+# A new entry is its own commit. Besides std, only the objc2 family (macOS Metal and VideoToolbox backends) is used.
 #
 # Expected first entries (designs): ruzstd (nxb-codec, O14), fancy-regex and closure (nxb-shader only, 1:1 regex port),
 # memchr, windows-sys (nxb-sys, Windows), libfuzzer-sys (dev only).
@@ -28,7 +28,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-svc-video"]
 
 [objc2-foundation]
 reason = "NSString, NSURL, NSArray and NSError, which the Metal API takes and returns"
@@ -46,7 +46,34 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-svc-video"]
+
+[objc2-core-media]
+reason = "CMSampleBuffer, CMBlockBuffer, CMVideoFormatDescription and CMTime, which VideoToolbox takes to decode a packet"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-video wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-svc-video"]
+
+[objc2-core-video]
+reason = "CVPixelBuffer for the decoded pictures and CVMetalTextureCache, which turns a picture into Metal textures without a copy"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-video wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-svc-video"]
+
+[objc2-video-toolbox]
+reason = "VTDecompressionSession, the hardware video decoder of macOS, for the cut scenes of the games"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-video wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-svc-video"]
 
 [objc2-metal]
 reason = "the Metal 4 API (MTL4CommandQueue, MTL4Compiler, MTLResidencySet and the rest) for the Metal backend of the host"
@@ -55,7 +82,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-svc-video"]
 
 [objc2-quartz-core]
 reason = "CAMetalLayer and its drawables, the present path of the host"
