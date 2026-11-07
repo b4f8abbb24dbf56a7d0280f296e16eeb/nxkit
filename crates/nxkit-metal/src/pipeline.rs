@@ -31,6 +31,11 @@ pub struct ShaderLibrary {
     raw: Retained<ProtocolObject<dyn MTLLibrary>>,
 }
 
+// SAFETY: a library is an immutable, thread safe Metal object.
+unsafe impl Send for ShaderLibrary {}
+// SAFETY: see `Send`.
+unsafe impl Sync for ShaderLibrary {}
+
 impl ShaderLibrary {
     /// Loads a `.metallib` file.
     pub fn from_path(ctx: &Context, path: &Path) -> Result<Self> {
@@ -178,6 +183,11 @@ pub struct PipelineCache {
     hits: AtomicU64,
     builds: AtomicU64,
 }
+
+// SAFETY: `MTL4Compiler` accepts calls from several threads, the entry map has a lock and the counters are atomic.
+unsafe impl Send for PipelineCache {}
+// SAFETY: see `Send`.
+unsafe impl Sync for PipelineCache {}
 
 impl PipelineCache {
     /// Makes a cache with its own compiler.

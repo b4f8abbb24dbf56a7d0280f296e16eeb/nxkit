@@ -164,6 +164,14 @@ pub enum RenderCommand {
         /// The texture.
         texture: Texture,
     },
+    /// Binds a GPU address to a buffer slot of the fragment argument table of a split pass
+    /// ([`CommandBuffer::begin_render_pass_split`]).
+    SetFragmentBuffer {
+        /// The slot.
+        index: u32,
+        /// The GPU address.
+        gpu_addr: u64,
+    },
     /// Sets the viewport.
     SetViewport(Viewport),
     /// Sets the scissor rectangle.
@@ -253,11 +261,31 @@ pub enum RenderCommand {
 }
 
 impl CommandBuffer {
-    /// Starts a render pass. `table` is the argument table of its draws.
+    /// Starts a render pass. `table` is the argument table of its draws, for both stages.
     pub fn begin_render_pass(
         &mut self,
         desc: &RenderPassDesc,
         table: &ArgumentTable,
+    ) -> Result<RenderPass<'_>> {
+        self.begin_render_pass_with(desc, table, None)
+    }
+
+    /// Starts a render pass with one argument table per stage. A translated shader reads its argument buffer at
+    /// `[[buffer(0)]]` in both stages, and the two stages have different buffers.
+    pub fn begin_render_pass_split(
+        &mut self,
+        desc: &RenderPassDesc,
+        vertex_table: &ArgumentTable,
+        fragment_table: &ArgumentTable,
+    ) -> Result<RenderPass<'_>> {
+        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table))
+    }
+
+    fn begin_render_pass_with(
+        &mut self,
+        desc: &RenderPassDesc,
+        table: &ArgumentTable,
+        fragment_table: Option<&ArgumentTable>,
     ) -> Result<RenderPass<'_>> {
         let first = desc
             .colors
@@ -317,16 +345,24 @@ impl CommandBuffer {
                     "renderCommandEncoderWithDescriptor returned nil",
                 )
             })?;
-        enc.setArgumentTable_atStages(
-            Some(&table.raw),
-            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-        );
+        match fragment_table {
+            Some(ft) => {
+                enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Vertex);
+                enc.setArgumentTable_atStages(Some(&ft.raw), MTLRenderStages::Fragment);
+                self.retain(ft.clone());
+            }
+            None => enc.setArgumentTable_atStages(
+                Some(&table.raw),
+                MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+            ),
+        }
         self.retain(table.clone());
         self.encode_passes += 1;
         Ok(RenderPass {
             enc,
             cb: self,
             table: table.clone(),
+            fragment_table: fragment_table.cloned(),
             has_pipeline: false,
             ended: false,
         })
@@ -338,6 +374,7 @@ pub struct RenderPass<'a> {
     enc: Retained<ProtocolObject<dyn MTL4RenderCommandEncoder>>,
     cb: &'a mut CommandBuffer,
     table: ArgumentTable,
+    fragment_table: Option<ArgumentTable>,
     has_pipeline: bool,
     ended: bool,
 }
@@ -357,6 +394,13 @@ impl RenderPass<'_> {
             RenderCommand::SetTexture { index, texture } => {
                 self.table.set_texture(*index, texture)?
             }
+            RenderCommand::SetFragmentBuffer { index, gpu_addr } => self
+                .fragment_table
+                .as_ref()
+                .ok_or(MetalError::Invalid(
+                    "the pass has no separate fragment argument table",
+                ))?
+                .set_buffer(*index, *gpu_addr)?,
             RenderCommand::SetViewport(v) => self.enc.setViewport(MTLViewport {
                 originX: v.x,
                 originY: v.y,

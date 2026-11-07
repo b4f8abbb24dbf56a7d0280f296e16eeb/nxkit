@@ -19,7 +19,7 @@ use crate::error::{MetalError, Result, create};
 use crate::guest::GuestMemory;
 use crate::pipeline::ComputePipeline;
 use crate::table::ArgumentTable;
-use crate::texture::Texture;
+use crate::texture::{Texture, TextureRegion};
 
 /// A command for a compute pass.
 #[derive(Clone)]
@@ -78,6 +78,22 @@ pub enum ComputeCommand {
     Barrier,
     /// A barrier with explicit stages. The stages must be `DISPATCH` or `BLIT` on the side of this pass.
     Depend(Dependency),
+    /// Copies a box between two textures of the same sample count. A compressed texture and an unsigned integer
+    /// texture of the same bytes per block can copy to each other, with the size in blocks of the integer texture.
+    CopyTexture {
+        /// The source.
+        src: Texture,
+        /// The destination.
+        dst: Texture,
+        /// The source level, slice and box.
+        src_region: TextureRegion,
+        /// The destination level, slice and first pixel.
+        dst_level: u32,
+        /// The destination slice.
+        dst_slice: u32,
+        /// The first pixel of the destination box.
+        dst_origin: [u32; 3],
+    },
     /// Copies a texture to guest memory. This is the copy-back for a game that reads a render target.
     CopyTextureToGuest {
         /// The texture. It must have finished rendering in an earlier pass.
@@ -204,6 +220,49 @@ impl ComputePass<'_> {
                     MTL4VisibilityOptions::Device,
                 ),
             ComputeCommand::Depend(d) => d.encode(&*self.enc, Stages::DISPATCH | Stages::BLIT)?,
+            ComputeCommand::CopyTexture {
+                src,
+                dst,
+                src_region,
+                dst_level,
+                dst_slice,
+                dst_origin,
+            } => {
+                src_region.check(&src.desc())?;
+                let to = TextureRegion {
+                    level: *dst_level,
+                    slice: *dst_slice,
+                    origin: *dst_origin,
+                    size: src_region.size,
+                };
+                // The size of the destination box is not known for a block copy between formats, so only the
+                // level, slice and origin are checked here. Metal validates the box.
+                if *dst_level >= dst.desc().mip_levels || *dst_slice >= dst.desc().slice_count() {
+                    return Err(MetalError::Invalid("the destination level or slice does not exist"));
+                }
+                let o = |v: [u32; 3]| MTLOrigin {
+                    x: v[0] as usize,
+                    y: v[1] as usize,
+                    z: v[2] as usize,
+                };
+                // SAFETY: the source box is inside the source (checked above) and both textures are retained until
+                // the GPU is done. Metal checks the destination box and the format pair.
+                unsafe {
+                    self.enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        src.raw(),
+                        src_region.slice as usize,
+                        src_region.level as usize,
+                        o(src_region.origin),
+                        size3(src_region.size),
+                        dst.raw(),
+                        to.slice as usize,
+                        to.level as usize,
+                        o(to.origin),
+                    );
+                }
+                self.cb.retain(src.clone());
+                self.cb.retain(dst.clone());
+            }
             ComputeCommand::CopyTextureToGuest {
                 texture,
                 guest,

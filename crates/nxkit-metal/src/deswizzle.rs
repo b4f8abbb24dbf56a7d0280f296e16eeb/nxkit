@@ -313,6 +313,12 @@ pub struct Deswizzler {
     k: Kernels,
 }
 
+// SAFETY: the kernels are immutable pipeline states and one argument table. The caller encodes through one
+// deswizzler on one thread at a time, as the docs of `table` say.
+unsafe impl Send for Deswizzler {}
+// SAFETY: see `Send`. A shared reference only reads the table and the pipelines.
+unsafe impl Sync for Deswizzler {}
+
 impl Deswizzler {
     /// Compiles the kernels through the pipeline cache.
     pub fn new(ctx: &Context, cache: &PipelineCache) -> Result<Self> {
@@ -388,6 +394,11 @@ impl Deswizzler {
 pub struct Swizzler {
     k: Kernels,
 }
+
+// SAFETY: as for `Deswizzler`.
+unsafe impl Send for Swizzler {}
+// SAFETY: as for `Deswizzler`.
+unsafe impl Sync for Swizzler {}
 
 impl Swizzler {
     /// Compiles the kernels through the pipeline cache.
