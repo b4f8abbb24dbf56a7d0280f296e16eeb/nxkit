@@ -18,6 +18,8 @@ use crate::record::{NO_HANDLE, Record};
 use crate::resource::{ResourceTable, TexId};
 use crate::space::GpuAddr;
 
+mod ext;
+
 /// The number of texture and image slots.
 pub const MAX_BINDINGS: usize = 128;
 /// The deepest nesting of calls.
@@ -417,6 +419,7 @@ impl Builder {
                     None => self.unresolved += 1,
                 }
             }
+            Record::Ext(x) => self.apply_ext(cx, x),
             Record::End | Record::Jump(_) | Record::Call(_) => {}
         }
     }

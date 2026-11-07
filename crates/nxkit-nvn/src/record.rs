@@ -8,9 +8,13 @@
 //!
 //! The record sizes are small on purpose. A record must never take more bytes than the real NVN command memory takes for the
 //! same command, because games size their command memory with `nvnCommandBufferGetCommandMemoryUsed`.
-//! The largest record is `SetTargets` with 88 bytes. A draw takes 8 bytes.
+//! The largest of the first records is `SetTargets` with 88 bytes. A draw takes 8 bytes.
+//! A command that carries parameters is an [`Ext`] record (refer to [`crate::ext`]). The largest takes 120 bytes. The
+//! real NVN sizes of these commands are not checked (R17), so a game may see a larger
+//! `nvnCommandBufferGetCommandMemoryUsed` than on the console.
 
 use crate::error::{NvnError, Result};
+use crate::ext::{Ext, ExtCode, FIRST_EXT_OP};
 use crate::frame::{DrawState, MAX_COLOR};
 use crate::mem::GuestMem;
 
@@ -19,7 +23,7 @@ pub const HEADER_BYTES: u32 = 8;
 /// The room that the recorder keeps after each record, for a `Jump` to the next memory block.
 pub const JUMP_BYTES: u32 = 16;
 /// The largest record in bytes.
-pub const MAX_RECORD_BYTES: usize = 88;
+pub const MAX_RECORD_BYTES: usize = 120;
 /// The value of a texture handle that unbinds the slot.
 pub const NO_HANDLE: u64 = u64::MAX;
 
@@ -100,6 +104,8 @@ pub enum Record {
     Present(u64),
     /// A CPU readback of a texture.
     CpuRead(u64),
+    /// A command with parameters (refer to [`crate::ext`]).
+    Ext(Ext),
 }
 
 const OP_END: u16 = 0;
@@ -249,6 +255,10 @@ impl Record {
                 n = 1;
                 (OP_CPU_READ, 0)
             }
+            Self::Ext(x) => {
+                e.len = x.encode_into(&mut e.bytes)?;
+                return Ok(e);
+            }
         };
         let len = HEADER_BYTES as usize + 8 * n;
         e.bytes[0..2].copy_from_slice(&op.to_le_bytes());
@@ -336,6 +346,10 @@ impl Record {
             OP_SYNC => Self::Sync,
             OP_PRESENT => Self::Present(w(0)?),
             OP_CPU_READ => Self::CpuRead(w(0)?),
+            op if op >= FIRST_EXT_OP => {
+                let code = ExtCode::from_u16(op).ok_or(NvnError::BadRecord("unknown operation"))?;
+                Self::Ext(Ext::from_payload(code, arg, body))
+            }
             _ => return Err(NvnError::BadRecord("unknown operation")),
         };
         Ok((rec, size))
@@ -399,6 +413,9 @@ mod tests {
             Record::Sync,
             Record::Present(0x15_0000_2000),
             Record::CpuRead(0x15_0000_2000),
+            Record::Ext(Ext::new(ExtCode::Draw, 1).u32(4).u32(0).u32(36).u32(0)),
+            Record::Ext(Ext::new(ExtCode::Setting, 0)),
+            Record::Ext(Ext::new(ExtCode::Push, 3).bytes(&[7; 112])),
         ]
     }
 
@@ -432,7 +449,10 @@ mod tests {
             color: [1; MAX_COLOR],
             depth: 1,
         };
-        assert_eq!(size(full) as usize, MAX_RECORD_BYTES);
+        assert_eq!(size(full), 88);
+        let widest = Record::Ext(Ext::new(ExtCode::Push, 0).bytes(&[0; 112]));
+        assert_eq!(size(widest) as usize, MAX_RECORD_BYTES);
+        assert_eq!(size(Record::Ext(Ext::new(ExtCode::Draw, 0).u32(1).u32(2).u32(3))), 16);
         assert!(all().iter().all(|r| size(*r) as usize <= MAX_RECORD_BYTES));
     }
 
@@ -448,6 +468,8 @@ mod tests {
         );
         assert!(Record::ClearColor { slot: 8 }.encode().is_err());
         assert!(Record::Barrier(0x100).encode().is_err());
+        let too_many = (0..=crate::ext::MAX_EXT_WORDS).fold(Ext::new(ExtCode::Push, 0), |e, i| e.u32(i as u32));
+        assert!(Record::Ext(too_many).encode().is_err());
     }
 
     #[test]
@@ -466,6 +488,7 @@ mod tests {
             (OP_DRAW, 12),
             (OP_DRAW, 4096),
             (99, 8),
+            (FIRST_EXT_OP + 200, 8),
             (OP_COPY, 8),
         ] {
             m.write(0, &header(op, size)).unwrap();
