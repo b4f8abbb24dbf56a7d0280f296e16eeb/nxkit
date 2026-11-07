@@ -28,6 +28,7 @@ pub mod stats;
 mod textures;
 mod translate;
 mod upload;
+mod walk;
 
 pub use gpu::{Gpu, GpuConfig};
 pub use stats::{EncodeReport, EncodeStats, Skip};

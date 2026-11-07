@@ -65,6 +65,18 @@ impl TickScheduler {
         }
     }
 
+    /// Changes the source of frames, for a title that changes its present interval while it runs. A switch to
+    /// [`FrameSource::Hold`] shows the next ready frame at once.
+    pub fn set_source(&mut self, source: FrameSource) {
+        if self.source == source {
+            return;
+        }
+        self.source = source;
+        if let FrameSource::Hold { ticks_per_frame } = source {
+            self.since_present = ticks_per_frame;
+        }
+    }
+
     /// The game has a finished frame. Frames show in the order they were made.
     pub fn frame_ready(&mut self, frame: u64) {
         self.ready.push_back(frame);
