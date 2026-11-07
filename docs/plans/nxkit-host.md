@@ -87,6 +87,10 @@ The core rules of Horizon are off by default (R9). When a title turns them on, `
 | H5 | `kernel` and the `nxkit-host` program | the game starts from `nxkit-host` without `dmhost` |
 | H6 | nxnative is off | `nxb build --platform mac` for Breath of the Wild has no nxnative stage, and the route runs |
 
+The part of H2 for `audio` exists in `nxkit-svc-audio` (R41, R42). It is written, but nobody has compiled or run it. The host must call
+`nxkit_audio_init` with its callbacks, and ask `nxkit_hle_find_big` for the functions that need a big stack. `nxgame-botw` still
+runs `offline` only, and its test `nxkit_runs_only_offline` changes when `audio` moves to nxkit.
+
 The part of H3 that does not need the frame format exists in `nxkit-metal`:
 
 - The device, the Metal 4 command queue, three command allocators for the frames in flight and a residency set.

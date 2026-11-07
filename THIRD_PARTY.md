@@ -86,6 +86,11 @@ The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for Ar
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
 
+The crate `nxkit-svc-audio` (`crates/nxkit-svc-audio/`) follows `dm/host/hle_audio.c` and `dm/host/hle_audren.c`. It ports the list of
+SDK functions that are taken over, the SDK layouts of the audio renderer (the work buffer, the command list, the DeviceSink command)
+and the prologue scan that finds them. It does not copy the global lock. The IPC layouts of `audout:u`, `audren:u` and `IAudioDevice`
+come from the public Switchbrew documentation. It uses the same licence notice as above.
+
 ## NVN front end ported from nxnative
 
 The crate `nxkit-nvn` (`crates/nxkit-nvn/`) ports logic and data from the nxnative engine. The nxnative engine is published under the MIT
