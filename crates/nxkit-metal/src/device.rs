@@ -103,14 +103,14 @@ impl Context {
     }
 
     /// Puts an allocation into the residency set. The change takes effect at the next `commit_residency`.
-    pub(crate) fn make_resident(&self, allocation: &ProtocolObject<dyn MTLAllocation>) {
+    pub(crate) fn add_allocation(&self, allocation: &ProtocolObject<dyn MTLAllocation>) {
         let _g = self.inner.residency_lock.lock();
         self.inner.residency.addAllocation(allocation);
         self.inner.residency_dirty.store(true, Ordering::Release);
     }
 
     /// Removes an allocation from the residency set.
-    pub(crate) fn evict(&self, allocation: &ProtocolObject<dyn MTLAllocation>) {
+    pub(crate) fn remove_allocation(&self, allocation: &ProtocolObject<dyn MTLAllocation>) {
         let _g = self.inner.residency_lock.lock();
         self.inner.residency.removeAllocation(allocation);
         self.inner.residency_dirty.store(true, Ordering::Release);

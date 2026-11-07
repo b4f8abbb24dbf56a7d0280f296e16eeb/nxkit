@@ -112,7 +112,7 @@ impl GuestMemory {
         }
         .ok_or_else(|| create("guest buffer", "newBufferWithBytesNoCopy returned nil"))?;
         let map = AddressMap::new(addr, buffer.gpuAddress(), len)?;
-        ctx.make_resident(ProtocolObject::from_ref(&*buffer));
+        ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
         ctx.commit_residency();
         Ok(Self {
             buffer,
@@ -191,7 +191,8 @@ impl GuestMemory {
 
 impl Drop for GuestMemory {
     fn drop(&mut self) {
-        self.ctx.evict(ProtocolObject::from_ref(&*self.buffer));
+        self.ctx
+            .remove_allocation(ProtocolObject::from_ref(&*self.buffer));
         self.ctx.commit_residency();
     }
 }

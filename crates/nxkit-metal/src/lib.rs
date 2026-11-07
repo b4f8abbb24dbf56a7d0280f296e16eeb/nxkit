@@ -31,6 +31,7 @@ mod metrics;
 mod pipeline;
 mod present;
 mod render;
+mod residency;
 mod scratch;
 mod state;
 mod table;
@@ -56,6 +57,7 @@ pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
     StencilAttachment, Viewport,
 };
+pub use residency::ResidentGuard;
 pub use scratch::{SCRATCH_ALIGN, Scratch};
 pub use state::{
     BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, DepthBias, DepthClip,

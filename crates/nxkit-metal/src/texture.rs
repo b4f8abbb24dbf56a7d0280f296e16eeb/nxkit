@@ -212,7 +212,8 @@ unsafe impl Sync for Inner {}
 impl Drop for Inner {
     fn drop(&mut self) {
         if self.resident {
-            self.ctx.evict(ProtocolObject::from_ref(&*self.raw));
+            self.ctx
+                .remove_allocation(ProtocolObject::from_ref(&*self.raw));
         }
     }
 }
@@ -268,7 +269,7 @@ impl Texture {
             .ok_or_else(|| create("texture", "newTextureWithDescriptor returned nil"))?;
         let resident = desc.storage != Storage::Memoryless;
         if resident {
-            ctx.make_resident(ProtocolObject::from_ref(&*raw));
+            ctx.add_allocation(ProtocolObject::from_ref(&*raw));
         }
         Ok(Self::wrap(ctx, raw, desc, resident, None))
     }

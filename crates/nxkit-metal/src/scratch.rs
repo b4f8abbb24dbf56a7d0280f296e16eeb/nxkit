@@ -33,7 +33,7 @@ impl Scratch {
             .device()
             .newBufferWithLength_options(size as usize, MTLResourceOptions::StorageModeShared)
             .ok_or_else(|| create("scratch buffer", "newBufferWithLength returned nil"))?;
-        ctx.make_resident(ProtocolObject::from_ref(&*buffer));
+        ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
         Ok(Self {
             buffer,
             ctx: ctx.clone(),
@@ -75,6 +75,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        self.ctx.evict(ProtocolObject::from_ref(&*self.buffer));
+        self.ctx
+            .remove_allocation(ProtocolObject::from_ref(&*self.buffer));
     }
 }
