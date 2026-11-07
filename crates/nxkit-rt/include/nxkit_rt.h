@@ -28,6 +28,10 @@ void nxkit_init(uint64_t services);
  * NULL also means: the service of the name is not enabled, or nxkit_init was not called. */
 const void *nxkit_hle_find(const char *name);
 
+/* Like nxkit_hle_find, for the functions that need the big host stack (HLE_FORCE_BIG in nxnative).
+ * The host runs the function it gets on its big stack. nxkit_hle_find never returns such a function. */
+const void *nxkit_hle_find_big(const char *name);
+
 /* The kernel service: the Horizon thread model. Enable NXKIT_SERVICE_KERNEL in nxkit_init, call
  * nxkit_kernel_init once, then call nxkit_svc from the gate of every svc. */
 

@@ -11,7 +11,8 @@
 //! - It is `extern "C"` and takes an argument of fewer than 32 bits as `u32`, because Switch code does not extend it.
 //! - It is never variadic, because Switch code passes variadic arguments in registers.
 //! - A function that needs a large stack must switch to a host stack, because a guest stack can be 8 KB.
-//!   No service needs this yet and none switches.
+//!   The runtime does not switch. A service lists such a function in its `big_stack_exports()`, and the host finds it
+//!   with [`nxkit_hle_find_big`] and runs it on its big stack. [`nxkit_hle_find`] never returns it.
 //!
 //! The `kernel` service forwards svc calls to `nxkit-hos` ([`nxkit_svc`]). The kernel is created by
 //! [`nxkit_kernel_init`] and the host calls it from the gate of every svc.
@@ -86,6 +87,9 @@ pub struct Entry {
     pub service: Service,
     /// The address of the function.
     pub addr: usize,
+    /// True when the function needs the big host stack (`HLE_FORCE_BIG` in nxnative). The host finds it with
+    /// [`nxkit_hle_find_big`] and runs it on that stack.
+    pub big_stack: bool,
 }
 
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
@@ -93,29 +97,40 @@ pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
     TABLE.get_or_init(|| {
         let mut table = Vec::new();
-        table.extend(mapped(nxkit_svc_fs::exports(), Service::Fs));
-        table.extend(mapped(nxkit_svc_offline::exports(), Service::Offline));
+        table.extend(mapped(nxkit_svc_fs::exports(), Service::Fs, false));
+        table.extend(mapped(nxkit_svc_fs::big_stack_exports(), Service::Fs, true));
+        table.extend(mapped(nxkit_svc_offline::exports(), Service::Offline, false));
         table
     })
 }
 
 /// The exports of one service crate as entries of `service`.
-fn mapped(exports: Vec<nxkit_abi::export::Export>, service: Service) -> impl Iterator<Item = Entry> {
+fn mapped(exports: Vec<nxkit_abi::export::Export>, service: Service, big_stack: bool) -> impl Iterator<Item = Entry> {
     exports.into_iter().map(move |e| Entry {
         name: e.name,
         service,
         addr: e.addr,
+        big_stack,
     })
 }
 
 /// The mask of enabled services. Zero before init.
 static SERVICES: AtomicU64 = AtomicU64::new(0);
 
-/// Finds `name` in `table`. Only a service in `mask` is found.
+/// Finds `name` in `table`. Only a service in `mask` is found. Functions that need the big stack are not found.
 pub fn find_in(table: &[Entry], mask: u64, name: &[u8]) -> Option<usize> {
+    find_kind(table, mask, name, false)
+}
+
+/// Finds `name` among the functions that need the big stack. Only a service in `mask` is found.
+pub fn find_big_in(table: &[Entry], mask: u64, name: &[u8]) -> Option<usize> {
+    find_kind(table, mask, name, true)
+}
+
+fn find_kind(table: &[Entry], mask: u64, name: &[u8], big_stack: bool) -> Option<usize> {
     table
         .iter()
-        .find(|e| e.service.bit() & mask != 0 && e.name.as_bytes() == name)
+        .find(|e| e.big_stack == big_stack && e.service.bit() & mask != 0 && e.name.as_bytes() == name)
         .map(|e| e.addr)
 }
 
@@ -146,10 +161,30 @@ pub unsafe extern "C" fn nxkit_hle_find(name: *const c_char) -> *const c_void {
     }
 }
 
+/// Returns the function for a Switch mangled name among those that need the big host stack, or NULL.
+/// The host runs such a function on its big stack (`HLE_FORCE_BIG`). NULL has the meaning of [`nxkit_hle_find`].
+///
+/// # Safety
+///
+/// `name` is NULL or points to a NUL-terminated string that stays valid during the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nxkit_hle_find_big(name: *const c_char) -> *const c_void {
+    if name.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: `name` is not NULL and the caller promises a valid NUL-terminated string.
+    let name = unsafe { CStr::from_ptr(name) };
+    match find_big_in(entries(), SERVICES.load(Ordering::Acquire), name.to_bytes()) {
+        Some(addr) => addr as *const c_void,
+        None => std::ptr::null(),
+    }
+}
+
 /// The names of the exported C symbols. The header has one declaration for each.
-pub const EXPORTS: [&str; 6] = [
+pub const EXPORTS: [&str; 7] = [
     "nxkit_init",
     "nxkit_hle_find",
+    "nxkit_hle_find_big",
     "nxkit_svc",
     "nxkit_kernel_init",
     "nxkit_kernel_set_thread_name",
@@ -174,11 +209,13 @@ mod tests {
                 name: "_ZN2nn3fs5ProbeEj",
                 service: Service::Fs,
                 addr: probe_addr(),
+                big_stack: false,
             },
             Entry {
                 name: "_ZN2nn3net5ProbeEj",
                 service: Service::Offline,
                 addr: probe_addr() + 4,
+                big_stack: false,
             },
         ]
     }
@@ -218,6 +255,24 @@ mod tests {
             find_in(&t, Service::Fs.bit(), t[0].name.as_bytes()),
             Some(probe_addr())
         );
+    }
+
+    #[test]
+    fn a_big_stack_function_is_found_only_as_one() {
+        let mut t = table();
+        t[0].big_stack = true;
+        let fs = Service::Fs.bit();
+        assert_eq!(find_in(&t, fs, b"_ZN2nn3fs5ProbeEj"), None);
+        assert_eq!(find_big_in(&t, fs, b"_ZN2nn3fs5ProbeEj"), Some(probe_addr()));
+        assert_eq!(find_big_in(&t, 0, b"_ZN2nn3fs5ProbeEj"), None);
+    }
+
+    #[test]
+    fn the_fs_functions_of_nxnative_need_the_big_stack() {
+        let all = Service::all_bits();
+        let name = b"_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci";
+        assert_eq!(find_in(entries(), all, name), None);
+        assert!(find_big_in(entries(), all, name).is_some());
     }
 
     #[test]
