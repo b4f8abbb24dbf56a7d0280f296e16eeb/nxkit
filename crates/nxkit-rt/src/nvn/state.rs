@@ -20,7 +20,7 @@
 //! table only. The command buffer group reads a state with [`blend`], [`color`], [`channel_mask`], [`depth_stencil`],
 //! [`multisample`], [`polygon`], [`vertex_attrib`] and [`vertex_stream`].
 //!
-//! Defaults, the bounds of the indexes and the getters follow `dm/gfx/nvn/hle_nvn.c` of nxnative (checked 2026-11-07).
+//! Defaults and the bounds of the indexes were checked on 2026-11-07 against `dm/gfx/nvn/hle_nvn.c` of nxnative.
 //! The NVN enum values are those of `dm/gfx/nvn/include/nvn.h`.
 
 use super::abi::{AbiResult, Obj, arg_bool, guard, log_once, ret_bool, table};
@@ -442,7 +442,7 @@ ms_get!(ms_get_c2c_out, "nvnMultisampleStateGetCoverageToColorOutput", MS_C2C_OU
 ms_get!(ms_get_sl_en, "nvnMultisampleStateGetSampleLocationsEnable", MS_SL_EN, flag);
 ms_get!(ms_get_sl_grid, "nvnMultisampleStateGetSampleLocationsGridEnable", MS_SL_GRID, flag);
 
-/// The programmable sample positions are not kept, as in nxnative.
+/// The programmable sample positions are not kept. The call is logged once.
 extern "C" fn ms_set_sample_locations(_s: u64, _start: i32, _n: i32, _v: u64) {
     log_once(
         "nvnMultisampleStateSetSampleLocations",
@@ -544,7 +544,7 @@ extern "C" fn va_set_defaults(s: u64) {
     guard("nvnVertexAttribStateSetDefaults", || store(s, VA, 0));
 }
 
-/// An offset outside the 19 bits is logged and stored cut to 19 bits, as in nxnative.
+/// An offset outside the 19 bits is logged and stored cut to 19 bits.
 extern "C" fn va_set_format(s: u64, format: i32, offset: i64) {
     guard("nvnVertexAttribStateSetFormat", || {
         if !(0..ATTRIB_OFFSET_LIMIT).contains(&offset) {
