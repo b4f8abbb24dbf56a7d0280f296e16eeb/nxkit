@@ -30,15 +30,17 @@ unsafe = "many: these are generated bindings, every call into Apple frameworks i
 owner = "project team"
 used_by = ["nxkit-metal", "nxkit-svc-input"]
 used_by = ["nxkit-metal", "nxkit-svc-video"]
+used_by = ["nxkit-metal", "nxkit-host"]
 
 [objc2-foundation]
-reason = "NSString, NSURL, NSArray and NSError, which the Metal API takes and returns"
+reason = "NSString, NSURL, NSArray and NSError, which the Metal API takes and returns, and the notifications of the AppKit window"
 source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
 licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
 used_by = ["nxkit-metal", "nxkit-svc-input"]
+used_by = ["nxkit-metal", "nxkit-host"]
 
 [objc2-core-foundation]
 reason = "CGSize and CFTimeInterval, used by Metal and CoreAnimation signatures"
@@ -94,6 +96,16 @@ version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-video wraps them in a safe API"
 owner = "project team"
 used_by = ["nxkit-svc-video"]
+used_by = ["nxkit-metal", "nxkit-host"]
+
+[objc2-app-kit]
+reason = "NSApplication, NSWindow and NSView, the window and the main loop of nxkit-host"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, the same commit as the rest of the family. The pin moves to a crates.io release once one has the Xcode 27 headers (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-host wraps them in its module sys::appkit"
+owner = "project team"
+used_by = ["nxkit-host"]
 
 [objc2-metal]
 reason = "the Metal 4 API (MTL4CommandQueue, MTL4Compiler, MTLResidencySet and the rest) for the Metal backend of the host"
@@ -111,7 +123,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-host"]
 
 [objc2-audio-toolbox]
 reason = "the AUHAL output unit (AudioComponent, AudioUnit properties, the render callback) of the audio service"

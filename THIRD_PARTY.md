@@ -208,6 +208,18 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 |---|---|
 | `crates/nxkit-gpu/src/translate.rs` | the state translation of `dm/gfx/nvn/nvn_mtl.m` (blend, depth, stencil, compare, stencil ops, topology, sampler modes) |
 | `crates/nxkit-gpu/src/format_map.rs` | the format and vertex format tables of `dm/gfx/nvn/nvn_mtl.m` and `nvn.h` |
+## Host program ported from nxnative
+
+The crate `nxkit-host` (`crates/nxkit-host/`) ports the approach and the assembly of the host of the nxnative engine. The nxnative
+engine is published under the MIT licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-host/src/gate.rs` (assembly) | `dm/host/entry.S` (the svc gate, the thread entry and leave) |
+| `crates/nxkit-host/src/bigstack.rs` (assembly) | `dm/host/hle_bigstack.c` (the big-stack entry of `HLE_FORCE_BIG`) |
+| `crates/nxkit-host/src/thread.rs` | `dm/host/thread.c` (the thread slots and the thread-local region) |
+| `crates/nxkit-host/src/loader.rs`, `place.rs`, `reloc.rs` | `dm/host/loader.c` (the module mapping, the relocations and the import fill) |
+| `crates/nxkit-host/src/manifest.rs`, `settings.rs` (the `memory` and `settings` keys) | `dm/games/game.py` and `dm/host/hle_svc.c` (the memory profile and the game profile) |
 
 ## Tools that nxkit starts and does not contain
 
