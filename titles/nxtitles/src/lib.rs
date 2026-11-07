@@ -1,6 +1,6 @@
 //! The one list of families and title modules.
 //!
-//! Each module is behind its own cargo feature (`agl`, `oot`, `botw`), so a build can leave any of them out. This is the
+//! Each module is behind its own cargo feature (`agl`, `oot`, `botw`, `mtf`), so a build can leave any of them out. This is the
 //! only crate that depends on family and title crates. The core depends on this crate and on `nxtitle`.
 
 use nxtitle::{Catalog, Family, Title};
@@ -16,6 +16,8 @@ pub fn catalog() -> Result<Catalog, String> {
         &nxgame_oot::OOT,
         #[cfg(feature = "botw")]
         &nxgame_botw::BOTW,
+        #[cfg(feature = "mtf")]
+        &nxgame_mtf::MTF,
     ];
     Catalog::new(families, titles)
 }
@@ -34,7 +36,7 @@ mod tests {
             c.missing_families().len(),
             usize::from(cfg!(feature = "oot")) + usize::from(cfg!(feature = "botw"))
         );
-        #[cfg(not(any(feature = "agl", feature = "oot", feature = "botw")))]
+        #[cfg(not(any(feature = "agl", feature = "oot", feature = "botw", feature = "mtf")))]
         assert!(c.titles().is_empty() && c.families().is_empty());
     }
 
