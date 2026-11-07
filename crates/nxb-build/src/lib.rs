@@ -42,6 +42,7 @@ mod programs;
 mod provisional;
 pub mod rewrite;
 mod stages;
+mod standalone;
 mod versions;
 
 /// The exit code a failing stage asks for (the first one wins). Stage closures return `Result<String, String>`, so the

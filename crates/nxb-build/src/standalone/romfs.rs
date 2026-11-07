@@ -8,12 +8,6 @@ use nxb_extract::storage::{FileStorage, Storage};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
-/// The files of the image, directories left out.
-pub fn list(img: &Path) -> Result<Vec<RomEntry>, String> {
-    let s = FileStorage::open(img).map_err(|e| e.to_string())?;
-    crate::host::survey_extract::image_files(&s, img)
-}
-
 /// The path of an entry below `dest`. A name with `..`, a drive or an absolute part is refused.
 fn target(dest: &Path, e: &RomEntry) -> Result<PathBuf, String> {
     let p = std::str::from_utf8(&e.path)
