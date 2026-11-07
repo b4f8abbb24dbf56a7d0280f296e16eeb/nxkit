@@ -57,7 +57,7 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-The decisions of the host and their causes are R1 to R54 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+The decisions of the host and their causes are R1 to R55 in [decisions.md](../decisions.md#part-3-runtime-decisions).
 
 ### The nxkit-host program
 
