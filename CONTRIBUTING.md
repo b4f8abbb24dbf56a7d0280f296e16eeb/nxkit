@@ -15,7 +15,7 @@ This file is for people who change the code. Read it before you open a pull requ
 ## Code rules
 
 - No `unwrap`, `expect` or `panic!` outside tests. Inputs are untrusted files.
-- Only `nxb-sys` can contain `unsafe` code.
+- Only `nxb-sys` and `nxkit-rt` can contain `unsafe` code.
 - Output must not depend on the order of completion or on the order of a `HashMap`.
 - Start child processes with `nxb_tool::Invocation` only.
 - A change that alters output bytes must prove byte identity with the reference build. Show the comparison in the pull request.

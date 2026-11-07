@@ -16,7 +16,7 @@ This document gives the architecture rules for a change to the workspace. Read [
 ## Layers and ownership
 
 - A crate uses only crates of a lower layer, plus the sideways edges in [architecture.md](architecture.md). A new edge must have a decision in [decisions.md](decisions.md) first.
-- L1 crates do no I/O. Only `nxb-sys` has `unsafe` code.
+- L1 crates do no I/O. Only `nxb-sys` and `nxkit-rt` have `unsafe` code.
 - A stage module has a maximum of 400 lines. A file has a maximum of 600 lines.
 - Each stage crate has one owner. A change touches only the files of its own concern.
 - `cargo run -p xtask -- layers` and `cargo run -p xtask -- limits` examine these rules.

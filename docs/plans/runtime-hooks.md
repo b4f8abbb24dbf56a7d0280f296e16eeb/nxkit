@@ -23,7 +23,7 @@
 | A5 | `nxb title` and the launcher | ComicBit | A2 |
 | A6 | Ocarina of Time module | ComicBit | A2 |
 | A7 | `TitleFacts.libraries` is filled | ComicBit | |
-| B1 | `nxkit-rt` static library | v0lumehi | |
+| B1 | `nxkit-rt` static library, built without a service | v0lumehi | |
 | B2 | the host asks nxkit first | v0lumehi | A2, B1 |
 | B3 | nxb links the library | v0lumehi | B1 |
 | B4 | first services in nxkit | v0lumehi | B2, B3 |
@@ -109,6 +109,11 @@ Open question: where do the names come from? The NSO's module name, its symbol t
 - It is the only crate allowed to use `unsafe`. The workspace forbids it everywhere else.
 - Its functions follow the Switch calling rules above. Arguments under 32 bits are taken as `u32`. No function is variadic. Functions with large stacks switch to a host stack.
 - The nxkit release ships the library next to `nxb`.
+- `crates/nxkit-rt/include/nxkit_rt.h` is the header for the host. A test checks it against the exports and against `Service::ALL`.
+- `nxkit_init` is thread-safe. The last call wins. Bits that name no service are ignored.
+- A function is found only by the exact bytes of its Switch mangled name. A name of a disabled service gives NULL.
+- The lookup table is empty. No service is implemented.
+- Verified on 2026-11-07: `nm -gU libnxkit_rt.a` lists `_nxkit_init` and `_nxkit_hle_find` for `aarch64-apple-darwin` and `aarch64-apple-ios`. The iOS build needs the rustup toolchain, not a Homebrew `rustc`.
 
 ### B2 The host asks nxkit first
 
