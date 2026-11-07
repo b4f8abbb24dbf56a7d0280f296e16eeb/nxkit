@@ -120,12 +120,14 @@ Open question: where do the names come from? The NSO's module name, its symbol t
 - An engine patch in NX2Apple's patch queue changes `hle_find`. It asks `nxkit_hle_find` first and its own section second.
 - `game_profile.h` has `DM_GAME_NXKIT_SERVICES`, a bit mask in `Service::ALL` order. The host passes it to `nxkit_init`.
 - `nxkit_hle_find` returns functions only for the services in the mask. With an empty mask the host runs as before.
+- On the Mac the host does not link nxkit. It loads `libnxkit_rt.dylib` with `dlopen` when the mask is not empty. The path is `DM_NXKIT_LIB`, or the file next to the host. `DM_NXKIT_SERVICES` (a list of service names) replaces the mask for a test.
+- A missing library or symbol writes one line to the log, and every service stays on nxnative.
 
 Open question: should the patch go upstream to nxnative instead of the patch queue?
 
 ### B3 nxb links the library
 
-When a game has an nxkit service, `nxb` adds `libnxkit_rt.a` to the host's compile line in `machost.rs`. The host build's fingerprint includes the library.
+On the Mac, `nxb build --platform mac` does not link the library. The run command it prints sets `DM_NXKIT_SERVICES` and `DM_NXKIT_LIB` (`NXB_NXKIT_RT`, or `libnxkit_rt.dylib` next to `nxb`). The host stage's key does not include the library, so a changed library needs no new stage. iOS links `libnxkit_rt.a`, because iOS cannot load unsigned code at run time.
 
 ### B4 Services move one at a time
 
@@ -143,7 +145,7 @@ When a game has an nxkit service, `nxb` adds `libnxkit_rt.a` to the host's compi
 
 - `offline` is first. It is small and only answers "unavailable", so it proves the seam.
 - Breath of the Wild is the pilot game. Its module moves a service with `RuntimeHooks::runtime` once a run of the game shows it works.
-- A service moves only with `Tested` or `Recorded` evidence.
+- A service may move with `Unverified` evidence while its code is written. The run of the fixed route at the end of part B turns it into `Recorded`, or moves the service back to nxnative.
 
 Open questions:
 
@@ -155,6 +157,8 @@ Open questions:
 - The `FRAME_STEP` stubs, the interval controller cuts and the render scale stubs of `patches.py` come from the module's `rewrite_rules`.
 - The integer output shaders of `shader_facts_manual.tsv` come from the module.
 - Optimisations for the game go into the module, into the family `agl` when they hold for the engine, or into an nxkit service.
+
+Part B continues in [nxkit-host.md](nxkit-host.md): Breath of the Wild on nxkit alone.
 
 ## Rules
 
