@@ -13,6 +13,9 @@
 //! They describe the build `cd57b23fa4bbad65803d9788c01821ee` of `main` and no other. The frame step protocol
 //! (the state page the stubs read) is in `nxkit-svc-pacing`.
 //!
+//! The pacing keys of the game's profile (`fps_target`, `fps_hold`, `present_snap`, `present_interval`) are the fact
+//! `PaceProfile`, with their evidence.
+//!
 //! This part is in `seedds/nxnative` `dm/games/01007EF00011E000/` and not in this module:
 //!
 //! - `shader_facts_manual.tsv`: two shaders with integer outputs from agl's BC4 encoder.
@@ -21,7 +24,8 @@
 
 use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Need, Pacing, Runtime, RuntimeHooks, Service, Title, TitleId,
+    BuildHooks, Evidence, Fact, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks,
+    Service, Title, TitleId,
 };
 
 /// The title module.
@@ -93,6 +97,29 @@ const PATCHES_PY: Evidence = Evidence::Recorded {
 /// interval. With them the game runs at the display's rate. The record is the pull request's own description.
 const PACING: Fact<Pacing> = Fact::new(Pacing::Display, PATCHES_PY);
 
+const PROFILE: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/01007EF00011E000/game.tsv, dm/games/game.py (defaults) and \
+             dm/host/gen/01007EF00011E000/game_profile.h at 88c7e03f",
+    read: "2026-11-07",
+};
+
+/// The keys of the game's profile in nxnative that steer the frame step and the presents. `game.tsv` sets `fps_target 60`
+/// and `present_snap on`. `fps_hold` (on) and `present_interval` (game) are the defaults of `game.py`, and
+/// `game_profile.h` has them as `DM_GAME_FPS_HOLD 1` and `DM_GAME_PRESENT_DISPLAY 0`.
+///
+/// With the frame step the hold of each frame overrides `present_interval`, so `Game` only decides a frame that no cap
+/// covers. The generated header of that checkout has no `fps_max` line, so the maximum stays at the default of 60 and
+/// this game never runs above 60 through the limiter path.
+const PACE_PROFILE: Fact<PaceProfile> = Fact::new(
+    PaceProfile {
+        fps_target: 60,
+        fps_hold: true,
+        present_snap: true,
+        present_interval: PresentInterval::Game,
+    },
+    PROFILE,
+);
+
 impl BuildHooks for Botw {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01007EF00011E000.toml"))
@@ -148,6 +175,10 @@ impl RuntimeHooks for Botw {
     fn pacing(&self) -> Option<Fact<Pacing>> {
         Some(PACING)
     }
+
+    fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
+        Some(PACE_PROFILE)
+    }
 }
 
 impl Title for Botw {
@@ -197,6 +228,17 @@ mod tests {
         assert!(BOTW.needs().iter().all(|n| n.evidence.is_checked()));
         assert!(BOTW.upscaler().is_none());
         assert!(BOTW.pacing().is_some_and(|p| p.evidence.is_checked()));
+    }
+
+    #[test]
+    fn the_pace_profile_is_the_one_of_the_nxnative_profile() {
+        let Some(p) = BOTW.pace_profile() else {
+            return;
+        };
+        assert!(p.evidence.is_checked());
+        assert_eq!(p.value.fps_target, 60);
+        assert!(p.value.fps_hold && p.value.present_snap);
+        assert_eq!(p.value.present_interval, PresentInterval::Game);
     }
 
     #[test]

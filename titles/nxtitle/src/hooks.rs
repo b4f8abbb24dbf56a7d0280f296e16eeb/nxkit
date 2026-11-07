@@ -89,6 +89,32 @@ pub enum Pacing {
     },
 }
 
+/// What a frame shows when the game sets no cap, as `present_interval` of nxnative's `game.tsv`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresentInterval {
+    /// A frame stays on screen for the present interval the game set (`game`). A game that sets none gets one tick.
+    Game,
+    /// A frame stays on screen for one tick of the display, whatever the game set (`display`).
+    Display,
+}
+
+/// The pacing profile of a game. It carries the keys of nxnative's `game.tsv` that steer the frame step and the
+/// presents. Each key has a meaning in `nxkit-svc-pacing` (`LoadConfig`, `PresentSample` and `PresentRule`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaceProfile {
+    /// The cap of the frame step in frames per second (`fps_target`): 0, 30, 60 or 120. The step page takes it at
+    /// 30 or 60. It is also the target that an engine limiter gets.
+    pub fps_target: u32,
+    /// Whether a frame that runs late may stay on screen for more vsyncs than the cap says (`fps_hold`). Off for a game
+    /// that steps by the cap whatever the hold.
+    pub fps_hold: bool,
+    /// Whether the present path keeps a ring of two present snapshots (`present_snap`). The lateness of a frame then comes
+    /// from what the screen showed.
+    pub present_snap: bool,
+    /// How long a frame stays on screen when no cap applies (`present_interval`).
+    pub present_interval: PresentInterval,
+}
+
 /// Questions of the build: shaders, preparation and rewriter rules.
 pub trait BuildHooks: Sync {
     /// The role of a shader, when this layer knows it.
@@ -117,6 +143,11 @@ pub trait RuntimeHooks: Sync {
     }
     /// Who paces the frames.
     fn pacing(&self) -> Option<Fact<Pacing>> {
+        None
+    }
+    /// The keys that steer the frame step and the presents. `None` leaves it to the next layer, and the core default is the
+    /// plain case: no cap, a hold of the game's interval, no snapshots.
+    fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
         None
     }
     /// The engine that runs a service for this game. `None` leaves it to the next layer, and the core default is

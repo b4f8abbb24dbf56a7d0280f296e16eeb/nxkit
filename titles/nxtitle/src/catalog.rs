@@ -1,8 +1,8 @@
 //! The catalog: families and titles, and how they are composed for one game.
 
 use crate::{
-    BuildHooks, Fact, Family, Match, Need, Pacing, Runtime, RuntimeHooks, Seed, Service,
-    ShaderRole, ShaderView, Title, TitleFacts, Upscaler,
+    BuildHooks, Fact, Family, Match, Need, PaceProfile, Pacing, Runtime, RuntimeHooks, Seed,
+    Service, ShaderRole, ShaderView, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -182,5 +182,10 @@ impl Resolved {
     /// Who paces the frames.
     pub fn pacing(&self) -> Option<Fact<Pacing>> {
         self.runtime_hooks().find_map(|h| h.pacing())
+    }
+
+    /// The keys that steer the frame step and the presents.
+    pub fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
+        self.runtime_hooks().find_map(|h| h.pace_profile())
     }
 }

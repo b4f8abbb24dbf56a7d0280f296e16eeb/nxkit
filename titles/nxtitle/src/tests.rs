@@ -34,6 +34,17 @@ impl RuntimeHooks for Fam {
     fn pacing(&self) -> Option<Fact<Pacing>> {
         Some(Fact::new(Pacing::Display, REC))
     }
+    fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
+        Some(Fact::new(
+            PaceProfile {
+                fps_target: 30,
+                fps_hold: false,
+                present_snap: false,
+                present_interval: PresentInterval::Display,
+            },
+            REC,
+        ))
+    }
     fn runtime(&self, s: Service) -> Option<Fact<Runtime>> {
         matches!(s, Service::Audio | Service::Fs).then_some(Fact::new(Runtime::Nxkit, REC))
     }
@@ -112,6 +123,7 @@ fn title_wins_then_family_then_core() {
     assert_eq!(r.family_from, FamilyFrom::Declared);
     assert_eq!(r.upscaler().map(|f| f.value), Some(Upscaler::Native));
     assert_eq!(r.pacing().map(|f| f.value), Some(Pacing::Display));
+    assert_eq!(r.pace_profile().map(|f| f.value.fps_target), Some(30));
     let keys: Vec<_> = r.seeds().iter().map(|s| s.key).collect();
     assert_eq!(keys, ["f", "t1", "t2"]);
     assert_eq!(r.rewrite_rules(), ["family"]);
@@ -130,6 +142,7 @@ fn family_by_detection_or_none() {
     let mut facts = TitleFacts::new(TitleId(2));
     assert_eq!(c.resolve(&facts).family_from, FamilyFrom::None);
     assert!(c.resolve(&facts).pacing().is_none());
+    assert!(c.resolve(&facts).pace_profile().is_none());
     facts.libraries.push("famlib".into());
     let r = c.resolve(&facts);
     assert_eq!(r.family_from, FamilyFrom::Detected);
