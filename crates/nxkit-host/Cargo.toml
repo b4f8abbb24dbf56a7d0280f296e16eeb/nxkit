@@ -1,0 +1,48 @@
+[package]
+name = "nxkit-host"
+description = "The nxkit host program: guest memory, the loader, the gates of the rewritten code, the game threads and the window"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L0"
+in_v = false
+
+[lib]
+name = "nxkit_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nxkit-host"
+path = "src/main.rs"
+
+[dependencies]
+nxkit-abi = { workspace = true }
+nxkit-rt = { path = "../nxkit-rt" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nxkit-metal = { path = "../nxkit-metal" }
+objc2 = { workspace = true, features = ["std"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSGraphics", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "objc2-quartz-core"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes"] }
+objc2-foundation = { workspace = true, features = ["std", "NSNotification", "NSObject", "NSString"] }
+objc2-quartz-core = { workspace = true, features = ["std", "CALayer", "CAMetalLayer"] }
+
+# Not `workspace = true`: `unsafe` is denied for the crate and allowed in the module `sys` (libc, dyld, Mach and AppKit
+# calls) and in the module `gate` (the assembly of the gates).
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
