@@ -23,6 +23,7 @@ pub mod decode;
 pub mod descriptors;
 pub mod entries;
 pub mod error;
+pub mod ext;
 pub mod format;
 pub mod frame;
 pub mod front;

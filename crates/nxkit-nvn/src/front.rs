@@ -272,10 +272,16 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     pub fn end_recording(&mut self, cb: usize) -> Result<CommandHandle> {
         self.buffer(cb);
         let r = self.buffers[cb].end_recording(&mut self.mem)?;
-        for s in &r.spans {
+        self.recorded(&r.spans);
+        Ok(r.handle)
+    }
+
+    /// Drops the summaries of recordings that lived in these memory ranges. A recorder that owns its command buffer
+    /// (the C ABI of `nxkit-rt`) calls this when it ends a recording, as [`FrontEnd::end_recording`] does.
+    pub fn recorded(&mut self, spans: &[std::ops::Range<u64>]) {
+        for s in spans {
             self.cache.invalidate(s.start, s.end);
         }
-        Ok(r.handle)
     }
 
     /// `nvnCommandBufferGetCommandMemoryUsed`.

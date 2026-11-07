@@ -47,6 +47,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
 - A QoS lend no longer reads a `pthread_t` of an owner that may have exited. The lend table lives in the owner's thread record (R31).
 - `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as nxnative's record, and R10, R17 and R19 replace some of them.
+- `nxkit-rt` has the NVN command buffer group (`nvn::cmdbuf`) with the 145 `nvnCommandBuffer*` functions of nxnative. A recording call takes no lock, makes no lookup and allocates nothing. The write position lives in the guest `NVNcommandBuffer` (R54). The host installs the texture seam with `cmdbuf::set_seam` and the title settings with `nvn::set_command_settings`.
+- `nxkit-nvn` has the extension record `Record::Ext` with `ExtCode`, `Setting`, `StateKind` and `DrawKind` (R53), the writer `Cursor` with `write_encoded` and `commit`, `FrontEnd::recorded`, and the list `NXNATIVE_EMPTY`.
+- The title module `nxgame-mtf` for Mario Tennis Fever (`0400D4201C6EA000`), behind the `nxtitles` feature `mtf`. It states the need `vertex_stream_null_bind`.
+
+### Changed
+
+- `MAX_RECORD_BYTES` of `nxkit-nvn` is 120. The memory callback of a command buffer runs with no lock held.
 - nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and nxnative keeps its MIT notice in `THIRD_PARTY.md`.
 
 ## 0.9.2 - 2026-11-07

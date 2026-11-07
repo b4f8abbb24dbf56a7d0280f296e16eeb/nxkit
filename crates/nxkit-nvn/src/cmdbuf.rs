@@ -30,6 +30,15 @@ pub struct Recording {
     pub spans: Vec<Range<u64>>,
 }
 
+/// The write position of a command buffer, for a writer that puts records straight into command memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cursor {
+    /// The host address of the next record.
+    pub pos: u64,
+    /// A record that is not the end record fits when `pos + size <= limit`.
+    pub limit: u64,
+}
+
 /// A command buffer.
 #[derive(Debug, Default)]
 pub struct CommandBuffer {
@@ -117,24 +126,30 @@ impl CommandBuffer {
 
     /// Writes one record. A failure leaves the command buffer as it was.
     pub fn write(&mut self, mem: &mut impl GuestMem, rec: Record) -> Result<()> {
+        let e = rec.encode()?;
+        self.write_encoded(mem, e.as_bytes(), rec == Record::End)
+    }
+
+    /// Writes one record that is already encoded. `is_end` is true for the end record, which needs no room for a
+    /// jump behind it. A failure leaves the command buffer as it was.
+    pub fn write_encoded(
+        &mut self,
+        mem: &mut impl GuestMem,
+        bytes: &[u8],
+        is_end: bool,
+    ) -> Result<()> {
         if !self.recording {
             return Err(NvnError::BadRecord("no recording is open"));
         }
-        let e = rec.encode()?;
-        let need = u64::from(e.len())
-            + if rec == Record::End {
-                0
-            } else {
-                u64::from(JUMP_BYTES)
-            };
+        let need = bytes.len() as u64 + if is_end { 0 } else { u64::from(JUMP_BYTES) };
         if !self.fits(need) {
             let next = self
                 .blocks
                 .get(self.current + 1)
                 .filter(|b| b.end - b.start >= need)
                 .cloned();
-            let Some(next) =
-                next.filter(|_| self.pos + u64::from(JUMP_BYTES) <= self.blocks[self.current].end)
+            let Some(next) = next
+                .filter(|_| self.pos + u64::from(JUMP_BYTES) <= self.blocks[self.current].end)
             else {
                 return Err(NvnError::OutOfCommandMemory { need: need as u32 });
             };
@@ -146,7 +161,33 @@ impl CommandBuffer {
             self.current += 1;
             self.pos = next.start;
         }
-        self.put(mem, e.as_bytes())
+        self.put(mem, bytes)
+    }
+
+    /// Where a writer that bypasses [`CommandBuffer::write`] puts its next record. `limit` is the end of the room for a
+    /// record that is not the end record: the block end less the room of a jump. A command buffer without a block
+    /// gives `limit == pos`, so no record fits.
+    pub fn cursor(&self) -> Cursor {
+        let limit = self
+            .blocks
+            .get(self.current)
+            .map_or(self.pos, |b| b.end.saturating_sub(u64::from(JUMP_BYTES)));
+        Cursor {
+            pos: self.pos,
+            limit,
+        }
+    }
+
+    /// Takes records that a writer put straight into the current block, from [`Cursor::pos`] up to `pos`. The
+    /// first records of a recording set its handle and the start of its first span.
+    pub fn commit(&mut self, pos: u64) {
+        if pos <= self.pos {
+            return;
+        }
+        self.begin.get_or_insert(self.pos);
+        self.open_from.get_or_insert(self.pos);
+        self.used += pos - self.pos;
+        self.pos = pos;
     }
 
     /// `nvnCommandBufferEndRecording`. It writes the end record and gives the finished recording.
@@ -274,5 +315,37 @@ mod tests {
         }
         assert!(cb.write(&mut mem, Record::Draw).is_err());
         assert_eq!(cb.used(), 32);
+    }
+
+    #[test]
+    fn a_writer_outside_the_buffer_commits_its_records() {
+        let (mut cb, mut mem) = setup();
+        assert_eq!(cb.cursor().pos, cb.cursor().limit);
+        cb.add_command_memory(BASE + 0x100, 128).unwrap();
+        cb.begin_recording().unwrap();
+        let c = cb.cursor();
+        assert_eq!(c.pos, BASE + 0x100);
+        assert_eq!(c.limit, BASE + 0x100 + 128 - u64::from(JUMP_BYTES));
+        let rec = Record::Draw.encode().unwrap();
+        mem.write(c.pos, rec.as_bytes()).unwrap();
+        mem.write(c.pos + 8, rec.as_bytes()).unwrap();
+        cb.commit(c.pos + 16);
+        assert_eq!(cb.used(), 16);
+        assert_eq!(cb.cursor().pos, c.pos + 16);
+        cb.commit(c.pos);
+        assert_eq!(cb.used(), 16);
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE + 0x100));
+        assert_eq!(r.spans, vec![BASE + 0x100..BASE + 0x100 + 24]);
+    }
+
+    #[test]
+    fn an_encoded_record_goes_the_same_way_as_a_record() {
+        let (mut cb, mut mem) = setup();
+        cb.add_command_memory(BASE, 64).unwrap();
+        cb.begin_recording().unwrap();
+        let e = Record::Dispatch.encode().unwrap();
+        cb.write_encoded(&mut mem, e.as_bytes(), false).unwrap();
+        assert_eq!(Record::read(&mem, BASE).unwrap().0, Record::Dispatch);
     }
 }

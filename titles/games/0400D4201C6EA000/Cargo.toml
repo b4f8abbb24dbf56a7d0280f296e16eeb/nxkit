@@ -1,0 +1,21 @@
+[package]
+name = "nxgame-mtf"
+description = "The title module of Mario Tennis Fever for Nintendo Switch 2 (0400D4201C6EA000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+
+[lints]
+workspace = true

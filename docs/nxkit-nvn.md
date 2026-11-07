@@ -35,6 +35,9 @@ The decision is R17 in [decisions.md](decisions.md#part-3-runtime-decisions).
 - `nvnCommandBufferGetCommandMemoryUsed` counts from the last added block, as in nxnative. `GetCommandMemoryFree` is what is left in the current block.
 - A record that does not fit goes to the next block behind a jump. When no block is left, `cmdbuf` returns `OutOfCommandMemory` and changes nothing. `FrontEnd::write` then calls the memory callback of the game through the host trait `MemoryCallback`, adds the block that it gives and writes the record again, at most 4 times. Without an enabled callback, or when it gives no usable block, the caller gets `OutOfCommandMemory`.
 - The handle of a recording is the host address of its first record.
+- A command that carries parameters is an extension record (`ext`, R53). Its operation is 64 or more and its payload is up to 28 words, so a record is at most 120 bytes (`MAX_RECORD_BYTES`). `ExtCode` names the 36 codes. `Setting` names the single-value state commands and `StateKind` and `DrawKind` the state binds and draw forms. A command with more data than one record holds, as push constants, inline uniform data or vertex states, is several records.
+- `write_ext` and `write_encoded` write a record at a cursor without the `CommandBuffer`. `CommandBuffer::cursor` gives the write position and the limit of the current block, and `commit` takes a position that the writer reached. `FrontEnd::recorded` drops the summaries of a range that a recording wrote.
+- The decoder reads the draws, dispatches, clears, copies and syncs of the extension records and the state patch of a state bind. It skips the rest.
 
 ### Summaries and the cache
 
@@ -108,6 +111,39 @@ An attachment is memoryless when it is not stored, not loaded, not sampled, and 
 `entries` has the 743 names of nxnative (`names.txt`), the 484 that nxnative implements, and the table `RECORDED` of the names that this crate handles. The table has the command memory functions and the CPU wait functions too. `FFI_GROUPS` has one row per group of `nxkit-rt` with the names that the group exports.
 `Coverage::of` takes the function names that one game imports and returns three lists: handled, not handled yet, and not implemented in nxnative.
 
+## The command buffer group
+
+The group is `nxkit-rt`, module `nvn::cmdbuf`. It answers the 145 names of the row "cmdbuf" in `FFI_GROUPS`. `nvnCommandBufferEvaluateDlss` is not in the row and keeps the stop stub (R24). The decisions are R53 and R54.
+
+### The hot path
+
+A recording function takes no lock, looks up no registry entry and allocates nothing in the common case.
+- The `NVNcommandBuffer` keeps a magic word at 0, the recording flag at 4, the write position at 8, the limit of the block at 0x18, the texture and sampler pool bases at 0x30 and 0x34 and the copy strides at 0x38 and 0x40. The bytes 0x10 to 0x17 belong to the game.
+- A call reads the first 0x20 bytes, checks the flag and `pos + size <= limit`, writes the record into command memory and stores the new position.
+- The slow path folds the position into the `CommandBuffer` with `commit`, writes with `write_encoded`, and stores the new cursor back. It runs when a block is full and in `AddCommandMemory`, `BeginRecording`, `EndRecording` and the memory getters. It holds one shard lock of the registry and never the lock of the front end.
+- The memory callback runs on the slow path with no lock held. It may call `nvnCommandBufferAddCommandMemory`. A record that does not fit is retried after at most 2 callbacks. Without a callback, or after the second, the game stops (R15).
+- `EndRecording` takes the lock of the front end once, for `FrontEnd::recorded`.
+
+### Handles and slots
+
+A texture handle holds the texture id in bits 0 to 19 and the sampler id in bits 20 to 31. A nonzero id gets the pool base of the command buffer added. The bases are set by `nvnCommandBufferSetTexturePool` and `nvnCommandBufferSetSamplerPool`. A slot is `bank * 32 + index`. The banks are vertex 0, fragment 1, compute 2 and the others 3. The stages 6 and 7 map to 3 and 4. A uniform or storage buffer index of 16 or more stops the game.
+
+### State binds
+
+The group reads the guest state structs itself and writes the draw state patch into the record. The layouts that the patch relies on are in `cmdbuf/seam.rs`. They must agree with the writers of the state functions. These are unverified until a title runs.
+
+### Seam
+
+`cmdbuf::Seam` has `texture_pool_base`, `sampler_pool_base` and `texture_address`. `set_seam` installs it once. Without a seam every call that needs it stops the game (R15). The default `texture_address` takes the lock of the front end once per call. A texture group that stores the GPU address in the guest `NVNtexture` can replace it with a read that takes no lock.
+
+### Title needs
+
+`set_command_settings` takes `CommandSettings`. The host sets it from the needs of the title before the game runs. `ignore_null_stream_binds` is the need `vertex_stream_null_bind`. When it is set, a bind of one null range at a stream of 16 or more is ignored. Otherwise a stream of 16 or more stops the game.
+
+### Timestamps
+
+A report timestamp is read from `Settings.clock_ns` when the command is recorded. This is unverified against the real GPU clock.
+
 ## Queue state
 
 A queue keeps the state that its last submit left. The next submit on the same queue starts with that state, as on the GPU. `FrontEnd::submit_on(queue, handle)` takes the number of the queue. `nxkit-rt` uses the guest address of the `NVNqueue`. A queue that was not seen before starts with the default state. `drop_queue` forgets the state at `nvnQueueFinalize`.
@@ -149,7 +185,8 @@ Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below 
 ## Limits
 
 - The crate takes typed values. The raw guest arguments of an NVN call are read in `nxkit-rt`.
-- One lock holds the front end. A recording function takes it for one call. Several threads that record at the same time wait for each other. This is a cost on the hot path of the command buffer functions, and the number of waits is not measured.
+- One lock holds the front end. The command buffer functions do not take it on the hot path (R54). `EndRecording`, `AddCommandMemory`, the texture address lookup of the default seam and the queue and resource functions take it. Several threads that call these at the same time wait for each other, and the number of waits is not measured.
+- The extension records can make `GetCommandMemoryUsed` larger than on the console (R53). This is unverified.
 - A function that nxnative does not implement, and a sparse `nvnMemoryPoolMapVirtual` request, end the game with the name of the function. The `nvnDlss*` functions are in this group.
 - `nvnDeviceGetInteger` has no table for the Switch 2 device. The entry 0x5F is not checked against a source.
 - The host does not use the queue memory of a queue builder. It stores the sizes and the pointer.
@@ -167,7 +204,7 @@ Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below 
 - `nvnMultisampleStateSetSampleLocations` ignores the positions and logs the first call. The host does not use custom sample locations.
 - A pool range that is initialised again with another size or address keeps its old ids reserved. The ids of a pool are never given back.
 - The analysis counts a texture as one unit. It does not track mip levels or layers separately.
-- The memory callback of a command buffer runs under the lock of the front end. It must not call a function of `ctx::Gpu` that takes the lock.
+- The memory callback of a command buffer runs with no lock held. It may call the command buffer functions.
 
 ## Attribution
 
