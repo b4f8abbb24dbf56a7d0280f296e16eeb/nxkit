@@ -25,6 +25,7 @@ todo = "deny"
 nxb-model = { path = "crates/nxb-model" }
 nxkit-abi = { path = "crates/nxkit-abi" }
 nxkit-hos = { path = "crates/nxkit-hos" }
+nxkit-svc-system = { path = "crates/nxkit-svc-system" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }

@@ -92,7 +92,15 @@ pub struct Entry {
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
 pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
-    TABLE.get_or_init(offline::entries)
+    TABLE.get_or_init(|| {
+        let mut table = offline::entries();
+        table.extend(nxkit_svc_system::exports().into_iter().map(|e| Entry {
+            name: e.name,
+            service: Service::System,
+            addr: e.addr,
+        }));
+        table
+    })
 }
 
 /// The mask of enabled services. Zero before init.

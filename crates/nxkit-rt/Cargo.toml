@@ -16,6 +16,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 nxkit-hos = { workspace = true }
+nxkit-svc-system = { workspace = true }
 
 [dev-dependencies]
 nxtitle = { workspace = true }
