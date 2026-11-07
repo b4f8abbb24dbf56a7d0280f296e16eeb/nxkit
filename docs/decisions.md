@@ -1,7 +1,7 @@
 # Decisions
 
 This document records the architecture decisions and their causes. Part 1 has the workspace decisions W1 to W23.
-They apply where they are different from the two design proposals. Part 2 has the design decisions of the shader step and of the other stages. Part 3 has the runtime decisions R1 to R16.
+They apply where they are different from the two design proposals. Part 2 has the design decisions of the shader step and of the other stages. Part 3 has the runtime decisions R1 to R17.
 
 ## Principles
 
@@ -101,3 +101,4 @@ These decisions are for the nxkit host, which runs a game without nxnative. The 
 | R14 | A service answers at the level of the SDK functions. The loader writes the address of the nxkit function into the import table of the game's module. Other calls reach an IPC server in nxkit. | A call is then a plain branch. An IPC request costs a message write and a parse on each call. |
 | R15 | Nothing falls back in silence. A command the IPC server does not know stops the game with its name, service and command ID. | A silent fallback hides a missing service until a crash far from the cause. |
 | R16 | Measurement is part of the host from the start: CPU and GPU time of every frame, and the count of every IPC command. | Step H3 is done only when GPU time is at or below nxnative. That needs numbers from the first run. |
+| R17 | `nxkit-nvn` records into the game's own command memory. A record is never larger than the size real NVN reports through `GetCommandMemoryUsed`, and it holds guest GPU addresses directly. The analysis of a recording is kept for each handle and depends on the state it inherits from its caller. It is dropped when the game writes that command memory again. A frame is held until Present, or until the CPU waits for the GPU, and each early flush is counted. Then the passes are found and the frame is encoded. A recording the game reuses unchanged becomes a Metal indirect command buffer, once the limits of these buffers are measured against Breath of the Wild. | Breath of the Wild reuses the recorded commands of each model every frame and sizes them by `GetCommandMemoryUsed` (`dm/gfx/nvn/hle_nvn.c` near line 1023). nxnative translates a called recording again on every submit (`OP_CALL` in `mtl_exec`, `dm/gfx/nvn/nvn_mtl.m` near line 13655), checked on 2026-11-07. Native engines also describe a whole frame before they encode it (render graph). The load and store action of a pass needs the whole frame. |

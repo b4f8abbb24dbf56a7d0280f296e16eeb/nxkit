@@ -54,7 +54,7 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-The decisions of the host and their causes are R1 to R16 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+The decisions of the host and their causes are R1 to R17 in [decisions.md](../decisions.md#part-3-runtime-decisions).
 
 ## Apple hardware
 
@@ -93,6 +93,6 @@ The route is one save and one path through the game: the title screen, loading t
 
 ## Open questions
 
-- Which frame format does `nxkit-nvn` record, and how much of a frame does it hold before `nxkit-metal` encodes it?
+- Which state of a recording can a Metal indirect command buffer hold, and what stays outside it?
 - How does iOS load the host later? iOS has no `dlopen` of unsigned code, so the library is linked there.
 - Does Ocarina of Time move to the same host later? It is a family `agl` game on NVN2 with mesh shaders.
