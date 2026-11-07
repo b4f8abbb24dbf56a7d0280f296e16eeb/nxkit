@@ -20,7 +20,7 @@ The own shader front end is not byte-identical either. Its raw path is on by def
 | 9 | [translator.md](translator.md) | the Rust shader translator and its contract with the shader step |
 | 10 | [early-cutoff.md](early-cutoff.md) | the key scheme of each stage and the cost of a chain change |
 | 11 | [benchmarks.md](benchmarks.md) | measured and estimated timings |
-| 12 | [decisions.md](decisions.md) | architecture decisions W1 to W23, design decisions and runtime decisions R1 to R17 |
+| 12 | [decisions.md](decisions.md) | architecture decisions W1 to W23, design decisions and runtime decisions R1 to R50 |
 | 13 | [contributing-architecture.md](contributing-architecture.md) | rules for contributors |
 | 14 | [research/](research/README.md) | short notes on the studies behind the design |
 | 15 | [analysis/oot-open-issues.md](analysis/oot-open-issues.md) | the cause of three defects of one title on Apple GPUs |

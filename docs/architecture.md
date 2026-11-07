@@ -8,8 +8,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 - The repository is one Cargo workspace. The crates of the build are in `crates/`. The families and title modules are in `titles/` (refer to [titles.md](titles.md)). The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
 - `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `rewrite`, `profile`, `rewrite-rules`, `nro`, `shaders`, `app`, `ipa`, `sign`, `pso`, `archive`, `ios` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
-- The workspace uses the standard library only, with one exception. `nxkit-metal` and `nxkit-svc-input` use the `objc2` family of crates to bind Metal, GameController and Core Haptics on macOS. `deps.toml` lists them.
-- The workspace uses the standard library only, with one exception. `nxkit-metal` and `nxkit-host` use the `objc2` family of crates to bind Metal and AppKit on macOS. `deps.toml` lists them.
+- The workspace uses the standard library only, with one exception. `nxkit-metal`, `nxkit-svc-input` and `nxkit-host` use the `objc2` family of crates to bind Metal, GameController, Core Haptics and AppKit on macOS. `deps.toml` lists them.
 
 ## Layers
 
@@ -20,18 +19,9 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 ```mermaid
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
-  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile"]
+  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host)"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-rt (unsafe code, the C ABI of the host)"]
-  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile, nxkit-gpu (macOS only)"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host), nxkit-svc-video (unsafe code, the video service of the nxkit host)"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-svc-audio (unsafe only in its module sys, macOS audio), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
@@ -47,11 +37,7 @@ The rules:
 2. L1 does no I/O. Its crates are pure functions over bytes and text that return `Result`. L1 can call `nxb-sys` only for pure calculations.
 3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends. `nxb-nro` collects the NRO files of a game.
 4. L2 does not make output bytes of the shader step.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos`, `nxkit-svc-fs` and `nxkit-svc-offline` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos`, the module `sys` of `nxkit-svc-input` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-svc-video`, the module `sys` of `nxkit-hos` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos` and of `nxkit-svc-audio`, and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, the module `sys` of `nxkit-hos` and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
+5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-svc-video`, the module `sys` of `nxkit-hos`, of `nxkit-svc-fs`, of `nxkit-svc-offline`, of `nxkit-svc-input` and of `nxkit-svc-audio`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
@@ -101,12 +87,13 @@ The rules:
 | nxb-crypto, nxb-plist, nxb-hos, nxb-romfs, nxb-bundle, nxb-zip, nxb-pso | L1 | no | skel | pure domain logic. Some of it is in the stage crates at this time. |
 | nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports many container families (refer to [pipeline-stages.md](pipeline-stages.md)). Formats that are not ported stop with a named `Unsupported` error and exit code 4. |
 | nxkit-hos | L0 | no | impl | the Horizon kernel: objects, handles, events, threads, `WaitSynchronization`, the lock, condition variable and address arbiters, the process memory and its svcs, IPC sessions and the SDK take-overs of nxnative's kernel side. Guest memory and the host's pages sit behind traits, so the crate has no `unsafe` code outside `sys`. Refer to [nxkit-hos.md](nxkit-hos.md). It uses `nxkit-abi` and the standard library |
-| nxkit-hos | L0 | no | impl | the Horizon thread model: kernel objects, handles, events, threads, `WaitSynchronization` and the lock, condition variable and address arbiters. Guest memory sits behind a trait, so the crate has no `unsafe` code outside `sys`. It uses only the standard library |
 | nxkit-ipc | L0 | no | impl | the IPC server of the nxkit host: HIPC and CMIF parsing, domains, the service manager `sm:`, per-command counters and the stop on an unknown command. No `unsafe` code, no global lock on the request path |
 | nxkit-svc-fs | L0 | no | impl | the `fs` service: `fsp-srv` and its interfaces over IPC, the SDK-level `nn::fs` functions, the romfs through `mmap` and the save layout of nxnative. `unsafe` only in `sys` (`mmap`, `pread`, `clonefile`, `renamex_np`) |
 | nxkit-svc-offline | L0 | no | impl | the `offline` service: the answers for networking and peripherals the game cannot use here. `unsafe` only in `sys` |
 | nxkit-svc-video | L0 | no | impl | the `video` service: `movie::Decoder` and `nn::codec` video decoders for VP9 on VideoToolbox, with `CVPixelBuffer` frames and a `CVMetalTextureCache` path. Source only, not yet compiled or run |
+| nxkit-svc-input | L0 | no | impl | the `input` service: controllers, GameController and Core Haptics through `objc2`. `unsafe` only in `sys` |
 | nxkit-svc-audio | L0 | no | impl | the audio service of the nxkit host: SDK take-overs, `audout:u`, `audren:u`, `IAudioDevice`, and a mixer in the AUHAL callback (R41, R42). It is not compiled or tested yet |
+| nxkit-svc-pacing | L0 | no | impl | the `pacing` service: the `Pacer` for present intervals and the frame pace profile |
 | nxkit-host | L0 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
 | nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |
