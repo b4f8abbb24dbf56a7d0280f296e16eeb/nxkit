@@ -94,6 +94,11 @@ impl Kernel {
         self.system_events.find(event).map_or(0, |(_, id)| id)
     }
 
+    /// The write end handle of the binding of `event`, or 0 when it is not bound.
+    pub fn system_event_writable_handle(&self, event: u64) -> u32 {
+        self.system_events.find(event).map_or(0, |(w, _)| w)
+    }
+
     /// Signals the event of a binding from any thread. False when the binding is gone (the game destroyed the event
     /// or the handle is not valid any more).
     pub fn signal_system_event_binding(&self, id: u64) -> bool {

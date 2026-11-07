@@ -65,6 +65,8 @@ pub struct Config {
     pub process_exit: fn(u32),
     /// The process id that `GetProcessId` returns.
     pub process_id: u64,
+    /// Told the value of each handle that `CloseHandle` closed, after the kernel dropped it.
+    pub on_close: Option<fn(u32)>,
 }
 
 impl Default for Config {
@@ -86,6 +88,7 @@ impl Default for Config {
             },
             // Unverified: the process id of a title is not read anywhere. The SDK only passes it back.
             process_id: 0x80,
+            on_close: None,
         }
     }
 }
@@ -442,6 +445,9 @@ impl Kernel {
         let object = self.handles.remove(handle)?;
         self.system_events.unbind(handle);
         self.on_close(object);
+        if let Some(hook) = self.config.on_close {
+            hook(handle);
+        }
         Ok(())
     }
 
