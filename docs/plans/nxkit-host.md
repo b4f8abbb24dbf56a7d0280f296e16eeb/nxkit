@@ -58,6 +58,12 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 - The rewrite rules are nxkit's own. The core and the title module hold them.
 - `nxkit-host` owns the window. It uses AppKit and a `CAMetalLayer`.
 - Saves have the same layout as on nxnative, so a save moves between the two. If this costs speed, the layout changes.
+- Each guest thread is one macOS thread. The structure of the game's threads does not change.
+- There is no global lock. A guest lock waits on its own word in guest memory with `os_sync_wait_on_address` (macOS 14.4).
+- A thread's QoS class follows its role, not its Switch priority. The title module names the roles. Render and audio run at user-interactive, loading and streaming may run on the efficiency cores.
+- The core rules of Horizon (a thread runs before every lower priority thread of its core) are copied only where a game needs them. That is a fact of the family or the title, not the default.
+- nxkit's own work runs like a native game: a job system on the free cores, `os_workgroup` for the frame, and the GPU encoding of frame N while the game builds frame N+1.
+- If Breath of the Wild stays slow on the CPU after that, a patch of its thread structure for this game is the next step.
 - Measurement is part of the host from the start: CPU and GPU time of every frame, and the count of every IPC command.
 
 ## Apple hardware
@@ -98,7 +104,6 @@ The route is one save and one path through the game: the title screen, loading t
 ## Open questions
 
 - How does guest memory map to host memory and to GPU addresses?
-- How do guest threads map to host threads, and which QoS class does each get?
 - Which language binds Metal: Rust through `objc2-metal`, or a thin Objective-C layer?
 
 - Which frame format does `nxkit-nvn` record, and how much of a frame does it hold before `nxkit-metal` encodes it?
