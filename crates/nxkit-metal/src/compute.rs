@@ -10,6 +10,7 @@ use objc2_metal::{
     MTLOrigin, MTLSize, MTLStages,
 };
 
+use crate::barrier::{Dependency, Stages};
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::guest::GuestMemory;
@@ -54,6 +55,8 @@ pub enum ComputeCommand {
     WaitForEarlierPasses,
     /// Orders the later commands of this pass after the earlier ones.
     Barrier,
+    /// A barrier with explicit stages. The stages must be `DISPATCH` or `BLIT` on the side of this pass.
+    Depend(Dependency),
     /// Copies a texture to guest memory. This is the copy-back for a game that reads a render target.
     CopyTextureToGuest {
         /// The texture. It must have finished rendering in an earlier pass.
@@ -148,6 +151,7 @@ impl ComputePass<'_> {
                     MTLStages::Dispatch | MTLStages::Blit,
                     MTL4VisibilityOptions::Device,
                 ),
+            ComputeCommand::Depend(d) => d.encode(&*self.enc, Stages::DISPATCH | Stages::BLIT)?,
             ComputeCommand::CopyTextureToGuest {
                 texture,
                 guest,

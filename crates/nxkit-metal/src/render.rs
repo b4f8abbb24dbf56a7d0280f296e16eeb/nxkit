@@ -8,6 +8,7 @@ use objc2_metal::{
     MTLViewport,
 };
 
+use crate::barrier::{Dependency, Stages};
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::format::{IndexType, LoadAction, Primitive, StoreAction};
@@ -191,6 +192,8 @@ pub enum RenderCommand {
     },
     /// Orders this pass after the work of earlier passes of the command buffer.
     WaitForEarlierPasses,
+    /// A barrier with explicit stages. The stages must be `VERTEX` or `FRAGMENT` on the side of this pass.
+    Depend(Dependency),
     /// Draws primitives.
     Draw {
         /// The topology.
@@ -369,6 +372,7 @@ impl RenderPass<'_> {
             RenderCommand::SetDepthBounds { min, max } => {
                 self.enc.setDepthTestMinBound_maxBound(*min, *max)
             }
+            RenderCommand::Depend(d) => d.encode(&*self.enc, Stages::VERTEX | Stages::FRAGMENT)?,
             RenderCommand::WaitForEarlierPasses => self
                 .enc
                 .barrierAfterQueueStages_beforeStages_visibilityOptions(

@@ -642,3 +642,72 @@ fn blend_and_depth_state_change_the_result() {
             .all(|p| p == [0, 0, 255, 255])
     );
 }
+
+#[test]
+fn explicit_barrier_orders_a_copy_after_a_draw_and_checks_stages() {
+    use nxkit_metal::{Dependency, Stages, Use, Visibility};
+    let Some(ctx) = ctx() else { return };
+    let (w, h) = (32u32, 32u32);
+    let g = guest(&ctx, 2 * MIB);
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let lib = ShaderLibrary::from_source(&ctx, "draw", DRAW_MSL).unwrap();
+    let pipe = cache
+        .render(
+            40,
+            &RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]),
+        )
+        .unwrap();
+    let target = shared_target(&ctx, w, h);
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let desc = RenderPassDesc {
+        colors: vec![ColorAttachment {
+            texture: target.clone(),
+            load: LoadAction::Clear,
+            store: StoreAction::Store,
+            clear: [0.0; 4],
+            memoryless: false,
+        }],
+        ..Default::default()
+    };
+    let mut pass = frame.commands().begin_render_pass(&desc, &table).unwrap();
+    let blit = Dependency::between(Use::CopyWrite, Use::CopyRead);
+    assert!(pass.encode(&RenderCommand::Depend(blit)).is_err());
+    pass.encode(&RenderCommand::SetPipeline(pipe)).unwrap();
+    pass.encode(&RenderCommand::Draw {
+        primitive: Primitive::Triangle,
+        first_vertex: 0,
+        vertex_count: 3,
+        instance_count: 1,
+        base_instance: 0,
+    })
+    .unwrap();
+    pass.end();
+    let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
+    let dep = Dependency::between(Use::AttachmentWrite, Use::CopyRead);
+    assert_eq!(
+        (dep.after, dep.before, dep.visibility),
+        (Stages::FRAGMENT, Stages::BLIT, Visibility::Device)
+    );
+    pass.encode(&ComputeCommand::Depend(dep)).unwrap();
+    assert!(
+        pass.encode(&ComputeCommand::Depend(Dependency::between(
+            Use::AttachmentWrite,
+            Use::FragmentRead
+        )))
+        .is_err()
+    );
+    pass.encode(&ComputeCommand::CopyTextureToGuest {
+        texture: target,
+        guest: g.clone(),
+        offset: 0,
+        bytes_per_row: w * 4,
+    })
+    .unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    g.read(0, &mut out).unwrap();
+    assert!(out.chunks(4).all(|p| p == [255, 0, 0, 255]));
+}

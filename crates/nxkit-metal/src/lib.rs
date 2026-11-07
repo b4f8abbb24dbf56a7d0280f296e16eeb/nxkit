@@ -18,6 +18,7 @@
 #![cfg(target_os = "macos")]
 
 mod address;
+mod barrier;
 mod blocklinear;
 mod compute;
 mod deswizzle;
@@ -38,6 +39,7 @@ mod table;
 mod texture;
 
 pub use address::AddressMap;
+pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, Swizzler};
