@@ -12,8 +12,9 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSArray, NSURL};
 use objc2_metal::{
-    MTL4Compiler, MTL4CompilerDescriptor, MTL4CompilerTaskOptions, MTL4ComputePipelineDescriptor,
-    MTL4LibraryDescriptor, MTL4LibraryFunctionDescriptor, MTL4PipelineDataSetSerializer,
+    MTL4AlphaToCoverageState, MTL4Compiler, MTL4CompilerDescriptor, MTL4CompilerTaskOptions,
+    MTL4ComputePipelineDescriptor, MTL4IndirectCommandBufferSupportState, MTL4LibraryDescriptor,
+    MTL4LibraryFunctionDescriptor, MTL4PipelineDataSetSerializer,
     MTL4PipelineDataSetSerializerConfiguration, MTL4PipelineDataSetSerializerDescriptor,
     MTL4RenderPipelineDescriptor, MTLComputePipelineState, MTLDevice, MTLLibrary,
     MTLRenderPipelineState,
@@ -22,6 +23,7 @@ use objc2_metal::{
 use crate::device::{Context, RawCompiler, ns};
 use crate::error::{MetalError, Result, create};
 use crate::format::Format;
+use crate::state::{ColorTarget, TopologyClass, VertexDescriptor, check_sample_count};
 
 /// A compiled shader library.
 #[derive(Clone)]
@@ -101,15 +103,45 @@ pub struct RenderPipeline {
     pub(crate) raw: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
 }
 
-/// What a render pipeline needs. Blending, depth and the vertex layout come with the frame format later.
+/// What a render pipeline needs.
 #[derive(Clone)]
 pub struct RenderPipelineDesc<'a> {
     /// The library and function name of the vertex stage.
     pub vertex: (&'a ShaderLibrary, &'a str),
     /// The library and function name of the fragment stage, or none for a depth-only pipeline.
     pub fragment: Option<(&'a ShaderLibrary, &'a str)>,
-    /// The formats of the colour attachments, in order.
-    pub color_formats: Vec<Format>,
+    /// The colour attachments in order, with their blending.
+    pub colors: Vec<ColorTarget>,
+    /// The vertex input. Empty when the shader fetches its own vertices.
+    pub vertex_layout: VertexDescriptor,
+    /// The primitive class the pipeline draws.
+    pub topology: TopologyClass,
+    /// The samples per pixel: 1, 2, 4 or 8.
+    pub sample_count: u32,
+    /// Whether the fragment coverage comes from its alpha.
+    pub alpha_to_coverage: bool,
+    /// Whether an indirect command buffer may use the pipeline. Metal needs the flag at build time.
+    pub support_icb: bool,
+}
+
+impl<'a> RenderPipelineDesc<'a> {
+    /// A triangle pipeline without blending, vertex layout or multisampling.
+    pub fn new(
+        vertex: (&'a ShaderLibrary, &'a str),
+        fragment: Option<(&'a ShaderLibrary, &'a str)>,
+        color_formats: &[Format],
+    ) -> Self {
+        Self {
+            vertex,
+            fragment,
+            colors: color_formats.iter().map(|f| ColorTarget::new(*f)).collect(),
+            vertex_layout: VertexDescriptor::default(),
+            topology: TopologyClass::Triangle,
+            sample_count: 1,
+            alpha_to_coverage: false,
+            support_icb: false,
+        }
+    }
 }
 
 /// Where a pipeline cache reads and writes its archive.
@@ -212,11 +244,38 @@ impl PipelineCache {
             let ff = lib.function(name)?;
             d.setFragmentFunctionDescriptor(Some(&ff));
         }
+        check_sample_count(desc.sample_count)?;
+        if let Some(vd) = desc.vertex_layout.build() {
+            d.setVertexDescriptor(Some(&vd));
+        }
+        d.setInputPrimitiveTopology(desc.topology.to_mtl());
+        // SAFETY: the count was checked above and is a supported value.
+        unsafe { d.setRasterSampleCount(desc.sample_count as usize) };
+        d.setAlphaToCoverageState(if desc.alpha_to_coverage {
+            MTL4AlphaToCoverageState::Enabled
+        } else {
+            MTL4AlphaToCoverageState::Disabled
+        });
+        d.setSupportIndirectCommandBuffers(if desc.support_icb {
+            MTL4IndirectCommandBufferSupportState::Enabled
+        } else {
+            MTL4IndirectCommandBufferSupportState::Disabled
+        });
         let colors = d.colorAttachments();
-        for (i, f) in desc.color_formats.iter().enumerate() {
+        for (i, c) in desc.colors.iter().enumerate() {
             // SAFETY: the index is a plain attachment slot. Metal checks the limit when it compiles.
             let a = unsafe { colors.objectAtIndexedSubscript(i) };
-            a.setPixelFormat(f.to_mtl());
+            a.setPixelFormat(c.format.to_mtl());
+            a.setWriteMask(c.mask());
+            a.setBlendingState(c.blend_state());
+            if let Some(b) = &c.blend {
+                a.setSourceRGBBlendFactor(b.src_rgb.to_mtl());
+                a.setDestinationRGBBlendFactor(b.dst_rgb.to_mtl());
+                a.setRgbBlendOperation(b.op_rgb.to_mtl());
+                a.setSourceAlphaBlendFactor(b.src_alpha.to_mtl());
+                a.setDestinationAlphaBlendFactor(b.dst_alpha.to_mtl());
+                a.setAlphaBlendOperation(b.op_alpha.to_mtl());
+            }
         }
         let raw = self
             .compiler

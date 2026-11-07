@@ -23,6 +23,8 @@ pub enum Format {
     Rgba16Float,
     /// 32 bit float depth.
     Depth32Float,
+    /// 32 bit float depth with an 8 bit stencil.
+    Depth32FloatStencil8,
 }
 
 impl Format {
@@ -37,6 +39,7 @@ impl Format {
             Self::Bgra8Unorm => MTLPixelFormat::BGRA8Unorm,
             Self::Rgba16Float => MTLPixelFormat::RGBA16Float,
             Self::Depth32Float => MTLPixelFormat::Depth32Float,
+            Self::Depth32FloatStencil8 => MTLPixelFormat::Depth32Float_Stencil8,
         }
     }
 
@@ -46,14 +49,19 @@ impl Format {
             Self::R8Uint => 1,
             Self::R16Uint => 2,
             Self::R32Uint | Self::Rgba8Unorm | Self::Bgra8Unorm | Self::Depth32Float => 4,
-            Self::Rg32Uint | Self::Rgba16Float => 8,
+            Self::Rg32Uint | Self::Rgba16Float | Self::Depth32FloatStencil8 => 8,
             Self::Rgba32Uint => 16,
         }
     }
 
     /// True for a depth format.
     pub fn is_depth(self) -> bool {
-        self == Self::Depth32Float
+        matches!(self, Self::Depth32Float | Self::Depth32FloatStencil8)
+    }
+
+    /// True when the format has a stencil aspect.
+    pub fn has_stencil(self) -> bool {
+        self == Self::Depth32FloatStencil8
     }
 
     /// The unsigned integer format with the same pixel size, which the deswizzle kernel writes.

@@ -12,6 +12,7 @@ use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::format::{IndexType, LoadAction, Primitive, StoreAction};
 use crate::pipeline::RenderPipeline;
+use crate::state::{DepthBias, DepthClip, DepthStencilState, FillMode, Winding};
 use crate::table::ArgumentTable;
 use crate::texture::{Storage, Texture};
 
@@ -86,6 +87,21 @@ pub struct DepthAttachment {
     pub memoryless: bool,
 }
 
+/// The stencil attachment of a render pass. The texture is usually the depth texture of a combined format.
+#[derive(Clone)]
+pub struct StencilAttachment {
+    /// The texture.
+    pub texture: Texture,
+    /// The action at the start.
+    pub load: LoadAction,
+    /// The action at the end.
+    pub store: StoreAction,
+    /// The clear value, used with `LoadAction::Clear`.
+    pub clear: u32,
+    /// True when the texture is memoryless.
+    pub memoryless: bool,
+}
+
 /// The attachments of a render pass.
 #[derive(Clone, Default)]
 pub struct RenderPassDesc {
@@ -93,6 +109,8 @@ pub struct RenderPassDesc {
     pub colors: Vec<ColorAttachment>,
     /// The depth attachment.
     pub depth: Option<DepthAttachment>,
+    /// The stencil attachment.
+    pub stencil: Option<StencilAttachment>,
 }
 
 fn check_attachment(
@@ -145,6 +163,32 @@ pub enum RenderCommand {
     SetScissor(Scissor),
     /// Sets the cull mode.
     SetCullMode(CullMode),
+    /// Binds a depth and stencil state.
+    SetDepthStencil(DepthStencilState),
+    /// Sets which winding order is a front face.
+    SetWinding(Winding),
+    /// Sets how triangles are filled.
+    SetFillMode(FillMode),
+    /// Sets the depth bias.
+    SetDepthBias(DepthBias),
+    /// Sets whether fragments outside the depth range are clipped or clamped.
+    SetDepthClip(DepthClip),
+    /// Sets the stencil reference values of front and back faces.
+    SetStencilRef {
+        /// The value for front faces.
+        front: u32,
+        /// The value for back faces.
+        back: u32,
+    },
+    /// Sets the constant blend colour.
+    SetBlendColor([f32; 4]),
+    /// Sets the depth bounds test range.
+    SetDepthBounds {
+        /// The lower bound.
+        min: f32,
+        /// The upper bound.
+        max: f32,
+    },
     /// Orders this pass after the work of earlier passes of the command buffer.
     WaitForEarlierPasses,
     /// Draws primitives.
@@ -220,6 +264,20 @@ impl CommandBuffer {
             a.setClearDepth(d.clear);
             self.retain(d.texture.clone());
         }
+        if let Some(d) = &desc.stencil {
+            check_attachment(&d.texture, d.load, d.store, d.memoryless)?;
+            if !d.texture.desc().format.has_stencil() {
+                return Err(MetalError::Invalid(
+                    "the stencil texture has no stencil aspect",
+                ));
+            }
+            let a = rp.stencilAttachment();
+            a.setTexture(Some(d.texture.raw()));
+            a.setLoadAction(d.load.to_mtl());
+            a.setStoreAction(d.store.to_mtl());
+            a.setClearStencil(d.clear);
+            self.retain(d.texture.clone());
+        }
         let td = first.desc();
         rp.setRenderTargetWidth(td.width as usize);
         rp.setRenderTargetHeight(td.height as usize);
@@ -291,6 +349,26 @@ impl RenderPass<'_> {
                 CullMode::Front => MTLCullMode::Front,
                 CullMode::Back => MTLCullMode::Back,
             }),
+            RenderCommand::SetDepthStencil(d) => {
+                self.enc.setDepthStencilState(Some(&d.raw));
+                self.cb.retain(d.clone());
+            }
+            RenderCommand::SetWinding(w) => self.enc.setFrontFacingWinding(w.to_mtl()),
+            RenderCommand::SetFillMode(f) => self.enc.setTriangleFillMode(f.to_mtl()),
+            RenderCommand::SetDepthBias(b) => {
+                self.enc
+                    .setDepthBias_slopeScale_clamp(b.constant, b.slope_scale, b.clamp)
+            }
+            RenderCommand::SetDepthClip(c) => self.enc.setDepthClipMode(c.to_mtl()),
+            RenderCommand::SetStencilRef { front, back } => self
+                .enc
+                .setStencilFrontReferenceValue_backReferenceValue(*front, *back),
+            RenderCommand::SetBlendColor(c) => self
+                .enc
+                .setBlendColorRed_green_blue_alpha(c[0], c[1], c[2], c[3]),
+            RenderCommand::SetDepthBounds { min, max } => {
+                self.enc.setDepthTestMinBound_maxBound(*min, *max)
+            }
             RenderCommand::WaitForEarlierPasses => self
                 .enc
                 .barrierAfterQueueStages_beforeStages_visibilityOptions(

@@ -31,6 +31,7 @@ mod pipeline;
 mod present;
 mod render;
 mod scratch;
+mod state;
 mod table;
 mod texture;
 
@@ -51,8 +52,13 @@ pub use pipeline::{
 pub use present::{Drawable, PRESENT_FORMAT, Presenter};
 pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
-    Viewport,
+    StencilAttachment, Viewport,
 };
 pub use scratch::{SCRATCH_ALIGN, Scratch};
+pub use state::{
+    BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, DepthBias, DepthClip,
+    DepthStencilDesc, DepthStencilState, FillMode, StencilFace, StencilOp, StepFunction,
+    TopologyClass, VertexAttribute, VertexDescriptor, VertexFormat, VertexLayout, Winding,
+};
 pub use table::ArgumentTable;
 pub use texture::{Storage, Texture, TextureDesc};

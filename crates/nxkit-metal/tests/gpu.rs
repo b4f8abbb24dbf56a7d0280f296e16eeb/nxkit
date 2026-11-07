@@ -371,11 +371,7 @@ fn render_clear_and_draw_then_copy_back_to_guest() {
     let pipe = cache
         .render(
             20,
-            &RenderPipelineDesc {
-                vertex: (&lib, "vs"),
-                fragment: Some((&lib, "fs")),
-                color_formats: vec![Format::Rgba8Unorm],
-            },
+            &RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]),
         )
         .unwrap();
     let clear_only = shared_target(&ctx, w, h);
@@ -392,6 +388,7 @@ fn render_clear_and_draw_then_copy_back_to_guest() {
             memoryless: false,
         }],
         depth: None,
+        stencil: None,
     };
     frame
         .commands()
@@ -457,6 +454,7 @@ fn memoryless_attachment_that_stores_is_refused() {
             memoryless: true,
         }],
         depth: None,
+        stencil: None,
     };
     assert!(frame.commands().begin_render_pass(&bad, &table).is_err());
 }
@@ -525,6 +523,7 @@ fn offscreen_drawable_is_presented() {
                 memoryless: false,
             }],
             depth: None,
+            stencil: None,
         };
         frame
             .commands()
@@ -535,4 +534,111 @@ fn offscreen_drawable_is_presented() {
         let stats = frame.submit().unwrap().wait().unwrap();
         assert!(!stats.failed);
     }
+}
+
+const BLEND_MSL: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+struct V { float4 pos [[position]]; };
+vertex V vs(uint id [[vertex_id]]) {
+    float2 p = float2((id << 1) & 2, id & 2);
+    V v; v.pos = float4(p * 2.0 - 1.0, 0.0, 1.0); return v;
+}
+fragment float4 fs(V in [[stage_in]]) { return float4(1.0, 0.0, 0.0, 0.5); }
+"#;
+
+#[test]
+fn blend_and_depth_state_change_the_result() {
+    use nxkit_metal::{
+        BlendState, ColorTarget, CompareFn, DepthAttachment, DepthStencilDesc, DepthStencilState,
+    };
+    let Some(ctx) = ctx() else { return };
+    let (w, h) = (16u32, 16u32);
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let lib = ShaderLibrary::from_source(&ctx, "blend", BLEND_MSL).unwrap();
+    let mut desc = RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]);
+    desc.colors = vec![ColorTarget::new(Format::Rgba8Unorm).with_blend(BlendState::ALPHA)];
+    let pipe = cache.render(30, &desc).unwrap();
+    let blended = shared_target(&ctx, w, h);
+    let rejected = shared_target(&ctx, w, h);
+    let depth = Texture::new(
+        &ctx,
+        TextureDesc::render_target_2d(w, h, Format::Depth32Float),
+    )
+    .unwrap();
+    let test = DepthStencilState::new(
+        &ctx,
+        &DepthStencilDesc {
+            depth_compare: CompareFn::Less,
+            depth_write: true,
+            ..DepthStencilDesc::OFF
+        },
+    )
+    .unwrap();
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let draw = RenderCommand::Draw {
+        primitive: Primitive::Triangle,
+        first_vertex: 0,
+        vertex_count: 3,
+        instance_count: 1,
+        base_instance: 0,
+    };
+    let colors = |t: &Texture| {
+        vec![ColorAttachment {
+            texture: t.clone(),
+            load: LoadAction::Clear,
+            store: StoreAction::Store,
+            clear: [0.0, 0.0, 1.0, 1.0],
+            memoryless: false,
+        }]
+    };
+    let mut pass = frame
+        .commands()
+        .begin_render_pass(
+            &RenderPassDesc {
+                colors: colors(&blended),
+                ..Default::default()
+            },
+            &table,
+        )
+        .unwrap();
+    pass.encode(&RenderCommand::SetPipeline(pipe.clone()))
+        .unwrap();
+    pass.encode(&draw).unwrap();
+    pass.end();
+    // The depth is cleared to 0, so a fragment at depth 0 fails the `Less` test.
+    let mut pass = frame
+        .commands()
+        .begin_render_pass(
+            &RenderPassDesc {
+                colors: colors(&rejected),
+                depth: Some(DepthAttachment {
+                    texture: depth,
+                    load: LoadAction::Clear,
+                    store: StoreAction::DontCare,
+                    clear: 0.0,
+                    memoryless: false,
+                }),
+                stencil: None,
+            },
+            &table,
+        )
+        .unwrap();
+    pass.encode(&RenderCommand::SetPipeline(pipe)).unwrap();
+    pass.encode(&RenderCommand::SetDepthStencil(test)).unwrap();
+    pass.encode(&draw).unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    let b = pixels(&blended, w, h);
+    assert!(
+        b.chunks(4)
+            .all(|p| p[0].abs_diff(128) <= 1 && p[2].abs_diff(128) <= 1)
+    );
+    assert!(
+        pixels(&rejected, w, h)
+            .chunks(4)
+            .all(|p| p == [0, 0, 255, 255])
+    );
 }
