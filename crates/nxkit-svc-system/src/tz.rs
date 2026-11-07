@@ -62,7 +62,7 @@ pub(crate) fn calendar(posix: i64) -> Option<[u8; CALENDAR_LEN]> {
     b[6] = u8::try_from(tm.second).ok()?;
     b[8..12].copy_from_slice(&tm.wday.to_le_bytes());
     b[12..16].copy_from_slice(&tm.yday.to_le_bytes());
-    b[16..24].copy_from_slice(&padded::<8>(&tm.zone));
+    b[16..24].copy_from_slice(&tm.zone);
     b[24..28].copy_from_slice(&u32::from(tm.dst).to_le_bytes());
     b[28..32].copy_from_slice(&tm.offset.to_le_bytes());
     Some(b)

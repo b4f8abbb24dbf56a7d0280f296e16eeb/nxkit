@@ -1,0 +1,21 @@
+[package]
+name = "nxgame-acnh"
+description = "The title module of Animal Crossing: New Horizons for Nintendo Switch (01006F8002326000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+
+[lints]
+workspace = true

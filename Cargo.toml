@@ -31,6 +31,7 @@ nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }
 nxgame-oot = { path = "titles/games/0400486024DEC000" }
 nxgame-botw = { path = "titles/games/01007EF00011E000" }
+nxgame-acnh = { path = "titles/games/01006F8002326000" }
 nxb-error = { path = "crates/nxb-error" }
 nxb-sys = { path = "crates/nxb-sys" }
 nxb-pyjson = { path = "crates/nxb-pyjson" }

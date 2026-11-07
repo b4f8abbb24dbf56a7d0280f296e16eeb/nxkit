@@ -183,4 +183,20 @@ impl Resolved {
     pub fn pacing(&self) -> Option<Fact<Pacing>> {
         self.runtime_hooks().find_map(|h| h.pacing())
     }
+
+    /// Whether the game decodes the shared font with `ScalableFontEngineHelper::Decode`. The title's answer, then the
+    /// family's.
+    pub fn shared_font_decode(&self) -> Option<Fact<bool>> {
+        self.runtime_hooks().find_map(|h| h.shared_font_decode())
+    }
+
+    /// The services the game opens through `nn::sf::hipc`, of the family and then the title.
+    pub fn sf_services(&self) -> Vec<Fact<&'static str>> {
+        let hooks: Vec<_> = self.runtime_hooks().collect();
+        hooks
+            .into_iter()
+            .rev()
+            .flat_map(|h| h.sf_services().iter().copied())
+            .collect()
+    }
 }

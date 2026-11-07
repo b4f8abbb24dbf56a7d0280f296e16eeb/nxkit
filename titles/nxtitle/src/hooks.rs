@@ -124,4 +124,14 @@ pub trait RuntimeHooks: Sync {
     fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
         None
     }
+    /// Whether the game decodes the shared font with `ScalableFontEngineHelper::Decode` and so expects the BFTTF
+    /// header at the font address, not the TTF behind it.
+    fn shared_font_decode(&self) -> Option<Fact<bool>> {
+        None
+    }
+    /// The services the game opens through `nn::sf::hipc` that the host answers with zeroed output (service names of
+    /// at most 8 bytes). Lists of all layers add up.
+    fn sf_services(&self) -> &'static [Fact<&'static str>] {
+        &[]
+    }
 }

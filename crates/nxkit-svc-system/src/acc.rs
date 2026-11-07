@@ -3,7 +3,7 @@
 //!
 //! IDs and layouts are from libnx `acc.c` and switchbrew `Account services`. The values follow nxnative
 //! `dm/host/hle_account.c`:
-//! - One local user with the uid [`UID`]. The nickname is `Config::nickname` (`DM_NICK`, default `Player`).
+//! - One local user with the uid [`UID`]. The nickname is `Config::nickname`.
 //! - The profile image is the plain 256x256 JPEG of nxnative (`k_profile_jpeg`, 670 bytes).
 //! - Every online call fails with `RES_FAIL` (the network service account is out of scope).
 //! - Save data thumbnails are accepted and dropped.
@@ -64,7 +64,7 @@ const JPEG_ZEROS: usize = 382;
 const JPEG_TAIL: [u8; 3] = [0x3f, 0xff, 0xd9];
 
 /// The profile image.
-fn profile_jpeg() -> Vec<u8> {
+pub(crate) fn profile_jpeg() -> Vec<u8> {
     let mut v = Vec::with_capacity(JPEG_HEAD.len() + JPEG_ZEROS + JPEG_TAIL.len());
     v.extend_from_slice(&JPEG_HEAD);
     v.resize(JPEG_HEAD.len() + JPEG_ZEROS, 0);

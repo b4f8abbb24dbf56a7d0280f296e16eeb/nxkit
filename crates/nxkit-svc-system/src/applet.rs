@@ -124,9 +124,9 @@ impl Service for CommonStateGetter {
             5 => rsp.push_bytes(&[s.operation_mode() as u8]),
             6 => rsp.push_u32(s.performance_mode()),
             8 | 50 => rsp.push_bytes(&[0]),
-            9 => rsp.push_bytes(&[s.with(|i| i.focus) as u8]),
+            9 => rsp.push_bytes(&[s.seen_focus()]),
             60 => {
-                let (w, h) = if s.with(|i| i.handheld) {
+                let (w, h) = if s.is_handheld() {
                     (1280u32, 720u32)
                 } else {
                     (1920, 1080)

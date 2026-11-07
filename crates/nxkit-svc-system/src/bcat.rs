@@ -8,8 +8,8 @@
 //! (10100, 10101, 20100, 20101, 20300, 20301, 20400, 20401, 20410 and 20500) fail with `RES_FAIL`.
 //! `IDeliveryCacheStorageService` fails 0, 1 and 10, so the game sees an empty delivery cache that cannot be mounted.
 //!
-//! `aoc:u` (`nn::aoc::IAddOnContentManager`): nxnative counts add-on content in a directory of the host, and this host
-//! has none (`dm/host/hle_fs.c`, `MountAddOnContent` with `DM_AOC_DIR`). IDs are from switchbrew `NS` (the `aoc:u` table).
+//! `aoc:u` (`nn::aoc::IAddOnContentManager`): nxnative counts add-on content in a directory of the host, and this
+//! service has none (`dm/host/hle_fs.c`, `MountAddOnContent`). IDs are from switchbrew `NS` (the `aoc:u` table).
 //! 2 `CountAddOnContent` and 3 `ListAddOnContent` give 0, 5 `GetAddOnContentBaseId` gives 0, 7 `PrepareAddOnContent` is
 //! accepted, 8 and 10 (the list changed event) give an event that is never signalled and 9
 //! `GetAddOnContentLostErrorCode` gives 0.

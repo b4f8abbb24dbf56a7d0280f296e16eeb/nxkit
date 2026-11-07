@@ -2,7 +2,7 @@
 //!
 //! Command IDs are from switchbrew `Time services` and libnx `time.c`. The values follow nxnative
 //! (`dm/host/hle_time.c`):
-//! - The user clock is the clock of the host. `Config::fixed_time` pins its start (`DM_FIXED_TIME` of nxnative).
+//! - The user clock is the clock of the host. `Config::fixed_time` pins its start.
 //! - The steady clock is the monotonic clock of the host in seconds, with the source ID [`STEADY_ID`].
 //! - The network clock is offline and never accurate. Its context is zero and `GetCurrentTime` fails.
 //! - The user clock context is `{s64 offset, steady time point}`. It is renewed only when the host clock drifts more
@@ -35,11 +35,20 @@ const MEM_SIZE: u64 = 0x1000;
 const STEADY_OFFSET: u64 = 0x00;
 const USER_OFFSET: u64 = 0x38;
 const NETWORK_OFFSET: u64 = 0x80;
-const SNAPSHOT_LEN: usize = 0xD0;
+pub(crate) const SNAPSHOT_LEN: usize = 0xD0;
 
 /// The steady clock in seconds.
-fn steady_secs() -> i64 {
+pub(crate) fn steady_secs() -> i64 {
     i64::try_from(sys::monotonic_ns() / 1_000_000_000).unwrap_or(0)
+}
+
+/// The time of the host clock in seconds since the epoch.
+pub(crate) fn real_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0)
 }
 
 /// The time of the user clock in seconds since the epoch.
@@ -47,16 +56,12 @@ pub(crate) fn user_now() -> i64 {
     static START: OnceLock<i64> = OnceLock::new();
     match config().fixed_time {
         Some(fixed) => fixed + steady_secs() - *START.get_or_init(steady_secs),
-        None => std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .and_then(|d| i64::try_from(d.as_secs()).ok())
-            .unwrap_or(0),
+        None => real_now(),
     }
 }
 
 /// A steady time point, `{s64 seconds, uuid}`.
-fn steady_point() -> [u8; 0x18] {
+pub(crate) fn steady_point() -> [u8; 0x18] {
     let mut b = [0u8; 0x18];
     b[..8].copy_from_slice(&steady_secs().to_le_bytes());
     b[8..].copy_from_slice(&STEADY_ID);
@@ -187,7 +192,7 @@ impl Service for SteadyClock {
 }
 
 /// The 0xD0 bytes of `nn::time::sf::ClockSnapshot` for the user clock of the host and an offline network clock.
-fn snapshot(clock_type: u8) -> Option<[u8; SNAPSHOT_LEN]> {
+pub(crate) fn snapshot(clock_type: u8) -> Option<[u8; SNAPSHOT_LEN]> {
     let now = user_now();
     let cal = tz::calendar(now)?;
     let mut b = [0u8; SNAPSHOT_LEN];

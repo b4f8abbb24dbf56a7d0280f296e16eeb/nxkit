@@ -100,6 +100,17 @@ switchbrew wiki, and no code is copied from them.
 | `src/nifm.rs`, `src/ssl.rs` | `dm/host/hle_net.c`: the offline network request and the TLS context |
 | `src/friend.rs`, `src/lm.rs` (prepo), `src/bcat.rs` | `dm/host/hle_offline.c` and `dm/host/hle_friends.c`: the offline friends, telemetry and BCAT answers |
 | `src/bcat.rs` (aoc) | `dm/host/hle_fs.c`: the add-on content mount |
+| `src/event.rs`, `src/seams.rs`, `src/sdk/mod.rs` | `dm/host/hle.h`, `dm/host/hle_sdk16.c`: the calling convention of a take-over, the guest event creation and the guest symbol lookup |
+| `src/sdk/init.rs` | `dm/host/hle_sdkinit.c`: the SDK module init |
+| `src/sdk/oe.rs`, `src/sdk/oe_state.rs`, `src/sdk/sdk16.rs`, `src/sdk/settings.rs`, `src/sdk/diag.rs`, `src/sdk/nfp.rs`, `src/sdk/font.rs` | `dm/host/hle_oe.c` and `dm/host/hle_sdk16.c`: the `nn::oe` functions, the message queue, the settings, the diag log, the NFC library and the shared font |
+| `src/sdk/account.rs`, `src/sdk/time.rs`, `src/sdk/friends.rs` | `dm/host/hle_account.c`, `dm/host/hle_time.c`, `dm/host/hle_friends.c` |
+| `src/sdk/mii.rs`, `src/sdk/swkbd.rs`, `src/sdk/web.rs` | `dm/host/hle_mii.c`, `dm/host/hle_swkbd.c`, `dm/host/hle_web.c` |
+| `src/sdk/misc.rs`, `src/sdk/aoc.rs`, `src/sdk/shop.rs`, `src/sdk/ngc.rs`, `src/sdk/stpl.rs`, `src/sdk/chat.rs` | `dm/host/hle_misc.c`: the add-on content, the shop, the error applet, the word filter, the nsd, the pctl and the GameChat answers |
+| `src/sdk/net.rs`, `src/sdk/socket.rs` | `dm/host/hle_net.c`: the names that `nxkit-rt` offline does not list, and the event file descriptors |
+| `src/sdk/ro.rs`, `src/sdk/sf.rs`, `src/sdk/nvdrv.rs`, `src/sdk/codec.rs` | `dm/host/hle_ro.c`, `dm/host/hle_sf.c`, `dm/host/hle_nvdrv.c`, `dm/host/hle_codec.c` |
+| `src/sdk/lifecycle.rs` | `dm/host/hle_lifecycle.c`: the graceful exit |
+
+The title modules `nxgame-botw` and `nxgame-acnh` hold two facts from `dm/host/hle_sdk16.c` and `dm/host/hle_sf.c`: the shared font form and the `nn::sf::hipc` service names.
 
 ## NVN front end ported from nxnative
 
