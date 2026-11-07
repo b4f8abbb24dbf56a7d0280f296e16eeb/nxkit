@@ -127,7 +127,8 @@ impl FrameInterpolator {
                 "the device does not support it with Metal 4",
             ));
         }
-        let d = MTLFXFrameInterpolatorDescriptor::new();
+        // SAFETY: `new` makes a fresh descriptor.
+        let d = unsafe { MTLFXFrameInterpolatorDescriptor::new() };
         // SAFETY: the descriptor is a fresh object that nothing else uses. The sizes are not zero.
         unsafe {
             d.setColorTextureFormat(desc.color.to_mtl());

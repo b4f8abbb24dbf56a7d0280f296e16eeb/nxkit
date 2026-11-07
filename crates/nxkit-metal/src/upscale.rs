@@ -69,7 +69,8 @@ impl SpatialUpscaler {
                 "the device does not support it with Metal 4",
             ));
         }
-        let d = MTLFXSpatialScalerDescriptor::new();
+        // SAFETY: `new` makes a fresh descriptor.
+        let d = unsafe { MTLFXSpatialScalerDescriptor::new() };
         let mode = if desc.linear {
             MTLFXSpatialScalerColorProcessingMode::Linear
         } else {
