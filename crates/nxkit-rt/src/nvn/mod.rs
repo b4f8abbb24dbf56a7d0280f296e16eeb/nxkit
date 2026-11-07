@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn every_group_that_has_a_row_exports_exactly_that_row() {
-        let groups: [(&str, Vec<(&str, usize)>); 8] = [
+        let groups: [(&str, Vec<(&str, usize)>); 11] = [
             ("device", device::procs()),
             ("queue", queue::procs()),
             ("sync", sync::procs()),
@@ -264,6 +264,9 @@ mod tests {
             ("window", window::procs()),
             ("event", event::procs()),
             ("program", program::procs()),
+            ("texture", texture::procs()),
+            ("sampler", sampler::procs()),
+            ("state", state::procs()),
         ];
         for (group, got) in groups {
             let mut got: Vec<&str> = got.iter().map(|(n, _)| *n).collect();
