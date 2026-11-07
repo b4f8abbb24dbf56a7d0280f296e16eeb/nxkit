@@ -6,7 +6,7 @@
 | Game | The Legend of Zelda: Breath of the Wild (`01007EF00011E000`), update 1.9.0 (v1114112) |
 | Platform | Mac first |
 | Builds on | [runtime-hooks.md](runtime-hooks.md), part B |
-| Status | H1 (the `nxkit-host` program) written, not yet run with the game |
+| Status | H1 (the `nxkit-host` program) written and aligned with the build output (third segment, slide, relocations, `settings`, `aoc`), not yet run with the game. The seams in `crates/nxkit-host/src/seams.rs` are open |
 
 ## Goal
 
