@@ -16,6 +16,7 @@ pub struct Recorder {
     stream: CmdStream,
     targets: RtSet,
     scissor_full: bool,
+    state: DrawState,
     textures: [Option<TexId>; MAX_BINDINGS],
     images: [Option<TexId>; MAX_BINDINGS],
     texture_list: Option<Span>,
@@ -29,6 +30,10 @@ impl Default for Recorder {
             stream: CmdStream::new(),
             targets: RtSet::default(),
             scissor_full: true,
+            state: DrawState {
+                color_write: 0xff,
+                ..DrawState::default()
+            },
             textures: [None; MAX_BINDINGS],
             images: [None; MAX_BINDINGS],
             texture_list: None,
@@ -63,6 +68,10 @@ impl Recorder {
         self.stream.clear();
         self.targets = RtSet::default();
         self.scissor_full = true;
+        self.state = DrawState {
+            color_write: 0xff,
+            ..DrawState::default()
+        };
         self.textures = [None; MAX_BINDINGS];
         self.images = [None; MAX_BINDINGS];
         self.texture_list = None;
@@ -89,21 +98,21 @@ impl Recorder {
 
     /// Binds a texture for sampling in a slot, or unbinds it.
     pub fn bind_texture(&mut self, slot: usize, tex: Option<TexId>) {
-        if let Some(s) = self.textures.get_mut(slot) {
-            if *s != tex {
-                *s = tex;
-                self.texture_list = None;
-            }
+        if let Some(s) = self.textures.get_mut(slot)
+            && *s != tex
+        {
+            *s = tex;
+            self.texture_list = None;
         }
     }
 
     /// Binds an image for load and store in a slot, or unbinds it.
     pub fn bind_image(&mut self, slot: usize, tex: Option<TexId>) {
-        if let Some(s) = self.images.get_mut(slot) {
-            if *s != tex {
-                *s = tex;
-                self.image_list = None;
-            }
+        if let Some(s) = self.images.get_mut(slot)
+            && *s != tex
+        {
+            *s = tex;
+            self.image_list = None;
         }
     }
 
@@ -135,6 +144,16 @@ impl Recorder {
         let s = self.stream.push_list(&self.scratch);
         self.texture_list = Some(s);
         s
+    }
+
+    /// The state that the next `draw_now` uses. The NVN bind calls for blend, colour, channel mask and depth state set it.
+    pub fn state_mut(&mut self) -> &mut DrawState {
+        &mut self.state
+    }
+
+    /// A draw with the current state. This is what `nvnCommandBufferDrawArrays` and its relatives record.
+    pub fn draw_now(&mut self) {
+        self.draw(self.state);
     }
 
     /// A draw. The textures that are bound now are its reads.
@@ -204,6 +223,20 @@ mod tests {
         r.bind_texture(1, Some(TexId(6)));
         r.draw(DrawState::default());
         assert_eq!(r.stream().lists, [TexId(5), TexId(5), TexId(6)]);
+    }
+
+    #[test]
+    fn draw_now_uses_the_state_that_was_set() {
+        let mut r = Recorder::new();
+        r.state_mut().blend = true;
+        r.state_mut().color_write = 1;
+        r.draw_now();
+        let Cmd::Draw { state, .. } = r.stream().cmds[0] else {
+            panic!()
+        };
+        assert!(state.blend && state.color_write == 1);
+        r.begin();
+        assert_eq!(r.state_mut().color_write, 0xff);
     }
 
     #[test]
