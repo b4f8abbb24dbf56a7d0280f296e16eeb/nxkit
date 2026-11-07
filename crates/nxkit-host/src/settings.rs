@@ -34,6 +34,7 @@ const TYPED: &[&str] = &[
     "tex_dirty_upload",
     "tex_dyn_slots",
     "render_cond",
+    "vertex_stream_null_bind",
     "vconv_range",
     "gpu_ts_segment",
     "draw_barriers_game",
@@ -87,6 +88,8 @@ pub struct Settings {
     pub tex_dyn_slots: bool,
     /// Whether conditional rendering is on.
     pub render_cond: bool,
+    /// Whether the command buffer ignores a bind of one null range at a vertex stream of 16 or more.
+    pub vertex_stream_null_bind: bool,
     /// Whether the vertex conversion keeps the range.
     pub vconv_range: bool,
     /// Whether GPU timestamps segment the frame.
@@ -199,6 +202,7 @@ impl Settings {
             tex_dirty_upload: flag(v, "tex_dirty_upload")?,
             tex_dyn_slots: flag(v, "tex_dyn_slots")?,
             render_cond: flag(v, "render_cond")?,
+            vertex_stream_null_bind: flag(v, "vertex_stream_null_bind")?,
             vconv_range: flag(v, "vconv_range")?,
             gpu_ts_segment: flag(v, "gpu_ts_segment")?,
             draw_barriers_game: flag(v, "draw_barriers_game")?,
@@ -243,7 +247,7 @@ pub(crate) mod samples {
         "core_preempt": true, "present_display": false, "fps_target": 30, "fps_max": 60, "fps_hold": false,
         "present_snap": true, "pso_mtl4": true, "enc_thread": false, "screen_aspect": false,
         "pad_layout": "nintendo", "op_mode": "docked", "perf_boost": false, "tex_flush_upload": false, "tex_dirty_upload": false,
-        "tex_dyn_slots": false, "render_cond": false, "vconv_range": false, "gpu_ts_segment": false, "draw_barriers_game": false,
+        "tex_dyn_slots": false, "render_cond": false, "vertex_stream_null_bind": false, "vconv_range": false, "gpu_ts_segment": false, "draw_barriers_game": false,
         "shader_key_skip": {"offset": 8, "length": 4}, "upscaler_keys": ["k"], "nvn_api": {"major": 53, "minor": 12}, "engine_key": 1}"#;
 }
 

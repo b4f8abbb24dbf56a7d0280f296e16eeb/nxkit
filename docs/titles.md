@@ -31,7 +31,7 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `shader_role` | `BuildHooks` | what a shader does for the frame, for example the game's own upscaler |
 | `seeds` | `BuildHooks` | shaders to prepare before the first frame |
 | `rewrite_rules` | `BuildHooks` | rewriter rules as TOML text |
-| `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting |
+| `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting. `nxb build` writes the need `vertex_stream_null_bind` with the setting `ignore` as the key of that name in `settings` of `game.json`. |
 | `upscaler` | `RuntimeHooks` | keep the game's upscaler, render at the output size, or use MetalFX |
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
 | `pace_profile` | `RuntimeHooks` | the keys that steer the frame step and the presents |

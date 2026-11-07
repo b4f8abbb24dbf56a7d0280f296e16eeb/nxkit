@@ -65,6 +65,8 @@ struct Game {
     st: Standalone,
     rules: &'static str,
     services: Vec<&'static str>,
+    /// The title needs the command buffer to ignore a bind of one null range at a stream of 16 or more.
+    vertex_stream_null_bind: bool,
 }
 
 /// The title module of the input's game, `None` when the game has no module or has no data for this build.
@@ -84,6 +86,10 @@ fn module(src: &Inputs, program: u64) -> Result<Option<Game>, String> {
         st,
         rules,
         services: r.nxkit_services().into_iter().map(nxtitle::Service::id).collect(),
+        vertex_stream_null_bind: r
+            .needs()
+            .iter()
+            .any(|n| n.value.capability == "vertex_stream_null_bind" && n.value.setting == "ignore"),
     }))
 }
 
@@ -336,6 +342,7 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
             main_thread,
             aoc: &aoc,
             settings: t.st.settings.value,
+            vertex_stream_null_bind: t.vertex_stream_null_bind,
         };
         let put = |n: &str, d: &[u8]| std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e));
         put("game.json", manifest::game_json(&m).as_bytes())?;

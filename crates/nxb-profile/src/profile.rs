@@ -12,6 +12,7 @@ pub const CAPABILITY_KEYS: &[&str] = &[
     "tex_flush_upload",
     "tex_dirty_upload",
     "render_cond",
+    "vertex_stream_null_bind",
     "gpu_timestamps",
     "alloc_big_align",
     "mem_map_limit",

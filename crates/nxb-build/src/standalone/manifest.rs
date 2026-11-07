@@ -42,6 +42,8 @@ pub struct Manifest<'a> {
     pub aoc: &'a [Aoc],
     /// The run settings of the title module.
     pub settings: nxtitle::Settings,
+    /// The need `vertex_stream_null_bind` of the title.
+    pub vertex_stream_null_bind: bool,
 }
 
 fn s(v: &str) -> Value {
@@ -84,7 +86,7 @@ fn memory(m: &nxtitle::Memory) -> Value {
 }
 
 /// The `settings` object: the other keys of nxnative's `game_profile.h`.
-fn settings(t: &nxtitle::Settings) -> Value {
+fn settings(t: &nxtitle::Settings, vertex_stream_null_bind: bool) -> Value {
     let mut f = vec![
         ("args", s(t.args)),
         ("env", s(t.env)),
@@ -115,6 +117,7 @@ fn settings(t: &nxtitle::Settings) -> Value {
         ("tex_dirty_upload", flag(t.tex_dirty_upload)),
         ("tex_dyn_slots", flag(t.tex_dyn_slots)),
         ("render_cond", flag(t.render_cond)),
+        ("vertex_stream_null_bind", flag(vertex_stream_null_bind)),
         ("vconv_range", flag(t.vconv_range)),
         ("gpu_ts_segment", flag(t.gpu_ts_segment)),
         ("draw_barriers_game", flag(t.draw_barriers_game)),
@@ -225,7 +228,7 @@ pub fn game_json(m: &Manifest) -> String {
     ));
     f.push(("npdm", s("main.npdm")));
     f.push(("memory", memory(&m.settings.memory)));
-    f.push(("settings", settings(&m.settings)));
+    f.push(("settings", settings(&m.settings, m.vertex_stream_null_bind)));
     f.push(("dylib", s("nxgame.dylib")));
     f.push(("page_size", n(PAGE)));
     f.push((
