@@ -48,6 +48,24 @@ unsafe = "many: these are generated bindings, every call into Apple frameworks i
 owner = "project team"
 used_by = ["nxkit-metal"]
 
+[objc2-core-haptics]
+reason = "CHHapticEngine and its patterns, the rumble output of nxkit-svc-input (one engine per controller handle)"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-input wraps them in a safe API in its module sys"
+owner = "project team"
+used_by = ["nxkit-svc-input"]
+
+[objc2-game-controller]
+reason = "GCController, GCMotion, GCKeyboard and GCMouse, which nxkit-svc-input reads at the moment the game calls nn::hid"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-input wraps them in a safe API in its module sys"
+owner = "project team"
+used_by = ["nxkit-svc-input"]
+
 [objc2-metal]
 reason = "the Metal 4 API (MTL4CommandQueue, MTL4Compiler, MTLResidencySet and the rest) for the Metal backend of the host"
 source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
