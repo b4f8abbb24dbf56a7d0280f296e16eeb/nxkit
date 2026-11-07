@@ -1,6 +1,6 @@
 # Third-party notes
 
-The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
+The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-video` uses to bind VideoToolbox, CoreVideo and CoreMedia on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
 
@@ -85,6 +85,17 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for ArbitrateLock, ArbitrateUnlock, WaitProcessWideKeyAtomic,
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
+
+## Video service ported from nxnative
+
+The crate `nxkit-svc-video` (`crates/nxkit-svc-video/`) ports the protocol of `movie::Decoder` from the nxnative engine. The nxnative engine is published under the MIT
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above. The decoder itself is new code on VideoToolbox. nxnative decodes with libvpx.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-svc-video/src/decoder.rs` | `dm/host/hle_movie.c` (slots, queues, events, error codes, the format keys) |
+| `crates/nxkit-svc-video/src/exports.rs` | `dm/host/hle_movie.c` (the replaced `movie::Decoder` functions and their signatures) |
+| `crates/nxkit-svc-video/src/pacing.rs` | `dm/host/hle_movie.c` (`dm_movie_playing`) |
 
 ## NVN front end ported from nxnative
 
