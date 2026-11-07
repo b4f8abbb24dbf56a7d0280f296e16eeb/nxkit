@@ -35,7 +35,7 @@ pub(crate) fn named() -> Vec<Named> {
 
 /// The shared memory of the service. It is created on the first call and filled at once.
 fn shared_memory() -> Result<SharedMemory, u32> {
-    with(|input| {
+    with(|input| -> Result<SharedMemory, u32> {
         if let Some(shm) = input.shm {
             return Ok(shm);
         }
@@ -191,7 +191,7 @@ fn style_event(id: u32) -> Result<u32, u32> {
     if id_bit(id) == 0 {
         return Err(RESULT_INVALID);
     }
-    with(|i| {
+    with(|i| -> Result<u32, u32> {
         if let Some((_, readable)) = i.style_event {
             return Ok(readable);
         }
