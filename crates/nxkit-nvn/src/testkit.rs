@@ -1,85 +1,36 @@
-//! The recorder of one command buffer.
+//! A test-only builder of effect streams.
 //!
-//! The recorder keeps the state that NVN keeps per command buffer: the attachments, the scissor and the bound textures.
-//! It turns the NVN calls into [`Cmd`] values in its [`CmdStream`]. A texture list is stored only when the bindings
-//! changed since the last draw, so a run of draws with the same bindings shares one list.
+//! The pass analysis tests use it to write a stream of [`Cmd`] values without command memory.
+//! The real path is [`crate::cmdbuf`] and [`crate::decode`].
 
-use crate::frame::{Cmd, CmdStream, DrawState, MAX_COLOR, RtSet, Span};
+use crate::frame::{Cmd, CmdStream, DrawState, MAX_COLOR, RtSet};
 use crate::resource::TexId;
 
-/// The number of texture and image binding slots that the recorder tracks.
-pub const MAX_BINDINGS: usize = 128;
-
-/// The record of one command buffer.
 #[derive(Debug)]
-pub struct Recorder {
+pub(crate) struct Recorder {
     stream: CmdStream,
-    targets: RtSet,
     scissor_full: bool,
-    state: DrawState,
-    textures: [Option<TexId>; MAX_BINDINGS],
-    images: [Option<TexId>; MAX_BINDINGS],
-    texture_list: Option<Span>,
-    image_list: Option<Span>,
-    scratch: Vec<TexId>,
-}
-
-impl Default for Recorder {
-    fn default() -> Self {
-        Self {
-            stream: CmdStream::new(),
-            targets: RtSet::default(),
-            scissor_full: true,
-            state: DrawState {
-                color_write: 0xff,
-                ..DrawState::default()
-            },
-            textures: [None; MAX_BINDINGS],
-            images: [None; MAX_BINDINGS],
-            texture_list: None,
-            image_list: None,
-            scratch: Vec::new(),
-        }
-    }
-}
-
-fn collect(slots: &[Option<TexId>], out: &mut Vec<TexId>) {
-    out.clear();
-    for t in slots.iter().flatten() {
-        if !out.contains(t) {
-            out.push(*t);
-        }
-    }
+    textures: [Option<TexId>; 128],
 }
 
 impl Recorder {
-    /// An empty recorder.
-    pub fn new() -> Self {
-        Self::default()
+    pub(crate) fn new() -> Self {
+        Self {
+            stream: CmdStream::new(),
+            scissor_full: true,
+            textures: [None; 128],
+        }
     }
 
-    /// The commands so far.
-    pub fn stream(&self) -> &CmdStream {
+    pub(crate) fn stream(&self) -> &CmdStream {
         &self.stream
     }
 
-    /// `nvnCommandBufferBeginRecording`. It forgets the commands and the state.
-    pub fn begin(&mut self) {
-        self.stream.clear();
-        self.targets = RtSet::default();
-        self.scissor_full = true;
-        self.state = DrawState {
-            color_write: 0xff,
-            ..DrawState::default()
-        };
-        self.textures = [None; MAX_BINDINGS];
-        self.images = [None; MAX_BINDINGS];
-        self.texture_list = None;
-        self.image_list = None;
+    pub(crate) fn begin(&mut self) {
+        *self = Self::new();
     }
 
-    /// `nvnCommandBufferSetRenderTargets`.
-    pub fn set_render_targets(&mut self, color: &[TexId], depth: Option<TexId>) {
+    pub(crate) fn set_render_targets(&mut self, color: &[TexId], depth: Option<TexId>) {
         let mut set = RtSet {
             depth,
             ..RtSet::default()
@@ -87,193 +38,56 @@ impl Recorder {
         for (slot, t) in color.iter().take(MAX_COLOR).enumerate() {
             set.color[slot] = Some(*t);
         }
-        self.targets = set;
         self.stream.cmds.push(Cmd::SetRenderTargets(set));
     }
 
-    /// Tells whether the scissor covers the whole target. A clear under a smaller scissor is not a full clear.
-    pub fn set_scissor_full(&mut self, full: bool) {
+    pub(crate) fn set_scissor_full(&mut self, full: bool) {
         self.scissor_full = full;
     }
 
-    /// Binds a texture for sampling in a slot, or unbinds it.
-    pub fn bind_texture(&mut self, slot: usize, tex: Option<TexId>) {
-        if let Some(s) = self.textures.get_mut(slot)
-            && *s != tex
-        {
-            *s = tex;
-            self.texture_list = None;
-        }
+    pub(crate) fn bind_texture(&mut self, slot: usize, tex: Option<TexId>) {
+        self.textures[slot] = tex;
     }
 
-    /// Binds an image for load and store in a slot, or unbinds it.
-    pub fn bind_image(&mut self, slot: usize, tex: Option<TexId>) {
-        if let Some(s) = self.images.get_mut(slot)
-            && *s != tex
-        {
-            *s = tex;
-            self.image_list = None;
-        }
+    pub(crate) fn clear_color(&mut self, slot: u8) {
+        let full = self.scissor_full;
+        self.stream.cmds.push(Cmd::ClearColor { slot, full });
     }
 
-    /// `nvnCommandBufferClearColor`.
-    pub fn clear_color(&mut self, slot: u8) {
-        self.stream.cmds.push(Cmd::ClearColor {
-            slot,
-            full: self.scissor_full,
-        });
+    pub(crate) fn clear_depth_stencil(&mut self) {
+        let full = self.scissor_full;
+        self.stream.cmds.push(Cmd::ClearDepthStencil { full });
     }
 
-    /// `nvnCommandBufferClearDepthStencil`.
-    pub fn clear_depth_stencil(&mut self) {
-        self.stream.cmds.push(Cmd::ClearDepthStencil {
-            full: self.scissor_full,
-        });
-    }
-
-    /// `nvnCommandBufferDiscardColor` and `nvnCommandBufferDiscardDepthStencil`.
-    pub fn discard(&mut self, color: u8, depth: bool) {
+    pub(crate) fn discard(&mut self, color: u8, depth: bool) {
         self.stream.cmds.push(Cmd::Discard { color, depth });
     }
 
-    fn texture_span(&mut self) -> Span {
-        if let Some(s) = self.texture_list {
-            return s;
-        }
-        collect(&self.textures, &mut self.scratch);
-        let s = self.stream.push_list(&self.scratch);
-        self.texture_list = Some(s);
-        s
+    fn reads(&mut self) -> crate::frame::Span {
+        let list: Vec<TexId> = self.textures.iter().flatten().copied().collect();
+        self.stream.push_list(&list)
     }
 
-    /// The state that the next `draw_now` uses. The NVN bind calls for blend, colour, channel mask and depth state set it.
-    pub fn state_mut(&mut self) -> &mut DrawState {
-        &mut self.state
-    }
-
-    /// A draw with the current state. This is what `nvnCommandBufferDrawArrays` and its relatives record.
-    pub fn draw_now(&mut self) {
-        self.draw(self.state);
-    }
-
-    /// A draw. The textures that are bound now are its reads.
-    pub fn draw(&mut self, state: DrawState) {
-        let reads = self.texture_span();
+    pub(crate) fn draw(&mut self, state: DrawState) {
+        let reads = self.reads();
         self.stream.cmds.push(Cmd::Draw { state, reads });
     }
 
-    /// A compute dispatch.
-    pub fn dispatch(&mut self) {
-        let reads = self.texture_span();
-        let writes = match self.image_list {
-            Some(s) => s,
-            None => {
-                collect(&self.images, &mut self.scratch);
-                let s = self.stream.push_list(&self.scratch);
-                self.image_list = Some(s);
-                s
-            }
-        };
+    pub(crate) fn dispatch(&mut self) {
+        let reads = self.reads();
+        let writes = self.stream.push_list(&[]);
         self.stream.cmds.push(Cmd::Dispatch { reads, writes });
     }
 
-    /// A copy or a blit. A side that is a buffer is None.
-    pub fn copy(&mut self, src: Option<TexId>, dst: Option<TexId>) {
+    pub(crate) fn copy(&mut self, src: Option<TexId>, dst: Option<TexId>) {
         self.stream.cmds.push(Cmd::Copy { src, dst });
     }
 
-    /// `nvnCommandBufferDownsample`.
-    pub fn downsample(&mut self, src: TexId, dst: TexId) {
-        self.stream.cmds.push(Cmd::Downsample { src, dst });
-    }
-
-    /// `nvnCommandBufferBarrier`.
-    pub fn barrier(&mut self, bits: u32) {
+    pub(crate) fn barrier(&mut self, bits: u32) {
         self.stream.cmds.push(Cmd::Barrier(bits));
     }
 
-    /// A fence or a wait.
-    pub fn sync(&mut self) {
-        self.stream.cmds.push(Cmd::Sync);
-    }
-
-    /// The game presents a texture.
-    pub fn present(&mut self, tex: TexId) {
+    pub(crate) fn present(&mut self, tex: TexId) {
         self.stream.cmds.push(Cmd::Present(tex));
-    }
-
-    /// The CPU reads a texture back.
-    pub fn cpu_read(&mut self, tex: TexId) {
-        self.stream.cmds.push(Cmd::CpuRead(tex));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn draws_with_the_same_bindings_share_one_list() {
-        let mut r = Recorder::new();
-        r.bind_texture(0, Some(TexId(5)));
-        r.bind_texture(3, Some(TexId(5)));
-        r.draw(DrawState::default());
-        r.draw(DrawState::default());
-        assert_eq!(r.stream().lists, [TexId(5)]);
-        r.bind_texture(1, Some(TexId(6)));
-        r.draw(DrawState::default());
-        assert_eq!(r.stream().lists, [TexId(5), TexId(5), TexId(6)]);
-    }
-
-    #[test]
-    fn draw_now_uses_the_state_that_was_set() {
-        let mut r = Recorder::new();
-        r.state_mut().blend = true;
-        r.state_mut().color_write = 1;
-        r.draw_now();
-        let Cmd::Draw { state, .. } = r.stream().cmds[0] else {
-            panic!()
-        };
-        assert!(state.blend && state.color_write == 1);
-        r.begin();
-        assert_eq!(r.state_mut().color_write, 0xff);
-    }
-
-    #[test]
-    fn a_scissor_makes_a_clear_partial() {
-        let mut r = Recorder::new();
-        r.clear_color(0);
-        r.set_scissor_full(false);
-        r.clear_color(0);
-        r.clear_depth_stencil();
-        assert_eq!(
-            r.stream().cmds[0],
-            Cmd::ClearColor {
-                slot: 0,
-                full: true
-            }
-        );
-        assert_eq!(
-            r.stream().cmds[1],
-            Cmd::ClearColor {
-                slot: 0,
-                full: false
-            }
-        );
-        assert_eq!(r.stream().cmds[2], Cmd::ClearDepthStencil { full: false });
-    }
-
-    #[test]
-    fn begin_forgets_everything_and_keeps_the_memory() {
-        let mut r = Recorder::new();
-        r.set_render_targets(&[TexId(1)], Some(TexId(2)));
-        r.bind_texture(0, Some(TexId(3)));
-        r.dispatch();
-        let cap = r.stream().cmds.capacity();
-        r.begin();
-        assert!(r.stream().cmds.is_empty());
-        r.dispatch();
-        assert!(r.stream().lists.is_empty());
-        assert_eq!(r.stream().cmds.capacity(), cap);
     }
 }

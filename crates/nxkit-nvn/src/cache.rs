@@ -1,0 +1,160 @@
+//! The cache of recording summaries.
+//!
+//! Games reuse recordings. Breath of the Wild records the commands of each model once and submits them in every frame.
+//! The cache keeps the [`Summary`] of a recording by its handle, so a later submit does not decode again.
+//!
+//! A summary is valid for the inherited state that it needs. A handle can have several summaries for different states.
+//! A summary is dropped when the game writes its command memory again, and so are the summaries of the recordings that call it.
+//! A summary is also dropped when a texture address or a handle that it resolved now names something else.
+
+use std::collections::{BTreeMap, HashMap};
+
+use crate::decode::{State, Summary};
+use crate::descriptors::Descriptors;
+use crate::resource::ResourceTable;
+
+/// The most summaries that one handle keeps. The oldest goes first.
+pub const MAX_ENTRIES_PER_HANDLE: usize = 16;
+/// A summary is stable after this many hits.
+pub const STABLE_HITS: u32 = 3;
+
+/// The counters of the cache.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheStats {
+    /// Lookups that found a valid summary.
+    pub hits: u64,
+    /// Lookups that decoded a recording.
+    pub misses: u64,
+    /// Handles that lost their summaries because the command memory changed.
+    pub invalidations: u64,
+    /// Summaries that were dropped because a texture or a handle changed.
+    pub revalidations: u64,
+    /// Summaries that were dropped because a handle had too many.
+    pub evictions: u64,
+    /// Addresses and handles that named no texture, counted at decode.
+    pub unresolved: u64,
+}
+
+/// The summaries of the recordings of the game.
+#[derive(Debug, Default)]
+pub struct RecCache {
+    entries: HashMap<u64, Vec<Summary>>,
+    // (start, handle) to end, for the recordings that occupy command memory
+    by_start: BTreeMap<(u64, u64), u64>,
+    parents: HashMap<u64, Vec<u64>>,
+    longest: u64,
+    /// The counters.
+    pub stats: CacheStats,
+}
+
+impl RecCache {
+    /// An empty cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The number of handles that have a summary.
+    pub fn handles(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// The summary at an index of a handle.
+    pub fn entry(&self, handle: u64, index: usize) -> Option<&Summary> {
+        self.entries.get(&handle)?.get(index)
+    }
+
+    /// Finds a summary of `handle` that fits the inherited state and still holds.
+    pub fn find(
+        &mut self,
+        handle: u64,
+        inherited: &State,
+        table: &ResourceTable,
+        desc: &Descriptors,
+    ) -> Option<usize> {
+        let list = self.entries.get_mut(&handle)?;
+        let i = list
+            .iter()
+            .position(|s| s.key.matches(&s.needs, inherited))?;
+        if !list[i].refs.iter().all(|r| r.holds(table, desc)) {
+            list.remove(i);
+            self.stats.revalidations += 1;
+            return None;
+        }
+        list[i].hits = list[i].hits.saturating_add(1);
+        self.stats.hits += 1;
+        Some(i)
+    }
+
+    /// Keeps a summary and returns its index. A new recording drops the summaries of the memory that it overwrote.
+    pub fn insert(&mut self, handle: u64, s: Summary) -> usize {
+        let fresh = !self.entries.contains_key(&handle);
+        if fresh {
+            for r in &s.spans {
+                self.longest = self.longest.max(r.end - r.start);
+                self.by_start.insert((r.start, handle), r.end);
+            }
+        }
+        for c in &s.children {
+            let p = self.parents.entry(*c).or_default();
+            if !p.contains(&handle) {
+                p.push(handle);
+            }
+        }
+        let list = self.entries.entry(handle).or_default();
+        if list.len() >= MAX_ENTRIES_PER_HANDLE {
+            list.remove(0);
+            self.stats.evictions += 1;
+        }
+        list.push(s);
+        list.len() - 1
+    }
+
+    /// Tells that the game wrote `[start, end)` of host memory.
+    /// Every handle whose records overlap loses its summaries. The recordings that call it lose theirs too.
+    pub fn invalidate(&mut self, start: u64, end: u64) {
+        let from = (start.saturating_sub(self.longest), 0);
+        let hit: Vec<u64> = self
+            .by_start
+            .range(from..(end, 0))
+            .filter(|((_, _), e)| **e > start)
+            .map(|((_, h), _)| *h)
+            .collect();
+        for h in hit {
+            self.drop_handle(h);
+        }
+    }
+
+    fn drop_handle(&mut self, handle: u64) {
+        let Some(list) = self.entries.remove(&handle) else {
+            return;
+        };
+        self.stats.invalidations += 1;
+        for s in &list {
+            for r in &s.spans {
+                self.by_start.remove(&(r.start, handle));
+            }
+            for c in &s.children {
+                if let Some(p) = self.parents.get_mut(c) {
+                    p.retain(|x| *x != handle);
+                }
+            }
+        }
+        for p in self.parents.remove(&handle).unwrap_or_default() {
+            self.drop_handle(p);
+        }
+    }
+
+    /// The summaries that could become indirect command buffers and are stable: no blocking command and enough hits.
+    /// The result is the handle, the number of draws and the number of hits. The limits of Metal are not checked here.
+    pub fn icb_candidates(&self) -> Vec<(u64, u32, u32)> {
+        let mut out: Vec<_> = self
+            .entries
+            .iter()
+            .flat_map(|(h, l)| l.iter().map(move |s| (*h, s)))
+            .filter(|(_, s)| s.blockers == 0 && s.draws > 0 && s.hits >= STABLE_HITS)
+            .map(|(h, s)| (h, s.draws, s.hits))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+}

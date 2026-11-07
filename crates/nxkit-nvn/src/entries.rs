@@ -18,8 +18,16 @@ pub const NXNATIVE_IMPLEMENTED: &str = include_str!("../data/nxnative_implemente
 /// What the front end does for a call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
-    /// Starts a command buffer.
+    /// Starts a recording.
     BeginRecording,
+    /// Ends a recording and gives its handle.
+    EndRecording,
+    /// Gives a command buffer a block of command memory.
+    AddCommandMemory,
+    /// Asks how much command memory is used, free or in total.
+    CommandMemoryInfo,
+    /// The CPU waits for the GPU. This flushes the frame early.
+    CpuWait,
     /// Sets the attachments.
     SetRenderTargets,
     /// Sets the scissor.
@@ -75,6 +83,22 @@ pub enum Op {
 /// The functions that the front end handles.
 pub const RECORDED: &[(&str, Op)] = &[
     ("nvnCommandBufferBeginRecording", Op::BeginRecording),
+    ("nvnCommandBufferEndRecording", Op::EndRecording),
+    ("nvnCommandBufferAddCommandMemory", Op::AddCommandMemory),
+    (
+        "nvnCommandBufferGetCommandMemoryUsed",
+        Op::CommandMemoryInfo,
+    ),
+    (
+        "nvnCommandBufferGetCommandMemoryFree",
+        Op::CommandMemoryInfo,
+    ),
+    (
+        "nvnCommandBufferGetCommandMemorySize",
+        Op::CommandMemoryInfo,
+    ),
+    ("nvnQueueFinish", Op::CpuWait),
+    ("nvnSyncWait", Op::CpuWait),
     ("nvnCommandBufferSetRenderTargets", Op::SetRenderTargets),
     ("nvnCommandBufferSetScissor", Op::SetScissor),
     ("nvnCommandBufferSetScissors", Op::SetScissor),

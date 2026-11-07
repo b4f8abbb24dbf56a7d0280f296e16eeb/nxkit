@@ -133,6 +133,14 @@ impl CmdStream {
         self.lists.clear();
     }
 
+    /// Appends another stream. Its spans move behind the lists of this stream.
+    pub fn splice(&mut self, other: &CmdStream) {
+        let base = self.lists.len() as u32;
+        self.lists.extend_from_slice(&other.lists);
+        self.cmds
+            .extend(other.cmds.iter().map(|c| rebase(*c, base)));
+    }
+
     /// Adds a list and returns its span.
     pub fn push_list(&mut self, items: &[TexId]) -> Span {
         let start = self.lists.len() as u32;

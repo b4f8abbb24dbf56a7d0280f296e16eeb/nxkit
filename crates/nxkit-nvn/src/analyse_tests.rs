@@ -3,9 +3,9 @@ use crate::error::NvnError;
 use crate::frame::{DrawState, Frame};
 use crate::layout::{Target, TextureDesc};
 use crate::passes::{Boundary, LoadAction, PassKind, PassPlan, StoreAction};
-use crate::recorder::Recorder;
 use crate::resource::{ResourceTable, TexId};
 use crate::space::GpuAddr;
+use crate::testkit::Recorder;
 
 const RGBA8: i32 = 0x25;
 const D32F: i32 = 0x33;
