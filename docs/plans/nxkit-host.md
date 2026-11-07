@@ -65,6 +65,9 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 - nxkit's own work runs like a native game: a job system on the free cores, `os_workgroup` for the frame, and the GPU encoding of frame N while the game builds frame N+1.
 - If Breath of the Wild stays slow on the CPU after that, a patch of its thread structure for this game is the next step.
 - Measurement is part of the host from the start: CPU and GPU time of every frame, and the count of every IPC command.
+- Guest memory is one no-copy `MTLBuffer`. The GPU address the game sees is the Metal `gpuAddress` of that buffer plus the offset of the host address. There is no translation table. A shader reads guest memory through a `device` pointer made from that address.
+- Render targets live only in Metal. They are copied back to guest memory only when the game reads those bytes.
+- `nxkit-metal` binds Metal in Rust with `objc2-metal`. The crate is Zlib, Apache-2.0 or MIT. Its `main` has the headers of Xcode 27.1 (commit "Update to Xcode 27.1", 2026-10-16). The last release on crates.io is 0.3.2 from 2025-10-04, which stops before macOS 27. Until a release has the new headers, nxkit uses a pinned commit of `main`. The `unsafe` calls stay inside `nxkit-metal`.
 
 ## Apple hardware
 
@@ -102,9 +105,6 @@ The route is one save and one path through the game: the title screen, loading t
 - seedds/nxnative#76 brings Breath of the Wild above 60 fps and above 1080p on nxnative. Its frame step is the reference for H4.
 
 ## Open questions
-
-- How does guest memory map to host memory and to GPU addresses?
-- Which language binds Metal: Rust through `objc2-metal`, or a thin Objective-C layer?
 
 - Which frame format does `nxkit-nvn` record, and how much of a frame does it hold before `nxkit-metal` encodes it?
 - How does iOS load the host later? iOS has no `dlopen` of unsigned code, so the library is linked there.
