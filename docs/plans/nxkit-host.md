@@ -54,7 +54,7 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-The decisions of the host and their causes are R1 to R17 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+The decisions of the host and their causes are R1 to R21 in [decisions.md](../decisions.md#part-3-runtime-decisions).
 
 ## Apple hardware
 
@@ -62,8 +62,8 @@ The decisions of the host and their causes are R1 to R17 in [decisions.md](../de
 - Tile-based GPU: `nxkit-nvn` records a whole frame before `nxkit-metal` encodes it. The backend merges passes, keeps attachments in tile memory and drops loads and stores nobody reads. Breath of the Wild loads and stores about 800 MB a frame on nxnative (game note, 2026-10-21).
 - Metal 4 only. The pipelines are built ahead of time for the Apple GPU by `nxb`.
 - Performance and efficiency cores: guest threads get QoS classes. The render and audio threads run at user-interactive QoS.
-- Frame pacing follows `CADisplayLink` and the display's refresh rate, not a fake vsync.
-- MetalFX does the upscaling.
+- Frame pacing follows `CAMetalDisplayLink` at 120 Hz, not a fake vsync (R19).
+- The host renders at 4K itself. MetalFX upscales heavy games only (R19).
 
 ## Modular builds
 
@@ -93,6 +93,5 @@ The route is one save and one path through the game: the title screen, loading t
 
 ## Open questions
 
-- Which state of a recording can a Metal indirect command buffer hold, and what stays outside it?
 - How does iOS load the host later? iOS has no `dlopen` of unsigned code, so the library is linked there.
 - Does Ocarina of Time move to the same host later? It is a family `agl` game on NVN2 with mesh shaders.
