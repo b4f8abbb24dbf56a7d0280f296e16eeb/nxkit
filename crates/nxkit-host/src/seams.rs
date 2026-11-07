@@ -6,9 +6,8 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use nxkit_metal::{Context, DisplayTick, FrameHooks, GuestMemory};
+use nxkit_metal::{Context, FrameHooks, GuestMemory};
 
 use crate::error::{HostError, Result};
 use crate::layout::Layout;
@@ -95,28 +94,11 @@ pub fn focus_changed(focused: bool) {
     let _ = focused;
 }
 
-/// Counts the display ticks and drops their drawables. It is the stand-in until the encoder is connected.
-#[derive(Debug, Default)]
-struct DropFrames {
-    ticks: AtomicU64,
-}
-
-impl FrameHooks for DropFrames {
-    fn display_tick(&self, tick: DisplayTick) {
-        if self.ticks.fetch_add(1, Ordering::Relaxed) == 0 {
-            eprintln!("nxkit-host: no encoder is connected, the frames of the display are dropped (see seams.rs)");
-        }
-        drop(tick);
-    }
-}
-
 /// The hooks that the display link calls. They connect the encoder of `nxkit-gpu` and the pacing of `nxkit-metal`
 /// to the window: on each display tick they present the frame that the guest finished. `settings` has the pacing and
 /// encoder keys (`fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread` and the `tex_*` keys).
 ///
-/// Needs: the encoder (`nxkit-gpu`) over `memory`, which is the reservation as the GPU buffer, and the pacing
-/// service.
-pub fn frame_hooks(ctx: &Context, memory: &Arc<GuestMemory>, settings: &Settings) -> Result<Arc<dyn FrameHooks>> {
-    let _ = (ctx, memory, settings);
-    Ok(Arc::new(DropFrames::default()))
+/// `root` is the run folder, which has the shaders. The work is in `frames.rs`.
+pub fn frame_hooks(ctx: &Context, memory: &Arc<GuestMemory>, root: &std::path::Path, settings: &Settings) -> Result<Arc<dyn FrameHooks>> {
+    crate::frames::install(ctx, memory, root, settings)
 }

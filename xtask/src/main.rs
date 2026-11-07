@@ -60,6 +60,10 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxkit-svc-system", "nxkit-abi"),
     ("nxkit-svc-video", "nxkit-abi"),
     ("nxkit-rt", "nxkit-nvn"),
+    // The GPU backend (`nxkit-gpu`) implements the `Backend` of the NVN front end. The host installs it.
+    ("nxkit-gpu", "nxkit-nvn"),
+    ("nxkit-host", "nxkit-gpu"),
+    ("nxkit-host", "nxkit-nvn"),
 ];
 
 /// Edges from a crate in V to a crate outside V that are output-neutral by contract (ADR W17: hardware SHA-256 gives

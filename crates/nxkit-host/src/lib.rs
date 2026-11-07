@@ -4,6 +4,8 @@
 //! (`docs/architecture.md`, rule 5). The parts that talk to macOS exist on macOS only.
 
 pub mod error;
+#[cfg(target_os = "macos")]
+pub mod frames;
 pub mod gates;
 pub mod json;
 pub mod layout;
