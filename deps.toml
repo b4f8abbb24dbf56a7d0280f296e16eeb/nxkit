@@ -66,6 +66,49 @@ unsafe = "many: these are generated bindings, every call into Apple frameworks i
 owner = "project team"
 used_by = ["nxkit-metal"]
 
+[objc2-audio-toolbox]
+reason = "the AUHAL output unit (AudioComponent, AudioUnit properties, the render callback) of the audio service"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, the same as objc2"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings. nxkit-svc-audio calls them only in its module sys"
+owner = "project team"
+used_by = ["nxkit-svc-audio"]
+
+[objc2-core-audio]
+reason = "the default output device, its os_workgroup and its sample rate (AudioHardware)"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, the same as objc2"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings. nxkit-svc-audio calls them only in its module sys"
+owner = "project team"
+used_by = ["nxkit-svc-audio"]
+
+[objc2-core-audio-types]
+reason = "AudioStreamBasicDescription, AudioBufferList and AudioTimeStamp for the output unit"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, the same as objc2"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings. nxkit-svc-audio calls them only in its module sys"
+owner = "project team"
+used_by = ["nxkit-svc-audio"]
+
+[accelerate]
+reason = "vDSP (vDSP_vsma, vDSP_vclip, vDSP_vsmul) for the mix in the output callback. No objc2 crate covers it, so a small extern block in the module sys declares the functions"
+source = "system framework, linked with `#[link(name = \"Accelerate\", kind = \"framework\")]`. Not a crate"
+licence = "part of macOS (system framework)"
+unsafe = "3 functions, in the module sys of nxkit-svc-audio"
+owner = "project team"
+used_by = ["nxkit-svc-audio"]
+
+[libsystem]
+reason = "os_workgroup_join and dispatch_semaphore (the wake of the notifier thread) from libSystem, which every process links. A small extern block in the module sys declares them"
+source = "system library, no extra link flag"
+licence = "part of macOS (system library)"
+unsafe = "a few functions, in the module sys of nxkit-svc-audio"
+owner = "project team"
+used_by = ["nxkit-svc-audio"]
+
 [block2]
 reason = "Objective-C blocks, for the MTL4 commit feedback handler"
 source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
