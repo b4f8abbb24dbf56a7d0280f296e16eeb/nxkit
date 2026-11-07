@@ -86,6 +86,44 @@ The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for Ar
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
 
+## NVN front end ported from nxnative
+
+The crate `nxkit-nvn` (`crates/nxkit-nvn/`) ports logic and data from the nxnative engine. The nxnative engine is published under the MIT
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-nvn/src/layout.rs` | `dm/gfx/nvn/nvn_tex.c` and `nvn_tex.h` (texture storage layout) |
+| `crates/nxkit-nvn/src/swizzle.rs` | `dm/gfx/tex/nvn_deswizzle.c` (GOB order and block-linear addressing) |
+| `crates/nxkit-nvn/src/format.rs` | the format table (`fmt_of`) of `dm/gfx/nvn/` |
+| `crates/nxkit-nvn/data/nvn_names.txt` | `dm/gfx/nvn/names.txt` |
+| `crates/nxkit-nvn/data/nxnative_implemented.txt` | the names that `dm/gfx/nvn/hle_nvn.c` implements |
+
+`nvn_tex.c` credits other work. The layout algorithm comes from deko3d, `source/dk_image.cpp`. The notice of deko3d follows.
+Its source is under the zlib licence.
+
+```
+Copyright (C) 2018-2020 fincs
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+```
+
+The header of `nvn_tex.c` also names digitalhivehub and MacNativeGames for the packaged texture layout. The Rust code does not copy their code.
+
 ## Tools that nxkit starts and does not contain
 
 | tool | licence | use |

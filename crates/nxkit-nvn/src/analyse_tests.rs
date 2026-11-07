@@ -1,0 +1,358 @@
+use crate::analyse::Analyser;
+use crate::error::NvnError;
+use crate::frame::{DrawState, Frame};
+use crate::layout::{Target, TextureDesc};
+use crate::passes::{Boundary, LoadAction, PassKind, PassPlan, StoreAction};
+use crate::resource::{ResourceTable, TexId};
+use crate::space::GpuAddr;
+use crate::testkit::Recorder;
+
+const RGBA8: i32 = 0x25;
+const D32F: i32 = 0x33;
+// 64x64 RGBA8, the first mip level is 16 KiB
+const COLOR_BYTES: u64 = 64 * 64 * 4;
+
+struct Fx {
+    table: ResourceTable,
+    rec: Recorder,
+    frame: Frame,
+    plan: PassPlan,
+    an: Analyser,
+    next: u64,
+}
+
+impl Fx {
+    fn new() -> Self {
+        Self {
+            table: ResourceTable::new(),
+            rec: Recorder::new(),
+            frame: Frame::new(),
+            plan: PassPlan::new(),
+            an: Analyser::new(),
+            next: 0x100_0000,
+        }
+    }
+
+    fn tex(&mut self, format: i32) -> TexId {
+        let d = TextureDesc {
+            target: Target::D2,
+            format,
+            flags: 0,
+            samples: 0,
+            width: 64,
+            height: 64,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
+        };
+        self.next += 0x10_0000;
+        self.table
+            .create(d, GpuAddr::new(self.next).unwrap())
+            .unwrap()
+    }
+
+    fn run(&mut self) -> Result<(), NvnError> {
+        self.frame.clear();
+        self.frame.append(self.rec.stream());
+        self.an.analyse(&self.frame, &self.table, &mut self.plan)
+    }
+}
+
+fn paint() -> DrawState {
+    DrawState {
+        color_write: 1,
+        ..DrawState::default()
+    }
+}
+
+fn depth_draw() -> DrawState {
+    DrawState {
+        color_write: 1,
+        depth_test: true,
+        depth_write: true,
+        ..DrawState::default()
+    }
+}
+
+#[test]
+fn a_full_clear_at_the_start_is_a_clear_load() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.clear_color(0);
+    f.rec.draw(paint());
+    f.rec.present(c);
+    f.run().unwrap();
+    let a = f.plan.attachments[0];
+    assert_eq!((a.load, a.store), (LoadAction::Clear, StoreAction::Store));
+    assert!(!a.store_assumed);
+    assert_eq!(f.plan.stats.bytes_loaded, 0);
+    assert_eq!(f.plan.stats.bytes_stored, COLOR_BYTES);
+}
+
+#[test]
+fn a_partial_clear_keeps_the_old_contents() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.set_scissor_full(false);
+    f.rec.clear_color(0);
+    f.run().unwrap();
+    assert_eq!(f.plan.attachments[0].load, LoadAction::Load);
+}
+
+#[test]
+fn depth_that_nobody_reads_is_not_stored_and_stays_in_tile_memory() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(D32F));
+    f.table.set_frame_local(d, true).unwrap();
+    f.rec.set_render_targets(&[c], Some(d));
+    f.rec.clear_color(0);
+    f.rec.clear_depth_stencil();
+    f.rec.draw(depth_draw());
+    f.rec.present(c);
+    f.run().unwrap();
+    let depth = f.plan.attachments[1];
+    assert_eq!(
+        (depth.load, depth.store),
+        (LoadAction::Clear, StoreAction::DontCare)
+    );
+    assert!(depth.memoryless);
+    assert_eq!(f.plan.stats.bytes_memoryless, COLOR_BYTES);
+}
+
+#[test]
+fn depth_is_stored_when_the_host_does_not_know_that_it_is_dead() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(D32F));
+    f.rec.set_render_targets(&[c], Some(d));
+    f.rec.clear_depth_stencil();
+    f.rec.draw(depth_draw());
+    f.run().unwrap();
+    let depth = f.plan.attachments[1];
+    assert_eq!(depth.store, StoreAction::Store);
+    assert!(depth.store_assumed && !depth.memoryless);
+    assert_eq!(f.plan.stats.bytes_stored_assumed, 2 * COLOR_BYTES);
+}
+
+#[test]
+fn an_explicit_discard_at_the_end_drops_the_store() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(D32F));
+    f.rec.set_render_targets(&[c], Some(d));
+    f.rec.draw(depth_draw());
+    f.rec.discard(0, true);
+    f.run().unwrap();
+    assert_eq!(f.plan.attachments[1].store, StoreAction::DontCare);
+    assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
+}
+
+#[test]
+fn a_texture_that_a_later_pass_samples_is_stored_and_not_assumed() {
+    let mut f = Fx::new();
+    let (scene, out) = (f.tex(RGBA8), f.tex(RGBA8));
+    f.rec.set_render_targets(&[scene], None);
+    f.rec.clear_color(0);
+    f.rec.draw(paint());
+    f.rec.set_render_targets(&[out], None);
+    f.rec.bind_texture(0, Some(scene));
+    f.rec.clear_color(0);
+    f.rec.draw(paint());
+    f.rec.present(out);
+    f.run().unwrap();
+    assert_eq!(f.plan.stats.render_passes, 2);
+    let s = f.plan.attachments[0];
+    assert_eq!(s.store, StoreAction::Store);
+    assert!(!s.store_assumed);
+    assert_eq!(f.plan.attachments[1].store, StoreAction::Store);
+    assert!(!f.plan.attachments[1].store_assumed);
+}
+
+#[test]
+fn a_second_full_clear_of_a_used_target_starts_a_new_pass() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.clear_color(0);
+    f.rec.draw(paint());
+    f.rec.clear_color(0);
+    f.rec.draw(paint());
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 2);
+    assert_eq!(f.plan.passes[1].begin, Boundary::FullClear);
+    let first = f.plan.attachments[0];
+    let second = f.plan.attachments[1];
+    assert_eq!(first.store, StoreAction::DontCare);
+    assert_eq!(second.load, LoadAction::Clear);
+    assert!(!first.memoryless);
+    assert_eq!(second.store, StoreAction::Store);
+}
+
+#[test]
+fn an_unchanged_target_set_does_not_split() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 1);
+}
+
+#[test]
+fn compute_and_copy_cut_the_render_pass() {
+    let mut f = Fx::new();
+    let (c, other) = (f.tex(RGBA8), f.tex(RGBA8));
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.rec.dispatch();
+    f.rec.copy(Some(c), Some(other));
+    f.rec.copy(Some(c), Some(other));
+    f.rec.draw(paint());
+    f.run().unwrap();
+    let kinds: Vec<_> = f.plan.passes.iter().map(|p| p.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            PassKind::Render,
+            PassKind::Compute,
+            PassKind::Copy,
+            PassKind::Render
+        ]
+    );
+    assert_eq!(f.plan.passes[3].begin, Boundary::Foreign);
+    // the copy reads `c`, so the first pass must store it and the last pass must load it
+    assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
+    assert!(!f.plan.attachments[0].store_assumed);
+    assert_eq!(f.plan.attachments[1].load, LoadAction::Load);
+}
+
+#[test]
+fn a_barrier_without_a_read_after_write_is_merged() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.clear_color(0);
+    f.rec.draw(paint());
+    f.rec.barrier(2);
+    f.rec.draw(paint());
+    f.run().unwrap();
+    assert_eq!(f.plan.stats.render_passes_before_merge, 2);
+    assert_eq!(f.plan.stats.render_passes, 1);
+    assert_eq!(f.plan.passes.len(), 1);
+    assert_eq!(f.plan.attachments.len(), 1);
+    assert_eq!(f.plan.attachments[0].load, LoadAction::Clear);
+    assert_eq!(f.plan.passes[0].cmds, 1..5);
+}
+
+#[test]
+fn a_barrier_before_a_read_of_the_target_is_not_merged() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.rec.barrier(0x10);
+    f.rec.bind_texture(0, Some(c));
+    f.rec.draw(paint());
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 2);
+    assert_eq!(f.plan.passes[1].begin, Boundary::Barrier(0x10));
+    assert_eq!(f.plan.attachments[1].load, LoadAction::Load);
+    assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
+}
+
+#[test]
+fn a_history_buffer_stays_stored() {
+    let mut f = Fx::new();
+    let (cur, hist) = (f.tex(RGBA8), f.tex(RGBA8));
+    f.rec.set_render_targets(&[cur], None);
+    f.rec.bind_texture(0, Some(hist));
+    f.rec.draw(paint());
+    f.rec.set_render_targets(&[hist], None);
+    f.rec.bind_texture(0, Some(cur));
+    f.rec.draw(paint());
+    f.rec.present(hist);
+    f.run().unwrap();
+    // `cur` is read by the second pass, `hist` is stored for the next frame and for the present
+    assert!(
+        f.plan
+            .attachments
+            .iter()
+            .all(|a| a.store == StoreAction::Store && !a.memoryless)
+    );
+}
+
+#[test]
+fn blending_loads_the_old_colour() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.table.set_frame_local(c, true).unwrap();
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(DrawState {
+        color_write: 1,
+        blend: true,
+        ..DrawState::default()
+    });
+    f.run().unwrap();
+    let a = f.plan.attachments[0];
+    assert_eq!((a.load, a.store), (LoadAction::Load, StoreAction::DontCare));
+}
+
+#[test]
+fn the_counters_add_up() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(D32F));
+    f.table.set_frame_local(d, true).unwrap();
+    f.rec.set_render_targets(&[c], Some(d));
+    f.rec.clear_color(0);
+    f.rec.clear_depth_stencil();
+    f.rec.draw(depth_draw());
+    f.rec.present(c);
+    f.run().unwrap();
+    let s = f.plan.stats;
+    assert_eq!(s.bytes_naive, 4 * COLOR_BYTES);
+    assert_eq!((s.bytes_loaded, s.bytes_stored), (0, COLOR_BYTES));
+    assert_eq!(s.bytes_saved, 3 * COLOR_BYTES);
+    assert_eq!(s.passes, 2);
+}
+
+#[test]
+fn drawing_without_a_target_is_an_error() {
+    let mut f = Fx::new();
+    f.rec.draw(paint());
+    assert_eq!(f.run().unwrap_err(), NvnError::NoTarget(0));
+}
+
+#[test]
+fn a_second_frame_reuses_the_memory() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    let record = |f: &mut Fx| {
+        f.rec.begin();
+        f.rec.set_render_targets(&[c], None);
+        for _ in 0..10 {
+            f.rec.draw(paint());
+            f.rec.barrier(1);
+        }
+        f.rec.present(c);
+    };
+    record(&mut f);
+    f.run().unwrap();
+    let caps = (
+        f.frame.cmds.capacity(),
+        f.plan.passes.capacity(),
+        f.plan.attachments.capacity(),
+    );
+    record(&mut f);
+    f.run().unwrap();
+    assert_eq!(
+        caps,
+        (
+            f.frame.cmds.capacity(),
+            f.plan.passes.capacity(),
+            f.plan.attachments.capacity()
+        )
+    );
+}
