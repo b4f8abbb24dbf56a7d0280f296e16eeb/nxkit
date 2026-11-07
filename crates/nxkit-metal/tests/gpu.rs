@@ -711,3 +711,83 @@ fn explicit_barrier_orders_a_copy_after_a_draw_and_checks_stages() {
     g.read(0, &mut out).unwrap();
     assert!(out.chunks(4).all(|p| p == [255, 0, 0, 255]));
 }
+
+#[test]
+fn an_indirect_command_buffer_draws_in_a_pass_and_refuses_inherited_state() {
+    use nxkit_metal::{IcbCommand, IcbDesc, Inherit};
+    let Some(ctx) = ctx() else { return };
+    let (w, h) = (32u32, 32u32);
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let lib = ShaderLibrary::from_source(&ctx, "draw", DRAW_MSL).unwrap();
+    let mut pdesc =
+        RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]);
+    pdesc.support_icb = true;
+    let pipe = cache.render(41, &pdesc).unwrap();
+    let icb = ctx
+        .new_indirect_command_buffer(&IcbDesc {
+            max_commands: 4,
+            inherit: Inherit {
+                buffers: true,
+                ..Inherit::NOTHING
+            },
+            max_vertex_buffers: 0,
+            max_fragment_buffers: 0,
+        })
+        .unwrap();
+    let draw = IcbCommand::Draw {
+        primitive: Primitive::Triangle,
+        first_vertex: 0,
+        vertex_count: 3,
+        instance_count: 1,
+        base_instance: 0,
+    };
+    icb.encode(0, &[IcbCommand::SetPipeline(pipe), draw])
+        .unwrap();
+    let g = guest(&ctx, MIB);
+    let buffer = nxkit_metal::IcbBuffer {
+        guest: g,
+        offset: 0,
+    };
+    assert!(
+        icb.encode(1, &[IcbCommand::SetVertexBuffer { index: 0, buffer }])
+            .is_err()
+    );
+    assert!(icb.encode(4, &[]).is_err());
+    ctx.commit_residency();
+    let target = shared_target(&ctx, w, h);
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let desc = RenderPassDesc {
+        colors: vec![ColorAttachment {
+            texture: target.clone(),
+            load: LoadAction::Clear,
+            store: StoreAction::Store,
+            clear: [0.0; 4],
+            memoryless: false,
+        }],
+        ..Default::default()
+    };
+    let mut pass = frame.commands().begin_render_pass(&desc, &table).unwrap();
+    assert!(
+        pass.encode(&RenderCommand::ExecuteIcb {
+            icb: icb.clone(),
+            first: 0,
+            count: 5
+        })
+        .is_err()
+    );
+    pass.encode(&RenderCommand::ExecuteIcb {
+        icb,
+        first: 0,
+        count: 1,
+    })
+    .unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    assert!(
+        pixels(&target, w, h)
+            .chunks(4)
+            .all(|p| p == [255, 0, 0, 255])
+    );
+}

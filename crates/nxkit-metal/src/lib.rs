@@ -8,6 +8,7 @@
 //! - [`ShaderLibrary`], [`PipelineCache`]: pipelines through `MTL4Compiler`, keyed by a hash, with an archive.
 //! - [`FrameRing`], [`Frame`]: three command allocators, one per frame in flight, with timing.
 //! - [`CommandBuffer`], [`RenderPass`], [`ComputePass`]: data-driven encoding of passes.
+//! - [`IndirectCommandBuffer`]: render commands encoded once and run in a pass. The module docs list what an ICB holds.
 //! - [`Presenter`]: a `CAMetalLayer` drawable path.
 //! - [`Deswizzler`]: block-linear deswizzle from guest memory into a texture.
 //!
@@ -28,6 +29,7 @@ mod error;
 mod format;
 mod frame;
 mod guest;
+mod icb;
 mod metrics;
 mod pipeline;
 mod present;
@@ -49,6 +51,7 @@ pub use error::{MetalError, Result};
 pub use format::{Format, IndexType, LoadAction, Primitive, StoreAction};
 pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
+pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pipeline::{
     ArchiveConfig, ComputePipeline, PipelineCache, RenderPipeline, RenderPipelineDesc,

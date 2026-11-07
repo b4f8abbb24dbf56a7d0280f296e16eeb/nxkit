@@ -2,6 +2,7 @@
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2_foundation::NSRange;
 use objc2_metal::{
     MTL4CommandBuffer, MTL4CommandEncoder, MTL4RenderCommandEncoder, MTL4RenderPassDescriptor,
     MTL4VisibilityOptions, MTLClearColor, MTLCullMode, MTLRenderStages, MTLScissorRect, MTLStages,
@@ -12,6 +13,7 @@ use crate::barrier::{Dependency, Stages};
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::format::{IndexType, LoadAction, Primitive, StoreAction};
+use crate::icb::IndirectCommandBuffer;
 use crate::pipeline::RenderPipeline;
 use crate::state::{DepthBias, DepthClip, DepthStencilState, FillMode, Winding};
 use crate::table::ArgumentTable;
@@ -194,6 +196,15 @@ pub enum RenderCommand {
     WaitForEarlierPasses,
     /// A barrier with explicit stages. The stages must be `VERTEX` or `FRAGMENT` on the side of this pass.
     Depend(Dependency),
+    /// Runs `count` commands of an ICB from `first`. The ICB, its pipelines and buffers stay alive until the GPU is done.
+    ExecuteIcb {
+        /// The ICB.
+        icb: IndirectCommandBuffer,
+        /// The first command.
+        first: u32,
+        /// The number of commands.
+        count: u32,
+    },
     /// Draws primitives.
     Draw {
         /// The topology.
@@ -380,6 +391,20 @@ impl RenderPass<'_> {
                     MTLStages::Vertex | MTLStages::Fragment,
                     MTL4VisibilityOptions::Device,
                 ),
+            RenderCommand::ExecuteIcb { icb, first, count } => {
+                if u64::from(*first) + u64::from(*count) > u64::from(icb.size()) {
+                    return Err(MetalError::Invalid("the ICB range is out of range"));
+                }
+                // SAFETY: the range is inside the ICB (checked above). The ICB is retained until the GPU is done
+                // and it is in the residency set.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_withRange(
+                        &icb.raw,
+                        NSRange::new(*first as usize, *count as usize),
+                    );
+                }
+                self.cb.retain(icb.clone());
+            }
             RenderCommand::Draw {
                 primitive,
                 first_vertex,
