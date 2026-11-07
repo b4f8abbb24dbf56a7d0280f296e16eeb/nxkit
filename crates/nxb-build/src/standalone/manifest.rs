@@ -103,8 +103,7 @@ fn settings(t: &nxtitle::Settings) -> Value {
         ("fps_target", n(t.fps_target)),
         ("fps_max", n(t.fps_max)),
         ("fps_hold", flag(t.fps_hold)),
-        ("ue_texture_pool", n(t.ue_texture_pool)),
-        ("ue_fps_cvar", s(t.ue_fps_cvar)),
+        ("texture_pool_mb", n(t.texture_pool_mb)),
         ("present_snap", flag(t.present_snap)),
         ("pso_mtl4", flag(t.pso_mtl4)),
         ("enc_thread", flag(t.enc_thread)),
@@ -128,6 +127,9 @@ fn settings(t: &nxtitle::Settings) -> Value {
         ),
         ("upscaler_keys", list(t.upscaler_keys)),
     ];
+    if let Some(cvar) = t.fps_cvar {
+        f.push(("fps_cvar", s(cvar)));
+    }
     if let Some(font) = t.shared_font {
         f.push(("shared_font", s(font)));
     }

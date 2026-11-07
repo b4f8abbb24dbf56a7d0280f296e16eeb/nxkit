@@ -50,10 +50,11 @@ pub struct Settings {
     pub fps_max: u32,
     /// `fps_hold`: the frame step may hold a frame longer when frames come late.
     pub fps_hold: bool,
-    /// `ue_texture_pool`: Unreal's `r.Streaming.PoolSize` in MB, 0 for the game's own.
-    pub ue_texture_pool: u32,
-    /// `ue_fps_cvar`: the Unreal console variable the host writes `fps_target` into.
-    pub ue_fps_cvar: &'static str,
+    /// `texture_pool_mb`: the size of the engine's texture streaming pool in MB, 0 for the game's own.
+    /// A game of an engine with such a pool states it. The core knows no engine.
+    pub texture_pool_mb: u32,
+    /// `fps_cvar`: the name of the engine variable the host writes `fps_target` into, `None` when the game has none.
+    pub fps_cvar: Option<&'static str>,
     /// `present_snap`: present snapshots by default.
     pub present_snap: bool,
     /// `pso_mtl4`: pipelines through `MTL4Compiler` with the archive.
@@ -115,8 +116,8 @@ impl Settings {
         fps_target: 0,
         fps_max: 60,
         fps_hold: true,
-        ue_texture_pool: 0,
-        ue_fps_cvar: "t.MaxFPS",
+        texture_pool_mb: 0,
+        fps_cvar: None,
         present_snap: false,
         pso_mtl4: false,
         enc_thread: false,

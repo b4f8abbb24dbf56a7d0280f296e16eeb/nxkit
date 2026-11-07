@@ -91,4 +91,6 @@ The Nintendo Switch game on NVN, update 1.9.0 (v1114112), family `agl`. The reco
 
 - The title states `gpu_timestamps segment`, `fps_target 60`, `present_snap`, `pso_mtl4` and `screen_aspect`.
 - `fps_target 60` needs the `FRAME_STEP` stubs of the game's `patches.py`. `nxb` applies them from `data/rewrite-rules`.
+- The settings are nxnative's values. R19 sets the target to 120 fps through the same frame step stubs, so `fps_target 60` is a record and not a cap. R10 and R17 replace `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys. The host reader reads no `settings` object yet.
+- `Settings` names no engine. An engine with a texture pool or a frame rate variable uses `texture_pool_mb` and `fps_cvar`. nxnative has two games with these values. No Unreal family exists in nxkit yet, so those two games are not taken along.
 - The game is the pilot for the nxkit runtime. nxnative runs every service of it.

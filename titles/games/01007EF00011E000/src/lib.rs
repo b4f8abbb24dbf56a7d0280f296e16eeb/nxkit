@@ -31,6 +31,12 @@ const GAME_TSV: Evidence = Evidence::Recorded {
 /// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The generated
 /// `game_profile.h` (`python3 dm/games/game.py header 01007EF00011E000 <out.h>`, read 2026-11-07) shows each result.
 /// `render_base` (1600x900 docked, 1280x720 handheld) has no field: the host's resolution is its own business.
+///
+/// These are nxnative's values, kept as the record of the game. nxkit's goals override some of them. R19 sets the
+/// target to 120 fps through the frame step patch in the rewrite rules, so `fps_target 60` and `fps_max 60` do not cap
+/// nxkit. `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys describe nxnative's
+/// translator. R10 and R17 replace them (encoding on its own thread, a whole frame, barriers only where data flows).
+/// The host reader of `game.json` (`nxkit-host`) reads no `settings` object yet, checked on 2026-11-07.
 const SETTINGS: Fact<Settings> = Fact::new(
     Settings {
         memory: Memory {

@@ -105,8 +105,8 @@ mod tests {
     #[test]
     fn the_name_loses_slashes_and_colons() {
         assert_eq!(
-            file_name("The Legend of Zelda: Breath of the Wild"),
-            "The Legend of Zelda Breath of the Wild"
+            file_name("Some Game: The Sequel"),
+            "Some Game The Sequel"
         );
         assert_eq!(file_name("../x/y"), "xy");
         assert_eq!(file_name(":"), "Game");

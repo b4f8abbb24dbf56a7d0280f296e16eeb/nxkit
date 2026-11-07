@@ -19,6 +19,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
+- `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as nxnative's record, and R10, R17 and R19 replace some of them.
 - nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and nxnative keeps its MIT notice in `THIRD_PARTY.md`.
 
 ## 0.9.2 - 2026-11-07
