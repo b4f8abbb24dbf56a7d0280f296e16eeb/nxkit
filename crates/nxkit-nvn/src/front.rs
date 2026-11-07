@@ -45,7 +45,7 @@ pub struct FlushStats {
 
 /// The memory callback of a game (`nvnCommandBufferSetMemoryCallback`). The host implements it
 /// and keeps the callback data of the game inside.
-pub trait MemoryCallback: std::fmt::Debug {
+pub trait MemoryCallback: std::fmt::Debug + Send {
     /// The command buffer `cb` needs `needed` more bytes. The result is a block as host address and length.
     /// None means that the game gives no memory.
     fn command_memory(&mut self, cb: usize, needed: u32) -> Option<(u64, u64)>;
