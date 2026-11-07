@@ -121,7 +121,7 @@ impl Reservation {
     pub fn map_anon(&self, addr: u64, len: u64, prot: i32) -> Result<()> {
         let p = self.check(addr, len)?;
         // SAFETY: without `MAP_FIXED` the system never replaces an existing mapping.
-        let got = unsafe { mmap(p, len as usize, prot, MAP_PRIVATE | MAP_ANON, -1, 0) };
+        let got = unsafe { mmap(p, len as usize, prot, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0) };
         if got == map_failed() {
             return Err(mem_err("mmap", errno()));
         }
@@ -167,6 +167,10 @@ impl Reservation {
     }
 
     /// Wraps the whole range as the buffer of the GPU backend (R3).
+    ///
+    /// No page of the range may be `PROT_NONE` when this runs. Metal `newBufferWithBytesNoCopy` returns nil then
+    /// (measured 2026-11-08). The reservation is therefore mapped read and write, which costs nothing until a page is
+    /// touched. The buffer stays valid when pages become `PROT_NONE` or `PROT_RX` later.
     pub fn as_guest_memory(&self, ctx: &nxkit_metal::Context) -> Result<nxkit_metal::GuestMemory> {
         let base = NonNull::new(self.base as usize as *mut u8)
             .ok_or_else(|| HostError::Memory("the reservation has no address".into()))?;
@@ -176,7 +180,7 @@ impl Reservation {
     }
 }
 
-/// Reserves `[tail_start, end)` as address space with no access, behind an image that dyld mapped, and returns a view
+/// Reserves `[tail_start, end)` as address space (read and write, no commit), behind an image that dyld mapped, and returns a view
 /// over `[view_start, end)`. The part `[view_start, tail_start)` is what dyld mapped. The view lets the host protect
 /// and fill those pages. The call fails when the tail is not free.
 pub fn reserve_tail(view_start: u64, tail_start: u64, end: u64) -> Result<Reservation> {
@@ -186,7 +190,7 @@ pub fn reserve_tail(view_start: u64, tail_start: u64, end: u64) -> Result<Reserv
         )));
     }
     let len = end - tail_start;
-    let got = map_hint(tail_start, len, PROT_NONE)?;
+    let got = map_hint(tail_start, len, PROT_RW)?;
     if got != tail_start {
         // SAFETY: `got` was just mapped here with `len` bytes.
         unsafe { munmap(got as usize as *mut c_void, len as usize) };
@@ -200,10 +204,10 @@ pub fn reserve_tail(view_start: u64, tail_start: u64, end: u64) -> Result<Reserv
     })
 }
 
-/// Reserves `[start, start + len)` as address space with no access and no commit. The call fails when the system
-/// gives another address, because the guest needs exactly this one (R18).
+/// Reserves `[start, start + len)` as address space, read and write and with no commit. The call fails when the
+/// system gives another address, because the guest needs exactly this one (R18).
 pub fn reserve(start: u64, len: u64) -> Result<Reservation> {
-    let got = map_hint(start, len, PROT_NONE)?;
+    let got = map_hint(start, len, PROT_RW)?;
     if got != start {
         // SAFETY: `got` was just mapped here with `len` bytes.
         unsafe { munmap(got as usize as *mut c_void, len as usize) };
@@ -212,6 +216,28 @@ pub fn reserve(start: u64, len: u64) -> Result<Reservation> {
         )));
     }
     Ok(Reservation { base: start, len })
+}
+
+/// Reserves `len` bytes of address space, read and write and with no commit, at an address that `accept` takes.
+/// Each hint is tried in order. A range that the system gives and `accept` refuses is given back. The error names
+/// what the system gave.
+pub fn reserve_where(hints: &[u64], len: u64, accept: impl Fn(u64) -> bool) -> Result<Reservation> {
+    let mut given = Vec::new();
+    for &hint in hints {
+        match map_hint(hint, len, PROT_RW) {
+            Ok(got) if accept(got) => return Ok(Reservation { base: got, len }),
+            Ok(got) => {
+                // SAFETY: `got` was just mapped here with `len` bytes.
+                unsafe { munmap(got as usize as *mut c_void, len as usize) };
+                given.push(format!("{got:#x} for the hint {hint:#x}"));
+            }
+            Err(e) => given.push(format!("{e} for the hint {hint:#x}")),
+        }
+    }
+    Err(HostError::Memory(format!(
+        "no usable address for {len:#x} bytes of guest memory, the system gave {}",
+        given.join(", ")
+    )))
 }
 
 /// Maps anonymous memory with `addr` as a hint and returns the address that the system chose.

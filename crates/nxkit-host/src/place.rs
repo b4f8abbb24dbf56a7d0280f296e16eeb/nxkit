@@ -9,10 +9,14 @@
 //! The segments of the library are signed with the library, so no run time permission for unsigned code is needed.
 //!
 //! The second way is the copy. When the library cannot be used (dyld refuses it, or the range behind it is taken), the
-//! host reserves the whole range at the preferred addresses and copies each segment from the flat image file. This is
-//! what nxnative does: it copies code into anonymous memory and calls `mprotect` to make it executable. It uses no
+//! host reserves the whole range and copies each segment from the flat image file. It asks for the preferred
+//! address first. The kernel models a 39-bit address space, so the range must end at or below `1 << 39`. When the
+//! preferred range ends higher or is not free, the host takes the address that the system gives below that limit and
+//! moves the game by the difference, as it does for a slid library. This is what nxnative does: it copies code into anonymous memory and calls `mprotect` to make it executable. It uses no
 //! `MAP_JIT` and signs nothing, which works while the process has no hardened runtime. A hardened runtime needs the
 //! entitlement `com.apple.security.cs.allow-unsigned-executable-memory`, and the build of the host adds it then.
+//!
+//! The reservation is read and write everywhere, because Metal refuses a no-copy buffer over a `PROT_NONE` page.
 //!
 //! A library that does not match `game.json` is an error and never a reason to copy (R15). The reason for a fall back
 //! is written to the log.
@@ -23,7 +27,7 @@ use crate::macho::{self, Segment as MachSegment};
 use crate::manifest::Game;
 use crate::memory::{self, GuestMemory};
 use crate::module::Prot;
-use crate::sys::{self, Dylib, PROT_NONE, PROT_RW, PROT_RX, Reservation};
+use crate::sys::{self, Dylib, PROT_RW, PROT_RX, Reservation};
 
 /// How the modules came to their addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +69,7 @@ fn read_images(game: &Game) -> Result<Vec<Vec<u8>>> {
         .collect()
 }
 
-/// Maps `PROT_NONE` anonymous memory over every part of `[from, to)` that no segment of the library covers. A failure
+/// Maps read and write anonymous memory over every part of `[from, to)` that no segment of the library covers. A failure
 /// gives back what it mapped.
 fn fill_gaps(res: &Reservation, segs: &[MachSegment], slide: i64, from: u64, to: u64) -> Result<()> {
     let mut spans: Vec<(u64, u64)> = segs
@@ -92,7 +96,7 @@ fn fill_gaps(res: &Reservation, segs: &[MachSegment], slide: i64, from: u64, to:
     }
     let mut done: Vec<(u64, u64)> = Vec::new();
     for (at, len) in gaps {
-        if let Err(e) = res.map_anon(at, len, PROT_NONE) {
+        if let Err(e) = res.map_anon(at, len, PROT_RW) {
             for (a, l) in done {
                 let _ = res.unmap(a, l);
             }
@@ -125,6 +129,14 @@ fn attempt(game: &Game, dylib: &Dylib) -> Result<std::result::Result<Mapped, Str
         .max()
         .unwrap_or(0);
     let layout = layout::plan(&moved, floor)?;
+    if !layout.fits_address_space() {
+        return Ok(Err(format!(
+            "the library at slide {:#x} would end at {:#x}, behind the {:#x} limit of the guest address space",
+            image.slide,
+            layout.all.end(),
+            layout::SPACE_END
+        )));
+    }
     let tail_len = layout.all.end().saturating_sub(floor);
     let res = match sys::reserve_tail(layout.all.start, floor, layout.all.end()) {
         Ok(r) => r,
@@ -158,9 +170,45 @@ fn via_dylib(game: &Game) -> Result<std::result::Result<(Mapped, Dylib), String>
     }
 }
 
+/// Reserves the whole guest range below `SPACE_END` and returns the game moved to where the system gave it, with its
+/// layout. The preferred address is tried first, if its range fits. Then the address that the system gives below the
+/// limit is tried. The slide is a multiple of `REGION_ALIGN`, so the regions keep the alignment that the layout needs.
+pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
+    let wanted = layout::plan(game, 0)?;
+    let (start, len) = (wanted.all.start, wanted.all.len);
+    let mut hints = Vec::new();
+    if wanted.fits_address_space() {
+        hints.push(start);
+    }
+    hints.push(layout::FALLBACK_BASE + start % layout::REGION_ALIGN);
+    let accept = |got: u64| {
+        got.checked_add(len).is_some_and(|e| e <= layout::SPACE_END) && got.wrapping_sub(start) % layout::REGION_ALIGN == 0
+    };
+    let res = sys::reserve_where(&hints, len, accept).map_err(|e| {
+        HostError::Memory(format!(
+            "the guest range {start:#x} + {len:#x} has no home below {:#x}: {e}",
+            layout::SPACE_END
+        ))
+    })?;
+    let slide = res.base().wrapping_sub(start) as i64;
+    if slide == 0 {
+        return Ok((res, game.clone(), wanted));
+    }
+    let moved = game.moved(slide)?;
+    let layout = layout::plan(&moved, 0)?;
+    if layout.all.start != res.base() || layout.all.len != len {
+        return Err(HostError::Memory(format!(
+            "the guest range moved to {:#x} changes its size from {len:#x} to {:#x}",
+            res.base(),
+            layout.all.len
+        )));
+    }
+    eprintln!("nxkit-host: the guest moved by {slide:#x} to {:#x}", res.base());
+    Ok((res, moved, layout))
+}
+
 fn via_copy(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
-    let layout = layout::plan(game, 0)?;
-    let res = sys::reserve(layout.all.start, layout.all.len)?;
+    let (res, game, layout) = reserve_guest(game)?;
     for (m, image) in game.modules.iter().zip(images) {
         for s in &m.segments {
             let at = m.segment_addr(s);
@@ -178,11 +226,7 @@ fn via_copy(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
             }
         }
     }
-    Ok(Mapped {
-        game: game.clone(),
-        layout,
-        res,
-    })
+    Ok(Mapped { game, layout, res })
 }
 
 /// Puts the modules into the reservation and registers the reservation with `nxkit_abi::guest`.

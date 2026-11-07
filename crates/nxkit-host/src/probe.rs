@@ -18,6 +18,7 @@ use crate::layout::{self, Layout};
 use crate::macho;
 use crate::manifest::Game;
 use crate::memory;
+use crate::place;
 use crate::sys::{self, Dylib, PROT_NONE};
 
 const COPY_RUNS: usize = 5;
@@ -43,6 +44,11 @@ fn named_ranges(game: &Game, layout: &Layout) -> Vec<(String, u64, u64)> {
 /// the system returns the hint only when the range is free.
 fn free_in_fresh_process(ranges: &[(String, u64, u64)]) -> Vec<bool> {
     println!("1. Are the fixed addresses free in this process (mmap with a hint)?");
+    if let Some((name, start, len)) = ranges.first() {
+        let end = start.saturating_add(*len);
+        let verdict = if end <= layout::SPACE_END { "fits" } else { "does NOT fit" };
+        println!("   {name}: ends at {end:#x}, which {verdict} below the 39-bit limit {:#x}", layout::SPACE_END);
+    }
     let mut free = Vec::new();
     for (name, start, len) in ranges {
         match sys::map_hint(*start, *len, PROT_NONE) {
@@ -171,12 +177,14 @@ fn mib(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)
 }
 
-/// Measurements 5 and 6: reserve the guest range, wrap it as the no-copy buffer of R3 and see how much memory the
-/// system wires for it.
-fn buffer_and_residency(layout: Layout) -> Result<()> {
+/// Measurements 5 and 6: reserve the guest range the way the host does (read and write, below the 39-bit limit),
+/// wrap it as the no-copy buffer of R3 and see how much memory the system wires for it. The guard page of the main
+/// stack comes after the buffer, as in the host.
+fn buffer_and_residency(game: &Game) -> Result<()> {
     println!("5. No-copy buffer over the reservation, and 6. wired memory:");
     let before = wired_bytes()?;
-    let res = sys::reserve(layout.all.start, layout.all.len)?;
+    let (res, _, layout) = place::reserve_guest(game)?;
+    println!("   reservation {:#x} + {:#x}, read and write", res.base(), res.len());
     let mem = memory::init(layout, res)?;
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     println!(
@@ -192,6 +200,8 @@ fn buffer_and_residency(layout: Layout) -> Result<()> {
         Ok(_) => println!("   newBufferWithBytesNoCopy over the whole range: ok in {:.2} ms", ms(took)),
         Err(e) => println!("   newBufferWithBytesNoCopy over the whole range: failed: {e}"),
     }
+    mem.seal()?;
+    println!("   guard page of the main stack set after the buffer");
     let after = wired_bytes()?;
     println!(
         "   wired memory of the system: {:.1} MiB before, {:.1} MiB after, resident allocations {}",
@@ -212,5 +222,5 @@ pub fn run(root: &Path) -> Result<()> {
     fixed_calls(&ranges, &free);
     copy_cost(&game)?;
     dyld_placement(&game);
-    buffer_and_residency(layout)
+    buffer_and_residency(&game)
 }

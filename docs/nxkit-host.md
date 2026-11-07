@@ -41,7 +41,7 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | key | meaning |
 |---|---|
 | `name` | `rtld`, `main`, `subsdk0` and so on, and `sdk`. |
-| `base` | The preferred guest address of offset 0. It is a multiple of 0x4000. dyld may slide the library, so the real address can differ (R47a). |
+| `base` | The preferred guest address of offset 0. It is a multiple of 0x4000. dyld may slide the library, and the host moves the guest below `1 << 39`, so the real address can differ (R47a, R56). |
 | `size` | The offset after the last byte of the highest segment, counted from `base`. A far layout has a patch segment below `base` that `size` does not count. |
 | `low` | The offset of the first byte of the lowest segment. It is 0 or negative. |
 | `span` | The memory the module maps, `size - low`. The host reserves `[base + low, base + low + span)` for the module, and it stops if `low` and `span` do not fit the segments. |
@@ -62,7 +62,7 @@ The relocations are not in `game.json`. The host reads `RELATIVE`, `RELR`, `ABS6
 
 ### nxgame.dylib
 
-The Mach-O library of all modules. Each module has three segments: `__NX_<NAME>_TEXT` (r-x) at `base`, `__NX_<NAME>_DATA` (rw-) at `base + data.offset`, and `__NX_<NAME>_PATCH` (r-x) for the patch area. In a near layout the patch segment lies behind the data. In a far layout it lies below `base`. `<NAME>` is the module name in upper case. The library has a header segment (`__TEXT`, one page) below the first module segment and an `__LINKEDIT` of one page behind the highest. It has no symbols and no rebase information, so dyld only maps it and slides it. The header page lies below the start of the first module and is never part of the guest range. The host starts its own regions behind `__LINKEDIT` and reserves the rest of the range behind it. The pages inside the module range that no segment covers are mapped by the host with no access. In a near layout this includes the zero bytes between the key page and the patch area, which the rewriter aligns to 64K.
+The Mach-O library of all modules. Each module has three segments: `__NX_<NAME>_TEXT` (r-x) at `base`, `__NX_<NAME>_DATA` (rw-) at `base + data.offset`, and `__NX_<NAME>_PATCH` (r-x) for the patch area. In a near layout the patch segment lies behind the data. In a far layout it lies below `base`. `<NAME>` is the module name in upper case. The library has a header segment (`__TEXT`, one page) below the first module segment and an `__LINKEDIT` of one page behind the highest. It has no symbols and no rebase information, so dyld only maps it and slides it. The header page lies below the start of the first module and is never part of the guest range. The host starts its own regions behind `__LINKEDIT` and reserves the rest of the range behind it. The pages inside the module range that no segment covers are mapped by the host read and write. In a near layout this includes the zero bytes between the key page and the patch area, which the rewriter aligns to 64K.
 
 ### The gate list
 
@@ -97,7 +97,9 @@ One reservation holds all guest memory. It is the guest range of `nxkit_abi::gue
 5. The stack region, aligned to 2 MiB. The stack of the main thread is at its start, with a guard page at the low end.
 6. The alias region, aligned to 2 MiB.
 
-The host regions start behind the highest module. When dyld mapped the library, they start behind the `__LINKEDIT` segment, which lies behind the last module.
+The reservation is mapped read and write, and the pages are not committed until they are touched. The GPU buffer is created over it before any page becomes `PROT_NONE`, because Metal refuses a no-copy buffer over such a page. The guard page of the main stack is set after that.
+
+The whole reservation ends at or below `1 << 39`, the end of the address space that the kernel models. The host regions start behind the highest module. When dyld mapped the library, they start behind the `__LINKEDIT` segment, which lies behind the last module.
 
 ### The memory profile
 
@@ -123,8 +125,10 @@ The host gives these numbers and the region ranges to the kernel when it starts 
 
 1. The host reads every `image` file.
 2. It calls `dlopen` on `nxgame.dylib` and reads the header and the load commands of the mapped image. It checks that every `__NX_<NAME>_*` segment has the offset, size and protection of `game.json` relative to the image.
-3. dyld may slide the library. The host takes the slide, moves every module by it and reserves the rest of the guest range behind `__LINKEDIT` with an address hint. It maps `PROT_NONE` memory over the gaps between the segments.
-4. If dyld refuses the library, or the range behind it is not free, the host closes the library, prints the reason and copies. It reserves the range at the preferred addresses and copies each segment from `image` with `file_offset` and `file_size`. The segment is `rw-` while it is written, and then `r-x` if it is code. This uses `mprotect` only. It has no `MAP_JIT` and signs nothing. A hardened runtime would need the entitlement `com.apple.security.cs.allow-unsigned-executable-memory`.
+3. dyld may slide the library. The host takes the slide, moves every module by it and reserves the rest of the guest range behind `__LINKEDIT` with an address hint. It maps read and write memory over the gaps between the segments. If the slid layout would end above `1 << 39`, the host skips this step and gives the reason in the log.
+4. If dyld refuses the library, or the range behind it is not free, the host closes the library, prints the reason and copies. It reserves the whole range, read and write, and copies each segment from `image` with `file_offset` and `file_size`. The segment is `rw-` while it is written, and then `r-x` if it is code. The reservation is made as follows. The host asks for the preferred address first if the range ends at or below `1 << 39`. Otherwise it asks for `0x70_0000_0000`, which is the only range that macOS gives below that limit. It takes the address only if the range ends at or below `1 << 39` and the slide is a multiple of 2 MiB. Then it moves every module by the slide, plans the layout again and copies at the moved addresses. It prints `nxkit-host: the guest moved by <slide> to <base>`. If the system gives no such address, the host stops and names the range. The loader relocates for the moved bases, as for a slid library.
+
+The copy uses `mprotect` only. It has no `MAP_JIT` and signs nothing. A hardened runtime would need the entitlement `com.apple.security.cs.allow-unsigned-executable-memory`.
 
 A mismatch between the library and `game.json` is an error and never a reason to copy.
 
@@ -190,11 +194,11 @@ At most two frames are in flight on the GPU. The backend presents at the target 
 
 `nxkit-host probe <run folder>` runs these measurements and prints each result:
 
-1. Whether each fixed range is free in a fresh process.
+1. Whether each fixed range is free in a fresh process, and whether the whole layout ends below `1 << 39`.
 2. Whether `MAP_FIXED` and `mach_vm_allocate` with `VM_FLAGS_FIXED` get each range.
 3. The cost of the copy: map, copy and `mprotect` for the size of each module.
 4. Where dyld puts the segments of `nxgame.dylib`, and its slide.
-5. Whether `newBufferWithBytesNoCopy` accepts the whole reservation.
+5. Whether `newBufferWithBytesNoCopy` accepts the whole reservation, made as the host makes it: read and write, below `1 << 39`, with the guard page set after the buffer.
 6. How much wired memory the system has before and after step 5.
 
 ## Seams

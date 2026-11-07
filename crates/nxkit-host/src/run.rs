@@ -1,7 +1,8 @@
 //! The startup order of the host (R47).
 //!
 //! 1. Read `game.json`. 2. Place the modules: dyld maps the library, or the host copies the segments, and the one
-//! reservation holds everything, registered with `nxkit_abi::guest`. 3. Start the kernel. 4. Register the kernel and
+//! reservation holds everything, registered with `nxkit_abi::guest`. The GPU buffer over it comes next, and then the
+//! guard page. 3. Start the kernel. 4. Register the kernel and
 //! the IPC server and start the services. 5. Finish the load: relocations, imports and gates. 6. Open the window.
 //! 7. Start the main guest thread. 8. Run the AppKit loop until the game or the window stops.
 //!
@@ -56,6 +57,11 @@ pub fn run(opts: &Options) -> Result<()> {
     let mem = placed.mem;
     let (layout, settings) = (mem.layout, placed.game.settings.clone());
 
+    // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
+    let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
+    let gpu_memory = Arc::new(mem.res.as_guest_memory(&ctx)?);
+    mem.seal()?;
+
     nxkit_rt::nxkit_init(mask);
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
     seams::register_kernel()?;
@@ -72,8 +78,6 @@ pub fn run(opts: &Options) -> Result<()> {
     );
     guestsym::set(std::mem::take(&mut loaded.exports));
 
-    let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
-    let gpu_memory = Arc::new(mem.res.as_guest_memory(&ctx)?);
     let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),

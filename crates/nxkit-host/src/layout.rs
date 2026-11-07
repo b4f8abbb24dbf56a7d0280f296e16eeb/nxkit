@@ -12,6 +12,10 @@ use crate::manifest::Game;
 pub const PAGE: u64 = 0x4000;
 /// The alignment of the heap and alias regions. Horizon wants 2 MiB.
 pub const REGION_ALIGN: u64 = 0x20_0000;
+/// The end of the 39-bit address space that the kernel models. The whole reservation lies below it.
+pub const SPACE_END: u64 = 1 << 39;
+/// The address that the system gives below `SPACE_END` in a macOS process (measured 2026-11-08).
+pub const FALLBACK_BASE: u64 = 0x70_0000_0000;
 /// The number of guest threads that have a thread-local block at the same time.
 pub const TLS_SLOTS: u64 = 1024;
 /// The size of the area that backs the shared memory objects of the guest.
@@ -26,6 +30,13 @@ pub struct Range {
     pub start: u64,
     /// The length in bytes.
     pub len: u64,
+}
+
+impl Layout {
+    /// True when the whole reservation ends at or below the end of the 39-bit address space.
+    pub fn fits_address_space(&self) -> bool {
+        self.all.end() <= SPACE_END
+    }
 }
 
 impl Range {
