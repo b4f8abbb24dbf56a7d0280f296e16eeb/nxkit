@@ -66,6 +66,41 @@ impl Default for State {
     }
 }
 
+impl State {
+    /// Applies the state that a recording left behind. A queue calls this after each submit, because the state
+    /// that one submit leaves is the inherited state of the next.
+    pub fn apply(&mut self, d: &Delta) {
+        if let Some(t) = d.targets {
+            self.targets = t;
+        }
+        if let Some(f) = d.scissor {
+            self.scissor_full = f;
+        }
+        if let Some(s) = d.draw {
+            self.draw = s;
+        }
+        for (i, t) in &d.tex {
+            self.tex[*i as usize] = *t;
+        }
+        for (i, t) in &d.img {
+            self.img[*i as usize] = *t;
+        }
+    }
+
+    /// Removes a texture from every slot, for a texture that was finalised.
+    pub fn forget(&mut self, id: TexId) {
+        let gone = |t: &mut Option<TexId>| {
+            if *t == Some(id) {
+                *t = None;
+            }
+        };
+        self.targets.color.iter_mut().for_each(gone);
+        gone(&mut self.targets.depth);
+        self.tex.iter_mut().for_each(gone);
+        self.img.iter_mut().for_each(gone);
+    }
+}
+
 /// The parts of the inherited state that a recording reads before it sets them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Needs {

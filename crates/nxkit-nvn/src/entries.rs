@@ -5,6 +5,8 @@
 //! - [`NXNATIVE_IMPLEMENTED`] is the part that nxnative implements in `hle_nvn.c`.
 //!
 //! [`RECORDED`] is the part that this front end handles. Each entry names the [`Op`] that a call turns into.
+//! [`FFI_GROUPS`] is the part that the C ABI of `nxkit-rt` implements without the front end recording anything,
+//! one row per group (device, queue, memory pool and so on).
 //! The GPU moves to nxkit one game at a time. [`Coverage::of`] takes the names that one game imports
 //! and reports the ones that this front end does not handle yet.
 
@@ -168,6 +170,171 @@ pub const RECORDED: &[(&str, Op)] = &[
     ("nvnTextureReadTexelsStrided", Op::TextureRead),
 ];
 
+/// The functions that the C ABI of `nxkit-rt` implements, in one row per group. A group module of `nxkit-rt` owns its row.
+/// A test of `nxkit-rt` checks that the names of a row are the names that the group exports.
+/// A function that is in [`RECORDED`] and in a row is counted once.
+pub const FFI_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "device",
+        &[
+            "nvnDeviceBuilderSetDefaults",
+            "nvnDeviceBuilderSetFlags",
+            "nvnDeviceInitialize",
+            "nvnDeviceFinalize",
+            "nvnDeviceFinalizeCommandHandle",
+            "nvnDeviceGetProcAddress",
+            "nvnDeviceGetInteger",
+            "nvnDeviceGetCurrentTimestampInNanoseconds",
+            "nvnDeviceGetTimestampInNanoseconds",
+            "nvnDeviceGetTextureHandle",
+            "nvnDeviceGetTexelFetchHandle",
+            "nvnDeviceGetImageHandle",
+            "nvnDeviceGetSeparateTextureHandle",
+            "nvnDeviceGetSeparateSamplerHandle",
+            "nvnDeviceInstallDebugCallback",
+            "nvnDeviceSetWindowOriginMode",
+            "nvnDeviceGetWindowOriginMode",
+            "nvnDeviceSetDepthMode",
+            "nvnDeviceGetDepthMode",
+            "nvnDeviceRegisterFastClearColor",
+            "nvnDeviceRegisterFastClearDepth",
+            "nvnDeviceSetIntermediateShaderCache",
+            "nvnSetExternalDebuggerEnabledNVX",
+        ],
+    ),
+    (
+        "queue",
+        &[
+            "nvnQueueBuilderSetDevice",
+            "nvnQueueBuilderSetDefaults",
+            "nvnQueueBuilderSetFlags",
+            "nvnQueueBuilderSetCommandMemorySize",
+            "nvnQueueBuilderSetComputeMemorySize",
+            "nvnQueueBuilderSetControlMemorySize",
+            "nvnQueueBuilderSetCommandFlushThreshold",
+            "nvnQueueBuilderSetQueueMemory",
+            "nvnQueueBuilderSetQueuePriority",
+            "nvnQueueBuilderSetPrimaryQueue",
+            "nvnQueueBuilderGetQueueMemorySize",
+            "nvnQueueInitialize",
+            "nvnQueueFinalize",
+            "nvnQueueSetDebugLabel",
+            "nvnQueueSubmitCommands",
+            "nvnQueueFlush",
+            "nvnQueueFinish",
+            "nvnQueuePresentTexture",
+            "nvnQueueAcquireTexture",
+            "nvnQueueFenceSync",
+            "nvnQueueWaitSync",
+            "nvnQueueGetError",
+        ],
+    ),
+    (
+        "sync",
+        &[
+            "nvnSyncInitialize",
+            "nvnSyncFinalize",
+            "nvnSyncSetDebugLabel",
+            "nvnSyncWait",
+        ],
+    ),
+    (
+        "pool",
+        &[
+            "nvnMemoryPoolBuilderSetDevice",
+            "nvnMemoryPoolBuilderSetDefaults",
+            "nvnMemoryPoolBuilderSetStorage",
+            "nvnMemoryPoolBuilderSetFlags",
+            "nvnMemoryPoolInitialize",
+            "nvnMemoryPoolFinalize",
+            "nvnMemoryPoolSetDebugLabel",
+            "nvnMemoryPoolMap",
+            "nvnMemoryPoolFlushMappedRange",
+            "nvnMemoryPoolInvalidateMappedRange",
+            "nvnMemoryPoolGetBufferAddress",
+            "nvnMemoryPoolMapVirtual",
+            "nvnMemoryPoolGetSize",
+            "nvnMemoryPoolGetFlags",
+        ],
+    ),
+    (
+        "buffer",
+        &[
+            "nvnBufferBuilderSetDevice",
+            "nvnBufferBuilderSetDefaults",
+            "nvnBufferBuilderSetStorage",
+            "nvnBufferBuilderGetMemoryPool",
+            "nvnBufferBuilderGetMemoryOffset",
+            "nvnBufferBuilderGetSize",
+            "nvnBufferInitialize",
+            "nvnBufferFinalize",
+            "nvnBufferSetDebugLabel",
+            "nvnBufferMap",
+            "nvnBufferGetAddress",
+            "nvnBufferFlushMappedRange",
+            "nvnBufferInvalidateMappedRange",
+            "nvnBufferGetMemoryPool",
+            "nvnBufferGetMemoryOffset",
+            "nvnBufferGetSize",
+        ],
+    ),
+    (
+        "window",
+        &[
+            "nvnWindowBuilderSetDevice",
+            "nvnWindowBuilderSetDefaults",
+            "nvnWindowBuilderSetNativeWindow",
+            "nvnWindowBuilderSetTextures",
+            "nvnWindowBuilderSetNumActiveTextures",
+            "nvnWindowBuilderSetPresentInterval",
+            "nvnWindowBuilderGetPresentInterval",
+            "nvnWindowInitialize",
+            "nvnWindowSetDebugLabel",
+            "nvnWindowAcquireTexture",
+            "nvnWindowSetNumActiveTextures",
+            "nvnWindowSetPresentInterval",
+            "nvnWindowGetPresentInterval",
+            "nvnWindowSetCrop",
+            "nvnWindowGetCrop",
+        ],
+    ),
+    (
+        "event",
+        &[
+            "nvnEventBuilderSetDefaults",
+            "nvnEventBuilderSetStorage",
+            "nvnEventBuilderGetMemoryPool",
+            "nvnEventBuilderGetMemoryOffset",
+            "nvnEventInitialize",
+            "nvnEventFinalize",
+            "nvnEventGetValue",
+            "nvnEventSignal",
+            "nvnEventGetMemoryPool",
+            "nvnEventGetMemoryOffset",
+        ],
+    ),
+    (
+        "program",
+        &[
+            "nvnProgramBuilderSetDevice",
+            "nvnProgramBuilderSetDefaults",
+            "nvnProgramBuilderSetShaders",
+            "nvnProgramInitialize",
+            "nvnProgramInitializeFromBuilder",
+            "nvnProgramFinalize",
+            "nvnProgramSetDebugLabel",
+            "nvnProgramSetShaders",
+            "nvnProgramSetShadersExt",
+            "nvnProgramSetSampleShading",
+        ],
+    ),
+];
+
+/// Whether a group of `nxkit-rt` implements the function.
+pub fn in_ffi(name: &str) -> bool {
+    FFI_GROUPS.iter().any(|(_, names)| names.contains(&name))
+}
+
 /// The names of a list, one per line. Empty lines and lines that start with `#` are skipped.
 pub fn parse_names(text: &str) -> impl Iterator<Item = &str> {
     text.lines()
@@ -201,7 +368,7 @@ impl Coverage {
             if !seen.insert(name) {
                 continue;
             }
-            let bucket = if op_of(name).is_some() {
+            let bucket = if op_of(name).is_some() || in_ffi(name) {
                 &mut c.handled
             } else if known.contains(name) {
                 &mut c.unhandled
@@ -254,6 +421,21 @@ mod tests {
     }
 
     #[test]
+    fn every_ffi_name_is_implemented_by_nxnative_and_listed_once() {
+        let known: HashSet<&str> = parse_names(NXNATIVE_IMPLEMENTED).collect();
+        let mut seen = HashSet::new();
+        for (group, names) in FFI_GROUPS {
+            for name in *names {
+                assert!(
+                    known.contains(name),
+                    "{group}: {name} has no nxnative reference"
+                );
+                assert!(seen.insert(*name), "{name} is in two groups or twice");
+            }
+        }
+    }
+
+    #[test]
     fn coverage_splits_a_list_in_three() {
         let c = Coverage::of([
             "nvnCommandBufferBarrier",
@@ -261,15 +443,23 @@ mod tests {
             "nvnDeviceInitialize",
             "nvnNotAnNvnName",
         ]);
-        assert_eq!(c.handled, ["nvnCommandBufferBarrier"]);
-        assert_eq!(c.unhandled, ["nvnDeviceInitialize"]);
+        assert_eq!(
+            c.handled,
+            ["nvnCommandBufferBarrier", "nvnDeviceInitialize"]
+        );
+        assert!(c.unhandled.is_empty());
         assert_eq!(c.unknown, ["nvnNotAnNvnName"]);
     }
 
     #[test]
     fn the_whole_nxnative_list_splits_without_loss() {
         let c = Coverage::of_nxnative();
-        assert_eq!(c.handled.len(), RECORDED.len());
+        let ffi_only = FFI_GROUPS
+            .iter()
+            .flat_map(|(_, names)| names.iter())
+            .filter(|n| op_of(n).is_none())
+            .count();
+        assert_eq!(c.handled.len(), RECORDED.len() + ffi_only);
         assert_eq!(c.handled.len() + c.unhandled.len(), 484);
         assert!(c.unknown.is_empty());
     }

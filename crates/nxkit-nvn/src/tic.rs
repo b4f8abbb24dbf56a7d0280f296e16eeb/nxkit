@@ -1,9 +1,44 @@
 //! The texture header (TIC) and the sampler header (TSC), 32 bytes each, as the texture pool and the sampler pool hold them.
 //!
 //! The words follow the structure of the Maxwell headers: the address in words 1 and 2, the layout kind in word 2,
-//! the block shape in word 3 and the size in words 4 and 5. The exact bit positions are nxkit's own and are not checked
-//! against hardware. The game never reads the headers. The front end writes them when the game registers a texture,
+//! the block shape in word 3 and the size in words 4 and 5. The bit positions are nxkit's own encoding, not the
+//! hardware encoding. The game never reads the headers. The front end writes them when the game registers a texture,
 //! so the encoding only has to be lossless. Each field has a round-trip test.
+//!
+//! ## How the fields were checked (2026-11-07)
+//!
+//! nxnative has no hardware header code. Its texture pool is a table in the host (`dpool` in `hle_nvn.c`), and
+//! `nvn_texdesc` in `nvn_tex.h` plus `view_t` and `samp_par` in `nvn_obj.h` hold the same values as the fields here.
+//! No deko3d or Mesa header (`cl9097tex.h`, `clb197tex.h`) exists on the development machine. A search with Spotlight and
+//! in `~/repos/me` found none. So no bit position is checked against hardware.
+//! Every bit position is unverified against hardware, and nothing in nxkit needs it to be.
+//!
+//! Checked against `dm/gfx/nvn/include/nvn.h` and `nvn_tex.h` of nxnative:
+//!
+//! | Field | Bits | Largest value in nxnative | Result |
+//! |---|---|---|---|
+//! | format, view format | 8 | `NVNformat` 156 | fits |
+//! | target, view target | 4 | `NVN_TEXTURE_TARGET_BUFFER` 10 | fits, and the discriminants of [`Target`] equal the NVN values |
+//! | swizzle, 4 fields | 3 each | `NVN_TEXTURE_SWIZZLE_A` 5 | fits |
+//! | samples (log2) | 3 | a power of two up to 128 | fits, nxkit's limit |
+//! | levels, view levels | 6 | 15 (`g_devinfo[0x2C]`) | fits |
+//! | base level | 5 | 15 | fits |
+//! | width, height, depth minus 1 | 20 | 16384 (`g_devinfo[0x3D]`) | fits |
+//! | layers, base layer | 16 | 2048 (`g_devinfo[0x2D]`) | fits |
+//! | flags | 12 | `NVN_TEXTURE_FLAGS_ZCULL_SUPPORT_STENCIL` 0x400 | fits |
+//! | block shape `tile_h`, `tile_d` | 3 each | `sparse_tile_h` in `nvn_tex.c` gives 5 at most | fits |
+//! | stride | 24 | 16 MiB pitch | unverified, the limit is nxkit's |
+//! | wrap s, t, r | 3 each | `NVN_WRAP_MODE_CLAMP_TO_EDGE` 7 | fits |
+//! | min filter | 3 | `NVN_MIN_FILTER_LINEAR_MIPMAP_LINEAR` 5 | fits |
+//! | mag filter | 2 | `NVN_MAG_FILTER_LINEAR` 1 | fits |
+//! | compare mode | 2 | 1 | fits |
+//! | compare func | 4 | `NVN_COMPARE_FUNC_ALWAYS` 8 | fits |
+//! | reduction | 2 | `NVN_SAMPLER_REDUCTION_MAX` 2 | fits |
+//! | anisotropy | 7, in steps of 0.25 | 16.0 (`g_devinfo[0x1B]`), 64 steps | fits, the value is rounded to 0.25 |
+//! | lod min, max, bias, border | raw `f32` | `samp_par` holds `float` | exact |
+//!
+//! The test `the_fields_do_not_overlap_and_hold_the_largest_values` fills every field with its largest value and reads
+//! each back, so no field sits on the bits of another. The sampler header is lossless except for the anisotropy.
 
 use crate::error::{NvnError, Result};
 use crate::layout::{Target, TextureDesc};
@@ -475,5 +510,57 @@ mod tests {
         bad = tsc;
         bad.compare_func = 16;
         assert!(bad.encode().is_err());
+    }
+
+    #[test]
+    fn the_fields_do_not_overlap_and_hold_the_largest_values() {
+        let tic = Tic {
+            address: GpuAddr::new((1 << 40) - 1).unwrap(),
+            format: 156,
+            target: Target::Buffer,
+            layout: TicLayout::BlockLinear {
+                tile_h: 7,
+                tile_d: 7,
+            },
+            samples: 128,
+            width: 1 << 20,
+            height: 1 << 20,
+            depth: 1 << 20,
+            levels: 63,
+            view: TextureView {
+                base_level: 31,
+                levels: 63,
+                base_layer: u16::MAX,
+                layers: u16::MAX,
+                format: Some(156),
+                target: Some(Target::Buffer),
+                swizzle: [5, 5, 5, 5],
+            },
+            flags: 0xfff,
+        };
+        assert_eq!(Tic::decode(&tic.encode().unwrap()).unwrap(), tic);
+        let pitch = Tic {
+            layout: TicLayout::Pitch {
+                stride: (1 << 24) - 1,
+            },
+            ..tic
+        };
+        assert_eq!(Tic::decode(&pitch.encode().unwrap()).unwrap(), pitch);
+        let tsc = Tsc {
+            min_filter: 7,
+            mag_filter: 3,
+            wrap_s: 7,
+            wrap_t: 7,
+            wrap_r: 7,
+            compare_mode: 3,
+            compare_func: 15,
+            reduction: 3,
+            lod_min: f32::MIN,
+            lod_max: f32::MAX,
+            lod_bias: -0.0,
+            aniso: 31.75,
+            border: [f32::MAX, f32::MIN, 1.0, 0.0],
+        };
+        assert_eq!(Tsc::decode(&tsc.encode().unwrap()), tsc);
     }
 }

@@ -20,7 +20,7 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-rt (unsafe code, the C ABI of the host)"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
