@@ -1,6 +1,6 @@
 # External dependencies of the nxkit workspace (CONTRIBUTING.md "Dependencies").
 # One table per crate: reason, licence, version, unsafe count, owner, which workspace crates may use it.
-# A new entry is its own commit. Today the workspace uses std only.
+# A new entry is its own commit. Besides std, only the objc2 family (macOS Metal backend) is used.
 #
 # Expected first entries (designs): ruzstd (nxb-codec, O14), fancy-regex and closure (nxb-shader only, 1:1 regex port),
 # memchr, windows-sys (nxb-sys, Windows), libfuzzer-sys (dev only).
@@ -20,3 +20,57 @@ licence = "GPL-3.0-only (same workspace)"
 unsafe = "0 (forbid(unsafe_code))"
 owner = "project team"
 used_by = ["nxb-cli (cargo feature air-front, on by default)"]
+
+[objc2]
+reason = "the Objective-C runtime binding that every Apple framework call goes through"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
+
+[objc2-foundation]
+reason = "NSString, NSURL, NSArray and NSError, which the Metal API takes and returns"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
+
+[objc2-core-foundation]
+reason = "CGSize and CFTimeInterval, used by Metal and CoreAnimation signatures"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
+
+[objc2-metal]
+reason = "the Metal 4 API (MTL4CommandQueue, MTL4Compiler, MTLResidencySet and the rest) for the Metal backend of the host"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
+
+[objc2-quartz-core]
+reason = "CAMetalLayer and its drawables, the present path of the host"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
+
+[block2]
+reason = "Objective-C blocks, for the MTL4 commit feedback handler"
+source = "git https://github.com/madsmtm/objc2 at a pinned commit of main, because crates.io 0.3.2 lacks the Xcode 27 headers with Metal 4. The pin moves to a crates.io release once one has them (request: madsmtm/objc2#892)"
+licence = "Zlib OR Apache-2.0 OR MIT"
+version = "8a5abacd90d5403fc0463459a35826f892b9142e"
+unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
+owner = "project team"
+used_by = ["nxkit-metal"]
