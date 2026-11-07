@@ -22,6 +22,7 @@ mod state;
 mod sys;
 mod touch;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use nxkit_abi::export::Export;
@@ -64,6 +65,18 @@ pub fn big_stack_exports() -> Vec<Export> {
 /// The IPC services of the input service: `hid`.
 pub fn services() -> Vec<Named> {
     ipc::named()
+}
+
+static FOCUSED: AtomicBool = AtomicBool::new(true);
+
+/// Tells the service that the window gained or lost the key focus. A window without focus reports no key and no mouse
+/// button, so a key that was held at the loss is released.
+pub fn set_focus(focused: bool) {
+    FOCUSED.store(focused, Ordering::Relaxed);
+}
+
+pub(crate) fn focused() -> bool {
+    FOCUSED.load(Ordering::Relaxed)
 }
 
 /// The display tick. It looks up the controllers, renews the rumble pulses and writes the HID shared memory when a

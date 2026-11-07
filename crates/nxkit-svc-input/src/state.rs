@@ -268,19 +268,22 @@ impl Input {
 
     /// The bytes of a `KeyboardState`. All zero when there is no keyboard.
     pub(crate) fn keyboard_state(&mut self) -> [u8; KEYBOARD_STATE_SIZE] {
-        let keys = self.platform.read_keys().unwrap_or_default();
+        let keys = self.keys();
         self.keyboard_sampling += 1;
         keys.to_state_bytes(self.keyboard_sampling)
     }
 
     /// The keys that are down.
     pub(crate) fn keys(&self) -> KeySet {
+        if !crate::focused() {
+            return KeySet::default();
+        }
         self.platform.read_keys().unwrap_or_default()
     }
 
     /// The bytes of a `MouseState`. Only the buttons are filled. Position, delta and wheel are 0.
     pub(crate) fn mouse_state(&mut self) -> [u8; MOUSE_STATE_SIZE] {
-        let buttons = self.platform.read_mouse();
+        let buttons = if crate::focused() { self.platform.read_mouse() } else { None };
         self.mouse_sampling += 1;
         let mut b = [0u8; MOUSE_STATE_SIZE];
         b[0..8].copy_from_slice(&self.mouse_sampling.to_le_bytes());
