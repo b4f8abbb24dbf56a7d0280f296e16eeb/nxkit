@@ -23,11 +23,11 @@ The host follows the layers of the workspace and the title layer.
 
 | crate | function |
 |---|---|
-| `nxkit-rt` | the guest ABI, the entry points the host calls, the only crate with `unsafe` besides `nxb-sys` |
+| `nxkit-rt` | the guest ABI, the entry points the host calls, contains `unsafe` code, with `nxb-sys` and `nxkit-metal` |
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline` |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
-| `nxkit-metal` | the Metal 4 backend: it runs a recorded frame |
+| `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
 
 ### Core, family and title
@@ -82,6 +82,18 @@ The decisions of the host and their causes are R1 to R17 in [decisions.md](../de
 | H4 | `pacing` on nxkit | the game holds 60 and 120 fps on a 120 Hz display at the right game speed |
 | H5 | `kernel` and the `nxkit-host` program | the game starts from `nxkit-host` without `dmhost` |
 | H6 | nxnative is off | `nxb build --platform mac` for Breath of the Wild has no nxnative stage, and the route runs |
+
+The part of H3 that does not need the frame format exists in `nxkit-metal`:
+
+- The device, the Metal 4 command queue, three command allocators for the frames in flight and a residency set.
+- Guest memory as one no-copy `MTLBuffer`, with the mapping from a host address to a GPU address.
+- Shader libraries from a `.metallib` file or from source, pipeline states from `MTL4Compiler`, and a pipeline cache under a hash from the caller, with an optional binary archive on disk.
+- A `CAMetalLayer` drawable path and the hooks for frame pacing. The window belongs to `nxkit-host`.
+- CPU encode time and GPU time of every command buffer.
+- A block-linear deswizzle compute kernel from guest memory into a texture.
+- A data-driven encoding API for render passes and compute passes. The frame encoder will call it from a loop over the recorded commands.
+
+What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, depth and blend state, the vertex layout, and `CADisplayLink`.
 
 The route is one save and one path through the game: the title screen, loading the save, the Great Plateau outdoors, a shrine, the menus and a cutscene.
 

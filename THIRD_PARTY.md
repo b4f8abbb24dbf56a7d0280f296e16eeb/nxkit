@@ -1,6 +1,6 @@
 # Third-party notes
 
-This repository has no external Rust dependencies. `Cargo.lock` lists only the crates of the workspace.
+The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
 

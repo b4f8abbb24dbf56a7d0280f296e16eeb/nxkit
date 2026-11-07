@@ -61,6 +61,12 @@ nxb-xlatedev = { path = "crates/nxb-xlatedev" }
 nxb-xlate = { path = "crates/nxb-xlate" }
 nxb-layer = { path = "crates/nxb-layer" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
+objc2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-core-foundation = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-foundation = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-metal = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-quartz-core = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+block2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 
 [profile.test]
 # the parser tests recurse deeply: optimise them as the front-end project did
