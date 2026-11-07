@@ -306,6 +306,7 @@ pub fn map_stack(len: u64, guard: u64) -> Result<u64> {
 }
 
 /// A library that `dlopen` loaded. It is never unloaded, except by `close`.
+#[derive(Debug)]
 pub struct Dylib {
     handle: *mut c_void,
     path: PathBuf,
@@ -443,6 +444,12 @@ pub fn kernel_init(thread_entry: nxkit_rt::NxkitThreadEntry) -> Result<()> {
         core_rules: 1,
         roles: std::ptr::null(),
         role_count: 0,
+        main_thread_priority: -1,
+        main_thread_core: -2,
+        main_thread_stack_size: 0,
+        process_id: 0,
+        process_exit: None,
+        memory: std::ptr::null(),
     };
     // SAFETY: `config` is valid for the call and has no rules. The guest range is registered before any svc runs.
     match unsafe { nxkit_rt::nxkit_kernel_init(&config) } {

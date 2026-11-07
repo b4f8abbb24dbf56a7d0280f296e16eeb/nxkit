@@ -231,7 +231,8 @@ pub fn run(
     });
     // SAFETY: `init` of `NSObject` on a freshly allocated instance whose ivars are set.
     let delegate: Retained<AppDelegate> = unsafe { msg_send![super(delegate), init] };
-    window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    // SAFETY: the delegate is kept alive by `delegate` for the whole run of the app, and the window only holds it weakly.
+    unsafe { window.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks { inner: hooks, stop });
