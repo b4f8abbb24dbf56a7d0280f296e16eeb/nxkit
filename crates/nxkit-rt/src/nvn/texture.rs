@@ -284,6 +284,12 @@ getter!(get_stride, "nvnTextureGetStride", i64, STRIDE, u32, i64::from);
 getter!(get_memory_pool, "nvnTextureGetMemoryPool", u64, POOL, u64, |v| v);
 getter!(get_memory_offset, "nvnTextureGetMemoryOffset", i64, OFF, i64, |v| v);
 getter!(get_texture_address, "nvnTextureGetTextureAddress", u64, ADDRESS, u64, |v| v);
+
+/// The GPU address of the storage of the texture at the guest address `t`, which is the address that a record names
+/// the texture by. It reads the guest object and takes no lock.
+pub(crate) fn storage_address(t: u64) -> AbiResult<u64> {
+    field(t, |o| o.u64(ADDRESS))
+}
 getter!(get_storage_size, "nvnTextureGetStorageSize", i32, SIZE, u64, |v| v as i32);
 
 fn byte(t: u64, at: u64) -> AbiResult<i32> {

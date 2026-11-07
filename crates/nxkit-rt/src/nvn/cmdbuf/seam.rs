@@ -2,9 +2,8 @@
 //!
 //! The groups are filled by different parts of the host. The command buffer group reads three things from them: the id
 //! base of a descriptor pool, the GPU address of a texture and, for the draw state that the pass analysis follows,
-//! three bits of the guest state objects. This module names them. The integrator sets one [`Seam`] with
-//! [`set_seam`], and the texture group gives the pool bases. Until then a call that needs a pool base ends the game
-//! with the name of the missing piece (R15).
+//! three bits of the guest state objects. This module names them. `install` sets one [`Seam`] with [`set_seam`]
+//! (refer to `nvn/wire.rs`). A call before that ends the game with the name of the missing piece (R15).
 
 use std::sync::OnceLock;
 
@@ -47,7 +46,6 @@ impl Seam for Unwired {
 static SEAM: OnceLock<&'static dyn Seam> = OnceLock::new();
 
 /// Sets the seam. False when one is set already.
-#[allow(dead_code, reason = "the integrator of the texture and sampler groups calls it")]
 pub(crate) fn set_seam(seam: &'static dyn Seam) -> bool {
     SEAM.set(seam).is_ok()
 }

@@ -126,7 +126,9 @@ pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), Inst
     let (base, len) = guest::range();
     let space = LinearSpace::new(base, backend.gpu_base(), len).map_err(InstallError::Space)?;
     GPU.set(Gpu::new(space, backend, settings))
-        .map_err(|_| InstallError::AlreadyInstalled)
+        .map_err(|_| InstallError::AlreadyInstalled)?;
+    super::wire::wire();
+    Ok(())
 }
 
 /// The installed context. A call before [`install`] ends the game with the name of the function.
