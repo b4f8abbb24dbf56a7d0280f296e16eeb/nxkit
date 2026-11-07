@@ -93,7 +93,7 @@ fn dlc_key(b: &Build) -> String {
 }
 
 /// DLC packages into `<work>/aoc/<index>.img`. Reused while the packages are as at the last extraction.
-fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, String> {
+pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, String> {
     if b.src.dlc.is_empty() || b.src.source != Source::Packages {
         return Ok(None);
     }
@@ -196,7 +196,7 @@ fn with_bytes<T>(
 
 /// Extracts the packages of the input (and the split in the same pass). Returns the image count and, when the fused
 /// split needs the game's own decoder (Oodle, LZ5), why: the split then runs again once the Mac host can decode.
-fn packages(a: &Args, b: &Build, p: &Progress) -> Result<(usize, Option<String>), String> {
+pub(crate) fn packages(a: &Args, b: &Build, p: &Progress) -> Result<(usize, Option<String>), String> {
     let out = |v: &str| b.work.join("extract").join(v);
     let counter = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::Request {

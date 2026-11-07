@@ -38,6 +38,8 @@ pub struct Manifest<'a> {
     pub main_thread: MainThread,
     /// The DLC folders.
     pub aoc: &'a [Aoc],
+    /// The run settings of the title module.
+    pub settings: nxtitle::Settings,
 }
 
 fn s(v: &str) -> Value {
@@ -54,6 +56,86 @@ fn obj(fields: Vec<(&str, Value)>) -> Value {
 
 fn range((offset, size): (usize, usize)) -> Value {
     obj(vec![("offset", n(offset)), ("size", n(size))])
+}
+
+fn flag(v: bool) -> Value {
+    Value::Bool(v)
+}
+
+fn list(v: &[&str]) -> Value {
+    Value::List(v.iter().map(|x| s(x)).collect())
+}
+
+/// The `memory` object: sizes in bytes, as numbers.
+fn memory(m: &nxtitle::Memory) -> Value {
+    obj(vec![
+        ("reserve", n(m.reserve)),
+        ("alias", n(m.alias)),
+        ("stack", n(m.stack)),
+        ("app_pool", n(m.app_pool)),
+        ("used", n(m.used)),
+        ("system_resource", n(m.system_resource)),
+        ("map_limit", flag(m.map_limit)),
+        ("stdalloc_cap", n(m.stdalloc_cap)),
+        ("alloc_big_align", flag(m.alloc_big_align)),
+    ])
+}
+
+/// The `settings` object: the other keys of nxnative's `game_profile.h`.
+fn settings(t: &nxtitle::Settings) -> Value {
+    let mut f = vec![
+        ("args", s(t.args)),
+        ("env", s(t.env)),
+        ("launch_param", s(t.launch_param)),
+        (
+            "display_versions",
+            Value::List(
+                t.display_versions
+                    .iter()
+                    .map(|(id, v)| obj(vec![("build_id", s(id)), ("version", s(v))]))
+                    .collect(),
+            ),
+        ),
+        ("core_preempt", flag(t.core_preempt)),
+        ("present_display", flag(t.present_display)),
+        ("fps_target", n(t.fps_target)),
+        ("fps_max", n(t.fps_max)),
+        ("fps_hold", flag(t.fps_hold)),
+        ("ue_texture_pool", n(t.ue_texture_pool)),
+        ("ue_fps_cvar", s(t.ue_fps_cvar)),
+        ("present_snap", flag(t.present_snap)),
+        ("pso_mtl4", flag(t.pso_mtl4)),
+        ("enc_thread", flag(t.enc_thread)),
+        ("screen_aspect", flag(t.screen_aspect)),
+        ("pad_layout", s(t.pad_layout)),
+        ("op_mode", s(t.op_mode)),
+        ("perf_boost", flag(t.perf_boost)),
+        ("tex_flush_upload", flag(t.tex_flush_upload)),
+        ("tex_dirty_upload", flag(t.tex_dirty_upload)),
+        ("tex_dyn_slots", flag(t.tex_dyn_slots)),
+        ("render_cond", flag(t.render_cond)),
+        ("vconv_range", flag(t.vconv_range)),
+        ("gpu_ts_segment", flag(t.gpu_ts_segment)),
+        ("draw_barriers_game", flag(t.draw_barriers_game)),
+        (
+            "shader_key_skip",
+            obj(vec![
+                ("offset", n(t.shader_key_skip.0)),
+                ("length", n(t.shader_key_skip.1)),
+            ]),
+        ),
+        ("upscaler_keys", list(t.upscaler_keys)),
+    ];
+    if let Some(font) = t.shared_font {
+        f.push(("shared_font", s(font)));
+    }
+    if let Some((major, minor)) = t.nvn_api {
+        f.push((
+            "nvn_api",
+            obj(vec![("major", n(major)), ("minor", n(minor))]),
+        ));
+    }
+    obj(f)
 }
 
 fn segment(g: &Segment) -> Value {
@@ -127,6 +209,8 @@ pub fn game_json(m: &Manifest) -> String {
         ]),
     ));
     f.push(("npdm", s("main.npdm")));
+    f.push(("memory", memory(&m.settings.memory)));
+    f.push(("settings", settings(&m.settings)));
     f.push(("dylib", s("nxgame.dylib")));
     f.push(("page_size", n(PAGE)));
     f.push((
@@ -177,6 +261,16 @@ mod tests {
     #[test]
     fn the_nvn_list_skips_blank_and_comment_lines() {
         assert_eq!(nvn_list("# x\nnvnA\n\n nvnB \n"), ["nvnA", "nvnB"]);
+    }
+
+    #[test]
+    fn the_memory_object_carries_the_layout() {
+        let mut t = nxtitle::Settings::DEFAULT;
+        t.memory.app_pool = 0xCD50_0000;
+        let v = memory(&t.memory);
+        let text = nxb_pyjson::dumps(&v);
+        assert!(text.contains(r#""app_pool": 3444572160"#), "{text}");
+        assert!(text.contains(r#""map_limit": false"#));
     }
 
     #[test]

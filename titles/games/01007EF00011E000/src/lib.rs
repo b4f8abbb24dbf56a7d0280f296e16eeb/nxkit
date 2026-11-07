@@ -13,7 +13,8 @@
 
 use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Need, Runtime, RuntimeHooks, Service, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Need, Runtime, RuntimeHooks, Service, Settings, Standalone,
+    Title, TitleId,
 };
 
 /// The title module.
@@ -26,6 +27,30 @@ const GAME_TSV: Evidence = Evidence::Recorded {
     source: "seedds/nxnative dm/games/01007EF00011E000/game.tsv at f25fa956",
     read: "2026-11-07",
 };
+
+/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The generated
+/// `game_profile.h` (`python3 dm/games/game.py header 01007EF00011E000 <out.h>`, read 2026-11-07) shows each result.
+/// `render_base` (1600x900 docked, 1280x720 handheld) has no field: the host's resolution is its own business.
+const SETTINGS: Fact<Settings> = Fact::new(
+    Settings {
+        memory: Memory {
+            reserve: 0x1_0000_0000,
+            alias: 0x1000_0000,
+            stack: 0x1000_0000,
+            app_pool: 0xCD50_0000,
+            ..Settings::DEFAULT.memory
+        },
+        display_versions: &[("cd57b23fa4bbad65803d9788c01821ee", "1.9.0")],
+        fps_target: 60,
+        present_snap: true,
+        pso_mtl4: true,
+        screen_aspect: true,
+        pad_layout: "full",
+        gpu_ts_segment: true,
+        ..Settings::DEFAULT
+    },
+    GAME_TSV,
+);
 
 const NEEDS: &[Fact<Need>] = &[
     Fact::new(
@@ -99,6 +124,7 @@ impl BuildHooks for Botw {
             shader_note: "Breath of the Wild shaders",
             shader_facts: Some(include_str!("../shader_facts.tsv")),
             romfs_marker: "/Pack/Bootup_Graphics.pack",
+            settings: SETTINGS,
         })
     }
 

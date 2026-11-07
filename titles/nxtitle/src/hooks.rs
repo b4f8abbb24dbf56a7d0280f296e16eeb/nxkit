@@ -107,6 +107,8 @@ pub struct Standalone {
     pub shader_facts: Option<&'static str>,
     /// A path of the base game's romfs that every version has. The build refuses a romfs without it.
     pub romfs_marker: &'static str,
+    /// The memory layout and the other run settings of the game, which the host reads from `game.json`.
+    pub settings: Fact<crate::Settings>,
 }
 
 /// Questions of the build: shaders, preparation and rewriter rules.
