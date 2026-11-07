@@ -5,8 +5,8 @@
 //! time. Only 2D, one layer and one level at a time. The layout is the one that `nxkit-nvn` documents for the
 //! Tegra X1 and the Switch 2.
 
+use crate::compute::{ComputeCommand, ComputePass};
 use crate::device::Context;
-use crate::encode::{ComputeCommand, ComputePass};
 use crate::error::{MetalError, Result};
 use crate::format::Format;
 use crate::guest::GuestMemory;

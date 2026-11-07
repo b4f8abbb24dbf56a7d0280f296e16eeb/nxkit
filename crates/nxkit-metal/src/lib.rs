@@ -18,6 +18,7 @@
 #![cfg(target_os = "macos")]
 
 mod address;
+mod compute;
 mod deswizzle;
 mod device;
 mod encode;
@@ -28,17 +29,16 @@ mod guest;
 mod metrics;
 mod pipeline;
 mod present;
+mod render;
 mod scratch;
 mod table;
 mod texture;
 
 pub use address::AddressMap;
+pub use compute::{ComputeCommand, ComputePass};
 pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, GobOrder};
 pub use device::Context;
-pub use encode::{
-    ColorAttachment, CommandBuffer, ComputeCommand, ComputePass, CullMode, DepthAttachment,
-    RenderCommand, RenderPass, RenderPassDesc, Scissor, Viewport,
-};
+pub use encode::CommandBuffer;
 pub use error::{MetalError, Result};
 pub use format::{Format, IndexType, LoadAction, Primitive, StoreAction};
 pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
@@ -49,6 +49,10 @@ pub use pipeline::{
     ShaderLibrary,
 };
 pub use present::{Drawable, PRESENT_FORMAT, Presenter};
+pub use render::{
+    ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
+    Viewport,
+};
 pub use scratch::{SCRATCH_ALIGN, Scratch};
 pub use table::ArgumentTable;
 pub use texture::{Storage, Texture, TextureDesc};
