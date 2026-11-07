@@ -1,4 +1,5 @@
-//! Horizon result codes. Module 1 is the kernel, and the code is `module | description << 9`.
+//! Horizon result codes. Module 1 is the kernel, and the code is `module | description << 9`. The descriptions
+//! below match `svc_results.hpp` of Atmosphere (checked on 2026-11-07).
 
 use std::fmt;
 
@@ -35,6 +36,26 @@ impl KResult {
     pub const INVALID_ENUM_VALUE: KResult = KResult(0xF001);
     /// The object is in the wrong state for the call (125).
     pub const INVALID_STATE: KResult = KResult(0xFA01);
+    /// The call is not implemented (33).
+    pub const NOT_IMPLEMENTED: KResult = KResult(0x4201);
+    /// A size is zero, not aligned or too large (101).
+    pub const INVALID_SIZE: KResult = KResult(0xCA01);
+    /// The kernel has no memory for the request (104).
+    pub const OUT_OF_MEMORY: KResult = KResult(0xD001);
+    /// The address range is not in the region the call needs (110).
+    pub const INVALID_MEMORY_REGION: KResult = KResult(0xDC01);
+    /// A pointer is null or not aligned (115).
+    pub const INVALID_POINTER: KResult = KResult(0xE601);
+    /// The name is not known (121).
+    pub const NOT_FOUND: KResult = KResult(0xF201);
+    /// The session is closed (123).
+    pub const SESSION_CLOSED: KResult = KResult(0xF601);
+    /// The call is not supported (127).
+    pub const NOT_SUPPORTED: KResult = KResult(0xFE01);
+    /// The permission asked for is not allowed for the call (108).
+    pub const INVALID_NEW_MEMORY_PERMISSION: KResult = KResult(0xD801);
+    /// The process is at the limit of a resource (132).
+    pub const LIMIT_REACHED: KResult = KResult(0x10801);
 
     /// The raw code.
     pub const fn raw(self) -> u32 {
@@ -69,6 +90,16 @@ mod tests {
             (KResult::INVALID_STATE, 125),
             (KResult::INVALID_ADDRESS, 102),
             (KResult::INVALID_CURRENT_MEMORY, 106),
+            (KResult::NOT_IMPLEMENTED, 33),
+            (KResult::INVALID_SIZE, 101),
+            (KResult::OUT_OF_MEMORY, 104),
+            (KResult::INVALID_MEMORY_REGION, 110),
+            (KResult::INVALID_POINTER, 115),
+            (KResult::NOT_FOUND, 121),
+            (KResult::SESSION_CLOSED, 123),
+            (KResult::NOT_SUPPORTED, 127),
+            (KResult::LIMIT_REACHED, 132),
+            (KResult::INVALID_NEW_MEMORY_PERMISSION, 108),
         ] {
             assert_eq!(r.raw(), 1 | desc << 9);
         }

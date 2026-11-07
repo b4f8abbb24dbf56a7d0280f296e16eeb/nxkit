@@ -4,24 +4,38 @@
 //! of a table by address, and an event holds its own lock. A blocked thread waits on its own parker word.
 
 use crate::gate::CoreGates;
-use crate::handle::{CURRENT_THREAD, Event, HandleTable, KObject};
+use crate::handle::{CURRENT_THREAD, HandleTable, KObject};
+use crate::lend::LendGuard;
 use crate::memory::GuestMemory;
 use crate::result::{KResult, KResultOr};
 use crate::role::{Qos, RoleTable, ThreadInfo, ThreadRole, qos_for_role};
 use crate::stats::{StatsSnapshot, format_stats};
 use crate::svc::GuestLauncher;
 use crate::sys;
-use crate::thread::{Thread, ThreadState, Timeout, WaitKind, lock};
+use crate::sysevent::SystemEvents;
+use crate::thread::{Thread, ThreadState, Timeout, lock};
+use crate::vm::{MemoryConfig, Vm};
 use crate::waitq::WaitTable;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Instant;
 
 /// The most handles `WaitSynchronization` takes.
 pub const MAX_WAIT_HANDLES: usize = 64;
 /// The highest priority number.
 pub const MAX_PRIORITY: i32 = 63;
+
+/// The main thread of the process, as the NPDM of the title describes it (`main_thread` in `game.json`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MainThread {
+    /// The Switch priority, 0 to 63.
+    pub priority: i32,
+    /// The core of the thread.
+    pub core: i32,
+    /// The stack size in bytes.
+    pub stack_size: u64,
+}
 
 /// How the kernel behaves. The title and the family decide most of it.
 #[derive(Clone)]
@@ -42,6 +56,15 @@ pub struct Config {
     pub log: fn(&str),
     /// Makes the body of a guest thread for `CreateThread`. Without it `dispatch_svc` refuses that call.
     pub launcher: Option<Arc<dyn GuestLauncher>>,
+    /// Priority, core and stack size of the main thread. `attach_main_thread` needs it. There is no default,
+    /// because a guessed priority gave the main thread the wrong place among the game's threads.
+    pub main_thread: Option<MainThread>,
+    /// The guest's memory. Without it the memory, IPC and `GetInfo` svcs are not answered.
+    pub memory: Option<MemoryConfig>,
+    /// Ends the process with an exit code, for `ExitProcess`, `Break` and `ReturnFromException`.
+    pub process_exit: fn(u32),
+    /// The process id that `GetProcessId` returns.
+    pub process_id: u64,
 }
 
 impl Default for Config {
@@ -55,6 +78,14 @@ impl Default for Config {
             core_rules: false,
             log: |m| eprintln!("nxkit-hos: {m}"),
             launcher: None,
+            main_thread: None,
+            memory: None,
+            process_exit: |code| {
+                eprintln!("nxkit-hos: the process ends with code {code:#x}");
+                std::process::exit(code as i32)
+            },
+            // Unverified: the process id of a title is not read anywhere. The SDK only passes it back.
+            process_id: 0x80,
         }
     }
 }
@@ -103,15 +134,38 @@ pub struct Kernel {
     pub(crate) condvars: WaitTable,
     pub(crate) addresses: WaitTable,
     pub(crate) gates: CoreGates,
-    threads: Mutex<Vec<Arc<Thread>>>,
+    pub(crate) threads: Mutex<Vec<Arc<Thread>>>,
     next_id: AtomicU64,
     unknown_logged: AtomicBool,
     me: Weak<Kernel>,
+    pub(crate) vm: Option<Vm>,
+    pub(crate) resource_limit: OnceLock<u32>,
+    pub(crate) system_events: SystemEvents,
 }
 
 impl Kernel {
-    /// A kernel over a guest memory.
-    pub fn new(config: Config, mem: Arc<dyn GuestMemory>) -> Arc<Kernel> {
+    /// A kernel over a guest memory. A memory configuration that does not fit is logged and the kernel then runs
+    /// without its memory model. Use [`Kernel::try_new`] to get the error instead.
+    pub fn new(mut config: Config, mem: Arc<dyn GuestMemory>) -> Arc<Kernel> {
+        let vm = match config.memory.take().map(Vm::new).transpose() {
+            Ok(vm) => vm,
+            Err(e) => {
+                (config.log)(&format!(
+                    "the memory model is off, the configuration is wrong: {e}"
+                ));
+                None
+            }
+        };
+        Self::build(config, mem, vm)
+    }
+
+    /// A kernel over a guest memory. The error names the value of `config.memory` that does not fit.
+    pub fn try_new(mut config: Config, mem: Arc<dyn GuestMemory>) -> Result<Arc<Kernel>, String> {
+        let vm = config.memory.take().map(Vm::new).transpose()?;
+        Ok(Self::build(config, mem, vm))
+    }
+
+    fn build(config: Config, mem: Arc<dyn GuestMemory>, vm: Option<Vm>) -> Arc<Kernel> {
         Arc::new_cyclic(|me| Kernel {
             handles: HandleTable::new(config.handle_capacity),
             gates: CoreGates::new(config.core_rules),
@@ -124,7 +178,26 @@ impl Kernel {
             next_id: AtomicU64::new(0x51),
             unknown_logged: AtomicBool::new(false),
             me: me.clone(),
+            vm,
+            resource_limit: OnceLock::new(),
+            system_events: SystemEvents::default(),
         })
+    }
+
+    /// The memory model, or the error of a kernel that has none.
+    pub(crate) fn vm(&self) -> KResultOr<&Vm> {
+        self.vm.as_ref().ok_or(KResult::NOT_SUPPORTED)
+    }
+
+    /// Whether the kernel models the guest's memory.
+    pub fn has_memory(&self) -> bool {
+        self.vm.is_some()
+    }
+
+    /// The reservation as `(base, size)`, or none for a kernel without a memory model. The host names it to
+    /// `nxkit_abi::guest::set_range`.
+    pub fn guest_range(&self) -> Option<(u64, u64)> {
+        self.vm.as_ref().map(|vm| (vm.cfg.base, vm.cfg.size))
     }
 
     fn check_priority(p: i32) -> KResultOr<()> {
@@ -176,10 +249,31 @@ impl Kernel {
             body: Box::new(|| {}),
         };
         let t = self.new_thread(&spec, ThreadState::Started)?;
+        if let Err(e) = self.tls_attach(&t) {
+            self.exit_thread(&t);
+            return Err(e);
+        }
         CURRENT.with(|c| *c.borrow_mut() = Some(t.clone()));
-        t.host.store(sys::current_host_thread(), Ordering::Relaxed);
+        t.lend.open(sys::current_host_thread());
         self.apply_qos(&t);
         self.gates.enter(&t);
+        Ok(t)
+    }
+
+    /// Registers the calling host thread as the main thread, with the priority, core and stack size of the NPDM
+    /// from [`Config::main_thread`]. Without them the call fails and says so, and it never guesses a priority.
+    pub fn attach_main_thread(&self, name: &str) -> KResultOr<Arc<Thread>> {
+        let Some(main) = self.config.main_thread else {
+            (self.config.log)(
+                "the main thread cannot attach, the configuration has no main_thread from the NPDM",
+            );
+            return Err(KResult::INVALID_STATE);
+        };
+        let t = self.attach_current_thread(name, main.priority, main.core)?;
+        t.stack_size.store(
+            usize::try_from(main.stack_size).unwrap_or(usize::MAX),
+            Ordering::Relaxed,
+        );
         Ok(t)
     }
 
@@ -220,7 +314,14 @@ impl Kernel {
             .spawn(move || {
                 CURRENT.with(|c| *c.borrow_mut() = Some(th.clone()));
                 let _exit = ExitGuard(kernel.clone(), th.clone());
-                th.host.store(sys::current_host_thread(), Ordering::Relaxed);
+                if let Err(e) = kernel.tls_attach(&th) {
+                    (kernel.config.log)(&format!(
+                        "thread {:#x} does not start, it has no thread-local slot: {e:?}",
+                        th.id
+                    ));
+                    return;
+                }
+                th.lend.open(sys::current_host_thread());
                 kernel.apply_qos(&th);
                 kernel.gates.enter(&th);
                 if let Some(body) = body {
@@ -235,13 +336,17 @@ impl Kernel {
     }
 
     /// `ExitThread`. Marks the thread as exited and signals the threads that wait for it. The host's svc gate then
-    /// ends the host thread. Calling it twice does nothing.
+    /// ends the host thread. Calling it twice does nothing. The lend table closes first, while the host thread still
+    /// runs (see `lend.rs`), and the thread-local slot goes back to the free list. The thread must not read its
+    /// thread-local region after the call.
     pub fn exit_thread(&self, cur: &Arc<Thread>) {
         if cur.state() == ThreadState::Exited {
             return;
         }
         self.gates.leave(cur);
+        cur.lend.close();
         cur.set_state(ThreadState::Exited);
+        self.tls_release(cur);
         cur.exit.signal();
     }
 
@@ -282,8 +387,9 @@ impl Kernel {
 
     /// Lends the QoS class of `cur` to the owner of a lock while `cur` waits, when the owner has a lower class. The
     /// Horizon kernel lends the waiter's priority the same way. nxnative does it in `dm/host/hle_thread.c`, case
-    /// 0x1A (ArbitrateLock), with `pthread_override_qos_class_start_np`. The returned value ends the override.
-    pub(crate) fn boost_owner(&self, cur: &Arc<Thread>, owner: u32) -> Option<sys::QosOverride> {
+    /// 0x1A (ArbitrateLock), with `pthread_override_qos_class_start_np`. The returned guard ends the override. An
+    /// owner that exits meanwhile is safe, see `lend.rs`.
+    pub(crate) fn boost_owner(&self, cur: &Arc<Thread>, owner: u32) -> Option<LendGuard> {
         if !self.config.apply_qos {
             return None;
         }
@@ -293,7 +399,7 @@ impl Kernel {
         if !lower || owner.state() != ThreadState::Started {
             return None;
         }
-        sys::QosOverride::start(owner.host.load(Ordering::Relaxed), waiter)
+        LendGuard::start(owner, waiter)
     }
 
     /// The start of every blocking call.
@@ -330,9 +436,13 @@ impl Kernel {
         }
     }
 
-    /// `CloseHandle`.
+    /// `CloseHandle`. A session gets its `close`, transfer memory is unlocked and a SystemEvent binding of the
+    /// handle is dropped.
     pub fn close_handle(&self, handle: u32) -> KResultOr<()> {
-        self.handles.remove(handle)
+        let object = self.handles.remove(handle)?;
+        self.system_events.unbind(handle);
+        self.on_close(object);
+        Ok(())
     }
 
     /// `GetThreadPriority`.
@@ -443,135 +553,6 @@ impl Kernel {
         signaled
     }
 
-    /// `CreateEvent`: the write end and the read end.
-    pub fn create_event(&self) -> KResultOr<(u32, u32)> {
-        let e = Arc::new(Event {
-            sync: Default::default(),
-        });
-        let w = self.handles.insert(KObject::EventWrite(e.clone()))?;
-        match self.handles.insert(KObject::EventRead(e)) {
-            Ok(r) => Ok((w, r)),
-            Err(err) => {
-                let _ = self.handles.remove(w);
-                Err(err)
-            }
-        }
-    }
-
-    /// `SignalEvent`: takes the write end.
-    pub fn signal_event(&self, handle: u32) -> KResultOr<()> {
-        match self.handles.get(handle) {
-            Some(KObject::EventWrite(e)) => {
-                e.sync.signal();
-                Ok(())
-            }
-            _ => Err(KResult::INVALID_HANDLE),
-        }
-    }
-
-    /// `ClearEvent`: takes either end.
-    pub fn clear_event(&self, handle: u32) -> KResultOr<()> {
-        match self.handles.get(handle) {
-            Some(KObject::EventWrite(e) | KObject::EventRead(e)) => {
-                e.sync.clear();
-                Ok(())
-            }
-            _ => Err(KResult::INVALID_HANDLE),
-        }
-    }
-
-    /// `ResetSignal`: takes the read end, and fails when the event is not signalled.
-    pub fn reset_signal(&self, handle: u32) -> KResultOr<()> {
-        match self.handles.get(handle) {
-            Some(KObject::EventRead(e)) if e.sync.reset() => Ok(()),
-            Some(KObject::EventRead(_) | KObject::Thread(_)) => Err(KResult::INVALID_STATE),
-            _ => Err(KResult::INVALID_HANDLE),
-        }
-    }
-
-    /// Whether the read end or thread of `handle` is signalled, for tools and tests.
-    pub fn is_signaled(&self, handle: u32) -> KResultOr<bool> {
-        match self.handles.get(handle) {
-            Some(KObject::EventRead(e)) => Ok(e.sync.is_signaled()),
-            Some(KObject::Thread(t)) => Ok(t.exit.is_signaled()),
-            _ => Err(KResult::INVALID_HANDLE),
-        }
-    }
-
-    /// `WaitSynchronization`: the index of the first signalled handle.
-    pub fn wait_synchronization(
-        &self,
-        cur: &Arc<Thread>,
-        handles: &[u32],
-        timeout: Timeout,
-    ) -> KResultOr<usize> {
-        self.svc_enter(cur);
-        if handles.len() > MAX_WAIT_HANDLES {
-            return Err(KResult::OUT_OF_RANGE);
-        }
-        let mut objects = Vec::with_capacity(handles.len());
-        for h in handles {
-            objects.push(match self.handles.get(*h) {
-                Some(KObject::EventRead(e)) => Waitable::Event(e),
-                Some(KObject::Thread(t)) => Waitable::Thread(t),
-                _ => return Err(KResult::INVALID_HANDLE),
-            });
-        }
-        let deadline = match timeout {
-            Timeout::After(d) => Instant::now().checked_add(d),
-            _ => None,
-        };
-        loop {
-            if cur.take_cancel() {
-                return Err(KResult::CANCELLED);
-            }
-            cur.parker.prepare();
-            *lock(&cur.wait_kind) = WaitKind::Sync;
-            let hit = objects.iter().position(|o| o.sync().check_or_register(cur));
-            let left = match (timeout, deadline) {
-                (Timeout::Immediate, _) => Timeout::Immediate,
-                (Timeout::After(_), Some(dl)) => match dl.checked_duration_since(Instant::now()) {
-                    Some(l) if !l.is_zero() => Timeout::After(l),
-                    _ => Timeout::Immediate,
-                },
-                _ => Timeout::Infinite,
-            };
-            let mut timed_out = false;
-            if hit.is_none() {
-                if left == Timeout::Immediate {
-                    timed_out = true;
-                } else {
-                    timed_out = !self.block_on(cur, left, || true);
-                }
-            }
-            for o in &objects {
-                o.sync().unregister(cur);
-            }
-            *lock(&cur.wait_kind) = WaitKind::None;
-            if let Some(i) = hit {
-                return Ok(i);
-            }
-            if timed_out {
-                return Err(if cur.take_cancel() {
-                    KResult::CANCELLED
-                } else {
-                    KResult::TIMED_OUT
-                });
-            }
-        }
-    }
-
-    /// `CancelSynchronization`: ends the thread's `WaitSynchronization`, or its next one.
-    pub fn cancel_synchronization(&self, handle: u32) -> KResultOr<()> {
-        let t = self.thread_by_handle(handle)?;
-        t.cancel.store(true, Ordering::SeqCst);
-        let kind = lock(&t.wait_kind);
-        if *kind == WaitKind::Sync {
-            t.parker.wake(KResult::CANCELLED);
-        }
-        Ok(())
-    }
-
     /// The counters of every thread.
     pub fn stats(&self) -> Vec<StatsSnapshot> {
         lock(&self.threads)
@@ -591,20 +572,6 @@ impl Kernel {
     /// The counters as a table.
     pub fn dump_stats(&self) -> String {
         format_stats(&self.stats())
-    }
-}
-
-enum Waitable {
-    Event(Arc<Event>),
-    Thread(Arc<Thread>),
-}
-
-impl Waitable {
-    fn sync(&self) -> &crate::thread::SyncObject {
-        match self {
-            Waitable::Event(e) => &e.sync,
-            Waitable::Thread(t) => &t.exit,
-        }
     }
 }
 
