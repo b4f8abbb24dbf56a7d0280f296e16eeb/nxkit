@@ -7,16 +7,22 @@
 //! The game does not need `tex_flush_upload`, `render_cond` or `tex_dirty_upload`. The game's README in
 //! nxnative says so for `tex_flush_upload`, and its `game.tsv` sets none of the three.
 //!
-//! These parts are in `seedds/nxnative` `dm/games/01007EF00011E000/` and not in this module:
+//! The rewrite rules are data in `rules/01007EF00011E000.toml`: the seven interval controller cuts, the frame step
+//! stubs, the render scale, render pool and output size stubs. Each rule names its source file, commit and read
+//! date in its `evidence` key. The rules are the ones of `patches.py` at pull request 76 of `seedds/nxnative`.
+//! They describe the build `cd57b23fa4bbad65803d9788c01821ee` of `main` and no other. The frame step protocol
+//! (the state page the stubs read) is in `nxkit-svc-pacing`.
 //!
-//! - `patches.py`: the `FRAME_STEP` stubs for `fps_target`, the interval controller cuts (`CUTS`) and the render
-//!   scale stubs.
+//! This part is in `seedds/nxnative` `dm/games/01007EF00011E000/` and not in this module:
+//!
 //! - `shader_facts_manual.tsv`: two shaders with integer outputs from agl's BC4 encoder.
 //!
 //! nxnative runs every service of the game. This module moves a service to nxkit once the nxkit runtime has it.
 
 use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
-use nxtitle::{BuildHooks, Evidence, Fact, Need, Runtime, RuntimeHooks, Service, Title, TitleId};
+use nxtitle::{
+    BuildHooks, Evidence, Fact, Need, Pacing, Runtime, RuntimeHooks, Service, Title, TitleId,
+};
 
 /// The title module.
 pub struct Botw;
@@ -44,7 +50,7 @@ const NEEDS: &[Fact<Need>] = &[
             capability: "fps_target",
             setting: "60",
             why: "the host picks each frame's step in whole vsyncs, so the game runs at 60 fps (30 on the Switch). \
-                  This needs the FRAME_STEP stubs from patches.py.",
+                  This needs the frame step stubs in rules/01007EF00011E000.toml.",
         },
         GAME_TSV,
     ),
@@ -77,7 +83,21 @@ const NEEDS: &[Fact<Need>] = &[
     ),
 ];
 
-impl BuildHooks for Botw {}
+const PATCHES_PY: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head \
+             0f2a772c13e2caed2959d1d1a93f8fe57f44c754",
+    read: "2026-11-07",
+};
+
+/// The game steps its logic once per interval of the framework, and the frame step stubs let the host choose the
+/// interval. With them the game runs at the display's rate. The record is the pull request's own description.
+const PACING: Fact<Pacing> = Fact::new(Pacing::Display, PATCHES_PY);
+
+impl BuildHooks for Botw {
+    fn rewrite_rules(&self) -> Option<&'static str> {
+        Some(include_str!("../rules/01007EF00011E000.toml"))
+    }
+}
 
 const THREAD_NOTE: &str = "the thread names and priorities are guesses from the engine's usual layout and are not \
                            read from the game. A thread dump of a run (nxkit-hos `dump_stats`) checks them.";
@@ -123,6 +143,10 @@ impl RuntimeHooks for Botw {
 
     fn runtime(&self, service: Service) -> Option<Fact<Runtime>> {
         (service == Service::Offline).then_some(OFFLINE)
+    }
+
+    fn pacing(&self) -> Option<Fact<Pacing>> {
+        Some(PACING)
     }
 }
 
@@ -171,7 +195,17 @@ mod tests {
     #[test]
     fn every_need_has_a_record() {
         assert!(BOTW.needs().iter().all(|n| n.evidence.is_checked()));
-        assert!(BOTW.upscaler().is_none() && BOTW.pacing().is_none());
+        assert!(BOTW.upscaler().is_none());
+        assert!(BOTW.pacing().is_some_and(|p| p.evidence.is_checked()));
+    }
+
+    #[test]
+    fn every_rewrite_rule_names_its_evidence() {
+        let text = BOTW.rewrite_rules().unwrap_or_default();
+        let rules = text.matches("[[rule]]").count();
+        assert_eq!(rules, 8);
+        assert_eq!(text.matches("evidence = \"seedds/nxnative ").count(), rules);
+        assert!(text.contains("read 2026-11-07"));
     }
 
     #[test]
