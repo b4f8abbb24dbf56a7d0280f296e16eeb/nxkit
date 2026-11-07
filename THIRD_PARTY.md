@@ -86,6 +86,13 @@ The crate `nxkit-hos` follows `dm/host/hle_thread.c` and the svc handlers for Ar
 SignalProcessWideKey, WaitForAddress, SignalToAddress and the events. It ports the lock handoff, the condition variable key rules and the
 address arbitration arithmetic. It does not copy the global lock. It uses the same licence notice as above.
 
+The memory, information and process svcs of `nxkit-hos` (`crates/nxkit-hos/src/{svc,memsvc,info,process,vm,space,shared,ipc,tls}.rs`)
+port the svc handlers of `dm/host/hle_svc.c` and `dm/host/thread.c`: the `GetInfo` values and the memory profile numbers,
+`SetHeapSize`, `MapMemory`, `QueryMemory`, `GetSystemTick`, `Break` and the exit code rules. The result codes were checked
+against Atmosphere (GPL-2.0-or-later, not copied). The SDK take-overs of `crates/nxkit-hos/src/{os,guestthread,sysevent,entropy}.rs`
+port `HLE` and `HLE_FORCE` entries of `dm/host/hle_os.c` (`getentropy`, the csrng bytes, `getenv`, `StandardAllocator::Allocate`)
+and the SystemEvent binding and guest thread spawn of `dm/host/hle_thread.c` and `dm/host/hle_guestthread.c`.
+
 ## NVN front end ported from nxnative
 
 The crate `nxkit-nvn` (`crates/nxkit-nvn/`) ports logic and data from the nxnative engine. The nxnative engine is published under the MIT

@@ -86,7 +86,7 @@ The rules:
 | nxb-codec | L1 | no | impl | the ZBIC decoder (`nxb_codec::zbic`). The other codec modules are empty. |
 | nxb-crypto, nxb-plist, nxb-hos, nxb-romfs, nxb-bundle, nxb-zip, nxb-pso | L1 | no | skel | pure domain logic. Some of it is in the stage crates at this time. |
 | nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports many container families (refer to [pipeline-stages.md](pipeline-stages.md)). Formats that are not ported stop with a named `Unsupported` error and exit code 4. |
-| nxkit-hos | L0 | no | impl | the Horizon thread model: kernel objects, handles, events, threads, `WaitSynchronization` and the lock, condition variable and address arbiters. Guest memory sits behind a trait, so the crate has no `unsafe` code outside `sys`. It uses only the standard library |
+| nxkit-hos | L0 | no | impl | the Horizon kernel: objects, handles, events, threads, `WaitSynchronization`, the lock, condition variable and address arbiters, the process memory and its svcs, IPC sessions and the SDK take-overs of nxnative's kernel side. Guest memory and the host's pages sit behind traits, so the crate has no `unsafe` code outside `sys`. Refer to [nxkit-hos.md](nxkit-hos.md). It uses `nxkit-abi` and the standard library |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
 | nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |
 | nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. `nxb-build` uses it for `nxb profile` and the provisional profile |
