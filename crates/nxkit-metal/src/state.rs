@@ -229,6 +229,58 @@ mtl_enum! {
         Int1010102Norm => Int1010102Normalized,
         /// 10-10-10-2 unsigned, normalised.
         UInt1010102Norm => UInt1010102Normalized,
+        /// One u8, not normalised.
+        UChar => UChar,
+        /// One i8, not normalised.
+        Char => Char,
+        /// One u8, normalised.
+        UCharNorm => UCharNormalized,
+        /// One i8, normalised.
+        CharNorm => CharNormalized,
+        /// Two u8, not normalised.
+        UChar2 => UChar2,
+        /// Two i8, not normalised.
+        Char2 => Char2,
+        /// Two u8, normalised.
+        UChar2Norm => UChar2Normalized,
+        /// Two i8, normalised.
+        Char2Norm => Char2Normalized,
+        /// Three u8, not normalised.
+        UChar3 => UChar3,
+        /// Three i8, not normalised.
+        Char3 => Char3,
+        /// Three u8, normalised.
+        UChar3Norm => UChar3Normalized,
+        /// Three i8, normalised.
+        Char3Norm => Char3Normalized,
+        /// Four i8, not normalised.
+        Char4 => Char4,
+        /// One u16, not normalised.
+        UShort => UShort,
+        /// One i16, not normalised.
+        Short => Short,
+        /// One u16, normalised.
+        UShortNorm => UShortNormalized,
+        /// One i16, normalised.
+        ShortNorm => ShortNormalized,
+        /// Two u16, not normalised.
+        UShort2 => UShort2,
+        /// Two i16, not normalised.
+        Short2 => Short2,
+        /// Three u16, not normalised.
+        UShort3 => UShort3,
+        /// Three i16, not normalised.
+        Short3 => Short3,
+        /// Three u16, normalised.
+        UShort3Norm => UShort3Normalized,
+        /// Three i16, normalised.
+        Short3Norm => Short3Normalized,
+        /// One f16.
+        Half => Half,
+        /// Three f16.
+        Half3 => Half3,
+        /// 11-11-10 float.
+        FloatRg11B10 => FloatRG11B10,
     }
 }
 
@@ -445,6 +497,11 @@ impl DepthStencilDesc {
 pub struct DepthStencilState {
     pub(crate) raw: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
 }
+
+// SAFETY: a depth and stencil state is an immutable, thread safe Metal object.
+unsafe impl Send for DepthStencilState {}
+// SAFETY: see `Send`.
+unsafe impl Sync for DepthStencilState {}
 
 impl DepthStencilState {
     /// Makes the state object.

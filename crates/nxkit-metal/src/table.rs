@@ -1,9 +1,7 @@
 //! The argument table and the keep-alive list that the encoder uses.
 
 use std::any::Any;
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -34,8 +32,14 @@ pub struct ArgumentTable {
     pub(crate) raw: Retained<ProtocolObject<dyn MTL4ArgumentTable>>,
     max_buffers: u32,
     max_textures: u32,
-    bound: Rc<RefCell<Vec<Texture>>>,
+    bound: Arc<Mutex<Vec<Texture>>>,
 }
+
+// SAFETY: the table is a Metal object that one thread fills while it encodes. The `bound` list has a lock. A table
+// is moved to the thread that encodes a pass and is not filled from two threads at once.
+unsafe impl Send for ArgumentTable {}
+// SAFETY: see `Send`. Shared access only reads the slot counts.
+unsafe impl Sync for ArgumentTable {}
 
 impl ArgumentTable {
     /// Makes a table with `max_buffers` address slots and `max_textures` texture slots.
@@ -51,7 +55,7 @@ impl ArgumentTable {
             raw,
             max_buffers,
             max_textures,
-            bound: Rc::new(RefCell::new(Vec::new())),
+            bound: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -77,7 +81,10 @@ impl ArgumentTable {
             self.raw
                 .setTexture_atIndex(texture.raw().gpuResourceID(), index as usize)
         };
-        self.bound.borrow_mut().push(texture.clone());
+        self.bound
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(texture.clone());
         Ok(())
     }
 }

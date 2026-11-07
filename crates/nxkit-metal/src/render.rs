@@ -1,5 +1,7 @@
 //! Render passes: the attachments, the commands and the pass that encodes them.
 
+use std::sync::Arc;
+
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSRange;
@@ -10,6 +12,8 @@ use objc2_metal::{
 };
 
 use crate::barrier::{Dependency, Stages};
+use crate::compute_icb::check_range_buffer;
+use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::format::{IndexType, LoadAction, Primitive, StoreAction};
@@ -204,6 +208,15 @@ pub enum RenderCommand {
         first: u32,
         /// The number of commands.
         count: u32,
+    },
+    /// Runs the range of an ICB that the GPU reads from a buffer when the command executes.
+    ExecuteIcbIndirect {
+        /// The ICB.
+        icb: IndirectCommandBuffer,
+        /// The buffer that holds an [`ExecutionRange`](crate::ExecutionRange) at `range_offset`.
+        range: Arc<DataBuffer>,
+        /// The byte offset of the range in `range`.
+        range_offset: u64,
     },
     /// Draws primitives.
     Draw {
@@ -404,6 +417,24 @@ impl RenderPass<'_> {
                     );
                 }
                 self.cb.retain(icb.clone());
+            }
+            RenderCommand::ExecuteIcbIndirect {
+                icb,
+                range,
+                range_offset,
+            } => {
+                check_range_buffer(range, *range_offset)?;
+                // SAFETY: the range lies inside the data buffer (checked above). The GPU reads it when the command
+                // executes, so the caller keeps it valid until then. Metal does not bounds check the range it
+                // reads, and the caller writes one inside the ICB.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_indirectBuffer(
+                        &icb.raw,
+                        range.gpu_address() + *range_offset,
+                    );
+                }
+                self.cb.retain(icb.clone());
+                self.cb.retain(range.clone());
             }
             RenderCommand::Draw {
                 primitive,

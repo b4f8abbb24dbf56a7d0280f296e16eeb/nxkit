@@ -5,12 +5,15 @@ use std::sync::Arc;
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2_foundation::NSRange;
 use objc2_metal::{
     MTL4CommandBuffer, MTL4CommandEncoder, MTL4ComputeCommandEncoder, MTL4VisibilityOptions,
     MTLOrigin, MTLSize, MTLStages,
 };
 
 use crate::barrier::{Dependency, Stages};
+use crate::compute_icb::{ComputeIndirectCommandBuffer, check_range_buffer};
+use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::guest::GuestMemory;
@@ -53,6 +56,24 @@ pub enum ComputeCommand {
     },
     /// Orders this pass after the work of earlier passes of the command buffer.
     WaitForEarlierPasses,
+    /// Runs `count` commands of a compute ICB from `first`.
+    ExecuteIcb {
+        /// The ICB.
+        icb: ComputeIndirectCommandBuffer,
+        /// The first command.
+        first: u32,
+        /// The number of commands.
+        count: u32,
+    },
+    /// Runs the range of a compute ICB that the GPU reads from a buffer when the command executes.
+    ExecuteIcbIndirect {
+        /// The ICB.
+        icb: ComputeIndirectCommandBuffer,
+        /// The buffer that holds an [`ExecutionRange`](crate::ExecutionRange) at `range_offset`.
+        range: Arc<DataBuffer>,
+        /// The byte offset of the range in `range`.
+        range_offset: u64,
+    },
     /// Orders the later commands of this pass after the earlier ones.
     Barrier,
     /// A barrier with explicit stages. The stages must be `DISPATCH` or `BLIT` on the side of this pass.
@@ -136,6 +157,37 @@ impl ComputePass<'_> {
                 self.need_pipeline()?;
                 self.enc
                     .dispatchThreads_threadsPerThreadgroup(size3(*grid), size3(*threads));
+            }
+            ComputeCommand::ExecuteIcb { icb, first, count } => {
+                if u64::from(*first) + u64::from(*count) > u64::from(icb.size()) {
+                    return Err(MetalError::Invalid("the ICB range is out of range"));
+                }
+                // SAFETY: the range is inside the ICB (checked above). The ICB is retained until the GPU is done
+                // and it is in the residency set.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_withRange(
+                        &icb.raw,
+                        NSRange::new(*first as usize, *count as usize),
+                    );
+                }
+                self.cb.retain(icb.clone());
+            }
+            ComputeCommand::ExecuteIcbIndirect {
+                icb,
+                range,
+                range_offset,
+            } => {
+                check_range_buffer(range, *range_offset)?;
+                // SAFETY: the range lies inside the data buffer (checked above). The caller writes a range inside
+                // the ICB, because Metal does not bounds check it.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_indirectBuffer(
+                        &icb.raw,
+                        range.gpu_address() + *range_offset,
+                    );
+                }
+                self.cb.retain(icb.clone());
+                self.cb.retain(range.clone());
             }
             ComputeCommand::WaitForEarlierPasses => self
                 .enc
