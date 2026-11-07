@@ -6,7 +6,7 @@
 | Game | The Legend of Zelda: Breath of the Wild (`01007EF00011E000`), update 1.9.0 (v1114112) |
 | Platform | Mac first |
 | Builds on | [runtime-hooks.md](runtime-hooks.md), part B |
-| Status | H1 written, not yet run with the game |
+| Status | H1 (the `nxkit-host` program) written, not yet run with the game |
 
 ## Goal
 
@@ -54,7 +54,18 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-The decisions of the host and their causes are R1 to R21 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+The decisions of the host and their causes are R1 to R21 and R45 to R47 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+
+### The nxkit-host program
+
+`crates/nxkit-host` is the program that starts the game. [nxkit-host.md](../nxkit-host.md) is its contract with the build stage.
+
+- It reserves one range of address space for the modules, the main stack, the thread blocks, the heap, the stack region and the alias region. The range is also the no-copy buffer of R3 (R45).
+- It loads `nxgame.dylib` at the fixed addresses, with a copy fallback, and fills the import slots from the service crates (R45).
+- It holds the svc gate, the TLS slots and the big-stack entry in assembly (R46).
+- It runs AppKit on the main thread and the game on its own thread (R47).
+- `nxkit-host probe <run folder>` measures what R18 asks for: the free addresses, `MAP_FIXED` against `mach_vm_allocate`, the cost of the copy fallback and the no-copy buffer over the reservation.
+- A part that another crate provides is a seam in `src/seams.rs`. The integration step fills the seams. A seam that is not filled stops the start with its name.
 
 ### Core rules act at svc boundaries only
 
