@@ -12,7 +12,7 @@ layer = "L0"
 in_v = false
 
 [dependencies]
-
+nxkit-abi = { workspace = true }
 # Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which holds the macOS FFI.
 [lints.rust]
 missing_docs = "deny"

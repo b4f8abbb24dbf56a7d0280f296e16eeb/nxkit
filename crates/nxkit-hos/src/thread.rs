@@ -1,5 +1,6 @@
 //! Guest threads, the parker a blocked thread waits on, and the objects a thread can wait for.
 
+use crate::lend::Lend;
 use crate::result::KResult;
 use crate::role::{Qos, ThreadRole};
 use crate::stats::ThreadStats;
@@ -176,7 +177,8 @@ pub struct Thread {
     role: AtomicU8,
     pub(crate) qos_applied: AtomicU8,
     pub(crate) qos_pending: AtomicBool,
-    pub(crate) host: AtomicUsize,
+    pub(crate) lend: Lend,
+    pub(crate) tls_slot: AtomicU64,
     pub(crate) stack_size: AtomicUsize,
     state: AtomicU8,
     pub(crate) exit: SyncObject,
@@ -209,7 +211,8 @@ impl Thread {
             role: AtomicU8::new(ThreadRole::Unknown.to_u8()),
             qos_applied: AtomicU8::new(0),
             qos_pending: AtomicBool::new(false),
-            host: AtomicUsize::new(0),
+            lend: Lend::default(),
+            tls_slot: AtomicU64::new(0),
             stack_size: AtomicUsize::new(0),
             state: AtomicU8::new(state as u8),
             exit: SyncObject::default(),
@@ -219,6 +222,23 @@ impl Thread {
             stats: ThreadStats::default(),
             gate_slot: Mutex::new(None),
             body: Mutex::new(None),
+        }
+    }
+
+    /// The address of the thread's TLS block (`tpidr_el0`), or zero when the kernel does not model thread memory.
+    pub fn tls(&self) -> u64 {
+        match self.tls_slot.load(Ordering::Acquire) {
+            0 => 0,
+            slot => slot + crate::vm::TLS_OFFSET,
+        }
+    }
+
+    /// The address of the thread-local region (`tpidrro_el0`) with the IPC buffer in its first 0x100 bytes, or zero
+    /// when the kernel does not model thread memory.
+    pub fn tlr(&self) -> u64 {
+        match self.tls_slot.load(Ordering::Acquire) {
+            0 => 0,
+            slot => slot + crate::vm::TLR_OFFSET,
         }
     }
 

@@ -22,13 +22,19 @@ use std::ffi::{CStr, c_char, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod guestos;
 mod kernel;
 pub mod nvn;
 mod offline;
 
+pub use guestos::{
+    NxkitGuestSym, NxkitOsConfig, nxkit_kernel_forced_names, nxkit_kernel_os_init,
+    nxkit_kernel_set_deterministic, nxkit_kernel_set_guest_sym,
+};
 pub use kernel::{
-    NxkitKernelConfig, NxkitRoleRule, NxkitThreadEntry, nxkit_kernel_dump_stats, nxkit_kernel_init,
-    nxkit_kernel_set_thread_name, nxkit_svc,
+    NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRoleRule, NxkitThreadEntry,
+    nxkit_kernel_dump_stats, nxkit_kernel_init, nxkit_kernel_set_thread_name,
+    nxkit_kernel_thread_tls, nxkit_svc,
 };
 
 /// A service that nxkit can run. The bit of a service in the mask is its index in `nxtitle::Service::ALL`.
@@ -91,16 +97,22 @@ pub struct Entry {
 }
 
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
+/// The SDK take-overs of the kernel service come after the offline entries.
 pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
     TABLE.get_or_init(|| {
-        let mut all = offline::entries();
-        all.push(Entry {
+        let mut table = offline::entries();
+        table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,
             addr: nvn::nvn_bootstrap_loader as extern "C" fn(u64) -> u64 as usize,
         });
-        all
+        table.extend(nxkit_hos::exports().into_iter().map(|e| Entry {
+            name: e.name,
+            service: Service::Kernel,
+            addr: e.addr,
+        }));
+        table
     })
 }
 
@@ -143,13 +155,18 @@ pub unsafe extern "C" fn nxkit_hle_find(name: *const c_char) -> *const c_void {
 }
 
 /// The names of the exported C symbols. The header has one declaration for each.
-pub const EXPORTS: [&str; 6] = [
+pub const EXPORTS: [&str; 11] = [
     "nxkit_init",
     "nxkit_hle_find",
     "nxkit_svc",
     "nxkit_kernel_init",
     "nxkit_kernel_set_thread_name",
     "nxkit_kernel_dump_stats",
+    "nxkit_kernel_thread_tls",
+    "nxkit_kernel_set_guest_sym",
+    "nxkit_kernel_os_init",
+    "nxkit_kernel_set_deterministic",
+    "nxkit_kernel_forced_names",
 ];
 
 #[cfg(test)]

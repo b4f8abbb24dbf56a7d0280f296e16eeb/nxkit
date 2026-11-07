@@ -3,6 +3,7 @@
 
 use crate::result::{KResult, KResultOr};
 use crate::thread::{SyncObject, Thread, lock};
+use nxkit_abi::kernel::Session;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -20,12 +21,28 @@ pub(crate) struct Event {
     pub(crate) sync: SyncObject,
 }
 
+/// Shared memory that a service made. Its pages are in the kernel's backing area.
+pub(crate) struct SharedMemory {
+    pub(crate) base: u64,
+    pub(crate) size: u64,
+}
+
+/// Memory of the game that is lent to a service. Its pages stay in the guest's heap and are locked.
+pub(crate) struct TransferMemory {
+    pub(crate) addr: u64,
+    pub(crate) size: u64,
+}
+
 /// What a handle refers to.
 #[derive(Clone)]
 pub(crate) enum KObject {
     Thread(Arc<Thread>),
     EventWrite(Arc<Event>),
     EventRead(Arc<Event>),
+    Session(Arc<dyn Session>),
+    SharedMemory(Arc<SharedMemory>),
+    TransferMemory(Arc<TransferMemory>),
+    ResourceLimit,
 }
 
 struct Slot {
@@ -109,18 +126,18 @@ impl HandleTable {
         slot.object.clone()
     }
 
-    pub(crate) fn remove(&self, handle: u32) -> KResultOr<()> {
+    /// Removes the handle and gives back the object it named.
+    pub(crate) fn remove(&self, handle: u32) -> KResultOr<KObject> {
         let (shard_no, local, generation) = Self::split(handle).ok_or(KResult::INVALID_HANDLE)?;
         let mut shard = lock(&self.shards[shard_no]);
-        match shard.slots.get_mut(local) {
-            Some(s) if s.generation == generation && s.object.is_some() => {
-                s.object = None;
-                shard.free.push(local);
-                self.used.fetch_sub(1, Ordering::AcqRel);
-                Ok(())
-            }
-            _ => Err(KResult::INVALID_HANDLE),
-        }
+        let object = match shard.slots.get_mut(local) {
+            Some(s) if s.generation == generation => s.object.take(),
+            _ => None,
+        };
+        let object = object.ok_or(KResult::INVALID_HANDLE)?;
+        shard.free.push(local);
+        self.used.fetch_sub(1, Ordering::AcqRel);
+        Ok(object)
     }
 }
 
@@ -139,8 +156,8 @@ mod tests {
         let t = HandleTable::new(4);
         let a = t.insert(event()).unwrap_or(0);
         assert!(t.get(a).is_some());
-        assert_eq!(t.remove(a), Ok(()));
-        assert_eq!(t.remove(a), Err(KResult::INVALID_HANDLE));
+        assert!(t.remove(a).is_ok());
+        assert_eq!(t.remove(a).err(), Some(KResult::INVALID_HANDLE));
         let b = t.insert(event()).unwrap_or(0);
         assert_ne!(a, b);
         assert!(t.get(a).is_none());

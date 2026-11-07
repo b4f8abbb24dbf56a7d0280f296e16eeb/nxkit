@@ -1,14 +1,20 @@
-//! The only module with `unsafe`: address waits, thread QoS and raw guest memory.
+//! The only module with `unsafe`: address waits, thread QoS, raw guest memory and calls into SDK functions (the
+//! child module `call`).
 //!
 //! On Apple platforms the waits are `os_sync_wait_on_address` and `os_sync_wake_by_address_*` (macOS 14.4, iOS 17.4).
 //! Other platforms get a safe fallback of sharded mutexes and condition variables, so the crate builds and tests there.
 
 #![allow(unsafe_code)]
 
-use crate::memory::GuestMemory;
+use crate::memory::{GuestMemory, HostSpace, PAGE_SIZE};
 use crate::role::Qos;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+
+mod call;
+
+pub use call::{GuestFn, random_fill};
+pub(crate) use call::{drop_spawn_arg, run_spawned, spawn_arg};
 
 /// Why a wait returned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +248,12 @@ pub fn current_host_thread() -> usize {
 /// A QoS class override of another thread. The thread runs at least at that class until the value is dropped.
 pub struct QosOverride(*mut std::ffi::c_void);
 
+// SAFETY: the pointer is an opaque token that `pthread_override_qos_class_start_np` returned. It is never
+// dereferenced here and only handed back to `pthread_override_qos_class_end_np`. Whether that call may come from
+// another thread is not verified. The lend table (`lend.rs`) ends overrides on the thread that exits and on the
+// waiter's thread, and the first one to run takes the value.
+unsafe impl Send for QosOverride {}
+
 impl QosOverride {
     /// Starts an override of the host thread `host` (from `current_host_thread`). `None` when the platform has no
     /// overrides or refuses it. The thread must still run, as the owner of a lock does.
@@ -320,4 +332,252 @@ impl GuestMemory for HostMemory {
     fn cas32(&self, addr: u64, current: u32, new: u32) -> Option<Result<u32, u32>> {
         Some(Self::word(addr)?.compare_exchange(current, new, Ordering::SeqCst, Ordering::SeqCst))
     }
+}
+
+#[cfg(unix)]
+mod posix {
+    use std::ffi::{c_int, c_void};
+
+    #[cfg(target_vendor = "apple")]
+    const MAP_ANON: c_int = 0x1000;
+    #[cfg(not(target_vendor = "apple"))]
+    const MAP_ANON: c_int = 0x20;
+    const MAP_PRIVATE: c_int = 0x2;
+    const MAP_FIXED: c_int = 0x10;
+
+    // SAFETY (all declarations): these are the POSIX functions with their C signatures from `<sys/mman.h>`,
+    // `<string.h>` and `<unistd.h>`.
+    unsafe extern "C" {
+        fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
+        fn mmap(
+            addr: *mut c_void,
+            len: usize,
+            prot: c_int,
+            flags: c_int,
+            fd: c_int,
+            offset: i64,
+        ) -> *mut c_void;
+        fn memset(dst: *mut c_void, byte: c_int, len: usize) -> *mut c_void;
+        fn memmove(dst: *mut c_void, src: *const c_void, len: usize) -> *mut c_void;
+        fn getpagesize() -> c_int;
+    }
+
+    pub(super) fn page_size() -> u64 {
+        // SAFETY: `getpagesize` has no preconditions.
+        u64::try_from(unsafe { getpagesize() }).unwrap_or(0x1000)
+    }
+
+    pub(super) fn protect(addr: u64, len: u64, prot: i32) -> bool {
+        // SAFETY: the range lies in the host's reservation. The kernel checks it against its model of the
+        // reservation before it calls, and `mprotect` only changes the access of whole pages.
+        unsafe { mprotect(addr as *mut c_void, len as usize, prot) == 0 }
+    }
+
+    /// Replaces the pages with fresh anonymous pages that nothing may access.
+    pub(super) fn drop_pages(addr: u64, len: u64) -> bool {
+        // SAFETY: as for `protect`. `MAP_FIXED` replaces the pages of the host's reservation, which is the aim.
+        let p = unsafe {
+            mmap(
+                addr as *mut c_void,
+                len as usize,
+                0,
+                MAP_FIXED | MAP_PRIVATE | MAP_ANON,
+                -1,
+                0,
+            )
+        };
+        p as isize != -1
+    }
+
+    pub(super) fn fill_zero(addr: u64, len: u64) -> bool {
+        // SAFETY: the kernel calls this for pages that its model marks as accessible.
+        unsafe { memset(addr as *mut c_void, 0, len as usize) };
+        true
+    }
+
+    pub(super) fn copy(dst: u64, src: u64, len: u64) -> bool {
+        // SAFETY: as for `fill_zero`, for both ranges.
+        unsafe { memmove(dst as *mut c_void, src as *const c_void, len as usize) };
+        true
+    }
+
+    #[cfg(target_vendor = "apple")]
+    pub(super) fn remap(dst: u64, src: u64, len: u64) -> bool {
+        const VM_FLAGS_FIXED: c_int = 0;
+        const VM_FLAGS_OVERWRITE: c_int = 0x4000;
+        const VM_INHERIT_SHARE: c_int = 0;
+        // SAFETY (declaration): the C signature of `mach_vm_remap` in `<mach/mach_vm.h>`.
+        unsafe extern "C" {
+            static mach_task_self_: u32;
+            fn mach_vm_remap(
+                target_task: u32,
+                target_address: *mut u64,
+                size: u64,
+                mask: u64,
+                flags: c_int,
+                src_task: u32,
+                src_address: u64,
+                copy: c_int,
+                cur_protection: *mut c_int,
+                max_protection: *mut c_int,
+                inheritance: c_int,
+            ) -> c_int;
+        }
+        let (mut target, mut cur, mut max) = (dst, 0, 0);
+        // SAFETY: both ranges lie in the host's reservation, which the kernel checks before it calls. The call
+        // replaces the pages at `dst` with a second mapping of the pages at `src`, which is the aim.
+        unsafe {
+            mach_vm_remap(
+                mach_task_self_,
+                &mut target,
+                len,
+                0,
+                VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+                mach_task_self_,
+                src,
+                0,
+                &mut cur,
+                &mut max,
+                VM_INHERIT_SHARE,
+            ) == 0
+                && target == dst
+        }
+    }
+
+    #[cfg(not(target_vendor = "apple"))]
+    pub(super) fn remap(_dst: u64, _src: u64, _len: u64) -> bool {
+        false
+    }
+}
+
+#[cfg(not(unix))]
+mod posix {
+    pub(super) fn page_size() -> u64 {
+        0x1000
+    }
+    pub(super) fn protect(_: u64, _: u64, _: i32) -> bool {
+        false
+    }
+    pub(super) fn drop_pages(_: u64, _: u64) -> bool {
+        false
+    }
+    pub(super) fn fill_zero(_: u64, _: u64) -> bool {
+        false
+    }
+    pub(super) fn copy(_: u64, _: u64, _: u64) -> bool {
+        false
+    }
+    pub(super) fn remap(_: u64, _: u64, _: u64) -> bool {
+        false
+    }
+}
+
+/// The host reservation as `HostSpace`. Addresses are host addresses (R18).
+///
+/// `protect` rounds outward when it grants access and inward when it removes it, so a host page that still has a
+/// Horizon page with access stays accessible. Two Horizon pages with different access on one host page get the
+/// access of the last call. `release` leaves a host page that it only partly releases readable and writable.
+impl HostSpace for HostMemory {
+    fn page_size(&self) -> u64 {
+        posix::page_size().max(PAGE_SIZE)
+    }
+
+    fn protect(&self, addr: u64, len: u64, perm: u32) -> bool {
+        let ps = self.page_size();
+        let (start, end) = if perm & 7 != 0 {
+            (addr & !(ps - 1), (addr + len).div_ceil(ps) * ps)
+        } else {
+            (addr.div_ceil(ps) * ps, (addr + len) & !(ps - 1))
+        };
+        end <= start || posix::protect(start, end - start, (perm & 7) as i32)
+    }
+
+    fn release(&self, addr: u64, len: u64) -> bool {
+        let ps = self.page_size();
+        let first = addr.div_ceil(ps) * ps;
+        let last = (addr + len) & !(ps - 1);
+        if last <= first {
+            return self.scrub(addr, len);
+        }
+        let mut ok = posix::drop_pages(first, last - first);
+        if first > addr {
+            ok &= self.scrub(addr, first - addr);
+        }
+        if last < addr + len {
+            ok &= self.scrub(last, addr + len - last);
+        }
+        ok
+    }
+
+    fn zero(&self, addr: u64, len: u64) -> bool {
+        posix::fill_zero(addr, len)
+    }
+
+    fn remap(&self, dst: u64, src: u64, len: u64, perm: u32) -> bool {
+        posix::remap(dst, src, len) && self.protect(dst, len, perm)
+    }
+
+    fn copy(&self, dst: u64, src: u64, len: u64) -> bool {
+        posix::copy(dst, src, len)
+    }
+}
+
+impl HostMemory {
+    /// Zeros a range that shares a host page with memory that stays. The host page is made readable and writable.
+    fn scrub(&self, addr: u64, len: u64) -> bool {
+        let ps = self.page_size();
+        let start = addr & !(ps - 1);
+        let end = (addr + len).div_ceil(ps) * ps;
+        posix::protect(start, end - start, 3) && posix::fill_zero(addr, len)
+    }
+}
+
+/// The Switch system tick frequency in Hz.
+pub const TICK_HZ: u64 = 19_200_000;
+
+/// The system tick of the Switch (19.2 MHz) from the host's monotonic clock. It counts from an arbitrary start and
+/// never goes back.
+pub fn system_tick() -> u64 {
+    let ns = u128::from(monotonic_ns());
+    (ns * u128::from(TICK_HZ) / 1_000_000_000) as u64
+}
+
+#[cfg(target_vendor = "apple")]
+fn monotonic_ns() -> u64 {
+    #[repr(C)]
+    struct TimebaseInfo {
+        numer: u32,
+        denom: u32,
+    }
+    // SAFETY (declarations): the C signatures of `<mach/mach_time.h>`.
+    unsafe extern "C" {
+        fn mach_absolute_time() -> u64;
+        fn mach_timebase_info(info: *mut TimebaseInfo) -> i32;
+    }
+    static SCALE: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+    let (numer, denom) = *SCALE.get_or_init(|| {
+        let mut info = TimebaseInfo { numer: 1, denom: 1 };
+        // SAFETY: `info` is a live local that the call fills.
+        let rc = unsafe { mach_timebase_info(&mut info) };
+        if rc == 0 && info.denom != 0 {
+            (u64::from(info.numer), u64::from(info.denom))
+        } else {
+            (1, 1)
+        }
+    });
+    // SAFETY: `mach_absolute_time` has no preconditions.
+    let ticks = unsafe { mach_absolute_time() };
+    (u128::from(ticks) * u128::from(numer) / u128::from(denom)) as u64
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn monotonic_ns() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    u64::try_from(
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_nanos(),
+    )
+    .unwrap_or(u64::MAX)
 }

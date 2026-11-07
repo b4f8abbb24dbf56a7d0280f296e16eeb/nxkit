@@ -16,8 +16,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxkit-nvn` has the trait `Backend`, which the GPU backend implements. A queue keeps the state that its last submit left, as on the GPU. The doc comment of `tic.rs` records how each TIC and TSC field was checked. No bit position is checked against hardware.
 - `nxkit-rt` has the module `nvn`, the NVN C ABI of the host (R22 to R24). It has the device, queue, sync, memory pool, buffer, window, event and program functions of nxnative, the GPU context, and the helpers for objects in guest memory. A name that nxnative knows and nxkit does not implement stops the game with its name. The service `gpu` exports `nvnBootstrapLoader`. The host installs the backend with `nxkit_rt::nvn::install`.
 
+- `nxkit-hos` models the process memory of Horizon over the host's reservation: `SetHeapSize`, `SetMemoryPermission`, `SetMemoryAttribute`, `MapMemory`, `UnmapMemory`, `QueryMemory`, `MapPhysicalMemory`, `UnmapPhysicalMemory`, shared and transfer memory, `GetInfo`, resource limits, `GetSystemTick`, `ExitProcess`, `Break`, `OutputDebugString`, `ReturnFromException`, `GetProcessId`, `GetThreadId` and the cache flush svcs. A thread has a thread-local slot with the IPC buffer. The kernel implements `nxkit_abi::kernel::Kernel`, so `ConnectToNamedPort`, the three request svcs and `CloseHandle` reach the sessions of a server. Refer to `docs/nxkit-hos.md`.
+- `nxkit-hos` exports the SDK take-overs that nxnative has on its kernel side: `getentropy`, the csrng bytes, `getenv` and `StandardAllocator::Allocate`. `nxkit-rt` lists them under the service `kernel` and adds `nxkit_kernel_set_guest_sym`, `nxkit_kernel_os_init`, `nxkit_kernel_set_deterministic`, `nxkit_kernel_forced_names` and `nxkit_kernel_thread_tls`.
+- `NxkitKernelConfig` has `main_thread_priority`, `main_thread_core`, `main_thread_stack_size`, `process_id`, `process_exit` and `memory`.
+
 ### Changed
 
+- The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
+- A QoS lend no longer reads a `pthread_t` of an owner that may have exited. The lend table lives in the owner's thread record (R31).
 - nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and nxnative keeps its MIT notice in `THIRD_PARTY.md`.
 
 ## 0.9.2 - 2026-11-07

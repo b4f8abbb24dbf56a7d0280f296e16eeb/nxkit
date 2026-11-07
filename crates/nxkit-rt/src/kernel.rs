@@ -5,8 +5,8 @@
 //! The gate answers a svc only when the `kernel` service is enabled in [`crate::nxkit_init`].
 
 use nxkit_hos::{
-    Config, GuestLauncher, Kernel, NameMatch, RoleRule, RoleTable, SvcRegs, Thread, ThreadRole,
-    current_thread, sys,
+    Config, GuestLauncher, Kernel, MAX_PRIORITY, MainThread, MemoryConfig, Module, NameMatch,
+    RoleRule, RoleTable, SvcRegs, Thread, ThreadRole, current_thread, sys,
 };
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::atomic::Ordering;
@@ -49,6 +49,76 @@ pub struct NxkitKernelConfig {
     pub roles: *const NxkitRoleRule,
     /// The number of rules.
     pub role_count: usize,
+    /// The priority of the main thread from the NPDM (`main_thread.priority` in `game.json`), 0 to 63. The value
+    /// -1 means the host gives none. The main thread then cannot attach and nxkit answers no svc of it.
+    pub main_thread_priority: i32,
+    /// The core of the main thread from the NPDM, 0 to 3, or -2 for the process default.
+    pub main_thread_core: i32,
+    /// The stack size of the main thread from the NPDM in bytes.
+    pub main_thread_stack_size: u64,
+    /// The process id that `GetProcessId` returns, or 0 for the default 0x80.
+    pub process_id: u64,
+    /// Ends the process for `ExitProcess`, `Break` and `ReturnFromException`, or NULL to call `exit(code)`.
+    pub process_exit: Option<extern "C" fn(code: u32)>,
+    /// The memory model, or NULL when the kernel does not model memory (no memory svc, `GetInfo` or IPC svc).
+    pub memory: *const NxkitMemoryConfig,
+}
+
+/// One module (an NSO) in the front region of the reservation.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NxkitModule {
+    /// The address of the text segment.
+    pub base: u64,
+    /// The size of the text segment.
+    pub text: u64,
+    /// The size of the read-only data segment.
+    pub rodata: u64,
+    /// The size of the data segment.
+    pub data: u64,
+    /// The size of the bss segment.
+    pub bss: u64,
+}
+
+/// The guest's memory, as [`nxkit_hos::MemoryConfig`] describes it. Addresses are host addresses (R18).
+#[repr(C)]
+pub struct NxkitMemoryConfig {
+    /// The base address of the reservation.
+    pub base: u64,
+    /// The size of the reservation.
+    pub size: u64,
+    /// The size of the front region at the start of the reservation.
+    pub front_size: u64,
+    /// The size of the stack region.
+    pub stack_size: u64,
+    /// The size of the alias region, at the end of the reservation.
+    pub alias_size: u64,
+    /// The memory pool of the application in bytes.
+    pub app_pool: u64,
+    /// What the process uses besides its heap in bytes.
+    pub used_memory: u64,
+    /// The system resource size of the NPDM, or 0.
+    pub system_resource: u64,
+    /// The program id that `GetInfo` returns.
+    pub program_id: u64,
+    /// The address of the thread-local area, inside the front region, readable and writable.
+    pub tls_addr: u64,
+    /// The size of the thread-local area. The first 0x4000 bytes are the exception context.
+    pub tls_size: u64,
+    /// The address of the area that backs shared memory, inside the front region, readable and writable.
+    pub shared_addr: u64,
+    /// The size of the shared memory area.
+    pub shared_size: u64,
+    /// The address of the main thread's stack, inside the stack region, or 0 for none.
+    pub main_stack_addr: u64,
+    /// The size of the main thread's stack.
+    pub main_stack_size: u64,
+    /// The modules.
+    pub modules: *const NxkitModule,
+    /// The number of modules.
+    pub module_count: usize,
+    /// Non-zero makes pages mapped by `MapPhysicalMemory` count against the pool.
+    pub map_limit: u32,
 }
 
 struct CLauncher {
@@ -136,20 +206,167 @@ pub unsafe extern "C" fn nxkit_kernel_init(config: *const NxkitKernelConfig) -> 
             user: c.user as usize,
         }));
     }
-    let mut created = false;
-    KERNEL.get_or_init(|| {
-        created = true;
-        // SAFETY: guest addresses are host addresses, as the safety contract of this function says.
-        let mem = unsafe { sys::HostMemory::new() };
-        Kernel::new(cfg, Arc::new(mem))
-    });
-    if created { 0 } else { 1 }
+    match main_thread(c) {
+        Ok(main) => cfg.main_thread = main,
+        Err(why) => {
+            eprintln!("nxkit-rt: {why}");
+            return -1;
+        }
+    }
+    if c.process_id != 0 {
+        cfg.process_id = c.process_id;
+    }
+    if let Some(exit) = c.process_exit {
+        // The hook is set once. A second kernel is refused below, so the first hook stays the one that runs.
+        let _ = PROCESS_EXIT.set(exit);
+        cfg.process_exit = |code| match PROCESS_EXIT.get() {
+            Some(exit) => exit(code),
+            None => std::process::exit(code as i32),
+        };
+    }
+    // SAFETY: the caller promises a valid memory configuration, or NULL.
+    match unsafe { read_memory(c.memory) } {
+        Ok(memory) => cfg.memory = memory,
+        Err(why) => {
+            eprintln!("nxkit-rt: {why}");
+            return -1;
+        }
+    }
+    if KERNEL.get().is_some() {
+        return 1;
+    }
+    // SAFETY: guest addresses are host addresses, as the safety contract of this function says.
+    let mem = unsafe { sys::HostMemory::new() };
+    let kernel = match Kernel::try_new(cfg, Arc::new(mem)) {
+        Ok(kernel) => kernel,
+        Err(why) => {
+            eprintln!("nxkit-rt: the kernel is not created: {why}");
+            return -1;
+        }
+    };
+    if KERNEL.set(kernel.clone()).is_err() {
+        return 1;
+    }
+    if let Some(range) = kernel.guest_range() {
+        nxkit_abi::guest::set_range(range.0, range.1);
+    }
+    if !nxkit_abi::kernel::set_kernel(kernel) {
+        eprintln!(
+            "nxkit-rt: a kernel is set in nxkit-abi already, the new kernel is not used by the services"
+        );
+    }
+    0
 }
 
-/// The calling thread as a guest thread. A host thread the kernel does not know yet, such as the main thread, is
-/// attached on its first svc.
+/// The process exit hook of the host.
+static PROCESS_EXIT: OnceLock<extern "C" fn(u32)> = OnceLock::new();
+
+/// The main thread from the configuration. `-1` as priority means the host gave none.
+fn main_thread(c: &NxkitKernelConfig) -> Result<Option<MainThread>, String> {
+    if c.main_thread_priority == -1 {
+        return Ok(None);
+    }
+    if !(0..=MAX_PRIORITY).contains(&c.main_thread_priority) {
+        return Err(format!(
+            "main_thread_priority {} is not -1 or 0 to {MAX_PRIORITY}",
+            c.main_thread_priority
+        ));
+    }
+    if !(0..=3).contains(&c.main_thread_core) && c.main_thread_core != -2 {
+        return Err(format!(
+            "main_thread_core {} is not 0 to 3 or -2",
+            c.main_thread_core
+        ));
+    }
+    Ok(Some(MainThread {
+        priority: c.main_thread_priority,
+        core: c.main_thread_core,
+        stack_size: c.main_thread_stack_size,
+    }))
+}
+
+/// Reads the memory configuration.
+///
+/// # Safety
+///
+/// `memory` is NULL or points to a valid [`NxkitMemoryConfig`] whose module list has `module_count` entries.
+unsafe fn read_memory(memory: *const NxkitMemoryConfig) -> Result<Option<MemoryConfig>, String> {
+    if memory.is_null() {
+        return Ok(None);
+    }
+    // SAFETY: the caller promises a valid configuration.
+    let m = unsafe { &*memory };
+    let modules = if m.modules.is_null() || m.module_count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: the caller promises `module_count` modules at `modules`.
+        unsafe { std::slice::from_raw_parts(m.modules, m.module_count) }
+            .iter()
+            .map(|x| Module {
+                base: x.base,
+                text: x.text,
+                rodata: x.rodata,
+                data: x.data,
+                bss: x.bss,
+            })
+            .collect()
+    };
+    let main_stack = (m.main_stack_size != 0).then_some((m.main_stack_addr, m.main_stack_size));
+    // SAFETY: guest addresses are host addresses, as the safety contract of `nxkit_kernel_init` says.
+    let host = unsafe { sys::HostMemory::new() };
+    Ok(Some(MemoryConfig {
+        host: Arc::new(host),
+        base: m.base,
+        size: m.size,
+        front_size: m.front_size,
+        stack_size: m.stack_size,
+        alias_size: m.alias_size,
+        app_pool: m.app_pool,
+        used_memory: m.used_memory,
+        system_resource: m.system_resource,
+        map_limit: m.map_limit != 0,
+        program_id: m.program_id,
+        tls: (m.tls_addr, m.tls_size),
+        shared: (m.shared_addr, m.shared_size),
+        main_stack,
+        modules,
+    }))
+}
+
+/// The calling thread as a guest thread. A host thread the kernel does not know yet is the main thread. It is
+/// attached on its first svc with the priority, core and stack size of the NPDM. Without them it does not attach.
 fn caller(kernel: &Kernel) -> Option<Arc<Thread>> {
-    current_thread().or_else(|| kernel.attach_current_thread("", 44, -2).ok())
+    current_thread().or_else(|| kernel.attach_main_thread("").ok())
+}
+
+/// Writes the addresses of the calling thread's thread-local region (`tpidrro_el0`) and TLS block (`tpidr_el0`)
+/// to `tlr` and `tls`. The host's thread entry sets both registers from them before it runs guest code. Returns 0
+/// on success and -1 when there is no kernel, the thread is not a guest thread or the kernel has no memory model.
+///
+/// # Safety
+///
+/// `tlr` and `tls` are NULL or point to a writable `uint64_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nxkit_kernel_thread_tls(tlr: *mut u64, tls: *mut u64) -> i32 {
+    let Some(kernel) = KERNEL.get() else {
+        return -1;
+    };
+    let Some(cur) = caller(kernel) else {
+        return -1;
+    };
+    if cur.tlr() == 0 {
+        return -1;
+    }
+    // SAFETY: the caller promises that a non-NULL pointer is writable.
+    unsafe {
+        if !tlr.is_null() {
+            *tlr = cur.tlr();
+        }
+        if !tls.is_null() {
+            *tls = cur.tls();
+        }
+    }
+    0
 }
 
 /// Runs svc `number` with the registers `regs` (x0 to x7, read and written). Returns 1 when nxkit answered the call
