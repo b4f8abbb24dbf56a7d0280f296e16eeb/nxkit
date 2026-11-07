@@ -32,11 +32,13 @@ pub enum Skip {
     Copy,
     /// A texture upload or copy-back failed.
     Transfer,
+    /// Metal refused an encoded command.
+    Encode,
 }
 
 impl Skip {
     /// The number of reasons.
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 14;
 
     /// The reason as a short name for logs.
     pub fn name(self) -> &'static str {
@@ -54,6 +56,7 @@ impl Skip {
             Self::Buffer => "buffer",
             Self::Copy => "copy",
             Self::Transfer => "transfer",
+            Self::Encode => "encode",
         }
     }
 }
