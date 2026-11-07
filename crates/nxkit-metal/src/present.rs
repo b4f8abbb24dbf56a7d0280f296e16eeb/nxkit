@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
-use objc2_metal::{MTLDrawable, MTLPixelFormat};
+use objc2_metal::{MTLDrawable, MTLPixelFormat, MTLTexture};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::device::Context;
@@ -29,6 +29,18 @@ pub struct Drawable {
 }
 
 impl Drawable {
+    pub(crate) fn wrap(ctx: &Context, raw: Retained<ProtocolObject<dyn CAMetalDrawable>>) -> Self {
+        let tex = raw.texture();
+        let mut desc =
+            TextureDesc::render_target_2d(tex.width() as u32, tex.height() as u32, PRESENT_FORMAT);
+        desc.shader_read = false;
+        desc.storage = Storage::Private;
+        Drawable {
+            texture: Texture::wrap_external(ctx, tex, desc),
+            raw,
+        }
+    }
+
     /// The texture to render into.
     pub fn texture(&self) -> &Texture {
         &self.texture
@@ -92,16 +104,15 @@ impl Presenter {
             .layer
             .nextDrawable()
             .ok_or(MetalError::Invalid("the layer gave no drawable"))?;
-        let size = self.layer.drawableSize();
-        let tex = raw.texture();
-        let mut desc =
-            TextureDesc::render_target_2d(size.width as u32, size.height as u32, PRESENT_FORMAT);
-        desc.shader_read = false;
-        desc.storage = Storage::Private;
-        Ok(Drawable {
-            texture: Texture::wrap_external(&self.ctx, tex, desc),
-            raw,
-        })
+        Ok(Drawable::wrap(&self.ctx, raw))
+    }
+
+    pub(crate) fn layer(&self) -> &CAMetalLayer {
+        &self.layer
+    }
+
+    pub(crate) fn context(&self) -> &Context {
+        &self.ctx
     }
 }
 

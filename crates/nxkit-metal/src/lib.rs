@@ -9,6 +9,7 @@
 //! - [`FrameRing`], [`Frame`]: three command allocators, one per frame in flight, with timing.
 //! - [`CommandBuffer`], [`RenderPass`], [`ComputePass`]: data-driven encoding of passes.
 //! - [`IndirectCommandBuffer`]: render commands encoded once and run in a pass. The module docs list what an ICB holds.
+//! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at 60 or 120 Hz through `FrameHooks::display_tick`.
 //! - [`Presenter`]: a `CAMetalLayer` drawable path.
 //! - [`Deswizzler`]: block-linear deswizzle from guest memory into a texture.
 //!
@@ -31,6 +32,7 @@ mod frame;
 mod guest;
 mod icb;
 mod metrics;
+mod pacing;
 mod pipeline;
 mod present;
 mod render;
@@ -53,6 +55,7 @@ pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
+pub use pacing::{DisplayLink, DisplayTick, FrameInterval};
 pub use pipeline::{
     ArchiveConfig, ComputePipeline, PipelineCache, RenderPipeline, RenderPipelineDesc,
     ShaderLibrary,
