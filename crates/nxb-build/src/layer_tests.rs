@@ -53,10 +53,10 @@ fn a_shaders_folder_named_for_the_api_is_taken() {
 fn par_map_keeps_the_order() {
     let v: Vec<u32> = (0..100).collect();
     assert_eq!(
-        par_map(&v, 7, |x| x * 2),
+        par_map(&v, 7, &crate::events::Count::default(), |x| x * 2),
         v.iter().map(|x| x * 2).collect::<Vec<_>>()
     );
-    assert!(par_map(&Vec::<u32>::new(), 4, |x| *x).is_empty());
+    assert!(par_map(&Vec::<u32>::new(), 4, &crate::events::Count::default(), |x| *x).is_empty());
 }
 
 #[test]

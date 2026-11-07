@@ -6,6 +6,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- `nxb build --progress bar` shows one live line at the bottom of a terminal: a spinner, the stage and step, a bar with the count and percent, the time left and the time spent. The count is shown for the extract and the shader split in bytes, for the RomFS unpack, the rewrite of modules and NROs, the module files, the shader translation and compile, the shader library copy, the pipeline archive batches and the app staging. Finished stages and `say` lines stay above the bar. `--progress auto` and `--progress lines` stay plain lines and never print escape codes, also on a terminal. `--progress json` gets `progress` events for the newly counted steps.
 - `nxkit-host` wires its seams to the kernel and the service crates: the kernel registration, the memory profile and the main thread of the NPDM, the IPC server, the big-stack exports, the start of every selected service, one symbol lookup of the game for all service crates, and the focus. A guest thread gets its thread-local regions from the kernel. The main stack lies at the start of the stack region and a shared memory area follows the thread blocks.
 - `nxkit-rt` has `kernel()` and `attach_main_thread()` for the host. `nxkit-hos` has `Config.on_close`, which tells the system service about a closed handle, and `Kernel::system_event_writable_handle`. `nxkit-svc-input` has `Config.pad_layout` and `set_focus`.
 - `game.json` has the optional settings `shared_font_decode` and `sf_services`.

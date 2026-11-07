@@ -350,9 +350,11 @@ fn group(
     let mut out = Vec::new();
     let mut batches = cut(script.bases(&digests)?, c.target);
     batches.extend(crate::compute::chunks(script.compute_bases(&digests)?));
+    crate::Batches::planned(c, batches.len());
     for batch in batches {
         let key = crate::batch_key(c, &batch);
         let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg, Some(headroom))?;
+        crate::Batches::finished(c);
         out.push((key, piece, rep));
     }
     Ok(out)

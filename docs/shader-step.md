@@ -201,6 +201,7 @@ The shader step does not use it.
 ## Progress and fixed strings
 
 - `nxb build --progress json` writes one JSON object for each line: the events `stage`, `step`, `progress`, `stage_end` and `say`.
+- `nxb build --progress bar` draws a live line on the terminal and prints the stage and `say` lines above it. It is the only mode with escape codes.
 - Callers parse some strings. Thus these strings must not change: `shaders {N}: ok {K}, ...`,
   `shader regressions against b-XXXX: N`, all `[RED] ` lines, and the failure-classifier keys.
 

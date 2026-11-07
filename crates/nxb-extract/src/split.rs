@@ -51,6 +51,8 @@ pub struct SplitRequest {
     pub nro_dir: Option<PathBuf>,
     /// The game's own decoder in the Mac host, for Oodle- and LZ5-compressed game files.
     pub oodle: Option<crate::oodle_host::HostSpec>,
+    /// Counts the scanned file bytes (`total` is set once the files are listed).
+    pub progress: Option<std::sync::Arc<crate::run::Counter>>,
 }
 
 pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -440,6 +442,11 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
         versions.push((tag, main, files));
     }
     let digests: Vec<Mutex<Option<Digest>>> = jobs.iter().map(|_| Mutex::new(None)).collect();
+    let scanned = req.progress.as_deref();
+    if let Some(c) = scanned {
+        c.total
+            .store(jobs.iter().map(|j| j.3).sum(), Ordering::Relaxed);
+    }
     let next = AtomicUsize::new(0);
     let fatal: Mutex<Option<ExtractError>> = Mutex::new(None);
     // NXB_SPLIT_LPT=1: largest first (results are merged in the Python's order by digest, not in completion order).
@@ -481,6 +488,9 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
                                 break;
                             }
                         }
+                        if let Some(c) = scanned {
+                            c.done.fetch_add(*size, Ordering::Relaxed);
+                        }
                         continue;
                     }
                     let mut data = vec![0u8; *size as usize];
@@ -494,6 +504,9 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
                     t.scan(label, &data, d);
                     if let Ok(mut g) = digests[j].lock() {
                         *g = Some(d);
+                    }
+                    if let Some(c) = scanned {
+                        c.done.fetch_add(*size, Ordering::Relaxed);
                     }
                 }
             });

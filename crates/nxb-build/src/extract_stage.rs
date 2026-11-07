@@ -4,8 +4,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::Ordering;
 
 use crate::Args;
 use crate::events::{Progress, Update};
@@ -166,32 +165,17 @@ fn with_bytes<T>(
     counter: &nxb_extract::Counter,
     f: impl FnOnce() -> T,
 ) -> T {
-    let stop = AtomicBool::new(false);
-    std::thread::scope(|sc| {
-        sc.spawn(|| {
-            let mut last = None;
-            while !stop.load(Ordering::Relaxed) {
-                let (done, total) = (
-                    counter.done.load(Ordering::Relaxed),
-                    counter.total.load(Ordering::Relaxed),
-                );
-                if total > 0 && last != Some(done) {
-                    last = Some(done);
-                    p.set(Update {
-                        step: Some(step),
-                        done: Some(done),
-                        total: Some(total),
-                        unit: Some("B"),
-                        ..Default::default()
-                    });
-                }
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
-        let r = f();
-        stop.store(true, Ordering::Relaxed);
-        r
-    })
+    p.tracked(
+        Some(step),
+        "B",
+        || {
+            (
+                counter.done.load(Ordering::Relaxed),
+                counter.total.load(Ordering::Relaxed),
+            )
+        },
+        f,
+    )
 }
 
 /// Extracts the packages of the input (and the split in the same pass). Returns the image count and, when the fused
@@ -303,6 +287,7 @@ pub(crate) fn split(a: &Args, b: &Build, p: &Progress) -> Result<String, String>
         }
         None => None,
     };
+    let scanned = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::split::SplitRequest {
         versions: b
             .split_versions
@@ -314,9 +299,22 @@ pub(crate) fn split(a: &Args, b: &Build, p: &Progress) -> Result<String, String>
         threads: a.threads,
         nro_dir: inputs.nro_dir.clone(),
         oodle,
+        progress: Some(scanned.clone()),
     };
     p.say("shader split (nxb-extract)");
-    let (_, bad) = nxb_extract::split::split(&req).map_err(|e| damaged(p, &e))?;
+    let (_, bad) = p
+        .tracked(
+            None,
+            "B",
+            || {
+                (
+                    scanned.done.load(Ordering::Relaxed),
+                    scanned.total.load(Ordering::Relaxed),
+                )
+            },
+            || nxb_extract::split::split(&req),
+        )
+        .map_err(|e| damaged(p, &e))?;
     for l in bad {
         p.say(&l);
     }
@@ -347,7 +345,8 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         _ => (container(a, b, p)?, None),
     };
     let aoc = dlc(a, b, p)?;
-    let note = crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
+    let note =
+        crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
     // the rewrite is skipped when this engine is not the one the port was checked against: without rewritten modules
     // the app cannot be made, and saying so here is clearer than the app stage's missing file
     let patched = b.work.join(format!("patched_{}", b.package));

@@ -59,10 +59,15 @@ fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Writes `modules/<name>.{bin,imports.json,exports.json,fixups.tsv,gates.tsv}` into the run folder.
-pub fn module_files(run: &Path, mods: &[(Built, u64)]) -> Result<(), String> {
+pub fn module_files(
+    run: &Path,
+    mods: &[(Built, u64)],
+    mut progress: impl FnMut(u64, u64),
+) -> Result<(), String> {
     let dir = run.join("modules");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for (b, _) in mods {
+    for (i, (b, _)) in mods.iter().enumerate() {
+        progress(i as u64, mods.len() as u64);
         let at = |s: &str| dir.join(format!("{}.{s}", b.name));
         put(&at("bin"), &b.image)?;
         put(&at("imports.json"), manifest::imports_json(&b.symbols.imports).as_bytes())?;
@@ -73,11 +78,18 @@ pub fn module_files(run: &Path, mods: &[(Built, u64)]) -> Result<(), String> {
     Ok(())
 }
 
-/// Writes and signs `nxgame.dylib`. Returns its size.
-pub fn write_dylib(run: &Path, mods: &[(Built, u64)]) -> Result<u64, String> {
+/// Writes and signs `nxgame.dylib`. Returns its size. `progress` gets the steps done (of 3) and what comes next.
+pub fn write_dylib(
+    run: &Path,
+    mods: &[(Built, u64)],
+    mut progress: impl FnMut(u64, &str),
+) -> Result<u64, String> {
+    progress(0, "linking");
     let bytes = dylib(mods)?;
     let path = run.join("nxgame.dylib");
+    progress(1, "writing");
     put(&path, &bytes)?;
+    progress(2, "signing");
     bundle::sign(&path)?;
     Ok(bytes.len() as u64)
 }

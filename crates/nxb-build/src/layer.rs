@@ -9,7 +9,7 @@
 //! the RomFS.
 
 use crate::Args;
-use crate::events::Progress;
+use crate::events::{Count, Progress, Update};
 use crate::graph::Build;
 use crate::host::Runner;
 use crate::host::rom::Rom;
@@ -115,8 +115,15 @@ pub fn msl_dir(b: &Build) -> Result<PathBuf, String> {
     })
 }
 
-/// `f` over `items` on `threads` threads, in order.
-fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+/// `f` over `items` on `threads` threads, in order. Each finished item is one atomic add to `count` (its total is the
+/// number of items), which the progress reads.
+fn par_map<T: Sync, R: Send>(
+    items: &[T],
+    threads: usize,
+    count: &Count,
+    f: impl Fn(&T) -> R + Sync,
+) -> Vec<R> {
+    count.set_total(items.len() as u64);
     let next = AtomicUsize::new(0);
     let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
         let hs: Vec<_> = (0..threads.clamp(1, items.len().max(1)))
@@ -127,6 +134,7 @@ fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + 
                         let i = next.fetch_add(1, Ordering::SeqCst);
                         let Some(it) = items.get(i) else { break };
                         got.push((i, f(it)));
+                        count.add(1);
                     }
                     got
                 })
@@ -176,8 +184,12 @@ struct Translated {
 
 /// The SPIR-V modules of the images (`vk_shaders.py`): every one must translate, stages Metal does not have are
 /// skipped and counted.
-fn vulkan(imgs: &[PathBuf], threads: usize) -> Result<Translated, String> {
+fn vulkan(imgs: &[PathBuf], threads: usize, p: &Progress) -> Result<Translated, String> {
     let mut mods: Vec<(Vec<u8>, String)> = Vec::new();
+    p.set(Update {
+        note: Some("reading the SPIR-V files"),
+        ..Default::default()
+    });
     for img in imgs {
         let rom = Rom::open(img)?;
         for f in rom.files() {
@@ -195,7 +207,14 @@ fn vulkan(imgs: &[PathBuf], threads: usize) -> Result<Translated, String> {
                 .join(" ")
         ));
     }
-    let done = par_map(&mods, threads, |(m, _)| nxb_layer::vk::translate(m));
+    let count = Count::default();
+    p.set(Update {
+        note: Some("translating"),
+        ..Default::default()
+    });
+    let done = p.counted(None, "modules", &count, || {
+        par_map(&mods, threads, &count, |(m, _)| nxb_layer::vk::translate(m))
+    });
     let mut t = Translated::default();
     let mut skipped = std::collections::BTreeMap::new();
     for ((_, path), r) in mods.into_iter().zip(done) {
@@ -221,7 +240,11 @@ fn vulkan(imgs: &[PathBuf], threads: usize) -> Result<Translated, String> {
 /// The GLSL sources of the images and of the packed version's `main` (`gl_shaders.py`): the `.shad` files of MVGL
 /// archives, `.vert` and `.frag` files, and the `#version` strings of `main`'s read-only segment. A source that does
 /// not translate is reported, the others make the library.
-fn gl(imgs: &[PathBuf], main: &Path, threads: usize) -> Result<Translated, String> {
+fn gl(imgs: &[PathBuf], main: &Path, threads: usize, p: &Progress) -> Result<Translated, String> {
+    p.set(Update {
+        note: Some("reading the GLSL sources"),
+        ..Default::default()
+    });
     let mut srcs: Vec<(Vec<u8>, Option<&'static str>, String)> = Vec::new();
     for img in imgs {
         let rom = Rom::open(img)?;
@@ -271,8 +294,15 @@ fn gl(imgs: &[PathBuf], main: &Path, threads: usize) -> Result<Translated, Strin
             main.display()
         ));
     }
-    let done = par_map(&srcs, threads, |(s, st, _)| {
-        nxb_layer::gl::translate_source(s, *st)
+    let count = Count::default();
+    p.set(Update {
+        note: Some("translating"),
+        ..Default::default()
+    });
+    let done = p.counted(None, "sources", &count, || {
+        par_map(&srcs, threads, &count, |(s, st, _)| {
+            nxb_layer::gl::translate_source(s, *st)
+        })
     });
     let mut t = Translated::default();
     let mut bad = Vec::new();
@@ -293,7 +323,36 @@ fn gl(imgs: &[PathBuf], main: &Path, threads: usize) -> Result<Translated, Strin
 }
 
 /// The MSL files of the shaders, one function each (the first shader of a key and stage), in `dir`.
+#[cfg(test)]
 fn write_msl(shaders: &[(Shader, String)], dir: &Path) -> Result<(Vec<PathBuf>, usize), String> {
+    write_msl_files(shaders, dir, &Count::default())
+}
+
+/// [`write_msl_files`] with its count reported to `p`.
+fn write_msl_counted(
+    shaders: &[(Shader, String)],
+    dir: &Path,
+    p: &Progress,
+) -> Result<(Vec<PathBuf>, usize), String> {
+    let all = shaders
+        .iter()
+        .map(|(s, _)| (&s.key, s.stage))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    let count = Count::default();
+    count.set_total(all as u64);
+    p.set(Update {
+        note: Some("writing the MSL files"),
+        ..Default::default()
+    });
+    p.counted(None, "shaders", &count, || write_msl_files(shaders, dir, &count))
+}
+
+fn write_msl_files(
+    shaders: &[(Shader, String)],
+    dir: &Path,
+    count: &Count,
+) -> Result<(Vec<PathBuf>, usize), String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     let mut n = 0;
@@ -302,6 +361,7 @@ fn write_msl(shaders: &[(Shader, String)], dir: &Path) -> Result<(Vec<PathBuf>, 
             continue;
         }
         n += 1;
+        count.add(1);
         let base = format!("{}_{}", s.key, s.stage);
         for (name, text) in std::iter::once((base.clone(), &s.msl))
             .chain(s.msl_dual.iter().map(|d| (format!("{base}_d"), d)))
@@ -324,8 +384,14 @@ fn metallib(
     extra: &[&str],
     lib: &Path,
     threads: usize,
+    p: &Progress,
 ) -> Result<(), String> {
-    let airs = par_map(msls, threads, |m| {
+    let count = Count::default();
+    p.set(Update {
+        note: Some(&format!("compiling for {sdk}")),
+        ..Default::default()
+    });
+    let airs = p.counted(None, "shaders", &count, || par_map(msls, threads, &count, |m| {
         let air = m.with_extension(format!("{sdk}.air"));
         let mut args: Vec<std::ffi::OsString> =
             ["-sdk", sdk, "metal", "-c", "-fpreserve-invariance"]
@@ -337,6 +403,10 @@ fn metallib(
         r.run("xcrun", args, None)
             .map(|_| air)
             .map_err(|e| format!("{}: metal compile failed: {e}", m.display()))
+    }));
+    p.set(Update {
+        note: Some(&format!("linking the {sdk} library")),
+        ..Default::default()
     });
     let airs = airs.into_iter().collect::<Result<Vec<_>, _>>()?;
     if let Some(d) = lib.parent() {
@@ -404,8 +474,8 @@ pub fn stage(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
     let threads = a.threads.max(1);
     let t = match g {
-        Gfx::Vulkan => vulkan(&imgs, threads)?,
-        Gfx::Gl => gl(&imgs, &main, threads)?,
+        Gfx::Vulkan => vulkan(&imgs, threads, p)?,
+        Gfx::Gl => gl(&imgs, &main, threads, p)?,
         Gfx::Nvn => return Err("an NVN game's shaders are the NVN shader chain's".into()),
     };
     for n in &t.notes {
@@ -423,7 +493,7 @@ pub fn stage(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     if t.shaders.is_empty() {
         return Err(format!("no {label} shader translates"));
     }
-    let (msls, n) = write_msl(&t.shaders, &work)?;
+    let (msls, n) = write_msl_counted(&t.shaders, &work, p)?;
     let tool = nxb_layer::translator_id();
     let tsv = if g == Gfx::Vulkan {
         nxb_layer::vk::table(&t.shaders, &tool)
@@ -440,7 +510,7 @@ pub fn stage(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         ));
     }
     for (o, sdk, extra) in dirs {
-        metallib(&r, &msls, &work, sdk, extra, &o.join(&lib_name), threads)?;
+        metallib(&r, &msls, &work, sdk, extra, &o.join(&lib_name), threads, p)?;
         let f = o.join(&tsv_name);
         std::fs::write(&f, &tsv).map_err(|e| format!("{}: {e}", f.display()))?;
         let verts = if g == Gfx::Gl {

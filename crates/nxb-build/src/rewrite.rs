@@ -452,6 +452,19 @@ pub fn ensure(
     work: &Path,
     package: &str,
 ) -> Result<Option<String>, String> {
+    ensure_with(engine, profile_dir, work, package, None)
+}
+
+/// [`ensure`] that reports the NRO collection (bytes) and the modules (count) to `p`.
+pub fn ensure_with(
+    engine: &Path,
+    profile_dir: &Path,
+    work: &Path,
+    package: &str,
+    p: Option<&crate::events::Progress>,
+) -> Result<Option<String>, String> {
+    use crate::events::Update;
+    use std::sync::atomic::Ordering::Relaxed;
     let game = crate::host::profile::Game::open(profile_dir)?;
     let modules = game.words("modules")?;
     let patched = work.join(format!("patched_{package}"));
@@ -468,7 +481,26 @@ pub fn ensure(
                 ));
             }
             // the first build: the collection of the script, in Rust (`nxb-nro`)
-            match nxb_nro::collect(&ex.join("RomFS.img"), &dir, None, true) {
+            let scanned = nxb_nro::Scanned::default();
+            let collect = || {
+                nxb_nro::collect_counted(&ex.join("RomFS.img"), &dir, None, true, Some(&scanned))
+            };
+            let collected = match p {
+                Some(p) => {
+                    p.set(Update {
+                        note: Some("collecting NROs"),
+                        ..Default::default()
+                    });
+                    p.tracked(
+                        None,
+                        "B",
+                        || (scanned.done.load(Relaxed), scanned.total.load(Relaxed)),
+                        collect,
+                    )
+                }
+                None => collect(),
+            };
+            match collected {
                 Ok(_) => {}
                 Err(nxb_nro::Fail::Unsupported(m)) => {
                     return Err(stopped(&format!("nro collection: {m}")));
@@ -506,7 +538,16 @@ pub fn ensure(
         .map(|m| (m.clone(), ex.join("ExeFS").join(m)))
         .collect();
     todo.extend(nros.iter().cloned());
-    for (m, file) in &todo {
+    for (i, (m, file)) in todo.iter().enumerate() {
+        if let Some(p) = p {
+            p.set(Update {
+                done: Some(i as u64),
+                total: Some(todo.len() as u64),
+                unit: Some("modules"),
+                note: Some(m),
+                ..Default::default()
+            });
+        }
         match eng.module(file, &tmp, m, &profile) {
             Ok(_) => {}
             Err(Fail::Unsupported(m)) => {

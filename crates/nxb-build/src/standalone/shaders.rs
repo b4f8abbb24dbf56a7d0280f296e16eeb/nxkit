@@ -2,7 +2,7 @@
 //! with the pipeline archive (`crate::pipeline`), and the files copied into the run folder.
 
 use crate::Args;
-use crate::events::Progress;
+use crate::events::{Progress, Update};
 use crate::graph::Build;
 use nxtitle::Standalone;
 use std::collections::BTreeMap;
@@ -74,17 +74,34 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
     let dst = run.join("shaders");
     let _ = std::fs::remove_dir_all(&dst);
     std::fs::create_dir_all(&dst).map_err(|e| io(&dst, e))?;
-    let mut n = 0usize;
-    for e in std::fs::read_dir(&o.lib).map_err(|e| io(&o.lib, e))?.flatten() {
-        let path = e.path();
-        let keep = path
-            .extension()
-            .is_some_and(|x| x == "metallib" || x == "json" || x == "tsv");
-        if keep && path.is_file() {
+    let keep: Vec<_> = std::fs::read_dir(&o.lib)
+        .map_err(|e| io(&o.lib, e))?
+        .flatten()
+        .filter(|e| {
+            let path = e.path();
+            path.extension()
+                .is_some_and(|x| x == "metallib" || x == "json" || x == "tsv")
+                && path.is_file()
+        })
+        .collect();
+    let n = keep.len();
+    p.set(Update {
+        total: Some(n as u64),
+        done: Some(0),
+        unit: Some("files"),
+        note: Some("copying shader libraries"),
+        ..Default::default()
+    });
+    let count = crate::events::Count::default();
+    count.set_total(n as u64);
+    p.counted(None, "files", &count, || {
+        for e in &keep {
+            let path = e.path();
             std::fs::copy(&path, dst.join(e.file_name())).map_err(|x| io(&path, x))?;
-            n += 1;
+            count.add(1);
         }
-    }
+        Ok::<(), String>(())
+    })?;
     if n == 0 {
         return Err(format!("the shader step left no library in {}", o.lib.display()));
     }
@@ -96,6 +113,10 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
     match (archive, &o.archive_error) {
         (Some(src), None) if src.is_file() => {
             let to = run.join("pipelines.mtl4archive");
+            p.set(Update {
+                note: Some("copying the pipeline archive"),
+                ..Default::default()
+            });
             std::fs::copy(&src, &to).map_err(|e| io(&src, e))?;
             has = true;
             if let Some(s) = &o.archive {

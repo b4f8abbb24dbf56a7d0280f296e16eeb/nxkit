@@ -291,6 +291,8 @@ The pipeline archive is an optimization. If it gives an error, the build writes 
 The Mac host stage makes the font file `nintendo_ext.ttf`. The shader stage reports `total` from its first progress event.
 
 With `--progress json`, standard output has NDJSON events only. All other text goes to standard error.
+
+With `--progress bar`, one live line at the bottom of the terminal shows the stage, the step, a bar with the count (files, bytes, shaders, modules or batches), the time left and the time spent. A count whose total is not known shows without a bar. The default `--progress auto` and `--progress lines` print plain lines and no escape codes, also on a terminal.
 In a test of three runs with an error, each line of standard output was an event (measured).
 
 | exit code | meaning |

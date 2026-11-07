@@ -171,6 +171,7 @@ fn run(args: &[String]) -> Result<()> {
                 hash_while_staging: o.hash_while_staging,
                 entitlements: o.entitlements.as_deref().map(read).transpose()?,
                 runtime: o.runtime,
+                progress: None,
             };
             let r = appstage::stage_and_sign(&plan, &o.path, &opts)?;
             println!(

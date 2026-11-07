@@ -166,14 +166,13 @@ fn extract(a: &Args, b: &Build, p: &Say, version: u32) -> Result<String, String>
 /// Unpacks a RomFS image into `dest`, reporting the bytes.
 fn unpack(p: &Say, img: &Path, dest: &Path, what: &str) -> Result<(usize, u64), String> {
     let _ = std::fs::remove_dir_all(dest);
-    romfs::unpack(img, dest, |done, total| {
-        p.set(Update {
-            step: Some(what),
-            done: Some(done),
-            total: Some(total),
-            unit: Some("B"),
-            ..Default::default()
-        });
+    p.set(Update { step: Some(what), ..Default::default() });
+    let count = crate::events::Count::default();
+    p.counted(None, "B", &count, || {
+        romfs::unpack(img, dest, |done, total| {
+            count.done.store(done, std::sync::atomic::Ordering::Relaxed);
+            count.set_total(total);
+        })
     })
 }
 
@@ -319,9 +318,23 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         Ok((aoc, note))
     })?;
     let built = stage(p, "rewrite", "modules", || {
-        let built = modules::rewrite_all(&exefs, &t.st, &format!("{:016X}", t.id), t.rules, |l| p.say(l)).map_err(
-            |e| if e.starts_with("unsupported") { crate::exit::fail(4, e) } else { e },
-        )?;
+        let built = modules::rewrite_all(
+            &exefs,
+            &t.st,
+            &format!("{:016X}", t.id),
+            t.rules,
+            |l| p.say(l),
+            |done, total, name| {
+                p.set(Update {
+                    done: Some(done),
+                    total: Some(total),
+                    unit: Some("modules"),
+                    note: Some(name),
+                    ..Default::default()
+                })
+            },
+        )
+        .map_err(|e| if e.starts_with("unsupported") { crate::exit::fail(4, e) } else { e })?;
         let names: Vec<&str> = built.iter().map(|m| m.name.as_str()).collect();
         let note = names.join(", ");
         Ok((built, note))
@@ -354,11 +367,27 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         put("game.json", manifest::game_json(&m).as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         put("main.npdm", &npdm_bytes)?;
-        link::module_files(&run_dir, &mods)?;
+        link::module_files(&run_dir, &mods, |done, total| {
+            p.set(Update {
+                done: Some(done),
+                total: Some(total),
+                unit: Some("modules"),
+                note: Some("writing module files"),
+                ..Default::default()
+            })
+        })?;
         Ok(((), format!("{} modules, {} NVN functions, {} services", mods.len(), m.nvn_functions.len(), m.services.len())))
     })?;
     stage(p, "link", "nxgame.dylib", || {
-        let n = link::write_dylib(&run_dir, &mods)?;
+        let n = link::write_dylib(&run_dir, &mods, |done, what| {
+            p.set(Update {
+                done: Some(done),
+                total: Some(3),
+                unit: Some("steps"),
+                note: Some(what),
+                ..Default::default()
+            })
+        })?;
         Ok(((), format!("{}, signed ad hoc", mib(n))))
     })?;
     b.gpus = gpus(a, &work, &b.profile.0)?;

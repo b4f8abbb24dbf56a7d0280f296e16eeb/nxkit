@@ -24,6 +24,11 @@ pub fn stdout_to_stderr() -> io::Result<File> {
     imp::stdout_to_stderr()
 }
 
+/// The width in columns of the terminal on descriptor `fd`, `None` when it is not a terminal or has no size.
+pub fn terminal_width(fd: i32) -> Option<usize> {
+    imp::terminal_width(fd)
+}
+
 /// Records `SIGINT` and `SIGTERM` in [`interrupted`] instead of ending the process.
 pub fn catch_interrupts() -> io::Result<()> {
     imp::catch_interrupts()
@@ -41,6 +46,7 @@ mod imp {
         fn dup(fd: i32) -> i32;
         fn dup2(from: i32, to: i32) -> i32;
         fn signal(sig: i32, handler: usize) -> usize;
+        fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
     }
 
     const SIGINT: i32 = 2;
@@ -49,6 +55,27 @@ mod imp {
 
     extern "C" fn on_signal(sig: i32) {
         CAUGHT.store(sig, Ordering::SeqCst);
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Winsize {
+        rows: u16,
+        cols: u16,
+        xpixel: u16,
+        ypixel: u16,
+    }
+
+    #[cfg(target_os = "linux")]
+    const TIOCGWINSZ: std::ffi::c_ulong = 0x5413;
+    #[cfg(not(target_os = "linux"))]
+    const TIOCGWINSZ: std::ffi::c_ulong = 0x4008_7468;
+
+    pub(super) fn terminal_width(fd: i32) -> Option<usize> {
+        let mut w = Winsize::default();
+        // SAFETY: TIOCGWINSZ writes one `struct winsize` (four u16) through the pointer, which points to one.
+        let r = unsafe { ioctl(fd, TIOCGWINSZ, &mut w as *mut Winsize) };
+        (r == 0 && w.cols > 0).then_some(w.cols as usize)
     }
 
     pub(super) fn stdout_to_stderr() -> io::Result<File> {
@@ -82,6 +109,10 @@ mod imp {
 mod imp {
     use std::fs::File;
     use std::io;
+
+    pub(super) fn terminal_width(_fd: i32) -> Option<usize> {
+        None
+    }
 
     pub(super) fn stdout_to_stderr() -> io::Result<File> {
         Err(io::Error::from(io::ErrorKind::Unsupported))

@@ -212,7 +212,33 @@ pub fn collect(
     only: Option<&str>,
     missing_ok: bool,
 ) -> Result<Summary, Fail> {
+    collect_counted(romfs, out, only, missing_ok, None)
+}
+
+/// Bytes of the image read so far and in all, for a progress display: one atomic add for each file or scan chunk. The
+/// count runs through the image once, then through the files the scan reads (it starts again from 0 for those).
+#[derive(Debug, Default)]
+pub struct Scanned {
+    /// Bytes done in the current pass.
+    pub done: std::sync::atomic::AtomicU64,
+    /// Bytes in all in the current pass, 0 until known.
+    pub total: std::sync::atomic::AtomicU64,
+}
+
+/// [`collect`] that counts its passes in `count`.
+pub fn collect_counted(
+    romfs: &Path,
+    out: &Path,
+    only: Option<&str>,
+    missing_ok: bool,
+    count: Option<&Scanned>,
+) -> Result<Summary, Fail> {
+    use std::sync::atomic::Ordering::Relaxed;
     let img = Image::open(romfs).map_err(Fail::Error)?;
+    if let Some(c) = count {
+        c.total
+            .store(img.files.iter().map(|f| f.size).sum(), Relaxed);
+    }
     let mut want = nrr_hashes(&img, only)?;
     if want.is_empty() {
         return Err(Fail::Error(format!(
@@ -226,6 +252,9 @@ pub fn collect(
     let nro_ext = hash40(b"nro");
     let wanted = |want: &[([u8; 32], String)], h: &[u8; 32]| want.iter().any(|w| &w.0 == h);
     for (k, it) in img.files.iter().enumerate() {
+        if let Some(c) = count {
+            c.done.fetch_add(it.size, Relaxed);
+        }
         let name = it.rel.rsplit('/').next().unwrap_or("");
         if name.ends_with(".nrr") || it.size < 0x40 {
             continue;
@@ -310,6 +339,11 @@ pub fn collect(
         let threads = std::thread::available_parallelism()
             .map_or(4, |n| n.get())
             .min(10);
+        if let Some(c) = count {
+            c.done.store(0, Relaxed);
+            c.total
+                .store(jobs.iter().map(|j| j.2 - j.1).sum(), Relaxed);
+        }
         let next = std::sync::atomic::AtomicUsize::new(0);
         let results: std::sync::Mutex<Vec<(usize, Vec<Hit>)>> = std::sync::Mutex::new(Vec::new());
         let first_err: std::sync::Mutex<Option<Fail>> = std::sync::Mutex::new(None);
@@ -320,7 +354,11 @@ pub fn collect(
                         let j = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let Some(&(k, a, b)) = jobs.get(j) else { break };
                         let src = img.src(&img.files[k]);
-                        match scan(src.as_ref(), a, b, &left) {
+                        let r = scan(src.as_ref(), a, b, &left);
+                        if let Some(c) = count {
+                            c.done.fetch_add(b - a, Relaxed);
+                        }
+                        match r {
                             Ok(r) => {
                                 if let Ok(mut v) = results.lock() {
                                     v.push((j, r));

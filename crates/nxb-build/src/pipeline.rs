@@ -10,7 +10,7 @@ use nxb_pyjson::Value;
 use nxb_stages::build::{BuildConfig, OnDone};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 
 /// The shader step's configuration from the build's plan: the chain version
 /// and the profile's inputs digest computed as `dmsh_chain.py` does, outputs in `<work>/shader/cache/b-<V>`.
@@ -149,9 +149,11 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
         b.work.join("shader/pso_pairs.tsv"),
     ];
     let text = nxb_archive::plan::pair_text(&pair_files);
+    let batches = Arc::new(nxb_archive::Batches::default());
     let acfg = match &arch {
         Some(arch) => Some(nxb_archive::Config {
             nice: ARCHIVE_NICE,
+            progress: Some(batches.clone()),
             ..archive_config(b, &lib, arch)?
         }),
         None => None,
@@ -171,15 +173,12 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
     let stream = arch
         .as_ref()
         .map(|_| Arc::new(nxb_archive::stream::Stream::new(&sinp)));
-    let done = Arc::new(AtomicU64::new(0));
+    // the shaders are counted by one atomic add each: the progress reads it, no lock in the parallel loop
+    let count = Arc::new(crate::events::Count::default());
     {
-        let (st, done, p) = (stream.clone(), done.clone(), p.clone());
+        let (st, count) = (stream.clone(), count.clone());
         cfg.on_done = Some(OnDone(Arc::new(move |key: &str, _status: &str| {
-            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-            p.set(Update {
-                done: Some(n),
-                ..Default::default()
-            });
+            count.add(1);
             if let Some(s) = &st {
                 s.done(key);
             }
@@ -190,17 +189,13 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
     }
     {
         // the total is reported with or without an archive: the app binary shows a percent bar and an ETA from it
-        let (s, total) = (stream.clone(), p.clone());
+        let (s, count) = (stream.clone(), count.clone());
         cfg.on_start = Some(nxb_stages::build::OnStart(Arc::new(
             move |keys: &[String]| {
                 if let Some(s) = &s {
                     s.building(&keys.iter().cloned().collect());
                 }
-                total.set(Update {
-                    total: Some(keys.len() as u64),
-                    done: Some(0),
-                    ..Default::default()
-                });
+                count.set_total(keys.len() as u64);
             },
         )));
     }
@@ -218,7 +213,9 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                 }
                 _ => None,
             };
-            let r = nxb_stages::build::build(cfg).map_err(|e| e.to_string());
+            let r = p
+                .counted(None, "shaders", &count, || nxb_stages::build::build(cfg))
+                .map_err(|e| e.to_string());
             if let Some(s) = &stream {
                 s.finish();
             }
@@ -255,8 +252,18 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                         step: Some("archive batches still running"),
                         ..Default::default()
                     });
-                    let done = j
-                        .join()
+                    let done = p
+                        .tracked(
+                            Some("archive batches still running"),
+                            "batches",
+                            || {
+                                (
+                                    batches.done.load(Ordering::Relaxed),
+                                    batches.total.load(Ordering::Relaxed),
+                                )
+                            },
+                            || j.join(),
+                        )
                         .map_err(|_| "archive thread panicked".to_string())
                         .and_then(|r| r)
                         .and_then(|((rep, bases), c)| {
@@ -371,7 +378,7 @@ pub(crate) fn write_archive_stamps(
 
 /// One architecture's pipeline archive: the plan of `pso_offline.py` (profile pairs, then the split's pso_pairs.tsv)
 /// and `nxb_archive::build` (content-cut batches in the store). Output in `<work>/pso/mac`, as the NSP script's.
-pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
+pub(crate) fn stage_pso(b: &Build, arch: &str, p: &Progress) -> Result<String, String> {
     use nxb_archive::plan;
     let pairs = [
         b.profile.0.join("shader_pairs.tsv"),
@@ -385,24 +392,38 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
         .and_then(|n| n.strip_prefix("b-"))
         .ok_or("library folder is not b-<chain>")?;
     let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero");
-    let p = plan::plan(&b.shaders, chain, &plan::read_pairs(&text), zero);
+    let plan = plan::plan(&b.shaders, chain, &plan::read_pairs(&text), zero);
     let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let (pipes, _) = nxb_archive::compute::plan_compute(&b.shaders, chain, &compute_shaders(b));
     let js = work.join("bases.mtl4-json");
-    std::fs::write(&js, plan::script_text_with(&b.shaders, &p.bases, &pipes))
+    std::fs::write(&js, plan::script_text_with(&b.shaders, &plan.bases, &pipes))
         .map_err(|e| e.to_string())?;
     let osmin = osmin()?;
-    let c = nxb_archive::Config::for_tools(
-        "macos",
-        arch,
-        &osmin,
-        &js,
-        &out.join(format!("{arch}.mtl4a")),
-        &work,
+    let batches = Arc::new(nxb_archive::Batches::default());
+    let c = nxb_archive::Config {
+        progress: Some(batches.clone()),
+        ..nxb_archive::Config::for_tools(
+            "macos",
+            arch,
+            &osmin,
+            &js,
+            &out.join(format!("{arch}.mtl4a")),
+            &work,
+        )?
+    };
+    let r = p.tracked(
+        None,
+        "batches",
+        || {
+            (
+                batches.done.load(Ordering::Relaxed),
+                batches.total.load(Ordering::Relaxed),
+            )
+        },
+        || nxb_archive::build(&c),
     )?;
-    let r = nxb_archive::build(&c)?;
     std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, &text))
         .map_err(|e| e.to_string())?;
     std::fs::write(
@@ -412,8 +433,8 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
             "macos",
             &osmin,
             &c.toolchain,
-            p.bases.len(),
-            p.rest.len(),
+            plan.bases.len(),
+            plan.rest.len(),
             pipes.len(),
         ),
     )
@@ -422,7 +443,7 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
         nxb_sched::Partial::read(&b.shaders).map_or(String::new(), |st| format!("; {}", st.note()));
     Ok(format!(
         "{} pipelines, {} MB, {} batches{tail}",
-        p.bases.len() + pipes.len(),
+        plan.bases.len() + pipes.len(),
         r.size >> 20,
         r.batches.len()
     ))
@@ -484,6 +505,7 @@ mod tests {
             pack_threads: 1,
             direct: None,
             nice: 0,
+            progress: None,
         }
     }
 

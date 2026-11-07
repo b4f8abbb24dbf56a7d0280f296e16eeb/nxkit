@@ -84,6 +84,7 @@ fn watch_interrupts(prog: std::sync::Arc<events::Progress>) {
                 prog.say(&format!(
                     "[RED] interrupted (signal {sig}), {n} child process groups stopped"
                 ));
+                prog.finish();
                 std::process::exit(130);
             }
         }
@@ -123,11 +124,14 @@ pub fn main(argv: &[String]) -> i32 {
     let mode = match a.progress.as_str() {
         "json" => events::Mode::Json,
         "off" => events::Mode::Off,
+        // the live bar is opt-in: `auto` and `lines` stay plain lines, so a log never holds escape codes
+        "bar" => events::Mode::Bar,
         _ => events::Mode::Lines,
     };
     let prog = std::sync::Arc::new(events::Progress::new(mode, sink));
     watch_interrupts(prog.clone());
-    match graph::run(&a, &prog) {
+    let result = graph::run(&a, &prog);
+    let code = match result {
         Ok(()) => 0,
         Err(e) => {
             prog.end("", false);
@@ -139,5 +143,7 @@ pub fn main(argv: &[String]) -> i32 {
                 c => c,
             }
         }
-    }
+    };
+    prog.finish();
+    code
 }

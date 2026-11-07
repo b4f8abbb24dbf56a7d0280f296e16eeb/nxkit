@@ -34,6 +34,30 @@ use nxb_tool::{EnvPolicy, Invocation, ProcessRegistry, run_process};
 use crate::cut::{Base, cut_for_slots};
 use crate::script::Script;
 
+/// Batches compiled so far and in all, for a caller's progress display: one atomic add for each batch.
+#[derive(Debug, Default)]
+pub struct Batches {
+    /// Batches done (compiled, or taken from the store).
+    pub done: std::sync::atomic::AtomicU64,
+    /// Batches in all (a streamed archive adds each group's batches as the group is planned).
+    pub total: std::sync::atomic::AtomicU64,
+}
+
+impl Batches {
+    pub(crate) fn planned(c: &Config, n: usize) {
+        if let Some(b) = &c.progress {
+            b.total
+                .fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn finished(c: &Config) {
+        if let Some(b) = &c.progress {
+            b.done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
 /// What to build.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -75,6 +99,8 @@ pub struct Config {
     pub direct: Option<Direct>,
     /// Nice value of the compiler runs (0 normal, up to 20 lowest), so they yield the CPU to a step running beside.
     pub nice: i32,
+    /// Counts the batches for a progress display (`None`: not counted).
+    pub progress: Option<Arc<Batches>>,
 }
 
 /// The tools `metal-tt` drives, called directly (`-j 1` costs half the CPU of `metal-tt`'s threads).
@@ -363,6 +389,7 @@ pub fn build(c: &Config) -> Result<Report, String> {
     let batches = Arc::new(batches);
     let cfg = Arc::new(c.clone());
     let sizes: Vec<usize> = batches.iter().map(Vec::len).collect();
+    Batches::planned(c, batches.len());
     let tasks: Vec<Task> = (0..batches.len())
         .map(|i| {
             let (script, store, results, reg, batches, cfg, key) = (
@@ -377,6 +404,7 @@ pub fn build(c: &Config) -> Result<Report, String> {
             // the largest batches first (they set the wall time)
             Task::new(move |_| {
                 let r = compile(&cfg, &script, &batches[i], &key, &store, &reg, None);
+                Batches::finished(&cfg);
                 if let Ok(mut g) = results.lock() {
                     g[i] = Some(r);
                 }
@@ -526,6 +554,7 @@ impl Config {
             pack_threads: 1,
             direct: None,
             nice: 0,
+            progress: None,
         })
         .map(|mut c: Config| {
             // applegpu-nt -j 1 + air-pack, one run per core: half the CPU of metal-tt's own threads.

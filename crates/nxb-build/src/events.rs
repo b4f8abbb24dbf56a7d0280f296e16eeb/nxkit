@@ -1,10 +1,13 @@
 //! The NSP script's console events (`Progress` in `build_ipa_from_nsp.py`): in `--progress json` mode one JSON object
 //! per stdout line (`json.dumps(obj, ensure_ascii=False)`), the events `stage`, `step`, `progress`, `stage_end` and
-//! `say`, each with `t` (Unix time, 3 decimals) last, the other modes print `[k/n] name` lines.
+//! `say`, each with `t` (Unix time, 3 decimals) last, the other modes print `[k/n] name` lines. `--progress bar` keeps
+//! one live status line at the bottom of a terminal (spinner, stage, bar, count, ETA, elapsed time) that a ticker
+//! thread redraws, and prints the permanent lines above it.
 
 use std::io::Write;
-use std::sync::Mutex;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nxb_obs::codes::{self, Code};
 use nxb_pyjson::Value;
@@ -14,8 +17,10 @@ use nxb_pyjson::Value;
 pub enum Mode {
     /// `json`.
     Json,
-    /// `lines` / `bar` / `auto` (plain lines here).
+    /// `lines` / `auto` (plain lines here).
     Lines,
+    /// `bar`: plain lines for what stays, and a live status line redrawn in place (a terminal only).
+    Bar,
     /// `off`.
     Off,
 }
@@ -56,11 +61,201 @@ pub struct Update<'a> {
 
 const JSON_INTERVAL: f64 = 0.5;
 
+type State = Mutex<(usize, usize, Option<Cur>)>;
+type Out = Mutex<Box<dyn Write + Send>>;
+
 /// The event writer (thread-safe).
 pub struct Progress {
     mode: Mode,
-    state: Mutex<(usize, usize, Option<Cur>)>,
-    out: Mutex<Box<dyn Write + Send>>,
+    state: Arc<State>,
+    out: Arc<Out>,
+    bar: Option<Arc<Bar>>,
+    ticker: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+/// A count that workers raise with one atomic add per item (or per chunk) and [`Progress::tracked`] reads: no lock and
+/// no allocation in the hot loop.
+#[derive(Debug, Default)]
+pub struct Count {
+    /// Items (or bytes) done.
+    pub done: AtomicU64,
+    /// Items (or bytes) in all, 0 while unknown.
+    pub total: AtomicU64,
+}
+
+impl Count {
+    /// `n` more done.
+    pub fn add(&self, n: u64) {
+        self.done.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// The total, once it is known.
+    pub fn set_total(&self, n: u64) {
+        self.total.store(n, Ordering::Relaxed);
+    }
+
+    /// `n` more in all.
+    pub fn add_total(&self, n: u64) {
+        self.total.fetch_add(n, Ordering::Relaxed);
+    }
+}
+
+const TICK: Duration = Duration::from_millis(100);
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const DIM: &str = "\x1b[2m";
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
+const RESET: &str = "\x1b[0m";
+
+/// The live line: what is drawn, where, and whether the cursor is hidden. Every write holds the `out` lock, and the
+/// state lock is held only while the line is formatted.
+struct Bar {
+    state: Arc<State>,
+    out: Arc<Out>,
+    t0: Instant,
+    stop: AtomicBool,
+    /// A live line is on the screen (so the next write clears it first).
+    drawn: AtomicBool,
+    hidden: AtomicBool,
+    columns: Option<usize>,
+}
+
+impl Bar {
+    fn width(&self) -> usize {
+        nxb_sys::stdio::terminal_width(1)
+            .or(self.columns)
+            .unwrap_or(100)
+    }
+
+    /// The live line of the current stage, `None` between stages.
+    fn line(&self) -> Option<String> {
+        let spin = SPINNER[(self.t0.elapsed().as_millis() / 80) as usize % SPINNER.len()];
+        let g = self.state.lock().ok()?;
+        let c = g.2.as_ref()?;
+        Some(live_line(c, g.1, spin, self.width()))
+    }
+
+    /// Clears the live line, writes `perm` as a permanent line, draws the live line again (when `live`, and the bar
+    /// has not been stopped). Without a live line the cursor comes back.
+    fn emit(&self, perm: Option<&str>, live: bool) {
+        let Ok(mut o) = self.out.lock() else { return };
+        let line = if live && !self.stop.load(Ordering::Relaxed) {
+            self.line()
+        } else {
+            None
+        };
+        let mut buf = String::new();
+        if self.drawn.load(Ordering::Relaxed) {
+            buf.push_str("\r\x1b[2K");
+        }
+        if let Some(p) = perm {
+            buf.push_str(p);
+            buf.push('\n');
+        }
+        match &line {
+            Some(l) => {
+                if !self.hidden.swap(true, Ordering::Relaxed) {
+                    buf.push_str("\x1b[?25l");
+                }
+                buf.push_str(l);
+            }
+            None => {
+                if self.hidden.swap(false, Ordering::Relaxed) {
+                    buf.push_str("\x1b[?25h");
+                }
+            }
+        }
+        self.drawn.store(line.is_some(), Ordering::Relaxed);
+        if !buf.is_empty() {
+            let _ = o.write_all(buf.as_bytes());
+            let _ = o.flush();
+        }
+    }
+}
+
+/// `n` bytes as `B`, `KiB`, `MiB` or `GiB`.
+fn size(n: u64) -> String {
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let (mut v, mut i) = (n as f64, 0);
+    while v >= 1024.0 && i < 3 {
+        v /= 1024.0;
+        i += 1;
+    }
+    format!("{v:.1} {}", ["B", "KiB", "MiB", "GiB"][i])
+}
+
+/// The seconds left from the last minute of counts, `None` while there is too little to say.
+fn eta(st: &Cur) -> Option<f64> {
+    match (st.total, st.hist.front(), st.hist.back(), st.done) {
+        (Some(t), Some(a), Some(b), Some(d))
+            if st.hist.len() >= 2 && b.0 - a.0 >= 3.0 && b.1 > a.1 =>
+        {
+            Some(t.saturating_sub(d) as f64 * (b.0 - a.0) / (b.1 - a.1) as f64)
+        }
+        _ => None,
+    }
+}
+
+/// `[k/n] name · step`, a bar with a percent when the total is known, the count, the ETA, the stage's running time and
+/// the note, cut to `width - 1` columns.
+fn live_line(c: &Cur, n: usize, spin: &str, width: usize) -> String {
+    let mut s = format!("{spin} [{}/{n}] {}", c.k, c.name);
+    if !c.step.is_empty() {
+        s.push_str(" · ");
+        s.push_str(&c.step);
+    }
+    let count = |d: u64, t: Option<u64>| {
+        let bytes = c.unit == "B";
+        let f = |v: u64| if bytes { size(v) } else { v.to_string() };
+        let mut x = match t {
+            Some(t) => format!("{}/{}", f(d), f(t)),
+            None => f(d),
+        };
+        if !bytes && !c.unit.is_empty() {
+            x.push(' ');
+            x.push_str(&c.unit);
+        }
+        x
+    };
+    match (c.done, c.total) {
+        (d, Some(t)) if t > 0 => {
+            let d = d.unwrap_or(0);
+            let bw = if width >= 100 {
+                24
+            } else if width >= 70 {
+                16
+            } else {
+                10
+            };
+            let frac = (d as f64 / t as f64).clamp(0.0, 1.0);
+            let fill = (frac * bw as f64) as usize;
+            s.push_str(&format!(
+                "  [{}{}] {:>3}%  {}",
+                "#".repeat(fill),
+                "-".repeat(bw - fill),
+                (frac * 100.0) as u64,
+                count(d, Some(t))
+            ));
+            if let Some(e) = eta(c) {
+                s.push_str(&format!("  ETA {}", hms(e)));
+            }
+        }
+        (Some(d), t) => s.push_str(&format!("  {}", count(d, t.filter(|t| *t > 0)))),
+        _ => {}
+    }
+    s.push_str(&format!("  {}", hms(c.t0.elapsed().as_secs_f64())));
+    if !c.note.is_empty() {
+        s.push_str("  ");
+        s.push_str(&c.note);
+    }
+    let max = width.saturating_sub(1).max(1);
+    if s.chars().count() > max {
+        s = s.chars().take(max - 1).collect();
+        s.push('…');
+    }
+    s
 }
 
 fn now() -> f64 {
@@ -93,11 +288,133 @@ fn hms(s: f64) -> String {
 impl Progress {
     /// A writer to `out`.
     pub fn new(mode: Mode, out: Box<dyn Write + Send>) -> Progress {
-        Progress {
+        let state: Arc<State> = Arc::new(Mutex::new((0, 0, None)));
+        let out: Arc<Out> = Arc::new(Mutex::new(out));
+        let mut p = Progress {
             mode,
-            state: Mutex::new((0, 0, None)),
-            out: Mutex::new(out),
+            state: state.clone(),
+            out: out.clone(),
+            bar: None,
+            ticker: Mutex::new(None),
+        };
+        if mode == Mode::Bar {
+            let bar = Arc::new(Bar {
+                state,
+                out,
+                t0: Instant::now(),
+                stop: AtomicBool::new(false),
+                drawn: AtomicBool::new(false),
+                hidden: AtomicBool::new(false),
+                columns: std::env::var("COLUMNS")
+                    .ok()
+                    .and_then(|v| v.trim().parse().ok())
+                    .filter(|c| *c > 0),
+            });
+            let b = bar.clone();
+            let h = std::thread::Builder::new()
+                .name("nxb-bar".into())
+                .spawn(move || {
+                    while !b.stop.load(Ordering::Relaxed) {
+                        std::thread::park_timeout(TICK);
+                        if !b.stop.load(Ordering::Relaxed) {
+                            b.emit(None, true);
+                        }
+                    }
+                });
+            if let Ok(h) = h {
+                *p.ticker.lock().unwrap_or_else(|e| e.into_inner()) = Some(h);
+            }
+            p.bar = Some(bar);
         }
+        p
+    }
+
+    /// Ends the live line for good: the ticker stops, the line is cleared and the cursor is shown. Safe to call more
+    /// than once, and a no-op in the other modes. Later `say` and `end` lines are printed without a live line.
+    pub fn finish(&self) {
+        let Some(b) = &self.bar else { return };
+        b.stop.store(true, Ordering::Relaxed);
+        if let Some(h) = self.ticker.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            h.thread().unpark();
+            let _ = h.join();
+        }
+        b.emit(None, false);
+    }
+
+    fn redraw(&self) {
+        if let Some(b) = &self.bar {
+            b.emit(None, true);
+        }
+    }
+
+    /// A permanent line: in `bar` mode above the live line, otherwise as it is.
+    fn permanent(&self, plain: &str, coloured: &str) {
+        match &self.bar {
+            Some(b) => b.emit(Some(coloured), true),
+            None => self.line(plain),
+        }
+    }
+
+    /// Runs `f` while a thread reports what `read` returns, `(done, total)`, as the stage's count (every 0.1 s on a
+    /// bar, otherwise every 0.25 s, and only when it changed). A total of 0 is unknown: the count shows without a bar.
+    /// `step` is set with the count when given (a step that differs from the current one is announced as usual).
+    pub fn tracked<T>(
+        &self,
+        step: Option<&str>,
+        unit: &str,
+        read: impl Fn() -> (u64, u64) + Sync,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let stop = AtomicBool::new(false);
+        let every = if self.mode == Mode::Bar {
+            TICK
+        } else {
+            Duration::from_millis(250)
+        };
+        std::thread::scope(|sc| {
+            let h = sc.spawn(|| {
+                let mut last = None;
+                while !stop.load(Ordering::Relaxed) {
+                    let (done, total) = read();
+                    if (total > 0 || done > 0) && last != Some(done) {
+                        last = Some(done);
+                        self.set(Update {
+                            step,
+                            done: Some(done),
+                            total: (total > 0).then_some(total),
+                            unit: Some(unit),
+                            note: None,
+                        });
+                    }
+                    std::thread::park_timeout(every);
+                }
+            });
+            let r = f();
+            stop.store(true, Ordering::Relaxed);
+            h.thread().unpark();
+            r
+        })
+    }
+
+    /// [`Progress::tracked`] over a [`Count`].
+    pub fn counted<T>(
+        &self,
+        step: Option<&str>,
+        unit: &str,
+        c: &Count,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        self.tracked(
+            step,
+            unit,
+            || {
+                (
+                    c.done.load(Ordering::Relaxed),
+                    c.total.load(Ordering::Relaxed),
+                )
+            },
+            f,
+        )
     }
 
     /// One event line: the fields, then `code` and `severity` (the code table of `nxb-obs`), then `t`.
@@ -165,6 +482,7 @@ impl Progress {
                     ("step".into(), Value::Str(step.into())),
                 ],
             ),
+            Mode::Bar => self.redraw(),
             Mode::Lines => self.line(&format!(
                 "[{}] [{k}/{n}] {name}{} …",
                 clock(),
@@ -212,10 +530,8 @@ impl Progress {
             ),
             _ => {
                 let n = self.state.lock().map(|g| g.1).unwrap_or(0);
-                self.line(&format!(
-                    "[{}] {} [{}/{n}] {} ({}){}",
-                    clock(),
-                    if ok { "✓" } else { "✗" },
+                let tail = format!(
+                    "[{}/{n}] {} ({}){}",
                     c.k,
                     c.name,
                     hms(el),
@@ -224,7 +540,19 @@ impl Progress {
                     } else {
                         format!(": {summary}")
                     }
-                ))
+                );
+                self.permanent(
+                    &format!("[{}] {} {tail}", clock(), if ok { "✓" } else { "✗" }),
+                    &format!(
+                        "{DIM}[{}]{RESET} {} {tail}",
+                        clock(),
+                        if ok {
+                            format!("{GREEN}✓{RESET}")
+                        } else {
+                            format!("{RED}✗{RESET}")
+                        }
+                    ),
+                )
             }
         }
     }
@@ -237,6 +565,7 @@ impl Progress {
         let Some(st) = g.2.as_mut() else { return };
         let mut events: Vec<(&Code, Vec<(String, Value)>)> = Vec::new();
         let mut lines = Vec::new();
+        let mut redraw = false;
         if let Some(step) = u.step
             && step != st.step
         {
@@ -252,12 +581,15 @@ impl Progress {
                     ("step".into(), Value::Str(step.into())),
                 ],
             ));
-            lines.push(format!(
-                "[{}] [{}/{n_all}] {} · {step} …",
-                clock(),
-                st.k,
-                st.name
-            ));
+            redraw = true;
+            if self.mode == Mode::Lines {
+                lines.push(format!(
+                    "[{}] [{}/{n_all}] {} · {step} …",
+                    clock(),
+                    st.k,
+                    st.name
+                ));
+            }
         }
         if let Some(x) = u.unit {
             st.unit = x.into();
@@ -276,26 +608,23 @@ impl Progress {
                 st.hist.pop_front();
             }
         }
-        let shape = (st.step.clone(), st.total, st.unit.clone(), st.note.clone());
-        let send = match &st.jlast {
-            None => true,
-            Some((t, prev)) => *prev != shape || t.elapsed().as_secs_f64() >= JSON_INTERVAL,
+        let shape = (self.mode == Mode::Json)
+            .then(|| (st.step.clone(), st.total, st.unit.clone(), st.note.clone()));
+        let send = match (&st.jlast, &shape) {
+            (_, None) => false,
+            (None, _) => true,
+            (Some((t, prev)), Some(shape)) => {
+                prev != shape || t.elapsed().as_secs_f64() >= JSON_INTERVAL
+            }
         };
-        if send && self.mode == Mode::Json {
+        if let (true, Some(shape)) = (send, shape) {
             st.jlast = Some((Instant::now(), shape));
             let opt = |v: Option<u64>| v.map_or(Value::Null, |x| Value::Int(x as i64));
             let frac = match (st.done, st.total) {
                 (Some(d), Some(t)) if t > 0 => Value::Float((d as f64 / t as f64).min(0.99)),
                 _ => Value::Null,
             };
-            let eta = match (st.total, st.hist.front(), st.hist.back(), st.done) {
-                (Some(t), Some(a), Some(b), Some(d))
-                    if st.hist.len() >= 2 && b.0 - a.0 >= 3.0 && b.1 > a.1 =>
-                {
-                    Value::Float(t.saturating_sub(d) as f64 * (b.0 - a.0) / (b.1 - a.1) as f64)
-                }
-                _ => Value::Null,
-            };
+            let eta = eta(st).map_or(Value::Null, Value::Float);
             let el = st.t0.elapsed().as_secs_f64();
             events.push((
                 &codes::PROGRESS,
@@ -322,7 +651,8 @@ impl Progress {
         match self.mode {
             Mode::Json => events.into_iter().for_each(|(c, e)| self.json(c, e)),
             Mode::Lines => lines.iter().for_each(|l| self.line(l)),
-            Mode::Off => {}
+            Mode::Bar if redraw => self.redraw(),
+            Mode::Bar | Mode::Off => {}
         }
     }
 
@@ -342,8 +672,17 @@ impl Progress {
                 f.extend(extra);
                 self.json(codes::say_code(msg), f);
             }
-            _ => self.line(&format!("[{}] {msg}", clock())),
+            _ => self.permanent(
+                &format!("[{}] {msg}", clock()),
+                &format!("{DIM}[{}]{RESET} {msg}", clock()),
+            ),
         }
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 

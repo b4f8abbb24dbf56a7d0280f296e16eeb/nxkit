@@ -44,7 +44,7 @@ pub(crate) fn run_nodes(
                 let r = r.clone();
                 Work::Turn(Box::new(move || {
                     let note =
-                        crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
+                        crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
                     crate::boot::run::after_rewrite(a, b, p)?;
                     Ok(format!(
                         "reused: {r}{}",
@@ -84,7 +84,7 @@ pub(crate) fn run_nodes(
                     match (made, failed) {
                         (Some(s), _) => Ok(s),
                         (None, Some(e)) => give_up(e),
-                        (None, None) => match crate::pipeline::stage_pso(b, arch) {
+                        (None, None) => match crate::pipeline::stage_pso(b, arch, p) {
                             Ok(s) => Ok(s),
                             Err(e) => give_up(crate::pipeline::archive_failure(&e)),
                         },
@@ -113,6 +113,7 @@ pub(crate) fn run_nodes(
                     crate::app_stage::stage_app(
                         a,
                         b,
+                        p,
                         prev,
                         made.ok_or("the app's parts were not made")?,
                         no_archive.load(std::sync::atomic::Ordering::SeqCst),

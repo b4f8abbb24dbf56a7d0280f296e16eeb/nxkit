@@ -43,11 +43,13 @@ pub fn rewrite_all(
     profile: &str,
     rules: &str,
     mut say: impl FnMut(&str),
+    mut progress: impl FnMut(u64, u64, &str),
 ) -> Result<Vec<Built>, String> {
     let table = PatchTable::from_toml(&[(format!("{profile}.toml"), rules.to_string())])
         .map_err(|e| err("rules", e))?;
     let mut out = Vec::new();
     for (index, (name, want_id)) in st.modules.iter().enumerate() {
+        progress(index as u64, st.modules.len() as u64, name);
         let path = exefs.join(name);
         let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let m = nso::load(&data, name).map_err(|e| err(name, e))?;

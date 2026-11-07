@@ -16,8 +16,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::bundle::{self, BundleOptions, BundleReport, Layout};
@@ -53,6 +53,15 @@ pub struct StagePlan {
     pub entries: Vec<StageEntry>,
 }
 
+/// Bytes staged so far and in all, for a progress display: one atomic add for each file.
+#[derive(Debug, Default)]
+pub struct Staged {
+    /// Bytes of the files staged (and hashed) so far.
+    pub done: AtomicU64,
+    /// Bytes of all files.
+    pub total: AtomicU64,
+}
+
 /// Options for [`stage_and_sign`].
 pub struct StageOptions {
     /// Worker threads for copying and hashing.
@@ -63,6 +72,8 @@ pub struct StageOptions {
     pub entitlements: Option<Vec<u8>>,
     /// Hardened runtime.
     pub runtime: bool,
+    /// Counts the staged bytes (`None`: not counted).
+    pub progress: Option<Arc<Staged>>,
 }
 
 impl Default for StageOptions {
@@ -72,6 +83,7 @@ impl Default for StageOptions {
             hash_while_staging: true,
             entitlements: None,
             runtime: false,
+            progress: None,
         }
     }
 }
@@ -151,6 +163,9 @@ pub fn stage_and_sign(plan: &StagePlan, out: &Path, opts: &StageOptions) -> Resu
     };
     let sizes: Vec<u64> = plan.entries.iter().map(size_of).collect();
     order.sort_by_key(|i| std::cmp::Reverse(sizes[*i]));
+    if let Some(c) = &opts.progress {
+        c.total.store(sizes.iter().sum(), Ordering::Relaxed);
+    }
     let next = AtomicUsize::new(0);
     let computed: Mutex<Vec<(usize, FileDigests)>> = Mutex::new(Vec::new());
     let threads = opts.threads.max(1);
@@ -180,6 +195,9 @@ pub fn stage_and_sign(plan: &StagePlan, out: &Path, opts: &StageOptions) -> Resu
                                 sha1: true,
                             };
                             local.push((i, digest::hash_file(&job, &mut buf)?));
+                        }
+                        if let Some(c) = &opts.progress {
+                            c.done.fetch_add(sizes[i], Ordering::Relaxed);
                         }
                     }
                     computed

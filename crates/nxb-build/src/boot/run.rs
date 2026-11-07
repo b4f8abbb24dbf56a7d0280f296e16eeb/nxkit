@@ -94,7 +94,7 @@ pub(crate) fn after_rewrite(a: &Args, b: &Build, p: &Progress) -> Result<(), Str
     }
     let mut inputs = HostInputs::default();
     if super::nro::capture_nro(&c)? {
-        crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
+        crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
     }
     inputs.nro_dir = super::captured_nros(&b.work.join(format!("nro_{}", b.package)));
     if b.prov {

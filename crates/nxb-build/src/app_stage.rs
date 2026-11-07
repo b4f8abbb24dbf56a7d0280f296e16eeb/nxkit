@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::Args;
+use crate::events::{Progress, Update};
 use crate::graph::Build;
 
 /// A pipeline archive folder with an archive in it (`pso_offline`: none when no base could be planned).
@@ -18,6 +19,7 @@ pub(crate) fn has_archive(d: &Path) -> bool {
 pub(crate) fn stage_app(
     a: &Args,
     b: &Build,
+    p: &Progress,
     previous: Option<PathBuf>,
     parts: crate::host::app::AppParts,
     no_archive: bool,
@@ -94,12 +96,28 @@ pub(crate) fn stage_app(
                 .map_err(|e| e.to_string())
         }
         None => {
+            let staged = std::sync::Arc::new(nxb_pack::appstage::Staged::default());
             let o = nxb_pack::appstage::StageOptions {
                 threads: a.threads,
+                progress: Some(staged.clone()),
                 ..Default::default()
             };
-            nxb_pack::appstage::stage_and_sign(&plan, &b.out, &o)
-                .map(|r| format!("{} files staged and signed", r.files))
+            p.set(Update {
+                note: Some("staging and hashing, then signing"),
+                ..Default::default()
+            });
+            p.tracked(
+                None,
+                "B",
+                || {
+                    (
+                        staged.done.load(std::sync::atomic::Ordering::Relaxed),
+                        staged.total.load(std::sync::atomic::Ordering::Relaxed),
+                    )
+                },
+                || nxb_pack::appstage::stage_and_sign(&plan, &b.out, &o),
+            )
+            .map(|r| format!("{} files staged and signed", r.files))
                 .map_err(|e| e.to_string())
         }
     }?;
