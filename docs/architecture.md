@@ -26,6 +26,8 @@ flowchart TD
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host), nxkit-svc-video (unsafe code, the video service of the nxkit host)"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-svc-audio (unsafe only in its module sys, macOS audio), nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
@@ -44,6 +46,7 @@ The rules:
 5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos`, `nxkit-svc-fs` and `nxkit-svc-offline` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos`, the module `sys` of `nxkit-svc-input` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-svc-video`, the module `sys` of `nxkit-hos` and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
+5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, the module `sys` of `nxkit-hos` and of `nxkit-svc-audio`, and the module `guest` of `nxkit-abi` contain `unsafe` code. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
@@ -98,6 +101,7 @@ The rules:
 | nxkit-svc-fs | L0 | no | impl | the `fs` service: `fsp-srv` and its interfaces over IPC, the SDK-level `nn::fs` functions, the romfs through `mmap` and the save layout of nxnative. `unsafe` only in `sys` (`mmap`, `pread`, `clonefile`, `renamex_np`) |
 | nxkit-svc-offline | L0 | no | impl | the `offline` service: the answers for networking and peripherals the game cannot use here. `unsafe` only in `sys` |
 | nxkit-svc-video | L0 | no | impl | the `video` service: `movie::Decoder` and `nn::codec` video decoders for VP9 on VideoToolbox, with `CVPixelBuffer` frames and a `CVMetalTextureCache` path. Source only, not yet compiled or run |
+| nxkit-svc-audio | L0 | no | impl | the audio service of the nxkit host: SDK take-overs, `audout:u`, `audren:u`, `IAudioDevice`, and a mixer in the AUHAL callback (R41, R42). It is not compiled or tested yet |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
 | nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |
 | nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. `nxb-build` uses it for `nxb profile` and the provisional profile |

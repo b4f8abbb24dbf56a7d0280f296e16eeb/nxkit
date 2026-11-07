@@ -126,6 +126,10 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 | `crates/nxkit-svc-video/src/codec.rs` | `dm/host/hle_codec_video.c` (decoder state, buffer counts, pools, native images, sync handles, sync point events, error codes) |
 | `crates/nxkit-svc-video/src/codec_exports.rs` | `dm/host/hle_codec_video.c` (the replaced `nn::codec` and `nn::syncpt::sdk` functions and their signatures) |
 | `crates/nxkit-svc-video/src/yuv.rs` | `dm/host/hle_codec_video.c` (the NV12 to RGBA read-back of `ReadDecoderOutputImage*`) |
+The crate `nxkit-svc-audio` (`crates/nxkit-svc-audio/`) follows `dm/host/hle_audio.c` and `dm/host/hle_audren.c`. It ports the list of
+SDK functions that are taken over, the SDK layouts of the audio renderer (the work buffer, the command list, the DeviceSink command)
+and the prologue scan that finds them. It does not copy the global lock. The IPC layouts of `audout:u`, `audren:u` and `IAudioDevice`
+come from the public Switchbrew documentation. It uses the same licence notice as above.
 
 ## NVN front end ported from nxnative
 

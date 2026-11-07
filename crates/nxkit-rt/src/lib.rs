@@ -13,6 +13,7 @@
 //! - A function that needs a large stack must switch to a host stack, because a guest stack can be 8 KB.
 //!   The runtime does not switch. A service lists such a function in its `big_stack_exports()`, and the host finds it
 //!   with [`nxkit_hle_find_big`] and runs it on its big stack. [`nxkit_hle_find`] never returns it.
+//!   The audio functions that start and stop Core Audio need this. No other service but `fs` needs it.
 //!
 //! The `kernel` service forwards svc calls to `nxkit-hos` ([`nxkit_svc`]). The kernel is created by
 //! [`nxkit_kernel_init`] and the host calls it from the gate of every svc.
@@ -23,10 +24,12 @@ use std::ffi::{CStr, c_char, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod audio;
 mod guestos;
 mod kernel;
 pub mod nvn;
 
+pub use audio::{NxkitAudioConfig, NxkitAudioHost, nxkit_audio_init};
 pub use guestos::{
     NxkitGuestSym, NxkitOsConfig, nxkit_kernel_forced_names, nxkit_kernel_os_init,
     nxkit_kernel_set_deterministic, nxkit_kernel_set_guest_sym,
@@ -110,6 +113,8 @@ pub fn entries() -> &'static [Entry] {
         table.extend(mapped(nxkit_svc_offline::exports(), Service::Offline, false));
         table.extend(mapped(nxkit_svc_input::exports(), Service::Input, false));
         table.extend(mapped(nxkit_svc_video::exports(), Service::Video, false));
+        table.extend(mapped(nxkit_svc_audio::exports(), Service::Audio, false));
+        table.extend(mapped(nxkit_svc_audio::big_stack_exports(), Service::Audio, true));
         table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,
@@ -198,10 +203,11 @@ pub unsafe extern "C" fn nxkit_hle_find_big(name: *const c_char) -> *const c_voi
 }
 
 /// The names of the exported C symbols. The header has one declaration for each.
-pub const EXPORTS: [&str; 12] = [
+pub const EXPORTS: [&str; 13] = [
     "nxkit_init",
     "nxkit_hle_find",
     "nxkit_hle_find_big",
+    "nxkit_audio_init",
     "nxkit_svc",
     "nxkit_kernel_init",
     "nxkit_kernel_set_thread_name",

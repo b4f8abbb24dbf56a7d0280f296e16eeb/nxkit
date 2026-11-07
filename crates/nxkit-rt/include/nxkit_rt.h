@@ -32,6 +32,26 @@ const void *nxkit_hle_find(const char *name);
  * The host runs the function it gets on its big stack. nxkit_hle_find never returns such a function. */
 const void *nxkit_hle_find_big(const char *name);
 
+/* The callbacks of the host that the audio service needs. Every field is required. */
+typedef struct NxkitAudioHost {
+    uintptr_t (*guest_sym)(const char *name);                  /* the SDK's own function by mangled name, or 0 */
+    void (*bind_system_event)(uint64_t addr, int32_t managed); /* guest SystemEvent to a kernel event */
+    void (*signal_system_event)(uint64_t addr);
+    uint32_t (*dup_readable_handle)(uint32_t handle);
+    uint64_t (*spawn_guest_thread)(void (*entry)(uint64_t), uint64_t arg, int32_t priority, size_t stack);
+    void (*join_guest_thread)(uint64_t thread);
+    void (*fatal)(const char *msg);                            /* does not return */
+} NxkitAudioHost;
+
+typedef struct NxkitAudioConfig {
+    float master_volume; /* 1.0 leaves the mix unchanged */
+    int32_t silent_sink; /* 1 opens no output device */
+} NxkitAudioConfig;
+
+/* Gives the audio service its callbacks and settings. Call it once, before the game starts. cfg may be NULL.
+ * Returns 1 on success, 0 when a callback is missing or it was called before. */
+int32_t nxkit_audio_init(const NxkitAudioHost *host, const NxkitAudioConfig *cfg);
+
 /* The kernel service: the Horizon thread model. Enable NXKIT_SERVICE_KERNEL in nxkit_init, call
  * nxkit_kernel_init once, then call nxkit_svc from the gate of every svc. */
 

@@ -26,6 +26,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - The crate `nxkit-svc-video` is the `video` service of the nxkit host. It replaces `movie::Decoder` of the Nintendo SDK and decodes VP9 with VideoToolbox into Metal compatible `CVPixelBuffer`s. A `CVMetalTextureCache` turns them into textures with no copy. It also replaces the `nn::codec` video decoders of the Switch 2 SDK (101 entries, VP9 only, the other codecs answer Initialize with an error). The service has exports and no named services, and `big_stack_exports()` is empty. Its `Config` takes a guest symbol resolver, a guest thread runner and an optional texture sink. Refer to R43 and R44.
 
+- The crate `nxkit-svc-audio` is the audio service of the nxkit host (R41, R42). It takes over the audio functions of the SDK as nxnative does, and keeps `audout:u`, `audren:u` and `IAudioDevice` as the IPC fallback. One AUHAL output unit mixes in its callback with vDSP and joins the `os_workgroup` of the device. The game hands blocks over through lock-free rings. `nxkit-rt` has the service under `Service::Audio`, a new lookup `nxkit_hle_find_big` for the functions that need a big host stack, and `nxkit_audio_init` for the host callbacks and settings. It is not compiled or tested yet.
+
 ### Changed
 
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
