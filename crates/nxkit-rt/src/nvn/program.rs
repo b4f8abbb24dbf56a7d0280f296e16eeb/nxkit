@@ -191,9 +191,10 @@ pub(crate) fn stages_of(name: &str, program: u64) -> Option<Vec<StageKey>> {
         s.key_bytes = Vec::new();
         changed = true;
     }
-    let keys = rec.stages.iter().map(stage_key).collect();
+    let keys: Vec<StageKey> = rec.stages.iter().map(stage_key).collect();
     if changed {
         g.programs.with(program, |r| *r = rec);
+        g.backend().program_set(program, &keys);
     }
     Some(keys)
 }
