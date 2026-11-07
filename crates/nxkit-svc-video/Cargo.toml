@@ -16,7 +16,7 @@ nxkit-abi = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true, features = ["std"] }
-objc2-core-foundation = { workspace = true, features = ["std", "CFData", "CFDictionary", "CFString"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString"] }
 objc2-core-media = { workspace = true, features = ["std", "objc2", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime"] }
 objc2-core-video = { workspace = true, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
 # The default features are the Metal headers, as in `nxkit-metal`.

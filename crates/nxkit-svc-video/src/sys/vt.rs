@@ -117,6 +117,12 @@ pub(crate) struct Vp9Session {
     pixel_format: u32,
 }
 
+// SAFETY: a VTDecompressionSession and a format description are CoreFoundation objects that VideoToolbox documents as
+// usable from any thread. The output slot sits behind a mutex, and `decode` takes `&mut self`.
+unsafe impl Send for Vp9Session {}
+// SAFETY: as for `Send`. Nothing is reachable through a shared reference except the mutex.
+unsafe impl Sync for Vp9Session {}
+
 impl Vp9Session {
     /// Opens a session for a stream that starts with `key`. The stream must be 8-bit 4:2:0.
     pub(crate) fn open(key: &KeyFrame) -> Result<Vp9Session, String> {
