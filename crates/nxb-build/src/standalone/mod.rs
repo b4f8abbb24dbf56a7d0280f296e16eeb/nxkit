@@ -65,6 +65,8 @@ struct Game {
     st: Standalone,
     rules: &'static str,
     services: Vec<&'static str>,
+    shared_font_decode: bool,
+    sf_services: Vec<&'static str>,
 }
 
 /// The title module of the input's game, `None` when the game has no module or has no data for this build.
@@ -84,6 +86,8 @@ fn module(src: &Inputs, program: u64) -> Result<Option<Game>, String> {
         st,
         rules,
         services: r.nxkit_services().into_iter().map(nxtitle::Service::id).collect(),
+        shared_font_decode: r.shared_font_decode().is_some_and(|f| f.value),
+        sf_services: r.sf_services().into_iter().map(|f| f.value).collect(),
     }))
 }
 
@@ -336,6 +340,8 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
             main_thread,
             aoc: &aoc,
             settings: t.st.settings.value,
+            shared_font_decode: t.shared_font_decode,
+            sf_services: t.sf_services.clone(),
         };
         let put = |n: &str, d: &[u8]| std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e));
         put("game.json", manifest::game_json(&m).as_bytes())?;

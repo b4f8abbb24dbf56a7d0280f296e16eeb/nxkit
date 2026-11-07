@@ -42,6 +42,10 @@ pub struct Manifest<'a> {
     pub aoc: &'a [Aoc],
     /// The run settings of the title module.
     pub settings: nxtitle::Settings,
+    /// Whether the game decodes the shared font itself (`RuntimeHooks::shared_font_decode`).
+    pub shared_font_decode: bool,
+    /// The services the game opens through `nn::sf::hipc` (`RuntimeHooks::sf_services`).
+    pub sf_services: Vec<&'static str>,
 }
 
 fn s(v: &str) -> Value {
@@ -84,7 +88,8 @@ fn memory(m: &nxtitle::Memory) -> Value {
 }
 
 /// The `settings` object: the other keys of nxnative's `game_profile.h`.
-fn settings(t: &nxtitle::Settings) -> Value {
+fn settings(m: &Manifest) -> Value {
+    let t = &m.settings;
     let mut f = vec![
         ("args", s(t.args)),
         ("env", s(t.env)),
@@ -126,6 +131,8 @@ fn settings(t: &nxtitle::Settings) -> Value {
             ]),
         ),
         ("upscaler_keys", list(t.upscaler_keys)),
+        ("shared_font_decode", flag(m.shared_font_decode)),
+        ("sf_services", list(&m.sf_services)),
     ];
     if let Some(cvar) = t.fps_cvar {
         f.push(("fps_cvar", s(cvar)));
@@ -225,7 +232,7 @@ pub fn game_json(m: &Manifest) -> String {
     ));
     f.push(("npdm", s("main.npdm")));
     f.push(("memory", memory(&m.settings.memory)));
-    f.push(("settings", settings(&m.settings)));
+    f.push(("settings", settings(m)));
     f.push(("dylib", s("nxgame.dylib")));
     f.push(("page_size", n(PAGE)));
     f.push((

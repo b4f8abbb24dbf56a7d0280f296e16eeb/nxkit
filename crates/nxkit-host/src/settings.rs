@@ -42,6 +42,8 @@ const TYPED: &[&str] = &[
     "shared_font",
     "nvn_api",
     "optional_imports",
+    "shared_font_decode",
+    "sf_services",
 ];
 
 /// The settings of the title module. The names follow `game.json`.
@@ -104,6 +106,10 @@ pub struct Settings {
     /// Imports that nothing provides and that stay 0, because the title says the game checks them before it calls
     /// them. Every other import that nothing provides stops the load (R15).
     pub optional_imports: Vec<String>,
+    /// Whether the game decodes the shared font with the SDK's font engine and so needs the BFTTF header.
+    pub shared_font_decode: bool,
+    /// The services the game opens through `nn::sf::hipc` that the system service answers with zeroed output.
+    pub sf_services: Vec<String>,
     /// The keys that no core mechanism names, in key order. The host does not read them. The title-addressed service
     /// reads them.
     pub extra: Vec<(String, Value)>,
@@ -209,6 +215,11 @@ impl Settings {
             optional_imports: match v.get("optional_imports") {
                 None | Some(Value::Null) => Vec::new(),
                 Some(_) => strings(v, "optional_imports")?,
+            },
+            shared_font_decode: v.get("shared_font_decode").and_then(Value::as_bool).unwrap_or(false),
+            sf_services: match v.get("sf_services") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(_) => strings(v, "sf_services")?,
             },
             extra: extra(v),
         })
