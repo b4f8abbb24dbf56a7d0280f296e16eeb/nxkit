@@ -1,7 +1,8 @@
 //! Present: a `CAMetalLayer` drawable path.
 //!
 //! The window belongs to `nxkit-host`. This module takes a layer, hands out drawables and presents them with a
-//! frame. Pacing is the caller's, through [`crate::FrameHooks`]. There is no `CADisplayLink` here yet.
+//! frame. A tick of the display link hands out the drawable, and `Frame::present_at` shows it at the target time of
+//! the tick. [`crate::DisplayLink`] and [`crate::Pacer`] drive the ticks.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -124,6 +125,22 @@ impl Frame {
         self.set_present(PendingPresent {
             drawable: raw,
             keep: Box::new(drawable.texture),
+            at: None,
+        });
+    }
+
+    /// Presents the drawable at `at` when the frame is submitted, in seconds on the `CACurrentMediaTime` clock.
+    ///
+    /// A tick of the display link gives the time as `DisplayTick::target_presentation_timestamp`. Metal shows the
+    /// frame on the first display refresh at or after that time. A time that has passed shows the frame on the next
+    /// refresh.
+    pub fn present_at(&mut self, drawable: Drawable, at: f64) {
+        let raw: Retained<ProtocolObject<dyn MTLDrawable>> =
+            ProtocolObject::from_retained(drawable.raw.clone());
+        self.set_present(PendingPresent {
+            drawable: raw,
+            keep: Box::new(drawable.texture),
+            at: Some(at),
         });
     }
 }

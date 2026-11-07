@@ -19,6 +19,8 @@ pub enum Format {
     Rgba8Unorm,
     /// 8 bit normalised, four channels, blue first.
     Bgra8Unorm,
+    /// 16 bit float, two channels. MetalFX motion textures use it.
+    Rg16Float,
     /// 16 bit float, four channels.
     Rgba16Float,
     /// 32 bit float depth.
@@ -37,6 +39,7 @@ impl Format {
             Self::Rgba32Uint => MTLPixelFormat::RGBA32Uint,
             Self::Rgba8Unorm => MTLPixelFormat::RGBA8Unorm,
             Self::Bgra8Unorm => MTLPixelFormat::BGRA8Unorm,
+            Self::Rg16Float => MTLPixelFormat::RG16Float,
             Self::Rgba16Float => MTLPixelFormat::RGBA16Float,
             Self::Depth32Float => MTLPixelFormat::Depth32Float,
             Self::Depth32FloatStencil8 => MTLPixelFormat::Depth32Float_Stencil8,
@@ -48,7 +51,11 @@ impl Format {
         match self {
             Self::R8Uint => 1,
             Self::R16Uint => 2,
-            Self::R32Uint | Self::Rgba8Unorm | Self::Bgra8Unorm | Self::Depth32Float => 4,
+            Self::R32Uint
+            | Self::Rg16Float
+            | Self::Rgba8Unorm
+            | Self::Bgra8Unorm
+            | Self::Depth32Float => 4,
             Self::Rg32Uint | Self::Rgba16Float | Self::Depth32FloatStencil8 => 8,
             Self::Rgba32Uint => 16,
         }

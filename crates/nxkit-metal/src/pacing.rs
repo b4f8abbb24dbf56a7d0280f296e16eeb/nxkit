@@ -4,9 +4,15 @@
 //! carries the drawable that the layer reserved for it. `CAMetalDisplayLink` is available on macOS 14 and later.
 //! There is no `CADisplayLink` fallback, because the SDK of this crate has `CAMetalDisplayLink` and the host
 //! targets macOS 26 and later.
+//!
+//! A [`Pacer`] is the `FrameHooks` that a host gives to the link. It takes the finished game frames
+//! (`Pacer::game_frame_ready`), asks the [`TickScheduler`] what each tick shows and hands that to a [`TickSink`]. The
+//! sink encodes the frame and calls `Frame::present_at` with `DisplayTick::target_presentation_timestamp`, so the
+//! display shows the frame on that tick and on no other. Frames are never blended.
 
 use std::cell::OnceCell;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -19,7 +25,10 @@ use objc2_quartz_core::{
 
 use crate::device::Context;
 use crate::metrics::FrameHooks;
+use crate::policy::PresentPlan;
 use crate::present::{Drawable, Presenter};
+use crate::schedule::{TickAction, TickScheduler};
+use crate::stats::PacingStats;
 
 /// The target frame rate of a [`DisplayLink`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +66,69 @@ pub struct DisplayTick {
     pub target_timestamp: f64,
     /// The time the frame is shown, in seconds on the same clock.
     pub target_presentation_timestamp: f64,
+}
+
+/// Takes the decision of each tick. The host implements it.
+///
+/// It runs on the main thread, inside the tick. Keep it short: encode the frame, call `Frame::present_at` with
+/// `tick.target_presentation_timestamp` and submit. For `TickAction::Hold` and `TickAction::Missed` the tick's
+/// drawable is not presented and the display keeps the last frame.
+pub trait TickSink: Send + Sync {
+    /// A tick of the display link and what it shows.
+    fn tick(&self, action: TickAction, tick: DisplayTick);
+}
+
+/// Drives the ticks of a [`DisplayLink`] by a [`PresentPlan`].
+pub struct Pacer {
+    plan: PresentPlan,
+    scheduler: Mutex<TickScheduler>,
+    stats: Arc<PacingStats>,
+    sink: Arc<dyn TickSink>,
+}
+
+impl Pacer {
+    /// A pacer for a plan. Give it to [`DisplayLink::new`] as the hooks.
+    pub fn new(plan: PresentPlan, sink: Arc<dyn TickSink>) -> Arc<Self> {
+        Arc::new(Self {
+            plan,
+            scheduler: Mutex::new(TickScheduler::new(plan.source)),
+            stats: Arc::new(PacingStats::default()),
+            sink,
+        })
+    }
+
+    /// The plan the pacer follows.
+    pub fn plan(&self) -> PresentPlan {
+        self.plan
+    }
+
+    /// The counters of the pacer. Give them to `FrameRing::set_pacing_stats` to also count shown frames.
+    pub fn stats(&self) -> Arc<PacingStats> {
+        self.stats.clone()
+    }
+
+    /// The game has a finished frame. It can be called from any thread, for example from the frame complete hook.
+    pub fn game_frame_ready(&self, frame: u64) {
+        self.scheduler
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .frame_ready(frame);
+    }
+}
+
+impl FrameHooks for Pacer {
+    fn display_tick(&self, tick: DisplayTick) {
+        let t0 = Instant::now();
+        let action = self
+            .scheduler
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .on_tick();
+        self.stats.record_tick(&action);
+        self.sink.tick(action, tick);
+        let ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.stats.record_handler(ns);
+    }
 }
 
 define_class!(

@@ -18,6 +18,8 @@ objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes", "CFD
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSError", "NSRunLoop", "NSString", "NSURL"] }
 # The default features are the Metal headers. Metal 4 (`MTL4*`) is part of them.
 objc2-metal = { workspace = true, features = ["default"] }
+# Spatial scaler and frame interpolator, with the Metal 4 command buffer entry points. The temporal scaler is on because the interpolator descriptor takes one.
+objc2-metal-fx = { workspace = true, features = ["std", "MTLFXSpatialScaler", "MTL4FXSpatialScaler", "MTLFXFrameInterpolator", "MTL4FXFrameInterpolator", "MTLFXTemporalScaler"] }
 objc2-quartz-core = { workspace = true, features = ["std", "CALayer", "CAMetalLayer", "CAMetalDisplayLink", "CAFrameRateRange", "objc2-metal", "objc2-core-foundation"] }
 
 # Not `workspace = true`: this crate holds the `unsafe` calls into Metal. Other crates see a safe API.
