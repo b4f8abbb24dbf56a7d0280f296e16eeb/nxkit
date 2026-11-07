@@ -4,7 +4,9 @@ use crate::result::KResult;
 use crate::role::{Qos, ThreadRole};
 use crate::stats::ThreadStats;
 use crate::sys::{self, WaitStatus};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
+};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 

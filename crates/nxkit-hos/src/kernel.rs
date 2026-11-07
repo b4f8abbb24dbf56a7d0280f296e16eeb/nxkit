@@ -192,7 +192,8 @@ impl Kernel {
         };
         let t = self.new_thread(&spec, ThreadState::Created)?;
         *lock(&t.body) = Some(body);
-        t.stack_size.store(stack_size(spec.stack_size), Ordering::Relaxed);
+        t.stack_size
+            .store(stack_size(spec.stack_size), Ordering::Relaxed);
         Ok(t.handle())
     }
 

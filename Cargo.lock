@@ -671,6 +671,7 @@ version = "0.9.2"
 name = "nxkit-rt"
 version = "0.9.2"
 dependencies = [
+ "nxkit-hos",
  "nxtitle",
 ]
 

@@ -13,13 +13,22 @@
 //! - A function that needs a large stack must switch to a host stack, because a guest stack can be 8 KB.
 //!   No service needs this yet and none switches.
 //!
-//! This is the only crate (with `nxb-sys`) that may use `unsafe`. The `unsafe` blocks are as small as possible.
+//! The `kernel` service forwards svc calls to `nxkit-hos` ([`nxkit_svc`]). The kernel is created by
+//! [`nxkit_kernel_init`] and the host calls it from the gate of every svc.
+//!
+//! This crate may use `unsafe`, with `nxb-sys` and the module `sys` of `nxkit-hos`. The `unsafe` blocks are as small as possible.
 
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod kernel;
 mod offline;
+
+pub use kernel::{
+    NxkitKernelConfig, NxkitRoleRule, NxkitThreadEntry, nxkit_kernel_dump_stats, nxkit_kernel_init,
+    nxkit_kernel_set_thread_name, nxkit_svc,
+};
 
 /// A service that nxkit can run. The bit of a service in the mask is its index in `nxtitle::Service::ALL`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,7 +134,14 @@ pub unsafe extern "C" fn nxkit_hle_find(name: *const c_char) -> *const c_void {
 }
 
 /// The names of the exported C symbols. The header has one declaration for each.
-pub const EXPORTS: [&str; 2] = ["nxkit_init", "nxkit_hle_find"];
+pub const EXPORTS: [&str; 6] = [
+    "nxkit_init",
+    "nxkit_hle_find",
+    "nxkit_svc",
+    "nxkit_kernel_init",
+    "nxkit_kernel_set_thread_name",
+    "nxkit_kernel_dump_stats",
+];
 
 #[cfg(test)]
 mod tests {

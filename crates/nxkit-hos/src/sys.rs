@@ -253,9 +253,8 @@ impl QosOverride {
             }
             // SAFETY: `host` came from `pthread_self` of a thread that holds a lock and so still runs. The call
             // allocates an override object that `Drop` hands back to `pthread_override_qos_class_end_np`.
-            let over = unsafe {
-                apple::pthread_override_qos_class_start_np(host as *mut _, qos.raw(), 0)
-            };
+            let over =
+                unsafe { apple::pthread_override_qos_class_start_np(host as *mut _, qos.raw(), 0) };
             (!over.is_null()).then_some(QosOverride(over))
         }
         #[cfg(not(target_vendor = "apple"))]

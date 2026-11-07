@@ -24,7 +24,7 @@ The host follows the layers of the workspace and the title layer.
 | crate | function |
 |---|---|
 | `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys` and the module `sys` of `nxkit-hos` |
-| `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. The svc entry points for the host are in `Kernel::dispatch_svc`, and `nxkit-rt` does not call them yet |
+| `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline` |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame |
@@ -55,6 +55,10 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 ## Decisions
 
 The decisions of the host and their causes are R1 to R17 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+
+### Core rules act at svc boundaries only
+
+The core rules of Horizon are off by default (R9). When a title turns them on, `nxkit-hos` holds a thread back only where it enters or leaves a svc, for example when it wakes from a wait or starts. A thread that runs guest code without a svc cannot be stopped, because macOS gives a process no way to suspend or preempt its own threads at a chosen point. The rules therefore order the threads that block and wake, and they do not replace the scheduler of the Switch. The gate of a core waits on one word and does not poll.
 
 ## Apple hardware
 
