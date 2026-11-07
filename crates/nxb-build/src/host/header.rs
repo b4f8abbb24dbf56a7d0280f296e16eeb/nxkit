@@ -32,6 +32,35 @@ fn on_off(g: &Game, key: &str, default: &str) -> Result<bool, String> {
     Ok(one_of(g, key, default, &["on", "off"], "on or off")? == "on")
 }
 
+/// `game.NXKIT_SERVICES`: nxkit's services in the order of `nxtitle::Service::ALL`, one bit each in `DM_GAME_NXKIT_SERVICES`.
+pub const NXKIT_SERVICES: [&str; 9] = [
+    "fs", "input", "audio", "video", "system", "offline", "pacing", "kernel", "gpu",
+];
+
+/// The `nxkit_services` key as a bit mask: a comma list of [`NXKIT_SERVICES`], each at most once.
+fn nxkit_mask(g: &Game) -> Result<i128, String> {
+    let raw = g.get_or("nxkit_services", "");
+    let names: Vec<&str> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut mask = 0i128;
+    for w in &names {
+        match NXKIT_SERVICES.iter().position(|s| s == w) {
+            Some(i) if mask & (1 << i) == 0 => mask |= 1 << i,
+            _ => {
+                return Err(format!(
+                    "{}: nxkit_services takes each of {} at most once, comma-separated: {raw}",
+                    g.id,
+                    NXKIT_SERVICES.join(", ")
+                ));
+            }
+        }
+    }
+    Ok(mask)
+}
+
 /// `game.upscaler_keys`: the compute shaders of `agl_ndsr.pck` in the shader map, sorted 16-digit keys.
 pub fn upscaler_keys(g: &Game) -> Result<Vec<String>, String> {
     let p = g.table("shader_map.tsv");
@@ -169,6 +198,7 @@ pub fn header_one(g: &Game, here: &Path) -> Result<String, String> {
     let vcr = on_off(g, "vconv_range", "off")?;
     let mml = on_off(g, "mem_map_limit", "off")?;
     let ups = upscaler_keys(g)?;
+    let nxs = nxkit_mask(g)?;
     let dbr = one_of(
         g,
         "draw_barriers",
@@ -322,6 +352,7 @@ pub fn header_one(g: &Game, here: &Path) -> Result<String, String> {
         format!("#define DM_GAME_UPSCALER_KEYS {}", q(&ups.join(","))),
         format!("#define DM_GAME_UPSCALER_N {}", ups.len()),
         format!("#define DM_GAME_VCONV_RANGE {}", b(vcr)),
+        format!("#define DM_GAME_NXKIT_SERVICES {}ull", hex(nxs)),
     ]);
     if !g.get_or("device_api", "").is_empty() {
         l.push(format!("#define DM_GAME_NVN_API_MAJOR {api_major}"));

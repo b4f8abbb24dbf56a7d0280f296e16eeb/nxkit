@@ -1,4 +1,5 @@
-//! The nxkit runtime for the host: a static library (`libnxkit_rt.a`) with a C ABI.
+//! The nxkit runtime for the host: a dynamic library (`libnxkit_rt.dylib`) with a C ABI.
+//! The host loads it with `dlopen` when a service is enabled. The crate also builds as a static library for a later iOS path.
 //!
 //! The host calls [`nxkit_init`] once with the services that nxkit runs, then asks [`nxkit_hle_find`] for a function
 //! by its Switch mangled name. A name of a service that is not enabled gives NULL, so the host uses its own function.
@@ -15,7 +16,10 @@
 //! This is the only crate (with `nxb-sys`) that may use `unsafe`. The `unsafe` blocks are as small as possible.
 
 use std::ffi::{CStr, c_char, c_void};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+mod offline;
 
 /// A service that nxkit can run. The bit of a service in the mask is its index in `nxtitle::Service::ALL`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +80,11 @@ pub struct Entry {
     pub addr: usize,
 }
 
-/// The functions of the runtime. No service is implemented yet.
-static TABLE: &[Entry] = &[];
+/// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
+pub fn entries() -> &'static [Entry] {
+    static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
+    TABLE.get_or_init(offline::entries)
+}
 
 /// The mask of enabled services. Zero before init.
 static SERVICES: AtomicU64 = AtomicU64::new(0);
@@ -111,7 +118,7 @@ pub unsafe extern "C" fn nxkit_hle_find(name: *const c_char) -> *const c_void {
     }
     // SAFETY: `name` is not NULL and the caller promises a valid NUL-terminated string.
     let name = unsafe { CStr::from_ptr(name) };
-    match find_in(TABLE, SERVICES.load(Ordering::Acquire), name.to_bytes()) {
+    match find_in(entries(), SERVICES.load(Ordering::Acquire), name.to_bytes()) {
         Some(addr) => addr as *const c_void,
         None => std::ptr::null(),
     }

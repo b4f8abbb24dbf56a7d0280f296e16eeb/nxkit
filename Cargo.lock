@@ -369,6 +369,8 @@ dependencies = [
  "nxb-stages",
  "nxb-sys",
  "nxb-tool",
+ "nxtitle",
+ "nxtitles",
 ]
 
 [[package]]

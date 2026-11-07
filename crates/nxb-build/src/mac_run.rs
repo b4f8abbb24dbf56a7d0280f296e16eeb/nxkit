@@ -116,6 +116,13 @@ pub(crate) fn run_of(
     set(&mut env, "DM_LANG", lang);
     set(&mut env, "DM_WINDOW", "1".into());
     set(&mut env, "DM_AUDIO", "1".into());
+    let nxkit = crate::nxkit::run_env(
+        &b.title,
+        b.profile.1.get("nxkit_services").map(String::as_str),
+    )?;
+    for (k, v) in nxkit {
+        set(&mut env, k, v);
+    }
     if let Some(f) = crate::options::env_file(a, &work)? {
         for (k, v) in crate::options::env_pairs(&f)? {
             set(&mut env, &k, v);

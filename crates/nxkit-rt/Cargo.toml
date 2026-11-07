@@ -12,7 +12,7 @@ layer = "L0"
 in_v = false
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 

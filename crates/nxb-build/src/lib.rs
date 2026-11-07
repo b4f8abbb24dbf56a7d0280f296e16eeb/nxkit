@@ -34,6 +34,7 @@ pub mod ios_cli;
 mod iosbuild;
 pub mod layer;
 mod mac_run;
+mod nxkit;
 mod options;
 pub mod order;
 pub mod pipeline;

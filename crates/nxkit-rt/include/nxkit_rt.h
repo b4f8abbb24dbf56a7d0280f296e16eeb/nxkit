@@ -1,4 +1,4 @@
-/* The C interface of libnxkit_rt.a, the nxkit runtime for the host.
+/* The C interface of libnxkit_rt.dylib, the nxkit runtime for the host.
  * The bits of the service mask follow Service::ALL in titles/nxtitle. */
 #ifndef NXKIT_RT_H
 #define NXKIT_RT_H
