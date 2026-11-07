@@ -88,7 +88,7 @@ address arbitration arithmetic. It does not copy the global lock. It uses the sa
 
 ## Video service ported from nxnative
 
-The crate `nxkit-svc-video` (`crates/nxkit-svc-video/`) ports the protocol of `movie::Decoder` from the nxnative engine. The nxnative engine is published under the MIT
+The crate `nxkit-svc-video` (`crates/nxkit-svc-video/`) ports the protocols of `movie::Decoder` and of the `nn::codec` video decoders from the nxnative engine. The nxnative engine is published under the MIT
 licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above. The decoder itself is new code on VideoToolbox. nxnative decodes with libvpx.
 
 | nxkit file | nxnative source |
@@ -96,6 +96,9 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 | `crates/nxkit-svc-video/src/decoder.rs` | `dm/host/hle_movie.c` (slots, queues, events, error codes, the format keys) |
 | `crates/nxkit-svc-video/src/exports.rs` | `dm/host/hle_movie.c` (the replaced `movie::Decoder` functions and their signatures) |
 | `crates/nxkit-svc-video/src/pacing.rs` | `dm/host/hle_movie.c` (`dm_movie_playing`) |
+| `crates/nxkit-svc-video/src/codec.rs` | `dm/host/hle_codec_video.c` (decoder state, buffer counts, pools, native images, sync handles, sync point events, error codes) |
+| `crates/nxkit-svc-video/src/codec_exports.rs` | `dm/host/hle_codec_video.c` (the replaced `nn::codec` and `nn::syncpt::sdk` functions and their signatures) |
+| `crates/nxkit-svc-video/src/yuv.rs` | `dm/host/hle_codec_video.c` (the NV12 to RGBA read-back of `ReadDecoderOutputImage*`) |
 
 ## NVN front end ported from nxnative
 

@@ -25,7 +25,7 @@ The host follows the layers of the workspace and the title layer.
 |---|---|
 | `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys`, `nxkit-metal` and the module `sys` of `nxkit-hos` |
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
-| `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline`. `nxkit-svc-video` exists: it replaces `movie::Decoder` and decodes VP9 with VideoToolbox |
+| `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline`. `nxkit-svc-video` exists: it replaces `movie::Decoder` and the `nn::codec` video decoders and decodes VP9 with VideoToolbox |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
