@@ -25,7 +25,7 @@ use objc2_quartz_core::{
 
 use crate::device::Context;
 use crate::metrics::FrameHooks;
-use crate::policy::PresentPlan;
+use crate::policy::{FrameSource, PresentPlan};
 use crate::present::{Drawable, Presenter};
 use crate::schedule::{TickAction, TickScheduler};
 use crate::stats::PacingStats;
@@ -105,6 +105,14 @@ impl Pacer {
     /// The counters of the pacer. Give them to `FrameRing::set_pacing_stats` to also count shown frames.
     pub fn stats(&self) -> Arc<PacingStats> {
         self.stats.clone()
+    }
+
+    /// Changes what the ticks show, for example when the game changes its present interval.
+    pub fn set_source(&self, source: FrameSource) {
+        self.scheduler
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_source(source);
     }
 
     /// The game has a finished frame. It can be called from any thread, for example from the frame complete hook.

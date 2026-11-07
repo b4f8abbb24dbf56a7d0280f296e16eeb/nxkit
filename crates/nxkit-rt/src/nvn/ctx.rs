@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use nxkit_abi::guest;
-use nxkit_nvn::backend::{Backend, Fence, Present, WaitResult};
+use nxkit_nvn::backend::{Backend, Fence, FlushCx, Present, WaitResult};
 use nxkit_nvn::cmdbuf::CommandHandle;
 use nxkit_nvn::error::{NvnError, Result as NvnResult};
 use nxkit_nvn::front::{FlushReason, FrontEnd};
@@ -126,7 +126,9 @@ pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), Inst
     let (base, len) = guest::range();
     let space = LinearSpace::new(base, backend.gpu_base(), len).map_err(InstallError::Space)?;
     GPU.set(Gpu::new(space, backend, settings))
-        .map_err(|_| InstallError::AlreadyInstalled)
+        .map_err(|_| InstallError::AlreadyInstalled)?;
+    super::wire::wire();
+    Ok(())
 }
 
 /// The installed context. A call before [`install`] ends the game with the name of the function.
@@ -227,9 +229,14 @@ impl Gpu {
         }
         let fence = Fence(self.flushed() + 1);
         front.end_frame(reason)?;
-        let sent = self
-            .backend
-            .flush_frame(front.frame(), front.plan(), reason, fence);
+        let (frame, plan, table, descriptors) = front.flush_parts();
+        let sent = self.backend.flush_frame(
+            frame,
+            plan,
+            reason,
+            fence,
+            FlushCx { table, descriptors },
+        );
         front.begin_frame();
         self.flushed.store(fence.0, Ordering::Release);
         sent?;
@@ -281,11 +288,18 @@ impl Gpu {
         origin_lower_left: bool,
     ) -> AbiResult<()> {
         let mut front = self.lock();
+        let mut accepted = 0;
+        let mut failed = None;
         for h in handles {
-            front.submit_on(queue as usize, *h)?;
+            if let Err(e) = front.submit_on(queue as usize, *h) {
+                failed = Some(e);
+                break;
+            }
+            accepted += 1;
         }
-        self.backend.submit(queue, handles, origin_lower_left);
-        Ok(())
+        self.backend
+            .submit(queue, &handles[..accepted], origin_lower_left);
+        failed.map_or(Ok(()), |e| Err(e.into()))
     }
 
     /// `nvnQueuePresentTexture`: puts the present into the frame, flushes the frame and tells the backend.
@@ -360,6 +374,7 @@ mod tests {
             _: &PassPlan,
             _: FlushReason,
             _: Fence,
+            _: FlushCx<'_>,
         ) -> BackendResult<()> {
             Ok(())
         }

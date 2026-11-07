@@ -720,9 +720,11 @@ name = "nxkit-host"
 version = "0.9.2"
 dependencies = [
  "nxkit-abi",
+ "nxkit-gpu",
  "nxkit-hos",
  "nxkit-ipc",
  "nxkit-metal",
+ "nxkit-nvn",
  "nxkit-rt",
  "nxkit-svc-audio",
  "nxkit-svc-fs",

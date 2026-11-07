@@ -35,6 +35,7 @@ pub(crate) mod sampler;
 pub(crate) mod state;
 pub(crate) mod sync;
 pub(crate) mod texture;
+mod wire;
 pub(crate) mod window;
 
 pub use cmdbuf::{CommandSettings, set_command_settings};

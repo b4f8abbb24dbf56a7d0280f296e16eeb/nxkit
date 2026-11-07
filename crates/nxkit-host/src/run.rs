@@ -74,7 +74,7 @@ pub fn run(opts: &Options) -> Result<()> {
 
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     let gpu_memory = Arc::new(mem.res.as_guest_memory(&ctx)?);
-    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &settings)?;
+    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,

@@ -130,6 +130,11 @@ impl TextureStore {
         }
     }
 
+    /// The texture of an id, if the store made one.
+    pub(crate) fn get(&self, id: TexId) -> Option<&Res> {
+        self.entries.get(&id)
+    }
+
     /// Notes how the frame uses a texture. Call it for every texture before `ensure`.
     pub(crate) fn note(&mut self, id: TexId, u: Use) {
         if u.attachment {

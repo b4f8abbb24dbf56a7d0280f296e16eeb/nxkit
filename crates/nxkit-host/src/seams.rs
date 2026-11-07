@@ -7,10 +7,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use nxkit_abi::ipc::Named;
-use nxkit_metal::{Context, DisplayTick, FrameHooks, GuestMemory};
+use nxkit_metal::{Context, FrameHooks, GuestMemory};
 use nxkit_rt::Service;
 use nxkit_svc_pacing::{LoadConfig, StepMode};
 
@@ -212,32 +211,11 @@ pub fn focus_changed(focused: bool) {
     nxkit_svc_input::set_focus(focused);
 }
 
-/// Counts the display ticks and drops their drawables. It is the stand-in until the encoder is connected. It still
-/// drives the input state and the vsync event on each tick, as the real hooks must.
-#[derive(Debug, Default)]
-struct DropFrames {
-    ticks: AtomicU64,
-}
-
-impl FrameHooks for DropFrames {
-    fn display_tick(&self, tick: DisplayTick) {
-        if self.ticks.fetch_add(1, Ordering::Relaxed) == 0 {
-            eprintln!("nxkit-host: no encoder is connected, the frames of the display are dropped (see seams.rs)");
-        }
-        nxkit_svc_input::tick();
-        // The pacing service is not started when the game does not select it, and then there is nothing to tick.
-        let _ = nxkit_svc_pacing::on_display_tick();
-        drop(tick);
-    }
-}
-
 /// The hooks that the display link calls. They connect the encoder of `nxkit-gpu` and the pacing of `nxkit-metal`
 /// to the window: on each display tick they present the frame that the guest finished. `settings` has the pacing and
 /// encoder keys (`fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread` and the `tex_*` keys).
 ///
-/// Needs: the encoder (`nxkit-gpu`) over `memory`, which is the reservation as the GPU buffer, and the pacing
-/// service.
-pub fn frame_hooks(ctx: &Context, memory: &Arc<GuestMemory>, settings: &Settings) -> Result<Arc<dyn FrameHooks>> {
-    let _ = (ctx, memory, settings);
-    Ok(Arc::new(DropFrames::default()))
+/// `root` is the run folder, which has the shaders. The work is in `frames.rs`.
+pub fn frame_hooks(ctx: &Context, memory: &Arc<GuestMemory>, root: &std::path::Path, settings: &Settings) -> Result<Arc<dyn FrameHooks>> {
+    crate::frames::install(ctx, memory, root, settings)
 }

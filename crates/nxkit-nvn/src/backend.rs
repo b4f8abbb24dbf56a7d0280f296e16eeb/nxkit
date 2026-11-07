@@ -23,8 +23,9 @@ use std::fmt;
 use crate::cmdbuf::CommandHandle;
 use crate::frame::Frame;
 use crate::front::FlushReason;
+use crate::descriptors::Descriptors;
 use crate::passes::PassPlan;
-use crate::resource::{TexId, TextureRecord};
+use crate::resource::{ResourceTable, TexId, TextureRecord};
 use crate::tic::Tsc;
 
 /// A failure that the backend reports. The text is for the log.
@@ -41,6 +42,16 @@ impl std::error::Error for BackendError {}
 
 /// The result type of the backend.
 pub type BackendResult<T> = std::result::Result<T, BackendError>;
+
+/// What a flush needs besides the frame: the textures and the descriptor pools. The backend reads the descriptors to
+/// resolve texture handles. It applies what the GPU wrote to the table ([`ResourceTable::gpu_wrote`] and
+/// [`ResourceTable::synced`]).
+pub struct FlushCx<'a> {
+    /// The textures.
+    pub table: &'a mut ResourceTable,
+    /// The descriptor pools.
+    pub descriptors: &'a Descriptors,
+}
 
 /// The number of a flush. The GPU finishes the fences in order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -135,13 +146,14 @@ pub trait Backend: Send + Sync {
     fn unregister_pool(&self, host: u64);
 
     /// A frame ends. `fence` is the number of this flush. The backend encodes `frame` as `plan` says and marks
-    /// `fence` done when the GPU has finished.
+    /// `fence` done when the GPU has finished. `cx` has the textures and the descriptors the frame refers to.
     fn flush_frame(
         &self,
         frame: &Frame,
         plan: &PassPlan,
         reason: FlushReason,
         fence: Fence,
+        cx: FlushCx<'_>,
     ) -> BackendResult<()>;
 
     /// The game presents a window texture. The frame that drew it was flushed before this call.
@@ -251,6 +263,7 @@ pub(crate) mod null {
             _plan: &PassPlan,
             reason: FlushReason,
             fence: Fence,
+            _cx: FlushCx<'_>,
         ) -> BackendResult<()> {
             self.log(Call::Flush {
                 commands: frame.cmds.len(),

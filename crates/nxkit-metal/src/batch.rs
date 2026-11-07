@@ -105,6 +105,9 @@ pub struct BatchRing {
     metrics: Arc<Metrics>,
 }
 
+// SAFETY: the Metal objects of a ring are only used through `&mut self`, so one thread at a time touches them.
+unsafe impl Send for BatchRing {}
+
 impl BatchRing {
     /// Makes the ring with [`BATCHES_IN_FLIGHT`] slots. A batch can hold up to `max_buffers` command buffers.
     pub fn new(ctx: &Context, max_buffers: usize) -> Result<Self> {

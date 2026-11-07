@@ -229,6 +229,11 @@ impl Gpu {
         self.ring.metrics()
     }
 
+    /// The Metal texture that holds a texture of the game, as the last frame left it. None when no frame used it.
+    pub fn texture(&self, id: TexId) -> Option<Texture> {
+        self.store.get(id).map(|r| r.tex.clone())
+    }
+
     /// Waits until the GPU finished the last submitted frame. The result is `None` when nothing was submitted.
     pub fn wait(&mut self) -> Result<Option<CommandBufferStats>> {
         self.last.take().map(|b| b.wait()).transpose()

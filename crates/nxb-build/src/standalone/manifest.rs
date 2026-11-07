@@ -46,6 +46,8 @@ pub struct Manifest<'a> {
     pub shared_font_decode: bool,
     /// The services the game opens through `nn::sf::hipc` (`RuntimeHooks::sf_services`).
     pub sf_services: Vec<&'static str>,
+    /// The need `vertex_stream_null_bind` of the title.
+    pub vertex_stream_null_bind: bool,
 }
 
 fn s(v: &str) -> Value {
@@ -120,6 +122,7 @@ fn settings(m: &Manifest) -> Value {
         ("tex_dirty_upload", flag(t.tex_dirty_upload)),
         ("tex_dyn_slots", flag(t.tex_dyn_slots)),
         ("render_cond", flag(t.render_cond)),
+        ("vertex_stream_null_bind", flag(m.vertex_stream_null_bind)),
         ("vconv_range", flag(t.vconv_range)),
         ("gpu_ts_segment", flag(t.gpu_ts_segment)),
         ("draw_barriers_game", flag(t.draw_barriers_game)),

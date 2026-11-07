@@ -54,7 +54,7 @@ A called recording gets its summary under the state that the caller has at the c
 ### The frame
 
 A queue submit takes the summary of a recording under the state that the queue has (see [Queue state](#queue-state)) and appends its effects to the `Frame`. The stream stays in the cache, so a game submits the same recording in every frame without a new decode.
-The frame is held until `end_frame`. The host calls it at a present or when the CPU waits for the GPU. `FlushStats` counts each reason. An early flush does not know the later frames, so a texture that is not proven dead stays stored.
+The frame is held until `end_frame`. The host calls it at a present or when the CPU waits for the GPU. `FlushStats` counts each reason. `Backend::flush_frame` gets the frame, the plan and a `FlushCx` with the resource table and the descriptor pools. The backend applies what the GPU wrote to the table. An early flush does not know the later frames, so a texture that is not proven dead stays stored.
 All vectors keep their memory from frame to frame.
 
 ### Indirect command buffers

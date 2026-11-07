@@ -363,6 +363,11 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         &self.plan
     }
 
+    /// The parts that a flush hands to the backend: the frame, its plan, the textures and the descriptors.
+    pub fn flush_parts(&mut self) -> (&Frame, &PassPlan, &mut ResourceTable, &Descriptors) {
+        (&self.frame, &self.plan, &mut self.table, &self.descriptors)
+    }
+
     /// Starts the next frame.
     pub fn begin_frame(&mut self) {
         self.frame.clear();

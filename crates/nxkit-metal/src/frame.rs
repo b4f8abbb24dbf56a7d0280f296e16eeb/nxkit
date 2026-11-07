@@ -89,6 +89,10 @@ pub struct FrameRing {
     pacing: Option<Arc<PacingStats>>,
 }
 
+// SAFETY: the Metal objects of a ring are only used through `&mut self`, so one thread at a time touches them. Metal
+// allows an allocator to move between threads when its use is serial.
+unsafe impl Send for FrameRing {}
+
 impl FrameRing {
     /// Makes the ring with [`FRAMES_IN_FLIGHT`] slots.
     pub fn new(ctx: &Context) -> Result<Self> {

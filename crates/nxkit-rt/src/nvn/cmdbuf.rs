@@ -29,10 +29,6 @@ mod xfer;
 
 use std::sync::OnceLock;
 
-#[allow(
-    unused_imports,
-    reason = "the integrator of the texture and sampler groups sets the seam"
-)]
 pub(crate) use seam::{Seam, set_seam};
 
 /// What a title needs the command buffer group to do differently. The host fills it from the needs of the title

@@ -72,7 +72,7 @@ One row for each rewritten site, with four tab-separated columns: the return add
 
 The title module and its family module answer the settings through their `nxtitle` hooks. The build writes them here. The host types the keys that name a mechanism of the core and gives them to the part that uses them (see Seams). It does not use them itself.
 
-Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode`, `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vconv_range`, `gpu_ts_segment`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
+Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode`, `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `gpu_ts_segment`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
 Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
@@ -165,6 +165,17 @@ A game can give a thread a small stack, and a service function that builds host 
 
 AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` that has the pixels of the main display, so the game renders at the native resolution, for example 4K on a 4K display. The display link runs at the highest rate of the screen, 120 Hz where the screen has it. The game runs on its own threads. A window close, a lost application or ExitProcess sets a stop flag. The next display tick ends the loop. A watchdog ends the process after 5 seconds if the loop does not. `--fullscreen` starts in full screen.
 
+## The frame path
+
+`frames.rs` builds the frame path. `seams::frame_hooks` calls it with the run folder.
+
+1. It makes the `GpuBackend` of `nxkit-gpu` over the guest memory. The shader folder is `<run folder>/shaders`. It holds `<key>_b.metallib`, `<key>_b.json` and `.tsv` files, one set per shader, with the 16 hex digit shader key as the name. The pipeline archive is `<run folder>/pipelines.mtl4archive` and is loaded when `pso_mtl4` is true. `enc_thread` false encodes on one thread, true picks the thread count from the cores. The render scale is 2.0.
+2. It installs the backend with `nxkit_rt::nvn::install`. The settings are `nvn_api` and `shader_key_skip`. It calls `nxkit_rt::nvn::set_command_settings` with `vertex_stream_null_bind`.
+3. It asks `choose_present_plan` for the plan of a 60 Hz game on a 120 Hz display and makes the `Pacer` of `nxkit-metal` with the backend as its tick sink.
+4. The returned hooks run on each display tick. They call `nxkit_svc_pacing::on_display_tick`, which signals the vsync event of the game. They read `nxkit_svc_pacing::hold`. A hold above zero sets the source of the `Pacer` to `Hold { ticks_per_frame: hold * ticks_per_vsync }`. Then they pass the tick to the `Pacer`.
+
+At most two frames are in flight on the GPU. The backend presents at the target presentation time of the tick. The game renders at the native size of the display. No title asks for MetalFX.
+
 ## Startup order
 
 1. Read `game.json`.
@@ -211,3 +222,4 @@ AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` 
 
 The hooks of the display link call `nxkit_svc_input::tick()` and `nxkit_svc_pacing::on_display_tick()` on each tick.
 | `frame_hooks` | Gives the display link the hooks that encode and present a frame, with the pacing and encoder settings. |
+| `frame_hooks` | Gives the display link the hooks that encode and present a frame. It calls `frames::install` with the run folder and the settings. |
