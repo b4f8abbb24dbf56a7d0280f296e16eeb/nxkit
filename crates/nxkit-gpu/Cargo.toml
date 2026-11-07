@@ -1,0 +1,19 @@
+[package]
+name = "nxkit-gpu"
+description = "The frame encoder of the nxkit host: turns a held NVN frame into Metal 4 work"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L2"
+in_v = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nxkit-metal = { workspace = true }
+nxkit-nvn = { workspace = true }
+
+[lints]
+workspace = true
