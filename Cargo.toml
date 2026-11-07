@@ -30,6 +30,7 @@ nxkit-ipc = { path = "crates/nxkit-ipc" }
 nxkit-svc-fs = { path = "crates/nxkit-svc-fs" }
 nxkit-svc-offline = { path = "crates/nxkit-svc-offline" }
 nxkit-svc-input = { path = "crates/nxkit-svc-input" }
+nxkit-svc-video = { path = "crates/nxkit-svc-video" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }
@@ -70,6 +71,9 @@ nxb-layer = { path = "crates/nxb-layer" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
 objc2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-core-foundation = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-core-media = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-core-video = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-video-toolbox = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-foundation = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-core-haptics = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-game-controller = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }

@@ -24,6 +24,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxkit-hos` exports the SDK take-overs that nxnative has on its kernel side: `getentropy`, the csrng bytes, `getenv` and `StandardAllocator::Allocate`. `nxkit-rt` lists them under the service `kernel` and adds `nxkit_kernel_set_guest_sym`, `nxkit_kernel_os_init`, `nxkit_kernel_set_deterministic`, `nxkit_kernel_forced_names` and `nxkit_kernel_thread_tls`.
 - `NxkitKernelConfig` has `main_thread_priority`, `main_thread_core`, `main_thread_stack_size`, `process_id`, `process_exit` and `memory`.
 
+- The crate `nxkit-svc-video` is the `video` service of the nxkit host. It replaces `movie::Decoder` of the Nintendo SDK and decodes VP9 with VideoToolbox into Metal compatible `CVPixelBuffer`s. A `CVMetalTextureCache` turns them into textures with no copy. It also replaces the `nn::codec` video decoders of the Switch 2 SDK (101 entries, VP9 only, the other codecs answer Initialize with an error). The service has exports and no named services, and `big_stack_exports()` is empty. Its `Config` takes a guest symbol resolver, a guest thread runner and an optional texture sink. Refer to R43 and R44.
+
 ### Changed
 
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.

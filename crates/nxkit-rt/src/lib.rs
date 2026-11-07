@@ -109,6 +109,7 @@ pub fn entries() -> &'static [Entry] {
         table.extend(mapped(nxkit_svc_fs::big_stack_exports(), Service::Fs, true));
         table.extend(mapped(nxkit_svc_offline::exports(), Service::Offline, false));
         table.extend(mapped(nxkit_svc_input::exports(), Service::Input, false));
+        table.extend(mapped(nxkit_svc_video::exports(), Service::Video, false));
         table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,

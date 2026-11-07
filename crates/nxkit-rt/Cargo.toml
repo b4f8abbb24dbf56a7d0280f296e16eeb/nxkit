@@ -22,6 +22,7 @@ nxkit-nvn = { workspace = true }
 nxkit-svc-fs = { workspace = true }
 nxkit-svc-offline = { workspace = true }
 nxkit-svc-input = { workspace = true }
+nxkit-svc-video = { workspace = true }
 
 [dev-dependencies]
 nxtitle = { workspace = true }

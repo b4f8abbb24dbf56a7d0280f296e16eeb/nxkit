@@ -1,6 +1,7 @@
 # Third-party notes
 
 The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-input` uses to bind GameController and Core Haptics on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
+The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-video` uses to bind VideoToolbox, CoreVideo and CoreMedia on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
 
@@ -112,6 +113,19 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 | `crates/nxkit-svc-input/src/keys.rs` | the keyboard map for player 1 in `dm/host/front_mac.m` |
 
 `touch.rs` also follows the gesture rules of yuzu (`hid_core`, `gesture_handler.cpp`) as nxnative does. No yuzu code is copied.
+## Video service ported from nxnative
+
+The crate `nxkit-svc-video` (`crates/nxkit-svc-video/`) ports the protocols of `movie::Decoder` and of the `nn::codec` video decoders from the nxnative engine. The nxnative engine is published under the MIT
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above. The decoder itself is new code on VideoToolbox. nxnative decodes with libvpx.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-svc-video/src/decoder.rs` | `dm/host/hle_movie.c` (slots, queues, events, error codes, the format keys) |
+| `crates/nxkit-svc-video/src/exports.rs` | `dm/host/hle_movie.c` (the replaced `movie::Decoder` functions and their signatures) |
+| `crates/nxkit-svc-video/src/pacing.rs` | `dm/host/hle_movie.c` (`dm_movie_playing`) |
+| `crates/nxkit-svc-video/src/codec.rs` | `dm/host/hle_codec_video.c` (decoder state, buffer counts, pools, native images, sync handles, sync point events, error codes) |
+| `crates/nxkit-svc-video/src/codec_exports.rs` | `dm/host/hle_codec_video.c` (the replaced `nn::codec` and `nn::syncpt::sdk` functions and their signatures) |
+| `crates/nxkit-svc-video/src/yuv.rs` | `dm/host/hle_codec_video.c` (the NV12 to RGBA read-back of `ReadDecoderOutputImage*`) |
 
 ## NVN front end ported from nxnative
 

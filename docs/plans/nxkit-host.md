@@ -31,6 +31,8 @@ The host follows the layers of the workspace and the title layer.
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
 | `nxkit-ipc` | the IPC server: HIPC and CMIF, domains, the service manager `sm:`, the count of every command, the stop on an unknown command |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline`. Each has `exports()` and `services()`, and a service that needs the big stack has `big_stack_exports()`. `fs` and `offline` exist |
+| `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
+| `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline`. `nxkit-svc-video` exists: it replaces `movie::Decoder` and the `nn::codec` video decoders and decodes VP9 with VideoToolbox |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
@@ -87,6 +89,7 @@ The core rules of Horizon are off by default (R9). When a title turns them on, `
 |---|---|---|
 | H1 | the seam and the service `offline` | Breath of the Wild runs with `offline` on nxkit, and the log shows its lookups going to nxkit |
 | H2 | `fs`, `input`, `audio`, `system`, `video` on nxkit | each one ran a fixed route of the game with the same result as nxnative. `fs` has the `nn::fs` functions of nxnative at SDK level and `fsp-srv` over `nxkit-ipc` |
+| H2 | `fs`, `input`, `audio`, `system`, `video` on nxkit | each one ran a fixed route of the game with the same result as nxnative. For `video` the route plays a cut scene of Breath of the Wild (VP9, 1080p, 30 fps) with VideoToolbox (R43, R44) |
 | H3 | `gpu` on nxkit for Breath of the Wild | the game's NVN function list is complete in nxkit, and the route runs with GPU time at or below nxnative |
 | H4 | `pacing` on nxkit | the game holds 60 and 120 fps on a 120 Hz display at the right game speed |
 | H5 | `kernel` and the `nxkit-host` program | the game starts from `nxkit-host` without `dmhost` |
