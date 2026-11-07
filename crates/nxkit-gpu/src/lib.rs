@@ -11,12 +11,15 @@
 
 #![cfg(target_os = "macos")]
 
+mod backend;
 mod barriers;
+mod blit;
 mod bindless;
 pub mod detail;
 mod draws;
 mod encode;
 mod format_map;
+mod guest;
 mod gpu;
 mod icbs;
 mod jobs;
@@ -24,11 +27,14 @@ mod json;
 mod passes;
 mod pipelines;
 mod programs;
+mod settings;
 pub mod stats;
 mod textures;
 mod translate;
 mod upload;
 mod walk;
 
+pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
+pub use settings::GpuSettings;
 pub use stats::{EncodeReport, EncodeStats, Skip};
