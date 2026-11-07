@@ -5,6 +5,7 @@ Usage: gen_rewrite_patches.py <engine folder holding dm/> <out.tsv>
 Loads sdk_patches.py and every dm/games/*/patches.py the way dm/tools/patch_nso.py load_patches() does and writes their
 CUTS, OBS, CAPABILITIES, FRAME_STEP build IDs and MATCH_CUTS rules, the build rows of every profile's game.tsv, and the
 SHA-256 of each source file (path relative to dm/tools).
+Games that have a title module (TITLE_MODULES) are left out: their rules are the title module's own data (R2).
 The snapshot is data/rewrite-rules/snapshot.tsv. Make the rule files from it with `nxb rewrite-rules data/rewrite-rules/snapshot.tsv data/rewrite-rules`.
 The patch data comes from the nxnative engine (MIT, see THIRD_PARTY.md and data/rewrite-rules/NOTICE)."""
 import glob, hashlib, importlib.util, os, sys, types
@@ -53,7 +54,9 @@ def B(frm, to):
     if isinstance(frm, Sym) or isinstance(to, Sym): return Tok('b', sym(frm), sym(to))
     return _real['B'](frm, to)
 nso_asm.ADRP, nso_asm.B = ADRP, B
-files = [os.path.join(tools, 'sdk_patches.py')] + sorted(glob.glob(os.path.join(tools, '../games/*/patches.py')))
+TITLE_MODULES = {'01007EF00011E000'}
+def has_module(path): return os.path.basename(os.path.dirname(path)) in TITLE_MODULES
+files = [os.path.join(tools, 'sdk_patches.py')] + sorted(p for p in glob.glob(os.path.join(tools, '../games/*/patches.py')) if not has_module(p))
 def esc(s): return str(s).replace('\\', '\\\\').replace('\t', '\\t').replace('\n', '\\n')
 def row(*c): return '\t'.join(esc(x) for x in c) + '\n'
 lines = []
@@ -120,6 +123,7 @@ for n, path in enumerate(files):
                     lines.append(row('rule', scope, module, rule['name'], ri, 0, rule['size'], ','.join(rule['fingerprints'])))
                     for d, ob, nb, why in rule['cuts']: lines.append(row('rcut', scope, module, rule['name'], ri, 0, d, ob, nb, why))
 for tsv in sorted(glob.glob(os.path.join(engine, 'dm', 'games', '*', 'game.tsv'))):
+    if has_module(tsv): continue
     prof = os.path.basename(os.path.dirname(tsv))
     lines.append(row('file', os.path.relpath(tsv, tools), hashlib.sha256(open(tsv, 'rb').read()).hexdigest()))
     for r in open(tsv, encoding='utf-8').read().splitlines():
