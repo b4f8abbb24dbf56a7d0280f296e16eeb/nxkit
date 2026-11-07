@@ -65,7 +65,7 @@ pub fn module_files(run: &Path, mods: &[(Built, u64)]) -> Result<(), String> {
     for (b, _) in mods {
         let at = |s: &str| dir.join(format!("{}.{s}", b.name));
         put(&at("bin"), &b.image)?;
-        put(&at("imports.json"), manifest::symbols_json(&b.symbols.imports).as_bytes())?;
+        put(&at("imports.json"), manifest::imports_json(&b.symbols.imports).as_bytes())?;
         put(&at("exports.json"), manifest::symbols_json(&b.symbols.exports).as_bytes())?;
         put(&at("fixups.tsv"), b.fixups.as_bytes())?;
         put(&at("gates.tsv"), &b.gates)?;
