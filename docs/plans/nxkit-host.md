@@ -107,8 +107,10 @@ The part of H4 that exists (R28 to R30):
 - `nxkit-metal` has the `Pacer`, which turns every display link tick into a decision (present a new frame with `presentAtTime`, hold the last frame, or make an interpolated frame). It has the present plan policy, the render scale policy, `SpatialUpscaler` and `FrameInterpolator` over MetalFX, and `PacingStats` (present time, missed ticks, frame interval histogram).
 - `nxkit-svc-pacing` exports `nn::vi::GetDisplayVsyncEvent` and signals it from the display ticks at the game's vsync rate. It owns the frame step state page and the variable step.
 - `nxgame-botw` carries the frame step, cut, render scale, render pool and output size rules as data, and its `pacing()` hook says `Display`.
+- `nxkit-svc-pacing` has the load-driven step of nxnative (`StepMode::Load`, R30a), the take-overs of `hle_fpslock.c` for engines with their own limiter (`Limits`, R30b) and the present interval rules. The host calls `frame_presented` once for each present and reads `hold()`, `present_vsyncs` and `deadline_vsyncs`.
+- `nxtitle` has `pace_profile`, and `nxgame-botw` sets `fps_target 60`, `fps_hold on`, `present_snap on` and `present_interval game` (R30c).
 
-What is still open for H4: the host that creates the `Pacer` and calls the service, the encoder that applies the render scale, a motion and depth source for the interpolator, the `nxkit-abi` function that looks up a guest symbol, and a run on a 120 Hz display.
+What is still open for H4: the host that creates the `Pacer`, builds the `PresentSample` (GPU time of the frame, present snapshots, thermal state, performance counters) and calls the service, the map from `hold` to ticks of the link in the `Pacer`, the encoder that applies the render scale, a motion and depth source for the interpolator, the `nxkit-abi` function that looks up a guest symbol, and a run on a 120 Hz display.
 
 What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, compute ICBs, and the tuning of frame latency on real hardware.
 
