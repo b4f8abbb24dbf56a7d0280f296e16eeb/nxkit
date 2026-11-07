@@ -24,6 +24,8 @@ pub enum Op {
     EndRecording,
     /// Gives a command buffer a block of command memory.
     AddCommandMemory,
+    /// Sets the memory callback, its data or its enabled flag.
+    SetMemoryCallback,
     /// Asks how much command memory is used, free or in total.
     CommandMemoryInfo,
     /// The CPU waits for the GPU. This flushes the frame early.
@@ -96,6 +98,15 @@ pub const RECORDED: &[(&str, Op)] = &[
     (
         "nvnCommandBufferGetCommandMemorySize",
         Op::CommandMemoryInfo,
+    ),
+    ("nvnCommandBufferSetMemoryCallback", Op::SetMemoryCallback),
+    (
+        "nvnCommandBufferSetMemoryCallbackData",
+        Op::SetMemoryCallback,
+    ),
+    (
+        "nvnCommandBufferSetCommandMemoryCallbackEnabled",
+        Op::SetMemoryCallback,
     ),
     ("nvnQueueFinish", Op::CpuWait),
     ("nvnSyncWait", Op::CpuWait),

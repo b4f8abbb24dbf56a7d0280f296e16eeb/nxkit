@@ -8,6 +8,8 @@
 //! runs the pass analysis and keeps the frame for the backend. The next [`FrontEnd::begin_frame`] drops the frame
 //! and keeps its memory.
 
+use std::collections::HashMap;
+
 use crate::analyse::Analyser;
 use crate::cache::{CacheStats, RecCache};
 use crate::cmdbuf::{CommandBuffer, CommandHandle};
@@ -41,6 +43,23 @@ pub struct FlushStats {
     pub cpu_wait: u64,
 }
 
+/// The memory callback of a game (`nvnCommandBufferSetMemoryCallback`). The host implements it
+/// and keeps the callback data of the game inside.
+pub trait MemoryCallback: std::fmt::Debug {
+    /// The command buffer `cb` needs `needed` more bytes. The result is a block as host address and length.
+    /// None means that the game gives no memory.
+    fn command_memory(&mut self, cb: usize, needed: u32) -> Option<(u64, u64)>;
+}
+
+/// How often the front end asks the callback for one record.
+pub const MAX_CALLBACK_TRIES: u32 = 4;
+
+#[derive(Debug)]
+struct Callback {
+    hook: Box<dyn MemoryCallback>,
+    enabled: bool,
+}
+
 /// The NVN front end.
 #[derive(Debug)]
 pub struct FrontEnd<S: GpuSpace, M: GuestMem> {
@@ -49,6 +68,7 @@ pub struct FrontEnd<S: GpuSpace, M: GuestMem> {
     table: ResourceTable,
     descriptors: Descriptors,
     buffers: Vec<CommandBuffer>,
+    callbacks: HashMap<usize, Callback>,
     cache: RecCache,
     frame: Frame,
     plan: PassPlan,
@@ -66,6 +86,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             table: ResourceTable::new(),
             descriptors: Descriptors::new(),
             buffers: Vec::new(),
+            callbacks: HashMap::new(),
             cache: RecCache::new(),
             frame: Frame::new(),
             plan: PassPlan::new(),
@@ -188,10 +209,50 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.buffer(cb).begin_recording()
     }
 
-    /// Writes a record. [`NvnError::OutOfCommandMemory`] tells the host to call the memory callback
-    /// of the game, to add memory and to write the record again.
+    /// `nvnCommandBufferSetMemoryCallback`. None removes the callback. A new callback is enabled.
+    pub fn set_memory_callback(&mut self, cb: usize, hook: Option<Box<dyn MemoryCallback>>) {
+        match hook {
+            Some(hook) => {
+                self.callbacks.insert(
+                    cb,
+                    Callback {
+                        hook,
+                        enabled: true,
+                    },
+                );
+            }
+            None => {
+                self.callbacks.remove(&cb);
+            }
+        }
+    }
+
+    /// `nvnCommandBufferSetCommandMemoryCallbackEnabled`.
+    pub fn set_memory_callback_enabled(&mut self, cb: usize, enabled: bool) {
+        if let Some(c) = self.callbacks.get_mut(&cb) {
+            c.enabled = enabled;
+        }
+    }
+
+    /// Writes a record. When the command memory is full, the front end calls the memory callback of the game,
+    /// adds the block that it gives and writes the record again, up to [`MAX_CALLBACK_TRIES`] times.
+    /// Without an enabled callback, or when it gives no usable block, the error is [`NvnError::OutOfCommandMemory`].
     pub fn write(&mut self, cb: usize, rec: Record) -> Result<()> {
         self.buffer(cb);
+        for _ in 0..MAX_CALLBACK_TRIES {
+            let need = match self.buffers[cb].write(&mut self.mem, rec) {
+                Err(NvnError::OutOfCommandMemory { need }) => need,
+                other => return other,
+            };
+            let block = match self.callbacks.get_mut(&cb) {
+                Some(c) if c.enabled => c.hook.command_memory(cb, need),
+                _ => None,
+            };
+            let Some((host, len)) = block else {
+                return Err(NvnError::OutOfCommandMemory { need });
+            };
+            self.add_command_memory(cb, host, len)?;
+        }
         self.buffers[cb].write(&mut self.mem, rec)
     }
 

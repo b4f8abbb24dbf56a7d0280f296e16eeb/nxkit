@@ -33,7 +33,7 @@ The decision is R17 in [decisions.md](decisions.md#part-3-runtime-decisions).
 - A draw, a dispatch, a clear and a state change take 8 bytes. A texture bind, a call and a jump take 16 bytes. A copy takes 24 bytes. `SetTargets` takes up to 88 bytes. A test checks these sizes.
 - A record holds guest GPU addresses. A texture is named by the GPU address of its first byte. `GuestMem` reads and writes the memory, because this crate has no `unsafe` code. `VecMem` is the implementation for tests.
 - `nvnCommandBufferGetCommandMemoryUsed` counts from the last added block, as in nxnative. `GetCommandMemoryFree` is what is left in the current block.
-- A record that does not fit goes to the next block behind a jump. When no block is left, `write` returns `OutOfCommandMemory` and changes nothing. The host calls the memory callback of the game and writes the record again.
+- A record that does not fit goes to the next block behind a jump. When no block is left, `cmdbuf` returns `OutOfCommandMemory` and changes nothing. `FrontEnd::write` then calls the memory callback of the game through the host trait `MemoryCallback`, adds the block that it gives and writes the record again, at most 4 times. Without an enabled callback, or when it gives no usable block, the caller gets `OutOfCommandMemory`.
 - The handle of a recording is the host address of its first record.
 
 ### Summaries and the cache

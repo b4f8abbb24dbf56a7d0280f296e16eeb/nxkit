@@ -2,7 +2,7 @@ use crate::cmdbuf::CommandHandle;
 use crate::descriptors::Descriptors;
 use crate::error::NvnError;
 use crate::frame::{Cmd, DrawState, MAX_COLOR};
-use crate::front::{FlushReason, FlushStats, FrontEnd};
+use crate::front::{FlushReason, FlushStats, FrontEnd, MemoryCallback};
 use crate::layout::{Target, TextureDesc};
 use crate::mem::VecMem;
 use crate::passes::{LoadAction, StoreAction};
@@ -378,4 +378,99 @@ fn a_cpu_write_to_texture_memory_is_found() {
         Residency::GuestNewer
     );
     assert!(f.guest_wrote(HOST - 1, 64).is_err());
+}
+
+#[derive(Debug)]
+struct Blocks {
+    next: u64,
+    len: u64,
+    asked: Vec<(usize, u32)>,
+}
+
+impl MemoryCallback for Blocks {
+    fn command_memory(&mut self, cb: usize, needed: u32) -> Option<(u64, u64)> {
+        self.asked.push((cb, needed));
+        let at = self.next;
+        self.next += 0x1000;
+        (self.len > 0).then_some((at, self.len))
+    }
+}
+
+#[test]
+fn the_front_end_calls_the_memory_callback_and_retries() {
+    let mut f = fe();
+    f.set_memory_callback(
+        0,
+        Some(Box::new(Blocks {
+            next: CMD + 0x1000,
+            len: 64,
+            asked: vec![],
+        })),
+    );
+    f.add_command_memory(0, CMD, 64).unwrap();
+    f.begin_recording(0).unwrap();
+    for _ in 0..20 {
+        f.write(0, Record::Draw).unwrap();
+    }
+    let h = f.end_recording(0).unwrap();
+    f.submit(h).unwrap();
+    assert_eq!(f.frame().cmds.len(), 20);
+}
+
+#[test]
+fn without_a_usable_callback_the_error_stays() {
+    let mut f = fe();
+    f.add_command_memory(0, CMD, 64).unwrap();
+    f.begin_recording(0).unwrap();
+    for _ in 0..6 {
+        f.write(0, Record::Draw).unwrap();
+    }
+    let full = Err(NvnError::OutOfCommandMemory { need: 24 });
+    assert_eq!(f.write(0, Record::Draw), full);
+    // a callback that gives nothing, and one that is disabled
+    f.set_memory_callback(
+        0,
+        Some(Box::new(Blocks {
+            next: CMD + 0x1000,
+            len: 0,
+            asked: vec![],
+        })),
+    );
+    assert_eq!(f.write(0, Record::Draw), full);
+    f.set_memory_callback(
+        0,
+        Some(Box::new(Blocks {
+            next: CMD + 0x1000,
+            len: 64,
+            asked: vec![],
+        })),
+    );
+    f.set_memory_callback_enabled(0, false);
+    assert_eq!(f.write(0, Record::Draw), full);
+    f.set_memory_callback_enabled(0, true);
+    f.write(0, Record::Draw).unwrap();
+}
+
+#[test]
+fn a_callback_that_gives_too_little_memory_is_not_asked_forever() {
+    let mut f = fe();
+    f.set_memory_callback(
+        0,
+        Some(Box::new(Blocks {
+            next: CMD + 0x1000,
+            len: 64,
+            asked: vec![],
+        })),
+    );
+    f.add_command_memory(0, CMD, 64).unwrap();
+    f.begin_recording(0).unwrap();
+    let big = Record::SetTargets {
+        color: [GPU; MAX_COLOR],
+        depth: GPU,
+    };
+    // 88 bytes and 16 for a jump do not fit in blocks of 64 bytes
+    assert!(matches!(
+        f.write(0, big),
+        Err(NvnError::OutOfCommandMemory { .. })
+    ));
 }
