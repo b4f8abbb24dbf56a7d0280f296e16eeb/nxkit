@@ -28,7 +28,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-svc-input"]
 
 [objc2-foundation]
 reason = "NSString, NSURL, NSArray and NSError, which the Metal API takes and returns"
@@ -37,7 +37,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-svc-input"]
 
 [objc2-core-foundation]
 reason = "CGSize and CFTimeInterval, used by Metal and CoreAnimation signatures"
@@ -46,7 +46,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal"]
+used_by = ["nxkit-metal", "nxkit-svc-input"]
 
 [objc2-core-haptics]
 reason = "CHHapticEngine and its patterns, the rumble output of nxkit-svc-input (one engine per controller handle)"

@@ -1,0 +1,65 @@
+[package]
+name = "nxkit-svc-input"
+description = "The input service of the nxkit host: nn::hid through GameController, rumble through Core Haptics and the hid IPC service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L0"
+in_v = false
+
+[dependencies]
+nxkit-abi = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-core-foundation = { workspace = true, features = ["std"] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSSet", "NSString"] }
+objc2-game-controller = { workspace = true, features = [
+    "std",
+    "objc2-core-foundation",
+    "objc2-core-haptics",
+    "GCController",
+    "GCControllerAxisInput",
+    "GCControllerButtonInput",
+    "GCControllerDirectionPad",
+    "GCControllerElement",
+    "GCDevice",
+    "GCDeviceHaptics",
+    "GCDeviceHapticsLocality",
+    "GCExtendedGamepad",
+    "GCKeyCodes",
+    "GCKeyboard",
+    "GCKeyboardInput",
+    "GCMotion",
+    "GCMouse",
+    "GCMouseInput",
+    "GCPhysicalInputProfile",
+] }
+objc2-core-haptics = { workspace = true, features = [
+    "std",
+    "CHHapticEngine",
+    "CHHapticEvent",
+    "CHHapticParameter",
+    "CHHapticPattern",
+    "CHHapticPatternPlayer",
+] }
+
+# Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which calls GameController
+# and Core Haptics.
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
