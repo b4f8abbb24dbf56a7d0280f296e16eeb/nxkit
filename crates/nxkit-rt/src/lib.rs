@@ -23,6 +23,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod kernel;
+pub mod nvn;
 mod offline;
 
 pub use kernel::{
@@ -92,7 +93,15 @@ pub struct Entry {
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
 pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
-    TABLE.get_or_init(offline::entries)
+    TABLE.get_or_init(|| {
+        let mut all = offline::entries();
+        all.push(Entry {
+            name: nvn::BOOTSTRAP_LOADER_NAME,
+            service: Service::Gpu,
+            addr: nvn::nvn_bootstrap_loader as extern "C" fn(u64) -> u64 as usize,
+        });
+        all
+    })
 }
 
 /// The mask of enabled services. Zero before init.
