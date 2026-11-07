@@ -1,18 +1,23 @@
-//! The video service: the `movie::Decoder` of the game's SDK, for a VP9 stream, decoded by VideoToolbox.
+//! The video service: the `movie::Decoder` and the `nn::codec` video decoders of the game's SDK, for VP9 streams
+//! decoded by VideoToolbox.
 //!
 //! Breath of the Wild plays its cut scenes as VP9 WebM files (R43). The game's SDK decoder would open the NVIDIA
-//! decoder device, so this crate answers the methods of `movie::Decoder` itself (R14). It opens no IPC service.
+//! decoder device, so this crate answers the methods of `movie::Decoder` itself (R14). The `nn::codec` video decoders
+//! of the Switch 2 SDK are answered the same way, with the same decoder. It opens no IPC service.
 //!
 //! The host calls [`init`] with a [`Config`] before the game starts, and puts [`exports`] into the import table of the
 //! game. [`movie_playing`] tells the pacing service that a movie is on screen.
 
 mod backend;
+mod codec;
+mod codec_exports;
 mod decoder;
 mod exports;
 mod frame;
 mod guest_api;
 mod pacing;
 mod vp9;
+mod yuv;
 
 #[cfg(target_os = "macos")]
 mod sys;
@@ -25,6 +30,7 @@ use std::time::Duration;
 use nxkit_abi::export::Export;
 use nxkit_abi::ipc::Named;
 
+pub use codec::{NativeImage, native_image, native_image_blank, native_image_blank_free};
 pub use frame::{Frame, Nv12};
 pub use pacing::playing as movie_playing;
 
@@ -37,6 +43,16 @@ pub trait Host: Send + Sync {
     /// Runs `job` on a guest thread after `delay`. `SignalEvent` of the game's SDK is guest code, so the events of a
     /// decoder go out through this.
     fn run_on_guest_thread(&self, delay: Duration, job: Box<dyn FnOnce() + Send>);
+
+    /// Makes the `nn::os::SystemEventType` at `event` (a guest address) an event of the host that is not signalled and
+    /// clears by hand. The decoders of `nn::codec` and the sync point events use it.
+    fn bind_system_event(&self, event: u64);
+
+    /// Signals the system event at `event`.
+    fn signal_system_event(&self, event: u64);
+
+    /// Clears the system event at `event`.
+    fn clear_system_event(&self, event: u64);
 }
 
 /// Takes a decoded picture into a texture of the game when the game asks for native texture output.
@@ -68,9 +84,17 @@ pub(crate) fn config() -> Option<Config> {
     CONFIG.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
-/// The functions that replace the methods of `movie::Decoder`.
+/// The functions that replace the methods of `movie::Decoder` and the decoder service of `nn::codec`.
 pub fn exports() -> Vec<Export> {
-    exports::table()
+    let mut all = exports::table();
+    all.extend(codec_exports::table());
+    all
+}
+
+/// The exports that must run on a big host stack, because a guest stack can be 8 KB. It is empty: the decoders that
+/// need a large stack run on a thread of their own that the call waits for.
+pub fn big_stack_exports() -> Vec<Export> {
+    Vec::new()
 }
 
 /// The Horizon services of this crate. It has none: a movie needs no IPC service.

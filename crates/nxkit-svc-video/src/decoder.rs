@@ -510,7 +510,7 @@ impl Shared {
     }
 }
 
-fn decode_packet(
+pub(crate) fn decode_packet(
     backend: &mut Option<(Box<dyn Backend>, u32, u32)>,
     open: Opener,
     data: &[u8],

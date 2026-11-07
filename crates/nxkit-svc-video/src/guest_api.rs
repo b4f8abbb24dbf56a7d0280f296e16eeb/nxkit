@@ -70,6 +70,39 @@ fn load(host: &dyn Host) -> Result<Fns, String> {
 
 static FNS: OnceLock<Result<Fns, String>> = OnceLock::new();
 
+/// The functions of `nn::os` that the decoder service of `nn::codec` calls.
+pub(crate) struct OsFns {
+    pub(crate) destroy_system_event: extern "C" fn(u64),
+    pub(crate) try_wait_system_event: extern "C" fn(u64) -> u32,
+    pub(crate) init_multi_wait_holder: extern "C" fn(u64, u64),
+}
+
+fn load_os(host: &dyn Host) -> Result<OsFns, String> {
+    let destroy = symbol(host, "_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE")?;
+    let try_wait = symbol(host, "_ZN2nn2os18TryWaitSystemEventEPNS0_15SystemEventTypeE")?;
+    let holder = symbol(host, "_ZN2nn2os25InitializeMultiWaitHolderEPNS0_19MultiWaitHolderTypeEPNS0_15SystemEventTypeE")?;
+    // SAFETY: each address is the entry of the `nn::os` function of the symbol, which takes pointers (here guest
+    // addresses) in the first registers and gives a `bool` in `w0`, read as a `u32` that the caller masks.
+    unsafe {
+        Ok(OsFns {
+            destroy_system_event: std::mem::transmute::<usize, extern "C" fn(u64)>(destroy),
+            try_wait_system_event: std::mem::transmute::<usize, extern "C" fn(u64) -> u32>(try_wait),
+            init_multi_wait_holder: std::mem::transmute::<usize, extern "C" fn(u64, u64)>(holder),
+        })
+    }
+}
+
+static OS_FNS: OnceLock<Result<OsFns, String>> = OnceLock::new();
+
+/// The `nn::os` functions of the game that `init` was given, or the name of the first symbol that is missing.
+pub(crate) fn os_fns() -> Result<&'static OsFns, String> {
+    let r = OS_FNS.get_or_init(|| match crate::config() {
+        Some(c) => load_os(&*c.host),
+        None => Err("the video service was not initialised".to_string()),
+    });
+    r.as_ref().map_err(Clone::clone)
+}
+
 /// The SDK functions of the game that `init` was given, or the name of the first symbol that is missing.
 pub(crate) fn fns() -> Result<&'static Fns, String> {
     let r = FNS.get_or_init(|| match crate::config() {

@@ -92,6 +92,16 @@ impl Frame {
         let uv = all.split_off(stride * slice);
         Ok(Nv12 { y: all, y_stride: stride, uv, uv_stride: stride })
     }
+
+    /// The picture as RGBA bytes, `width * 4` bytes a row and `height` rows, by the colour space of the picture. A
+    /// picture smaller than `width` by `height` is padded with opaque black, a larger one is cropped.
+    pub fn to_rgba(&self, width: u32, height: u32) -> Result<Vec<u8>, String> {
+        let planes = self.to_nv12()?;
+        let (w, h) = (width as usize, height as usize);
+        let mut out = vec![0u8; w * h * 4];
+        crate::yuv::nv12_to_rgba(&planes, self.width as usize, self.height as usize, self.colorspace, &mut out, w, h);
+        Ok(out)
+    }
 }
 
 /// Copies `rows` rows of `len` bytes from `src` to `dst`. A source that is too short for a row ends the copy.
