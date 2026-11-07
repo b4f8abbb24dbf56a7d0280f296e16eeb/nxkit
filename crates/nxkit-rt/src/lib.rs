@@ -11,7 +11,8 @@
 //! - It is `extern "C"` and takes an argument of fewer than 32 bits as `u32`, because Switch code does not extend it.
 //! - It is never variadic, because Switch code passes variadic arguments in registers.
 //! - A function that needs a large stack must switch to a host stack, because a guest stack can be 8 KB.
-//!   No service needs this yet and none switches.
+//!   The audio functions that start and stop Core Audio need this. They are in [`big_stack_entries`] and the host finds them
+//!   with [`nxkit_hle_find_big`]. The host runs them on a big stack. No other service needs this.
 //!
 //! The `kernel` service forwards svc calls to `nxkit-hos` ([`nxkit_svc`]). The kernel is created by
 //! [`nxkit_kernel_init`] and the host calls it from the gate of every svc.
@@ -22,9 +23,11 @@ use std::ffi::{CStr, c_char, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod audio;
 mod kernel;
 mod offline;
 
+pub use audio::{NxkitAudioConfig, NxkitAudioHost, nxkit_audio_init};
 pub use kernel::{
     NxkitKernelConfig, NxkitRoleRule, NxkitThreadEntry, nxkit_kernel_dump_stats, nxkit_kernel_init,
     nxkit_kernel_set_thread_name, nxkit_svc,
@@ -92,7 +95,19 @@ pub struct Entry {
 /// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
 pub fn entries() -> &'static [Entry] {
     static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
-    TABLE.get_or_init(offline::entries)
+    TABLE.get_or_init(|| {
+        let mut t = offline::entries();
+        t.extend(audio::entries());
+        t
+    })
+}
+
+/// The functions that the host must run on a big host stack, because they call into system frameworks that need more
+/// stack than a game thread leaves. They are not in [`entries`], so a host that does not know about big stacks never
+/// finds them and keeps its own function.
+pub fn big_stack_entries() -> &'static [Entry] {
+    static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
+    TABLE.get_or_init(audio::big_entries)
 }
 
 /// The mask of enabled services. Zero before init.
@@ -133,10 +148,32 @@ pub unsafe extern "C" fn nxkit_hle_find(name: *const c_char) -> *const c_void {
     }
 }
 
+/// Returns the function for a Switch mangled name that the host must run on a big host stack, or NULL.
+/// The rules of [`nxkit_hle_find`] apply. The host asks this first or second, but it must run the function on a big
+/// stack, for example one of 1 MiB.
+///
+/// # Safety
+///
+/// `name` is NULL or points to a NUL-terminated string that stays valid during the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nxkit_hle_find_big(name: *const c_char) -> *const c_void {
+    if name.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: `name` is not NULL and the caller promises a valid NUL-terminated string.
+    let name = unsafe { CStr::from_ptr(name) };
+    match find_in(big_stack_entries(), SERVICES.load(Ordering::Acquire), name.to_bytes()) {
+        Some(addr) => addr as *const c_void,
+        None => std::ptr::null(),
+    }
+}
+
 /// The names of the exported C symbols. The header has one declaration for each.
-pub const EXPORTS: [&str; 6] = [
+pub const EXPORTS: [&str; 8] = [
     "nxkit_init",
     "nxkit_hle_find",
+    "nxkit_hle_find_big",
+    "nxkit_audio_init",
     "nxkit_svc",
     "nxkit_kernel_init",
     "nxkit_kernel_set_thread_name",
