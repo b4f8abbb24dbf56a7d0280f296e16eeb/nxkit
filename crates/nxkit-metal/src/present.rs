@@ -94,15 +94,10 @@ impl Presenter {
             .ok_or(MetalError::Invalid("the layer gave no drawable"))?;
         let size = self.layer.drawableSize();
         let tex = raw.texture();
-        let desc = TextureDesc {
-            width: size.width as u32,
-            height: size.height as u32,
-            format: PRESENT_FORMAT,
-            shader_read: false,
-            shader_write: false,
-            render_target: true,
-            storage: Storage::Private,
-        };
+        let mut desc =
+            TextureDesc::render_target_2d(size.width as u32, size.height as u32, PRESENT_FORMAT);
+        desc.shader_read = false;
+        desc.storage = Storage::Private;
         Ok(Drawable {
             texture: Texture::wrap_external(&self.ctx, tex, desc),
             raw,

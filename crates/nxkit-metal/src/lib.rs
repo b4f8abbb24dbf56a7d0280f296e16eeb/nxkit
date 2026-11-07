@@ -61,4 +61,4 @@ pub use state::{
     TopologyClass, VertexAttribute, VertexDescriptor, VertexFormat, VertexLayout, Winding,
 };
 pub use table::ArgumentTable;
-pub use texture::{Storage, Texture, TextureDesc};
+pub use texture::{Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc};
