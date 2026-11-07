@@ -5,6 +5,11 @@ use nxkit_rt::{
 };
 use std::ptr::null_mut;
 
+fn init(cfg: &NxkitKernelConfig) -> i32 {
+    // SAFETY: a valid configuration without rules. The addresses of the test are live host memory.
+    unsafe { nxkit_kernel_init(cfg) }
+}
+
 fn svc(number: u32, regs: &mut [u64; 8]) -> i32 {
     // SAFETY: `regs` is eight live registers.
     unsafe { nxkit_svc(number, regs.as_mut_ptr()) }
@@ -21,14 +26,8 @@ fn svc_calls_reach_the_kernel_only_when_the_service_is_on() {
         roles: std::ptr::null(),
         role_count: 0,
     };
-    // SAFETY: a valid configuration without rules. The test's addresses are live host memory.
-    assert_eq!(unsafe { nxkit_kernel_init(&cfg) }, 0);
-    // SAFETY: as above.
-    assert_eq!(
-        unsafe { nxkit_kernel_init(&cfg) },
-        1,
-        "a second kernel is refused"
-    );
+    assert_eq!(init(&cfg), 0);
+    assert_eq!(init(&cfg), 1, "a second kernel is refused");
     assert_eq!(svc(0x45, &mut regs), 0, "the service is off");
 
     nxkit_init(Service::Kernel.bit());
