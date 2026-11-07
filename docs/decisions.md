@@ -1,7 +1,7 @@
 # Decisions
 
 This document records the architecture decisions and their causes. Part 1 has the workspace decisions W1 to W23.
-They apply where they are different from the two design proposals. Part 2 has the design decisions of the shader step and of the other stages.
+They apply where they are different from the two design proposals. Part 2 has the design decisions of the shader step and of the other stages. Part 3 has the runtime decisions R1 to R16.
 
 ## Principles
 
@@ -78,3 +78,26 @@ and shared APIs. The designs set the behavior.
 | E7 | One `nxb build` with one task graph. Stage commands first, as a migration step. | One graph lets the extract feed the split and the shader step feed the archive. |
 | E8 | Own zstd decoder in `nxb-split`, standard library only. | NSZ, XCZ and `.zs` files use zstd. The workspace has no external crates. |
 | E9 | No own GPU code generator. | Closed plugin, private format and ISA (refer to [research/backend-survey.md](research/backend-survey.md)). |
+
+## Part 3: runtime decisions
+
+These decisions are for the nxkit host, which runs a game without nxnative. The plan is [plans/nxkit-host.md](plans/nxkit-host.md).
+
+| # | decision | cause |
+|---|---|---|
+| R1 | The shader translator of the host is `nxb-xlate`. | It already writes the Mac shader libraries of every build (D20). The host reads the same reflection as the build. |
+| R2 | The rewrite rules are nxkit's own. The core and the title module hold them. | `nxb-rewrite` already holds its rules as data. A rule for one game stays in the module of that game. |
+| R3 | Guest memory is one no-copy `MTLBuffer`. The GPU address the game sees is the `gpuAddress` of that buffer plus the offset of the host address. A shader reads guest memory through a `device` pointer made from that address. There is no translation table. | Measured on 2026-11-07 on an M2 Max with macOS 27.2: no-copy buffers of 4 and 8 GiB work, and `maxBufferLength` is 18.72 GiB. An MSL 4.1 shader read and wrote guest memory 3 GiB into a 4 GiB buffer through a `ulong` cast. A table costs a lookup on every address. |
+| R4 | Render targets live only in Metal. They go back to guest memory only when the game reads those bytes. | Apple GPUs keep attachments in tile memory during a render pass. Breath of the Wild loads and stores about 800 MB a frame on nxnative. |
+| R5 | `nxkit-metal` binds Metal in Rust with `objc2-metal`, at a pinned commit of `main` until a release has the Xcode 27 headers (madsmtm/objc2#892). The `unsafe` calls stay inside `nxkit-metal`. | Metal is the only native GPU API on the Mac. The crate is Zlib, Apache-2.0 or MIT, which GPL-3.0 can take. Checked on 2026-11-07: `main` has the Xcode 27.1 headers, and crates.io has 0.3.2 from 2025-10-04. The cost of one Metal call is the same for every binding. The number of calls sets the speed. |
+| R6 | Each guest thread is one macOS thread. The structure of the game's threads does not change. | The game's own synchronisation assumes its threads. The M2 Max has 8 performance and 4 efficiency cores, more than the 3 cores a Switch game gets. |
+| R7 | There is no global lock. A guest lock waits on its own word in guest memory with `os_sync_wait_on_address`. | nxnative runs every kernel call under one mutex `G` in `dm/host/hle_thread.c`, with 49 lock sites. A wait on the word itself shares no lock. The call exists since macOS 14.4. |
+| R8 | A thread's QoS class follows its role, not its Switch priority. The title module names the roles. Render and audio run at user-interactive. Loading and streaming may run on the efficiency cores. | A Switch priority orders threads on one core. It says nothing about the type of core. nxnative runs every thread at user-interactive by default, because `DM_QOS_MAP` is off. |
+| R9 | The core rules of Horizon (a thread runs before every lower priority thread of its core) are copied only where a game needs them. That is a fact of the family or the title. | nxnative copies them for every game by polling with 50 µs sleeps (`dm_yield_to_core_peers`). It added them for a few games. |
+| R10 | nxkit's own work runs like a native game: a job system on the free cores, `os_workgroup` for the frame, and the GPU encoding of frame N while the game builds frame N+1. | The game's threads leave cores free. Encoding next to the game keeps the GPU busy without slowing the game. |
+| R11 | A patch of a game's thread structure comes only if the game stays slow on the CPU after R6 to R10. | A patch changes the game and needs its own proof for each game. |
+| R12 | `nxkit-host` owns the window. It uses AppKit and a `CAMetalLayer`. | This is the native path of a Mac game. |
+| R13 | Saves have the same layout as on nxnative. If this costs speed, the layout changes. | A save moves between the two hosts while both are in use. |
+| R14 | A service answers at the level of the SDK functions. The loader writes the address of the nxkit function into the import table of the game's module. Other calls reach an IPC server in nxkit. | A call is then a plain branch. An IPC request costs a message write and a parse on each call. |
+| R15 | Nothing falls back in silence. A command the IPC server does not know stops the game with its name, service and command ID. | A silent fallback hides a missing service until a crash far from the cause. |
+| R16 | Measurement is part of the host from the start: CPU and GPU time of every frame, and the count of every IPC command. | Step H3 is done only when GPU time is at or below nxnative. That needs numbers from the first run. |

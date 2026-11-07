@@ -54,20 +54,7 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-- The shader translator is `nxb-xlate`, nxkit's own.
-- The rewrite rules are nxkit's own. The core and the title module hold them.
-- `nxkit-host` owns the window. It uses AppKit and a `CAMetalLayer`.
-- Saves have the same layout as on nxnative, so a save moves between the two. If this costs speed, the layout changes.
-- Each guest thread is one macOS thread. The structure of the game's threads does not change.
-- There is no global lock. A guest lock waits on its own word in guest memory with `os_sync_wait_on_address` (macOS 14.4).
-- A thread's QoS class follows its role, not its Switch priority. The title module names the roles. Render and audio run at user-interactive, loading and streaming may run on the efficiency cores.
-- The core rules of Horizon (a thread runs before every lower priority thread of its core) are copied only where a game needs them. That is a fact of the family or the title, not the default.
-- nxkit's own work runs like a native game: a job system on the free cores, `os_workgroup` for the frame, and the GPU encoding of frame N while the game builds frame N+1.
-- If Breath of the Wild stays slow on the CPU after that, a patch of its thread structure for this game is the next step.
-- Measurement is part of the host from the start: CPU and GPU time of every frame, and the count of every IPC command.
-- Guest memory is one no-copy `MTLBuffer`. The GPU address the game sees is the Metal `gpuAddress` of that buffer plus the offset of the host address. There is no translation table. A shader reads guest memory through a `device` pointer made from that address.
-- Render targets live only in Metal. They are copied back to guest memory only when the game reads those bytes.
-- `nxkit-metal` binds Metal in Rust with `objc2-metal`. The crate is Zlib, Apache-2.0 or MIT. Its `main` has the headers of Xcode 27.1 (commit "Update to Xcode 27.1", 2026-10-16). The last release on crates.io is 0.3.2 from 2025-10-04, which stops before macOS 27. Until a release has the new headers, nxkit uses a pinned commit of `main`. The `unsafe` calls stay inside `nxkit-metal`.
+The decisions of the host and their causes are R1 to R16 in [decisions.md](../decisions.md#part-3-runtime-decisions).
 
 ## Apple hardware
 
