@@ -37,6 +37,13 @@ pub enum NvnError {
     FieldRange(&'static str),
     /// A command that needs a render target slot that the game did not set.
     NoTarget(u8),
+    /// The command memory has no room for the next record. The game adds memory and records again.
+    OutOfCommandMemory {
+        /// The bytes that the record needs, including the room for a jump.
+        need: u32,
+    },
+    /// A command record in guest memory is not valid. The text says why.
+    BadRecord(&'static str),
 }
 
 impl fmt::Display for NvnError {
@@ -60,6 +67,10 @@ impl fmt::Display for NvnError {
             }
             Self::FieldRange(what) => write!(f, "value does not fit the descriptor field {what}"),
             Self::NoTarget(slot) => write!(f, "render target slot {slot} is not set"),
+            Self::OutOfCommandMemory { need } => {
+                write!(f, "command memory is full, {need} more bytes are needed")
+            }
+            Self::BadRecord(why) => write!(f, "invalid command record: {why}"),
         }
     }
 }
