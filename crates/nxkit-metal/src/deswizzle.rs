@@ -1,10 +1,16 @@
-//! Block-linear deswizzle as a compute kernel: from guest memory into a texture.
+//! Block-linear kernels between guest memory and textures.
 //!
-//! One thread reads one block (1, 2, 4, 8 or 16 bytes) at its block-linear address and writes it to an unsigned
-//! integer texture. A caller that needs another format makes a view of the same size. The MSL is compiled at run
-//! time. Only 2D, one layer and one level at a time. The layout is the one that `nxkit-nvn` documents for the
-//! Tegra X1 and the Switch 2.
+//! [`Deswizzler`] reads blocks at their block-linear address and writes them to a texture. [`Swizzler`] is the
+//! inverse and writes the pixels of a texture into guest memory, for a game that reads a render target. Both work
+//! on a box of one level and one slice, so a sub-rectangle copy-back is the same call with a smaller region.
+//!
+//! One thread handles one block of 1, 2, 4, 8 or 16 bytes. The kernels see the texture as an unsigned integer image
+//! of that block size, which `encode_region` makes with a view when the texture has another format. The layout
+//! (levels, layers, block heights) is in [`crate::blocklinear`]. The MSL is compiled at run time.
 
+use std::sync::Arc;
+
+use crate::blocklinear::{KernelParams, LevelLayout};
 use crate::compute::{ComputeCommand, ComputePass};
 use crate::device::Context;
 use crate::error::{MetalError, Result};
@@ -13,23 +19,27 @@ use crate::guest::GuestMemory;
 use crate::pipeline::{ComputePipeline, PipelineCache, ShaderLibrary};
 use crate::scratch::Scratch;
 use crate::table::ArgumentTable;
+use crate::texture::{Texture, TextureKind, TextureRegion, ViewDesc};
+
+use crate::blocklinear::{GobOrder, SurfaceLayout};
 
 const KEY: u64 = 0x6e78_6b69_745f_6473; // "nxkit_ds"
 
-/// The MSL source of the kernel.
+/// The MSL source of the kernels: `deswizzle2d`, `deswizzle3d`, `swizzle2d` and `swizzle3d`.
 pub const DESWIZZLE_MSL: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 
 struct Params {
-    ulong src;
-    uint width;
-    uint height;
+    ulong base;
+    uint rows;
+    uint row_bytes;
     uint bytes_per_block;
     uint block_height;
-    uint pitch;
+    uint block_depth;
     uint order;
-    uint pad;
+    uint ox, oy, oz;
+    uint ew, eh, ed;
 };
 
 static inline uint gob_offset(uint x, uint y, uint order) {
@@ -39,44 +49,211 @@ static inline uint gob_offset(uint x, uint y, uint order) {
     return (x % 64 / 32) * 256 + (y % 8 / 4) * 128 + (x % 32 / 16) * 64 + (y % 4 / 2) * 32 + (y % 2) * 16 + x % 16;
 }
 
-kernel void deswizzle(constant Params& p [[buffer(0)]],
-                      texture2d<uint, access::write> dst [[texture(0)]],
-                      uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= p.width || gid.y >= p.height) {
-        return;
-    }
-    uint xb = gid.x * p.bytes_per_block;
+static inline device uchar* block_ptr(constant Params& p, uint3 b) {
+    uint xb = b.x * p.bytes_per_block;
     uint bh = p.block_height;
-    ulong gobs_x = (p.pitch + 63) / 64;
-    ulong block = 512ul * bh;
-    ulong at = (ulong)(gid.y / (8 * bh)) * gobs_x * block
+    uint bd = p.block_depth;
+    ulong gobs_x = (p.row_bytes + 63) / 64;
+    ulong blocks_y = (p.rows + 8 * bh - 1) / (8 * bh);
+    ulong block = 512ul * bh * bd;
+    ulong at = (ulong)(b.z / bd) * gobs_x * blocks_y * block
+             + (ulong)(b.y / (8 * bh)) * gobs_x * block
              + (ulong)(xb / 64) * block
-             + (ulong)((gid.y % (8 * bh)) / 8) * 512
-             + gob_offset(xb, gid.y, p.order);
-    device const uchar* ptr = (device const uchar*)(p.src + at);
+             + (ulong)((b.z % bd) * bh + (b.y % (8 * bh)) / 8) * 512
+             + gob_offset(xb, b.y, p.order);
+    return (device uchar*)(p.base + at);
+}
+
+static inline uint4 load_block(device const uchar* ptr, uint bytes) {
     uint4 v = uint4(0);
-    switch (p.bytes_per_block) {
+    switch (bytes) {
         case 1: v.x = *ptr; break;
         case 2: v.x = *(device const ushort*)ptr; break;
         case 4: v.x = *(device const uint*)ptr; break;
         case 8: v.xy = *(device const uint2*)ptr; break;
         default: v = *(device const uint4*)ptr; break;
     }
-    dst.write(v, gid);
+    return v;
+}
+
+static inline void store_block(device uchar* ptr, uint bytes, uint4 v) {
+    switch (bytes) {
+        case 1: *ptr = (uchar)v.x; break;
+        case 2: *(device ushort*)ptr = (ushort)v.x; break;
+        case 4: *(device uint*)ptr = v.x; break;
+        case 8: *(device uint2*)ptr = v.xy; break;
+        default: *(device uint4*)ptr = v; break;
+    }
+}
+
+kernel void deswizzle2d(constant Params& p [[buffer(0)]],
+                        texture2d<uint, access::write> dst [[texture(0)]],
+                        uint3 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.ew || gid.y >= p.eh || gid.z >= p.ed) { return; }
+    uint3 b = uint3(gid.x + p.ox, gid.y + p.oy, gid.z + p.oz);
+    dst.write(load_block(block_ptr(p, b), p.bytes_per_block), uint2(b.x, b.y));
+}
+
+kernel void deswizzle3d(constant Params& p [[buffer(0)]],
+                        texture3d<uint, access::write> dst [[texture(0)]],
+                        uint3 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.ew || gid.y >= p.eh || gid.z >= p.ed) { return; }
+    uint3 b = uint3(gid.x + p.ox, gid.y + p.oy, gid.z + p.oz);
+    dst.write(load_block(block_ptr(p, b), p.bytes_per_block), b);
+}
+
+kernel void swizzle2d(constant Params& p [[buffer(0)]],
+                      texture2d<uint, access::read> src [[texture(0)]],
+                      uint3 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.ew || gid.y >= p.eh || gid.z >= p.ed) { return; }
+    uint3 b = uint3(gid.x + p.ox, gid.y + p.oy, gid.z + p.oz);
+    store_block(block_ptr(p, b), p.bytes_per_block, src.read(uint2(b.x, b.y)));
+}
+
+kernel void swizzle3d(constant Params& p [[buffer(0)]],
+                      texture3d<uint, access::read> src [[texture(0)]],
+                      uint3 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.ew || gid.y >= p.eh || gid.z >= p.ed) { return; }
+    uint3 b = uint3(gid.x + p.ox, gid.y + p.oy, gid.z + p.oz);
+    store_block(block_ptr(p, b), p.bytes_per_block, src.read(b));
 }
 "#;
 
-/// The order of the 16 byte pieces inside a GOB.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum GobOrder {
-    /// The Tegra X1 order of the Switch.
-    #[default]
-    Tegra,
-    /// The order of the Switch 2.
-    Switch2,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    ToTexture,
+    FromTexture,
 }
 
-/// The geometry of one block-linear surface.
+struct Kernels {
+    d2: ComputePipeline,
+    d3: ComputePipeline,
+    table: ArgumentTable,
+    direction: Direction,
+}
+
+impl Kernels {
+    fn new(ctx: &Context, cache: &PipelineCache, direction: Direction) -> Result<Self> {
+        let lib = ShaderLibrary::from_source(ctx, "nxkit-block-linear", DESWIZZLE_MSL)?;
+        let (n2, n3, k) = match direction {
+            Direction::ToTexture => ("deswizzle2d", "deswizzle3d", KEY),
+            Direction::FromTexture => ("swizzle2d", "swizzle3d", KEY + 2),
+        };
+        Ok(Self {
+            d2: cache.compute(k, &lib, n2)?,
+            d3: cache.compute(k + 1, &lib, n3)?,
+            table: ArgumentTable::new(ctx, 1, 1)?,
+            direction,
+        })
+    }
+
+    fn dispatch(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        job: &KernelParams,
+        tex: &Texture,
+        three_d: bool,
+    ) -> Result<()> {
+        let l = &job.level;
+        let storage = u64::from(l.row_bytes.div_ceil(64))
+            * u64::from(l.height.div_ceil(8 * l.block_height))
+            * u64::from(l.depth.div_ceil(l.block_depth))
+            * 512
+            * u64::from(l.block_height * l.block_depth);
+        let addr = guest.gpu_address_of_offset(job.base, storage)?;
+        let p = scratch.push(&KernelParams { base: addr, ..*job }.to_bytes())?;
+        let pipe = if three_d { &self.d3 } else { &self.d2 };
+        pass.encode(&ComputeCommand::SetPipeline(pipe.clone()))?;
+        pass.encode(&ComputeCommand::SetBuffer {
+            index: 0,
+            gpu_addr: p,
+        })?;
+        pass.encode(&ComputeCommand::SetTexture {
+            index: 0,
+            texture: tex.clone(),
+        })?;
+        let width = pipe.thread_execution_width().max(1) as u32;
+        let height = (pipe.max_threads_per_threadgroup() as u32 / width).clamp(1, 8);
+        pass.encode(&ComputeCommand::DispatchThreads {
+            grid: job.extent,
+            threads: [width, height, 1],
+        })?;
+        pass.retain(guest.clone());
+        pass.retain(tex.clone());
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn region(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        guest_offset: u64,
+        surface: &SurfaceLayout,
+        tex: &Texture,
+        r: &TextureRegion,
+    ) -> Result<()> {
+        let d = tex.desc();
+        let level = surface.level(r.level)?;
+        let want = Format::uint_for_block_bytes(surface.bytes_per_block);
+        if d.format.bytes_per_pixel() != surface.bytes_per_block || want.is_none() {
+            return Err(MetalError::Invalid(
+                "the texture format does not match bytes per block",
+            ));
+        }
+        let [w, h, dep] = d.level_extent(r.level);
+        if (w, h, dep) != (level.width, level.height, level.depth)
+            || d.mip_levels != surface.mip_levels
+            || d.slice_count() != surface.layers
+        {
+            return Err(MetalError::Invalid(
+                "the texture does not match the surface layout",
+            ));
+        }
+        r.check(&d)?;
+        let write = self.direction == Direction::ToTexture;
+        if (write && !d.shader_write) || (!write && !d.shader_read) {
+            return Err(MetalError::Invalid(
+                "the texture is not usable by the kernel",
+            ));
+        }
+        let three_d = d.kind == TextureKind::D3;
+        let stride = surface.layer_stride()?;
+        let base = guest_offset + u64::from(r.slice) * stride + level.offset;
+        let uint = want.unwrap_or(Format::R32Uint);
+        let plain = d.format == uint && d.kind == TextureKind::D2 && d.mip_levels == 1;
+        let target = if plain {
+            tex.clone()
+        } else {
+            tex.view(&ViewDesc {
+                format: uint,
+                kind: if three_d {
+                    TextureKind::D3
+                } else {
+                    TextureKind::D2
+                },
+                first_level: r.level,
+                level_count: 1,
+                first_slice: r.slice,
+                slice_count: 1,
+            })?
+        };
+        let job = KernelParams {
+            base,
+            level,
+            order: surface.order,
+            bytes_per_block: surface.bytes_per_block,
+            origin: r.origin,
+            extent: r.size,
+        };
+        self.dispatch(pass, scratch, guest, &job, &target, three_d)
+    }
+}
+
+/// The geometry of one block-linear level of a 2D texture, as one flat surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeswizzleParams {
     /// The bytes of one block: 1, 2, 4, 8 or 16.
@@ -102,24 +279,25 @@ impl DeswizzleParams {
         }
     }
 
-    fn validate(&self) -> Result<()> {
-        if Format::uint_for_block_bytes(self.bytes_per_block).is_none() {
-            return Err(MetalError::Invalid(
-                "bytes per block must be 1, 2, 4, 8 or 16",
-            ));
-        }
-        if self.width == 0 || self.height == 0 {
-            return Err(MetalError::Invalid("the surface is empty"));
-        }
-        if !(1..=32).contains(&self.block_height) || !self.block_height.is_power_of_two() {
-            return Err(MetalError::Invalid(
-                "block height must be 1, 2, 4, 8, 16 or 32 GOBs",
-            ));
-        }
+    fn surface(&self) -> Result<SurfaceLayout> {
+        let s = SurfaceLayout::single(
+            self.bytes_per_block,
+            self.width,
+            self.height,
+            self.block_height,
+            self.order,
+        );
+        s.validate()?;
         if u64::from(self.row_pitch()) < u64::from(self.width) * u64::from(self.bytes_per_block) {
             return Err(MetalError::Invalid("pitch is smaller than a row"));
         }
-        Ok(())
+        Ok(s)
+    }
+
+    fn level(&self) -> Result<LevelLayout> {
+        let mut l = self.surface()?.level(0)?;
+        l.row_bytes = self.row_pitch();
+        Ok(l)
     }
 
     /// The bytes of the block-linear storage, with the padding of whole GOBs and blocks.
@@ -128,63 +306,63 @@ impl DeswizzleParams {
         let blocks_y = u64::from(self.height).div_ceil(8 * u64::from(self.block_height));
         gobs_x * blocks_y * 512 * u64::from(self.block_height)
     }
-
-    fn to_bytes(self, src: u64) -> [u8; 40] {
-        let mut b = [0u8; 40];
-        b[..8].copy_from_slice(&src.to_le_bytes());
-        let words = [
-            self.width,
-            self.height,
-            self.bytes_per_block,
-            self.block_height,
-            self.row_pitch(),
-            u32::from(self.order == GobOrder::Switch2),
-            0,
-        ];
-        for (i, w) in words.iter().enumerate() {
-            b[8 + i * 4..12 + i * 4].copy_from_slice(&w.to_le_bytes());
-        }
-        b
-    }
 }
 
-/// The kernel and the argument table it needs.
+/// Block-linear guest memory to a texture.
 pub struct Deswizzler {
-    pipeline: ComputePipeline,
-    table: ArgumentTable,
+    k: Kernels,
 }
 
 impl Deswizzler {
-    /// Compiles the kernel through the pipeline cache.
+    /// Compiles the kernels through the pipeline cache.
     pub fn new(ctx: &Context, cache: &PipelineCache) -> Result<Self> {
-        let lib = ShaderLibrary::from_source(ctx, "nxkit-deswizzle", DESWIZZLE_MSL)?;
         Ok(Self {
-            pipeline: cache.compute(KEY, &lib, "deswizzle")?,
-            table: ArgumentTable::new(ctx, 1, 1)?,
+            k: Kernels::new(ctx, cache, Direction::ToTexture)?,
         })
     }
 
-    /// The table that a compute pass must be started with to use [`Deswizzler::encode`].
+    /// The table that a compute pass must be started with to use the `encode` calls.
     pub fn table(&self) -> &ArgumentTable {
-        &self.table
+        &self.k.table
     }
 
-    /// Encodes the deswizzle of one surface of guest memory into `dst`.
+    /// Encodes the deswizzle of a box of one level and slice into `dst`.
     ///
-    /// `guest_offset` is the offset of the surface from the start of the guest memory. `scratch` holds the kernel
-    /// parameters. The pass must have been made with [`Deswizzler::table`].
+    /// `guest_offset` is the offset of the surface (level 0 of layer 0) from the start of the guest memory.
+    /// `scratch` holds the kernel parameters. The texture has the size, levels and slices of `surface`.
+    /// The texture needs `shader_write`, and `allow_views` unless it is a one-level 2D texture of the unsigned
+    /// integer format of the block size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_region(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        guest_offset: u64,
+        surface: &SurfaceLayout,
+        dst: &Texture,
+        region: &TextureRegion,
+    ) -> Result<()> {
+        self.k
+            .region(pass, scratch, guest, guest_offset, surface, dst, region)
+    }
+
+    /// Encodes the deswizzle of one whole 2D level into `dst` (the texture may be larger).
     pub fn encode(
         &self,
         pass: &mut ComputePass<'_>,
         scratch: &Scratch,
-        guest: &std::sync::Arc<GuestMemory>,
+        guest: &Arc<GuestMemory>,
         guest_offset: u64,
-        dst: &crate::texture::Texture,
+        dst: &Texture,
         params: &DeswizzleParams,
     ) -> Result<()> {
-        params.validate()?;
+        let level = params.level()?;
         let d = dst.desc();
-        if Format::uint_for_block_bytes(params.bytes_per_block) != Some(d.format) {
+        if Format::uint_for_block_bytes(params.bytes_per_block) != Some(d.format)
+            || d.kind != TextureKind::D2
+            || d.mip_levels != 1
+        {
             return Err(MetalError::Invalid(
                 "the texture format does not match bytes per block",
             ));
@@ -194,24 +372,53 @@ impl Deswizzler {
                 "the texture is too small or not writable",
             ));
         }
-        let src = guest.gpu_address_of_offset(guest_offset, params.storage_bytes())?;
-        let p = scratch.push(&params.to_bytes(src))?;
-        pass.encode(&ComputeCommand::SetPipeline(self.pipeline.clone()))?;
-        pass.encode(&ComputeCommand::SetBuffer {
-            index: 0,
-            gpu_addr: p,
-        })?;
-        pass.encode(&ComputeCommand::SetTexture {
-            index: 0,
-            texture: dst.clone(),
-        })?;
-        let width = self.pipeline.thread_execution_width().max(1) as u32;
-        let height = (self.pipeline.max_threads_per_threadgroup() as u32 / width).clamp(1, 8);
-        pass.encode(&ComputeCommand::DispatchThreads {
-            grid: [params.width, params.height, 1],
-            threads: [width, height, 1],
-        })?;
-        pass.retain(guest.clone());
-        Ok(())
+        let job = KernelParams {
+            base: guest_offset,
+            level,
+            order: params.order,
+            bytes_per_block: params.bytes_per_block,
+            origin: [0; 3],
+            extent: [params.width, params.height, 1],
+        };
+        self.k.dispatch(pass, scratch, guest, &job, dst, false)
+    }
+}
+
+/// A texture to block-linear guest memory, the copy-back of a render target.
+pub struct Swizzler {
+    k: Kernels,
+}
+
+impl Swizzler {
+    /// Compiles the kernels through the pipeline cache.
+    pub fn new(ctx: &Context, cache: &PipelineCache) -> Result<Self> {
+        Ok(Self {
+            k: Kernels::new(ctx, cache, Direction::FromTexture)?,
+        })
+    }
+
+    /// The table that a compute pass must be started with to use [`Swizzler::encode_region`].
+    pub fn table(&self) -> &ArgumentTable {
+        &self.k.table
+    }
+
+    /// Encodes the copy of a box of one level and slice of `src` to the block-linear surface in guest memory.
+    ///
+    /// The bytes outside the box stay as they are. `src` must have finished rendering in an earlier pass
+    /// (`ComputeCommand::WaitForEarlierPasses`) and needs `shader_read`, and `allow_views` unless it is a one-level
+    /// 2D texture of the unsigned integer format of the block size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_region(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        guest_offset: u64,
+        surface: &SurfaceLayout,
+        src: &Texture,
+        region: &TextureRegion,
+    ) -> Result<()> {
+        self.k
+            .region(pass, scratch, guest, guest_offset, surface, src, region)
     }
 }

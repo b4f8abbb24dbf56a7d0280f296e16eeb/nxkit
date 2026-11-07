@@ -18,6 +18,7 @@
 #![cfg(target_os = "macos")]
 
 mod address;
+mod blocklinear;
 mod compute;
 mod deswizzle;
 mod device;
@@ -36,8 +37,9 @@ mod table;
 mod texture;
 
 pub use address::AddressMap;
+pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
-pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, GobOrder};
+pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, Swizzler};
 pub use device::Context;
 pub use encode::CommandBuffer;
 pub use error::{MetalError, Result};
