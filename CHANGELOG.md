@@ -6,6 +6,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- `nxkit-gpu` has `GpuBackend`, the `Backend` of the NVN front end. It reads the draw detail of each frame from the recordings, encodes a flushed frame with `Gpu::encode_frame`, queues each presented frame and shows it on a display tick with a full-screen blit at `target_presentation_timestamp`. It is not run on a game yet.
+- `nxkit-host` installs the backend, the `Pacer` and the pacing service from `frame_hooks` (`crates/nxkit-host/src/frames.rs`). `Backend::flush_frame` takes a `FlushCx`. `nxkit-metal` has `Pacer::set_source`.
+- The need `vertex_stream_null_bind` is written to `settings` of `game.json` and read by the host, which gives it to `nxkit_rt::nvn::set_command_settings`.
+- `nxkit-rt` gives the cmdbuf group the texture and sampler pool bases and the texture address through `cmdbuf::set_seam`. A texture stores its GPU address in its guest object.
+
 - The crate `nxkit-ipc` is the IPC server of the nxkit host. It parses HIPC and CMIF, keeps sessions and domains, serves `sm:`, counts every command and stops the game on an unknown service or command. It has no global lock.
 - The crate `nxkit-svc-fs` is the `fs` service. It has the `nn::fs` functions of nxnative at SDK level (`exports()` and `big_stack_exports()`) and `fsp-srv` over IPC. The romfs is mapped, and the saves have the nxnative layout. `nxkit-rt` exports `nxkit_hle_find_big` for the functions that need the big host stack.
 - The service `offline` moved from `nxkit-rt` into the crate `nxkit-svc-offline`.
