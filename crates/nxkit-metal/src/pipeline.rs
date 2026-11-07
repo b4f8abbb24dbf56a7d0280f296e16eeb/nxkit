@@ -31,6 +31,11 @@ pub struct ShaderLibrary {
     raw: Retained<ProtocolObject<dyn MTLLibrary>>,
 }
 
+// SAFETY: a library is an immutable, thread safe Metal object.
+unsafe impl Send for ShaderLibrary {}
+// SAFETY: see `Send`.
+unsafe impl Sync for ShaderLibrary {}
+
 impl ShaderLibrary {
     /// Loads a `.metallib` file.
     pub fn from_path(ctx: &Context, path: &Path) -> Result<Self> {
@@ -103,6 +108,16 @@ pub struct RenderPipeline {
     pub(crate) raw: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
 }
 
+// SAFETY: a pipeline state is an immutable, thread safe Metal object.
+unsafe impl Send for RenderPipeline {}
+// SAFETY: see `Send`.
+unsafe impl Sync for RenderPipeline {}
+
+// SAFETY: a pipeline state is an immutable, thread safe Metal object.
+unsafe impl Send for ComputePipeline {}
+// SAFETY: see `Send`.
+unsafe impl Sync for ComputePipeline {}
+
 /// What a render pipeline needs.
 #[derive(Clone)]
 pub struct RenderPipelineDesc<'a> {
@@ -169,6 +184,11 @@ pub struct PipelineCache {
     builds: AtomicU64,
 }
 
+// SAFETY: `MTL4Compiler` accepts calls from several threads, the entry map has a lock and the counters are atomic.
+unsafe impl Send for PipelineCache {}
+// SAFETY: see `Send`.
+unsafe impl Sync for PipelineCache {}
+
 impl PipelineCache {
     /// Makes a cache with its own compiler.
     pub fn new(ctx: &Context, archive: &ArchiveConfig) -> Result<Self> {
@@ -214,12 +234,35 @@ impl PipelineCache {
         lib: &ShaderLibrary,
         function: &str,
     ) -> Result<ComputePipeline> {
+        self.compute_with(key, lib, function, false)
+    }
+
+    /// Like [`PipelineCache::compute`], for a pipeline that a compute indirect command buffer may use.
+    pub fn compute_icb(
+        &self,
+        key: u64,
+        lib: &ShaderLibrary,
+        function: &str,
+    ) -> Result<ComputePipeline> {
+        self.compute_with(key, lib, function, true)
+    }
+
+    fn compute_with(
+        &self,
+        key: u64,
+        lib: &ShaderLibrary,
+        function: &str,
+        support_icb: bool,
+    ) -> Result<ComputePipeline> {
         if let Some(Entry::Compute(p)) = self.lookup(key)? {
             return Ok(p);
         }
         let d = MTL4ComputePipelineDescriptor::new();
         let f = lib.function(function)?;
         d.setComputeFunctionDescriptor(Some(&f));
+        if support_icb {
+            d.setSupportIndirectCommandBuffers(MTL4IndirectCommandBufferSupportState::Enabled);
+        }
         let raw = self
             .compiler
             .newComputePipelineStateWithDescriptor_compilerTaskOptions_error(

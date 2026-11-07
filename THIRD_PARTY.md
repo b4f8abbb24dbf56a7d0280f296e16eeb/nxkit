@@ -191,6 +191,16 @@ freely, subject to the following restrictions:
 
 The header of `nvn_tex.c` also names digitalhivehub and MacNativeGames for the packaged texture layout. The Rust code does not copy their code.
 
+## Frame encoder ported from nxnative
+
+The crate `nxkit-gpu` (`crates/nxkit-gpu/`) takes enum values and tables from the nxnative engine. The nxnative engine is published under the MIT
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above. The code is written anew for the design of nxkit.
+
+| nxkit file | nxnative source |
+|---|---|
+| `crates/nxkit-gpu/src/translate.rs` | the state translation of `dm/gfx/nvn/nvn_mtl.m` (blend, depth, stencil, compare, stencil ops, topology, sampler modes) |
+| `crates/nxkit-gpu/src/format_map.rs` | the format and vertex format tables of `dm/gfx/nvn/nvn_mtl.m` and `nvn.h` |
+
 ## Tools that nxkit starts and does not contain
 
 | tool | licence | use |

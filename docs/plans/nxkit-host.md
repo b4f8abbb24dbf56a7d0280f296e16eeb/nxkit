@@ -34,6 +34,7 @@ The host follows the layers of the workspace and the title layer.
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads. The crate exists with the thread model. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline`. `nxkit-svc-video` exists: it replaces `movie::Decoder` and the `nn::codec` video decoders and decodes VP9 with VideoToolbox |
 | `nxkit-nvn` | the NVN front: the C functions, the objects in guest memory, the recording into a frame format |
+| `nxkit-gpu` | the frame encoder: it turns a held `nxkit-nvn` frame into Metal 4 work with `nxkit-metal`. It has no `unsafe` code and no game knowledge. Refer to [nxkit-gpu.md](../nxkit-gpu.md) |
 | `nxkit-metal` | the Metal 4 backend: it runs a recorded frame. It contains the `unsafe` calls into Metal and gives a safe API |
 | `nxkit-host` | the program: loader, memory, threads, the gates of the rewritten code, the window |
 
@@ -125,6 +126,9 @@ The part of H4 that exists (R28 to R30):
 What is still open for H4: the host that creates the `Pacer`, builds the `PresentSample` (GPU time of the frame, present snapshots, thermal state, performance counters) and calls the service, the map from `hold` to ticks of the link in the `Pacer`, the encoder that applies the render scale, a motion and depth source for the interpolator, the `nxkit-abi` function that looks up a guest symbol, and a run on a 120 Hz display.
 
 What is still open: the frame format from `nxkit-nvn`, the encoder that reads it, compute ICBs, and the tuning of frame latency on real hardware.
+The encoder that reads the frame format of `nxkit-nvn` is the crate `nxkit-gpu`. Compute ICBs and indirect execution ranges are wrapped in `nxkit-metal` (`compute_icb.rs`).
+
+What is still open: the recorder that fills `FrameDetail` and calls `Gpu::encode_frame` from the NVN functions, the first build and run of `nxkit-gpu`, and the tuning of frame latency on real hardware.
 
 The route is one save and one path through the game: the title screen, loading the save, the Great Plateau outdoors, a shrine, the menus and a cutscene.
 

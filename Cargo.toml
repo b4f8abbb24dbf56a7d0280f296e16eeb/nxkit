@@ -33,6 +33,8 @@ nxkit-svc-input = { path = "crates/nxkit-svc-input" }
 nxkit-svc-video = { path = "crates/nxkit-svc-video" }
 nxkit-svc-audio = { path = "crates/nxkit-svc-audio" }
 nxkit-svc-pacing = { path = "crates/nxkit-svc-pacing" }
+nxkit-metal = { path = "crates/nxkit-metal" }
+nxkit-gpu = { path = "crates/nxkit-gpu" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }

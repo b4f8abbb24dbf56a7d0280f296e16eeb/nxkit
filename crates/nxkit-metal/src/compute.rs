@@ -5,18 +5,21 @@ use std::sync::Arc;
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2_foundation::NSRange;
 use objc2_metal::{
     MTL4CommandBuffer, MTL4CommandEncoder, MTL4ComputeCommandEncoder, MTL4VisibilityOptions,
     MTLOrigin, MTLSize, MTLStages,
 };
 
 use crate::barrier::{Dependency, Stages};
+use crate::compute_icb::{ComputeIndirectCommandBuffer, check_range_buffer};
+use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::guest::GuestMemory;
 use crate::pipeline::ComputePipeline;
 use crate::table::ArgumentTable;
-use crate::texture::Texture;
+use crate::texture::{Texture, TextureRegion};
 
 /// A command for a compute pass.
 #[derive(Clone)]
@@ -53,10 +56,44 @@ pub enum ComputeCommand {
     },
     /// Orders this pass after the work of earlier passes of the command buffer.
     WaitForEarlierPasses,
+    /// Runs `count` commands of a compute ICB from `first`.
+    ExecuteIcb {
+        /// The ICB.
+        icb: ComputeIndirectCommandBuffer,
+        /// The first command.
+        first: u32,
+        /// The number of commands.
+        count: u32,
+    },
+    /// Runs the range of a compute ICB that the GPU reads from a buffer when the command executes.
+    ExecuteIcbIndirect {
+        /// The ICB.
+        icb: ComputeIndirectCommandBuffer,
+        /// The buffer that holds an [`ExecutionRange`](crate::ExecutionRange) at `range_offset`.
+        range: Arc<DataBuffer>,
+        /// The byte offset of the range in `range`.
+        range_offset: u64,
+    },
     /// Orders the later commands of this pass after the earlier ones.
     Barrier,
     /// A barrier with explicit stages. The stages must be `DISPATCH` or `BLIT` on the side of this pass.
     Depend(Dependency),
+    /// Copies a box between two textures of the same sample count. A compressed texture and an unsigned integer
+    /// texture of the same bytes per block can copy to each other, with the size in blocks of the integer texture.
+    CopyTexture {
+        /// The source.
+        src: Texture,
+        /// The destination.
+        dst: Texture,
+        /// The source level, slice and box.
+        src_region: TextureRegion,
+        /// The destination level, slice and first pixel.
+        dst_level: u32,
+        /// The destination slice.
+        dst_slice: u32,
+        /// The first pixel of the destination box.
+        dst_origin: [u32; 3],
+    },
     /// Copies a texture to guest memory. This is the copy-back for a game that reads a render target.
     CopyTextureToGuest {
         /// The texture. It must have finished rendering in an earlier pass.
@@ -137,6 +174,37 @@ impl ComputePass<'_> {
                 self.enc
                     .dispatchThreads_threadsPerThreadgroup(size3(*grid), size3(*threads));
             }
+            ComputeCommand::ExecuteIcb { icb, first, count } => {
+                if u64::from(*first) + u64::from(*count) > u64::from(icb.size()) {
+                    return Err(MetalError::Invalid("the ICB range is out of range"));
+                }
+                // SAFETY: the range is inside the ICB (checked above). The ICB is retained until the GPU is done
+                // and it is in the residency set.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_withRange(
+                        &icb.raw,
+                        NSRange::new(*first as usize, *count as usize),
+                    );
+                }
+                self.cb.retain(icb.clone());
+            }
+            ComputeCommand::ExecuteIcbIndirect {
+                icb,
+                range,
+                range_offset,
+            } => {
+                check_range_buffer(range, *range_offset)?;
+                // SAFETY: the range lies inside the data buffer (checked above). The caller writes a range inside
+                // the ICB, because Metal does not bounds check it.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_indirectBuffer(
+                        &icb.raw,
+                        range.gpu_address() + *range_offset,
+                    );
+                }
+                self.cb.retain(icb.clone());
+                self.cb.retain(range.clone());
+            }
             ComputeCommand::WaitForEarlierPasses => self
                 .enc
                 .barrierAfterQueueStages_beforeStages_visibilityOptions(
@@ -152,6 +220,49 @@ impl ComputePass<'_> {
                     MTL4VisibilityOptions::Device,
                 ),
             ComputeCommand::Depend(d) => d.encode(&*self.enc, Stages::DISPATCH | Stages::BLIT)?,
+            ComputeCommand::CopyTexture {
+                src,
+                dst,
+                src_region,
+                dst_level,
+                dst_slice,
+                dst_origin,
+            } => {
+                src_region.check(&src.desc())?;
+                let to = TextureRegion {
+                    level: *dst_level,
+                    slice: *dst_slice,
+                    origin: *dst_origin,
+                    size: src_region.size,
+                };
+                // The size of the destination box is not known for a block copy between formats, so only the
+                // level, slice and origin are checked here. Metal validates the box.
+                if *dst_level >= dst.desc().mip_levels || *dst_slice >= dst.desc().slice_count() {
+                    return Err(MetalError::Invalid("the destination level or slice does not exist"));
+                }
+                let o = |v: [u32; 3]| MTLOrigin {
+                    x: v[0] as usize,
+                    y: v[1] as usize,
+                    z: v[2] as usize,
+                };
+                // SAFETY: the source box is inside the source (checked above) and both textures are retained until
+                // the GPU is done. Metal checks the destination box and the format pair.
+                unsafe {
+                    self.enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        src.raw(),
+                        src_region.slice as usize,
+                        src_region.level as usize,
+                        o(src_region.origin),
+                        size3(src_region.size),
+                        dst.raw(),
+                        to.slice as usize,
+                        to.level as usize,
+                        o(to.origin),
+                    );
+                }
+                self.cb.retain(src.clone());
+                self.cb.retain(dst.clone());
+            }
             ComputeCommand::CopyTextureToGuest {
                 texture,
                 guest,

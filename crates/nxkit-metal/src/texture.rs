@@ -310,6 +310,12 @@ impl Texture {
         &self.inner.raw
     }
 
+    /// The 64 bit resource ID that a shader reads from an argument buffer to sample or write this texture.
+    /// The ID stays valid as long as the texture lives.
+    pub fn gpu_resource_id(&self) -> u64 {
+        self.inner.raw.gpuResourceID().to_raw()
+    }
+
     /// Makes a view of this texture. The view keeps the texture alive and shares its residency.
     pub fn view(&self, v: &ViewDesc) -> Result<Texture> {
         let d = self.inner.desc;

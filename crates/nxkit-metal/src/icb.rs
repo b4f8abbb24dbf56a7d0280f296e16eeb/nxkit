@@ -34,7 +34,10 @@
 //! - A render pass runs commands with `executeCommandsInBuffer:withRange:` or, with the range in a GPU buffer,
 //!   `executeCommandsInBuffer:indirectBuffer:`. This module wraps the first.
 //! - Compute ICBs hold `setComputePipelineState`, `setKernelBuffer`, `concurrentDispatchThreadgroups`,
-//!   `concurrentDispatchThreads` and a barrier. This crate does not wrap them yet.
+//!   `concurrentDispatchThreads` and a barrier. The `compute_icb` module wraps them.
+//! - A pass can also read the execution range from a GPU buffer (`executeCommandsInBuffer:indirectBuffer:`).
+//!   `RenderCommand::ExecuteIcbIndirect` wraps it. [`ExecutionRange`](crate::ExecutionRange) is the layout of the
+//!   range in that buffer.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -46,6 +49,7 @@ use objc2_metal::{
     MTLIndirectCommandType, MTLIndirectRenderCommand, MTLResourceOptions,
 };
 
+use crate::databuf::DataBuffer;
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 use crate::format::{IndexType, Primitive};
@@ -131,6 +135,24 @@ pub enum IcbCommand {
         /// The buffer.
         buffer: IcbBuffer,
     },
+    /// Binds a data buffer to a vertex buffer slot, for example an argument buffer of resource IDs.
+    SetVertexData {
+        /// The slot.
+        index: u32,
+        /// The buffer.
+        buffer: Arc<DataBuffer>,
+        /// The byte offset in the buffer.
+        offset: u64,
+    },
+    /// Binds a data buffer to a fragment buffer slot.
+    SetFragmentData {
+        /// The slot.
+        index: u32,
+        /// The buffer.
+        buffer: Arc<DataBuffer>,
+        /// The byte offset in the buffer.
+        offset: u64,
+    },
     /// Sets the depth and stencil state.
     SetDepthStencil(DepthStencilState),
     /// Sets the depth bias.
@@ -184,6 +206,12 @@ pub struct IndirectCommandBuffer {
     keep: Arc<Mutex<Vec<Keep>>>,
     _resident: Arc<ResidentGuard>,
 }
+
+// SAFETY: an ICB is a thread safe Metal object. The caller encodes one slot on one thread at a time and does not
+// encode while the GPU runs the ICB, as the docs of `encode` say.
+unsafe impl Send for IndirectCommandBuffer {}
+// SAFETY: see `Send`.
+unsafe impl Sync for IndirectCommandBuffer {}
 
 impl Context {
     /// Makes an ICB for render commands. It joins the residency set.
@@ -307,6 +335,45 @@ impl IndirectCommandBuffer {
                     )
                 };
                 self.keep().push(Keep::new(buffer.guest.clone()));
+            }
+            IcbCommand::SetVertexData {
+                index,
+                buffer,
+                offset,
+            } => {
+                refuse(inh.buffers, "the ICB inherits the buffers")?;
+                if *index >= self.max_vertex || *offset >= buffer.len() {
+                    return Err(MetalError::Invalid(
+                        "the vertex data slot or offset is out of range",
+                    ));
+                }
+                // SAFETY: the slot is below the bind count and the offset is inside the buffer (checked above).
+                // The ICB keeps the buffer alive and it is resident.
+                unsafe {
+                    cmd.setVertexBuffer_offset_atIndex(&buffer.raw, *offset as usize, *index as usize)
+                };
+                self.keep().push(Keep::new(buffer.clone()));
+            }
+            IcbCommand::SetFragmentData {
+                index,
+                buffer,
+                offset,
+            } => {
+                refuse(inh.buffers, "the ICB inherits the buffers")?;
+                if *index >= self.max_fragment || *offset >= buffer.len() {
+                    return Err(MetalError::Invalid(
+                        "the fragment data slot or offset is out of range",
+                    ));
+                }
+                // SAFETY: as for the vertex data.
+                unsafe {
+                    cmd.setFragmentBuffer_offset_atIndex(
+                        &buffer.raw,
+                        *offset as usize,
+                        *index as usize,
+                    )
+                };
+                self.keep().push(Keep::new(buffer.clone()));
             }
             IcbCommand::SetDepthStencil(d) => {
                 refuse(

@@ -1,0 +1,318 @@
+//! NVN state values to `nxkit-metal` state.
+//!
+//! Every function takes the raw `NVN*` enum value and returns the Metal side, or `None` when Metal has no equivalent.
+//! The tables follow `NVN_*` in `nvn.h` of the NVN headers.
+//! The behaviour for the values that Metal lacks (fan, quads, byte indices) is the caller's decision.
+
+use nxkit_metal::{
+    Border, BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, CullMode, DepthStencilDesc, FillMode,
+    Filter, Format, IndexType, MipFilter, Primitive, Reduction, SamplerDesc, StencilFace, StencilOp,
+    StepFunction, TopologyClass, VertexAttribute, VertexDescriptor, VertexLayout, Winding, Wrap,
+};
+use nxkit_nvn::tic::Tsc;
+
+use crate::detail::{BlendDetail, DepthStencilDetail, DrawDetail, StencilDetail};
+use crate::format_map::{is_integer, vertex_format};
+
+/// The Metal buffer slot of vertex stream `stream`. The streams use the slots from 16 so that they do not meet the
+/// argument buffer at slot 0 and the draw support buffers.
+pub(crate) fn stream_slot(stream: u32) -> u32 {
+    if stream < 14 { 16 + stream } else { stream }
+}
+
+/// `NVNdrawPrimitive` to the Metal primitive and its topology class.
+pub(crate) fn primitive(nvn: u32) -> Option<(Primitive, TopologyClass)> {
+    Some(match nvn {
+        0 => (Primitive::Point, TopologyClass::Point),
+        1 => (Primitive::Line, TopologyClass::Line),
+        3 => (Primitive::LineStrip, TopologyClass::Line),
+        4 => (Primitive::Triangle, TopologyClass::Triangle),
+        5 => (Primitive::TriangleStrip, TopologyClass::Triangle),
+        _ => return None,
+    })
+}
+
+/// `NVNindexType` to the Metal index type. Metal has no byte indices.
+pub(crate) fn index_type(nvn: u32) -> Option<IndexType> {
+    match nvn {
+        1 => Some(IndexType::U16),
+        2 => Some(IndexType::U32),
+        _ => None,
+    }
+}
+
+/// `NVNcompareFunc` and `NVNdepthFunc` (the same values).
+pub(crate) fn compare(nvn: u32) -> CompareFn {
+    match nvn {
+        1 => CompareFn::Never,
+        2 => CompareFn::Less,
+        3 => CompareFn::Equal,
+        4 => CompareFn::LessEqual,
+        5 => CompareFn::Greater,
+        6 => CompareFn::NotEqual,
+        7 => CompareFn::GreaterEqual,
+        _ => CompareFn::Always,
+    }
+}
+
+/// `NVNstencilOp`.
+pub(crate) fn stencil_op(nvn: u32) -> StencilOp {
+    match nvn {
+        2 => StencilOp::Zero,
+        3 => StencilOp::Replace,
+        4 => StencilOp::IncrementClamp,
+        5 => StencilOp::DecrementClamp,
+        6 => StencilOp::Invert,
+        7 => StencilOp::IncrementWrap,
+        8 => StencilOp::DecrementWrap,
+        _ => StencilOp::Keep,
+    }
+}
+
+/// `NVNblendFunc`. Unknown values give `One`.
+pub(crate) fn blend_factor(nvn: u32) -> BlendFactor {
+    match nvn {
+        1 => BlendFactor::Zero,
+        3 => BlendFactor::SrcColor,
+        4 => BlendFactor::OneMinusSrcColor,
+        5 => BlendFactor::SrcAlpha,
+        6 => BlendFactor::OneMinusSrcAlpha,
+        7 => BlendFactor::DstAlpha,
+        8 => BlendFactor::OneMinusDstAlpha,
+        9 => BlendFactor::DstColor,
+        10 => BlendFactor::OneMinusDstColor,
+        11 => BlendFactor::SrcAlphaSaturated,
+        0x10 => BlendFactor::Src1Color,
+        0x11 => BlendFactor::OneMinusSrc1Color,
+        0x12 => BlendFactor::Src1Alpha,
+        0x13 => BlendFactor::OneMinusSrc1Alpha,
+        0x61 => BlendFactor::BlendColor,
+        0x62 => BlendFactor::OneMinusBlendColor,
+        0x63 => BlendFactor::BlendAlpha,
+        0x64 => BlendFactor::OneMinusBlendAlpha,
+        _ => BlendFactor::One,
+    }
+}
+
+/// `NVNblendEquation`. Unknown values give `Add`.
+pub(crate) fn blend_op(nvn: u32) -> BlendOp {
+    match nvn {
+        2 => BlendOp::Subtract,
+        3 => BlendOp::ReverseSubtract,
+        4 => BlendOp::Min,
+        5 => BlendOp::Max,
+        _ => BlendOp::Add,
+    }
+}
+
+/// `NVNface` to a Metal cull mode. Front and back together draws nothing, which the caller handles.
+pub(crate) fn cull(nvn: u32) -> Option<CullMode> {
+    match nvn {
+        0 => Some(CullMode::None),
+        1 => Some(CullMode::Front),
+        2 => Some(CullMode::Back),
+        _ => None,
+    }
+}
+
+/// `NVNfrontFace`.
+pub(crate) fn winding(nvn: u32) -> Winding {
+    if nvn == 0 { Winding::Clockwise } else { Winding::CounterClockwise }
+}
+
+/// `NVNpolygonMode`. Metal has fill and lines. Points are drawn as lines.
+pub(crate) fn fill(nvn: u32) -> FillMode {
+    if nvn == 2 { FillMode::Fill } else { FillMode::Lines }
+}
+
+fn stencil_face(s: &StencilDetail) -> StencilFace {
+    StencilFace {
+        compare: compare(s.func),
+        fail: stencil_op(s.fail),
+        depth_fail: stencil_op(s.depth_fail),
+        pass: stencil_op(s.pass),
+        read_mask: u32::from(s.read_mask),
+        write_mask: u32::from(s.write_mask),
+    }
+}
+
+/// The depth and stencil state of a draw. A pass without a depth attachment sets the state that is off.
+pub(crate) fn depth_stencil(d: &DepthStencilDetail) -> DepthStencilDesc {
+    DepthStencilDesc {
+        depth_compare: if d.depth_test { compare(d.depth_func) } else { CompareFn::Always },
+        depth_write: d.depth_write,
+        front: d.stencil_test.then(|| stencil_face(&d.front)),
+        back: d.stencil_test.then(|| stencil_face(&d.back)),
+    }
+}
+
+/// The colour target of a draw for a target of `format`. Integer formats never blend. `written` is false when the
+/// shader does not write the output, and then the mask is zero.
+pub(crate) fn color_target(format: Format, blend: &BlendDetail, mask: u8, written: bool) -> ColorTarget {
+    let mut t = ColorTarget::new(format);
+    t.write_mask = if written { mask & 0xF } else { 0 };
+    if blend.enable && !is_integer(format) {
+        t.blend = Some(BlendState {
+            src_rgb: blend_factor(blend.src_rgb),
+            dst_rgb: blend_factor(blend.dst_rgb),
+            op_rgb: blend_op(blend.op_rgb),
+            src_alpha: blend_factor(blend.src_alpha),
+            dst_alpha: blend_factor(blend.dst_alpha),
+            op_alpha: blend_op(blend.op_alpha),
+        });
+    }
+    t
+}
+
+/// Why a vertex layout could not be translated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LayoutError {
+    /// The `NVNformat` of an attribute has no Metal vertex format.
+    Format(u32),
+}
+
+/// The vertex descriptor of a draw. A stream with stride 0 steps as a constant. A stream with a divisor steps per
+/// instance. An attribute that reads a stream the draw did not bind is dropped, so that the shader reads zero.
+pub(crate) fn vertex_descriptor(d: &DrawDetail) -> Result<VertexDescriptor, LayoutError> {
+    let mut out = VertexDescriptor::default();
+    for a in &d.attributes {
+        if !d.streams.iter().any(|s| s.index == a.stream) {
+            continue;
+        }
+        let format = vertex_format(a.format).ok_or(LayoutError::Format(a.format))?;
+        out.attributes.push((
+            a.location,
+            VertexAttribute { format, offset: a.offset, buffer: stream_slot(a.stream) },
+        ));
+    }
+    out.attributes.sort_by_key(|(l, _)| *l);
+    for s in &d.streams {
+        if !d.attributes.iter().any(|a| a.stream == s.index) {
+            continue;
+        }
+        let (step, step_rate) = if s.stride == 0 {
+            (StepFunction::Constant, 0)
+        } else if s.divisor != 0 {
+            (StepFunction::PerInstance, s.divisor)
+        } else {
+            (StepFunction::PerVertex, 1)
+        };
+        out.layouts.push(VertexLayout { buffer: stream_slot(s.index), stride: s.stride, step, step_rate });
+    }
+    out.layouts.sort_by_key(|l| l.buffer);
+    Ok(out)
+}
+
+fn wrap(nvn: u8) -> Wrap {
+    match nvn {
+        1 => Wrap::Repeat,
+        2 | 3 => Wrap::MirrorClampToEdge,
+        4 | 5 => Wrap::ClampToBorder,
+        6 => Wrap::MirrorRepeat,
+        _ => Wrap::ClampToEdge,
+    }
+}
+
+fn border(c: [f32; 4]) -> Border {
+    if c[3] < 0.5 {
+        Border::TransparentBlack
+    } else if c[0] + c[1] + c[2] > 1.5 {
+        Border::OpaqueWhite
+    } else {
+        Border::OpaqueBlack
+    }
+}
+
+/// The sampler of a sampler header. The filter values are `NVNminFilter` and `NVNmagFilter`.
+pub(crate) fn sampler(t: &Tsc) -> SamplerDesc {
+    let linear = |v: u8| if v == 1 { Filter::Linear } else { Filter::Nearest };
+    let mip = match t.min_filter {
+        2 | 3 => MipFilter::Nearest,
+        4 | 5 => MipFilter::Linear,
+        _ => MipFilter::None,
+    };
+    SamplerDesc {
+        min: if t.min_filter & 1 == 1 { Filter::Linear } else { Filter::Nearest },
+        mag: linear(t.mag_filter),
+        mip,
+        wrap: [wrap(t.wrap_s), wrap(t.wrap_t), wrap(t.wrap_r)],
+        border: border(t.border),
+        max_anisotropy: (t.aniso.round() as u32).clamp(1, 16),
+        compare: (t.compare_mode == 1).then(|| compare(u32::from(t.compare_func))),
+        reduction: match t.reduction {
+            1 => Reduction::Minimum,
+            2 => Reduction::Maximum,
+            _ => Reduction::Average,
+        },
+        lod_min: t.lod_min,
+        lod_max: t.lod_max,
+        lod_bias: t.lod_bias,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streams_use_slots_from_16() {
+        assert_eq!(stream_slot(0), 16);
+        assert_eq!(stream_slot(13), 29);
+        assert_eq!(stream_slot(14), 14);
+    }
+
+    #[test]
+    fn primitives() {
+        assert_eq!(primitive(4).map(|p| p.1), Some(TopologyClass::Triangle));
+        assert!(primitive(6).is_none());
+        assert!(primitive(7).is_none());
+    }
+
+    #[test]
+    fn byte_indices_are_unsupported() {
+        assert!(index_type(0).is_none());
+        assert_eq!(index_type(2), Some(IndexType::U32));
+    }
+
+    #[test]
+    fn blend_defaults() {
+        assert_eq!(blend_factor(0), BlendFactor::One);
+        assert_eq!(blend_factor(0x61), BlendFactor::BlendColor);
+        assert_eq!(blend_op(9), BlendOp::Add);
+        assert_eq!(blend_op(5), BlendOp::Max);
+    }
+
+    #[test]
+    fn integer_targets_do_not_blend() {
+        let b = BlendDetail { enable: true, src_rgb: 5, dst_rgb: 6, ..BlendDetail::default() };
+        let t = color_target(Format::Rgba8Unorm, &b, 0xF, true);
+        assert!(t.blend.is_some());
+        let t = color_target(Format::Rgba8Uint, &b, 0xF, true);
+        assert!(t.blend.is_none());
+        assert_eq!(color_target(Format::Rgba8Unorm, &b, 0xF, false).write_mask, 0);
+    }
+
+    #[test]
+    fn sampler_filters() {
+        let t = Tsc {
+            min_filter: 5,
+            mag_filter: 1,
+            wrap_s: 1,
+            wrap_t: 7,
+            wrap_r: 5,
+            compare_mode: 0,
+            compare_func: 0,
+            reduction: 0,
+            lod_min: 0.0,
+            lod_max: 12.0,
+            lod_bias: 0.0,
+            aniso: 4.0,
+            border: [0.0, 0.0, 0.0, 1.0],
+        };
+        let s = sampler(&t);
+        assert_eq!((s.min, s.mag, s.mip), (Filter::Linear, Filter::Linear, MipFilter::Linear));
+        assert_eq!(s.wrap, [Wrap::Repeat, Wrap::ClampToEdge, Wrap::ClampToBorder]);
+        assert_eq!(s.border, Border::OpaqueBlack);
+        assert_eq!(s.max_anisotropy, 4);
+    }
+}

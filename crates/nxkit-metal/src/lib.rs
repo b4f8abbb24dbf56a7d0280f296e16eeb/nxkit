@@ -9,6 +9,11 @@
 //! - [`FrameRing`], [`Frame`]: two command allocators, one per frame in flight, with timing.
 //! - [`CommandBuffer`], [`RenderPass`], [`ComputePass`]: data-driven encoding of passes.
 //! - [`IndirectCommandBuffer`]: render commands encoded once and run in a pass. The module docs list what an ICB holds.
+//! - [`ComputeIndirectCommandBuffer`], [`ExecutionRange`]: dispatches encoded once, and the layout of an indirect
+//!   execution range that the GPU reads from a [`DataBuffer`].
+//! - [`DataBuffer`]: a persistent shared buffer for argument buffers of resource IDs and addresses.
+//! - [`Sampler`], [`Texture::gpu_resource_id`]: the resource IDs that bindless shaders read.
+//! - [`BatchRing`], [`Batch`]: a frame in several command buffers, encoded on several threads, committed in order.
 //! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at 60 or 120 Hz through `FrameHooks::display_tick`.
 //! - [`Pacer`], [`TickScheduler`], [`TickSink`]: what each tick shows, by a [`PresentPlan`] from [`choose_present_plan`].
 //! - [`PacingStats`]: present time, missed ticks and the interval histogram (R16).
@@ -25,8 +30,11 @@
 
 mod address;
 mod barrier;
+mod batch;
 mod blocklinear;
 mod compute;
+mod compute_icb;
+mod databuf;
 mod deswizzle;
 mod device;
 mod encode;
@@ -45,6 +53,7 @@ mod render;
 mod residency;
 mod scale;
 mod schedule;
+mod sampler;
 mod scratch;
 mod state;
 mod stats;
@@ -54,13 +63,18 @@ mod upscale;
 
 pub use address::AddressMap;
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
+pub use batch::{BATCH_SCRATCH_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing, SubmittedBatch};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
+pub use compute_icb::{
+    ComputeIcbCommand, ComputeIcbDesc, ComputeIndirectCommandBuffer, ExecutionRange,
+};
+pub use databuf::DataBuffer;
 pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, Swizzler};
 pub use device::Context;
 pub use encode::CommandBuffer;
 pub use error::{MetalError, Result};
-pub use format::{Format, IndexType, LoadAction, Primitive, StoreAction};
+pub use format::{BcKind, Format, FormatClass, IndexType, LoadAction, Primitive, StoreAction};
 pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
@@ -83,6 +97,7 @@ pub use scale::{
     UpscaleMode, choose_render_scale,
 };
 pub use schedule::{Shown, TickAction, TickScheduler};
+pub use sampler::{Border, Filter, MipFilter, Reduction, Sampler, SamplerDesc, Wrap};
 pub use scratch::{SCRATCH_ALIGN, Scratch};
 pub use state::{
     BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, DepthBias, DepthClip,

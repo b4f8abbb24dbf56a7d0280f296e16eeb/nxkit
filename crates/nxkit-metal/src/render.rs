@@ -1,5 +1,7 @@
 //! Render passes: the attachments, the commands and the pass that encodes them.
 
+use std::sync::Arc;
+
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSRange;
@@ -10,6 +12,8 @@ use objc2_metal::{
 };
 
 use crate::barrier::{Dependency, Stages};
+use crate::compute_icb::check_range_buffer;
+use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::format::{IndexType, LoadAction, Primitive, StoreAction};
@@ -160,6 +164,14 @@ pub enum RenderCommand {
         /// The texture.
         texture: Texture,
     },
+    /// Binds a GPU address to a buffer slot of the fragment argument table of a split pass
+    /// ([`CommandBuffer::begin_render_pass_split`]).
+    SetFragmentBuffer {
+        /// The slot.
+        index: u32,
+        /// The GPU address.
+        gpu_addr: u64,
+    },
     /// Sets the viewport.
     SetViewport(Viewport),
     /// Sets the scissor rectangle.
@@ -205,6 +217,15 @@ pub enum RenderCommand {
         /// The number of commands.
         count: u32,
     },
+    /// Runs the range of an ICB that the GPU reads from a buffer when the command executes.
+    ExecuteIcbIndirect {
+        /// The ICB.
+        icb: IndirectCommandBuffer,
+        /// The buffer that holds an [`ExecutionRange`](crate::ExecutionRange) at `range_offset`.
+        range: Arc<DataBuffer>,
+        /// The byte offset of the range in `range`.
+        range_offset: u64,
+    },
     /// Draws primitives.
     Draw {
         /// The topology.
@@ -240,11 +261,31 @@ pub enum RenderCommand {
 }
 
 impl CommandBuffer {
-    /// Starts a render pass. `table` is the argument table of its draws.
+    /// Starts a render pass. `table` is the argument table of its draws, for both stages.
     pub fn begin_render_pass(
         &mut self,
         desc: &RenderPassDesc,
         table: &ArgumentTable,
+    ) -> Result<RenderPass<'_>> {
+        self.begin_render_pass_with(desc, table, None)
+    }
+
+    /// Starts a render pass with one argument table per stage. A translated shader reads its argument buffer at
+    /// `[[buffer(0)]]` in both stages, and the two stages have different buffers.
+    pub fn begin_render_pass_split(
+        &mut self,
+        desc: &RenderPassDesc,
+        vertex_table: &ArgumentTable,
+        fragment_table: &ArgumentTable,
+    ) -> Result<RenderPass<'_>> {
+        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table))
+    }
+
+    fn begin_render_pass_with(
+        &mut self,
+        desc: &RenderPassDesc,
+        table: &ArgumentTable,
+        fragment_table: Option<&ArgumentTable>,
     ) -> Result<RenderPass<'_>> {
         let first = desc
             .colors
@@ -304,16 +345,24 @@ impl CommandBuffer {
                     "renderCommandEncoderWithDescriptor returned nil",
                 )
             })?;
-        enc.setArgumentTable_atStages(
-            Some(&table.raw),
-            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-        );
+        match fragment_table {
+            Some(ft) => {
+                enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Vertex);
+                enc.setArgumentTable_atStages(Some(&ft.raw), MTLRenderStages::Fragment);
+                self.retain(ft.clone());
+            }
+            None => enc.setArgumentTable_atStages(
+                Some(&table.raw),
+                MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+            ),
+        }
         self.retain(table.clone());
         self.encode_passes += 1;
         Ok(RenderPass {
             enc,
             cb: self,
             table: table.clone(),
+            fragment_table: fragment_table.cloned(),
             has_pipeline: false,
             ended: false,
         })
@@ -325,6 +374,7 @@ pub struct RenderPass<'a> {
     enc: Retained<ProtocolObject<dyn MTL4RenderCommandEncoder>>,
     cb: &'a mut CommandBuffer,
     table: ArgumentTable,
+    fragment_table: Option<ArgumentTable>,
     has_pipeline: bool,
     ended: bool,
 }
@@ -344,6 +394,13 @@ impl RenderPass<'_> {
             RenderCommand::SetTexture { index, texture } => {
                 self.table.set_texture(*index, texture)?
             }
+            RenderCommand::SetFragmentBuffer { index, gpu_addr } => self
+                .fragment_table
+                .as_ref()
+                .ok_or(MetalError::Invalid(
+                    "the pass has no separate fragment argument table",
+                ))?
+                .set_buffer(*index, *gpu_addr)?,
             RenderCommand::SetViewport(v) => self.enc.setViewport(MTLViewport {
                 originX: v.x,
                 originY: v.y,
@@ -404,6 +461,24 @@ impl RenderPass<'_> {
                     );
                 }
                 self.cb.retain(icb.clone());
+            }
+            RenderCommand::ExecuteIcbIndirect {
+                icb,
+                range,
+                range_offset,
+            } => {
+                check_range_buffer(range, *range_offset)?;
+                // SAFETY: the range lies inside the data buffer (checked above). The GPU reads it when the command
+                // executes, so the caller keeps it valid until then. Metal does not bounds check the range it
+                // reads, and the caller writes one inside the ICB.
+                unsafe {
+                    self.enc.executeCommandsInBuffer_indirectBuffer(
+                        &icb.raw,
+                        range.gpu_address() + *range_offset,
+                    );
+                }
+                self.cb.retain(icb.clone());
+                self.cb.retain(range.clone());
             }
             RenderCommand::Draw {
                 primitive,

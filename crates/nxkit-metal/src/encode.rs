@@ -23,6 +23,10 @@ pub struct CommandBuffer {
     pub(crate) encode_passes: u32,
 }
 
+// SAFETY: a Metal 4 command buffer may be encoded on any thread, one thread at a time. `CommandBuffer` is not `Sync`,
+// so one thread owns it while it encodes. The retained values are `Keep`, which are `Send`.
+unsafe impl Send for CommandBuffer {}
+
 impl CommandBuffer {
     pub(crate) fn new(raw: RawCommandBuffer) -> Self {
         Self {
