@@ -65,33 +65,13 @@ The walker details every draw kind but transform feedback and `DrawTexture`. `Dr
 - `MultiDraw{Arrays,Elements}IndirectCount` and `DrawMeshTasksIndirect` go through a compute pre-pass (`indirect.rs`) before the render pass. It copies the records of a multi-draw, zeros past the GPU-written count, and turns the `{count, first}` of an indirect mesh draw into Metal's `{x, y, z}` grid with the first workgroup after it. The render pass draws from the copies. The CPU never waits for the GPU. An ICB would need the same kernel and GPU encoding of the whole draw state, so the pre-pass is the simpler choice. A multi-draw copies at most 4096 draws.
 - A mesh draw runs a Metal mesh pipeline (`Pipelines::mesh`, built in the background like a render pipeline, `skip.pending` until it is ready). The task shader is the object function, the mesh shader the mesh function. Metal needs a fragment function, so a program without a pixel shader gets an empty one and draws depth only. The mesh stage shares the argument table of the vertex stage and the object stage has its own. The first workgroup of the draw is at buffer 29 of the stage that starts the grid.
 - Without a task shader the grid is the mesh grid, at most 1024 threadgroups wide. A larger draw is cut into grids of 1024 with their own first workgroup (at most 64 grids). An indirect draw without a task shader gets 16 grids from the pre-pass, and those past the count are empty.
-- A render pass with an indirect or mesh draw waits for the compute pre-pass before its vertex, object and mesh stages. The buffers it reads (arguments, count, index and storage buffers) are buffer hazards of the barrier planner. With `oldbarriers` it waits for all earlier dispatches, copies and fragment work instead.
+- A render pass with an indirect or mesh draw waits for the earlier dispatches, copies and fragment work before its vertex, object and mesh stages, because the barrier planner follows textures only.
 
 `EncodeStats::kinds` counts these draws by class, encoded and skipped by reason, with the Metal draws they became, the pre-passes and their records, and what was clamped (`NXKIT_DIAG=mesh`).
 
 ## Barriers only where data flows (R19)
 
-`barriers.rs` plans one `Dependency` per pass, and only when the pass has a real hazard with earlier work. `hazards.rs` tells it what each pass touches: the stages that bind each sampled texture (from the draw details) and the buffer ranges by guest address. A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame: the passes have global numbers, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.
-
-The rule for each kind of hazard. The `after` stages are the stages of the earlier passes that wrote (or, for a write after a read, read) the resource. The `before` stages are the stages of this pass that touch it. Nothing else is held.
-
-| hazard | after | before | visibility |
-|---|---|---|---|
-| attachment written, then sampled by fragment shaders | fragment | fragment | device |
-| attachment written, then sampled by vertex (or task, mesh) shaders | fragment | vertex (object, mesh) | device |
-| attachment loaded or written again (load action `Load`, blending, a second pass into it) | writer's stages | fragment | device |
-| sampled texture, then written as attachment | the stage that sampled | fragment | none |
-| dispatch writes an image or a storage buffer, a later dispatch reads or writes it | dispatch | dispatch | device |
-| dispatch writes a storage buffer, a draw reads it (storage, uniform, vertex, index or indirect buffer) | dispatch | the stage that binds it | device |
-| a draw reads a buffer, a later dispatch or copy writes it | the stage that read | dispatch or blit | none |
-| copy writes a texture or a buffer (`TextureToBuffer`), a later pass uses it | blit | stages of that pass | device |
-| copy reads, a later pass writes | blit | stages of that pass | none |
-
-Buffers are followed by ranges of guest address (`Ranges`, disjoint, touching ranges merge, so the state is coarser and never wrong). A storage buffer counts as written when the reflection of the shader says `rw` (a binding without it counts as written); a dispatch or a draw that only reads it is a read. Uniform, vertex and index buffer reads are rounded to 4 KiB pages. Uniform buffers with a snapshot are CPU data and not followed.
-
-A barrier orders the work of its own pass only. The planner keeps, for each pair of stages, the newest point up to which a stage of some earlier pass already waits for the stage of the passes before it. A hazard whose writer is covered that way adds nothing to the `after` set of the barrier, so the barrier waits for as few stages as it can. A pass with no hazard of its own needs no barrier, and a pass with a hazard needs its own barrier even when an earlier read of the same data had one: the earlier barrier ordered only that pass.
-
-`NXKIT_KNOB=oldbarriers` restores the planner of before. `NXKIT_DIAG=barr` prints the hazards of the frame next to the barriers in force.
+`barriers.rs` tracks, for each texture, the stages that wrote it and the stages that read it. Before a pass it emits one `Dependency` only when the pass reads something that an earlier pass wrote, or writes something that an earlier pass wrote or read. The `after` stages are the stages of the earlier writers and the `before` stage is the first stage that needs the data (fragment for a render pass that samples in the fragment stage). A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.
 
 ## Tile memory
 

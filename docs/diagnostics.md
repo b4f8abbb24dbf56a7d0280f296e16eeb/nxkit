@@ -74,7 +74,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `copy` | gpu | copies that the encoder refused | first 400 | low |
 | `tcopy` | gpu | copies that touch a texture that passes `NXKIT_DIAG_TEX`. It needs the filter. | first 300 | low |
 | `comp` | gpu | each dispatch with its program, groups and result | sampled | low |
-| `barr` | gpu | for each pass, the bound textures that the barrier planner does not know (sampled). Every 120 frames, two lines. The first is the distance in passes to the work a barrier waits for. The second compares the barriers in force with the hazards of the frame: passes that depend on earlier work; of those, how many have a texture or a buffer hazard of write then read or write, and how many a write after a read; barriers in force with no hazard behind them, holding stages that the pass does not use, waiting for stages that did nothing of the hazards, and hazards that no barrier was emitted for; and how many hazards an earlier barrier already covered (they added no stage to the wait). | sampled / every 120 frames | medium |
+| `barr` | gpu | for each pass, the bound textures that the barrier planner does not know | sampled | medium |
 | `lum` | gpu | nine pixels of each stored colour pass that passes the filter, read after the frame | sampled | high (waits for the GPU) |
 | `img` | gpu | with `lum`: targets of 640x360 or more are sampled on a 96x54 grid and written as PPM pictures into `<NXKIT_DIAG_DIR>/img` | sampled | high |
 | `upload` | gpu | failed uploads, refused pitch-linear uploads, and every upload of a texture that passes `NXKIT_DIAG_TEX` | first 300 / first 200 | low |
@@ -120,7 +120,6 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `nopassmerge` | The pass plan keeps render passes with no draw and no clear, and merges only after a barrier (the behaviour before). Not wrong, only slower: it compares the frame time. |
 | `noloadstore` | The pass plan does not learn dead stores of textures that start every frame with a clear. Not wrong in a game that behaves; it compares the frame time. |
 | `coverload` | Opt in. A colour attachment whose first draw visibly covers the whole target (full-screen triangle, no vertex input, full viewport, no blend or test) is loaded as `DontCare`. A fragment shader that discards would show garbage. |
-| `oldbarriers` | Restores the barrier planner of before the hazard analysis: textures only, a pass holds the stages of its kind, a hazard is forgotten once any barrier covered it, and a pass with an indirect or mesh draw waits for all earlier dispatches, copies and fragment work. The `barr` lines then show how the old barriers compare with the hazards. |
 | `nobarrier` | Gives no pass a barrier. The picture is wrong; it measures what the barriers cost the GPU. |
 
 ## The render health report
