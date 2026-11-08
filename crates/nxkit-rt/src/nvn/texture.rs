@@ -241,6 +241,30 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
     })
 }
 
+/// Initialises the texture at `t` as a linear 2D texture with one level over the memory pool at `pool`, from its
+/// offset 0. `b` is a texture builder in guest memory that the call overwrites. The result is the one of
+/// `nvnTextureInitialize`. It serves the native images of `gfx`.
+pub(crate) fn initialize_linear(
+    t: u64,
+    b: u64,
+    dev: u64,
+    pool: u64,
+    format: i32,
+    (width, height, stride): (u32, u32, u32),
+) -> u32 {
+    const TARGET_2D: i32 = 1;
+    builder::set_defaults(b);
+    builder::set_device(b, dev);
+    builder::set_target(b, TARGET_2D);
+    builder::set_format(b, format);
+    builder::set_size_2d(b, width as i32, height as i32);
+    builder::set_levels(b, 1);
+    builder::set_flags(b, nxkit_nvn::layout::FLAG_LINEAR as i32);
+    builder::set_stride(b, i64::from(stride));
+    builder::set_storage(b, pool, 0);
+    initialize(t, b)
+}
+
 extern "C" fn finalize(t: u64) {
     guard("nvnTextureFinalize", || {
         release("nvnTextureFinalize", t)?;

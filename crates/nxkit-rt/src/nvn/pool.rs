@@ -77,32 +77,32 @@ pub(crate) fn view(pool: u64) -> AbiResult<PoolView> {
     })
 }
 
-extern "C" fn builder_set_defaults(b: u64) {
+pub(crate) extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnMemoryPoolBuilderSetDefaults", || {
         Obj(b).zero(size::POOL_BUILDER)
     });
 }
 
-extern "C" fn builder_set_device(b: u64, dev: u64) {
+pub(crate) extern "C" fn builder_set_device(b: u64, dev: u64) {
     guard("nvnMemoryPoolBuilderSetDevice", || {
         Obj(b).set_u64(B_DEV, dev)
     });
 }
 
-extern "C" fn builder_set_storage(b: u64, mem: u64, len: u64) {
+pub(crate) extern "C" fn builder_set_storage(b: u64, mem: u64, len: u64) {
     guard("nvnMemoryPoolBuilderSetStorage", || {
         Obj(b).set_u64(B_MEM, mem)?;
         Obj(b).set_u64(B_SIZE, len)
     });
 }
 
-extern "C" fn builder_set_flags(b: u64, flags: i32) {
+pub(crate) extern "C" fn builder_set_flags(b: u64, flags: i32) {
     guard("nvnMemoryPoolBuilderSetFlags", || {
         Obj(b).set_u32(B_FLAGS, flags as u32)
     });
 }
 
-extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
+pub(crate) extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
     guard("nvnMemoryPoolInitialize", || {
         let bo = Obj(b);
         let (mem, len, flags) = (bo.u64(B_MEM)?, bo.u64(B_SIZE)?, bo.u32(B_FLAGS)?);
@@ -131,7 +131,7 @@ extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
     })
 }
 
-extern "C" fn pool_finalize(p: u64) {
+pub(crate) extern "C" fn pool_finalize(p: u64) {
     guard("nvnMemoryPoolFinalize", || {
         let v = view(p)?;
         if v.mem != 0 && !v.is_virtual() {

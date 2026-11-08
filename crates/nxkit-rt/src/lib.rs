@@ -25,6 +25,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod audio;
+mod gfx;
 mod guestos;
 mod kernel;
 pub mod nvn;
@@ -124,6 +125,7 @@ pub fn entries() -> &'static [Entry] {
             addr: nvn::nvn_bootstrap_loader as extern "C" fn(u64) -> u64 as usize,
             big_stack: false,
         });
+        table.extend(mapped(gfx::exports(), Service::Gpu, false));
         table.extend(mapped(nxkit_hos::exports(), Service::Kernel, false));
         table
     })
