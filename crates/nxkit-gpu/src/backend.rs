@@ -235,17 +235,19 @@ impl GpuBackend {
         self.hold_counters(fence, detail);
         self.encoded.fetch_max(fence.0, Ordering::AcqRel);
         let report = result.map_err(fail)?;
-        for id in report.deswizzled.iter().chain(&report.gpu_wrote) {
-            let _ = cx.table.gpu_wrote(*id);
-        }
-        for id in report.deswizzled.iter().chain(&report.mirrored) {
-            let _ = cx.table.synced(*id);
-        }
+        // Only the state at the end of the frame is set: a texture that is synced in this frame is not first marked
+        // as written. Nothing reads the state in between, and setting both every frame made every texture that is
+        // copied back flip twice a frame, which defeated the alias cache of the table.
         if !report.copied_back.is_empty() {
             self.drain();
-            for id in &report.copied_back {
-                let _ = cx.table.synced(*id);
-            }
+        }
+        let synced: crate::draws::FastSet<TexId> =
+            report.deswizzled.iter().chain(&report.mirrored).chain(&report.copied_back).copied().collect();
+        for id in report.gpu_wrote.iter().filter(|id| !synced.contains(id)) {
+            let _ = cx.table.gpu_wrote(*id);
+        }
+        for id in report.deswizzled.iter().chain(&report.mirrored).chain(&report.copied_back) {
+            let _ = cx.table.synced(*id);
         }
         self.note_report(&report);
         Ok(())
