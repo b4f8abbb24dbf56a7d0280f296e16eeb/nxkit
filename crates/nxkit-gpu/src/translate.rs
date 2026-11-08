@@ -5,9 +5,10 @@
 //! The behaviour for the values that Metal lacks (fan, quads, byte indices) is the caller's decision.
 
 use nxkit_metal::{
-    Border, BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, CullMode, DepthStencilDesc, FillMode,
-    Filter, Format, IndexType, MipFilter, Primitive, Reduction, SamplerDesc, StencilFace, StencilOp,
-    StepFunction, TopologyClass, VertexAttribute, VertexDescriptor, VertexLayout, Winding, Wrap,
+    BlendFactor, BlendOp, BlendState, Border, ColorTarget, CompareFn, CullMode, DepthStencilDesc,
+    FillMode, Filter, Format, IndexType, MipFilter, Primitive, Reduction, SamplerDesc, StencilFace,
+    StencilOp, StepFunction, TopologyClass, VertexAttribute, VertexDescriptor, VertexFormat,
+    VertexLayout, Winding, Wrap,
 };
 use nxkit_nvn::tic::Tsc;
 
@@ -18,6 +19,17 @@ use crate::format_map::{is_integer, vertex_format};
 /// argument buffer at slot 0 and the draw support buffers.
 pub(crate) fn stream_slot(stream: u32) -> u32 {
     if stream < 14 { 16 + stream } else { stream }
+}
+
+/// A constant stream for shader inputs with no enabled, bound vertex attribute.
+pub(crate) const DEFAULT_VERTEX_SLOT: u32 = 30;
+
+pub(crate) fn needs_default_vertex(d: &DrawDetail, inputs: &[(u32, VertexFormat)]) -> bool {
+    inputs.iter().any(|(location, _)| {
+        !d.attributes
+            .iter()
+            .any(|a| a.location == *location && d.streams.iter().any(|s| s.index == a.stream))
+    })
 }
 
 /// `NVNdrawPrimitive` to the Metal primitive and its topology class.
@@ -180,8 +192,12 @@ pub(crate) enum LayoutError {
 }
 
 /// The vertex descriptor of a draw. A stream with stride 0 steps as a constant. A stream with a divisor steps per
-/// instance. An attribute that reads a stream the draw did not bind is dropped, so that the shader reads zero.
-pub(crate) fn vertex_descriptor(d: &DrawDetail) -> Result<VertexDescriptor, LayoutError> {
+/// instance. Shader inputs without a bound attribute read a constant zero stream. Metal requires a descriptor
+/// even for those inputs; omitting one makes the entire pipeline fail to compile.
+pub(crate) fn vertex_descriptor(
+    d: &DrawDetail,
+    inputs: &[(u32, VertexFormat)],
+) -> Result<VertexDescriptor, LayoutError> {
     let mut out = VertexDescriptor::default();
     for a in &d.attributes {
         if !d.streams.iter().any(|s| s.index == a.stream) {
@@ -190,8 +206,24 @@ pub(crate) fn vertex_descriptor(d: &DrawDetail) -> Result<VertexDescriptor, Layo
         let format = vertex_format(a.format).ok_or(LayoutError::Format(a.format))?;
         out.attributes.push((
             a.location,
-            VertexAttribute { format, offset: a.offset, buffer: stream_slot(a.stream) },
+            VertexAttribute {
+                format,
+                offset: a.offset,
+                buffer: stream_slot(a.stream),
+            },
         ));
+    }
+    for (location, format) in inputs {
+        if !out.attributes.iter().any(|(l, _)| l == location) {
+            out.attributes.push((
+                *location,
+                VertexAttribute {
+                    format: *format,
+                    offset: 0,
+                    buffer: DEFAULT_VERTEX_SLOT,
+                },
+            ));
+        }
     }
     out.attributes.sort_by_key(|(l, _)| *l);
     for s in &d.streams {
@@ -205,7 +237,20 @@ pub(crate) fn vertex_descriptor(d: &DrawDetail) -> Result<VertexDescriptor, Layo
         } else {
             (StepFunction::PerVertex, 1)
         };
-        out.layouts.push(VertexLayout { buffer: stream_slot(s.index), stride: s.stride, step, step_rate });
+        out.layouts.push(VertexLayout {
+            buffer: stream_slot(s.index),
+            stride: s.stride,
+            step,
+            step_rate,
+        });
+    }
+    if needs_default_vertex(d, inputs) {
+        out.layouts.push(VertexLayout {
+            buffer: DEFAULT_VERTEX_SLOT,
+            stride: 16,
+            step: StepFunction::Constant,
+            step_rate: 0,
+        });
     }
     out.layouts.sort_by_key(|l| l.buffer);
     Ok(out)

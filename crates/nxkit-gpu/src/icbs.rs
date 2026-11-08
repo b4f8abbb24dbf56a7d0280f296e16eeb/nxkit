@@ -167,13 +167,33 @@ fn slot_commands(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, arena: &mut Aren
     let data = |addr: u64| (arena.buffer.clone(), arena.offset_of(addr));
     let mut c = vec![IcbCommand::SetPipeline(p.pipeline.clone())];
     let (b, offset) = data(p.vertex_args);
-    c.push(IcbCommand::SetVertexData { index: 0, buffer: b, offset });
+    c.push(IcbCommand::SetVertexData {
+        index: 0,
+        buffer: b,
+        offset,
+    });
     if let Some(a) = p.fragment_args {
         let (b, offset) = data(a);
-        c.push(IcbCommand::SetFragmentData { index: 0, buffer: b, offset });
+        c.push(IcbCommand::SetFragmentData {
+            index: 0,
+            buffer: b,
+            offset,
+        });
     }
     for (index, addr) in &p.streams {
-        c.push(IcbCommand::SetVertexBuffer { index: *index, buffer: buffer(*addr)? });
+        if *index == crate::translate::DEFAULT_VERTEX_SLOT {
+            let (buffer, offset) = data(*addr);
+            c.push(IcbCommand::SetVertexData {
+                index: *index,
+                buffer,
+                offset,
+            });
+        } else {
+            c.push(IcbCommand::SetVertexBuffer {
+                index: *index,
+                buffer: buffer(*addr)?,
+            });
+        }
     }
     c.push(IcbCommand::SetDepthStencil(p.depth_stencil.clone()));
     c.push(IcbCommand::SetDepthBias(p.bias));

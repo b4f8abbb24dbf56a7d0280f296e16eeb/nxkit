@@ -195,16 +195,41 @@ pub(crate) fn prepare(
     let (geom, base_instance) = geometry(sh, d, primitive)?;
     let mut streams = Vec::with_capacity(d.streams.len());
     for s in &d.streams {
-        sh.guest_offset(s.address, s.size.max(1)).ok_or(Skip::Buffer)?;
+        if sh.guest_offset(s.address, s.size.max(1)).is_none() {
+            let m = sh.guest.address_map();
+            return Err(crate::buf_skip(format_args!(
+                "stream {} addr {:#x} size {:#x} base {:#x} len {:#x}",
+                s.index,
+                s.address,
+                s.size,
+                m.gpu_base(),
+                m.len()
+            )));
+        }
         streams.push((translate::stream_slot(s.index), s.address));
     }
-    let inputs = |stage| StageInputs { stage, ubos: &d.ubos, textures: &d.textures, base_instance, groups: None };
+    if translate::needs_default_vertex(d, &vs.inputs) {
+        streams.push((translate::DEFAULT_VERTEX_SLOT, sink.put(&[0; 16])?));
+    }
+    let inputs = |stage| StageInputs {
+        stage,
+        ubos: &d.ubos,
+        sbufs: &d.sbufs,
+        textures: &d.textures,
+        base_instance,
+        groups: None,
+    };
     let vertex_args = crate::bindless::fill_args(&vs, &inputs(Stage::Vertex), &sh.env, sink)?;
     let fragment_args = match &fs {
-        Some(f) => Some(crate::bindless::fill_args(f, &inputs(Stage::Fragment), &sh.env, sink)?),
+        Some(f) => Some(crate::bindless::fill_args(
+            f,
+            &inputs(Stage::Fragment),
+            &sh.env,
+            sink,
+        )?),
         None => None,
     };
-    let [factor, units, clamp] = d.raster.depth_bias.unwrap_or([0.0; 3]);
+    let [factor, units, clamp] = if crate::knob("nooffset") { [0.0; 3] } else { d.raster.depth_bias.unwrap_or([0.0; 3]) };
     Ok(Prep {
         pipeline,
         key,

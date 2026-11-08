@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use nxkit_metal::{Context, ShaderLibrary};
+use nxkit_metal::{Context, ShaderLibrary, VertexFormat};
 
 use crate::json::{Json, parse};
 use crate::stats::Skip;
@@ -83,7 +83,7 @@ pub(crate) struct StageProgram {
     /// The size of the argument buffer in bytes.
     pub(crate) arg_bytes: u32,
     /// The locations of the vertex inputs.
-    pub(crate) inputs: Vec<u32>,
+    pub(crate) inputs: Vec<(u32, VertexFormat)>,
     /// The colour outputs that a fragment shader writes. `None` means that the reflection does not say.
     pub(crate) colors: Option<Vec<u8>>,
     /// The threadgroup size of a compute shader.
@@ -235,8 +235,18 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .map(Json::as_arr)
             .unwrap_or(&[])
             .iter()
-            .filter_map(|v| v.get("location").and_then(Json::as_i64))
-            .filter_map(|l| u32::try_from(l).ok())
+            .filter_map(|v| {
+                let location = u32::try_from(v.get("location")?.as_i64()?).ok()?;
+                let ty = v.get("msl_type").and_then(Json::as_str).unwrap_or("float4");
+                let format = if ty.starts_with("uint") {
+                    VertexFormat::UInt4
+                } else if ty.starts_with("int") {
+                    VertexFormat::Int4
+                } else {
+                    VertexFormat::Float4
+                };
+                Some((location, format))
+            })
             .collect()
     } else {
         Vec::new()

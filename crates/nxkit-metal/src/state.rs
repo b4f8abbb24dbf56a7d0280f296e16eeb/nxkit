@@ -432,7 +432,11 @@ impl VertexDescriptor {
                 let o = layouts.objectAtIndexedSubscript(l.buffer as usize);
                 o.setStride(l.stride as usize);
                 o.setStepFunction(l.step.to_mtl());
-                o.setStepRate(l.step_rate.max(1) as usize);
+                o.setStepRate(if l.step == StepFunction::Constant {
+                    0
+                } else {
+                    l.step_rate.max(1) as usize
+                });
             }
         }
         Some(d)
