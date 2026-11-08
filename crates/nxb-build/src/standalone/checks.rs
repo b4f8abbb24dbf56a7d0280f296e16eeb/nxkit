@@ -32,7 +32,6 @@ pub fn refuse(a: &Args) -> Result<(), String> {
         (a.shell_framework.is_some(), "--shell-framework"),
         (a.provisional, "--provisional"),
         (a.survey_only, "--survey-only"),
-        (a.nup.is_some(), "--nup"),
         (a.dump.is_some(), "--dump"),
         (a.romfs.is_some(), "--romfs"),
         (a.also_ios, "--also-ios"),
@@ -75,6 +74,15 @@ mod tests {
     #[test]
     fn a_plain_mac_build_passes() {
         assert!(refuse(&args()).is_ok());
+    }
+
+    #[test]
+    fn a_nup_input_passes() {
+        let a = Args {
+            nup: Some("/g.nup".into()),
+            ..args()
+        };
+        assert!(refuse(&a).is_ok());
     }
 
     #[test]

@@ -117,7 +117,7 @@ fn write_file(path: &Path, data: &[u8]) -> Result<()> {
 }
 
 /// The ExeFS of package `k` into `dst` (module names checked, names starting with `.` left out).
-fn exefs(n: &Nup, k: &Package, dst: &Path) -> Result<usize> {
+pub(crate) fn exefs(n: &Nup, k: &Package, dst: &Path) -> Result<usize> {
     let mut files = Vec::new();
     for (name, isdir, i) in n.children(k.exefs) {
         if isdir {
@@ -168,7 +168,7 @@ fn localized(payload: &[u8]) -> Vec<(String, Vec<u8>)> {
 }
 
 /// `control`: `control.nacp` and `icon.jpg` from the package's meta block (what it lacks from `fallback`).
-fn control(n: &Nup, k: &Package, fallback: Option<&Package>, out: &Path) -> Result<()> {
+pub(crate) fn control(n: &Nup, k: &Package, fallback: Option<&Package>, out: &Path) -> Result<()> {
     let mut meta = match fallback {
         Some(f) => n.meta(f)?,
         None => BTreeMap::new(),
@@ -197,21 +197,18 @@ fn control(n: &Nup, k: &Package, fallback: Option<&Package>, out: &Path) -> Resu
     Ok(())
 }
 
-/// Extracts one version (and every DLC) of a container. Prints the engine's lines (`<title> version <v>: <package>`,
-/// `done: <out>`), returns the image results.
-pub fn extract_nup(r: &NupRequest) -> Result<Vec<ImageResult>> {
-    let n = Arc::new(Nup::open(&r.nup)?);
-    let s = scan(&n)?;
-    let ver = r
-        .version
-        .unwrap_or_else(|| s.updates.keys().next_back().copied().unwrap_or(0));
+/// The version to take (`version`, else the newest update, else the base game), its package and its RomFS folder
+/// (the package's own, else the base game's), with the engine's lines about the choice. The package must have
+/// `exefs/main` and `exefs/main.npdm` of the container's program ID.
+pub(crate) fn pick(n: &Nup, s: &super::Scan, version: Option<u32>) -> Result<(u32, Package, u32, Vec<String>)> {
+    let file = n
+        .path
+        .file_name()
+        .map(|x| x.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ver = version.unwrap_or_else(|| s.updates.keys().next_back().copied().unwrap_or(0));
     if ver != 0 && !s.updates.contains_key(&ver) {
         let have: Vec<String> = s.updates.keys().map(u32::to_string).collect();
-        let file = r
-            .nup
-            .file_name()
-            .map(|x| x.to_string_lossy().into_owned())
-            .unwrap_or_default();
         return Err(ExtractError::format(format!(
             "no update {ver} in {file} (have: {})",
             if have.is_empty() {
@@ -226,25 +223,19 @@ pub fn extract_nup(r: &NupRequest) -> Result<Vec<ImageResult>> {
     } else {
         s.updates.get(&ver).copied()
     };
-    let file = r
-        .nup
-        .file_name()
-        .map(|x| x.to_string_lossy().into_owned())
-        .unwrap_or_default();
     let ki = ki.ok_or_else(|| {
         ExtractError::format(format!(
             "{file}: no base game (version 0); choose a standalone update version"
         ))
     })?;
     let k = n.packages[ki].clone();
-    let mut stdout = std::io::stdout().lock();
+    let mut lines = Vec::new();
     if s.base.is_none() {
-        let _ = writeln!(
-            stdout,
-            "no base game in this NUP: its update is taken as the whole game (if the game then stops on missing files, the update holds only what changed: pack a NUP with the base game)"
+        lines.push(
+            "no base game in this NUP: its update is taken as the whole game (if the game then stops on missing files, the update holds only what changed: pack a NUP with the base game)".to_string(),
         );
     }
-    let _ = writeln!(stdout, "{:016X} version {ver}: {}", s.app, k.name);
+    lines.push(format!("{:016X} version {ver}: {}", s.app, k.name));
     // pack_version's checks
     let main_npdm = if k.exefs == NO_DIR {
         None
@@ -278,6 +269,19 @@ pub fn extract_nup(r: &NupRequest) -> Result<Vec<ImageResult>> {
             "{}: no romfs/ in this package or the base game",
             k.name
         )));
+    }
+    Ok((ver, k, d, lines))
+}
+
+/// Extracts one version (and every DLC) of a container. Prints the engine's lines (`<title> version <v>: <package>`,
+/// `done: <out>`), returns the image results.
+pub fn extract_nup(r: &NupRequest) -> Result<Vec<ImageResult>> {
+    let n = Arc::new(Nup::open(&r.nup)?);
+    let s = scan(&n)?;
+    let (ver, k, d, lines) = pick(&n, &s, r.version)?;
+    let mut stdout = std::io::stdout().lock();
+    for l in &lines {
+        let _ = writeln!(stdout, "{l}");
     }
     let work = if r.work.as_os_str().is_empty() {
         r.nup

@@ -212,6 +212,44 @@ pub(crate) fn packages(a: &Args, b: &Build, p: &Progress) -> Result<(usize, Opti
     Ok((s.images.len(), s.split_unsupported.clone()))
 }
 
+/// A NUP for a build without nxnative: `extract/v<version>/` with the ExeFS, the control data, the RomFS as a folder
+/// (`romfs/`, no image) and each DLC's RomFS as `aoc/<index>/`, and the shader split in the same pass. Returns the
+/// summary and, when the split needs the game's own decoder, why.
+pub(crate) fn nup_loose(
+    a: &Args,
+    b: &Build,
+    p: &Progress,
+    version: u32,
+) -> Result<(String, Option<String>), String> {
+    let dir = b.work.join("extract").join(format!("v{version}"));
+    let counter = Arc::new(nxb_extract::Counter::default());
+    let req = nxb_extract::nup::UnpackRequest {
+        nup: b.base.clone(),
+        version: Some(version),
+        out: dir.clone(),
+        romfs: dir.join("romfs"),
+        aoc: dir.join("aoc"),
+        threads: a.threads,
+        mem_limit: 2 << 30,
+        verify: true,
+        split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
+        progress: Some(counter.clone()),
+    };
+    p.say("unpack and shader split in one pass (nxb-extract, RomFS as a folder)");
+    let u = with_bytes(p, "unpacking", &counter, || nxb_extract::nup::unpack_nup(&req))
+        .map_err(|e| damaged(p, &e))?;
+    for l in &u.notes {
+        p.say(l);
+    }
+    let text = format!(
+        "{} files, {:.1} GB{}",
+        u.files,
+        u.bytes as f64 / 1e9,
+        if u.dlc.is_empty() { String::new() } else { format!(", {} DLC", u.dlc.len()) }
+    );
+    Ok((text, u.split_unsupported))
+}
+
 /// A NUP or a dump: one `extract/v<version>` per needed version.
 pub(crate) fn container(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
     let versions = needed(b);
