@@ -16,6 +16,7 @@ use nxkit_svc_pacing::{LoadConfig, StepMode};
 use crate::error::{HostError, Result};
 use crate::manifest::Game;
 use crate::settings::Settings;
+use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
 
 fn has(mask: u64, service: Service) -> bool {
@@ -145,9 +146,9 @@ fn game_env(settings: &Settings) -> Vec<(String, String)> {
 /// Starts the service crates with the configuration of the game. The services are the names in `game.services`.
 ///
 /// Every crate gets typed values from `game.json`: fs the romfs, the title ID and the DLC folder, system the launch
-/// parameter, the display version, the shared font facts and the DLC folder, input the pad layout and the focus, audio
-/// and video their host seams and pacing the step mode with the state page. The lookup of the game's own symbols is
-/// set in all of them (`guestsym.rs`).
+/// parameter, the display version, the shared font facts and the DLC folder, input the pad layout, the focus and the
+/// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
+/// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
 pub fn init_services(game: &Game, mask: u64) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
@@ -188,11 +189,17 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
         nxkit_svc_system::set_seams(wire::system_seams());
     }
     if has(mask, Service::Input) {
-        nxkit_svc_input::init(&nxkit_svc_input::Config {
+        let mut config = nxkit_svc_input::Config {
             handheld,
             pad_layout: s.pad_layout.clone(),
             ..nxkit_svc_input::Config::default()
-        });
+        };
+        let (file, warnings) = crate::input_file::load(&game.root, &game.title_id);
+        for w in warnings {
+            eprintln!("nxkit-host: input: {w}");
+        }
+        file.apply_to(&mut config);
+        nxkit_svc_input::init(&config);
         nxkit_svc_input::set_system_event_hooks(wire::input_hooks());
     }
     if has(mask, Service::Audio) {
@@ -216,6 +223,28 @@ pub fn focus_changed(focused: bool) {
     let focus = if focused { nxkit_svc_system::Focus::InFocus } else { nxkit_svc_system::Focus::OutOfFocus };
     nxkit_svc_system::set_focus(focus);
     nxkit_svc_input::set_focus(focused);
+}
+
+/// The held mouse did something. The input service turns it into the camera stick and the mouse bindings.
+pub fn mouse(event: MouseEvent) {
+    match event {
+        MouseEvent::Moved { dx, dy } => nxkit_svc_input::mouse_moved(dx, dy),
+        MouseEvent::Button { number, down } => nxkit_svc_input::mouse_button(number, down),
+        MouseEvent::Wheel { dy } => nxkit_svc_input::mouse_wheel(dy),
+        MouseEvent::Released => nxkit_svc_input::mouse_release(),
+    }
+}
+
+/// When the window holds the mouse: never when the input files turn the mouse off, on a click while a controller is
+/// connected, else whenever the window has the focus (R63).
+pub fn mouse_mode() -> MouseMode {
+    if !nxkit_svc_input::mouse_capture() {
+        MouseMode::Off
+    } else if nxkit_svc_input::controller_connected() {
+        MouseMode::Click
+    } else {
+        MouseMode::Auto
+    }
 }
 
 /// The hooks that the display link calls. They connect the encoder of `nxkit-gpu` and the pacing of `nxkit-metal`

@@ -7,6 +7,7 @@ pub mod error;
 #[cfg(target_os = "macos")]
 pub mod frames;
 pub mod gates;
+pub mod input_file;
 pub mod json;
 pub mod layout;
 pub mod macho;

@@ -37,7 +37,7 @@ nxkit-nvn = { workspace = true }
 nxkit-metal = { path = "../nxkit-metal" }
 nxkit-gpu = { workspace = true }
 objc2 = { workspace = true, features = ["std"] }
-objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSEvent", "NSGraphics", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSCursor", "NSEvent", "NSGraphics", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow", "objc2-core-foundation", "objc2-quartz-core"] }
 objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes"] }
 objc2-foundation = { workspace = true, features = ["std", "NSNotification", "NSObject", "NSString"] }
 objc2-quartz-core = { workspace = true, features = ["std", "CALayer", "CAMetalLayer"] }

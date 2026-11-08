@@ -86,6 +86,52 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 
 `romfs/`, `shaders/` and `pipelines.mtl4archive` are read by the services and the GPU backend, not by the loader.
 
+### input.json
+
+The keyboard and mouse layout of player 1 (R63) can be changed in `input.json`. The host reads `~/Library/Application Support/nxkit/input.json` first and `input.json` of the run folder second, each if it exists. A later value wins. Each file has a top-level section and an optional `titles` object with a section per title ID, which follows the top-level one. A file or key that does not parse gives a warning on stderr and is skipped.
+
+```json
+{
+  "keyboard": true,
+  "mouse": { "sensitivity": 1.0, "invert_y": false, "deadzone": 0.12, "capture": true },
+  "bind": { "f": "rstick", "mouse4": "zr", "c": "none" },
+  "titles": { "01007EF00011E000": { "mouse": { "sensitivity": 1.5 } } }
+}
+```
+
+| key | meaning |
+|---|---|
+| `keyboard` | Keyboard and mouse for player 1. Default `true`. |
+| `mouse.sensitivity` | Scales the mouse speed, 0.05 to 20. At 1 a motion of 1500 points per second is a full stick. |
+| `mouse.invert_y` | Mouse up turns the camera down. |
+| `mouse.deadzone` | The stick value of the smallest mouse motion, 0 to 0.9, to get past the dead zone of the game. Default 0.12. |
+| `mouse.capture` | The window may hold the mouse. `false` turns the mouse off for the game. |
+| `bind` | `key: action` pairs, applied in key order. A pair replaces the action of that key. `none` removes it. |
+
+Keys: `a` to `z`, `0` to `9`, `f1` to `f12`, `space`, `enter`, `tab`, `backspace`, `delete`, `escape`, `up`, `down`, `left`, `right`, `shift`, `ctrl`, `alt` (both sides; `lshift`, `rshift`, `lctrl`, `rctrl`, `lalt`, `ralt` for one), `capslock`, `minus`, `equal`, `lbracket`, `rbracket`, `backslash`, `semicolon`, `quote`, `grave`, `comma`, `period`, `slash`, `mouse_left`, `mouse_right`, `mouse_middle`, `mouse4`, `mouse5`, `wheel`, `wheel_up`, `wheel_down`. Actions: `a`, `b`, `x`, `y`, `l`, `r`, `zl`, `zr`, `plus`, `minus`, `lstick`, `rstick` (the stick clicks), `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `ls_up`, `ls_down`, `ls_left`, `ls_right`, `rs_up`, `rs_down`, `rs_left`, `rs_right`, `walk` (half deflection of the left stick) and `none`.
+
+The default layout:
+
+| input | Switch |
+|---|---|
+| W A S D | left stick, full |
+| Alt + W A S D | left stick, half (walk) |
+| mouse motion | right stick (camera) |
+| E, J | A |
+| Shift, K | B |
+| Space, U | X |
+| left mouse button, I | Y |
+| Q | L |
+| R | R |
+| right mouse button, Z | ZL |
+| wheel (either way), F | ZR |
+| Ctrl, C | left stick click |
+| middle mouse button, G | right stick click |
+| Tab, Return | Plus |
+| M | Minus |
+| 1 2 3 4 | D-pad up, right, down, left |
+| arrows | D-pad |
+
 ## Guest memory
 
 One reservation holds all guest memory. It is the guest range of `nxkit_abi::guest`. The no-copy buffer of R3 covers the part behind the modules. In address order it holds:
@@ -181,6 +227,8 @@ A game can give a thread a small stack, and a service function that builds host 
 
 AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` that has the pixels of the main display, so the game renders at the native resolution, for example 4K on a 4K display. The display link runs at the highest rate of the screen, 120 Hz where the screen has it. The game runs on its own threads. A window close, a lost application or ExitProcess sets a stop flag. The next display tick ends the loop. A watchdog ends the process after 5 seconds if the loop does not. `--fullscreen` starts in full screen.
 
+The content view takes the key events, so AppKit plays no alert sound, and passes the mouse events to `sys/mouse.rs`. The window holds the mouse for the camera (R63): the cursor is hidden and does not move, and each motion goes to the input service. It takes the mouse when it becomes the key window while no controller is connected, and on a click, which does not reach the game. Escape, Cmd+Tab or any other loss of the key focus, and a controller that connects let go. The display tick follows the controllers.
+
 ## The frame path
 
 `frames.rs` builds the frame path. `seams::frame_hooks` calls it with the run folder.
@@ -241,8 +289,10 @@ The host finds the guest functions in the export lists of the modules. A missing
 | `attach_main_thread` | Attaches the `guest-main` thread with the NPDM priority and core, which the kernel got at its start. |
 | `big_stack_exports` | Collects the names of the big-stack entries of the enabled services from `nxkit_rt::entries()`. |
 | `register_server` | Builds the IPC server from the `services()` of the enabled service crates and registers it with `set_server`. |
-| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders and the DLC folder for fs, the console facts and the font facts for system, the pad layout for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
+| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
 | `focus_changed` | Tells the `system` and `input` services about the focus of the window. |
+| `mouse` | Passes the motion, buttons and wheel of the held mouse to the input service. |
+| `mouse_mode` | When the window holds the mouse: never when `input.json` turns it off, on a click while a controller is connected, else whenever the window is key. |
 
 ### The symbol lookup
 

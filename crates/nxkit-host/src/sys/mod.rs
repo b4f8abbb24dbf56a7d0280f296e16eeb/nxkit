@@ -4,6 +4,7 @@
 //! touches memory.
 
 pub mod appkit;
+mod mouse;
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::fs::File;

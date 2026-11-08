@@ -21,6 +21,7 @@ use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
+use super::mouse;
 use crate::error::{HostError, Result};
 
 /// What the window reports to the host. The calls come on the main thread.
@@ -29,6 +30,47 @@ pub trait AppEvents: Send + Sync {
     fn focus_changed(&self, focused: bool);
     /// The window closes or the application terminates. The game must stop.
     fn closing(&self);
+    /// The mouse did something while the window holds it (`sys/mouse.rs`).
+    fn mouse(&self, event: MouseEvent);
+    /// When the window holds the mouse. The display tick asks, so the answer may change at any time.
+    fn mouse_mode(&self) -> MouseMode;
+}
+
+/// What the held mouse did.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MouseEvent {
+    /// It moved by `dx`, `dy` points, y down.
+    Moved {
+        /// To the right.
+        dx: f64,
+        /// Down.
+        dy: f64,
+    },
+    /// A button went down or up. 0 is left, 1 right, 2 middle.
+    Button {
+        /// The AppKit button number.
+        number: u8,
+        /// Down or up.
+        down: bool,
+    },
+    /// The wheel or the trackpad scrolled by `dy`, positive away from the user.
+    Wheel {
+        /// The scroll distance.
+        dy: f64,
+    },
+    /// The window let go of the mouse. Every held button counts as up.
+    Released,
+}
+
+/// When the window holds the mouse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseMode {
+    /// Never. The game gets no mouse.
+    Off,
+    /// After a click into the window, for example while a controller is connected.
+    Click,
+    /// Whenever the window is the key window, and after a click.
+    Auto,
 }
 
 /// How the window looks.
@@ -79,7 +121,8 @@ define_class!(
     // - `MainThreadOnly` is correct, because AppKit uses views on the main thread only.
     // - `GameView` does not implement `Drop`.
     /// The content view. The game reads the keyboard through GameController, so the view takes the key events of
-    /// AppKit and drops them. Without it AppKit finds no responder for a key and plays the alert sound.
+    /// AppKit and drops them. Without it AppKit finds no responder for a key and plays the alert sound. The mouse
+    /// events go to `sys/mouse.rs`, and Escape lets go of the mouse.
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "NxkitGameView"]
@@ -92,13 +135,70 @@ define_class!(
         }
 
         #[unsafe(method(keyDown:))]
-        fn key_down(&self, _event: &NSEvent) {}
+        fn key_down(&self, event: &NSEvent) {
+            mouse::key_down(event);
+        }
 
         #[unsafe(method(keyUp:))]
         fn key_up(&self, _event: &NSEvent) {}
 
         #[unsafe(method(flagsChanged:))]
         fn flags_changed(&self, _event: &NSEvent) {}
+
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: &NSEvent) {
+            mouse::moved(event);
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            mouse::moved(event);
+        }
+
+        #[unsafe(method(rightMouseDragged:))]
+        fn right_mouse_dragged(&self, event: &NSEvent) {
+            mouse::moved(event);
+        }
+
+        #[unsafe(method(otherMouseDragged:))]
+        fn other_mouse_dragged(&self, event: &NSEvent) {
+            mouse::moved(event);
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            mouse::button(event, true);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            mouse::button(event, false);
+        }
+
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, event: &NSEvent) {
+            mouse::button(event, true);
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, event: &NSEvent) {
+            mouse::button(event, false);
+        }
+
+        #[unsafe(method(otherMouseDown:))]
+        fn other_mouse_down(&self, event: &NSEvent) {
+            mouse::button(event, true);
+        }
+
+        #[unsafe(method(otherMouseUp:))]
+        fn other_mouse_up(&self, event: &NSEvent) {
+            mouse::button(event, false);
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            mouse::wheel(event);
+        }
     }
 );
 
@@ -131,6 +231,7 @@ define_class!(
     unsafe impl NSWindowDelegate for AppDelegate {
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _n: &NSNotification) {
+            mouse::release();
             if let Some(e) = self.events().get() {
                 e.closing();
             }
@@ -141,10 +242,12 @@ define_class!(
             if let Some(e) = self.events().get() {
                 e.focus_changed(true);
             }
+            mouse::focus(true);
         }
 
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _n: &NSNotification) {
+            mouse::focus(false);
             if let Some(e) = self.events().get() {
                 e.focus_changed(false);
             }
@@ -170,6 +273,7 @@ define_class!(
 
         #[unsafe(method(applicationWillTerminate:))]
         fn application_will_terminate(&self, _n: &NSNotification) {
+            mouse::release();
             if let Some(e) = self.events().get() {
                 e.closing();
             }
@@ -204,6 +308,7 @@ impl FrameHooks for StopHooks {
             }
             return;
         }
+        mouse::tick();
         self.inner.display_tick(tick);
     }
 }
@@ -254,6 +359,7 @@ pub fn run(
     view.setWantsLayer(true);
     window.setContentView(Some(&view));
     window.makeFirstResponder(Some(&view));
+    window.setAcceptsMouseMovedEvents(true);
 
     let layer_ptr = NonNull::from(&*layer).cast::<c_void>();
     // SAFETY: `layer_ptr` points to the live `CAMetalLayer` above. The presenter retains it.
@@ -263,6 +369,7 @@ pub fn run(
     let (w, h) = drawable_size(&window, &view);
     presenter.resize(w, h);
 
+    mouse::install(events.clone(), window.clone());
     let delegate = AppDelegate::alloc(mtm).set_ivars(Ivars::<AppDelegate> {
         events: OnceCell::from(events),
         presenter: OnceCell::from(presenter.clone()),

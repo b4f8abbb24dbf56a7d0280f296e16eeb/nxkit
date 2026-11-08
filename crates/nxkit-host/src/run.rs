@@ -14,7 +14,7 @@ use std::sync::Arc;
 use nxkit_metal::Context;
 
 use crate::error::{HostError, Result};
-use crate::sys::appkit::{self, AppEvents, WindowConfig};
+use crate::sys::appkit::{self, AppEvents, MouseEvent, MouseMode, WindowConfig};
 use crate::boot::Boot;
 use crate::manifest::Game;
 use crate::{guestsym, loader, place, seams, stop, sys, thread};
@@ -37,6 +37,14 @@ impl AppEvents for Events {
 
     fn closing(&self) {
         stop::request("the window closed");
+    }
+
+    fn mouse(&self, event: MouseEvent) {
+        seams::mouse(event);
+    }
+
+    fn mouse_mode(&self) -> MouseMode {
+        seams::mouse_mode()
     }
 }
 
