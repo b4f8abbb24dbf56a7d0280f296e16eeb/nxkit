@@ -272,6 +272,13 @@ extern "C" fn finalize(t: u64) {
 
 extern "C" fn compare(a: u64, b: u64) -> u32 {
     guard("nvnTextureCompare", || {
+        let (mut ra, mut rb) = ([0u8; USED], [0u8; USED]);
+        Obj(a).read(0, &mut ra)?;
+        Obj(b).read(0, &mut rb)?;
+        if word(&ra, MAGIC) != TEX || word(&rb, MAGIC) != TEX {
+            crate::diag!("DIAG nvnTextureCompare raw {a:#x} {b:#x}");
+            return Ok(ret_bool(ra == rb));
+        }
         let (x, y) = (Tex::load(a)?, Tex::load(b)?);
         Ok(ret_bool(
             x.desc == y.desc && x.host == y.host && x.swizzle == y.swizzle,
