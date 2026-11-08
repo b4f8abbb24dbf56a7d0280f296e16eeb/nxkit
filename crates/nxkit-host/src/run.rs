@@ -51,6 +51,7 @@ fn check_kernel_service(mask: u64) -> Result<()> {
 
 /// Runs the game. It returns when the window or the game has stopped.
 pub fn run(opts: &Options) -> Result<()> {
+    crate::diag_crash::install();
     let game = Game::read(&opts.root)?;
     let mask = loader::service_mask(&game.services)?;
     check_kernel_service(mask)?;

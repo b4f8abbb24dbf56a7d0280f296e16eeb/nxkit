@@ -24,6 +24,22 @@ use std::ffi::{CStr, c_char, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Whether `NXKIT_DIAG` names the `cmd` category (or `all`): the per-command-buffer lines are written only then.
+pub fn diag_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("NXKIT_DIAG")
+            .map(|v| v.split(',').any(|c| c == "cmd" || c == "all"))
+            .unwrap_or(false)
+    })
+}
+
+/// `eprintln!` behind the `cmd` category of `NXKIT_DIAG`.
+#[macro_export]
+macro_rules! diag {
+    ($($t:tt)*) => { if $crate::diag_on() { eprintln!($($t)*); } };
+}
+
 mod audio;
 mod gfx;
 mod guestos;

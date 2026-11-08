@@ -310,6 +310,64 @@ impl Texture {
         &self.inner.raw
     }
 
+    /// Reads single pixels of level 0, slice 0 back to the CPU. Diagnostics only. It makes its own command queue and
+    /// waits, so it sees what the GPU wrote before the call only when the caller waited for that work. Returns
+    /// `None` for compressed formats and formats with a stencil aspect.
+    pub fn debug_read_raw(&self, ctx: &Context, points: &[[u32; 2]]) -> Option<Vec<Vec<u8>>> {
+        use objc2_metal::{
+            MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
+            MTLResourceOptions,
+        };
+        let f = self.inner.desc.format;
+        let bpp = f.bytes_per_pixel() as usize;
+        if f.is_compressed() || f.has_stencil() || bpp == 0 || bpp > 16 || points.is_empty() {
+            return None;
+        }
+        let dev = ctx.device();
+        let queue = dev.newCommandQueue()?;
+        let buf = dev.newBufferWithLength_options(
+            bpp * points.len(),
+            MTLResourceOptions::StorageModeShared,
+        )?;
+        let cb = queue.commandBuffer()?;
+        let enc = cb.blitCommandEncoder()?;
+        for (i, p) in points.iter().enumerate() {
+            let x = p[0].min(self.inner.desc.width.saturating_sub(1));
+            let y = p[1].min(self.inner.desc.height.saturating_sub(1));
+            // SAFETY: the 1x1 source box is inside level 0 (clamped above) and the destination is `bpp` bytes
+            // inside `buf`.
+            unsafe {
+                enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                    &self.inner.raw,
+                    0,
+                    0,
+                    MTLOrigin { x: x as usize, y: y as usize, z: 0 },
+                    MTLSize { width: 1, height: 1, depth: 1 },
+                    &buf,
+                    bpp * i,
+                    bpp,
+                    bpp,
+                );
+            }
+        }
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        // SAFETY: the GPU is done with `buf` (waited above) and it holds `bpp * points.len()` shared bytes.
+        let bytes =
+            unsafe { std::slice::from_raw_parts(buf.contents().cast::<u8>(), bpp * points.len()) };
+        Some(bytes.chunks_exact(bpp).map(<[u8]>::to_vec).collect())
+    }
+
+    /// [`Texture::debug_read_raw`] for formats of 4 bytes per pixel.
+    pub fn debug_read(&self, ctx: &Context, points: &[[u32; 2]]) -> Option<Vec<[u8; 4]>> {
+        if self.inner.desc.format.bytes_per_pixel() != 4 {
+            return None;
+        }
+        let raw = self.debug_read_raw(ctx, points)?;
+        Some(raw.iter().map(|c| [c[0], c[1], c[2], c[3]]).collect())
+    }
+
     /// The 64 bit resource ID that a shader reads from an argument buffer to sample or write this texture.
     /// The ID stays valid as long as the texture lives.
     pub fn gpu_resource_id(&self) -> u64 {

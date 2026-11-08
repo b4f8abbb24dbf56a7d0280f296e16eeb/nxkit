@@ -76,7 +76,25 @@ impl Walker {
                 }
             }
             ExtCode::ClearDepthStencil => {
-                self.out.clears.push(ClearDetail { depth: f(x, 0), stencil: x.word(2), ..ClearDetail::default() });
+                if crate::diag("clear") {
+                    static SHOWN: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
+                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1000 < 20 {
+                        eprintln!(
+                            "DIAG clear depth {} write {} stencil {} mask {:#x} viewport {:?}",
+                            f(x, 0),
+                            x.word(1),
+                            x.word(2),
+                            x.word(3),
+                            st.viewport
+                        );
+                    }
+                }
+                self.out.clears.push(ClearDetail {
+                    depth: f(x, 0),
+                    stencil: x.word(2),
+                    ..ClearDetail::default()
+                });
             }
             ExtCode::Draw => {
                 let d = self.draw(&*mem, st, x);

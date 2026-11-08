@@ -116,7 +116,15 @@ impl Transfer {
                 let region = TextureRegion::whole(level, slice, extent(&d, level));
                 self.deswizzler
                     .encode_region(pass, scratch, guest, base, surf, &res.tex, &region)
-                    .map_err(|_| Skip::Transfer)?;
+                    .map_err(|e| {
+                        if crate::diag("hmcap") {
+                            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 20 {
+                                eprintln!("DIAG upfail {:?} {}x{} lvl {level} slice {slice}: {e:?}", d.format, d.width, d.height);
+                            }
+                        }
+                        Skip::Transfer
+                    })?;
             }
         }
         Ok(())

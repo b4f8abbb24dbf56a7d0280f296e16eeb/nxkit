@@ -101,10 +101,28 @@ impl Programs {
         if key.is_empty() || key.contains(['/', '\\']) || key.contains("..") {
             return Err(Skip::Program);
         }
-        let text = std::fs::read_to_string(self.dir.join(format!("{key}_b.json"))).map_err(|_| Skip::Program)?;
-        let json = parse(&text).ok_or(Skip::Program)?;
+        let why = |w: &str| {
+            if crate::diag("prog") {
+                eprintln!("DIAG prog {key}: {w}");
+            }
+            Skip::Program
+        };
+        let text = std::fs::read_to_string(self.dir.join(format!("{key}_b.json")))
+            .map_err(|e| why(&format!("json {e}")))?;
+        let json = parse(&text).ok_or_else(|| why("json parse"))?;
         let lib = ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_b.metallib")))
-            .map_err(|_| Skip::Program)?;
+            .map_err(|e| why(&format!("metallib {e:?}")))?;
+        if crate::diag("prog") {
+            if json
+                .get("raster")
+                .and_then(|r| r.get("primitive_id"))
+                .and_then(Json::as_i64)
+                .unwrap_or(0)
+                != 0
+            {
+                eprintln!("DIAG prog {key}: primitive_id");
+            }
+        }
         read_stage(&json, lib, vertex)
     }
 }

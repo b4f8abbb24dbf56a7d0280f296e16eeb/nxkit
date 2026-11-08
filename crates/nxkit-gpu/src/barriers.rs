@@ -131,8 +131,22 @@ impl BarrierState {
                 scope: Scope::FromEarlierPasses,
                 after,
                 before,
-                visibility: if writes_involved { Visibility::Device } else { Visibility::None },
+                visibility: if writes_involved {
+                    Visibility::Device
+                } else {
+                    Visibility::None
+                },
             });
+            let dep = if crate::knob("allbar") || crate::nobar(out.before.len()) {
+                Some(Dependency {
+                    scope: Scope::FromEarlierPasses,
+                    after: Stages::ALL,
+                    before: Stages::ALL,
+                    visibility: Visibility::Device,
+                })
+            } else {
+                dep
+            };
             match dep {
                 Some(_) => out.emitted += 1,
                 None if !first => out.avoided += 1,

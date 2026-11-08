@@ -162,6 +162,7 @@ extern "C" fn queue_submit_commands(q: u64, n: i32, handles: u64) {
             .collect::<AbiResult<Vec<_>>>()?;
         let o = Obj(q);
         let origin = o.u32(OFF_ORIGIN_LL)? != 0;
+        crate::diag!("DIAG submit q {q:#x} handles {handles:x?}");
         o.set_u64(OFF_SUBMITS, o.u64(OFF_SUBMITS)?.wrapping_add(1))?;
         gpu("nvnQueueSubmitCommands").submit(q, &handles, origin)
     });

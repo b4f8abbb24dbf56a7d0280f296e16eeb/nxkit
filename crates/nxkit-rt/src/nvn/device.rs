@@ -94,6 +94,9 @@ pub(super) fn origin_lower_left(d: u64) -> AbiResult<bool> {
 fn notify_modes(name: &'static str, d: Obj) -> AbiResult<()> {
     let lower_left = d.i32(OFF_ORIGIN)? == ORIGIN_LOWER_LEFT;
     let zero_to_one = d.i32(OFF_DEPTH)? != 0;
+    if crate::diag_on() {
+        eprintln!("DIAG depth {name}: origin lower left {lower_left}, depth zero to one {zero_to_one}");
+    }
     gpu(name).backend().device_modes(lower_left, zero_to_one);
     Ok(())
 }

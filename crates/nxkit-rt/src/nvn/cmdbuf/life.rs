@@ -30,6 +30,12 @@ extern "C" fn finalize(c: u64) {
 }
 
 extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
+    if crate::diag_on() {
+        let fp: u64;
+        unsafe { std::arch::asm!("mov {}, x29", out(reg) fp) };
+        let glr = unsafe { *((fp + 8) as *const u64) };
+        eprintln!("DIAG add cmdmem lr {glr:#x}");
+    }
     guard("nvnCommandBufferAddCommandMemory", || {
         let v = pool::view(memory_pool)?;
         let off = u64::try_from(off).map_err(|_| other("the command memory offset is negative"))?;
@@ -90,6 +96,13 @@ extern "C" fn begin_recording(c: u64) {
     guard("nvnCommandBufferBeginRecording", || {
         with_recorder(c, |r| {
             sync_in(c, r)?;
+            let tlr = nxkit_hos::current_thread().map_or(0, |t| t.tlr());
+            let (obj, tag, id) = if tlr != 0 {
+                let obj = unsafe { *((tlr + 0x1f8) as *const u64) };
+                let tag = if obj != 0 { unsafe { *((obj + 0x1b0) as *const u32) } } else { 0xdead };
+                (obj, tag, unsafe { *((tlr + 0x110) as *const u32) })
+            } else { (0, 0, 0) };
+            crate::diag!("DIAG begin cb {c:#x} tlr {tlr:#x} obj {obj:#x} tag {tag:#x} id {id:#x}");
             r.buf.begin_recording()?;
             sync_out(c, r)
         })?;
@@ -98,7 +111,9 @@ extern "C" fn begin_recording(c: u64) {
 }
 
 extern "C" fn end_recording(c: u64) -> u64 {
-    rec::end("nvnCommandBufferEndRecording", c)
+    let h = rec::end("nvnCommandBufferEndRecording", c);
+    crate::diag!("DIAG end cb {c:#x} -> {h:#x}");
+    h
 }
 
 extern "C" fn is_recording(c: u64) -> u32 {
@@ -116,6 +131,7 @@ fn call(name: &'static str, c: u64, n: i32, handles: u64) {
         }
         for i in 0..n as u64 {
             let h = Obj(handles + i * 8).u64(0)?;
+            crate::diag!("DIAG {name} cb {c:#x} handle {h:#x}");
             rec::emit_rec(name, c, Record::Call(h));
         }
         Ok(())
@@ -134,7 +150,9 @@ fn memory(name: &'static str, c: u64, pick: fn(u64, u64, u64) -> u64) -> u64 {
     guard(name, || {
         with_recorder(c, |r| {
             sync_in(c, r)?;
-            Ok(pick(r.buf.used(), r.buf.free(), r.control))
+            let v = pick(r.buf.used(), r.buf.free(), r.control);
+            crate::diag!("DIAG {name} cb {c:#x} = {v:#x}");
+            Ok(v)
         })
     })
 }

@@ -184,6 +184,13 @@ impl TextureStore {
 
     /// Forgets the Metal texture of `id` (the game created or finalized the texture again).
     pub(crate) fn invalidate(&mut self, id: TexId) {
+        if crate::diag("arr") {
+            if let Some(r) = self.entries.get(&id) {
+                if r.desc.array_layers == 8 && r.desc.width >= 256 {
+                    eprintln!("DIAG arr invalidate {id:?} gen {} {:?} {}x{}", r.generation, r.desc.format, r.desc.width, r.desc.height);
+                }
+            }
+        }
         if let Some(old) = self.entries.remove(&id) {
             self.retired.push(old.tex);
         }

@@ -139,7 +139,15 @@ fn stencil_face(s: &StencilDetail) -> StencilFace {
 /// The depth and stencil state of a draw. A pass without a depth attachment sets the state that is off.
 pub(crate) fn depth_stencil(d: &DepthStencilDetail) -> DepthStencilDesc {
     DepthStencilDesc {
-        depth_compare: if d.depth_test { compare(d.depth_func) } else { CompareFn::Always },
+        depth_compare: if d.depth_test {
+            if d.depth_func == 3 && crate::knob("noeq") {
+                CompareFn::Always
+            } else {
+                compare(d.depth_func)
+            }
+        } else {
+            CompareFn::Always
+        },
         depth_write: d.depth_write,
         front: d.stencil_test.then(|| stencil_face(&d.front)),
         back: d.stencil_test.then(|| stencil_face(&d.back)),

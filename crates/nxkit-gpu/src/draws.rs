@@ -141,7 +141,12 @@ pub(crate) fn prepare(
     sink: &mut dyn Sink,
     icb: bool,
 ) -> Result<Prep, Skip> {
-    let cull = translate::cull(d.raster.cull).ok_or(Skip::Cull)?;
+    let cull = translate::cull(if crate::knob("nocull") {
+        0
+    } else {
+        d.raster.cull
+    })
+    .ok_or(Skip::Cull)?;
     let (primitive, _) = translate::primitive(d.topology).ok_or(Skip::Primitive)?;
     let vs = sh.programs.stage(&d.program.vertex, true)?;
     let fs = match &d.program.fragment {
@@ -153,6 +158,23 @@ pub(crate) fn prepare(
     ds.depth_test &= pc.has_depth;
     ds.depth_write &= pc.has_depth;
     ds.stencil_test &= pc.has_stencil;
+    if diag_depth() {
+        static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let key = format!(
+            "{ds:?} range {:?} depth {} stencil {}",
+            d.dynamic.depth_range, pc.has_depth, pc.has_stencil
+        );
+        if let Ok(mut s) = SEEN.lock() {
+            if s.len() < 40 && !s.contains(&key) {
+                eprintln!("DIAG depth draw {key}");
+                s.push(key);
+            }
+        }
+    }
+    if crate::knob("nodepth") {
+        ds.depth_test = false;
+        ds.stencil_test = false;
+    }
     let depth_stencil_desc = translate::depth_stencil(&ds);
     let depth_stencil = sh.pipelines.depth_stencil(&depth_stencil_desc)?;
     let (geom, base_instance) = geometry(sh, d, primitive)?;
@@ -187,12 +209,38 @@ pub(crate) fn prepare(
 
 fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive) -> Result<(Geom, u32), Skip> {
     Ok(match d.args {
-        DrawArgs::Arrays { first, count, instances, base_instance } => {
-            (Geom::Arrays { primitive, first, count, instances, base_instance }, base_instance)
-        }
-        DrawArgs::Indexed { index_type, address, count, instances, base_vertex, base_instance } => {
+        DrawArgs::Arrays {
+            first,
+            count,
+            instances,
+            base_instance,
+        } => (
+            Geom::Arrays {
+                primitive,
+                first,
+                count,
+                instances,
+                base_instance,
+            },
+            base_instance,
+        ),
+        DrawArgs::Indexed {
+            index_type,
+            address,
+            count,
+            instances,
+            base_vertex,
+            base_instance,
+        } => {
             let it = translate::index_type(index_type).ok_or(Skip::Index)?;
-            sh.guest_offset(address, u64::from(count) * it.bytes()).ok_or(Skip::Buffer)?;
+            if sh
+                .guest_offset(address, u64::from(count) * it.bytes())
+                .is_none()
+            {
+                return Err(crate::buf_skip(format_args!(
+                    "index addr {address:#x} count {count}"
+                )));
+            }
             (
                 Geom::Indexed {
                     primitive,

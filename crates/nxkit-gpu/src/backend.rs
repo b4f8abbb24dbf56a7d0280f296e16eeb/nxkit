@@ -103,6 +103,12 @@ impl GpuBackend {
     }
 }
 
+/// Whether `NXKIT_DIAG` asks for the periodic counters.
+fn stats_diag() -> bool {
+    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DIAG.get_or_init(|| crate::diag("stats"))
+}
+
 /// True when the detail has one entry for each command that needs one.
 fn matches(frame: &Frame, d: &FrameDetail) -> bool {
     let (mut draws, mut clears, mut dispatches) = (0, 0, 0);
@@ -232,11 +238,34 @@ impl Backend for GpuBackend {
     fn sampler_released(&self, _id: u32) {}
 }
 
+/// Counters of the present path for the `present` diagnostics: ticks, presents asked, textures found, blits done.
+static PRESENT_DIAG: [std::sync::atomic::AtomicU64; 4] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+
+fn present_diag(i: usize) {
+    if !crate::diag("present") {
+        return;
+    }
+    let n = PRESENT_DIAG[i].fetch_add(1, Ordering::Relaxed) + 1;
+    if i == 0 && n % 120 == 0 {
+        let v: Vec<u64> = PRESENT_DIAG
+            .iter()
+            .map(|c| c.load(Ordering::Relaxed))
+            .collect();
+        eprintln!(
+            "DIAG present ticks {} asked {} found {} blitted {}",
+            v[0], v[1], v[2], v[3]
+        );
+    }
+}
+
 impl TickSink for GpuBackend {
     fn tick(&self, action: TickAction, tick: DisplayTick) {
+        present_diag(0);
         let TickAction::Present(shown) = action else {
             return;
         };
+        present_diag(1);
         let number = match shown {
             Shown::Game { frame } => frame,
             Shown::Interpolated { to, .. } => to,
@@ -251,14 +280,49 @@ impl TickSink for GpuBackend {
         let Some(texture) = texture else {
             return;
         };
+        present_diag(2);
+        if crate::diag("present") && PRESENT_DIAG[2].load(Ordering::Relaxed) % 300 == 1 {
+            eprintln!("DIAG present texture {:?}", texture.desc());
+        }
+        if crate::diag("pixelall") {
+            let d = texture.desc();
+            let pts: Vec<[u32; 2]> = (1..4)
+                .flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4]))
+                .collect();
+            let px = texture.debug_read(&self.ctx, &pts).unwrap_or_default();
+            let lit = px.iter().filter(|p| p[0] | p[1] | p[2] > 8).count();
+            eprintln!("PX {} lit {lit}", PRESENT_DIAG[2].load(Ordering::Relaxed));
+        }
+        if crate::diag("pixel") && PRESENT_DIAG[2].load(Ordering::Relaxed) % 60 == 1 {
+            let d = texture.desc();
+            let pts: Vec<[u32; 2]> = (1..4)
+                .flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4]))
+                .collect();
+            let px = texture.debug_read(&self.ctx, &pts).unwrap_or_default();
+            let lit = px.iter().filter(|p| p[0] | p[1] | p[2] != 0).count();
+            eprintln!(
+                "DIAG pixel {}x{} {:?} lit {lit}/9 {px:?}",
+                d.width, d.height, d.format
+            );
+        }
         let mut blit = locked(&self.blit);
         if blit.is_none() {
-            *blit = Blit::new(&self.ctx).ok();
+            *blit = Blit::new(&self.ctx)
+                .inspect_err(|e| {
+                    if !self.blit_failed.swap(true, Ordering::Relaxed) {
+                        eprintln!("nxkit-gpu: the present blit cannot be made: {e}");
+                    }
+                })
+                .ok();
         }
         let Some(b) = blit.as_mut() else {
             return;
         };
-        if let Err(e) = b.present(&texture, tick.drawable, tick.target_presentation_timestamp) {
+        let r = b.present(&texture, tick.drawable, tick.target_presentation_timestamp);
+        if r.is_ok() {
+            present_diag(3);
+        }
+        if let Err(e) = r {
             if !self.blit_failed.swap(true, Ordering::Relaxed) {
                 eprintln!("nxkit-gpu: the present failed: {e}");
             }

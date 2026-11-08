@@ -508,7 +508,13 @@ fn decode<M: GuestMem>(
     let mut spans = Vec::new();
     let (mut pos, mut from) = (handle, handle);
     for _ in 0..MAX_RECORDS {
-        let (rec, size) = Record::read(cx.mem, pos)?;
+        let (rec, size) = match Record::read(cx.mem, pos) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("DIAG decode fail handle {handle:#x} from {from:#x} pos {pos:#x} spans {spans:x?}");
+                return Err(e);
+            }
+        };
         let next = pos + u64::from(size);
         match rec {
             Record::End => {

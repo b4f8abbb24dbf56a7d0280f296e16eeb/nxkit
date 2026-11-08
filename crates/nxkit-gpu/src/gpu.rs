@@ -308,8 +308,14 @@ impl Gpu {
         detail: &FrameDetail,
         scale: f32,
     ) -> Result<EncodeReport> {
+        crate::refresh_knobs();
+        let lum = crate::lum::begin();
         let t0 = Instant::now();
-        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
         let mut stats = EncodeStats::default();
         let builds_before = self.pipelines.counts().0;
 
@@ -369,6 +375,39 @@ impl Gpu {
             let Ok(rec) = table.get(*id) else { continue };
             if res.scaled && rec.residency == nxkit_nvn::resource::Residency::GuestNewer {
                 stats.scaled_upload_lost += 1;
+            }
+            let tile = crate::diag("hmcap")
+                && res.desc.kind == nxkit_metal::TextureKind::D2
+                && res.desc.format == nxkit_metal::Format::R16Unorm
+                && res.desc.width == 256;
+            if crate::diag("linstale") && rec.layout.linear {
+                use std::hash::{Hash, Hasher};
+                static SEEN: std::sync::Mutex<Option<FastMap<u64, u64>>> = std::sync::Mutex::new(None);
+                let mut buf = vec![0u8; rec.layout.size as usize];
+                let off = rec.address.get().wrapping_sub(self.guest.address_map().gpu_base());
+                if self.guest.read(off, &mut buf).is_ok() {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    buf.hash(&mut h);
+                    let h = h.finish();
+                    let mut g = SEEN.lock().unwrap();
+                    let m = g.get_or_insert_with(FastMap::default);
+                    let key = rec.address.get();
+                    if let Some(old) = m.insert(key, h) {
+                        if old != h {
+                            eprintln!("DIAG hmstale {id:?} {:?} {}x{} addr {key:#x} changed, residency {:?} needs {}", res.desc.format, res.desc.width, res.desc.height, rec.residency, TextureStore::needs_upload(res, rec));
+                        }
+                    }
+                }
+            }
+            if tile {
+                static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 {
+                    eprintln!(
+                        "DIAG hmup {id:?} res {:?} scaled {} widened {} fresh {} storage {:?} needs {}",
+                        rec.residency, res.scaled, res.widened, res.fresh, res.desc.storage,
+                        TextureStore::needs_upload(res, rec)
+                    );
+                }
             }
             if !TextureStore::needs_upload(res, rec) {
                 continue;

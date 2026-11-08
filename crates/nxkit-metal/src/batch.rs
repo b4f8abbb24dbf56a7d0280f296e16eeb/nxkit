@@ -270,6 +270,16 @@ impl Batch {
                         gpu_end_s: end,
                         failed: fb.error().is_some(),
                     };
+                    if let Some(e) = fb.error() {
+                        static SHOWN: AtomicUsize = AtomicUsize::new(0);
+                        if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
+                            eprintln!(
+                                "nxkit-metal: [RED] batch {number} command buffer failed: {} {:?}",
+                                e.localizedDescription(),
+                                e.userInfo()
+                            );
+                        }
+                    }
                     held.lock().unwrap_or_else(PoisonError::into_inner).take();
                     metrics.record(&stats);
                     let last = remaining.fetch_sub(1, Ordering::AcqRel) == 1;
