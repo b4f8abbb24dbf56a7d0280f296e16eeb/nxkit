@@ -18,7 +18,7 @@ use objc2_app_kit::{
     NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSActivityOptions, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo, NSString};
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
 use super::mouse;
@@ -425,6 +425,11 @@ pub fn run(
     }
     app.activate();
 
+    // A game is latency critical and interactive whether its window is in front or not. Without the activity, macOS
+    // treated the process as a background app while another window had the focus (App Nap, timer coalescing, a lower
+    // scheduling class), and the frame rate fell. It also keeps the system from idle sleep while the game runs.
+    let _activity = NSProcessInfo::processInfo()
+        .beginActivityWithOptions_reason(NSActivityOptions::UserInteractive, &NSString::from_str("a game runs"));
     ready()?;
     app.run();
     Ok(())
