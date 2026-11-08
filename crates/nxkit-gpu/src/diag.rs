@@ -72,6 +72,14 @@ const KNOBS: &[&str] = &[
     "nosnapsbuf",
     // With the overlap and the encoder thread, a wait for the newest frame waits for the frame two back.
     "overlap2",
+    // The pass plan keeps render passes that do nothing, and does not merge across a dropped pass or a change of the
+    // target set (the behaviour before). For comparing the frame time.
+    "nopassmerge",
+    // The pass plan does not learn dead stores of scratch targets from the frames before.
+    "noloadstore",
+    // Opt in: a colour attachment that the first draw of its pass visibly covers whole (one full-screen triangle with
+    // no vertex input, full viewport, no blend, no test) loads nothing. The shader may still discard, so it is off.
+    "coverload",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
@@ -89,9 +97,15 @@ struct Knobs {
 fn knobs() -> &'static Knobs {
     static K: OnceLock<Knobs> = OnceLock::new();
     K.get_or_init(|| Knobs {
-        flags: AtomicU32::new(parse_knobs(&std::env::var("NXKIT_KNOB").unwrap_or_default())),
+        flags: AtomicU32::new(set_pass_options(parse_knobs(&std::env::var("NXKIT_KNOB").unwrap_or_default()))),
         file: std::env::var_os("NXKIT_KNOB_FILE").map(PathBuf::from),
     })
+}
+
+/// Hands the two knobs of the pass optimiser to `nxkit-nvn`, which makes the plan. Returns `flags`.
+fn set_pass_options(flags: u32) -> u32 {
+    nxkit_nvn::passes::set_options(flags & knob_bit("nopassmerge") == 0, flags & knob_bit("noloadstore") == 0);
+    flags
 }
 
 fn knob_bit(name: &str) -> u32 {
@@ -126,7 +140,7 @@ pub(crate) fn refresh_knobs() {
     }
     let k = knobs();
     if let Some(value) = k.file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()) {
-        k.flags.store(parse_knobs(&value), Ordering::Relaxed);
+        k.flags.store(set_pass_options(parse_knobs(&value)), Ordering::Relaxed);
     }
 }
 

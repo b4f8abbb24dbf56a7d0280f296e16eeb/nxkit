@@ -4,8 +4,47 @@
 //! action of each attachment. The result is plain data that the Metal backend encodes later.
 
 use std::ops::Range;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::resource::TexId;
+
+/// The two switches of the pass optimiser. The host sets them from its knobs (`nopassmerge`, `noloadstore`) with
+/// [`set_options`]. Without a call they read `NXKIT_KNOB` once, and both are on.
+static OPTIONS: AtomicU8 = AtomicU8::new(OPT_UNSET);
+const OPT_UNSET: u8 = 0x80;
+const OPT_NO_MERGE: u8 = 1;
+const OPT_NO_LOADSTORE: u8 = 2;
+
+fn options() -> u8 {
+    let v = OPTIONS.load(Ordering::Relaxed);
+    if v != OPT_UNSET {
+        return v;
+    }
+    let raw = std::env::var("NXKIT_KNOB").unwrap_or_default();
+    let has = |name: &str| raw.split(',').any(|k| k.trim() == name);
+    let v = (u8::from(has("nopassmerge")) * OPT_NO_MERGE) | (u8::from(has("noloadstore")) * OPT_NO_LOADSTORE);
+    // A host that called `set_options` meanwhile wins.
+    let _ = OPTIONS.compare_exchange(OPT_UNSET, v, Ordering::Relaxed, Ordering::Relaxed);
+    OPTIONS.load(Ordering::Relaxed)
+}
+
+/// Switches the pass optimiser. `merge` drops render passes that do nothing and merges neighbours after a dropped pass
+/// or a change of the target set that left the attachments equal. `loadstore` lets a texture that a game has cleared
+/// first in every frame for a long time store nothing at the end of the frame. Both are on by default.
+pub fn set_options(merge: bool, loadstore: bool) {
+    let v = (u8::from(!merge) * OPT_NO_MERGE) | (u8::from(!loadstore) * OPT_NO_LOADSTORE);
+    OPTIONS.store(v, Ordering::Relaxed);
+}
+
+/// True when the pass merge (empty passes, merge across a target change) is on.
+pub fn merge_on() -> bool {
+    options() & OPT_NO_MERGE == 0
+}
+
+/// True when the learned store actions are on.
+pub fn loadstore_on() -> bool {
+    options() & OPT_NO_LOADSTORE == 0
+}
 
 /// What a pass does with the old contents of an attachment at its start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +134,23 @@ pub struct AttachmentPlan {
     pub(crate) touched: bool,
 }
 
+impl AttachmentPlan {
+    /// True when the load action is `Load` only because the analysis cannot know that the draws cover the whole
+    /// attachment: the pass does not clear, discard, blend, test or sample it, and its result is stored. A host that
+    /// knows the draw geometry can turn such a load into `DontCare`.
+    pub fn load_is_default(&self) -> bool {
+        self.load == LoadAction::Load
+            && self.store == StoreAction::Store
+            && self.touched
+            && !(self.clear_start || self.discard_start || self.old_read || self.sampled)
+    }
+
+    /// True when no draw or clear of the pass wrote the attachment: it is loaded and stored for nothing.
+    pub fn is_untouched(&self) -> bool {
+        !self.touched
+    }
+}
+
 /// One pass.
 #[derive(Clone, Debug)]
 pub struct Pass {
@@ -180,6 +236,14 @@ pub struct PassStats {
     pub bytes_naive: u64,
     /// `bytes_naive` minus loaded and stored bytes.
     pub bytes_saved: u64,
+    /// Render passes that had no draw and no clear (only a discard). They are not in the plan.
+    pub empty_dropped: u32,
+    /// Merges of passes that started with a target change (not with a barrier).
+    pub merged_after_targets: u32,
+    /// Stores that are `DontCare` only because the texture has been cleared first in every frame for a long time.
+    pub stores_learned_dead: u32,
+    /// The bytes of `stores_learned_dead`.
+    pub bytes_learned_dead: u64,
 }
 
 /// The passes of one frame. The vectors are reused from frame to frame.
@@ -210,12 +274,17 @@ impl PassStats {
             )
         };
         format!(
-            "{}, {}, {}, render before merge {}, buffer copies absorbed {}",
+            "{}, {}, {}, render before merge {}, buffer copies absorbed {}, empty dropped {}, merged after targets {}, \
+             learned dead stores {} ({} bytes)",
             group("render", &self.render_begins),
             group("compute", &self.compute_begins),
             group("other", &self.other_begins),
             self.render_passes_before_merge,
-            self.buffer_copies_absorbed
+            self.buffer_copies_absorbed,
+            self.empty_dropped,
+            self.merged_after_targets,
+            self.stores_learned_dead,
+            self.bytes_learned_dead
         )
     }
 }

@@ -613,3 +613,104 @@ fn an_analyser_that_ran_before_gives_the_plan_of_a_fresh_one() {
     assert_eq!(f.plan.attachments[1].store, StoreAction::DontCare);
     assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
 }
+
+#[test]
+fn a_render_pass_with_only_a_discard_is_dropped() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(RGBA8));
+    f.rec.set_render_targets(&[c], None);
+    f.rec.discard(1, false);
+    f.rec.set_render_targets(&[d], None);
+    f.rec.draw(paint());
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 1);
+    assert_eq!(f.plan.attachments.len(), 1);
+    assert_eq!(f.plan.attachments[0].tex, d);
+    assert_eq!(f.plan.stats.empty_dropped, 1);
+    assert_eq!(f.plan.stats.render_begins.total(), 1);
+}
+
+#[test]
+fn passes_around_a_dropped_pass_merge() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(RGBA8));
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.rec.set_render_targets(&[d], None);
+    f.rec.discard(1, false);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(depth_free_blend());
+    f.run().unwrap();
+    assert_eq!(f.plan.stats.render_passes, 1);
+    assert_eq!(f.plan.stats.merged_after_targets, 1);
+    assert_eq!(f.plan.stats.render_begins.total(), 1);
+}
+
+fn depth_free_blend() -> DrawState {
+    DrawState { blend: true, ..paint() }
+}
+
+#[test]
+fn a_dropped_pass_lets_compute_passes_group() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.dispatch();
+    f.rec.set_render_targets(&[c], None);
+    f.rec.discard(1, false);
+    f.rec.dispatch();
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 1);
+    assert_eq!(f.plan.passes[0].kind, PassKind::Compute);
+}
+
+/// Runs `frames` frames of a texture that is cleared first and drawn, and returns the last plan's first attachment.
+fn scratch_frames(f: &mut Fx, c: TexId, frames: u32, sample_first: Option<TexId>) {
+    for _ in 0..frames {
+        f.rec.begin();
+        if let Some(d) = sample_first {
+            f.rec.bind_texture(0, Some(c));
+            f.rec.set_render_targets(&[d], None);
+            f.rec.draw(paint());
+            f.rec.bind_texture(0, None);
+        }
+        f.rec.set_render_targets(&[c], None);
+        f.rec.clear_color(0);
+        f.rec.draw(paint());
+        f.run().unwrap();
+    }
+}
+
+#[test]
+fn a_texture_that_starts_dead_for_many_frames_stops_being_stored() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    scratch_frames(&mut f, c, 10, None);
+    assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
+    scratch_frames(&mut f, c, 130, None);
+    let a = f.plan.attachments[0];
+    assert_eq!((a.load, a.store), (LoadAction::Clear, StoreAction::DontCare));
+    assert!(!a.memoryless);
+    assert_eq!(f.plan.stats.stores_learned_dead, 1);
+    assert_eq!(f.plan.stats.bytes_learned_dead, COLOR_BYTES);
+}
+
+#[test]
+fn a_texture_that_a_frame_reads_before_it_clears_keeps_its_store() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(RGBA8));
+    scratch_frames(&mut f, c, 140, Some(d));
+    let a = *f.plan.attachments.iter().find(|a| a.tex == c).unwrap();
+    assert_eq!(a.store, StoreAction::Store);
+    assert_eq!(f.plan.stats.stores_learned_dead, 0);
+}
+
+#[test]
+fn the_merge_report_counts_default_loads() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.run().unwrap();
+    let r = crate::passmerge::MergeReport::of(&f.frame, &f.plan);
+    assert_eq!((r.render, r.one_draw, r.empty, r.load_default), (1, 1, 0, 1));
+}

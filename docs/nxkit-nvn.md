@@ -80,14 +80,21 @@ NVN has no render passes. Metal needs them. `Analyser` cuts the recorded frame i
 - A clear under a scissor does not end the pass. The old contents stay in use, so the load action is `Load`.
 
 The scan keeps a stamp for each texture id that says which render pass already holds it in its read list, so a draw does not search the reads of its pass for each texture. The stamp counts up with each render pass.
+### Empty passes
+
+A render pass with no draw and no clear (a discard alone) does nothing. The scan drops it when it closes and puts the state back as it was before the pass: the way the next pass begins, the barrier bits and the kind of work before. A discard says that the contents are undefined, so leaving them alone is allowed. `PassStats::empty_dropped` counts them. The knob `nopassmerge` keeps them.
 
 ### Merge
 
 Two adjacent render passes become one when all of these are true.
 - The attachment sets are equal.
-- Only a barrier lies between them.
+- Only a barrier lies between them, or the target set changed and left the attachments equal (also after a dropped empty pass). The second pass begins with `Barrier` or `Targets`.
 - The second pass does not start with a clear or a discard.
 - The second pass does not sample an attachment of the first pass.
+
+Why it is safe: the commands keep their order, all draws carry their full state, and nothing else runs between the two passes. A barrier between them only matters for what the second pass reads, and the plan knows its sampled textures. `merged_after_targets` counts the merges that began with `Targets`. The knob `nopassmerge` goes back to merging after a barrier only.
+
+A compute or copy pass between two render passes still splits them. Moving it before the first pass is not done: the plan knows the textures of a dispatch, not its buffers, so it cannot show that the draws before do not read what the dispatch writes. `NXKIT_DIAG=passmerge` counts these splits and how many touch none of the textures of the two passes.
 
 ### Load action
 
@@ -96,6 +103,8 @@ Two adjacent render passes become one when all of these are true.
 3. `Load` when the pass blends, tests depth or stencil, or samples the attachment.
 4. `DontCare` when the attachment is not stored.
 5. `Load` otherwise, because a draw may cover only a part of the attachment.
+
+Rule 5 is the one a host can improve if it knows the draw geometry: `AttachmentPlan::load_is_default` is true for such an attachment. `nxkit-gpu` does it under the opt-in knob `coverload`, for a colour attachment whose first draw is a full-screen triangle or quad with no vertex input, a viewport and scissor that hold the target, all channels written, and no blend, test or alpha to coverage. It is off by default because the fragment shader may still discard and the vertex shader may place the triangle small.
 
 ### Store action
 
@@ -106,13 +115,15 @@ A backward walk knows for each texture whether a later command reads it.
 
 The analysis does not guess that a texture is dead. The host has to say it. This keeps a history buffer safe.
 
+One thing is learned from the frames. The backward walk also runs a second liveness that never uses what was learned (the evidence). When it ends at the start of the frame with `No` (the first use of the texture was a full clear or a discard, a single level and layer), the texture adds one to a streak. When it ends with `Proven` (the frame reads it before it overwrites it) the streak is zero again. A texture with a streak of 120 or more starts the walk as `No` instead of `Assumed`, so its store at the end of the frame is `DontCare`, and so is the next load by rule 4. It is a scratch target. The texture of a learned store is never memoryless. `stores_learned_dead` and `bytes_learned_dead` count them, the knob `noloadstore` turns the learning off. The risk is a game that starts to read such a texture without a clear after 120 frames: the first frame of the new pattern reads the lost contents.
+
 ### Memoryless
 
 An attachment is memoryless when it is not stored, not loaded, not sampled, and only one pass of the frame uses it.
 
 ### Counters
 
-`PassStats` has the number of render passes before and after the merge, the bytes loaded, the bytes stored, the bytes stored only by assumption, the memoryless bytes, the bytes of a naive load and store of every attachment of every unmerged pass, and the bytes saved. The size of an attachment is its first mip level.
+`PassStats` has the number of render passes before and after the merge, the dropped empty passes, the merges after a target change, the learned dead stores, the bytes loaded, the bytes stored, the bytes stored only by assumption, the memoryless bytes, the bytes of a naive load and store of every attachment of every unmerged pass, and the bytes saved. The size of an attachment is its first mip level.
 
 ## NVN functions
 
@@ -216,7 +227,8 @@ Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN th
 - `nv::GetGraphicsMemoryInfo` writes 0x20 bytes when the NVN API major is 53 or less and 0x40 bytes otherwise. A game of SDK 10 or older that does not set `nvn_api` in `game.json` gets 0x40 bytes. This is unverified.
 - `nn::vi::QueryDisplayBufferMaxResolution` answers 1920x1080 in both operation modes. The host has no fact of the size of the display.
 - The dirty range tracking of nxnative for pools is not ported. `nvnMemoryPoolFlushMappedRange` tells the front end that the guest wrote the range, and the invalidate call does nothing.
-- A copy or compute pass is not moved out of a render pass, so some merges are missed.
+- A copy or compute pass is not moved out of a render pass, so some merges are missed. The plan lists the textures of a dispatch and not its buffers, so a move cannot be proven safe. `NXKIT_DIAG=passmerge` counts the cases.
+- The learned dead store is a guess from 120 frames. The coverage load (`coverload`) is a guess from the draw. Both are marked as such above.
 - Memory aliasing between buffers and textures is not tracked. A buffer copy does not touch a texture of the same memory.
 - A handle is resolved when the recording is decoded. A summary is decoded again when the same descriptor slot is registered again. A game that rewrites the descriptor memory without a register call is not noticed.
 - A texture in a record is named by its GPU address. When two textures start at the same address, the newest one wins.
