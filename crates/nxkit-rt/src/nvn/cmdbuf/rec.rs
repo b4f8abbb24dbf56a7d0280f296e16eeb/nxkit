@@ -172,12 +172,13 @@ fn slow(name: &'static str, cb: u64, bytes: &[u8]) {
 }
 
 /// Runs `step` on the recorder. When it asks for memory, calls the memory callback of the game (with no lock held)
-/// and runs it again, up to [`MAX_CALLBACKS`] times.
+/// and runs it again, up to [`MAX_CALLBACKS`] times. When the callback gives no memory, the host adds a block of its
+/// own ([`overflow_block`]) and runs it once more.
 fn retrying<T>(
     cb: u64,
     mut step: impl FnMut(&mut Recorder) -> AbiResult<Try<T>>,
 ) -> AbiResult<T> {
-    for attempt in 0..=MAX_CALLBACKS {
+    for attempt in 0..=MAX_CALLBACKS + 1 {
         let t = with_recorder(cb, |r| {
             sync_in(cb, r)?;
             let t = step(r);
@@ -187,23 +188,26 @@ fn retrying<T>(
         match t {
             Try::Done(v) => return Ok(v),
             Try::Need(need, hook) => {
-                if attempt == MAX_CALLBACKS {
-                    return Err(other(format!(
-                        "out of command memory ({need} bytes needed) after {MAX_CALLBACKS} callbacks"
-                    )));
+                if std::env::var_os("NXKIT_CMDMEM_DIAG").is_some() {
+                    let (used, free, cursor) = with_recorder(cb, |r| Ok((r.buf.used(), r.buf.free(), r.buf.cursor())))?;
+                    eprintln!("DIAG cmdmem cb {cb:#x} attempt {attempt} need {need} used {used} free {free} cursor {cursor:?} hook {hook:?}");
                 }
-                run_hook(cb, need, hook)?;
+                if attempt > MAX_CALLBACKS {
+                    break;
+                }
+                if attempt == MAX_CALLBACKS || !run_hook(cb, need, hook) {
+                    add_overflow(cb, need)?;
+                }
             }
         }
     }
-    Err(other("out of command memory"))
+    Err(other("out of command memory after the host added a block of its own"))
 }
 
-fn run_hook(cb: u64, need: u32, hook: Hook) -> AbiResult<()> {
+/// Calls the memory callback of the game. False when no callback is set.
+fn run_hook(cb: u64, need: u32, hook: Hook) -> bool {
     if !hook.enabled || hook.func == 0 {
-        return Err(other(format!(
-            "out of command memory ({need} bytes needed) and no memory callback is set"
-        )));
+        return false;
     }
     // SAFETY: a guest function pointer is a host function pointer (R18). NVN defines the callback as
     // `void (*)(NVNcommandBuffer *, NVNcommandBufferMemoryEvent, size_t, void *)`.
@@ -211,7 +215,50 @@ fn run_hook(cb: u64, need: u32, hook: Hook) -> AbiResult<()> {
         std::mem::transmute::<usize, extern "C" fn(u64, i32, u64, u64)>(hook.func as usize)
     };
     f(cb, EVENT_OUT_OF_COMMAND_MEMORY, u64::from(need), hook.data);
-    Ok(())
+    true
+}
+
+/// The size of one block that the host adds when the game gives no memory.
+const OVERFLOW_BLOCK: u64 = 0x4000;
+/// The size of one piece of guest memory that the overflow blocks are cut from.
+const OVERFLOW_CHUNK: u64 = 0x10_0000;
+/// How much guest memory the overflow blocks take at most.
+const OVERFLOW_LIMIT: u64 = 0x100_0000;
+
+/// The guest memory that the next overflow block is cut from: the next free byte, the end and the bytes taken in total.
+static OVERFLOW: std::sync::Mutex<(u64, u64, u64)> = std::sync::Mutex::new((0, 0, 0));
+
+/// Guest memory for one overflow block of at least `need` bytes. The memory is never freed, because a recording that
+/// the game keeps may jump into it for the rest of the game.
+fn overflow_block(need: u32) -> AbiResult<(u64, u64)> {
+    let len = (u64::from(need) + 0x100).max(OVERFLOW_BLOCK).next_multiple_of(0x100);
+    let mut o = OVERFLOW.lock().unwrap_or_else(|e| e.into_inner());
+    if o.1 - o.0 < len {
+        let chunk = len.max(OVERFLOW_CHUNK);
+        if o.2 + chunk > OVERFLOW_LIMIT {
+            return Err(other("the command memory overflow of the host is used up"));
+        }
+        let k = nxkit_abi::kernel::kernel().ok_or_else(|| other("no kernel gives memory for command memory"))?;
+        let (_handle, base) = k
+            .create_shared_memory(chunk)
+            .map_err(|e| other(format!("the kernel gives no memory for command memory ({e:#x})")))?;
+        *o = (base, base + chunk, o.2 + chunk);
+    }
+    let at = o.0;
+    o.0 += len;
+    Ok((at, len))
+}
+
+/// Adds an overflow block of the host to the command buffer `cb`.
+fn add_overflow(cb: u64, need: u32) -> AbiResult<()> {
+    let (host, len) = overflow_block(need)?;
+    crate::diag!("DIAG cmdmem overflow cb {cb:#x} need {need} block {host:#x} len {len:#x}");
+    super::seam::validate_region(host, len)?;
+    with_recorder(cb, |r| {
+        sync_in(cb, r)?;
+        r.buf.add_command_memory(host, len)?;
+        sync_out(cb, r)
+    })
 }
 
 /// `EndRecording`. Gives the handle.
