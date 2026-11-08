@@ -20,6 +20,7 @@ mod backend;
 mod barr;
 mod clear;
 mod copyback;
+mod coverage;
 mod barriers;
 mod blit;
 mod bindless;

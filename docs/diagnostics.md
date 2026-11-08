@@ -79,7 +79,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | category | crate | prints | limit | cost |
 |---|---|---|---|---|
 | `health` | nvn, gpu | the render health report (see below) | every 300 frames, and when a reason counts for the first time | low |
-| `stats` | nvn, gpu | the encode counters, the walker counters, why the render passes start, and the decode time and the counters of the decode cache | every 30 frames, the decode every 300 submits | low |
+| `stats` | nvn, gpu | the encode counters, the walker counters, why the render passes start, the decode time and the counters of the decode cache, and the pipeline archive coverage (`pipelines: archive hits N, misses M ...`, then one line for each cause of a miss, see below) | every 30 frames, the decode every 300 submits | low |
 | `walkprof` | gpu | the walk of one submit: time in reading records, in the other records, in the detail of draws, in snapshots and in allocation (the clock reads make the walk slower), the records, draws and dispatches, the snapshots by kind (per-submit map, not copied, copied, shared with an earlier copy, fresh buffers, KiB), the heap blocks of the draws, and the banks of a draw that equal those of the draw before | first 200 submits, then every 20th | medium |
 | `cmd` | rt | each command buffer call: add memory, begin, end, call, memory queries, submits, clipped memory and overflow blocks | first 2000 per call site | medium |
 | `decodeprof` | nvn | where the time of a submit goes: lookups, hits, misses, call depth, records read, commands appended, and the time of the cache lookup (with the check of the references), of a miss (records, splices, end of decode) and of the append to the frame. Hits that skipped the check of their references are counted. The clocks read the time twice per step, so the numbers include that cost. | every 300 submits | low |
@@ -209,8 +209,34 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `copyback.refused` | encoder | A GPU-written texture in CPU-visible memory that could not be copied back. The CPU reads stale bytes. |
 | `copyback.over-budget` | encoder | A copy-back that was left out because the frame went over `NXKIT_COPYBACK_MAX_MB`. |
 | `program.failed` | encoder | A program that did not load. It counts once per key. |
+| `pipeline.archive-miss` | encoder | The archive of the build lacked a pipeline and Metal compiled it. The draw waited as `skip.pending`, so this is a hitch and not a loss. Without `NXKIT_DIAG=stats`, `health` or `pipe` it is only counted. With one on, the example says why (see "Archive coverage"). It counts the pipelines of a run without an archive too. |
 | `pipeline.failed` | encoder | A render, compute or depth-stencil state that Metal did not build. It counts every attempt. |
 
 The walker counts only when it reads a record. A recording that plays from the template cache does not count again. Without `NXKIT_WALK_CACHE=1` every frame counts. With `NXKIT_VERIFY_CACHE=1`, a recording is walked twice and counts twice.
 
 To add a reason, add it to `reasons!` in `nxkit-nvn/src/diag.rs`, call `nxkit_nvn::diag::note` where the work is dropped, and add a line to the table above.
+
+## Archive coverage
+
+The pipeline archive of the build holds one pipeline for each shader pair, with the state that the build assumes: eight unspecialized colour attachments, no vertex layout, no primitive class, one sample, no alpha to coverage, no ICB support. At run time a pipeline is the pair and the state of the draw. When Metal does not find it in the archive, the host compiles it on a background thread and the draw waits (`skip.pending`).
+
+`NXKIT_DIAG=stats` prints every 30 frames:
+
+```
+nxkit-gpu: pipelines: archive hits 1840, misses 212 (89.7% covered), compiled in 3180 ms (15.0 ms each)
+nxkit-gpu:   miss    150  pair archived, state differs: vertex-layout
+nxkit-gpu:   miss     40  pair not archived
+nxkit-gpu:   miss     22  pair archived, state differs: color-formats+blend
+```
+
+A hit is a pipeline that the archive gave. A miss is one that Metal compiled. The causes come from asking the archive again for each miss (up to nine lookups, only with `stats`, `health` or `pipe` on):
+
+| cause | meaning | what the build has to do |
+|---|---|---|
+| `pair not archived` | the archive has no pipeline with these two functions, even with the build's assumed state | put the pair in the plan. A pair whose vertex shader has stage inputs (not pull) is left out by the plan today (`left[2]` of `plan::plan`), because the vertex layout is not known at build time |
+| `pair archived, state differs: <groups>` | the pair is archived, and setting these groups of the pipeline's state alone on the archived pair makes the lookup miss. The groups are `topology`, `samples`, `alpha-to-coverage`, `vertex-layout`, `color-formats`, `blend`, `write-mask`, `icb` | precompile the pair with that state, because the unspecialized descriptor does not cover it |
+| `pair archived, only the whole state misses` | each group alone is found, the combination is not | precompile the combination |
+| `no archive` | the app has no archive (`pso_mtl4` off, or the file is missing) | |
+| `mesh (not in the build's archive)` | a mesh pipeline; the build makes none | |
+
+The example of `pipeline.archive-miss` in the health report carries the same text with the shader entries and the compile time of the pipeline.

@@ -42,6 +42,10 @@ let stats = gpu.wait()?;                     // GPU time of the last frame
 3. `programs.rs` loads the Metal library of a shader hash and its `_b.json` reflection from the shader directory (R1). The reflection gives the entry name, the binding list and the compute threadgroup size.
 4. `pipelines.rs` builds a `RenderPipeline` for the translated state and keeps it in the `PipelineCache`. The key is a hash of the program keys, the colour formats with blend and write mask, the vertex layout, the topology class, the sample count and alpha-to-coverage. Two draws with the same translated state share one pipeline, whatever their NVN state was. Depth and stencil are separate objects that Metal binds per draw.
 
+### Archive coverage
+
+`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts.
+
 ## Bindless textures and buffers
 
 A translated shader has one argument buffer per stage at `[[buffer(0)]]`. Member `arg_id` is at byte `8 * arg_id` and holds a GPU address or a resource ID. The encoder writes into it:

@@ -260,6 +260,9 @@ impl Stream {
             .take()
             .ok_or("stream already ran")?;
         fs::create_dir_all(&c.work).map_err(|e| format!("{}: {e}", c.work.display()))?;
+        // The groups are known now, before any shader is done: count one batch for each, so the progress has a total
+        // from the start. `group` corrects the count when it plans the group's real batches.
+        crate::Batches::planned(c, self.groups());
         let store = Store::open(&c.store).map_err(|e| e.to_string())?;
         let reg = ProcessRegistry::new();
         let seen: Mutex<HashSet<PlannedBase>> = Mutex::new(HashSet::new());
@@ -339,6 +342,7 @@ fn group(
         (b, c)
     };
     if bases.is_empty() && pipes.is_empty() {
+        crate::Batches::replanned(c, 1, 0);
         return Ok(Vec::new());
     }
     let script = Script::parse(&plan::script_text_with(&inp.lib_dir, &bases, &pipes))?;
@@ -350,7 +354,7 @@ fn group(
     let mut out = Vec::new();
     let mut batches = cut(script.bases(&digests)?, c.target);
     batches.extend(crate::compute::chunks(script.compute_bases(&digests)?));
-    crate::Batches::planned(c, batches.len());
+    crate::Batches::replanned(c, 1, batches.len());
     for batch in batches {
         let key = crate::batch_key(c, &batch);
         let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg, Some(headroom))?;

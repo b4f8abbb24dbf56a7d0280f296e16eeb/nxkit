@@ -491,10 +491,36 @@ The archive stage compiles one Metal 4 render pipeline base for each shader pair
   The compute pipelines are compiled apart from the render bases, in groups of 16. A change on one side leaves the other side's batches in the store.
   `archive.tsv` has a `compute` line with their number. `nxb pso` takes `--shader-map` and `--manifest` (repeatable), and `--no-compute` builds the bases alone.
   `nxb build` reads the two tables of the profile.
+- The progress of the batches (`batches done of total`, printed every 30 s in the lines mode) has a total from the start. The streamed archive counts one batch for each group of pairs when it starts, and corrects that when the group is planned, as a group is cut further or holds no pipeline. The total is then right when the last group has been planned.
 - The merge puts the pieces in hash order (`metal-pack`).
 - Measured on the reference title, cold: 207 s against 257 s for the reference build scripts, and 958 to 1,076 CPU seconds against 1,974.
   The loader probe found all 18,300 bases. The machine load was 7 to 33.
 - Measured: `bases.mtl4-json` and `prebuilt.tsv` are byte-identical (18,301 pairs). The `metal-tt` output is not deterministic. Thus the tests compare archives by content.
+
+### Where the state of an archive pipeline comes from
+
+The plan (`plan::plan`) and the script (`plan::script_text_with`) give every base the same state: eight colour attachments with every field `Unspecialized`, and nothing else (no vertex descriptor, no topology class, one sample, no alpha to coverage). Nothing in the profile sets it. A pair is left out when its vertex shader has stage inputs and is not a pull shader (`left[2]`), when the fragment shader uses the primitive ID, when the vertex shader writes the layer, when the library has function constants (these go to `rest`), and when it is a mesh shader. `NXKIT_DIAG=stats` of the host says at run time which of these states the archive misses (see [diagnostics.md](diagnostics.md#archive-coverage)).
+
+The profile's data that holds real states:
+
+- `pso_manifest.tsv` has `S` rows (shaders), `C` rows (compute shaders, used by the archive) and `R` rows. An `R` row is the hex of a `pso_skey` of the reference host (`nvn_pso_skey.h` of NX2Apple): the two shader keys, the colour formats of eight slots, the depth and stencil formats, the sample count, the blend enable and write masks, the alpha to coverage flag, eight blend states, 16 vertex attributes and 16 vertex streams, and the fragment variant flags. The formats and blend factors are NVN values. The Ocarina profile has 1,112 such rows. The archive does not read them.
+- `shader_seen.tsv` lists shader keys seen in play (7,279 lines for Ocarina). It is a list of shaders and not of pipelines. Only `--seen-shaders` reads it.
+- `shader_facts.tsv` has the answers for translation queries (thread group, shared memory), not pipeline state.
+
+To use the `R` rows the build has to translate their NVN formats, blend states and vertex layouts into Metal descriptor fields. The table for that is in `nxkit-gpu` (`translate.rs`, `format_map.rs`), a macOS-only L2 crate that `nxb-archive` cannot depend on. It needs a shared table first. Not done.
+
+### Cost of the compile
+
+Measured on this Mac (M2 Max, `applegpu-nt -arch applegpu_g14s -j 1`, toolchain 32023.922, other builds running, CPU seconds from `time -l`) with batch scripts of the Ocarina build:
+
+| test | result |
+|---|---|
+| 24 pipelines, `Unspecialized` attachments against one concrete attachment (`RGBA8Unorm`, no blend) | 21.7 s against 20.0 s. The state is not a lever |
+| the same 24 with `-disable-optimizations` | 20.9 s. It changes nothing in the time |
+| one pipeline with a large vertex function, then 4, then 24 pipelines that share that vertex function | 17.8 s, 26.6 s, 168 s. A vertex function is compiled once for a run (the first pipeline pays for it, 2.9 s for each next one). The cost of a function varies from 0.1 s to more than 15 s |
+| peak memory of a run | 0.5 GB at `-j 1` for these scripts |
+
+The pairs of Ocarina (`shader_pairs.tsv` and `pso_pairs.tsv`, 34,649 different pairs): 16,341 vertex keys and 22,329 fragment keys. Cut by the hash of the vertex key into 128 ranges, a vertex key is always in one batch, so the vertex functions are compiled once (16,341 times). A fragment key is compiled in each batch that holds it, 33,994 times against 22,329 keys, but 22,329 of the pairs have a fragment key of their own, so a change of the cut would save at most a few percent. The libraries of the pairs have 49,620 files with 47,441 different contents. Content-equal pairs are 224 of 34,649 (0.65 %): not worth a second dedupe pass. The remaining cost is the compile of each distinct function and pipeline, about 0.9 s of CPU for each pipeline on this sample. A cold build is bounded by the CPU time (34,650 pipelines at about 0.9 s are 31,000 CPU seconds, 55 minutes at ten busy cores). Tuning batch size or the number of runs does not reduce it. Fewer runs only help when the machine swaps, which `Headroom` already watches.
 
 For the study of the archive back end, refer to [research/backend-survey.md](research/backend-survey.md).
 
