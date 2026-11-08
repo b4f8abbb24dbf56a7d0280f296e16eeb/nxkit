@@ -135,6 +135,9 @@ reasons! {
     CopybackOverBudget => "copyback.over-budget",
     /// Shaders: a program that did not translate or load.
     ProgramFailed => "program.failed",
+    /// Pipelines: a pipeline that the build's archive lacked (or there is none) and Metal compiled. The draw waits as
+    /// `skip.pending`. It is a hitch, not a loss; `NXKIT_DIAG=stats` says why the archive missed.
+    PipelineMiss => "pipeline.archive-miss",
     /// Pipelines: a render, compute or depth-stencil state that Metal did not build.
     PipelineFailed => "pipeline.failed",
 }
@@ -142,7 +145,10 @@ reasons! {
 impl Reason {
     /// False for a reason that counts work that the hardware does not do either.
     pub fn is_loss(self) -> bool {
-        self != Reason::SkipCull && self != Reason::SkipPending && self != Reason::UploadScaled
+        self != Reason::SkipCull
+            && self != Reason::SkipPending
+            && self != Reason::UploadScaled
+            && self != Reason::PipelineMiss
     }
 }
 

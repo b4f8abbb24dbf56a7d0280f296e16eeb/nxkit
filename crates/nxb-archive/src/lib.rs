@@ -39,7 +39,8 @@ use crate::script::Script;
 pub struct Batches {
     /// Batches done (compiled, or taken from the store).
     pub done: std::sync::atomic::AtomicU64,
-    /// Batches in all (a streamed archive adds each group's batches as the group is planned).
+    /// Batches in all. A streamed archive counts one batch for each group when it starts and corrects the count of a
+    /// group when the group is planned (a group is one batch unless it is cut further or holds no pipeline).
     pub total: std::sync::atomic::AtomicU64,
 }
 
@@ -48,6 +49,18 @@ impl Batches {
         if let Some(b) = &c.progress {
             b.total
                 .fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// A group planned `n` batches where [`Batches::planned`] had counted `estimate` for it at the start.
+    pub(crate) fn replanned(c: &Config, estimate: usize, n: usize) {
+        if let Some(b) = &c.progress {
+            use std::sync::atomic::Ordering::Relaxed;
+            if n >= estimate {
+                b.total.fetch_add((n - estimate) as u64, Relaxed);
+            } else {
+                b.total.fetch_sub((estimate - n) as u64, Relaxed);
+            }
         }
     }
 

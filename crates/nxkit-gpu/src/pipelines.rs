@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
     ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format, MeshPipelineDesc,
-    PipelineCache, RenderPipeline, RenderPipelineDesc, ShaderLibrary, TopologyClass,
+    PipelineCache, RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source, TopologyClass,
 };
 
 use crate::detail::{AttributeDetail, BlendDetail, DrawDetail, ProgramRef};
@@ -196,17 +196,17 @@ fn build_render(
     fallbacks: &Mutex<FastSet<u64>>,
     key: u64,
     desc: &mut RenderPipelineDesc<'_>,
-) -> Result<RenderPipeline, nxkit_metal::MetalError> {
+) -> Result<(RenderPipeline, Source), nxkit_metal::MetalError> {
     if fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
         desc.topology = TopologyClass::Unspecified;
-        return cache.render(key ^ FALLBACK_KEY, desc);
+        return cache.render_traced(key ^ FALLBACK_KEY, desc);
     }
-    cache.render(key, desc).or_else(|e| {
+    cache.render_traced(key, desc).or_else(|e| {
         if desc.topology == TopologyClass::Point || !e.to_string().contains("point size") {
             return Err(e);
         }
         desc.topology = TopologyClass::Unspecified;
-        let pipeline = cache.render(key ^ FALLBACK_KEY, desc)?;
+        let pipeline = cache.render_traced(key ^ FALLBACK_KEY, desc)?;
         // Remember the successful variant. Retrying the rejected descriptor for every draw invokes the Metal compiler
         // thousands of times per frame even though the fallback itself is cached.
         fallbacks.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
@@ -257,9 +257,13 @@ impl Builds {
                 desc.topology = r.topology;
                 desc.sample_count = r.sample_count;
                 desc.alpha_to_coverage = r.alpha_to_coverage;
-                build_render(cache, fallbacks, job.key, &mut desc).map(|_| ())
+                build_render(cache, fallbacks, job.key, &mut desc).map(|(_, source)| {
+                    crate::coverage::record(cache, source, Some(&desc), &job.what);
+                })
             }
-            JobKind::Mesh(m) => cache.mesh(job.key, &m.desc()).map(|_| ()),
+            JobKind::Mesh(m) => cache.mesh_traced(job.key, &m.desc()).map(|(_, source)| {
+                crate::coverage::record(cache, source, None, &job.what);
+            }),
         };
         if let Err(e) = built {
             pipe_failed(format_args!("{}: {e}", job.what));
@@ -443,9 +447,10 @@ impl Pipelines {
             self.builds.start(&self.cache, &self.topology_fallbacks, job);
             return Err(Skip::Pending);
         }
-        let p = build_render(&self.cache, &self.topology_fallbacks, key, &mut desc).map_err(|e| {
-            pipe_failed(format_args!("render {} / {:?}: {e}", vs.entry, fs.map(|f| f.entry.as_str())))
-        })?;
+        let what = || format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str()));
+        let (p, source) = build_render(&self.cache, &self.topology_fallbacks, key, &mut desc)
+            .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
+        crate::coverage::record(&self.cache, source, Some(&desc), &what());
         Ok((p, key))
     }
 
@@ -508,7 +513,11 @@ impl Pipelines {
             self.builds.start(&self.cache, &self.topology_fallbacks, job);
             return Err(Skip::Pending);
         }
-        let p = self.cache.mesh(key, &job.desc()).map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
+        let (p, source) = self
+            .cache
+            .mesh_traced(key, &job.desc())
+            .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
+        crate::coverage::record(&self.cache, source, None, &what());
         Ok((p, key))
     }
 

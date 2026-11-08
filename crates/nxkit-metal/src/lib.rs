@@ -87,8 +87,8 @@ pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInp
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, Pacer, TickSink};
 pub use pipeline::{
-    ArchiveConfig, ComputePipeline, MeshPipelineDesc, PipelineCache, RenderPipeline,
-    RenderPipelineDesc, ShaderLibrary,
+    ArchiveConfig, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache, RenderPipeline,
+    RenderPipelineDesc, ShaderLibrary, Source,
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
 pub use present::{Drawable, PRESENT_FORMAT, Presenter, set_timed_present, timed_present};

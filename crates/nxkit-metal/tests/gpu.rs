@@ -749,6 +749,7 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: None,
             collect: true,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -762,6 +763,7 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: Some(archive.clone()),
             collect: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -773,6 +775,7 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: Some(dir.join("none")),
             collect: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -1210,4 +1213,31 @@ fn an_indirect_draw_reads_its_arguments_on_the_gpu() {
     pass.end();
     frame.submit().unwrap().wait().unwrap();
     assert!(pixels(&target, 16, 16).as_chunks::<4>().0.iter().all(|p| *p == [0, 255, 0, 255]));
+}
+
+/// A pipeline found in the archive is told from one that was compiled, and a miss is explained.
+#[test]
+fn archive_hits_and_misses_are_told_apart() {
+    use nxkit_metal::Source;
+    let Some(ctx) = ctx() else { return };
+    let dir = std::env::temp_dir().join(format!("nxkit-metal-trace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let archive = dir.join("p.mtl4archive");
+    let lib = ShaderLibrary::from_source(&ctx, "draw", DRAW_MSL).unwrap();
+    let desc = || RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]);
+    let first = PipelineCache::new(&ctx, &ArchiveConfig { collect: true, ..Default::default() }).unwrap();
+    assert!(matches!(first.render_traced(1, &desc()).unwrap().1, Source::Compiled(_)));
+    assert_eq!(first.render_traced(1, &desc()).unwrap().1, Source::Cached);
+    first.save_archive(&archive).unwrap();
+    let second = PipelineCache::new(
+        &ctx,
+        &ArchiveConfig { load: Some(archive), ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(second.render_traced(1, &desc()).unwrap().1, Source::Archive);
+    let mut other = desc();
+    other.fragment = None;
+    let why = second.explain_miss(&other).unwrap();
+    eprintln!("{why:?}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
