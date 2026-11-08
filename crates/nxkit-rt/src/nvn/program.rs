@@ -13,7 +13,8 @@
 //!   The code length is the u32 at +0x44.
 //!
 //! The code is part of the hash when its address is not null and its length is in `1..2^24`.
-//! A key exists after `SetShaders` when the code lies in guest memory. Mario sets some programs with an address that
+//! The address of the code is a GPU address (`NVNbufferAddress`). The host hashes the code at the host address of
+//! that GPU address. A key exists after `SetShaders` when the code lies in a memory pool. Mario sets some programs with an address that
 //! holds no code yet and fills it before the first draw. For such a stage the key bytes of the control section are
 //! copied at the call, because the control section is valid only during the call, and the key is computed at the first
 //! use ([`stages_of`]).
@@ -46,7 +47,7 @@ const CODE_LIMIT: u32 = 1 << 24;
 pub(crate) struct Stage {
     /// The position in the array of `SetShaders`.
     pub(crate) index: u8,
-    /// The host address of the code area.
+    /// The GPU address of the code area.
     pub(crate) code: u64,
     /// The length of the code area. Zero when the control section says there is none.
     pub(crate) code_len: u32,
@@ -134,11 +135,13 @@ fn read_stage(index: usize, data: u64, control: u64, settings: &Settings) -> Abi
     let mut section = vec![0u8; section_len(&head)];
     guest::read(control, &mut section)?;
     let (key_bytes, code_len) = key_parts(&section, settings.shader_key_skip);
-    let covered = has_code(data, code_len);
-    let key = if covered && guest::check(data, u64::from(code_len)).is_ok() {
-        Some(code_key(&key_bytes, data, code_len)?)
+    let key = if !has_code(data, code_len) {
+        Some(hash_key(&key_bytes, None))
     } else {
-        None
+        match code_host(data, code_len) {
+            Some(host) => Some(code_key(&key_bytes, host, code_len)?),
+            None => None,
+        }
     };
     Ok(Stage {
         index: index as u8,
@@ -147,6 +150,13 @@ fn read_stage(index: usize, data: u64, control: u64, settings: &Settings) -> Abi
         key_bytes: if key.is_some() { Vec::new() } else { key_bytes },
         key,
     })
+}
+
+/// The host address of the code at the GPU address `data`. None when no memory pool holds it.
+fn code_host(data: u64, len: u32) -> Option<u64> {
+    let host = gpu("nvnProgramSetShaders").host_address(data, u64::from(len)).ok()?;
+    guest::check(host, u64::from(len)).ok()?;
+    Some(host)
 }
 
 fn code_key(key_bytes: &[u8], data: u64, len: u32) -> AbiResult<ShaderKey> {
@@ -169,6 +179,14 @@ fn stage_key(s: &Stage) -> StageKey {
 ///
 /// The command buffer group calls it when a program is bound. A stage whose code is still not in guest memory ends the
 /// game with the name `nvnCommandBufferBindProgram`'s caller gives in `name`.
+/// True when a stage of the program at `program` has no key yet.
+pub(crate) fn has_pending(name: &str, program: u64) -> bool {
+    gpu(name)
+        .programs
+        .with(program, |r| r.stages.iter().any(|s| s.key.is_none()))
+        .unwrap_or(false)
+}
+
 pub(crate) fn stages_of(name: &str, program: u64) -> Option<Vec<StageKey>> {
     let g = gpu(name);
     let mut rec = g.programs.get(program)?;
@@ -178,7 +196,13 @@ pub(crate) fn stages_of(name: &str, program: u64) -> Option<Vec<StageKey>> {
             continue;
         }
         let key = if has_code(s.code, s.code_len) {
-            match code_key(&s.key_bytes, s.code, s.code_len) {
+            let Some(host) = code_host(s.code, s.code_len) else {
+                fatal(
+                    name,
+                    format_args!("the code of a shader stage at GPU address {:#x} is in no memory pool", s.code),
+                )
+            };
+            match code_key(&s.key_bytes, host, s.code_len) {
                 Ok(k) => k,
                 Err(e) => fatal(
                     name,

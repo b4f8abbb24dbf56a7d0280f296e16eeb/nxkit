@@ -22,6 +22,9 @@ const STREAMS_PER_CHUNK: u32 = 13;
 
 extern "C" fn bind_program(c: u64, program: u64, stages: i32) {
     guard("nvnCommandBufferBindProgram", || {
+        if crate::nvn::program::has_pending("nvnCommandBufferBindProgram", program) {
+            crate::nvn::program::stages_of("nvnCommandBufferBindProgram", program);
+        }
         emit(
             "nvnCommandBufferBindProgram",
             c,
