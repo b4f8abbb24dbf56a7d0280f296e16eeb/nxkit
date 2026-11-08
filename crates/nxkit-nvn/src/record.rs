@@ -282,17 +282,26 @@ impl Record {
 
     /// Reads the record at `host` and returns it with its size.
     pub fn read(mem: &impl GuestMem, host: u64) -> Result<(Self, u32)> {
+        let mut buf = [0u8; MAX_RECORD_BYTES];
+        // One read takes the header and the body. It fails when the record ends close to the end of the memory.
+        let whole = mem.read(host, &mut buf).is_ok();
         let mut h = [0u8; 8];
-        mem.read(host, &mut h)?;
+        if whole {
+            h.copy_from_slice(&buf[..8]);
+        } else {
+            mem.read(host, &mut h)?;
+        }
         let op = u16::from_le_bytes([h[0], h[1]]);
         let arg = u16::from_le_bytes([h[2], h[3]]);
         let size = u32::from_le_bytes([h[4], h[5], h[6], h[7]]);
         if size < HEADER_BYTES || size % 8 != 0 || size as usize > MAX_RECORD_BYTES {
+            eprintln!("DIAG bad record at {host:#x}: header {h:02x?}");
             return Err(NvnError::BadRecord("size"));
         }
-        let mut payload = [0u8; MAX_RECORD_BYTES];
-        let body = &mut payload[..(size - HEADER_BYTES) as usize];
-        mem.read(host + u64::from(HEADER_BYTES), body)?;
+        if !whole {
+            mem.read(host + u64::from(HEADER_BYTES), &mut buf[8..size as usize])?;
+        }
+        let body = &buf[HEADER_BYTES as usize..size as usize];
         let w = |i: usize| -> Result<u64> {
             body.get(8 * i..8 * i + 8)
                 .map(|b| u64::from_le_bytes(b.try_into().unwrap_or([0; 8])))
@@ -452,7 +461,10 @@ mod tests {
         assert_eq!(size(full), 88);
         let widest = Record::Ext(Ext::new(ExtCode::Push, 0).bytes(&[0; 112]));
         assert_eq!(size(widest) as usize, MAX_RECORD_BYTES);
-        assert_eq!(size(Record::Ext(Ext::new(ExtCode::Draw, 0).u32(1).u32(2).u32(3))), 16);
+        assert_eq!(
+            size(Record::Ext(Ext::new(ExtCode::Draw, 0).u32(1).u32(2).u32(3))),
+            24
+        );
         assert!(all().iter().all(|r| size(*r) as usize <= MAX_RECORD_BYTES));
     }
 
@@ -468,7 +480,8 @@ mod tests {
         );
         assert!(Record::ClearColor { slot: 8 }.encode().is_err());
         assert!(Record::Barrier(0x100).encode().is_err());
-        let too_many = (0..=crate::ext::MAX_EXT_WORDS).fold(Ext::new(ExtCode::Push, 0), |e, i| e.u32(i as u32));
+        let too_many = (0..=crate::ext::MAX_EXT_WORDS)
+            .fold(Ext::new(ExtCode::Push, 0), |e, i| e.u32(i as u32));
         assert!(Record::Ext(too_many).encode().is_err());
     }
 
@@ -487,7 +500,7 @@ mod tests {
             (OP_DRAW, 0),
             (OP_DRAW, 12),
             (OP_DRAW, 4096),
-            (99, 8),
+            (FIRST_EXT_OP - 1, 8),
             (FIRST_EXT_OP + 200, 8),
             (OP_COPY, 8),
         ] {

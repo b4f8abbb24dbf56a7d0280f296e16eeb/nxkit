@@ -5,16 +5,18 @@
 //! alpha-to-coverage flag. Two draws with the same translated state share one pipeline, however different their NVN
 //! state was. The depth and stencil state is a separate object that Metal binds per draw and not per pipeline.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use nxkit_metal::{
-    ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format, PipelineCache,
-    RenderPipeline, RenderPipelineDesc,
+    ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format,
+    PipelineCache, RenderPipeline, RenderPipelineDesc, ShaderLibrary, TopologyClass,
 };
 
-use crate::detail::DrawDetail;
+use crate::detail::{AttributeDetail, BlendDetail, DrawDetail, ProgramRef};
 use crate::programs::StageProgram;
 use crate::stats::Skip;
 use crate::translate;
@@ -30,16 +32,89 @@ pub(crate) struct Targets {
     pub(crate) samples: u32,
 }
 
+/// A map with the fast hasher. The keys of these maps are not attacker controlled.
+type FastMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
+type FastSet<K> = HashSet<K, foldhash::fast::RandomState>;
+
+/// The numbers of the [`Pipelines`] made so far, which tell the thread memos apart.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Everything of a draw that goes into the pipeline key, and the pipeline that came out. The encoder asks for the
+/// pipeline of every draw and nearly always gets the answer of the draw before, so one compare replaces building the
+/// descriptor and hashing it. A memo belongs to one thread.
+struct Last {
+    owner: u64,
+    icb: bool,
+    topology: u32,
+    alpha_to_coverage: bool,
+    program: ProgramRef,
+    targets: Targets,
+    blend: [BlendDetail; 8],
+    write_masks: [u8; 8],
+    attributes: Vec<AttributeDetail>,
+    /// The index, stride and divisor of each stream. The address does not matter for the pipeline.
+    streams: Vec<(u32, u32, u32)>,
+    pipeline: RenderPipeline,
+    key: u64,
+}
+
+impl Last {
+    fn matches(&self, owner: u64, d: &DrawDetail, targets: &Targets, icb: bool) -> bool {
+        self.owner == owner
+            && self.icb == icb
+            && self.topology == d.topology
+            && self.alpha_to_coverage == d.raster.alpha_to_coverage
+            && self.write_masks == d.write_masks
+            && self.blend == d.blend
+            && self.program == d.program
+            && self.targets == *targets
+            && self.attributes == d.attributes
+            && self.streams.len() == d.streams.len()
+            && self.streams.iter().zip(&d.streams).all(|(m, s)| *m == (s.index, s.stride, s.divisor))
+    }
+}
+
+/// The depth and stencil state that the last draw of a thread used.
+struct LastDepth {
+    owner: u64,
+    desc: DepthStencilDesc,
+    state: DepthStencilState,
+}
+
+thread_local! {
+    static LAST_PIPELINE: RefCell<Option<Last>> = const { RefCell::new(None) };
+    static LAST_DEPTH: RefCell<Option<LastDepth>> = const { RefCell::new(None) };
+}
+
 /// The pipeline cache and the depth and stencil states.
 pub(crate) struct Pipelines {
+    id: u64,
     ctx: Context,
     cache: PipelineCache,
-    depth: Mutex<HashMap<DepthStencilDesc, DepthStencilState>>,
+    depth: Mutex<FastMap<DepthStencilDesc, DepthStencilState>>,
+    flat: Mutex<Option<ShaderLibrary>>,
+    /// The shader of the `paint` knob, which colours every draw into a single HDR target.
+    paint: Mutex<Option<ShaderLibrary>>,
+    /// The shader of the `cubesrc` knobs, which replaces the cube map filter of one program.
+    cubetest: Mutex<Option<ShaderLibrary>>,
+    topology_fallbacks: Mutex<FastSet<u64>>,
 }
 
 impl Pipelines {
-    pub(crate) fn new(ctx: &Context, archive: &ArchiveConfig) -> Result<Self, nxkit_metal::MetalError> {
-        Ok(Self { ctx: ctx.clone(), cache: PipelineCache::new(ctx, archive)?, depth: Mutex::new(HashMap::new()) })
+    pub(crate) fn new(
+        ctx: &Context,
+        archive: &ArchiveConfig,
+    ) -> Result<Self, nxkit_metal::MetalError> {
+        Ok(Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            ctx: ctx.clone(),
+            cache: PipelineCache::new(ctx, archive)?,
+            depth: Mutex::new(FastMap::default()),
+            flat: Mutex::new(None),
+            paint: Mutex::new(None),
+            cubetest: Mutex::new(None),
+            topology_fallbacks: Mutex::new(FastSet::default()),
+        })
     }
 
     /// The cache that the deswizzle kernels and compute pipelines share.
@@ -53,7 +128,8 @@ impl Pipelines {
     }
 
     /// The pipeline of a draw. `fs` is `None` for a draw without a fragment shader. `icb` asks for a pipeline that an
-    /// indirect command buffer may use.
+    /// indirect command buffer may use. A draw whose translated state equals that of the previous draw on the same
+    /// thread gets the previous pipeline without a lookup.
     pub(crate) fn render(
         &self,
         d: &DrawDetail,
@@ -214,6 +290,18 @@ impl Pipelines {
 
     /// The depth and stencil state object of a description, made once.
     pub(crate) fn depth_stencil(&self, d: &DepthStencilDesc) -> Result<DepthStencilState, Skip> {
+        let hit = LAST_DEPTH.with(|l| {
+            l.borrow().as_ref().filter(|m| m.owner == self.id && m.desc == *d).map(|m| m.state.clone())
+        });
+        if let Some(s) = hit {
+            return Ok(s);
+        }
+        let state = self.depth_stencil_uncached(d)?;
+        LAST_DEPTH.with(|l| *l.borrow_mut() = Some(LastDepth { owner: self.id, desc: *d, state: state.clone() }));
+        Ok(state)
+    }
+
+    fn depth_stencil_uncached(&self, d: &DepthStencilDesc) -> Result<DepthStencilState, Skip> {
         let mut map = self.depth.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(s) = map.get(d) {
             return Ok(s.clone());

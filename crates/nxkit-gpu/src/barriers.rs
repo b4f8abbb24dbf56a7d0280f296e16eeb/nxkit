@@ -9,7 +9,7 @@
 //! A barrier after queue stages also covers the passes of earlier command buffers on the same queue. This is assumed
 //! from the Metal 4 documentation and is not verified on hardware.
 
-use std::collections::HashMap;
+use crate::draws::FastMap;
 
 use nxkit_metal::{Dependency, Scope, Stages, Visibility};
 use nxkit_nvn::frame::{Cmd, Frame};
@@ -70,7 +70,7 @@ fn join(a: Option<Stages>, b: Stages) -> Option<Stages> {
 /// The barriers of a frame, and the state that carries to the next one.
 #[derive(Default)]
 pub(crate) struct BarrierState {
-    pending: HashMap<TexId, Hazard>,
+    pending: FastMap<TexId, Hazard>,
 }
 
 /// The barrier before each pass and the counts.

@@ -133,6 +133,9 @@ pub enum WaitResult {
     Failed,
 }
 
+/// The work that [`Backend::submit`] defers until the front lock is gone.
+pub type Deferred<'a> = Box<dyn FnOnce() + 'a>;
+
 /// The GPU backend as the front end sees it. A call may come from any guest thread.
 pub trait Backend: Send + Sync {
     /// The GPU address that Metal gave to the first byte of the mapped guest memory. The front end builds its
@@ -191,7 +194,19 @@ pub trait Backend: Send + Sync {
     /// `NVNqueue`. `origin_lower_left` is the window origin that the queue captured at its creation. The frame holds
     /// the analysis of the commands, so the backend replays the recordings through these handles. The default does
     /// nothing.
-    fn submit(&self, _queue: u64, _handles: &[CommandHandle], _origin_lower_left: bool) {}
+    ///
+    /// The call runs under the lock of the front end and must be short. Work that needs no front end state goes into
+    /// the returned closure: the caller runs it after it released the front lock, on the same thread, and before it
+    /// returns to the game. Whatever order-sensitive state the backend needs (a lock that serialises the work) is taken
+    /// inside this call, so the closures run in the order of the calls even though they run unlocked.
+    fn submit<'a>(
+        &'a self,
+        _queue: u64,
+        _handles: &'a [CommandHandle],
+        _origin_lower_left: bool,
+    ) -> Option<Deferred<'a>> {
+        None
+    }
 
     /// A texture was created in guest memory (`nvnTextureInitialize`).
     fn texture_created(&self, record: &TextureRecord);

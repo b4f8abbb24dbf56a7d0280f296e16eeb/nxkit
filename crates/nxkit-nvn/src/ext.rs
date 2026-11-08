@@ -402,8 +402,11 @@ impl Ext {
     /// An extension from a header and its payload bytes.
     pub(crate) fn from_payload(code: ExtCode, arg: u16, body: &[u8]) -> Self {
         let mut e = Self::new(code, arg);
-        for c in body.chunks_exact(4) {
-            e = e.u32(u32::from_le_bytes([c[0], c[1], c[2], c[3]]));
+        let (chunks, _) = body.as_chunks::<4>();
+        e.over = chunks.len() > MAX_EXT_WORDS;
+        for (w, c) in e.words.iter_mut().zip(chunks) {
+            *w = u32::from_le_bytes(*c);
+            e.len += 1;
         }
         e
     }
@@ -426,14 +429,16 @@ mod tests {
     #[test]
     fn write_ext_matches_the_size_and_the_words() {
         assert_eq!(ext_size(0), 8);
-        assert_eq!(ext_size(3), 16);
-        let mut out = [0xffu8; 16];
+        assert_eq!(ext_size(3), 24);
+        let mut out = [0xffu8; 24];
         write_ext(&mut out, ExtCode::Draw, 7, &[1, 2, 3]);
         assert_eq!(&out[0..2], &(ExtCode::Draw as u16).to_le_bytes());
         assert_eq!(&out[2..4], &7u16.to_le_bytes());
-        assert_eq!(&out[4..8], &16u32.to_le_bytes());
+        assert_eq!(&out[4..8], &24u32.to_le_bytes());
         assert_eq!(&out[8..12], &1u32.to_le_bytes());
-        assert_eq!(&out[16 - 4..], &[0; 4]);
+        assert_eq!(&out[12..16], &2u32.to_le_bytes());
+        assert_eq!(&out[16..20], &3u32.to_le_bytes());
+        assert_eq!(&out[20..], &[0; 4]);
     }
 
     #[test]
@@ -442,7 +447,10 @@ mod tests {
             .u64(0x1122_3344_5566_7788)
             .i32(-1)
             .f32(1.0);
-        assert_eq!(e.words(), &[0x5566_7788, 0x1122_3344, u32::MAX, 0x3f80_0000]);
+        assert_eq!(
+            e.words(),
+            &[0x5566_7788, 0x1122_3344, u32::MAX, 0x3f80_0000]
+        );
         assert_eq!(e.word64(0), 0x1122_3344_5566_7788);
         assert_eq!(e.word(9), 0);
     }

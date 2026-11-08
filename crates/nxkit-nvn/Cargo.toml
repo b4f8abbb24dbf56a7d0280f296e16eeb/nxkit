@@ -12,6 +12,7 @@ layer = "L1"
 in_v = false
 
 [dependencies]
+foldhash = "0.2"
 
 [lints]
 workspace = true

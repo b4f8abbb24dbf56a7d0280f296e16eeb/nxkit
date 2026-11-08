@@ -137,6 +137,9 @@ impl Walker {
             return;
         }
         let end = at + bytes.len() as u64;
+        self.snaps
+            .get_mut()
+            .retain(|(a, s), _| !(*a < end && at < *a + u64::from(*s)));
         match self.updated.last_mut() {
             Some((s, e)) if at <= *e && *s <= end => {
                 *s = (*s).min(at);
@@ -151,44 +154,98 @@ impl Walker {
         }
     }
 
-    pub(super) fn ubos<M: GuestMem>(&self, mem: &M, st: &State, slot: usize, stage: Stage) -> Vec<UboDetail> {
-        st.ubo[slot]
-            .iter()
-            .enumerate()
-            .filter(|(_, (a, s))| *a != 0 && *s != 0)
-            .map(|(i, (a, s))| UboDetail {
-                stage,
-                slot: i as u32,
-                address: *a,
-                size: *s,
-                snapshot: self.snapshot(mem, *a, *s),
-            })
-            .collect()
+    /// The uniform buffers of the bank (0 vertex, 1 fragment, 2 compute) that are bound, added to `out`.
+    pub(super) fn ubos_into<M: GuestMem>(
+        &self,
+        mem: &M,
+        st: &State,
+        slot: usize,
+        stage: Stage,
+        out: &mut Vec<UboDetail>,
+    ) {
+        out.extend(
+            st.ubo[slot]
+                .iter()
+                .enumerate()
+                .filter(|(_, (a, s))| *a != 0 && *s != 0)
+                .map(|(i, (a, s))| UboDetail {
+                    stage,
+                    slot: i as u32,
+                    address: *a,
+                    size: *s,
+                    snapshot: self.snapshot(mem, *a, *s),
+                }),
+        );
+    }
+
+    pub(super) fn ubos<M: GuestMem>(
+        &self,
+        mem: &M,
+        st: &State,
+        slot: usize,
+        stage: Stage,
+    ) -> Vec<UboDetail> {
+        let mut out = Vec::with_capacity(bound_count(&st.ubo[slot]));
+        self.ubos_into(mem, st, slot, stage, &mut out);
+        out
     }
 
     /// The bytes of a buffer that an update touched, as the guest memory holds them now.
-    fn snapshot<M: GuestMem>(&self, mem: &M, addr: u64, size: u32) -> Option<Arc<[u8]>> {
+    pub(super) fn snapshot<M: GuestMem>(&self, mem: &M, addr: u64, size: u32) -> Option<Arc<[u8]>> {
+        if let Some(snapshot) = self.snaps.borrow().get(&(addr, size)) {
+            return snapshot.clone();
+        }
         let end = addr + u64::from(size);
+        // A partial update does not reduce the bound range. Its unchanged tail can contain constants that the
+        // shader still reads. Copying only the updated prefix makes those reads escape the scratch allocation.
         if !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
+            // Most bound blocks have no inline updates. Remember that result as well: scanning the update
+            // history for every UBO of every draw otherwise dominates the command walker on large frames.
+            self.snaps.borrow_mut().insert((addr, size), None);
             return None;
         }
         let mut buf = vec![0u8; size as usize];
         let host = self.map.host_address(addr, u64::from(size)).ok()?;
         mem.read(host, &mut buf).ok()?;
-        Some(buf.into())
+        let snap: Arc<[u8]> = buf.into();
+        self.snaps.borrow_mut().insert((addr, size), Some(snap.clone()));
+        Some(snap)
     }
 
-    fn draw<M: GuestMem>(&self, mem: &M, st: &State, x: &Ext) -> DrawDetail {
+    fn draw<M: GuestMem>(&mut self, mem: &M, st: &State, x: &Ext) -> DrawDetail {
         let mut d = empty_draw();
+        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let show =
+            || crate::diag("prog") && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40;
         let Some((topology, args)) = draw_args(x) else {
+            if crate::diag("indirect") {
+                static K: [std::sync::atomic::AtomicU32; 16] = [const { std::sync::atomic::AtomicU32::new(0) }; 16];
+                let n = K[usize::from(x.arg) & 15].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n.is_power_of_two() {
+                    eprintln!("DIAG indirect kind {} dropped {} times, program {:x?}", x.arg, n + 1, st.program);
+                }
+            }
+            if show() {
+                eprintln!("DIAG draw: no draw args, kind {}", x.arg);
+            }
             return d;
         };
+        self.track.program(0, st.program[0]);
         let Some(vertex) = self.programs.find(st.program[0], Kind::Vertex) else {
+            if show() {
+                eprintln!(
+                    "DIAG draw: no vertex stage, programs {:x?}, stages of [0]: {}",
+                    st.program,
+                    self.programs.describe(st.program[0])
+                );
+            }
             return d;
         };
+        self.track.program(1, st.program[1]);
+        self.track.read(&cache::DRAW_READS);
         d.program = ProgramRef {
-            vertex: vertex.to_owned(),
-            fragment: self.programs.find(st.program[1], Kind::Fragment).map(str::to_owned),
+            vertex: vertex.clone(),
+            fragment: self.programs.find(st.program[1], Kind::Fragment).cloned(),
         };
         d.topology = topology;
         d.args = args;
@@ -196,23 +253,48 @@ impl Walker {
         d.write_masks = st.masks;
         d.depth_stencil = objects::depth_stencil(&st.depth_stencil, &st.stencil);
         d.raster = st.raster.detail();
+        d.attributes.reserve_exact(st.attribute.iter().flatten().count());
+        let mut used = 0u32;
         for (location, a) in st.attribute.iter().enumerate().take(ATTRIBUTES) {
             if let Some((format, offset, stream)) = *a {
-                d.attributes.push(AttributeDetail { location: location as u32, format, offset, stream });
+                if stream < STREAMS as u32 {
+                    used |= 1 << stream;
+                }
+                d.attributes.push(AttributeDetail {
+                    location: location as u32,
+                    format,
+                    offset,
+                    stream,
+                });
             }
         }
+        d.streams.reserve_exact(used.count_ones() as usize);
         for index in 0..STREAMS {
             let (address, size) = st.vertex_buffer[index];
-            let used = d.attributes.iter().any(|a| a.stream as usize == index);
-            if used && address != 0 {
+            if used >> index & 1 != 0 {
+                self.track.read_bit(cache::vertex_buffer_bit(index));
+            }
+            if used >> index & 1 != 0 && address != 0 {
+                self.track.read_bit(cache::stream_bit(index));
                 let (stride, divisor) = st.stream[index];
-                d.streams.push(StreamDetail { index: index as u32, address, size, stride, divisor });
+                d.streams.push(StreamDetail {
+                    index: index as u32,
+                    address,
+                    size,
+                    stride,
+                    divisor,
+                });
             }
         }
-        d.ubos = self.ubos(mem, st, 0, Stage::Vertex);
-        d.ubos.extend(self.ubos(mem, st, 1, Stage::Fragment));
-        d.textures = textures(st, 0, Stage::Vertex);
-        d.textures.extend(textures(st, 1, Stage::Fragment));
+        d.ubos.reserve_exact(bound_count(&st.ubo[0]) + bound_count(&st.ubo[1]));
+        self.ubos_into(mem, st, 0, Stage::Vertex, &mut d.ubos);
+        self.ubos_into(mem, st, 1, Stage::Fragment, &mut d.ubos);
+        d.sbufs.reserve_exact(bound_count(&st.sbuf[0]) + bound_count(&st.sbuf[1]));
+        sbufs_into(st, 0, Stage::Vertex, &mut d.sbufs);
+        sbufs_into(st, 1, Stage::Fragment, &mut d.sbufs);
+        d.textures.reserve_exact(texture_count(st, 0) + texture_count(st, 1));
+        textures_into(st, 0, Stage::Vertex, &mut d.textures);
+        textures_into(st, 1, Stage::Fragment, &mut d.textures);
         d.dynamic = DynamicDetail {
             viewport: st.viewport,
             depth_range: st.depth_range,

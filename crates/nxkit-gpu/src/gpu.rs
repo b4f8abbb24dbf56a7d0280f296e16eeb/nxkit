@@ -10,7 +10,7 @@
 //! 5. It cuts the passes into runs and encodes each run into its own command buffer on its own thread.
 //! 6. It commits the command buffers in order.
 
-use std::collections::{HashMap, HashSet};
+use crate::draws::{FastMap, FastSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -107,9 +107,13 @@ fn collect_uses(frame: &Frame, plan: &PassPlan) -> HashMap<TexId, Use> {
             _ => {}
         }
     }
-    let mut uses: HashMap<TexId, Use> = HashMap::new();
+    let mut uses: FastMap<TexId, Use> = FastMap::default();
     for a in &plan.attachments {
-        let u = uses.entry(a.tex).or_insert(Use { attachment: true, memoryless: true, cpu_read: false });
+        let u = uses.entry(a.tex).or_insert(Use {
+            attachment: true,
+            memoryless: true,
+            cpu_read: false,
+        });
         u.memoryless &= a.memoryless && !other.contains(&a.tex);
     }
     for id in other {
@@ -122,6 +126,16 @@ fn collect_uses(frame: &Frame, plan: &PassPlan) -> HashMap<TexId, Use> {
 }
 
 fn run_chunk(
+    sh: &Shared<'_>,
+    cb: &mut CommandBuffer,
+    scratch: &Scratch,
+    keep: &Arc<Keep>,
+    range: Range<usize>,
+) -> (EncodeStats, Vec<TexId>) {
+    nxkit_metal::autorelease_pool(|| run_chunk_inner(sh, cb, scratch, keep, range))
+}
+
+fn run_chunk_inner(
     sh: &Shared<'_>,
     cb: &mut CommandBuffer,
     scratch: &Scratch,
@@ -448,6 +462,7 @@ impl Gpu {
             transfer: &self.transfer,
             first_write: &first_write,
             scale,
+            uploaded: &uploaded,
         };
         let mut start = 0;
         let ranges: Vec<Range<usize>> = ends
@@ -459,7 +474,11 @@ impl Gpu {
             })
             .collect();
         let items: Vec<(&mut CommandBuffer, Range<usize>)> = rest.iter_mut().zip(ranges).collect();
-        let results = jobs::run_all(self.threads, items, |(cb, range)| run_chunk(&sh, cb, &scratch, &keep, range));
+        let t_chunks = Instant::now();
+        let results = jobs::run_all(self.threads, items, |(cb, range)| {
+            run_chunk(&sh, cb, &scratch, &keep, range)
+        });
+        let chunks_ns = nanos(t_chunks, Instant::now());
         let mut copied_back = Vec::new();
         for (s, copied) in results {
             stats.add(&s);

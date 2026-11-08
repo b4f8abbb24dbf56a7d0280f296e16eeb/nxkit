@@ -141,7 +141,7 @@ pub struct Delta {
 }
 
 /// A resolution that a summary depends on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ref {
     /// A GPU address and the texture that starts there.
     Addr(u64, Option<TexId>),
@@ -159,13 +159,44 @@ pub struct Key {
     img: Vec<(u8, TexId)>,
 }
 
-fn bound(
+/// The bound slots of `slots` that `mask` selects, in slot order. It visits the set bits of the mask only.
+struct Bound<'a> {
     mask: u128,
-    slots: &[Option<TexId>; MAX_BINDINGS],
-) -> impl Iterator<Item = (u8, TexId)> + '_ {
-    (0..MAX_BINDINGS as u8)
-        .filter(move |i| mask >> i & 1 != 0)
-        .filter_map(|i| slots[i as usize].map(|t| (i, t)))
+    slots: &'a [Option<TexId>; MAX_BINDINGS],
+}
+
+impl Iterator for Bound<'_> {
+    type Item = (u8, TexId);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.mask != 0 {
+            let i = self.mask.trailing_zeros() as usize;
+            self.mask &= self.mask - 1;
+            if let Some(t) = self.slots.get(i).copied().flatten() {
+                return Some((i as u8, t));
+            }
+        }
+        None
+    }
+}
+
+fn bound(mask: u128, slots: &[Option<TexId>; MAX_BINDINGS]) -> Bound<'_> {
+    Bound { mask, slots }
+}
+
+/// The bound slots of `slots` that `mask` selects, as a list with room for all of them.
+fn bound_list(mask: u128, slots: &[Option<TexId>; MAX_BINDINGS]) -> Vec<(u8, TexId)> {
+    let mut out = Vec::with_capacity(mask.count_ones() as usize);
+    out.extend(bound(mask, slots));
+    out
+}
+
+/// The bit of each slot that holds a texture.
+fn live(slots: &[Option<TexId>; MAX_BINDINGS]) -> u128 {
+    slots
+        .iter()
+        .enumerate()
+        .fold(0, |bits, (i, t)| bits | u128::from(t.is_some()) << i)
 }
 
 impl Key {
@@ -174,8 +205,8 @@ impl Key {
             targets: n.targets.then_some(s.targets),
             scissor: n.scissor.then_some(s.scissor_full),
             draw: n.draw.then_some(s.draw),
-            tex: bound(n.tex, &s.tex).collect(),
-            img: bound(n.img, &s.img).collect(),
+            tex: bound_list(n.tex, &s.tex),
+            img: bound_list(n.img, &s.img),
         }
     }
 
@@ -236,7 +267,7 @@ pub fn texture_of(desc: &Descriptors, handle: u64) -> Option<TexId> {
 
 impl Ref {
     /// True when the resolution is still the same.
-    pub fn holds(&self, table: &ResourceTable, desc: &Descriptors) -> bool {
+    pub fn holds(&self, table: &ResourceTable, desc: &Descriptors, mem: &impl GuestMem) -> bool {
         match *self {
             Self::Addr(a, t) => texture_at(table, a) == t,
             Self::Handle(h, t) => texture_of(desc, h) == t,
@@ -257,22 +288,37 @@ struct Builder {
     tex_list: Option<Span>,
     img_list: Option<Span>,
     scratch: Vec<TexId>,
+    /// The bit of each sampling slot of `st.tex` that holds a texture.
+    tex_live: u128,
+    /// The bit of each image slot of `st.img` that holds a texture.
+    img_live: u128,
 }
 
-fn collect(slots: &[Option<TexId>], out: &mut Vec<TexId>) {
+/// The distinct textures of the slots that `live` marks, in slot order.
+fn collect(live: u128, slots: &[Option<TexId>; MAX_BINDINGS], out: &mut Vec<TexId>) {
     out.clear();
-    for t in slots.iter().flatten() {
-        if !out.contains(t) {
-            out.push(*t);
+    for (_, t) in bound(live, slots) {
+        if !out.contains(&t) {
+            out.push(t);
         }
     }
 }
 
+/// Sets or clears the bit of `slot` in `live` after the slot got `value`.
+fn mark(live: &mut u128, slot: usize, value: Option<TexId>) {
+    let bit = 1u128 << slot;
+    *live = if value.is_some() { *live | bit } else { *live & !bit };
+}
+
 fn delta_slots(mask: u128, slots: &[Option<TexId>; MAX_BINDINGS]) -> Slots {
-    (0..MAX_BINDINGS as u8)
-        .filter(|i| mask >> i & 1 != 0)
-        .map(|i| (i, slots[i as usize]))
-        .collect()
+    let mut out = Vec::with_capacity(mask.count_ones() as usize);
+    let mut rest = mask;
+    while rest != 0 {
+        let i = rest.trailing_zeros() as usize;
+        rest &= rest - 1;
+        out.push((i as u8, slots.get(i).copied().flatten()));
+    }
+    out
 }
 
 impl Builder {
@@ -307,7 +353,7 @@ impl Builder {
         if let Some(s) = self.tex_list {
             return s;
         }
-        collect(&self.st.tex, &mut self.scratch);
+        collect(self.tex_live, &self.st.tex, &mut self.scratch);
         let s = self.stream.push_list(&self.scratch);
         self.tex_list = Some(s);
         s
@@ -317,7 +363,7 @@ impl Builder {
         if let Some(s) = self.img_list {
             return s;
         }
-        collect(&self.st.img, &mut self.scratch);
+        collect(self.img_live, &self.st.img, &mut self.scratch);
         let s = self.stream.push_list(&self.scratch);
         self.img_list = Some(s);
         s
@@ -364,7 +410,9 @@ impl Builder {
                 self.sets.draw = true;
             }
             Record::BindTexture { slot, handle } => {
-                self.st.tex[slot as usize] = self.handle(cx, handle);
+                let t = self.handle(cx, handle);
+                self.st.tex[slot as usize] = t;
+                mark(&mut self.tex_live, usize::from(slot), t);
                 self.sets.tex |= 1 << slot;
                 self.tex_list = None;
             }
@@ -452,11 +500,13 @@ impl Builder {
         }
         for (i, t) in &d.tex {
             self.st.tex[*i as usize] = *t;
+            mark(&mut self.tex_live, usize::from(*i), *t);
             self.sets.tex |= 1 << i;
             self.tex_list = None;
         }
         for (i, t) in &d.img {
             self.st.img[*i as usize] = *t;
+            mark(&mut self.img_live, usize::from(*i), *t);
             self.sets.img |= 1 << i;
             self.img_list = None;
         }
@@ -472,7 +522,7 @@ pub fn summary<M: GuestMem>(
     inherited: &State,
     depth: u32,
 ) -> Result<usize> {
-    if let Some(i) = cache.find(handle, inherited, cx.table, cx.desc) {
+    if let Some(i) = cache.find(handle, inherited, cx.table, cx.desc, cx.mem) {
         return Ok(i);
     }
     cache.stats.misses += 1;
@@ -492,6 +542,8 @@ fn decode<M: GuestMem>(
         return Err(NvnError::BadRecord("calls are nested too deep"));
     }
     let mut b = Builder {
+        tex_live: live(&inherited.tex),
+        img_live: live(&inherited.img),
         st: inherited.clone(),
         needs: Needs::default(),
         sets: Sets::default(),
@@ -539,7 +591,18 @@ fn decode<M: GuestMem>(
     Err(NvnError::BadRecord("recording does not end"))
 }
 
-fn finish(b: Builder, inherited: &State, spans: Vec<Range<u64>>) -> Summary {
+/// Drops the repeated resolutions and keeps the first of each, in order. A binding that is set again and again
+/// would otherwise be checked once per repeat on every cache hit.
+fn dedup_refs(refs: &mut Vec<Ref>) {
+    let mut seen = std::collections::HashSet::with_capacity_and_hasher(
+        refs.len(),
+        foldhash::fast::RandomState::default(),
+    );
+    refs.retain(|r| seen.insert(*r));
+}
+
+fn finish(mut b: Builder, inherited: &State, spans: Vec<Range<u64>>) -> Summary {
+    dedup_refs(&mut b.refs);
     let (st, sets) = (&b.st, &b.sets);
     let delta = Delta {
         targets: sets.targets.then_some(st.targets),

@@ -173,3 +173,9 @@ impl Context {
 pub(crate) fn ns(s: &str) -> Retained<NSString> {
     NSString::from_str(s)
 }
+
+/// Drains temporary Objective-C objects at the end of one encoding task. Worker and guest threads do not have
+/// AppKit's event-loop pools. Returned Metal objects own retained references and may safely outlive this scope.
+pub fn autorelease_pool<T>(f: impl FnOnce() -> T) -> T {
+    objc2::rc::autoreleasepool(|_| f())
+}

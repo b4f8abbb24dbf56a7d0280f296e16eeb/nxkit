@@ -14,8 +14,10 @@
 //! details, the resolved texture and sampler ids and the attachment formats of the pass. Another signature builds
 //! the buffer again. `Gpu::recording_dropped` forgets a buffer when the cache dropped its summary.
 
-use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::sync::Arc;
+
+use crate::draws::{FastMap, FastSet};
 
 use nxkit_metal::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 
@@ -48,11 +50,11 @@ pub(crate) struct Built {
 /// The ICBs of all candidate recordings.
 #[derive(Default)]
 pub(crate) struct Icbs {
-    entries: HashMap<u64, Entry>,
-    candidates: HashSet<u64>,
+    entries: FastMap<u64, Entry>,
+    candidates: FastSet<u64>,
 }
 
-fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut DefaultHasher) {
+fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut impl Hasher) {
     d.program.hash(h);
     d.blend.hash(h);
     d.write_masks.hash(h);

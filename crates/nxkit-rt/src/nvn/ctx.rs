@@ -36,7 +36,7 @@ use nxkit_nvn::mem::GuestMem;
 use nxkit_nvn::resource::TexId;
 use nxkit_nvn::space::{GpuSpace, LinearSpace};
 
-use super::abi::{AbiResult, Registry, fatal};
+use super::abi::{AbiResult, Registry, fatal, log_once};
 use super::program::ProgramRecord;
 
 /// Guest memory for the front end: the range that the host named with `nxkit_abi::guest::set_range`.
@@ -155,9 +155,15 @@ struct CommandBufferIds {
 /// The GPU context. See the module documentation.
 pub(crate) struct Gpu {
     front: Mutex<Front>,
+    /// A copy of the address mapping of the front end. It never changes, so address queries need no lock.
+    space: LinearSpace,
     backend: Arc<dyn Backend>,
     settings: Settings,
     flushed: AtomicU64,
+    /// The ranges of `nvnMemoryPoolFlushMappedRange` that [`Gpu::lock`] has not yet told the front end.
+    pending_writes: Mutex<Vec<(u64, u64)>>,
+    /// True when `pending_writes` may hold a range. Keeps the common case of [`Gpu::lock`] to one atomic load.
+    writes_dirty: AtomicBool,
     /// The guest address of an initialised `NVNtexture` to its id in the resource table. The texture group maintains it.
     pub(crate) textures: Registry<TexId>,
     /// The guest address of an initialised `NVNprogram` to its stages. The program group maintains it.
@@ -179,9 +185,12 @@ impl Gpu {
     pub(crate) fn new(space: LinearSpace, backend: Arc<dyn Backend>, settings: Settings) -> Self {
         Self {
             front: Mutex::new(FrontEnd::new(space, GuestMemory)),
+            space,
             backend,
             settings,
             flushed: AtomicU64::new(0),
+            pending_writes: Mutex::new(Vec::new()),
+            writes_dirty: AtomicBool::new(false),
             textures: Registry::new(),
             programs: Registry::new(),
             cb_ids: Registry::new(),
@@ -206,8 +215,47 @@ impl Gpu {
 
     /// Takes the lock of the front end. The lock is not re-entrant. A thread that panicked while it held the lock does
     /// not poison it, because the ABI never unwinds into the guest (a failure aborts).
+    ///
+    /// The ranges that [`Gpu::guest_wrote_deferred`] queued so far are handed to [`Front::guest_wrote`] before the
+    /// guard returns, so every user of the front end sees every flush that completed before its call. An error of
+    /// `guest_wrote` is logged once and does not fail the caller.
     pub(crate) fn lock(&self) -> MutexGuard<'_, Front> {
-        self.front.lock().unwrap_or_else(PoisonError::into_inner)
+        let mut front = self.front.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.writes_dirty.swap(false, Ordering::Acquire) {
+            let ranges = std::mem::take(
+                &mut *self
+                    .pending_writes
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            );
+            for (start, len) in ranges {
+                if let Err(e) = front.guest_wrote(start, len) {
+                    log_once(
+                        "nvnMemoryPoolFlushMappedRange",
+                        format_args!("nvnMemoryPoolFlushMappedRange: {e}"),
+                    );
+                }
+            }
+        }
+        front
+    }
+
+    /// Tells the backend that the guest wrote `len` bytes at the host address `start`, so that it drops what it kept of the
+    /// recordings there. It takes no lock of the front end. Every write that the front end learns about goes through
+    /// here, and so does the end of a recording ([`Front::recorded`]).
+    pub(crate) fn invalidated(&self, start: u64, len: u64) {
+        self.backend.recording_invalidated(start, start.saturating_add(len));
+    }
+
+    /// Tells the front end that the guest wrote `len` bytes at the host address `start`, without taking its lock. The
+    /// next [`Gpu::lock`] applies the range, in the order of the calls.
+    pub(crate) fn guest_wrote_deferred(&self, start: u64, len: u64) {
+        self.invalidated(start, len);
+        self.pending_writes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((start, len));
+        self.writes_dirty.store(true, Ordering::Release);
     }
 
     /// Runs `f` on the front end under the lock. An error of the front end becomes an [`AbiError`](super::abi::AbiError).
@@ -217,7 +265,13 @@ impl Gpu {
 
     /// The GPU address of `len` bytes at the guest address `host`.
     pub(crate) fn gpu_address(&self, host: u64, len: u64) -> AbiResult<u64> {
-        Ok(self.lock().space().gpu_address(host, len)?.get())
+        Ok(self.space.gpu_address(host, len)?.get())
+    }
+
+    /// The host address of `len` bytes at the GPU address `gpu`.
+    pub(crate) fn host_address(&self, gpu: u64, len: u64) -> AbiResult<u64> {
+        let gpu = nxkit_nvn::space::GpuAddr::new(gpu)?;
+        Ok(self.space.host_address(gpu, len)?)
     }
 
     /// The width and height of the texture at the guest address of an `NVNtexture`. None when the game did not
@@ -288,7 +342,8 @@ impl Gpu {
     }
 
     /// `nvnQueueSubmitCommands`: submits `handles` in order on the queue at the guest address `queue`. The queue keeps
-    /// the state that the recordings leave. The backend sees the handles after the front end accepted all of them.
+    /// the state that the recordings leave. The backend sees the handles after the front end accepted all of them. The
+    /// backend claims its order under the lock and its deferred work (the walk) runs after the lock is released.
     pub(crate) fn submit(
         &self,
         queue: u64,
@@ -305,8 +360,13 @@ impl Gpu {
             }
             accepted += 1;
         }
-        self.backend
+        let deferred = self
+            .backend
             .submit(queue, &handles[..accepted], origin_lower_left);
+        drop(front);
+        if let Some(run) = deferred {
+            run();
+        }
         failed.map_or(Ok(()), |e| Err(e.into()))
     }
 

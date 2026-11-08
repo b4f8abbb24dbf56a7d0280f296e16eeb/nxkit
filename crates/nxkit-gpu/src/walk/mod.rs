@@ -14,16 +14,19 @@ mod ext;
 mod objects;
 mod programs;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use nxkit_metal::AddressMap;
 use nxkit_nvn::backend::StageKey;
 use nxkit_nvn::cmdbuf::CommandHandle;
 use nxkit_nvn::mem::GuestMem;
-use nxkit_nvn::record::{NO_HANDLE, Record};
+use nxkit_nvn::record::{NO_HANDLE, Record, deferred_handle};
 
-use crate::detail::{ClearDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef};
+use crate::detail::{
+    ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage, TextureBind, UboDetail,
+};
+use crate::draws::FastMap;
 use objects::{Blends, Raster, StencilValues};
 use programs::Programs;
 
@@ -173,10 +176,19 @@ impl Walker {
     }
 }
 
+/// The empty shader key of a draw that cannot run, shared so that such a draw allocates nothing.
+fn empty_key() -> Arc<str> {
+    static EMPTY: std::sync::OnceLock<Arc<str>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(|| Arc::from("")).clone()
+}
+
 /// The detail of a draw that cannot run. It keeps the ordinals of the draws after it.
 fn empty_draw() -> DrawDetail {
     DrawDetail {
-        program: ProgramRef { vertex: String::new(), fragment: None },
+        program: ProgramRef {
+            vertex: empty_key(),
+            fragment: None,
+        },
         blend: Default::default(),
         write_masks: [0xf; 8],
         depth_stencil: Default::default(),
@@ -191,12 +203,64 @@ fn empty_draw() -> DrawDetail {
     }
 }
 
+/// The number of bound buffers in a bank of `(address, size)` slots.
+pub(super) fn bound_count(bank: &[(u64, u32); UBOS]) -> usize {
+    bank.iter().filter(|(a, s)| *a != 0 && *s != 0).count()
+}
+
+/// Adds the storage buffers of the bank (0 vertex, 1 fragment, 2 compute) that are bound to `out`. The shader reads
+/// and writes them in place, so they carry no snapshot.
+pub(super) fn sbufs_into(st: &State, bank: usize, stage: Stage, out: &mut Vec<UboDetail>) {
+    out.extend(
+        st.sbuf[bank]
+            .iter()
+            .enumerate()
+            .filter(|(_, (a, s))| *a != 0 && *s != 0)
+            .map(|(i, (a, s))| UboDetail {
+                stage,
+                slot: i as u32,
+                address: *a,
+                size: *s,
+                snapshot: None,
+            }),
+    );
+}
+
+/// The storage buffers of the bank (0 vertex, 1 fragment, 2 compute) that are bound.
+pub(super) fn sbufs(st: &State, bank: usize, stage: Stage) -> Vec<UboDetail> {
+    let mut out = Vec::with_capacity(bound_count(&st.sbuf[bank]));
+    sbufs_into(st, bank, stage, &mut out);
+    out
+}
+
+/// The 32 texture handles of the bank (0 vertex, 1 fragment, 2 compute).
+fn bank(st: &State, bank: usize) -> &[u64] {
+    st.texture.get(bank * 32..bank * 32 + 32).unwrap_or(&[])
+}
+
+/// The number of texture handles of the bank that are bound.
+pub(super) fn texture_count(st: &State, bank_index: usize) -> usize {
+    bank(st, bank_index).iter().filter(|h| **h != NO_HANDLE).count()
+}
+
+/// Adds the texture handles of the bank (0 vertex, 1 fragment, 2 compute) that are bound to `out`.
+pub(super) fn textures_into(st: &State, bank_index: usize, stage: Stage, out: &mut Vec<TextureBind>) {
+    out.extend(
+        bank(st, bank_index)
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| **h != NO_HANDLE)
+            .map(|(i, handle)| TextureBind {
+                stage,
+                slot: i as u32,
+                handle: *handle,
+            }),
+    );
+}
+
 /// The texture handles of the bank (0 vertex, 1 fragment, 2 compute) that are bound.
-fn textures(st: &State, bank: usize, stage: crate::detail::Stage) -> Vec<crate::detail::TextureBind> {
-    (0..32)
-        .filter_map(|i| {
-            let handle = st.texture[bank * 32 + i];
-            (handle != NO_HANDLE).then_some(crate::detail::TextureBind { stage, slot: i as u32, handle })
-        })
-        .collect()
+fn textures(st: &State, bank_index: usize, stage: Stage) -> Vec<TextureBind> {
+    let mut out = Vec::with_capacity(texture_count(st, bank_index));
+    textures_into(st, bank_index, stage, &mut out);
+    out
 }

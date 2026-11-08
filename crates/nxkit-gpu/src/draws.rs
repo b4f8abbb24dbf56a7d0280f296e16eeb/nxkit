@@ -27,6 +27,19 @@ use crate::textures::Res;
 use crate::translate;
 use crate::upload::Transfer;
 
+/// A map with the fast hasher of `foldhash`. The keys of the per-draw maps are small integers and short keys that do
+/// not need the protection of the default hasher. Build one with `FastMap::default()`.
+pub(crate) type FastMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
+
+/// A set with the fast hasher of `foldhash`. Build one with `FastSet::default()`.
+pub(crate) type FastSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+
+/// Whether `NXKIT_DIAG` asks for the depth diagnostic. It is read once, because [`prepare`] runs for every draw.
+fn diag_depth() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::diag("depth"))
+}
+
 /// How many draws, clears, copies and dispatches come before a command.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Ordinal {
@@ -68,12 +81,14 @@ pub(crate) struct Shared<'a> {
     pub(crate) icbs: &'a Mutex<Icbs>,
     pub(crate) ordinals: &'a [Ordinal],
     /// The recording runs by the ordinal of their first draw.
-    pub(crate) run_at: &'a HashMap<u32, RecordingRun>,
+    pub(crate) run_at: &'a FastMap<u32, RecordingRun>,
     pub(crate) barriers: &'a BarrierPlan,
     pub(crate) transfer: &'a Transfer,
     /// The index of the first pass of the frame that writes a texture.
-    pub(crate) first_write: &'a HashMap<TexId, usize>,
+    pub(crate) first_write: &'a FastMap<TexId, usize>,
     pub(crate) scale: f32,
+    /// The scratch address of each uniform snapshot that the batch already uploaded, by the address of its bytes.
+    pub(crate) uploaded: &'a Mutex<FastMap<usize, u64>>,
 }
 
 impl Shared<'_> {

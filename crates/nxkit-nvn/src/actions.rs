@@ -20,37 +20,48 @@ enum Live {
     Proven,
 }
 
-/// Scratch memory of the walk.
+/// Scratch memory of the walk. The vectors are indexed by texture id and persist. Only the entries of the textures
+/// that the plan uses are valid, `touched` lists them so the next frame can reset them.
 #[derive(Debug, Default)]
 pub(crate) struct Actions {
     live: Vec<Live>,
     uses: Vec<u32>,
     single: Vec<bool>,
+    touched: Vec<u32>,
 }
 
 impl Actions {
-    pub(crate) fn assign(&mut self, table: &ResourceTable, plan: &mut PassPlan) -> Result<()> {
-        let n = table.id_count();
-        self.live.clear();
-        self.uses.clear();
-        self.single.clear();
-        self.uses.resize(n, 0);
-        for i in 0..n {
+    /// Counts one use of the texture `i` and starts its entries on the first use of the frame.
+    fn touch(&mut self, table: &ResourceTable, i: usize) {
+        if self.uses[i] == 0 {
             let rec = table.get(crate::resource::TexId(i as u32)).ok();
             let local = rec.is_some_and(|r| r.frame_local);
-            self.live.push(if local { Live::No } else { Live::Assumed });
-            self.single
-                .push(rec.is_some_and(|r| r.desc.levels <= 1 && r.desc.depth <= 1));
+            self.live[i] = if local { Live::No } else { Live::Assumed };
+            self.single[i] = rec.is_some_and(|r| r.desc.levels <= 1 && r.desc.depth <= 1);
+            self.touched.push(i as u32);
+        }
+        self.uses[i] += 1;
+    }
+
+    pub(crate) fn assign(&mut self, table: &ResourceTable, plan: &mut PassPlan) -> Result<()> {
+        for i in self.touched.drain(..) {
+            self.uses[i as usize] = 0;
+        }
+        let n = table.id_count();
+        if self.uses.len() < n {
+            self.live.resize(n, Live::Assumed);
+            self.uses.resize(n, 0);
+            self.single.resize(n, false);
         }
         for p in &plan.passes {
             for a in &plan.attachments[p.attachments.clone()] {
-                self.uses[a.tex.0 as usize] += 1;
+                self.touch(table, a.tex.0 as usize);
             }
             for t in plan.reads[p.reads.clone()]
                 .iter()
                 .chain(&plan.writes[p.writes.clone()])
             {
-                self.uses[t.0 as usize] += 1;
+                self.touch(table, t.0 as usize);
             }
         }
         let st = &mut plan.stats;

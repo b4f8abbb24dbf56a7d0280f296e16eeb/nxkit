@@ -160,7 +160,8 @@ extern "C" fn pool_flush_mapped_range(p: u64, off: i64, n: u64) {
             return Ok(());
         }
         let start = v.mem.wrapping_add(off as u64);
-        gpu("nvnMemoryPoolFlushMappedRange").with_front(|f| f.guest_wrote(start, n).map(|_| ()))
+        gpu("nvnMemoryPoolFlushMappedRange").guest_wrote_deferred(start, n);
+        Ok(())
     });
 }
 

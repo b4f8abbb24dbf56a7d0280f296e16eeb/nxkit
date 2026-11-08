@@ -9,7 +9,7 @@
 //! texture that the game only uploads is never an attachment and keeps its size. A texture that the CPU reads back
 //! stays at its size for good, because the guest memory has the unscaled bytes.
 
-use std::collections::{HashMap, HashSet};
+use crate::draws::{FastMap, FastSet};
 use std::sync::{Mutex, PoisonError};
 
 use nxkit_metal::{Context, Format, Storage, Texture, TextureDesc, TextureKind, ViewDesc};
@@ -121,12 +121,14 @@ impl TextureStore {
     pub(crate) fn new(ctx: &Context) -> Self {
         Self {
             ctx: ctx.clone(),
-            entries: HashMap::new(),
-            attachments: HashSet::new(),
-            pinned: HashSet::new(),
+            entries: FastMap::default(),
+            aliases: FastMap::default(),
+            attachments: FastSet::default(),
+            pinned: FastSet::default(),
             next_generation: 1,
-            views: Mutex::new(HashMap::new()),
+            views: Mutex::new(FastMap::default()),
             retired: Vec::new(),
+            spans: Mutex::new(Vec::new()),
         }
     }
 

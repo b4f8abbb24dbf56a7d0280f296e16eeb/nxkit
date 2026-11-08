@@ -5,7 +5,6 @@
 //! key and rejects the programs that the encoder cannot drive. Each stage has one argument buffer at `[[buffer(0)]]`.
 //! Member `arg_id` sits at byte `8 * arg_id` and holds a resource ID or a GPU address.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -69,32 +68,45 @@ impl StageProgram {
     }
 }
 
+type ProgramMap = crate::draws::FastMap<String, Result<Arc<StageProgram>, Skip>>;
+
 /// Reads and caches the programs of one shader directory.
 pub(crate) struct Programs {
     ctx: Context,
     dir: PathBuf,
-    cache: Mutex<HashMap<(String, bool), Result<Arc<StageProgram>, Skip>>>,
+    /// One map per reading of the vertex inputs (index 1 for vertex), so that a lookup by `&str` allocates nothing.
+    cache: Mutex<[ProgramMap; 2]>,
 }
 
 impl Programs {
     pub(crate) fn new(ctx: &Context, dir: PathBuf) -> Self {
-        Self { ctx: ctx.clone(), dir, cache: Mutex::new(HashMap::new()) }
+        Self {
+            ctx: ctx.clone(),
+            dir,
+            cache: Mutex::new([ProgramMap::default(), ProgramMap::default()]),
+        }
     }
 
     /// The program of `key`. `vertex` selects the reading of the vertex inputs. The result is cached, also a failure.
     pub(crate) fn stage(&self, key: &str, vertex: bool) -> Result<Arc<StageProgram>, Skip> {
-        let k = (key.to_owned(), vertex);
-        if let Some(r) = self.cache.lock().unwrap_or_else(PoisonError::into_inner).get(&k) {
+        if let Some(r) = self.cache.lock().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].get(key) {
             return r.clone();
         }
         let r = self.load(key, vertex).map(Arc::new);
-        self.cache.lock().unwrap_or_else(PoisonError::into_inner).insert(k, r.clone());
+        if let Err(e) = &r {
+            if crate::diag("prog") {
+                eprintln!("DIAG prog {key} vertex={vertex}: {e:?}");
+            }
+        }
+        self.cache.lock().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].insert(key.to_owned(), r.clone());
         r
     }
 
     /// Forgets all programs, for example after the shader directory changed.
     pub(crate) fn clear(&self) {
-        self.cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        for m in self.cache.lock().unwrap_or_else(PoisonError::into_inner).iter_mut() {
+            m.clear();
+        }
     }
 
     fn load(&self, key: &str, vertex: bool) -> Result<StageProgram, Skip> {

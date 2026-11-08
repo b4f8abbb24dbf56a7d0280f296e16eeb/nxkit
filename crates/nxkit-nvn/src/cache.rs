@@ -7,7 +7,11 @@
 //! A summary is dropped when the game writes its command memory again, and so are the summaries of the recordings that call it.
 //! A summary is also dropped when a texture address or a handle that it resolved now names something else.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+/// A map with the fast hasher of `foldhash`. The keys are addresses and ids, so the map needs no protection against
+/// crafted keys.
+type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
 
 use crate::decode::{State, Summary};
 use crate::descriptors::Descriptors;
@@ -35,10 +39,18 @@ pub struct CacheStats {
     pub unresolved: u64,
 }
 
+/// The summaries of one handle and the one that answered last.
+#[derive(Debug, Default)]
+struct Entries {
+    list: Vec<Summary>,
+    // a hint: a game submits the same recording under the same state again and again
+    recent: usize,
+}
+
 /// The summaries of the recordings of the game.
 #[derive(Debug, Default)]
 pub struct RecCache {
-    entries: HashMap<u64, Vec<Summary>>,
+    entries: HashMap<u64, Entries>,
     // (start, handle) to end, for the recordings that occupy command memory
     by_start: BTreeMap<(u64, u64), u64>,
     parents: HashMap<u64, Vec<u64>>,
@@ -60,7 +72,7 @@ impl RecCache {
 
     /// The summary at an index of a handle.
     pub fn entry(&self, handle: u64, index: usize) -> Option<&Summary> {
-        self.entries.get(&handle)?.get(index)
+        self.entries.get(&handle)?.list.get(index)
     }
 
     /// Finds a summary of `handle` that fits the inherited state and still holds.
@@ -70,16 +82,22 @@ impl RecCache {
         inherited: &State,
         table: &ResourceTable,
         desc: &Descriptors,
+        mem: &impl crate::mem::GuestMem,
     ) -> Option<usize> {
-        let list = self.entries.get_mut(&handle)?;
-        let i = list
-            .iter()
-            .position(|s| s.key.matches(&s.needs, inherited))?;
-        if !list[i].refs.iter().all(|r| r.holds(table, desc)) {
+        let e = self.entries.get_mut(&handle)?;
+        let list = &mut e.list;
+        let fits = |s: &Summary| s.key.matches(&s.needs, inherited);
+        let i = match list.get(e.recent) {
+            Some(s) if fits(s) => e.recent,
+            _ => list.iter().position(fits)?,
+        };
+        if !list[i].refs.iter().all(|r| r.holds(table, desc, mem)) {
             list.remove(i);
+            e.recent = 0;
             self.stats.revalidations += 1;
             return None;
         }
+        e.recent = i;
         list[i].hits = list[i].hits.saturating_add(1);
         self.stats.hits += 1;
         Some(i)
@@ -100,13 +118,14 @@ impl RecCache {
                 p.push(handle);
             }
         }
-        let list = self.entries.entry(handle).or_default();
-        if list.len() >= MAX_ENTRIES_PER_HANDLE {
-            list.remove(0);
+        let e = self.entries.entry(handle).or_default();
+        if e.list.len() >= MAX_ENTRIES_PER_HANDLE {
+            e.list.remove(0);
             self.stats.evictions += 1;
         }
-        list.push(s);
-        list.len() - 1
+        e.list.push(s);
+        e.recent = e.list.len() - 1;
+        e.list.len() - 1
     }
 
     /// Tells that the game wrote `[start, end)` of host memory.
@@ -125,7 +144,7 @@ impl RecCache {
     }
 
     fn drop_handle(&mut self, handle: u64) {
-        let Some(list) = self.entries.remove(&handle) else {
+        let Some(Entries { list, .. }) = self.entries.remove(&handle) else {
             return;
         };
         self.stats.invalidations += 1;
@@ -150,7 +169,7 @@ impl RecCache {
         let mut out: Vec<_> = self
             .entries
             .iter()
-            .flat_map(|(h, l)| l.iter().map(move |s| (*h, s)))
+            .flat_map(|(h, l)| l.list.iter().map(move |s| (*h, s)))
             .filter(|(_, s)| s.blockers == 0 && s.draws > 0 && s.hits >= STABLE_HITS)
             .map(|(h, s)| (h, s.draws, s.hits))
             .collect();

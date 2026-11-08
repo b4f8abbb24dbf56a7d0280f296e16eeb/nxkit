@@ -3,11 +3,12 @@
 //! `Backend::program_set` gives the keys of the stages of a program. The type of a stage (vertex, fragment, compute)
 //! is in the `stage` field of the `_b.json` of the shader step. The walker reads it once for each key.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use nxkit_nvn::backend::StageKey;
 
+use crate::draws::FastMap;
 use crate::json::{Json, parse};
 
 /// The kind of a shader stage, as the shader step writes it.
@@ -19,9 +20,9 @@ pub(super) enum Kind {
     Other,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Stage {
-    key: String,
+    key: Arc<str>,
     kind: Kind,
 }
 
@@ -42,7 +43,7 @@ impl Programs {
         let stages = keys
             .iter()
             .filter_map(|s| {
-                let key = s.key?.to_hex();
+                let key: Arc<str> = s.key?.to_hex().into();
                 let kind = self.kind(&key, s.index);
                 Some(Stage { key, kind })
             })
@@ -55,8 +56,8 @@ impl Programs {
     }
 
     /// The key of the stage of `kind` in `program`.
-    pub(super) fn find(&self, program: u64, kind: Kind) -> Option<&str> {
-        self.by_program.get(&program)?.iter().find(|s| s.kind == kind).map(|s| s.key.as_str())
+    pub(super) fn find(&self, program: u64, kind: Kind) -> Option<&Arc<str>> {
+        self.by_program.get(&program)?.iter().find(|s| s.kind == kind).map(|s| &s.key)
     }
 
     fn kind(&mut self, key: &str, index: u8) -> Kind {
@@ -97,10 +98,14 @@ mod tests {
     fn a_stage_without_a_json_takes_its_kind_from_its_index() {
         let mut p = Programs::new(PathBuf::from("/nonexistent"));
         p.set(7, &[stage(0, 1), stage(1, 2), StageKey { index: 2, key: None, code: 0, code_len: 0 }]);
-        assert_eq!(p.find(7, Kind::Vertex), Some("0101010101010101"));
-        assert_eq!(p.find(7, Kind::Fragment), Some("0202020202020202"));
+        assert_eq!(p.find(7, Kind::Vertex).map(|k| &**k), Some("0101010101010101"));
+        assert_eq!(p.find(7, Kind::Fragment).map(|k| &**k), Some("0202020202020202"));
         assert_eq!(p.find(7, Kind::Compute), None);
+        let epoch = p.epoch();
+        p.set(7, &[stage(0, 1), stage(1, 2)]);
+        assert_eq!(p.epoch(), epoch);
         p.release(7);
-        assert_eq!(p.find(7, Kind::Vertex), None);
+        assert_eq!(p.find(7, Kind::Vertex).map(|k| &**k), None);
+        assert!(p.epoch() > epoch && p.generation(7) > 0);
     }
 }

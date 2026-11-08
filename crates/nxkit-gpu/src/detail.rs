@@ -24,10 +24,10 @@ pub enum Stage {
 /// The shaders of a draw, as the keys of the shader step. A key names `<key>_b.metallib` and `<key>_b.json`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProgramRef {
-    /// The key of the vertex shader.
-    pub vertex: String,
+    /// The key of the vertex shader. The walker shares one allocation per key between all draws.
+    pub vertex: Arc<str>,
     /// The key of the fragment shader. A draw without one writes depth only.
-    pub fragment: Option<String>,
+    pub fragment: Option<Arc<str>>,
 }
 
 /// The blend state of one colour target (`NVNblendFunc` and `NVNblendEquation` values).

@@ -102,6 +102,14 @@ pub struct EncodeStats {
     pub scaled_upload_lost: u32,
     /// Nanoseconds of CPU time that the encode took, from the start of `encode_frame` to the submit.
     pub encode_ns: u64,
+    /// Nanoseconds that `resolve_handles` took.
+    pub resolve_ns: u64,
+    /// Nanoseconds that `fit_handles` took.
+    pub fit_ns: u64,
+    /// Nanoseconds that the barrier plan took.
+    pub barrier_ns: u64,
+    /// Wall-clock nanoseconds of the chunk encoding, all threads together.
+    pub chunks_ns: u64,
 }
 
 impl EncodeStats {
@@ -138,6 +146,10 @@ impl EncodeStats {
         self.swizzle_ignored += o.swizzle_ignored;
         self.scaled_upload_lost += o.scaled_upload_lost;
         self.encode_ns += o.encode_ns;
+        self.resolve_ns += o.resolve_ns;
+        self.fit_ns += o.fit_ns;
+        self.barrier_ns += o.barrier_ns;
+        self.chunks_ns += o.chunks_ns;
     }
 }
 

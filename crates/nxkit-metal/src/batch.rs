@@ -34,7 +34,7 @@ use crate::table::Keep;
 pub const BATCHES_IN_FLIGHT: usize = 3;
 
 /// The size of the scratch buffer of each slot.
-pub const BATCH_SCRATCH_BYTES: u64 = 4 * 1024 * 1024;
+pub const BATCH_SCRATCH_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Default)]
 struct DoneState {

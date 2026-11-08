@@ -6,9 +6,8 @@
 //! buffer, so a draw needs no bind call per texture. Shaders that index a pool read two host tables, one of texture
 //! resource IDs by descriptor id and one of sampler resource IDs by sampler id.
 
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::sync::{Arc, Mutex};
 
 use nxkit_metal::{Context, DataBuffer, Sampler, Scratch, Texture};
 use nxkit_nvn::tic::Tsc;
@@ -68,14 +67,120 @@ pub(crate) struct Handles {
 /// A place that takes bytes and returns the GPU address of the copy.
 pub(crate) trait Sink {
     fn put(&mut self, data: &[u8]) -> Result<u64, Skip>;
+
+    /// Puts bytes that many draws share. A sink may put them once and return the same address again.
+    fn put_shared(&mut self, data: &Arc<[u8]>) -> Result<u64, Skip> {
+        self.put(data)
+    }
+
+    /// The memo of the argument buffers that this sink's draws share, when it keeps one.
+    fn memo(&mut self) -> Option<&mut ArgsMemo> {
+        None
+    }
+}
+
+/// The argument buffers that the previous draws of one render pass wrote. A draw that binds what the draw before it
+/// bound per stage reuses that buffer instead of writing a new one. The addresses point into the scratch buffer of
+/// the batch, so a memo must not outlive the pass.
+#[derive(Default)]
+pub(crate) struct ArgsMemo {
+    stages: [StageMemo; 2],
+}
+
+/// The last argument buffer of one stage, with the words that describe what it was built from.
+#[derive(Default)]
+struct StageMemo {
+    last: Vec<u64>,
+    next: Vec<u64>,
+    addr: u64,
+    valid: bool,
+}
+
+impl ArgsMemo {
+    /// The address of the argument buffer for `inp`, when the previous draw of the stage built it from the same
+    /// inputs. A miss prepares [`ArgsMemo::store`].
+    fn lookup(&mut self, p: &StageProgram, inp: &StageInputs<'_>) -> Option<u64> {
+        let m = match inp.stage {
+            Stage::Vertex => &mut self.stages[0],
+            Stage::Fragment => &mut self.stages[1],
+            Stage::Compute => return None,
+        };
+        m.next.clear();
+        m.next.push(p as *const StageProgram as u64);
+        m.next.push(u64::from(inp.base_instance));
+        let mark = m.next.len();
+        m.next.push(0);
+        for u in inp.ubos.iter().filter(|u| u.stage == inp.stage) {
+            let snapshot = u.snapshot.as_ref().map_or(0, |b| b.as_ptr() as u64);
+            m.next.extend([u64::from(u.slot), snapshot, u.address, u64::from(u.size)]);
+        }
+        let ubos = m.next.len() - mark - 1;
+        m.next[mark] = ubos as u64;
+        for s in inp.sbufs.iter().filter(|s| s.stage == inp.stage) {
+            m.next.extend([u64::from(s.slot), s.address]);
+        }
+        m.next.push(u64::MAX);
+        for t in inp.textures.iter().filter(|t| t.stage == inp.stage) {
+            m.next.extend([u64::from(t.slot), t.handle]);
+        }
+        if m.valid && m.next == m.last {
+            return Some(m.addr);
+        }
+        std::mem::swap(&mut m.last, &mut m.next);
+        m.valid = false;
+        None
+    }
+
+    /// Records the buffer that was built after a miss of [`ArgsMemo::lookup`].
+    fn store(&mut self, stage: Stage, addr: u64) {
+        let m = match stage {
+            Stage::Vertex => &mut self.stages[0],
+            Stage::Fragment => &mut self.stages[1],
+            Stage::Compute => return,
+        };
+        m.addr = addr;
+        m.valid = true;
+    }
 }
 
 /// The per-batch scratch buffer as a sink.
-pub(crate) struct ScratchSink<'a>(pub(crate) &'a Scratch);
+pub(crate) struct ScratchSink<'a> {
+    scratch: &'a Scratch,
+    uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
+    memo: Option<&'a mut ArgsMemo>,
+}
+
+impl<'a> ScratchSink<'a> {
+    /// A sink that writes into `scratch`. `uploaded` remembers the shared snapshots of the batch. A `memo` lets
+    /// draws of one pass share argument buffers.
+    pub(crate) fn new(
+        scratch: &'a Scratch,
+        uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
+        memo: Option<&'a mut ArgsMemo>,
+    ) -> Self {
+        Self { scratch, uploaded, memo }
+    }
+}
 
 impl Sink for ScratchSink<'_> {
+    fn put_shared(&mut self, data: &Arc<[u8]>) -> Result<u64, Skip> {
+        let key = data.as_ptr() as usize;
+        if let Some(a) = self.uploaded.lock().ok().and_then(|m| m.get(&key).copied()) {
+            return Ok(a);
+        }
+        let a = self.put(data)?;
+        if let Ok(mut m) = self.uploaded.lock() {
+            m.insert(key, a);
+        }
+        Ok(a)
+    }
+
     fn put(&mut self, data: &[u8]) -> Result<u64, Skip> {
-        self.0.push(data).map_err(|_| Skip::Buffer)
+        self.scratch.push(data).map_err(|e| crate::buf_skip(format_args!("scratch push {} bytes: {e:?}", data.len())))
+    }
+
+    fn memo(&mut self) -> Option<&mut ArgsMemo> {
+        self.memo.as_deref_mut()
     }
 }
 
@@ -108,7 +213,7 @@ impl Sink for Arena {
 /// The host tables and the sampler cache.
 pub(crate) struct Bindless {
     ctx: Context,
-    samplers: HashMap<u64, Sampler>,
+    samplers: crate::draws::FastMap<u64, Sampler>,
     default_sampler: Sampler,
     tex_pool: Arc<DataBuffer>,
     samp_pool: Arc<DataBuffer>,
@@ -225,42 +330,86 @@ fn put_u32(buf: &mut [u8], at: usize, v: u32) {
 
 /// The driver constant block of a stage. Its layout follows the constants of `nxb-xlate`. The fill is partial:
 /// the combined texture handles, the base instance and, for compute, the dispatch size and the uniform buffers.
-fn drv_block(inp: &StageInputs<'_>, ubo_addr: &[(u32, u64, u32)]) -> Vec<u8> {
-    let mut b = vec![0u8; DRV_SIZE];
+fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubo_addr: &[(u32, u64, u32)]) {
+    b.clear();
+    b.resize(DRV_SIZE, 0);
     for t in inp.textures.iter().filter(|t| t.stage == inp.stage) {
         if (t.slot as usize) < DRV_C2_TEX_SLOTS {
-            put_u64(&mut b, DRV_C2_TEX + 8 * t.slot as usize, t.handle);
+            put_u64(b, DRV_C2_TEX + 8 * t.slot as usize, t.handle);
         }
     }
-    put_u32(&mut b, DRV_BASE_INSTANCE, inp.base_instance);
+    put_u32(b, DRV_BASE_INSTANCE, inp.base_instance);
     if let Some(g) = inp.groups {
         for (i, v) in g.iter().enumerate() {
-            put_u32(&mut b, DRV_DISPATCH + 4 * i, *v);
+            put_u32(b, DRV_DISPATCH + 4 * i, *v);
         }
         for (slot, addr, size) in ubo_addr {
             if (*slot as usize) < DRV_CS_UBO_SLOTS {
                 let at = DRV_CS_UBO + 0x10 * *slot as usize;
-                put_u64(&mut b, at, *addr);
-                put_u32(&mut b, at + 8, *size);
+                put_u64(b, at, *addr);
+                put_u32(b, at + 8, *size);
             }
         }
     }
-    b
+}
+
+/// The buffers that [`build_args`] reuses from draw to draw.
+#[derive(Default)]
+struct ArgsScratch {
+    args: Vec<u8>,
+    drv: Vec<u8>,
+    ubos: Vec<(u32, u64, u32)>,
+}
+
+thread_local! {
+    static ARGS_SCRATCH: std::cell::Cell<ArgsScratch> = std::cell::Cell::new(ArgsScratch::default());
 }
 
 /// Builds the argument buffer of one stage and puts it into `sink`, together with the bytes of the uniform buffers
-/// that the guest rewrote in the same frame and the driver block.
+/// that the guest rewrote in the same frame and the driver block. When the sink keeps an [`ArgsMemo`] and the
+/// previous draw of the stage bound the same inputs, the buffer of that draw is returned and nothing is written.
 pub(crate) fn fill_args(
     p: &StageProgram,
     inp: &StageInputs<'_>,
     env: &Env<'_>,
     sink: &mut dyn Sink,
 ) -> Result<u64, Skip> {
-    let mut args = vec![0u8; (p.arg_bytes as usize).max(8)];
-    let mut ubos: Vec<(u32, u64, u32)> = Vec::new();
+    if let Some(a) = sink.memo().and_then(|m| m.lookup(p, inp)) {
+        return Ok(a);
+    }
+    let addr = build_args(p, inp, env, sink)?;
+    if let Some(m) = sink.memo() {
+        m.store(inp.stage, addr);
+    }
+    Ok(addr)
+}
+
+fn build_args(
+    p: &StageProgram,
+    inp: &StageInputs<'_>,
+    env: &Env<'_>,
+    sink: &mut dyn Sink,
+) -> Result<u64, Skip> {
+    let mut scratch = ARGS_SCRATCH.take();
+    let r = build_args_in(p, inp, env, sink, &mut scratch);
+    ARGS_SCRATCH.set(scratch);
+    r
+}
+
+fn build_args_in(
+    p: &StageProgram,
+    inp: &StageInputs<'_>,
+    env: &Env<'_>,
+    sink: &mut dyn Sink,
+    scratch: &mut ArgsScratch,
+) -> Result<u64, Skip> {
+    let ArgsScratch { args, drv, ubos } = scratch;
+    args.clear();
+    args.resize((p.arg_bytes as usize).max(8), 0);
+    ubos.clear();
     for u in inp.ubos.iter().filter(|u| u.stage == inp.stage) {
         let addr = match &u.snapshot {
-            Some(bytes) => sink.put(bytes)?,
+            Some(bytes) => sink.put_shared(bytes)?,
             None => u.address,
         };
         ubos.push((u.slot, addr, u.size));

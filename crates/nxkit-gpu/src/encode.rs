@@ -18,8 +18,9 @@ use nxkit_metal::{
 };
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
+use nxkit_nvn::resource::TexId;
 
-use crate::bindless::ScratchSink;
+use crate::bindless::{ArgsMemo, ScratchSink};
 use crate::detail::{ClearDetail, DynamicDetail, RecordingRun};
 use crate::draws::{Geom, PassCtx, Prep, Shared, prepare};
 use crate::pipelines::Targets;
@@ -151,6 +152,8 @@ struct Tracker {
     bias: Option<DepthBias>,
     clip: Option<DepthClip>,
     dynamic: Option<DynamicDetail>,
+    vertex_args: Option<u64>,
+    fragment_args: Option<u64>,
     streams: [Option<u64>; 32],
 }
 
@@ -166,6 +169,8 @@ impl Tracker {
             bias: None,
             clip: None,
             dynamic: None,
+            vertex_args: None,
+            fragment_args: None,
             streams: [None; 32],
         }
     }
@@ -246,9 +251,19 @@ fn emit(
         tr.clip = Some(p.clip);
     }
     tr.dynamic(rp, pc, d, p.cull)?;
-    rp.encode(&RenderCommand::SetBuffer { index: 0, gpu_addr: p.vertex_args })?;
-    if let Some(a) = p.fragment_args {
-        rp.encode(&RenderCommand::SetFragmentBuffer { index: 0, gpu_addr: a })?;
+    if tr.vertex_args != Some(p.vertex_args) {
+        rp.encode(&RenderCommand::SetBuffer {
+            index: 0,
+            gpu_addr: p.vertex_args,
+        })?;
+        tr.vertex_args = Some(p.vertex_args);
+    }
+    if let Some(a) = p.fragment_args.filter(|a| tr.fragment_args != Some(*a)) {
+        rp.encode(&RenderCommand::SetFragmentBuffer {
+            index: 0,
+            gpu_addr: a,
+        })?;
+        tr.fragment_args = Some(a);
     }
     for (slot, addr) in &p.streams {
         let at = *slot as usize;
@@ -282,12 +297,14 @@ fn emit(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw(
     sh: &Shared<'_>,
     pc: &PassCtx,
     rp: &mut RenderPass<'_>,
     tr: &mut Tracker,
     scratch: &Scratch,
+    memo: &mut ArgsMemo,
     n: u32,
     stats: &mut EncodeStats,
 ) {
@@ -702,6 +719,7 @@ pub(crate) fn render_pass(
         }
     }
     let mut tr = Tracker::new(s.pc.size);
+    let mut memo = ArgsMemo::default();
     let mut n = range.start;
     while n < range.end {
         if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end) {
@@ -710,7 +728,7 @@ pub(crate) fn render_pass(
                 continue;
             }
         }
-        draw(sh, &s.pc, &mut rp, &mut tr, scratch, n, stats);
+        draw(sh, &s.pc, &mut rp, &mut tr, scratch, &mut memo, n, stats);
         n += 1;
     }
     rp.end();

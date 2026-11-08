@@ -71,7 +71,7 @@ pub use compute_icb::{
 };
 pub use databuf::DataBuffer;
 pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, Swizzler};
-pub use device::Context;
+pub use device::{Context, autorelease_pool};
 pub use encode::CommandBuffer;
 pub use error::{MetalError, Result};
 pub use format::{BcKind, Format, FormatClass, IndexType, LoadAction, Primitive, StoreAction};
