@@ -23,11 +23,11 @@ pub(crate) enum Part {
 static SUM: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 static CALLS: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 static MAX: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
-/// Pieces inside the timed calls: the present's flush, the backend's present, the submit's decode, and the submit's wait
-/// for its walk after the decode.
-static SUB: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+/// Pieces of the frame: the present's flush, the backend's present, the submit's decode, the submit's wait
+/// for its walk after the decode, and the window acquire (not part of the timed calls).
+static SUB: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
 /// The names of [`SUB`].
-const SUB_NAMES: [&str; 4] = ["flush", "backend", "decode", "walk-join"];
+const SUB_NAMES: [&str; 5] = ["flush", "backend", "decode", "walk-join", "acquire"];
 
 /// Runs `body` and counts its time as the piece `i` of [`SUB`].
 pub(crate) fn sub<T>(i: usize, body: impl FnOnce() -> T) -> T {

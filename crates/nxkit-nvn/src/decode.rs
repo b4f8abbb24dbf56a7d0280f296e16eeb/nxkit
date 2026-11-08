@@ -212,6 +212,24 @@ impl Key {
         }
     }
 
+    /// A hash of the key that `n` and `s` give, made without building the key. Equal keys have equal hashes, so a
+    /// lookup compares the hashes of many summaries before it compares one key in full.
+    pub fn hash_of(n: &Needs, s: &State) -> u64 {
+        use std::hash::{BuildHasher, Hash, Hasher};
+        let mut h = foldhash::fast::FixedState::with_seed(0x6e786b).build_hasher();
+        n.targets.then_some(s.targets).hash(&mut h);
+        n.scissor.then_some(s.scissor_full).hash(&mut h);
+        n.draw.then_some(s.draw).hash(&mut h);
+        for t in bound(n.tex, &s.tex) {
+            t.hash(&mut h);
+        }
+        0xffu8.hash(&mut h);
+        for t in bound(n.img, &s.img) {
+            t.hash(&mut h);
+        }
+        h.finish()
+    }
+
     /// True when `s` has the same values for everything in `n`.
     pub fn matches(&self, n: &Needs, s: &State) -> bool {
         self.targets == n.targets.then_some(s.targets)
@@ -230,6 +248,8 @@ pub struct Summary {
     /// The state that the recording takes from its caller.
     pub needs: Needs,
     pub(crate) key: Key,
+    /// [`Key::hash_of`] of the key.
+    pub(crate) key_hash: u64,
     pub(crate) delta: Delta,
     /// The resolutions that the summary depends on.
     pub refs: Vec<Ref>,
@@ -688,6 +708,7 @@ fn finish(mut b: Builder, inherited: &State, spans: Vec<Range<u64>>) -> Summary 
     };
     Summary {
         key: Key::of(&b.needs, inherited),
+        key_hash: Key::hash_of(&b.needs, inherited),
         needs: b.needs,
         delta,
         stream: b.stream,

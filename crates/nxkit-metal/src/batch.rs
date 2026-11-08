@@ -238,62 +238,59 @@ impl Batch {
         self.scratch.clone()
     }
 
-    /// Ends every command buffer and commits them in order. Returns at once.
+    /// Ends every command buffer and commits them in order, in one commit. Returns at once.
+    ///
+    /// One commit for the whole batch: committed one by one, the GPU paused 0.2 to 1 ms at every command buffer
+    /// boundary (Breath of the Wild, six command buffers a frame).
     pub fn submit(mut self) -> Result<SubmittedBatch> {
         let cpu_encode_ns = u64::try_from(self.t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
-        let total = self.buffers.len();
-        let remaining = Arc::new(AtomicUsize::new(total));
         let number = self.number;
         self.done.set_pending();
         let queue = self.ctx.queue();
-        let scratch_keep = Keep::new(self.scratch.clone());
-        let mut scratch_keep = Some(scratch_keep);
+        let mut held = vec![Keep::new(self.scratch.clone())];
+        let mut list: Vec<NonNull<ProtocolObject<dyn MTL4CommandBuffer>>> = Vec::with_capacity(self.buffers.len());
         for cb in &mut self.buffers {
             cb.raw().endCommandBuffer();
-            let mut held = vec![Keep::new(cb.take_retained())];
-            if let Some(k) = scratch_keep.take() {
-                held.push(k);
-            }
-            let held = Mutex::new(Some(held));
-            let done = self.done.clone();
-            let metrics = self.metrics.clone();
-            let remaining = remaining.clone();
-            let handler: FeedbackBlock =
-                RcBlock::new(move |fb: NonNull<ProtocolObject<dyn MTL4CommitFeedback>>| {
-                    // SAFETY: Metal passes a valid feedback object that lives for the call.
-                    let fb = unsafe { fb.as_ref() };
-                    let (start, end) = (fb.GPUStartTime(), fb.GPUEndTime());
-                    let stats = CommandBufferStats {
-                        frame: number,
-                        cpu_encode_ns,
-                        gpu_ns: ((end - start).max(0.0) * 1e9) as u64,
-                        gpu_start_s: start,
-                        gpu_end_s: end,
-                        failed: fb.error().is_some(),
-                    };
-                    if let Some(e) = fb.error() {
-                        static SHOWN: AtomicUsize = AtomicUsize::new(0);
-                        if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
-                            eprintln!(
-                                "nxkit-metal: [RED] batch {number} command buffer failed: {} {:?}",
-                                e.localizedDescription(),
-                                e.userInfo()
-                            );
-                        }
-                    }
-                    held.lock().unwrap_or_else(PoisonError::into_inner).take();
-                    metrics.record(&stats);
-                    let last = remaining.fetch_sub(1, Ordering::AcqRel) == 1;
-                    done.add(&stats, last);
-                });
-            let opts = MTL4CommitOptions::new();
-            opts.addFeedbackHandler(&handler);
-            let ptr: NonNull<ProtocolObject<dyn MTL4CommandBuffer>> =
-                NonNull::from(&**cb.raw());
-            let list = [ptr];
-            // SAFETY: `list` holds one valid, ended command buffer and the count says one.
-            unsafe { queue.commit_count_options(NonNull::from(&list[0]), 1, &opts) };
+            list.push(NonNull::from(&**cb.raw()));
+            held.push(Keep::new(cb.take_retained()));
         }
+        if list.is_empty() {
+            self.done.add(&CommandBufferStats { frame: number, cpu_encode_ns, ..Default::default() }, true);
+            return Ok(SubmittedBatch { number, done: self.done.clone() });
+        }
+        let held = Mutex::new(Some(held));
+        let done = self.done.clone();
+        let metrics = self.metrics.clone();
+        let handler: FeedbackBlock = RcBlock::new(move |fb: NonNull<ProtocolObject<dyn MTL4CommitFeedback>>| {
+            // SAFETY: Metal passes a valid feedback object that lives for the call.
+            let fb = unsafe { fb.as_ref() };
+            let (start, end) = (fb.GPUStartTime(), fb.GPUEndTime());
+            let stats = CommandBufferStats {
+                frame: number,
+                cpu_encode_ns,
+                gpu_ns: ((end - start).max(0.0) * 1e9) as u64,
+                gpu_start_s: start,
+                gpu_end_s: end,
+                failed: fb.error().is_some(),
+            };
+            if let Some(e) = fb.error() {
+                static SHOWN: AtomicUsize = AtomicUsize::new(0);
+                if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
+                    eprintln!(
+                        "nxkit-metal: [RED] batch {number} command buffer failed: {} {:?}",
+                        e.localizedDescription(),
+                        e.userInfo()
+                    );
+                }
+            }
+            held.lock().unwrap_or_else(PoisonError::into_inner).take();
+            metrics.record(&stats);
+            done.add(&stats, true);
+        });
+        let opts = MTL4CommitOptions::new();
+        opts.addFeedbackHandler(&handler);
+        // SAFETY: `list` holds `list.len()` valid, ended command buffers, kept alive by `held` until the feedback.
+        unsafe { queue.commit_count_options(NonNull::from(&list[0]), list.len(), &opts) };
         Ok(SubmittedBatch {
             number,
             done: self.done.clone(),

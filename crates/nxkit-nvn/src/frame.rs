@@ -32,7 +32,7 @@ impl TargetView {
 }
 
 /// The attachments that are set at one time.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct RtSet {
     /// The colour targets by slot.
     pub color: [Option<TexId>; MAX_COLOR],
@@ -59,7 +59,7 @@ pub struct Span {
 }
 
 /// The state of a draw that decides what it reads of its own attachments.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct DrawState {
     /// Bit n is set when colour slot n is written.
     pub color_write: u8,

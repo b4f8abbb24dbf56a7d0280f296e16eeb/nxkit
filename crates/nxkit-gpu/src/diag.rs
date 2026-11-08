@@ -70,6 +70,8 @@ const KNOBS: &[&str] = &[
     // With the overlap on, the storage buffers that draws only read use the buffer itself instead of the walk's copy
     // (the behaviour before; the CPU's writes for the next frame then race with the GPU).
     "nosnapsbuf",
+    // With the overlap and the encoder thread, a wait for the newest frame waits for the frame two back.
+    "overlap2",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

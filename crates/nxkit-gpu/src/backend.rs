@@ -82,6 +82,9 @@ pub struct GpuBackend {
     enc: Option<Encoder>,
     /// The newest fence that was flushed.
     flushed: AtomicU64,
+    /// The presents of the game, counted when it presents, and the newest present number a tick showed.
+    asked: AtomicU64,
+    shown_upto: AtomicU64,
     /// With the encoder thread: the batches on the GPU with the fence of their frame, so that a wait for the GPU needs
     /// no lock that the encoder holds.
     inflight: Mutex<std::collections::VecDeque<(u64, nxkit_metal::SubmittedBatch)>>,
@@ -134,6 +137,8 @@ impl GpuBackend {
                 blit_failed: AtomicBool::new(false),
                 enc,
                 flushed: AtomicU64::new(0),
+                asked: AtomicU64::new(0),
+                shown_upto: AtomicU64::new(0),
                 inflight: Mutex::new(std::collections::VecDeque::new()),
                 copied_recent: AtomicBool::new(false),
             }
@@ -321,10 +326,11 @@ impl GpuBackend {
 
     /// Keeps the Metal texture of the presented frame and tells the pacer. Runs after the encode of that frame.
     fn present_now(&self, present: Present) -> BackendResult<()> {
+        // The number goes first, so that a present without a texture still counts as one of the game's presents.
+        let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
         let texture = locked(&self.gpu)
             .texture(present.texture)
             .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
-        let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
         encpace::ready(number);
         if crate::diag("present") && number % 120 == 1 {
             eprintln!(
@@ -498,6 +504,7 @@ impl Backend for GpuBackend {
 
     fn present(&self, present: Present) -> BackendResult<()> {
         encpace::asked();
+        self.asked.fetch_add(1, Ordering::AcqRel);
         match &self.enc {
             Some(enc) if enc.send(Msg::Present(present)) => Ok(()),
             _ => self.present_now(present),
@@ -534,11 +541,13 @@ impl Backend for GpuBackend {
         // wait goes to the batch itself, not through the lock that the encoder holds while it encodes the newest frame.
         if crate::overlap::on()
             && let Some(enc) = &self.enc
-            && fence.0 > 1
+            && fence.0 > 2
             && fence.0 == self.flushed.load(Ordering::Acquire)
             && !self.copied_recent.load(Ordering::Acquire)
         {
-            let older = fence.0 - 1;
+            // The `overlap2` knob waits for the frame two back: the encode on its own thread makes the way from a
+            // present to the GPU's end longer than one frame.
+            let older = fence.0 - if crate::knob("overlap2") { 2 } else { 1 };
             if older > self.done.load(Ordering::Acquire) {
                 let reached = || self.encoded.load(Ordering::Acquire) >= older;
                 if !enc.wait_for(reached) || enc.has_error() {
@@ -604,6 +613,26 @@ impl Backend for GpuBackend {
 
     fn acquire(&self, _window: u64, _index: u32) {
         let mut pending = locked(&self.pending);
+        if self.enc.is_some() {
+            // With the encoder thread a frame reaches the queue only after its encode, so the queue does not see the
+            // frames that wait for the encoder. Counted from the game's presents, at most MAX_PENDING frames are on
+            // their way to the screen; otherwise the game ran frames ahead, each showed 80 ms after it, and the
+            // textures it wrote for later frames reached the encodes of earlier ones.
+            let in_flight = |_: &Vec<Pending>| {
+                self.asked.load(Ordering::Acquire).saturating_sub(self.shown_upto.load(Ordering::Acquire))
+            };
+            while in_flight(&pending) >= MAX_PENDING as u64 {
+                let (guard, timeout) = self
+                    .freed
+                    .wait_timeout(pending, ACQUIRE_WAIT)
+                    .unwrap_or_else(PoisonError::into_inner);
+                pending = guard;
+                if timeout.timed_out() {
+                    break;
+                }
+            }
+            return;
+        }
         while pending.len() >= MAX_PENDING {
             let (guard, timeout) = self
                 .freed
@@ -672,6 +701,7 @@ impl TickSink for GpuBackend {
                 nxkit_nvn::screen::shown(p.number, -1.0);
             }
             pending.retain(|p| p.number > number);
+            self.shown_upto.fetch_max(number, Ordering::AcqRel);
             self.freed.notify_all();
             found
         };

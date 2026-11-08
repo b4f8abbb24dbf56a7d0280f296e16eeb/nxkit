@@ -196,7 +196,7 @@ extern "C" fn window_set_debug_label(_w: u64, _label: u64) {}
 
 extern "C" fn window_acquire_texture(w: u64, sync: u64, idx: u64) -> u32 {
     guard("nvnWindowAcquireTexture", || {
-        acquire("nvnWindowAcquireTexture", w, sync, idx)?;
+        super::frametime::sub(4, || acquire("nvnWindowAcquireTexture", w, sync, idx))?;
         Ok(0)
     })
 }

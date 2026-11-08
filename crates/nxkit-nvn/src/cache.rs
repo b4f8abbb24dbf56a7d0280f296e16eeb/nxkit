@@ -18,7 +18,7 @@ use crate::descriptors::Descriptors;
 use crate::resource::ResourceTable;
 
 /// The most summaries that one handle keeps. The oldest goes first.
-pub const MAX_ENTRIES_PER_HANDLE: usize = 16;
+pub const MAX_ENTRIES_PER_HANDLE: usize = 64;
 /// A summary is stable after this many hits.
 pub const STABLE_HITS: u32 = 3;
 
@@ -55,7 +55,7 @@ struct Entries {
 }
 
 /// A handle with this many evictions turns cold when it had fewer than one hit per [`COLD_RATIO`] evictions.
-const COLD_AFTER: u32 = 4 * MAX_ENTRIES_PER_HANDLE as u32;
+const COLD_AFTER: u32 = 64;
 const COLD_RATIO: u32 = 8;
 
 /// The summaries of the recordings of the game.
@@ -101,7 +101,27 @@ impl RecCache {
         let i = match list.get(e.recent) {
             Some(s) if fits(s) => e.recent,
             _ if e.cold => return None,
-            _ => list.iter().position(fits)?,
+            _ => {
+                // The summaries of a handle almost always share their needs, so the hash of the inherited state is
+                // made once per run of equal needs, and only a summary with the same hash is compared in full.
+                let mut memo: Option<(crate::decode::Needs, u64)> = None;
+                let mut found = None;
+                for (i, s) in list.iter().enumerate() {
+                    let h = match memo {
+                        Some((n, h)) if n == s.needs => h,
+                        _ => {
+                            let h = crate::decode::Key::hash_of(&s.needs, inherited);
+                            memo = Some((s.needs, h));
+                            h
+                        }
+                    };
+                    if h == s.key_hash && fits(s) {
+                        found = Some(i);
+                        break;
+                    }
+                }
+                found?
+            }
         };
         if !list[i].refs.iter().all(|r| r.holds(table, desc, mem)) {
             list.remove(i);
