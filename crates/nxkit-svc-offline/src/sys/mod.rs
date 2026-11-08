@@ -6,11 +6,11 @@
 //! -1, an output the game passes is written when it is not NULL. A function that ignores all its arguments is one shared
 //! function for the whole group, because Switch code passes arguments in registers and the callee need not read them.
 //!
-//! What stays in nxnative, because it needs the host: the events that are bound to a host system event
-//! (`ldn::AttachStateChangeEvent`, `bluetooth::Acquire*Event`), the error and web applets and the album calls that log
-//! through the host, `poll`, `select` and the event descriptors, the socket calls that set the host's `errno` of the
-//! thread (`sk_fail`, `GetLastError`, `GetHostEnt*`, `SetLastErrno`, `Close`), the variadic `Fcntl` and the naked
-//! assembly `PlayReport::Send`.
+//! What `nxkit-svc-system` takes over, because it needs the host (`sdk/offline.rs`, `sdk/net.rs`, `sdk/socket.rs`): the
+//! events that are bound to a host system event (`ldn::AttachStateChangeEvent`, `bluetooth::Acquire*Event`), the error
+//! and web applets and the album calls that log through the host, `poll`, `select` and the event descriptors, the
+//! variadic `Fcntl`, and the socket calls that set the `errno` of the thread (`sk_fail`, `GetLastError`, `GetHostEnt*`,
+//! `SetLastErrno`, `Close`). The naked assembly `PlayReport::Send` stays in nxnative.
 
 #![allow(unsafe_code)]
 

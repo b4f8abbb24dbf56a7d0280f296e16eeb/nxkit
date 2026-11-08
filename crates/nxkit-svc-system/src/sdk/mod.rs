@@ -32,6 +32,7 @@ mod diag;
 mod font;
 mod friends;
 mod init;
+mod jit;
 mod lifecycle;
 mod mii;
 mod misc;
@@ -41,6 +42,7 @@ mod ngc;
 mod nvdrv;
 mod oe;
 mod oe_state;
+mod offline;
 mod ro;
 mod sdk16;
 mod settings;
@@ -50,6 +52,7 @@ mod socket;
 mod stpl;
 mod swkbd;
 mod time;
+mod time_detail;
 mod web;
 
 pub use lifecycle::quit;
@@ -83,6 +86,9 @@ pub(crate) fn all() -> Vec<Export> {
     v.extend(sf::exports());
     v.extend(nvdrv::exports());
     v.extend(codec::exports());
+    v.extend(jit::exports());
+    v.extend(offline::exports());
+    v.extend(time_detail::exports());
     v
 }
 
