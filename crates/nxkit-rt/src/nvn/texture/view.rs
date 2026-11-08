@@ -1,6 +1,7 @@
 //! The texture view: `nvnTextureView*`.
 //!
-//! An `NVNtextureView` is 16 bytes of plain data in guest memory. The layout is private to nxkit:
+//! An `NVNtextureView` is 16 bytes in newer SDKs and a game keeps it in a stack slot of that size. The host uses the
+//! first 14 bytes of it as plain data and writes no byte past them. The layout is private to nxkit:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -11,13 +12,13 @@
 //! | 6 | first layer (u16), number of layers (u16) |
 //! | 10 | swizzle (4 bytes) |
 //!
-//! [`View::load`] reads the 16 bytes once. [`texture_view`] turns them into the [`TextureView`] that the front end
+//! [`View::load`] reads the 14 bytes once. [`texture_view`] turns them into the [`TextureView`] that the front end
 //! registers. A view that the game passes as null shows the whole texture.
 
 use nxkit_nvn::layout::{Target, TextureDesc};
 use nxkit_nvn::tic::TextureView;
 
-use crate::nvn::abi::{AbiResult, Obj, guard, ret_bool, table};
+use crate::nvn::abi::{AbiResult, Obj, guard, ret_bool, table, used};
 
 use super::builder::{IDENTITY_SWIZZLE, out_swizzle};
 
@@ -29,8 +30,8 @@ const SET_SWIZZLE: u8 = 0x10;
 const SET_MODE: u8 = 0x20;
 const MODE_SHIFT: u32 = 6;
 const MODE_STENCIL: u8 = 1;
-/// The bytes of an `NVNtextureView`.
-const BYTES: u64 = 16;
+/// The bytes of an `NVNtextureView` that the host uses.
+const BYTES: u64 = used::TEXTURE_VIEW;
 const TARGET: u64 = 1;
 const LEVELS: u64 = 2;
 const FORMAT: u64 = 4;

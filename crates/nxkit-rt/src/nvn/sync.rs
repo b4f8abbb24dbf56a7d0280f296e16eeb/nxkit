@@ -1,6 +1,6 @@
 //! The sync group: `nvnSync*` and the sync part of `nvnQueueFenceSync` and `nvnQueueWaitSync` (see the queue group).
 //!
-//! The `NVNsync` is plain data in guest memory:
+//! The `NVNsync` is 0x40 bytes in the headers. The host uses the first 0x10 bytes as plain data and writes no more:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -14,7 +14,7 @@
 
 use nxkit_nvn::backend::{Fence, WaitResult};
 
-use super::abi::{AbiResult, Obj, guard, magic, other, size, table};
+use super::abi::{AbiResult, Obj, guard, magic, other, table, used};
 use super::ctx::gpu;
 
 /// The magic of an initialised sync.
@@ -77,7 +77,7 @@ fn wait_result(
 extern "C" fn sync_initialize(s: u64, _dev: u64) -> u32 {
     guard("nvnSyncInitialize", || {
         let o = Obj(s);
-        o.zero(size::SYNC)?;
+        o.zero(used::SYNC)?;
         o.set_u32(0, SYNC)?;
         Ok(1)
     })

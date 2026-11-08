@@ -1,6 +1,7 @@
 //! The texture builder: `nvnTextureBuilder*`.
 //!
-//! An `NVNtextureBuilder` is 0x80 bytes of plain data in guest memory. The layout is private to nxkit:
+//! An `NVNtextureBuilder` is 0x80 bytes in the headers. The host uses the first 0x50 bytes of it as plain data and writes
+//! no byte past them. The layout is private to nxkit:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -20,7 +21,7 @@
 
 use nxkit_nvn::layout::{FLAG_SPARSE, Target, TextureDesc};
 
-use crate::nvn::abi::{AbiResult, Obj, guard, other, size, table};
+use crate::nvn::abi::{AbiResult, Obj, guard, other, table, used};
 
 const DEV: u64 = 0;
 const POOL: u64 = 8;
@@ -41,7 +42,7 @@ const PACKAGED: u64 = 0x40;
 const SWIZZLE: u64 = 0x48;
 const HAS_SWIZZLE: u64 = 0x4C;
 /// The bytes that [`Built::load`] reads.
-const USED: usize = 0x50;
+const USED: usize = used::TEXTURE_BUILDER as usize;
 
 /// `NVN_TEXTURE_TARGET_2D`.
 const TARGET_2D: u8 = 1;
@@ -121,16 +122,14 @@ fn desc_of(b: u64) -> AbiResult<TextureDesc> {
     Ok(Built::load(b)?.desc)
 }
 
-/// `NVNtextureSparseTileLayout`: the tiled levels and the tile size, then 16 reserved integers.
-pub(super) const SPARSE_TILE_LAYOUT_BYTES: u64 = 32;
-
-/// The sparse tile layout of a texture. A texture that is not sparse has no tiled levels and no tile size. nxkit has no
-/// layout for a sparse texture, so a sparse one stops the game here instead of getting a made-up size.
+/// The sparse tile layout of a texture: the tiled levels and the tile size, four i32. The host writes these 16 bytes and
+/// not the 16 reserved bytes after them. A texture that is not sparse has no tiled levels and no tile size. nxkit has
+/// no layout for a sparse texture, so a sparse one stops the game here instead of getting a made-up size.
 pub(super) fn sparse_tile_layout(desc: &TextureDesc, out: u64) -> AbiResult<()> {
     if desc.flags & FLAG_SPARSE != 0 && desc.target != Target::Buffer {
         return Err(other("a sparse texture has no layout in nxkit"));
     }
-    Obj(out).zero(SPARSE_TILE_LAYOUT_BYTES)
+    Obj(out).zero(used::SPARSE_TILE_LAYOUT)
 }
 
 /// The bytes of a ZCull save area. The host runs no ZCull, but a game allocates the area from its own pool, so the size
@@ -160,7 +159,7 @@ pub(super) extern "C" fn set_defaults(b: u64) {
     guard("nvnTextureBuilderSetDefaults", || {
         let o = Obj(b);
         let dev = o.u64(DEV)?;
-        o.zero(size::TEXTURE_BUILDER)?;
+        o.zero(used::TEXTURE_BUILDER)?;
         o.set_u64(DEV, dev)?;
         o.write(TARGET, &[TARGET_2D])?;
         o.set_u32(WIDTH, 1)?;

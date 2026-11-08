@@ -1,6 +1,7 @@
 //! The buffer group: `nvnBuffer*` and the buffer builder.
 //!
-//! A buffer is a range of a memory pool. The `NVNbuffer` is 0x30 bytes of plain data in guest memory:
+//! A buffer is a range of a memory pool. The `NVNbuffer` is 0x30 bytes in guest memory. The host uses the first 0x28 bytes
+//! as plain data and writes no more:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -12,13 +13,14 @@
 //! The offsets 0x18 and 0x20 are a contract with the games. The ring allocators of some engines write them
 //! directly, and the host reads them at every call, so the host keeps no copy.
 //!
-//! The buffer builder is 0x40 bytes: device at 0, pool at 8, offset at 16, size at 24.
+//! The buffer builder is 0x40 bytes in the headers. The host writes the first 0x20 bytes: device at 0, pool at 8,
+//! offset at 16, size at 24.
 //!
 //! The GPU address of a buffer is `GPU address of (pool storage + offset)`. A buffer over a pool without storage does not
 //! initialise (the result is 0). A buffer that reaches past the end of its pool is logged once, because a game may
 //! create it and never use the part outside the pool.
 
-use super::abi::{AbiResult, Obj, guard, log_once, magic, size, table};
+use super::abi::{AbiResult, Obj, guard, log_once, magic, table, used};
 use super::ctx::gpu;
 use super::pool::{self, PoolView};
 
@@ -70,7 +72,7 @@ pub(crate) fn storage(buf: u64) -> AbiResult<(PoolView, u64)> {
 extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnBufferBuilderSetDefaults", || {
         let dev = Obj(b).u64(B_DEV)?;
-        Obj(b).zero(size::BUFFER_BUILDER)?;
+        Obj(b).zero(used::BUFFER_BUILDER)?;
         Obj(b).set_u64(B_DEV, dev)
     });
 }
@@ -126,7 +128,7 @@ extern "C" fn buffer_initialize(buf: u64, b: u64) -> u32 {
             );
         }
         let o = Obj(buf);
-        o.zero(size::BUFFER)?;
+        o.zero(used::BUFFER)?;
         o.set_u32(0, BUF)?;
         o.set_u64(OFF_POOL, pool)?;
         o.set_i64(OFF_OFF, off)?;

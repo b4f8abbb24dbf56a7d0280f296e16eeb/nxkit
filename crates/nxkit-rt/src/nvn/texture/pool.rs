@@ -1,14 +1,15 @@
 //! The descriptor pool objects of the texture pool and the sampler pool.
 //!
-//! An `NVNtexturePool` and an `NVNsamplerPool` are 0x20 bytes of plain data in guest memory:
+//! An `NVNtexturePool` and an `NVNsamplerPool` are 0x20 bytes in the headers. The host uses the first 0x1C bytes of them
+//! as plain data and writes no byte past them:
 //!
 //! | offset | field |
 //! | --- | --- |
 //! | 0 | the guest address of the `NVNmemoryPool` |
 //! | 8 | the offset in the memory pool (i64) |
 //! | 0x10 | the number of descriptors (i32) |
-//! | 0x18 | the magic while initialised (`TPL\0` or `SPL\0`) |
-//! | 0x1C | the first id of the pool in the id space of its kind (u32) |
+//! | 0x14 | the magic while initialised (`TPL\0` or `SPL\0`) |
+//! | 0x18 | the first id of the pool in the id space of its kind (u32) |
 //!
 //! A texture id or a sampler id that a game passes is an index in the pool that the command buffer has bound. The front
 //! end keeps one id space for each kind, so every pool gets a range of it: its base is the end of the previous range
@@ -22,7 +23,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::nvn::abi::{AbiResult, Obj, Registry, other, size};
+use crate::nvn::abi::{AbiResult, Obj, Registry, other, used};
 use crate::nvn::pool as memory_pool;
 
 /// The bytes of one descriptor in a pool.
@@ -31,8 +32,8 @@ pub(in crate::nvn) const HEADER_BYTES: u64 = nxkit_nvn::tic::HEADER_BYTES as u64
 const OFF_POOL: u64 = 0;
 const OFF_OFF: u64 = 8;
 const OFF_N: u64 = 0x10;
-const OFF_MAGIC: u64 = 0x18;
-const OFF_BASE: u64 = 0x1C;
+const OFF_MAGIC: u64 = 0x14;
+const OFF_BASE: u64 = 0x18;
 
 /// The range of ids of one pool object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,7 +116,7 @@ impl DescPools {
             }
         };
         let o = Obj(obj);
-        o.zero(size::DESCRIPTOR_POOL)?;
+        o.zero(used::DESCRIPTOR_POOL)?;
         o.set_u64(OFF_POOL, mem_pool)?;
         o.set_i64(OFF_OFF, off)?;
         o.set_i32(OFF_N, n)?;

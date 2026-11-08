@@ -6,7 +6,7 @@ use super::rec::{
     self, MAGIC, O_IMAGE_STRIDE, O_MAGIC, O_REC, O_ROW_STRIDE, create, destroy, sync_in, sync_out,
     with_recorder,
 };
-use crate::nvn::abi::{Obj, arg_bool, guard, other, ret_bool, size, table};
+use crate::nvn::abi::{Obj, arg_bool, guard, other, ret_bool, table, used};
 use crate::nvn::pool;
 
 /// How many handles one `CallCommands` takes at most. A game that passes more is wrong.
@@ -14,7 +14,7 @@ const MAX_CALLED: i32 = 1024;
 
 extern "C" fn initialize(c: u64, _dev: u64) -> u32 {
     guard("nvnCommandBufferInitialize", || {
-        Obj(c).zero(size::COMMAND_BUFFER)?;
+        Obj(c).zero(used::COMMAND_BUFFER)?;
         Obj(c).set_u32(O_MAGIC, MAGIC)?;
         create(c);
         Ok(1)
@@ -236,6 +236,7 @@ pub(super) fn procs() -> Vec<(&'static str, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nvn::abi::size;
     use crate::nvn::abi::testing::alloc;
 
     #[test]

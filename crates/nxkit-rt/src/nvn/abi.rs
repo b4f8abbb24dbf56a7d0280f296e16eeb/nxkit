@@ -23,8 +23,67 @@ use nxkit_abi::guest::{self, Fault};
 use nxkit_nvn::backend::BackendError;
 use nxkit_nvn::error::NvnError;
 
-/// The sizes in bytes that real NVN reserves for its objects (`nvn.h` of nxnative). The host keeps its state in the
-/// first bytes and never reads or writes past the size.
+/// The bytes that the host writes into a game object or builder: the end of the highest field of its layout.
+///
+/// The reserved sizes of the headers differ between SDK versions, in both directions. A newer SDK has an `NVNtexture`
+/// of 0x80 bytes and an `NVNtextureView` of 16 bytes. A game keeps a builder in a stack slot or an object next to
+/// another one. A write past the real size overwrites the saved registers of the caller or the next object. So the
+/// host writes only these bytes. A zero of an object never covers more (R62).
+///
+/// Where the game reads and writes fields at a fixed offset (`NVNbuffer`), the size ends at the last such field.
+pub(crate) mod used {
+    /// `NVNdevice`: the debug callback data at 24.
+    pub(crate) const DEVICE: u64 = 0x20;
+    /// `NVNdeviceBuilder`: the flags at 0.
+    pub(crate) const DEVICE_BUILDER: u64 = 4;
+    /// `NVNqueue`: the origin at 24.
+    pub(crate) const QUEUE: u64 = 0x20;
+    /// `NVNqueueBuilder`: the queue memory size at 56.
+    pub(crate) const QUEUE_BUILDER: u64 = 0x40;
+    /// `NVNwindow`: the texture addresses from 48 to 80.
+    pub(crate) const WINDOW: u64 = 0x50;
+    /// `NVNwindowBuilder`: the texture addresses from 24 to 56.
+    pub(crate) const WINDOW_BUILDER: u64 = 0x38;
+    /// `NVNsync`: the fence number at 8.
+    pub(crate) const SYNC: u64 = 0x10;
+    /// `NVNprogram`: the magic at 0 and the stage count at 4.
+    pub(crate) const PROGRAM: u64 = 8;
+    /// `NVNprogramBuilder`: the stage count at 16.
+    pub(crate) const PROGRAM_BUILDER: u64 = 0x18;
+    /// `NVNmemoryPool`: the size at 16.
+    pub(crate) const POOL: u64 = 0x18;
+    /// `NVNmemoryPoolBuilder`: the flags at 24.
+    pub(crate) const POOL_BUILDER: u64 = 0x1C;
+    /// `NVNbuffer`: the size at 0x20.
+    pub(crate) const BUFFER: u64 = 0x28;
+    /// `NVNbufferBuilder`: the size at 24.
+    pub(crate) const BUFFER_BUILDER: u64 = 0x20;
+    /// `NVNevent`: the offset in the pool at 24.
+    pub(crate) const EVENT: u64 = 0x20;
+    /// `NVNeventBuilder`: the offset in the pool at 8.
+    pub(crate) const EVENT_BUILDER: u64 = 0x10;
+    /// `NVNtexture`: the swizzle at 0x58.
+    pub(crate) const TEXTURE: u64 = 0x5C;
+    /// `NVNtextureBuilder`: the swizzle flag at 0x4C.
+    pub(crate) const TEXTURE_BUILDER: u64 = 0x50;
+    /// `NVNtextureView`: the swizzle at 10.
+    pub(crate) const TEXTURE_VIEW: u64 = 0xE;
+    /// `NVNtexturePool` and `NVNsamplerPool`: the first id at 0x18.
+    pub(crate) const DESCRIPTOR_POOL: u64 = 0x1C;
+    /// `NVNsampler`: the magic at 0 and the 40 bytes of parameters at 4.
+    pub(crate) const SAMPLER: u64 = 0x2C;
+    /// `NVNsamplerBuilder`: the device at 0 and the 40 bytes of parameters at 8.
+    pub(crate) const SAMPLER_BUILDER: u64 = 0x30;
+    /// `NVNcommandBuffer`: the image stride at 0x40.
+    pub(crate) const COMMAND_BUFFER: u64 = 0x48;
+    /// `NVNtextureSparseTileLayout`: four i32. The 16 reserved bytes after them stay as they are.
+    pub(crate) const SPARSE_TILE_LAYOUT: u64 = 0x10;
+}
+
+/// The sizes in bytes that the headers of one NVN version reserve for the objects (`nvn.h` of nxnative). They are
+/// for the allocations of tests only. The host never zeroes or writes by them, see [`used`].
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) mod size {
     /// `NVNdevice`
     pub(crate) const DEVICE: u64 = 0x3000;
@@ -241,7 +300,7 @@ impl Obj {
         Ok(guest::write(self.0.wrapping_add(off), data)?)
     }
 
-    /// Sets the first `len` bytes to zero. `Initialize` calls it with the object size.
+    /// Sets the first `len` bytes to zero. `Initialize` calls it with the [`used`] size of the object.
     pub(crate) fn zero(self, len: u64) -> AbiResult<()> {
         Ok(guest::fill(self.0, len, 0)?)
     }
