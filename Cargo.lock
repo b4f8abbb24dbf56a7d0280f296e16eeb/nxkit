@@ -823,6 +823,9 @@ dependencies = [
 [[package]]
 name = "nxkit-ndve"
 version = "0.10.0"
+dependencies = [
+ "nxb-model",
+]
 
 [[package]]
 name = "nxkit-nvn"
