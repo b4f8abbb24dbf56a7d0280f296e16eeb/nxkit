@@ -149,6 +149,7 @@ impl ArgsMemo {
 pub(crate) struct ScratchSink<'a> {
     scratch: &'a Scratch,
     uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
+    preloaded: Option<&'a crate::draws::FastMap<usize, u64>>,
     memo: Option<&'a mut ArgsMemo>,
 }
 
@@ -160,13 +161,22 @@ impl<'a> ScratchSink<'a> {
         uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
         memo: Option<&'a mut ArgsMemo>,
     ) -> Self {
-        Self { scratch, uploaded, memo }
+        Self { scratch, uploaded, preloaded: None, memo }
+    }
+
+    /// Looks shared snapshots up in `preloaded` first, without a lock.
+    pub(crate) fn with_preloaded(mut self, preloaded: &'a crate::draws::FastMap<usize, u64>) -> Self {
+        self.preloaded = Some(preloaded);
+        self
     }
 }
 
 impl Sink for ScratchSink<'_> {
     fn put_shared(&mut self, data: &Arc<[u8]>) -> Result<u64, Skip> {
         let key = data.as_ptr() as usize;
+        if let Some(a) = self.preloaded.and_then(|m| m.get(&key).copied()) {
+            return Ok(a);
+        }
         if let Some(a) = self.uploaded.lock().ok().and_then(|m| m.get(&key).copied()) {
             return Ok(a);
         }

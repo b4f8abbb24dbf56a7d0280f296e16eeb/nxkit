@@ -28,7 +28,7 @@ fn dispatch(sh: &Shared<'_>, cp: &mut ComputePass<'_>, scratch: &Scratch, n: u32
         base_instance: 0,
         groups: Some(dd.groups),
     };
-    let args = fill_args(&p, &inputs, &sh.env, &mut ScratchSink::new(scratch, sh.uploaded, None))?;
+    let args = fill_args(&p, &inputs, &sh.env, &mut ScratchSink::new(scratch, sh.uploaded, None).with_preloaded(sh.preloaded))?;
     let enc = |cp: &mut ComputePass<'_>, c| cp.encode(&c).map_err(|_| Skip::Encode);
     enc(cp, ComputeCommand::SetPipeline(pipeline))?;
     enc(cp, ComputeCommand::SetBuffer { index: 0, gpu_addr: args })?;

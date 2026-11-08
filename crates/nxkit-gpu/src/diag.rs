@@ -57,6 +57,9 @@ const KNOBS: &[&str] = &[
     "allbar",
     // No pass gets a barrier. Wrong on purpose: it measures what the barriers cost the GPU.
     "nobarrier",
+    // `nvnSyncWait` returns at once and does not wait for the GPU. Wrong on purpose: the game may write memory that the
+    // frame on the GPU still reads. It measures what the wait for the newest fence costs.
+    "nowait",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

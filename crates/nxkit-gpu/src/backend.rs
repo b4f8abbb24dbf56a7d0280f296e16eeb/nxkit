@@ -59,6 +59,8 @@ pub struct GpuBackend {
     walker: Mutex<Walker>,
     /// The memory writes that the walker has not seen yet. It has a lock of its own, so a write never waits for a walk.
     invalidations: Arc<Invalidations>,
+    /// The counters of `NXKIT_DIAG=overlap`.
+    overlap: crate::overlap::Overlap,
     scale: f32,
     /// The last fence whose frame was encoded.
     encoded: AtomicU64,
@@ -109,6 +111,7 @@ impl GpuBackend {
                 gpu: Mutex::new(gpu),
                 walker: Mutex::new(walker),
                 invalidations,
+                overlap: crate::overlap::Overlap::default(),
                 scale: settings.scale,
                 encoded: AtomicU64::new(0),
                 done: AtomicU64::new(0),
@@ -326,6 +329,12 @@ fn drop_later<T: Send + 'static>(v: T) {
     }
 }
 
+/// Whether `NXKIT_DIAG` asks for the overlap counters.
+fn overlap_diag() -> bool {
+    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DIAG.get_or_init(|| crate::diag("overlap"))
+}
+
 /// Whether `NXKIT_DIAG` asks for the periodic counters.
 fn stats_diag() -> bool {
     static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -401,6 +410,9 @@ impl Backend for GpuBackend {
             }
             walker.take()
         };
+        if overlap_diag() {
+            self.overlap.frame(&detail, fence.0, &self.guest);
+        }
         if !matches(frame, &detail) {
             eprintln!(
                 "nxkit-gpu: the walked detail does not match the frame, its draws are skipped"
@@ -449,6 +461,28 @@ impl Backend for GpuBackend {
         if fence.0 == 0 || fence.0 <= self.done.load(Ordering::Acquire) {
             return WaitResult::AlreadyDone;
         }
+        if crate::knob("nowait") {
+            return WaitResult::AlreadyDone;
+        }
+        // One frame of overlap: a wait for the newest frame waits for the one before it. A frame that copied back to
+        // CPU memory waited in full when it was encoded, so `done` covers it already.
+        if crate::overlap::on() && self.enc.is_none() && fence.0 == self.encoded.load(Ordering::Acquire) && fence.0 > 1 {
+            let older = fence.0 - 1;
+            if older > self.done.load(Ordering::Acquire) {
+                let result = locked(&self.gpu).wait_older();
+                match result {
+                    Ok(Some(stats)) => {
+                        *locked(&self.last_gpu) = Some((stats.gpu_start_s, stats.gpu_end_s));
+                        nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                    }
+                    Ok(None) => {}
+                    Err(_) => return WaitResult::Failed,
+                }
+                self.write_counters(older);
+                self.done.fetch_max(older, Ordering::AcqRel);
+            }
+            return WaitResult::Done;
+        }
         if let Some(enc) = &self.enc {
             let reached = || self.encoded.load(Ordering::Acquire) >= fence.0;
             if !enc.wait_for(reached) || enc.has_error() {
@@ -479,6 +513,11 @@ impl Backend for GpuBackend {
 
     fn recording_invalidated(&self, start: u64, end: u64) {
         self.invalidations.push(start, end);
+        if overlap_diag()
+            && let Ok(gpu) = self.guest.gpu_address(start, end.saturating_sub(start).max(1))
+        {
+            self.overlap.flushed(gpu, end.saturating_sub(start), self.done.load(Ordering::Acquire));
+        }
     }
 
     fn acquire(&self, _window: u64, _index: u32) {

@@ -300,7 +300,9 @@ impl Walker {
         let end = addr + u64::from(size);
         // A partial update does not reduce the bound range. Its unchanged tail can contain constants that the
         // shader still reads. Copying only the updated prefix makes those reads escape the scratch allocation.
-        if !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
+        // With the overlap on, every bound block gets its copy: the CPU may write it for the next frame while the GPU
+        // still reads this one.
+        if !crate::overlap::on() && !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
             // Most bound blocks have no inline updates. Remember that result as well: scanning the update
             // history for every UBO of every draw otherwise dominates the command walker on large frames.
             self.snaps.borrow_mut().insert((addr, size), None);

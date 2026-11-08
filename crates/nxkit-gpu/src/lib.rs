@@ -34,6 +34,7 @@ mod gpu;
 mod icbs;
 mod jobs;
 mod lum;
+mod overlap;
 mod json;
 mod passes;
 mod pipelines;

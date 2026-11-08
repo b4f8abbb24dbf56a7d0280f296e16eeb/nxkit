@@ -576,7 +576,7 @@ fn draw(
             }
         }
     }
-    let p = prepare(sh, pc, d, &mut ScratchSink::new(scratch, sh.uploaded, Some(memo)), false);
+    let p = prepare(sh, pc, d, &mut ScratchSink::new(scratch, sh.uploaded, Some(memo)).with_preloaded(sh.preloaded), false);
     if crate::diag("pixel") && crate::diag::sampled() && FOCUS_PASS.with(std::cell::Cell::get) {
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 97 == 0 {

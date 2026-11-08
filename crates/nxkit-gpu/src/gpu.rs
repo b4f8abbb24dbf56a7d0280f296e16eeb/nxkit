@@ -89,6 +89,8 @@ pub struct Gpu {
     ring: BatchRing,
     threads: usize,
     last: Option<SubmittedBatch>,
+    /// The batch before `last`, while it may still run: the frame that `wait_older` waits for.
+    older: Option<SubmittedBatch>,
     pools: Vec<(u64, u64)>,
     copyback: CopyBack,
 }
@@ -229,6 +231,7 @@ impl Gpu {
             ring: BatchRing::new(ctx, threads * CHUNKS_PER_THREAD + 1)?,
             threads,
             last: None,
+            older: None,
             pools: Vec::new(),
             copyback: CopyBack::default(),
         })
@@ -317,6 +320,11 @@ impl Gpu {
     /// The Metal texture that holds a texture of the game, as the last frame left it. None when no frame used it.
     pub fn texture(&self, id: TexId) -> Option<Texture> {
         self.store.get(id).map(|r| r.tex.clone())
+    }
+
+    /// Waits until the GPU finished the batch before the newest one, and leaves the newest one running.
+    pub fn wait_older(&mut self) -> Result<Option<CommandBufferStats>> {
+        self.older.take().map(|b| b.wait()).transpose()
     }
 
     /// Waits until the GPU finished the last submitted frame. The result is `None` when nothing was submitted.
@@ -826,6 +834,25 @@ impl Gpu {
         let ords = ordinals(frame);
         let run_at: FastMap<u32, RecordingRun> =
             detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
+        // Every uniform snapshot of the frame goes to the scratch memory once, here on one thread. The chunks then only
+        // look the addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
+        // every draw by all chunk threads.
+        let mut preloaded: FastMap<usize, u64> = FastMap::default();
+        for u in detail
+            .draws
+            .iter()
+            .flat_map(|d| d.ubos.iter())
+            .chain(detail.dispatches.iter().flat_map(|d| d.ubos.iter()))
+        {
+            if let Some(bytes) = &u.snapshot {
+                let key = bytes.as_ptr() as usize;
+                if !preloaded.contains_key(&key)
+                    && let Ok(a) = scratch.push(bytes)
+                {
+                    preloaded.insert(key, a);
+                }
+            }
+        }
         let uploaded = Mutex::new(FastMap::default());
         let sh = Shared {
             ctx: &self.ctx,
@@ -853,6 +880,7 @@ impl Gpu {
             first_write: &first_write,
             scale,
             uploaded: &uploaded,
+            preloaded: &preloaded,
         };
         let mut start = 0;
         let ranges: Vec<Range<usize>> = ends
@@ -892,7 +920,7 @@ impl Gpu {
         self.ctx.commit_residency();
         let submitted = batch.submit()?;
         let number = submitted.number();
-        self.last = Some(submitted);
+        self.older = self.last.replace(submitted);
         self.copyback.submitted(number, &mirrored_ranges);
         if lum {
             let _ = self.wait();

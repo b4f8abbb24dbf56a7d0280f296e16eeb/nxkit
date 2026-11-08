@@ -91,6 +91,8 @@ pub(crate) struct Shared<'a> {
     pub(crate) scale: f32,
     /// The scratch address of each uniform snapshot that the batch already uploaded, by the address of its bytes.
     pub(crate) uploaded: &'a Mutex<FastMap<usize, u64>>,
+    /// The snapshots that were uploaded before the chunks started. A lookup needs no lock.
+    pub(crate) preloaded: &'a FastMap<usize, u64>,
 }
 
 impl Shared<'_> {
