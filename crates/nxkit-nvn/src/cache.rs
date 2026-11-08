@@ -45,7 +45,18 @@ struct Entries {
     list: Vec<Summary>,
     // a hint: a game submits the same recording under the same state again and again
     recent: usize,
+    /// Summaries dropped because the list was full, and hits, since the handle was first seen.
+    evicted: u32,
+    hits: u32,
+    /// A handle that is called with more states than [`MAX_ENTRIES_PER_HANDLE`] (a model recording that runs once per
+    /// instance) drops its summaries as fast as it makes them. It keeps one summary, the last, and a lookup looks only
+    /// at that one. It stays in `by_start` and `parents`, so a write to its memory still drops its callers.
+    cold: bool,
 }
+
+/// A handle with this many evictions turns cold when it had fewer than one hit per [`COLD_RATIO`] evictions.
+const COLD_AFTER: u32 = 4 * MAX_ENTRIES_PER_HANDLE as u32;
+const COLD_RATIO: u32 = 8;
 
 /// The summaries of the recordings of the game.
 #[derive(Debug, Default)]
@@ -89,6 +100,7 @@ impl RecCache {
         let fits = |s: &Summary| s.key.matches(&s.needs, inherited);
         let i = match list.get(e.recent) {
             Some(s) if fits(s) => e.recent,
+            _ if e.cold => return None,
             _ => list.iter().position(fits)?,
         };
         if !list[i].refs.iter().all(|r| r.holds(table, desc, mem)) {
@@ -98,6 +110,7 @@ impl RecCache {
             return None;
         }
         e.recent = i;
+        e.hits = e.hits.saturating_add(1);
         list[i].hits = list[i].hits.saturating_add(1);
         self.stats.hits += 1;
         Some(i)
@@ -119,9 +132,16 @@ impl RecCache {
             }
         }
         let e = self.entries.entry(handle).or_default();
-        if e.list.len() >= MAX_ENTRIES_PER_HANDLE {
+        if e.cold {
+            e.list.clear();
+        } else if e.list.len() >= MAX_ENTRIES_PER_HANDLE {
             e.list.remove(0);
             self.stats.evictions += 1;
+            e.evicted += 1;
+            if e.evicted >= COLD_AFTER && e.hits.saturating_mul(COLD_RATIO) < e.evicted {
+                e.cold = true;
+                e.list.clear();
+            }
         }
         e.list.push(s);
         e.recent = e.list.len() - 1;

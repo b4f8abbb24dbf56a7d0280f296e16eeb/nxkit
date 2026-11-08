@@ -348,7 +348,9 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             desc: &self.descriptors,
         };
         let inherited = self.queues.entry(queue).or_default();
+        let t0 = std::time::Instant::now();
         let i = summary(&mut self.cache, &cx, handle.0, inherited, 0)?;
+        decode_diag(t0.elapsed().as_nanos() as u64, self.cache.stats);
         let s = self
             .cache
             .entry(handle.0, i)
@@ -429,5 +431,21 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.hit.clear();
         self.table.guest_wrote(start, len, &mut self.hit);
         Ok(&self.hit)
+    }
+}
+
+/// `NXKIT_DIAG=stats`: the time of the decode of the submits and the counters of its cache, every 300 submits.
+fn decode_diag(ns: u64, c: crate::cache::CacheStats) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    static NS: AtomicU64 = AtomicU64::new(0);
+    if !crate::diag::on("stats") {
+        return;
+    }
+    let total = NS.fetch_add(ns, Ordering::Relaxed) + ns;
+    let n = N.fetch_add(1, Ordering::Relaxed) + 1;
+    if n % 300 == 0 {
+        NS.store(0, Ordering::Relaxed);
+        eprintln!("nxkit-nvn: decode {:.2} ms per submit (mean of 300), cache {c:?}", total as f64 / 300.0 / 1e6);
     }
 }
