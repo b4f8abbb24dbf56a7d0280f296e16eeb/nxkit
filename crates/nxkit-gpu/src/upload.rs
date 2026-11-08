@@ -15,6 +15,7 @@ use nxkit_nvn::format::format_info;
 use nxkit_nvn::layout::Target;
 use nxkit_nvn::resource::TextureRecord;
 
+use crate::scaled::ScaledUploads;
 use crate::stats::Skip;
 use crate::textures::Res;
 
@@ -25,6 +26,8 @@ pub(crate) struct Transfer {
     swizzler: Swizzler,
     order: GobOrder,
     gate: Mutex<()>,
+    /// The staging pool and the queued scalings of uploads into scaled textures.
+    scaled: Mutex<ScaledUploads>,
 }
 
 /// Counts a failed upload for the health report and prints it under the `upload` category (at most 300 lines).
@@ -92,7 +95,43 @@ impl Transfer {
             swizzler: Swizzler::new(ctx, cache)?,
             order,
             gate: Mutex::new(()),
+            scaled: Mutex::new(ScaledUploads::new(ctx, cache)?),
         })
+    }
+
+    /// Starts a frame of scaled uploads.
+    pub(crate) fn begin_frame(&self) {
+        self.scaled.lock().unwrap_or_else(PoisonError::into_inner).begin_frame();
+    }
+
+    /// Uploads the guest data of `rec` into the scaled texture `res`: the plain upload fills a staging texture of the
+    /// native size, and the scaling is queued for [`Transfer::flush_scaled`]. Counts as lost what it cannot do.
+    pub(crate) fn upload_scaled(
+        &self,
+        cb: &mut CommandBuffer,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        rec: &TextureRecord,
+        res: &Res,
+        wait: bool,
+    ) -> Result<(), Skip> {
+        if !ScaledUploads::supports(res) {
+            nxkit_nvn::diag::example(
+                nxkit_nvn::diag::Reason::UploadScaledLost,
+                format_args!("{:?} {:?} {}x{}: no scaling kernel", res.desc.format, res.desc.kind, res.desc.width, res.desc.height),
+            );
+            return Err(Skip::Transfer);
+        }
+        let staging = self.scaled.lock().unwrap_or_else(PoisonError::into_inner).staging(rec, res)?;
+        self.upload(cb, scratch, guest, rec, &staging, wait)?;
+        cb.retain(staging.tex.clone());
+        self.scaled.lock().unwrap_or_else(PoisonError::into_inner).queue(&staging, res);
+        Ok(())
+    }
+
+    /// Encodes the scalings of this frame's scaled uploads. Returns the textures scaled and the textures lost.
+    pub(crate) fn flush_scaled(&self, cb: &mut CommandBuffer) -> (u32, u32) {
+        self.scaled.lock().unwrap_or_else(PoisonError::into_inner).flush(cb)
     }
 
     /// Encodes the deswizzle of all levels and layers of `rec` into `res`. The commands go into a compute pass of

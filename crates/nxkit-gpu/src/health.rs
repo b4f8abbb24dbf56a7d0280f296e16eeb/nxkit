@@ -31,6 +31,7 @@ pub(crate) fn frame(n: u64, stats: &EncodeStats) {
         note_n(*why, u64::from(count));
     }
     note_n(Reason::UploadScaledLost, u64::from(stats.scaled_upload_lost));
+    note_n(Reason::UploadScaled, u64::from(stats.scaled_uploads));
     frame_end(n);
 }
 
