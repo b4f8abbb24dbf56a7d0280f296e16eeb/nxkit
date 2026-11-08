@@ -3,9 +3,9 @@
 //! The parts are in the modules below: the builder in [`builder`], the views in [`view`], the texel access in [`io`],
 //! the descriptor pools in [`pool`] and the texture pool in [`tpool`]. This module has the texture itself.
 //!
-//! An `NVNtexture` is 0xC0 bytes in the headers and the game treats it as opaque. nxkit keeps its own copy of what
-//! it needs in the first 0x5C bytes, so every getter reads the guest object and nothing else. No getter takes a lock
-//! and no registration looks a texture up by address:
+//! An `NVNtexture` is 0xC0 bytes in the headers and 0x80 bytes in newer SDKs. The game treats it as opaque. nxkit
+//! keeps its own copy of what it needs in the first 0x5C bytes and writes no byte past them, so every getter reads the
+//! guest object and nothing else. No getter takes a lock and no registration looks a texture up by address:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -31,7 +31,7 @@ use nxkit_abi::guest;
 use nxkit_nvn::layout::{Target, TextureDesc};
 use nxkit_nvn::resource::TexId;
 
-use super::abi::{AbiResult, Obj, guard, magic, other, ret_bool, table};
+use super::abi::{AbiResult, Obj, guard, magic, other, ret_bool, table, used};
 use super::ctx::gpu;
 use super::pool as memory_pool;
 use builder::{Built, out_swizzle, sparse_tile_layout, zcull_size};
@@ -62,9 +62,7 @@ const STENCIL: u64 = 0x56;
 const PACKAGED: u64 = 0x57;
 const SWIZZLE: u64 = 0x58;
 /// The bytes that nxkit uses of the object.
-const USED: usize = 0x5C;
-/// The part of the object that nxkit clears. The game may use no more than this of an `NVNtexture`.
-const CLEARED: u64 = 0x80;
+const USED: usize = used::TEXTURE as usize;
 const NO_PACKAGED_BLOCK: u8 = 0xFF;
 
 /// What a texture object holds.
@@ -162,9 +160,7 @@ impl Tex {
             ],
         );
         put(SWIZZLE, &self.swizzle);
-        let o = Obj(addr);
-        o.zero(CLEARED)?;
-        o.write(0, &raw)
+        Obj(addr).write(0, &raw)
     }
 }
 
@@ -479,7 +475,7 @@ mod tests {
         let a = testing::alloc(size::TEXTURE);
         let b = testing::alloc(size::TEXTURE);
         tex().store(a, 0x7000_0040).expect("store");
-        let mut raw = [0u8; CLEARED as usize];
+        let mut raw = [0u8; USED];
         Obj(a).read(0, &mut raw).expect("read");
         Obj(b).write(0, &raw).expect("write");
         assert_eq!(compare(a, b), 1);

@@ -3,7 +3,7 @@
 //! An event is a 32-bit counter in a memory pool that both the CPU and the GPU can write. The host runs the commands
 //! of the game on the CPU timeline, so `nvnEventSignal` and the GPU signal commands write the word in guest memory directly.
 //!
-//! The `NVNevent` is 0x40 bytes of plain data in guest memory:
+//! The `NVNevent` is 0x40 bytes in guest memory. The host uses the first 0x20 bytes as plain data and writes no more:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -12,9 +12,9 @@
 //! | 16 | the guest address of the `NVNmemoryPool` |
 //! | 24 | the offset in the pool (i64) |
 //!
-//! The event builder is 0x20 bytes: pool at 0, offset at 8.
+//! The event builder is 0x20 bytes in the headers. The host writes the first 0x10 bytes: pool at 0, offset at 8.
 
-use super::abi::{AbiResult, Obj, guard, magic, size, table};
+use super::abi::{AbiResult, Obj, guard, magic, table, used};
 use super::pool;
 
 /// The magic of an initialised event.
@@ -30,7 +30,7 @@ const B_OFF: u64 = 8;
 
 extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnEventBuilderSetDefaults", || {
-        Obj(b).zero(size::EVENT_BUILDER)
+        Obj(b).zero(used::EVENT_BUILDER)
     });
 }
 
@@ -62,7 +62,7 @@ extern "C" fn event_initialize(e: u64, b: u64) -> u32 {
             return Ok(0);
         }
         let o = Obj(e);
-        o.zero(size::EVENT)?;
+        o.zero(used::EVENT)?;
         o.set_u32(0, EVNT)?;
         o.set_u64(OFF_VAL, mem.wrapping_add(off as u64))?;
         o.set_u64(OFF_POOL, pool_addr)?;
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn an_event_signals_the_word_it_points_at() {
         let word = testing::alloc(8);
-        let event = testing::alloc(size::EVENT);
+        let event = testing::alloc(crate::nvn::abi::size::EVENT);
         Obj(event).set_u64(OFF_VAL, word).expect("val");
         event_signal(event, 0, 10);
         assert_eq!(event_get_value(event), 10);

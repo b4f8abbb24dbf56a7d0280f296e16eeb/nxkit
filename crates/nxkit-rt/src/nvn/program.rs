@@ -19,12 +19,13 @@
 //! use ([`stages_of`]).
 //!
 //! The keys live in `Gpu::programs`, keyed by the guest address of the `NVNprogram`, because a game may allocate a
-//! program object of fewer than 0xC0 bytes.
+//! program object of fewer than 0xC0 bytes. The host writes the first 8 bytes of the program: the magic at 0 and the
+//! stage count at 4. The program builder is written up to byte 0x18: device at 0, stage array at 8, stage count at 16.
 
 use nxkit_abi::guest;
 use nxkit_nvn::backend::{ShaderKey, StageKey};
 
-use super::abi::{AbiResult, Obj, fatal, guard, log_once, magic, ret_bool, size, table};
+use super::abi::{AbiResult, Obj, fatal, guard, log_once, magic, ret_bool, table, used};
 use super::ctx::{Settings, gpu};
 
 /// The magic of an initialised program.
@@ -226,7 +227,7 @@ fn set_shaders(name: &'static str, p: u64, n: i32, sd: u64, stride: u64) -> AbiR
 }
 
 extern "C" fn program_builder_set_defaults(b: u64) {
-    guard("nvnProgramBuilderSetDefaults", || Obj(b).zero(24));
+    guard("nvnProgramBuilderSetDefaults", || Obj(b).zero(used::PROGRAM_BUILDER));
 }
 
 extern "C" fn program_builder_set_device(b: u64, dev: u64) {
@@ -249,7 +250,7 @@ extern "C" fn program_initialize(p: u64, _dev: u64) -> u32 {
 
 fn init(p: u64) -> AbiResult<()> {
     let o = Obj(p);
-    o.zero(size::PROGRAM)?;
+    o.zero(used::PROGRAM)?;
     o.set_u32(0, PROG)?;
     gpu("nvnProgramInitialize").programs.remove(p);
     Ok(())

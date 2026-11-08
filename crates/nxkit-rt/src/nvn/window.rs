@@ -1,6 +1,7 @@
 //! The window group: `nvnWindow*` and the window builder.
 //!
-//! A window is a swap chain of up to four textures. The `NVNwindow` is 0x180 bytes of plain data in guest memory:
+//! A window is a swap chain of up to four textures. The `NVNwindow` is 0x180 bytes in guest memory. The host uses the
+//! first 0x50 bytes as plain data and writes no more:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -12,7 +13,7 @@
 //! | 28 | the crop, four i32: x, y, width, height. Zero width and height mean no crop |
 //! | 48 | the guest addresses of the textures, four u64 |
 //!
-//! The window builder is 0x40 bytes: device at 0, native window at 8, number of textures at 16, present interval at 20
+//! The window builder is 0x40 bytes in the headers. The host writes the first 0x38 bytes: device at 0, native window at 8, number of textures at 16, present interval at 20
 //! (default 1), the texture addresses at 24.
 //!
 //! `nvnWindowAcquireTexture` hands out the textures in a ring. The backend paces the game there
@@ -24,7 +25,7 @@
 
 use nxkit_nvn::backend::Rect;
 
-use super::abi::{AbiResult, Obj, guard, log_once, magic, size, table};
+use super::abi::{AbiResult, Obj, guard, log_once, magic, table, used};
 use super::ctx::gpu;
 use super::sync;
 
@@ -104,7 +105,7 @@ extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnWindowBuilderSetDefaults", || {
         let o = Obj(b);
         let dev = o.u64(B_DEV)?;
-        o.zero(size::WINDOW_BUILDER)?;
+        o.zero(used::WINDOW_BUILDER)?;
         o.set_u64(B_DEV, dev)?;
         o.set_i32(B_INTERVAL, 1)
     });
@@ -162,7 +163,7 @@ extern "C" fn window_initialize(w: u64, b: u64) -> u32 {
     guard("nvnWindowInitialize", || {
         let (src, o) = (Obj(b), Obj(w));
         let ntex = src.i32(B_NTEX)?;
-        o.zero(size::WINDOW)?;
+        o.zero(used::WINDOW)?;
         o.set_u32(0, WIND)?;
         o.set_u64(OFF_NATIVE, src.u64(B_NATIVE)?)?;
         o.set_i32(OFF_NTEX, ntex)?;
@@ -304,7 +305,7 @@ mod tests {
 
     #[test]
     fn the_builder_copies_up_to_four_textures_and_defaults_to_interval_one() {
-        let (b, list) = (testing::alloc(size::WINDOW_BUILDER), testing::alloc(32));
+        let (b, list) = (testing::alloc(crate::nvn::abi::size::WINDOW_BUILDER), testing::alloc(32));
         builder_set_defaults(b);
         assert_eq!(builder_get_present_interval(b), 1);
         for i in 0..3u64 {
@@ -317,7 +318,7 @@ mod tests {
 
     #[test]
     fn a_present_view_exists_only_for_an_index_inside_the_swap_chain() {
-        let w = testing::alloc(size::WINDOW);
+        let w = testing::alloc(crate::nvn::abi::size::WINDOW);
         Obj(w).set_i32(OFF_NTEX, 2).expect("n");
         Obj(w).set_i32(OFF_INTERVAL, 2).expect("interval");
         Obj(w).set_u64(OFF_TEX + 8, 0xABC0).expect("tex");

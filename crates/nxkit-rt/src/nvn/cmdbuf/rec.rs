@@ -1,7 +1,7 @@
 //! How a command buffer function puts a record into command memory.
 //!
 //! The write position of a command buffer is kept in the guest `NVNcommandBuffer` itself, in bytes that the host owns
-//! (the offsets below). The common case is a record that fits into the current block. It reads the position and the
+//! (the offsets below). The host writes the first 0x48 bytes of the object and no more. The common case is a record that fits into the current block. It reads the position and the
 //! limit from the object, writes the record straight into command memory and stores the new position. It takes no
 //! lock, finds no registry entry, builds no `Vec` and writes a record once (the writer puts the words of the record
 //! into command memory and nowhere else).

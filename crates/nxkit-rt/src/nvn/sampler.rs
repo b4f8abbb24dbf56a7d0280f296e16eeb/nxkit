@@ -1,8 +1,9 @@
 //! The sampler group: `nvnSampler*`, the sampler builder and the sampler pool.
 //!
-//! A sampler builder is 0x60 bytes of plain data in guest memory and a sampler is 0x30 bytes. Both hold the same 40
-//! bytes of parameters, at offset 8 in the builder (the device is at 0) and at offset 4 in the sampler (the magic
-//! `SMP\0` is at 0):
+//! A sampler builder is 0x60 bytes in the headers and a sampler is 0x30 bytes. A game keeps a builder in a stack slot of
+//! at most 0x48 bytes. The host writes the first 0x30 bytes of a builder and the first 0x2C bytes of a sampler. Both hold
+//! the same 40 bytes of parameters, at offset 8 in the builder (the device is at 0) and at offset 4 in the sampler (the
+//! magic `SMP\0` is at 0):
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -24,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use nxkit_abi::guest;
 use nxkit_nvn::tic::Tsc;
 
-use super::abi::{AbiResult, Obj, guard, magic, size, table};
+use super::abi::{AbiResult, Obj, guard, magic, table, used};
 use super::ctx::gpu;
 use super::texture::pool::{self, DescPools};
 
@@ -139,7 +140,7 @@ extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnSamplerBuilderSetDefaults", || {
         let o = Obj(b);
         let dev = o.u64(B_DEV)?;
-        o.zero(size::SAMPLER_BUILDER)?;
+        o.zero(used::SAMPLER_BUILDER)?;
         o.set_u64(B_DEV, dev)?;
         edit(b, B_PARAMS, |p| {
             p[P_MIN] = MIN_NEAREST_MIPMAP_LINEAR;
@@ -284,7 +285,7 @@ extern "C" fn sampler_initialize(s: u64, b: u64) -> u32 {
     guard("nvnSamplerInitialize", || {
         let p = load(b, B_PARAMS)?;
         let o = Obj(s);
-        o.zero(size::SAMPLER)?;
+        o.zero(used::SAMPLER)?;
         o.set_u32(0, SMP)?;
         o.write(S_PARAMS, &p)?;
         Ok(1)

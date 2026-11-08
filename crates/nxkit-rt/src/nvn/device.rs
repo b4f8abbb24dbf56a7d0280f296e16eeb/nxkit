@@ -1,6 +1,6 @@
 //! The device group: `nvnDevice*`, the device builder, the device queries and the handle getters.
 //!
-//! The `NVNdevice` is 0x3000 bytes that the game owns. The host uses the first bytes:
+//! The `NVNdevice` is 0x3000 bytes that the game owns. The host uses and writes the first 0x20 bytes only:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -11,7 +11,7 @@
 //! | 16 | the debug callback, 0 when the game switched it off |
 //! | 24 | the data pointer of the debug callback |
 //!
-//! The device builder is 0x40 bytes with the flags at offset 0.
+//! The device builder is 0x40 bytes in the headers. The host uses the flags at offset 0 and writes 4 bytes.
 //!
 //! The texture and sampler handles are numbers. A texture handle is `texture id | sampler id << 20`, as on the GPU.
 //! The host calls the debug callback of a game never. A game that installs one gets none of its messages.
@@ -21,7 +21,7 @@
 //! 0x30 are the GPU code version of the settings. Item 0x5F (4096) is the one value that `nxnative` marks as unverified.
 //! The Switch 2 table of `nxnative` is not ported, so a game of the Switch 2 sees the Switch 1 values.
 
-use super::abi::{AbiResult, Obj, arg_bool, guard, log_once, magic, ret_bool, size, table};
+use super::abi::{AbiResult, Obj, arg_bool, guard, log_once, magic, ret_bool, table, used};
 use super::ctx::{Settings, gpu};
 use super::{lookup, name_at};
 
@@ -55,7 +55,7 @@ const INFO: [u32; INFO_TABLE_LEN] = [
 
 extern "C" fn device_builder_set_defaults(b: u64) {
     guard("nvnDeviceBuilderSetDefaults", || {
-        Obj(b).zero(size::DEVICE_BUILDER)
+        Obj(b).zero(used::DEVICE_BUILDER)
     });
 }
 
@@ -67,7 +67,7 @@ extern "C" fn device_initialize(d: u64, b: u64) -> u32 {
     guard("nvnDeviceInitialize", || {
         let flags = Obj(b).i32(0)?;
         let o = Obj(d);
-        o.zero(size::DEVICE)?;
+        o.zero(used::DEVICE)?;
         o.set_u32(0, DEV)?;
         o.set_i32(OFF_FLAGS, flags)?;
         o.set_i32(OFF_ORIGIN, ORIGIN_LOWER_LEFT)?;

@@ -1,6 +1,6 @@
 //! The queue group: `nvnQueue*` and the queue builder.
 //!
-//! The `NVNqueue` is 0x2000 bytes in guest memory. The host uses the first bytes as plain data:
+//! The `NVNqueue` is 0x2000 bytes in guest memory. The host uses the first 0x20 bytes as plain data and writes no more:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -12,7 +12,7 @@
 //! The origin is captured once, as NVN writes it into the initial GPU state of the queue. A later change of the
 //! device origin does not change the queue.
 //!
-//! The queue builder is 0x40 bytes: device at 0, flags at 8, command, compute and control memory sizes at 16, 24 and 32,
+//! The queue builder is 0x40 bytes in the headers and the host writes all of them: device at 0, flags at 8, command, compute and control memory sizes at 16, 24 and 32,
 //! flush threshold at 40, queue memory at 48 and its size at 56. The host only stores them. It does not use the queue
 //! memory, because it executes the recordings itself.
 //!
@@ -22,7 +22,7 @@
 use nxkit_nvn::backend::Present;
 use nxkit_nvn::cmdbuf::CommandHandle;
 
-use super::abi::{AbiResult, Obj, guard, log_once, magic, other, size, table};
+use super::abi::{AbiResult, Obj, guard, log_once, magic, other, table, used};
 use super::ctx::gpu;
 use super::device;
 use super::sync;
@@ -60,7 +60,7 @@ extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnQueueBuilderSetDefaults", || {
         let o = Obj(b);
         let dev = o.u64(B_DEV)?;
-        o.zero(size::QUEUE_BUILDER)?;
+        o.zero(used::QUEUE_BUILDER)?;
         o.set_u64(B_DEV, dev)?;
         o.set_u64(B_CMD, DEFAULT_COMMAND)?;
         o.set_u64(B_COMP, DEFAULT_COMPUTE)?;
@@ -129,7 +129,7 @@ extern "C" fn queue_initialize(q: u64, b: u64) -> u32 {
         let dev = Obj(b).u64(B_DEV)?;
         let lower_left = device::origin_lower_left(dev)?;
         let o = Obj(q);
-        o.zero(size::QUEUE)?;
+        o.zero(used::QUEUE)?;
         o.set_u32(0, QUEU)?;
         o.set_u64(OFF_DEV, dev)?;
         o.set_u32(OFF_ORIGIN_LL, u32::from(lower_left))?;
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn set_defaults_keeps_the_device_and_sets_the_sizes() {
-        let b = testing::alloc(size::QUEUE_BUILDER);
+        let b = testing::alloc(crate::nvn::abi::size::QUEUE_BUILDER);
         builder_set_device(b, 0x1234);
         builder_set_queue_memory(b, 0x5000, 0x100);
         builder_set_defaults(b);

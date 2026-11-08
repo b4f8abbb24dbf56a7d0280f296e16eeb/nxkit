@@ -3,7 +3,7 @@
 //! A pool is memory that the game owns. The game gives its address and size to the builder, and the host never
 //! allocates for it. A guest address is a host address (R18), so [`Backend::register_pool`] gets the range as it is.
 //!
-//! The `NVNmemoryPool` is 0x100 bytes of plain data in guest memory:
+//! The `NVNmemoryPool` is 0x100 bytes in guest memory. The host uses the first 0x18 bytes as plain data and writes no more:
 //!
 //! | offset | field |
 //! | --- | --- |
@@ -14,7 +14,8 @@
 //!
 //! The offsets 4, 8 and 16 are the contract with the other groups, which read a pool with [`view`].
 //!
-//! The pool builder is 0x40 bytes: device at 0, storage at 8, size at 16, flags (u32) at 24.
+//! The pool builder is 0x40 bytes in the headers. The host writes the first 0x1C bytes: device at 0, storage at 8,
+//! size at 16, flags (u32) at 24.
 //!
 //! A virtual pool (flag 0x200) has no storage of its own. `nvnMemoryPoolMapVirtual` points it at a part of a physical
 //! pool, and only a mapping that keeps the offsets of the physical pool is possible (the virtual pool is then a window
@@ -24,7 +25,7 @@
 use nxkit_abi::guest;
 use nxkit_nvn::backend::PoolInfo;
 
-use super::abi::{AbiResult, Obj, guard, log_once, magic, other, ret_bool, size, table};
+use super::abi::{AbiResult, Obj, guard, log_once, magic, other, ret_bool, table, used};
 use super::ctx::gpu;
 
 /// The magic of an initialised pool.
@@ -79,7 +80,7 @@ pub(crate) fn view(pool: u64) -> AbiResult<PoolView> {
 
 pub(crate) extern "C" fn builder_set_defaults(b: u64) {
     guard("nvnMemoryPoolBuilderSetDefaults", || {
-        Obj(b).zero(size::POOL_BUILDER)
+        Obj(b).zero(used::POOL_BUILDER)
     });
 }
 
@@ -107,7 +108,7 @@ pub(crate) extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
         let bo = Obj(b);
         let (mem, len, flags) = (bo.u64(B_MEM)?, bo.u64(B_SIZE)?, bo.u32(B_FLAGS)?);
         let o = Obj(p);
-        o.zero(size::POOL)?;
+        o.zero(used::POOL)?;
         o.set_u32(0, POOL)?;
         o.set_u32(OFF_FLAGS, flags)?;
         o.set_u64(OFF_MEM, mem)?;

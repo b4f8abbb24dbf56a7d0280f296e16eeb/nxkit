@@ -9,7 +9,8 @@
 //! upload. The pool is made once for an image and ends with `nvnNativeImageFinalize`.
 //!
 //! The game gives the builder 0x100 bytes and the image 0x200 bytes. Its texture is 0x200 further on (Fire Emblem
-//! Fortune's Weave). The host keeps these in them:
+//! Fortune's Weave). Other SDKs may reserve less, so the host writes only the first 0x10 bytes of the builder and the
+//! first 0xA0 bytes of the image. The host keeps these in them:
 //!
 //! | object | offset | field |
 //! | --- | --- | --- |
@@ -17,9 +18,9 @@
 //! | builder | 8 | the handle (u32), then the format (i32) |
 //! | image | 0 | the device, the handle, the format as in the builder |
 //! | image | 0x10 | 1 when the image has a memory pool (u32) |
-//! | image | 0x18 | the `NVNmemoryPool`, 0x100 bytes |
-//! | image | 0x118 | scratch: a memory pool builder, 0x40 bytes |
-//! | image | 0x160 | scratch: a texture builder, 0x80 bytes |
+//! | image | 0x18 | the `NVNmemoryPool`, 0x18 bytes |
+//! | image | 0x30 | scratch: a memory pool builder, 0x1C bytes |
+//! | image | 0x50 | scratch: a texture builder, 0x50 bytes |
 //!
 //! The scratch builders are in guest memory because the NVN layer reads its builders there.
 
@@ -27,23 +28,30 @@ use nxkit_abi::guest;
 use nxkit_svc_video::native_image;
 
 use super::{checked, log, table};
-use crate::nvn::{abi::size, pool, texture};
+use crate::nvn::{abi::used, pool, texture};
 
 const OFF_DEV: u64 = 0;
 const OFF_HANDLE: u64 = 8;
 const OFF_FORMAT: u64 = 0xC;
 const OFF_HAS_POOL: u64 = 0x10;
 const OFF_POOL: u64 = 0x18;
-const OFF_POOL_BUILDER: u64 = 0x118;
-const OFF_TEXTURE_BUILDER: u64 = 0x160;
-/// The bytes of the builder that the game gives.
+const OFF_POOL_BUILDER: u64 = 0x30;
+const OFF_TEXTURE_BUILDER: u64 = 0x50;
+/// The bytes of the builder that the host writes.
+const BUILDER_USED: u64 = 0x10;
+/// The bytes of the image that the host writes.
+const IMAGE_USED: u64 = 0xA0;
+/// The bytes of the builder that the game gives, for the allocations of tests.
+#[cfg(test)]
 const BUILDER_SIZE: u64 = 0x100;
-/// The bytes of the image that the game gives.
+/// The bytes of the image that the game gives, for the allocations of tests.
+#[cfg(test)]
 const IMAGE_SIZE: u64 = 0x200;
 
-const _: () = assert!(OFF_POOL + size::POOL <= OFF_POOL_BUILDER);
-const _: () = assert!(OFF_POOL_BUILDER + size::POOL_BUILDER <= OFF_TEXTURE_BUILDER);
-const _: () = assert!(OFF_TEXTURE_BUILDER + size::TEXTURE_BUILDER <= IMAGE_SIZE);
+const _: () = assert!(OFF_FORMAT + 4 <= BUILDER_USED);
+const _: () = assert!(OFF_POOL + used::POOL <= OFF_POOL_BUILDER);
+const _: () = assert!(OFF_POOL_BUILDER + used::POOL_BUILDER <= OFF_TEXTURE_BUILDER);
+const _: () = assert!(OFF_TEXTURE_BUILDER + used::TEXTURE_BUILDER <= IMAGE_USED);
 
 /// `NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED | NVN_MEMORY_POOL_FLAGS_GPU_CACHED`.
 const PICTURE_POOL_FLAGS: i32 = 0x2 | 0x20;
@@ -53,7 +61,7 @@ const PICTURE_POOL_FLAGS: i32 = 0x2 | 0x20;
 extern "C" fn builder_set_defaults(b: u64) {
     const NAME: &str = "nvnNativeImageBuilderSetDefaults";
     let dev = checked(NAME, guest::read_u64(b + OFF_DEV));
-    checked(NAME, guest::fill(b, BUILDER_SIZE, 0));
+    checked(NAME, guest::fill(b, BUILDER_USED, 0));
     checked(NAME, guest::write_u64(b + OFF_DEV, dev));
 }
 
