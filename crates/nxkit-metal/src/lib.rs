@@ -59,6 +59,7 @@ mod state;
 mod stats;
 mod table;
 mod texture;
+pub mod thread;
 mod upscale;
 
 pub use address::AddressMap;

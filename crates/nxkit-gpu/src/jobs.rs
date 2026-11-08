@@ -3,7 +3,9 @@
 //! The frame is cut into chunks of passes. Each chunk goes into its own Metal command buffer. [`run_all`] runs one
 //! closure for each chunk on up to `threads` threads and returns the results in the order of the chunks. The caller
 //! thread takes part, so one thread means no spawn at all. The threads live for one call. A frame at 60 Hz spawns a
-//! handful of threads, which is small against the encode time of a frame.
+//! handful of threads, which is small against the encode time of a frame. They run at the user-interactive QoS class:
+//! at the default class the system often put them on the efficiency cores, and the caller waited about a third of the
+//! chunk time for the slowest one.
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, PoisonError};
@@ -30,7 +32,10 @@ pub(crate) fn run_all<I: Send, T: Send>(threads: usize, items: Vec<I>, f: impl F
     let out: Mutex<Vec<Option<T>>> = Mutex::new((0..n).map(|_| None).collect());
     thread::scope(|s| {
         for _ in 1..threads.min(n) {
-            s.spawn(|| worker(&queue, &out, &f));
+            s.spawn(|| {
+                nxkit_metal::thread::set_user_interactive();
+                worker(&queue, &out, &f)
+            });
         }
         worker(&queue, &out, &f);
     });
