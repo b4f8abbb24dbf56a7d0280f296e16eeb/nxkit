@@ -415,6 +415,14 @@ impl Walker {
         d.sbufs.reserve_exact(bound_count(&st.sbuf[0]) + bound_count(&st.sbuf[1]));
         sbufs_into(st, 0, Stage::Vertex, &mut d.sbufs);
         sbufs_into(st, 1, Stage::Fragment, &mut d.sbufs);
+        // With the overlap on, the storage buffers of a draw get a copy too: the CPU writes some of them for the next
+        // frame while the GPU still draws this one (Breath of the Wild's dialog text). The encoder uses the copy only
+        // for a binding that the shader does not write. Dispatches keep the buffer itself.
+        if crate::overlap::on() && !crate::knob("nosnapsbuf") {
+            for b in &mut d.sbufs {
+                b.snapshot = self.snapshot(mem, b.address, b.size);
+            }
+        }
         d.textures.reserve_exact(texture_count(st, 0) + texture_count(st, 1));
         textures_into(st, 0, Stage::Vertex, &mut d.textures);
         textures_into(st, 1, Stage::Fragment, &mut d.textures);

@@ -67,6 +67,9 @@ const KNOBS: &[&str] = &[
     // A render pass that samples what an earlier pass wrote holds its vertex stage too, also when no vertex shader of
     // it samples (the behaviour before the barriers looked at the stages of the bindings).
     "vsbar",
+    // With the overlap on, the storage buffers that draws only read use the buffer itself instead of the walk's copy
+    // (the behaviour before; the CPU's writes for the next frame then race with the GPU).
+    "nosnapsbuf",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

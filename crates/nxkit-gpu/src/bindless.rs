@@ -119,7 +119,8 @@ impl ArgsMemo {
         let ubos = m.next.len() - mark - 1;
         m.next[mark] = ubos as u64;
         for s in inp.sbufs.iter().filter(|s| s.stage == inp.stage) {
-            m.next.extend([u64::from(s.slot), s.address]);
+            let snapshot = s.snapshot.as_ref().map_or(0, |b| b.as_ptr() as u64);
+            m.next.extend([u64::from(s.slot), s.address, snapshot]);
         }
         m.next.push(u64::MAX);
         for t in inp.textures.iter().filter(|t| t.stage == inp.stage) {
@@ -476,12 +477,16 @@ fn build_args_in(
             BindKind::Support => env.statics.0,
             // A zero border block has no sampler bit set, so no sample is corrected.
             BindKind::Border => env.statics.1,
-            // A storage buffer that is not bound reads zeros, and its writes land in the zero buffer.
-            BindKind::Sbuf => inp
-                .sbufs
-                .iter()
-                .find(|s| s.stage == inp.stage && s.slot == b.reg)
-                .map_or(env.statics.1, |s| s.address),
+            // A storage buffer that is not bound reads zeros, and its writes land in the zero buffer. A buffer that the
+            // shader only reads takes the walk's copy when there is one (the overlap: the CPU may already write the next
+            // frame's data); one that it may write keeps the buffer itself, so the writes stay.
+            BindKind::Sbuf => match inp.sbufs.iter().find(|s| s.stage == inp.stage && s.slot == b.reg) {
+                Some(s) => match &s.snapshot {
+                    Some(bytes) if !b.rw => sink.put_shared(bytes)?,
+                    _ => s.address,
+                },
+                None => env.statics.1,
+            },
             BindKind::C1 if p.c1.is_empty() => env.statics.1,
             BindKind::C1 => sink.put(&p.c1)?,
         };

@@ -53,6 +53,8 @@ pub(crate) struct Bind {
     pub(crate) reg: u32,
     /// The texture type that the shader declares for a `tex` member, from its `msl_type`.
     pub(crate) dim: Option<nxkit_metal::TextureKind>,
+    /// Whether the shader may write an `sbuf` member (`rw` of the reflection; a missing `rw` counts as written).
+    pub(crate) rw: bool,
 }
 
 /// The texture type of an MSL argument type such as `texture2d_array<float>`.
@@ -232,7 +234,8 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         } else {
             None
         };
-        binds.push(Bind { arg_id, kind, reg, dim });
+        let rw = b.get("rw").and_then(Json::as_bool).unwrap_or(true);
+        binds.push(Bind { arg_id, kind, reg, dim, rw });
     }
     let inputs = if vertex {
         json.get("vertex_inputs")
