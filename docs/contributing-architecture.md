@@ -8,10 +8,9 @@ This document gives the architecture rules for a change to the workspace. Read [
    not `.air` files. Show the parity result in the pull request.
 2. GPU tests validate a front-end change: `gpudiff` for each family, coverage, and scene comparisons for a release.
    Only shaders with the verdict `own-identical` go on the allow list.
-3. Do not put a port, a speed change and an output change into one commit. V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, plus the options string. No Rust source goes into V.
+3. Do not put a port, a speed change and an output change into one commit. V is a hash of the translator input files plus the options string. No Rust source goes into V.
    A change of the translator in `nxb-xlate` translates again only when you increase `nxb_xlate::msl::TRANSLATOR_ID` by hand. Without the increase the store gives the old MSL.
-4. The reference build scripts are only the reference. Do not change them, and do not copy code from them.
-5. Do not change the fixed strings (refer to [shader-step.md](shader-step.md)). Add new texts. Keep old texts.
+4. Do not change the fixed strings (refer to [shader-step.md](shader-step.md)). Add new texts. Keep old texts.
 
 ## Layers and ownership
 
@@ -39,7 +38,7 @@ This document gives the architecture rules for a change to the workspace. Read [
 4. Set `[package.metadata.nxb] layer` and `in_v` in the `Cargo.toml` of each new crate.
 5. Write events through `nxb-obs` with a step name and a unit.
 6. Add a store object with a versioned `ContentKey`.
-7. Add a parity test against the reference build scripts. Read the inputs from environment variables.
+7. Add a parity test against stored expected output. Read the inputs from environment variables.
 8. Do `tools/check.sh`.
 
 Other additions follow the same pattern. A new container is one module and one registry line in the split. A new operating system is one implementation in `nxb-sys`.
@@ -68,11 +67,11 @@ from environment variables and do not use a default path.
 
 ## Parity tests with local game files
 
-These tests compare the output with the work folder of a build with the reference build scripts. Set the variables to your own files.
+These tests compare the output with a stored work folder. Set the variables to your own files.
 
 | test | variables | command |
 |---|---|---|
-| extract and split | `NXB_PARITY_BASE` (base NSP), `NXB_PARITY_UPDATE` (update NSP), `NXB_PARITY_KEYS` (`prod.keys`), `NXB_PARITY_GAME` (profile `game.tsv`), `NXB_PARITY_REF` (reference work folder), `NXB_TEST_TMP` (scratch folder) | `cargo test -p nxb-extract --release --test parity_real_data -- --ignored` |
+| extract and split | `NXB_PARITY_BASE` (base NSP), `NXB_PARITY_UPDATE` (update NSP), `NXB_PARITY_KEYS` (`prod.keys`), `NXB_PARITY_GAME` (profile `game.tsv`), `NXB_PARITY_REF` (expected work folder), `NXB_TEST_TMP` (scratch folder) | `cargo test -p nxb-extract --release --test parity_real_data -- --ignored` |
 | JSON writer | `NXB_BDIR` (a `b-<V>` folder) | `cargo test -p nxb-pyjson --test real_files -- --ignored` |
 | shader stages | `NXB_FRONT_WORK`, `NXB_PKG`, `NXB_PROFILE` | the tests in `crates/nxb-stages/tests` |
 | own front end and `gpudiff` | `NXB_AIRC`, `NXB_PROTO`, `NXB_REF`, `NXB_CORPUS`, `NXB_SPECS`, `NXB_CAS` | refer to [frontend.md](frontend.md) and [gpu-differential-testing.md](gpu-differential-testing.md) |

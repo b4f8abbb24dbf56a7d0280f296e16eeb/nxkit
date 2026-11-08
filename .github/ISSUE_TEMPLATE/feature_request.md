@@ -14,4 +14,4 @@ What must the tool do? Keep it short.
 
 ## Output compatibility
 
-Must the output stay byte-identical to the reference build scripts? Write yes or no.
+Must the output files stay byte-identical to the current output? Write yes or no.

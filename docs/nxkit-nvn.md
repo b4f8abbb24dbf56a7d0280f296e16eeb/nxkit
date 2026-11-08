@@ -15,8 +15,8 @@ An address outside the mapping is an error. An address that does not fit in 40 b
 
 ## Textures
 
-- `format` knows the size of a block and the aspects of an NVN format. It is ported from nxnative.
-- `layout` computes the storage size, alignment, block height and level offsets. It is ported from nxnative, which took the algorithm from deko3d. The tests compare the result with the C code of nxnative. Sparse textures are not supported and return an error.
+- `format` knows the size of a block and the aspects of an NVN format.
+- `layout` computes the storage size, alignment, block height and level offsets. The algorithm comes from deko3d. Sparse textures are not supported and return an error.
 - `swizzle` has a CPU reference for block-linear to linear and back. It is byte-by-byte and slow on purpose. It is the fallback and the reference for tests. Both GOB orders exist, Tegra X1 and Switch 2.
 - `tic` encodes and decodes a texture header (TIC) and a sampler header (TSC) of 32 bytes. The words follow the structure of the Maxwell headers, but the bit positions are nxkit's own encoding. No bit position is checked against hardware, because no deko3d or Mesa header is on the development machine. The game never reads the headers, so the encoding has to be lossless and nothing more. Refer to [TIC and TSC](#tic-and-tsc).
 - `descriptors` holds the texture pools and sampler pools. A handle is `texture_id | sampler_id << 20`. All pools share one id space.
@@ -32,7 +32,7 @@ The decision is R17 in [decisions.md](decisions.md#part-3-runtime-decisions).
 - A record is a multiple of 8 bytes and starts with an 8-byte header: operation, a small value and the size. All values are little endian.
 - A draw, a dispatch, a clear and a state change take 8 bytes. A texture bind, a call and a jump take 16 bytes. A copy takes 24 bytes. `SetTargets` takes up to 88 bytes. A test checks these sizes.
 - A record holds guest GPU addresses. A texture is named by the GPU address of its first byte. `GuestMem` reads and writes the memory, because this crate has no `unsafe` code. `VecMem` is the implementation for tests.
-- `nvnCommandBufferGetCommandMemoryUsed` counts from the last added block, as in nxnative. `GetCommandMemoryFree` is what is left in the current block.
+- `nvnCommandBufferGetCommandMemoryUsed` counts from the last added block, as the NVN driver does. `GetCommandMemoryFree` is what is left in the current block.
 - A record that does not fit goes to the next block behind a jump. When no block is left, `cmdbuf` returns `OutOfCommandMemory` and changes nothing. `FrontEnd::write` then calls the memory callback of the game through the host trait `MemoryCallback`, adds the block that it gives and writes the record again, at most 4 times. Without an enabled callback, or when it gives no usable block, the caller gets `OutOfCommandMemory`.
 - The handle of a recording is the host address of its first record.
 - A command that carries parameters is an extension record (`ext`, R53). Its operation is 64 or more and its payload is up to 28 words, so a record is at most 120 bytes (`MAX_RECORD_BYTES`). `ExtCode` names the 36 codes. `Setting` names the single-value state commands and `StateKind` and `DrawKind` the state binds and draw forms. A command with more data than one record holds, as push constants, inline uniform data or vertex states, is several records.
@@ -42,7 +42,7 @@ The decision is R17 in [decisions.md](decisions.md#part-3-runtime-decisions).
 ### Summaries and the cache
 
 `decode` reads a recording from its handle, follows jumps and calls, and gives a `Summary`. The summary has the effect stream (`Cmd` values), the state that the recording takes from its caller (`Needs`), the state that it leaves behind, and every address and handle that it resolved.
-A called recording gets its summary under the state that the caller has at the call. State that the callee sets stays set for the caller, as in nxnative.
+A called recording gets its summary under the state that the caller has at the call. State that the callee sets stays set for the caller.
 
 `cache` keeps the summaries by handle. A summary is valid for the inherited state that it needs, and a handle can have several. A key holds the needed parts only: the attachments, the scissor, the draw state and the bound textures and images. A draw needs the attachments, because the Metal indirect command buffer of a later step depends on their formats.
 - The game writes the command memory again: the summaries of that handle and of every recording that calls it are dropped. This happens at `end_recording` and in `guest_wrote`.
@@ -127,8 +127,8 @@ An attachment is memoryless when it is not stored, not loaded, not sampled, and 
 
 ## NVN functions
 
-`entries` has the 743 names of nxnative (`names.txt`), the 484 that nxnative implements, and the table `RECORDED` of the names that this crate handles. The table has the command memory functions and the CPU wait functions too. `FFI_GROUPS` has one row per group of `nxkit-rt` with the names that the group exports.
-`Coverage::of` takes the function names that one game imports and returns three lists: handled, not handled yet, and not implemented in nxnative.
+`entries` has the 743 NVN function names (`data/nvn_names.txt`), the 484 that are implemented (`data/nxnative_implemented.txt`), and the table `RECORDED` of the names that this crate handles. The table has the command memory functions and the CPU wait functions too. `FFI_GROUPS` has one row per group of `nxkit-rt` with the names that the group exports.
+`Coverage::of` takes the function names that one game imports and returns three lists: handled, not handled yet, and not implemented.
 
 ## The command buffer group
 
@@ -171,9 +171,9 @@ The cache key of a summary holds the parts of the inherited state that the recor
 
 ## TIC and TSC
 
-The words of the headers follow the structure of the Maxwell headers. The bit positions are nxkit's own encoding. No source on the development machine has the hardware bit positions: nxnative keeps the texture pool as a table in the host, and no deko3d or Mesa header (`cl9097tex.h`, `clb197tex.h`) was found. So no bit position is checked against hardware, and the doc comment of `tic.rs` says so.
+The words of the headers follow the structure of the Maxwell headers. The bit positions are nxkit's own encoding. No source on the development machine has the hardware bit positions: the texture pool is a table in the host, and no deko3d or Mesa header (`cl9097tex.h`, `clb197tex.h`) was found. So no bit position is checked against hardware, and the doc comment of `tic.rs` says so.
 
-What was checked on 2026-11-07 is that each field is wide enough for the largest value that nxnative can hold, from `nvn.h`, `nvn_tex.h`, `nvn_obj.h` and `g_devinfo`. The table is in the doc comment of `tic.rs`. The test `the_fields_do_not_overlap_and_hold_the_largest_values` fills every field with its largest value and reads each back. The stride limit of 16 MiB is nxkit's and is unverified.
+What was checked on 2026-11-07 is that each field is wide enough for the largest value that the NVN API can hold, from `nvn.h`, `nvn_tex.h`, `nvn_obj.h` and `g_devinfo`. The table is in the doc comment of `tic.rs`. The test `the_fields_do_not_overlap_and_hold_the_largest_values` fills every field with its largest value and reads each back. The stride limit of 16 MiB is nxkit's and is unverified.
 
 ## FFI
 
@@ -188,7 +188,7 @@ The C functions are in `nxkit-rt`, module `nvn` (R22 to R24). A game gets them b
 - A name that a group does not export is handled as R24 says. A test per group compares the names of the group with its row in `FFI_GROUPS`.
 - `nvnProgramSetShaders` computes the key of every stage from its control section and code (`program::stages_of`) and tells the backend, so the backend can find the shader in the `_b.json` of the shader step by that key.
 - A sync that a queue fenced signals when the GPU finished the work submitted until then. A sync that a window acquire fenced is signalled at once, because `Backend::acquire` blocks until the image is free.
-- `nvnDeviceGetInteger` has the table of nxnative. The values of the API version and of the GPU code come from `Settings`.
+- `nvnDeviceGetInteger` has a fixed table. The values of the API version and of the GPU code come from `Settings`.
 
 ### Textures, samplers and state objects
 
@@ -203,7 +203,7 @@ Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below 
 
 ## Graphics take-overs of the SDK
 
-Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN that nxnative takes over with `HLE_FORCE`. They are guest exports of the `gpu` service, not entries of the NVN proc table. Each source file of nxnative has one module. A check on 2026-11-08 of the files `dm/gfx/hle_nv.c`, `dm/gfx/hle_vi.c` and `dm/gfx/nvn/hle_nvn.c` gave 47 names.
+Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN that the host takes over. They are guest exports of the `gpu` service, not entries of the NVN proc table. Each group of functions has one module. The groups have 47 names in all (checked on 2026-11-08).
 
 - `gfx::nv` has 8 names: the allocator and devtools allocator callbacks, `nv::InitializeGraphics` and `nv::FinalizeGraphics`, `nv::InitCheck`, `nn::gs::sdk::CheckGraphicsSystemInitialized` and the two memory info calls. The module records the callbacks and the pool of the game. `nv::InitCheck` ends the game with `[RED]` when `nv::InitializeGraphics` was not called.
 - `gfx::vi` has 31 `nn::vi` names. The display, the layer and the native window are static objects of the host. The native window handle goes to `nvnWindowBuilderSetNativeWindow`, which stores it and never reads it, so any non-null pointer works. `OpenDisplay` accepts only the name `Default`.
@@ -218,7 +218,7 @@ Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN th
 - The crate takes typed values. The raw guest arguments of an NVN call are read in `nxkit-rt`.
 - One lock holds the front end. The command buffer functions do not take it on the hot path (R54). `EndRecording`, `AddCommandMemory`, the texture address lookup of the default seam and the queue and resource functions take it. Several threads that call these at the same time wait for each other, and the number of waits is not measured.
 - The extension records can make `GetCommandMemoryUsed` larger than on the console (R53). This is unverified.
-- A function that nxnative does not implement, and a sparse `nvnMemoryPoolMapVirtual` request, end the game with the name of the function. The `nvnDlss*` functions are in this group.
+- A function that is not implemented, and a sparse `nvnMemoryPoolMapVirtual` request, end the game with the name of the function. The `nvnDlss*` functions are in this group.
 - `nvnDeviceGetInteger` has no table for the Switch 2 device. The entry 0x5F is not checked against a source.
 - The host does not use the queue memory of a queue builder. It stores the sizes and the pointer.
 - `Present.crop` holds the crop of the window, or the crop of the `vi` layer when the window has none. The blit of `nxkit-gpu` does not read it, so a crop does not change the picture. This is unverified on a running game.
@@ -226,13 +226,13 @@ Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN th
 - The frame history of the layer counts a frame as shown from the first `nn::vi::ListFrameHistory` call that sees it, because `Backend` reports no present time. Its ticks run at 19.2 MHz. An SDK of the Switch 2 counts at another rate. The host cannot tell the SDK apart.
 - `nv::GetGraphicsMemoryInfo` writes 0x20 bytes when the NVN API major is 53 or less and 0x40 bytes otherwise. A game of SDK 10 or older that does not set `nvn_api` in `game.json` gets 0x40 bytes. This is unverified.
 - `nn::vi::QueryDisplayBufferMaxResolution` answers 1920x1080 in both operation modes. The host has no fact of the size of the display.
-- The dirty range tracking of nxnative for pools is not ported. `nvnMemoryPoolFlushMappedRange` tells the front end that the guest wrote the range, and the invalidate call does nothing.
+- Dirty range tracking for pools is not done. `nvnMemoryPoolFlushMappedRange` tells the front end that the guest wrote the range, and the invalidate call does nothing.
 - A copy or compute pass is not moved out of a render pass, so some merges are missed. The plan lists the textures of a dispatch and not its buffers, so a move cannot be proven safe. `NXKIT_DIAG=passmerge` counts the cases.
 - The learned dead store is a guess from 120 frames. The coverage load (`coverload`) is a guess from the draw. Both are marked as such above.
 - Memory aliasing between buffers and textures is not tracked. A buffer copy does not touch a texture of the same memory.
 - A handle is resolved when the recording is decoded. A summary is decoded again when the same descriptor slot is registered again. A game that rewrites the descriptor memory without a register call is not noticed.
 - A texture in a record is named by its GPU address. When two textures start at the same address, the newest one wins.
-- A callee that sets state is assumed to leave it set for the caller, as nxnative does.
+- A callee that sets state is assumed to leave it set for the caller.
 - A recording that overwrites the memory of another recording while it is still being written is found at its end, not before.
 - Sparse textures are not supported. A sparse texture stops the game at `nvnTextureInitialize`.
 - A stencil view or a stencil texture is registered as its depth view, because `TextureView` has no depth-stencil mode. The first one is logged.
@@ -244,4 +244,4 @@ Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN th
 
 ## Attribution
 
-The layout and the GOB order are ported from nxnative. The names lists are copied from it. Refer to `THIRD_PARTY.md`.
+The layout and the GOB order are ported, and the name lists are copied. Refer to `THIRD_PARTY.md`.

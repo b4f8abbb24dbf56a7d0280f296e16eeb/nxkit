@@ -1,6 +1,6 @@
 # Build Breath of the Wild with nxkit
 
-This page shows how to make the app of The Legend of Zelda: Breath of the Wild from your own game files. The build uses nxkit only. It needs no nxnative, no Python and no `--engine`.
+This page shows how to make the app of The Legend of Zelda: Breath of the Wild from your own game files. The build uses nxkit only. It needs no Python and no `--engine`.
 
 You need a Mac with Apple silicon, Xcode command line tools and Rust 1.99 or newer. You also need the game files and your `prod.keys` file. nxkit does not contain either of them.
 
@@ -92,7 +92,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 - `--platform ios` is not supported for this game. The build stops with exit code 4. Options of the old path (for example `--shaders`, `--companion-app` and `--dump`) stop the build with exit code 4 and name the option.
 - A missing pipeline archive is a `[RED]` warning. The game then compiles its pipelines while it runs.
 - The bundle is not sealed. Whether macOS starts it without a seal is not tested.
-- The rules of the title module are the 168 frame-step steps of nxnative PR 76. The screen shape, layout and FOV stubs of nxnative main are not in them. Without them the game keeps its own aspect and field of view.
+- The rules of the title module are the 168 frame-step steps. The screen shape, layout and FOV stubs are not in them. Without them the game keeps its own aspect and field of view.
 - The relocations come from the NSO itself and the import list has an entry for each undefined symbol, with addend and weak flag. This was written and unit tested but never checked against the real NSOs. TLS relocations stop the host with their type number. The dyld slide and the tail reservation are not tested on the game.
-- The NVN function list has 197 names from one run of nxnative. It can be too short.
+- The NVN function list has 197 names from one run of the game. It can be too short.
 - Without `nxkit-host` beside `nxb` and without `NXB_NXKIT_HOST`, the build stops.

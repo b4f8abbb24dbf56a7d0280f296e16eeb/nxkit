@@ -9,7 +9,7 @@
 ## Goal
 
 - A title module decides how the host runs its game. Its needs become the host's per-game settings.
-- nxkit replaces nxnative one service at a time. nxnative runs every service of a game until its module moves one.
+- The nxkit runtime takes over one service at a time. A service runs in the host until the game's module moves it to nxkit.
 - Work on one game lands in nxkit: in its title module, in its family or in the nxkit runtime.
 
 ## Who does what
@@ -33,27 +33,27 @@ Each reviews the other's pull requests in `titles/nxtitle`. The interface betwee
 
 ## How the host works
 
-These facts were checked on 2026-11-07 against nxnative `f25fa956` and nxkit `main`.
+These facts were checked on 2026-11-07 against nxkit `main`.
 
 ### Per-game settings
 
-- Each game has `dm/games/<title id>/game.tsv`.
-- `dm/games/game.py header` writes `dm/host/gen/<title id>/game_profile.h` with `DM_GAME_*` macros. The defaults are in `header_one`.
-- The settings are fixed when the host is compiled. A few have overrides through environment variables, for example `DM_FPS_TARGET` and `DM_SCREEN_ASPECT`.
-- `nxb` runs `make gen/<title id>/game_profile.h` in the engine and takes the host's compile line from `make -n` (`crates/nxb-build/src/host/machost.rs`).
+- Each game has a table of settings, `game.tsv`.
+- A generator writes the header `game_profile.h` for the game, with one macro for each setting. The defaults are in `header_one`.
+- The settings are fixed when the host is compiled. A few have overrides through environment variables, for example the target frame rate and the screen aspect.
+- `nxb` runs `make` for the header and takes the host's compile line from `make -n` (`crates/nxb-build/src/host/machost.rs`).
 - `crates/nxb-build/src/host/header.rs` is a Rust port of `header_one`.
 
 ### HLE functions
 
-- The host registers its functions by their Switch mangled names in the Mach-O section `__DATA,swhle` (`dm/host/hle.h`, macro `HLE`).
-- `hle_find` in `dm/host/hle.c` looks a name up in that section. With a duplicated name, the first entry wins.
+- The host registers its functions by their Switch mangled names in the Mach-O section `__DATA,swhle` (macro `HLE`).
+- `hle_find` looks a name up in that section. With a duplicated name, the first entry wins.
 - `HLE_FORCE` entries in `__DATA,swforce` replace a function even when the SDK defines it.
 - Kernel calls do not go through names. The rewriter turns each `svc` into a gate, and `gate_dispatch` calls `svc_dispatch`.
 - Switch code does not extend arguments smaller than 32 bits, and it passes variadic arguments in registers. A guest thread's stack can be 8 KB.
 
 ### Rewriter patches
 
-`nxb` applies each game's `patches.py` from rule files in `data/rewrite-rules`. These files are generated from the engine's patches. `nxb` refuses to rewrite when `DM_GAMES_DIR` is set or an engine patch file changed (`crates/nxb-build/src/rewrite.rs`).
+`nxb` applies each game's `patches.py` from rule files in `data/rewrite-rules`. These files are generated from the patch data. `nxb` refuses to rewrite when the games folder is overridden or a patch file changed (`crates/nxb-build/src/rewrite.rs`).
 
 ## Part A: runtime hooks (ComicBit)
 
@@ -67,11 +67,11 @@ These facts were checked on 2026-11-07 against nxnative `f25fa956` and nxkit `ma
 - A need that contradicts `game.tsv` stops the build. The message names the key, both values and the module.
 - `nxb build` prints which keys came from which module.
 
-Open question: how do the needs reach the header? `DM_GAMES_DIR` cannot be used, because the rewrite step refuses it. One option is to write the header with `header.rs` instead of `make`. The other is a patch that lets `game.py` read an extra file.
+Open question: how do the needs reach the header? An override of the games folder cannot be used, because the rewrite step refuses it. One option is to write the header with `header.rs` instead of `make`. The other is a patch that lets `game.py` read an extra file.
 
 ### A3 Modules and `game.tsv` do not drift apart
 
-A command compares the needs of every module with `game.tsv` at the engine pin. It lists each key that differs. It runs when the engine pin changes.
+A command compares the needs of every module with `game.tsv` at the pinned host source. It lists each key that differs. It runs when the pin changes.
 
 ### A4 Upscaler and pacing have keys
 
@@ -117,51 +117,51 @@ Open question: where do the names come from? The NSO's module name, its symbol t
 
 ### B2 The host asks nxkit first
 
-- An engine patch in NX2Apple's patch queue changes `hle_find`. It asks `nxkit_hle_find` first and its own section second.
-- `game_profile.h` has `DM_GAME_NXKIT_SERVICES`, a bit mask in `Service::ALL` order. The host passes it to `nxkit_init`.
+- A patch in NX2Apple's patch queue changes `hle_find`. It asks `nxkit_hle_find` first and its own section second.
+- `game_profile.h` has a bit mask of the nxkit services, in `Service::ALL` order. The host passes it to `nxkit_init`.
 - `nxkit_hle_find` returns functions only for the services in the mask. With an empty mask the host runs as before.
-- On the Mac the host does not link nxkit. It loads `libnxkit_rt.dylib` with `dlopen` when the mask is not empty. The path is `DM_NXKIT_LIB`, or the file next to the host. `DM_NXKIT_SERVICES` (a list of service names) replaces the mask for a test.
-- A missing library or symbol writes one line to the log, and every service stays on nxnative.
+- On the Mac the host does not link nxkit. It loads `libnxkit_rt.dylib` with `dlopen` when the mask is not empty. The path comes from an environment variable, or it is the file next to the host. A second environment variable (a list of service names) replaces the mask for a test.
+- A missing library or symbol writes one line to the log, and every service stays in the host.
 
-Open question: should the patch go upstream to nxnative instead of the patch queue?
+Open question: should the patch go upstream instead of the patch queue?
 
 ### B3 nxb links the library
 
-On the Mac, `nxb build --platform mac` does not link the library. The run command it prints sets `DM_NXKIT_SERVICES` and `DM_NXKIT_LIB` (`NXB_NXKIT_RT`, or `libnxkit_rt.dylib` next to `nxb`). The host stage's key does not include the library, so a changed library needs no new stage. iOS links `libnxkit_rt.a`, because iOS cannot load unsigned code at run time.
+On the Mac, `nxb build --platform mac` does not link the library. The run command it prints sets the service list and the library path (`NXB_NXKIT_RT`, or `libnxkit_rt.dylib` next to `nxb`). The host stage's key does not include the library, so a changed library needs no new stage. iOS links `libnxkit_rt.a`, because iOS cannot load unsigned code at run time.
 
 ### B4 Services move one at a time
 
-| service | host files | addressed by |
-|---|---|---|
-| `offline` | `hle_net.c`, `hle_offline.c` | name |
-| `fs` | `hle_fs.c`, `save_sync.c` | name |
-| `input` | `hle_hid.c`, `hle_touch.c`, `hle_haptics.c` | name |
-| `audio` | `hle_audio.c`, `hle_audren.c`, `hle_codec.c` | name |
-| `system` | `hle_oe.c`, `hle_account.c`, `hle_time.c`, `hle_misc.c`, `hle_swkbd.c`, `hle_web.c` | name |
-| `video` | `hle_movie*.c`, `hle_codec_video.c` | name |
-| `pacing` | `hle_fpslock.c` | called on every present |
-| `kernel` | `hle_svc.c`, `hle_thread.c` | gate dispatch |
-| `gpu` | `dm/gfx/nvn`, `dm/gfx/gl`, `dm/gfx/vk` | NVN, GL and Vulkan entry points |
+| service | addressed by |
+|---|---|
+| `offline` | name |
+| `fs` | name |
+| `input` | name |
+| `audio` | name |
+| `system` | name |
+| `video` | name |
+| `pacing` | called on every present |
+| `kernel` | gate dispatch |
+| `gpu` | NVN, GL and Vulkan entry points |
 
 - `offline` is first. It is small and only answers "unavailable", so it proves the seam.
 - Breath of the Wild is the pilot game. Its module moves a service with `RuntimeHooks::runtime` once a run of the game shows it works.
-- A service may move with `Unverified` evidence while its code is written. The run of the fixed route at the end of part B turns it into `Recorded`, or moves the service back to nxnative.
+- A service may move with `Unverified` evidence while its code is written. The run of the fixed route at the end of part B turns it into `Recorded`, or moves the service back to the host.
 
 Open questions:
 
 - `pacing`, `kernel` and `gpu` are not found by name. What seam does each need?
-- How does a test compare an nxkit service with the nxnative one?
+- How does a test compare an nxkit service with the one in the host?
 
 ### B5 Breath of the Wild is answered by its module
 
 - The `FRAME_STEP` stubs, the interval controller cuts and the render scale stubs of `patches.py` come from the module's `rewrite_rules`.
 - The integer output shaders of `shader_facts_manual.tsv` come from the module.
-- Optimisations for the game go into the module, into the family `agl` when they hold for the engine, or into an nxkit service.
+- Optimisations for the game go into the module, into the family `agl` when they hold for the game's engine, or into an nxkit service.
 
 Part B continues in [nxkit-host.md](nxkit-host.md): Breath of the Wild on nxkit alone.
 
 ## Rules
 
 - Every answer is a `Fact` with its evidence. A fact that was not checked is `Unverified` and says what would check it.
-- nxnative is the default for every service of every game.
+- The host is the default for every service of every game.
 - A fix that helps more than one game goes into the core or the family, not into a title module.

@@ -5,9 +5,9 @@ the chain version V. A V change translates again, but compiles only the shaders 
 
 ## Problem
 
-The host loads the shader libraries from the folder `b-<V>/`. V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, plus the options string `debug=True reduced=True`. No Rust source goes into V. The reference build
-scripts put the code of the full chain into each cache key. Thus a change of one line in the chain makes all cache
-entries of all games invalid, and the next build compiles all shaders again.
+The host loads the shader libraries from the folder `b-<V>/`. V is a hash of the host's shader chain files, plus the options string `debug=True reduced=True`. No Rust source goes into V. A cache key that holds the code of the full chain
+would make a change of one line in the chain invalidate all cache
+entries of all games, and the next build would compile all shaders again.
 
 ## Decision
 

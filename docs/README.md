@@ -2,8 +2,7 @@
 
 `nxkit` is a Rust monorepo. Its build tool `nxb` changes Switch game packages into Apple builds. It extracts the game package, splits
 the shaders, rewrites the code, translates and compiles the shaders into Metal libraries, makes the pipeline archive, and packs and signs the app.
-The output files are byte-identical to the output of the reference build scripts, with two exceptions. The MSL of the Rust translator is not byte-identical.
-The own shader front end is not byte-identical either. Its raw path is on by default since 0.4.0, and GPU tests cover only a part of the shaders.
+Two parts do not give the same output as Apple's tools. The MSL of the Rust translator and the own shader front end are such parts. Its raw path is on by default since 0.4.0, and GPU tests cover only a part of the shaders.
 
 ## Reading order
 
@@ -31,5 +30,5 @@ The own shader front end is not byte-identical either. Its raw path is on by def
 ## Data
 
 The documents give results for one reference title on the reference machine. The game files, keys, the shader corpus and
-the run outputs are not in this repository. They are not necessary to compile the workspace. To do the parity tests on
+the run outputs are not in this repository. They are not necessary to compile the workspace. To do the tests with game data on
 your own files, refer to [contributing-architecture.md](contributing-architecture.md).

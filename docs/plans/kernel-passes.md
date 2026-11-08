@@ -13,12 +13,12 @@ The passes form a chain: of 176 barriers a frame, 159 wait for the pass right be
 (`NXKIT_DIAG=barr`). Finer barriers or fences gain nothing; dropping the barriers (`nobarrier` knob) gives under 8 ms
 but a broken picture. What can be won is the cost of the pass boundary itself.
 
-nxnative measured that on this machine (M2 Max): 132 dependent dispatches with a barrier each in one compute encoder
+A measurement on this machine (M2 Max): 132 dependent dispatches with a barrier each in one compute encoder
 take 0.37 ms, as one-draw render passes 4.6 ms.
 
-## Prior art: nxnative's DM_NVN_KPASS (October 2026, not merged)
+## Prior art: an earlier kernel pass experiment (October 2026, not merged)
 
-`dm/gfx/tools/dmsh_kpass.py` and `nvn_mtl.m` (commits 353c2e7b, 789f0696). A pass of one draw of at most two triangles,
+In the experiment, a pass of one draw of at most two triangles,
 without depth, stencil and blending, ran as one compute dispatch that runs the pair's vertex shader for its 3 to 6
 vertices, rasterizes the triangles itself (pixel centres, top-left rule, perspective-correct varyings) and runs the
 fragment body per pixel, with texture writes for the colour outputs. Threads run as 2x2 quads, so implicit LOD and
@@ -31,7 +31,7 @@ Its first run was worse (frame p50 8.97 -> 9.69 ms, p95 9.98 -> 13.14 ms). Its o
   made, or the kernels ran next to them.
 - Most candidates were refused because their pass had queries.
 - A colour target that a kernel writes needs the `ShaderWrite` usage, which can cost the lossless compression of the
-  target and so the speed of every pass that reads it. nxnative limited it to targets of at most 512x512.
+  target and so the speed of every pass that reads it. The experiment limited it to targets of at most 512x512.
 - The kernels came from regular expressions over SPIRV-Cross output, and 12 pairs had no library.
 
 ## What is different here
@@ -68,7 +68,7 @@ write) up to 71 passes, about 2 ms if they chain.
 - A run of consecutive candidate passes becomes one compute encoder. Each candidate is one dispatch over its target
   rectangle (viewport and scissor), with an encoder-local barrier before it when it reads what the one before wrote.
 - The replaced render passes are not made at all; the stats count render passes, kernel passes and kernel encoders, so
-  that nxnative's "passes did not drop" shows at once.
+  that "passes did not drop" shows at once.
 - Targets that a kernel writes get `ShaderWrite` at creation; a texture that becomes a candidate target later is made
   again with the usage (counted, like the other re-creations).
 - A check mode renders a candidate both ways on sampled frames and compares the pixels, as `NXKIT_VERIFY_CACHE` does for
@@ -78,7 +78,7 @@ write) up to 71 passes, about 2 ms if they chain.
 
 - `nxb-xlate` emits, for a vertex/fragment pair, a kernel: the vertex body for the 3 to 6 vertices (into threadgroup
   memory), the triangle test and the interpolation per pixel, the fragment body, and texture writes for the colour
-  outputs. Discard, implicit LOD and derivatives follow nxnative's quad scheme.
+  outputs. Discard, implicit LOD and derivatives follow the quad scheme.
 - Pairs are known only at run time. Two ways, to decide in step 0:
   - offline: the host writes the pairs that it met (`want` list), nxbuild's shader step builds their kernels, and the
     next run uses them;
@@ -95,7 +95,7 @@ write) up to 71 passes, about 2 ms if they chain.
 
 ## Risks
 
-- `ShaderWrite` costs more than the encoders save (nxnative's open point). Step 3 measures it apart.
+- `ShaderWrite` costs more than the encoders save (an open point). Step 3 measures it apart.
 - Kernels that differ in rounding or derivatives from the fragment path; the check mode finds them.
 - Candidates are rarer than the count of one-draw passes suggests (queries, blending, large targets); step 0 says so
   before anything else is built.

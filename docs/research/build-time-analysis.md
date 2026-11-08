@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05.
 
-**Question:** Where does the time of a build go with the reference build scripts, and what are the lower limits of each stage?
+**Question:** Where does the time of a build go in a full build, and what are the lower limits of each stage?
 
 **Method:**
 

@@ -37,7 +37,7 @@ let stats = gpu.wait()?;                     // GPU time of the last frame
 
 ## From NVN state to Metal
 
-1. `translate.rs` maps blend, depth, stencil, raster, topology, samplers and vertex formats. The enum values come from `nvn.h` of nxnative (listed in `THIRD_PARTY.md`).
+1. `translate.rs` maps blend, depth, stencil, raster, topology, samplers and vertex formats. The enum values come from `nvn.h` (listed in `THIRD_PARTY.md`).
 2. `format_map.rs` is the one table from NVN formats to Metal formats. A format that Metal lacks maps to a wider one or to a uint format that a copy kernel fills. The row says which.
 3. `programs.rs` loads the Metal library of a shader hash and its `_b.json` reflection from the shader directory (R1). The reflection gives the entry name, the binding list and the compute threadgroup size.
 4. `pipelines.rs` builds a `RenderPipeline` for the translated state and keeps it in the `PipelineCache`. The key is a hash of the program keys, the colour formats with blend and write mask, the vertex layout, the topology class, the sample count and alpha-to-coverage. Two draws with the same translated state share one pipeline, whatever their NVN state was. Depth and stencil are separate objects that Metal binds per draw.
@@ -216,4 +216,4 @@ The code has not been compiled or run. The first build and the first frame of Br
 
 ## Numbers that shaped the design
 
-Super Mario Bros. Wonder frame 7200 on nxnative has 601 draws in about 11,000 records and 565 recordings. 62 percent of the draws are in recordings called more than once, which is the case for ICBs. Binds are the largest group: 1,976 vertex buffers, 1,848 small uniform buffers and 1,365 textures, which is the case for bindless tables and guest-address binds. There are 67 render target changes and 217 program switches. nxnative needs 4.5 ms of 4.7 ms CPU for translation, 14,700 full barriers and 591 split submits for one frame. The target here is to encode the whole frame in parallel with few barriers and re-run the reused recordings from ICBs.
+Super Mario Bros. Wonder frame 7200 has 601 draws in about 11,000 records and 565 recordings. 62 percent of the draws are in recordings called more than once, which is the case for ICBs. Binds are the largest group: 1,976 vertex buffers, 1,848 small uniform buffers and 1,365 textures, which is the case for bindless tables and guest-address binds. There are 67 render target changes and 217 program switches. Translating that frame on the CPU takes 4.5 ms of 4.7 ms, and it has 14,700 full barriers and 591 split submits. The target here is to encode the whole frame in parallel with few barriers and re-run the reused recordings from ICBs.

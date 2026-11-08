@@ -9,10 +9,10 @@ with almost every fix, the translated shaders when the translator changes, the g
 update, and the player's saves and settings all the time. When one key covers all of them, any change to any part
 asks for a rebuild of everything, and a rebuild of a big Switch 2 game costs an hour and a half of compiler time.
 
-The engine-based builds (nxnative and launchers on top of it, such as NX2Apple) show the pattern. From NX2Apple's
+Engine-based builds, and launchers on top of them such as NX2Apple, show the pattern. From NX2Apple's
 code (survey of `LNPANDY/NX2Apple` at `v0lumehi/nxbuild-feature-toggle`, launcher v1.3.1):
 
-- A game counts as built with old tools when a `git diff` of the engine tree touches the host, graphics, tool,
+- A game counts as built with old tools when a `git diff` of the engine source tree touches the host, graphics, tool,
   platform or third-party folders, also when the game's app would run unchanged.
 - A shader-chain change flags every game and retranslates and recompiles every shader and the pipeline archive.
 - Stage keys hash the whole host source, the chain tools, the Xcode and Metal toolchain and the packer's inputs.

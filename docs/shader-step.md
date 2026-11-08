@@ -5,7 +5,7 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
 
 ## Rules
 
-1. **Port rule.** A port gives the same files as the reference build scripts for the same inputs.
+1. **Port rule.** A port gives the same files for the same inputs, and the output does not depend on the number of tasks.
    This applies to orchestration, guards and the store. The translator is the exception (refer to the section on the translator).
 2. The tests compare the last output files (`.metallib`, `.json`, `.metal`, tables), not `.air` files.
    The `.air` bytes can differ when the libraries are byte-identical (measured on 300 of 300 libraries).
@@ -19,7 +19,7 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
 | interface | contract |
 |---|---|
 | input from the split | package files `<stage>_<group>.bin` (`BTCDBTCD` records) and the tables `shader_map.tsv`, `shader_facts.tsv`, `shader_pairs.tsv`, `pso_pairs.tsv` |
-| translator | `nxb_xlate::msl::translate(&job, &code, &ctx)`, called in the process for each key. The job is the job JSON of the reference build scripts |
+| translator | `nxb_xlate::msl::translate(&job, &code, &ctx)`, called in the process for each key. The job is the job JSON of the translator |
 | output of the translator | the libraries of the key (`<key><suffix>.metal`), the reflection of the libraries that have one, the inputs of a pixel shader and the side library entries |
 | output to the pack stage | `b-<V>/` folders, `inputs.tsv`, `_b_build.json`, `_b_cas.txt`, `c1_full.tsv`, `cb_extent.tsv`, the reuse keys |
 | output to the archive stage | `pso_pairs.tsv` and the reflection fields `entry`, `entry_z`, `pull`, `vertex_inputs`, `raster.primitive_id`, `bindings` |
@@ -42,7 +42,7 @@ flowchart LR
   S --> P["publish entry"] --> F["summary and build files"]
 ```
 
-The reference build scripts do the cache checks in series, then all translations, then two thread-pool passes.
+The step does not run the cache checks in series, then all translations, then two thread-pool passes.
 The shader step streams: each shader goes to the next task when its inputs are ready. The only real dependencies are the
 vertex shaders that wait for their pixel shaders (the `partners` of the translator context) and the summary at the end.
 
@@ -61,7 +61,7 @@ The step does this for each key:
 6. A geometry shader (`gs`) needs no `geometry_topology` in its job. The translator makes the kernels for all input topologies, so the step writes `_b`, `_bg0` to `_bg4` and `_bgv`, each with its own `.json`. A passthrough geometry shader also gives `_bl0`, `_bl1` and `_bl3`.
 7. The job of an NVN2 task or mesh shader (`ts`, `ms`) has stage `cs`, the code without its 0x80 byte SPH, `mesh_stage`, `stage_memory`, `local` and `shared`. `mesh_stage` of a mesh shader has `verts` (control +0x5f, 3 when 0), `max_v`, `max_p` and the lists `vertex` and `primitive`. The point size is the first entry of `vertex`, written as `["psiz", 0]`. It has no answer-table members. A job whose shader has shared memory of its own, or whose stage memory is past Metal's limit, carries `refused` in `mesh_stage`.
 
-The reasons of a failure are the reason strings of the reference build scripts (`translation failed`, `metal failed` and the reasons that the translator names).
+The reasons of a failure are fixed reason strings (`translation failed`, `metal failed` and the reasons that the translator names).
 A panic and a job that the step cannot read are `translation failed`. The step counts each reason. The run report and the `shaders done` event have the counters `xlate_hits` (translations from the store) and `xlate_refused` (an object of reasons and counts).
 A key that the translator does not do is a `ShaderError` of that key. The build continues.
 
@@ -75,13 +75,13 @@ The output is not byte-identical to the output of the former C# translator and `
 
 | identity | function | made from |
 |---|---|---|
-| V (chain version) | names the folder `b-<V>/` that the host loads. Each `_b.json` file has the same value | the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True` |
+| V (chain version) | names the folder `b-<V>/` that the host loads. Each `_b.json` file has the same value | the host's shader chain files, and the options string `debug=True reduced=True` |
 | TOOL_FP | the external tools that made a result | translator identity, `metal` identity, SDK version, deployment target, PCH convention, front-end id |
 | BIN_ID | the `nxb` binary that ran | SHA-256 of the binary, rustc version, `Cargo.lock` digest, commit, flags |
 
 The rules for these identities:
 
-1. V comes from engine files, not from the binary. No Rust source goes into V.
+1. V comes from the host's shader chain files, not from the binary. No Rust source goes into V.
 2. `TRANSLATOR_ID` in `nxb-xlate` is a string. Increase it by hand for each change of the translator output.
 3. The runtime crates are not in V, and TOOL_FP does not contain BIN_ID. A new binary from the same sources keeps V and all cache keys.
 4. The design compares BIN_ID with a lock file at start, and a mismatch is a `[RED]` build error. The code does not have this check at this time. The command `nxb self-check` only finds the external tools and shows their versions.
@@ -90,7 +90,7 @@ The rules for these identities:
    When the own front end is on, the library key `nxb.metallib.v2` gets a `frontend` field. Apple libraries and own libraries thus do not share a store entry.
 7. Since 0.5.1, the value of V in each `_b.json` file is the computed V. In 0.5.0, the vertex shader files had the constant `0ad559cdbb28`.
    The folder name had the computed V. The two values were not equal. In a full Wonder run with the 0.5.0 code, the pipeline archive found no base library. The build packed the app without an archive.
-   The calculation of V reads the engine files that `dmsh_chain.py` names.
+   The calculation of V reads the shader chain files of the host.
 
 ## Execution model
 
@@ -178,7 +178,7 @@ A full cold build of one title (16,268 shaders, cold store, M2 Max, 0.6.3) took 
 
 | class | scope | examples | effect |
 |---|---|---|---|
-| `ShaderError` | one shader | the translator refuses a key, `metal` error | the reason string of the reference build scripts. The build continues. |
+| `ShaderError` | one shader | the translator refuses a key, `metal` error | a fixed reason string. The build continues. |
 | `ToolError` | one task | crash, timeout, exit code not 0 | recovery, then `ShaderError` |
 | `FrontEndReject` | one shader | construct not covered, back-half failure | fallback to the Apple front end, counted |
 | `BuildError` | the build | lock mismatch, missing facts table, bad `DMSH_TARGETS` | `[RED]` text, exit code 1 |
@@ -194,8 +194,8 @@ The shader step does not use it.
 
 ## Determinism
 
-- The output order does not come from the completion order or from a hash map. `_b_build.json` and the summary use the key
-  order of the reference build scripts. JSON goes through `nxb-pyjson` (insertion order, `indent=1`, Python float format).
+- The output order does not come from the completion order or from a hash map. `_b_build.json` and the summary use a fixed key
+  order. JSON goes through `nxb-pyjson` (insertion order, `indent=1`, Python float format).
 - The tests compare 1 task against N tasks, two runs, and pipes against files. Apple's tools gave the same bytes on 300 of 300 samples (measured).
 
 ## Progress and fixed strings
@@ -205,14 +205,14 @@ The shader step does not use it.
 - Callers parse some strings. Thus these strings must not change: `shaders {N}: ok {K}, ...`,
   `shader regressions against b-XXXX: N`, all `[RED] ` lines, and the failure-classifier keys.
 
-## Parity results
+## Results
 
-The JSON writer and the guard tables follow the reference build scripts (measured on the reference title and the Mac target).
+The JSON writer and the guard tables were checked on the reference title and the Mac target.
 
 | part | compared on | result |
 |---|---|---|
 | JSON writer | 16,269 JSON files | all byte-identical |
 | guard tables | 16,268 shaders | byte-identical |
 
-The libraries and `_b.json` come from the Rust translator. They are not compared byte for byte with the reference build scripts. No game ran with them yet (D20).
-The side library cut and the compile conventions are the same as in the reference build scripts. The raw tier is not byte-identical to Apple's libraries.
+The libraries and `_b.json` come from the Rust translator. They are not compared byte for byte with earlier output. No game ran with them yet (D20).
+The side library cut and the compile conventions are fixed. The raw tier is not byte-identical to Apple's libraries.

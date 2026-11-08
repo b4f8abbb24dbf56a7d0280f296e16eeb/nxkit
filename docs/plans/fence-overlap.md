@@ -7,7 +7,7 @@ The measurements changed the design: see "What the measurements showed".
 
 Breath of the Wild waits in `nvnSyncWait` every frame for the fence of the frame it just submitted. The frame time is
 then the CPU work of the game and the host plus the GPU time, one after the other. In Zora's Domain at 1080p that is
-about 11 ms of CPU and 10 ms of GPU, so 60 fps does not hold. The same pattern is in nxnative's notes (#142, #159):
+about 11 ms of CPU and 10 ms of GPU, so 60 fps does not hold. The same pattern is in earlier notes:
 "BotW waits every frame for its newest fence, so CPU and GPU run one after the other".
 
 Measured with the `nowait` knob (`nvnSyncWait` returns at once, nothing is protected): the frame step goes to hold 1

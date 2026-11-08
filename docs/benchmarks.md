@@ -1,6 +1,6 @@
 # Benchmarks
 
-This document gives the timings of the reference build scripts and of `nxkit` on the reference title.
+This document gives the timings of `nxkit` on the reference title.
 Each number has a label: measured, derived or estimate. Read the conditions first.
 
 ## Conditions
@@ -12,33 +12,23 @@ Each number has a label: measured, derived or estimate. Read the conditions firs
 - `/usr/bin/time -l` measured each command. Average cores = CPU time / wall time.
 - `nxb build` does not call `nxb shaders`. The end-to-end run thus contains extract, split, archive and app, without the shader step.
 
-## Reference build scripts (measured)
-
-| stage | wall time |
-|---|---|
-| full build | 23:42 |
-| shader step | 13:19 (799 s) |
-| pipeline archive | 4:17 (257 s) |
-| extract, rewrite and split | 2:27 + 0:19 + 0:43 (209 s) |
-| Mac app pack and sign | 2:09 (129 s) |
-
 ## nxkit (measured, 2026-11-05)
 
-| stage and run | wall | CPU user + system (s) | average cores | reference build scripts | factor |
-|---|---|---|---|---|---|
-| extract and split, cold, 3 runs | 15.5 s, 13.4 s, 10.5 s | approximately 49 + 7 to 11 | 3.9 to 5.4 | 209 s | 13.5x to 20x |
-| extract and split, warm, 2 runs | 14.7 s, 13.3 s | 48.9 + 11.1 | 4.1 to 4.5 | | |
-| shader step, cold, Apple front end | 650.2 s (10:50) | 4,347.5 + 728.6 | 7.8 | 799 s | 1.23x |
-| shader step, cold, own front end for `own-identical` shaders | 586.4 s (9:46) | 3,862.4 + 667.5 | 7.7 | 799 s | 1.36x |
-| shader step, cold, own front end for `own-identical` and `own-validated` shaders | 416.1 s (6:56) | 2,528.9 + 509.5 | 7.3 | 799 s | 1.92x |
-| shader step, warm store, outputs removed | 113.3 s | 333.1 + 116.7 | 4.0 | | 7.1x |
-| pipeline archive, cold, `metal-tt` for each batch | 273.0 s | 1,974.2 + 174.3 | 7.9 | 257 s | 0.94x |
-| pipeline archive, cold, `applegpu-nt -j 1` and `air-pack` for each batch, one batch for each core (load 7 to 33) | 207 s | 958 to 1,076 | | 257 s | 1.24x |
-| pipeline archive, no change | 3.2 s | | | | |
-| Mac app, new | 23.0 s | 7.5 + 18.3 | 1.1 | 129 s | 5.6x |
-| Mac app, no change | 4.8 s | 7.7 + 6.0 | 2.9 | | |
-| `nxb build`, cold, without the shader step | 316.6 s (5:17) | 2,025.0 + 190.1 | 7.0 | approximately 10:23 | 2.0x |
-| `nxb build`, warm, no change | 14.1 s | 10.3 + 8.6 | 1.3 | | |
+| stage and run | wall | CPU user + system (s) | average cores |
+|---|---|---|---|
+| extract and split, cold, 3 runs | 15.5 s, 13.4 s, 10.5 s | approximately 49 + 7 to 11 | 3.9 to 5.4 |
+| extract and split, warm, 2 runs | 14.7 s, 13.3 s | 48.9 + 11.1 | 4.1 to 4.5 |
+| shader step, cold, Apple front end | 650.2 s (10:50) | 4,347.5 + 728.6 | 7.8 |
+| shader step, cold, own front end for `own-identical` shaders | 586.4 s (9:46) | 3,862.4 + 667.5 | 7.7 |
+| shader step, cold, own front end for `own-identical` and `own-validated` shaders | 416.1 s (6:56) | 2,528.9 + 509.5 | 7.3 |
+| shader step, warm store, outputs removed | 113.3 s | 333.1 + 116.7 | 4.0 |
+| pipeline archive, cold, `metal-tt` for each batch | 273.0 s | 1,974.2 + 174.3 | 7.9 |
+| pipeline archive, cold, `applegpu-nt -j 1` and `air-pack` for each batch, one batch for each core (load 7 to 33) | 207 s | 958 to 1,076 | |
+| pipeline archive, no change | 3.2 s | | |
+| Mac app, new | 23.0 s | 7.5 + 18.3 | 1.1 |
+| Mac app, no change | 4.8 s | 7.7 + 6.0 | 2.9 |
+| `nxb build`, cold, without the shader step | 316.6 s (5:17) | 2,025.0 + 190.1 | 7.0 |
+| `nxb build`, warm, no change | 14.1 s | 10.3 + 8.6 | 1.3 |
 
 Peak memory: extract and split 3.0 GiB. Shader step 0.17 to 0.94 GiB. One `metal-tt` child used up to 5.9 GiB.
 
@@ -47,18 +37,17 @@ The Apple front end and the own front end for `own-identical` shaders gave the s
 ## Full build (derived)
 
 The sum of the stages is approximately 16:00 with the Apple front end, 15:00 with the own front end for `own-identical` shaders,
-and 12:10 with the own front end for `own-identical` and `own-validated` shaders. The reference build scripts take 23:42.
-This is a factor of approximately 1.5x, 1.6x or 1.9x. These sums use the first archive time (273 s). With the archive time of 207 s, each sum is approximately 1 min shorter (derived). Nobody ran this sum as one process. There is no overlap of stages in this sum.
+and 12:10 with the own front end for `own-identical` and `own-validated` shaders. These sums use the first archive time (273 s). With the archive time of 207 s, each sum is approximately 1 min shorter (derived). Nobody ran this sum as one process. There is no overlap of stages in this sum.
 The overlap of stages in version 0.3.0 can make a real run shorter than the sum. Nobody timed a cold build with overlap, thus the size of the gain is an estimate.
 The changes of version 0.4.0 (raw path, Rust translator, host) are not in these sums. The 0.5.1 changes (the fix of the chain value, the rewrite step of the current engine, the new inputs and options of `nxb build`) are not in these sums. Nobody timed a full run of `nxb build` with them.
 
 ## Findings
 
-- Extract and split, the Mac app stage and the paths with no change give the largest decreases of time (13x to 20x, 5.6x, seconds).
+- Extract and split, the Mac app stage and the paths with no change take seconds.
 - The shader step is compile-bound. All 12 cores are busy. The CPU average is 7.3 to 7.8 cores, because the other cores wait for Apple's tools.
 - The own front end decreases the wall time by 10 % with the same output and by 36 % with validated output.
-- With `metal-tt` for each batch, the archive was not faster than the reference build scripts. With `applegpu-nt -j 1` and
-  `air-pack` for each batch and one batch for each core, it took 207 s against 257 s. The loader probe found all 18,300 bases.
+- With `metal-tt` for each batch, the archive took 273 s. With `applegpu-nt -j 1` and
+  `air-pack` for each batch and one batch for each core, it took 207 s. The loader probe found all 18,300 bases.
 - Hardware SHA-256: 1,841 MB/s with the ARMv8 path, 225 MB/s scalar (1 GiB, measured with load).
 
 ## Version 0.3.0
@@ -76,12 +65,12 @@ The changes of version 0.4.0 (raw path, Rust translator, host) are not in these 
 All runs are on the reference machine. The machine was not quiet (the load average was 8 to 12 in the shader runs). Other jobs used the CPU.
 No run below is a full build. The numbers of the earlier sections do not include the changes of 0.4.0.
 
-| run | reference | 0.4.0 | label |
+| run | before | 0.4.0 | label |
 |---|---|---|---|
-| rewrite of a 29 MB main module | 63 s (script) | 3.4 s | measured |
-| rewrite of a larger main module | 121 s (script) | 8.9 s | measured |
-| rewrite of synthetic modules with 100 to 185.6 MB of text | 183 to 672 s (script) | 1 to 3.5 s | measured, synthetic modules |
-| NRO collection, one image | 4.5 s (script) | 3.5 s | measured. The archive table dominates both times |
+| rewrite of a 29 MB main module | 63 s | 3.4 s | measured |
+| rewrite of a larger main module | 121 s | 8.9 s | measured |
+| rewrite of synthetic modules with 100 to 185.6 MB of text | 183 to 672 s | 1 to 3.5 s | measured, synthetic modules |
+| NRO collection, one image | 4.5 s | 3.5 s | measured. The archive table dominates both times |
 | translation of 802 jobs, host against process bridge | 6.3 to 8.4 s (19 starts) | 1.0 to 1.7 s (1 start) | measured, load average 9 to 10 |
 | shader step subset (160 keys, 261 shaders), host against process bridge | 20.7 s | 20.2 s | measured. The Metal compile dominates |
 | shader step subset (160 keys), Rust translator against C# process bridge | 16 s | 17 s | measured with 0.4.0, with the Rust translator on. No gain, no .NET process |

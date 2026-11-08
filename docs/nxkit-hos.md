@@ -36,13 +36,13 @@ The host's thread entry reads both values with `nxkit_kernel_thread_tls` and set
 
 ## The svc table
 
-The table is in `crates/nxkit-hos/src/svc.rs`. It lists every svc number that nxnative answers and the state of each here. A number that the table does not answer returns false and the host goes on with its own handler. Two numbers that nxnative answers are not done: 0x32 SetThreadActivity and 0x33 GetThreadContext3, because they need a signal that pauses a host thread. 0x20 SendSyncRequestLight is also not answered.
+The table is in `crates/nxkit-hos/src/svc.rs`. It lists every svc number that a game can call and the state of each here. A number that the table does not answer returns false and the host goes on with its own handler. Two numbers are not done: 0x32 SetThreadActivity and 0x33 GetThreadContext3, because they need a signal that pauses a host thread. 0x20 SendSyncRequestLight is also not answered.
 
-nxnative has a default branch that answers every unknown svc with success. nxkit does not (R15).
+An unknown svc does not return success (R15).
 
 ## SDK take-overs
 
-nxnative runs the SDK's own `nn::os` and replaces the kernel under it. Four functions of its kernel side replace SDK or libc functions. `nxkit_hos::exports()` lists them:
+The host runs the SDK's own `nn::os` and replaces the kernel under it. Four functions of the kernel side replace SDK or libc functions. `nxkit_hos::exports()` lists them:
 
 | name | function |
 |---|---|
@@ -55,13 +55,13 @@ The environment of a game profile is empty for most games, as Horizon gives a pr
 
 The forced names are in `nxkit_hos::forced_names()`. All references to such a name must go to the export. The host sets `set_guest_sym`, which finds the SDK's own definition of a name and never the export. A missing symbol stops the game with a message (R15).
 
-`SystemEvent` binding (`bind_system_event`, `signal_bound_system_event` and `clear_system_event`) and `GuestThread::spawn` and `join` port `dm/host/hle_thread.c` and `dm/host/hle_guestthread.c`. A guest thread runs on the host through the SDK's own `CreateThread`, with a stack from the SDK's `malloc`.
+`SystemEvent` binding (`bind_system_event`, `signal_bound_system_event` and `clear_system_event`) and `GuestThread::spawn` and `join` bind the system event and spawn a guest thread. A guest thread runs on the host through the SDK's own `CreateThread`, with a stack from the SDK's `malloc`.
 
-`GetInfo` type 11 and the take-overs share one entropy stream. `entropy::set_deterministic(true)` gives a fixed stream, as `DM_DETCLOCK` does in nxnative.
+`GetInfo` type 11 and the take-overs share one entropy stream. `entropy::set_deterministic(true)` gives a fixed stream.
 
 ### Not ported
 
-The scheduling helpers of nxnative are not ported, because the core gates keep no hand-off state: `dm_thread_service_connect`, `dm_thread_service_request`, `dm_thread_native_wait`, `dm_yield_to_core_peers` and `dm_thread_mark_host`. The guest clock, `objmap` and the `DM_GAME_ENV` variable of `hle_os.c` are not ported either. The host passes the environment through `OsConfig`.
+There are no scheduling helpers for hand-off between threads, because the core gates keep no hand-off state. There is no guest clock or `objmap` either. The host passes the environment through `OsConfig`.
 
 ## What the host fills
 
@@ -87,7 +87,7 @@ The scheduling helpers of nxnative are not ported, because the core gates keep n
 - The values of the resource limits and the peak value.
 - `FlushDataCache` as a checked no-op.
 - The process id 0x80.
-- The registers of `GetSystemTick`. nxnative writes the tick into x1 and Horizon into x0. The kernel writes both.
-- The clear mode values of a `SystemEvent` (0 manual, 1 auto, as nxnative passes them).
+- The registers of `GetSystemTick`. Horizon returns the tick in x0. The kernel writes both x0 and x1.
+- The clear mode values of a `SystemEvent` (0 manual, 1 auto).
 - Calls of Switch SDK functions through `extern "C"` pointers with the Apple AAPCS64 convention.
-- The thread names of Breath of the Wild. On 2026-11-07 no extracted main NSO and no name in nxnative was found.
+- The thread names of Breath of the Wild. On 2026-11-07 no extracted main NSO was found.

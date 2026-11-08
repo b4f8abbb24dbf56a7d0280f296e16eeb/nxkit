@@ -15,7 +15,7 @@ They stop with a message when a variable is not set. They never use a private pa
 | variable | meaning |
 |---|---|
 | `NXB_AIRC` | the `airc` binary. Default is `target/release/airc` |
-| `NXB_PROTO` | a checkout of the reference prototype of the front end (the oracle) |
+| `NXB_PROTO` | a checkout of the Python prototype of the front end |
 | `NXB_REF` | a folder with reference tools and stored reference libraries |
 | `NXB_CORPUS` | a text file with one MSL file path on each line |
 | `NXB_SPECS` | a folder of prepared GPU test specifications (`*.spec.json`) |

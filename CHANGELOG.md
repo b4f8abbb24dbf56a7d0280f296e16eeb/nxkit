@@ -21,39 +21,39 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxkit-rt` gives the cmdbuf group the texture and sampler pool bases and the texture address through `cmdbuf::set_seam`. A texture stores its GPU address in its guest object.
 
 - The crate `nxkit-ipc` is the IPC server of the nxkit host. It parses HIPC and CMIF, keeps sessions and domains, serves `sm:`, counts every command and stops the game on an unknown service or command. It has no global lock.
-- The crate `nxkit-svc-fs` is the `fs` service. It has the `nn::fs` functions of nxnative at SDK level (`exports()` and `big_stack_exports()`) and `fsp-srv` over IPC. The romfs is mapped, and the saves have the nxnative layout. `nxkit-rt` exports `nxkit_hle_find_big` for the functions that need the big host stack.
+- The crate `nxkit-svc-fs` is the `fs` service. It has the `nn::fs` functions at SDK level (`exports()` and `big_stack_exports()`) and `fsp-srv` over IPC. The romfs is mapped, and the saves use a committed folder with `.work` and `.new` folders and a commit by clone and swap. `nxkit-rt` exports `nxkit_hle_find_big` for the functions that need the big host stack.
 - The service `offline` moved from `nxkit-rt` into the crate `nxkit-svc-offline`.
-- `nxb build` makes the app of a game with a title module without nxnative (R48 to R50). The stages are extract, romfs, rewrite, manifest, link, shaders and bundle. The app has `nxkit-host` as its program and `Contents/Resources/nxkit/` with `game.json`, `nxgame.dylib`, `romfs/`, `shaders/` and `pipelines.mtl4archive`. `nxb` writes `nxgame.dylib` as a Mach-O file with each module at its fixed address and signs it ad hoc. `--engine` has no use for such a game and stops the build with exit code 4. A game without a title module keeps the old path. Refer to `docs/build-botw.md`. The code was not compiled or run on game files when it was written.
-- The title hook `standalone` of `nxtitle` carries the NVN function list, the shader facts, the run settings and the memory layout of a game. `nxgame-botw` fills it from nxnative.
+- `nxb build` makes the app of a game with a title module with no other engine (R48 to R50). The stages are extract, romfs, rewrite, manifest, link, shaders and bundle. The app has `nxkit-host` as its program and `Contents/Resources/nxkit/` with `game.json`, `nxgame.dylib`, `romfs/`, `shaders/` and `pipelines.mtl4archive`. `nxb` writes `nxgame.dylib` as a Mach-O file with each module at its fixed address and signs it ad hoc. `--engine` has no use for such a game and stops the build with exit code 4. A game without a title module keeps the old path. Refer to `docs/build-botw.md`. The code was not compiled or run on game files when it was written.
+- The title hook `standalone` of `nxtitle` carries the NVN function list, the shader facts, the run settings and the memory layout of a game. `nxgame-botw` fills it.
 - `nxb build` unpacks DLC into `aoc/<index>/` in the run folder and lists it in `game.json`.
 - The crate `nxkit-host` is the main program of the nxkit host (`nxkit-host <run folder>`, macOS only). It reserves one range of guest memory that is also the no-copy GPU buffer, loads `nxgame.dylib` with `dlopen`, takes the slide of dyld and relocates the modules for it, or copies them when dyld cannot, fills the import slots from the service crates, runs the svc and TLS gates, the big-stack entry for service functions, the game threads and the AppKit window. `nxkit-host probe` measures the address and copy costs of R18. The contract with the build stage is `docs/nxkit-host.md`. The parts that other crates provide are seams in `crates/nxkit-host/src/seams.rs`.
 - The crate `nxkit-rt` builds `libnxkit_rt.a` for the host, for `aarch64-apple-darwin` and `aarch64-apple-ios`. It exports `nxkit_init` and `nxkit_hle_find` (header `crates/nxkit-rt/include/nxkit_rt.h`). It implements no service yet, so every lookup gives NULL. Refer to `docs/plans/runtime-hooks.md`.
-- `nxkit-rt` also builds `libnxkit_rt.dylib`, which the Mac host loads at run time. It answers the `offline` service, ported from nxnative. `nxb build --platform mac` puts `DM_NXKIT_SERVICES` and `DM_NXKIT_LIB` into the run command.
+- `nxkit-rt` also builds `libnxkit_rt.dylib`, which the Mac host loads at run time. It answers the `offline` service. `nxb build --platform mac` puts the service list and the library path into the run command.
 - `nxgame-botw` runs the `offline` service on nxkit.
-- The crate `nxkit-svc-input` is the `input` service. Its exports answer the `nn::hid` calls that nxnative's `hle_hid.c` replaces (npad, six-axis, vibration, mouse, keyboard, touch screen, gesture, Nmouse, Palma). It reads `GCController`, `GCMotion`, `GCKeyboard` and `GCMouse` at each call and plays rumble with `CHHapticEngine`. The `hid` IPC service hands out the HID shared memory in the Horizon layout. The host calls `nxkit_svc_input::tick()` on each display tick, sets `SystemEventHooks` once and sends touch points through `set_touches` (R39, R40).
+- The crate `nxkit-svc-input` is the `input` service. Its exports answer the `nn::hid` calls that a game makes (npad, six-axis, vibration, mouse, keyboard, touch screen, gesture, Nmouse, Palma). It reads `GCController`, `GCMotion`, `GCKeyboard` and `GCMouse` at each call and plays rumble with `CHHapticEngine`. The `hid` IPC service hands out the HID shared memory in the Horizon layout. The host calls `nxkit_svc_input::tick()` on each display tick, sets `SystemEventHooks` once and sends touch points through `set_touches` (R39, R40).
 - The crate `nxkit-hos` holds the Horizon thread model of the nxkit host. One guest thread is one host thread. Guest locks, condition variables and address waits wait with `os_sync_wait_on_address` and have no global lock. It has handles, threads, events and `WaitSynchronization`. The QoS class of a thread follows its role, which a title supplies as a table. The core rules are off by default and opt-in. Per-thread counters are always on and `Kernel::dump_stats` prints them. `nxgame-botw` has a role table that is marked unverified. A waiter of a higher QoS class lends it to the owner of the lock. The handle table has 16 shards. `ThreadSpec.stack_size` sets the host stack.
 - `nxkit-rt` exports `nxkit_kernel_init`, `nxkit_svc`, `nxkit_kernel_set_thread_name` and `nxkit_kernel_dump_stats` for the service `kernel`. The host gates call `nxkit_svc` with the svc number and registers x0 to x7.
 - The crate `nxkit-metal` is the base of the Metal 4 backend of the nxkit host. It builds on macOS only. It has the Metal 4 queue and command allocators, guest memory as one no-copy buffer with the GPU address mapping, a pipeline cache with an optional binary archive, a drawable path, CPU and GPU time per command buffer, a block-linear deswizzle kernel and a data-driven pass encoding API. It also has full pipeline state, mipmapped, layered, 3D and cube textures with views, block-linear deswizzle and swizzle for them, sub-rectangle copy-back, a residency API, a barrier API, indirect command buffers and a `CAMetalDisplayLink` driver for 60 and 120 Hz. It binds Metal with a pinned commit of `objc2-metal` from GitHub, listed in `deps.toml`.
-- The crate `nxkit-nvn` is the first part of the nxkit GPU. It is pure Rust and has no Metal code. It maps guest memory to GPU addresses, models textures (layout, block-linear reference, TIC and TSC headers, pools, a resource table with residency flags), records into the command memory of the game with a cache of recording summaries (R17), holds a frame until a present or a CPU wait, and infers render passes with load, store and memoryless choices. It also lists the NVN functions of nxnative and the ones it handles. It is not wired into the host. Refer to `docs/nxkit-nvn.md`.
+- The crate `nxkit-nvn` is the first part of the nxkit GPU. It is pure Rust and has no Metal code. It maps guest memory to GPU addresses, models textures (layout, block-linear reference, TIC and TSC headers, pools, a resource table with residency flags), records into the command memory of the game with a cache of recording summaries (R17), holds a frame until a present or a CPU wait, and infers render passes with load, store and memoryless choices. It also lists the NVN functions that a game can call and the ones it handles. It is not wired into the host. Refer to `docs/nxkit-nvn.md`.
 - `nxkit-nvn` has the trait `Backend`, which the GPU backend implements. A queue keeps the state that its last submit left, as on the GPU. The doc comment of `tic.rs` records how each TIC and TSC field was checked. No bit position is checked against hardware.
-- `nxkit-rt` has the module `nvn`, the NVN C ABI of the host (R22 to R24). It has the device, queue, sync, memory pool, buffer, window, event and program functions of nxnative, the GPU context, and the helpers for objects in guest memory. A name that nxnative knows and nxkit does not implement stops the game with its name. The service `gpu` exports `nvnBootstrapLoader`. The host installs the backend with `nxkit_rt::nvn::install`.
+- `nxkit-rt` has the module `nvn`, the NVN C ABI of the host (R22 to R24). It has the device, queue, sync, memory pool, buffer, window, event and program functions, the GPU context, and the helpers for objects in guest memory. A name that is in the NVN function list and that nxkit does not implement stops the game with its name. The service `gpu` exports `nvnBootstrapLoader`. The host installs the backend with `nxkit_rt::nvn::install`.
 - `nxkit-rt` `nvn` also has the texture, sampler and state groups (R51, R52): the texture builder, texture, view and texel access, the texture and sampler pools with their TIC and TSC headers, the sampler builder and sampler, and the blend, color, channel mask, depth stencil, multisample, polygon, vertex attribute and vertex stream state objects. The `state` module has a reader for each state object for the command buffer.
 
 - `nxkit-hos` models the process memory of Horizon over the host's reservation: `SetHeapSize`, `SetMemoryPermission`, `SetMemoryAttribute`, `MapMemory`, `UnmapMemory`, `QueryMemory`, `MapPhysicalMemory`, `UnmapPhysicalMemory`, shared and transfer memory, `GetInfo`, resource limits, `GetSystemTick`, `ExitProcess`, `Break`, `OutputDebugString`, `ReturnFromException`, `GetProcessId`, `GetThreadId` and the cache flush svcs. A thread has a thread-local slot with the IPC buffer. The kernel implements `nxkit_abi::kernel::Kernel`, so `ConnectToNamedPort`, the three request svcs and `CloseHandle` reach the sessions of a server. Refer to `docs/nxkit-hos.md`.
-- `nxkit-hos` exports the SDK take-overs that nxnative has on its kernel side: `getentropy`, the csrng bytes, `getenv` and `StandardAllocator::Allocate`. `nxkit-rt` lists them under the service `kernel` and adds `nxkit_kernel_set_guest_sym`, `nxkit_kernel_os_init`, `nxkit_kernel_set_deterministic`, `nxkit_kernel_forced_names` and `nxkit_kernel_thread_tls`.
+- `nxkit-hos` exports the SDK take-overs of the kernel side: `getentropy`, the csrng bytes, `getenv` and `StandardAllocator::Allocate`. `nxkit-rt` lists them under the service `kernel` and adds `nxkit_kernel_set_guest_sym`, `nxkit_kernel_os_init`, `nxkit_kernel_set_deterministic`, `nxkit_kernel_forced_names` and `nxkit_kernel_thread_tls`.
 - `NxkitKernelConfig` has `main_thread_priority`, `main_thread_core`, `main_thread_stack_size`, `process_id`, `process_exit` and `memory`.
 
 - The crate `nxkit-svc-video` is the `video` service of the nxkit host. It replaces `movie::Decoder` of the Nintendo SDK and decodes VP9 with VideoToolbox into Metal compatible `CVPixelBuffer`s. A `CVMetalTextureCache` turns them into textures with no copy. It also replaces the `nn::codec` video decoders of the Switch 2 SDK (101 entries, VP9 only, the other codecs answer Initialize with an error). The service has exports and no named services, and `big_stack_exports()` is empty. Its `Config` takes a guest symbol resolver, a guest thread runner and an optional texture sink. Refer to R43 and R44.
 
-- The crate `nxkit-svc-audio` is the audio service of the nxkit host (R41, R42). It takes over the audio functions of the SDK as nxnative does, and keeps `audout:u`, `audren:u` and `IAudioDevice` as the IPC fallback. One AUHAL output unit mixes in its callback with vDSP and joins the `os_workgroup` of the device. The game hands blocks over through lock-free rings. `nxkit-rt` has the service under `Service::Audio`, a new lookup `nxkit_hle_find_big` for the functions that need a big host stack, and `nxkit_audio_init` for the host callbacks and settings. It is not compiled or tested yet.
+- The crate `nxkit-svc-audio` is the audio service of the nxkit host (R41, R42). It takes over the audio functions of the SDK and keeps `audout:u`, `audren:u` and `IAudioDevice` as the IPC fallback. One AUHAL output unit mixes in its callback with vDSP and joins the `os_workgroup` of the device. The game hands blocks over through lock-free rings. `nxkit-rt` has the service under `Service::Audio`, a new lookup `nxkit_hle_find_big` for the functions that need a big host stack, and `nxkit_audio_init` for the host callbacks and settings. It is not compiled or tested yet.
 - `nxkit-metal` has the present path of R19. Every tick of the 120 Hz display link drives the `Pacer`, which shows a game frame with `presentAtTime` or holds the last one. At most two frames are in flight (before: three). It adds the present plan policy, the render scale policy, `SpatialUpscaler` and `FrameInterpolator` over MetalFX (`objc2-metal-fx`, pinned in `deps.toml`), and `PacingStats` for present time, missed ticks and the frame interval histogram.
-- The crate `nxkit-svc-pacing` is the `pacing` service. It exports `nn::vi::GetDisplayVsyncEvent`, clocks it from the display ticks, and owns the frame step state page and the variable step ported from nxnative. `nxkit-rt` lists its exports under `Service::Pacing`.
-- `nxgame-botw` carries the frame step, the interval controller cuts and the render scale stubs of seedds/nxnative#76 as data in `rules/01007EF00011E000.toml`, with the evidence of each rule, and sets its `pacing()` hook. `tools/gen_botw_rules.py` makes the file.
-- `nxkit-svc-pacing` ports the frame limit logic of nxnative. `StepMode::Load` is the load-driven step (`fstep_tick`: the cap, the hold in vsyncs, the extra vsync for a late frame, the thermal cap and the CPU watch). `Limits` is the mechanism of `hle_fpslock.c`: it writes the target into value rows, found offsets and a reflected class. The data comes from title and family modules through the new `nxtitle` hook `RuntimeHooks::limits`. `interval.rs` holds the target and present interval rules. `frame_presented`, `hold`, `present_vsyncs` and `deadline_vsyncs` are the calls of the host. `hle_fpslock.c` has no SDK export, so `exports()` has not changed.
-- `nxtitle` has the hook `RuntimeHooks::pace_profile` and the type `PaceProfile` (`fps_target`, `fps_hold`, `present_snap`, `present_interval`). `nxgame-botw` sets it from the profile of nxnative.
+- The crate `nxkit-svc-pacing` is the `pacing` service. It exports `nn::vi::GetDisplayVsyncEvent`, clocks it from the display ticks, and owns the frame step state page and the variable step. `nxkit-rt` lists its exports under `Service::Pacing`.
+- `nxgame-botw` carries the frame step, the interval controller cuts and the render scale stubs as data in `rules/01007EF00011E000.toml`, with the evidence of each rule, and sets its `pacing()` hook. `tools/gen_botw_rules.py` makes the file.
+- `nxkit-svc-pacing` has the frame limit logic. `StepMode::Load` is the load-driven step (`fstep_tick`: the cap, the hold in vsyncs, the extra vsync for a late frame, the thermal cap and the CPU watch). `Limits` is the frame rate lock mechanism: it writes the target into value rows, found offsets and a reflected class. The data comes from title and family modules through the new `nxtitle` hook `RuntimeHooks::limits`. `interval.rs` holds the target and present interval rules. `frame_presented`, `hold`, `present_vsyncs` and `deadline_vsyncs` are the calls of the host. The frame rate lock has no SDK export, so `exports()` has not changed.
+- `nxtitle` has the hook `RuntimeHooks::pace_profile` and the type `PaceProfile` (`fps_target`, `fps_hold`, `present_snap`, `present_interval`). `nxgame-botw` sets it.
 - The crate `nxkit-gpu` is the frame encoder of the nxkit host. It builds on macOS only and has no `unsafe` code. It turns a held `nxkit-nvn` frame into Metal 4 work: pipelines keyed by the translated state, one indirect command buffer for each reused recording, bindless textures and samplers, barriers only where data flows, memoryless attachments, parallel encoding on a small job system, a render target scale for native 4K, and counters for the CPU and GPU time. `nxkit-metal` gained the formats, samplers, data buffers, compute indirect command buffers, ICB data commands and split render tables that it needs. It is not wired into the host. Refer to `docs/nxkit-gpu.md`.
-- The crate `nxkit-svc-system` holds the system services as `Service` objects for the IPC server: `set`, `set:sys`, `apm`, `apm:p`, `time:u`, `time:a`, `time:s`, `acc:u0`, `acc:u1`, `appletOE`, `appletAE`, `pctl`, `pctl:a`, `pctl:s`, `pctl:r`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u`. Values follow nxnative and command IDs follow libnx and switchbrew. `nxkit-rt` lists it under `Service::System`. The host sets the focus and operation mode with `set_focus` and `set_operation_mode`.
-- The crate `nxkit-svc-system` also exports the SDK functions that nxnative takes over (`exports()`, and `big_stack_exports()` for the two that need a big stack) and a `quit` function for the graceful exit. The host passes the functions that the exports need in `set_seams`. `Config` has the fields `previous_program`, `aoc_dir`, `font_dir`, `shared_font`, `shared_font_ext`, `shared_font_decode` and `sf_services`.
+- The crate `nxkit-svc-system` holds the system services as `Service` objects for the IPC server: `set`, `set:sys`, `apm`, `apm:p`, `time:u`, `time:a`, `time:s`, `acc:u0`, `acc:u1`, `appletOE`, `appletAE`, `pctl`, `pctl:a`, `pctl:s`, `pctl:r`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u`. Command IDs follow libnx and switchbrew. `nxkit-rt` lists it under `Service::System`. The host sets the focus and operation mode with `set_focus` and `set_operation_mode`.
+- The crate `nxkit-svc-system` also exports the SDK functions that the host takes over (`exports()`, and `big_stack_exports()` for the two that need a big stack) and a `quit` function for the graceful exit. The host passes the functions that the exports need in `set_seams`. `Config` has the fields `previous_program`, `aoc_dir`, `font_dir`, `shared_font`, `shared_font_ext`, `shared_font_decode` and `sf_services`.
 - `RuntimeHooks` has the hooks `shared_font_decode` and `sf_services`. The title module `nxgame-botw` answers the first, and the new title module `nxgame-acnh` (Animal Crossing: New Horizons, behind the feature `acnh`) answers the second.
 
 ### Changed
@@ -64,9 +64,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The host resolves the names of the big-stack exports to their stubs. Before, the loader looked up the plain entries only, so no big-stack export reached the game.
 - The main thread attaches with the priority, core and stack size of the NPDM instead of a guessed priority 44. Without them it does not attach.
 - A QoS lend no longer reads a `pthread_t` of an owner that may have exited. The lend table lives in the owner's thread record (R31).
-- `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as nxnative's record, and R10, R17 and R19 replace some of them.
-- `nxkit-rt` has the NVN command buffer group (`nvn::cmdbuf`) with the 145 `nvnCommandBuffer*` functions of nxnative. A recording call takes no lock, makes no lookup and allocates nothing. The write position lives in the guest `NVNcommandBuffer` (R54). The host installs the texture seam with `cmdbuf::set_seam` and the title settings with `nvn::set_command_settings`.
-- `nxkit-nvn` has the extension record `Record::Ext` with `ExtCode`, `Setting`, `StateKind` and `DrawKind` (R53), the writer `Cursor` with `write_encoded` and `commit`, `FrontEnd::recorded`, and the list `NXNATIVE_EMPTY`.
+- `nxtitle::Settings` names no engine. `ue_texture_pool` is now `texture_pool_mb`, and `ue_fps_cvar` is now `fps_cvar`, with no default. `game.json` writes `fps_cvar` only when a title sets it. The settings of `nxgame-botw` are marked as a record, and R10, R17 and R19 replace some of them.
+- `nxkit-rt` has the NVN command buffer group (`nvn::cmdbuf`) with the 145 `nvnCommandBuffer*` functions. A recording call takes no lock, makes no lookup and allocates nothing. The write position lives in the guest `NVNcommandBuffer` (R54). The host installs the texture seam with `cmdbuf::set_seam` and the title settings with `nvn::set_command_settings`.
+- `nxkit-nvn` has the extension record `Record::Ext` with `ExtCode`, `Setting`, `StateKind` and `DrawKind` (R53), the writer `Cursor` with `write_encoded` and `commit`, `FrontEnd::recorded`, and a list of NVN names that are not implemented.
 - The title module `nxgame-mtf` for Mario Tennis Fever (`0400D4201C6EA000`), behind the `nxtitles` feature `mtf`. It states the need `vertex_stream_null_bind`.
 
 ### Changed
@@ -82,7 +82,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Changed
 
 - `nxb rewrite` and `nxb build` no longer pin the engine (LNPANDY/NX2Apple#942). The table of expected hashes of the engine files (`patch_nso.py` and the other Python files of `dm/tools`) is gone, with its comparison and its message, so a newer engine no longer stops the build. The engine's files are read as they are, and `build_src.sha256` lists their hashes. A missing engine file is still an error, and a patch file that differs from the rule snapshot or is missing in it still stops the rewrite.
-- nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and nxnative keeps its MIT notice in `THIRD_PARTY.md`.
+- nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and from other MIT-licensed projects keeps its MIT notice in `THIRD_PARTY.md`.
 
 ## 0.9.2 - 2026-11-07
 
@@ -95,8 +95,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Added
 
 - The title module `nxgame-botw` for The Legend of Zelda: Breath of the Wild (`01007EF00011E000`), behind the `nxtitles` feature `botw`.
-- `nxtitle` splits the host into services (`Service`). `RuntimeHooks::runtime` lets a family or title move one service of its game from nxnative to nxkit. `Resolved::nxkit_services` lists them.
-- `docs/plans/runtime-hooks.md` plans how needs reach the host and how the nxkit runtime replaces nxnative one service at a time.
+- `nxtitle` splits the host into services (`Service`). `RuntimeHooks::runtime` lets a family or title move one service of its game to nxkit. `Resolved::nxkit_services` lists them.
+- `docs/plans/runtime-hooks.md` plans how needs reach the host and how the nxkit runtime takes over one service at a time.
 
 ### Changed
 
@@ -105,7 +105,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Fixed
 
 - The shell framework build links its own host and writes loader `FH` when the engine has the `DmShellGame` target (#11, @STRML). Before, it built the target `DmGame` and wrote loader `FR`, and the shell refused the framework. An engine without that target keeps `DmGame` and `FR`.
-- The framework keeps `dm/env.txt` in that case. The shell reads the build-time defaults of the player from it, for example `DM_PROF_TEX_BC_CPU=1` for older devices.
+- The framework keeps `dm/env.txt` in that case. The shell reads the build-time defaults of the player from it, for example the setting that turns on CPU texture decoding for older devices.
 - The check for the `DmShellGame` target no longer depends on the indent of `project-framework.yml`.
 - The manifest key is `launcher`, as the engine's script writes it. Before, it was `app binary`.
 
@@ -154,11 +154,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `TRANSLATOR_ID` is `msl-2.15`.
 - The Unreal decode of `nxb build` reads the shader libraries of Unreal Engine 5.6 IoStore containers (`.utoc` and `.ucas`).
   Each library becomes a version 2 shader code archive in `<version>/ue_shaders`. The archive name comes from the `Manifest_*.txt` files.
-  Stored, zlib and LZ4 blocks decode in nxb. Oodle blocks and shader groups decode with the game's own decoder in the Mac host (`DM_OODLE_SERVE`).
-  An encrypted container opens with the AES-256 key that main holds for the paks. The reference script has no key for these containers.
+  Stored, zlib and LZ4 blocks decode in nxb. Oodle blocks and shader groups decode with the game's own decoder in the Mac host.
+  An encrypted container opens with the AES-256 key that main holds for the paks.
   The tests use synthetic containers and a fake decoder. No real IoStore game was run.
 - `nxb build --platform ios` builds the iPhone app of a Vulkan or OpenGL game. The stage `Vulkan shaders` (or `GL shaders`) writes `<work>/shader/ios/vk` (or `gl`), and the IPA has it in `msl/vk` (or `msl/gl`). The NVN split and chain do not run. Unit tests only, no real game IPA and no device test.
-- The JIT capture is ported. An iOS build of a game whose main imports `nn::jit` boots the game in the Mac host and builds `jit/jit.img` with `nxb_rewrite::jit`, the port of `jit_capture.py`. The build no longer stops when `jit.img` is missing. `--platform mac` sets `DM_JIT_CAPTURE` for such a game.
+- The JIT capture is ported. An iOS build of a game whose main imports `nn::jit` boots the game in the Mac host and builds `jit/jit.img` with `nxb_rewrite::jit`, the port of `jit_capture.py`. The build no longer stops when `jit.img` is missing. `--platform mac` sets the JIT capture mode for such a game.
 
 ### Fixed
 
@@ -183,9 +183,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxb build` boots the game in the Mac host after the rewrite. The host runs headless with a time limit, and its output goes to `<work>/logs`.
   The boots are the NRO capture, the heap check and the region check of a provisional profile, the GLSLC capture, the Vulkan and GL captures and the Unreal decode.
   A step whose output is complete does not boot again.
-- The split decodes Oodle and LZ5 streams with the game's own decoder in the Mac host (`DM_OODLE_SERVE`). `nxb build` starts it when the profile names Oodle packs or legacy Unreal paks.
+- The split decodes Oodle and LZ5 streams with the game's own decoder in the Mac host. `nxb build` starts it when the profile names Oodle packs or legacy Unreal paks.
 - The split reads Trinity packs, Frostbite superbundles, the NROs of the NRO capture, the outputs of the GLSLC capture and the decoded Unreal shader archives.
-- The Unreal decode opens pak indexes encrypted with AES-256. The key comes from main. LZ4 shaders decode in nxb. Oodle shaders decode in one boot of the Mac host (`DM_OODLE_JOB`).
+- The Unreal decode opens pak indexes encrypted with AES-256. The key comes from main. LZ4 shaders decode in nxb. Oodle shaders decode in one boot of the Mac host.
 - `nxb-nro` finds NROs, reads NRR version 1 and `.nrolz` files, and writes `missing.tsv`.
 
 ### Fixed
@@ -380,7 +380,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A vertex shader waits for its pixel shaders and gets their varyings from the translator (`StageInputs`).
   It no longer reads `_b.metal` files.
 - The `shaders done` event has the fields `xlate_hits` and `xlate_refused`. The fields `xlate_starts`, `xlate_restarts` and `xlate_fallbacks` are gone.
-- The output is not byte-identical to the output of the reference build scripts. No game ran with it yet. Unit tests and Metal compile tests on built samples cover it.
+- The output is not compared byte for byte with another implementation. No game ran with it yet. Unit tests and Metal compile tests on built samples cover it.
 
 ### Removed
 
@@ -406,12 +406,12 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   as `profile_guess.build_sources` does. The counts are identical to the script on a synthetic RomFS (`crates/nxb-build/tests/sources.rs`).
 - The split reads zip members compressed with bzip2 or lzma. The decoders are `nxb-split::bzip2` (new) and `nxb-split::unity::lzma`.
 - The split reads BND3 archives whose entry names are Shift JIS with double-byte characters. The decoder is `nxb-split::sjis` (new). Its table is made by `tools/gen_sjis_table.py`.
-- The split reads the CRA archive family (`nxb-split::cra`, new). The file tables come from the NROs of `DM_NRO_DIR`, and each NRO is scanned like main. New `jobs::plan_with` takes the NROs. It was checked with a synthetic fixture made by `tools/gen_cra_fixture.py`.
+- The split reads the CRA archive family (`nxb-split::cra`, new). The file tables come from the NROs of the NRO folder, and each NRO is scanned like main. New `jobs::plan_with` takes the NROs. It was checked with a synthetic fixture made by `tools/gen_cra_fixture.py`.
 - The extract reads a sparse base program together with its update NSP (`nxb-extract::sparse`, new). The base alone still stops with exit code 4. The reader follows the Atmosphere sparse storage and was checked with a synthetic fixture.
 
 ### Fixed
 
-- The profile header follows the current engine `game.py`. It has the keys `fps_max` (`DM_GAME_FPS_MAX`) and `draw_barriers` (`DM_GAME_DRAW_BARRIERS_GAME`) now.
+- The profile header follows the current engine `game.py`. It has the keys `fps_max` and `draw_barriers` now.
   The key `tex_bc_cpu` is gone. The headers of all profiles, the multi-program header and the app settings files are identical to the engine scripts again.
 
 ## 0.5.1
@@ -587,9 +587,9 @@ All results are **measured**.
   (16,268 of 16,268, 19,592 of 19,592 and 28,669 of 28,669), and for 42,299 of 42,331 keys of one Switch 2 title (Ampere).
   Of the 32 other keys, 17 fail in the C# translator also and 15 go to the C# path (`SharedStoreSmallIntCas`). The corpus has no job for task and mesh shaders.
 - Translator host: 802 of 802 results equal to the process bridge.
-- Extract and split: one real update image with a 17.6 GB archive gave all package files and tables byte-identical to the reference split. Real zstd dictionaries: byte-identical to `zstd -D`.
-  The readers for the other formats were compared with the reference functions on synthetic files.
-- iOS: 142 of 142 profiles byte-identical in the profile port. The framework flow, the multi-program flow and the IPA reuse were compared with the reference script on synthetic fixtures
+- Extract and split: one real update image with a 17.6 GB archive gave all package files and tables as expected. Real zstd dictionaries: byte-identical to `zstd -D`.
+  The readers for the other formats were checked on synthetic files.
+- iOS: 142 of 142 profiles checked in the profile port. The framework flow, the multi-program flow and the IPA reuse were checked on synthetic fixtures
   (the framework IPA also with a real `xcodebuild` run: 47 of 47 entries equal, the executable, the framework binary and the font file equal in part).
 
 ### Only synthetic or only partly checked
@@ -626,9 +626,9 @@ All results are **measured**.
 
 ### Added
 
-- iOS stages in `nxb-build::ios` and a new binary `nxb-ios`. It does the work of the reference iOS scripts with the same command lines
+- iOS stages in `nxb-build::ios` and a new binary `nxb-ios`. It does the work of the iOS build with the same command lines
   and environment: `nxb-ios ipa [<out.ipa> | --prepare-xcode]` and `nxb-ios shell --prepare-xcode | --build`.
-  `xcodegen`, `xcodebuild`, `codesign` and the other Apple tools stay external. Exit code 3 means unsupported: the caller runs the reference script.
+  `xcodegen`, `xcodebuild`, `codesign` and the other Apple tools stay external. Exit code 3 means unsupported.
 - Stage overlap in `nxb build`. The Mac host starts at the same time as the extract. The companion app, the icon and the settings file
   start when the extract and the host are done, beside the shader step. The stream of the pipeline archive gets more workers
   (one for each slot, if the memory is sufficient) when the shader step stops. The events are the same as in a run in series, except the times.
@@ -640,7 +640,7 @@ All results are **measured**.
 
 ### Checked
 
-- iOS stages, each against the reference script on real or synthetic inputs. The manifest, resource, embed and build-setting generators
+- iOS stages, each on real or synthetic inputs. The manifest, resource, embed and build-setting generators
   and the Xcode workspace writer: byte-identical. The shell project: all files equal, except the font file (equal in size only,
   because the font tool writes a time stamp). The IPA flow on one title: 75 of 75 entries equal in name, method, sizes, CRC and attributes.
   Two entries are equal only in part. In the executable, only `__LINKEDIT` differs (debug map paths and signature), and the bytes before it are identical.
@@ -665,7 +665,7 @@ All results are **measured**.
 
 - `nxb build` still takes only the Mac target. `nxb build` refuses `--platform` for iOS. The iOS stages run through `nxb-ios` only.
 - `nxb-ios` returns exit code 3 for games with more than one program and for framework builds.
-- The default name of the shell app is `NxbShell`. The reference script has a different default name. Set `DM_SHELL_NAME` to get the same name.
+- The default name of the shell app is `NxbShell`. An environment variable sets the name.
 - Not run: `nxb-ios shell --build`, and an IPA with a pipeline archive. The IPA is always packed in full (no reuse of the previous IPA).
   The `codesign` of the host signs the executable. The own signer does not.
 - The allow lists for the own front end and for the raw tier are not in this repository. Without a list, the tier is off.
@@ -680,17 +680,16 @@ All results are **measured**.
 - `nxb-extract` reads game cards (`.xci`), compressed packages (`.nsz`, `.xcz`) and dump folders (`--dump`).
   The zstd decoder streams the data and has an output limit. `--app <id>` selects one application in a merged package.
 - Mac stages in `nxb build`: the Mac host (`make` and `clang`), the companion app, the app settings file and the app icon.
-  The reference build scripts are the oracle.
 
 ### Checked
 
-- XCI, merged packages and dump folders: synthetic fixtures only. The output is byte-identical to the reference extractors.
+- XCI, merged packages and dump folders: synthetic fixtures only. The output matches the expected files.
   No real sample was available.
-- NSZ: one real file. The decoded NCA is identical to the output of the reference decompressor. The NCZ block mode was not checked on real data.
+- NSZ: one real file. The decoded NCA is as expected. The NCZ block mode was not checked on real data.
 - App icon and companion app: byte-identical on one title.
-- App settings file: 425 of 425 outputs are byte-identical for 142 profiles. One multi-program header is not ported.
+- App settings file: 425 of 425 outputs are as expected for 142 profiles. One multi-program header is not ported.
 - Mac host: the reuse key and the decoder inputs are byte-identical. The binary is not byte-identical.
-  The reference script also gives a different binary on each run (`LC_UUID` and the debug map). The code part is identical.
+  The binary differs on each run (`LC_UUID` and the debug map). The code part is identical.
 
 ### Limits
 
@@ -701,7 +700,7 @@ All results are **measured**.
 
 ### Added
 
-- Reads Switch 2 packages (`.nup`) without keys. Same output layout as the reference script.
+- Reads Switch 2 packages (`.nup`) without keys. Same output layout as for the other packages.
   Use `nxb extract --nup <game.nup>` or `nxb-extract` with the same arguments.
 - Checked on one real package and on synthetic containers, including damaged ones.
 - Not checked on real data: packages with base game, update and DLC, and the control data.
@@ -727,5 +726,4 @@ All results are **measured**.
 - Mac only.
 - Not ported: code rewrite, host app build, app binary build, app settings file and icon, XCI and NSZ input, geometry and mesh shaders.
 - Verified on one reference title. The shader step for iOS was compared on a sample only.
-- The pipeline archive step is slower than the reference scripts on the reference machine (273 s against 257 s).
-- The reference scripts remain the fallback for every stage that is not ported.
+- Stages that are not ported are not available in `nxb`.

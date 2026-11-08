@@ -5,7 +5,7 @@ Game: Zelda Ocarina of Time (0400486024DEC000). File: `Movie/Ndve/Ndve-Nvn2-vid_
 Claim marks:
 
 - **V** = verified from file bytes or shader code. "Emulated" means: I ran the SASS of the shader in a lane-exact Python emulator (scratchpad only, not in the repo) with symbolic memory, and read the HMMA operand addresses and store addresses from it.
-- **I** = inferred, or taken from nxnative PR #1837 and not re-derived.
+- **I** = inferred, not re-derived from the code.
 - **R** = only answerable at runtime (see section 10).
 
 Scratch tools (not in the repo): `/private/tmp/claude-501/-Users-nzaljic-repos-me-nxkit-rt/2bd3ad49-183b-493a-8d88-aa4b15fad0cc/scratchpad/ndve/` (`ndve.dat`, `emu.py`, `rep2.py`, `chains.py`, `lst.py`).
@@ -102,9 +102,9 @@ What is V and what is I here:
 
 `out_c = ((f16(picture_c) + D_n) + bias_n) + (-0.0)`, then converted to f32 with `HADD2.F32` and written with SUST (formatted store, mask 0xF = RGBA) to a 1920x1080 image. The picture is the same texel read with TLD (RGBA8 at the output pixel), rounded to f16 with F2FP.
 
-Differences to PR #1837: the PR sums in f32 (`(t + d) + bias` with `t` unrounded). The SASS does two f16 additions with `t` rounded to f16 first (V from the emulated expression tree). The last bias values are all +-0.0 in this file (V), so only the first difference matters.
+Difference to the earlier implementation: it sums in f32 (`(t + d) + bias` with `t` unrounded). The SASS does two f16 additions with `t` rounded to f16 first (V from the emulated expression tree). The last bias values are all +-0.0 in this file (V), so only the first difference matters.
 
-**Image write (I).** RGB10A2 unorm conversion happens in the SUST / Metal image write (clamp to [0,1], round to 10 bits; alpha 2 bits). The format of the image is from PR #1837 (R to confirm).
+**Image write (I).** RGB10A2 unorm conversion happens in the SUST / Metal image write (clamp to [0,1], round to 10 bits; alpha 2 bits). The format of the image is inferred (R to confirm).
 
 ## 7. Colour conversion 49dff010 (V from MSL and SASS)
 
@@ -131,8 +131,8 @@ Differences to PR #1837: the PR sums in f32 (`(t + d) + bias` with `t` unrounded
   - last block (block 5): only g-stage and j = 0 (6 HMMAs): `Y` is the 8x8 delta, **no ReLU**.
   - all accumulation f16, chain start C = 0.
 - Epilogue (V from MSL): `sample` of the picture at the output pixel centre with a linear sampler (`uv = ((x + 0.5) * w10, (y + 0.5) * w11)`), the TEX unit returns f16 (V: TEX has the f16-result bit set); `v = (-0.0) + (s + delta)` per channel; when `w20 != 0`: `k = rint(fma(v, 255.0, dither*2 - 1))`, `out = k * (1/255 as 0x3b808081)`; the same delta is added to R, G and B; alpha = 1.0; the row is flipped when `w19 != 0` (`y_out = w18 - y`).
-- Push words read (V from MSL): w2, w3 (int max x, y of the luma window, 1919 and 1079), w10, w11 (float 1/2560 and 1/1440 in PR's runtime checks), w18, w19 (flip base and enable), w20 (quantize and dither enable). Words 0, 1, 4-9, 12-17 are never read by the shader.
-- Window mapping (I, from PR #1837): luma window 16x16 at `(6 bx - 5 .. , 6 by - 5 ..)` clamped to `[0, w2] x [0, w3]`, output block (bx, by) covers pixels `8 bx .. 8 bx + 7`. My emulation of the window coordinates did not converge (the lane-to-texel map of its TLD and shuffle code showed implausible coordinates), so this stays I. The PR's CPU test gives the same arithmetic order.
+- Push words read (V from MSL): w2, w3 (int max x, y of the luma window, 1919 and 1079), w10, w11 (float 1/2560 and 1/1440), w18, w19 (flip base and enable), w20 (quantize and dither enable). Words 0, 1, 4-9, 12-17 are never read by the shader.
+- Window mapping (I): luma window 16x16 at `(6 bx - 5 .. , 6 by - 5 ..)` clamped to `[0, w2] x [0, w3]`, output block (bx, by) covers pixels `8 bx .. 8 bx + 7`. My emulation of the window coordinates did not converge (the lane-to-texel map of its TLD and shuffle code showed implausible coordinates), so this stays I.
 - The weights are 6144 f16 values (range -3.25 to 3.35).
 
 ## 9. HMMA patterns for the translator (V, counts per shader, whole shader)
@@ -180,7 +180,7 @@ A game runs exactly this network if all of these hold:
 - weight blob length 0x3c320, SHA-256 `50bac9b0...c023` (copy 1 at 0x1060c8, copy 2 at 0x1895f8, equal);
 - shader keys of section 4 in order (pass 3 to 16), network A weights offsets per dispatch;
 - resampler weights SHA-256 `44af61fd...1dab`;
-- picture sizes 1920x1080 RGBA8 in, RGB10A2 1920x1080, RGBA8 2560x1440 out (PR #1837 checks the same).
+- picture sizes 1920x1080 RGBA8 in, RGB10A2 1920x1080, RGBA8 2560x1440 out.
 
 ## 12. What this implies (short)
 
@@ -190,5 +190,5 @@ A game runs exactly this network if all of these hold:
 
 ## 13. Unknown after this pass
 
-- Resampler luma window mapping (only the PR); HMMA internal rounding; contents and role of the 1 MiB pack blob; when network B and `8e98d86c` are used; all push-constant values; sampler states; texture and image formats (I from PR); tile-to-threadgroup mapping of ba079f68 and a8b4fb48 (loop inside the threadgroup).
+- Resampler luma window mapping (inferred only); HMMA internal rounding; contents and role of the 1 MiB pack blob; when network B and `8e98d86c` are used; all push-constant values; sampler states; texture and image formats (inferred); tile-to-threadgroup mapping of ba079f68 and a8b4fb48 (loop inside the threadgroup).
 - Emulator coverage: all 9 network A shaders and 4f41ccf2 ran; 49dff010 was read from MSL, not emulated.

@@ -155,7 +155,7 @@ Every key is required. Numbers are JSON numbers or strings with a decimal or `0x
 
 | key | meaning |
 |---|---|
-| `reserve` | The total that the game gets, as nxnative counts it. The heap is `reserve - alias - stack - 0x10000000`. The host derives it, and the build writes no `heap` key (checked in `dm/host/hle_svc.c` of nxnative on 2026-11-07). |
+| `reserve` | The total that the game gets, as the Horizon memory profile counts it. The heap is `reserve - alias - stack - 0x10000000`. The host derives it, and the build writes no `heap` key (checked on 2026-11-07). |
 | `alias` | Size of the alias region. The host does not widen it. |
 | `stack` | Size of the stack region. `MapMemory` takes its destination from it. |
 | `app_pool` | The application memory pool. `SetHeapSize` and `MapPhysicalMemory` fail beyond it. `GetInfo` reports it as total memory. |
@@ -242,7 +242,7 @@ At most two frames are in flight on the GPU. The backend presents at the target 
 
 ## Start of the game
 
-The main guest thread does the work of `rtld` and `nn::init::Start` (R57). The sequence follows `dm/host/main.c` of nxnative (checked 2026-11-08). The thread calls each guest function with `gate::enter` on the top of the main stack. The call returns when the function returns. Each step prints `>>> <name>` on stderr.
+The main guest thread does the work of `rtld` and `nn::init::Start` (R57). The sequence was checked on 2026-11-08. The thread calls each guest function with `gate::enter` on the top of the main stack. The call returns when the function returns. Each step prints `>>> <name>` on stderr.
 
 | Step | Call |
 | --- | --- |

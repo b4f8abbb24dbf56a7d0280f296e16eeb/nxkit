@@ -8,7 +8,7 @@
 
 - Read the help text, the manual pages and the symbol and string tables of the toolchain binaries (toolchain 32023.922).
 - Ran `metal-tt` with `-verbose` and `-time-report` on 40 bases.
-- Read the logs of the archive stage of the reference build.
+- Read the logs of the archive stage of an earlier build.
 - Compatibility survey only. The study copied no code.
 
 ## Result
@@ -45,9 +45,9 @@ With `-j 1` and `-j 4`, the output size was different (972,400 against 1,069,488
 and the ISA are private and change with each generation. The OS accepts only archives from its own compiler build.
 On a miss, the device uses the same code generator. Thus an own generator saves no time.
 
-**Subsequent measurements.** The first archive stage of `nxkit` ran `metal-tt` for each batch. It took 273 s against 257 s
-for the reference build scripts (measured, with load). Then each batch ran `applegpu-nt -j 1` and `air-pack`, with one batch
-for each core. This took 207 s cold and 958 to 1,076 CPU seconds (against 1,974). The loader probe found all 18,300 bases (measured, load 7 to 33).
+**Subsequent measurements.** The first archive stage of `nxkit` ran `metal-tt` for each batch. It took 273 s
+(measured, with load). Then each batch ran `applegpu-nt -j 1` and `air-pack`, with one batch
+for each core. This took 207 s cold and 958 to 1,076 CPU seconds (1,974 with `metal-tt` for each batch). The loader probe found all 18,300 bases (measured, load 7 to 33).
 
 ## Decision
 
