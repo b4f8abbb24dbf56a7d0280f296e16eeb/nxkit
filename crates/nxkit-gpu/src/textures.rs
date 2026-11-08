@@ -286,7 +286,10 @@ impl TextureStore {
                     self.entries.get(&id).map(|r| r.generation)
                 );
             }
-            let tex = Texture::new(&self.ctx, desc).map_err(|e| {
+            let t_create = std::time::Instant::now();
+            let made = Texture::new(&self.ctx, desc);
+            stats.texture_create_ns += u64::try_from(t_create.elapsed().as_nanos()).unwrap_or(0);
+            let tex = made.map_err(|e| {
                 let what = format_args!("new {id:?} {desc:?}: {e:?}");
                 nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::TextureCreate, what);
                 crate::tex_skip(what)

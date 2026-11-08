@@ -772,7 +772,9 @@ impl Gpu {
                 .collect();
             jobs::split(&weights, self.threads * CHUNKS_PER_THREAD)
         };
+        let t_ring = Instant::now();
         let mut batch = self.ring.begin(1 + ends.len())?;
+        PHASES.with(|p| p.borrow_mut()[0] = nanos(t_ring, Instant::now()));
         let scratch = batch.scratch();
         let keep: Arc<Keep> = {
             let (a, b) = self.bindless.pool_buffers();
@@ -799,7 +801,9 @@ impl Gpu {
                 continue;
             }
             let wait = self.copyback.upload_waits(rec);
+            let t_up = Instant::now();
             let r = self.transfer.upload(first, &scratch, &self.guest, rec, res, wait);
+            stats.upload_ns += nanos(t_up, Instant::now());
             static UPLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             if crate::diag("upload")
                 && crate::diag::tex_filtered()
@@ -838,13 +842,14 @@ impl Gpu {
         // look the addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
         // every draw by all chunk threads.
         let mut preloaded: FastMap<usize, u64> = FastMap::default();
-        for u in detail
+        let ubo_snaps = detail
             .draws
             .iter()
             .flat_map(|d| d.ubos.iter())
             .chain(detail.dispatches.iter().flat_map(|d| d.ubos.iter()))
-        {
-            if let Some(bytes) = &u.snapshot {
+            .filter_map(|u| u.snapshot.as_ref());
+        for bytes in ubo_snaps {
+            {
                 let key = bytes.as_ptr() as usize;
                 if !preloaded.contains_key(&key)
                     && let Ok(a) = scratch.push(bytes)
@@ -894,17 +899,34 @@ impl Gpu {
         let items: Vec<(&mut CommandBuffer, Range<usize>)> = rest.iter_mut().zip(ranges).collect();
         let t_chunks = Instant::now();
         let results = jobs::run_all(self.threads, items, |(cb, range)| {
-            run_chunk(&sh, cb, &scratch, &keep, range)
+            let (start, cpu0) = (Instant::now(), nxkit_metal::thread::cpu_time_ns());
+            let passes = range.len();
+            let r = run_chunk(&sh, cb, &scratch, &keep, range);
+            let timing = ChunkTiming {
+                delay_ns: nanos(t_chunks, start),
+                wall_ns: nanos(start, Instant::now()),
+                cpu_ns: nxkit_metal::thread::cpu_time_ns().saturating_sub(cpu0),
+                passes,
+            };
+            (r, timing)
         });
         let chunks_ns = nanos(t_chunks, Instant::now());
         let mut copied_back = Vec::new();
-        for (s, copied) in results {
+        let mut timings = Vec::with_capacity(results.len());
+        for ((s, copied), timing) in results {
             stats.add(&s);
             copied_back.extend(copied);
+            timings.push(timing);
         }
+        CHUNKS.with(|c| *c.borrow_mut() = timings);
         let (mirrored, mirrored_ranges) = match rest.last_mut() {
             Some(cb) if !dirty.is_empty() => {
-                self.copy_back_written(cb, &scratch, view, &textures, &dirty, &copied_back, &mut stats)
+                {
+                    let t_cb = Instant::now();
+                    let r = self.copy_back_written(cb, &scratch, view, &textures, &dirty, &copied_back, &mut stats);
+                    PHASES.with(|p| p.borrow_mut()[1] = nanos(t_cb, Instant::now()));
+                    r
+                }
             }
             _ => Default::default(),
         };
@@ -918,8 +940,15 @@ impl Gpu {
         hitch_diag(&stats, detail.draws.len());
 
         // ICBs and argument buffers made during the encode join the residency set before the commit.
+        let t_commit = Instant::now();
         self.ctx.commit_residency();
+        let t_submit = Instant::now();
         let submitted = batch.submit()?;
+        PHASES.with(|p| {
+            let mut p = p.borrow_mut();
+            p[2] = nanos(t_commit, t_submit);
+            p[3] = nanos(t_submit, Instant::now());
+        });
         let number = submitted.number();
         self.older = self.last.replace(submitted);
         self.copyback.submitted(number, &mirrored_ranges);
@@ -1005,10 +1034,36 @@ fn hitch_diag(s: &EncodeStats, draws: usize) {
         return;
     }
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+    let phases = PHASES.with(|p| *p.borrow());
+    let chunks = CHUNKS.with(|c| {
+        c.borrow()
+            .iter()
+            .map(|t| {
+                format!(
+                    "{}p +{:.1} {:.1}/{:.1}",
+                    t.passes,
+                    t.delay_ns as f64 / 1e6,
+                    t.wall_ns as f64 / 1e6,
+                    t.cpu_ns as f64 / 1e6
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    });
+    if s.chunks_ns > 5_000_000 {
+        eprintln!("DIAG hitch chunks (passes +start wall/cpu ms): {chunks}");
+    }
     eprintln!(
-        "DIAG hitch t {ms} encode {:.2} ms chunks {:.2} ms pipelines {} textures {} uploads {} copybacks {} passes {}+{} draws {draws}",
+        "DIAG hitch t {ms} encode {:.2} ms chunks {:.2} ms create {:.2} ms upload {:.2} ms resolve {:.2} ms ring {:.2} ms copyback {:.2} ms (last commit {:.2} submit {:.2}) pipelines {} textures {} uploads {} copybacks {} passes {}+{} draws {draws}",
         s.encode_ns as f64 / 1e6,
         s.chunks_ns as f64 / 1e6,
+        s.texture_create_ns as f64 / 1e6,
+        s.upload_ns as f64 / 1e6,
+        s.resolve_ns as f64 / 1e6,
+        phases[0] as f64 / 1e6,
+        phases[1] as f64 / 1e6,
+        phases[2] as f64 / 1e6,
+        phases[3] as f64 / 1e6,
         s.pipeline_builds,
         s.textures_created,
         s.uploads,
@@ -1016,4 +1071,24 @@ fn hitch_diag(s: &EncodeStats, draws: usize) {
         s.render_passes,
         s.compute_passes,
     );
+}
+
+thread_local! {
+    /// The time of the phases of the last encode on this thread, for `NXKIT_DIAG=hitch`: the wait for a free batch, the
+    /// copy-back, the residency commit and the submit.
+    static PHASES: std::cell::RefCell<[u64; 4]> = const { std::cell::RefCell::new([0; 4]) };
+}
+
+/// When a chunk of the encode started, how long it ran on the wall clock and on its thread's CPU clock.
+#[derive(Clone, Copy, Default)]
+struct ChunkTiming {
+    delay_ns: u64,
+    wall_ns: u64,
+    cpu_ns: u64,
+    passes: usize,
+}
+
+thread_local! {
+    /// The chunks of the last encode on this thread, for `NXKIT_DIAG=hitch`.
+    static CHUNKS: std::cell::RefCell<Vec<ChunkTiming>> = const { std::cell::RefCell::new(Vec::new()) };
 }

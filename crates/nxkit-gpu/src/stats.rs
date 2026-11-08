@@ -116,6 +116,10 @@ pub struct EncodeStats {
     pub barrier_ns: u64,
     /// Wall-clock nanoseconds of the chunk encoding, all threads together.
     pub chunks_ns: u64,
+    /// Nanoseconds spent making Metal textures.
+    pub texture_create_ns: u64,
+    /// Nanoseconds spent encoding uploads of guest data into textures.
+    pub upload_ns: u64,
 }
 
 impl EncodeStats {
@@ -157,6 +161,8 @@ impl EncodeStats {
         self.fit_ns += o.fit_ns;
         self.barrier_ns += o.barrier_ns;
         self.chunks_ns += o.chunks_ns;
+        self.texture_create_ns += o.texture_create_ns;
+        self.upload_ns += o.upload_ns;
     }
 }
 
