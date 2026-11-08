@@ -775,6 +775,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
                 task: None,
                 mesh: None,
             },
+            push: None,
             blend: Default::default(),
             write_masks: [15; 8],
             depth_stencil: Default::default(),

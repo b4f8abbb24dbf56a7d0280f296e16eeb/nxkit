@@ -93,6 +93,8 @@ pub(crate) struct Shared<'a> {
     pub(crate) uploaded: &'a Mutex<FastMap<usize, u64>>,
     /// The snapshots that were uploaded before the chunks started. A lookup needs no lock.
     pub(crate) preloaded: &'a FastMap<usize, u64>,
+    /// The run of dispatches that a native plan replaces in this frame, when there is one.
+    pub(crate) native: Option<&'a crate::native::Prepared>,
 }
 
 impl Shared<'_> {

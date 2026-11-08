@@ -24,12 +24,21 @@ pub fn packed_len(taps: usize, cin: usize, cout: usize) -> usize {
 /// # Errors
 ///
 /// When `cin` or `cout` is not a multiple of 8, or `weights` is not exactly `taps * cin * cout * 2` bytes.
-pub fn pack_weights(weights: &[u8], taps: usize, cin: usize, cout: usize) -> Result<Vec<u8>, String> {
+pub fn pack_weights(
+    weights: &[u8],
+    taps: usize,
+    cin: usize,
+    cout: usize,
+) -> Result<Vec<u8>, String> {
     if !cin.is_multiple_of(8) || !cout.is_multiple_of(8) || taps == 0 || cin == 0 || cout == 0 {
         return Err(format!("channels {cin} -> {cout} are not multiples of 8"));
     }
     if weights.len() != taps * cin * cout * 2 {
-        return Err(format!("{} weight bytes, expected {}", weights.len(), taps * cin * cout * 2));
+        return Err(format!(
+            "{} weight bytes, expected {}",
+            weights.len(),
+            taps * cin * cout * 2
+        ));
     }
     let (k8s, n8s) = (cin / 8, cout / 8);
     let mut out = vec![0u8; weights.len()];
@@ -76,7 +85,13 @@ pub fn pack_bias(bias: &[u8], cout: usize) -> Result<Vec<u8>, String> {
 /// # Errors
 ///
 /// As [`pack_weights`] and [`pack_bias`].
-pub fn pack_layer(weights: &[u8], bias: &[u8], taps: usize, cin: usize, cout: usize) -> Result<Vec<u8>, String> {
+pub fn pack_layer(
+    weights: &[u8],
+    bias: &[u8],
+    taps: usize,
+    cin: usize,
+    cout: usize,
+) -> Result<Vec<u8>, String> {
     let mut out = pack_weights(weights, taps, cin, cout)?;
     out.extend_from_slice(&pack_bias(bias, cout)?);
     debug_assert_eq!(out.len(), packed_len(taps, cin, cout));
@@ -89,7 +104,9 @@ mod tests {
 
     /// Element `i` of a fake tensor as the two bytes of the half `i`.
     fn counting(n: usize) -> Vec<u8> {
-        (0..n).flat_map(|i| u16::try_from(i).unwrap_or(0).to_le_bytes()).collect()
+        (0..n)
+            .flat_map(|i| u16::try_from(i).unwrap_or(0).to_le_bytes())
+            .collect()
     }
     fn half_at(bytes: &[u8], i: usize) -> u16 {
         u16::from_le_bytes([bytes[2 * i], bytes[2 * i + 1]])
@@ -110,7 +127,11 @@ mod tests {
                         for c in 0..8 {
                             let got = half_at(&p, tile * 64 + r * 8 + c);
                             let want = (tap * cin + k8 * 8 + r) * cout + n8 * 8 + c;
-                            assert_eq!(usize::from(got), want, "tap {tap} k8 {k8} n8 {n8} r {r} c {c}");
+                            assert_eq!(
+                                usize::from(got),
+                                want,
+                                "tap {tap} k8 {k8} n8 {n8} r {r} c {c}"
+                            );
                         }
                     }
                 }

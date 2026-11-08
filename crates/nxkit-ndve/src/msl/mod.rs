@@ -25,7 +25,17 @@ mod tests {
     #[test]
     fn source_compiles() {
         let child = Command::new("xcrun")
-            .args(["-sdk", "macosx", "metal", "-c", "-x", "metal", "-", "-o", "/dev/null"])
+            .args([
+                "-sdk",
+                "macosx",
+                "metal",
+                "-c",
+                "-x",
+                "metal",
+                "-",
+                "-o",
+                "/dev/null",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -42,7 +52,9 @@ mod tests {
             return;
         };
         let err = String::from_utf8_lossy(&out.stderr);
-        if !out.status.success() && (err.contains("unable to find utility") || err.contains("cannot execute")) {
+        if !out.status.success()
+            && (err.contains("unable to find utility") || err.contains("cannot execute"))
+        {
             eprintln!("skipped: no Metal toolchain: {err}");
             return;
         }

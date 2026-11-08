@@ -74,18 +74,150 @@ const T32X4: Geometry = Geometry::Tiles { tw: 32, th: 4 };
 const T16X4: Geometry = Geometry::Tiles { tw: 16, th: 4 };
 
 const LAYERS: [Layer; 12] = [
-    Layer { kernel: "ndve_l01", label: "ndve.w01", kind: Kind::First, cin: 16, cout: 16, in_wh: (960, 540), out_wh: (960, 540), w_off: 0x0, b_off: 0x1200, geo: T32X4 },
-    Layer { kernel: "ndve_l02", label: "ndve.w02", kind: Kind::Conv3, cin: 16, cout: 16, in_wh: (960, 540), out_wh: (960, 540), w_off: 0x1300, b_off: 0x2500, geo: T32X4 },
-    Layer { kernel: "ndve_l03", label: "ndve.w03", kind: Kind::Down, cin: 16, cout: 32, in_wh: (960, 540), out_wh: (480, 270), w_off: 0x2600, b_off: 0x3600, geo: Geometry::Tasks { mt: 2 } },
-    Layer { kernel: "ndve_l04", label: "ndve.w04", kind: Kind::Conv3, cin: 32, cout: 32, in_wh: (480, 270), out_wh: (480, 270), w_off: 0x3700, b_off: 0x7f00, geo: T32X4 },
-    Layer { kernel: "ndve_l05", label: "ndve.w05", kind: Kind::Down, cin: 32, cout: 64, in_wh: (480, 270), out_wh: (240, 135), w_off: 0x8000, b_off: 0xc000, geo: Geometry::Tasks { mt: 2 } },
-    Layer { kernel: "ndve_l06", label: "ndve.w06", kind: Kind::Conv3, cin: 64, cout: 64, in_wh: (240, 135), out_wh: (240, 135), w_off: 0xc100, b_off: 0x1e100, geo: T16X4 },
-    Layer { kernel: "ndve_l07", label: "ndve.w07", kind: Kind::Conv3, cin: 64, cout: 64, in_wh: (240, 135), out_wh: (240, 135), w_off: 0x1e200, b_off: 0x30200, geo: T16X4 },
-    Layer { kernel: "ndve_l08", label: "ndve.w08", kind: Kind::Up, cin: 64, cout: 32, in_wh: (240, 135), out_wh: (480, 270), w_off: 0x30300, b_off: 0x34300, geo: Geometry::Tasks { mt: 2 } },
-    Layer { kernel: "ndve_l09", label: "ndve.w09", kind: Kind::Conv3, cin: 32, cout: 32, in_wh: (480, 270), out_wh: (480, 270), w_off: 0x34400, b_off: 0x38c00, geo: T32X4 },
-    Layer { kernel: "ndve_l10", label: "ndve.w10", kind: Kind::Up, cin: 32, cout: 16, in_wh: (480, 270), out_wh: (960, 540), w_off: 0x38d00, b_off: 0x39d00, geo: Geometry::Tasks { mt: 4 } },
-    Layer { kernel: "ndve_l11", label: "ndve.w11", kind: Kind::Conv3, cin: 16, cout: 16, in_wh: (960, 540), out_wh: (960, 540), w_off: 0x39e00, b_off: 0x3b000, geo: T32X4 },
-    Layer { kernel: "ndve_l12", label: "ndve.w12", kind: Kind::Last, cin: 16, cout: 16, in_wh: (960, 540), out_wh: (960, 540), w_off: 0x3b100, b_off: 0x3c300, geo: T32X4 },
+    Layer {
+        kernel: "ndve_l01",
+        label: "ndve.w01",
+        kind: Kind::First,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x0,
+        b_off: 0x1200,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l02",
+        label: "ndve.w02",
+        kind: Kind::Conv3,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x1300,
+        b_off: 0x2500,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l03",
+        label: "ndve.w03",
+        kind: Kind::Down,
+        cin: 16,
+        cout: 32,
+        in_wh: (960, 540),
+        out_wh: (480, 270),
+        w_off: 0x2600,
+        b_off: 0x3600,
+        geo: Geometry::Tasks { mt: 2 },
+    },
+    Layer {
+        kernel: "ndve_l04",
+        label: "ndve.w04",
+        kind: Kind::Conv3,
+        cin: 32,
+        cout: 32,
+        in_wh: (480, 270),
+        out_wh: (480, 270),
+        w_off: 0x3700,
+        b_off: 0x7f00,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l05",
+        label: "ndve.w05",
+        kind: Kind::Down,
+        cin: 32,
+        cout: 64,
+        in_wh: (480, 270),
+        out_wh: (240, 135),
+        w_off: 0x8000,
+        b_off: 0xc000,
+        geo: Geometry::Tasks { mt: 2 },
+    },
+    Layer {
+        kernel: "ndve_l06",
+        label: "ndve.w06",
+        kind: Kind::Conv3,
+        cin: 64,
+        cout: 64,
+        in_wh: (240, 135),
+        out_wh: (240, 135),
+        w_off: 0xc100,
+        b_off: 0x1e100,
+        geo: T16X4,
+    },
+    Layer {
+        kernel: "ndve_l07",
+        label: "ndve.w07",
+        kind: Kind::Conv3,
+        cin: 64,
+        cout: 64,
+        in_wh: (240, 135),
+        out_wh: (240, 135),
+        w_off: 0x1e200,
+        b_off: 0x30200,
+        geo: T16X4,
+    },
+    Layer {
+        kernel: "ndve_l08",
+        label: "ndve.w08",
+        kind: Kind::Up,
+        cin: 64,
+        cout: 32,
+        in_wh: (240, 135),
+        out_wh: (480, 270),
+        w_off: 0x30300,
+        b_off: 0x34300,
+        geo: Geometry::Tasks { mt: 2 },
+    },
+    Layer {
+        kernel: "ndve_l09",
+        label: "ndve.w09",
+        kind: Kind::Conv3,
+        cin: 32,
+        cout: 32,
+        in_wh: (480, 270),
+        out_wh: (480, 270),
+        w_off: 0x34400,
+        b_off: 0x38c00,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l10",
+        label: "ndve.w10",
+        kind: Kind::Up,
+        cin: 32,
+        cout: 16,
+        in_wh: (480, 270),
+        out_wh: (960, 540),
+        w_off: 0x38d00,
+        b_off: 0x39d00,
+        geo: Geometry::Tasks { mt: 4 },
+    },
+    Layer {
+        kernel: "ndve_l11",
+        label: "ndve.w11",
+        kind: Kind::Conv3,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x39e00,
+        b_off: 0x3b000,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l12",
+        label: "ndve.w12",
+        kind: Kind::Last,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x3b100,
+        b_off: 0x3c300,
+        geo: T32X4,
+    },
 ];
 
 impl Layer {
@@ -117,7 +249,11 @@ impl Layer {
             Geometry::Tiles { tw, th } => [ceil(self.out_wh.0, tw), ceil(self.out_wh.1, th), 1],
             Geometry::Tasks { mt } => {
                 // tasks are over the output (down) or the input (up) pixels
-                let (w, h) = if self.kind == Kind::Up { self.in_wh } else { self.out_wh };
+                let (w, h) = if self.kind == Kind::Up {
+                    self.in_wh
+                } else {
+                    self.out_wh
+                };
                 [ceil(w / (8 * mt) * h, 4), 1, 1]
             }
         }
@@ -136,10 +272,18 @@ const B_LUMA: usize = 19;
 const B_RS_W: usize = 20;
 
 fn buf(index: u32, source: usize, writes: bool) -> Binding {
-    Binding { index, source: Source::Buffer(source), writes }
+    Binding {
+        index,
+        source: Source::Buffer(source),
+        writes,
+    }
 }
 fn game(index: u32, resource: GameResource, writes: bool) -> Binding {
-    Binding { index, source: Source::Game(resource), writes }
+    Binding {
+        index,
+        source: Source::Game(resource),
+        writes,
+    }
 }
 
 /// The plan for the network of the weight blob `weights` (0x3c320 bytes) and the resampler's weights (0x3000 bytes).
@@ -154,21 +298,38 @@ fn game(index: u32, resource: GameResource, writes: bool) -> Binding {
 /// When a slice has the wrong length or a layer's weights cannot be packed.
 pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
     if weights.len() != BLOB_BYTES {
-        return Err(format!("the weight blob has {} bytes, expected {BLOB_BYTES}", weights.len()));
+        return Err(format!(
+            "the weight blob has {} bytes, expected {BLOB_BYTES}",
+            weights.len()
+        ));
     }
     if resampler.len() != RESAMPLER_BYTES {
-        return Err(format!("the resampler weights have {} bytes, expected {RESAMPLER_BYTES}", resampler.len()));
+        return Err(format!(
+            "the resampler weights have {} bytes, expected {RESAMPLER_BYTES}",
+            resampler.len()
+        ));
     }
     let mut buffers = Vec::with_capacity(21);
     for l in &LAYERS {
         let w = weights
             .get(l.w_off..l.w_off + l.weight_bytes())
             .ok_or_else(|| format!("{}: weights outside the blob", l.label))?;
-        let b = weights.get(l.b_off..).ok_or_else(|| format!("{}: bias outside the blob", l.label))?;
-        let packed = pack_layer(w, b, l.taps(), l.cin, l.cout).map_err(|e| format!("{}: {e}", l.label))?;
-        buffers.push(Buffer { name: l.label, bytes: packed.len() as u64, init: Some(packed) });
+        let b = weights
+            .get(l.b_off..)
+            .ok_or_else(|| format!("{}: bias outside the blob", l.label))?;
+        let packed =
+            pack_layer(w, b, l.taps(), l.cin, l.cout).map_err(|e| format!("{}: {e}", l.label))?;
+        buffers.push(Buffer {
+            name: l.label,
+            bytes: packed.len() as u64,
+            init: Some(packed),
+        });
     }
-    let scratch = |name: &'static str, w: usize, h: usize, c: usize| Buffer { name, bytes: (w * h * c * 2) as u64, init: None };
+    let scratch = |name: &'static str, w: usize, h: usize, c: usize| Buffer {
+        name,
+        bytes: (w * h * c * 2) as u64,
+        init: None,
+    };
     buffers.push(scratch("ndve.t1", 960, 540, 16));
     buffers.push(scratch("ndve.s16", 960, 540, 16));
     buffers.push(scratch("ndve.d32a", 480, 270, 32));
@@ -177,7 +338,11 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
     buffers.push(scratch("ndve.e64a", 240, 135, 64));
     buffers.push(scratch("ndve.e64b", 240, 135, 64));
     buffers.push(scratch("ndve.luma", 1920, 1080, 1));
-    buffers.push(Buffer { name: "ndve.rs_w", bytes: RESAMPLER_BYTES as u64, init: Some(resampler.to_vec()) });
+    buffers.push(Buffer {
+        name: "ndve.rs_w",
+        bytes: RESAMPLER_BYTES as u64,
+        init: Some(resampler.to_vec()),
+    });
 
     // (input, output, skip) per layer, as buffer indices
     let routes: [(usize, usize, Option<usize>); 12] = [
@@ -268,7 +433,9 @@ mod tests {
 
     /// A blob of the right length whose halves are small finite numbers.
     fn blob() -> Vec<u8> {
-        (0..BLOB_BYTES / 2).flat_map(|i| (0x3000 + (i % 0x400) as u16).to_le_bytes()).collect()
+        (0..BLOB_BYTES / 2)
+            .flat_map(|i| (0x3000 + (i % 0x400) as u16).to_le_bytes())
+            .collect()
     }
     fn make() -> Plan {
         plan(&blob(), &vec![0u8; RESAMPLER_BYTES]).expect("the plan builds")
@@ -299,11 +466,21 @@ mod tests {
         assert_eq!(p.buffers.len(), 21);
         for (i, l) in LAYERS.iter().enumerate() {
             let b = &p.buffers[i];
-            assert_eq!(b.bytes as usize, packed_len(l.taps(), l.cin, l.cout), "{}", l.label);
+            assert_eq!(
+                b.bytes as usize,
+                packed_len(l.taps(), l.cin, l.cout),
+                "{}",
+                l.label
+            );
             assert_eq!(b.init.as_ref().map(Vec::len), Some(b.bytes as usize));
         }
         for (i, b) in p.buffers.iter().enumerate().skip(12) {
-            assert_eq!(b.init.as_ref().map(Vec::len).is_some(), i == B_RS_W, "{}", b.name);
+            assert_eq!(
+                b.init.as_ref().map(Vec::len).is_some(),
+                i == B_RS_W,
+                "{}",
+                b.name
+            );
         }
         let mut names = BTreeSet::new();
         for b in &p.buffers {
@@ -323,10 +500,13 @@ mod tests {
                 }
             }
             let size_of = |index: u32| -> Option<u64> {
-                s.buffers.iter().find(|b| b.index == index).and_then(|b| match b.source {
-                    Source::Buffer(i) => Some(p.buffers[i].bytes),
-                    Source::Game(_) => None,
-                })
+                s.buffers
+                    .iter()
+                    .find(|b| b.index == index)
+                    .and_then(|b| match b.source {
+                        Source::Buffer(i) => Some(p.buffers[i].bytes),
+                        Source::Game(_) => None,
+                    })
             };
             match l.kind {
                 Kind::First => assert_eq!(size_of(1), Some(l.out_bytes())),
@@ -352,12 +532,20 @@ mod tests {
             let g = l.groups();
             match l.geo {
                 Geometry::Tiles { tw, th } => {
-                    assert!(g[0] as usize * tw >= l.out_wh.0 && g[1] as usize * th >= l.out_wh.1, "{}", l.kernel);
+                    assert!(
+                        g[0] as usize * tw >= l.out_wh.0 && g[1] as usize * th >= l.out_wh.1,
+                        "{}",
+                        l.kernel
+                    );
                     // the kernels read their tile geometry from template arguments; the widths divide the images
                     assert_eq!(l.out_wh.0 % tw, 0, "{}", l.kernel);
                 }
                 Geometry::Tasks { mt } => {
-                    let (w, h) = if l.kind == Kind::Up { l.in_wh } else { l.out_wh };
+                    let (w, h) = if l.kind == Kind::Up {
+                        l.in_wh
+                    } else {
+                        l.out_wh
+                    };
                     assert_eq!(w % (8 * mt), 0, "{}", l.kernel);
                     assert!(g[0] as usize * 4 >= w / (8 * mt) * h, "{}", l.kernel);
                 }
@@ -369,14 +557,23 @@ mod tests {
         assert_eq!(rs.groups[0] * 5 * 4 * 2 * 8, 2560);
         assert_eq!(rs.groups[1] * 8, 1440);
         let luma = &p.steps[12];
-        assert_eq!((luma.groups[0] * luma.threads[0], luma.groups[1] * luma.threads[1]), (1920, 1080));
+        assert_eq!(
+            (
+                luma.groups[0] * luma.threads[0],
+                luma.groups[1] * luma.threads[1]
+            ),
+            (1920, 1080)
+        );
     }
 
     /// The text of the kernel's parameter list in the MSL.
     fn signature(name: &str) -> String {
         let src = crate::msl::SOURCE;
         let head = format!("kernel void {name}(");
-        let start = src.find(&head).unwrap_or_else(|| panic!("no kernel {name}")) + head.len();
+        let start = src
+            .find(&head)
+            .unwrap_or_else(|| panic!("no kernel {name}"))
+            + head.len();
         let end = src[start..].find(") {").map_or(src.len(), |e| start + e);
         src[start..end].to_string()
     }
@@ -399,10 +596,24 @@ mod tests {
             let t: BTreeSet<u32> = s.textures.iter().map(|b| b.index).collect();
             assert_eq!(indices(&sig, "buffer"), b, "{} buffers", s.kernel);
             assert_eq!(indices(&sig, "texture"), t, "{} textures", s.kernel);
-            assert_eq!(b.len(), s.buffers.len(), "{}: a buffer index twice", s.kernel);
-            assert_eq!(t.len(), s.textures.len(), "{}: a texture index twice", s.kernel);
+            assert_eq!(
+                b.len(),
+                s.buffers.len(),
+                "{}: a buffer index twice",
+                s.kernel
+            );
+            assert_eq!(
+                t.len(),
+                s.textures.len(),
+                "{}: a texture index twice",
+                s.kernel
+            );
             let threads = s.threads[0] * s.threads[1] * s.threads[2];
-            assert!(threads <= 1024 && s.groups.iter().all(|&g| g > 0), "{}", s.kernel);
+            assert!(
+                threads <= 1024 && s.groups.iter().all(|&g| g > 0),
+                "{}",
+                s.kernel
+            );
         }
     }
 
@@ -410,9 +621,18 @@ mod tests {
     fn no_step_reads_and_writes_one_buffer() {
         let p = make();
         for s in &p.steps {
-            let reads: Vec<Source> = s.buffers.iter().filter(|b| !b.writes).map(|b| b.source).collect();
+            let reads: Vec<Source> = s
+                .buffers
+                .iter()
+                .filter(|b| !b.writes)
+                .map(|b| b.source)
+                .collect();
             for w in s.buffers.iter().filter(|b| b.writes) {
-                assert!(!reads.contains(&w.source), "{} reads and writes one buffer", s.kernel);
+                assert!(
+                    !reads.contains(&w.source),
+                    "{} reads and writes one buffer",
+                    s.kernel
+                );
             }
         }
     }

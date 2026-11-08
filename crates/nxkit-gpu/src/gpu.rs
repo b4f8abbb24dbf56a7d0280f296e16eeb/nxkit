@@ -106,6 +106,7 @@ pub struct Gpu {
     older: Option<SubmittedBatch>,
     pools: Vec<(u64, u64)>,
     copyback: CopyBack,
+    native: crate::native::Native,
 }
 
 /// How each texture of the frame is used. A texture is memoryless only when every attachment use says so and no
@@ -252,6 +253,7 @@ impl Gpu {
             older: None,
             pools: Vec::new(),
             copyback: CopyBack::default(),
+            native: crate::native::Native::new(),
         })
     }
 
@@ -769,6 +771,7 @@ impl Gpu {
         scale: f32,
     ) -> Result<EncodeReport> {
         crate::refresh_knobs();
+        self.native.begin_frame();
         let diag_frame = crate::diag::begin_frame();
         let lum = crate::lum::begin();
         let t0 = Instant::now();
@@ -924,6 +927,15 @@ impl Gpu {
         mark(t0, "resolve+fit");
         self.imgdump_step(view, detail, &textures);
         let ords = ordinals(frame);
+        let native = self.native.prepare(&crate::native::PrepareCx {
+            ctx: &self.ctx,
+            guest: &self.guest,
+            pipelines: &self.pipelines,
+            frame,
+            detail,
+            view,
+            textures: &textures,
+        });
         let pass_images = crate::images::pass_images(frame, plan, &ords, &image_uses.per_draw);
         let mut first_write: FastMap<TexId, usize> = FastMap::default();
         let mut gpu_wrote: Vec<TexId> = Vec::new();
@@ -1146,6 +1158,7 @@ impl Gpu {
             scale,
             uploaded: &uploaded,
             preloaded: &preloaded,
+            native: native.as_ref(),
         };
         let mut start = 0;
         let ranges: Vec<Range<usize>> = ends

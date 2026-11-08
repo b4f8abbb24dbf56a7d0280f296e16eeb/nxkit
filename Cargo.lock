@@ -765,6 +765,7 @@ version = "0.10.0"
 dependencies = [
  "foldhash 0.2.0",
  "nxkit-metal",
+ "nxkit-ndve",
  "nxkit-nvn",
 ]
 

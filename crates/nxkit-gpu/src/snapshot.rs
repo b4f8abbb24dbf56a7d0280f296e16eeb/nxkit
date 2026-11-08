@@ -73,7 +73,12 @@ impl Snapshot {
             .draws
             .iter()
             .flat_map(|d| d.textures.iter())
-            .chain(detail.dispatches.iter().flat_map(|d| d.textures.iter()))
+            .chain(
+                detail
+                    .dispatches
+                    .iter()
+                    .flat_map(|d| d.textures.iter().chain(d.images.iter())),
+            )
             .map(|t| t.handle)
             .filter(|&h| h != 0);
         for handle in wanted {
