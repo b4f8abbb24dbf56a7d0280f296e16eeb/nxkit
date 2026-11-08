@@ -437,6 +437,118 @@ fn render_clear_and_draw_then_copy_back_to_guest() {
 }
 
 #[test]
+fn a_box_goes_from_guest_memory_into_a_texture_and_back() {
+    let Some(ctx) = ctx() else { return };
+    let (w, h) = (16u32, 8u32);
+    let g = guest(&ctx, 2 * MIB);
+    let tex = shared_target(&ctx, w, h);
+    // Rows of 4 pixels at a pitch of 32 bytes, so the box does not read packed bytes.
+    let src = pattern(32 * 3, 7);
+    g.write(4096, &src).unwrap();
+    let region = TextureRegion { level: 0, slice: 0, origin: [3, 2, 0], size: [4, 3, 1] };
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
+    let up = |offset, bytes_per_row, texture: &Texture, region| ComputeCommand::CopyGuestToTexture {
+        guest: g.clone(), offset, bytes_per_row, bytes_per_image: 0, texture: texture.clone(), region,
+    };
+    pass.encode(&up(4096, 32, &tex, region)).unwrap();
+    // A pitch below one row of blocks and a box outside the level are refused.
+    assert!(pass.encode(&up(4096, 8, &tex, region)).is_err());
+    assert!(pass.encode(&up(4096, 32, &tex, TextureRegion { origin: [14, 0, 0], ..region })).is_err());
+    assert!(pass.encode(&up(2 * MIB - 8, 32, &tex, region)).is_err());
+    pass.encode(&ComputeCommand::Barrier).unwrap();
+    pass.encode(&ComputeCommand::CopyTextureRegionToGuest {
+        texture: tex.clone(), region, guest: g.clone(), offset: 8192, bytes_per_row: 16, bytes_per_image: 0,
+    })
+    .unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    let all = pixels(&tex, w, h);
+    let mut back = vec![0u8; 16 * 3];
+    g.read(8192, &mut back).unwrap();
+    for row in 0..3usize {
+        let at = ((2 + row) * w as usize + 3) * 4;
+        assert_eq!(&all[at..at + 16], &src[row * 32..row * 32 + 16]);
+        assert_eq!(&back[row * 16..row * 16 + 16], &src[row * 32..row * 32 + 16]);
+    }
+}
+
+#[test]
+fn scratch_bytes_fill_a_box_of_a_texture() {
+    let Some(ctx) = ctx() else { return };
+    let (w, h) = (16u32, 8u32);
+    let tex = shared_target(&ctx, w, h);
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let scratch = frame.scratch();
+    // Two rows of 5 pixels in one colour.
+    let bytes: Vec<u8> = [10u8, 20, 30, 40].repeat(10);
+    let address = scratch.push(&bytes).unwrap();
+    let region = TextureRegion { level: 0, slice: 0, origin: [2, 3, 0], size: [5, 2, 1] };
+    let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
+    pass.copy_scratch_to_texture(&scratch, address, 20, &tex, &region).unwrap();
+    // A range that is not in the scratch, a box that is too deep and a box outside the texture are refused.
+    assert!(pass.copy_scratch_to_texture(&scratch, 16, 20, &tex, &region).is_err());
+    assert!(pass.copy_scratch_to_texture(&scratch, address, 20, &tex, &TextureRegion { size: [5, 2, 2], ..region }).is_err());
+    assert!(pass.copy_scratch_to_texture(&scratch, address, 20, &tex, &TextureRegion { origin: [14, 0, 0], ..region }).is_err());
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    let all = pixels(&tex, w, h);
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            let inside = (2..7).contains(&x) && (3..5).contains(&y);
+            let at = (y * w as usize + x) * 4;
+            let want = if inside { [10, 20, 30, 40] } else { [0; 4] };
+            assert_eq!(all[at..at + 4], want, "pixel {x},{y}");
+        }
+    }
+}
+
+#[test]
+fn all_render_targets_keep_their_shader_output_slots() {
+    let Some(ctx) = ctx() else { return };
+    let source = format!("{DRAW_MSL}\n{}", r#"
+struct Outputs { float4 a [[color(0)]]; float4 b [[color(1)]];
+    float4 c [[color(2)]]; float4 d [[color(3)]]; };
+fragment Outputs mrt() { return {float4(1,0,0,1), float4(0,1,0,1),
+    float4(0,0,1,1), float4(1)}; }
+"#);
+    let lib = ShaderLibrary::from_source(&ctx, "mrt", &source).unwrap();
+    let formats = [Format::Rgba8Unorm, Format::Rgba8UnormSrgb,
+        Format::Rgba8Unorm, Format::Rgba8Unorm];
+    let targets: Vec<_> = formats.iter().map(|format| {
+        let mut desc = TextureDesc::render_target_2d(16, 16, *format);
+        desc.storage = nxkit_metal::Storage::Shared;
+        Texture::new(&ctx, desc).unwrap()
+    }).collect();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let pipeline = cache.render(21, &RenderPipelineDesc::new(
+        (&lib, "vs"), Some((&lib, "mrt")), &formats)).unwrap();
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let desc = RenderPassDesc {
+        colors: targets.iter().map(|texture| Some(ColorAttachment { depth_plane: 0,
+            texture: texture.clone(), load: LoadAction::Clear, store: StoreAction::Store,
+            clear: [0.0; 4], memoryless: false,
+        })).collect(), depth: None, stencil: None,
+    };
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let mut pass = frame.commands().begin_render_pass(&desc, &table).unwrap();
+    pass.encode(&RenderCommand::SetPipeline(pipeline)).unwrap();
+    pass.encode(&RenderCommand::Draw { primitive: Primitive::Triangle,
+        first_vertex: 0, vertex_count: 3, instance_count: 1, base_instance: 0 }).unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    let expected = [[255,0,0,255], [0,255,0,255], [0,0,255,255], [255;4]];
+    for (slot, (texture, color)) in targets.iter().zip(expected).enumerate() {
+        assert!(pixels(texture, 16, 16).chunks_exact(4).all(|pixel| pixel == color), "output slot {slot}");
+    }
+}
+
+#[test]
 fn memoryless_attachment_that_stores_is_refused() {
     let Some(ctx) = ctx() else { return };
     let mut d = TextureDesc::render_target_2d(16, 16, Format::Rgba8Unorm);

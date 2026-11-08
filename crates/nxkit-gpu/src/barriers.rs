@@ -49,7 +49,10 @@ pub(crate) fn touch(frame: &Frame, plan: &PassPlan, p: &Pass) -> Touch {
     for i in p.cmds.clone() {
         match frame.cmds.get(i as usize) {
             Some(Cmd::Dispatch { writes, .. }) => t.writes.extend_from_slice(frame.list(*writes)),
-            Some(Cmd::Copy { dst: Some(d), .. }) => t.writes.push(*d),
+            Some(Cmd::Copy { src, dst }) => {
+                t.reads.extend(src);
+                t.writes.extend(dst);
+            }
             Some(Cmd::Downsample { dst, .. }) => t.writes.push(*dst),
             _ => {}
         }

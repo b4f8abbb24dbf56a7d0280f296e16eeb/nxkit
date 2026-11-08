@@ -18,6 +18,7 @@ use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::guest::GuestMemory;
 use crate::pipeline::ComputePipeline;
+use crate::scratch::Scratch;
 use crate::table::ArgumentTable;
 use crate::texture::{Texture, TextureRegion};
 
@@ -105,6 +106,50 @@ pub enum ComputeCommand {
         /// The bytes between two rows.
         bytes_per_row: u32,
     },
+    /// Copies image data from guest memory into a box of one texture level and slice (or of a 3D texture).
+    CopyGuestToTexture {
+        /// The guest memory.
+        guest: Arc<GuestMemory>,
+        /// The source, as an offset from the start of the guest memory.
+        offset: u64,
+        /// The bytes between two rows of blocks.
+        bytes_per_row: u32,
+        /// The bytes between two depth slices of a 3D box. Unused when the depth is 1.
+        bytes_per_image: u32,
+        /// The destination texture.
+        texture: Texture,
+        /// The destination level, slice and box, measured in texels.
+        region: TextureRegion,
+    },
+    /// Copies a box of one texture level and slice (or of a 3D texture) into guest memory. The arguments are those of
+    /// [`ComputeCommand::CopyGuestToTexture`], with the texture as the source.
+    CopyTextureRegionToGuest {
+        /// The source texture.
+        texture: Texture,
+        /// The source level, slice and box, measured in texels.
+        region: TextureRegion,
+        /// The guest memory.
+        guest: Arc<GuestMemory>,
+        /// The destination, as an offset from the start of the guest memory.
+        offset: u64,
+        /// The bytes between two rows of blocks.
+        bytes_per_row: u32,
+        /// The bytes between two depth slices of a 3D box. Unused when the depth is 1.
+        bytes_per_image: u32,
+    },
+    /// Copies tightly packed or padded image data from a buffer into one texture level and slice.
+    CopyBufferToTexture {
+        /// The source buffer.
+        buffer: Arc<DataBuffer>,
+        /// The byte offset in the source buffer.
+        offset: u64,
+        /// The row pitch, in bytes (one row of blocks for compressed formats).
+        bytes_per_row: u32,
+        /// The destination texture.
+        texture: Texture,
+        /// The destination level, slice and box, measured in texels.
+        region: TextureRegion,
+    },
 }
 
 impl CommandBuffer {
@@ -134,6 +179,39 @@ pub struct ComputePass<'a> {
     table: ArgumentTable,
     has_pipeline: bool,
     ended: bool,
+}
+
+/// Checks a box of a texture against a buffer layout of offset, bytes per row and bytes per depth slice. Returns the
+/// bytes that the box spans in the buffer and the bytes per image to give Metal.
+fn box_layout(
+    texture: &Texture,
+    region: &TextureRegion,
+    (offset, bytes_per_row, bytes_per_image): (u64, u32, u32),
+) -> Result<(u64, usize)> {
+    let d = texture.desc();
+    region.check(&d)?;
+    let format = d.format;
+    if format.is_depth() {
+        return Err(MetalError::Invalid("a depth texture needs blit options"));
+    }
+    let (bw, bh) = format.block_dim();
+    let block = u64::from(format.block_bytes());
+    let rows = u64::from(region.size[1].div_ceil(bh));
+    let row = u64::from(region.size[0].div_ceil(bw)) * block;
+    let (bpr, bpi) = (u64::from(bytes_per_row), u64::from(bytes_per_image));
+    let depth = u64::from(region.size[2]);
+    if region.origin[0] % bw != 0
+        || region.origin[1] % bh != 0
+        || bpr < row
+        || bpr % block != 0
+        || offset % block != 0
+        || (depth > 1 && bpi < bpr * rows)
+    {
+        return Err(MetalError::Invalid(
+            "the buffer image range, row pitch or box alignment is invalid",
+        ));
+    }
+    Ok((bpi * (depth - 1) + bpr * rows, bpi.max(bpr * rows) as usize))
 }
 
 fn size3(v: [u32; 3]) -> MTLSize {
@@ -269,8 +347,154 @@ impl ComputePass<'_> {
                 offset,
                 bytes_per_row,
             } => self.copy_to_guest(texture, guest, *offset, *bytes_per_row)?,
+            ComputeCommand::CopyGuestToTexture {
+                guest,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+                texture,
+                region,
+            } => self.guest_texture_box(
+                false,
+                texture,
+                region,
+                guest,
+                (*offset, *bytes_per_row, *bytes_per_image),
+            )?,
+            ComputeCommand::CopyTextureRegionToGuest {
+                texture,
+                region,
+                guest,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+            } => self.guest_texture_box(
+                true,
+                texture,
+                region,
+                guest,
+                (*offset, *bytes_per_row, *bytes_per_image),
+            )?,
+            ComputeCommand::CopyBufferToTexture {
+                buffer,
+                offset,
+                bytes_per_row,
+                texture,
+                region,
+            } => {
+                region.check(&texture.desc())?;
+                let format = texture.desc().format;
+                let (bw, bh) = format.block_dim();
+                let row = u64::from(region.size[0].div_ceil(bw)) * u64::from(format.block_bytes());
+                let bpr = u64::from(*bytes_per_row);
+                let image_bytes = bpr * u64::from(region.size[1].div_ceil(bh));
+                let bytes = image_bytes * u64::from(region.size[2]);
+                if bpr < row
+                    || bpr % u64::from(format.block_bytes()) != 0
+                    || offset % u64::from(format.block_bytes()) != 0
+                    || offset
+                        .checked_add(bytes)
+                        .is_none_or(|end| end > buffer.len())
+                {
+                    return Err(MetalError::Invalid(
+                        "the buffer image range or row pitch is invalid",
+                    ));
+                }
+                // SAFETY: both image ranges are checked above. The buffer and texture are retained below.
+                unsafe {
+                    self.enc.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        &buffer.raw, *offset as usize, *bytes_per_row as usize, image_bytes as usize,
+                        size3(region.size), texture.raw(), region.slice as usize, region.level as usize,
+                        MTLOrigin { x: region.origin[0] as usize, y: region.origin[1] as usize, z: region.origin[2] as usize });
+                }
+                self.cb.retain(buffer.clone());
+                self.cb.retain(texture.clone());
+            }
         }
         Ok(())
+    }
+
+    /// Blits a box between a texture and guest memory. `to_guest` picks the direction. `layout` is the offset, the
+    /// bytes per row and the bytes per depth slice in guest memory.
+    fn guest_texture_box(
+        &mut self,
+        to_guest: bool,
+        texture: &Texture,
+        region: &TextureRegion,
+        guest: &Arc<GuestMemory>,
+        layout: (u64, u32, u32),
+    ) -> Result<()> {
+        let (bytes, per_image) = box_layout(texture, region, layout)?;
+        guest.gpu_address_of_offset(layout.0, bytes)?;
+        // SAFETY: `box_layout` checked the box and the layout, and the guest range `[offset, offset + bytes)` is
+        // inside the guest buffer (checked above). The guest memory is retained below until the GPU is done.
+        unsafe { self.blit_box(to_guest, texture, region, guest.buffer(), layout, per_image) };
+        self.cb.retain(guest.clone());
+        Ok(())
+    }
+
+    /// Copies bytes that lie in `scratch` into a box of a texture. `address` is the GPU address that
+    /// [`Scratch::push`] returned. The rows are `bytes_per_row` apart and the box must be one slice deep, so a caller
+    /// that fills a 3D or array texture calls this once per slice with the same bytes.
+    ///
+    /// The scratch buffer is resident and not reused before the batch of the pass is done.
+    pub fn copy_scratch_to_texture(
+        &mut self,
+        scratch: &Scratch,
+        address: u64,
+        bytes_per_row: u32,
+        texture: &Texture,
+        region: &TextureRegion,
+    ) -> Result<()> {
+        if region.size[2] != 1 {
+            return Err(MetalError::Invalid("a scratch copy is one slice deep"));
+        }
+        // Scratch blocks start at a multiple of `SCRATCH_ALIGN`, which is a multiple of every block size.
+        let (bytes, per_image) = box_layout(texture, region, (0, bytes_per_row, 0))?;
+        let (buffer, offset) = scratch
+            .locate(address, bytes)
+            .ok_or(MetalError::Invalid("the scratch range is not in one buffer"))?;
+        let layout = (offset, bytes_per_row, 0);
+        // SAFETY: `box_layout` checked the box and the layout against the texture, and `locate` checked that
+        // `[offset, offset + bytes)` is inside `buffer`. The texture is retained below and the buffer is owned by the
+        // scratch, which the batch keeps until the GPU is done.
+        unsafe { self.blit_box(false, texture, region, &buffer, layout, per_image) };
+        Ok(())
+    }
+
+    /// Encodes the blit of a box.
+    ///
+    /// # Safety
+    ///
+    /// The box must be inside the texture, the layout must pass [`box_layout`], and the bytes that it names must be
+    /// inside `buffer`. `buffer` must stay alive until the GPU is done.
+    unsafe fn blit_box(
+        &mut self,
+        to_buffer: bool,
+        texture: &Texture,
+        region: &TextureRegion,
+        buffer: &ProtocolObject<dyn objc2_metal::MTLBuffer>,
+        (offset, bytes_per_row, _): (u64, u32, u32),
+        per_image: usize,
+    ) {
+        let origin = MTLOrigin {
+            x: region.origin[0] as usize,
+            y: region.origin[1] as usize,
+            z: region.origin[2] as usize,
+        };
+        // SAFETY: the contract of this function.
+        unsafe {
+            if to_buffer {
+                self.enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                    texture.raw(), region.slice as usize, region.level as usize, origin, size3(region.size),
+                    buffer, offset as usize, bytes_per_row as usize, per_image);
+            } else {
+                self.enc.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                    buffer, offset as usize, bytes_per_row as usize, per_image,
+                    size3(region.size), texture.raw(), region.slice as usize, region.level as usize, origin);
+            }
+        }
+        self.cb.retain(texture.clone());
     }
 
     fn copy_to_guest(

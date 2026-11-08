@@ -242,23 +242,61 @@ pub struct ClearDetail {
     pub stencil: u32,
 }
 
-/// The box of a `Cmd::Copy`. A copy without detail copies level 0, layer 0, from the origin, the smaller size.
+/// What a `Cmd::Copy` or `Cmd::Downsample` does, as far as the walker could read it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CopyKind {
+    /// No box was read: a downsample, a buffer to buffer copy, an inline update, a clear, or a copy of a recording
+    /// that has no extension record. The entry only keeps the ordinals aligned.
+    #[default]
+    Other,
+    /// `nvnCommandBufferCopyBufferToTexture`. The destination texture side is in the `dst_*` fields.
+    BufferToTexture,
+    /// `nvnCommandBufferCopyTextureToBuffer`. The source texture side is in the `src_*` fields.
+    TextureToBuffer,
+    /// `nvnCommandBufferCopyTextureToTexture`.
+    TextureToTexture,
+    /// `nvnCommandBufferClearTexture` and `ClearTextureui`. The destination texture side is in the `dst_*` fields and
+    /// the colour in [`CopyDetail::clear`].
+    Clear,
+}
+
+/// The box of a `Cmd::Copy`, one entry per `Cmd::Copy` and `Cmd::Downsample`.
+///
+/// The origins and sizes are the raw `NVNcopyRegion` values. The walker does not know the target of a texture, so the
+/// third value is the first layer of the region for array and cube textures (added to the layer of the view) and the
+/// z offset or the depth for a 3D texture. The encoder resolves it with the texture it has.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CopyDetail {
+    /// What the entry is. [`CopyKind::Other`] carries no box.
+    pub kind: CopyKind,
     /// The source level.
     pub src_level: u32,
-    /// The source layer.
+    /// The first layer of the source view.
     pub src_layer: u32,
     /// The first source texel.
     pub src_origin: [u32; 3],
     /// The destination level.
     pub dst_level: u32,
-    /// The destination layer.
+    /// The first layer of the destination view.
     pub dst_layer: u32,
     /// The first destination texel.
     pub dst_origin: [u32; 3],
     /// The size in texels of the source.
     pub size: [u32; 3],
+    /// The size in texels of the destination. A copy between textures only runs when it equals `size`.
+    pub dst_size: [u32; 3],
+    /// The colour of a [`CopyKind::Clear`] as the raw words: `f32` bits for kind 0, `u32` values for kind 2.
+    pub clear: [u32; 4],
+    /// The value type of a [`CopyKind::Clear`]: 0 for `f32` and 2 for `u32`, as in `ExtCode::ClearColor`.
+    pub clear_kind: u32,
+    /// The channel mask of a [`CopyKind::Clear`]. Bit 0 is red and bit 3 alpha.
+    pub channel_mask: u32,
+    /// The GPU address of the buffer side of a buffer copy.
+    pub buffer: u64,
+    /// The bytes between two rows of the buffer (`SetCopyRowStride`). 0 means tightly packed.
+    pub row_stride: u64,
+    /// The bytes between two layers or depth slices of the buffer (`SetCopyImageStride`). 0 means tightly packed.
+    pub image_stride: u64,
 }
 
 /// A `Cmd::Dispatch`.

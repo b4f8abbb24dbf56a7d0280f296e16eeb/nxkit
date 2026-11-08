@@ -5,7 +5,8 @@
 //! (programs, buffers, vertex layout, state objects, viewport) to fill a [`FrameDetail`].
 //!
 //! The ordinals agree with the decoder of the front end. Each `Draw`, each `Dispatch`, each clear of a colour slot
-//! below 8 and each depth stencil clear gives one entry, in submit order. A call record plays its recording with the
+//! below 8 and each depth stencil clear gives one entry, in submit order. Each command that the decoder turns into
+//! `Cmd::Copy` or `Cmd::Downsample` gives one copy entry, whatever it copies (see `copy_detail`). A call record plays its recording with the
 //! state of the caller, and what the callee sets stays set. The state of a queue stays across submits.
 //!
 //! A walk runs when the queue submits, because the game may write the command memory again after the submit.
@@ -57,6 +58,8 @@ pub(super) struct State {
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
     texture: [u64; TEXTURE_SLOTS],
+    /// `SetCopyRowStride` and `SetCopyImageStride` of the command buffer. 0 is tightly packed.
+    copy_strides: [u64; 2],
 }
 
 impl Default for State {
@@ -77,6 +80,7 @@ impl Default for State {
             scissor: None,
             blend_color: [0.0; 4],
             texture: [NO_HANDLE; TEXTURE_SLOTS],
+            copy_strides: [0; 2],
         }
     }
 }
