@@ -1,5 +1,5 @@
 //! The video service: the `movie::Decoder` and the `nn::codec` video decoders of the game's SDK, for VP9 streams
-//! decoded by VideoToolbox.
+//! decoded by VideoToolbox and AV1 streams decoded by VideoToolbox or, on a Mac without an AV1 decoder, by rav1d.
 //!
 //! Breath of the Wild plays its cut scenes as VP9 WebM files (R43). The game's SDK decoder would open the NVIDIA
 //! decoder device, so this crate answers the methods of `movie::Decoder` itself (R14). The `nn::codec` video decoders
@@ -8,6 +8,7 @@
 //! The host calls [`init`] with a [`Config`] before the game starts, and puts [`exports`] into the import table of the
 //! game. [`movie_playing`] tells the pacing service that a movie is on screen.
 
+mod av1;
 mod backend;
 mod codec;
 mod codec_exports;

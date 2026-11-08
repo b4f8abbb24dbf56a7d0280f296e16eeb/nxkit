@@ -1,6 +1,7 @@
 # Third-party notes
 
 The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-input` uses to bind GameController and Core Haptics on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
+The crate `rav1d` (BSD-2-Clause, the Rust port of dav1d by the rav1d developers and Prossimo) is the other external dependency. `nxkit-svc-video` uses it to decode AV1 on the CPU. `deps.toml` lists it and the small crates that it brings.
 The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-video` uses to bind VideoToolbox, CoreVideo and CoreMedia on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
@@ -116,7 +117,7 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 ## Video service ported from nxnative
 
 The crate `nxkit-svc-video` (`crates/nxkit-svc-video/`) ports the protocols of `movie::Decoder` and of the `nn::codec` video decoders from the nxnative engine. The nxnative engine is published under the MIT
-licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above. The decoder itself is new code on VideoToolbox. nxnative decodes with libvpx.
+licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite rules from nxnative" above. The decoder itself is new code on VideoToolbox. nxnative decodes with libvpx. For AV1, nxnative uses VideoToolbox or dav1d (`dm/host/hle_movie_av1.c`). The nxkit file `av1.rs` follows its reading of the sequence header for the `av1C` atom and its 8-bit NV12 output, and was written from the AV1 specification. `rav1d` replaces dav1d.
 
 | nxkit file | nxnative source |
 |---|---|
@@ -125,6 +126,7 @@ licence, Copyright (c) 2026 seedds. The full notice is in the section "Rewrite r
 | `crates/nxkit-svc-video/src/pacing.rs` | `dm/host/hle_movie.c` (`dm_movie_playing`) |
 | `crates/nxkit-svc-video/src/codec.rs` | `dm/host/hle_codec_video.c` (decoder state, buffer counts, pools, native images, sync handles, sync point events, error codes) |
 | `crates/nxkit-svc-video/src/codec_exports.rs` | `dm/host/hle_codec_video.c` (the replaced `nn::codec` and `nn::syncpt::sdk` functions and their signatures) |
+| `crates/nxkit-svc-video/src/av1.rs`, `backend.rs` | `dm/host/hle_movie_av1.c` (which decoder opens, the `av1C` record, the 10-bit to 8-bit NV12 output) |
 | `crates/nxkit-svc-video/src/yuv.rs` | `dm/host/hle_codec_video.c` (the NV12 to RGBA read-back of `ReadDecoderOutputImage*`) |
 The crate `nxkit-svc-audio` (`crates/nxkit-svc-audio/`) follows `dm/host/hle_audio.c` and `dm/host/hle_audren.c`. It ports the list of
 SDK functions that are taken over, the SDK layouts of the audio renderer (the work buffer, the command list, the DeviceSink command)

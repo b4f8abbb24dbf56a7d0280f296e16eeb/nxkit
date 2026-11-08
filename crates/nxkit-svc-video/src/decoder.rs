@@ -532,6 +532,24 @@ pub(crate) fn decode_packet(
     }
 }
 
+/// Decodes one packet of an AV1 stream. The decoder opens at the first packet and finds the sequence header itself.
+pub(crate) fn decode_av1(
+    backend: &mut Option<(Box<dyn Backend>, u32, u32)>,
+    open: fn() -> Result<Box<dyn Backend>, String>,
+    data: &[u8],
+) -> Result<Option<Arc<Frame>>, String> {
+    if data.is_empty() {
+        return Ok(None);
+    }
+    if backend.is_none() {
+        *backend = Some((open()?, 0, 0));
+    }
+    match backend {
+        Some((b, _, _)) => b.decode(data),
+        None => Ok(None),
+    }
+}
+
 fn worker(sh: &Arc<Shared>) {
     let mut backend: Option<(Box<dyn Backend>, u32, u32)> = None;
     let mut seen_close = 0;

@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use nxkit_abi::guest;
 
 use crate::config;
-use crate::decoder::{Backend, decode_packet};
+use crate::decoder::{Backend, decode_av1, decode_packet};
 use crate::frame::Frame;
 
 /// Marks a handle that this crate wrote into an SDK object, in the upper 32 bits.
@@ -459,11 +459,12 @@ pub(crate) struct Dec {
 }
 
 /// Decodes one packet on a thread with a big stack, because the caller can be a guest thread with 8 KB.
-fn decode_big(stream: &mut Stream, data: &[u8]) -> Result<Option<Arc<Frame>>, String> {
+fn decode_big(codec: Codec, stream: &mut Stream, data: &[u8]) -> Result<Option<Arc<Frame>>, String> {
     std::thread::scope(|s| {
-        let job = std::thread::Builder::new()
-            .stack_size(DECODE_STACK)
-            .spawn_scoped(s, || decode_packet(stream, crate::backend::open, data));
+        let job = std::thread::Builder::new().stack_size(DECODE_STACK).spawn_scoped(s, || match codec {
+            Codec::Av1 => decode_av1(stream, crate::backend::open_av1, data),
+            _ => decode_packet(stream, crate::backend::open, data),
+        });
         match job {
             Ok(h) => h
                 .join()
@@ -601,7 +602,7 @@ impl Dec {
         }
         let mut got = false;
         if !data.is_empty() {
-            match decode_big(&mut self.stream, data) {
+            match decode_big(self.codec, &mut self.stream, data) {
                 Ok(Some(frame)) => got = self.hold(frame, ts),
                 Ok(None) => {}
                 Err(e) => {
@@ -785,16 +786,16 @@ pub(crate) fn pool_frame(t: u64, i: u32) -> Option<Arc<Frame>> {
     p.frame(i)
 }
 
-/// `Initialize…Decoder`: makes the decoder in the SDK object at `t`. Only VP9 decodes. The other codecs are refused
+/// `Initialize…Decoder`: makes the decoder in the SDK object at `t`. VP9 and AV1 decode. The other codecs are refused
 /// at once with a named line, so the game does not wait for pictures that never come.
 pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u32) -> u32 {
     let Some(cfg) = config() else {
         red("a decoder was made before the video service was initialised");
         return BAD;
     };
-    if codec != Codec::Vp9 {
+    if !matches!(codec, Codec::Vp9 | Codec::Av1) {
         red(&format!(
-            "nn::codec {} decoders are not implemented, only VP9. Initialize answers an error",
+            "nn::codec {} decoders are not implemented, only VP9 and AV1. Initialize answers an error",
             codec.name()
         ));
         return BAD;
@@ -823,8 +824,9 @@ pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u
     cfg.host.bind_system_event(event);
     cfg.host.signal_system_event(event);
     eprintln!(
-        "[codec] {} decoder {id}: {w}x{h}, input format {input}, output format {output} (VideoToolbox on the host)",
-        codec.name()
+        "[codec] {} decoder {id}: {w}x{h}, input format {input}, output format {output} ({} on the host)",
+        codec.name(),
+        if codec == Codec::Av1 { "VideoToolbox or rav1d" } else { "VideoToolbox" }
     );
     0
 }

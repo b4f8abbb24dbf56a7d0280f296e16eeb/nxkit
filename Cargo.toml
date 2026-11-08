@@ -92,11 +92,16 @@ objc2-metal = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403
 objc2-app-kit = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-quartz-core = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-metal-fx = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+rav1d = { version = "=1.1.0", default-features = false }
 block2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 
 [profile.test]
 # the parser tests recurse deeply: optimise them as the front-end project did
 opt-level = 1
+
+# The software AV1 decoder is too slow at the default level of a debug build for a movie at 30 fps.
+[profile.dev.package.rav1d]
+opt-level = 3
 
 [profile.release]
 debug = "line-tables-only"

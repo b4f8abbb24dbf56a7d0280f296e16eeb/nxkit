@@ -1,4 +1,5 @@
-//! The VideoToolbox side of the decoder: a VP9 decompression session that fills `CVPixelBuffer`s which Metal can use.
+//! The VideoToolbox side of the decoder: a VP9 or AV1 decompression session that fills `CVPixelBuffer`s which Metal can
+//! use.
 
 use std::ffi::c_void;
 use std::ptr;
@@ -7,7 +8,7 @@ use std::sync::{Mutex, Once};
 use objc2_core_foundation::{CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, Type, kCFAllocatorNull};
 use objc2_core_media::{
     CMBlockBuffer, CMSampleBuffer, CMTime, CMVideoFormatDescription, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
-    kCMVideoCodecType_VP9,
+    kCMVideoCodecType_AV1, kCMVideoCodecType_VP9,
 };
 use objc2_core_video::{
     CVImageBuffer, CVPixelBuffer, CVPixelBufferLockFlags, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey,
@@ -18,6 +19,7 @@ use objc2_video_toolbox::{
     VTRegisterSupplementalVideoDecoderIfAvailable,
 };
 
+use crate::av1::Sequence;
 use crate::vp9::KeyFrame;
 
 /// A `CVPixelBuffer` that a decoder filled, with its planes in NV12.
@@ -49,6 +51,12 @@ impl Drop for Locked<'_> {
 }
 
 impl PixelBuffer {
+    /// The width and the height of the picture in pixels.
+    pub(crate) fn size(&self) -> (u32, u32) {
+        let pb: &CVPixelBuffer = &self.0;
+        (pb.width() as u32, pb.height() as u32)
+    }
+
     /// Calls `f` with the luma plane, its stride, the chroma plane and its stride while the buffer is locked.
     pub(crate) fn with_planes<R>(&self, f: impl FnOnce(&[u8], usize, &[u8], usize) -> R) -> Result<R, String> {
         let pb: &CVPixelBuffer = &self.0;
@@ -86,7 +94,7 @@ unsafe extern "C-unwind" fn on_frame(
     _pts: CMTime,
     _duration: CMTime,
 ) {
-    // SAFETY: `refcon` is the `Mutex<Out>` that the `Vp9Session` boxed. It is not freed before the session is
+    // SAFETY: `refcon` is the `Mutex<Out>` that the `Session` boxed. It is not freed before the session is
     // invalidated, and the session is invalidated before the box is dropped.
     let out = unsafe { &*(refcon as *const Mutex<Out>) };
     let Ok(mut out) = out.lock() else { return };
@@ -102,15 +110,16 @@ fn register_vp9() {
     });
 }
 
-/// Whether VideoToolbox says it decodes VP9 in hardware on this Mac.
-pub(crate) fn vp9_hardware() -> bool {
-    register_vp9();
+/// Whether VideoToolbox says it decodes AV1 in hardware on this Mac (Apple M3 and A17 Pro on). Its AV1 decoder is
+/// hardware only.
+pub(crate) fn av1_hardware() -> bool {
     // SAFETY: a plain query with a codec type.
-    unsafe { VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9) }
+    unsafe { VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) }
 }
 
-/// A VP9 decompression session for one stream size.
-pub(crate) struct Vp9Session {
+/// A decompression session for one stream: VP9 or AV1, 8-bit 4:2:0.
+pub(crate) struct Session {
+    name: &'static str,
     session: CFRetained<VTDecompressionSession>,
     format: CFRetained<CMVideoFormatDescription>,
     out: Box<Mutex<Out>>,
@@ -119,13 +128,13 @@ pub(crate) struct Vp9Session {
 
 // SAFETY: a VTDecompressionSession and a format description are CoreFoundation objects that VideoToolbox documents as
 // usable from any thread. The output slot sits behind a mutex, and `decode` takes `&mut self`.
-unsafe impl Send for Vp9Session {}
+unsafe impl Send for Session {}
 // SAFETY: as for `Send`. Nothing is reachable through a shared reference except the mutex.
-unsafe impl Sync for Vp9Session {}
+unsafe impl Sync for Session {}
 
-impl Vp9Session {
-    /// Opens a session for a stream that starts with `key`. The stream must be 8-bit 4:2:0.
-    pub(crate) fn open(key: &KeyFrame) -> Result<Vp9Session, String> {
+impl Session {
+    /// Opens a session for a VP9 stream that starts with `key`. The stream must be 8-bit 4:2:0.
+    pub(crate) fn vp9(key: &KeyFrame) -> Result<Session, String> {
         if !key.is_nv12() {
             return Err(format!(
                 "VP9 profile {} at {} bits with subsampling {}/{} has no NV12 output",
@@ -133,13 +142,37 @@ impl Vp9Session {
             ));
         }
         register_vp9();
-        let (width, height) = (i32::try_from(key.width), i32::try_from(key.height));
-        let (Ok(width), Ok(height)) = (width, height) else {
-            return Err(format!("the size {}x{} is out of range", key.width, key.height));
+        Session::open("VP9", kCMVideoCodecType_VP9, "vpcC", &key.vpcc(), key.width, key.height, key.full_range)
+    }
+
+    /// Opens a session for an AV1 stream with the sequence header `seq`. The stream must be 8-bit 4:2:0, and this Mac
+    /// must decode AV1 in hardware.
+    pub(crate) fn av1(seq: &Sequence) -> Result<Session, String> {
+        if !seq.is_nv12() {
+            return Err(format!(
+                "AV1 profile {} at {} bits with subsampling {}/{} has no NV12 output",
+                seq.profile, seq.bit_depth, seq.subsampling_x as u8, seq.subsampling_y as u8
+            ));
+        }
+        Session::open("AV1", kCMVideoCodecType_AV1, "av1C", &seq.av1c(), seq.max_width, seq.max_height, seq.full_range)
+    }
+
+    fn open(
+        name: &'static str,
+        codec: u32,
+        atom_name: &'static str,
+        atom: &[u8],
+        width: u32,
+        height: u32,
+        full_range: bool,
+    ) -> Result<Session, String> {
+        let (width_i, height_i) = (i32::try_from(width), i32::try_from(height));
+        let (Ok(width_i), Ok(height_i)) = (width_i, height_i) else {
+            return Err(format!("the size {width}x{height} is out of range"));
         };
 
-        let atom = CFData::from_bytes(&key.vpcc());
-        let atom_key = CFString::from_static_str("vpcC");
+        let atom = CFData::from_bytes(atom);
+        let atom_key = CFString::from_str(atom_name);
         let atom_value: &CFType = &atom;
         let atoms = CFDictionary::<CFString, CFType>::from_slices(&[&*atom_key], &[atom_value]);
         // SAFETY: reads a constant that CoreMedia exports.
@@ -148,12 +181,12 @@ impl Vp9Session {
         let extensions = CFDictionary::<CFString, CFType>::from_slices(&[extensions_key], &[atoms_value]);
         let mut format = None;
         // SAFETY: every reference is live for the call and `format` is `None` as the function needs.
-        let status = unsafe { CMVideoFormatDescription::new(None, kCMVideoCodecType_VP9, width, height, Some(&extensions), &mut format) };
+        let status = unsafe { CMVideoFormatDescription::new(None, codec, width_i, height_i, Some(&extensions), &mut format) };
         let Some(format) = format.filter(|_| status == 0) else {
             return Err(format!("CMVideoFormatDescriptionCreate failed with OSStatus {status}"));
         };
 
-        let pixel_format = if key.full_range {
+        let pixel_format = if full_range {
             kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         } else {
             kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
@@ -178,7 +211,7 @@ impl Vp9Session {
         let Some(session) = session.filter(|_| status == 0) else {
             return Err(format!("VTDecompressionSessionCreate failed with OSStatus {status}"));
         };
-        Ok(Vp9Session { session, format, out, pixel_format })
+        Ok(Session { name, session, format, out, pixel_format })
     }
 
     /// Decodes one packet. `Ok(None)` when the packet shows no picture, for example a frame that only updates
@@ -218,7 +251,7 @@ impl Vp9Session {
         }
         let mut o = self.out.lock().map_err(|_| "the decoder callback panicked".to_string())?;
         if o.status != 0 {
-            return Err(format!("the VP9 decoder reported OSStatus {}", o.status));
+            return Err(format!("the {} decoder reported OSStatus {}", self.name, o.status));
         }
         let Some(buffer) = o.buffer.take() else { return Ok(None) };
         let pb: &CVPixelBuffer = &buffer.0;
@@ -234,7 +267,7 @@ impl Vp9Session {
     }
 }
 
-impl Drop for Vp9Session {
+impl Drop for Session {
     fn drop(&mut self) {
         // SAFETY: the session is live and is not used after this. Invalidating it stops any call of the callback, so
         // the `out` box can be freed after.

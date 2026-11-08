@@ -92,7 +92,7 @@ The rules:
 | nxkit-ipc | L0 | no | impl | the IPC server of the nxkit host: HIPC and CMIF parsing, domains, the service manager `sm:`, per-command counters and the stop on an unknown command. No `unsafe` code, no global lock on the request path |
 | nxkit-svc-fs | L0 | no | impl | the `fs` service: `fsp-srv` and its interfaces over IPC, the SDK-level `nn::fs` functions, the romfs through `mmap` and the save layout of nxnative. `unsafe` only in `sys` (`mmap`, `pread`, `clonefile`, `renamex_np`) |
 | nxkit-svc-offline | L0 | no | impl | the `offline` service: the answers for networking and peripherals the game cannot use here. `unsafe` only in `sys` |
-| nxkit-svc-video | L0 | no | impl | the `video` service: `movie::Decoder` and `nn::codec` video decoders for VP9 on VideoToolbox, with `CVPixelBuffer` frames and a `CVMetalTextureCache` path. Source only, not yet compiled or run |
+| nxkit-svc-video | L0 | no | impl | the `video` service: `movie::Decoder` and `nn::codec` video decoders for VP9 on VideoToolbox and AV1 on VideoToolbox (M3 and newer) or rav1d (software), with `CVPixelBuffer` frames and a `CVMetalTextureCache` path. Source only, not yet compiled or run |
 | nxkit-svc-input | L0 | no | impl | the `input` service: controllers, GameController and Core Haptics through `objc2`. `unsafe` only in `sys` |
 | nxkit-svc-audio | L0 | no | impl | the audio service of the nxkit host: SDK take-overs, `audout:u`, `audren:u`, `IAudioDevice`, and a mixer in the AUHAL callback (R41, R42). It is not compiled or tested yet |
 | nxkit-svc-pacing | L0 | no | impl | the `pacing` service: the `Pacer` for present intervals and the frame pace profile |
