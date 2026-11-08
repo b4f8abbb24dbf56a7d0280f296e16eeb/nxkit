@@ -239,7 +239,13 @@ impl Pipelines {
                 .push(Some(translate::color_target(format, &blend, mask, written)));
         }
         desc.vertex_layout =
-            translate::vertex_descriptor(d, &vs.inputs).map_err(|_| Skip::Format)?;
+            translate::vertex_descriptor(d, &vs.inputs).map_err(|e| {
+                nxkit_nvn::diag::example(
+                    nxkit_nvn::diag::Reason::SkipFormat,
+                    format_args!("vertex {e:?} vs {:?}", d.program.vertex),
+                );
+                Skip::Format
+            })?;
         desc.topology = class;
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;

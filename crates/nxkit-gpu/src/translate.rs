@@ -197,6 +197,29 @@ pub(crate) fn color_target(
     t
 }
 
+/// `format` with the scalar type that the shader reads (`read` is `Float4`, `UInt4` or `Int4`).
+///
+/// The vertex input registers of Maxwell have no type: an attribute of 32-bit floats that the shader reads as
+/// integers hands over the bits of the floats. Metal refuses a pipeline whose attribute format and shader type differ
+/// in kind, so a 32-bit format takes the kind of the shader, which keeps the bits. The other formats convert their
+/// values on fetch and have no bit-exact equivalent; they stay as they are.
+pub(crate) fn as_read(format: VertexFormat, read: VertexFormat) -> VertexFormat {
+    use VertexFormat as V;
+    let width = match format {
+        V::Float | V::UInt | V::Int => 1,
+        V::Float2 | V::UInt2 | V::Int2 => 2,
+        V::Float3 | V::UInt3 | V::Int3 => 3,
+        V::Float4 | V::UInt4 | V::Int4 => 4,
+        _ => return format,
+    };
+    let row = match read {
+        V::UInt4 => [V::UInt, V::UInt2, V::UInt3, V::UInt4],
+        V::Int4 => [V::Int, V::Int2, V::Int3, V::Int4],
+        _ => [V::Float, V::Float2, V::Float3, V::Float4],
+    };
+    row[width - 1]
+}
+
 /// Why a vertex layout could not be translated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LayoutError {
@@ -216,7 +239,10 @@ pub(crate) fn vertex_descriptor(
         if !d.streams.iter().any(|s| s.index == a.stream) {
             continue;
         }
-        let format = vertex_format(a.format).ok_or(LayoutError::Format(a.format))?;
+        let mut format = vertex_format(a.format).ok_or(LayoutError::Format(a.format))?;
+        if let Some((_, read)) = inputs.iter().find(|(l, _)| *l == a.location) {
+            format = as_read(format, *read);
+        }
         out.attributes.push((
             a.location,
             VertexAttribute {
@@ -329,6 +355,16 @@ pub(crate) fn sampler(t: &Tsc) -> SamplerDesc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thirty_two_bit_attributes_take_the_kind_the_shader_reads() {
+        use VertexFormat as V;
+        assert_eq!(as_read(V::Float4, V::UInt4), V::UInt4);
+        assert_eq!(as_read(V::Float2, V::Int4), V::Int2);
+        assert_eq!(as_read(V::UInt3, V::Float4), V::Float3);
+        assert_eq!(as_read(V::Float4, V::Float4), V::Float4);
+        assert_eq!(as_read(V::UChar4Norm, V::UInt4), V::UChar4Norm);
+    }
 
     #[test]
     fn streams_use_slots_from_16() {

@@ -149,6 +149,10 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         // compressed format, so such a pass is left out.
         if matches!(a.slot, Slot::Color(_)) && (d.format.is_compressed() || d.format.is_depth()) {
             target_diag(format_args!("not renderable {:?} {}x{} cmds {:?}", d.format, d.width, d.height, pass.cmds));
+            nxkit_nvn::diag::example(
+                nxkit_nvn::diag::Reason::SkipFormat,
+                format_args!("colour target {:?} {:?} {}x{}x{}", a.slot, d.format, d.width, d.height, d.depth),
+            );
             return Err(Skip::Format);
         }
         let mem = d.storage == Storage::Memoryless;
