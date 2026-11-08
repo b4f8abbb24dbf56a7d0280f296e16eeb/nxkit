@@ -81,6 +81,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `prog` | gpu | programs that did not load, unknown binding kinds, draws without a vertex stage | once per program, first 40 draws | low |
 | `pipe` | gpu | render, compute and depth-stencil states that Metal did not build | first 300 | low |
 | `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
+| `passes` | gpu | the render passes of a frame by their number of draws and by the size of their first attachment | every 300 frames | low |
 | `indirect` | gpu | draw records without arguments (indirect or unknown draw kinds) | at powers of two per kind | low |
 
 ## Knobs (`NXKIT_KNOB`)
