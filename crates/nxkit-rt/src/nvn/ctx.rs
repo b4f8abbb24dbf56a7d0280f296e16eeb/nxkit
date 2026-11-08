@@ -355,22 +355,29 @@ impl Gpu {
         origin_lower_left: bool,
     ) -> AbiResult<()> {
         let mut front = self.lock();
-        let mut accepted = 0;
-        let mut failed = None;
-        for h in handles {
-            if let Err(e) = front.submit_on(queue as usize, *h) {
-                failed = Some(e);
-                break;
+        // The backend's walk and the front end's decode read the same recordings and do not depend on each other, so the
+        // walk runs on a helper thread while this one decodes. The walk ends before the front lock goes, so the next
+        // flush finds it done, as when both ran here one after the other.
+        let deferred = self.backend.submit(queue, handles, origin_lower_left);
+        let qos = nxkit_hos::sys::current_qos();
+        let failed = std::thread::scope(|s| {
+            let walk = deferred.map(|run| {
+                s.spawn(move || {
+                    if let Some(q) = qos {
+                        nxkit_hos::sys::set_current_qos(q);
+                    }
+                    run();
+                })
+            });
+            let failed = handles.iter().find_map(|h| front.submit_on(queue as usize, *h).err());
+            if let Some(w) = walk
+                && let Err(p) = w.join()
+            {
+                std::panic::resume_unwind(p);
             }
-            accepted += 1;
-        }
-        let deferred = self
-            .backend
-            .submit(queue, &handles[..accepted], origin_lower_left);
+            failed
+        });
         drop(front);
-        if let Some(run) = deferred {
-            run();
-        }
         failed.map_or(Ok(()), |e| Err(e.into()))
     }
 

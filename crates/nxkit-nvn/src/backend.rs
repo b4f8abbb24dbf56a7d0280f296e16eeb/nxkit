@@ -133,8 +133,9 @@ pub enum WaitResult {
     Failed,
 }
 
-/// The work that [`Backend::submit`] defers until the front lock is gone.
-pub type Deferred<'a> = Box<dyn FnOnce() + 'a>;
+/// The work of [`Backend::submit`] that does not need the front end. The caller may run it on another thread while the
+/// front end decodes the same recordings, and waits for it before it lets go of the front lock.
+pub type Deferred<'a> = Box<dyn FnOnce() + Send + 'a>;
 
 /// The GPU backend as the front end sees it. A call may come from any guest thread.
 pub trait Backend: Send + Sync {
@@ -202,15 +203,14 @@ pub trait Backend: Send + Sync {
     /// (vertical sync pacing). The default does not block.
     fn acquire(&self, _window: u64, _index: u32) {}
 
-    /// The game submitted `handles` on `queue`, after the front end accepted them. `queue` is the guest address of the
-    /// `NVNqueue`. `origin_lower_left` is the window origin that the queue captured at its creation. The frame holds
-    /// the analysis of the commands, so the backend replays the recordings through these handles. The default does
-    /// nothing.
+    /// The game submitted `handles` on `queue`. `queue` is the guest address of the `NVNqueue`. `origin_lower_left` is
+    /// the window origin that the queue captured at its creation. The frame holds the analysis of the commands, so the
+    /// backend replays the recordings through these handles. The default does nothing.
     ///
     /// The call runs under the lock of the front end and must be short. Work that needs no front end state goes into
-    /// the returned closure: the caller runs it after it released the front lock, on the same thread, and before it
-    /// returns to the game. Whatever order-sensitive state the backend needs (a lock that serialises the work) is taken
-    /// inside this call, so the closures run in the order of the calls even though they run unlocked.
+    /// the returned closure: the caller runs it on a helper thread while the front end decodes the same handles, and
+    /// waits for it before it releases the front lock and returns to the game. The closures therefore run one at a time
+    /// and in the order of the calls.
     fn submit<'a>(
         &'a self,
         _queue: u64,
