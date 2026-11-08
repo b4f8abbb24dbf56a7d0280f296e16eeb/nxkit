@@ -156,7 +156,7 @@ pub(super) fn out_swizzle(sw: [u8; 4], out: [u64; 4]) -> AbiResult<()> {
     Ok(())
 }
 
-extern "C" fn set_defaults(b: u64) {
+pub(super) extern "C" fn set_defaults(b: u64) {
     guard("nvnTextureBuilderSetDefaults", || {
         let o = Obj(b);
         let dev = o.u64(DEV)?;
@@ -170,15 +170,15 @@ extern "C" fn set_defaults(b: u64) {
     });
 }
 
-extern "C" fn set_device(b: u64, dev: u64) {
+pub(super) extern "C" fn set_device(b: u64, dev: u64) {
     guard("nvnTextureBuilderSetDevice", || Obj(b).set_u64(DEV, dev));
 }
 
-extern "C" fn set_flags(b: u64, v: i32) {
+pub(super) extern "C" fn set_flags(b: u64, v: i32) {
     guard("nvnTextureBuilderSetFlags", || Obj(b).set_i32(FLAGS, v));
 }
 
-extern "C" fn set_target(b: u64, v: i32) {
+pub(super) extern "C" fn set_target(b: u64, v: i32) {
     guard("nvnTextureBuilderSetTarget", || Obj(b).write(TARGET, &[v as u8]));
 }
 
@@ -203,7 +203,7 @@ extern "C" fn set_size_1d(b: u64, w: i32) {
     });
 }
 
-extern "C" fn set_size_2d(b: u64, w: i32, h: i32) {
+pub(super) extern "C" fn set_size_2d(b: u64, w: i32, h: i32) {
     guard("nvnTextureBuilderSetSize2D", || {
         let o = Obj(b);
         o.set_i32(WIDTH, w)?;
@@ -221,11 +221,11 @@ extern "C" fn set_size_3d(b: u64, w: i32, h: i32, d: i32) {
     });
 }
 
-extern "C" fn set_levels(b: u64, v: i32) {
+pub(super) extern "C" fn set_levels(b: u64, v: i32) {
     guard("nvnTextureBuilderSetLevels", || Obj(b).set_i32(LEVELS, v));
 }
 
-extern "C" fn set_format(b: u64, v: i32) {
+pub(super) extern "C" fn set_format(b: u64, v: i32) {
     guard("nvnTextureBuilderSetFormat", || Obj(b).set_i32(FORMAT, v));
 }
 
@@ -233,11 +233,11 @@ extern "C" fn set_samples(b: u64, v: i32) {
     guard("nvnTextureBuilderSetSamples", || Obj(b).write(SAMPLES, &[v as u8]));
 }
 
-extern "C" fn set_stride(b: u64, v: i64) {
+pub(super) extern "C" fn set_stride(b: u64, v: i64) {
     guard("nvnTextureBuilderSetStride", || Obj(b).set_u32(STRIDE, v as u32));
 }
 
-extern "C" fn set_storage(b: u64, pool: u64, off: i64) {
+pub(super) extern "C" fn set_storage(b: u64, pool: u64, off: i64) {
     guard("nvnTextureBuilderSetStorage", || {
         let o = Obj(b);
         o.set_u64(POOL, pool)?;

@@ -9,6 +9,7 @@
 //! calling convention is the one of `nxkit_abi::export`: narrow integers are `u32`, pointers are `u64` guest
 //! addresses.
 
+pub(crate) mod native_image;
 pub(crate) mod nv;
 pub(crate) mod vi;
 
@@ -32,6 +33,7 @@ pub(crate) use table;
 /// All forced take-overs of the graphics service.
 pub(crate) fn exports() -> Vec<Export> {
     let mut v = Vec::new();
+    v.extend(native_image::exports());
     v.extend(nv::exports());
     v.extend(vi::exports());
     v
