@@ -27,7 +27,7 @@ use nxkit_nvn::resource::TexId;
 use crate::barriers::{BarrierState, touch};
 use crate::bindless::{Bindless, Env, Handles, Resolved};
 use crate::copyback::CopyBack;
-use crate::detail::{FrameDetail, RecordingRun};
+use crate::detail::{DrawArgs, FrameDetail, RecordingRun};
 use crate::draws::{Shared, ordinals};
 use crate::encode::{Tables, render_pass};
 use crate::icbs::Icbs;
@@ -833,6 +833,7 @@ impl Gpu {
             .map(|(id, res)| (*id, res.barrier_id))
             .collect();
         let ords = ordinals(frame);
+        kpass_diag(frame, plan, detail, &ords, &textures);
         let t_barrier = Instant::now();
         let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
         let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples);
@@ -1130,4 +1131,98 @@ fn vertex_sampling_passes(
             })
         })
         .collect()
+}
+
+/// `NXKIT_DIAG=kpass` (`docs/plans/kernel-passes.md`, step 0): every 300 frames, the render passes that could run as a
+/// compute dispatch instead (one draw of at most 6 vertices or indices, one instance, no depth, stencil, blending or
+/// alpha to coverage, one sample, colour targets that a kernel can write, at most 512x512), the runs of them in a row,
+/// and why the other one-draw passes cannot.
+fn kpass_diag(
+    frame: &Frame,
+    plan: &PassPlan,
+    detail: &FrameDetail,
+    ords: &[crate::draws::Ordinal],
+    textures: &FastMap<TexId, Res>,
+) {
+    use nxkit_metal::Format as F;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    if !crate::diag("kpass") || N.fetch_add(1, Ordering::Relaxed) % 300 != 150 {
+        return;
+    }
+    const MAX_PX: u64 = 512 * 512;
+    let mut why = std::collections::BTreeMap::<&str, u32>::new();
+    let (mut candidates, mut renders, mut runs, mut in_run) = (0u32, 0u32, 0u32, false);
+    let mut sizes = std::collections::BTreeMap::<String, u32>::new();
+    for p in &plan.passes {
+        let kind_render = p.kind == nxkit_nvn::passes::PassKind::Render;
+        let mut ok = false;
+        if kind_render {
+            renders += 1;
+            let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
+            let draws = cmds.iter().filter(|c| matches!(c, Cmd::Draw { .. })).count();
+            let reason = if draws != 1 {
+                Some(if draws == 0 { "no draw" } else { "several draws" })
+            } else {
+                let first = ords.get(p.cmds.start as usize).map_or(0, |o| o.draw) as usize;
+                let atts = plan.attachments_of(p);
+                let colors: Vec<&Res> = atts
+                    .iter()
+                    .filter(|a| matches!(a.slot, nxkit_nvn::passes::Slot::Color(_)))
+                    .filter_map(|a| textures.get(&a.tex))
+                    .collect();
+                match detail.draws.get(first) {
+                    None => Some("no detail"),
+                    Some(d) => {
+                        let small_geometry = match d.args {
+                            DrawArgs::Arrays { count, instances, .. } => count <= 6 && instances <= 1,
+                            DrawArgs::Indexed { count, instances, .. } => count <= 6 && instances <= 1,
+                        };
+                        let ds = &d.depth_stencil;
+                        if !small_geometry {
+                            Some("more than 6 vertices or instanced")
+                        } else if ds.depth_test || ds.depth_write || ds.stencil_test {
+                            Some("depth or stencil")
+                        } else if d.blend.iter().any(|b| b.enable) {
+                            Some("blending")
+                        } else if d.raster.alpha_to_coverage {
+                            Some("alpha to coverage")
+                        } else if colors.is_empty() {
+                            Some("no colour target")
+                        } else if colors.iter().any(|r| {
+                            r.desc.format.is_compressed()
+                                || r.desc.format.is_depth()
+                                || matches!(r.desc.format, F::Rgba8UnormSrgb | F::Bgra8UnormSrgb)
+                        }) {
+                            Some("format")
+                        } else if colors.iter().any(|r| u64::from(r.desc.width) * u64::from(r.desc.height) > MAX_PX) {
+                            Some("larger than 512x512")
+                        } else {
+                            if let Some(r) = colors.first() {
+                                *sizes.entry(format!("{}x{}", r.desc.width, r.desc.height)).or_default() += 1;
+                            }
+                            None
+                        }
+                    }
+                }
+            };
+            match reason {
+                None => ok = true,
+                Some(r) if draws == 1 => *why.entry(r).or_default() += 1,
+                Some(r) => *why.entry(r).or_default() += 1,
+            }
+        }
+        if ok {
+            candidates += 1;
+            if !in_run {
+                runs += 1;
+            }
+            in_run = true;
+        } else if kind_render {
+            in_run = false;
+        }
+    }
+    eprintln!(
+        "DIAG kpass: {candidates} of {renders} render passes are candidates, in {runs} runs; the others: {why:?}; candidate targets: {sizes:?}"
+    );
 }

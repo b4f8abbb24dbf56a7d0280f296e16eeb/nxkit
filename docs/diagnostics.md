@@ -88,6 +88,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `pipe` | gpu | render, compute and depth-stencil states that Metal did not build | first 300 | low |
 | `overlap` | gpu | the flushes of the CPU, the dynamic pages, and per kind of buffer binding the bytes bound and the bytes changed since the last frame (`docs/plans/fence-overlap.md`) | every 120 frames | high (hashes every bound range) |
 | `hitch` | gpu | each frame whose encode took 7 ms or more or that built pipelines or textures, with the wall clock in ms, to put next to the late frames of `NXKIT_PACE_DIAG` | each such frame | low |
+| `kpass` | gpu | the render passes that could run as compute dispatches (`docs/plans/kernel-passes.md`, step 0), the runs of them, and why the others cannot | every 300 frames | low |
 | `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
 | `passes` | gpu | the render passes of a frame by their number of draws and by the size of their first attachment | every 300 frames | low |
 | `indirect` | gpu | draw records without arguments (indirect or unknown draw kinds) | at powers of two per kind | low |

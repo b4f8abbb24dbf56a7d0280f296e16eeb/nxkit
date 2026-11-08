@@ -57,6 +57,12 @@ A diagnostic counts, per frame, the render passes that could become kernel passe
 With the GPU trace that maps encoders to passes (`NXKIT_PASS_LIST`), this gives the GPU time that the candidates cost now,
 and so the most that the plan can win. If it is under about 1.5 ms in a loaded scene, the plan stops here.
 
+Result in Breath of the Wild, a loaded scene (GPU 12 to 13 ms), per frame: 33 of 146 to 167 render passes are
+candidates, in 5 runs, almost all tiny (twelve of 16x16, 1x1 to 96x96, three of 400x225). Of the other one-draw passes
+38 blend, 16 to 26 test depth or stencil, about 10 are too large or have more vertices. At about 32 us a pass boundary
+(the microbenchmark), the candidates are worth about 0.9 ms; with blending in the kernel (read the target, blend,
+write) up to 71 passes, about 2 ms if they chain.
+
 ### Step 1: the encoder
 
 - A run of consecutive candidate passes becomes one compute encoder. Each candidate is one dispatch over its target
