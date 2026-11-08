@@ -7,6 +7,7 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
@@ -30,6 +31,17 @@ pub struct Drawable {
 }
 
 impl Drawable {
+    /// Calls `f` with the time in seconds on the host clock at which the display showed the drawable, 0 when it did not
+    /// show it. It must be called before the drawable is presented.
+    pub fn on_presented(&self, f: impl Fn(f64) + Send + Sync + 'static) {
+        let block: RcBlock<'static, fn(NonNull<ProtocolObject<dyn MTLDrawable>>), dyn Send + Sync> =
+            RcBlock::new(move |d: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                // SAFETY: Metal passes a valid drawable that lives for the call.
+                f(unsafe { d.as_ref() }.presentedTime());
+            });
+        self.raw.addPresentedHandler(&block);
+    }
+
     pub(crate) fn wrap(ctx: &Context, raw: Retained<ProtocolObject<dyn CAMetalDrawable>>) -> Self {
         let tex = raw.texture();
         let mut desc =

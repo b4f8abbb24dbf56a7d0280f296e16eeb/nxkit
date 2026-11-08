@@ -85,10 +85,35 @@ pub struct WindowConfig {
     pub fullscreen: bool,
 }
 
+/// The screen of the window: `NXKIT_SCREEN` names it by its index in the screen list (0 is the built-in one) or by a part
+/// of its name, for example `XB273U`. Without it, or when nothing matches, it is the main screen.
+fn target_screen(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
+    if let Ok(want) = std::env::var("NXKIT_SCREEN") {
+        let screens = NSScreen::screens(mtm);
+        let found = match want.parse::<usize>() {
+            Ok(i) if i < screens.count() => Some(screens.objectAtIndex(i)),
+            Ok(_) => None,
+            Err(_) => {
+                let want = want.to_lowercase();
+                screens.iter().find(|s| s.localizedName().to_string().to_lowercase().contains(&want))
+            }
+        };
+        match found {
+            Some(s) => return Some(s),
+            None => eprintln!("nxkit-host: NXKIT_SCREEN={want} matches no screen, using the main screen"),
+        }
+    }
+    NSScreen::mainScreen(mtm)
+}
+
 /// The display link rate that the main screen supports. The game's own pacing (the title's frame step) picks the
 /// frames it renders. The link never asks for less than the screen can show.
 fn screen_interval(mtm: MainThreadMarker) -> FrameInterval {
-    match NSScreen::mainScreen(mtm) {
+    let screen = target_screen(mtm);
+    if let Some(s) = &screen {
+        nxkit_svc_pacing::set_screen_hz(u32::try_from(s.maximumFramesPerSecond()).unwrap_or(0));
+    }
+    match screen {
         Some(s) if s.maximumFramesPerSecond() >= 120 => FrameInterval::Hz120,
         _ => FrameInterval::Hz60,
     }
@@ -98,7 +123,7 @@ fn content_size(mtm: MainThreadMarker, size: Option<(f64, f64)>) -> (f64, f64) {
     if let Some(s) = size {
         return s;
     }
-    match NSScreen::mainScreen(mtm) {
+    match target_screen(mtm) {
         Some(s) => {
             let f = s.visibleFrame();
             (f.size.width, f.size.height)
@@ -385,7 +410,15 @@ pub fn run(
     let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks { inner: hooks, stop });
     let _link = DisplayLink::new(mtm, &presenter, screen_interval(mtm), link_hooks);
 
-    window.center();
+    match target_screen(mtm) {
+        Some(screen) if std::env::var_os("NXKIT_SCREEN").is_some() => {
+            let (v, f) = (screen.visibleFrame(), window.frame());
+            let x = v.origin.x + (v.size.width - f.size.width).max(0.0) / 2.0;
+            let y = v.origin.y + (v.size.height - f.size.height).max(0.0) / 2.0;
+            window.setFrameOrigin(CGPoint::new(x, y));
+        }
+        _ => window.center(),
+    }
     window.makeKeyAndOrderFront(None);
     if cfg.fullscreen {
         window.toggleFullScreen(None);

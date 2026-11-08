@@ -175,6 +175,20 @@ extern "C" fn queue_finish(_q: u64) {
     guard("nvnQueueFinish", || gpu("nvnQueueFinish").finish());
 }
 
+/// What the screen showed of the present 8 back from `presents`, the one before it and how long it was to stay. The
+/// presents of the game queue up to [`nxkit_gpu`]'s `MAX_PENDING` ahead of the screen, so a frame that runs long is
+/// absorbed, and only the screen says whether the game was late. The interval between presents `n - 1` and `n` shows
+/// frame `n - 1`: it is judged against the larger hold of the two, at least one 60 Hz vsync.
+fn snap_view(presents: u64) -> Option<nxkit_svc_pacing::load::SnapView> {
+    let n = presents.checked_sub(8).filter(|n| *n > 1)?;
+    let k = nxkit_nvn::screen::hold(n).max(nxkit_nvn::screen::hold(n - 1)).max(1);
+    Some(nxkit_svc_pacing::load::SnapView {
+        presented: nxkit_nvn::screen::shown_at(n),
+        before: nxkit_nvn::screen::shown_at(n - 1),
+        expect_ms: f64::from(k) * 1000.0 / 60.0,
+    })
+}
+
 /// Tells the frame step that a frame was presented, and logs what it decided: the hold of the frames on screen and the
 /// step that the game gets, and every 1800 presents the game time against the real time.
 fn pace_present(now_ns: u64) {
@@ -183,9 +197,9 @@ fn pace_present(now_ns: u64) {
     let sample = nxkit_svc_pacing::PresentSample {
         presents,
         now_ns,
-        gpu_ms: None,
-        snap: None,
-        screen_hz: 120,
+        gpu_ms: nxkit_nvn::screen::gpu_ms(),
+        snap: snap_view(presents),
+        screen_hz: nxkit_svc_pacing::screen_hz(),
         link_active: true,
         movie: false,
         thermal: 0,
@@ -193,6 +207,9 @@ fn pace_present(now_ns: u64) {
         perf: None,
     };
     let Ok(done) = nxkit_svc_pacing::frame_presented(&sample) else { return };
+    if let Ok(k) = nxkit_svc_pacing::hold() {
+        nxkit_nvn::screen::set_hold(presents, u32::try_from(k).unwrap_or(0));
+    }
     for e in done.outcome.iter().flat_map(|o| &o.events) {
         match e {
             nxkit_svc_pacing::load::Event::HoldChanged { from, to, why, cost, .. } => {

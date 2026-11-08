@@ -138,6 +138,7 @@ impl GpuBackend {
         drop(gpu);
         if let Ok(Some(stats)) = &result {
             *locked(&self.last_gpu) = Some((stats.gpu_start_s, stats.gpu_end_s));
+            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         self.write_counters(upto);
         self.done.fetch_max(upto, Ordering::AcqRel);
@@ -520,6 +521,9 @@ impl TickSink for GpuBackend {
                 .iter()
                 .position(|p| p.number == number)
                 .map(|i| pending.remove(i).texture);
+            for p in pending.iter().filter(|p| p.number < number) {
+                nxkit_nvn::screen::shown(p.number, -1.0);
+            }
             pending.retain(|p| p.number > number);
             self.freed.notify_all();
             found
@@ -565,6 +569,9 @@ impl TickSink for GpuBackend {
         let Some(b) = blit.as_mut() else {
             return;
         };
+        if matches!(shown, Shown::Game { .. }) {
+            tick.drawable.on_presented(move |secs| nxkit_nvn::screen::shown(number, secs));
+        }
         let r = b.present(&texture, tick.drawable, tick.target_presentation_timestamp);
         if r.is_ok() {
             present_diag(3);

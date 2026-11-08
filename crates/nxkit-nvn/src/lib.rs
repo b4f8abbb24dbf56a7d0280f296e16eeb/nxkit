@@ -33,6 +33,7 @@ pub mod mem;
 pub mod passes;
 pub mod record;
 pub mod resource;
+pub mod screen;
 pub mod space;
 pub mod swizzle;
 pub mod tic;

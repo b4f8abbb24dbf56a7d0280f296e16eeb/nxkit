@@ -230,6 +230,22 @@ pub fn on_display_tick() -> Result<(), Error> {
     Ok(())
 }
 
+/// The refresh rate of the screen that shows the game, 120 until the host sets it.
+static SCREEN_HZ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(120);
+
+/// Sets the refresh rate of the screen that shows the game. A rate that is not a multiple of the step rate (144 Hz)
+/// shows a frame on time one refresh longer now and then, which the frame step must not take for lateness.
+pub fn set_screen_hz(hz: u32) {
+    if hz > 0 {
+        SCREEN_HZ.store(hz, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The refresh rate of the screen that shows the game.
+pub fn screen_hz() -> u32 {
+    SCREEN_HZ.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Sets the display rate and the vsync rate of the game. The host calls it when the plan changes.
 pub fn set_rates(display_hz: f32, vsync_hz: f32) -> Result<(), Error> {
     if !rate_ok(display_hz) || !rate_ok(vsync_hz) {

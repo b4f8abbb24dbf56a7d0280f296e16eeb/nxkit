@@ -202,6 +202,7 @@ impl LoadStepper {
         self.prev_ns = start;
         let gpu = s.gpu_ms.filter(|g| *g >= 0.0).map_or(0.0, |g| g * 1e6 / v);
         let cost = (shown - pace_wait as f64 / v).max(gpu);
+        cost_diag(shown, pace_wait as f64 / v, gpu, &self.fs, kmax_diag(&self.cfg, hz, cap));
         let kmin = hz / cap as i32;
         let kmax = if self.cfg.at_120() {
             2
@@ -359,6 +360,43 @@ impl LoadStepper {
             self.held = [0; 3];
         }
         Ok(())
+    }
+}
+
+/// `NXKIT_PACE_DIAG=1` prints the mean frame interval, pacing wait, CPU cost and GPU time (in vsyncs) of every 120
+/// presents, to see which of them keeps the hold up.
+fn kmax_diag(cfg: &LoadConfig, hz: i32, cap: u32) -> String {
+    format!("cap {cap} hz {hz} hold-cfg {} at120 {}", cfg.hold, cfg.at_120())
+}
+
+fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
+    let k = fs.k;
+    use std::sync::{Mutex, OnceLock};
+    static ON: OnceLock<bool> = OnceLock::new();
+    static SUM: Mutex<[f64; 5]> = Mutex::new([0.0; 5]);
+    if !*ON.get_or_init(|| std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let Ok(mut a) = SUM.lock() else { return };
+    a[0] += shown;
+    a[1] += wait;
+    a[2] += shown - wait;
+    a[3] += gpu;
+    a[4] += 1.0;
+    if a[4] >= 120.0 {
+        let n = a[4];
+        eprintln!(
+            "nxkit-pacing: diag hold {k}: shown {:.2} wait {:.2} cpu {:.2} gpu {:.2} vsyncs (mean of {n})",
+            a[0] / n,
+            a[1] / n,
+            a[2] / n,
+            a[3] / n
+        );
+        *a = [0.0; 5];
+        eprintln!(
+            "nxkit-pacing: diag state fit_run {} late_run {} trial {} probe {} hold {:.0} since {:.0} late {} ups {} downs {} probes {} failed {} debt {:.2} {cfg}",
+            fs.fit_run, fs.late_run, fs.trial, fs.probe, fs.hold, fs.since, fs.late, fs.ups, fs.downs, fs.probes, fs.failed, fs.debt
+        );
     }
 }
 
