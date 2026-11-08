@@ -43,7 +43,10 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Config {
-        Config { master_volume: 1.0, silent_sink: false }
+        Config {
+            master_volume: 1.0,
+            silent_sink: false,
+        }
     }
 }
 
@@ -76,7 +79,13 @@ pub fn big_stack_exports() -> Vec<Export> {
 /// The IPC services `audout:u` and `audren:u`.
 pub fn services() -> Vec<Named> {
     vec![
-        Named { name: "audout:u", root: Arc::new(ipc_out::AudioOutManager) },
-        Named { name: "audren:u", root: Arc::new(ipc_ren::AudioRendererManager) },
+        Named {
+            name: "audout:u",
+            root: Arc::new(ipc_out::AudioOutManager),
+        },
+        Named {
+            name: "audren:u",
+            root: Arc::new(ipc_ren::AudioRendererManager),
+        },
     ]
 }

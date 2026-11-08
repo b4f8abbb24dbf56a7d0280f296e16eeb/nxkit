@@ -40,7 +40,12 @@ pub(crate) struct Decl {
 pub(crate) type Decls = [FastMap<String, Vec<Decl>>; 2];
 
 /// The `img` members of the program of `key`, cached by key.
-pub(crate) fn declared<'a>(decls: &'a mut Decls, programs: &Programs, key: &str, vertex: bool) -> &'a [Decl] {
+pub(crate) fn declared<'a>(
+    decls: &'a mut Decls,
+    programs: &Programs,
+    key: &str,
+    vertex: bool,
+) -> &'a [Decl] {
     let map = &mut decls[usize::from(vertex)];
     if !map.contains_key(key) {
         let v = programs
@@ -49,7 +54,13 @@ pub(crate) fn declared<'a>(decls: &'a mut Decls, programs: &Programs, key: &str,
                 p.binds
                     .iter()
                     .filter(|b| b.kind == BindKind::Img)
-                    .filter_map(|b| Some(Decl { reg: b.reg, dim: b.dim?, img: b.img? }))
+                    .filter_map(|b| {
+                        Some(Decl {
+                            reg: b.reg,
+                            dim: b.dim?,
+                            img: b.img?,
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -76,19 +87,39 @@ pub(crate) fn sites(detail: &FrameDetail) -> Vec<Site<'_>> {
             continue;
         }
         let stages = [
-            (Some(&*d.program.vertex).filter(|k| !k.is_empty()), true, Stage::Vertex),
+            (
+                Some(&*d.program.vertex).filter(|k| !k.is_empty()),
+                true,
+                Stage::Vertex,
+            ),
             (d.program.fragment.as_deref(), false, Stage::Fragment),
             (d.program.task.as_deref(), false, Stage::Task),
             (d.program.mesh.as_deref(), false, Stage::Mesh),
         ];
         for (key, vertex, stage) in stages {
             if let Some(key) = key {
-                out.push(Site { key, vertex, stage, binds: &d.images, draw: Some(n as u32) });
+                out.push(Site {
+                    key,
+                    vertex,
+                    stage,
+                    binds: &d.images,
+                    draw: Some(n as u32),
+                });
             }
         }
     }
-    for d in detail.dispatches.iter().filter(|d| !d.images.is_empty() && !d.program.is_empty()) {
-        out.push(Site { key: &d.program, vertex: false, stage: Stage::Compute, binds: &d.images, draw: None });
+    for d in detail
+        .dispatches
+        .iter()
+        .filter(|d| !d.images.is_empty() && !d.program.is_empty())
+    {
+        out.push(Site {
+            key: &d.program,
+            vertex: false,
+            stage: Stage::Compute,
+            binds: &d.images,
+            draw: None,
+        });
     }
     out
 }
@@ -114,21 +145,41 @@ pub(crate) struct ImageUses {
 }
 
 /// Pairs the image binds of the frame with the `img` members of their shaders.
-pub(crate) fn uses(decls: &mut Decls, programs: &Programs, view: &dyn EncodeView, detail: &FrameDetail) -> ImageUses {
+pub(crate) fn uses(
+    decls: &mut Decls,
+    programs: &Programs,
+    view: &dyn EncodeView,
+    detail: &FrameDetail,
+) -> ImageUses {
     let mut out = ImageUses::default();
     for site in sites(detail) {
         for d in declared(decls, programs, site.key, site.vertex) {
-            let Some(h) = site.binds.iter().find(|t| t.stage == site.stage && t.slot == d.reg).map(|t| t.handle) else {
+            let Some(h) = site
+                .binds
+                .iter()
+                .find(|t| t.stage == site.stage && t.slot == d.reg)
+                .map(|t| t.handle)
+            else {
                 continue;
             };
-            let Some(id) = (h != 0).then(|| view.resolve(h).ok()).flatten().map(|(s, _)| s.texture) else { continue };
+            let Some(id) = (h != 0)
+                .then(|| view.resolve(h).ok())
+                .flatten()
+                .map(|(s, _)| s.texture)
+            else {
+                continue;
+            };
             out.all.insert(id);
             if d.img.atomic {
                 out.atomic.insert(id);
             }
             if let Some(n) = site.draw {
                 let e = out.per_draw.entry(n).or_default();
-                let list = if d.img.writes() { &mut e.writes } else { &mut e.reads };
+                let list = if d.img.writes() {
+                    &mut e.writes
+                } else {
+                    &mut e.reads
+                };
                 if !list.contains(&id) {
                     list.push(id);
                 }
@@ -139,7 +190,12 @@ pub(crate) fn uses(decls: &mut Decls, programs: &Programs, view: &dyn EncodeView
 }
 
 /// For each pass, the textures its draws read and write through images. Only render passes have any.
-pub(crate) fn pass_images(frame: &Frame, plan: &PassPlan, ords: &[Ordinal], per_draw: &FastMap<u32, PassImages>) -> Vec<PassImages> {
+pub(crate) fn pass_images(
+    frame: &Frame,
+    plan: &PassPlan,
+    ords: &[Ordinal],
+    per_draw: &FastMap<u32, PassImages>,
+) -> Vec<PassImages> {
     plan.passes
         .iter()
         .map(|p| {
@@ -151,7 +207,9 @@ pub(crate) fn pass_images(frame: &Frame, plan: &PassPlan, ords: &[Ordinal], per_
                 if !matches!(frame.cmds.get(i as usize), Some(Cmd::Draw { .. })) {
                     continue;
                 }
-                let Some(u) = ords.get(i as usize).and_then(|o| per_draw.get(&o.draw)) else { continue };
+                let Some(u) = ords.get(i as usize).and_then(|o| per_draw.get(&o.draw)) else {
+                    continue;
+                };
                 for (from, to) in [(&u.reads, &mut out.reads), (&u.writes, &mut out.writes)] {
                     for id in from {
                         if !to.contains(id) {
@@ -182,7 +240,12 @@ pub(crate) fn resolve(
 ) {
     for site in sites(detail) {
         for d in declared(decls, programs, site.key, site.vertex) {
-            let Some(h) = site.binds.iter().find(|t| t.stage == site.stage && t.slot == d.reg).map(|t| t.handle) else {
+            let Some(h) = site
+                .binds
+                .iter()
+                .find(|t| t.stage == site.stage && t.slot == d.reg)
+                .map(|t| t.handle)
+            else {
                 continue;
             };
             let key = (h, d.dim, d.img.atomic_code());
@@ -216,16 +279,24 @@ fn one(
     })?;
     let id = slot.texture;
     if !textures.contains_key(&id) {
-        let rec = view.record(id).map_err(|e| crate::tex_skip(format_args!("image {id:?}: {e:?}")))?;
+        let rec = view
+            .record(id)
+            .map_err(|e| crate::tex_skip(format_args!("image {id:?}: {e:?}")))?;
         let res = store.ensure(rec, scale, crate::textures::Use::default(), stats)?;
         textures.insert(id, res);
     }
     let res = textures.get(&id).ok_or(Skip::Texture)?;
     if !res.desc.shader_write && d.img.writes() {
-        return Err(crate::tex_skip(format_args!("image {id:?} {:?} cannot be written by a shader", res.desc.format)));
+        return Err(crate::tex_skip(format_args!(
+            "image {id:?} {:?} cannot be written by a shader",
+            res.desc.format
+        )));
     }
     let tex = store.image_view(id, res, &slot.header, d.dim, d.img.atomic_code(), stats)?;
-    let r = ImageRes { id: tex.gpu_resource_id(), scaled: res.scaled };
+    let r = ImageRes {
+        id: tex.gpu_resource_id(),
+        scaled: res.scaled,
+    };
     handles.keep.push(tex);
     Ok(r)
 }
@@ -237,7 +308,11 @@ mod tests {
     use crate::programs::ImgAccess;
 
     fn bind(stage: Stage, slot: u32, handle: u64) -> TextureBind {
-        TextureBind { stage, slot, handle }
+        TextureBind {
+            stage,
+            slot,
+            handle,
+        }
     }
 
     #[test]
@@ -261,15 +336,30 @@ mod tests {
         });
         let s = sites(&detail);
         assert_eq!(s.len(), 1);
-        assert_eq!((s[0].key, s[0].stage, s[0].draw), ("cs", Stage::Compute, None));
+        assert_eq!(
+            (s[0].key, s[0].stage, s[0].draw),
+            ("cs", Stage::Compute, None)
+        );
         assert_eq!(s[0].binds[0].handle, 9);
     }
 
     #[test]
     fn an_atomic_or_written_image_counts_as_a_write() {
-        let read = ImgDecl { access: ImgAccess::Read, atomic: false, signed: false };
-        let rw = ImgDecl { access: ImgAccess::ReadWrite, atomic: false, signed: false };
-        let atomic = ImgDecl { access: ImgAccess::Read, atomic: true, signed: true };
+        let read = ImgDecl {
+            access: ImgAccess::Read,
+            atomic: false,
+            signed: false,
+        };
+        let rw = ImgDecl {
+            access: ImgAccess::ReadWrite,
+            atomic: false,
+            signed: false,
+        };
+        let atomic = ImgDecl {
+            access: ImgAccess::Read,
+            atomic: true,
+            signed: true,
+        };
         assert!(!read.writes());
         assert!(rw.writes());
         assert!(atomic.writes());

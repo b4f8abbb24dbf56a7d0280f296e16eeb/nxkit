@@ -40,7 +40,13 @@ mod tests {
                 + usize::from(cfg!(feature = "botw"))
                 + usize::from(cfg!(feature = "acnh"))
         );
-        #[cfg(not(any(feature = "agl", feature = "oot", feature = "botw", feature = "acnh", feature = "mtf")))]
+        #[cfg(not(any(
+            feature = "agl",
+            feature = "oot",
+            feature = "botw",
+            feature = "acnh",
+            feature = "mtf"
+        )))]
         assert!(c.titles().is_empty() && c.families().is_empty());
     }
 

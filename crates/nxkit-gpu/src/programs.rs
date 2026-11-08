@@ -98,7 +98,11 @@ fn declared_img(msl_type: &str, atomic: bool) -> ImgDecl {
         ImgAccess::Read
     };
     let signed = args.trim_start().starts_with("int") || args.trim_start().starts_with("short");
-    ImgDecl { access, atomic, signed }
+    ImgDecl {
+        access,
+        atomic,
+        signed,
+    }
 }
 
 /// One member of the argument buffer.
@@ -214,7 +218,9 @@ impl Programs {
 
     /// The program of `key`. `vertex` selects the reading of the vertex inputs. The result is cached, also a failure.
     pub(crate) fn stage(&self, key: &str, vertex: bool) -> Result<Arc<StageProgram>, Skip> {
-        if let Some(r) = self.cache.read().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].get(key) {
+        if let Some(r) =
+            self.cache.read().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].get(key)
+        {
             return r.clone();
         }
         let r = self.load(key, vertex).map(Arc::new);
@@ -226,13 +232,19 @@ impl Programs {
                 eprintln!("DIAG prog {what}");
             }
         }
-        self.cache.write().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].insert(key.to_owned(), r.clone());
+        self.cache.write().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)]
+            .insert(key.to_owned(), r.clone());
         r
     }
 
     /// Forgets all programs, for example after the shader directory changed.
     pub(crate) fn clear(&self) {
-        for m in self.cache.write().unwrap_or_else(PoisonError::into_inner).iter_mut() {
+        for m in self
+            .cache
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter_mut()
+        {
             m.clear();
         }
     }
@@ -285,7 +297,10 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         .unwrap_or("main0")
         .to_owned();
     let mut binds = Vec::new();
-    let pass_scale = json.get("pass_scale").and_then(Json::as_bool).unwrap_or(false);
+    let pass_scale = json
+        .get("pass_scale")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
     let mut arg_bytes = 0u32;
     for b in json.get("bindings").map(Json::as_arr).unwrap_or(&[]) {
         let kind = match b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)? {
@@ -308,7 +323,10 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
                 // The reason names the kind, so the health report says which one is missing.
                 nxkit_nvn::diag::example(
                     nxkit_nvn::diag::Reason::SkipBinding,
-                    format_args!("binding kind {other} (arg {})", b.get("arg_id").and_then(Json::as_i64).unwrap_or(-1)),
+                    format_args!(
+                        "binding kind {other} (arg {})",
+                        b.get("arg_id").and_then(Json::as_i64).unwrap_or(-1)
+                    ),
                 );
                 nxkit_nvn::diag::note(
                     nxkit_nvn::diag::Reason::BindingRefused,
@@ -334,7 +352,9 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
                 .saturating_mul(8),
         );
         let dim = if matches!(kind, BindKind::Tex | BindKind::Img) {
-            b.get("msl_type").and_then(Json::as_str).and_then(declared_dim)
+            b.get("msl_type")
+                .and_then(Json::as_str)
+                .and_then(declared_dim)
         } else {
             None
         };
@@ -350,10 +370,26 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         };
         let img = (kind == BindKind::Img).then(|| {
             let atomic = b.get("atomic").and_then(Json::as_bool).unwrap_or(false);
-            declared_img(b.get("msl_type").and_then(Json::as_str).unwrap_or(""), atomic)
+            declared_img(
+                b.get("msl_type").and_then(Json::as_str).unwrap_or(""),
+                atomic,
+            )
         });
-        let bank = b.get("bank").and_then(Json::as_i64).and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
-        binds.push(Bind { arg_id, kind, reg, dim, rw, rscale, img, bank });
+        let bank = b
+            .get("bank")
+            .and_then(Json::as_i64)
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(0);
+        binds.push(Bind {
+            arg_id,
+            kind,
+            reg,
+            dim,
+            rw,
+            rscale,
+            img,
+            bank,
+        });
     }
     let inputs = if vertex {
         json.get("vertex_inputs")
@@ -411,8 +447,14 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
     Ok(StageProgram {
         lib,
         entry,
-        entry_uint: json.get("entry_u").and_then(Json::as_str).map(str::to_owned),
-        entry_mixed: json.get("entry_m").and_then(Json::as_str).zip(json.get("uint_mask_m").and_then(Json::as_i64))
+        entry_uint: json
+            .get("entry_u")
+            .and_then(Json::as_str)
+            .map(str::to_owned),
+        entry_mixed: json
+            .get("entry_m")
+            .and_then(Json::as_str)
+            .zip(json.get("uint_mask_m").and_then(Json::as_i64))
             .map(|(entry, mask)| (entry.to_owned(), mask as u8)),
         binds,
         arg_bytes,
@@ -431,8 +473,14 @@ fn read_mesh(m: &Json) -> Result<MeshInfo, Skip> {
         Some("ms") => MeshKind::Mesh,
         _ => return Err(Skip::Program),
     };
-    let int = |k: &str| m.get(k).and_then(Json::as_i64).and_then(|v| u32::try_from(v).ok());
-    let threads = int("threads").filter(|t| (1..=1024).contains(t)).ok_or(Skip::Program)?;
+    let int = |k: &str| {
+        m.get(k)
+            .and_then(Json::as_i64)
+            .and_then(|v| u32::try_from(v).ok())
+    };
+    let threads = int("threads")
+        .filter(|t| (1..=1024).contains(t))
+        .ok_or(Skip::Program)?;
     Ok(MeshInfo {
         kind,
         threads,
@@ -448,21 +496,33 @@ mod img_tests {
     #[test]
     fn an_img_member_gives_its_access_and_texel_type() {
         let d = declared_img("texture2d<float, access::write>", false);
-        assert_eq!((d.access, d.atomic, d.signed), (ImgAccess::Write, false, false));
+        assert_eq!(
+            (d.access, d.atomic, d.signed),
+            (ImgAccess::Write, false, false)
+        );
         assert!(d.writes());
         let d = declared_img("texture2d_array<float, access::read>", false);
         assert_eq!(d.access, ImgAccess::Read);
         assert!(!d.writes());
         let d = declared_img("texture2d<uint, access::read_write>", true);
-        assert_eq!((d.access, d.atomic, d.signed, d.atomic_code()), (ImgAccess::ReadWrite, true, false, 1));
-        assert_eq!(declared_img("texture3d<int, access::read_write>", true).atomic_code(), 2);
+        assert_eq!(
+            (d.access, d.atomic, d.signed, d.atomic_code()),
+            (ImgAccess::ReadWrite, true, false, 1)
+        );
+        assert_eq!(
+            declared_img("texture3d<int, access::read_write>", true).atomic_code(),
+            2
+        );
     }
 
     #[test]
     fn the_image_types_of_the_shaders_map_to_texture_kinds() {
         use nxkit_metal::TextureKind as K;
         assert_eq!(declared_dim("texture2d<float, access::write>"), Some(K::D2));
-        assert_eq!(declared_dim("texture2d_array<float, access::read>"), Some(K::D2Array));
+        assert_eq!(
+            declared_dim("texture2d_array<float, access::read>"),
+            Some(K::D2Array)
+        );
         assert_eq!(declared_dim("texture3d<float, access::write>"), Some(K::D3));
     }
 }

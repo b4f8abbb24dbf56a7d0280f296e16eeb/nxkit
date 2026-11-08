@@ -74,12 +74,20 @@ impl Config {
 
     /// The gain within 0 to 3. A value that is not finite is 1.
     pub(crate) fn gain(&self) -> f32 {
-        if self.rumble_gain.is_finite() { self.rumble_gain.clamp(0.0, 3.0) } else { 1.0 }
+        if self.rumble_gain.is_finite() {
+            self.rumble_gain.clamp(0.0, 3.0)
+        } else {
+            1.0
+        }
     }
 
     /// The minimum within 0 to 0.9. A value that is not finite is 0.
     pub(crate) fn min(&self) -> f32 {
-        if self.rumble_min.is_finite() { self.rumble_min.clamp(0.0, 0.9) } else { 0.0 }
+        if self.rumble_min.is_finite() {
+            self.rumble_min.clamp(0.0, 0.9)
+        } else {
+            0.0
+        }
     }
 }
 
@@ -96,14 +104,21 @@ mod tests {
 
     #[test]
     fn gains_are_limited() {
-        let c = Config { rumble_gain: 9.0, rumble_min: f32::NAN, ..Config::default() };
+        let c = Config {
+            rumble_gain: 9.0,
+            rumble_min: f32::NAN,
+            ..Config::default()
+        };
         assert_eq!(c.gain(), 3.0);
         assert_eq!(c.min(), 0.0);
     }
 
     #[test]
     fn a_bad_axes_string_gives_the_identity() {
-        let c = Config { motion_axes: "q".to_owned(), ..Config::default() };
+        let c = Config {
+            motion_axes: "q".to_owned(),
+            ..Config::default()
+        };
         assert_eq!(c.motion_map(), MotionMap::default());
     }
 
@@ -113,11 +128,20 @@ mod tests {
         use crate::keys::usage;
         use crate::npad::btn;
         let c = Config {
-            binds: vec![("f".to_owned(), "x".to_owned()), ("nope".to_owned(), "a".to_owned())],
+            binds: vec![
+                ("f".to_owned(), "x".to_owned()),
+                ("nope".to_owned(), "a".to_owned()),
+            ],
             ..Config::default()
         };
         let b = c.bindings();
-        assert_eq!(b.get(Source::Key(usage::letter(b'f'))), Some(Action::Button(btn::X)));
-        assert_eq!(b.get(Source::Key(usage::letter(b'e'))), Some(Action::Button(btn::A)));
+        assert_eq!(
+            b.get(Source::Key(usage::letter(b'f'))),
+            Some(Action::Button(btn::X))
+        );
+        assert_eq!(
+            b.get(Source::Key(usage::letter(b'e'))),
+            Some(Action::Button(btn::A))
+        );
     }
 }

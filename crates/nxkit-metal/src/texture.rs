@@ -237,7 +237,8 @@ impl Drop for Inner {
     fn drop(&mut self) {
         if self.resident {
             let owner = self.atomic_raw.as_ref().unwrap_or(&self.raw);
-            self.ctx.remove_allocation(ProtocolObject::from_ref(&**owner));
+            self.ctx
+                .remove_allocation(ProtocolObject::from_ref(&**owner));
         }
     }
 }
@@ -270,7 +271,8 @@ impl Texture {
         }
         let alias = desc.atomic_alias();
         let mut usage = MTLTextureUsage::empty();
-        if desc.shader_write && (alias || matches!(desc.format, Format::R32Uint | Format::R32Sint)) {
+        if desc.shader_write && (alias || matches!(desc.format, Format::R32Uint | Format::R32Sint))
+        {
             usage |= MTLTextureUsage::ShaderAtomic;
         }
         if desc.shader_read {
@@ -428,11 +430,19 @@ impl Texture {
     /// `shader_atomic` serves any 4 byte colour format; an `R32Uint` or `R32Sint` texture serves itself.
     pub fn atomic_view(&self, v: &ViewDesc, signed: bool) -> Result<Texture> {
         let d = self.inner.desc;
-        let ok = d.shader_write && (self.inner.atomic_raw.is_some() || matches!(d.format, Format::R32Uint | Format::R32Sint));
+        let ok = d.shader_write
+            && (self.inner.atomic_raw.is_some()
+                || matches!(d.format, Format::R32Uint | Format::R32Sint));
         if !ok {
-            return Err(MetalError::Invalid("the texture was not made for image atomics"));
+            return Err(MetalError::Invalid(
+                "the texture was not made for image atomics",
+            ));
         }
-        let format = if signed { Format::R32Sint } else { Format::R32Uint };
+        let format = if signed {
+            Format::R32Sint
+        } else {
+            Format::R32Uint
+        };
         self.view_of(&ViewDesc { format, ..*v }, [2, 3, 4, 5], true)
     }
 
@@ -483,29 +493,32 @@ impl Texture {
                 "the view is outside the slices of the texture",
             ));
         }
-        let source = if atomic { self.inner.atomic_raw.as_ref().unwrap_or(&self.inner.raw) } else { &self.inner.raw };
+        let source = if atomic {
+            self.inner.atomic_raw.as_ref().unwrap_or(&self.inner.raw)
+        } else {
+            &self.inner.raw
+        };
         // SAFETY: the level and slice ranges are inside the texture (checked above).
         let raw = unsafe {
-            source
-                .newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
-                    v.format.to_mtl(),
-                    v.kind.to_mtl(),
-                    NSRange::new(v.first_level as usize, v.level_count as usize),
-                    NSRange::new(
-                        first as usize,
-                        if v.kind == TextureKind::CubeArray {
-                            v.slice_count as usize * 6
-                        } else {
-                            slices as usize
-                        },
-                    ),
-                    MTLTextureSwizzleChannels {
-                        red: MTLTextureSwizzle(channels[0]),
-                        green: MTLTextureSwizzle(channels[1]),
-                        blue: MTLTextureSwizzle(channels[2]),
-                        alpha: MTLTextureSwizzle(channels[3]),
+            source.newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
+                v.format.to_mtl(),
+                v.kind.to_mtl(),
+                NSRange::new(v.first_level as usize, v.level_count as usize),
+                NSRange::new(
+                    first as usize,
+                    if v.kind == TextureKind::CubeArray {
+                        v.slice_count as usize * 6
+                    } else {
+                        slices as usize
                     },
-                )
+                ),
+                MTLTextureSwizzleChannels {
+                    red: MTLTextureSwizzle(channels[0]),
+                    green: MTLTextureSwizzle(channels[1]),
+                    blue: MTLTextureSwizzle(channels[2]),
+                    alpha: MTLTextureSwizzle(channels[3]),
+                },
+            )
         }
         .ok_or_else(|| create("texture view", "newTextureView returned nil"))?;
         let [w, h, depth] = d.level_extent(v.first_level);

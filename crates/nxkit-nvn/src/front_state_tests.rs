@@ -118,6 +118,8 @@ fn a_hit_skips_the_check_of_its_references_until_a_texture_changes() {
     f.submit(rec).unwrap();
     assert_eq!(f.cache_stats().revalidations, 1);
     let last = f.frame().cmds.last().copied();
-    let Some(Cmd::Draw { reads, .. }) = last else { panic!("no draw") };
+    let Some(Cmd::Draw { reads, .. }) = last else {
+        panic!("no draw")
+    };
     assert_eq!(f.frame().list(reads), [b]);
 }

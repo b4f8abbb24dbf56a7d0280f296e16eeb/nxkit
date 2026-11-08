@@ -180,7 +180,11 @@ fn with_bytes<T>(
 
 /// Extracts the packages of the input (and the split in the same pass). Returns the image count and, when the fused
 /// split needs the game's own decoder (Oodle, LZ5), why: the split then runs again once the Mac host can decode.
-pub(crate) fn packages(a: &Args, b: &Build, p: &Progress) -> Result<(usize, Option<String>), String> {
+pub(crate) fn packages(
+    a: &Args,
+    b: &Build,
+    p: &Progress,
+) -> Result<(usize, Option<String>), String> {
     let out = |v: &str| b.work.join("extract").join(v);
     let counter = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::Request {
@@ -236,8 +240,10 @@ pub(crate) fn nup_loose(
         progress: Some(counter.clone()),
     };
     p.say("unpack and shader split in one pass (nxb-extract, RomFS as a folder)");
-    let u = with_bytes(p, "unpacking", &counter, || nxb_extract::nup::unpack_nup(&req))
-        .map_err(|e| damaged(p, &e))?;
+    let u = with_bytes(p, "unpacking", &counter, || {
+        nxb_extract::nup::unpack_nup(&req)
+    })
+    .map_err(|e| damaged(p, &e))?;
     for l in &u.notes {
         p.say(l);
     }
@@ -245,7 +251,11 @@ pub(crate) fn nup_loose(
         "{} files, {:.1} GB{}",
         u.files,
         u.bytes as f64 / 1e9,
-        if u.dlc.is_empty() { String::new() } else { format!(", {} DLC", u.dlc.len()) }
+        if u.dlc.is_empty() {
+            String::new()
+        } else {
+            format!(", {} DLC", u.dlc.len())
+        }
     );
     Ok((text, u.split_unsupported))
 }
@@ -383,8 +393,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         _ => (container(a, b, p)?, None),
     };
     let aoc = dlc(a, b, p)?;
-    let note =
-        crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
+    let note = crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
     // the rewrite is skipped when this engine's rules are outside the port's contract: without rewritten modules
     // the app cannot be made, and saying so here is clearer than the app stage's missing file
     let patched = b.work.join(format!("patched_{}", b.package));

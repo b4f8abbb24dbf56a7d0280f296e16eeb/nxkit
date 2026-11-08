@@ -341,8 +341,7 @@ pub fn collect_counted(
             .min(10);
         if let Some(c) = count {
             c.done.store(0, Relaxed);
-            c.total
-                .store(jobs.iter().map(|j| j.2 - j.1).sum(), Relaxed);
+            c.total.store(jobs.iter().map(|j| j.2 - j.1).sum(), Relaxed);
         }
         let next = std::sync::atomic::AtomicUsize::new(0);
         let results: std::sync::Mutex<Vec<(usize, Vec<Hit>)>> = std::sync::Mutex::new(Vec::new());

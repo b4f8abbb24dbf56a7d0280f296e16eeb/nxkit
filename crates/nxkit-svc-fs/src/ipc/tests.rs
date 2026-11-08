@@ -2,11 +2,19 @@ use super::*;
 use crate::files::{MODE_READ, MODE_WRITE};
 use crate::result::{PATH_NOT_FOUND, TARGET_NOT_FOUND};
 use crate::testutil::{Guest, global};
-use nxkit_abi::ipc::{Service, Handled};
+use nxkit_abi::ipc::{Handled, Service};
 use std::sync::Arc;
 
 fn call(s: &dyn Service, command: u32, data: &[u8], buffers: &[Buffer]) -> (Handled, Response) {
-    let req = Request { command, data, pid: None, copy_handles: &[], move_handles: &[], buffers, objects: &[] };
+    let req = Request {
+        command,
+        data,
+        pid: None,
+        copy_handles: &[],
+        move_handles: &[],
+        buffers,
+        objects: &[],
+    };
     let mut rsp = Response::default();
     let h = s.handle(&req, &mut rsp);
     (h, rsp)
@@ -14,15 +22,30 @@ fn call(s: &dyn Service, command: u32, data: &[u8], buffers: &[Buffer]) -> (Hand
 
 fn pointer(g: &Guest, off: u64, index: u32, text: &str) -> Buffer {
     g.cstr(off, text);
-    Buffer { addr: g.addr() + off, size: 0x301, kind: BufferKind::Pointer, index }
+    Buffer {
+        addr: g.addr() + off,
+        size: 0x301,
+        kind: BufferKind::Pointer,
+        index,
+    }
 }
 
 fn receive(g: &Guest, off: u64, size: u64) -> Buffer {
-    Buffer { addr: g.addr() + off, size, kind: BufferKind::Receive, index: 0 }
+    Buffer {
+        addr: g.addr() + off,
+        size,
+        kind: BufferKind::Receive,
+        index: 0,
+    }
 }
 
 fn send(g: &Guest, off: u64, size: u64) -> Buffer {
-    Buffer { addr: g.addr() + off, size, kind: BufferKind::Send, index: 0 }
+    Buffer {
+        addr: g.addr() + off,
+        size,
+        kind: BufferKind::Send,
+        index: 0,
+    }
 }
 
 fn u32_data(v: u32) -> Vec<u8> {
@@ -69,16 +92,29 @@ fn a_cache_file_system_creates_writes_and_reads_a_file() {
     let mut create = u32_data(0);
     create.extend_from_slice(&6u64.to_le_bytes());
     assert_eq!(call(&*fs, 0, &create, &[path]).1.result, 0);
-    assert_eq!(call(&*fs, 0, &create, &[path]).1.result, crate::result::PATH_EXISTS);
+    assert_eq!(
+        call(&*fs, 0, &create, &[path]).1.result,
+        crate::result::PATH_EXISTS
+    );
     assert_eq!(call(&*fs, 7, &[], &[path]).1.data, 1u32.to_le_bytes());
-    assert_eq!(call(&*fs, 7, &[], &[pointer(&g, 0x40, 0, "/none")]).1.result, PATH_NOT_FOUND);
+    assert_eq!(
+        call(&*fs, 7, &[], &[pointer(&g, 0x40, 0, "/none")])
+            .1
+            .result,
+        PATH_NOT_FOUND
+    );
 
     let (_, mut rsp) = call(&*fs, 8, &u32_data(MODE_READ | MODE_WRITE), &[path]);
     assert_eq!(rsp.result, 0);
     let file = rsp.objects.remove(0);
     assert_eq!(file.name(), "IFile");
     g.put(0x400, b"hello!");
-    assert_eq!(call(&*file, 1, &file_data(0, 6), &[send(&g, 0x400, 6)]).1.result, 0);
+    assert_eq!(
+        call(&*file, 1, &file_data(0, 6), &[send(&g, 0x400, 6)])
+            .1
+            .result,
+        0
+    );
     assert_eq!(call(&*file, 4, &[], &[]).1.data, 6u64.to_le_bytes());
     let (_, rsp) = call(&*file, 0, &file_data(1, 4), &[receive(&g, 0x500, 4)]);
     assert_eq!((rsp.result, rsp.data), (0, 4u64.to_le_bytes().to_vec()));
@@ -118,7 +154,10 @@ fn the_data_storage_reads_the_romfs_image() {
     assert_eq!(g.u64_at(0), 0x50);
     let mut past = size.to_le_bytes().to_vec();
     past.extend_from_slice(&8u64.to_le_bytes());
-    assert_eq!(call(&*storage, 0, &past, &[receive(&g, 0, 8)]).1.result, FAIL);
+    assert_eq!(
+        call(&*storage, 0, &past, &[receive(&g, 0, 8)]).1.result,
+        FAIL
+    );
 }
 
 #[test]

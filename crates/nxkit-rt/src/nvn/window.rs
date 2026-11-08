@@ -311,7 +311,10 @@ mod tests {
 
     #[test]
     fn the_builder_copies_up_to_four_textures_and_defaults_to_interval_one() {
-        let (b, list) = (testing::alloc(crate::nvn::abi::size::WINDOW_BUILDER), testing::alloc(32));
+        let (b, list) = (
+            testing::alloc(crate::nvn::abi::size::WINDOW_BUILDER),
+            testing::alloc(32),
+        );
         builder_set_defaults(b);
         assert_eq!(builder_get_present_interval(b), 1);
         for i in 0..3u64 {

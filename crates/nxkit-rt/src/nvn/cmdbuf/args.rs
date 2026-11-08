@@ -51,7 +51,9 @@ pub(super) fn slot(stage: u16, index: i32) -> AbiResult<u8> {
 pub(super) fn span(first: i32, n: i32, max: u32) -> AbiResult<(u32, u32)> {
     match (u32::try_from(first), u32::try_from(n)) {
         (Ok(f), Ok(n)) if f + n <= max => Ok((f, n)),
-        _ => Err(other(format!("first {first} and count {n} do not fit {max}"))),
+        _ => Err(other(format!(
+            "first {first} and count {n} do not fit {max}"
+        ))),
     }
 }
 

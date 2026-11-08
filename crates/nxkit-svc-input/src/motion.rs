@@ -21,7 +21,12 @@ pub(crate) struct MotionMap {
 
 impl Default for MotionMap {
     fn default() -> Self {
-        MotionMap { src: [0, 1, 2], sign: [1.0; 3], acc_sign: 1.0, det: 1.0 }
+        MotionMap {
+            src: [0, 1, 2],
+            sign: [1.0; 3],
+            acc_sign: 1.0,
+            det: 1.0,
+        }
     }
 }
 
@@ -54,7 +59,9 @@ impl MotionMap {
             m.src[i] = a;
             m.sign[i] = sg;
         }
-        let inv = (m.src[0] > m.src[1]) as u32 + (m.src[0] > m.src[2]) as u32 + (m.src[1] > m.src[2]) as u32;
+        let inv = (m.src[0] > m.src[1]) as u32
+            + (m.src[0] > m.src[2]) as u32
+            + (m.src[1] > m.src[2]) as u32;
         m.det = m.sign[0] * m.sign[1] * m.sign[2] * if inv & 1 == 1 { -1.0 } else { 1.0 };
         Some(m)
     }
@@ -158,7 +165,11 @@ fn norm(v: [f32; 3]) -> f32 {
 }
 
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 impl MotionState {
@@ -191,7 +202,14 @@ impl MotionState {
 
     /// One sample. `acc_raw` in G and `rot_raw` in rad/s as Apple reports them, `dt` in seconds since the previous
     /// sample, `k` the tilt correction gain. A sample with a non-finite value is dropped.
-    pub(crate) fn update(&mut self, map: &MotionMap, acc_raw: [f32; 3], rot_raw: [f32; 3], dt: f32, k: f32) {
+    pub(crate) fn update(
+        &mut self,
+        map: &MotionMap,
+        acc_raw: [f32; 3],
+        rot_raw: [f32; 3],
+        dt: f32,
+        k: f32,
+    ) {
         if acc_raw.iter().chain(rot_raw.iter()).any(|v| !v.is_finite()) {
             return;
         }
@@ -219,9 +237,21 @@ impl MotionState {
                 let (sn, c) = th.sin_cos();
                 let v = 1.0 - c;
                 let e = [
-                    [c + u[0] * u[0] * v, u[0] * u[1] * v - u[2] * sn, u[0] * u[2] * v + u[1] * sn],
-                    [u[1] * u[0] * v + u[2] * sn, c + u[1] * u[1] * v, u[1] * u[2] * v - u[0] * sn],
-                    [u[2] * u[0] * v - u[1] * sn, u[2] * u[1] * v + u[0] * sn, c + u[2] * u[2] * v],
+                    [
+                        c + u[0] * u[0] * v,
+                        u[0] * u[1] * v - u[2] * sn,
+                        u[0] * u[2] * v + u[1] * sn,
+                    ],
+                    [
+                        u[1] * u[0] * v + u[2] * sn,
+                        c + u[1] * u[1] * v,
+                        u[1] * u[2] * v - u[0] * sn,
+                    ],
+                    [
+                        u[2] * u[0] * v - u[1] * sn,
+                        u[2] * u[1] * v + u[0] * sn,
+                        c + u[2] * u[2] * v,
+                    ],
                 ];
                 self.r = mul(&self.r, &e);
                 orthonormalize(&mut self.r);
@@ -248,7 +278,12 @@ impl MotionState {
                 dir[3 * i + j] = self.r[j][i];
             }
         }
-        SixAxisData { acc: self.acc, gyro: self.gyro, angle: self.angle, dir }
+        SixAxisData {
+            acc: self.acc,
+            gyro: self.gyro,
+            angle: self.angle,
+            dir,
+        }
     }
 
     /// The sum of the absolute angular velocities, in revolutions per second.
@@ -322,7 +357,13 @@ mod tests {
     #[test]
     fn a_non_finite_sample_is_dropped() {
         let mut s = MotionState::default();
-        s.update(&MotionMap::default(), [f32::NAN, 0.0, -1.0], [0.0; 3], 0.01, 0.5);
+        s.update(
+            &MotionMap::default(),
+            [f32::NAN, 0.0, -1.0],
+            [0.0; 3],
+            0.01,
+            0.5,
+        );
         assert_eq!(s, MotionState::default());
     }
 }

@@ -30,7 +30,10 @@ pub(crate) struct AppletResource {
 
 /// The services this crate registers with the IPC server.
 pub(crate) fn named() -> Vec<Named> {
-    vec![Named { name: "hid", root: Arc::new(HidServer) }]
+    vec![Named {
+        name: "hid",
+        root: Arc::new(HidServer),
+    }]
 }
 
 /// The shared memory of the service. It is created on the first call and filled at once.
@@ -74,16 +77,29 @@ impl Service for AppletResource {
 
 fn applet_resource() -> Arc<dyn Service> {
     static RESOURCE: OnceLock<Arc<AppletResource>> = OnceLock::new();
-    RESOURCE.get_or_init(|| Arc::new(AppletResource { handle: Mutex::new(None) })).clone()
+    RESOURCE
+        .get_or_init(|| {
+            Arc::new(AppletResource {
+                handle: Mutex::new(None),
+            })
+        })
+        .clone()
 }
 
 /// The ids of a `SetSupportedNpadIdType` request.
 fn read_ids(req: &Request<'_>) -> Option<Vec<u32>> {
-    let buf = req.buffer(BufferKind::Send, 0).or_else(|| req.buffer(BufferKind::Pointer, 0))?;
+    let buf = req
+        .buffer(BufferKind::Send, 0)
+        .or_else(|| req.buffer(BufferKind::Pointer, 0))?;
     let n = (buf.size as usize / 4).min(MAX_IDS);
     let mut bytes = vec![0u8; n * 4];
     guest::read(buf.addr, &mut bytes).ok()?;
-    Some(bytes.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+    Some(
+        bytes
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
+    )
 }
 
 fn value_at(req: &Request<'_>, offset: usize) -> Option<VibrationValue> {
@@ -162,7 +178,9 @@ impl Service for HidServer {
                 let on = req.u32_at(0).unwrap_or(0) & 1 == 1;
                 with(|i| i.vibration_permitted = on);
             }
-            205 => rsp.push_u32(u32::from(with(|i| i.vibration_permitted && i.rumble_available()))),
+            205 => rsp.push_u32(u32::from(with(|i| {
+                i.vibration_permitted && i.rumble_available()
+            }))),
             // StartSixAxisSensor, StopSixAxisSensor, EnableSixAxisSensorFusion, SetSixAxisSensorFusionParameters,
             // ResetSixAxisSensorFusionParameters, SetGyroscopeZeroDriftMode, ResetGyroscopeZeroDriftMode.
             301 | 302 | 304 | 305 | 307 | 308 | 310 => {}
@@ -258,7 +276,12 @@ mod tests {
         for (i, id) in [0u32, 0x20].into_iter().enumerate() {
             guest::write_u32(base + 4 * i as u64, id).ok();
         }
-        let buf = Buffer { addr: base, size: 8, kind: BufferKind::Send, index: 0 };
+        let buf = Buffer {
+            addr: base,
+            size: 8,
+            kind: BufferKind::Send,
+            index: 0,
+        };
         let (h, rsp) = call(102, &[0; 8], &[buf]);
         assert_eq!((h, rsp.result), (Handled::Done, 0));
         assert_eq!(with(|i| i.ids), 1 | 1 << 8);

@@ -174,10 +174,7 @@ fn slow(name: &'static str, cb: u64, bytes: &[u8]) {
 /// Runs `step` on the recorder. When it asks for memory, calls the memory callback of the game (with no lock held)
 /// and runs it again, up to [`MAX_CALLBACKS`] times. When the callback gives no memory, the host adds a block of its
 /// own ([`overflow_block`]) and runs it once more.
-fn retrying<T>(
-    cb: u64,
-    mut step: impl FnMut(&mut Recorder) -> AbiResult<Try<T>>,
-) -> AbiResult<T> {
+fn retrying<T>(cb: u64, mut step: impl FnMut(&mut Recorder) -> AbiResult<Try<T>>) -> AbiResult<T> {
     for attempt in 0..=MAX_CALLBACKS + 1 {
         let t = with_recorder(cb, |r| {
             sync_in(cb, r)?;
@@ -189,8 +186,11 @@ fn retrying<T>(
             Try::Done(v) => return Ok(v),
             Try::Need(need, hook) => {
                 if crate::diag_on() {
-                    let (used, free, cursor) = with_recorder(cb, |r| Ok((r.buf.used(), r.buf.free(), r.buf.cursor())))?;
-                    crate::diag!("DIAG cmdmem cb {cb:#x} attempt {attempt} need {need} used {used} free {free} cursor {cursor:?} hook {hook:?}");
+                    let (used, free, cursor) =
+                        with_recorder(cb, |r| Ok((r.buf.used(), r.buf.free(), r.buf.cursor())))?;
+                    crate::diag!(
+                        "DIAG cmdmem cb {cb:#x} attempt {attempt} need {need} used {used} free {free} cursor {cursor:?} hook {hook:?}"
+                    );
                 }
                 if attempt > MAX_CALLBACKS {
                     break;
@@ -201,7 +201,9 @@ fn retrying<T>(
             }
         }
     }
-    Err(other("out of command memory after the host added a block of its own"))
+    Err(other(
+        "out of command memory after the host added a block of its own",
+    ))
 }
 
 /// Calls the memory callback of the game. False when no callback is set.
@@ -231,17 +233,22 @@ static OVERFLOW: std::sync::Mutex<(u64, u64, u64)> = std::sync::Mutex::new((0, 0
 /// Guest memory for one overflow block of at least `need` bytes. The memory is never freed, because a recording that
 /// the game keeps may jump into it for the rest of the game.
 fn overflow_block(need: u32) -> AbiResult<(u64, u64)> {
-    let len = (u64::from(need) + 0x100).max(OVERFLOW_BLOCK).next_multiple_of(0x100);
+    let len = (u64::from(need) + 0x100)
+        .max(OVERFLOW_BLOCK)
+        .next_multiple_of(0x100);
     let mut o = OVERFLOW.lock().unwrap_or_else(|e| e.into_inner());
     if o.1 - o.0 < len {
         let chunk = len.max(OVERFLOW_CHUNK);
         if o.2 + chunk > OVERFLOW_LIMIT {
             return Err(other("the command memory overflow of the host is used up"));
         }
-        let k = nxkit_abi::kernel::kernel().ok_or_else(|| other("no kernel gives memory for command memory"))?;
-        let (_handle, base) = k
-            .create_shared_memory(chunk)
-            .map_err(|e| other(format!("the kernel gives no memory for command memory ({e:#x})")))?;
+        let k = nxkit_abi::kernel::kernel()
+            .ok_or_else(|| other("no kernel gives memory for command memory"))?;
+        let (_handle, base) = k.create_shared_memory(chunk).map_err(|e| {
+            other(format!(
+                "the kernel gives no memory for command memory ({e:#x})"
+            ))
+        })?;
         *o = (base, base + chunk, o.2 + chunk);
     }
     let at = o.0;

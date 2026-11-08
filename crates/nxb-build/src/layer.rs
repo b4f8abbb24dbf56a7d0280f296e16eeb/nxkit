@@ -345,7 +345,9 @@ fn write_msl_counted(
         note: Some("writing the MSL files"),
         ..Default::default()
     });
-    p.counted(None, "shaders", &count, || write_msl_files(shaders, dir, &count))
+    p.counted(None, "shaders", &count, || {
+        write_msl_files(shaders, dir, &count)
+    })
 }
 
 fn write_msl_files(
@@ -391,19 +393,21 @@ fn metallib(
         note: Some(&format!("compiling for {sdk}")),
         ..Default::default()
     });
-    let airs = p.counted(None, "shaders", &count, || par_map(msls, threads, &count, |m| {
-        let air = m.with_extension(format!("{sdk}.air"));
-        let mut args: Vec<std::ffi::OsString> =
-            ["-sdk", sdk, "metal", "-c", "-fpreserve-invariance"]
-                .into_iter()
-                .chain(extra.iter().copied())
-                .map(Into::into)
-                .collect();
-        args.extend([m.clone().into(), "-o".into(), air.clone().into()]);
-        r.run("xcrun", args, None)
-            .map(|_| air)
-            .map_err(|e| format!("{}: metal compile failed: {e}", m.display()))
-    }));
+    let airs = p.counted(None, "shaders", &count, || {
+        par_map(msls, threads, &count, |m| {
+            let air = m.with_extension(format!("{sdk}.air"));
+            let mut args: Vec<std::ffi::OsString> =
+                ["-sdk", sdk, "metal", "-c", "-fpreserve-invariance"]
+                    .into_iter()
+                    .chain(extra.iter().copied())
+                    .map(Into::into)
+                    .collect();
+            args.extend([m.clone().into(), "-o".into(), air.clone().into()]);
+            r.run("xcrun", args, None)
+                .map(|_| air)
+                .map_err(|e| format!("{}: metal compile failed: {e}", m.display()))
+        })
+    });
     p.set(Update {
         note: Some(&format!("linking the {sdk} library")),
         ..Default::default()

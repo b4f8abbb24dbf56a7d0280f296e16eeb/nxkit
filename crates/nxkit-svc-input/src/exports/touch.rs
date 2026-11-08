@@ -71,9 +71,23 @@ mod tests {
     #[test]
     fn there_are_sixteen_sizes_with_two_functions_each() {
         let names: Vec<&str> = list().iter().map(|e| e.name).collect();
-        assert_eq!(names.iter().filter(|n| n.contains("GetTouchScreenState")).count(), 32);
-        assert!(names.contains(&"_ZN2nn3hid19GetTouchScreenStateILm16EEEvPNS0_16TouchScreenStateIXT_EEE"));
-        assert!(names.contains(&"_ZN2nn3hid20GetTouchScreenStatesILm1EEEiPNS0_16TouchScreenStateIXT_EEEi"));
+        assert_eq!(
+            names
+                .iter()
+                .filter(|n| n.contains("GetTouchScreenState"))
+                .count(),
+            32
+        );
+        assert!(
+            names.contains(
+                &"_ZN2nn3hid19GetTouchScreenStateILm16EEEvPNS0_16TouchScreenStateIXT_EEE"
+            )
+        );
+        assert!(
+            names.contains(
+                &"_ZN2nn3hid20GetTouchScreenStatesILm1EEEiPNS0_16TouchScreenStateIXT_EEEi"
+            )
+        );
     }
 
     #[test]

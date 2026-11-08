@@ -46,9 +46,26 @@ impl TextureCache {
         };
         let pb: &CVPixelBuffer = &buffer.0;
         let image: &CVImageBuffer = pb;
-        let (luma, luma_ref) = self.plane(image, MTLPixelFormat::R8Unorm, pb.width_of_plane(0), pb.height_of_plane(0), 0)?;
-        let (chroma, chroma_ref) = self.plane(image, MTLPixelFormat::RG8Unorm, pb.width_of_plane(1), pb.height_of_plane(1), 1)?;
-        Ok(Planes { luma, chroma, _luma_ref: luma_ref, _chroma_ref: chroma_ref })
+        let (luma, luma_ref) = self.plane(
+            image,
+            MTLPixelFormat::R8Unorm,
+            pb.width_of_plane(0),
+            pb.height_of_plane(0),
+            0,
+        )?;
+        let (chroma, chroma_ref) = self.plane(
+            image,
+            MTLPixelFormat::RG8Unorm,
+            pb.width_of_plane(1),
+            pb.height_of_plane(1),
+            1,
+        )?;
+        Ok(Planes {
+            luma,
+            chroma,
+            _luma_ref: luma_ref,
+            _chroma_ref: chroma_ref,
+        })
     }
 
     fn plane(
@@ -58,13 +75,26 @@ impl TextureCache {
         width: usize,
         height: usize,
         index: usize,
-    ) -> Result<(Retained<ProtocolObject<dyn MTLTexture>>, CFRetained<CVMetalTexture>), String> {
+    ) -> Result<
+        (
+            Retained<ProtocolObject<dyn MTLTexture>>,
+            CFRetained<CVMetalTexture>,
+        ),
+        String,
+    > {
         let mut out = None;
         // SAFETY: `image` is a live pixel buffer with an IOSurface, and `out` is `None` as the function needs.
-        unsafe { self.cache.texture_from_image(None, image, None, format, width, height, index, &mut out) }
-            .map_err(|e| format!("CVMetalTextureCacheCreateTextureFromImage failed for plane {index}: {e:?}"))?;
+        unsafe {
+            self.cache
+                .texture_from_image(None, image, None, format, width, height, index, &mut out)
+        }
+        .map_err(|e| {
+            format!("CVMetalTextureCacheCreateTextureFromImage failed for plane {index}: {e:?}")
+        })?;
         let holder = out.ok_or_else(|| format!("plane {index} gave no CVMetalTexture"))?;
-        let texture = holder.texture().ok_or_else(|| format!("plane {index} gave no MTLTexture"))?;
+        let texture = holder
+            .texture()
+            .ok_or_else(|| format!("plane {index} gave no MTLTexture"))?;
         Ok((texture, holder))
     }
 

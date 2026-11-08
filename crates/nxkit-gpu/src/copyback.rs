@@ -141,7 +141,15 @@ impl CopyBack {
     }
 
     /// Prints the texture the first time it is copied back (`NXKIT_DIAG=copyback`).
-    pub(crate) fn log_first(&mut self, id: TexId, rec: &TextureRecord, res: &Res, flags: u32, dirty: &Dirty, bytes: u64) {
+    pub(crate) fn log_first(
+        &mut self,
+        id: TexId,
+        rec: &TextureRecord,
+        res: &Res,
+        flags: u32,
+        dirty: &Dirty,
+        bytes: u64,
+    ) {
         if !crate::diag("copyback") || self.seen.len() >= LOG_TEXTURES || !self.seen.insert(id) {
             return;
         }

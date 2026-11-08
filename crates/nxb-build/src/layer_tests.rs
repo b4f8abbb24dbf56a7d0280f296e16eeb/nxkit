@@ -56,7 +56,15 @@ fn par_map_keeps_the_order() {
         par_map(&v, 7, &crate::events::Count::default(), |x| x * 2),
         v.iter().map(|x| x * 2).collect::<Vec<_>>()
     );
-    assert!(par_map(&Vec::<u32>::new(), 4, &crate::events::Count::default(), |x| *x).is_empty());
+    assert!(
+        par_map(
+            &Vec::<u32>::new(),
+            4,
+            &crate::events::Count::default(),
+            |x| *x
+        )
+        .is_empty()
+    );
 }
 
 #[test]

@@ -46,7 +46,14 @@ const RTLD_LOCAL: c_int = 4;
 const VM_FLAGS_FIXED: c_int = 0;
 
 unsafe extern "C" {
-    fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void;
+    fn mmap(
+        addr: *mut c_void,
+        len: usize,
+        prot: c_int,
+        flags: c_int,
+        fd: c_int,
+        off: i64,
+    ) -> *mut c_void;
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
     fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
@@ -57,7 +64,8 @@ unsafe extern "C" {
     fn _dyld_get_image_name(index: u32) -> *const c_char;
     fn _dyld_get_image_header(index: u32) -> *const c_void;
     fn _dyld_get_image_vmaddr_slide(index: u32) -> isize;
-    fn pthread_key_create(key: *mut usize, destructor: Option<extern "C" fn(*mut c_void)>) -> c_int;
+    fn pthread_key_create(key: *mut usize, destructor: Option<extern "C" fn(*mut c_void)>)
+    -> c_int;
     fn pthread_setspecific(key: usize, value: *const c_void) -> c_int;
     fn pthread_getspecific(key: usize) -> *mut c_void;
     fn mach_vm_allocate(task: u32, addr: *mut u64, size: u64, flags: c_int) -> c_int;
@@ -103,7 +111,9 @@ impl Reservation {
     fn check(&self, addr: u64, len: u64) -> Result<*mut c_void> {
         let end = addr.checked_add(len);
         match end {
-            Some(e) if addr >= self.base && e <= self.base + self.len => Ok(addr as usize as *mut c_void),
+            Some(e) if addr >= self.base && e <= self.base + self.len => {
+                Ok(addr as usize as *mut c_void)
+            }
             _ => Err(HostError::Memory(format!(
                 "range {addr:#x} + {len:#x} is outside the reservation {:#x} + {:#x}",
                 self.base, self.len
@@ -136,7 +146,16 @@ impl Reservation {
     pub fn map_anon(&self, addr: u64, len: u64, prot: i32) -> Result<()> {
         let p = self.check(addr, len)?;
         // SAFETY: without `MAP_FIXED` the system never replaces an existing mapping.
-        let got = unsafe { mmap(p, len as usize, prot, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0) };
+        let got = unsafe {
+            mmap(
+                p,
+                len as usize,
+                prot,
+                MAP_PRIVATE | MAP_ANON | MAP_NORESERVE,
+                -1,
+                0,
+            )
+        };
         if got == map_failed() {
             return Err(mem_err("mmap", errno()));
         }
@@ -157,10 +176,20 @@ impl Reservation {
     /// created. `offset` and `len` are multiples of the page size.
     pub fn map_file_exec(&self, addr: u64, len: u64, file: &File, offset: u64) -> Result<()> {
         let p = self.check(addr, len)?;
-        let off = i64::try_from(offset).map_err(|_| HostError::Memory(format!("file offset {offset:#x} is too big")))?;
+        let off = i64::try_from(offset)
+            .map_err(|_| HostError::Memory(format!("file offset {offset:#x} is too big")))?;
         // SAFETY: the range lies inside the reservation, which this process owns. `MAP_FIXED` replaces the anonymous
         // pages there on purpose, and nothing uses them yet.
-        let got = unsafe { mmap(p, len as usize, PROT_RX, MAP_PRIVATE | MAP_FIXED, file.as_raw_fd(), off) };
+        let got = unsafe {
+            mmap(
+                p,
+                len as usize,
+                PROT_RX,
+                MAP_PRIVATE | MAP_FIXED,
+                file.as_raw_fd(),
+                off,
+            )
+        };
         if got == map_failed() {
             return Err(mem_err("mmap of the code", errno()));
         }
@@ -206,13 +235,19 @@ impl Reservation {
     /// The range must hold no page that is mapped from a file. The residency set of the buffer makes such pages
     /// unreadable (SIGBUS, measured 2026-11-08). The code of the modules is mapped from `nxgame.dylib`, so the range
     /// starts behind the modules.
-    pub fn as_gpu_memory(&self, ctx: &nxkit_metal::Context, start: u64, len: u64) -> Result<nxkit_metal::GuestMemory> {
+    pub fn as_gpu_memory(
+        &self,
+        ctx: &nxkit_metal::Context,
+        start: u64,
+        len: u64,
+    ) -> Result<nxkit_metal::GuestMemory> {
         let p = self.check(start, len)?;
         let base = NonNull::new(p.cast::<u8>())
             .ok_or_else(|| HostError::Memory("the GPU range has no address".into()))?;
         // SAFETY: the range lies inside the reservation, which is mapped and never unmapped or moved.
-        unsafe { nxkit_metal::GuestMemory::from_raw(ctx, base, len) }
-            .map_err(|e| HostError::Memory(format!("the GPU buffer over {start:#x} + {len:#x}: {e}")))
+        unsafe { nxkit_metal::GuestMemory::from_raw(ctx, base, len) }.map_err(|e| {
+            HostError::Memory(format!("the GPU buffer over {start:#x} + {len:#x}: {e}"))
+        })
     }
 }
 
@@ -241,7 +276,14 @@ pub fn add_file_signature(file: &File, blob_off: u64, blob_size: u64) -> Result<
     };
     // SAFETY: `sig` is a valid `fsignatures_t` that outlives the call. The kernel reads the blob from the file at the
     // offset in `blob_start` and does not read memory at that value.
-    if unsafe { fcntl(file.as_raw_fd(), F_ADDFILESIGS_RETURN, &mut sig as *mut FSignatures) } != 0 {
+    if unsafe {
+        fcntl(
+            file.as_raw_fd(),
+            F_ADDFILESIGS_RETURN,
+            &mut sig as *mut FSignatures,
+        )
+    } != 0
+    {
         return Err(mem_err("fcntl F_ADDFILESIGS_RETURN", errno()));
     }
     Ok(())
@@ -311,7 +353,16 @@ pub fn reserve_where(hints: &[u64], len: u64, accept: impl Fn(u64) -> bool) -> R
 pub fn map_hint(addr: u64, len: u64, prot: i32) -> Result<u64> {
     let flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
     // SAFETY: without `MAP_FIXED` the system never replaces an existing mapping.
-    let got = unsafe { mmap(addr as usize as *mut c_void, len as usize, prot, flags, -1, 0) };
+    let got = unsafe {
+        mmap(
+            addr as usize as *mut c_void,
+            len as usize,
+            prot,
+            flags,
+            -1,
+            0,
+        )
+    };
     if got == map_failed() {
         return Err(mem_err("mmap", errno()));
     }
@@ -323,7 +374,16 @@ pub fn map_hint(addr: u64, len: u64, prot: i32) -> Result<u64> {
 pub fn map_fixed(addr: u64, len: u64) -> Result<()> {
     let flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | MAP_FIXED;
     // SAFETY: the probe calls this only for ranges that an earlier hint call showed to be free.
-    let got = unsafe { mmap(addr as usize as *mut c_void, len as usize, PROT_NONE, flags, -1, 0) };
+    let got = unsafe {
+        mmap(
+            addr as usize as *mut c_void,
+            len as usize,
+            PROT_NONE,
+            flags,
+            -1,
+            0,
+        )
+    };
     if got == map_failed() {
         return Err(mem_err("mmap MAP_FIXED", errno()));
     }
@@ -336,7 +396,9 @@ pub fn mach_allocate_fixed(addr: u64, len: u64) -> Result<()> {
     // SAFETY: `a` is a valid pointer and `VM_FLAGS_FIXED` never replaces a mapping.
     let kr = unsafe { mach_vm_allocate(mach_task_self_, &mut a, len, VM_FLAGS_FIXED) };
     if kr != 0 {
-        return Err(HostError::Memory(format!("mach_vm_allocate failed, kern_return {kr}")));
+        return Err(HostError::Memory(format!(
+            "mach_vm_allocate failed, kern_return {kr}"
+        )));
     }
     Ok(())
 }
@@ -431,7 +493,11 @@ impl Dylib {
         // SAFETY: `c` is a valid C string.
         let handle = unsafe { dlopen(c.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
         if handle.is_null() {
-            return Err(HostError::Load(format!("dlopen {}: {}", path.display(), dl_message())));
+            return Err(HostError::Load(format!(
+                "dlopen {}: {}",
+                path.display(),
+                dl_message()
+            )));
         }
         Ok(Dylib { handle, path })
     }
@@ -455,16 +521,22 @@ impl Dylib {
                 continue;
             }
             // SAFETY: `i` is below the count.
-            let (head, slide) = unsafe { (_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i)) };
+            let (head, slide) =
+                unsafe { (_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i)) };
             if head.is_null() {
-                return Err(HostError::Load("dyld gave no header for the library".into()));
+                return Err(HostError::Load(
+                    "dyld gave no header for the library".into(),
+                ));
             }
             return Ok(Image {
                 header: head as usize as u64,
                 slide: slide as i64,
             });
         }
-        Err(HostError::Load(format!("dyld does not list {} as a loaded image", self.path.display())))
+        Err(HostError::Load(format!(
+            "dyld does not list {} as a loaded image",
+            self.path.display()
+        )))
     }
 
     /// Unloads the library.
@@ -488,11 +560,23 @@ impl Image {
     pub fn commands(&self) -> Result<Vec<u8>> {
         let mut head = [0u8; macho::HEADER_SIZE];
         // SAFETY: dyld mapped the header at this address, it is readable for the life of the image.
-        unsafe { std::ptr::copy_nonoverlapping(self.header as usize as *const u8, head.as_mut_ptr(), head.len()) };
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.header as usize as *const u8,
+                head.as_mut_ptr(),
+                head.len(),
+            )
+        };
         let total = macho::commands_end(&head)?;
         let mut all = vec![0u8; total];
         // SAFETY: the load commands directly follow the header in the same mapped segment.
-        unsafe { std::ptr::copy_nonoverlapping(self.header as usize as *const u8, all.as_mut_ptr(), total) };
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.header as usize as *const u8,
+                all.as_mut_ptr(),
+                total,
+            )
+        };
         Ok(all)
     }
 }
@@ -536,7 +620,9 @@ pub fn kernel_thread_tls() -> Result<(u64, u64)> {
     let (mut tlr, mut tls) = (0u64, 0u64);
     // SAFETY: both pointers are writable `u64` values on this stack.
     if unsafe { nxkit_rt::nxkit_kernel_thread_tls(&mut tlr, &mut tls) } != 0 {
-        return Err(HostError::App("the kernel gave no thread-local region to this thread".into()));
+        return Err(HostError::App(
+            "the kernel gave no thread-local region to this thread".into(),
+        ));
     }
     Ok((tlr, tls))
 }
@@ -544,9 +630,15 @@ pub fn kernel_thread_tls() -> Result<(u64, u64)> {
 /// Starts the kernel of `nxkit-rt`. `thread_entry` runs every guest thread that the game creates. The kernel gets the
 /// regions of the reservation, the memory profile and the main thread of the game. `core_rules` turns the core rules of
 /// Horizon on, for a title that needs the same-core preemption (`core_preempt`).
-pub fn kernel_init(thread_entry: nxkit_rt::NxkitThreadEntry, layout: &Layout, game: &Game) -> Result<()> {
-    let program_id = u64::from_str_radix(game.title_id.trim_start_matches("0x"), 16)
-        .map_err(|_| HostError::Manifest(format!("title_id {:?} is not a hex number", game.title_id)))?;
+pub fn kernel_init(
+    thread_entry: nxkit_rt::NxkitThreadEntry,
+    layout: &Layout,
+    game: &Game,
+) -> Result<()> {
+    let program_id =
+        u64::from_str_radix(game.title_id.trim_start_matches("0x"), 16).map_err(|_| {
+            HostError::Manifest(format!("title_id {:?} is not a hex number", game.title_id))
+        })?;
     let modules: Vec<nxkit_rt::NxkitModule> = game
         .modules
         .iter()

@@ -112,7 +112,8 @@ impl Prof {
                 d.sbufs.capacity(),
                 d.textures.capacity(),
             ];
-            self.draw_blocks.set(self.draw_blocks.get() + 1 + vecs.iter().filter(|c| **c != 0).count() as u64);
+            self.draw_blocks
+                .set(self.draw_blocks.get() + 1 + vecs.iter().filter(|c| **c != 0).count() as u64);
         }
     }
 
@@ -127,12 +128,16 @@ impl Prof {
                 p.ubo[1] == st.ubo[1],
                 p.sbuf[0] == st.sbuf[0],
                 p.sbuf[1] == st.sbuf[1],
-                p.attribute == st.attribute && p.stream == st.stream && p.vertex_buffer == st.vertex_buffer,
+                p.attribute == st.attribute
+                    && p.stream == st.stream
+                    && p.vertex_buffer == st.vertex_buffer,
                 p.texture[..32] == st.texture[..32],
                 p.texture[32..64] == st.texture[32..64],
             ];
-            self.banks_total.set(self.banks_total.get() + same.len() as u64);
-            self.banks_same.set(self.banks_same.get() + same.iter().filter(|s| **s).count() as u64);
+            self.banks_total
+                .set(self.banks_total.get() + same.len() as u64);
+            self.banks_same
+                .set(self.banks_same.get() + same.iter().filter(|s| **s).count() as u64);
         }
         self.prev = Some(Box::new(st.clone()));
     }
@@ -175,7 +180,18 @@ impl Prof {
         let apply_own = apply.saturating_sub(detail + alloc_draw);
         let detail_own = detail.saturating_sub(snap);
         let snap_own = snap.saturating_sub(alloc_snap);
-        let [snaps, hits, none, copied, shared, fresh, bytes, blocks, same, total] = counts;
+        let [
+            snaps,
+            hits,
+            none,
+            copied,
+            shared,
+            fresh,
+            bytes,
+            blocks,
+            same,
+            total,
+        ] = counts;
         eprintln!(
             "DIAG walkprof submit {n}: total {:.0}us = read {:.0} + apply {:.0} + detail {:.0} + snap {:.0} + alloc {:.0} us \
              (rest {:.0}); records {records} draws {draws} dispatches {dispatches}; snapshots {snaps} \

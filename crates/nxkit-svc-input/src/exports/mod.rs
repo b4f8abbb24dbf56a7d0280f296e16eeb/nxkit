@@ -106,7 +106,10 @@ mod tests {
         let mut base = [0u8; 16];
         base[..8].copy_from_slice(&10i64.to_le_bytes());
         let h = history(base, 3);
-        let numbers: Vec<i64> = h.iter().map(|e| i64::from_le_bytes(e[..8].try_into().unwrap_or([0; 8]))).collect();
+        let numbers: Vec<i64> = h
+            .iter()
+            .map(|e| i64::from_le_bytes(e[..8].try_into().unwrap_or([0; 8])))
+            .collect();
         assert_eq!(numbers, [10, 9, 8]);
     }
 

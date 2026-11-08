@@ -59,7 +59,12 @@ fn n(v: impl TryInto<i64>) -> Value {
 }
 
 fn obj(fields: Vec<(&str, Value)>) -> Value {
-    Value::Object(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    Value::Object(
+        fields
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+    )
 }
 
 fn range((offset, size): (usize, usize)) -> Value {
@@ -196,10 +201,16 @@ fn module(b: &Built, base: u64) -> Value {
         f.push(("entry", n(0)));
     }
     f.push(("build_id", s(&b.build_id)));
-    f.push(("segments", Value::List(b.shape.segments.iter().map(segment).collect())));
+    f.push((
+        "segments",
+        Value::List(b.shape.segments.iter().map(segment).collect()),
+    ));
     f.push((
         "patch",
-        obj(vec![("offset", n(b.shape.patch.0)), ("size", n(b.shape.patch.1))]),
+        obj(vec![
+            ("offset", n(b.shape.patch.0)),
+            ("size", n(b.shape.patch.1)),
+        ]),
     ));
     f.push(("key_page", n(b.shape.key_page.0)));
     f.push(("fixups", s(&format!("modules/{}.fixups.tsv", b.name))));
@@ -218,7 +229,10 @@ pub fn game_json(m: &Manifest) -> String {
             "modules",
             Value::List(m.modules.iter().map(|(b, base)| module(b, *base)).collect()),
         ),
-        ("services", Value::List(m.services.iter().map(|v| s(v)).collect())),
+        (
+            "services",
+            Value::List(m.services.iter().map(|v| s(v)).collect()),
+        ),
         (
             "nvn_functions",
             Value::List(m.nvn_functions.iter().map(|v| s(v)).collect()),
@@ -270,7 +284,11 @@ fn list_json(list: Vec<Value>) -> String {
 
 /// A list of `{ "name", "slot" }`: the form of the exports file.
 pub fn symbols_json(v: &[Sym]) -> String {
-    list_json(v.iter().map(|x| obj(vec![("name", s(&x.name)), ("slot", n(x.slot))])).collect())
+    list_json(
+        v.iter()
+            .map(|x| obj(vec![("name", s(&x.name)), ("slot", n(x.slot))]))
+            .collect(),
+    )
 }
 
 /// A list of `{ "name", "slot", "addend", "weak" }`: the form of the imports file. One entry for each slot.
@@ -315,7 +333,10 @@ mod tests {
         let text = nxb_pyjson::dumps(&v);
         assert!(text.contains(r#""app_pool": 3444572160"#), "{text}");
         assert!(text.contains(r#""map_limit": false"#));
-        assert!(text.contains(r#""mem_used": "#) && text.contains(r#""sys_resource": "#), "{text}");
+        assert!(
+            text.contains(r#""mem_used": "#) && text.contains(r#""sys_resource": "#),
+            "{text}"
+        );
     }
 
     #[test]

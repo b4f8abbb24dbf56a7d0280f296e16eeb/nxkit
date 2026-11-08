@@ -51,7 +51,9 @@ pub(crate) fn fatal(msg: &str) -> ! {
 /// The address of the SDK function `name`. Stops the game when the host has no such function.
 pub(crate) fn sym(name: &str) -> usize {
     let Some(h) = host() else {
-        fatal(&format!("the host seams are not set, cannot find the SDK symbol {name}"));
+        fatal(&format!(
+            "the host seams are not set, cannot find the SDK symbol {name}"
+        ));
     };
     let a = (h.guest_sym)(name);
     if a == 0 {

@@ -94,13 +94,20 @@ impl Programs {
     pub(super) fn describe(&self, program: u64) -> String {
         match self.by_program.get(&program) {
             None => format!("unknown ({} programs known)", self.by_program.len()),
-            Some(v) => format!("{:?}", v.iter().map(|s| (&*s.key, s.kind)).collect::<Vec<_>>()),
+            Some(v) => format!(
+                "{:?}",
+                v.iter().map(|s| (&*s.key, s.kind)).collect::<Vec<_>>()
+            ),
         }
     }
 
     /// The key of the stage of `kind` in `program`.
     pub(super) fn find(&self, program: u64, kind: Kind) -> Option<&Arc<str>> {
-        self.by_program.get(&program)?.iter().find(|s| s.kind == kind).map(|s| &s.key)
+        self.by_program
+            .get(&program)?
+            .iter()
+            .find(|s| s.kind == kind)
+            .map(|s| &s.key)
     }
 
     fn kind(&mut self, key: &str, index: u8) -> Kind {
@@ -127,7 +134,10 @@ impl Programs {
         let text = std::fs::read_to_string(self.dir.join(format!("{key}_b.json"))).ok()?;
         let json = parse(&text)?;
         // A task or mesh shader is translated as a compute job with a `mesh_stage`. Its kind names the stage.
-        let mesh = json.get("mesh_stage").and_then(|m| m.get("kind")).and_then(Json::as_str);
+        let mesh = json
+            .get("mesh_stage")
+            .and_then(|m| m.get("kind"))
+            .and_then(Json::as_str);
         Some(match mesh.or(json.get("stage").and_then(Json::as_str))? {
             "vs" => Kind::Vertex,
             "ps" => Kind::Fragment,
@@ -145,15 +155,38 @@ mod tests {
     use nxkit_nvn::backend::ShaderKey;
 
     fn stage(index: u8, key: u8) -> StageKey {
-        StageKey { index, key: Some(ShaderKey([key; 8])), code: 0, code_len: 0 }
+        StageKey {
+            index,
+            key: Some(ShaderKey([key; 8])),
+            code: 0,
+            code_len: 0,
+        }
     }
 
     #[test]
     fn a_stage_without_a_json_takes_its_kind_from_its_index() {
         let mut p = Programs::new(PathBuf::from("/nonexistent"));
-        p.set(7, &[stage(0, 1), stage(1, 2), StageKey { index: 2, key: None, code: 0, code_len: 0 }]);
-        assert_eq!(p.find(7, Kind::Vertex).map(|k| &**k), Some("0101010101010101"));
-        assert_eq!(p.find(7, Kind::Fragment).map(|k| &**k), Some("0202020202020202"));
+        p.set(
+            7,
+            &[
+                stage(0, 1),
+                stage(1, 2),
+                StageKey {
+                    index: 2,
+                    key: None,
+                    code: 0,
+                    code_len: 0,
+                },
+            ],
+        );
+        assert_eq!(
+            p.find(7, Kind::Vertex).map(|k| &**k),
+            Some("0101010101010101")
+        );
+        assert_eq!(
+            p.find(7, Kind::Fragment).map(|k| &**k),
+            Some("0202020202020202")
+        );
         assert_eq!(p.find(7, Kind::Compute), None);
         let epoch = p.epoch();
         p.set(7, &[stage(0, 1), stage(1, 2)]);

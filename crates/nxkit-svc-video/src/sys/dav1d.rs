@@ -8,12 +8,13 @@ use std::ptr::NonNull;
 use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
 use rav1d::include::dav1d::headers::{
-    DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422, DAV1D_PIXEL_LAYOUT_I444,
+    DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422,
+    DAV1D_PIXEL_LAYOUT_I444,
 };
 use rav1d::include::dav1d::picture::Dav1dPicture;
 use rav1d::src::lib::{
-    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture, dav1d_open,
-    dav1d_picture_unref, dav1d_send_data,
+    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture,
+    dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
 
 use crate::av1::{Layout, Planar};
@@ -48,7 +49,12 @@ impl Dav1d {
 
         let mut ctx: Option<Dav1dContext> = None;
         // SAFETY: both pointers are valid for the call. `ctx` receives a context that `drop` closes.
-        let r = unsafe { dav1d_open(Some(NonNull::from(&mut ctx)), Some(NonNull::from(&mut settings))) };
+        let r = unsafe {
+            dav1d_open(
+                Some(NonNull::from(&mut ctx)),
+                Some(NonNull::from(&mut settings)),
+            )
+        };
         match (r.0, ctx) {
             (0, Some(ctx)) => Ok(Dav1d { ctx: Some(ctx) }),
             (code, _) => Err(format!("dav1d could not be opened (code {code})")),
@@ -139,7 +145,10 @@ impl Picture {
 
     /// Runs `f` with the planes of the picture.
     pub(crate) fn with_planar<R>(&self, f: impl FnOnce(&Planar<'_>) -> R) -> Option<R> {
-        let (w, h) = (usize::try_from(self.pic.p.w).ok()?, usize::try_from(self.pic.p.h).ok()?);
+        let (w, h) = (
+            usize::try_from(self.pic.p.w).ok()?,
+            usize::try_from(self.pic.p.h).ok()?,
+        );
         let bit_depth = u8::try_from(self.pic.p.bpc).ok()?;
         let layout = match self.pic.p.layout {
             DAV1D_PIXEL_LAYOUT_I400 => Layout::Mono,
@@ -160,14 +169,25 @@ impl Picture {
                 return Some((&[], 0));
             }
             let ptr = self.pic.data[i]?;
-            let stride = usize::try_from(self.pic.stride[usize::from(i > 0)]).ok().filter(|s| *s > 0)?;
+            let stride = usize::try_from(self.pic.stride[usize::from(i > 0)])
+                .ok()
+                .filter(|s| *s > 0)?;
             let len = stride * (rows - 1) + width * sample;
             // SAFETY: the decoder allocated this plane with `rows` rows of `stride` bytes, the last of them at least
             // `width * sample` bytes long, and it stays alive and unchanged while `self` holds the picture.
-            Some((unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast::<u8>(), len) }, stride))
+            Some((
+                unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast::<u8>(), len) },
+                stride,
+            ))
         };
         let planes = [plane(0, w, h)?, plane(1, cw, ch)?, plane(2, cw, ch)?];
-        Some(f(&Planar { width: w, height: h, bit_depth, layout, planes }))
+        Some(f(&Planar {
+            width: w,
+            height: h,
+            bit_depth,
+            layout,
+            planes,
+        }))
     }
 }
 

@@ -56,8 +56,15 @@ impl Fs {
         let last = comps.last().ok_or(PATH_EXISTS)?;
         let _guard = m.txn.as_ref().map(|t| t.writing());
         let host = Self::host_path(&m, &comps, true)?;
-        let file = OpenOptions::new().write(true).create_new(true).mode(0o644).open(&host).map_err(|e| from_io(&e))?;
-        let done = file.set_len(size).and_then(|()| names::set_guest_name(&host, last));
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(&host)
+            .map_err(|e| from_io(&e))?;
+        let done = file
+            .set_len(size)
+            .and_then(|()| names::set_guest_name(&host, last));
         if done.is_err() {
             drop(file);
             if std::fs::remove_file(&host).is_err() {
@@ -78,7 +85,10 @@ impl Fs {
         let last = comps.last().ok_or(PATH_EXISTS)?;
         let _guard = m.txn.as_ref().map(|t| t.writing());
         let host = Self::host_path(&m, &comps, true)?;
-        DirBuilder::new().mode(0o755).create(&host).map_err(|e| from_io(&e))?;
+        DirBuilder::new()
+            .mode(0o755)
+            .create(&host)
+            .map_err(|e| from_io(&e))?;
         if names::set_guest_name(&host, last).is_err() {
             if std::fs::remove_dir(&host).is_err() {
                 poison(&m);
@@ -160,7 +170,11 @@ impl Fs {
         let to_last = to_comps.last().ok_or(PATH_EXISTS)?;
         let _guard = m.txn.as_ref().map(|t| t.writing());
         let src = Self::host_path(&m, &from_comps, false)?;
-        if std::fs::symlink_metadata(&src).map_err(|e| from_io(&e))?.is_dir() != is_dir {
+        if std::fs::symlink_metadata(&src)
+            .map_err(|e| from_io(&e))?
+            .is_dir()
+            != is_dir
+        {
             return Err(PATH_NOT_FOUND);
         }
         if Self::host_path(&m, &to_comps, false).is_ok() {
@@ -205,7 +219,10 @@ mod tests {
     fn a_file_is_created_once() {
         let fs = temp();
         assert_eq!(fs.create_file(b"tmp:/a.sav", 16), OK);
-        assert_eq!(std::fs::metadata(fs.cfg.temp.join("a.sav")).unwrap().len(), 16);
+        assert_eq!(
+            std::fs::metadata(fs.cfg.temp.join("a.sav")).unwrap().len(),
+            16
+        );
         assert_eq!(fs.create_file(b"tmp:/a.sav", 16), PATH_EXISTS);
         assert_eq!(fs.create_file(b"tmp:/missing/a.sav", 0), PATH_NOT_FOUND);
         assert_eq!(fs.create_file(b"tmp:/b.sav", -1), FAIL);

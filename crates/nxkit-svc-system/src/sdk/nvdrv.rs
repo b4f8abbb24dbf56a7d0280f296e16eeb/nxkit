@@ -15,8 +15,14 @@ static OPEN_NOTE: AtomicBool = AtomicBool::new(false);
 /// `NvOsDrvOpen(const char*)`: no device opens.
 extern "C" fn open(path: u64) -> i32 {
     log_once_with(&OPEN_NOTE, || {
-        let path = if path != 0 { get_cstr(path, 256) } else { "(null)".to_owned() };
-        format!("nvdrv: cannot open {path} (the host has no nvdrv, only hardware movie decoding uses it)")
+        let path = if path != 0 {
+            get_cstr(path, 256)
+        } else {
+            "(null)".to_owned()
+        };
+        format!(
+            "nvdrv: cannot open {path} (the host has no nvdrv, only hardware movie decoding uses it)"
+        )
     });
     -1
 }

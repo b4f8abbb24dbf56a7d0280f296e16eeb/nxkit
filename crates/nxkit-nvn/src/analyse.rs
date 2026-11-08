@@ -103,7 +103,11 @@ impl Analyser {
         self.actions.assign(table, plan)?;
         self.frames += 1;
         if stats_diag() && self.frames % 30 == 1 {
-            eprintln!("nxkit-nvn: pass frame {}: {}", self.frames, plan.stats.describe());
+            eprintln!(
+                "nxkit-nvn: pass frame {}: {}",
+                self.frames,
+                plan.stats.describe()
+            );
         }
         if merge_diag() && self.frames % 30 == 1 {
             let r = crate::passmerge::MergeReport::of(frame, plan);
@@ -150,7 +154,10 @@ impl Scan<'_> {
                 let (r, w) = (self.frame.list(reads), self.frame.list(writes));
                 self.foreign_pass(i, PassKind::Compute, r, w);
             }
-            Cmd::Copy { src: None, dst: None } => self.plan.stats.buffer_copies_absorbed += 1,
+            Cmd::Copy {
+                src: None,
+                dst: None,
+            } => self.plan.stats.buffer_copies_absorbed += 1,
             Cmd::Copy { src, dst } => {
                 let (r, w) = (src.as_slice(), dst.as_slice());
                 self.foreign_pass(i, PassKind::Copy, r, w);
@@ -211,7 +218,10 @@ impl Scan<'_> {
         let start = p.attachments.len();
         for (slot, tex) in slots(&self.rt) {
             let r = self.table.get(tex)?;
-            let view = self.rt.views[match slot { Slot::Color(n) => usize::from(n), Slot::Depth => MAX_COLOR }];
+            let view = self.rt.views[match slot {
+                Slot::Color(n) => usize::from(n),
+                Slot::Depth => MAX_COLOR,
+            }];
             let bytes = r.desc.level_bytes(view.level())?;
             p.attachments.push(AttachmentPlan {
                 tex,
@@ -374,11 +384,17 @@ impl Scan<'_> {
     /// True when the open render pass, which ends before command `end`, has no draw and no clear.
     fn is_empty(&self, end: u32) -> bool {
         let start = self.plan.passes.last().map_or(0, |p| p.cmds.start);
-        self.frame.cmds.get(start as usize..end as usize).is_some_and(|cmds| {
-            !cmds.iter().any(|c| {
-                matches!(c, Cmd::Draw { .. } | Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. })
+        self.frame
+            .cmds
+            .get(start as usize..end as usize)
+            .is_some_and(|cmds| {
+                !cmds.iter().any(|c| {
+                    matches!(
+                        c,
+                        Cmd::Draw { .. } | Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. }
+                    )
+                })
             })
-        })
     }
 
     /// Takes the open render pass out of the plan and puts the scan back in the state before it.

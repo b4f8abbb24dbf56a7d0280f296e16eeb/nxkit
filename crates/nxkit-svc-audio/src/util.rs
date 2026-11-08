@@ -18,14 +18,19 @@ pub(crate) struct IdxMap {
 impl IdxMap {
     /// An empty map.
     pub(crate) const fn new() -> IdxMap {
-        IdxMap { keys: [const { AtomicU64::new(0) }; IDX_CAP], vals: [const { AtomicUsize::new(0) }; IDX_CAP] }
+        IdxMap {
+            keys: [const { AtomicU64::new(0) }; IDX_CAP],
+            vals: [const { AtomicUsize::new(0) }; IDX_CAP],
+        }
     }
 
     /// The entry of `k`. The search starts at the home entry of the key, so a hit usually costs one load. A removed
     /// entry is only a hole, and the search covers the whole table, so a hole never hides a key.
     fn find(&self, k: u64) -> Option<usize> {
         let home = ((k >> 4) as usize) % IDX_CAP;
-        (0..IDX_CAP).map(|n| (home + n) % IDX_CAP).find(|&i| self.keys[i].load(Ordering::Acquire) == k)
+        (0..IDX_CAP)
+            .map(|n| (home + n) % IDX_CAP)
+            .find(|&i| self.keys[i].load(Ordering::Acquire) == k)
     }
 
     /// Stores `v` under `k`. Returns false when the map is full. A key is only used after its `put` returned, which is
@@ -41,7 +46,10 @@ impl IdxMap {
         let home = ((k >> 4) as usize) % IDX_CAP;
         for n in 0..IDX_CAP {
             let i = (home + n) % IDX_CAP;
-            if self.keys[i].compare_exchange(0, k, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+            if self.keys[i]
+                .compare_exchange(0, k, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
                 self.vals[i].store(v, Ordering::Release);
                 return true;
             }
@@ -79,7 +87,9 @@ pub(crate) struct ObjMap<T> {
 impl<T: Clone> ObjMap<T> {
     /// An empty map.
     pub(crate) const fn new() -> ObjMap<T> {
-        ObjMap { m: Mutex::new(BTreeMap::new()) }
+        ObjMap {
+            m: Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// Stores `v` under `k`.

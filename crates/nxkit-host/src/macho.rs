@@ -74,7 +74,9 @@ pub fn segments(bytes: &[u8]) -> Result<Vec<Segment>> {
             return Err(bad("a load command has a bad size"));
         }
         if cmd == LC_SEGMENT_64 {
-            let name_bytes = bytes.get(at + 8..at + 24).ok_or_else(|| bad("short segment"))?;
+            let name_bytes = bytes
+                .get(at + 8..at + 24)
+                .ok_or_else(|| bad("short segment"))?;
             let n = name_bytes.iter().position(|&c| c == 0).unwrap_or(16);
             let name = String::from_utf8_lossy(&name_bytes[..n]).into_owned();
             let f = |off: usize| u64_at(bytes, at + off).ok_or_else(|| bad("short segment"));
@@ -122,15 +124,25 @@ pub fn code_signature(bytes: &[u8]) -> Result<Option<(u32, u32)>> {
 /// disagree, so it is an error and not a reason to copy.
 pub fn verify(m: &Module, segs: &[Segment]) -> Result<()> {
     for s in &m.segments {
-        let found = segs
-            .iter()
-            .find(|x| x.name == s.name)
-            .ok_or_else(|| HostError::Load(format!("module {}: the library has no segment {}", m.name, s.name)))?;
-        let want = if s.prot == Prot::Exec { PROT_READ | PROT_EXEC } else { PROT_READ | PROT_WRITE };
+        let found = segs.iter().find(|x| x.name == s.name).ok_or_else(|| {
+            HostError::Load(format!(
+                "module {}: the library has no segment {}",
+                m.name, s.name
+            ))
+        })?;
+        let want = if s.prot == Prot::Exec {
+            PROT_READ | PROT_EXEC
+        } else {
+            PROT_READ | PROT_WRITE
+        };
         let at = m.segment_addr(s);
         // The library pads the file bytes of a segment to a page, so only the rounded size is comparable.
         let file = s.file_size.div_ceil(0x4000) * 0x4000;
-        if found.vmaddr != at || found.vmsize != s.size || found.initprot != want || found.filesize != file {
+        if found.vmaddr != at
+            || found.vmsize != s.size
+            || found.initprot != want
+            || found.filesize != file
+        {
             return Err(HostError::Load(format!(
                 "module {}: segment {} is {:#x} + {:#x} (file bytes {:#x}, protection {}) in the library and {at:#x} + {:#x} (file bytes {file:#x}, protection {want}) in game.json",
                 m.name, s.name, found.vmaddr, found.vmsize, found.filesize, found.initprot, s.size

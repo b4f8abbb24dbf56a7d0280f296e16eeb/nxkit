@@ -19,7 +19,13 @@ pub(crate) struct Lay {
 
 impl Lay {
     fn new() -> Lay {
-        Lay { layout: Layout::new(), sink_set: false, sum: Duration::ZERO, max: Duration::ZERO, count: 0 }
+        Lay {
+            layout: Layout::new(),
+            sink_set: false,
+            sum: Duration::ZERO,
+            max: Duration::ZERO,
+            count: 0,
+        }
     }
 }
 
@@ -42,7 +48,10 @@ pub(crate) struct Sym {
 impl Sym {
     /// A lookup of the SDK function with this mangled name.
     pub(crate) const fn new(name: &'static str) -> Sym {
-        Sym { cell: OnceLock::new(), name }
+        Sym {
+            cell: OnceLock::new(),
+            name,
+        }
     }
 
     /// The address of the SDK's own function.
@@ -163,7 +172,12 @@ pub(crate) fn free_slot(r: &Arc<Ren>) {
 /// every frame (the game's update) remembers its last answer, so only the first call and a change of renderer take
 /// the lock of the slots.
 pub(crate) fn of_sys(sys: u64) -> Option<Arc<Ren>> {
-    let hit = T_SYS.with(|c| c.borrow().as_ref().filter(|(s, r)| *s == sys && r.is_open()).map(|(_, r)| r.clone()));
+    let hit = T_SYS.with(|c| {
+        c.borrow()
+            .as_ref()
+            .filter(|(s, r)| *s == sys && r.is_open())
+            .map(|(_, r)| r.clone())
+    });
     if hit.is_some() {
         return hit;
     }

@@ -116,7 +116,9 @@ fn scaled_size(v: u32, scale: f32) -> u32 {
 /// `NXKIT_DIAG_TEX`, and at most 300 lines are printed.
 fn life_diag(format: Format, width: u32, height: u32, layers: u32) -> bool {
     static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    crate::diag("life") && crate::diag::tex_match(format, width, height, layers) && crate::diag::first(&SHOWN, 300)
+    crate::diag("life")
+        && crate::diag::tex_match(format, width, height, layers)
+        && crate::diag::first(&SHOWN, 300)
 }
 
 /// The Metal description of a record at `scale` (1.0 for an unscaled texture).
@@ -129,7 +131,10 @@ pub(crate) fn describe(
     let unsupported = |what: &str| {
         nxkit_nvn::diag::note(
             nxkit_nvn::diag::Reason::FormatUnsupported,
-            format_args!("{what} {:?} {:?} {}x{}x{}", d.format, d.target, d.width, d.height, d.depth),
+            format_args!(
+                "{what} {:?} {:?} {}x{}x{}",
+                d.format, d.target, d.width, d.height, d.depth
+            ),
         );
         Skip::Format
     };
@@ -190,26 +195,65 @@ pub(crate) fn describe(
 
 impl TextureStore {
     /// A single renderable mip/layer. Sampling views and attachment views share the cache.
-    pub(crate) fn target_view(&self, res: &Res, view: nxkit_nvn::frame::TargetView) -> Result<Texture, Skip> {
+    pub(crate) fn target_view(
+        &self,
+        res: &Res,
+        view: nxkit_nvn::frame::TargetView,
+    ) -> Result<Texture, Skip> {
         let d = res.desc;
         let format = match view.format().and_then(texture_format) {
             Some(Mapped::Exact(format)) if !res.widened => format,
             _ => d.format,
         };
-        if d.kind == TextureKind::D2 && d.mip_levels == 1 && view.level() == 0 && view.layer() == 0 && format == d.format {
+        if d.kind == TextureKind::D2
+            && d.mip_levels == 1
+            && view.level() == 0
+            && view.layer() == 0
+            && format == d.format
+        {
             return Ok(res.tex.clone());
         }
-        let kind = if d.kind == TextureKind::D3 { TextureKind::D3 } else { TextureKind::D2 };
-        let slice = if kind == TextureKind::D3 { 0 } else { view.layer() };
-        let key = (res.generation, [view.level(), 1, slice, 1, format_key(format), kind as u32, u32::from_le_bytes([2,3,4,5])]);
+        let kind = if d.kind == TextureKind::D3 {
+            TextureKind::D3
+        } else {
+            TextureKind::D2
+        };
+        let slice = if kind == TextureKind::D3 {
+            0
+        } else {
+            view.layer()
+        };
+        let key = (
+            res.generation,
+            [
+                view.level(),
+                1,
+                slice,
+                1,
+                format_key(format),
+                kind as u32,
+                u32::from_le_bytes([2, 3, 4, 5]),
+            ],
+        );
         let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(texture) = views.get(&key) { return Ok(texture.clone()) }
-        let texture = res.tex.view(&ViewDesc { format, kind, first_level: view.level(), level_count: 1,
-            first_slice: slice, slice_count: 1 }).map_err(|e| {
-            let what = format_args!("attachment view {view:?} of {d:?}: {e}");
-            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::ViewCreate, what);
-            crate::tex_skip(what)
-        })?;
+        if let Some(texture) = views.get(&key) {
+            return Ok(texture.clone());
+        }
+        let texture = res
+            .tex
+            .view(&ViewDesc {
+                format,
+                kind,
+                first_level: view.level(),
+                level_count: 1,
+                first_slice: slice,
+                slice_count: 1,
+            })
+            .map_err(|e| {
+                let what = format_args!("attachment view {view:?} of {d:?}: {e}");
+                nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::ViewCreate, what);
+                crate::tex_skip(what)
+            })?;
         views.insert(key, texture.clone());
         Ok(texture)
     }
@@ -306,9 +350,21 @@ impl TextureStore {
                         eprintln!(
                             "DIAG contain {} new {id:?} {:?} {}x{}x{} l{} {:?} [{a0:#x}+{:#x}] {} old {other:?} {:?} {}x{}x{} l{} {:?} [{b0:#x}+{:#x}] off {:#x}",
                             if inside { "inside" } else { "around" },
-                            desc.kind, desc.width, desc.height, desc.array_layers, desc.mip_levels, desc.format, a1 - a0,
+                            desc.kind,
+                            desc.width,
+                            desc.height,
+                            desc.array_layers,
+                            desc.mip_levels,
+                            desc.format,
+                            a1 - a0,
                             if inside { "of" } else { "holds" },
-                            od.kind, od.width, od.height, od.array_layers, od.mip_levels, od.format, b1 - b0,
+                            od.kind,
+                            od.width,
+                            od.height,
+                            od.array_layers,
+                            od.mip_levels,
+                            od.format,
+                            b1 - b0,
                             a0.abs_diff(b0)
                         );
                     }
@@ -323,8 +379,21 @@ impl TextureStore {
                     if *a == rec.address.get() && crate::diag::first(&SPLIT, 300) {
                         eprintln!(
                             "DIAG split addr {a:#x} new {id:?} {:?} {}x{}x{} l{} {:?} rt {} | old {:?} {:?} {}x{}x{} l{} {:?} rt {}",
-                            desc.kind, desc.width, desc.height, desc.array_layers, desc.mip_levels, desc.format, desc.render_target,
-                            r.barrier_id, other.kind, other.width, other.height, other.array_layers, other.mip_levels, other.format, other.render_target
+                            desc.kind,
+                            desc.width,
+                            desc.height,
+                            desc.array_layers,
+                            desc.mip_levels,
+                            desc.format,
+                            desc.render_target,
+                            r.barrier_id,
+                            other.kind,
+                            other.width,
+                            other.height,
+                            other.array_layers,
+                            other.mip_levels,
+                            other.format,
+                            other.render_target
                         );
                     }
                 }
@@ -332,7 +401,11 @@ impl TextureStore {
             if life_diag(desc.format, desc.width, desc.height, desc.array_layers) {
                 eprintln!(
                     "DIAG life new metal texture {id:?} at {:#x} {:?} {}x{} gen {} (entry had {:?})",
-                    rec.address.get(), desc.format, desc.width, desc.height, self.next_generation,
+                    rec.address.get(),
+                    desc.format,
+                    desc.width,
+                    desc.height,
+                    self.next_generation,
                     self.entries.get(&id).map(|r| r.generation)
                 );
             }
@@ -368,8 +441,16 @@ impl TextureStore {
     /// Forgets the Metal texture of `id` (the game created or finalized the texture again).
     pub(crate) fn invalidate(&mut self, id: TexId) {
         if let Some(r) = self.entries.get(&id) {
-            if life_diag(r.desc.format, r.desc.width, r.desc.height, r.desc.array_layers) {
-                eprintln!("DIAG life invalidate {id:?} gen {} {:?} {}x{}", r.generation, r.desc.format, r.desc.width, r.desc.height);
+            if life_diag(
+                r.desc.format,
+                r.desc.width,
+                r.desc.height,
+                r.desc.array_layers,
+            ) {
+                eprintln!(
+                    "DIAG life invalidate {id:?} gen {} {:?} {}x{}",
+                    r.generation, r.desc.format, r.desc.width, r.desc.height
+                );
             }
         }
         if let Some(old) = self.entries.remove(&id) {
@@ -481,7 +562,11 @@ impl TextureStore {
             TextureKind::D2 => (base.min(slices - 1), 1),
             TextureKind::D2Array => {
                 let first = base.min(slices - 1);
-                let n = if count == 0 { slices - first } else { count.min(slices - first) };
+                let n = if count == 0 {
+                    slices - first
+                } else {
+                    count.min(slices - first)
+                };
                 (first, n.max(1))
             }
             TextureKind::Cube => {
@@ -491,7 +576,11 @@ impl TextureStore {
             TextureKind::CubeArray => {
                 let cubes = slices / 6;
                 let first = base.min(cubes - 1);
-                let n = if count == 0 { cubes - first } else { count.min(cubes - first) };
+                let n = if count == 0 {
+                    cubes - first
+                } else {
+                    count.min(cubes - first)
+                };
                 (first, n.max(1))
             }
         };
@@ -526,7 +615,14 @@ impl TextureStore {
         if let Some(v) = views.get(&key) {
             return Ok(v.clone());
         }
-        let vd = ViewDesc { format, kind, first_level, level_count, first_slice, slice_count };
+        let vd = ViewDesc {
+            format,
+            kind,
+            first_level,
+            level_count,
+            first_slice,
+            slice_count,
+        };
         let made = if atomic == 0 {
             res.tex.view_swizzled(&vd, tic.view.swizzle)
         } else {
@@ -588,30 +684,86 @@ mod tests {
 
     #[test]
     fn attachment_views_write_distinct_mips_and_layers() {
-        use nxkit_metal::{ArgumentTable, ColorAttachment, FrameRing, LoadAction, RenderPassDesc, StoreAction};
+        use nxkit_metal::{
+            ArgumentTable, ColorAttachment, FrameRing, LoadAction, RenderPassDesc, StoreAction,
+        };
         use nxkit_nvn::frame::TargetView;
-        let Ok(ctx) = Context::system_default() else { return };
-        let desc = nxkit_nvn::layout::TextureDesc { target: Target::D2Array, format: 0x25,
-            flags: 0, samples: 0, width: 16, height: 16, depth: 2, levels: 2, stride: 0, packaged_block: None };
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: Target::D2Array,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 16,
+            height: 16,
+            depth: 2,
+            levels: 2,
+            stride: 0,
+            packaged_block: None,
+        };
         let mut table = ResourceTable::new();
         let id = table.create(desc, GpuAddr::new(0x2000).unwrap()).unwrap();
         let mut store = TextureStore::new(&ctx);
-        let res = store.ensure(table.get(id).unwrap(), 1.0, Use { attachment: true, ..Use::default() }, &mut EncodeStats::default()).unwrap();
-        let first = store.target_view(&res, TargetView::from_words([3, 0, 1, 0])).unwrap();
-        let second = store.target_view(&res, TargetView::from_words([0x00010003, 1 << 16, 1, 0])).unwrap();
+        let res = store
+            .ensure(
+                table.get(id).unwrap(),
+                1.0,
+                Use {
+                    attachment: true,
+                    ..Use::default()
+                },
+                &mut EncodeStats::default(),
+            )
+            .unwrap();
+        let first = store
+            .target_view(&res, TargetView::from_words([3, 0, 1, 0]))
+            .unwrap();
+        let second = store
+            .target_view(&res, TargetView::from_words([0x00010003, 1 << 16, 1, 0]))
+            .unwrap();
         assert_eq!((first.desc().width, second.desc().width), (16, 8));
         let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
         let mut ring = FrameRing::new(&ctx).unwrap();
         let mut frame = ring.begin().unwrap();
-        for (texture, clear) in [(&first, [1.,0.,0.,1.]), (&second, [0.,1.,0.,1.])] {
-            frame.commands().begin_render_pass(&RenderPassDesc { colors: vec![Some(ColorAttachment { depth_plane: 0,
-                texture: texture.clone(), load: LoadAction::Clear, store: StoreAction::Store,
-                clear, memoryless: false })], depth: None, stencil: None }, &table).unwrap().end();
+        for (texture, clear) in [(&first, [1., 0., 0., 1.]), (&second, [0., 1., 0., 1.])] {
+            frame
+                .commands()
+                .begin_render_pass(
+                    &RenderPassDesc {
+                        colors: vec![Some(ColorAttachment {
+                            depth_plane: 0,
+                            texture: texture.clone(),
+                            load: LoadAction::Clear,
+                            store: StoreAction::Store,
+                            clear,
+                            memoryless: false,
+                        })],
+                        depth: None,
+                        stencil: None,
+                    },
+                    &table,
+                )
+                .unwrap()
+                .end();
         }
         frame.submit().unwrap().wait().unwrap();
-        assert_eq!(first.debug_read(&ctx, &[[0,0]]).unwrap()[0], [255,0,0,255]);
-        assert_eq!(second.debug_read(&ctx, &[[0,0]]).unwrap()[0], [0,255,0,255]);
-        assert_eq!(store.target_view(&res, TargetView::from_words([3,0,1,0])).unwrap().gpu_resource_id(), first.gpu_resource_id());
+        assert_eq!(
+            first.debug_read(&ctx, &[[0, 0]]).unwrap()[0],
+            [255, 0, 0, 255]
+        );
+        assert_eq!(
+            second.debug_read(&ctx, &[[0, 0]]).unwrap()[0],
+            [0, 255, 0, 255]
+        );
+        assert_eq!(
+            store
+                .target_view(&res, TargetView::from_words([3, 0, 1, 0]))
+                .unwrap()
+                .gpu_resource_id(),
+            first.gpu_resource_id()
+        );
     }
 
     #[test]

@@ -68,7 +68,12 @@ pub(crate) fn parse(msg: &[u8]) -> Result<Parsed<'_>, ParseError> {
     let w0 = word(msg, 0)?;
     let w1 = word(msg, 4)?;
     let msg_type = (w0 & 0xFFFF) as u16;
-    let counts = [(w0 >> 16) & 0xF, (w0 >> 20) & 0xF, (w0 >> 24) & 0xF, (w0 >> 28) & 0xF];
+    let counts = [
+        (w0 >> 16) & 0xF,
+        (w0 >> 20) & 0xF,
+        (w0 >> 24) & 0xF,
+        (w0 >> 28) & 0xF,
+    ];
     let data_words = (w1 & 0x3FF) as usize;
     let c_mode = (w1 >> 10) & 0xF;
     let mut at = 8;
@@ -98,7 +103,8 @@ pub(crate) fn parse(msg: &[u8]) -> Result<Parsed<'_>, ParseError> {
         let a = word(msg, at)?;
         let b = word(msg, at + 4)?;
         at += 8;
-        let addr = u64::from(b) | u64::from((a >> 12) & 0xF) << 32 | u64::from((a >> 6) & 0x3F) << 36;
+        let addr =
+            u64::from(b) | u64::from((a >> 12) & 0xF) << 32 | u64::from((a >> 6) & 0x3F) << 36;
         buffers.push(Buffer {
             addr,
             size: u64::from(a >> 16),
@@ -113,9 +119,16 @@ pub(crate) fn parse(msg: &[u8]) -> Result<Parsed<'_>, ParseError> {
             let addr_lo = word(msg, at + 4)?;
             let w2 = word(msg, at + 8)?;
             at += 12;
-            let addr = u64::from(addr_lo) | u64::from(w2 >> 28) << 32 | u64::from((w2 >> 2) & 0x3F_FFFF) << 36;
+            let addr = u64::from(addr_lo)
+                | u64::from(w2 >> 28) << 32
+                | u64::from((w2 >> 2) & 0x3F_FFFF) << 36;
             let size = u64::from(size_lo) | u64::from((w2 >> 24) & 0xF) << 32;
-            buffers.push(Buffer { addr, size, kind, index: i });
+            buffers.push(Buffer {
+                addr,
+                size,
+                kind,
+                index: i,
+            });
         }
     }
 
@@ -124,7 +137,11 @@ pub(crate) fn parse(msg: &[u8]) -> Result<Parsed<'_>, ParseError> {
     if raw_end > msg.len() {
         return Err(ParseError::Truncated);
     }
-    let raw = if raw_end > raw_start { &msg[raw_start..raw_end] } else { &[] };
+    let raw = if raw_end > raw_start {
+        &msg[raw_start..raw_end]
+    } else {
+        &[]
+    };
 
     // Mode 0 has no receive list. Mode 2 lets the kernel choose the pointer buffer, which this server never uses
     // because `QueryPointerBufferSize` answers 0. A mode above 2 has `mode - 2` entries after the raw data.
@@ -284,7 +301,10 @@ mod tests {
         let p = parse(&out).unwrap();
         assert_eq!(p.move_handles, [0x77]);
         assert_eq!(&p.raw[..4], b"SFCO");
-        assert_eq!(u32::from_le_bytes([p.raw[8], p.raw[9], p.raw[10], p.raw[11]]), 0x202);
+        assert_eq!(
+            u32::from_le_bytes([p.raw[8], p.raw[9], p.raw[10], p.raw[11]]),
+            0x202
+        );
         assert_eq!(&p.raw[16..20], [1, 2, 3, 4]);
     }
 }

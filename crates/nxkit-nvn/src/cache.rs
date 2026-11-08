@@ -158,7 +158,9 @@ impl RecCache {
             prof.epoch_skips += 1;
         } else {
             prof.refs_checked += s.refs.len() as u64;
-            let same = s.refs.iter().all(|r| matches!(r, crate::decode::Ref::Deferred(..)) || r.holds(table, desc, mem));
+            let same = s.refs.iter().all(|r| {
+                matches!(r, crate::decode::Ref::Deferred(..)) || r.holds(table, desc, mem)
+            });
             if !same {
                 return false;
             }

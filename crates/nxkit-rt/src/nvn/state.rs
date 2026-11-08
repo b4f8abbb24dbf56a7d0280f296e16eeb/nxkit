@@ -269,19 +269,50 @@ macro_rules! ms_get {
 // Blend state.
 
 extern "C" fn blend_set_defaults(s: u64) {
-    guard("nvnBlendStateSetDefaults", || store(s, BLEND, blend_defaults()));
+    guard("nvnBlendStateSetDefaults", || {
+        store(s, BLEND, blend_defaults())
+    });
 }
 
-set_field!(blend_set_target, "nvnBlendStateSetBlendTarget", BLEND, BL_TARGET);
-set_field!(blend_set_overlap, "nvnBlendStateSetAdvancedOverlap", BLEND, BL_ADV_OVL);
-get_field!(blend_get_target, "nvnBlendStateGetBlendTarget", BLEND, BL_TARGET);
-get_field!(blend_get_advanced_mode, "nvnBlendStateGetAdvancedMode", BLEND, BL_ADV);
-get_field!(blend_get_overlap, "nvnBlendStateGetAdvancedOverlap", BLEND, BL_ADV_OVL);
+set_field!(
+    blend_set_target,
+    "nvnBlendStateSetBlendTarget",
+    BLEND,
+    BL_TARGET
+);
+set_field!(
+    blend_set_overlap,
+    "nvnBlendStateSetAdvancedOverlap",
+    BLEND,
+    BL_ADV_OVL
+);
+get_field!(
+    blend_get_target,
+    "nvnBlendStateGetBlendTarget",
+    BLEND,
+    BL_TARGET
+);
+get_field!(
+    blend_get_advanced_mode,
+    "nvnBlendStateGetAdvancedMode",
+    BLEND,
+    BL_ADV
+);
+get_field!(
+    blend_get_overlap,
+    "nvnBlendStateGetAdvancedOverlap",
+    BLEND,
+    BL_ADV_OVL
+);
 
 /// A mode above the last one is stored as none.
 extern "C" fn blend_set_advanced_mode(s: u64, mode: i32) {
     guard("nvnBlendStateSetAdvancedMode", || {
-        let mode = if (0..=BLEND_ADVANCED_MODE_HSL_LUMINOSITY).contains(&mode) { mode } else { 0 };
+        let mode = if (0..=BLEND_ADVANCED_MODE_HSL_LUMINOSITY).contains(&mode) {
+            mode
+        } else {
+            0
+        };
         put(s, BLEND, BL_ADV, mode as u32)
     });
 }
@@ -289,7 +320,12 @@ extern "C" fn blend_set_advanced_mode(s: u64, mode: i32) {
 extern "C" fn blend_set_func(s: u64, sr: i32, dr: i32, sa: i32, da: i32) {
     guard("nvnBlendStateSetBlendFunc", || {
         let mut w = load(s, BLEND)?;
-        for (f, v) in [(BL_SRC_RGB, sr), (BL_DST_RGB, dr), (BL_SRC_A, sa), (BL_DST_A, da)] {
+        for (f, v) in [
+            (BL_SRC_RGB, sr),
+            (BL_DST_RGB, dr),
+            (BL_SRC_A, sa),
+            (BL_DST_A, da),
+        ] {
             w = pack(w, f, v as u32);
         }
         store(s, BLEND, w)
@@ -298,7 +334,11 @@ extern "C" fn blend_set_func(s: u64, sr: i32, dr: i32, sa: i32, da: i32) {
 
 extern "C" fn blend_set_equation(s: u64, er: i32, ea: i32) {
     guard("nvnBlendStateSetBlendEquation", || {
-        let w = pack(pack(load(s, BLEND)?, BL_EQ_RGB, er as u32), BL_EQ_A, ea as u32);
+        let w = pack(
+            pack(load(s, BLEND)?, BL_EQ_RGB, er as u32),
+            BL_EQ_A,
+            ea as u32,
+        );
         store(s, BLEND, w)
     });
 }
@@ -351,7 +391,11 @@ extern "C" fn blend_get_equation(s: u64, er: u64, ea: u64) {
 
 extern "C" fn color_set_defaults(s: u64) {
     guard("nvnColorStateSetDefaults", || {
-        let w = pack(pack(0, COLOR_LOGIC_OP, LOGIC_OP_COPY), COLOR_ALPHA_FUNC, ALPHA_FUNC_ALWAYS);
+        let w = pack(
+            pack(0, COLOR_LOGIC_OP, LOGIC_OP_COPY),
+            COLOR_ALPHA_FUNC,
+            ALPHA_FUNC_ALWAYS,
+        );
         store(s, COLOR, w)
     });
 }
@@ -364,26 +408,59 @@ extern "C" fn color_set_blend_enable(s: u64, i: i32, en: u32) {
         }
         let bits = get(s, COLOR, COLOR_BLEND_EN)?;
         let bit = 1u32 << i;
-        put(s, COLOR, COLOR_BLEND_EN, if arg_bool(en) { bits | bit } else { bits & !bit })
+        put(
+            s,
+            COLOR,
+            COLOR_BLEND_EN,
+            if arg_bool(en) {
+                bits | bit
+            } else {
+                bits & !bit
+            },
+        )
     });
 }
 
 /// An index outside 0 to 7 reads as false.
 extern "C" fn color_get_blend_enable(s: u64, i: i32) -> u32 {
     guard("nvnColorStateGetBlendEnable", || {
-        Ok(ret_bool((0..TARGETS).contains(&i) && get(s, COLOR, COLOR_BLEND_EN)? >> i & 1 != 0))
+        Ok(ret_bool(
+            (0..TARGETS).contains(&i) && get(s, COLOR, COLOR_BLEND_EN)? >> i & 1 != 0,
+        ))
     })
 }
 
-set_field!(color_set_alpha_test, "nvnColorStateSetAlphaTest", COLOR, COLOR_ALPHA_FUNC);
-set_field!(color_set_logic_op, "nvnColorStateSetLogicOp", COLOR, COLOR_LOGIC_OP);
-get_field!(color_get_alpha_test, "nvnColorStateGetAlphaTest", COLOR, COLOR_ALPHA_FUNC);
-get_field!(color_get_logic_op, "nvnColorStateGetLogicOp", COLOR, COLOR_LOGIC_OP);
+set_field!(
+    color_set_alpha_test,
+    "nvnColorStateSetAlphaTest",
+    COLOR,
+    COLOR_ALPHA_FUNC
+);
+set_field!(
+    color_set_logic_op,
+    "nvnColorStateSetLogicOp",
+    COLOR,
+    COLOR_LOGIC_OP
+);
+get_field!(
+    color_get_alpha_test,
+    "nvnColorStateGetAlphaTest",
+    COLOR,
+    COLOR_ALPHA_FUNC
+);
+get_field!(
+    color_get_logic_op,
+    "nvnColorStateGetLogicOp",
+    COLOR,
+    COLOR_LOGIC_OP
+);
 
 // Channel mask state.
 
 extern "C" fn mask_set_defaults(s: u64) {
-    guard("nvnChannelMaskStateSetDefaults", || Obj(s).set_u32(0, u32::MAX));
+    guard("nvnChannelMaskStateSetDefaults", || {
+        Obj(s).set_u32(0, u32::MAX)
+    });
 }
 
 /// An index outside 0 to 7 changes nothing.
@@ -404,7 +481,11 @@ extern "C" fn mask_set(s: u64, i: i32, r: u32, g: u32, b: u32, a: u32) {
 /// An index outside 0 to 7 reads as no channel. A null out-pointer is skipped.
 extern "C" fn mask_get(s: u64, i: i32, r: u64, g: u64, b: u64, a: u64) {
     guard("nvnChannelMaskStateGetChannelMask", || {
-        let m = if (0..TARGETS).contains(&i) { Obj(s).u32(0)? >> (4 * i) & 0xf } else { 0 };
+        let m = if (0..TARGETS).contains(&i) {
+            Obj(s).u32(0)? >> (4 * i) & 0xf
+        } else {
+            0
+        };
         out_bool(r, m & 1 != 0)?;
         out_bool(g, m & 2 != 0)?;
         out_bool(b, m & 4 != 0)?;
@@ -421,26 +502,126 @@ extern "C" fn ms_set_defaults(s: u64) {
     });
 }
 
-ms_set!(ms_set_enable, "nvnMultisampleStateSetMultisampleEnable", MS_ENABLE, flag);
-ms_set!(ms_set_samples, "nvnMultisampleStateSetSamples", MS_SAMPLES, int);
-ms_set!(ms_set_a2c, "nvnMultisampleStateSetAlphaToCoverageEnable", MS_A2C, flag);
-ms_set!(ms_set_a2c_dither, "nvnMultisampleStateSetAlphaToCoverageDither", MS_A2C_DITHER, flag);
-ms_set!(ms_set_raster, "nvnMultisampleStateSetRasterSamples", MS_RASTER, int);
-ms_set!(ms_set_cov_mod, "nvnMultisampleStateSetCoverageModulationMode", MS_COV_MOD, int);
-ms_set!(ms_set_c2c_en, "nvnMultisampleStateSetCoverageToColorEnable", MS_C2C_EN, flag);
-ms_set!(ms_set_c2c_out, "nvnMultisampleStateSetCoverageToColorOutput", MS_C2C_OUT, int);
-ms_set!(ms_set_sl_en, "nvnMultisampleStateSetSampleLocationsEnable", MS_SL_EN, flag);
-ms_set!(ms_set_sl_grid, "nvnMultisampleStateSetSampleLocationsGridEnable", MS_SL_GRID, flag);
-ms_get!(ms_get_enable, "nvnMultisampleStateGetMultisampleEnable", MS_ENABLE, flag);
-ms_get!(ms_get_samples, "nvnMultisampleStateGetSamples", MS_SAMPLES, int);
-ms_get!(ms_get_a2c, "nvnMultisampleStateGetAlphaToCoverageEnable", MS_A2C, flag);
-ms_get!(ms_get_a2c_dither, "nvnMultisampleStateGetAlphaToCoverageDither", MS_A2C_DITHER, flag);
-ms_get!(ms_get_raster, "nvnMultisampleStateGetRasterSamples", MS_RASTER, int);
-ms_get!(ms_get_cov_mod, "nvnMultisampleStateGetCoverageModulationMode", MS_COV_MOD, int);
-ms_get!(ms_get_c2c_en, "nvnMultisampleStateGetCoverageToColorEnable", MS_C2C_EN, flag);
-ms_get!(ms_get_c2c_out, "nvnMultisampleStateGetCoverageToColorOutput", MS_C2C_OUT, int);
-ms_get!(ms_get_sl_en, "nvnMultisampleStateGetSampleLocationsEnable", MS_SL_EN, flag);
-ms_get!(ms_get_sl_grid, "nvnMultisampleStateGetSampleLocationsGridEnable", MS_SL_GRID, flag);
+ms_set!(
+    ms_set_enable,
+    "nvnMultisampleStateSetMultisampleEnable",
+    MS_ENABLE,
+    flag
+);
+ms_set!(
+    ms_set_samples,
+    "nvnMultisampleStateSetSamples",
+    MS_SAMPLES,
+    int
+);
+ms_set!(
+    ms_set_a2c,
+    "nvnMultisampleStateSetAlphaToCoverageEnable",
+    MS_A2C,
+    flag
+);
+ms_set!(
+    ms_set_a2c_dither,
+    "nvnMultisampleStateSetAlphaToCoverageDither",
+    MS_A2C_DITHER,
+    flag
+);
+ms_set!(
+    ms_set_raster,
+    "nvnMultisampleStateSetRasterSamples",
+    MS_RASTER,
+    int
+);
+ms_set!(
+    ms_set_cov_mod,
+    "nvnMultisampleStateSetCoverageModulationMode",
+    MS_COV_MOD,
+    int
+);
+ms_set!(
+    ms_set_c2c_en,
+    "nvnMultisampleStateSetCoverageToColorEnable",
+    MS_C2C_EN,
+    flag
+);
+ms_set!(
+    ms_set_c2c_out,
+    "nvnMultisampleStateSetCoverageToColorOutput",
+    MS_C2C_OUT,
+    int
+);
+ms_set!(
+    ms_set_sl_en,
+    "nvnMultisampleStateSetSampleLocationsEnable",
+    MS_SL_EN,
+    flag
+);
+ms_set!(
+    ms_set_sl_grid,
+    "nvnMultisampleStateSetSampleLocationsGridEnable",
+    MS_SL_GRID,
+    flag
+);
+ms_get!(
+    ms_get_enable,
+    "nvnMultisampleStateGetMultisampleEnable",
+    MS_ENABLE,
+    flag
+);
+ms_get!(
+    ms_get_samples,
+    "nvnMultisampleStateGetSamples",
+    MS_SAMPLES,
+    int
+);
+ms_get!(
+    ms_get_a2c,
+    "nvnMultisampleStateGetAlphaToCoverageEnable",
+    MS_A2C,
+    flag
+);
+ms_get!(
+    ms_get_a2c_dither,
+    "nvnMultisampleStateGetAlphaToCoverageDither",
+    MS_A2C_DITHER,
+    flag
+);
+ms_get!(
+    ms_get_raster,
+    "nvnMultisampleStateGetRasterSamples",
+    MS_RASTER,
+    int
+);
+ms_get!(
+    ms_get_cov_mod,
+    "nvnMultisampleStateGetCoverageModulationMode",
+    MS_COV_MOD,
+    int
+);
+ms_get!(
+    ms_get_c2c_en,
+    "nvnMultisampleStateGetCoverageToColorEnable",
+    MS_C2C_EN,
+    flag
+);
+ms_get!(
+    ms_get_c2c_out,
+    "nvnMultisampleStateGetCoverageToColorOutput",
+    MS_C2C_OUT,
+    int
+);
+ms_get!(
+    ms_get_sl_en,
+    "nvnMultisampleStateGetSampleLocationsEnable",
+    MS_SL_EN,
+    flag
+);
+ms_get!(
+    ms_get_sl_grid,
+    "nvnMultisampleStateGetSampleLocationsGridEnable",
+    MS_SL_GRID,
+    flag
+);
 
 /// The programmable sample positions are not kept. The call is logged once.
 extern "C" fn ms_set_sample_locations(_s: u64, _start: i32, _n: i32, _v: u64) {
@@ -454,34 +635,110 @@ extern "C" fn ms_set_sample_locations(_s: u64, _start: i32, _n: i32, _v: u64) {
 
 extern "C" fn poly_set_defaults(s: u64) {
     guard("nvnPolygonStateSetDefaults", || {
-        let w = pack(pack(0, PO_FRONT, FRONT_FACE_CCW), PO_MODE, POLYGON_MODE_FILL);
+        let w = pack(
+            pack(0, PO_FRONT, FRONT_FACE_CCW),
+            PO_MODE,
+            POLYGON_MODE_FILL,
+        );
         store(s, POLY, w)
     });
 }
 
 set_field!(poly_set_cull, "nvnPolygonStateSetCullFace", POLY, PO_CULL);
-set_field!(poly_set_front, "nvnPolygonStateSetFrontFace", POLY, PO_FRONT);
-set_field!(poly_set_mode, "nvnPolygonStateSetPolygonMode", POLY, PO_MODE);
-set_field!(poly_set_offset, "nvnPolygonStateSetPolygonOffsetEnables", POLY, PO_OFFSET);
+set_field!(
+    poly_set_front,
+    "nvnPolygonStateSetFrontFace",
+    POLY,
+    PO_FRONT
+);
+set_field!(
+    poly_set_mode,
+    "nvnPolygonStateSetPolygonMode",
+    POLY,
+    PO_MODE
+);
+set_field!(
+    poly_set_offset,
+    "nvnPolygonStateSetPolygonOffsetEnables",
+    POLY,
+    PO_OFFSET
+);
 get_field!(poly_get_cull, "nvnPolygonStateGetCullFace", POLY, PO_CULL);
-get_field!(poly_get_front, "nvnPolygonStateGetFrontFace", POLY, PO_FRONT);
-get_field!(poly_get_mode, "nvnPolygonStateGetPolygonMode", POLY, PO_MODE);
-get_field!(poly_get_offset, "nvnPolygonStateGetPolygonOffsetEnables", POLY, PO_OFFSET);
+get_field!(
+    poly_get_front,
+    "nvnPolygonStateGetFrontFace",
+    POLY,
+    PO_FRONT
+);
+get_field!(
+    poly_get_mode,
+    "nvnPolygonStateGetPolygonMode",
+    POLY,
+    PO_MODE
+);
+get_field!(
+    poly_get_offset,
+    "nvnPolygonStateGetPolygonOffsetEnables",
+    POLY,
+    PO_OFFSET
+);
 
 // Depth stencil state.
 
 extern "C" fn ds_set_defaults(s: u64) {
-    guard("nvnDepthStencilStateSetDefaults", || store(s, DS, depth_stencil_defaults()));
+    guard("nvnDepthStencilStateSetDefaults", || {
+        store(s, DS, depth_stencil_defaults())
+    });
 }
 
-set_flag!(ds_set_depth_test, "nvnDepthStencilStateSetDepthTestEnable", DS, DS_DT);
-set_flag!(ds_set_depth_write, "nvnDepthStencilStateSetDepthWriteEnable", DS, DS_DW);
-set_flag!(ds_set_stencil_test, "nvnDepthStencilStateSetStencilTestEnable", DS, DS_ST);
-set_field!(ds_set_depth_func, "nvnDepthStencilStateSetDepthFunc", DS, DS_DF);
-get_flag!(ds_get_depth_test, "nvnDepthStencilStateGetDepthTestEnable", DS, DS_DT);
-get_flag!(ds_get_depth_write, "nvnDepthStencilStateGetDepthWriteEnable", DS, DS_DW);
-get_flag!(ds_get_stencil_test, "nvnDepthStencilStateGetStencilTestEnable", DS, DS_ST);
-get_field!(ds_get_depth_func, "nvnDepthStencilStateGetDepthFunc", DS, DS_DF);
+set_flag!(
+    ds_set_depth_test,
+    "nvnDepthStencilStateSetDepthTestEnable",
+    DS,
+    DS_DT
+);
+set_flag!(
+    ds_set_depth_write,
+    "nvnDepthStencilStateSetDepthWriteEnable",
+    DS,
+    DS_DW
+);
+set_flag!(
+    ds_set_stencil_test,
+    "nvnDepthStencilStateSetStencilTestEnable",
+    DS,
+    DS_ST
+);
+set_field!(
+    ds_set_depth_func,
+    "nvnDepthStencilStateSetDepthFunc",
+    DS,
+    DS_DF
+);
+get_flag!(
+    ds_get_depth_test,
+    "nvnDepthStencilStateGetDepthTestEnable",
+    DS,
+    DS_DT
+);
+get_flag!(
+    ds_get_depth_write,
+    "nvnDepthStencilStateGetDepthWriteEnable",
+    DS,
+    DS_DW
+);
+get_flag!(
+    ds_get_stencil_test,
+    "nvnDepthStencilStateGetStencilTestEnable",
+    DS,
+    DS_ST
+);
+get_field!(
+    ds_get_depth_func,
+    "nvnDepthStencilStateGetDepthFunc",
+    DS,
+    DS_DF
+);
 
 /// Sets the function of the front face, of the back face, or of both.
 extern "C" fn ds_set_stencil_func(s: u64, face: i32, func: i32) {
@@ -552,7 +809,11 @@ extern "C" fn va_set_format(s: u64, format: i32, offset: i64) {
                 "[RED] NVN nvnVertexAttribStateSetFormat: the vertex attribute offset {offset} exceeds the packed range"
             );
         }
-        let w = pack(pack(load(s, VA)?, VA_FMT, format as u32), VA_OFFSET, offset as u32);
+        let w = pack(
+            pack(load(s, VA)?, VA_FMT, format as u32),
+            VA_OFFSET,
+            offset as u32,
+        );
         store(s, VA, w)
     });
 }
@@ -569,8 +830,18 @@ extern "C" fn va_get_format(s: u64, format: u64, offset: u64) {
     });
 }
 
-set_field!(va_set_stream, "nvnVertexAttribStateSetStreamIndex", VA, VA_STREAM);
-get_field!(va_get_stream, "nvnVertexAttribStateGetStreamIndex", VA, VA_STREAM);
+set_field!(
+    va_set_stream,
+    "nvnVertexAttribStateSetStreamIndex",
+    VA,
+    VA_STREAM
+);
+get_field!(
+    va_get_stream,
+    "nvnVertexAttribStateGetStreamIndex",
+    VA,
+    VA_STREAM
+);
 
 // Vertex stream state.
 
@@ -580,19 +851,27 @@ extern "C" fn vs_set_defaults(s: u64) {
 
 /// The stride is stored as 32 bits.
 extern "C" fn vs_set_stride(s: u64, stride: i64) {
-    guard("nvnVertexStreamStateSetStride", || Obj(s).set_u32(VS_STRIDE, stride as u32));
+    guard("nvnVertexStreamStateSetStride", || {
+        Obj(s).set_u32(VS_STRIDE, stride as u32)
+    });
 }
 
 extern "C" fn vs_get_stride(s: u64) -> i64 {
-    guard("nvnVertexStreamStateGetStride", || Ok(i64::from(Obj(s).u32(VS_STRIDE)?)))
+    guard("nvnVertexStreamStateGetStride", || {
+        Ok(i64::from(Obj(s).u32(VS_STRIDE)?))
+    })
 }
 
 extern "C" fn vs_set_divisor(s: u64, divisor: i32) {
-    guard("nvnVertexStreamStateSetDivisor", || Obj(s).set_u32(VS_DIVISOR, divisor as u32));
+    guard("nvnVertexStreamStateSetDivisor", || {
+        Obj(s).set_u32(VS_DIVISOR, divisor as u32)
+    });
 }
 
 extern "C" fn vs_get_divisor(s: u64) -> i32 {
-    guard("nvnVertexStreamStateGetDivisor", || Ok(Obj(s).u32(VS_DIVISOR)? as i32))
+    guard("nvnVertexStreamStateGetDivisor", || {
+        Ok(Obj(s).u32(VS_DIVISOR)? as i32)
+    })
 }
 
 /// The functions of the group.
@@ -694,7 +973,10 @@ mod tests {
         let s = obj();
         blend_set_defaults(s);
         let b = blend(s).expect("blend");
-        assert_eq!((b.src_rgb, b.dst_rgb, b.src_alpha, b.dst_alpha), (2, 1, 2, 1));
+        assert_eq!(
+            (b.src_rgb, b.dst_rgb, b.src_alpha, b.dst_alpha),
+            (2, 1, 2, 1)
+        );
         assert_eq!((b.eq_rgb, b.eq_alpha, b.advanced_mode), (1, 1, 0));
         assert!(b.premultiplied_src && b.normalized_dst);
     }
@@ -711,8 +993,14 @@ mod tests {
         blend_set_normalized(s, 0);
         blend_set_overlap(s, 3);
         let b = blend(s).expect("blend");
-        assert_eq!((b.target, b.src_rgb, b.dst_rgb, b.src_alpha, b.dst_alpha), (7, 0x7f, 0x55, 0x2a, 0x7f));
-        assert_eq!((b.eq_rgb, b.eq_alpha, b.advanced_mode, b.overlap), (7, 5, 0x32, 3));
+        assert_eq!(
+            (b.target, b.src_rgb, b.dst_rgb, b.src_alpha, b.dst_alpha),
+            (7, 0x7f, 0x55, 0x2a, 0x7f)
+        );
+        assert_eq!(
+            (b.eq_rgb, b.eq_alpha, b.advanced_mode, b.overlap),
+            (7, 5, 0x32, 3)
+        );
         assert!(!b.premultiplied_src && !b.normalized_dst);
         assert_eq!(blend_get_premultiplied(s), 0);
         blend_set_advanced_mode(s, 0x33);
@@ -789,13 +1077,19 @@ mod tests {
         let s = obj();
         poly_set_defaults(s);
         let p = polygon(s).expect("polygon");
-        assert_eq!((p.cull_face, p.front_face, p.mode, p.offset_enables), (0, 1, 2, 0));
+        assert_eq!(
+            (p.cull_face, p.front_face, p.mode, p.offset_enables),
+            (0, 1, 2, 0)
+        );
         poly_set_cull(s, 2);
         poly_set_front(s, 0);
         poly_set_mode(s, 1);
         poly_set_offset(s, 7);
         let p = polygon(s).expect("polygon");
-        assert_eq!((p.cull_face, p.front_face, p.mode, p.offset_enables), (2, 0, 1, 7));
+        assert_eq!(
+            (p.cull_face, p.front_face, p.mode, p.offset_enables),
+            (2, 0, 1, 7)
+        );
     }
 
     #[test]

@@ -44,7 +44,11 @@ impl GpuSettings {
         let defaults = GpuConfig::default();
         GpuConfig {
             shader_dir: self.shader_dir.clone(),
-            threads: if self.threads > 0 { self.threads } else { defaults.threads },
+            threads: if self.threads > 0 {
+                self.threads
+            } else {
+                defaults.threads
+            },
             archive: ArchiveConfig {
                 load: self.archive.clone(),
                 collect: self.collect_archive,

@@ -64,7 +64,8 @@ fn symbol(name: &'static str) -> Result<Func> {
 /// Makes `argv = { "game", NULL }` and leaks it. It returns the address of the array.
 fn leak_argv() -> Result<u64> {
     let arg = CString::new(ARGV0).map_err(|e| HostError::Load(format!("argv[0]: {e}")))?;
-    let argv: &'static mut [*mut c_char; 2] = Box::leak(Box::new([arg.into_raw(), std::ptr::null_mut()]));
+    let argv: &'static mut [*mut c_char; 2] =
+        Box::leak(Box::new([arg.into_raw(), std::ptr::null_mut()]));
     Ok(argv.as_mut_ptr() as usize as u64)
 }
 

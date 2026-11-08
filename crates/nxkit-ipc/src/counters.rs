@@ -37,9 +37,7 @@ impl Counters {
             }
         }
         let mut map = self.map.write().unwrap_or_else(PoisonError::into_inner);
-        map.entry(key)
-            .or_default()
-            .fetch_add(1, Ordering::Relaxed);
+        map.entry(key).or_default().fetch_add(1, Ordering::Relaxed);
     }
 
     /// Every counter, sorted by interface and command ID.
@@ -73,6 +71,9 @@ mod tests {
         assert_eq!(s.len(), 3);
         assert_eq!((s[0].interface, s[0].command, s[0].count), ("IFile", 0, 2));
         assert_eq!((s[1].interface, s[1].command, s[1].count), ("IFile", 1, 1));
-        assert_eq!((s[2].interface, s[2].command, s[2].count), ("IFileSystem", 0, 1));
+        assert_eq!(
+            (s[2].interface, s[2].command, s[2].count),
+            ("IFileSystem", 0, 1)
+        );
     }
 }

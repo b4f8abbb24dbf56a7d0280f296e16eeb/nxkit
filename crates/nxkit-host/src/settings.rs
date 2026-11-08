@@ -146,7 +146,8 @@ fn flag(v: &Value, key: &str) -> Result<bool> {
 }
 
 fn small(v: &Value, key: &str) -> Result<u32> {
-    u32::try_from(num(v, key, "settings")?).map_err(|_| bad(format!("settings.{key} is out of range")))
+    u32::try_from(num(v, key, "settings")?)
+        .map_err(|_| bad(format!("settings.{key} is out of range")))
 }
 
 fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
@@ -181,13 +182,21 @@ impl Settings {
             .as_array()
             .ok_or_else(|| bad("settings.display_versions is not an array"))?
             .iter()
-            .map(|e| Ok((text(e, "build_id", "settings.display_versions")?, text(e, "version", "settings.display_versions")?)))
+            .map(|e| {
+                Ok((
+                    text(e, "build_id", "settings.display_versions")?,
+                    text(e, "version", "settings.display_versions")?,
+                ))
+            })
             .collect::<Result<Vec<_>>>()?;
         let skip = field(v, "shader_key_skip", "settings")?;
         let nvn_api = match v.get("nvn_api") {
             None | Some(Value::Null) => None,
             Some(a) => {
-                let part = |k: &str| u32::try_from(num(a, k, "settings.nvn_api")?).map_err(|_| bad("settings.nvn_api is out of range"));
+                let part = |k: &str| {
+                    u32::try_from(num(a, k, "settings.nvn_api")?)
+                        .map_err(|_| bad("settings.nvn_api is out of range"))
+                };
                 Some((part("major")?, part("minor")?))
             }
         };
@@ -205,7 +214,11 @@ impl Settings {
             fps_target: small(v, "fps_target")?,
             fps_max: small(v, "fps_max")?,
             fps_hold: flag(v, "fps_hold")?,
-            set_refresh: v.get("set_refresh").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+            set_refresh: v
+                .get("set_refresh")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0),
             fps_free: v.get("fps_free").and_then(Value::as_bool).unwrap_or(false),
             present_snap: flag(v, "present_snap")?,
             pso_mtl4: flag(v, "pso_mtl4")?,
@@ -222,7 +235,10 @@ impl Settings {
             vconv_range: flag(v, "vconv_range")?,
             gpu_ts_segment: flag(v, "gpu_ts_segment")?,
             draw_barriers_game: flag(v, "draw_barriers_game")?,
-            shader_key_skip: (num(skip, "offset", "settings.shader_key_skip")?, num(skip, "length", "settings.shader_key_skip")?),
+            shader_key_skip: (
+                num(skip, "offset", "settings.shader_key_skip")?,
+                num(skip, "length", "settings.shader_key_skip")?,
+            ),
             upscaler_keys: strings(v, "upscaler_keys")?,
             shared_font,
             nvn_api,
@@ -230,7 +246,10 @@ impl Settings {
                 None | Some(Value::Null) => Vec::new(),
                 Some(_) => strings(v, "optional_imports")?,
             },
-            shared_font_decode: v.get("shared_font_decode").and_then(Value::as_bool).unwrap_or(false),
+            shared_font_decode: v
+                .get("shared_font_decode")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             sf_services: match v.get("sf_services") {
                 None | Some(Value::Null) => Vec::new(),
                 Some(_) => strings(v, "sf_services")?,
@@ -245,16 +264,20 @@ pub fn parse_aoc(v: Option<&Value>) -> Result<Vec<Aoc>> {
     let Some(list) = v else {
         return Ok(Vec::new());
     };
-    let items = list.as_array().ok_or_else(|| bad("\"aoc\" is not an array"))?;
+    let items = list
+        .as_array()
+        .ok_or_else(|| bad("\"aoc\" is not an array"))?;
     items
         .iter()
         .map(|e| {
             let id = text(e, "title_id", "aoc")?;
             Ok(Aoc {
-                index: u32::try_from(num(e, "index", "aoc")?).map_err(|_| bad("aoc.index is out of range"))?,
+                index: u32::try_from(num(e, "index", "aoc")?)
+                    .map_err(|_| bad("aoc.index is out of range"))?,
                 title_id: u64::from_str_radix(id.trim_start_matches("0x"), 16)
                     .map_err(|_| bad(format!("aoc.title_id {id} is not a hex number")))?,
-                version: u32::try_from(num(e, "version", "aoc")?).map_err(|_| bad("aoc.version is out of range"))?,
+                version: u32::try_from(num(e, "version", "aoc")?)
+                    .map_err(|_| bad("aoc.version is out of range"))?,
                 path: PathBuf::from(text(e, "path", "aoc")?),
             })
         })
@@ -293,12 +316,18 @@ mod tests {
         assert_eq!(s.nvn_api, Some((53, 12)));
         assert_eq!(s.shared_font, None);
         assert_eq!(s.extra, vec![("engine_key".to_string(), Value::Int(1))]);
-        assert_eq!(s.display_versions, vec![("ab".to_string(), "1.6.0".to_string())]);
+        assert_eq!(
+            s.display_versions,
+            vec![("ab".to_string(), "1.6.0".to_string())]
+        );
     }
 
     #[test]
     fn reads_the_optional_imports() {
-        let with = SETTINGS.replace("\"engine_key\": 1", "\"optional_imports\": [\"_ZN2nn3fs1fEv\"]");
+        let with = SETTINGS.replace(
+            "\"engine_key\": 1",
+            "\"optional_imports\": [\"_ZN2nn3fs1fEv\"]",
+        );
         let v = json::parse(&with);
         assert!(v.is_ok());
         let Ok(v) = v else { return };
@@ -319,7 +348,9 @@ mod tests {
 
     #[test]
     fn reads_the_aoc_list() {
-        let v = json::parse(r#"[{"index": 1, "title_id": "01007EF00011F001", "version": 196608, "path": "aoc/1"}]"#);
+        let v = json::parse(
+            r#"[{"index": 1, "title_id": "01007EF00011F001", "version": 196608, "path": "aoc/1"}]"#,
+        );
         assert!(v.is_ok());
         let Ok(v) = v else { return };
         let a = parse_aoc(Some(&v));

@@ -178,7 +178,9 @@ pub(super) extern "C" fn set_flags(b: u64, v: i32) {
 }
 
 pub(super) extern "C" fn set_target(b: u64, v: i32) {
-    guard("nvnTextureBuilderSetTarget", || Obj(b).write(TARGET, &[v as u8]));
+    guard("nvnTextureBuilderSetTarget", || {
+        Obj(b).write(TARGET, &[v as u8])
+    });
 }
 
 extern "C" fn set_width(b: u64, v: i32) {
@@ -229,11 +231,15 @@ pub(super) extern "C" fn set_format(b: u64, v: i32) {
 }
 
 extern "C" fn set_samples(b: u64, v: i32) {
-    guard("nvnTextureBuilderSetSamples", || Obj(b).write(SAMPLES, &[v as u8]));
+    guard("nvnTextureBuilderSetSamples", || {
+        Obj(b).write(SAMPLES, &[v as u8])
+    });
 }
 
 pub(super) extern "C" fn set_stride(b: u64, v: i64) {
-    guard("nvnTextureBuilderSetStride", || Obj(b).set_u32(STRIDE, v as u32));
+    guard("nvnTextureBuilderSetStride", || {
+        Obj(b).set_u32(STRIDE, v as u32)
+    });
 }
 
 pub(super) extern "C" fn set_storage(b: u64, pool: u64, off: i64) {
@@ -266,7 +272,10 @@ extern "C" fn set_packaged_data(b: u64, data: u64) {
 extern "C" fn set_swizzle(b: u64, r: i32, g: i32, bl: i32, a: i32) {
     guard("nvnTextureBuilderSetSwizzle", || {
         let o = Obj(b);
-        o.write(SWIZZLE, &[r as u8 & 7, g as u8 & 7, bl as u8 & 7, a as u8 & 7])?;
+        o.write(
+            SWIZZLE,
+            &[r as u8 & 7, g as u8 & 7, bl as u8 & 7, a as u8 & 7],
+        )?;
         o.write(HAS_SWIZZLE, &[1])
     });
 }
@@ -440,7 +449,12 @@ mod tests {
         assert_eq!(Obj(b).u64(DEV).expect("device"), 0xD0);
         assert_eq!(built.desc.target, Target::D2);
         assert_eq!(
-            (built.desc.width, built.desc.height, built.desc.depth, built.desc.levels),
+            (
+                built.desc.width,
+                built.desc.height,
+                built.desc.depth,
+                built.desc.levels
+            ),
             (1, 1, 1, 1)
         );
         assert_eq!(built.swizzle, IDENTITY_SWIZZLE);
@@ -462,15 +476,25 @@ mod tests {
         set_swizzle(b, 5, 4, 3, 2);
         set_depth_stencil_mode(b, 1);
         let l = testing::alloc(8);
-        Obj(l).write(0, &[0x23, 0, 0, 0, 0, 0, 0, 0]).expect("layout");
+        Obj(l)
+            .write(0, &[0x23, 0, 0, 0, 0, 0, 0, 0])
+            .expect("layout");
         set_packaged_layout(b, l);
         let built = Built::load(b).expect("load");
         assert_eq!(built.desc.target, Target::D3);
         assert_eq!(
-            (built.desc.width, built.desc.height, built.desc.depth, built.desc.levels),
+            (
+                built.desc.width,
+                built.desc.height,
+                built.desc.depth,
+                built.desc.levels
+            ),
             (8, 4, 2, 3)
         );
-        assert_eq!((built.desc.format, built.desc.flags, built.desc.stride), (0x25, 0x10, 256));
+        assert_eq!(
+            (built.desc.format, built.desc.flags, built.desc.stride),
+            (0x25, 0x10, 256)
+        );
         assert_eq!(built.desc.samples, 4);
         assert_eq!((built.pool, built.off), (0xAA00, 0x200));
         assert_eq!(built.swizzle, [5, 4, 3, 2]);

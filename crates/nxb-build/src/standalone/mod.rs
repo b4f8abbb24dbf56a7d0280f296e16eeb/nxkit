@@ -89,20 +89,25 @@ fn module(src: &Inputs, program: u64) -> Result<Option<Game>, String> {
         name: t.name(),
         st,
         rules,
-        services: r.nxkit_services().into_iter().map(nxtitle::Service::id).collect(),
+        services: r
+            .nxkit_services()
+            .into_iter()
+            .map(nxtitle::Service::id)
+            .collect(),
         shared_font_decode: r.shared_font_decode().is_some_and(|f| f.value),
         sf_services: r.sf_services().into_iter().map(|f| f.value).collect(),
-        vertex_stream_null_bind: r
-            .needs()
-            .iter()
-            .any(|n| n.value.capability == "vertex_stream_null_bind" && n.value.setting == "ignore"),
+        vertex_stream_null_bind: r.needs().iter().any(|n| {
+            n.value.capability == "vertex_stream_null_bind" && n.value.setting == "ignore"
+        }),
     }))
 }
 
 /// The folder the work folder and the output default into: the input folder, or the one holding the input file.
 fn home(a: &Args) -> PathBuf {
     if a.nsp_dir.is_file() {
-        a.nsp_dir.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+        a.nsp_dir
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
     } else {
         a.nsp_dir.clone()
     }
@@ -143,7 +148,9 @@ fn extract(a: &Args, b: &Build, p: &Say, version: u32, marker: &str) -> Result<S
         .collect::<Vec<_>>()
         .join(";");
     let romfs = if nup {
-        dir.join("romfs").join(marker.trim_start_matches('/')).is_file()
+        dir.join("romfs")
+            .join(marker.trim_start_matches('/'))
+            .is_file()
     } else {
         dir.join("RomFS.img").is_file()
     };
@@ -180,7 +187,10 @@ fn extract(a: &Args, b: &Build, p: &Say, version: u32, marker: &str) -> Result<S
 /// Unpacks a RomFS image into `dest`, reporting the bytes.
 fn unpack(p: &Say, img: &Path, dest: &Path, what: &str) -> Result<(usize, u64), String> {
     let _ = std::fs::remove_dir_all(dest);
-    p.set(Update { step: Some(what), ..Default::default() });
+    p.set(Update {
+        step: Some(what),
+        ..Default::default()
+    });
     let count = crate::events::Count::default();
     p.counted(None, "B", &count, || {
         romfs::unpack(img, dest, |done, total| {
@@ -234,12 +244,17 @@ fn link(
     dest: &Path,
     what: &str,
 ) -> Result<(usize, u64), String> {
-    p.set(Update { step: Some(what), ..Default::default() });
+    p.set(Update {
+        step: Some(what),
+        ..Default::default()
+    });
     let count = crate::events::Count::default();
     p.counted(None, "B", &count, || {
         romfs::link_tree(from, overlay, dest, threads, |done, total| {
             // the workers report out of order
-            count.done.fetch_max(done, std::sync::atomic::Ordering::Relaxed);
+            count
+                .done
+                .fetch_max(done, std::sync::atomic::Ordering::Relaxed);
             count.set_total(total);
         })
     })
@@ -260,7 +275,10 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
         s.push_str(&format!("  update:    v{v} {}\n", path.display()));
     }
     for (tid, v, path) in &b.src.dlc {
-        s.push_str(&format!("  dlc:       {tid:016X} v{v} {}\n", path.display()));
+        s.push_str(&format!(
+            "  dlc:       {tid:016X} v{v} {}\n",
+            path.display()
+        ));
     }
     s.push_str(&format!("  work:      {}\n", b.work.display()));
     s.push_str(&format!("  host:      {}\n", host.display()));
@@ -360,7 +378,11 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
     p.plan(7);
     let nup = b.src.source == Source::Nup;
-    let what = if nup { "NUP and shader split" } else { "packages and shader split" };
+    let what = if nup {
+        "NUP and shader split"
+    } else {
+        "packages and shader split"
+    };
     stage(p, "extract", what, || {
         Ok(((), extract(a, &b, p, version, t.st.romfs_marker)?))
     })?;
@@ -369,17 +391,34 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let img = ver_dir.join("RomFS.img");
     let aoc = stage(p, "romfs", "RomFS", || {
         // title resource patches: only the patched files are new, in a folder beside the extract
-        let patched = crate::resource_patch::overlay(a, &b, &|m| p.say(m), &ver_dir, &ver_dir.join("romfs"))?;
+        let patched =
+            crate::resource_patch::overlay(a, &b, &|m| p.say(m), &ver_dir, &ver_dir.join("romfs"))?;
         // a NUP's RomFS is a folder already: its files are linked into the app, not copied
         let (files, bytes) = if nup {
-            link(p, a.threads, &ver_dir.join("romfs"), patched.as_deref(), &run_dir.join("romfs"), "linking RomFS")?
+            link(
+                p,
+                a.threads,
+                &ver_dir.join("romfs"),
+                patched.as_deref(),
+                &run_dir.join("romfs"),
+                "linking RomFS",
+            )?
         } else {
             // the image is unpacked once beside the extract and linked into each app, like a NUP's folder
             let loose = ver_dir.join("romfs");
             unpack_once(p, &img, &loose, "unpacking RomFS")?;
-            link(p, a.threads, &loose, patched.as_deref(), &run_dir.join("romfs"), "linking RomFS")?
+            link(
+                p,
+                a.threads,
+                &loose,
+                patched.as_deref(),
+                &run_dir.join("romfs"),
+                "linking RomFS",
+            )?
         };
-        let marker = run_dir.join("romfs").join(t.st.romfs_marker.trim_start_matches('/'));
+        let marker = run_dir
+            .join("romfs")
+            .join(t.st.romfs_marker.trim_start_matches('/'));
         if !marker.exists() {
             return Err(format!(
                 "{}: the RomFS has no {}: it is not the game's files",
@@ -393,14 +432,33 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
                 .map_err(|_| format!("DLC {tid:016X}: its index does not fit 32 bits"))?;
             let rel = format!("aoc/{index}");
             if nup {
-                link(p, a.threads, &ver_dir.join(&rel), None, &run_dir.join(&rel), "linking DLC")?;
+                link(
+                    p,
+                    a.threads,
+                    &ver_dir.join(&rel),
+                    None,
+                    &run_dir.join(&rel),
+                    "linking DLC",
+                )?;
             } else {
                 let from = work.join("aoc").join(format!("{index}.img"));
                 let loose = work.join("aoc").join(index.to_string());
                 unpack_once(p, &from, &loose, "unpacking DLC")?;
-                link(p, a.threads, &loose, None, &run_dir.join(&rel), "linking DLC")?;
+                link(
+                    p,
+                    a.threads,
+                    &loose,
+                    None,
+                    &run_dir.join(&rel),
+                    "linking DLC",
+                )?;
             }
-            aoc.push(manifest::Aoc { index, title_id: *tid, version: *v, path: rel });
+            aoc.push(manifest::Aoc {
+                index,
+                title_id: *tid,
+                version: *v,
+                path: rel,
+            });
         }
         let note = format!("{files} files, {}, {} DLC", mib(bytes), aoc.len());
         Ok((aoc, note))
@@ -422,7 +480,13 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
                 })
             },
         )
-        .map_err(|e| if e.starts_with("unsupported") { crate::exit::fail(4, e) } else { e })?;
+        .map_err(|e| {
+            if e.starts_with("unsupported") {
+                crate::exit::fail(4, e)
+            } else {
+                e
+            }
+        })?;
         let names: Vec<&str> = built.iter().map(|m| m.name.as_str()).collect();
         let note = names.join(", ");
         Ok((built, note))
@@ -431,9 +495,13 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(layout::bases(&shapes)).collect();
     stage(p, "manifest", "game.json", || {
         if !t.services.contains(&"kernel") {
-            return Err(format!("the title module of {:016X} does not list the kernel service, which the host needs", t.id));
+            return Err(format!(
+                "the title module of {:016X} does not list the kernel service, which the host needs",
+                t.id
+            ));
         }
-        let npdm_bytes = std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
+        let npdm_bytes =
+            std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
         let main_thread = npdm::main_thread(&npdm_bytes)?;
         let m = manifest::Manifest {
             title_id: t.id,
@@ -455,7 +523,9 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
             sf_services: t.sf_services.clone(),
             vertex_stream_null_bind: t.vertex_stream_null_bind,
         };
-        let put = |n: &str, d: &[u8]| std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e));
+        let put = |n: &str, d: &[u8]| {
+            std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e))
+        };
         put("game.json", manifest::game_json(&m).as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         put("main.npdm", &npdm_bytes)?;
@@ -468,7 +538,15 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
                 ..Default::default()
             })
         })?;
-        Ok(((), format!("{} modules, {} NVN functions, {} services", mods.len(), m.nvn_functions.len(), m.services.len())))
+        Ok((
+            (),
+            format!(
+                "{} modules, {} NVN functions, {} services",
+                mods.len(),
+                m.nvn_functions.len(),
+                m.services.len()
+            ),
+        ))
     })?;
     stage(p, "link", "nxgame.dylib", || {
         let n = link::write_dylib(&run_dir, &mods, |done, what| {
@@ -494,10 +572,16 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         if old_save.is_dir() {
             let new_save = run_dir.join("save");
             if new_save.exists() {
-                return Err(format!("{}: the new app already has a save folder", new_save.display()));
+                return Err(format!(
+                    "{}: the new app already has a save folder",
+                    new_save.display()
+                ));
             }
             std::fs::rename(&old_save, &new_save).map_err(|e| io(&new_save, e))?;
-            p.say(&format!("save: kept from the old app ({})", new_save.display()));
+            p.say(&format!(
+                "save: kept from the old app ({})",
+                new_save.display()
+            ));
         }
         let _ = std::fs::remove_dir_all(&out);
         std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
@@ -508,12 +592,23 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
 }
 
 fn plist(a: &Args, t: &Game) -> String {
-    let id = a.bundle_id.clone().unwrap_or_else(|| bundle::default_bundle_id(t.id));
+    let id = a
+        .bundle_id
+        .clone()
+        .unwrap_or_else(|| bundle::default_bundle_id(t.id));
     let shown = shown_version(t);
-    bundle::info_plist(&bundle::file_name(a.app_name.as_deref().unwrap_or(t.name)), &id, &shown)
+    bundle::info_plist(
+        &bundle::file_name(a.app_name.as_deref().unwrap_or(t.name)),
+        &id,
+        &shown,
+    )
 }
 
 /// The version as the game shows it: the display version of the title module, else the number of the update.
 fn shown_version(t: &Game) -> String {
-    t.st.settings.value.display_versions.first().map_or_else(|| t.st.version.to_string(), |v| v.1.to_string())
+    t.st.settings
+        .value
+        .display_versions
+        .first()
+        .map_or_else(|| t.st.version.to_string(), |v| v.1.to_string())
 }

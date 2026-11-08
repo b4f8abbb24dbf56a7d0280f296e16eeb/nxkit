@@ -13,10 +13,10 @@ use nxkit_metal::{Context, DataBuffer, Sampler, Scratch, Texture};
 use nxkit_nvn::tic::Tsc;
 
 use crate::detail::{Stage, TextureBind, UboDetail};
-use nxkit_nvn::diag::{Reason, note_n};
 use crate::programs::{BindKind, StageProgram};
 use crate::stats::Skip;
 use crate::translate;
+use nxkit_nvn::diag::{Reason, note_n};
 
 /// The bytes before the first element of a pool table. The layout of the tables is unverified against the shader
 /// step. The check is to compile a shader with a pool binding and read the index expression in its Metal source.
@@ -135,7 +135,8 @@ impl ArgsMemo {
         m.next.push(0);
         for u in inp.ubos.iter().filter(|u| u.stage == inp.stage) {
             let snapshot = u.snapshot.as_ref().map_or(0, |b| b.as_ptr() as u64);
-            m.next.extend([u64::from(u.slot), snapshot, u.address, u64::from(u.size)]);
+            m.next
+                .extend([u64::from(u.slot), snapshot, u.address, u64::from(u.size)]);
         }
         let ubos = m.next.len() - mark - 1;
         m.next[mark] = ubos as u64;
@@ -187,11 +188,19 @@ impl<'a> ScratchSink<'a> {
         uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
         memo: Option<&'a mut ArgsMemo>,
     ) -> Self {
-        Self { scratch, uploaded, preloaded: None, memo }
+        Self {
+            scratch,
+            uploaded,
+            preloaded: None,
+            memo,
+        }
     }
 
     /// Looks shared snapshots up in `preloaded` first, without a lock.
-    pub(crate) fn with_preloaded(mut self, preloaded: &'a crate::draws::FastMap<usize, u64>) -> Self {
+    pub(crate) fn with_preloaded(
+        mut self,
+        preloaded: &'a crate::draws::FastMap<usize, u64>,
+    ) -> Self {
         self.preloaded = Some(preloaded);
         self
     }
@@ -214,7 +223,9 @@ impl Sink for ScratchSink<'_> {
     }
 
     fn put(&mut self, data: &[u8]) -> Result<u64, Skip> {
-        self.scratch.push(data).map_err(|e| crate::buf_skip(format_args!("scratch push {} bytes: {e:?}", data.len())))
+        self.scratch
+            .push(data)
+            .map_err(|e| crate::buf_skip(format_args!("scratch push {} bytes: {e:?}", data.len())))
     }
 
     fn memo(&mut self) -> Option<&mut ArgsMemo> {
@@ -230,7 +241,10 @@ pub(crate) struct Arena {
 
 impl Arena {
     pub(crate) fn new(ctx: &Context, len: u64) -> Result<Self, Skip> {
-        Ok(Self { buffer: Arc::new(DataBuffer::new(ctx, len.max(256)).map_err(|_| Skip::Buffer)?), cursor: 0 })
+        Ok(Self {
+            buffer: Arc::new(DataBuffer::new(ctx, len.max(256)).map_err(|_| Skip::Buffer)?),
+            cursor: 0,
+        })
     }
 
     /// The offset of a GPU address inside the buffer.
@@ -274,9 +288,27 @@ const SUPPORT_SIZE: usize = 1392;
 
 fn tsc_key(t: &Tsc) -> u64 {
     let mut h = foldhash::fast::FixedState::default().build_hasher();
-    (t.min_filter, t.mag_filter, t.wrap_s, t.wrap_t, t.wrap_r, t.compare_mode, t.compare_func, t.reduction)
+    (
+        t.min_filter,
+        t.mag_filter,
+        t.wrap_s,
+        t.wrap_t,
+        t.wrap_r,
+        t.compare_mode,
+        t.compare_func,
+        t.reduction,
+    )
         .hash(&mut h);
-    for v in [t.lod_min, t.lod_max, t.lod_bias, t.aniso, t.border[0], t.border[1], t.border[2], t.border[3]] {
+    for v in [
+        t.lod_min,
+        t.lod_max,
+        t.lod_bias,
+        t.aniso,
+        t.border[0],
+        t.border[1],
+        t.border[2],
+        t.border[3],
+    ] {
         v.to_bits().hash(&mut h);
     }
     h.finish()
@@ -285,8 +317,10 @@ fn tsc_key(t: &Tsc) -> u64 {
 impl Bindless {
     pub(crate) fn new(ctx: &Context) -> Result<Self, nxkit_metal::MetalError> {
         let default_sampler = Sampler::new(ctx, &translate::sampler(&DEFAULT_TSC))?;
-        let tex_bytes = POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_TEXTURE_ID) + 1);
-        let samp_bytes = POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID) + 1);
+        let tex_bytes =
+            POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_TEXTURE_ID) + 1);
+        let samp_bytes =
+            POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID) + 1);
         let support = Arc::new(DataBuffer::new(ctx, STATIC_BYTES)?);
         for i in 0..SUPPORT_RENDER_SCALES {
             support.write(SUPPORT_RENDER_SCALE + 16 * i, &1.0f32.to_le_bytes())?;
@@ -312,7 +346,9 @@ impl Bindless {
 
     /// The sampler of a header, made once per distinct header.
     pub(crate) fn sampler(&mut self, t: Option<&Tsc>) -> Result<u64, Skip> {
-        let Some(t) = t else { return Ok(self.default_sampler_id()) };
+        let Some(t) = t else {
+            return Ok(self.default_sampler_id());
+        };
         let key = tsc_key(t);
         if let Some(s) = self.samplers.get(&key) {
             return Ok(s.gpu_resource_id());
@@ -450,12 +486,17 @@ fn support_block(
         match bind.kind {
             BindKind::Support => Some((i, pass_scale)),
             BindKind::Tex => {
-                let scaled = handle_of(bind.reg).and_then(|h| env.handles.get(&h)).is_some_and(|r| r.scaled);
+                let scaled = handle_of(bind.reg)
+                    .and_then(|h| env.handles.get(&h))
+                    .is_some_and(|r| r.scaled);
                 Some((i, if scaled { env.scale } else { 1.0 }))
             }
             BindKind::Img => {
                 let (h, decl, dim) = (image_of(bind.reg)?, bind.img?, bind.dim?);
-                let scaled = env.images.get(&(h, dim, decl.atomic_code())).is_some_and(|r| r.scaled);
+                let scaled = env
+                    .images
+                    .get(&(h, dim, decl.atomic_code()))
+                    .is_some_and(|r| r.scaled);
                 Some((i, if scaled { env.scale } else { 1.0 }))
             }
             _ => None,
@@ -544,7 +585,12 @@ fn build_args_in(
     sink: &mut dyn Sink,
     scratch: &mut ArgsScratch,
 ) -> Result<u64, Skip> {
-    let ArgsScratch { args, drv, support, ubos } = scratch;
+    let ArgsScratch {
+        args,
+        drv,
+        support,
+        ubos,
+    } = scratch;
     args.clear();
     args.resize((p.arg_bytes as usize).max(8), 0);
     ubos.clear();
@@ -555,12 +601,25 @@ fn build_args_in(
         };
         ubos.push((u.slot, addr, u.size));
     }
-    let handle_of = |slot: u32| inp.textures.iter().find(|t| t.stage == inp.stage && t.slot == slot).map(|t| t.handle);
-    let image_of = |slot: u32| inp.images.iter().find(|t| t.stage == inp.stage && t.slot == slot).map(|t| t.handle);
+    let handle_of = |slot: u32| {
+        inp.textures
+            .iter()
+            .find(|t| t.stage == inp.stage && t.slot == slot)
+            .map(|t| t.handle)
+    };
+    let image_of = |slot: u32| {
+        inp.images
+            .iter()
+            .find(|t| t.stage == inp.stage && t.slot == slot)
+            .map(|t| t.handle)
+    };
     for b in &p.binds {
         let at = 8 * b.arg_id as usize;
         let v = match b.kind {
-            BindKind::Cbuf => ubos.iter().find(|(s, _, _)| *s == b.reg).map_or(env.statics.1, |(_, a, _)| *a),
+            BindKind::Cbuf => ubos
+                .iter()
+                .find(|(s, _, _)| *s == b.reg)
+                .map_or(env.statics.1, |(_, a, _)| *a),
             BindKind::Tex => handle_of(b.reg).map_or(0, |h| {
                 b.dim
                     .and_then(|k| env.fits.get(&(h, k)).copied())
@@ -581,7 +640,10 @@ fn build_args_in(
                 drv_block(drv, inp, ubos);
                 sink.put(drv)?
             }
-            BindKind::UboPtr => ubos.iter().find(|(s, _, _)| *s == b.reg).map_or(env.statics.1, |(_, a, _)| *a),
+            BindKind::UboPtr => ubos
+                .iter()
+                .find(|(s, _, _)| *s == b.reg)
+                .map_or(env.statics.1, |(_, a, _)| *a),
             BindKind::Support => {
                 if support_block(support, &p.binds, env, pass_scale, &handle_of, &image_of) {
                     sink.put(support)?
@@ -594,7 +656,11 @@ fn build_args_in(
             // A storage buffer that is not bound reads zeros, and its writes land in the zero buffer. A buffer that the
             // shader only reads takes the walk's copy when there is one (the overlap: the CPU may already write the next
             // frame's data); one that it may write keeps the buffer itself, so the writes stay.
-            BindKind::Sbuf => match inp.sbufs.iter().find(|s| s.stage == inp.stage && s.slot == b.reg) {
+            BindKind::Sbuf => match inp
+                .sbufs
+                .iter()
+                .find(|s| s.stage == inp.stage && s.slot == b.reg)
+            {
                 Some(s) => match &s.snapshot {
                     Some(bytes) if !b.rw => sink.put_shared(bytes)?,
                     _ => s.address,
@@ -617,7 +683,11 @@ fn build_args_in(
             }
             BindKind::GmemMap => {
                 note_n(Reason::BindGmemMap, 1);
-                if env.gmem.map != 0 { env.gmem.map } else { env.statics.1 }
+                if env.gmem.map != 0 {
+                    env.gmem.map
+                } else {
+                    env.statics.1
+                }
             }
             BindKind::GmemLog => {
                 note_n(Reason::BindGmemLog, 1);
@@ -640,7 +710,15 @@ mod support_tests {
     use crate::programs::Bind;
 
     fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
-        Bind { arg_id: 0, kind, reg, dim: None, rw: false, rscale, img: None }
+        Bind {
+            arg_id: 0,
+            kind,
+            reg,
+            dim: None,
+            rw: false,
+            rscale,
+            img: None,
+        }
     }
 
     fn env<'a>(
@@ -648,7 +726,16 @@ mod support_tests {
         fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
         images: &'a crate::draws::FastMap<ImageKey, ImageRes>,
     ) -> Env<'a> {
-        Env { handles, fits, images, gmem: crate::gmem::GmemEnv::NONE, pools: (0, 0), default_sampler: 0, statics: (0, 0), scale: 2.0 }
+        Env {
+            handles,
+            fits,
+            images,
+            gmem: crate::gmem::GmemEnv::NONE,
+            pools: (0, 0),
+            default_sampler: 0,
+            statics: (0, 0),
+            scale: 2.0,
+        }
     }
 
     fn entry(b: &[u8], i: usize) -> f32 {
@@ -659,16 +746,40 @@ mod support_tests {
     #[test]
     fn native_size_needs_no_block() {
         let (h, f, i) = Default::default();
-        let binds = [bind(BindKind::Support, 0, Some(0)), bind(BindKind::Tex, 3, Some(1))];
+        let binds = [
+            bind(BindKind::Support, 0, Some(0)),
+            bind(BindKind::Tex, 3, Some(1)),
+        ];
         let mut b = Vec::new();
-        assert!(!support_block(&mut b, &binds, &env(&h, &f, &i), 1.0, &|_| None, &|_| None));
+        assert!(!support_block(
+            &mut b,
+            &binds,
+            &env(&h, &f, &i),
+            1.0,
+            &|_| None,
+            &|_| None
+        ));
     }
 
     #[test]
     fn the_pass_and_the_scaled_texture_get_their_entries() {
         let mut h: crate::draws::FastMap<u64, Resolved> = Default::default();
-        h.insert(7, Resolved { texture: 1, sampler: 1, scaled: true });
-        h.insert(8, Resolved { texture: 2, sampler: 2, scaled: false });
+        h.insert(
+            7,
+            Resolved {
+                texture: 1,
+                sampler: 1,
+                scaled: true,
+            },
+        );
+        h.insert(
+            8,
+            Resolved {
+                texture: 2,
+                sampler: 2,
+                scaled: false,
+            },
+        );
         let (f, i) = Default::default();
         let binds = [
             bind(BindKind::Support, 0, Some(0)),
@@ -682,9 +793,19 @@ mod support_tests {
             _ => None,
         };
         let mut b = Vec::new();
-        assert!(support_block(&mut b, &binds, &env(&h, &f, &i), 2.0, &handle, &|_| None));
+        assert!(support_block(
+            &mut b,
+            &binds,
+            &env(&h, &f, &i),
+            2.0,
+            &handle,
+            &|_| None
+        ));
         assert_eq!(b.len(), SUPPORT_SIZE);
-        assert_eq!((entry(&b, 0), entry(&b, 1), entry(&b, 2), entry(&b, 3)), (2.0, 2.0, 1.0, 1.0));
+        assert_eq!(
+            (entry(&b, 0), entry(&b, 1), entry(&b, 2), entry(&b, 3)),
+            (2.0, 2.0, 1.0, 1.0)
+        );
         // frag_scale_count stays 0
         assert_eq!(&b[176..180], &[0; 4]);
     }
@@ -693,18 +814,42 @@ mod support_tests {
     fn a_scaled_image_gets_its_entry() {
         use crate::programs::{ImgAccess, ImgDecl};
         use nxkit_metal::TextureKind;
-        let decl = ImgDecl { access: ImgAccess::Write, atomic: false, signed: false };
+        let decl = ImgDecl {
+            access: ImgAccess::Write,
+            atomic: false,
+            signed: false,
+        };
         let mut img = bind(BindKind::Img, 0, Some(3));
         img.dim = Some(TextureKind::D2);
         img.img = Some(decl);
         let (h, f) = Default::default();
         let mut images: crate::draws::FastMap<ImageKey, ImageRes> = Default::default();
-        images.insert((5, TextureKind::D2, 0), ImageRes { id: 9, scaled: true });
+        images.insert(
+            (5, TextureKind::D2, 0),
+            ImageRes {
+                id: 9,
+                scaled: true,
+            },
+        );
         let mut b = Vec::new();
         let at = |slot: u32| (slot == 0).then_some(5);
-        assert!(support_block(&mut b, &[img], &env(&h, &f, &images), 1.0, &|_| None, &at));
+        assert!(support_block(
+            &mut b,
+            &[img],
+            &env(&h, &f, &images),
+            1.0,
+            &|_| None,
+            &at
+        ));
         assert_eq!(entry(&b, 3), 2.0);
         // an image nothing is bound to keeps scale 1
-        assert!(!support_block(&mut b, &[img], &env(&h, &f, &images), 1.0, &|_| None, &|_| None));
+        assert!(!support_block(
+            &mut b,
+            &[img],
+            &env(&h, &f, &images),
+            1.0,
+            &|_| None,
+            &|_| None
+        ));
     }
 }

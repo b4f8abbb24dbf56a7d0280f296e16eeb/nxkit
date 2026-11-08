@@ -519,8 +519,14 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
                 let merge_secs = merge.elapsed().as_secs_f64();
                 let (d1, d2) = nxb_split::scanfile::decoded_totals();
                 let st = SplitStats {
-                    scanned: (n_scan.load(Ordering::Relaxed), b_scan.load(Ordering::Relaxed)),
-                    skipped: (n_skip.load(Ordering::Relaxed), b_skip.load(Ordering::Relaxed)),
+                    scanned: (
+                        n_scan.load(Ordering::Relaxed),
+                        b_scan.load(Ordering::Relaxed),
+                    ),
+                    skipped: (
+                        n_skip.load(Ordering::Relaxed),
+                        b_skip.load(Ordering::Relaxed),
+                    ),
                     decoded: (d1 - decoded0.0, d2 - decoded0.1),
                     scan_cpu_secs: scan_ns.load(Ordering::Relaxed) as f64 / 1e9,
                     pass_secs,

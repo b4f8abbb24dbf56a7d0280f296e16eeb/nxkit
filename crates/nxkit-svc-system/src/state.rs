@@ -8,7 +8,7 @@
 use crate::config;
 use crate::util::{Event, lock};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
 
 /// The message of a focus change.
@@ -254,7 +254,10 @@ pub fn set_operation_mode(handheld: bool) {
         let changed = i.handheld != handheld;
         i.handheld = handheld;
         s.handheld.store(handheld, Ordering::Relaxed);
-        (changed && i.notify_operation, changed && i.notify_performance)
+        (
+            changed && i.notify_operation,
+            changed && i.notify_performance,
+        )
     });
     if operation {
         s.push(MSG_OPERATION_MODE);

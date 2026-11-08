@@ -24,7 +24,9 @@ pub(crate) const IMPL_EXEC: &str = "_ZN2nn5audio6server24AudioRendererManagerImp
 /// Follows a PLT stub (`adrp x16, page`, `ldr x17, [x16, #off]`) to the function its GOT slot holds. Anything else is
 /// returned as it is.
 fn plt_target(pc: usize) -> usize {
-    let (Some(a), Some(l)) = (read_insn(pc), read_insn(pc + 4)) else { return pc };
+    let (Some(a), Some(l)) = (read_insn(pc), read_insn(pc + 4)) else {
+        return pc;
+    };
     if a & 0x9f00_001f != 0x9000_0010 || l & 0xffc0_03ff != 0xf940_0211 {
         return pc;
     }

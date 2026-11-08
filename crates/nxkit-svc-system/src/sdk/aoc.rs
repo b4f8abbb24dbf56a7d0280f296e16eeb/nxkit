@@ -24,16 +24,26 @@ static OWNED: OnceLock<Vec<i32>> = OnceLock::new();
 /// The index of a directory entry name: `7` and `7.img` are the index 7, `0`, `07` and `x` are none.
 fn index_of(name: &str) -> Option<i32> {
     let digits = name.strip_suffix(".img").unwrap_or(name);
-    if !digits.starts_with(|c: char| ('1'..='9').contains(&c)) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    if !digits.starts_with(|c: char| ('1'..='9').contains(&c))
+        || !digits.bytes().all(|b| b.is_ascii_digit())
+    {
         return None;
     }
-    digits.parse::<i64>().ok().filter(|&i| i <= MAX_INDEX).map(|i| i as i32)
+    digits
+        .parse::<i64>()
+        .ok()
+        .filter(|&i| i <= MAX_INDEX)
+        .map(|i| i as i32)
 }
 
 /// The sorted, unique indices in `dir`.
 fn scan(dir: &Path) -> Vec<i32> {
     let mut v: Vec<i32> = std::fs::read_dir(dir)
-        .map(|rd| rd.flatten().filter_map(|e| index_of(&e.file_name().to_string_lossy())).collect())
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| index_of(&e.file_name().to_string_lossy()))
+                .collect()
+        })
         .unwrap_or_default();
     v.sort_unstable();
     v.dedup();
@@ -47,7 +57,11 @@ fn owned() -> &'static [i32] {
             None => (Vec::new(), "no aoc_dir".to_owned()),
         };
         let text: Vec<String> = list.iter().map(i32::to_string).collect();
-        log(&format!("aoc: reporting {} add-on contents {{{}}} ({why})", list.len(), text.join(",")));
+        log(&format!(
+            "aoc: reporting {} add-on contents {{{}}} ({why})",
+            list.len(),
+            text.join(",")
+        ));
         list
     })
 }
@@ -81,8 +95,14 @@ extern "C" fn changed_event(ev: u64) {
 /// `ShowAddOnContentLostError(const int*, int)`: the error applet, logged only.
 extern "C" fn lost_error(indices: u64, n: u32) {
     let _applet = AppletGuard::new("error");
-    let shown = if indices != 0 && n > 0 { get_i32(indices) } else { 0 };
-    log(&format!("aoc::ShowAddOnContentLostError ({n} entries, the first {shown}) (cut)"));
+    let shown = if indices != 0 && n > 0 {
+        get_i32(indices)
+    } else {
+        0
+    };
+    log(&format!(
+        "aoc::ShowAddOnContentLostError ({n} entries, the first {shown}) (cut)"
+    ));
 }
 
 table! {
@@ -93,8 +113,14 @@ table! {
 /// The two take-overs that nxnative registers with `HLE_FORCE_BIG`.
 pub(super) fn big_stack() -> Vec<Export> {
     vec![
-        Export::new("_ZN2nn3aoc17CountAddOnContentEv", count as *const () as usize),
-        Export::new("_ZN2nn3aoc16ListAddOnContentEPiii", list as *const () as usize),
+        Export::new(
+            "_ZN2nn3aoc17CountAddOnContentEv",
+            count as *const () as usize,
+        ),
+        Export::new(
+            "_ZN2nn3aoc16ListAddOnContentEPiii",
+            list as *const () as usize,
+        ),
     ]
 }
 
@@ -123,6 +149,12 @@ mod tests {
     #[test]
     fn the_big_stack_exports_are_the_two_of_nxnative() {
         let names: Vec<&str> = big_stack().iter().map(|e| e.name).collect();
-        assert_eq!(names, ["_ZN2nn3aoc17CountAddOnContentEv", "_ZN2nn3aoc16ListAddOnContentEPiii"]);
+        assert_eq!(
+            names,
+            [
+                "_ZN2nn3aoc17CountAddOnContentEv",
+                "_ZN2nn3aoc16ListAddOnContentEPiii"
+            ]
+        );
     }
 }

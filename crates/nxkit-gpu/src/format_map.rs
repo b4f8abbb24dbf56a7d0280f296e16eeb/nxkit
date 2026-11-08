@@ -78,9 +78,11 @@ pub(crate) fn texture_format(nvn: i32) -> Option<Mapped> {
         0x3E => exact(F::Rgb10A2Uint),
         0x3F => exact(F::Rg11B10Float),
         0x40 => exact(F::Rgb9E5Float),
-        0x41 | 0x42 | 0x45 | 0x46 => {
-            exact(F::Bc(if matches!(nvn, 0x45 | 0x46) { BcKind::Bc1Srgb } else { BcKind::Bc1 }))
-        }
+        0x41 | 0x42 | 0x45 | 0x46 => exact(F::Bc(if matches!(nvn, 0x45 | 0x46) {
+            BcKind::Bc1Srgb
+        } else {
+            BcKind::Bc1
+        })),
         0x43 => exact(F::Bc(BcKind::Bc2)),
         0x44 => exact(F::Bc(BcKind::Bc3)),
         0x47 => exact(F::Bc(BcKind::Bc2Srgb)),
@@ -160,7 +162,12 @@ pub(crate) fn vertex_format(nvn: u32) -> Option<VertexFormat> {
         [V::UChar, V::UChar2, V::UChar3, V::UChar4],
         [V::Char, V::Char2, V::Char3, V::Char4],
         [V::Half, V::Half2, V::Half3, V::Half4],
-        [V::UShortNorm, V::UShort2Norm, V::UShort3Norm, V::UShort4Norm],
+        [
+            V::UShortNorm,
+            V::UShort2Norm,
+            V::UShort3Norm,
+            V::UShort4Norm,
+        ],
         [V::ShortNorm, V::Short2Norm, V::Short3Norm, V::Short4Norm],
         [V::UShort, V::UShort2, V::UShort3, V::UShort4],
         [V::Short, V::Short2, V::Short3, V::Short4],
@@ -177,12 +184,21 @@ mod tests {
 
     #[test]
     fn colour_and_depth_formats_map() {
-        assert_eq!(texture_format(0x25).map(Mapped::format), Some(Format::Rgba8Unorm));
-        assert_eq!(texture_format(0x35), Some(Mapped::Widened(Format::Depth32FloatStencil8)));
+        assert_eq!(
+            texture_format(0x25).map(Mapped::format),
+            Some(Format::Rgba8Unorm)
+        );
+        assert_eq!(
+            texture_format(0x35),
+            Some(Mapped::Widened(Format::Depth32FloatStencil8))
+        );
         assert_eq!(texture_format(0x19), None);
         assert_eq!(
             texture_format(0x80).map(Mapped::format),
-            Some(Format::Astc { size: 7, srgb: false })
+            Some(Format::Astc {
+                size: 7,
+                srgb: false
+            })
         );
     }
 

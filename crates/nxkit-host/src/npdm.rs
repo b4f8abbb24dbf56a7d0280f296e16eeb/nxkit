@@ -18,7 +18,10 @@ pub fn core_mask(game: &Game) -> Option<u64> {
 
 /// [`core_mask`] over the bytes of an NPDM.
 pub fn core_mask_of(npdm: &[u8]) -> Option<u64> {
-    let u32_at = |b: &[u8], o: usize| b.get(o..o + 4).map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]));
+    let u32_at = |b: &[u8], o: usize| {
+        b.get(o..o + 4)
+            .map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+    };
     if npdm.get(0..4)? != b"META" {
         return None;
     }

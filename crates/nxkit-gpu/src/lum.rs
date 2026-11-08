@@ -82,7 +82,11 @@ pub(crate) fn capture(
             let region = TextureRegion {
                 level: 0,
                 slice: 0,
-                origin: [d.width * (2 * i + 1) / (2 * g[0]), d.height * (2 * j + 1) / (2 * g[1]), depth_plane],
+                origin: [
+                    d.width * (2 * i + 1) / (2 * g[0]),
+                    d.height * (2 * j + 1) / (2 * g[1]),
+                    depth_plane,
+                ],
                 size: [1, 1, 1],
             };
             let _ = cp.encode(&ComputeCommand::CopyTexture {
@@ -122,7 +126,9 @@ pub(crate) fn dump(ctx: &Context) {
     for (cmd, id, size, tex) in all {
         let d = tex.desc();
         let g = grid(size[0], size[1]);
-        let pts: Vec<[u32; 2]> = (0..g[1]).flat_map(|j| (0..g[0]).map(move |i| [i, j])).collect();
+        let pts: Vec<[u32; 2]> = (0..g[1])
+            .flat_map(|j| (0..g[0]).map(move |i| [i, j]))
+            .collect();
         let px = tex.debug_read_raw(ctx, &pts);
         if g != [3, 3] {
             write_picture(cmd, id, d.format, g, px.as_deref().unwrap_or_default());
@@ -143,11 +149,23 @@ pub(crate) fn dump(ctx: &Context) {
 fn rgb(f: Format, b: &[u8]) -> [f32; 3] {
     let u32s = |i: usize| u32::from_le_bytes([b[4 * i], b[4 * i + 1], b[4 * i + 2], b[4 * i + 3]]);
     let c = match f {
-        Format::Rgba8Unorm | Format::Rgba8UnormSrgb => [f32::from(b[0]) / 255.0, f32::from(b[1]) / 255.0, f32::from(b[2]) / 255.0],
-        Format::Bgra8Unorm | Format::Bgra8UnormSrgb => [f32::from(b[2]) / 255.0, f32::from(b[1]) / 255.0, f32::from(b[0]) / 255.0],
+        Format::Rgba8Unorm | Format::Rgba8UnormSrgb => [
+            f32::from(b[0]) / 255.0,
+            f32::from(b[1]) / 255.0,
+            f32::from(b[2]) / 255.0,
+        ],
+        Format::Bgra8Unorm | Format::Bgra8UnormSrgb => [
+            f32::from(b[2]) / 255.0,
+            f32::from(b[1]) / 255.0,
+            f32::from(b[0]) / 255.0,
+        ],
         Format::Rg11B10Float => {
             let w = u32s(0);
-            [small_float(w & 0x7ff, 6), small_float(w >> 11 & 0x7ff, 6), small_float(w >> 22, 5)]
+            [
+                small_float(w & 0x7ff, 6),
+                small_float(w >> 11 & 0x7ff, 6),
+                small_float(w >> 22, 5),
+            ]
         }
         Format::Rgb10A2Unorm => {
             let w = u32s(0);
@@ -164,7 +182,13 @@ fn rgb(f: Format, b: &[u8]) -> [f32; 3] {
         }
         _ => [0.0; 3],
     };
-    c.map(|v| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 })
+    c.map(|v| {
+        if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    })
 }
 
 /// Writes the sampled texels of a full size target as a binary PPM under `<NXKIT_DIAG_DIR>/img`.
@@ -173,7 +197,9 @@ fn write_picture(cmd: u32, id: TexId, format: Format, g: [u32; 2], px: &[Vec<u8>
     let dir = crate::diag::diag_dir().join("img");
     let _ = std::fs::create_dir_all(&dir);
     let name = dir.join(format!("cmd{cmd:05}-tex{}-{format:?}.ppm", id.0));
-    let Ok(mut file) = std::fs::File::create(&name) else { return };
+    let Ok(mut file) = std::fs::File::create(&name) else {
+        return;
+    };
     let _ = write!(file, "P6\n{} {}\n255\n", g[0], g[1]);
     let mut bytes = Vec::with_capacity(px.len() * 3);
     for texel in px {

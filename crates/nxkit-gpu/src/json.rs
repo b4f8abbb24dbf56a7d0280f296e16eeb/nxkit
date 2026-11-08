@@ -239,9 +239,15 @@ mod tests {
             r#"{"key":"06ec","entry":"main0","pull":{},"bindings":[{"arg_id":2,"kind":"tex","reg":null,"rw":true}],"n":-3,"s":"a\u00e9\n"}"#,
         );
         let j = j.as_ref();
-        assert_eq!(j.and_then(|j| j.get("entry")).and_then(Json::as_str), Some("main0"));
+        assert_eq!(
+            j.and_then(|j| j.get("entry")).and_then(Json::as_str),
+            Some("main0")
+        );
         assert_eq!(j.and_then(|j| j.get("n")).and_then(Json::as_i64), Some(-3));
-        assert_eq!(j.and_then(|j| j.get("s")).and_then(Json::as_str), Some("a\u{e9}\n"));
+        assert_eq!(
+            j.and_then(|j| j.get("s")).and_then(Json::as_str),
+            Some("a\u{e9}\n")
+        );
         let b = j.and_then(|j| j.get("bindings")).map(Json::as_arr);
         assert_eq!(b.map(<[Json]>::len), Some(1));
         assert_eq!(

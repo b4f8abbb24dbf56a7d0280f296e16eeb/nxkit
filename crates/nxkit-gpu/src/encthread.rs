@@ -156,7 +156,9 @@ fn run(rx: Receiver<Msg>, shared: Arc<Shared>, mut handler: impl FnMut(Msg) -> R
             Ok(Reply::Done) => {}
             Err(p) => {
                 let why = format!("the encoder thread panicked: {}", panic_text(p.as_ref()));
-                eprintln!("nxkit-gpu: {why}; the frames are encoded on the game thread from now on");
+                eprintln!(
+                    "nxkit-gpu: {why}; the frames are encoded on the game thread from now on"
+                );
                 if is_job {
                     shared.die(why);
                 }
@@ -167,7 +169,9 @@ fn run(rx: Receiver<Msg>, shared: Arc<Shared>, mut handler: impl FnMut(Msg) -> R
 
 impl Encoder {
     /// Starts the thread. `handler` serves each message on it.
-    pub(crate) fn spawn(handler: impl FnMut(Msg) -> Reply + Send + 'static) -> std::io::Result<Self> {
+    pub(crate) fn spawn(
+        handler: impl FnMut(Msg) -> Reply + Send + 'static,
+    ) -> std::io::Result<Self> {
         let (tx, rx) = channel();
         let shared = Arc::new(Shared::default());
         let thread_shared = shared.clone();
@@ -208,7 +212,11 @@ impl Encoder {
     pub(crate) fn settle(&self) -> Settled {
         let mut s = self.shared.lock();
         while s.finished < s.sent {
-            s = self.shared.cv.wait(s).unwrap_or_else(PoisonError::into_inner);
+            s = self
+                .shared
+                .cv
+                .wait(s)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         Settled {
             update: s.update.take(),
@@ -220,7 +228,11 @@ impl Encoder {
     pub(crate) fn wait_idle(&self) {
         let mut s = self.shared.lock();
         while s.finished < s.sent {
-            s = self.shared.cv.wait(s).unwrap_or_else(PoisonError::into_inner);
+            s = self
+                .shared
+                .cv
+                .wait(s)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 
@@ -235,7 +247,11 @@ impl Encoder {
             if s.dead || s.finished >= s.sent {
                 return false;
             }
-            s = self.shared.cv.wait(s).unwrap_or_else(PoisonError::into_inner);
+            s = self
+                .shared
+                .cv
+                .wait(s)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 }

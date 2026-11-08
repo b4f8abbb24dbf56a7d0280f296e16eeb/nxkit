@@ -7,8 +7,8 @@
 use super::{get_bytes, get_i32, put_bytes};
 
 const CODES: [&str; 18] = [
-    "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru", "zh-TW", "en-GB", "fr-CA", "es-419",
-    "zh-Hans", "zh-Hant", "pt-BR",
+    "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru", "zh-TW", "en-GB",
+    "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR",
 ];
 
 fn code_bytes(lang: i32) -> Option<[u8; 8]> {
@@ -32,7 +32,10 @@ fn matches(lang: i32, code: &[u8]) -> bool {
         16 => b"zh-TW",
         _ => return false,
     };
-    code.starts_with(other) && code.get(other.len()..).is_some_and(|rest| rest.iter().all(|&c| c == 0))
+    code.starts_with(other)
+        && code
+            .get(other.len()..)
+            .is_some_and(|rest| rest.iter().all(|&c| c == 0))
 }
 
 /// `operator==(const Language&, const LanguageCode&)`.

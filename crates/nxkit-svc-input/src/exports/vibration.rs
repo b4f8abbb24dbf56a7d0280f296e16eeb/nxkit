@@ -87,12 +87,18 @@ extern "C" fn get_actual_value(out: u64, handle: u64) {
 /// The vibration functions.
 pub(super) fn list() -> Vec<Export> {
     vec![
-        Export::new("_ZN2nn3hid20IsVibrationPermittedEv", is_vibration_permitted as usize),
+        Export::new(
+            "_ZN2nn3hid20IsVibrationPermittedEv",
+            is_vibration_permitted as usize,
+        ),
         Export::new(
             "_ZN2nn3hid25GetVibrationDeviceHandlesEPNS0_21VibrationDeviceHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE",
             get_device_handles as usize,
         ),
-        Export::new("_ZN2nn3hid25InitializeVibrationDeviceERKNS0_21VibrationDeviceHandleE", initialize_device as usize),
+        Export::new(
+            "_ZN2nn3hid25InitializeVibrationDeviceERKNS0_21VibrationDeviceHandleE",
+            initialize_device as usize,
+        ),
         Export::new(
             "_ZN2nn3hid18SendVibrationValueERKNS0_21VibrationDeviceHandleERKNS0_14VibrationValueE",
             send_value as usize,
@@ -105,7 +111,10 @@ pub(super) fn list() -> Vec<Export> {
             "_ZN2nn3hid22GetVibrationDeviceInfoEPNS0_19VibrationDeviceInfoERKNS0_21VibrationDeviceHandleE",
             get_device_info as usize,
         ),
-        Export::new("_ZN2nn3hid24IsVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE", is_device_mounted as usize),
+        Export::new(
+            "_ZN2nn3hid24IsVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE",
+            is_device_mounted as usize,
+        ),
         Export::new(
             "_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE",
             is_device_mounted as usize,
@@ -140,7 +149,12 @@ mod tests {
     #[test]
     fn the_actual_value_is_the_last_one_sent() {
         let (base, _guard) = guest_memory();
-        let sent = VibrationValue { amp_low: 0.5, freq_low: 160.0, amp_high: 0.25, freq_high: 320.0 };
+        let sent = VibrationValue {
+            amp_low: 0.5,
+            freq_low: 160.0,
+            amp_high: 0.25,
+            freq_high: 320.0,
+        };
         guest::write_u32(base, 3).ok();
         guest::write(base + 16, &sent.to_bytes()).ok();
         send_value(base, base + 16);

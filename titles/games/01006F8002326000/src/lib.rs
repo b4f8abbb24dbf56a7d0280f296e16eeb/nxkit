@@ -70,6 +70,10 @@ mod tests {
 
     #[test]
     fn every_served_service_has_a_record() {
-        assert!(ACNH.sf_services().iter().all(|s| s.evidence.is_checked() && s.value.len() <= 8));
+        assert!(
+            ACNH.sf_services()
+                .iter()
+                .all(|s| s.evidence.is_checked() && s.value.len() <= 8)
+        );
     }
 }

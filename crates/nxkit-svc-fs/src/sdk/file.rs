@@ -22,7 +22,14 @@ pub(super) extern "C" fn read_file(out: u64, handle: u64, offset: i64, buf: u64,
     r
 }
 
-pub(super) extern "C" fn read_file_option(out: u64, handle: u64, offset: i64, buf: u64, size: u64, _opt: u64) -> u32 {
+pub(super) extern "C" fn read_file_option(
+    out: u64,
+    handle: u64,
+    offset: i64,
+    buf: u64,
+    size: u64,
+    _opt: u64,
+) -> u32 {
     read_file(out, handle, offset, buf, size)
 }
 
@@ -31,14 +38,22 @@ pub(super) extern "C" fn read_file_exact(handle: u64, offset: i64, buf: u64, siz
     match run_read(handle, offset, buf, size) {
         Ok(n) if n == size => OK,
         Ok(n) => {
-            eprintln!("nxkit-svc-fs: short ReadFile at offset {offset}: wanted {size} bytes, got {n}");
+            eprintln!(
+                "nxkit-svc-fs: short ReadFile at offset {offset}: wanted {size} bytes, got {n}"
+            );
             FAIL
         }
         Err(r) => r,
     }
 }
 
-pub(super) extern "C" fn read_file_exact_option(handle: u64, offset: i64, buf: u64, size: u64, _opt: u64) -> u32 {
+pub(super) extern "C" fn read_file_exact_option(
+    handle: u64,
+    offset: i64,
+    buf: u64,
+    size: u64,
+    _opt: u64,
+) -> u32 {
     read_file_exact(handle, offset, buf, size)
 }
 
@@ -47,7 +62,13 @@ fn run_read(handle: u64, offset: i64, buf: u64, size: u64) -> Result<u64, u32> {
     fs.file(handle)?.read(offset, buf, size)
 }
 
-pub(super) extern "C" fn write_file(handle: u64, offset: i64, buf: u64, size: u64, _opt: u64) -> u32 {
+pub(super) extern "C" fn write_file(
+    handle: u64,
+    offset: i64,
+    buf: u64,
+    size: u64,
+    _opt: u64,
+) -> u32 {
     run(|fs| match fs.file(handle) {
         Ok(f) => f.write(offset, buf, size),
         Err(r) => r,
@@ -80,7 +101,9 @@ pub(super) extern "C" fn close_file(handle: u64) {
 }
 
 pub(super) extern "C" fn get_file_open_mode(handle: u64) -> u32 {
-    crate::fs().and_then(|fs| fs.file(handle).ok()).map_or(0, |f| f.mode())
+    crate::fs()
+        .and_then(|fs| fs.file(handle).ok())
+        .map_or(0, |f| f.mode())
 }
 
 pub(super) extern "C" fn create_file(path: u64, size: i64) -> u32 {
@@ -137,10 +160,12 @@ pub(super) extern "C" fn open_directory(out: u64, path: u64, mode: i32) -> u32 {
 }
 
 pub(super) extern "C" fn read_directory(count: u64, entries: u64, handle: u64, max: i64) -> u32 {
-    run(|fs| match fs.dir(handle).and_then(|d| d.read(max, entries)) {
-        Ok(n) => put_i64(count, n),
-        Err(r) => r,
-    })
+    run(
+        |fs| match fs.dir(handle).and_then(|d| d.read(max, entries)) {
+            Ok(n) => put_i64(count, n),
+            Err(r) => r,
+        },
+    )
 }
 
 pub(super) extern "C" fn close_directory(handle: u64) {

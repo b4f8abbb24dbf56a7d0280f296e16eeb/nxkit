@@ -41,8 +41,14 @@ mod tests {
 
     #[test]
     fn host_errors_map_as_in_nxnative() {
-        assert_eq!(from_io(&io::Error::from_raw_os_error(ENOENT)), PATH_NOT_FOUND);
-        assert_eq!(from_io(&io::Error::from_raw_os_error(ENOTDIR)), PATH_NOT_FOUND);
+        assert_eq!(
+            from_io(&io::Error::from_raw_os_error(ENOENT)),
+            PATH_NOT_FOUND
+        );
+        assert_eq!(
+            from_io(&io::Error::from_raw_os_error(ENOTDIR)),
+            PATH_NOT_FOUND
+        );
         assert_eq!(from_io(&io::Error::from_raw_os_error(EEXIST)), PATH_EXISTS);
         assert_eq!(from_io(&io::Error::from_raw_os_error(28)), FAIL);
         assert_eq!(from_io(&io::Error::from(io::ErrorKind::InvalidInput)), FAIL);

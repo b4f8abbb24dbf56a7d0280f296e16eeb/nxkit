@@ -102,7 +102,10 @@ impl GateTable {
                         break;
                     }
                     Some(e) if e.ret == g.ret => {
-                        return Err(HostError::Manifest(format!("two gates return to {:#x}", g.ret)));
+                        return Err(HostError::Manifest(format!(
+                            "two gates return to {:#x}",
+                            g.ret
+                        )));
                     }
                     Some(_) => i = (i + 1) & mask,
                 }
@@ -176,7 +179,10 @@ mod tests {
     #[test]
     fn refuses_an_unknown_kind_and_a_duplicate() {
         assert!(parse("0x10\tfoo\t1\t0x0\n", 0).is_err());
-        let g = Gate { ret: 8, kind: Kind::Obs };
+        let g = Gate {
+            ret: 8,
+            kind: Kind::Obs,
+        };
         assert!(GateTable::build(&[g, g]).is_err());
     }
 }

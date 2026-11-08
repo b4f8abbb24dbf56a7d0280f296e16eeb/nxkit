@@ -12,10 +12,10 @@
 use std::sync::PoisonError;
 
 use nxkit_metal::{
-    ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, DepthAttachment, DepthBias,
-    DepthClip, DepthStencilDesc, Dependency, FillMode, LoadAction as MLoad, MetalError, RenderCommand,
-    RenderPass, RenderPassDesc, Scissor, Scratch, Scope, Stages, StencilAttachment, Storage,
-    StoreAction as MStore, Viewport, Visibility, Winding,
+    ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, Dependency, DepthAttachment,
+    DepthBias, DepthClip, DepthStencilDesc, FillMode, LoadAction as MLoad, MetalError,
+    RenderCommand, RenderPass, RenderPassDesc, Scissor, Scope, Scratch, Stages, StencilAttachment,
+    Storage, StoreAction as MStore, Viewport, Visibility, Winding,
 };
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
@@ -98,17 +98,41 @@ fn clear_of(sh: &Shared<'_>, pass: &Pass, slot: Slot) -> ClearDetail {
 /// Then the old contents are never read and a `Load` is wasted. The shader could still discard a fragment, and the
 /// geometry of a vertex shader without input could still be small, so only the `coverload` knob uses this.
 fn first_draw_covers(sh: &Shared<'_>, pass: &Pass, slot: u8, size: [u32; 2], scale: f32) -> bool {
-    let Some(d) = draw_range(sh, pass).next().and_then(|n| sh.detail.draws.get(n as usize)) else { return false };
+    let Some(d) = draw_range(sh, pass)
+        .next()
+        .and_then(|n| sh.detail.draws.get(n as usize))
+    else {
+        return false;
+    };
     let vertices_ok = matches!(
         (d.topology, d.args),
-        (4, DrawArgs::Arrays { count: 3 | 6, instances: 1, .. }) | (5, DrawArgs::Arrays { count: 4, instances: 1, .. })
+        (
+            4,
+            DrawArgs::Arrays {
+                count: 3 | 6,
+                instances: 1,
+                ..
+            }
+        ) | (
+            5,
+            DrawArgs::Arrays {
+                count: 4,
+                instances: 1,
+                ..
+            }
+        )
     );
     let [x, y, w, h] = d.dynamic.viewport.map(|v| v * scale);
     let holds = |x0: f32, y0: f32, w0: f32, h0: f32| {
         x0 <= 0.5 && y0 <= 0.5 && x0 + w0 >= size[0] as f32 - 0.5 && y0 + h0 >= size[1] as f32 - 0.5
     };
     let scissor_ok = d.dynamic.scissor.is_none_or(|[sx, sy, sw, shh]| {
-        holds(sx as f32 * scale, sy as f32 * scale, sw as f32 * scale, shh as f32 * scale)
+        holds(
+            sx as f32 * scale,
+            sy as f32 * scale,
+            sw as f32 * scale,
+            shh as f32 * scale,
+        )
     });
     let i = usize::from(slot).min(7);
     vertices_ok
@@ -126,22 +150,44 @@ fn first_draw_covers(sh: &Shared<'_>, pass: &Pass, slot: u8, size: [u32; 2], sca
 
 fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
     let attachments = sh.plan.attachments_of(pass);
-    let color_aliases: Vec<_> = attachments.iter().filter_map(|a| {
-        let Slot::Color(slot) = a.slot else { return None };
-        let res = sh.textures.get(&a.tex)?;
-        Some((slot, (res.barrier_id, a.view.level(), a.view.layer()), a.load == LoadAction::Clear))
-    }).collect();
-    let has_aliases = color_aliases.iter().enumerate().any(|(i, a)|
-        color_aliases[..i].iter().any(|b| a.1 == b.1));
+    let color_aliases: Vec<_> = attachments
+        .iter()
+        .filter_map(|a| {
+            let Slot::Color(slot) = a.slot else {
+                return None;
+            };
+            let res = sh.textures.get(&a.tex)?;
+            Some((
+                slot,
+                (res.barrier_id, a.view.level(), a.view.layer()),
+                a.load == LoadAction::Clear,
+            ))
+        })
+        .collect();
+    let has_aliases = color_aliases
+        .iter()
+        .enumerate()
+        .any(|(i, a)| color_aliases[..i].iter().any(|b| a.1 == b.1));
     let selected = if has_aliases {
         let mut written = 0u8;
         let mut outputs = crate::draws::FastMap::default();
         for n in draw_range(sh, pass) {
-            let Some(d) = sh.detail.draws.get(n as usize) else { continue };
-            let Some(key) = &d.program.fragment else { continue };
-            let locations = if let Some(mask) = outputs.get(key) { *mask } else {
+            let Some(d) = sh.detail.draws.get(n as usize) else {
+                continue;
+            };
+            let Some(key) = &d.program.fragment else {
+                continue;
+            };
+            let locations = if let Some(mask) = outputs.get(key) {
+                *mask
+            } else {
                 let fs = sh.programs.stage(key, false)?;
-                let mask = fs.colors.as_ref().map_or(u8::MAX, |colors| colors.iter().filter(|c| **c < 8).fold(0, |m, c| m | (1 << c)));
+                let mask = fs.colors.as_ref().map_or(u8::MAX, |colors| {
+                    colors
+                        .iter()
+                        .filter(|c| **c < 8)
+                        .fold(0, |m, c| m | (1 << c))
+                });
                 outputs.insert(key, mask);
                 mask
             };
@@ -155,17 +201,25 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
             Ok(selected) => selected,
             Err(why) => {
                 if crate::diag("target") && crate::diag::sampled() {
-                    eprintln!("DIAG alias conflict cmds {:?} attachments {:?}", pass.cmds, color_aliases);
+                    eprintln!(
+                        "DIAG alias conflict cmds {:?} attachments {:?}",
+                        pass.cmds, color_aliases
+                    );
                     for n in draw_range(sh, pass) {
                         if let Some(d) = sh.detail.draws.get(n as usize) {
-                            eprintln!("DIAG alias draw {n} fs {:?} masks {:?}", d.program.fragment, d.write_masks);
+                            eprintln!(
+                                "DIAG alias draw {n} fs {:?} masks {:?}",
+                                d.program.fragment, d.write_masks
+                            );
                         }
                     }
                 }
                 return Err(why);
             }
         }
-    } else { u8::MAX };
+    } else {
+        u8::MAX
+    };
     let mut colors: Vec<(u8, ColorAttachment)> = Vec::new();
     let mut desc = RenderPassDesc::default();
     let mut size: Option<[u32; 2]> = None;
@@ -178,16 +232,28 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         let res = sh.textures.get(&a.tex).ok_or(Skip::Texture)?;
         let texture = sh.texture_store.target_view(res, a.view)?;
         let d = texture.desc();
-        if crate::diag("draw") && crate::diag::sampled() && crate::diag::tex_match(d.format, d.width, d.height, d.array_layers) {
-            eprintln!("DIAG attachment {:?} {:?} backing {:?} {:?} {}x{} cmds {:?}", a.slot, a.tex, res.barrier_id, d.format, d.width, d.height, pass.cmds);
+        if crate::diag("draw")
+            && crate::diag::sampled()
+            && crate::diag::tex_match(d.format, d.width, d.height, d.array_layers)
+        {
+            eprintln!(
+                "DIAG attachment {:?} {:?} backing {:?} {:?} {}x{} cmds {:?}",
+                a.slot, a.tex, res.barrier_id, d.format, d.width, d.height, pass.cmds
+            );
         }
         // The game encodes block compressed textures on the GPU by rendering into them. Metal cannot render into a
         // compressed format, so such a pass is left out.
         if matches!(a.slot, Slot::Color(_)) && (d.format.is_compressed() || d.format.is_depth()) {
-            target_diag(format_args!("not renderable {:?} {}x{} cmds {:?}", d.format, d.width, d.height, pass.cmds));
+            target_diag(format_args!(
+                "not renderable {:?} {}x{} cmds {:?}",
+                d.format, d.width, d.height, pass.cmds
+            ));
             nxkit_nvn::diag::example(
                 nxkit_nvn::diag::Reason::SkipFormat,
-                format_args!("colour target {:?} {:?} {}x{}x{}", a.slot, d.format, d.width, d.height, d.depth),
+                format_args!(
+                    "colour target {:?} {:?} {}x{}x{}",
+                    a.slot, d.format, d.width, d.height, d.depth
+                ),
             );
             return Err(Skip::Format);
         }
@@ -195,7 +261,10 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         // Attachments of different sizes render into the smallest one, as in NVN.
         let s = size.get_or_insert([d.width, d.height]);
         if *s != [d.width, d.height] {
-            target_diag(format_args!("size mismatch {:?} vs {}x{} slot {:?}", s, d.width, d.height, a.slot));
+            target_diag(format_args!(
+                "size mismatch {:?} vs {}x{} slot {:?}",
+                s, d.width, d.height, a.slot
+            ));
             *s = [s[0].min(d.width), s[1].min(d.height)];
         }
         if res.scaled {
@@ -208,9 +277,18 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
             && !mem
             && l == MLoad::Load
         {
-            let covers = first_draw_covers(sh, pass, n, [d.width, d.height], if res.scaled { sh.scale } else { 1.0 });
+            let covers = first_draw_covers(
+                sh,
+                pass,
+                n,
+                [d.width, d.height],
+                if res.scaled { sh.scale } else { 1.0 },
+            );
             if crate::diag("passmerge") && crate::diag::sampled() {
-                eprintln!("DIAG passmerge cover cmds {:?} slot {n} {}x{} first draw covers {covers}", pass.cmds, d.width, d.height);
+                eprintln!(
+                    "DIAG passmerge cover cmds {:?} slot {n} {}x{} first draw covers {covers}",
+                    pass.cmds, d.width, d.height
+                );
             }
             if covers && crate::knob("coverload") {
                 l = MLoad::DontCare;
@@ -221,7 +299,12 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         match a.slot {
             Slot::Color(n) => colors.push((
                 n,
-                ColorAttachment { depth_plane: if d.kind == nxkit_metal::TextureKind::D3 { a.view.layer() } else { 0 },
+                ColorAttachment {
+                    depth_plane: if d.kind == nxkit_metal::TextureKind::D3 {
+                        a.view.layer()
+                    } else {
+                        0
+                    },
                     texture: texture.clone(),
                     load: l,
                     store: s,
@@ -269,7 +352,10 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
     }
     colors.sort_by_key(|(n, _)| *n);
     if colors.windows(2).any(|w| w[0].0 == w[1].0) {
-        target_diag(format_args!("twice {:?}", colors.iter().map(|(n, _)| *n).collect::<Vec<_>>()));
+        target_diag(format_args!(
+            "twice {:?}",
+            colors.iter().map(|(n, _)| *n).collect::<Vec<_>>()
+        ));
         return Err(Skip::Target);
     }
     if size.is_none() {
@@ -300,19 +386,29 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
 /// NVN may bind a texture to several slots and select the writer with channel masks. Metal gives each attachment
 /// its own tile storage, so storing an inactive alias can overwrite the active output. Preserve the slot of the
 /// actual writer (or clear), leaving the other aliases empty rather than compacting the output locations.
-fn distinct_color_slots<K: Copy + Eq + std::fmt::Debug>(colors: &[(u8, K, bool)], written: u8) -> Result<u8, Skip> {
+fn distinct_color_slots<K: Copy + Eq + std::fmt::Debug>(
+    colors: &[(u8, K, bool)],
+    written: u8,
+) -> Result<u8, Skip> {
     let mut selected = 0u8;
     for (i, &(slot, backing, _)) in colors.iter().enumerate() {
-        if colors[..i].iter().any(|c| c.1 == backing) { continue }
+        if colors[..i].iter().any(|c| c.1 == backing) {
+            continue;
+        }
         let aliases: Vec<_> = colors.iter().filter(|c| c.1 == backing).collect();
-        let writers: Vec<_> = aliases.iter().filter(|c| written & (1 << c.0) != 0).collect();
+        let writers: Vec<_> = aliases
+            .iter()
+            .filter(|c| written & (1 << c.0) != 0)
+            .collect();
         if writers.len() > 1 {
             if crate::diag("target") && crate::diag::sampled() {
                 eprintln!("DIAG target competing aliases {backing:?} written {written:#x}");
             }
             return Err(Skip::Target);
         }
-        let winner = writers.first().map(|c| c.0)
+        let winner = writers
+            .first()
+            .map(|c| c.0)
             .or_else(|| aliases.iter().find(|c| c.2).map(|c| c.0))
             .unwrap_or(slot);
         selected |= 1 << winner;
@@ -541,53 +637,102 @@ fn emit(
         if !rp.has_object_table() {
             rp.set_object_table(x.object);
         }
-        rp.encode(&RenderCommand::SetObjectBuffer { index: 0, gpu_addr: a })?;
+        rp.encode(&RenderCommand::SetObjectBuffer {
+            index: 0,
+            gpu_addr: a,
+        })?;
         tr.object_args = Some(a);
     }
-    let copies = || x.copies.ok_or(MetalError::Invalid("the pre-pass made no copy for the draw"));
+    let copies = || {
+        x.copies.ok_or(MetalError::Invalid(
+            "the pre-pass made no copy for the draw",
+        ))
+    };
     let first_slot = crate::mesh::MESH_FIRST_SLOT;
     // The first workgroup goes to the object stage when there is a task shader, else to the mesh stage. The slot of
     // the mesh stage is a vertex stream slot of the vertex stage, so the tracker forgets it.
     let first = |rp: &mut RenderPass<'_>, tr: &mut Tracker, task: bool, gpu_addr: u64| {
         if task {
-            rp.encode(&RenderCommand::SetObjectBuffer { index: first_slot, gpu_addr })
+            rp.encode(&RenderCommand::SetObjectBuffer {
+                index: first_slot,
+                gpu_addr,
+            })
         } else {
             tr.streams[first_slot as usize] = None;
-            rp.encode(&RenderCommand::SetBuffer { index: first_slot, gpu_addr })
+            rp.encode(&RenderCommand::SetBuffer {
+                index: first_slot,
+                gpu_addr,
+            })
         }
     };
     match p.geom {
-        Geom::Mesh { first: at, count, object_threads, mesh_threads, task } => {
+        Geom::Mesh {
+            first: at,
+            count,
+            object_threads,
+            mesh_threads,
+            task,
+        } => {
             let n = crate::mesh::splits(count, task);
             if !task {
                 stats.kinds.clamped += count.saturating_sub(n * crate::mesh::MAX_GRID);
             }
             for k in 0..n {
                 first(rp, tr, task, at + crate::mesh::FIRST_STRIDE * u64::from(k))?;
-                let groups = if task { count } else { (count - k * crate::mesh::MAX_GRID).min(crate::mesh::MAX_GRID) };
-                rp.encode(&RenderCommand::DrawMeshThreadgroups { groups: [groups, 1, 1], object_threads, mesh_threads })?;
+                let groups = if task {
+                    count
+                } else {
+                    (count - k * crate::mesh::MAX_GRID).min(crate::mesh::MAX_GRID)
+                };
+                rp.encode(&RenderCommand::DrawMeshThreadgroups {
+                    groups: [groups, 1, 1],
+                    object_threads,
+                    mesh_threads,
+                })?;
             }
             stats.kinds.metal_draws += n;
             return Ok(());
         }
-        Geom::MeshIndirect { splits, object_threads, mesh_threads, task } => {
+        Geom::MeshIndirect {
+            splits,
+            object_threads,
+            mesh_threads,
+            task,
+        } => {
             let base = copies()?;
             for k in 0..u64::from(splits) {
                 let rec = base + crate::indirect::RECORD * k;
                 first(rp, tr, task, rec + 16)?;
-                rp.encode(&RenderCommand::DrawMeshThreadgroupsIndirect { indirect_addr: rec, object_threads, mesh_threads })?;
+                rp.encode(&RenderCommand::DrawMeshThreadgroupsIndirect {
+                    indirect_addr: rec,
+                    object_threads,
+                    mesh_threads,
+                })?;
             }
             stats.kinds.metal_draws += splits;
             return Ok(());
         }
-        Geom::MultiIndirect { primitive, index, draws } => {
+        Geom::MultiIndirect {
+            primitive,
+            index,
+            draws,
+        } => {
             let base = copies()?;
             for i in 0..u64::from(draws) {
                 let indirect_addr = base + crate::indirect::RECORD * i;
                 rp.encode(&match index {
-                    None => RenderCommand::DrawIndirect { primitive, indirect_addr },
+                    None => RenderCommand::DrawIndirect {
+                        primitive,
+                        indirect_addr,
+                    },
                     Some((index_type, index_addr, index_bytes)) => {
-                        RenderCommand::DrawIndexedIndirect { primitive, index_type, index_addr, index_bytes, indirect_addr }
+                        RenderCommand::DrawIndexedIndirect {
+                            primitive,
+                            index_type,
+                            index_addr,
+                            index_bytes,
+                            indirect_addr,
+                        }
                     }
                 })?;
             }
@@ -597,11 +742,23 @@ fn emit(
         _ => {}
     }
     rp.encode(&match p.geom {
-        Geom::Indirect { primitive, indirect } => {
+        Geom::Indirect {
+            primitive,
+            indirect,
+        } => {
             stats.kinds.metal_draws += 1;
-            RenderCommand::DrawIndirect { primitive, indirect_addr: indirect }
+            RenderCommand::DrawIndirect {
+                primitive,
+                indirect_addr: indirect,
+            }
         }
-        Geom::IndexedIndirect { primitive, index_type, address, index_bytes, indirect } => {
+        Geom::IndexedIndirect {
+            primitive,
+            index_type,
+            address,
+            index_bytes,
+            indirect,
+        } => {
             stats.kinds.metal_draws += 1;
             RenderCommand::DrawIndexedIndirect {
                 primitive,
@@ -701,7 +858,10 @@ fn draw(
             .collect();
         static SEEN: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
         if !unresolved.is_empty() {
-            let key = (format!("{:?}", d.program.fragment), format!("{unresolved:?}"));
+            let key = (
+                format!("{:?}", d.program.fragment),
+                format!("{unresolved:?}"),
+            );
             if let Ok(mut seen) = SEEN.lock() {
                 if !seen.contains(&key) && seen.len() < 400 {
                     seen.push(key);
@@ -713,7 +873,13 @@ fn draw(
             }
         }
     }
-    let p = prepare(sh, pc, d, &mut ScratchSink::new(scratch, sh.uploaded, Some(memo)).with_preloaded(sh.preloaded), false);
+    let p = prepare(
+        sh,
+        pc,
+        d,
+        &mut ScratchSink::new(scratch, sh.uploaded, Some(memo)).with_preloaded(sh.preloaded),
+        false,
+    );
     if crate::diag("pixel") && crate::diag::sampled() && FOCUS_PASS.with(std::cell::Cell::get) {
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 97 == 0 {
@@ -765,26 +931,37 @@ fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
     let floats = |addr: u64, count: usize| -> Vec<f32> {
         let mut bytes = vec![0u8; count * 4];
         match sh.guest_offset(addr, bytes.len() as u64) {
-            Some(off) if sh.guest.read(off, &mut bytes).is_ok() => {
-                bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
-            }
+            Some(off) if sh.guest.read(off, &mut bytes).is_ok() => bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect(),
             _ => Vec::new(),
         }
     };
     for u in &d.ubos {
         let count = (u.size as usize / 4).min(16);
         let snap: Option<Vec<f32>> = u.snapshot.as_ref().map(|b| {
-            b.chunks_exact(4).take(count).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+            b.chunks_exact(4)
+                .take(count)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
         });
         eprintln!(
             "DIAG ubo draw {n} {:?} slot {} addr {:#x} size {} live {:?} snapshot {snap:?}",
-            u.stage, u.slot, u.address, u.size, floats(u.address, count)
+            u.stage,
+            u.slot,
+            u.address,
+            u.size,
+            floats(u.address, count)
         );
     }
     for st in d.streams.iter().take(2) {
         eprintln!(
             "DIAG ubo draw {n} stream {} addr {:#x} stride {} floats {:?}",
-            st.index, st.address, st.stride, floats(st.address, 8)
+            st.index,
+            st.address,
+            st.stride,
+            floats(st.address, 8)
         );
     }
 }
@@ -850,7 +1027,12 @@ pub(crate) fn render_pass(
     if crate::diag::tex_filtered() {
         let focus = sh.plan.attachments_of(pass).iter().any(|a| {
             sh.textures.get(&a.tex).is_some_and(|r| {
-                crate::diag::tex_match(r.desc.format, r.desc.width, r.desc.height, r.desc.array_layers)
+                crate::diag::tex_match(
+                    r.desc.format,
+                    r.desc.width,
+                    r.desc.height,
+                    r.desc.array_layers,
+                )
             })
         });
         FOCUS_PASS.with(|c| c.set(focus));
@@ -931,9 +1113,17 @@ pub(crate) fn render_pass(
     };
     stats.render_passes += 1;
     if crate::diag::gpu_labels() {
-        let first = s.desc.colors.iter().flatten().map(|c| c.texture.desc()).next()
+        let first = s
+            .desc
+            .colors
+            .iter()
+            .flatten()
+            .map(|c| c.texture.desc())
+            .next()
             .or_else(|| s.desc.depth.as_ref().map(|d| d.texture.desc()));
-        let what = first.map_or_else(String::new, |d| format!("{}x{} {:?}", d.width, d.height, d.format));
+        let what = first.map_or_else(String::new, |d| {
+            format!("{}x{} {:?}", d.width, d.height, d.format)
+        });
         rp.set_label(&format!("r{index} {what} d{}", range.len()));
     }
     if let Some(dep) = sh.barriers.before.get(index).copied().flatten() {
@@ -966,7 +1156,18 @@ pub(crate) fn render_pass(
                 continue;
             }
         }
-        draw(sh, &s.pc, &mut rp, &mut tr, scratch, &mut memo, &pre, &tables.object, n, stats);
+        draw(
+            sh,
+            &s.pc,
+            &mut rp,
+            &mut tr,
+            scratch,
+            &mut memo,
+            &pre,
+            &tables.object,
+            n,
+            stats,
+        );
         n += 1;
     }
     rp.end();
@@ -974,7 +1175,9 @@ pub(crate) fn render_pass(
         for a in sh.plan.attachments_of(pass) {
             if matches!(a.slot, Slot::Color(_)) && a.store == StoreAction::Store {
                 if let Slot::Color(slot) = a.slot {
-                    let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else { continue };
+                    let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else {
+                        continue;
+                    };
                     crate::lum::capture(
                         sh.ctx,
                         cb,
@@ -993,24 +1196,40 @@ pub(crate) fn render_pass(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nxkit_metal::{ArchiveConfig, Format, FrameRing, PipelineCache, Primitive,
-        RenderPipelineDesc, ShaderLibrary, Texture, TextureDesc};
+    use nxkit_metal::{
+        ArchiveConfig, Format, FrameRing, PipelineCache, Primitive, RenderPipelineDesc,
+        ShaderLibrary, Texture, TextureDesc,
+    };
 
     #[test]
     fn inactive_aliases_leave_the_original_output_locations_empty() {
-        let colors = [(0, TexId(1), false), (1, TexId(2), false),
-            (2, TexId(2), false), (3, TexId(3), false), (4, TexId(3), false)];
+        let colors = [
+            (0, TexId(1), false),
+            (1, TexId(2), false),
+            (2, TexId(2), false),
+            (3, TexId(3), false),
+            (4, TexId(3), false),
+        ];
         assert_eq!(distinct_color_slots(&colors, 0b01011).unwrap(), 0b01011);
         assert_eq!(distinct_color_slots(&colors, 0b10101).unwrap(), 0b10101);
-        assert_eq!(distinct_color_slots(&[(1, TexId(2), false), (2, TexId(2), true)], 0).unwrap(), 4);
+        assert_eq!(
+            distinct_color_slots(&[(1, TexId(2), false), (2, TexId(2), true)], 0).unwrap(),
+            4
+        );
         assert!(distinct_color_slots(&colors, 0b00110).is_err());
     }
 
     #[test]
     fn an_inactive_alias_cannot_overwrite_a_rendered_color() {
-        let Ok(ctx) = Context::system_default() else { return };
-        let selected = distinct_color_slots(&[(0, TexId(1), false), (1, TexId(1), false)], 1).unwrap();
-        let lib = ShaderLibrary::from_source(&ctx, "alias-output", r#"
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let selected =
+            distinct_color_slots(&[(0, TexId(1), false), (1, TexId(1), false)], 1).unwrap();
+        let lib = ShaderLibrary::from_source(
+            &ctx,
+            "alias-output",
+            r#"
 #include <metal_stdlib>
 using namespace metal;
 struct V { float4 pos [[position]]; };
@@ -1020,14 +1239,26 @@ vertex V vs(uint id [[vertex_id]]) {
 }
 struct Outputs { float4 a [[color(0)]]; float4 b [[color(1)]]; };
 fragment Outputs fs() { return {float4(1,0,0,1), float4(0)}; }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let mut texture_desc = TextureDesc::render_target_2d(16, 16, Format::Rgba8Unorm);
         texture_desc.storage = Storage::Shared;
         let texture = Texture::new(&ctx, texture_desc).unwrap();
-        let mut pipeline_desc = RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm; 2]);
+        let mut pipeline_desc =
+            RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm; 2]);
         pipeline_desc.colors[1].as_mut().unwrap().write_mask = 0;
-        let mut colors = vec![Some(ColorAttachment { depth_plane: 0, texture: texture.clone(), load: MLoad::Clear,
-            store: MStore::Store, clear: [0.0; 4], memoryless: false }); 2];
+        let mut colors = vec![
+            Some(ColorAttachment {
+                depth_plane: 0,
+                texture: texture.clone(),
+                load: MLoad::Clear,
+                store: MStore::Store,
+                clear: [0.0; 4],
+                memoryless: false
+            });
+            2
+        ];
         for slot in 0..2 {
             if selected & (1 << slot) == 0 {
                 colors[slot] = None;
@@ -1039,10 +1270,26 @@ fragment Outputs fs() { return {float4(1,0,0,1), float4(0)}; }
         let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
         let mut ring = FrameRing::new(&ctx).unwrap();
         let mut frame = ring.begin().unwrap();
-        let mut pass = frame.commands().begin_render_pass(&RenderPassDesc { colors, depth: None, stencil: None }, &table).unwrap();
+        let mut pass = frame
+            .commands()
+            .begin_render_pass(
+                &RenderPassDesc {
+                    colors,
+                    depth: None,
+                    stencil: None,
+                },
+                &table,
+            )
+            .unwrap();
         pass.encode(&RenderCommand::SetPipeline(pipeline)).unwrap();
-        pass.encode(&RenderCommand::Draw { primitive: Primitive::Triangle, first_vertex: 0,
-            vertex_count: 3, instance_count: 1, base_instance: 0 }).unwrap();
+        pass.encode(&RenderCommand::Draw {
+            primitive: Primitive::Triangle,
+            first_vertex: 0,
+            vertex_count: 3,
+            instance_count: 1,
+            base_instance: 0,
+        })
+        .unwrap();
         pass.end();
         frame.submit().unwrap().wait().unwrap();
         let mut pixels = vec![0; 16 * 16 * 4];

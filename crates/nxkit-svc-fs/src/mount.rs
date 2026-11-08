@@ -92,14 +92,23 @@ impl Fs {
     }
 
     fn plain(name: &[u8], root: PathBuf, ro: bool) -> Mount {
-        Mount { name: name.to_vec(), root, ro, txn: None, cache: IndexCache::new() }
+        Mount {
+            name: name.to_vec(),
+            root,
+            ro,
+            txn: None,
+            cache: IndexCache::new(),
+        }
     }
 
     /// Mounts the romfs of the game, read-only.
     pub(crate) fn mount_rom(&self, name: &[u8]) -> u32 {
         self.mount_with(name, || {
             if !self.cfg.romfs.is_dir() {
-                eprintln!("nxkit-svc-fs: the romfs folder {} does not exist, so rom: cannot be mounted", self.cfg.romfs.display());
+                eprintln!(
+                    "nxkit-svc-fs: the romfs folder {} does not exist, so rom: cannot be mounted",
+                    self.cfg.romfs.display()
+                );
                 return Err(FAIL);
             }
             Ok(Self::plain(name, self.cfg.romfs.clone(), true))
@@ -193,7 +202,11 @@ impl Fs {
     pub(crate) fn save_dir(&self) -> PathBuf {
         let s = self.cfg.save.to_string_lossy();
         let trimmed = s.trim_end_matches('/');
-        if trimmed.is_empty() { self.cfg.save.clone() } else { PathBuf::from(trimmed) }
+        if trimmed.is_empty() {
+            self.cfg.save.clone()
+        } else {
+            PathBuf::from(trimmed)
+        }
     }
 
     /// The device save folder, next to the account save folder.

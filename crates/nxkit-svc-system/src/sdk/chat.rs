@@ -41,8 +41,13 @@ extern "C" fn buffer_size() -> u64 {
 fn storage_init(ty: u64, w: u32, h: u32, n: u32) {
     put_zero(ty, STORAGE_LEN);
     let (w, h, n) = (w as i32, h as i32, n as i32);
-    if !(32..=1920).contains(&w) || !(32..=1080).contains(&h) || !(1..=MAX_IMAGES as i32).contains(&n) {
-        log(&format!("chat: camera video storage {w}x{h} x{n} is out of the SDK range"));
+    if !(32..=1920).contains(&w)
+        || !(32..=1080).contains(&h)
+        || !(1..=MAX_IMAGES as i32).contains(&n)
+    {
+        log(&format!(
+            "chat: camera video storage {w}x{h} x{n} is out of the SDK range"
+        ));
         return;
     }
     let Some(blank) = seams().native_image_blank else {
@@ -96,7 +101,10 @@ extern "C" fn room_info() -> u32 {
 
 /// `GetVirtualCameraNativeWindowHandle`: no window.
 extern "C" fn virtual_window() -> u64 {
-    log_once(&NO_WINDOW, "chat: GetVirtualCameraNativeWindowHandle has no window");
+    log_once(
+        &NO_WINDOW,
+        "chat: GetVirtualCameraNativeWindowHandle has no window",
+    );
     0
 }
 

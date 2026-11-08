@@ -76,7 +76,11 @@ fn push_lifo(base: u64, state: &mut [u8], sampling_at: usize, timestamp: i64) ->
     let last = guest::read_i64(base + 0x10)?.clamp(0, LIFO_ENTRIES - 1);
     let count = guest::read_i64(base + 0x18)?.clamp(0, LIFO_ENTRIES);
     let entry = |i: i64| base + LIFO_HEADER + i as u64 * entry_size;
-    let previous = if count > 0 { guest::read_i64(entry(last) + 8 + sampling_at as u64)? } else { 0 };
+    let previous = if count > 0 {
+        guest::read_i64(entry(last) + 8 + sampling_at as u64)?
+    } else {
+        0
+    };
     let sampling = previous.wrapping_add(1);
     state[sampling_at..sampling_at + 8].copy_from_slice(&sampling.to_le_bytes());
     let next = (last + 1) % LIFO_ENTRIES;
@@ -101,7 +105,9 @@ pub(crate) fn fill(input: &mut Input) -> Result<(), Fault> {
     let timestamp = input.now_ns() as i64;
     let ids = (0..8).chain([ID_HANDHELD, ID_OTHER]);
     for id in ids {
-        let Some(index) = npad_index(id) else { continue };
+        let Some(index) = npad_index(id) else {
+            continue;
+        };
         let entry = shm.addr + at::NPAD + at::NPAD_STRIDE * index;
         let player = layout.player_of(id);
         let styles = Layout::style_for(id, player);
@@ -168,12 +174,18 @@ mod tests {
     fn fill_writes_the_style_set_and_the_player_one_lifo() {
         let (base, _guard) = guest_memory();
         let mut input = Input::new(&Config::default());
-        input.shm = Some(SharedMemory { handle: 1, addr: base });
+        input.shm = Some(SharedMemory {
+            handle: 1,
+            addr: base,
+        });
         assert!(fill(&mut input).is_ok());
         let entry = base + at::NPAD;
         assert_eq!(guest::read_u32(entry).unwrap_or(0), style::FULL_KEY);
         assert_eq!(guest::read_i64(entry + at::FULL_KEY + 0x18).unwrap_or(0), 1);
-        assert_eq!(guest::read_i64(entry + at::SIX_FULL_KEY + 0x18).unwrap_or(0), 1);
+        assert_eq!(
+            guest::read_i64(entry + at::SIX_FULL_KEY + 0x18).unwrap_or(0),
+            1
+        );
         let other = base + at::NPAD + at::NPAD_STRIDE;
         assert_eq!(guest::read_u32(other).unwrap_or(1), 0);
         assert!(fill(&mut input).is_ok());

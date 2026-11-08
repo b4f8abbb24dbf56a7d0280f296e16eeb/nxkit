@@ -161,7 +161,22 @@ impl Service for SelfController {
         let s = state();
         match req.command {
             0 => eprintln!("nxkit-svc-system: ISelfController::Exit"),
-            1..=4 | 10 | 14 | 16..=20 | 50 | 51 | 60 | 61 | 64 | 65 | 70 | 72 | 80 | 100 | 110 | 120
+            1..=4
+            | 10
+            | 14
+            | 16..=20
+            | 50
+            | 51
+            | 60
+            | 61
+            | 64
+            | 65
+            | 70
+            | 72
+            | 80
+            | 100
+            | 110
+            | 120
             | 130 => {}
             9 => return self.launchable.reply(rsp, true),
             11 => s.with(|i| i.notify_operation = bool_at(req, 0)),

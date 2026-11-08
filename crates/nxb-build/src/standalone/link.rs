@@ -25,9 +25,12 @@ pub fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
     let mut segs: Vec<Seg> = Vec::new();
     for (b, base) in mods {
         for g in &b.shape.segments {
-            let addr = base
-                .checked_add_signed(g.offset)
-                .ok_or_else(|| format!("module {}: segment {} leaves the address space", b.name, g.name))?;
+            let addr = base.checked_add_signed(g.offset).ok_or_else(|| {
+                format!(
+                    "module {}: segment {} leaves the address space",
+                    b.name, g.name
+                )
+            })?;
             let data = b
                 .image
                 .get(g.file_off..g.file_off + g.file_len)
@@ -70,8 +73,14 @@ pub fn module_files(
         progress(i as u64, mods.len() as u64);
         let at = |s: &str| dir.join(format!("{}.{s}", b.name));
         put(&at("bin"), &b.image)?;
-        put(&at("imports.json"), manifest::imports_json(&b.symbols.imports).as_bytes())?;
-        put(&at("exports.json"), manifest::symbols_json(&b.symbols.exports).as_bytes())?;
+        put(
+            &at("imports.json"),
+            manifest::imports_json(&b.symbols.imports).as_bytes(),
+        )?;
+        put(
+            &at("exports.json"),
+            manifest::symbols_json(&b.symbols.exports).as_bytes(),
+        )?;
         put(&at("fixups.tsv"), b.fixups.as_bytes())?;
         put(&at("gates.tsv"), &b.gates)?;
     }

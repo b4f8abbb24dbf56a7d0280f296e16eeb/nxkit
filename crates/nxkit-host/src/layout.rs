@@ -80,16 +80,29 @@ fn overflow() -> HostError {
 /// The host regions start at `floor` or behind the highest module, whichever is higher. When dyld mapped the
 /// library, `floor` is the end of everything that dyld mapped, which is a bit behind the last module.
 pub fn plan(game: &Game, floor: u64) -> Result<Layout> {
-    let lo = game.modules.iter().map(|m| m.start()).min().ok_or_else(overflow)?;
-    let hi = game.modules.iter().map(|m| m.end()).max().ok_or_else(overflow)?;
+    let lo = game
+        .modules
+        .iter()
+        .map(|m| m.start())
+        .min()
+        .ok_or_else(overflow)?;
+    let hi = game
+        .modules
+        .iter()
+        .map(|m| m.end())
+        .max()
+        .ok_or_else(overflow)?;
     let stack_len = align_up(game.main_thread.stack_size, PAGE)
         .and_then(|s| s.checked_add(PAGE))
         .ok_or_else(overflow)?;
     let tls_start = align_up(hi.max(floor), PAGE).ok_or_else(overflow)?;
     let tls_len = TLS_SLOTS * TLS_SLOT_SIZE;
     let shared_start = tls_start.checked_add(tls_len).ok_or_else(overflow)?;
-    let heap_start = align_up(shared_start.checked_add(SHARED_LEN).ok_or_else(overflow)?, REGION_ALIGN)
-        .ok_or_else(overflow)?;
+    let heap_start = align_up(
+        shared_start.checked_add(SHARED_LEN).ok_or_else(overflow)?,
+        REGION_ALIGN,
+    )
+    .ok_or_else(overflow)?;
     let heap_len = align_up(game.memory.heap, REGION_ALIGN).ok_or_else(overflow)?;
     let stack_region_start = heap_start.checked_add(heap_len).ok_or_else(overflow)?;
     let stack_region_len = game
@@ -98,18 +111,44 @@ pub fn plan(game: &Game, floor: u64) -> Result<Layout> {
         .checked_add(stack_len)
         .and_then(|v| align_up(v, REGION_ALIGN))
         .ok_or_else(overflow)?;
-    let alias_start = stack_region_start.checked_add(stack_region_len).ok_or_else(overflow)?;
+    let alias_start = stack_region_start
+        .checked_add(stack_region_len)
+        .ok_or_else(overflow)?;
     let alias_len = align_up(game.memory.alias, REGION_ALIGN).ok_or_else(overflow)?;
     let end = alias_start.checked_add(alias_len).ok_or_else(overflow)?;
     Ok(Layout {
-        all: Range { start: lo, len: end - lo },
-        modules: Range { start: lo, len: hi - lo },
-        main_stack: Range { start: stack_region_start, len: stack_len },
-        tls: Range { start: tls_start, len: tls_len },
-        shared: Range { start: shared_start, len: SHARED_LEN },
-        heap: Range { start: heap_start, len: heap_len },
-        stack: Range { start: stack_region_start, len: stack_region_len },
-        alias: Range { start: alias_start, len: alias_len },
+        all: Range {
+            start: lo,
+            len: end - lo,
+        },
+        modules: Range {
+            start: lo,
+            len: hi - lo,
+        },
+        main_stack: Range {
+            start: stack_region_start,
+            len: stack_len,
+        },
+        tls: Range {
+            start: tls_start,
+            len: tls_len,
+        },
+        shared: Range {
+            start: shared_start,
+            len: SHARED_LEN,
+        },
+        heap: Range {
+            start: heap_start,
+            len: heap_len,
+        },
+        stack: Range {
+            start: stack_region_start,
+            len: stack_region_len,
+        },
+        alias: Range {
+            start: alias_start,
+            len: alias_len,
+        },
     })
 }
 

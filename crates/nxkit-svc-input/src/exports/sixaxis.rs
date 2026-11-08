@@ -24,12 +24,23 @@ fn handle_states(out: u64, n: usize, handle: u32) -> i32 {
 
 /// `GetSixAxisSensorHandles`: two sensors for the handheld and dual styles, one for the others.
 extern "C" fn get_handles(handles: u64, n: i32, id: u64, styles: u32) -> i32 {
-    let wanted = if styles & (style::HANDHELD | style::JOY_DUAL) != 0 { 2 } else { 1 };
+    let wanted = if styles & (style::HANDHELD | style::JOY_DUAL) != 0 {
+        2
+    } else {
+        1
+    };
     let k = wanted.min(n.max(0));
     let id = read_ref(id) & 0xff;
-    let bit = if styles == 0 { 0 } else { styles.trailing_zeros() };
+    let bit = if styles == 0 {
+        0
+    } else {
+        styles.trailing_zeros()
+    };
     for i in 0..k as u32 {
-        let _ = guest::write_u32(handles.wrapping_add(4 * u64::from(i)), bit | id << 8 | i << 16);
+        let _ = guest::write_u32(
+            handles.wrapping_add(4 * u64::from(i)),
+            bit | id << 8 | i << 16,
+        );
     }
     k
 }
@@ -87,7 +98,10 @@ pub(super) fn list() -> Vec<Export> {
             "_ZN2nn3hid21GetSixAxisSensorStateEPNS0_18SixAxisSensorStateERKNS0_19SixAxisSensorHandleE",
             get_state as usize,
         ),
-        Export::new("_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE", is_at_rest as usize),
+        Export::new(
+            "_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE",
+            is_at_rest as usize,
+        ),
         Export::new(
             "_ZN2nn3hid32GetSixAxisSensorFusionParametersEPfS1_RKNS0_19SixAxisSensorHandleE",
             get_fusion_parameters as usize,

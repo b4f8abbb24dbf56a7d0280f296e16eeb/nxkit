@@ -61,7 +61,9 @@ extern "C" fn pop_launch_parameter(out: u64, buf: u64, n: u64) -> u32 {
     if LAUNCH_POPPED.swap(true, Ordering::SeqCst) {
         return 0;
     }
-    let len = parameter.len().min(usize::try_from(n).unwrap_or(usize::MAX));
+    let len = parameter
+        .len()
+        .min(usize::try_from(n).unwrap_or(usize::MAX));
     put_bytes(buf, &parameter[..len]);
     put_u64(out, len as u64);
     log(&format!("oe::TryPopLaunchParameter: {len} bytes"));
@@ -77,11 +79,18 @@ extern "C" fn previous_program() -> i32 {
 /// the process just ends. The call does not return.
 extern "C" fn execute_program(index: u32, param: u64, n: u64) {
     let len = usize::try_from(n).unwrap_or(0).min(0x10_0000);
-    let bytes = if param != 0 && len > 0 { get_bytes(param, len) } else { Vec::new() };
+    let bytes = if param != 0 && len > 0 {
+        get_bytes(param, len)
+    } else {
+        Vec::new()
+    };
     let index = index as i32;
     match seams().execute_program {
         Some(start) => {
-            log(&format!("oe::ExecuteProgram({index}, {} bytes): this program ends", bytes.len()));
+            log(&format!(
+                "oe::ExecuteProgram({index}, {} bytes): this program ends",
+                bytes.len()
+            ));
             start(index, &bytes);
         }
         None => log(&format!(
@@ -134,7 +143,9 @@ extern "C" fn graphics_scale() -> u32 {
 /// `gs::sdk::SetGraphicsFrameLengthMode`: noted.
 extern "C" fn frame_length(mode: u32) {
     if LAST_FRAME_LENGTH.swap(mode, Ordering::Relaxed) != mode {
-        log(&format!("gs: graphics frame length mode {mode} (0 auto, 1 30 fps, 2 60 fps, 3 120 fps)"));
+        log(&format!(
+            "gs: graphics frame length mode {mode} (0 auto, 1 30 fps, 2 60 fps, 3 120 fps)"
+        ));
     }
 }
 
@@ -163,7 +174,9 @@ extern "C" fn desired_language() -> u64 {
 /// `GetRegionCode`.
 extern "C" fn region() -> i32 {
     let r = region_code(&config().language);
-    log_once_with(&REGION_LOGGED, || format!("oe::GetRegionCode: {r} for language {}", config().language));
+    log_once_with(&REGION_LOGGED, || {
+        format!("oe::GetRegionCode: {r} for language {}", config().language)
+    });
     r
 }
 

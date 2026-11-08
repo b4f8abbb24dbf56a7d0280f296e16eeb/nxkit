@@ -117,7 +117,12 @@ fn adr_imm(w: u32) -> i64 {
 /// `adrp` + `add` (the table), `ldrb`, `add .., lsl #2` and `br`, with `cmp wN, #<last item>` before it. All of them
 /// lie within 8 instructions of the `mov`. The table must lie in `ro`.
 fn find_driver_switch(text: &[u8], text_addr: u64, ro: (u64, u64)) -> Option<DriverSwitch> {
-    let t: Vec<u32> = text.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+    let t: Vec<u32> = text
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
+        .collect();
     let at = |q: usize| text_addr + q as u64 * 4;
     let n = t.len();
     let mut p = 8;
@@ -144,11 +149,17 @@ fn find_driver_switch(text: &[u8], text_addr: u64, ro: (u64, u64)) -> Option<Dri
             }
         }
         p += 1;
-        let (Some(table), Some(cases)) = (table, cases) else { continue };
+        let (Some(table), Some(cases)) = (table, cases) else {
+            continue;
+        };
         if lim <= 1 || !ldrb || !br || table < ro.0 || table + u64::from(lim) >= ro.1 {
             continue;
         }
-        return Some(DriverSwitch { table, cases, last: lim });
+        return Some(DriverSwitch {
+            table,
+            cases,
+            last: lim,
+        });
     }
     None
 }
@@ -224,7 +235,9 @@ fn notify_modes(name: &'static str, d: Obj) -> AbiResult<()> {
     let lower_left = d.i32(OFF_ORIGIN)? == ORIGIN_LOWER_LEFT;
     let zero_to_one = d.i32(OFF_DEPTH)? != 0;
     if crate::diag_on() {
-        eprintln!("DIAG depth {name}: origin lower left {lower_left}, depth zero to one {zero_to_one}");
+        eprintln!(
+            "DIAG depth {name}: origin lower left {lower_left}, depth zero to one {zero_to_one}"
+        );
     }
     gpu(name).backend().device_modes(lower_left, zero_to_one);
     Ok(())
@@ -287,15 +300,19 @@ enum Info {
 
 /// The value of an `NVNdeviceInfo` item. `sdk` gives the constant of the game's own NVN2 driver for an item.
 fn info_value(item: i32, s: &Settings, p: Platform, sdk: impl Fn(u32) -> Option<u32>) -> Info {
-    let Ok(i) = usize::try_from(item) else { return Info::Unknown };
+    let Ok(i) = usize::try_from(item) else {
+        return Info::Unknown;
+    };
     match (p, item) {
         (_, 0) => Info::Value(s.api_major),
         (_, 1) => Info::Value(s.api_minor),
         // The Switch 2: the game's constant, then the table. A run-time item below 0x60 keeps the Switch value.
-        (Platform::Ounce, _) if i < INFO2_LEN && (INFO2[i] != RT || i >= INFO_TABLE_LEN) => match INFO2[i] {
-            RT => Info::Runtime,
-            v => Info::Value(sdk(i as u32).unwrap_or(v as u32)),
-        },
+        (Platform::Ounce, _) if i < INFO2_LEN && (INFO2[i] != RT || i >= INFO_TABLE_LEN) => {
+            match INFO2[i] {
+                RT => Info::Runtime,
+                v => Info::Value(sdk(i as u32).unwrap_or(v as u32)),
+            }
+        }
         (_, 0x2E) => Info::Value(s.gpu_code.0),
         (_, 0x30) => Info::Value(s.gpu_code.1),
         (Platform::Nx, INFO_EXTRA) => Info::Value(256),
@@ -462,7 +479,11 @@ mod tests {
         assert_eq!(none(0x62), Info::Runtime);
         let sdk = |i| info_value(i, &s, Platform::Ounce, |item| (item == 0x30).then_some(17));
         assert_eq!(sdk(0x30), Info::Value(17));
-        assert_eq!(sdk(1), Info::Value(30), "item 1 is the settings', which the host took from the sdk");
+        assert_eq!(
+            sdk(1),
+            Info::Value(30),
+            "item 1 is the settings', which the host took from the sdk"
+        );
     }
 
     #[test]
@@ -471,17 +492,31 @@ mod tests {
         // add x10, x10, #0x800 / ldrb w11, [x10, x1] / add x9, x9, x11, lsl #2 / br x9, then padding.
         let mut w = vec![0xD503_201Fu32; 8];
         w.extend([
-            0x7102_A43F, 0x5280_1CE0, 0x1000_0209, 0x9000_000A, 0x9120_014A, 0x3861_694B,
-            0x8B0B_0929, 0xD61F_0120,
+            0x7102_A43F,
+            0x5280_1CE0,
+            0x1000_0209,
+            0x9000_000A,
+            0x9120_014A,
+            0x3861_694B,
+            0x8B0B_0929,
+            0xD61F_0120,
         ]);
         w.extend([0xD503_201F; 12]);
         let bytes: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
         let found = find_driver_switch(&bytes, 0x1000, (0x1800, 0x2000));
         assert_eq!(
             found,
-            Some(DriverSwitch { table: 0x1800, cases: 0x1000 + 10 * 4 + 0x40, last: 0xA9 })
+            Some(DriverSwitch {
+                table: 0x1800,
+                cases: 0x1000 + 10 * 4 + 0x40,
+                last: 0xA9
+            })
         );
-        assert_eq!(find_driver_switch(&bytes, 0x1000, (0x1900, 0x2000)), None, "the table lies outside the data");
+        assert_eq!(
+            find_driver_switch(&bytes, 0x1000, (0x1900, 0x2000)),
+            None,
+            "the table lies outside the data"
+        );
     }
 
     #[test]

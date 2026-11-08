@@ -45,12 +45,12 @@ pub mod run;
 #[cfg(target_os = "macos")]
 pub mod seams;
 #[cfg(target_os = "macos")]
-pub mod wire;
-#[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod sys;
 #[cfg(target_os = "macos")]
 pub mod thread;
+#[cfg(target_os = "macos")]
+pub mod wire;
 
 pub use error::{HostError, Result};
 pub use manifest::Game;

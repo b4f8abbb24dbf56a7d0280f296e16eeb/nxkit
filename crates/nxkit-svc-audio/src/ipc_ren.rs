@@ -30,7 +30,9 @@ impl AudioRendererManager {
         p[0x34..0x38].copy_from_slice(&d[0x30..0x34]);
         let n = service_work_size(&p);
         if n == 0 {
-            eprintln!("nxkit-audio: [RED] audren: GetWorkBufferSize for an unknown revision or an invalid parameter");
+            eprintln!(
+                "nxkit-audio: [RED] audren: GetWorkBufferSize for an unknown revision or an invalid parameter"
+            );
             rsp.result = NOT_SUPPORTED;
             return;
         }
@@ -48,7 +50,8 @@ impl AudioRendererManager {
             rsp.result = RES_FAIL;
             return;
         };
-        rsp.objects.push(Arc::new(AudioDevice { writable, readable }));
+        rsp.objects
+            .push(Arc::new(AudioDevice { writable, readable }));
     }
 }
 
@@ -124,7 +127,10 @@ impl Service for AudioDevice {
             4 | 11 | 12 => rsp.copy_handles.push(self.readable),
             5 => rsp.push_u32(2),
             15..=18 => {
-                eprintln!("nxkit-audio: audren: IAudioDevice command {} (device notification) is not supported", req.command);
+                eprintln!(
+                    "nxkit-audio: audren: IAudioDevice command {} (device notification) is not supported",
+                    req.command
+                );
                 rsp.result = NOT_SUPPORTED;
             }
             19 => AUTOTUNE.store(req.u32_at(0).unwrap_or(0) & 1 != 0, Ordering::Relaxed),

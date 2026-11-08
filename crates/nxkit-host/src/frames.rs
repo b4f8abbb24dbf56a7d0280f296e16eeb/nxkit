@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use nxkit_abi::platform::{self, Platform};
 use nxkit_gpu::{GpuBackend, GpuSettings};
 use nxkit_metal::{
-    Context, DisplayTick, FrameHooks, FrameInterval, FrameSource, GobOrder, GuestMemory, Pacer, PolicyInput,
-    choose_present_plan,
+    Context, DisplayTick, FrameHooks, FrameInterval, FrameSource, GobOrder, GuestMemory, Pacer,
+    PolicyInput, choose_present_plan,
 };
 use nxkit_nvn::backend::Backend;
 use nxkit_rt::nvn::{self, CommandSettings};
@@ -46,9 +46,15 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
             (settings.pso_mtl4 || path.is_file()).then_some(path)
         },
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
-        threads: std::env::var("NXKIT_ENCODE_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+        threads: std::env::var("NXKIT_ENCODE_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         // Scaling is off until every attachment of a pass gets the same scale decision.
-        scale: std::env::var("NXKIT_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
+        scale: std::env::var("NXKIT_SCALE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0),
         enc_thread: settings.enc_thread,
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
@@ -66,7 +72,10 @@ fn nvn_settings(settings: &Settings) -> nvn::Settings {
     if platform::get() == Platform::Ounce {
         s.api_major = nvn::NVN2_API_MAJOR;
         s.api_minor = nvn::sdk_item(1).unwrap_or(nvn::NVN2_API_MINOR);
-        eprintln!("nxkit-host: NVN2 device API {}.{} (Switch 2)", s.api_major, s.api_minor);
+        eprintln!(
+            "nxkit-host: NVN2 device API {}.{} (Switch 2)",
+            s.api_major, s.api_minor
+        );
     }
     if let Some((major, minor)) = settings.nvn_api {
         (s.api_major, s.api_minor) = (major, minor);
@@ -95,7 +104,10 @@ impl FrameHooks for Ticks {
         nxkit_svc_input::tick();
         // `Err` means the pacing service is not initialised. The pacer then keeps the source of the plan.
         let _ = nxkit_svc_pacing::on_display_tick();
-        let hold = nxkit_svc_pacing::hold().ok().and_then(|h| u32::try_from(h).ok()).unwrap_or(0);
+        let hold = nxkit_svc_pacing::hold()
+            .ok()
+            .and_then(|h| u32::try_from(h).ok())
+            .unwrap_or(0);
         let per_vsync = nxkit_svc_pacing::snapshot().map_or(1, |s| s.ticks_per_vsync.max(1));
         // A change of the hold, or of the ticks per vsync (the screen changed its rate), makes a new source. Without a
         // hold from the frame step, a frame stays one vsync.
@@ -104,7 +116,9 @@ impl FrameHooks for Ticks {
             let mut applied = self.applied.lock().unwrap_or_else(PoisonError::into_inner);
             if *applied != key {
                 *applied = key;
-                self.pacer.set_source(FrameSource::Hold { ticks_per_frame: hold.max(1) * per_vsync });
+                self.pacer.set_source(FrameSource::Hold {
+                    ticks_per_frame: hold.max(1) * per_vsync,
+                });
             }
         }
         let n = self.ticks.fetch_add(1, Ordering::Relaxed) + 1;
@@ -126,13 +140,22 @@ impl FrameHooks for Ticks {
 }
 
 /// Makes the backend, installs it in the NVN front end and returns the hooks for the display link.
-pub fn install(ctx: &Context, memory: &Arc<GuestMemory>, root: &Path, settings: &Settings) -> Result<Arc<dyn FrameHooks>> {
+pub fn install(
+    ctx: &Context,
+    memory: &Arc<GuestMemory>,
+    root: &Path,
+    settings: &Settings,
+) -> Result<Arc<dyn FrameHooks>> {
     let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings))
         .map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
     nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))
         .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
-    if !nvn::set_command_settings(CommandSettings { ignore_null_stream_binds: settings.vertex_stream_null_bind }) {
-        return Err(HostError::App("the NVN command settings came after the first command buffer".into()));
+    if !nvn::set_command_settings(CommandSettings {
+        ignore_null_stream_binds: settings.vertex_stream_null_bind,
+    }) {
+        return Err(HostError::App(
+            "the NVN command settings came after the first command buffer".into(),
+        ));
     }
     let plan = choose_present_plan(&PolicyInput {
         title: None,
@@ -141,7 +164,10 @@ pub fn install(ctx: &Context, memory: &Arc<GuestMemory>, root: &Path, settings: 
         display: DISPLAY,
         interpolation: false,
     });
-    eprintln!("nxkit-host: present plan {:?} ({})", plan.source, plan.reason);
+    eprintln!(
+        "nxkit-host: present plan {:?} ({})",
+        plan.source, plan.reason
+    );
     let pacer = Pacer::new(plan, backend.clone());
     backend.set_pacer(pacer.clone());
     Ok(Arc::new(Ticks {

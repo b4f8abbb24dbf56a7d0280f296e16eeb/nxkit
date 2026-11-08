@@ -24,7 +24,10 @@ pub(super) fn applet_enter(name: &str) {
 
 /// The library applet closes.
 pub(super) fn applet_leave() {
-    if OPEN_APPLETS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_err() {
+    if OPEN_APPLETS
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+        .is_err()
+    {
         super::fatal("applet_leave without applet_enter");
     }
     state().focus_sync(-1);
@@ -58,7 +61,11 @@ extern "C" fn set_focus_mode(mode: u32) {
     state().with(|i| i.notify_focus = notifies);
     log(&format!(
         "oe::SetFocusHandlingMode {mode} ({})",
-        if notifies { "focus notifications" } else { "suspended out of focus, no focus notifications" }
+        if notifies {
+            "focus notifications"
+        } else {
+            "suspended out of focus, no focus notifications"
+        }
     ));
 }
 

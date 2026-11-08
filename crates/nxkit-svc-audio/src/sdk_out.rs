@@ -46,16 +46,25 @@ fn open_at(g: u64, ev: u64, param: u64) -> u32 {
         ch = 2;
     }
     if rate != 0 && rate != engine::RATE as i32 {
-        host::fatal(&format!("AudioOut sample rate {rate} is not supported (48000 only)"));
+        host::fatal(&format!(
+            "AudioOut sample rate {rate} is not supported (48000 only)"
+        ));
     }
     let Some(idx) = open_slot(ev, ch) else {
-        host::fatal(&format!("more than {} AudioOuts are open at once", engine::SLOTS));
+        host::fatal(&format!(
+            "more than {} AudioOuts are open at once",
+            engine::SLOTS
+        ));
     };
     if !OUTS.put(g, idx) {
         host::fatal("more AudioOut objects than the host can map");
     }
     write_info(g, ch, engine::STOPPED);
-    let how = if ev == 0 { ", no release event (the game polls)" } else { "" };
+    let how = if ev == 0 {
+        ", no release event (the game polls)"
+    } else {
+        ""
+    };
     eprintln!("nxkit-audio: OpenAudioOut {g:#x} with {ch} channels, slot {idx}{how}");
     0
 }
@@ -166,7 +175,15 @@ extern "C" fn append(g: u64, b: u64) -> u32 {
     let idx = slot(g);
     let addr = guest::read_u64(b + BUF_PTR).unwrap_or(0);
     let size = guest::read_u64(b + BUF_SIZE).unwrap_or(0);
-    u32::from(mixer().append(idx, Buf { token: b, addr, size, host: false }))
+    u32::from(mixer().append(
+        idx,
+        Buf {
+            token: b,
+            addr,
+            size,
+            host: false,
+        },
+    ))
 }
 
 extern "C" fn released(g: u64) -> u64 {
@@ -175,10 +192,18 @@ extern "C" fn released(g: u64) -> u64 {
 
 fn ai_open(name: u64) -> u32 {
     if !AI_LOGGED.swap(true, Ordering::Relaxed) {
-        let n = if name == 0 { Vec::new() } else { guest::read_cstr(name, 64).unwrap_or_default() };
+        let n = if name == 0 {
+            Vec::new()
+        } else {
+            guest::read_cstr(name, 64).unwrap_or_default()
+        };
         eprintln!(
             "nxkit-audio: audio input {}: the host has no microphone, the open fails",
-            if n.is_empty() { "(default)".to_string() } else { String::from_utf8_lossy(&n).into_owned() }
+            if n.is_empty() {
+                "(default)".to_string()
+            } else {
+                String::from_utf8_lossy(&n).into_owned()
+            }
         );
     }
     RES_FAIL
@@ -229,8 +254,16 @@ extern "C" fn in_format(_g: u64) -> i32 {
 /// Adds the exports of this module. `StartAudioOut`, `StopAudioOut` and `CloseAudioOut` go to `big` because Core Audio
 /// needs far more stack than a game thread may have left.
 pub(crate) fn exports(v: &mut Vec<Export>, big: &mut Vec<Export>) {
-    ex!(v, "_ZN2nn5audio27InitializeAudioOutParameterEPNS0_17AudioOutParameterE", init_param);
-    ex!(v, "_ZN2nn5audio13ListAudioOutsEPNS0_12AudioOutInfoEi", list_outs);
+    ex!(
+        v,
+        "_ZN2nn5audio27InitializeAudioOutParameterEPNS0_17AudioOutParameterE",
+        init_param
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio13ListAudioOutsEPNS0_12AudioOutInfoEi",
+        list_outs
+    );
     ex!(
         v,
         "_ZN2nn5audio12OpenAudioOutEPNS0_8AudioOutEPNS_2os11SystemEventEPKcRKNS0_17AudioOutParameterE",
@@ -255,20 +288,68 @@ pub(crate) fn exports(v: &mut Vec<Export>, big: &mut Vec<Export>) {
     ex!(big, "_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", stop);
     ex!(big, "_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE", close);
     ex!(v, "_ZN2nn5audio16GetAudioOutStateEPKNS0_8AudioOutE", state);
-    ex!(v, "_ZN2nn5audio22GetAudioOutBufferCountEPKNS0_8AudioOutE", buffer_count);
-    ex!(v, "_ZN2nn5audio21GetAudioOutSampleRateEPKNS0_8AudioOutE", sample_rate);
-    ex!(v, "_ZN2nn5audio23GetAudioOutChannelCountEPKNS0_8AudioOutE", channel_count);
+    ex!(
+        v,
+        "_ZN2nn5audio22GetAudioOutBufferCountEPKNS0_8AudioOutE",
+        buffer_count
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio21GetAudioOutSampleRateEPKNS0_8AudioOutE",
+        sample_rate
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio23GetAudioOutChannelCountEPKNS0_8AudioOutE",
+        channel_count
+    );
     ex!(v, "_ZN2nn5audio15GetAudioOutNameEPKNS0_8AudioOutE", name);
-    ex!(v, "_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE", sample_format);
-    ex!(v, "_ZN2nn5audio17SetAudioOutVolumeEPNS0_8AudioOutEf", set_volume);
-    ex!(v, "_ZN2nn5audio17GetAudioOutVolumeEPKNS0_8AudioOutE", get_volume);
-    ex!(v, "_ZN2nn5audio21SetAudioOutBufferInfoEPNS0_14AudioOutBufferEPvmm", set_buffer_info);
-    ex!(v, "_ZN2nn5audio28GetAudioOutBufferDataPointerEPKNS0_14AudioOutBufferE", buffer_data_pointer);
-    ex!(v, "_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE", buffer_data_size);
-    ex!(v, "_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE", append);
-    ex!(v, "_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE", released);
+    ex!(
+        v,
+        "_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE",
+        sample_format
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio17SetAudioOutVolumeEPNS0_8AudioOutEf",
+        set_volume
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio17GetAudioOutVolumeEPKNS0_8AudioOutE",
+        get_volume
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio21SetAudioOutBufferInfoEPNS0_14AudioOutBufferEPvmm",
+        set_buffer_info
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio28GetAudioOutBufferDataPointerEPKNS0_14AudioOutBufferE",
+        buffer_data_pointer
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE",
+        buffer_data_size
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE",
+        append
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE",
+        released
+    );
 
-    ex!(v, "_ZN2nn5audio12ListAudioInsEPNS0_11AudioInInfoEi", list_ins);
+    ex!(
+        v,
+        "_ZN2nn5audio12ListAudioInsEPNS0_11AudioInInfoEi",
+        list_ins
+    );
     ex!(
         v,
         "_ZN2nn5audio11OpenAudioInEPNS0_7AudioInEPNS_2os11SystemEventEPKcRKNS0_16AudioInParameterE",
@@ -287,9 +368,29 @@ pub(crate) fn exports(v: &mut Vec<Export>, big: &mut Vec<Export>) {
     ex!(v, "_ZN2nn5audio12StartAudioInEPNS0_7AudioInE", start_in);
     ex!(v, "_ZN2nn5audio11StopAudioInEPNS0_7AudioInE", nothing1);
     ex!(v, "_ZN2nn5audio12CloseAudioInEPNS0_7AudioInE", nothing1);
-    ex!(v, "_ZN2nn5audio19AppendAudioInBufferEPNS0_7AudioInEPNS0_13AudioInBufferE", append_in);
-    ex!(v, "_ZN2nn5audio24GetReleasedAudioInBufferEPNS0_7AudioInE", released_in);
-    ex!(v, "_ZN2nn5audio20GetAudioInSampleRateEPKNS0_7AudioInE", in_rate);
-    ex!(v, "_ZN2nn5audio22GetAudioInChannelCountEPKNS0_7AudioInE", in_channels);
-    ex!(v, "_ZN2nn5audio22GetAudioInSampleFormatEPKNS0_7AudioInE", in_format);
+    ex!(
+        v,
+        "_ZN2nn5audio19AppendAudioInBufferEPNS0_7AudioInEPNS0_13AudioInBufferE",
+        append_in
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio24GetReleasedAudioInBufferEPNS0_7AudioInE",
+        released_in
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio20GetAudioInSampleRateEPKNS0_7AudioInE",
+        in_rate
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio22GetAudioInChannelCountEPKNS0_7AudioInE",
+        in_channels
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio22GetAudioInSampleFormatEPKNS0_7AudioInE",
+        in_format
+    );
 }

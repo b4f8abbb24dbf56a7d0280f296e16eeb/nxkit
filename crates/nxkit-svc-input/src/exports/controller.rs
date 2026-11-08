@@ -67,8 +67,14 @@ stubs! { stub_list;
 /// The controller functions.
 pub(super) fn list() -> Vec<Export> {
     let mut v = vec![
-        Export::new("_ZN2nn3hid19GetPlayerLedPatternERKj", get_player_led_pattern as usize),
-        Export::new("_ZN2nn3hid22GetNpadControllerColorEPNS0_19NpadControllerColorERKj", get_controller_color as usize),
+        Export::new(
+            "_ZN2nn3hid19GetPlayerLedPatternERKj",
+            get_player_led_pattern as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid22GetNpadControllerColorEPNS0_19NpadControllerColorERKj",
+            get_controller_color as usize,
+        ),
         Export::new(
             "_ZN2nn3hid22GetNpadControllerColorEPNS0_19NpadControllerColorES2_RKj",
             get_controller_colors as usize,
@@ -77,7 +83,10 @@ pub(super) fn list() -> Vec<Export> {
             "_ZN2nn3hid21ShowControllerSupportEPNS0_27ControllerSupportResultInfoERKNS0_20ControllerSupportArgE",
             show_controller_support_with_info as usize,
         ),
-        Export::new("_ZN2nn3hid21ShowControllerSupportERKNS0_20ControllerSupportArgE", show_controller_support_arg as usize),
+        Export::new(
+            "_ZN2nn3hid21ShowControllerSupportERKNS0_20ControllerSupportArgE",
+            show_controller_support_arg as usize,
+        ),
     ];
     v.extend(stub_list());
     v

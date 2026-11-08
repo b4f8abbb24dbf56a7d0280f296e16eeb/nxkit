@@ -148,8 +148,8 @@ impl CommandBuffer {
                 .get(self.current + 1)
                 .filter(|b| b.end - b.start >= need)
                 .cloned();
-            let Some(next) = next
-                .filter(|_| self.pos + u64::from(JUMP_BYTES) <= self.blocks[self.current].end)
+            let Some(next) =
+                next.filter(|_| self.pos + u64::from(JUMP_BYTES) <= self.blocks[self.current].end)
             else {
                 return Err(NvnError::OutOfCommandMemory { need: need as u32 });
             };

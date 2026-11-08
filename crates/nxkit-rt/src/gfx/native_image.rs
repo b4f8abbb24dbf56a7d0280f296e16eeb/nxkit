@@ -67,7 +67,10 @@ extern "C" fn builder_set_defaults(b: u64) {
 
 /// `nvnNativeImageBuilderSetDevice(builder, device)`: native images are the host's.
 extern "C" fn builder_set_device(b: u64, dev: u64) {
-    checked("nvnNativeImageBuilderSetDevice", guest::write_u64(b + OFF_DEV, dev));
+    checked(
+        "nvnNativeImageBuilderSetDevice",
+        guest::write_u64(b + OFF_DEV, dev),
+    );
 }
 
 /// `nvnNativeImageBuilderSetNativeImageHandle(builder, handle)`: native images are the host's.
@@ -84,7 +87,10 @@ extern "C" fn builder_set_memory_permission(_b: u64, _permission: u32) {}
 
 /// `nvnNativeImageBuilderSetFormat(builder, format)`: native images are the host's.
 extern "C" fn builder_set_format(b: u64, format: u32) {
-    checked("nvnNativeImageBuilderSetFormat", guest::write_u32(b + OFF_FORMAT, format));
+    checked(
+        "nvnNativeImageBuilderSetFormat",
+        guest::write_u32(b + OFF_FORMAT, format),
+    );
 }
 
 /// `nvnNativeImageInitialize(image, builder)`: native images are the host's. The image takes the device, the handle
@@ -119,7 +125,9 @@ extern "C" fn texture_initialize_from_native_image(t: u64, i: u64) -> u32 {
     let handle = checked(NAME, guest::read_u32(i + OFF_HANDLE));
     let format = checked(NAME, guest::read_u32(i + OFF_FORMAT));
     let Some(picture) = native_image(handle) else {
-        log(format_args!("[RED] {NAME}: handle {handle:#x} names no picture"));
+        log(format_args!(
+            "[RED] {NAME}: handle {handle:#x} names no picture"
+        ));
         return 0;
     };
     if checked(NAME, guest::read_u32(i + OFF_HAS_POOL)) == 0 {
@@ -181,7 +189,10 @@ mod tests {
         guest::write_u32(i + OFF_HAS_POOL, 5).expect("flag");
         assert_eq!(image_initialize(i, b), 1);
         assert_eq!(guest::read_u64(i).expect("device"), 0xD00D);
-        assert_eq!(guest::read_u32(i + OFF_HANDLE).expect("handle"), 0x8000_0001);
+        assert_eq!(
+            guest::read_u32(i + OFF_HANDLE).expect("handle"),
+            0x8000_0001
+        );
         assert_eq!(guest::read_u32(i + OFF_FORMAT).expect("format"), 37);
         assert_eq!(guest::read_u32(i + OFF_HAS_POOL).expect("flag"), 0);
         image_finalize(i);

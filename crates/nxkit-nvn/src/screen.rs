@@ -26,7 +26,11 @@ fn slot(present: u64) -> usize {
 /// Present `present` (counted from 1) went on screen at `secs` on the host clock. A time of 0 or less means the display
 /// dropped it, and a present that was replaced before a tick showed it is dropped too.
 pub fn shown(present: u64, secs: f64) {
-    let v = if secs.is_finite() && secs > 0.0 { secs } else { -1.0 };
+    let v = if secs.is_finite() && secs > 0.0 {
+        secs
+    } else {
+        -1.0
+    };
     let i = slot(present);
     SHOWN[i].store(v.to_bits(), Ordering::Relaxed);
     TAG[i].store(present, Ordering::Release);
@@ -50,7 +54,11 @@ pub fn set_hold(present: u64, vsyncs: u32) {
 /// The hold of present `present`, 0 when not known.
 pub fn hold(present: u64) -> u32 {
     let v = HOLD[slot(present)].load(Ordering::Relaxed);
-    if v >> 8 == present { (v & 0xFF) as u32 } else { 0 }
+    if v >> 8 == present {
+        (v & 0xFF) as u32
+    } else {
+        0
+    }
 }
 
 /// The GPU took `ms` for the latest finished frame.
@@ -118,7 +126,10 @@ fn judder_note(secs: f64) {
     }
     let held = refreshes_held(secs - prev, hz);
     BIN[bin(held)].fetch_add(1, Ordering::Relaxed);
-    STAY_MILLI.fetch_add(((secs - prev) * hz * 1000.0).round() as u64, Ordering::Relaxed);
+    STAY_MILLI.fetch_add(
+        ((secs - prev) * hz * 1000.0).round() as u64,
+        Ordering::Relaxed,
+    );
     let counted: u64 = BIN[..5].iter().map(|b| b.load(Ordering::Relaxed)).sum();
     if counted >= JUDDER_EVERY {
         let b: Vec<u64> = BIN.iter().map(|b| b.swap(0, Ordering::Relaxed)).collect();
@@ -173,6 +184,9 @@ mod tests {
     #[test]
     fn the_judder_line_names_every_bin() {
         let l = judder_line(120.0, &[0, 118, 2, 0, 0, 1], 2.02);
-        assert_eq!(l, "DIAG judder refresh 120.00 Hz: 1x 0 2x 118 3x 2 4x 0 5x+ 0 dropped 1 mean 2.02 refreshes");
+        assert_eq!(
+            l,
+            "DIAG judder refresh 120.00 Hz: 1x 0 2x 118 3x 2 4x 0 5x+ 0 dropped 1 mean 2.02 refreshes"
+        );
     }
 }

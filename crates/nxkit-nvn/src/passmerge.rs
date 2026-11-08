@@ -53,7 +53,10 @@ fn atts<'a>(p: &'a PassPlan, pass: &Pass) -> &'a [AttachmentPlan] {
 }
 
 fn same_attachments(a: &[AttachmentPlan], b: &[AttachmentPlan]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(l, r)| l.tex == r.tex && l.slot == r.slot && l.view == r.view)
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(l, r)| l.tex == r.tex && l.slot == r.slot && l.view == r.view)
 }
 
 fn writes_of<'a>(p: &'a PassPlan, pass: &Pass) -> &'a [TexId] {
@@ -70,7 +73,10 @@ fn blocked(p: &PassPlan, a: &Pass, b: &Pass) -> Option<usize> {
     if p.reads_of(b).iter().any(|t| xa.iter().any(|x| x.tex == *t)) {
         return Some(1);
     }
-    if matches!(b.begin, crate::passes::Boundary::Barrier(_) | crate::passes::Boundary::Targets) {
+    if matches!(
+        b.begin,
+        crate::passes::Boundary::Barrier(_) | crate::passes::Boundary::Targets
+    ) {
         None
     } else {
         Some(2)
@@ -86,9 +92,17 @@ impl MergeReport {
                 continue;
             }
             r.render += 1;
-            let cmds = frame.cmds.get(pass.cmds.start as usize..pass.cmds.end as usize).unwrap_or(&[]);
-            let draws = cmds.iter().filter(|c| matches!(c, Cmd::Draw { .. })).count();
-            let clears = cmds.iter().any(|c| matches!(c, Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. }));
+            let cmds = frame
+                .cmds
+                .get(pass.cmds.start as usize..pass.cmds.end as usize)
+                .unwrap_or(&[]);
+            let draws = cmds
+                .iter()
+                .filter(|c| matches!(c, Cmd::Draw { .. }))
+                .count();
+            let clears = cmds
+                .iter()
+                .any(|c| matches!(c, Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. }));
             r.one_draw += u32::from(draws == 1);
             r.empty += u32::from(draws == 0 && !clears);
             for a in atts(plan, pass) {
@@ -105,7 +119,9 @@ impl MergeReport {
                     r.store_assumed_bytes += a.bytes;
                 }
             }
-            let Some(next) = plan.passes.get(i + 1) else { continue };
+            let Some(next) = plan.passes.get(i + 1) else {
+                continue;
+            };
             let (xa, a_reads) = (atts(plan, pass), plan.reads_of(pass));
             if next.kind == PassKind::Render && same_attachments(xa, atts(plan, next)) {
                 match blocked(plan, pass, next) {
@@ -114,14 +130,24 @@ impl MergeReport {
                     _ => r.blocked_other += 1,
                 }
             }
-            let Some(after) = plan.passes.get(i + 2) else { continue };
+            let Some(after) = plan.passes.get(i + 2) else {
+                continue;
+            };
             let between = matches!(next.kind, PassKind::Compute | PassKind::Copy);
-            if between && after.kind == PassKind::Render && same_attachments(xa, atts(plan, after)) && blocked(plan, pass, after).is_none() {
+            if between
+                && after.kind == PassKind::Render
+                && same_attachments(xa, atts(plan, after))
+                && blocked(plan, pass, after).is_none()
+            {
                 r.split_by_foreign += 1;
                 let (reads, writes) = (plan.reads_of(next), writes_of(plan, next));
                 let in_a = |t: &TexId| xa.iter().any(|x| x.tex == *t);
                 let touches_after = |t: &TexId| atts(plan, after).iter().any(|x| x.tex == *t);
-                if !reads.iter().any(in_a) && !writes.iter().any(|t| in_a(t) || a_reads.contains(t) || touches_after(t)) {
+                if !reads.iter().any(in_a)
+                    && !writes
+                        .iter()
+                        .any(|t| in_a(t) || a_reads.contains(t) || touches_after(t))
+                {
                     r.split_independent += 1;
                 }
             }

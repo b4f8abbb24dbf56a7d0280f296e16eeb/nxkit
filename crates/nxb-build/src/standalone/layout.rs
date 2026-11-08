@@ -69,7 +69,8 @@ impl Fixups {
                 continue;
             };
             if let Some((k, v)) = rest.split_once('\t') {
-                m.entry(k.trim().to_string()).or_insert_with(|| v.trim().to_string());
+                m.entry(k.trim().to_string())
+                    .or_insert_with(|| v.trim().to_string());
             }
         }
         Fixups(m)
@@ -80,7 +81,9 @@ impl Fixups {
         let Some(v) = self.0.get(key) else {
             return Ok(None);
         };
-        let (neg, digits) = v.strip_prefix('-').map_or((false, v.as_str()), |d| (true, d));
+        let (neg, digits) = v
+            .strip_prefix('-')
+            .map_or((false, v.as_str()), |d| (true, d));
         let n = match digits.strip_prefix("0x") {
             Some(h) => i64::from_str_radix(h, 16),
             None => digits.parse(),
@@ -137,10 +140,17 @@ pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Sh
         )));
     }
     if patch_off.unsigned_abs() % PAGE != 0 {
-        return Err(bad(format!("the patch area at {patch_off:#x} is not 16K aligned")));
+        return Err(bad(format!(
+            "the patch area at {patch_off:#x} is not 16K aligned"
+        )));
     }
     let tag = tag(name, index);
-    let seg = |kind: &'static str, offset: i64, file_off: usize, file_len: usize, mem: u64, exec: bool| Segment {
+    let seg = |kind: &'static str,
+               offset: i64,
+               file_off: usize,
+               file_len: usize,
+               mem: u64,
+               exec: bool| Segment {
         name: format!("__NX_{tag}_{kind}"),
         kind,
         offset,
@@ -163,11 +173,27 @@ pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Sh
                 )));
             }
             if file_len < patch_off as usize {
-                return Err(bad(format!("the file ({file_len:#x} bytes) ends before the patch area")));
+                return Err(bad(format!(
+                    "the file ({file_len:#x} bytes) ends before the patch area"
+                )));
             }
             patch_size = (file_len - patch_off as usize) as u64;
-            segments.push(seg("DATA", p as i64, p as usize, (key_end - p) as usize, key_end - p, false));
-            segments.push(seg("PATCH", patch_off, patch_off as usize, patch_size as usize, patch_size, true));
+            segments.push(seg(
+                "DATA",
+                p as i64,
+                p as usize,
+                (key_end - p) as usize,
+                key_end - p,
+                false,
+            ));
+            segments.push(seg(
+                "PATCH",
+                patch_off,
+                patch_off as usize,
+                patch_size as usize,
+                patch_size,
+                true,
+            ));
         }
         Some(image_size) => {
             let image_size = image_size as u64;
@@ -182,11 +208,30 @@ pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Sh
             }
             patch_size = (file_len - image_len) as u64;
             if patch_off + up(patch_size) as i64 > 0 {
-                return Err(bad(format!("the patch area at {patch_off:#x} reaches the base")));
+                return Err(bad(format!(
+                    "the patch area at {patch_off:#x} reaches the base"
+                )));
             }
             let data_file = image_len.saturating_sub(p as usize);
-            segments.push(seg("DATA", p as i64, p as usize, data_file, image_size - p, false));
-            segments.insert(0, seg("PATCH", patch_off, image_len, patch_size as usize, patch_size, true));
+            segments.push(seg(
+                "DATA",
+                p as i64,
+                p as usize,
+                data_file,
+                image_size - p,
+                false,
+            ));
+            segments.insert(
+                0,
+                seg(
+                    "PATCH",
+                    patch_off,
+                    image_len,
+                    patch_size as usize,
+                    patch_size,
+                    true,
+                ),
+            );
         }
     }
     segments.sort_by_key(|s| s.offset);
@@ -201,8 +246,20 @@ pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Sh
 impl Shape {
     /// The lowest and the highest offset the module maps: `(low <= 0, high > 0)`.
     pub fn extent(&self) -> (i64, u64) {
-        let lo = self.segments.iter().map(|s| s.offset).min().unwrap_or(0).min(0);
-        let hi = self.segments.iter().map(|s| s.offset + s.mem_size as i64).max().unwrap_or(0).max(0);
+        let lo = self
+            .segments
+            .iter()
+            .map(|s| s.offset)
+            .min()
+            .unwrap_or(0)
+            .min(0);
+        let hi = self
+            .segments
+            .iter()
+            .map(|s| s.offset + s.mem_size as i64)
+            .max()
+            .unwrap_or(0)
+            .max(0);
         (lo, hi as u64)
     }
 }
@@ -239,8 +296,19 @@ mod tests {
     #[test]
     fn a_near_module_has_text_data_and_patch() {
         let s = shape("main", 0, 0x70000, &near()).unwrap();
-        let k: Vec<_> = s.segments.iter().map(|x| (x.kind, x.offset, x.mem_size)).collect();
-        assert_eq!(k, [("TEXT", 0, 0x20000), ("DATA", 0x20000, 0x24000), ("PATCH", 0x60000, 0x10000)]);
+        let k: Vec<_> = s
+            .segments
+            .iter()
+            .map(|x| (x.kind, x.offset, x.mem_size))
+            .collect();
+        assert_eq!(
+            k,
+            [
+                ("TEXT", 0, 0x20000),
+                ("DATA", 0x20000, 0x24000),
+                ("PATCH", 0x60000, 0x10000)
+            ]
+        );
         assert_eq!(s.segments[1].file_len, 0x24000);
         assert_eq!(s.extent(), (0, 0x70000));
     }
@@ -249,7 +317,14 @@ mod tests {
     fn a_far_module_puts_the_patch_area_before_the_base() {
         let s = shape("main", 0, 0x32000, &far()).unwrap();
         assert_eq!(s.segments[0].kind, "PATCH");
-        assert_eq!((s.segments[0].offset, s.segments[0].file_off, s.segments[0].file_len), (-0x20000, 0x30000, 0x2000));
+        assert_eq!(
+            (
+                s.segments[0].offset,
+                s.segments[0].file_off,
+                s.segments[0].file_len
+            ),
+            (-0x20000, 0x30000, 0x2000)
+        );
         assert_eq!(s.segments[2].mem_size, 0x24000);
         assert_eq!(s.segments[2].file_len, 0x10000);
         assert_eq!(s.extent(), (-0x20000, 0x44000));
@@ -261,7 +336,11 @@ mod tests {
         assert_eq!(s.segments[0].name, "__NX_M1_TEXT");
         assert!(s.segments.iter().all(|x| x.name.len() <= 16));
         let two = Fixups::parse("# BACK_OFF\t0x1000\n");
-        assert!(shape("main", 0, 0, &two).unwrap_err().starts_with("unsupported"));
+        assert!(
+            shape("main", 0, 0, &two)
+                .unwrap_err()
+                .starts_with("unsupported")
+        );
     }
 
     #[test]

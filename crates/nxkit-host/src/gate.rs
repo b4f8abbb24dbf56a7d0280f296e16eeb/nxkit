@@ -267,7 +267,9 @@ pub fn call_svc(number: u32, regs: &mut [u64]) -> i32 {
 pub fn tsd_base() -> u64 {
     let v: u64;
     // SAFETY: reading a thread register has no side effect.
-    unsafe { std::arch::asm!("mrs {}, tpidrro_el0", out(reg) v, options(nomem, nostack, preserves_flags)) };
+    unsafe {
+        std::arch::asm!("mrs {}, tpidrro_el0", out(reg) v, options(nomem, nostack, preserves_flags))
+    };
     v
 }
 
@@ -296,7 +298,9 @@ extern "C" fn nxkit_thread_returned() -> ! {
 
 #[unsafe(no_mangle)]
 extern "C" fn nxkit_gate_nested(sp: u64) -> ! {
-    stop::fatal(&format!("a gate was entered on its own gate stack, sp {sp:#x}: a gate handler ran guest code"))
+    stop::fatal(&format!(
+        "a gate was entered on its own gate stack, sp {sp:#x}: a gate handler ran guest code"
+    ))
 }
 
 fn svc(number: u32, regs: &mut [u64], ret: u64) {
@@ -320,7 +324,9 @@ fn counter() -> u64 {
     // SAFETY: `r` holds eight registers.
     let answered = unsafe { nxkit_rt::nxkit_svc(SVC_GET_SYSTEM_TICK, r.as_mut_ptr()) };
     if answered == 0 {
-        stop::fatal("the counter read needs svc GetSystemTick (0x1E) and the kernel does not answer it");
+        stop::fatal(
+            "the counter read needs svc GetSystemTick (0x1E) and the kernel does not answer it",
+        );
     }
     r[0]
 }

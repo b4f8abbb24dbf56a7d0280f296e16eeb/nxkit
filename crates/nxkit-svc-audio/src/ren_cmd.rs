@@ -17,15 +17,19 @@ fn byte(q: &[u8], o: usize) -> u8 {
 }
 
 fn le_i16(q: &[u8], o: usize) -> i32 {
-    q.get(o..o + 2).map_or(0, |b| i32::from(i16::from_le_bytes([b[0], b[1]])))
+    q.get(o..o + 2)
+        .map_or(0, |b| i32::from(i16::from_le_bytes([b[0], b[1]])))
 }
 
 fn le_u32(q: &[u8], o: usize) -> u32 {
-    q.get(o..o + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    q.get(o..o + 4)
+        .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 fn le_u64(q: &[u8], o: usize) -> u64 {
-    q.get(o..o + 8).map_or(0, |b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    q.get(o..o + 8).map_or(0, |b| {
+        u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+    })
 }
 
 /// The command header of one SDK generation.
@@ -39,7 +43,16 @@ struct Hdr {
 
 impl Hdr {
     fn size(self, q: &[u8]) -> i32 {
-        le_i16(q, if self.v21 { 2 } else if self.six { 4 } else { 6 })
+        le_i16(
+            q,
+            if self.v21 {
+                2
+            } else if self.six {
+                4
+            } else {
+                6
+            },
+        )
     }
 
     fn id(self, q: &[u8]) -> i32 {
@@ -121,7 +134,10 @@ impl Layout {
     pub(crate) const fn new() -> Layout {
         Layout {
             sink_id: 0x13,
-            hdr: Hdr { six: false, v21: false },
+            hdr: Hdr {
+                six: false,
+                v21: false,
+            },
             sink4: false,
             sink5: false,
             done: false,
@@ -180,7 +196,11 @@ fn taps() -> &'static [[f32; RS_T]; 3] {
             for (k, wk) in w.iter_mut().enumerate() {
                 let x = p as f64 / 3.0 + (RS_T / 2 - 1) as f64 - k as f64;
                 let fc = 0.9;
-                let s = if x.abs() < 1e-9 { fc } else { (PI * fc * x).sin() / (PI * x) };
+                let s = if x.abs() < 1e-9 {
+                    fc
+                } else {
+                    (PI * fc * x).sin() / (PI * x)
+                };
                 let t = (x + (RS_T / 2) as f64) / RS_T as f64;
                 let win = 0.42 - 0.5 * (2.0 * PI * t).cos() + 0.08 * (4.0 * PI * t).cos();
                 *wk = s * win;
@@ -231,12 +251,24 @@ fn read_i32s(addr: u64, out: &mut [i32]) {
 
 fn detect(lay: &mut Layout, cl: &[u8], ncmd: u32) -> bool {
     let w16 = Hdr::default().walks(cl, ncmd);
-    let w6 = Hdr { six: true, v21: false }.walks(cl, ncmd);
-    let w21 = Hdr { six: false, v21: true }.walks(cl, ncmd);
+    let w6 = Hdr {
+        six: true,
+        v21: false,
+    }
+    .walks(cl, ncmd);
+    let w21 = Hdr {
+        six: false,
+        v21: true,
+    }
+    .walks(cl, ncmd);
     if u8::from(w16) + u8::from(w6) + u8::from(w21) != 1 {
         if !lay.skipped_logged {
             lay.skipped_logged = true;
-            let which = if w16 || w6 || w21 { "more than one" } else { "no" };
+            let which = if w16 || w6 || w21 {
+                "more than one"
+            } else {
+                "no"
+            };
             eprintln!(
                 "nxkit-audio: audren: command list of {ncmd} commands walks in {which} header layout (generated before the first update?), silent frame, the layout is taken from a later list"
             );
@@ -247,11 +279,15 @@ fn detect(lay: &mut Layout, cl: &[u8], ncmd: u32) -> bool {
     if w6 {
         lay.hdr.six = true;
         lay.sink_id = 0x10;
-        eprintln!("nxkit-audio: audren: command headers in the SDK 6 layout, DeviceSink is ID 0x10");
+        eprintln!(
+            "nxkit-audio: audren: command headers in the SDK 6 layout, DeviceSink is ID 0x10"
+        );
     }
     if w21 {
         lay.hdr.v21 = true;
-        eprintln!("nxkit-audio: audren: command headers in the SDK 21 layout (no magic), DeviceSink 0x140 bytes");
+        eprintln!(
+            "nxkit-audio: audren: command headers in the SDK 21 layout (no magic), DeviceSink 0x140 bytes"
+        );
     }
     true
 }
@@ -278,23 +314,46 @@ fn histogram(lay: &mut Layout, cl: &[u8], ncmd: u32) {
         }
         pos += sz as usize;
     }
-    let line: Vec<String> =
-        hist.iter().enumerate().filter(|(_, n)| **n > 0).map(|(k, n)| format!("{k}x{n}")).collect();
-    eprintln!("nxkit-audio: audren: first-frame commands {ncmd}, by command ID: {}", line.join(" "));
+    let line: Vec<String> = hist
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n > 0)
+        .map(|(k, n)| format!("{k}x{n}"))
+        .collect();
+    eprintln!(
+        "nxkit-audio: audren: first-frame commands {ncmd}, by command ID: {}",
+        line.join(" ")
+    );
     let have = hist[(lay.sink_id & 63) as usize] != 0;
     if !have && ncand == 1 {
-        eprintln!("nxkit-audio: audren: no command with ID {:#x}, taking the only 0x148 byte command, ID {cand:#x}, as DeviceSink", lay.sink_id);
+        eprintln!(
+            "nxkit-audio: audren: no command with ID {:#x}, taking the only 0x148 byte command, ID {cand:#x}, as DeviceSink",
+            lay.sink_id
+        );
         lay.sink_id = cand;
     } else if !have && ncand == 0 && ncand4 == 1 {
-        eprintln!("nxkit-audio: audren: no command with ID {:#x}, taking the only 0x130 or 0x138 byte command, ID {cand4:#x}, as DeviceSink", lay.sink_id);
+        eprintln!(
+            "nxkit-audio: audren: no command with ID {:#x}, taking the only 0x130 or 0x138 byte command, ID {cand4:#x}, as DeviceSink",
+            lay.sink_id
+        );
         lay.sink_id = cand4;
         lay.sink4 = true;
     } else if !have {
-        eprintln!("nxkit-audio: [RED] audren: no DeviceSink (ID {:#x}) in the command list, {ncand} commands of {sink_sz:#x} bytes: the game will have no sound", lay.sink_id);
+        eprintln!(
+            "nxkit-audio: [RED] audren: no DeviceSink (ID {:#x}) in the command list, {ncand} commands of {sink_sz:#x} bytes: the game will have no sound",
+            lay.sink_id
+        );
     }
 }
 
-fn sink_out(lay: &mut Layout, cap: &mut Cap, idx: usize, c: &[u8], h: &Head, dst: &mut [i16]) -> usize {
+fn sink_out(
+    lay: &mut Layout,
+    cap: &mut Cap,
+    idx: usize,
+    c: &[u8],
+    h: &Head,
+    dst: &mut [i16],
+) -> usize {
     let hdr = lay.hdr;
     let nin = le_u32(c, hdr.sink_off(if lay.sink4 { 0x120 } else { 0x130 })) as usize;
     let mut ins = [0i32; 6];
@@ -302,7 +361,10 @@ fn sink_out(lay: &mut Layout, cap: &mut Cap, idx: usize, c: &[u8], h: &Head, dst
         *slot = if lay.sink4 && !lay.sink5 {
             i32::from(byte(c, hdr.sink_off(0x124) + j) as i8)
         } else {
-            le_i16(c, hdr.sink_off(if lay.sink4 { 0x124 } else { 0x134 }) + 2 * j)
+            le_i16(
+                c,
+                hdr.sink_off(if lay.sink4 { 0x124 } else { 0x134 }) + 2 * j,
+            )
         };
     }
     if !cap.sink_logged {
@@ -313,17 +375,28 @@ fn sink_out(lay: &mut Layout, cap: &mut Cap, idx: usize, c: &[u8], h: &Head, dst
             ins[1],
             h.rate,
             h.samples,
-            if h.rate == 32000 { " (32 kHz: resampled to 48 kHz on the host)" } else { "" }
+            if h.rate == 32000 {
+                " (32 kHz: resampled to 48 kHz on the host)"
+            } else {
+                ""
+            }
         );
     }
-    let limit = if h.rate == 48000 { FRAME_MAX } else { FRAME_MAX * 2 / 3 - 1 };
+    let limit = if h.rate == 48000 {
+        FRAME_MAX
+    } else {
+        FRAME_MAX * 2 / 3 - 1
+    };
     if nin == 0 || h.samples > limit {
         return 0;
     }
     if h.rate != 48000 && h.rate != 32000 {
         if !lay.rate_logged {
             lay.rate_logged = true;
-            eprintln!("nxkit-audio: [RED] audren: renderer sample rate {} (the SDK takes 32000 or 48000): no sound", h.rate);
+            eprintln!(
+                "nxkit-audio: [RED] audren: renderer sample rate {} (the SDK takes 32000 or 48000): no sound",
+                h.rate
+            );
         }
         return 0;
     }
@@ -348,7 +421,10 @@ fn sink_out(lay: &mut Layout, cap: &mut Cap, idx: usize, c: &[u8], h: &Head, dst
         for s in 0..n {
             let (l, r) = if k >= 6 {
                 let c = at(2, s) * CC + at(3, s) * CL;
-                ((at(0, s) * CF + c + at(4, s) * CB) >> 15, (at(1, s) * CF + c + at(5, s) * CB) >> 15)
+                (
+                    (at(0, s) * CF + c + at(4, s) * CB) >> 15,
+                    (at(1, s) * CF + c + at(5, s) * CB) >> 15,
+                )
             } else {
                 let l = at(0, s);
                 (l, if k > 1 { at(1, s) } else { l })
@@ -369,19 +445,32 @@ fn sink_out(lay: &mut Layout, cap: &mut Cap, idx: usize, c: &[u8], h: &Head, dst
         cap.nonsilent += 1;
     }
     if cap.frames == 200 || cap.frames % 12000 == 0 {
-        eprintln!("nxkit-audio: audren: renderer {idx} rendered {} frames, {} of them not silent", cap.frames, cap.nonsilent);
+        eprintln!(
+            "nxkit-audio: audren: renderer {idx} rendered {} frames, {} of them not silent",
+            cap.frames, cap.nonsilent
+        );
     }
     nout
 }
 
 /// Reads the DeviceSink of the command list `cl` into `dst` as stereo 16-bit samples. Returns the number of stereo
 /// samples, or 0 when the list has no sound for the device. `dst` holds `FRAME_MAX * 2` values.
-pub(crate) fn capture(lay: &mut Layout, cap: &mut Cap, idx: usize, cl: &[u8], dst: &mut [i16]) -> usize {
+pub(crate) fn capture(
+    lay: &mut Layout,
+    cap: &mut Cap,
+    idx: usize,
+    cl: &[u8],
+    dst: &mut [i16],
+) -> usize {
     if cl.len() < 0x20 {
         return 0;
     }
     let ncmd = le_u32(cl, 4);
-    let h = Head { mix: le_u64(cl, 8), samples: le_u32(cl, 0x14) as usize, rate: le_u32(cl, 0x18) };
+    let h = Head {
+        mix: le_u64(cl, 8),
+        samples: le_u32(cl, 0x14) as usize,
+        rate: le_u32(cl, 0x18),
+    };
     // A list made before the game's first update need not walk in any layout. It decides nothing.
     if !lay.done && ncmd != 0 && !detect(lay, cl, ncmd) {
         return 0;

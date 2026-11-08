@@ -3,7 +3,7 @@
 //! An abort prints the Result and ends the process with a failure. The call site of nxnative comes from the guest
 //! return address, which an export cannot read, so the message has no call site.
 
-use super::{fatal, get_u32, log, get_bytes, get_cstr, zero};
+use super::{fatal, get_bytes, get_cstr, get_u32, log, zero};
 
 /// `PutImpl(const LogMetaData&, const char*, size_t)`: the text goes to the host log.
 extern "C" fn put(_meta: u64, text: u64, len: u64) {
@@ -37,9 +37,26 @@ extern "C" fn abort_result(result: u64) {
 /// `VAbortImpl(...)`: prints the place and the format of the message. The arguments of the format are not expanded,
 /// because a `va_list` that the guest built is not readable on the host.
 #[allow(clippy::too_many_arguments)]
-extern "C" fn v_abort(func: u64, expr: u64, file: u64, line: u32, result: u64, _info: u64, format: u64, _ap: u64) {
-    let (func, expr, file, format) = (get_cstr(func, 256), get_cstr(expr, 256), get_cstr(file, 256), get_cstr(format, 256));
-    log(&format!("[diag] abort at {func}: {expr} ({file}:{}) message format {format}", line as i32));
+extern "C" fn v_abort(
+    func: u64,
+    expr: u64,
+    file: u64,
+    line: u32,
+    result: u64,
+    _info: u64,
+    format: u64,
+    _ap: u64,
+) {
+    let (func, expr, file, format) = (
+        get_cstr(func, 256),
+        get_cstr(expr, 256),
+        get_cstr(file, 256),
+        get_cstr(format, 256),
+    );
+    log(&format!(
+        "[diag] abort at {func}: {expr} ({file}:{}) message format {format}",
+        line as i32
+    ));
     abort(if result == 0 { 0 } else { get_u32(result) })
 }
 

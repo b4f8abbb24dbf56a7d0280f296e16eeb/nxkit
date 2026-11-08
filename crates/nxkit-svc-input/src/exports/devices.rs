@@ -7,8 +7,8 @@ use nxkit_abi::export::Export;
 use nxkit_abi::guest;
 
 use super::{count, history, put_all};
-use crate::state::{MOUSE_STATE_SIZE, Input};
 use crate::keys::KEYBOARD_STATE_SIZE;
+use crate::state::{Input, MOUSE_STATE_SIZE};
 use crate::with;
 
 /// The size of one `DebugPadState` in bytes: sampling number, attributes, buttons and two sticks.
@@ -76,12 +76,30 @@ stubs! { stub_list;
 /// The mouse, keyboard and debug pad functions.
 pub(super) fn list() -> Vec<Export> {
     let mut v = vec![
-        Export::new("_ZN2nn3hid13GetMouseStateEPNS0_10MouseStateE", get_mouse_state as usize),
-        Export::new("_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi", get_mouse_states as usize),
-        Export::new("_ZN2nn3hid16GetKeyboardStateEPNS0_13KeyboardStateE", get_keyboard_state as usize),
-        Export::new("_ZN2nn3hid17GetKeyboardStatesEPNS0_13KeyboardStateEi", get_keyboard_states as usize),
-        Export::new("_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE", get_debug_pad_state as usize),
-        Export::new("_ZN2nn3hid17GetDebugPadStatesEPNS0_13DebugPadStateEi", get_debug_pad_states as usize),
+        Export::new(
+            "_ZN2nn3hid13GetMouseStateEPNS0_10MouseStateE",
+            get_mouse_state as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi",
+            get_mouse_states as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid16GetKeyboardStateEPNS0_13KeyboardStateE",
+            get_keyboard_state as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid17GetKeyboardStatesEPNS0_13KeyboardStateEi",
+            get_keyboard_states as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
+            get_debug_pad_state as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid17GetDebugPadStatesEPNS0_13DebugPadStateEi",
+            get_debug_pad_states as usize,
+        ),
     ];
     v.extend(stub_list());
     v
@@ -109,7 +127,10 @@ mod tests {
         let (base, _guard) = guest_memory();
         guest::fill(base, 0x400, 0xff).ok();
         assert_eq!(get_keyboard_states(base, 2), 2);
-        assert_eq!(guest::read_u8(base + 2 * KEYBOARD_STATE_SIZE as u64).unwrap_or(0), 0xff);
+        assert_eq!(
+            guest::read_u8(base + 2 * KEYBOARD_STATE_SIZE as u64).unwrap_or(0),
+            0xff
+        );
     }
 
     #[test]

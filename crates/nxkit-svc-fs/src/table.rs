@@ -35,7 +35,14 @@ impl<T> Table<T> {
     /// An empty table.
     pub(crate) fn new() -> Table<T> {
         Table {
-            shards: (0..SHARDS).map(|_| Mutex::new(Shard { slots: Vec::new(), free: Vec::new() })).collect(),
+            shards: (0..SHARDS)
+                .map(|_| {
+                    Mutex::new(Shard {
+                        slots: Vec::new(),
+                        free: Vec::new(),
+                    })
+                })
+                .collect(),
             next: AtomicUsize::new(0),
         }
     }
@@ -52,7 +59,10 @@ impl<T> Table<T> {
                 (i, slot.generation)
             }
             None => {
-                s.slots.push(Slot { generation: 1, item: Some(item) });
+                s.slots.push(Slot {
+                    generation: 1,
+                    item: Some(item),
+                });
                 ((s.slots.len() - 1) as u32, 1)
             }
         };
@@ -91,7 +101,11 @@ impl<T> Table<T> {
             return None;
         }
         let item = slot.item.take()?;
-        slot.generation = if slot.generation + 1 >= (1 << GEN_BITS) { 1 } else { slot.generation + 1 };
+        slot.generation = if slot.generation + 1 >= (1 << GEN_BITS) {
+            1
+        } else {
+            slot.generation + 1
+        };
         s.free.push(index as u32);
         Some(item)
     }
@@ -119,7 +133,9 @@ mod tests {
         let handles: Vec<u64> = (0..SHARDS as u32).map(|i| t.insert(Arc::new(i))).collect();
         let old = handles[0];
         assert!(t.remove(old).is_some());
-        let fresh: Vec<u64> = (0..SHARDS as u32).map(|i| t.insert(Arc::new(100 + i))).collect();
+        let fresh: Vec<u64> = (0..SHARDS as u32)
+            .map(|i| t.insert(Arc::new(100 + i)))
+            .collect();
         assert!(t.get(old).is_none());
         assert!(fresh.iter().all(|h| t.get(*h).is_some()));
     }

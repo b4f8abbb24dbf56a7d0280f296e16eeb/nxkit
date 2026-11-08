@@ -12,8 +12,8 @@ use crate::sys::call_guest;
 use crate::util::lock;
 use nxkit_abi::kernel::kernel;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const CREATE: &str = "_ZN2nn2os17CreateSystemEventEPNS0_15SystemEventTypeENS0_14EventClearModeEb";
 const WRITABLE: &str = "_ZN2nn2os30GetWritableHandleOfSystemEventEPKNS0_15SystemEventTypeE";
@@ -118,7 +118,10 @@ impl Block {
         if fresh == 0 {
             return 0;
         }
-        match self.0.compare_exchange(0, fresh, Ordering::AcqRel, Ordering::Acquire) {
+        match self
+            .0
+            .compare_exchange(0, fresh, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => fresh,
             Err(won) => won,
         }

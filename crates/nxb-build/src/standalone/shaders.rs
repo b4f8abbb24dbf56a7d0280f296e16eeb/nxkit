@@ -34,9 +34,13 @@ pub fn profile(
         ("shader_note", st.shader_note.to_string()),
     ];
     // the split reads a compressed file outside the groups as it is (see `Profile::reads`)
-    let scope = st.shader_groups_only.then(|| ("shader_scope", "groups".to_string()));
+    let scope = st
+        .shader_groups_only
+        .then(|| ("shader_scope", "groups".to_string()));
     let rows: Vec<_> = rows.into_iter().chain(scope).collect();
-    let mut text = String::from("# Written by nxb build from the title module. Edit the title module, not this file.\n");
+    let mut text = String::from(
+        "# Written by nxb build from the title module. Edit the title module, not this file.\n",
+    );
     for (k, v) in &rows {
         text.push_str(&format!("{k}\t{v}\n"));
     }
@@ -48,12 +52,20 @@ pub fn profile(
             let _ = std::fs::remove_file(&manual);
         }
     }
-    Ok((dir, rows.into_iter().map(|(k, v)| (k.to_string(), v)).collect()))
+    Ok((
+        dir,
+        rows.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+    ))
 }
 
 /// The split's tables go into the profile folder, where the shader step reads them.
 pub fn take_tables(work: &Path, profile: &Path) -> Result<(), String> {
-    for n in ["shader_map.tsv", "shader_facts.tsv", "shader_pairs.tsv", "pso_pairs.tsv"] {
+    for n in [
+        "shader_map.tsv",
+        "shader_facts.tsv",
+        "shader_pairs.tsv",
+        "pso_pairs.tsv",
+    ] {
         let src = work.join("shader").join(n);
         if src.is_file() {
             std::fs::copy(&src, profile.join(n)).map_err(|e| io(&src, e))?;
@@ -106,12 +118,16 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
         Ok::<(), String>(())
     })?;
     if n == 0 {
-        return Err(format!("the shader step left no library in {}", o.lib.display()));
+        return Err(format!(
+            "the shader step left no library in {}",
+            o.lib.display()
+        ));
     }
     let mut summary = format!("{n} shader files ({})", o.shaders);
-    let archive = b.gpus.first().map(|arch| {
-        b.work.join("pso/mac").join(format!("{arch}.mtl4a"))
-    });
+    let archive = b
+        .gpus
+        .first()
+        .map(|arch| b.work.join("pso/mac").join(format!("{arch}.mtl4a")));
     let mut has = false;
     match (archive, &o.archive_error) {
         (Some(src), None) if src.is_file() => {
@@ -132,11 +148,17 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
             ));
         }
         (Some(src), None) => {
-            return Err(format!("the archive step reported no error and left no file at {}", src.display()));
+            return Err(format!(
+                "the archive step reported no error and left no file at {}",
+                src.display()
+            ));
         }
         (None, _) => summary.push_str(", no archive (--gpu none)"),
     }
-    Ok(Done { summary, archive: has })
+    Ok(Done {
+        summary,
+        archive: has,
+    })
 }
 
 #[cfg(test)]
@@ -163,9 +185,14 @@ mod tests {
         };
         let (dir, keys) = profile(&d, &st, 0x0100_0000_0000_0000, "Game").unwrap();
         let text = std::fs::read_to_string(dir.join("game.tsv")).unwrap();
-        assert!(text.contains("shader_versions\tv7\n") && text.contains("title_id\t0100000000000000\n"));
+        assert!(
+            text.contains("shader_versions\tv7\n") && text.contains("title_id\t0100000000000000\n")
+        );
         assert!(text.contains("shader_scope\tgroups\n"));
-        assert_eq!(keys.get("shader_groups").map(String::as_str), Some("/Shader/=shader"));
+        assert_eq!(
+            keys.get("shader_groups").map(String::as_str),
+            Some("/Shader/=shader")
+        );
         assert!(dir.join("shader_facts_manual.tsv").is_file());
         std::fs::remove_dir_all(&d).unwrap();
     }

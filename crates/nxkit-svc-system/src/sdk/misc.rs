@@ -13,7 +13,11 @@ use super::{fail, log, nothing, ok, zero};
 /// `err::ShowError(Result)`.
 extern "C" fn show_error(result: u32) {
     let _applet = AppletGuard::new("error");
-    log(&format!("err::ShowError Result={result:#x} (module {}, description {})", result & 0x1ff, (result >> 9) & 0x1fff));
+    log(&format!(
+        "err::ShowError Result={result:#x} (module {}, description {})",
+        result & 0x1ff,
+        (result >> 9) & 0x1fff
+    ));
 }
 
 table! {

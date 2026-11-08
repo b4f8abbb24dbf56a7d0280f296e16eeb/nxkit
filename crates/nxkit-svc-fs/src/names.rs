@@ -30,7 +30,11 @@ const INDEX_SHARDS: usize = 16;
 /// by a game that uses `\` is found under the `/` form.
 pub(crate) fn fwd_slashes(p: &[u8]) -> Cow<'_, [u8]> {
     if p.contains(&b'\\') {
-        Cow::Owned(p.iter().map(|&b| if b == b'\\' { b'/' } else { b }).collect())
+        Cow::Owned(
+            p.iter()
+                .map(|&b| if b == b'\\' { b'/' } else { b })
+                .collect(),
+        )
     } else {
         Cow::Borrowed(p)
     }
@@ -76,7 +80,11 @@ pub(crate) fn guest_name(parent: &Path, physical: &OsStr) -> io::Result<Vec<u8>>
 /// name and removed when it does not, because a rename can move an old attribute along.
 pub(crate) fn set_guest_name(host: &Path, guest: &[u8]) -> io::Result<()> {
     let physical = host.file_name().map(OsStr::as_bytes).unwrap_or_default();
-    if physical == guest { sys::set_guest_name(host, None) } else { sys::set_guest_name(host, Some(guest)) }
+    if physical == guest {
+        sys::set_guest_name(host, None)
+    } else {
+        sys::set_guest_name(host, Some(guest))
+    }
 }
 
 struct DirIndex {
@@ -91,7 +99,11 @@ pub(crate) struct IndexCache {
 impl IndexCache {
     /// An empty cache.
     pub(crate) fn new() -> IndexCache {
-        IndexCache { shards: (0..INDEX_SHARDS).map(|_| Mutex::new(HashMap::new())).collect() }
+        IndexCache {
+            shards: (0..INDEX_SHARDS)
+                .map(|_| Mutex::new(HashMap::new()))
+                .collect(),
+        }
     }
 
     fn get(&self, dir: &Path) -> io::Result<Arc<DirIndex>> {
@@ -108,13 +120,21 @@ impl IndexCache {
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         let index = Arc::new(DirIndex { entries });
-        Ok(Arc::clone(lock(shard).entry(dir.to_path_buf()).or_insert(index)))
+        Ok(Arc::clone(
+            lock(shard).entry(dir.to_path_buf()).or_insert(index),
+        ))
     }
 }
 
 /// The host path of the entry `name` in `dir`. With `create`, a name that does not exist gets a host name that no
 /// other entry has.
-fn component(cache: &IndexCache, ro: bool, dir: &Path, name: &[u8], create: bool) -> io::Result<PathBuf> {
+fn component(
+    cache: &IndexCache,
+    ro: bool,
+    dir: &Path,
+    name: &[u8],
+    create: bool,
+) -> io::Result<PathBuf> {
     if name.len() > MAX_NAME {
         return Err(too_long());
     }
@@ -173,7 +193,10 @@ mod tests {
     #[test]
     fn components_are_normalised_lexically() {
         assert_eq!(components(b"/a/./b//c"), Some(vec![&b"a"[..], b"b", b"c"]));
-        assert_eq!(components(b"/system/snd/../../sounds/x"), Some(vec![&b"sounds"[..], b"x"]));
+        assert_eq!(
+            components(b"/system/snd/../../sounds/x"),
+            Some(vec![&b"sounds"[..], b"x"])
+        );
         assert_eq!(components(b"/.."), None);
         assert_eq!(components(b""), Some(vec![]));
     }

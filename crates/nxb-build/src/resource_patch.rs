@@ -195,10 +195,9 @@ pub(crate) fn overlay(
     }
     let work = ex.parent().and_then(Path::parent).unwrap_or(&b.work);
     let res = work.join("resources");
-    let name = ex.file_name().map_or_else(
-        || b.package.clone(),
-        |n| n.to_string_lossy().into_owned(),
-    );
+    let name = ex
+        .file_name()
+        .map_or_else(|| b.package.clone(), |n| n.to_string_lossy().into_owned());
     let out = res.join(format!("{name}.overlay"));
     let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
     // an overlay of an earlier build is not used when this one has nothing to patch

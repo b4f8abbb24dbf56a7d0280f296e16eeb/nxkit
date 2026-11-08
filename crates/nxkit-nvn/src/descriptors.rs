@@ -205,7 +205,9 @@ impl Descriptors {
 
     /// True while a pool slot holds `texture`.
     pub fn has_slots(&self, texture: TexId) -> bool {
-        self.slots_of.get(texture.0 as usize).is_some_and(|s| !s.is_empty())
+        self.slots_of
+            .get(texture.0 as usize)
+            .is_some_and(|s| !s.is_empty())
     }
 
     /// Forgets every slot that holds `texture`. The game must not use them after `nvnTextureFinalize`.

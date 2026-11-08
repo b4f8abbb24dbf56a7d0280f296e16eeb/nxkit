@@ -28,12 +28,24 @@ fn ms(d: Duration) -> f64 {
 }
 
 fn named_ranges(game: &Game, layout: &Layout) -> Vec<(String, u64, u64)> {
-    let mut out = vec![("all guest memory".to_string(), layout.all.start, layout.all.len)];
+    let mut out = vec![(
+        "all guest memory".to_string(),
+        layout.all.start,
+        layout.all.len,
+    )];
     for m in &game.modules {
         out.push((format!("module {}", m.name), m.start(), m.end() - m.start()));
     }
-    out.push(("main stack".into(), layout.main_stack.start, layout.main_stack.len));
-    out.push(("thread-local blocks".into(), layout.tls.start, layout.tls.len));
+    out.push((
+        "main stack".into(),
+        layout.main_stack.start,
+        layout.main_stack.len,
+    ));
+    out.push((
+        "thread-local blocks".into(),
+        layout.tls.start,
+        layout.tls.len,
+    ));
     out.push(("heap".into(), layout.heap.start, layout.heap.len));
     out.push(("stack region".into(), layout.stack.start, layout.stack.len));
     out.push(("alias".into(), layout.alias.start, layout.alias.len));
@@ -46,8 +58,15 @@ fn free_in_fresh_process(ranges: &[(String, u64, u64)]) -> Vec<bool> {
     println!("1. Are the fixed addresses free in this process (mmap with a hint)?");
     if let Some((name, start, len)) = ranges.first() {
         let end = start.saturating_add(*len);
-        let verdict = if end <= layout::SPACE_END { "fits" } else { "does NOT fit" };
-        println!("   {name}: ends at {end:#x}, which {verdict} below the 39-bit limit {:#x}", layout::SPACE_END);
+        let verdict = if end <= layout::SPACE_END {
+            "fits"
+        } else {
+            "does NOT fit"
+        };
+        println!(
+            "   {name}: ends at {end:#x}, which {verdict} below the 39-bit limit {:#x}",
+            layout::SPACE_END
+        );
     }
     let mut free = Vec::new();
     for (name, start, len) in ranges {
@@ -88,13 +107,19 @@ fn fixed_calls(ranges: &[(String, u64, u64)], free: &[bool]) {
             Ok(()) => "ok".to_string(),
             Err(e) => format!("failed: {e}"),
         };
-        println!("   {name}: MAP_FIXED {}, mach_vm_allocate {}", word(&a), word(&b));
+        println!(
+            "   {name}: MAP_FIXED {}, mach_vm_allocate {}",
+            word(&a),
+            word(&b)
+        );
     }
 }
 
 /// Measurement 3: what does a copy into anonymous memory cost for a module of the size of the game?
 fn copy_cost(game: &Game) -> Result<()> {
-    println!("3. Cost of a copy into anonymous memory (map, copy, mprotect to r-x), {COPY_RUNS} runs per module:");
+    println!(
+        "3. Cost of a copy into anonymous memory (map, copy, mprotect to r-x), {COPY_RUNS} runs per module:"
+    );
     for m in &game.modules {
         let span = m.end() - m.start();
         let len = span as usize;
@@ -126,14 +151,19 @@ fn copy_cost(game: &Game) -> Result<()> {
 /// Measurement 4: where does dyld put the segments of `nxgame.dylib` in a fresh process? The build asks for the
 /// preferred addresses of `game.json`. dyld may slide the library, and the host handles both (R48).
 fn dyld_placement(game: &Game) {
-    println!("4. Where does dyld put the segments of {}?", game.dylib.display());
+    println!(
+        "4. Where does dyld put the segments of {}?",
+        game.dylib.display()
+    );
     let path = game.path(&game.dylib);
     if !path.exists() {
         println!("   {} does not exist, skipped", path.display());
         return;
     }
     let result = Dylib::open(&path).and_then(|lib| {
-        let read = lib.image().and_then(|img| Ok((img, macho::segments(&img.commands()?)?)));
+        let read = lib
+            .image()
+            .and_then(|img| Ok((img, macho::segments(&img.commands()?)?)));
         lib.close();
         read
     });
@@ -147,8 +177,15 @@ fn dyld_placement(game: &Game) {
     println!("   header at {:#x}, slide {:#x}", img.header, img.slide);
     for s in segs.iter().filter(|s| s.name.starts_with("__NX_")) {
         let at = s.vmaddr.wrapping_add_signed(img.slide);
-        let verdict = if img.slide == 0 { "at the preferred address" } else { "moved" };
-        println!("   {}: preferred {:#x}, loaded {at:#x}, {verdict}", s.name, s.vmaddr);
+        let verdict = if img.slide == 0 {
+            "at the preferred address"
+        } else {
+            "moved"
+        };
+        println!(
+            "   {}: preferred {:#x}, loaded {at:#x}, {verdict}",
+            s.name, s.vmaddr
+        );
     }
 }
 
@@ -165,11 +202,20 @@ fn wired_bytes() -> Result<u64> {
             .parse()
             .ok()
     };
-    let page = text.lines().next().and_then(|l| l.split("page size of").nth(1)).and_then(number);
-    let wired = text.lines().find(|l| l.starts_with("Pages wired down")).and_then(number);
+    let page = text
+        .lines()
+        .next()
+        .and_then(|l| l.split("page size of").nth(1))
+        .and_then(number);
+    let wired = text
+        .lines()
+        .find(|l| l.starts_with("Pages wired down"))
+        .and_then(number);
     match (page, wired) {
         (Some(p), Some(w)) => Ok(p * w),
-        _ => Err(HostError::App("cannot read the wired pages from vm_stat".into())),
+        _ => Err(HostError::App(
+            "cannot read the wired pages from vm_stat".into(),
+        )),
     }
 }
 
@@ -185,7 +231,11 @@ fn buffer_and_residency(game: &Game) -> Result<()> {
     println!("5. No-copy buffer over the memory behind the modules, and 6. wired memory:");
     let before = wired_bytes()?;
     let (res, _, layout) = place::reserve_guest(game)?;
-    println!("   reservation {:#x} + {:#x}, read and write", res.base(), res.len());
+    println!(
+        "   reservation {:#x} + {:#x}, read and write",
+        res.base(),
+        res.len()
+    );
     let mem = memory::init(layout, res)?;
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     println!(
@@ -205,7 +255,10 @@ fn buffer_and_residency(game: &Game) -> Result<()> {
     let wrapped = mem.gpu_memory(&ctx);
     let took = t.elapsed();
     match &wrapped {
-        Ok(_) => println!("   newBufferWithBytesNoCopy over the GPU range: ok in {:.2} ms", ms(took)),
+        Ok(_) => println!(
+            "   newBufferWithBytesNoCopy over the GPU range: ok in {:.2} ms",
+            ms(took)
+        ),
         Err(e) => println!("   newBufferWithBytesNoCopy over the GPU range: failed: {e}"),
     }
     mem.seal()?;

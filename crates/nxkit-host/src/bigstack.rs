@@ -149,7 +149,12 @@ pub fn wrap(target: u64) -> Result<u64> {
     let k = USED.load(Ordering::Acquire);
     for i in 0..k {
         // SAFETY: `i` is below the number of stubs in use, so word `i` was written and is not written again.
-        let t = unsafe { std::ptr::addr_of!(TABLE).cast::<u64>().add(i).read_volatile() };
+        let t = unsafe {
+            std::ptr::addr_of!(TABLE)
+                .cast::<u64>()
+                .add(i)
+                .read_volatile()
+        };
         if t == target {
             return Ok(stubs as usize as u64 + 16 * i as u64);
         }
@@ -161,9 +166,19 @@ pub fn wrap(target: u64) -> Result<u64> {
     }
     // SAFETY: `k` is below the table length. Word `k` is not in use, and the stub that reads it is not reachable
     // before the stub address is returned.
-    unsafe { std::ptr::addr_of_mut!(TABLE).cast::<u64>().add(k).write_volatile(target) };
-    if USED.compare_exchange(k, k + 1, Ordering::AcqRel, Ordering::Acquire).is_err() {
-        return Err(HostError::Load("two threads wrap big-stack exports at the same time".into()));
+    unsafe {
+        std::ptr::addr_of_mut!(TABLE)
+            .cast::<u64>()
+            .add(k)
+            .write_volatile(target)
+    };
+    if USED
+        .compare_exchange(k, k + 1, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(HostError::Load(
+            "two threads wrap big-stack exports at the same time".into(),
+        ));
     }
     Ok(stubs as usize as u64 + 16 * k as u64)
 }

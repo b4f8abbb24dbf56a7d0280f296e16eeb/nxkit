@@ -243,11 +243,20 @@ impl Record {
                 n = 1;
                 (OP_IMAGE, u16::from(slot))
             }
-            Self::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
+            Self::BindTexturesDeferred {
+                first,
+                count,
+                src,
+                tex_base,
+                samp_base,
+            } => {
                 words[0] = src;
                 words[1] = u64::from(tex_base) | u64::from(samp_base) << 32;
                 n = 2;
-                (OP_TEXTURES_DEFERRED, u16::from(first) | u16::from(count) << 8)
+                (
+                    OP_TEXTURES_DEFERRED,
+                    u16::from(first) | u16::from(count) << 8,
+                )
             }
             Self::Draw => (OP_DRAW, 0),
             Self::Dispatch => (OP_DISPATCH, 0),
@@ -547,7 +556,10 @@ mod tests {
             (at + 8, 5 | 2 << 20, 105 | 12 << 20)
         );
         m.write(at + 8, &(9u64 | 2 << 20).to_le_bytes()).unwrap();
-        assert_eq!(deferred_handle(&m, at, 1, 100, 10).unwrap().2, 109 | 12 << 20);
+        assert_eq!(
+            deferred_handle(&m, at, 1, 100, 10).unwrap().2,
+            109 | 12 << 20
+        );
         assert_eq!(deferred_handle(&m, at, 0, 100, 10).unwrap().2, 0);
     }
 

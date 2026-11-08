@@ -5,9 +5,9 @@
 //! the window's crop is shown when the game set one (a 1080p picture in the top left of a 1440p window texture).
 
 use nxkit_metal::{
-    ArchiveConfig, ArgumentTable, ColorAttachment, Context, Drawable, Format, FrameRing, LoadAction, PRESENT_FORMAT,
-    PipelineCache, Primitive, RenderCommand, RenderPassDesc, RenderPipeline, RenderPipelineDesc, Result,
-    ShaderLibrary, StoreAction, Texture,
+    ArchiveConfig, ArgumentTable, ColorAttachment, Context, Drawable, Format, FrameRing,
+    LoadAction, PRESENT_FORMAT, PipelineCache, Primitive, RenderCommand, RenderPassDesc,
+    RenderPipeline, RenderPipelineDesc, Result, ShaderLibrary, StoreAction, Texture,
 };
 
 const MSL: &str = r#"
@@ -54,7 +54,12 @@ impl Blit {
     pub(crate) fn new(ctx: &Context) -> Result<Self> {
         let cache = PipelineCache::new(ctx, &ArchiveConfig::default())?;
         let lib = ShaderLibrary::from_source(ctx, "nxkit_blit", MSL)?;
-        let pipe = |key, fs| cache.render(key, &RenderPipelineDesc::new((&lib, "blit_vs"), Some((&lib, fs)), &[PRESENT_FORMAT]));
+        let pipe = |key, fs| {
+            cache.render(
+                key,
+                &RenderPipelineDesc::new((&lib, "blit_vs"), Some((&lib, fs)), &[PRESENT_FORMAT]),
+            )
+        };
         Ok(Self {
             ring: FrameRing::new(ctx)?,
             plain: pipe(1, "blit_plain")?,
@@ -64,9 +69,18 @@ impl Blit {
     }
 
     /// Draws `src` into `drawable` and presents it at `at` (seconds on the `CACurrentMediaTime` clock).
-    pub(crate) fn present(&mut self, src: &Texture, crop: nxkit_nvn::backend::Rect, drawable: Drawable, at: f64) -> Result<()> {
+    pub(crate) fn present(
+        &mut self,
+        src: &Texture,
+        crop: nxkit_nvn::backend::Rect,
+        drawable: Drawable,
+        at: f64,
+    ) -> Result<()> {
         let mut frame = self.ring.begin()?;
-        let words: Vec<u8> = [crop.x, crop.y, crop.width, crop.height].iter().flat_map(|v| v.to_le_bytes()).collect();
+        let words: Vec<u8> = [crop.x, crop.y, crop.width, crop.height]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
         let crop_addr = frame.scratch().push(&words)?;
         let target = drawable.texture().clone();
         let pipeline = match src.desc().format {
@@ -74,7 +88,8 @@ impl Blit {
             _ => self.plain.clone(),
         };
         let desc = RenderPassDesc {
-            colors: vec![Some(ColorAttachment { depth_plane: 0,
+            colors: vec![Some(ColorAttachment {
+                depth_plane: 0,
                 texture: target,
                 load: LoadAction::DontCare,
                 store: StoreAction::Store,
@@ -95,7 +110,10 @@ impl Blit {
                 index: 0,
                 texture: src.clone(),
             })?;
-            pass.encode(&RenderCommand::SetBuffer { index: 0, gpu_addr: crop_addr })?;
+            pass.encode(&RenderCommand::SetBuffer {
+                index: 0,
+                gpu_addr: crop_addr,
+            })?;
             pass.encode(&RenderCommand::Draw {
                 primitive: Primitive::Triangle,
                 first_vertex: 0,

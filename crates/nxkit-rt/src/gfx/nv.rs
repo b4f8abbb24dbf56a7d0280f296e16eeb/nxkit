@@ -42,9 +42,23 @@ struct State {
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
-    alloc: Allocator { alloc: 0, free: 0, realloc: 0, user: 0 },
-    devtools_alloc: Allocator { alloc: 0, free: 0, realloc: 0, user: 0 },
-    pool: Pool { mem: 0, size: 0, inited: false },
+    alloc: Allocator {
+        alloc: 0,
+        free: 0,
+        realloc: 0,
+        user: 0,
+    },
+    devtools_alloc: Allocator {
+        alloc: 0,
+        free: 0,
+        realloc: 0,
+        user: 0,
+    },
+    pool: Pool {
+        mem: 0,
+        size: 0,
+        inited: false,
+    },
 });
 
 fn state() -> MutexGuard<'static, State> {
@@ -66,18 +80,32 @@ pub(crate) fn devtools_allocator() -> Allocator {
 /// `nv::SetGraphicsAllocator(alloc, free, realloc, user)`: NVN has been replaced wholesale with a host device, so
 /// the driver glue layer has nothing to do. The allocator is recorded.
 extern "C" fn set_allocator(alloc: u64, free: u64, realloc: u64, user: u64) {
-    state().alloc = Allocator { alloc, free, realloc, user };
+    state().alloc = Allocator {
+        alloc,
+        free,
+        realloc,
+        user,
+    };
 }
 
 /// `nv::SetGraphicsDevtoolsAllocator(alloc, free, realloc, user)`: as above, for the devtools allocator.
 extern "C" fn set_devtools_allocator(alloc: u64, free: u64, realloc: u64, user: u64) {
-    state().devtools_alloc = Allocator { alloc, free, realloc, user };
+    state().devtools_alloc = Allocator {
+        alloc,
+        free,
+        realloc,
+        user,
+    };
 }
 
 /// `nv::InitializeGraphics(void *mem, size_t size)`: the pool is recorded for `nv::GetGraphicsMemoryInfo`. The
 /// graphics layer allocates its own Metal objects.
 extern "C" fn initialize_graphics(mem: u64, size: u64) {
-    state().pool = Pool { mem, size, inited: true };
+    state().pool = Pool {
+        mem,
+        size,
+        inited: true,
+    };
     log(format_args!(
         "nv::InitializeGraphics: pool {:.2} MB, recorded (the host's graphics layer allocates its own)",
         size as f64 / 1_048_576.0
@@ -93,7 +121,10 @@ extern "C" fn finalize_graphics() {
 /// `nv::InitializeGraphics` sets and which runs on the host instead, so the record of the host answers.
 extern "C" fn init_check() {
     if !state().pool.inited {
-        fatal("nv::InitCheck", "graphics not initialised (nv::InitializeGraphics was not called)");
+        fatal(
+            "nv::InitCheck",
+            "graphics not initialised (nv::InitializeGraphics was not called)",
+        );
     }
 }
 
@@ -113,7 +144,11 @@ static INFO_NOTE: AtomicBool = AtomicBool::new(false);
 /// bytes up to SDK 10 and 0x40 from SDK 11 on. Writing 0x40 on an old SDK overruns the record of the caller.
 extern "C" fn get_graphics_memory_info(out: u64) {
     const NAME: &str = "nv::GetGraphicsMemoryInfo";
-    let len = if old_sdk() { MEMORY_INFO_OLD } else { MEMORY_INFO };
+    let len = if old_sdk() {
+        MEMORY_INFO_OLD
+    } else {
+        MEMORY_INFO
+    };
     checked(NAME, guest::fill(out, len, 0));
     let pool = state().pool;
     if pool.inited {
@@ -156,15 +191,34 @@ mod tests {
     fn the_pool_allocator_and_memory_info_follow_the_calls() {
         set_allocator(1, 2, 3, 4);
         set_devtools_allocator(5, 6, 7, 8);
-        assert_eq!(allocator(), Allocator { alloc: 1, free: 2, realloc: 3, user: 4 });
-        assert_eq!(devtools_allocator(), Allocator { alloc: 5, free: 6, realloc: 7, user: 8 });
+        assert_eq!(
+            allocator(),
+            Allocator {
+                alloc: 1,
+                free: 2,
+                realloc: 3,
+                user: 4
+            }
+        );
+        assert_eq!(
+            devtools_allocator(),
+            Allocator {
+                alloc: 5,
+                free: 6,
+                realloc: 7,
+                user: 8
+            }
+        );
 
         let out = testing::alloc(0x100);
         guest::fill(out, 0x100, 0xAA).expect("fill");
         get_graphics_memory_info(out);
         assert_eq!(guest::read_u64(out).expect("total"), 0);
         assert_eq!(guest::read_u64(out + 0x38).expect("tail"), 0);
-        assert_eq!(guest::read_u64(out + 0x40).expect("past the record"), 0xAAAA_AAAA_AAAA_AAAA);
+        assert_eq!(
+            guest::read_u64(out + 0x40).expect("past the record"),
+            0xAAAA_AAAA_AAAA_AAAA
+        );
 
         initialize_graphics(0x1000, 3 << 20);
         init_check();

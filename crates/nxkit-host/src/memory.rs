@@ -46,7 +46,10 @@ impl GuestMemory {
     /// residency set over them makes them unreadable.
     pub fn gpu_range(&self) -> Range {
         let start = self.layout.tls.start;
-        Range { start, len: self.layout.all.end() - start }
+        Range {
+            start,
+            len: self.layout.all.end() - start,
+        }
     }
 
     /// Creates the GPU buffer over [`GuestMemory::gpu_range`].
@@ -58,6 +61,7 @@ impl GuestMemory {
     /// Makes the lowest page of the main stack a guard page. It runs after the GPU buffer exists, because Metal
     /// refuses a range with a `PROT_NONE` page.
     pub fn seal(&self) -> Result<()> {
-        self.res.protect(self.layout.main_stack.start, PAGE, PROT_NONE)
+        self.res
+            .protect(self.layout.main_stack.start, PAGE, PROT_NONE)
     }
 }

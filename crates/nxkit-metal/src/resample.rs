@@ -111,8 +111,12 @@ impl Resampler {
         if sd.format != dd.format || !Self::supports(&dd) || !sd.shader_read {
             return Err(MetalError::Invalid("the textures cannot be resampled"));
         }
-        if level >= sd.mip_levels.min(dd.mip_levels) || slice >= sd.slice_count().min(dd.slice_count()) {
-            return Err(MetalError::Invalid("the level or slice is outside the textures"));
+        if level >= sd.mip_levels.min(dd.mip_levels)
+            || slice >= sd.slice_count().min(dd.slice_count())
+        {
+            return Err(MetalError::Invalid(
+                "the level or slice is outside the textures",
+            ));
         }
         let view = |t: &Texture| {
             t.view(&ViewDesc {
@@ -131,12 +135,21 @@ impl Resampler {
             SampleType::Sint => &self.sint,
         };
         pass.encode(&ComputeCommand::SetPipeline(pipeline.clone()))?;
-        pass.encode(&ComputeCommand::SetTexture { index: 0, texture: src_view.clone() })?;
-        pass.encode(&ComputeCommand::SetTexture { index: 1, texture: dst_view.clone() })?;
+        pass.encode(&ComputeCommand::SetTexture {
+            index: 0,
+            texture: src_view.clone(),
+        })?;
+        pass.encode(&ComputeCommand::SetTexture {
+            index: 1,
+            texture: dst_view.clone(),
+        })?;
         let [w, h, _] = dd.level_extent(level);
         let width = pipeline.thread_execution_width().max(1) as u32;
         let height = (pipeline.max_threads_per_threadgroup() as u32 / width).clamp(1, 8);
-        pass.encode(&ComputeCommand::DispatchThreads { grid: [w, h, 1], threads: [width, height, 1] })?;
+        pass.encode(&ComputeCommand::DispatchThreads {
+            grid: [w, h, 1],
+            threads: [width, height, 1],
+        })?;
         pass.retain(src_view);
         pass.retain(dst_view);
         Ok(())

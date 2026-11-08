@@ -41,7 +41,9 @@ impl std::fmt::Display for CmifError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CmifError::Truncated => f.write_str("the CMIF data is shorter than its headers say"),
-            CmifError::BadMagic(m) => write!(f, "the CMIF header has the magic {m:#x} instead of SFCI"),
+            CmifError::BadMagic(m) => {
+                write!(f, "the CMIF header has the magic {m:#x} instead of SFCI")
+            }
             CmifError::BadDomainType(t) => write!(f, "the domain message has the unknown type {t}"),
         }
     }

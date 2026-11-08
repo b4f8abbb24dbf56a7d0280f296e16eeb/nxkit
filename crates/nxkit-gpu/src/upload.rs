@@ -101,7 +101,10 @@ impl Transfer {
 
     /// Starts a frame of scaled uploads.
     pub(crate) fn begin_frame(&self) {
-        self.scaled.lock().unwrap_or_else(PoisonError::into_inner).begin_frame();
+        self.scaled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .begin_frame();
     }
 
     /// Uploads the guest data of `rec` into the scaled texture `res`: the plain upload fills a staging texture of the
@@ -118,20 +121,33 @@ impl Transfer {
         if !ScaledUploads::supports(res) {
             nxkit_nvn::diag::example(
                 nxkit_nvn::diag::Reason::UploadScaledLost,
-                format_args!("{:?} {:?} {}x{}: no scaling kernel", res.desc.format, res.desc.kind, res.desc.width, res.desc.height),
+                format_args!(
+                    "{:?} {:?} {}x{}: no scaling kernel",
+                    res.desc.format, res.desc.kind, res.desc.width, res.desc.height
+                ),
             );
             return Err(Skip::Transfer);
         }
-        let staging = self.scaled.lock().unwrap_or_else(PoisonError::into_inner).staging(rec, res)?;
+        let staging = self
+            .scaled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .staging(rec, res)?;
         self.upload(cb, scratch, guest, rec, &staging, wait)?;
         cb.retain(staging.tex.clone());
-        self.scaled.lock().unwrap_or_else(PoisonError::into_inner).queue(&staging, res);
+        self.scaled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .queue(&staging, res);
         Ok(())
     }
 
     /// Encodes the scalings of this frame's scaled uploads. Returns the textures scaled and the textures lost.
     pub(crate) fn flush_scaled(&self, cb: &mut CommandBuffer) -> (u32, u32) {
-        self.scaled.lock().unwrap_or_else(PoisonError::into_inner).flush(cb)
+        self.scaled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .flush(cb)
     }
 
     /// Encodes the deswizzle of all levels and layers of `rec` into `res`. The commands go into a compute pass of
@@ -213,7 +229,10 @@ impl Transfer {
                         // The caller counts the failure. This keeps what the kernel said as an example.
                         nxkit_nvn::diag::example(
                             nxkit_nvn::diag::Reason::UploadFailed,
-                            format_args!("{:?} {}x{} level {level} slice {slice}: {e}", d.format, d.width, d.height),
+                            format_args!(
+                                "{:?} {}x{} level {level} slice {slice}: {e}",
+                                d.format, d.width, d.height
+                            ),
                         );
                         Skip::Transfer
                     })?;
@@ -234,10 +253,21 @@ impl Transfer {
     ) -> Result<(), Skip> {
         let d = res.desc;
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        if d.kind == TextureKind::D3 || d.mip_levels != 1 || d.array_layers != 1 || rec.desc.stride == 0 {
+        if d.kind == TextureKind::D3
+            || d.mip_levels != 1
+            || d.array_layers != 1
+            || rec.desc.stride == 0
+        {
             let what = format_args!(
                 "{:?} {:?} {}x{}x{} levels {} layers {} stride {}",
-                d.format, d.kind, d.width, d.height, d.depth, d.mip_levels, d.array_layers, rec.desc.stride
+                d.format,
+                d.kind,
+                d.width,
+                d.height,
+                d.depth,
+                d.mip_levels,
+                d.array_layers,
+                rec.desc.stride
             );
             nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::UploadLinearRefused, what);
             if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
@@ -246,11 +276,17 @@ impl Transfer {
             return Err(Skip::Transfer);
         }
         if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
-            eprintln!("DIAG upload linear {:?} {}x{} stride {}", d.format, d.width, d.height, rec.desc.stride);
+            eprintln!(
+                "DIAG upload linear {:?} {}x{} stride {}",
+                d.format, d.width, d.height, rec.desc.stride
+            );
         }
         let r = self.copy_linear(cb, guest, rec, res, wait);
         if let Err(why) = r {
-            upload_failed(format_args!("linear {:?} {}x{} stride {}: {why:?}", d.format, d.width, d.height, rec.desc.stride));
+            upload_failed(format_args!(
+                "linear {:?} {}x{} stride {}: {why:?}",
+                d.format, d.width, d.height, rec.desc.stride
+            ));
         }
         r
     }
@@ -451,7 +487,12 @@ impl Transfer {
         dirty: &Dirty,
     ) -> Result<u64, Skip> {
         let d = res.desc;
-        if res.widened || res.scaled || d.format.is_compressed() || d.format.is_depth() || d.format.has_stencil() {
+        if res.widened
+            || res.scaled
+            || d.format.is_compressed()
+            || d.format.is_depth()
+            || d.format.has_stencil()
+        {
             return Err(Skip::Transfer);
         }
         let base = guest_offset(rec, guest)?;
@@ -462,7 +503,11 @@ impl Transfer {
         };
         if rec.layout.linear {
             // NVN linear textures have one level and one layer (see `upload_linear`).
-            if d.kind == TextureKind::D3 || d.mip_levels != 1 || d.array_layers != 1 || rec.desc.stride == 0 {
+            if d.kind == TextureKind::D3
+                || d.mip_levels != 1
+                || d.array_layers != 1
+                || rec.desc.stride == 0
+            {
                 return Err(Skip::Transfer);
             }
             pass.encode(&ComputeCommand::CopyTextureRegionToGuest {
@@ -477,7 +522,11 @@ impl Transfer {
             return Ok(bytes(0));
         }
         let surf = surface(rec, res, self.order)?;
-        let slices = if d.kind == TextureKind::D3 { 1 } else { d.slice_count() };
+        let slices = if d.kind == TextureKind::D3 {
+            1
+        } else {
+            d.slice_count()
+        };
         let mut total = 0;
         for (level, slice) in dirty.parts(d.mip_levels, slices) {
             let region = TextureRegion::whole(level, slice, extent(&d, level));
@@ -523,9 +572,15 @@ impl Dirty {
     /// The (level, slice) pairs inside a texture of `levels` levels and `slices` slices, in order.
     pub(crate) fn parts(&self, levels: u32, slices: u32) -> Vec<(u32, u32)> {
         match self {
-            Self::All => (0..slices).flat_map(|s| (0..levels).map(move |l| (l, s))).collect(),
+            Self::All => (0..slices)
+                .flat_map(|s| (0..levels).map(move |l| (l, s)))
+                .collect(),
             Self::Parts(v) => {
-                let mut v: Vec<_> = v.iter().copied().filter(|&(l, s)| l < levels && s < slices).collect();
+                let mut v: Vec<_> = v
+                    .iter()
+                    .copied()
+                    .filter(|&(l, s)| l < levels && s < slices)
+                    .collect();
                 v.sort_unstable_by_key(|&(l, s)| (s, l));
                 v
             }
@@ -541,7 +596,10 @@ mod tests {
 
     /// Uploads `desc` from a pattern in guest memory, clears the memory, copies `dirty` back and returns the
     /// pattern, the guest bytes after the copy-back and the record.
-    fn round_trip(desc: nxkit_nvn::layout::TextureDesc, dirty: &Dirty) -> Option<(Vec<u8>, Vec<u8>, TextureRecord)> {
+    fn round_trip(
+        desc: nxkit_nvn::layout::TextureDesc,
+        dirty: &Dirty,
+    ) -> Option<(Vec<u8>, Vec<u8>, TextureRecord)> {
         let ctx = match Context::system_default() {
             Ok(c) => c,
             Err(e) => {
@@ -552,7 +610,10 @@ mod tests {
         let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
         let mut resources = ResourceTable::new();
         let id = resources
-            .create(desc, GpuAddr::new(guest.address_map().gpu_base() + 0x1000).unwrap())
+            .create(
+                desc,
+                GpuAddr::new(guest.address_map().gpu_base() + 0x1000).unwrap(),
+            )
             .unwrap();
         let rec = *resources.get(id).unwrap();
         let size = rec.layout.size as usize;
@@ -560,7 +621,12 @@ mod tests {
         guest.write(0x1000, &pattern).unwrap();
         let mut store = crate::textures::TextureStore::new(&ctx);
         let res = store
-            .ensure(&rec, 1.0, crate::textures::Use::default(), &mut Default::default())
+            .ensure(
+                &rec,
+                1.0,
+                crate::textures::Use::default(),
+                &mut Default::default(),
+            )
             .unwrap();
         let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
         let transfer = Transfer::new(&ctx, &cache, GobOrder::Tegra).unwrap();
@@ -575,7 +641,8 @@ mod tests {
         guest.write(0x1000, &vec![0; size]).unwrap();
         let mut frame = ring.begin().unwrap();
         let scratch = frame.scratch();
-        let results = transfer.copy_back_many(frame.commands(), &scratch, &guest, &[(&rec, &res, dirty)]);
+        let results =
+            transfer.copy_back_many(frame.commands(), &scratch, &guest, &[(&rec, &res, dirty)]);
         assert!(results[0].is_ok(), "{results:?}");
         ctx.commit_residency();
         frame.submit().unwrap().wait().unwrap();
@@ -601,7 +668,9 @@ mod tests {
         let mut dirty = Dirty::default();
         dirty.add(0, 0);
         dirty.add(1, 2);
-        let Some((pattern, out, rec)) = round_trip(desc, &dirty) else { return };
+        let Some((pattern, out, rec)) = round_trip(desc, &dirty) else {
+            return;
+        };
         // Both levels fill whole GOB blocks, so every byte of a level is a texel.
         let level = |l: u32| {
             let lo = desc.level_offset(l).unwrap();
@@ -614,9 +683,16 @@ mod tests {
                 let at = (slice * rec.layout.layer_size + lo) as usize;
                 let got = &out[at..at + len as usize];
                 if dirty.parts(2, 3).contains(&(l, slice as u32)) {
-                    assert_eq!(got, &pattern[at..at + len as usize], "level {l} slice {slice}");
+                    assert_eq!(
+                        got,
+                        &pattern[at..at + len as usize],
+                        "level {l} slice {slice}"
+                    );
                 } else {
-                    assert!(got.iter().all(|b| *b == 0), "level {l} slice {slice} was written");
+                    assert!(
+                        got.iter().all(|b| *b == 0),
+                        "level {l} slice {slice} was written"
+                    );
                 }
             }
         }
@@ -636,11 +712,16 @@ mod tests {
             stride: 128,
             packaged_block: None,
         };
-        let Some((pattern, out, _)) = round_trip(desc, &Dirty::All) else { return };
+        let Some((pattern, out, _)) = round_trip(desc, &Dirty::All) else {
+            return;
+        };
         for row in 0..8 {
             let at = row * 128;
             assert_eq!(&out[at..at + 80], &pattern[at..at + 80], "row {row}");
-            assert!(out[at + 80..at + 128].iter().all(|b| *b == 0), "the padding of row {row} was written");
+            assert!(
+                out[at + 80..at + 128].iter().all(|b| *b == 0),
+                "the padding of row {row} was written"
+            );
         }
     }
 

@@ -20,11 +20,13 @@ pub fn quit(why: &str) {
         return;
     }
     log(&format!("received {why}: graceful exit"));
-    let watchdog = std::thread::Builder::new().name("nxkit-quit".to_owned()).spawn(|| {
-        std::thread::sleep(GRACE);
-        log("graceful exit not done in 1.5 seconds, exiting at once");
-        std::process::exit(0)
-    });
+    let watchdog = std::thread::Builder::new()
+        .name("nxkit-quit".to_owned())
+        .spawn(|| {
+            std::thread::sleep(GRACE);
+            log("graceful exit not done in 1.5 seconds, exiting at once");
+            std::process::exit(0)
+        });
     if watchdog.is_err() {
         log("no watchdog thread for the graceful exit");
     }

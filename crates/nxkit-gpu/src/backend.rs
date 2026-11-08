@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use nxkit_metal::{Context, DisplayTick, GuestMemory, Pacer, Shown, Texture, TickAction, TickSink};
 use nxkit_nvn::backend::{
-    Backend, BackendError, BackendResult, Deferred, Fence, FlushCx, PoolInfo, Present, StageKey, WaitResult,
+    Backend, BackendError, BackendResult, Deferred, Fence, FlushCx, PoolInfo, Present, StageKey,
+    WaitResult,
 };
 use nxkit_nvn::cmdbuf::CommandHandle;
 use nxkit_nvn::frame::{Cmd, Frame};
@@ -105,7 +106,8 @@ impl GpuBackend {
         let gpu = Gpu::with_config(ctx, guest.clone(), settings.config())?;
         let walker = Walker::new(settings.shader_dir.clone(), guest.address_map());
         let invalidations = walker.invalidations();
-        let threaded = settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
+        let threaded =
+            settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {
             let enc = threaded
                 .then(|| {
@@ -114,7 +116,9 @@ impl GpuBackend {
                         Some(backend) => backend.serve(msg),
                         None => Reply::Stop,
                     })
-                    .inspect_err(|e| eprintln!("nxkit-gpu: no encoder thread, encoding on the game thread: {e}"))
+                    .inspect_err(|e| {
+                        eprintln!("nxkit-gpu: no encoder thread, encoding on the game thread: {e}")
+                    })
                     .ok()
                 })
                 .flatten();
@@ -178,7 +182,9 @@ impl GpuBackend {
     /// difference and picks its frame interval from it; without the reports it saw no GPU time and kept a 30 fps
     /// step on frames that took longer, which ran the game in slow motion.
     fn write_counters(&self, upto: u64) {
-        let Some((start, end)) = *locked(&self.last_gpu) else { return };
+        let Some((start, end)) = *locked(&self.last_gpu) else {
+            return;
+        };
         let due: Vec<_> = {
             let mut c = locked(&self.counters);
             let (due, keep): (Vec<_>, Vec<_>) = c.drain(..).partition(|(f, _)| *f <= upto);
@@ -223,7 +229,13 @@ impl GpuBackend {
     fn encode_job(&self, job: &Job) -> Result<TableUpdate, String> {
         let (result, submitted) = {
             let mut gpu = locked(&self.gpu);
-            let r = gpu.encode_frame(&job.frame, &job.plan, &job.snapshot, &job.detail, self.scale);
+            let r = gpu.encode_frame(
+                &job.frame,
+                &job.plan,
+                &job.snapshot,
+                &job.detail,
+                self.scale,
+            );
             (r, gpu.last_submitted())
         };
         if let Some(b) = submitted {
@@ -236,17 +248,32 @@ impl GpuBackend {
             }
         }
         if let Ok(r) = &result {
-            self.copied_recent.store(!r.copied_back.is_empty(), Ordering::Release);
+            self.copied_recent
+                .store(!r.copied_back.is_empty(), Ordering::Release);
             if crate::diag("frame") && job.fence.0 % 60 == 0 {
-                eprintln!("DIAG frame copyback fence {} copied_back {}", job.fence.0, r.copied_back.len());
+                eprintln!(
+                    "DIAG frame copyback fence {} copied_back {}",
+                    job.fence.0,
+                    r.copied_back.len()
+                );
             }
         }
         self.hold_counters(job.fence, &job.detail);
         self.encoded.fetch_max(job.fence.0, Ordering::AcqRel);
         let report = result.map_err(|e| e.to_string())?;
         let epoch = |id: &TexId| job.snapshot.record(*id).ok().map(|r| (*id, r.write_epoch));
-        let wrote = report.deswizzled.iter().chain(&report.gpu_wrote).filter_map(&epoch).collect();
-        let mut synced: Vec<_> = report.deswizzled.iter().chain(&report.mirrored).filter_map(&epoch).collect();
+        let wrote = report
+            .deswizzled
+            .iter()
+            .chain(&report.gpu_wrote)
+            .filter_map(&epoch)
+            .collect();
+        let mut synced: Vec<_> = report
+            .deswizzled
+            .iter()
+            .chain(&report.mirrored)
+            .filter_map(&epoch)
+            .collect();
         if !report.copied_back.is_empty() {
             self.drain();
             synced.extend(report.copied_back.iter().filter_map(&epoch));
@@ -276,17 +303,31 @@ impl GpuBackend {
         // as written. Nothing reads the state in between, and setting both every frame made every texture that is
         // copied back flip twice a frame, which defeated the alias cache of the table.
         if crate::diag("frame") && fence.0 % 60 == 0 {
-            eprintln!("DIAG frame copyback fence {} copied_back {} (sync)", fence.0, report.copied_back.len());
+            eprintln!(
+                "DIAG frame copyback fence {} copied_back {} (sync)",
+                fence.0,
+                report.copied_back.len()
+            );
         }
         if !report.copied_back.is_empty() {
             self.drain();
         }
-        let synced: crate::draws::FastSet<TexId> =
-            report.deswizzled.iter().chain(&report.mirrored).chain(&report.copied_back).copied().collect();
+        let synced: crate::draws::FastSet<TexId> = report
+            .deswizzled
+            .iter()
+            .chain(&report.mirrored)
+            .chain(&report.copied_back)
+            .copied()
+            .collect();
         for id in report.gpu_wrote.iter().filter(|id| !synced.contains(id)) {
             let _ = cx.table.gpu_wrote(*id);
         }
-        for id in report.deswizzled.iter().chain(&report.mirrored).chain(&report.copied_back) {
+        for id in report
+            .deswizzled
+            .iter()
+            .chain(&report.mirrored)
+            .chain(&report.copied_back)
+        {
             let _ = cx.table.synced(*id);
         }
         self.note_report(&report);
@@ -308,8 +349,16 @@ impl GpuBackend {
             let st = &report.stats;
             eprintln!(
                 "DIAG pixelall frame {n} bar {:?} draws {} passes {}/{} created {} rescaled {} uploads {} copybacks {} skipped {} {:?}",
-                crate::nobar_range(), st.draws, st.render_passes, st.compute_passes, st.textures_created, st.textures_rescaled,
-                st.uploads, st.copybacks, st.skipped_total(), st.skipped
+                crate::nobar_range(),
+                st.draws,
+                st.render_passes,
+                st.compute_passes,
+                st.textures_created,
+                st.textures_rescaled,
+                st.uploads,
+                st.copybacks,
+                st.skipped_total(),
+                st.skipped
             );
         }
         if (report.stats.skipped_total() > 0 && n < 16) || (diag && n % 30 == 0) {
@@ -324,7 +373,10 @@ impl GpuBackend {
             static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
             let first = FIRST.swap(false, Ordering::Relaxed);
             if first || ((diag || crate::diag("mesh")) && n % 30 == 0) {
-                eprintln!("nxkit-gpu: frame {n}: mesh and indirect draws: {}", kinds.describe());
+                eprintln!(
+                    "nxkit-gpu: frame {n}: mesh and indirect draws: {}",
+                    kinds.describe()
+                );
             }
         }
     }
@@ -346,7 +398,11 @@ impl GpuBackend {
                 texture.desc().format
             );
         }
-        locked(&self.pending).push(Pending { number, texture, crop: present.crop });
+        locked(&self.pending).push(Pending {
+            number,
+            texture,
+            crop: present.crop,
+        });
         if let Some(p) = self.pacer.get() {
             p.game_frame_ready(number);
         }
@@ -525,7 +581,11 @@ impl Backend for GpuBackend {
         }
         // One frame of overlap: a wait for the newest frame waits for the one before it. A frame that copied back to
         // CPU memory waited in full when it was encoded, so `done` covers it already.
-        if crate::overlap::on() && self.enc.is_none() && fence.0 == self.encoded.load(Ordering::Acquire) && fence.0 > 1 {
+        if crate::overlap::on()
+            && self.enc.is_none()
+            && fence.0 == self.encoded.load(Ordering::Acquire)
+            && fence.0 > 1
+        {
             let older = fence.0 - 1;
             if older > self.done.load(Ordering::Acquire) {
                 let result = locked(&self.gpu).wait_older();
@@ -610,9 +670,15 @@ impl Backend for GpuBackend {
     fn recording_invalidated(&self, start: u64, end: u64) {
         self.invalidations.push(start, end);
         if overlap_diag()
-            && let Ok(gpu) = self.guest.gpu_address(start, end.saturating_sub(start).max(1))
+            && let Ok(gpu) = self
+                .guest
+                .gpu_address(start, end.saturating_sub(start).max(1))
         {
-            self.overlap.flushed(gpu, end.saturating_sub(start), self.done.load(Ordering::Acquire));
+            self.overlap.flushed(
+                gpu,
+                end.saturating_sub(start),
+                self.done.load(Ordering::Acquire),
+            );
         }
     }
 
@@ -624,7 +690,9 @@ impl Backend for GpuBackend {
             // their way to the screen; otherwise the game ran frames ahead, each showed 80 ms after it, and the
             // textures it wrote for later frames reached the encodes of earlier ones.
             let in_flight = |_: &Vec<Pending>| {
-                self.asked.load(Ordering::Acquire).saturating_sub(self.shown_upto.load(Ordering::Acquire))
+                self.asked
+                    .load(Ordering::Acquire)
+                    .saturating_sub(self.shown_upto.load(Ordering::Acquire))
             };
             while in_flight(&pending) >= MAX_PENDING as u64 {
                 let (guard, timeout) = self
@@ -698,10 +766,10 @@ impl TickSink for GpuBackend {
         encpace::shown(number, locked(&self.pending).len());
         let texture = {
             let mut pending = locked(&self.pending);
-            let found = pending
-                .iter()
-                .position(|p| p.number == number)
-                .map(|i| { let p = pending.remove(i); (p.texture, p.crop) });
+            let found = pending.iter().position(|p| p.number == number).map(|i| {
+                let p = pending.remove(i);
+                (p.texture, p.crop)
+            });
             for p in pending.iter().filter(|p| p.number < number) {
                 nxkit_nvn::screen::shown(p.number, -1.0);
             }
@@ -724,7 +792,10 @@ impl TickSink for GpuBackend {
                 .collect();
             let px = texture.debug_read(&self.ctx, &pts).unwrap_or_default();
             let lit = px.iter().filter(|p| p[0] | p[1] | p[2] > 8).count();
-            eprintln!("DIAG pixelall present {} lit {lit}/9", PRESENT_DIAG[2].load(Ordering::Relaxed));
+            eprintln!(
+                "DIAG pixelall present {} lit {lit}/9",
+                PRESENT_DIAG[2].load(Ordering::Relaxed)
+            );
         }
         if crate::diag("pixel") && PRESENT_DIAG[2].load(Ordering::Relaxed) % 60 == 1 {
             let d = texture.desc();
@@ -752,9 +823,15 @@ impl TickSink for GpuBackend {
             return;
         };
         if matches!(shown, Shown::Game { .. }) {
-            tick.drawable.on_presented(move |secs| nxkit_nvn::screen::shown(number, secs));
+            tick.drawable
+                .on_presented(move |secs| nxkit_nvn::screen::shown(number, secs));
         }
-        let r = b.present(&texture, crop, tick.drawable, tick.target_presentation_timestamp);
+        let r = b.present(
+            &texture,
+            crop,
+            tick.drawable,
+            tick.target_presentation_timestamp,
+        );
         if r.is_ok() {
             present_diag(3);
         }

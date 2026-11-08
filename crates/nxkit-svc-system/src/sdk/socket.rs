@@ -60,7 +60,12 @@ struct Slot {
     count: AtomicU64,
 }
 
-static SLOTS: [Slot; MAX] = [const { Slot { flags: AtomicU32::new(0), count: AtomicU64::new(0) } }; MAX];
+static SLOTS: [Slot; MAX] = [const {
+    Slot {
+        flags: AtomicU32::new(0),
+        count: AtomicU64::new(0),
+    }
+}; MAX];
 static WAITERS: AtomicU32 = AtomicU32::new(0);
 static PARK: Mutex<()> = Mutex::new(());
 static WAKE: Condvar = Condvar::new();
@@ -95,7 +100,9 @@ fn park(mut ready: impl FnMut() -> bool, until: Option<Instant>) -> bool {
                 if now >= t {
                     break false;
                 }
-                WAKE.wait_timeout(guard, t - now).unwrap_or_else(PoisonError::into_inner).0
+                WAKE.wait_timeout(guard, t - now)
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0
             }
         };
     };
@@ -110,7 +117,10 @@ fn take(s: &Slot) -> Option<u64> {
     let mut c = s.count.load(Ordering::Acquire);
     while c != 0 {
         let next = if semaphore { c - 1 } else { 0 };
-        match s.count.compare_exchange_weak(c, next, Ordering::AcqRel, Ordering::Acquire) {
+        match s
+            .count
+            .compare_exchange_weak(c, next, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => return Some(if semaphore { 1 } else { c }),
             Err(now) => c = now,
         }
@@ -121,7 +131,10 @@ fn take(s: &Slot) -> Option<u64> {
 /// `EventFd(unsigned long value, EventFdFlags)`.
 pub(super) extern "C" fn event_fd(value: u64, flags: u32) -> i32 {
     for (i, s) in SLOTS.iter().enumerate() {
-        if s.flags.compare_exchange(0, IN_USE | flags, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        if s.flags
+            .compare_exchange(0, IN_USE | flags, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
             s.count.store(value, Ordering::Release);
             return BASE + i as i32;
         }
@@ -216,7 +229,9 @@ fn scan(fds: u64, n: u64) -> i32 {
 }
 
 fn idle(ms: i64) -> i32 {
-    std::thread::sleep(Duration::from_millis(u64::try_from(if ms < 0 { IDLE_MS } else { ms }).unwrap_or(0)));
+    std::thread::sleep(Duration::from_millis(
+        u64::try_from(if ms < 0 { IDLE_MS } else { ms }).unwrap_or(0),
+    ));
     0
 }
 
@@ -234,7 +249,8 @@ pub(super) extern "C" fn poll(fds: u64, n: u64, ms: u32) -> i32 {
         }
         return idle(ms);
     }
-    let until = Instant::now() + Duration::from_millis(u64::try_from(if ms < 0 { IDLE_MS } else { ms }).unwrap_or(0));
+    let until = Instant::now()
+        + Duration::from_millis(u64::try_from(if ms < 0 { IDLE_MS } else { ms }).unwrap_or(0));
     let mut ready = scan(fds, n);
     if ready == 0 {
         park(

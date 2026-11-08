@@ -213,7 +213,10 @@ pub enum DrawArgs {
 impl DrawArgs {
     /// True for a mesh draw.
     pub fn is_mesh(&self) -> bool {
-        matches!(self, Self::MeshTasks { .. } | Self::MeshTasksIndirect { .. })
+        matches!(
+            self,
+            Self::MeshTasks { .. } | Self::MeshTasksIndirect { .. }
+        )
     }
 
     /// True when the GPU reads the arguments from memory when the draw runs.

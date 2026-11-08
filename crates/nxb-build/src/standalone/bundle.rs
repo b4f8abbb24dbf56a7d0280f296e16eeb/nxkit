@@ -33,7 +33,9 @@ pub fn file_name(title: &str) -> String {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The bundle identifier of a title when `--bundle-id` is not given.
@@ -59,7 +61,10 @@ pub fn info_plist(name: &str, bundle_id: &str, version: &str) -> String {
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n",
     );
     for (k, v) in rows {
-        s.push_str(&format!("\t<key>{k}</key>\n\t<string>{}</string>\n", escape(v)));
+        s.push_str(&format!(
+            "\t<key>{k}</key>\n\t<string>{}</string>\n",
+            escape(v)
+        ));
     }
     s.push_str("\t<key>NSHighResolutionCapable</key>\n\t<true/>\n</dict>\n</plist>\n");
     s
@@ -104,10 +109,7 @@ mod tests {
 
     #[test]
     fn the_name_loses_slashes_and_colons() {
-        assert_eq!(
-            file_name("Some Game: The Sequel"),
-            "Some Game The Sequel"
-        );
+        assert_eq!(file_name("Some Game: The Sequel"), "Some Game The Sequel");
         assert_eq!(file_name("../x/y"), "xy");
         assert_eq!(file_name(":"), "Game");
     }

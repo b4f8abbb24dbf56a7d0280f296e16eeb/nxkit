@@ -124,7 +124,12 @@ impl DrawClass {
     }
 
     /// Every class, in index order.
-    pub const ALL: [Self; Self::COUNT] = [Self::Mesh, Self::MeshIndirect, Self::Indirect, Self::MultiIndirectCount];
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Mesh,
+        Self::MeshIndirect,
+        Self::Indirect,
+        Self::MultiIndirectCount,
+    ];
 }
 
 /// The mesh and indirect draws of a frame: how many were encoded and why the others were not. They are also in
@@ -179,7 +184,12 @@ impl KindStats {
                 .map(|(n, why)| format!("{} {n}", why.name()))
                 .collect();
             if self.encoded[i] > 0 || !skipped.is_empty() {
-                out.push(format!("{} encoded {} skipped [{}]", c.name(), self.encoded[i], skipped.join(", ")));
+                out.push(format!(
+                    "{} encoded {} skipped [{}]",
+                    c.name(),
+                    self.encoded[i],
+                    skipped.join(", ")
+                ));
             }
         }
         format!(

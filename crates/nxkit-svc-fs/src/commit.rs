@@ -44,12 +44,20 @@ impl Txn {
         remove_tree(&work)?;
         remove_tree(&neu)?;
         sys::clone_dir(dir, &work)?;
-        Ok(Txn { commit: dir.to_path_buf(), work, neu, gate: RwLock::new(()), poisoned: AtomicBool::new(false) })
+        Ok(Txn {
+            commit: dir.to_path_buf(),
+            work,
+            neu,
+            gate: RwLock::new(()),
+            poisoned: AtomicBool::new(false),
+        })
     }
 
     /// Held by an operation that changes the work folder.
     pub(crate) fn writing(&self) -> RwLockReadGuard<'_, ()> {
-        self.gate.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.gate
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Marks the work folder as one that must not be committed.
@@ -64,16 +72,25 @@ impl Txn {
 
     /// Makes the work folder the committed save, or refuses.
     pub(crate) fn commit(&self) -> u32 {
-        let _exclusive = self.gate.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _exclusive = self
+            .gate
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.is_poisoned() {
             self.reset_work();
-            eprintln!("[RED] nxkit-svc-fs: a write to {} failed, so the commit is refused and the work folder is reset", self.commit.display());
+            eprintln!(
+                "[RED] nxkit-svc-fs: a write to {} failed, so the commit is refused and the work folder is reset",
+                self.commit.display()
+            );
             return FAIL;
         }
         match self.publish() {
             Ok(()) => OK,
             Err(e) => {
-                eprintln!("nxkit-svc-fs: the commit of {} failed: {e}", self.commit.display());
+                eprintln!(
+                    "nxkit-svc-fs: the commit of {} failed: {e}",
+                    self.commit.display()
+                );
                 FAIL
             }
         }
@@ -95,7 +112,10 @@ impl Txn {
             .and_then(|()| remove_tree(&re));
         match done {
             Ok(()) => self.poisoned.store(false, Ordering::SeqCst),
-            Err(e) => eprintln!("nxkit-svc-fs: the reset of {} failed: {e}", self.work.display()),
+            Err(e) => eprintln!(
+                "nxkit-svc-fs: the reset of {} failed: {e}",
+                self.work.display()
+            ),
         }
     }
 }
@@ -103,7 +123,9 @@ impl Txn {
 impl Fs {
     /// `Commit(name)`. A name that is not mounted or has no save behind it succeeds, as in nxnative.
     pub(crate) fn commit(&self, name: &[u8]) -> u32 {
-        let Some(txn) = self.find(name).and_then(|m| m.txn.clone()) else { return OK };
+        let Some(txn) = self.find(name).and_then(|m| m.txn.clone()) else {
+            return OK;
+        };
         self.commit_txn(&txn)
     }
 
@@ -161,7 +183,10 @@ mod tests {
         std::fs::write(txn.work.join("option.sav"), b"one").unwrap();
         assert!(!txn.commit.join("option.sav").exists());
         assert_eq!(fs.commit(b"save"), OK);
-        assert_eq!(std::fs::read(txn.commit.join("option.sav")).unwrap(), b"one");
+        assert_eq!(
+            std::fs::read(txn.commit.join("option.sav")).unwrap(),
+            b"one"
+        );
         assert!(!with_suffix(&txn.commit, ".new").exists());
         assert_eq!(fs.commit_count(), 1);
     }

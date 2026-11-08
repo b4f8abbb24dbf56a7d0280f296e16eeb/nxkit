@@ -5,22 +5,26 @@
 //! onto the host zone too, because the SDK copies have no zone data and always give UTC. `gmtime` and `timegm` are
 //! UTC in the SDK as well and stay with it.
 
-use super::{get_i32, get_i64, get_u16, get_u8, log, log_once_with, one, ok, put_bytes, put_i32, put_i64, put_u32, put_zero, zero};
+use super::{
+    get_i32, get_i64, get_u8, get_u16, log, log_once_with, ok, one, put_bytes, put_i32, put_i64,
+    put_u32, put_zero, zero,
+};
 use crate::config;
 use crate::event::Block;
 use crate::seams::guest_ns;
 use crate::sys;
-use crate::time::{self as clock, snapshot, SNAPSHOT_LEN};
+use crate::time::{self as clock, SNAPSHOT_LEN, snapshot};
 use crate::tz;
 use crate::util::lock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static CALENDAR_LOGGED: AtomicBool = AtomicBool::new(false);
 static CONTEXT: Mutex<Option<([u8; 0x20], i64)>> = Mutex::new(None);
 static TM_STATIC: Block = Block::new();
 static ZONES: Block = Block::new();
-static ZONE_KEYS: [AtomicU64; ZONE_SLOTS as usize] = [const { AtomicU64::new(0) }; ZONE_SLOTS as usize];
+static ZONE_KEYS: [AtomicU64; ZONE_SLOTS as usize] =
+    [const { AtomicU64::new(0) }; ZONE_SLOTS as usize];
 
 /// The size of a guest `struct tm` and the place of its fields: nine `int`, then `long tm_gmtoff` at 40 and
 /// `const char* tm_zone` at 48.
@@ -72,7 +76,11 @@ extern "C" fn user_timespec(ts: u64) -> u32 {
             let d = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
-            put_timespec(ts, i64::try_from(d.as_secs()).unwrap_or(0), i64::from(d.subsec_nanos()));
+            put_timespec(
+                ts,
+                i64::try_from(d.as_secs()).unwrap_or(0),
+                i64::from(d.subsec_nanos()),
+            );
         }
     }
     0
@@ -81,7 +89,11 @@ extern "C" fn user_timespec(ts: u64) -> u32 {
 /// The C library monotonic clock from the steady clock. SDK 22 reads it through this function.
 extern "C" fn steady_timespec(ts: u64) -> u32 {
     let ns = sys::monotonic_ns();
-    put_timespec(ts, i64::try_from(ns / 1_000_000_000).unwrap_or(0), i64::try_from(ns % 1_000_000_000).unwrap_or(0));
+    put_timespec(
+        ts,
+        i64::try_from(ns / 1_000_000_000).unwrap_or(0),
+        i64::try_from(ns % 1_000_000_000).unwrap_or(0),
+    );
     0
 }
 
@@ -96,12 +108,18 @@ fn user_context() -> [u8; 0x20] {
     };
     if renew {
         let point = clock::steady_point();
-        let offset = now - i64::from_le_bytes([point[0], point[1], point[2], point[3], point[4], point[5], point[6], point[7]]);
+        let offset = now
+            - i64::from_le_bytes([
+                point[0], point[1], point[2], point[3], point[4], point[5], point[6], point[7],
+            ]);
         let mut ctx = [0u8; 0x20];
         ctx[..8].copy_from_slice(&offset.to_le_bytes());
         ctx[8..].copy_from_slice(&point);
         if let Some((_, old)) = *g {
-            log(&format!("time: host clock moved {:+} s against the guest ticks, new user clock context", drift - old));
+            log(&format!(
+                "time: host clock moved {:+} s against the guest ticks, new user clock context",
+                drift - old
+            ));
         }
         *g = Some((ctx, drift));
     }
@@ -119,7 +137,10 @@ fn put_calendar(ct: u64, ai: u64, posix: i64) {
         return;
     };
     log_once_with(&CALENDAR_LOGGED, || {
-        format!("ToCalendarTime: first conversion {posix} gives year {}", u16::from_le_bytes([cal[0], cal[1]]))
+        format!(
+            "ToCalendarTime: first conversion {posix} gives year {}",
+            u16::from_le_bytes([cal[0], cal[1]])
+        )
     });
     put_bytes(ct, &cal[..8]);
     put_bytes(ai, &cal[8..]);
@@ -135,7 +156,10 @@ extern "C" fn to_calendar_time(ct: u64, ai: u64, posix: u64) -> u32 {
 extern "C" fn load_time_zone_rule(_rule: u64, name: u64) -> u32 {
     static LOGGED: AtomicBool = AtomicBool::new(false);
     log_once_with(&LOGGED, || {
-        format!("time::LoadTimeZoneRule {} (host time zone used instead)", super::get_cstr(name, 36))
+        format!(
+            "time::LoadTimeZoneRule {} (host time zone used instead)",
+            super::get_cstr(name, 36)
+        )
     });
     0
 }
@@ -189,7 +213,15 @@ extern "C" fn user_difference(a: u64, b: u64) -> i64 {
 /// The fields of a guest `CalendarTime`.
 fn calendar_bytes(ct: u64) -> [u8; 7] {
     let year = get_u16(ct).to_le_bytes();
-    [year[0], year[1], get_u8(ct + 2), get_u8(ct + 3), get_u8(ct + 4), get_u8(ct + 5), get_u8(ct + 6)]
+    [
+        year[0],
+        year[1],
+        get_u8(ct + 2),
+        get_u8(ct + 3),
+        get_u8(ct + 4),
+        get_u8(ct + 5),
+        get_u8(ct + 6),
+    ]
 }
 
 /// `ToPosixTime(int*, PosixTime*, int, const CalendarTime&)`, with or without a zone rule: one candidate.

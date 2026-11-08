@@ -101,7 +101,15 @@ impl Hold {
 /// Sets up the hold for the window. The window starts with a free mouse.
 pub(crate) fn install(events: Arc<dyn AppEvents>, window: Retained<NSWindow>) {
     let mode = events.mouse_mode();
-    HOLD.with(|h| *h.borrow_mut() = Some(Hold { events, window, since: None, swallow: 0, mode }));
+    HOLD.with(|h| {
+        *h.borrow_mut() = Some(Hold {
+            events,
+            window,
+            since: None,
+            swallow: 0,
+            mode,
+        })
+    });
 }
 
 /// The window became the key window or lost it.
@@ -142,7 +150,10 @@ pub(crate) fn tick() {
 pub(crate) fn moved(event: &NSEvent) {
     with(|h| {
         if h.since.is_some_and(|t| t.elapsed() >= SETTLE) {
-            h.events.mouse(MouseEvent::Moved { dx: event.deltaX(), dy: event.deltaY() });
+            h.events.mouse(MouseEvent::Moved {
+                dx: event.deltaX(),
+                dy: event.deltaY(),
+            });
         }
     });
 }

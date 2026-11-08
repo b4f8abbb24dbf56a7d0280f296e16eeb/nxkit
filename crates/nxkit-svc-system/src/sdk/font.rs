@@ -23,8 +23,8 @@ use crate::seams::guest_sym;
 use crate::sys::call_guest;
 use nxkit_abi::guest;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const HEADER: u64 = 8;
 const ENGINES: usize = 16;
@@ -42,7 +42,10 @@ fn map(path: &Path) -> Option<Font> {
     let len = data.len() as u64;
     let addr = guest_alloc(len + HEADER);
     if addr == 0 {
-        log(&format!("shared font memory allocation failed ({} bytes)", len + HEADER));
+        log(&format!(
+            "shared font memory allocation failed ({} bytes)",
+            len + HEADER
+        ));
         return None;
     }
     let size = u32::try_from(len).ok()?;
@@ -51,7 +54,10 @@ fn map(path: &Path) -> Option<Font> {
     head[4..].copy_from_slice(&(size ^ 0x4962_1806).swap_bytes().to_le_bytes());
     guest::write(addr, &head).ok()?;
     guest::write(addr + HEADER, &data).ok()?;
-    Some(Font { addr, len: len + HEADER })
+    Some(Font {
+        addr,
+        len: len + HEADER,
+    })
 }
 
 fn first(configured: Option<&PathBuf>, file: &str, fallback: Option<&str>) -> Font {
@@ -59,7 +65,11 @@ fn first(configured: Option<&PathBuf>, file: &str, fallback: Option<&str>) -> Fo
     let fallback = fallback.map(PathBuf::from);
     for path in [configured.cloned(), dir, fallback].into_iter().flatten() {
         if let Some(f) = map(&path) {
-            log(&format!("shared font ({file}): {} ({} bytes)", path.display(), f.len - HEADER));
+            log(&format!(
+                "shared font ({file}): {} ({} bytes)",
+                path.display(),
+                f.len - HEADER
+            ));
             return f;
         }
     }
@@ -101,7 +111,11 @@ fn font(kind: u32) -> Font {
 
 /// How far the address of a font moves past the header: 0 for a game that decodes the header, else 8.
 fn skip() -> u64 {
-    if config().shared_font_decode { 0 } else { HEADER }
+    if config().shared_font_decode {
+        0
+    } else {
+        HEADER
+    }
 }
 
 /// `GetSharedFontLoadState(SharedFontType)`: loaded when the font exists.
@@ -167,7 +181,15 @@ extern "C" fn begin_vr() -> u32 {
 /// The font engine takes the TTF itself, so the base of a host font gets the header cut off.
 fn payload(data: u64) -> u64 {
     let known = [STANDARD.get(), EXTENDED.get()];
-    if known.iter().flatten().any(|f| f.addr != 0 && f.addr == data) { data + HEADER } else { data }
+    if known
+        .iter()
+        .flatten()
+        .any(|f| f.addr != 0 && f.addr == data)
+    {
+        data + HEADER
+    } else {
+        data
+    }
 }
 
 static LOAD_FONT: OnceLock<Option<u64>> = OnceLock::new();
@@ -183,8 +205,21 @@ fn original(cell: &OnceLock<Option<u64>>, name: &str) -> u64 {
 
 /// `ScalableFontEngine::LoadFont(char*, const void*, unsigned, unsigned)`: the game's function with a TTF address.
 extern "C" fn load_font(this: u64, name: u64, data: u64, index: u32, capacity: u32) -> u32 {
-    let f = original(&LOAD_FONT, "_ZN2nn6fontll18ScalableFontEngine8LoadFontEPcPKvjj");
-    call_guest(f, [this, name, payload(data), u64::from(index), u64::from(capacity), 0]) as u32
+    let f = original(
+        &LOAD_FONT,
+        "_ZN2nn6fontll18ScalableFontEngine8LoadFontEPcPKvjj",
+    );
+    call_guest(
+        f,
+        [
+            this,
+            name,
+            payload(data),
+            u64::from(index),
+            u64::from(capacity),
+            0,
+        ],
+    ) as u32
 }
 
 struct Engine {
@@ -193,19 +228,29 @@ struct Engine {
     host: AtomicU64,
 }
 
-static ENGINES_TABLE: [Engine; ENGINES] =
-    [const { Engine { this: AtomicU64::new(0), game: AtomicU64::new(0), host: AtomicU64::new(0) } }; ENGINES];
+static ENGINES_TABLE: [Engine; ENGINES] = [const {
+    Engine {
+        this: AtomicU64::new(0),
+        game: AtomicU64::new(0),
+        host: AtomicU64::new(0),
+    }
+}; ENGINES];
 
 /// Finds the entry of an engine, or claims a free one when `claim` is set.
 fn engine(this: u64, claim: bool) -> Option<&'static Engine> {
     for e in &ENGINES_TABLE {
         match e.this.load(Ordering::Acquire) {
             t if t == this => return Some(e),
-            0 if claim => match e.this.compare_exchange(0, this, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => return Some(e),
-                Err(t) if t == this => return Some(e),
-                Err(_) => {}
-            },
+            0 if claim => {
+                match e
+                    .this
+                    .compare_exchange(0, this, Ordering::AcqRel, Ordering::Acquire)
+                {
+                    Ok(_) => return Some(e),
+                    Err(t) if t == this => return Some(e),
+                    Err(_) => {}
+                }
+            }
             0 => return None,
             _ => {}
         }
@@ -215,7 +260,10 @@ fn engine(this: u64, claim: bool) -> Option<&'static Engine> {
 
 /// `ScalableFontEngine::Initialize(void*, unsigned)`: a small work buffer of the game is replaced by host memory.
 extern "C" fn initialize(this: u64, buf: u64, len: u32) {
-    let f = original(&INITIALIZE, "_ZN2nn6fontll18ScalableFontEngine10InitializeEPvj");
+    let f = original(
+        &INITIALIZE,
+        "_ZN2nn6fontll18ScalableFontEngine10InitializeEPvj",
+    );
     let (mut buf, mut len) = (buf, len);
     if len < WORK_MIN {
         match engine(this, true) {
@@ -232,7 +280,9 @@ extern "C" fn initialize(this: u64, buf: u64, len: u32) {
                 buf = host;
                 len = WORK_MIN;
             }
-            None => log(&format!("more than {ENGINES} font engines with a small work buffer, this one keeps the game's")),
+            None => log(&format!(
+                "more than {ENGINES} font engines with a small work buffer, this one keeps the game's"
+            )),
         }
     }
     call_guest(f, [this, buf, u64::from(len), 0, 0, 0]);
@@ -246,7 +296,13 @@ extern "C" fn work_buffer(this: u64) -> u64 {
             return game;
         }
     }
-    call_guest(original(&WORK_BUFFER, "_ZN2nn6fontll18ScalableFontEngine22GetPointerToWorkBufferEv"), [this, 0, 0, 0, 0, 0])
+    call_guest(
+        original(
+            &WORK_BUFFER,
+            "_ZN2nn6fontll18ScalableFontEngine22GetPointerToWorkBufferEv",
+        ),
+        [this, 0, 0, 0, 0, 0],
+    )
 }
 
 table! {

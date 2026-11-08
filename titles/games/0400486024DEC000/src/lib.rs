@@ -17,8 +17,8 @@
 //! `pso_manifest.tsv` in `seedds/nxnative` `dm/games/0400486024DEC000/`.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks, Service,
-    Settings, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime,
+    RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
 };
 
 /// The fixed resolution scale (a resource patch at build time).
@@ -259,7 +259,10 @@ mod tests {
         // an empty list: the build reads the names from the modules
         assert!(s.nvn_functions.value.is_empty());
         let m = s.settings.value.memory;
-        assert_eq!((m.reserve, m.app_pool, m.system_resource), (0x3_2000_0000, 0x2_4000_0000, 0x300_0000));
+        assert_eq!(
+            (m.reserve, m.app_pool, m.system_resource),
+            (0x3_2000_0000, 0x2_4000_0000, 0x300_0000)
+        );
         assert!(m.map_limit && s.settings.value.render_cond);
     }
 
@@ -275,6 +278,10 @@ mod tests {
 
     #[test]
     fn nxkit_runs_every_service() {
-        assert!(Service::ALL.into_iter().all(|s| OOT.runtime(s).map(|f| f.value) == Some(Runtime::Nxkit)));
+        assert!(
+            Service::ALL
+                .into_iter()
+                .all(|s| OOT.runtime(s).map(|f| f.value) == Some(Runtime::Nxkit))
+        );
     }
 }

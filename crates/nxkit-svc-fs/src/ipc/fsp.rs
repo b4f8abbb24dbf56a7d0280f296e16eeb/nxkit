@@ -1,7 +1,7 @@
 //! The root interface `fsp-srv`.
 
 use super::filesystem::IFileSystem;
-use super::storage::{IStorage, ISaveDataInfoReader};
+use super::storage::{ISaveDataInfoReader, IStorage};
 use super::{SPACE, answer, service};
 use crate::image::Image;
 use crate::mount::Fs;
@@ -24,7 +24,9 @@ pub(crate) struct FspSrv {
 
 impl FspSrv {
     pub(crate) fn new() -> FspSrv {
-        FspSrv { image: OnceLock::new() }
+        FspSrv {
+            image: OnceLock::new(),
+        }
     }
 
     /// The image of the romfs, built at the first use. A failure is logged and stays a failure.
@@ -33,7 +35,10 @@ impl FspSrv {
             .get_or_init(|| match Image::build(&fs.cfg.romfs) {
                 Ok(i) => Some(Arc::new(i)),
                 Err(e) => {
-                    eprintln!("[RED] nxkit-svc-fs: the romfs image of {} cannot be built: {e}", fs.cfg.romfs.display());
+                    eprintln!(
+                        "[RED] nxkit-svc-fs: the romfs image of {} cannot be built: {e}",
+                        fs.cfg.romfs.display()
+                    );
                     None
                 }
             })
@@ -41,7 +46,9 @@ impl FspSrv {
     }
 
     fn data_storage(&self, rsp: &mut Response) -> Handled {
-        let Some(fs) = service(rsp) else { return Handled::Done };
+        let Some(fs) = service(rsp) else {
+            return Handled::Done;
+        };
         match self.image(fs) {
             Some(img) => {
                 rsp.objects.push(Arc::new(IStorage::new(img)));
@@ -54,12 +61,19 @@ impl FspSrv {
     /// `OpenSaveDataFileSystem`: space id u8 at 0, then the attribute at 8 (program id, user id, system save data id,
     /// type u8 at 0x20, rank u8, index u16 at 0x22).
     fn open_save(req: &Request<'_>, rsp: &mut Response) -> Handled {
-        let Some(fs) = service(rsp) else { return Handled::Done };
-        let Some(attr) = req.data.get(8..0x48) else { return answer(rsp, FAIL) };
+        let Some(fs) = service(rsp) else {
+            return Handled::Done;
+        };
+        let Some(attr) = req.data.get(8..0x48) else {
+            return answer(rsp, FAIL);
+        };
         let (kind, index) = (attr[0x20], u16::from_le_bytes([attr[0x22], attr[0x23]]));
         let (name, r) = match kind {
             TYPE_ACCOUNT => (b"@save".to_vec(), fs.mount_save(b"@save", &fs.save_dir())),
-            TYPE_DEVICE if fs.cfg.separate_device_save => (b"@device".to_vec(), fs.mount_save(b"@device", &fs.device_save_dir())),
+            TYPE_DEVICE if fs.cfg.separate_device_save => (
+                b"@device".to_vec(),
+                fs.mount_save(b"@device", &fs.device_save_dir()),
+            ),
             TYPE_DEVICE => (b"@save".to_vec(), fs.mount_save(b"@save", &fs.save_dir())),
             TYPE_CACHE => {
                 let name = format!("@cache{index}").into_bytes();
@@ -67,7 +81,9 @@ impl FspSrv {
                 (name, r)
             }
             other => {
-                eprintln!("[RED] nxkit-svc-fs: OpenSaveDataFileSystem of save type {other}: the host serves account, device and cache saves only");
+                eprintln!(
+                    "[RED] nxkit-svc-fs: OpenSaveDataFileSystem of save type {other}: the host serves account, device and cache saves only"
+                );
                 return answer(rsp, TARGET_NOT_FOUND);
             }
         };
@@ -90,7 +106,9 @@ impl Service for FspSrv {
             // is mounted and has no size limit.
             1 | 22 | 32 => answer(rsp, OK),
             33 => {
-                let Some(fs) = service(rsp) else { return Handled::Done };
+                let Some(fs) = service(rsp) else {
+                    return Handled::Done;
+                };
                 match req.u32_at(0) {
                     Some(index) => answer(rsp, fs.delete_cache(index as i32)),
                     None => answer(rsp, FAIL),
@@ -103,13 +121,18 @@ impl Service for FspSrv {
             }
             51 => Self::open_save(req, rsp),
             53 => {
-                eprintln!("[RED] nxkit-svc-fs: read-only open of save data: the host has none for another program");
+                eprintln!(
+                    "[RED] nxkit-svc-fs: read-only open of save data: the host has none for another program"
+                );
                 answer(rsp, TARGET_NOT_FOUND)
             }
             61 => {
-                let Some(fs) = service(rsp) else { return Handled::Done };
+                let Some(fs) = service(rsp) else {
+                    return Handled::Done;
+                };
                 let user = req.data.first() == Some(&SPACE_USER);
-                let reader = ISaveDataInfoReader::new(fs.cfg.title_id, user && fs.save_dir().is_dir());
+                let reader =
+                    ISaveDataInfoReader::new(fs.cfg.title_id, user && fs.save_dir().is_dir());
                 rsp.objects.push(Arc::new(reader));
                 Handled::Done
             }

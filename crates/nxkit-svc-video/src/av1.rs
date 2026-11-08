@@ -141,9 +141,16 @@ fn for_each_obu(data: &[u8], mut f: impl FnMut(u8, &[u8]) -> bool) {
             return; // no size field: not the low-overhead format
         }
         let header = if first & 4 != 0 { 2 } else { 1 };
-        let Some(rest) = data.get(at + header..) else { return };
-        let Some((size, n)) = leb128(rest) else { return };
-        let Some(end) = usize::try_from(size).ok().and_then(|s| (at + header + n).checked_add(s)) else {
+        let Some(rest) = data.get(at + header..) else {
+            return;
+        };
+        let Some((size, n)) = leb128(rest) else {
+            return;
+        };
+        let Some(end) = usize::try_from(size)
+            .ok()
+            .and_then(|s| (at + header + n).checked_add(s))
+        else {
             return;
         };
         let Some(obu) = data.get(at..end) else { return };
@@ -172,7 +179,10 @@ fn parse_sequence(obu: &[u8]) -> Option<Sequence> {
     let header = if obu.first()? & 4 != 0 { 2 } else { 1 };
     let (size, n) = leb128(obu.get(header..)?)?;
     let payload = obu.get(header + n..)?.get(..usize::try_from(size).ok()?)?;
-    let mut r = Bits { data: payload, pos: 0 };
+    let mut r = Bits {
+        data: payload,
+        pos: 0,
+    };
 
     let profile = r.bits(3)? as u8;
     r.bit()?; // still_picture
@@ -356,13 +366,21 @@ impl Planar<'_> {
                     Layout::Mono => (128, 128),
                     Layout::I420 => (self.sample(1, row, x), self.sample(2, row, x)),
                     Layout::I422 => (self.sample(1, 2 * row, x), self.sample(2, 2 * row, x)),
-                    Layout::I444 => (self.sample(1, 2 * row, 2 * x), self.sample(2, 2 * row, 2 * x)),
+                    Layout::I444 => (
+                        self.sample(1, 2 * row, 2 * x),
+                        self.sample(2, 2 * row, 2 * x),
+                    ),
                 };
                 uv.push(u);
                 uv.push(v);
             }
         }
-        Nv12 { y, y_stride: w, uv, uv_stride: cw * 2 }
+        Nv12 {
+            y,
+            y_stride: w,
+            uv,
+            uv_stride: cw * 2,
+        }
     }
 }
 
@@ -392,7 +410,10 @@ mod tests {
     /// A sequence header OBU of a main-profile 8-bit 4:2:0 stream of `w` by `h` with BT.709 limited colour, as an
     /// encoder writes it (no timing info, one operating point, every tool on).
     fn sequence_obu(w: u32, h: u32) -> Vec<u8> {
-        let mut b = Writer { bytes: vec![], n: 0 };
+        let mut b = Writer {
+            bytes: vec![],
+            n: 0,
+        };
         b.put(0, 3); // profile
         b.put(0, 1); // still_picture
         b.put(0, 1); // reduced_still_picture_header
@@ -468,7 +489,10 @@ mod tests {
         assert_eq!(find_sequence(&[]), None);
         assert_eq!(find_sequence(&[(2 << 3) | 2, 0]), None);
         // A size that runs past the data.
-        assert_eq!(find_sequence(&[(OBU_SEQUENCE_HEADER << 3) | 2, 40, 1, 2]), None);
+        assert_eq!(
+            find_sequence(&[(OBU_SEQUENCE_HEADER << 3) | 2, 40, 1, 2]),
+            None
+        );
         // No size field.
         assert_eq!(find_sequence(&[OBU_SEQUENCE_HEADER << 3, 1, 2, 3]), None);
         // A header that stops in the middle.
@@ -504,7 +528,10 @@ mod tests {
 
     #[test]
     fn a_10_bit_picture_drops_two_bits() {
-        let samples: Vec<u8> = [0x3FFu16, 0x200, 0x100, 0x004].iter().flat_map(|s| s.to_le_bytes()).collect();
+        let samples: Vec<u8> = [0x3FFu16, 0x200, 0x100, 0x004]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
         let chroma: Vec<u8> = 0x200u16.to_le_bytes().to_vec();
         let p = Planar {
             width: 2,
@@ -535,10 +562,22 @@ mod tests {
     #[test]
     fn mono_and_444_have_chroma_in_nv12() {
         let y = [10u8, 20, 30, 40];
-        let m = Planar { width: 2, height: 2, bit_depth: 8, layout: Layout::Mono, planes: [(&y, 2), (&[], 0), (&[], 0)] };
+        let m = Planar {
+            width: 2,
+            height: 2,
+            bit_depth: 8,
+            layout: Layout::Mono,
+            planes: [(&y, 2), (&[], 0), (&[], 0)],
+        };
         assert_eq!(m.to_nv12().uv, vec![128, 128]);
         let (u, v) = ([1u8, 2, 3, 4], [5u8, 6, 7, 8]);
-        let f = Planar { width: 2, height: 2, bit_depth: 8, layout: Layout::I444, planes: [(&y, 2), (&u, 2), (&v, 2)] };
+        let f = Planar {
+            width: 2,
+            height: 2,
+            bit_depth: 8,
+            layout: Layout::I444,
+            planes: [(&y, 2), (&u, 2), (&v, 2)],
+        };
         assert_eq!(f.to_nv12().uv, vec![1, 5]);
     }
 }

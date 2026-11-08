@@ -9,12 +9,12 @@ use super::cache::{self, sc};
 use super::objects::{self, Blends, StencilValues, write_masks};
 use super::programs::Kind;
 use super::{
-    ATTRIBUTES, MAX_COLOR, MESH, MESH_TEXTURES, STREAMS, State, TASK, UBOS, Walker, bound_count, empty_draw,
-    images_into, sbufs_into, texture_count, textures_into,
+    ATTRIBUTES, MAX_COLOR, MESH, MESH_TEXTURES, STREAMS, State, TASK, UBOS, Walker, bound_count,
+    empty_draw, images_into, sbufs_into, texture_count, textures_into,
 };
 use crate::detail::{
-    AttributeDetail, ClearDetail, CopyDetail, CopyKind, DrawArgs, DrawDetail, DynamicDetail, ProgramRef, Stage,
-    StreamDetail, UboDetail,
+    AttributeDetail, ClearDetail, CopyDetail, CopyKind, DrawArgs, DrawDetail, DynamicDetail,
+    ProgramRef, Stage, StreamDetail, UboDetail,
 };
 
 /// The `NVNshaderStage` values that have uniform buffers here, as the slot in `State::ubo`. The recorder writes the
@@ -53,7 +53,10 @@ impl Walker {
     pub(super) fn ext<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, x: &Ext) {
         match x.code {
             ExtCode::ReportCounter if matches!(x.word(0), 0 | 0x10) => {
-                self.out.reports.push(crate::detail::CounterReport { kind: x.word(0), addr: x.word64(1) });
+                self.out.reports.push(crate::detail::CounterReport {
+                    kind: x.word(0),
+                    addr: x.word64(1),
+                });
             }
             ExtCode::Program => {
                 let (program, bits) = (x.word64(0), x.word(2));
@@ -73,7 +76,8 @@ impl Walker {
             ExtCode::VertexBuffer => {
                 if let Some(v) = st.vertex_buffer.get_mut(usize::from(x.arg)) {
                     *v = (x.word64(0), x.word64(2));
-                    self.track.write(cache::vertex_buffer_bit(usize::from(x.arg)));
+                    self.track
+                        .write(cache::vertex_buffer_bit(usize::from(x.arg)));
                 }
             }
             ExtCode::UniformBuffer => {
@@ -112,7 +116,8 @@ impl Walker {
             }
             ExtCode::State => self.state_object(st, x),
             ExtCode::TargetView if crate::diag("target") => {
-                static VIEWS: std::sync::Mutex<Vec<(u16, [u32; 4])>> = std::sync::Mutex::new(Vec::new());
+                static VIEWS: std::sync::Mutex<Vec<(u16, [u32; 4])>> =
+                    std::sync::Mutex::new(Vec::new());
                 let value = (x.arg, [x.word(0), x.word(1), x.word(2), x.word(3)]);
                 if let Ok(mut views) = VIEWS.lock() {
                     if views.len() < 80 && !views.contains(&value) {
@@ -123,11 +128,13 @@ impl Walker {
             }
             ExtCode::VertexState => self.vertex_state(st, x),
             ExtCode::Setting => self.setting(st, x),
-            ExtCode::ClearBuffer
-            | ExtCode::CopyBufferToBuffer
-            | ExtCode::DownsampleView => self.out.copies.push(CopyDetail::default()),
+            ExtCode::ClearBuffer | ExtCode::CopyBufferToBuffer | ExtCode::DownsampleView => {
+                self.out.copies.push(CopyDetail::default())
+            }
             ExtCode::ClearTexture => self.out.copies.push(clear_detail(x)),
-            ExtCode::CopyBufferToTexture | ExtCode::CopyTextureToBuffer | ExtCode::CopyTextureToTexture => {
+            ExtCode::CopyBufferToTexture
+            | ExtCode::CopyTextureToBuffer
+            | ExtCode::CopyTextureToTexture => {
                 self.track.read(&cache::COPY_READS);
                 self.out.copies.push(copy_detail(st, x));
             }
@@ -136,9 +143,16 @@ impl Walker {
                 let (compute, len) = (x.arg & 1 != 0, usize::from(x.arg >> 1));
                 let w = x.words();
                 let off = w.first().copied().unwrap_or(0) as usize;
-                let bytes: Vec<u8> = w.iter().skip(1).flat_map(|v| v.to_le_bytes()).take(len).collect();
+                let bytes: Vec<u8> = w
+                    .iter()
+                    .skip(1)
+                    .flat_map(|v| v.to_le_bytes())
+                    .take(len)
+                    .collect();
                 let slot = &mut st.push[usize::from(compute)];
-                let mut block: Vec<u8> = slot.as_deref().map_or_else(|| vec![0; PUSH_BYTES], <[u8]>::to_vec);
+                let mut block: Vec<u8> = slot
+                    .as_deref()
+                    .map_or_else(|| vec![0; PUSH_BYTES], <[u8]>::to_vec);
                 if let Some(dst) = block.get_mut(off..(off + bytes.len()).min(PUSH_BYTES)) {
                     let n = dst.len();
                     dst.copy_from_slice(&bytes[..n]);
@@ -185,7 +199,8 @@ impl Walker {
                 let t = self.prof.start();
                 let d = self.draw(&*mem, st, x);
                 self.prof.lap(&self.prof.detail_ns, t);
-                self.track.patches_of(&d.textures, self.out.draws.len(), false);
+                self.track
+                    .patches_of(&d.textures, self.out.draws.len(), false);
                 let t = self.prof.start();
                 self.prof.draw_built(&d);
                 self.out.draws.push(Arc::new(d));
@@ -200,7 +215,8 @@ impl Walker {
                 let t = self.prof.start();
                 let d = self.dispatch(&*mem, st, groups);
                 self.prof.lap(&self.prof.detail_ns, t);
-                self.track.patches_of(&d.textures, self.out.dispatches.len(), true);
+                self.track
+                    .patches_of(&d.textures, self.out.dispatches.len(), true);
                 self.out.dispatches.push(d);
             }
             _ => {}
@@ -243,7 +259,8 @@ impl Walker {
     /// The command writes its bytes into the buffer when the GPU runs it. The walker writes them now and remembers the
     /// range, so that the draws that bind it get the bytes they saw.
     fn update_uniform<M: GuestMem>(&mut self, mem: &mut M, x: &Ext) {
-        self.track.update(x, self.out.draws.len(), self.out.dispatches.len());
+        self.track
+            .update(x, self.out.draws.len(), self.out.dispatches.len());
         let mut bytes = std::mem::take(&mut self.update_bytes);
         self.write_update(mem, x, &mut bytes);
         self.update_bytes = bytes;
@@ -396,7 +413,9 @@ impl Walker {
         {
             let mut pool = self.snap_pool.borrow_mut();
             let ring = pool.entry(size).or_default();
-            if ring.front().is_some_and(|b| Arc::strong_count(b) == 1 && Arc::weak_count(b) == 0)
+            if ring
+                .front()
+                .is_some_and(|b| Arc::strong_count(b) == 1 && Arc::weak_count(b) == 0)
                 && let Some(b) = ring.pop_front()
             {
                 return b;
@@ -434,17 +453,27 @@ impl Walker {
                 nxkit_nvn::diag::Reason::DrawNoArgs,
                 format_args!("draw kind {} program {:x?}", x.arg, st.program),
             );
-            static K: [std::sync::atomic::AtomicU32; 16] = [const { std::sync::atomic::AtomicU32::new(0) }; 16];
+            static K: [std::sync::atomic::AtomicU32; 16] =
+                [const { std::sync::atomic::AtomicU32::new(0) }; 16];
             let n = K[usize::from(x.arg) & 15].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if crate::diag("indirect") && n.is_power_of_two() {
-                eprintln!("DIAG indirect kind {} dropped {} times, program {:x?}", x.arg, n + 1, st.program);
+                eprintln!(
+                    "DIAG indirect kind {} dropped {} times, program {:x?}",
+                    x.arg,
+                    n + 1,
+                    st.program
+                );
             }
             return d;
         };
         self.prof.banks(st);
         self.track.program(0, st.program[0]);
         let Some(vertex) = self.programs.find(st.program[0], Kind::Vertex) else {
-            let what = format_args!("programs {:x?}, stages of [0]: {}", st.program, self.programs.describe(st.program[0]));
+            let what = format_args!(
+                "programs {:x?}, stages of [0]: {}",
+                st.program,
+                self.programs.describe(st.program[0])
+            );
             nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::DrawNoVertex, what);
             if show() {
                 eprintln!("DIAG draw: no vertex stage, {what}");
@@ -462,7 +491,8 @@ impl Walker {
         d.topology = topology;
         d.args = args;
         fixed_function(st, &mut d);
-        d.attributes.reserve_exact(st.attribute.iter().flatten().count());
+        d.attributes
+            .reserve_exact(st.attribute.iter().flatten().count());
         let mut used = 0u32;
         for (location, a) in st.attribute.iter().enumerate().take(ATTRIBUTES) {
             if let Some((format, offset, stream)) = *a {
@@ -495,10 +525,12 @@ impl Walker {
                 });
             }
         }
-        d.ubos.reserve_exact(bound_count(&st.ubo[0]) + bound_count(&st.ubo[1]));
+        d.ubos
+            .reserve_exact(bound_count(&st.ubo[0]) + bound_count(&st.ubo[1]));
         self.ubos_into(mem, st, 0, Stage::Vertex, &mut d.ubos);
         self.ubos_into(mem, st, 1, Stage::Fragment, &mut d.ubos);
-        d.sbufs.reserve_exact(bound_count(&st.sbuf[0]) + bound_count(&st.sbuf[1]));
+        d.sbufs
+            .reserve_exact(bound_count(&st.sbuf[0]) + bound_count(&st.sbuf[1]));
         sbufs_into(st, 0, Stage::Vertex, &mut d.sbufs);
         sbufs_into(st, 1, Stage::Fragment, &mut d.sbufs);
         // With the overlap on, the storage buffers of a draw get a copy too: the CPU writes some of them for the next
@@ -509,7 +541,8 @@ impl Walker {
                 b.snapshot = self.snapshot(mem, b.address, b.size);
             }
         }
-        d.textures.reserve_exact(texture_count(st, 0) + texture_count(st, 1));
+        d.textures
+            .reserve_exact(texture_count(st, 0) + texture_count(st, 1));
         textures_into(st, 0, Stage::Vertex, &mut d.textures);
         textures_into(st, 1, Stage::Fragment, &mut d.textures);
         images_into(st, 0, Stage::Vertex, &mut d.images);
@@ -552,18 +585,31 @@ impl Walker {
         self.track.read(&cache::DRAW_READS);
         self.track.read(&cache::MESH_READS);
         let has_task = task.is_some();
-        d.program = ProgramRef { vertex: d.program.vertex, fragment, task, mesh: Some(mesh) };
+        d.program = ProgramRef {
+            vertex: d.program.vertex,
+            fragment,
+            task,
+            mesh: Some(mesh),
+        };
         d.args = args;
         fixed_function(st, &mut d);
         let banks: &[(usize, Stage)] = if has_task {
-            &[(TASK, Stage::Task), (MESH, Stage::Mesh), (1, Stage::Fragment)]
+            &[
+                (TASK, Stage::Task),
+                (MESH, Stage::Mesh),
+                (1, Stage::Fragment),
+            ]
         } else {
             &[(MESH, Stage::Mesh), (1, Stage::Fragment)]
         };
         for &(bank, stage) in banks {
             self.ubos_into(mem, st, bank, stage, &mut d.ubos);
             sbufs_into(st, bank, stage, &mut d.sbufs);
-            let textures = if stage == Stage::Fragment { 1 } else { MESH_TEXTURES };
+            let textures = if stage == Stage::Fragment {
+                1
+            } else {
+                MESH_TEXTURES
+            };
             textures_into(st, textures, stage, &mut d.textures);
             images_into(st, textures, stage, &mut d.images);
         }
@@ -593,9 +639,14 @@ fn fixed_function(st: &State, d: &mut DrawDetail) {
 fn mesh_args(x: &Ext) -> Option<DrawArgs> {
     let kind = x.arg;
     if kind == DrawKind::MeshTasks as u16 {
-        Some(DrawArgs::MeshTasks { first: x.word(0), count: x.word(1) })
+        Some(DrawArgs::MeshTasks {
+            first: x.word(0),
+            count: x.word(1),
+        })
     } else if kind == DrawKind::MeshTasksIndirect as u16 {
-        Some(DrawArgs::MeshTasksIndirect { indirect: x.word64(0) })
+        Some(DrawArgs::MeshTasksIndirect {
+            indirect: x.word64(0),
+        })
     } else {
         None
     }
@@ -632,7 +683,12 @@ fn draw_args(x: &Ext) -> Option<(u32, DrawArgs)> {
         };
         Some((x.word(0), args))
     } else if kind == DrawKind::ArraysIndirect as u16 {
-        Some((x.word(0), DrawArgs::ArraysIndirect { indirect: x.word64(1) }))
+        Some((
+            x.word(0),
+            DrawArgs::ArraysIndirect {
+                indirect: x.word64(1),
+            },
+        ))
     } else if kind == DrawKind::ElementsIndirect as u16 {
         let args = DrawArgs::IndexedIndirect {
             index_type: x.word(1),
@@ -746,7 +802,11 @@ fn clear_detail(x: &Ext) -> CopyDetail {
     if x.words().len() < at + 6 {
         return CopyDetail::default();
     }
-    let (level, layer) = if has_view { view_of([7, 8, 9, 10].map(|i| x.word(i))) } else { (0, 0) };
+    let (level, layer) = if has_view {
+        view_of([7, 8, 9, 10].map(|i| x.word(i)))
+    } else {
+        (0, 0)
+    };
     let (origin, size) = region_of([0, 1, 2, 3, 4, 5].map(|i| x.word(at + i)));
     CopyDetail {
         kind: CopyKind::Clear,
@@ -767,7 +827,11 @@ fn clear_detail(x: &Ext) -> CopyDetail {
 fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
     let view = |at: usize| view_of([x.word(at), x.word(at + 1), x.word(at + 2), x.word(at + 3)]);
     let region = |at: usize| region_of([0, 1, 2, 3, 4, 5].map(|i| x.word(at + i)));
-    let mut d = CopyDetail { row_stride: st.copy_strides[0], image_stride: st.copy_strides[1], ..CopyDetail::default() };
+    let mut d = CopyDetail {
+        row_stride: st.copy_strides[0],
+        image_stride: st.copy_strides[1],
+        ..CopyDetail::default()
+    };
     if x.code == ExtCode::CopyTextureToTexture {
         let (has_src, has_dst) = (x.arg & 1 != 0, x.arg & 2 != 0);
         let src_at = 5 + if has_src { 4 } else { 0 };
@@ -781,7 +845,14 @@ fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
         let (dst_origin, dst_size) = region(dst_at);
         return CopyDetail {
             kind: CopyKind::TextureToTexture,
-            src_level, src_layer, src_origin, dst_level, dst_layer, dst_origin, size, dst_size,
+            src_level,
+            src_layer,
+            src_origin,
+            dst_level,
+            dst_layer,
+            dst_origin,
+            size,
+            dst_size,
             ..d
         };
     }
@@ -818,35 +889,85 @@ mod tests {
     #[test]
     fn indirect_and_mesh_draw_records_give_their_arguments() {
         let draw = |kind: DrawKind| Ext::new(ExtCode::Draw, kind as u16);
-        let x = draw(DrawKind::MultiElementsIndirectCount).u32(4).u32(2).u64(0x1000).u64(0x2000).u64(0x3000).u32(9).u64(20);
+        let x = draw(DrawKind::MultiElementsIndirectCount)
+            .u32(4)
+            .u32(2)
+            .u64(0x1000)
+            .u64(0x2000)
+            .u64(0x3000)
+            .u32(9)
+            .u64(20);
         assert_eq!(
             draw_args(&x),
-            Some((4, DrawArgs::MultiIndirectCount {
-                index: Some((2, 0x1000)),
-                indirect: 0x2000,
-                count: 0x3000,
-                max: 9,
-                stride: 20
-            }))
+            Some((
+                4,
+                DrawArgs::MultiIndirectCount {
+                    index: Some((2, 0x1000)),
+                    indirect: 0x2000,
+                    count: 0x3000,
+                    max: 9,
+                    stride: 20
+                }
+            ))
         );
-        let x = draw(DrawKind::MultiArraysIndirectCount).u32(5).u64(0x2000).u64(0x3000).u32(3).u64(16);
+        let x = draw(DrawKind::MultiArraysIndirectCount)
+            .u32(5)
+            .u64(0x2000)
+            .u64(0x3000)
+            .u32(3)
+            .u64(16);
         assert_eq!(
             draw_args(&x),
-            Some((5, DrawArgs::MultiIndirectCount { index: None, indirect: 0x2000, count: 0x3000, max: 3, stride: 16 }))
+            Some((
+                5,
+                DrawArgs::MultiIndirectCount {
+                    index: None,
+                    indirect: 0x2000,
+                    count: 0x3000,
+                    max: 3,
+                    stride: 16
+                }
+            ))
         );
-        let x = draw(DrawKind::ElementsIndirect).u32(4).u32(1).u64(0x1000).u64(0x2000);
+        let x = draw(DrawKind::ElementsIndirect)
+            .u32(4)
+            .u32(1)
+            .u64(0x1000)
+            .u64(0x2000);
         assert_eq!(
             draw_args(&x),
-            Some((4, DrawArgs::IndexedIndirect { index_type: 1, address: 0x1000, indirect: 0x2000 }))
+            Some((
+                4,
+                DrawArgs::IndexedIndirect {
+                    index_type: 1,
+                    address: 0x1000,
+                    indirect: 0x2000
+                }
+            ))
         );
         let x = draw(DrawKind::ArraysIndirect).u32(0).u64(0x2000);
-        assert_eq!(draw_args(&x), Some((0, DrawArgs::ArraysIndirect { indirect: 0x2000 })));
+        assert_eq!(
+            draw_args(&x),
+            Some((0, DrawArgs::ArraysIndirect { indirect: 0x2000 }))
+        );
         let x = draw(DrawKind::MeshTasks).u32(7).u32(2048);
-        assert_eq!(mesh_args(&x), Some(DrawArgs::MeshTasks { first: 7, count: 2048 }));
+        assert_eq!(
+            mesh_args(&x),
+            Some(DrawArgs::MeshTasks {
+                first: 7,
+                count: 2048
+            })
+        );
         assert_eq!(draw_args(&x), None);
         let x = draw(DrawKind::MeshTasksIndirect).u64(0x4000);
-        assert_eq!(mesh_args(&x), Some(DrawArgs::MeshTasksIndirect { indirect: 0x4000 }));
-        assert_eq!(mesh_args(&draw(DrawKind::Arrays).u32(4).u32(0).u32(3)), None);
+        assert_eq!(
+            mesh_args(&x),
+            Some(DrawArgs::MeshTasksIndirect { indirect: 0x4000 })
+        );
+        assert_eq!(
+            mesh_args(&draw(DrawKind::Arrays).u32(4).u32(0).u32(3)),
+            None
+        );
     }
 
     #[test]
@@ -924,8 +1045,14 @@ mod tests {
         let mut mem = VecMem::new(0x1000, 128);
         assert!(walker.snapshot(&mem, 0x2000, 128).is_none());
         assert!(walker.snaps.borrow().contains_key(&(0x2000, 128)));
-        let update = Ext::new(ExtCode::UpdateUniform, 4).u32(0x2000).u32(0).u32(128).u32(0)
-            .u32(16).u32(0).u32(0x12345678);
+        let update = Ext::new(ExtCode::UpdateUniform, 4)
+            .u32(0x2000)
+            .u32(0)
+            .u32(128)
+            .u32(0)
+            .u32(16)
+            .u32(0)
+            .u32(0x12345678);
         walker.update_uniform(&mut mem, &update);
         let snapshot = walker.snapshot(&mem, 0x2000, 128).unwrap();
         assert_eq!(&snapshot[16..20], &0x12345678u32.to_le_bytes());
@@ -995,25 +1122,44 @@ mod tests {
         // texture 0x2000, buffer 0x9_0000_1000, flags, view (levels, layers), region.
         let view = [1 | 2 | 3 << 16, 5 << 16, 0, 0];
         let region = [4u32, 8, 2, 120, 75, 3];
-        let words: Vec<u32> = [0x2000, 0, 0x1000, 9, 0].into_iter().chain(view).chain(region).collect();
+        let words: Vec<u32> = [0x2000, 0, 0x1000, 9, 0]
+            .into_iter()
+            .chain(view)
+            .chain(region)
+            .collect();
         let d = copy_detail(&st, &copy_ext(ExtCode::CopyBufferToTexture, 1, &words));
-        assert_eq!((d.kind, d.buffer), (CopyKind::BufferToTexture, 0x9_0000_1000));
+        assert_eq!(
+            (d.kind, d.buffer),
+            (CopyKind::BufferToTexture, 0x9_0000_1000)
+        );
         assert_eq!((d.dst_level, d.dst_layer), (3, 5));
-        assert_eq!((d.dst_origin, d.size, d.dst_size), ([4, 8, 2], [120, 75, 3], [120, 75, 3]));
+        assert_eq!(
+            (d.dst_origin, d.size, d.dst_size),
+            ([4, 8, 2], [120, 75, 3], [120, 75, 3])
+        );
         assert_eq!((d.row_stride, d.image_stride), (512, 4096));
 
         // Without a view the region starts 4 words earlier and the copy uses level 0, layer 0.
         let words = [0x2000, 0, 0x1000, 9, 0, 0, 0, 0, 320, 180, 0];
         let d = copy_detail(&st, &copy_ext(ExtCode::CopyBufferToTexture, 0, &words));
-        assert_eq!((d.dst_level, d.dst_layer, d.dst_origin, d.size), (0, 0, [0; 3], [320, 180, 1]));
+        assert_eq!(
+            (d.dst_level, d.dst_layer, d.dst_origin, d.size),
+            (0, 0, [0; 3], [320, 180, 1])
+        );
     }
 
     #[test]
     fn a_texture_to_buffer_copy_keeps_the_texture_on_the_source_side() {
         let words = [0x2000, 0, 0x1000, 9, 0, 0, 0, 0, 16, 16, 1];
-        let d = copy_detail(&State::default(), &copy_ext(ExtCode::CopyTextureToBuffer, 0, &words));
+        let d = copy_detail(
+            &State::default(),
+            &copy_ext(ExtCode::CopyTextureToBuffer, 0, &words),
+        );
         assert_eq!(d.kind, CopyKind::TextureToBuffer);
-        assert_eq!((d.src_origin, d.size, d.dst_origin), ([0; 3], [16, 16, 1], [0; 3]));
+        assert_eq!(
+            (d.src_origin, d.size, d.dst_origin),
+            ([0; 3], [16, 16, 1], [0; 3])
+        );
     }
 
     #[test]
@@ -1027,15 +1173,25 @@ mod tests {
             .chain(dst_view)
             .chain([5, 6, 0, 64, 32, 1])
             .collect();
-        let d = copy_detail(&State::default(), &copy_ext(ExtCode::CopyTextureToTexture, 3, &words));
+        let d = copy_detail(
+            &State::default(),
+            &copy_ext(ExtCode::CopyTextureToTexture, 3, &words),
+        );
         assert_eq!(d.kind, CopyKind::TextureToTexture);
         assert_eq!((d.src_level, d.src_layer, d.src_origin), (2, 0, [1, 2, 0]));
         assert_eq!((d.dst_level, d.dst_layer, d.dst_origin), (1, 7, [5, 6, 0]));
         assert_eq!((d.size, d.dst_size), ([64, 32, 1], [64, 32, 1]));
 
         // Only the destination has a view.
-        let words: Vec<u32> = [1, 0, 2, 0, 0, 0, 0, 0, 8, 8, 1].into_iter().chain(dst_view).chain([0, 0, 0, 8, 8, 1]).collect();
-        let d = copy_detail(&State::default(), &copy_ext(ExtCode::CopyTextureToTexture, 2, &words));
+        let words: Vec<u32> = [1, 0, 2, 0, 0, 0, 0, 0, 8, 8, 1]
+            .into_iter()
+            .chain(dst_view)
+            .chain([0, 0, 0, 8, 8, 1])
+            .collect();
+        let d = copy_detail(
+            &State::default(),
+            &copy_ext(ExtCode::CopyTextureToTexture, 2, &words),
+        );
         assert_eq!((d.src_level, d.dst_level, d.dst_layer), (0, 1, 7));
     }
 
@@ -1051,27 +1207,56 @@ mod tests {
             .collect();
         let d = clear_detail(&copy_ext(ExtCode::ClearTexture, 1 << 8, &words));
         assert_eq!(d.kind, CopyKind::Clear);
-        assert_eq!((d.dst_level, d.dst_layer, d.dst_origin, d.size), (2, 3, [1, 2, 0], [30, 40, 1]));
+        assert_eq!(
+            (d.dst_level, d.dst_layer, d.dst_origin, d.size),
+            (2, 3, [1, 2, 0], [30, 40, 1])
+        );
         assert_eq!((d.clear, d.clear_kind, d.channel_mask), (colour, 0, 0xb));
 
-        let words: Vec<u32> = head.into_iter().chain([7, 0, 0, 0]).chain([0, 0, 0, 8, 8, 0]).collect();
+        let words: Vec<u32> = head
+            .into_iter()
+            .chain([7, 0, 0, 0])
+            .chain([0, 0, 0, 8, 8, 0])
+            .collect();
         let d = clear_detail(&copy_ext(ExtCode::ClearTexture, 2, &words));
-        assert_eq!((d.clear_kind, d.clear[0], d.dst_level, d.size), (2, 7, 0, [8, 8, 1]));
-        assert_eq!(clear_detail(&copy_ext(ExtCode::ClearTexture, 0, &head)), CopyDetail::default());
+        assert_eq!(
+            (d.clear_kind, d.clear[0], d.dst_level, d.size),
+            (2, 7, 0, [8, 8, 1])
+        );
+        assert_eq!(
+            clear_detail(&copy_ext(ExtCode::ClearTexture, 0, &head)),
+            CopyDetail::default()
+        );
     }
 
     #[test]
     fn a_short_copy_record_keeps_an_empty_entry() {
-        let d = copy_detail(&State::default(), &copy_ext(ExtCode::CopyBufferToTexture, 1, &[1, 0, 2, 0, 0]));
+        let d = copy_detail(
+            &State::default(),
+            &copy_ext(ExtCode::CopyBufferToTexture, 1, &[1, 0, 2, 0, 0]),
+        );
         assert_eq!(d, CopyDetail::default());
     }
 
     #[test]
     fn the_copy_strides_come_from_settings_and_reset_per_recording() {
         let mut st = State::default();
-        let mut walker = Walker::new(Default::default(), AddressMap::new(0x1000, 0x2000, 128).unwrap());
-        walker.setting(&mut st, &Ext::new(ExtCode::Setting, Setting::CopyRowStride as u16).u32(256).u32(0));
-        walker.setting(&mut st, &Ext::new(ExtCode::Setting, Setting::CopyImageStride as u16).u32(0xffff_ffff).u32(0xffff_ffff));
+        let mut walker = Walker::new(
+            Default::default(),
+            AddressMap::new(0x1000, 0x2000, 128).unwrap(),
+        );
+        walker.setting(
+            &mut st,
+            &Ext::new(ExtCode::Setting, Setting::CopyRowStride as u16)
+                .u32(256)
+                .u32(0),
+        );
+        walker.setting(
+            &mut st,
+            &Ext::new(ExtCode::Setting, Setting::CopyImageStride as u16)
+                .u32(0xffff_ffff)
+                .u32(0xffff_ffff),
+        );
         assert_eq!(st.copy_strides, [256, 0]);
     }
 
@@ -1081,16 +1266,70 @@ mod tests {
         let t = |i: usize| [tex[i] as u32, (tex[i] >> 32) as u32];
         let join = |a: &[u32], b: &[u32]| a.iter().chain(b).copied().collect::<Vec<u32>>();
         vec![
-            (copy_ext(ExtCode::ClearBuffer, 0, &[0x100, 0, 4, 0, 0]), CopyKind::Other),
-            (copy_ext(ExtCode::CopyBufferToTexture, 0, &join(&[t(0)[0], t(0)[1], 0x100, 0, 0], &region)), CopyKind::BufferToTexture),
-            (copy_ext(ExtCode::CopyBufferToBuffer, 0, &[0x100, 0, 0x200, 0, 4, 0, 0]), CopyKind::Other),
-            (copy_ext(ExtCode::CopyTextureToBuffer, 0, &join(&[t(0)[0], t(0)[1], 0x100, 0, 0], &region)), CopyKind::TextureToBuffer),
-            (copy_ext(ExtCode::UpdateUniform, 4, &[0x300, 0, 0, 0, 0, 0, 7]), CopyKind::Other),
-            (copy_ext(ExtCode::CopyTextureToTexture, 0, &join(&[t(0)[0], t(0)[1], t(1)[0], t(1)[1], 0], &[0, 0, 0, 4, 4, 1, 0, 0, 0, 4, 4, 1])), CopyKind::TextureToTexture),
+            (
+                copy_ext(ExtCode::ClearBuffer, 0, &[0x100, 0, 4, 0, 0]),
+                CopyKind::Other,
+            ),
+            (
+                copy_ext(
+                    ExtCode::CopyBufferToTexture,
+                    0,
+                    &join(&[t(0)[0], t(0)[1], 0x100, 0, 0], &region),
+                ),
+                CopyKind::BufferToTexture,
+            ),
+            (
+                copy_ext(
+                    ExtCode::CopyBufferToBuffer,
+                    0,
+                    &[0x100, 0, 0x200, 0, 4, 0, 0],
+                ),
+                CopyKind::Other,
+            ),
+            (
+                copy_ext(
+                    ExtCode::CopyTextureToBuffer,
+                    0,
+                    &join(&[t(0)[0], t(0)[1], 0x100, 0, 0], &region),
+                ),
+                CopyKind::TextureToBuffer,
+            ),
+            (
+                copy_ext(ExtCode::UpdateUniform, 4, &[0x300, 0, 0, 0, 0, 0, 7]),
+                CopyKind::Other,
+            ),
+            (
+                copy_ext(
+                    ExtCode::CopyTextureToTexture,
+                    0,
+                    &join(
+                        &[t(0)[0], t(0)[1], t(1)[0], t(1)[1], 0],
+                        &[0, 0, 0, 4, 4, 1, 0, 0, 0, 4, 4, 1],
+                    ),
+                ),
+                CopyKind::TextureToTexture,
+            ),
             // A downsample of an address that is no texture is dropped by the decoder and still has an entry.
-            (copy_ext(ExtCode::DownsampleView, 0, &[0x7777, 0, 0x8888, 0]), CopyKind::Other),
-            (copy_ext(ExtCode::DownsampleView, 0, &[t(0)[0], t(0)[1], t(1)[0], t(1)[1]]), CopyKind::Other),
-            (copy_ext(ExtCode::ClearTexture, 0, &join(&[t(1)[0], t(1)[1], 0xf, 0, 0, 0, 0], &region)), CopyKind::Clear),
+            (
+                copy_ext(ExtCode::DownsampleView, 0, &[0x7777, 0, 0x8888, 0]),
+                CopyKind::Other,
+            ),
+            (
+                copy_ext(
+                    ExtCode::DownsampleView,
+                    0,
+                    &[t(0)[0], t(0)[1], t(1)[0], t(1)[1]],
+                ),
+                CopyKind::Other,
+            ),
+            (
+                copy_ext(
+                    ExtCode::ClearTexture,
+                    0,
+                    &join(&[t(1)[0], t(1)[1], 0xf, 0, 0, 0, 0], &region),
+                ),
+                CopyKind::Clear,
+            ),
         ]
     }
 
@@ -1105,10 +1344,21 @@ mod tests {
         const HOST: u64 = 0x7000_0000;
         const GPU: u64 = 0x15_0400_8000;
         const SIZE: u64 = 1 << 20;
-        let mut f = FrontEnd::new(LinearSpace::new(HOST, GPU, SIZE).unwrap(), VecMem::new(HOST, SIZE as usize));
+        let mut f = FrontEnd::new(
+            LinearSpace::new(HOST, GPU, SIZE).unwrap(),
+            VecMem::new(HOST, SIZE as usize),
+        );
         let desc = TextureDesc {
-            target: Target::D2, format: 0x25, flags: 0, samples: 0, width: 4, height: 4, depth: 1, levels: 1,
-            stride: 0, packaged_block: None,
+            target: Target::D2,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 4,
+            height: 4,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
         };
         let a = f.create_texture(desc, HOST + 0x1_0000).unwrap();
         let b = f.create_texture(desc, HOST + 0x2_0000).unwrap();
@@ -1122,18 +1372,31 @@ mod tests {
         }
         let h = f.end_recording(0).unwrap();
         f.submit(h).unwrap();
-        let cmds = f.frame().cmds.iter().filter(|c| matches!(c, Cmd::Copy { .. } | Cmd::Downsample { .. })).count();
+        let cmds = f
+            .frame()
+            .cmds
+            .iter()
+            .filter(|c| matches!(c, Cmd::Copy { .. } | Cmd::Downsample { .. }))
+            .count();
 
         let map = AddressMap::new(HOST, GPU, SIZE).unwrap();
         let mut walker = Walker::new(Default::default(), map);
         let mut mem = VecMem::new(HOST, SIZE as usize);
         let mut at = HOST + 0x8_0000;
-        for rec in list.iter().map(|(x, _)| Record::Ext(*x)).chain([Record::End]) {
+        for rec in list
+            .iter()
+            .map(|(x, _)| Record::Ext(*x))
+            .chain([Record::End])
+        {
             let bytes = rec.encode().unwrap();
             mem.write(at, bytes.as_bytes()).unwrap();
             at += bytes.len() as u64;
         }
-        walker.submit(&mut mem, 1, &[nxkit_nvn::cmdbuf::CommandHandle(HOST + 0x8_0000)]);
+        walker.submit(
+            &mut mem,
+            1,
+            &[nxkit_nvn::cmdbuf::CommandHandle(HOST + 0x8_0000)],
+        );
         let detail = walker.take();
         assert_eq!(cmds, list.len());
         assert_eq!(detail.copies.len(), cmds);

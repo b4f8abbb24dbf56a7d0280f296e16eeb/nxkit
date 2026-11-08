@@ -150,7 +150,10 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
 
     /// The record word of a texture: its GPU address tagged with its id (see [`crate::decode::tag_address`]).
     pub fn texture_address(&self, id: TexId) -> Result<u64> {
-        Ok(crate::decode::tag_address(self.table.get(id)?.address.get(), id))
+        Ok(crate::decode::tag_address(
+            self.table.get(id)?.address.get(),
+            id,
+        ))
     }
 
     /// Creates a texture in guest memory. This is `nvnTextureInitialize`.
@@ -160,7 +163,11 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
 
     /// Like [`FrontEnd::create_texture`]. A live texture with the same address and description is shared and comes back
     /// with `true` (see [`ResourceTable::create_shared`]); the backend already knows it.
-    pub fn create_texture_shared(&mut self, desc: TextureDesc, host_address: u64) -> Result<(TexId, bool)> {
+    pub fn create_texture_shared(
+        &mut self,
+        desc: TextureDesc,
+        host_address: u64,
+    ) -> Result<(TexId, bool)> {
         let size = desc.layout()?.size;
         let address = self.space.gpu_address(host_address, size)?;
         self.table.create_shared(desc, address)
@@ -223,7 +230,9 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         view: TextureView,
     ) -> Result<TextureSlot> {
         let old = self.descriptors.texture(id).ok().map(|s| s.texture);
-        let slot = self.descriptors.register_texture(&self.table, id, texture, view)?;
+        let slot = self
+            .descriptors
+            .register_texture(&self.table, id, texture, view)?;
         if let Some(old) = old.filter(|&o| o != texture) {
             if let Some(i) = self.orphans.iter().position(|&o| o == old) {
                 if !self.descriptors.has_slots(old) {
@@ -360,7 +369,11 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         let inherited = self.queues.entry(queue).or_default();
         let t0 = std::time::Instant::now();
         let i = summary(&mut self.cache, &cx, handle.0, inherited, 0)?;
-        decode_diag(t0.elapsed().as_nanos() as u64, self.cache.stats, self.table.counts());
+        decode_diag(
+            t0.elapsed().as_nanos() as u64,
+            self.cache.stats,
+            self.table.counts(),
+        );
         let s = self
             .cache
             .entry(handle.0, i)
@@ -488,10 +501,17 @@ fn verify_decode() -> bool {
 }
 
 /// Fails when the cached summary differs from a fresh decode under the same inherited state.
-fn verify<M: GuestMem>(cx: &Ctx<M>, handle: u64, inherited: &State, cached: &crate::decode::Summary) -> Result<()> {
+fn verify<M: GuestMem>(
+    cx: &Ctx<M>,
+    handle: u64,
+    inherited: &State,
+    cached: &crate::decode::Summary,
+) -> Result<()> {
     let mut fresh = RecCache::new();
     let i = summary(&mut fresh, cx, handle, inherited, 0)?;
-    let Some(f) = fresh.entry(handle, i) else { return Ok(()) };
+    let Some(f) = fresh.entry(handle, i) else {
+        return Ok(());
+    };
     let same = f.stream.cmds == cached.stream.cmds
         && f.stream.lists == cached.stream.lists
         && f.needs == cached.needs
@@ -499,8 +519,12 @@ fn verify<M: GuestMem>(cx: &Ctx<M>, handle: u64, inherited: &State, cached: &cra
         && f.draws == cached.draws
         && f.blockers == cached.blockers;
     if !same {
-        eprintln!("nxkit-nvn: NXKIT_VERIFY_CACHE: the cached summary of recording {handle:#x} differs from a fresh decode");
-        return Err(NvnError::BadRecord("cached summary differs from a fresh decode"));
+        eprintln!(
+            "nxkit-nvn: NXKIT_VERIFY_CACHE: the cached summary of recording {handle:#x} differs from a fresh decode"
+        );
+        return Err(NvnError::BadRecord(
+            "cached summary differs from a fresh decode",
+        ));
     }
     Ok(())
 }

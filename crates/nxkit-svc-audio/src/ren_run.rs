@@ -30,12 +30,17 @@ static ORIG_UPDATE: Sym = Sym::new(UPDATE);
 static WAKES: [OnceLock<Sem>; AR_MAX] = [const { OnceLock::new() }; AR_MAX];
 
 fn rd_u32(addr: u64) -> u32 {
-    mem::with_host(addr, 4, |b| b.get(0..4).map_or(0, |x| u32::from_le_bytes([x[0], x[1], x[2], x[3]])))
+    mem::with_host(addr, 4, |b| {
+        b.get(0..4)
+            .map_or(0, |x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+    })
 }
 
 fn rd_u64(addr: u64) -> u64 {
     mem::with_host(addr, 8, |b| {
-        b.get(0..8).map_or(0, |x| u64::from_le_bytes([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]]))
+        b.get(0..8).map_or(0, |x| {
+            u64::from_le_bytes([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]])
+        })
     })
 }
 
@@ -106,7 +111,11 @@ impl Render {
         eprintln!(
             "nxkit-audio: audren: AudioRenderSystem in the SDK {} layout (update lock {} at +{:#x}), DeviceSink id {:#x}",
             if sdk20 { "20" } else { "16" },
-            if os_mutex { "nn::os::MutexType" } else { "SdkMutexType" },
+            if os_mutex {
+                "nn::os::MutexType"
+            } else {
+                "SdkMutexType"
+            },
             self.mu_off,
             self.sink_id
         );
@@ -131,7 +140,10 @@ fn render_once(a: &Ren, sys: u64, want: bool, out: &mut Vec<i16>) -> u32 {
     let (mode, device) = if sdk20 {
         (rd_u32(sys + 0x4c), rd_u32(sys + 0x48))
     } else {
-        (call(r.mode, args(&[sys])) as u32, call(r.device, args(&[sys])) as u32)
+        (
+            call(r.mode, args(&[sys])) as u32,
+            call(r.device, args(&[sys])) as u32,
+        )
     };
     // The original needs the CPU renderer in manual mode. The host made it so.
     if mode != 1 || device != 1 {
@@ -142,7 +154,10 @@ fn render_once(a: &Ren, sys: u64, want: bool, out: &mut Vec<i16>) -> u32 {
     let lock_at = sys + r.mu_off as u64;
     call(r.lock, args(&[lock_at]));
     let (cl, n) = if sdk20 {
-        call_pair(r.gen20, args(&[sys, rd_u64(sys + 0xf8), rd_u64(sys + 0x100)]))
+        call_pair(
+            r.gen20,
+            args(&[sys, rd_u64(sys + 0xf8), rd_u64(sys + 0x100)]),
+        )
     } else {
         let cl = call(r.cbuf, args(&[sys]));
         let size = call(r.cbsz, args(&[sys]));
@@ -195,7 +210,9 @@ fn ar_exec(sys: u64) -> u32 {
     let own = T_AR.with(|t| t.borrow().clone());
     let a = match own {
         Some(a) => {
-            let _ = a.sys.compare_exchange(0, sys, Ordering::AcqRel, Ordering::Acquire);
+            let _ = a
+                .sys
+                .compare_exchange(0, sys, Ordering::AcqRel, Ordering::Acquire);
             Some(a)
         }
         None => of_sys(sys),
@@ -235,13 +252,22 @@ extern "C" fn render_main(idx: u64) {
     let wake = WAKES[a.idx].get_or_init(Sem::new);
     let m = mixer();
     let Some(out) = m.open(2, Notify::Wake(wake)) else {
-        eprintln!("nxkit-audio: [RED] audren: no free output for renderer {}: it makes no sound", a.idx);
+        eprintln!(
+            "nxkit-audio: [RED] audren: no free output for renderer {}: it makes no sound",
+            a.idx
+        );
         return;
     };
-    let mut blocks: Vec<Box<[i16]>> = (0..4).map(|_| vec![0i16; FRAME_MAX * 2].into_boxed_slice()).collect();
+    let mut blocks: Vec<Box<[i16]>> = (0..4)
+        .map(|_| vec![0i16; FRAME_MAX * 2].into_boxed_slice())
+        .collect();
     let mut free: Vec<usize> = (0..blocks.len()).collect();
     m.start(out);
-    eprintln!("nxkit-audio: audren: render thread {} started ({} buffers in flight, paced by the output)", a.idx, blocks.len());
+    eprintln!(
+        "nxkit-audio: audren: render thread {} started ({} buffers in flight, paced by the output)",
+        a.idx,
+        blocks.len()
+    );
     let exec = EXEC.addr();
     let mut clicks = Clicks::default();
     while a.is_open() {
@@ -270,7 +296,12 @@ extern "C" fn render_main(idx: u64) {
             }
         };
         clicks.check(&blk[..n * 2], from_queue_flag);
-        let b = Buf { token: bi as u64, addr: blk.as_ptr() as u64, size: (n * 4) as u64, host: true };
+        let b = Buf {
+            token: bi as u64,
+            addr: blk.as_ptr() as u64,
+            size: (n * 4) as u64,
+            host: true,
+        };
         if !m.append(out, b) {
             free.push(bi);
             wake.wait_ms(5);
@@ -312,7 +343,10 @@ fn catch_up(a: &Ren, sys: u64) {
         static DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
         if n.is_power_of_two() {
-            eprintln!("nxkit-audio: audren: renderer {}: catch-up queue full, frame discarded ({n} so far)", a.idx);
+            eprintln!(
+                "nxkit-audio: audren: renderer {}: catch-up queue full, frame discarded ({n} so far)",
+                a.idx
+            );
         }
         render_once(a, sys, false, &mut Vec::new());
     } else {
@@ -326,7 +360,15 @@ fn catch_up(a: &Ren, sys: u64) {
 
 /// The take-over of `AudioRenderSystem::Update`. When nothing was rendered since the last update, one frame is rendered
 /// first on this thread, so that the effects get their initial commands. Then the SDK's update runs.
-pub(crate) extern "C" fn h_update(sys: u64, o: u64, on: u64, p: u64, pn: u64, inp: u64, inn: u64) -> u32 {
+pub(crate) extern "C" fn h_update(
+    sys: u64,
+    o: u64,
+    on: u64,
+    p: u64,
+    pn: u64,
+    inp: u64,
+    inn: u64,
+) -> u32 {
     let orig = ORIG_UPDATE.addr();
     let go = || call(orig, args(&[sys, o, on, p, pn, inp, inn])) as u32;
     // Two renderers just opened and neither has rendered: at most one catch-up frame less.
@@ -344,7 +386,8 @@ pub(crate) extern "C" fn h_update(sys: u64, o: u64, on: u64, p: u64, pn: u64, in
         catch_up(&a, sys);
     }
     let res = go();
-    a.last_r.store(a.renders.load(Ordering::Acquire), Ordering::Release);
+    a.last_r
+        .store(a.renders.load(Ordering::Acquire), Ordering::Release);
     a.updated.store(true, Ordering::Release);
     res
 }
@@ -362,22 +405,34 @@ struct Clicks {
 impl Clicks {
     fn check(&mut self, blk: &[i16], catch_up: bool) {
         static ON: OnceLock<bool> = OnceLock::new();
-        if !*ON.get_or_init(|| std::env::var("NXKIT_AUDIO_CLICKS").is_ok_and(|v| v == "1")) || blk.len() < 4 {
+        if !*ON.get_or_init(|| std::env::var("NXKIT_AUDIO_CLICKS").is_ok_and(|v| v == "1"))
+            || blk.len() < 4
+        {
             return;
         }
         let now = Instant::now();
         let inner = blk
             .chunks_exact(2)
             .zip(blk.chunks_exact(2).skip(1))
-            .map(|(a, b)| (i32::from(b[0]) - i32::from(a[0])).abs().max((i32::from(b[1]) - i32::from(a[1])).abs()))
+            .map(|(a, b)| {
+                (i32::from(b[0]) - i32::from(a[0]))
+                    .abs()
+                    .max((i32::from(b[1]) - i32::from(a[1])).abs())
+            })
             .max()
             .unwrap_or(0);
         if let Some(prev) = self.last {
-            let jump = (i32::from(blk[0]) - i32::from(prev[0])).abs().max((i32::from(blk[1]) - i32::from(prev[1])).abs());
+            let jump = (i32::from(blk[0]) - i32::from(prev[0]))
+                .abs()
+                .max((i32::from(blk[1]) - i32::from(prev[1])).abs());
             if jump > 2000 && jump > 3 * inner.max(1) && self.found < 2000 {
                 self.found += 1;
-                let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
-                let gap = self.at.map_or(0.0, |t| now.duration_since(t).as_secs_f64() * 1e3);
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() % 1_000_000);
+                let gap = self
+                    .at
+                    .map_or(0.0, |t| now.duration_since(t).as_secs_f64() * 1e3);
                 eprintln!(
                     "nxkit-audio: click t {ms}: jump {jump} (largest step inside {inner}), catch-up {catch_up}, {gap:.1} ms since the last block"
                 );

@@ -4,7 +4,7 @@
 use nxkit_nvn::ext::{ExtCode, StateKind};
 use nxkit_nvn::record::Record;
 
-use super::args::{hi, load_bytes, lo, range, slot, span, stage};
+use super::args::{hi, lo, load_bytes, range, slot, span, stage};
 use super::rec::{O_SAMP_BASE, O_TEX_BASE, emit, emit_rec};
 use super::seam::{channel_mask_patch, color_patch, depth_stencil_patch, seam};
 use crate::nvn::abi::{AbiResult, Obj, guard, log_once, other, table};
@@ -50,7 +50,13 @@ fn bind_buffer(
         .ok()
         .filter(|i| *i < BUFFERS)
         .ok_or_else(|| other(format!("buffer binding {index} is not valid")))?;
-    emit(name, c, code, s << 8 | i, &[lo(addr), hi(addr), lo(n), hi(n)]);
+    emit(
+        name,
+        c,
+        code,
+        s << 8 | i,
+        &[lo(addr), hi(addr), lo(n), hi(n)],
+    );
     Ok(())
 }
 
@@ -73,22 +79,30 @@ fn bind_buffers(
 
 extern "C" fn bind_uniform_buffer(c: u64, st: i32, i: i32, addr: u64, n: u64) {
     let name = "nvnCommandBufferBindUniformBuffer";
-    guard(name, || bind_buffer(name, ExtCode::UniformBuffer, c, st, i, addr, n));
+    guard(name, || {
+        bind_buffer(name, ExtCode::UniformBuffer, c, st, i, addr, n)
+    });
 }
 
 extern "C" fn bind_uniform_buffers(c: u64, st: i32, first: i32, n: i32, ranges: u64) {
     let name = "nvnCommandBufferBindUniformBuffers";
-    guard(name, || bind_buffers(name, ExtCode::UniformBuffer, c, st, first, n, ranges));
+    guard(name, || {
+        bind_buffers(name, ExtCode::UniformBuffer, c, st, first, n, ranges)
+    });
 }
 
 extern "C" fn bind_storage_buffer(c: u64, st: i32, i: i32, addr: u64, n: u64) {
     let name = "nvnCommandBufferBindStorageBuffer";
-    guard(name, || bind_buffer(name, ExtCode::StorageBuffer, c, st, i, addr, n));
+    guard(name, || {
+        bind_buffer(name, ExtCode::StorageBuffer, c, st, i, addr, n)
+    });
 }
 
 extern "C" fn bind_storage_buffers(c: u64, st: i32, first: i32, n: i32, ranges: u64) {
     let name = "nvnCommandBufferBindStorageBuffers";
-    guard(name, || bind_buffers(name, ExtCode::StorageBuffer, c, st, first, n, ranges));
+    guard(name, || {
+        bind_buffers(name, ExtCode::StorageBuffer, c, st, first, n, ranges)
+    });
 }
 
 /// Which slots a handle bind writes.
@@ -170,7 +184,9 @@ fn bind_many(c: u64, kind: Kind, st: i32, first: i32, n: i32, handles: u64) -> A
 }
 
 extern "C" fn bind_texture(c: u64, st: i32, i: i32, h: u64) {
-    guard("nvnCommandBufferBindTexture", || bind_one(c, Kind::Texture, st, i, h));
+    guard("nvnCommandBufferBindTexture", || {
+        bind_one(c, Kind::Texture, st, i, h)
+    });
 }
 
 extern "C" fn bind_textures(c: u64, st: i32, first: i32, n: i32, h: u64) {
@@ -207,7 +223,9 @@ extern "C" fn bind_textures_deferred(c: u64, st: i32, first: i32, n: i32, h: u64
 }
 
 extern "C" fn bind_image(c: u64, st: i32, i: i32, h: u64) {
-    guard("nvnCommandBufferBindImage", || bind_one(c, Kind::Image, st, i, h));
+    guard("nvnCommandBufferBindImage", || {
+        bind_one(c, Kind::Image, st, i, h)
+    });
 }
 
 extern "C" fn bind_images(c: u64, st: i32, first: i32, n: i32, h: u64) {
@@ -230,7 +248,13 @@ extern "C" fn bind_separate_textures(c: u64, st: i32, first: i32, n: i32, h: u64
 
 fn bind_sampler(name: &'static str, c: u64, s: u16, index: u32, h: u64, b: Bases) {
     let id = adjust(h, b, false, true) as u32;
-    emit(name, c, ExtCode::SeparateSampler, s << 8 | index as u16, &[id]);
+    emit(
+        name,
+        c,
+        ExtCode::SeparateSampler,
+        s << 8 | index as u16,
+        &[id],
+    );
 }
 
 extern "C" fn bind_separate_sampler(c: u64, st: i32, i: i32, h: u64) {
@@ -281,7 +305,10 @@ extern "C" fn bind_vertex_buffers(c: u64, first: i32, n: i32, ranges: u64) {
         if first >= STREAMS as i32 && n == 1 && super::settings().ignore_null_stream_binds {
             let (addr, size) = range(ranges, 0)?;
             if addr == 0 && size == 0 {
-                log_once(name, "a bind of a null range past the last vertex stream is ignored (title need)");
+                log_once(
+                    name,
+                    "a bind of a null range past the last vertex stream is ignored (title need)",
+                );
                 return Ok(());
             }
         }
@@ -358,11 +385,25 @@ fn bind_state(
 }
 
 extern "C" fn bind_blend_state(c: u64, st: u64) {
-    bind_state("nvnCommandBufferBindBlendState", c, StateKind::Blend, st, 8, |_| 0);
+    bind_state(
+        "nvnCommandBufferBindBlendState",
+        c,
+        StateKind::Blend,
+        st,
+        8,
+        |_| 0,
+    );
 }
 
 extern "C" fn bind_color_state(c: u64, st: u64) {
-    bind_state("nvnCommandBufferBindColorState", c, StateKind::Color, st, 4, color_patch);
+    bind_state(
+        "nvnCommandBufferBindColorState",
+        c,
+        StateKind::Color,
+        st,
+        4,
+        color_patch,
+    );
 }
 
 extern "C" fn bind_channel_mask_state(c: u64, st: u64) {
@@ -388,7 +429,14 @@ extern "C" fn bind_depth_stencil_state(c: u64, st: u64) {
 }
 
 extern "C" fn bind_polygon_state(c: u64, st: u64) {
-    bind_state("nvnCommandBufferBindPolygonState", c, StateKind::Polygon, st, 4, |_| 0);
+    bind_state(
+        "nvnCommandBufferBindPolygonState",
+        c,
+        StateKind::Polygon,
+        st,
+        4,
+        |_| 0,
+    );
 }
 
 extern "C" fn bind_multisample_state(c: u64, st: u64) {
@@ -407,7 +455,13 @@ extern "C" fn set_texture_pool(c: u64, pool: u64) {
     guard(name, || {
         let base = seam().texture_pool_base(pool)?;
         Obj(c).set_u32(O_TEX_BASE, base)?;
-        emit(name, c, ExtCode::TexturePool, 0, &[lo(pool), hi(pool), base]);
+        emit(
+            name,
+            c,
+            ExtCode::TexturePool,
+            0,
+            &[lo(pool), hi(pool), base],
+        );
         Ok(())
     });
 }
@@ -417,7 +471,13 @@ extern "C" fn set_sampler_pool(c: u64, pool: u64) {
     guard(name, || {
         let base = seam().sampler_pool_base(pool)?;
         Obj(c).set_u32(O_SAMP_BASE, base)?;
-        emit(name, c, ExtCode::SamplerPool, 0, &[lo(pool), hi(pool), base]);
+        emit(
+            name,
+            c,
+            ExtCode::SamplerPool,
+            0,
+            &[lo(pool), hi(pool), base],
+        );
         Ok(())
     });
 }

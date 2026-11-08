@@ -4,8 +4,8 @@
 //! fires at once. The nickname comes from the configuration.
 
 use super::oe_state::AppletGuard;
-use super::{fatal, fail, get_u64, nothing, ok, put_u32, put_u64, put_u8, put_bytes, RES_FAIL};
-use crate::acc::{profile_jpeg, UID};
+use super::{RES_FAIL, fail, fatal, get_u64, nothing, ok, put_bytes, put_u8, put_u32, put_u64};
+use crate::acc::{UID, profile_jpeg};
 use crate::config;
 use crate::event;
 
@@ -73,7 +73,9 @@ extern "C" fn open_user(handle: u64, uid: u64) -> u32 {
 extern "C" fn user_id(out: u64, handle: u64) -> u32 {
     let magic = get_u64(handle + 16);
     if magic != HANDLE_MAGIC {
-        fatal(&format!("account::GetUserId: the handle was not issued by the host ({magic:#x})"));
+        fatal(&format!(
+            "account::GetUserId: the handle was not issued by the host ({magic:#x})"
+        ));
     }
     put_u64(out, get_u64(handle));
     put_u64(out + 8, get_u64(handle + 8));
@@ -98,7 +100,10 @@ extern "C" fn user_count(out: u64) -> u32 {
 
 /// `GetUserExistence`: true for the local user.
 extern "C" fn user_existence(out: u64, uid: u64) -> u32 {
-    put_u8(out, u8::from(get_u64(uid) == UID[0] && get_u64(uid + 8) == UID[1]));
+    put_u8(
+        out,
+        u8::from(get_u64(uid) == UID[0] && get_u64(uid + 8) == UID[1]),
+    );
     0
 }
 

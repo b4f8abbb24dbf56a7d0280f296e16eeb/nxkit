@@ -98,12 +98,16 @@ extern "C" fn pool_size(size: u64, align: u64, pref_at: u64, n: u32) -> u32 {
 }
 
 extern "C" fn pool_with_mode(t: u64, mem: u64, size: u64, pref_at: u64, n: u32, _mode: u32) -> u32 {
-    crate::codec::trace(format_args!("pool {t:#x} mem {mem:#x} size {size:#x} n {n} mode {_mode}"));
+    crate::codec::trace(format_args!(
+        "pool {t:#x} mem {mem:#x} size {size:#x} n {n} mode {_mode}"
+    ));
     pool_no_mode(t, mem, size, pref_at, n)
 }
 
 extern "C" fn pool_no_mode(t: u64, mem: u64, size: u64, pref_at: u64, n: u32) -> u32 {
-    crate::codec::trace(format_args!("pool {t:#x} mem {mem:#x} size {size:#x} n {n}"));
+    crate::codec::trace(format_args!(
+        "pool {t:#x} mem {mem:#x} size {size:#x} n {n}"
+    ));
     match Pref::read(pref_at) {
         Some(p) => pool_init(t, mem, size, &p, n),
         None => BAD,
@@ -150,7 +154,9 @@ extern "C" fn read_rgba(
     stride: u64,
     size: u64,
 ) -> u32 {
-    crate::codec::trace(format_args!("read rgba picture {i} {w}x{h} at {x},{y} stride {stride} size {size}"));
+    crate::codec::trace(format_args!(
+        "read rgba picture {i} {w}x{h} at {x},{y} stride {stride} size {size}"
+    ));
     static ONCE: AtomicBool = AtomicBool::new(false);
     let (x, y, w, h) = (x as u16, y as u16, u64::from(w as u16), u64::from(h as u16));
     let Some(frame) = pool_frame(t, i) else {
@@ -223,7 +229,9 @@ extern "C" fn read_nv12(
     uvstride: u64,
     uvsize: u64,
 ) -> u32 {
-    crate::codec::trace(format_args!("read nv12 picture {i} {w}x{h} y {ydst:#x} uv {uvdst:#x}"));
+    crate::codec::trace(format_args!(
+        "read nv12 picture {i} {w}x{h} y {ydst:#x} uv {uvdst:#x}"
+    ));
     static ONCE: AtomicBool = AtomicBool::new(false);
     let (x, y, w, h) = (x as u16, y as u16, u64::from(w as u16), u64::from(h as u16));
     if x != 0 || y != 0 || ystride != w || uvstride != w || ysize < w * h || uvsize < w * h / 2 {

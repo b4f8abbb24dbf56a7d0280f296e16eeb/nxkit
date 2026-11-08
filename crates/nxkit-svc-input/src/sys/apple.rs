@@ -103,7 +103,11 @@ impl Platform {
             motion: config.motion,
             rumble: config.rumble,
             keyboard: config.keyboard,
-            keys: if config.keyboard { key_table() } else { Vec::new() },
+            keys: if config.keyboard {
+                key_table()
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -129,12 +133,17 @@ impl Platform {
             let (gamepad, name, category) = unsafe {
                 (
                     controller.extendedGamepad(),
-                    controller.vendorName().map(|n| n.to_string()).unwrap_or_default(),
+                    controller
+                        .vendorName()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default(),
                     controller.productCategory().to_string(),
                 )
             };
             let Some(gamepad) = gamepad else { continue };
-            let Some(slot) = slots.take(owner, &name) else { continue };
+            let Some(slot) = slots.take(owner, &name) else {
+                continue;
+            };
             self.pads[slot] = Some(Pad {
                 motion: self.attach_motion(&controller),
                 labelled: is_labelled(&category),
@@ -194,7 +203,10 @@ impl Platform {
                 (down(&dpad.right()), btn::RIGHT),
                 (down(&dpad.down()), btn::DOWN),
             ];
-            let buttons = pairs.iter().filter(|(on, _)| *on).fold(0, |m, (_, b)| m | b);
+            let buttons = pairs
+                .iter()
+                .filter(|(on, _)| *on)
+                .fold(0, |m, (_, b)| m | b);
             let axes = [
                 value(&ls.xAxis()),
                 value(&ls.yAxis()),

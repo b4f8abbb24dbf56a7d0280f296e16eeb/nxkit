@@ -63,7 +63,11 @@ fn plan(t: &Tex, view: u64, region: u64, row: i64, img: i64) -> AbiResult<Option
         )));
     }
     let f = format_info(t.desc.format)?;
-    let (bw, bh, bpb) = (u32::from(f.block_w), u32::from(f.block_h), u32::from(f.bytes_per_block));
+    let (bw, bh, bpb) = (
+        u32::from(f.block_w),
+        u32::from(f.block_h),
+        u32::from(f.bytes_per_block),
+    );
     let wb = (w as u32).div_ceil(bw) * bpb;
     let hb = (h as u32).div_ceil(bh);
     if wb == 0 || hb == 0 {
@@ -71,7 +75,11 @@ fn plan(t: &Tex, view: u64, region: u64, row: i64, img: i64) -> AbiResult<Option
     }
     let view = View::load(view)?;
     let row = if row == 0 { u64::from(wb) } else { row as u64 };
-    let img = if img == 0 { row * u64::from(hb) } else { img as u64 };
+    let img = if img == 0 {
+        row * u64::from(hb)
+    } else {
+        img as u64
+    };
     Ok(Some(Plan {
         level: view.level(),
         layer0: view.first_layer(),
@@ -127,7 +135,11 @@ fn walk(
         for y in 0..p.hb {
             let at = (u64::from(p.y0) + u64::from(y)) * pitch + u64::from(p.x0);
             check(at, u64::from(p.wb))?;
-            f(to_usize(at)?, to_usize(u64::from(y) * p.row)?, p.wb as usize)?;
+            f(
+                to_usize(at)?,
+                to_usize(u64::from(y) * p.row)?,
+                p.wb as usize,
+            )?;
         }
         return Ok(());
     }
@@ -177,8 +189,13 @@ fn put(t: &Tex, p: &Plan, src: u64) -> AbiResult<(u64, u64)> {
     guest::with_slice(src, p.buffer_bytes(), |buf| {
         guest::with_slice_mut(t.host, t.size, |st| {
             walk(t, p, |so, bo, n| {
-                let to = st.get_mut(so..so + n).ok_or_else(|| other("a run leaves the storage"))?;
-                to.copy_from_slice(buf.get(bo..bo + n).ok_or_else(|| other("a run leaves the buffer"))?);
+                let to = st
+                    .get_mut(so..so + n)
+                    .ok_or_else(|| other("a run leaves the storage"))?;
+                to.copy_from_slice(
+                    buf.get(bo..bo + n)
+                        .ok_or_else(|| other("a run leaves the buffer"))?,
+                );
                 lo = lo.min(so as u64);
                 hi = hi.max((so + n) as u64);
                 Ok(())
@@ -193,8 +210,13 @@ fn take(t: &Tex, p: &Plan, dst: u64) -> AbiResult<()> {
     guest::with_slice_mut(dst, p.buffer_bytes(), |buf| {
         guest::with_slice(t.host, t.size, |st| {
             walk(t, p, |so, bo, n| {
-                let to = buf.get_mut(bo..bo + n).ok_or_else(|| other("a run leaves the buffer"))?;
-                to.copy_from_slice(st.get(so..so + n).ok_or_else(|| other("a run leaves the storage"))?);
+                let to = buf
+                    .get_mut(bo..bo + n)
+                    .ok_or_else(|| other("a run leaves the buffer"))?;
+                to.copy_from_slice(
+                    st.get(so..so + n)
+                        .ok_or_else(|| other("a run leaves the storage"))?,
+                );
                 Ok(())
             })
         })
@@ -202,7 +224,15 @@ fn take(t: &Tex, p: &Plan, dst: u64) -> AbiResult<()> {
     Ok(())
 }
 
-fn write_texels(name: &str, t: u64, view: u64, region: u64, src: u64, row: i64, img: i64) -> AbiResult<()> {
+fn write_texels(
+    name: &str,
+    t: u64,
+    view: u64,
+    region: u64,
+    src: u64,
+    row: i64,
+    img: i64,
+) -> AbiResult<()> {
     let t = Tex::load(t)?;
     if t.host == 0 {
         eprintln!("[RED] NVN {name}: the texture has no storage");
@@ -216,7 +246,15 @@ fn write_texels(name: &str, t: u64, view: u64, region: u64, src: u64, row: i64, 
     gpu(name).with_front(|f| f.texels_written(t.host + lo, hi - lo).map(|_| ()))
 }
 
-fn read_texels(name: &str, t: u64, view: u64, region: u64, dst: u64, row: i64, img: i64) -> AbiResult<()> {
+fn read_texels(
+    name: &str,
+    t: u64,
+    view: u64,
+    region: u64,
+    dst: u64,
+    row: i64,
+    img: i64,
+) -> AbiResult<()> {
     let t = Tex::load(t)?;
     if t.host == 0 {
         eprintln!("[RED] NVN {name}: the texture has no storage");
@@ -246,7 +284,15 @@ extern "C" fn write(t: u64, view: u64, region: u64, src: u64) {
 
 extern "C" fn write_strided(t: u64, view: u64, region: u64, src: u64, row: i64, img: i64) {
     guard("nvnTextureWriteTexelsStrided", || {
-        write_texels("nvnTextureWriteTexelsStrided", t, view, region, src, row, img)
+        write_texels(
+            "nvnTextureWriteTexelsStrided",
+            t,
+            view,
+            region,
+            src,
+            row,
+            img,
+        )
     });
 }
 
@@ -258,7 +304,15 @@ extern "C" fn read(t: u64, view: u64, region: u64, dst: u64) {
 
 extern "C" fn read_strided(t: u64, view: u64, region: u64, dst: u64, row: i64, img: i64) {
     guard("nvnTextureReadTexelsStrided", || {
-        read_texels("nvnTextureReadTexelsStrided", t, view, region, dst, row, img)
+        read_texels(
+            "nvnTextureReadTexelsStrided",
+            t,
+            view,
+            region,
+            dst,
+            row,
+            img,
+        )
     });
 }
 
@@ -334,14 +388,23 @@ mod tests {
     fn a_region_written_in_place_is_what_the_whole_level_decodes_to() {
         let t = texture(64, 64, 0x25, 0);
         let src = pattern(8 * 8 * 4);
-        let p = plan(&t, 0, region(4, 5, 8, 8), 0, 0).expect("plan").expect("not empty");
+        let p = plan(&t, 0, region(4, 5, 8, 8), 0, 0)
+            .expect("plan")
+            .expect("not empty");
         let (lo, hi) = put(&t, &p, src).expect("put");
         assert!(lo < hi && hi <= t.size);
         let mut lin = vec![0u8; 64 * 64 * 4];
         let mut storage = vec![0u8; t.size as usize];
         guest::read(t.host, &mut storage).expect("storage");
-        deswizzle_level(&t.desc, GobOrder::default(), (0, 0), &storage, &mut lin, 64 * 4)
-            .expect("deswizzle");
+        deswizzle_level(
+            &t.desc,
+            GobOrder::default(),
+            (0, 0),
+            &storage,
+            &mut lin,
+            64 * 4,
+        )
+        .expect("deswizzle");
         let mut want = vec![0u8; 8 * 8 * 4];
         guest::read(src, &mut want).expect("src");
         for y in 0..8usize {
@@ -355,7 +418,9 @@ mod tests {
     fn a_region_that_is_read_back_equals_what_was_written() {
         let t = texture(100, 70, 0x25, 0);
         let src = pattern(33 * 17 * 4);
-        let p = plan(&t, 0, region(3, 2, 33, 17), 0, 0).expect("plan").expect("not empty");
+        let p = plan(&t, 0, region(3, 2, 33, 17), 0, 0)
+            .expect("plan")
+            .expect("not empty");
         put(&t, &p, src).expect("put");
         let dst = testing::alloc(33 * 17 * 4);
         take(&t, &p, dst).expect("take");
@@ -369,7 +434,9 @@ mod tests {
     fn a_linear_texture_is_written_row_by_row_with_its_pitch() {
         let t = texture(10, 4, 0x25, FLAG_LINEAR);
         let src = pattern(2 * 2 * 4);
-        let p = plan(&t, 0, region(1, 1, 2, 2), 0, 0).expect("plan").expect("not empty");
+        let p = plan(&t, 0, region(1, 1, 2, 2), 0, 0)
+            .expect("plan")
+            .expect("not empty");
         put(&t, &p, src).expect("put");
         let pitch = (t.size / 4) as usize;
         let mut st = vec![0u8; t.size as usize];
@@ -384,21 +451,29 @@ mod tests {
     fn a_region_outside_the_level_is_an_error() {
         let t = texture(16, 16, 0x25, 0);
         let src = pattern(32 * 32 * 4);
-        let p = plan(&t, 0, region(8, 8, 32, 32), 0, 0).expect("plan").expect("not empty");
+        let p = plan(&t, 0, region(8, 8, 32, 32), 0, 0)
+            .expect("plan")
+            .expect("not empty");
         assert!(put(&t, &p, src).is_err());
     }
 
     #[test]
     fn an_empty_region_copies_nothing() {
         let t = texture(16, 16, 0x25, 0);
-        assert!(plan(&t, 0, region(0, 0, 0, 4), 0, 0).expect("plan").is_none());
+        assert!(
+            plan(&t, 0, region(0, 0, 0, 4), 0, 0)
+                .expect("plan")
+                .is_none()
+        );
     }
 
     #[test]
     fn the_strides_of_the_buffer_are_kept() {
         let t = texture(32, 32, 0x25, 0);
         let src = pattern(64 * 4);
-        let p = plan(&t, 0, region(0, 0, 4, 2), 64, 0).expect("plan").expect("not empty");
+        let p = plan(&t, 0, region(0, 0, 4, 2), 64, 0)
+            .expect("plan")
+            .expect("not empty");
         assert_eq!(p.buffer_bytes(), 64 + 16);
         put(&t, &p, src).expect("put");
         let dst = testing::alloc(64 * 4);

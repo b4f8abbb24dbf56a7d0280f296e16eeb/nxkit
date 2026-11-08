@@ -76,7 +76,10 @@ fn entropy() -> u64 {
 fn default_mii(female: bool, index: i32) -> [u8; CHAR_INFO] {
     let mut c = [0u8; CHAR_INFO];
     let (a, b) = if index >= 0 {
-        (0x4d49_494e_4445_4641u64 + index as u64, 0x554c_5444_4d48_4f53u64)
+        (
+            0x4d49_494e_4445_4641u64 + index as u64,
+            0x554c_5444_4d48_4f53u64,
+        )
     } else {
         (entropy(), entropy())
     };
@@ -99,14 +102,21 @@ fn default_mii(female: bool, index: i32) -> [u8; CHAR_INFO] {
 
 /// `Initialize()`: the six default Miis, none of the console's own.
 extern "C" fn initialize(_this: u64) -> u32 {
-    log_once(&INIT, "mii: Database::Initialize (the six default Miis, none of the console's own)");
+    log_once(
+        &INIT,
+        "mii: Database::Initialize (the six default Miis, none of the console's own)",
+    );
     0
 }
 
 static INIT: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn count(_this: u64, source: u32) -> i32 {
-    if source & SOURCE_DEFAULT != 0 { DEFAULTS } else { 0 }
+    if source & SOURCE_DEFAULT != 0 {
+        DEFAULTS
+    } else {
+        0
+    }
 }
 
 /// Writes the default Miis. `stride` is the size of one element, and an element of `CharInfoElement` ends with the
@@ -146,7 +156,11 @@ extern "C" fn not_found() -> u32 {
 
 /// `BuildRandom(CharInfo*, const RandomDesc&)`: the second word of the description is the gender.
 extern "C" fn build_random(_this: u64, out: u64, desc: u64) -> u32 {
-    let gender = if desc == 0 { 0 } else { super::get_i32(desc + 4) };
+    let gender = if desc == 0 {
+        0
+    } else {
+        super::get_i32(desc + 4)
+    };
     put_bytes(out, &default_mii(gender == 1, -1));
     0
 }
@@ -154,7 +168,11 @@ extern "C" fn build_random(_this: u64, out: u64, desc: u64) -> u32 {
 /// `BuildDefault(CharInfo*, int index)`.
 extern "C" fn build_default(_this: u64, out: u64, index: u32) -> u32 {
     let index = index as i32;
-    let i = if (0..DEFAULTS).contains(&index) { index } else { 0 };
+    let i = if (0..DEFAULTS).contains(&index) {
+        index
+    } else {
+        0
+    };
     put_bytes(out, &default_mii(index >= 3, i));
     0
 }

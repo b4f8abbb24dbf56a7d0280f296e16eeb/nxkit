@@ -37,7 +37,9 @@ impl Service for IFile {
         match req.command {
             // Read and Write: option u32 at 0, offset s64 at 8, size s64 at 16
             0 => {
-                let (Ok(offset), Ok(size), Ok(buf)) = (arg_u64(req, 8), arg_u64(req, 16), out_buffer(req, 0)) else {
+                let (Ok(offset), Ok(size), Ok(buf)) =
+                    (arg_u64(req, 8), arg_u64(req, 16), out_buffer(req, 0))
+                else {
                     return answer(rsp, FAIL);
                 };
                 match file.read(offset as i64, buf.addr, size.min(buf.size)) {
@@ -47,7 +49,9 @@ impl Service for IFile {
                 Handled::Done
             }
             1 => {
-                let (Ok(offset), Ok(size), Ok(buf)) = (arg_u64(req, 8), arg_u64(req, 16), in_buffer(req, 0)) else {
+                let (Ok(offset), Ok(size), Ok(buf)) =
+                    (arg_u64(req, 8), arg_u64(req, 16), in_buffer(req, 0))
+                else {
                     return answer(rsp, FAIL);
                 };
                 answer(rsp, file.write(offset as i64, buf.addr, size.min(buf.size)))
@@ -100,7 +104,9 @@ impl Service for IDirectory {
         match req.command {
             // Read: the entries go to the receive buffer, the count is the answer
             0 => {
-                let Ok(buf) = out_buffer(req, 0) else { return answer(rsp, FAIL) };
+                let Ok(buf) = out_buffer(req, 0) else {
+                    return answer(rsp, FAIL);
+                };
                 match dir.read((buf.size / ENTRY_SIZE as u64) as i64, buf.addr) {
                     Ok(n) => rsp.push_u64(n as u64),
                     Err(r) => rsp.result = r,

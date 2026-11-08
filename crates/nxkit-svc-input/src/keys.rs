@@ -134,6 +134,9 @@ mod tests {
         assert_eq!(&b[0..8], &7u64.to_le_bytes());
         assert_eq!(&b[8..16], &(modifier::SHIFT | modifier::GUI).to_le_bytes());
         assert_eq!(&b[16..24], &(1u64 << 4).to_le_bytes());
-        assert_eq!(&b[40..48], &(1u64 << (0xe1 - 0xc0) | 1u64 << (0xe3 - 0xc0)).to_le_bytes());
+        assert_eq!(
+            &b[40..48],
+            &(1u64 << (0xe1 - 0xc0) | 1u64 << (0xe3 - 0xc0)).to_le_bytes()
+        );
     }
 }

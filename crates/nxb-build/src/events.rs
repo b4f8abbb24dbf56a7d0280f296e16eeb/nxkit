@@ -657,7 +657,9 @@ impl Progress {
         // far a long step is, with an ETA when there is one.
         if self.mode == Mode::Lines
             && let Some(d) = st.done
-            && st.llast.is_none_or(|t| t.elapsed().as_secs_f64() >= LINES_INTERVAL)
+            && st
+                .llast
+                .is_none_or(|t| t.elapsed().as_secs_f64() >= LINES_INTERVAL)
         {
             st.llast = Some(Instant::now());
             let of = st.total.map_or(String::new(), |t| format!(" of {t}"));
@@ -665,7 +667,9 @@ impl Progress {
                 Some(t) if t > 0 => format!(" ({:.0}%)", 100.0 * d as f64 / t as f64),
                 _ => String::new(),
             };
-            let left = eta(st).map_or(String::new(), |e| format!(", about {:.0} min left", (e / 60.0).ceil()));
+            let left = eta(st).map_or(String::new(), |e| {
+                format!(", about {:.0} min left", (e / 60.0).ceil())
+            });
             lines.push(format!(
                 "[{}] [{}/{n_all}] {} · {}: {d}{of} {}{pct}{left}",
                 clock(),

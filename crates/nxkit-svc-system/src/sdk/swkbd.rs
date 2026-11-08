@@ -11,9 +11,9 @@
 //! nxnative (`hle_charname.c`) and the freeze of the guest clock while the box is open are not part of this crate.
 
 use super::oe_state::AppletGuard;
-use super::{get_bytes, get_i32, get_u64, get_u8, log, nothing, put_bytes, put_zero, zero};
+use super::{get_bytes, get_i32, get_u8, get_u64, log, nothing, put_bytes, put_zero, zero};
 use crate::event::Block;
-use crate::seams::{seams, TextRequest};
+use crate::seams::{TextRequest, seams};
 use crate::sys::call_guest;
 use crate::util::lock;
 use std::sync::Mutex;
@@ -41,7 +41,11 @@ static CHANGED_ARG: Block = Block::new();
 /// UTF-16 units at `addr` (at most `n`, stops at 0) as a string.
 fn read_utf16(addr: u64, n: usize) -> String {
     let b = get_bytes(addr, n * 2);
-    let units: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|&u| u != 0).collect();
+    let units: Vec<u16> = b
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|&u| u != 0)
+        .collect();
     String::from_utf16_lossy(&units)
 }
 
@@ -118,11 +122,22 @@ extern "C" fn show_keyboard(out: u64, arg: u64) -> u32 {
         return 0;
     }
     put_zero(buf, cap);
-    let units = to_utf16(&text, if max_len > 0 { max_len as usize } else { TEXT_UNITS });
+    let units = to_utf16(
+        &text,
+        if max_len > 0 {
+            max_len as usize
+        } else {
+            TEXT_UNITS
+        },
+    );
     if get_u8(arg + ARG_UTF8) != 0 {
         put_bytes(buf, &utf16_to_utf8(&units, cap as usize));
     } else {
-        let n = if (units.len() as u64 + 1) * 2 <= cap { units.len() } else { (cap / 2).saturating_sub(1) as usize };
+        let n = if (units.len() as u64 + 1) * 2 <= cap {
+            units.len()
+        } else {
+            (cap / 2).saturating_sub(1) as usize
+        };
         let bytes: Vec<u8> = units.iter().take(n).flat_map(|u| u.to_le_bytes()).collect();
         put_bytes(buf, &bytes);
     }
@@ -166,10 +181,12 @@ static SLOTS: Mutex<[Slot; 4]> = Mutex::new(
 );
 
 fn slot_index(slots: &mut [Slot; 4], kb: u64) -> Option<usize> {
-    slots
-        .iter()
-        .position(|s| s.kb == kb)
-        .or_else(|| slots.iter().position(|s| s.kb == 0).inspect(|&i| slots[i].kb = kb))
+    slots.iter().position(|s| s.kb == kb).or_else(|| {
+        slots
+            .iter()
+            .position(|s| s.kb == 0)
+            .inspect(|&i| slots[i].kb = kb)
+    })
 }
 
 /// Runs `f` on the slot of `kb`, which the first use claims. Gives `None` when the four slots are taken.
@@ -218,9 +235,15 @@ extern "C" fn inline_appear(kb: u64, arg: u64) {
     with_slot(kb, |s| {
         s.pending = true;
         s.state = 3;
-        s.max_len = if max > 0 && max <= INLINE_UNITS as i32 { max } else { 0 };
+        s.max_len = if max > 0 && max <= INLINE_UNITS as i32 {
+            max
+        } else {
+            0
+        };
     });
-    log(&format!("swkbd: inline keyboard Appear {kb:#x} (at most {max} characters), text asked for on the next tick"));
+    log(&format!(
+        "swkbd: inline keyboard Appear {kb:#x} (at most {max} characters), text asked for on the next tick"
+    ));
 }
 
 /// `InlineKeyboard::Disappear()`: the finished callback follows on the next `Calc`.
@@ -307,7 +330,10 @@ extern "C" fn inline_calc(kb: u64) -> u32 {
         return d.state as u32;
     }
     let text = if d.enter != 0 {
-        ask_text(&TextRequest { max_len: d.max.max(0) as u32, ..TextRequest::default() })
+        ask_text(&TextRequest {
+            max_len: d.max.max(0) as u32,
+            ..TextRequest::default()
+        })
     } else {
         None
     };
@@ -330,7 +356,14 @@ extern "C" fn inline_calc(kb: u64) -> u32 {
     }
     // ChangedStringArg and DecidedEnterArg: the text inline, then its length, the dictionary range and the cursor.
     put_zero(a, 0x400);
-    let units = to_utf16(&text, if d.max > 0 { d.max as usize } else { INLINE_UNITS });
+    let units = to_utf16(
+        &text,
+        if d.max > 0 {
+            d.max as usize
+        } else {
+            INLINE_UNITS
+        },
+    );
     let bytes: Vec<u8> = units.iter().flat_map(|u| u.to_le_bytes()).collect();
     put_bytes(a, &bytes);
     put_bytes(a + 0x3ec, &(units.len() as i32).to_le_bytes());

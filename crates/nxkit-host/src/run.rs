@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use nxkit_metal::Context;
 
-use crate::error::{HostError, Result};
-use crate::sys::appkit::{self, AppEvents, MouseEvent, MouseMode, WindowConfig};
 use crate::boot::Boot;
+use crate::error::{HostError, Result};
 use crate::manifest::Game;
+use crate::sys::appkit::{self, AppEvents, MouseEvent, MouseMode, WindowConfig};
 use crate::{guestsym, loader, place, seams, stop, sys, thread};
 
 /// What the command line asks for.
@@ -51,7 +51,8 @@ impl AppEvents for Events {
 fn check_kernel_service(mask: u64) -> Result<()> {
     if mask & nxkit_rt::Service::Kernel.bit() == 0 {
         return Err(HostError::Manifest(
-            "\"services\" must include \"kernel\", because every svc of the game goes through it".into(),
+            "\"services\" must include \"kernel\", because every svc of the game goes through it"
+                .into(),
         ));
     }
     Ok(())
@@ -95,9 +96,14 @@ pub fn run(opts: &Options) -> Result<()> {
         fullscreen: opts.fullscreen,
     };
     let stack_top = layout.main_stack.end();
-    let result = appkit::run(&window, &ctx, hooks, Arc::new(Events), stop::flag(), move || {
-        thread::start_main(boot, stack_top)
-    });
+    let result = appkit::run(
+        &window,
+        &ctx,
+        hooks,
+        Arc::new(Events),
+        stop::flag(),
+        move || thread::start_main(boot, stack_top),
+    );
     drop(loaded);
     result
 }

@@ -22,7 +22,14 @@ const MAP_PRIVATE: c_int = 2;
 
 // SAFETY (declarations): `mmap` and `munmap` are POSIX functions with these signatures on macOS and Linux.
 unsafe extern "C" {
-    fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void;
+    fn mmap(
+        addr: *mut c_void,
+        len: usize,
+        prot: c_int,
+        flags: c_int,
+        fd: c_int,
+        off: i64,
+    ) -> *mut c_void;
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
 }
 
@@ -45,15 +52,30 @@ impl Map {
     /// Maps the first `len` bytes of `file`. A length of zero maps nothing and reads as an empty slice.
     pub(crate) fn new(file: &File, len: usize) -> io::Result<Map> {
         if len == 0 {
-            return Ok(Map { ptr: std::ptr::null(), len: 0 });
+            return Ok(Map {
+                ptr: std::ptr::null(),
+                len: 0,
+            });
         }
         // SAFETY: a null address lets the system choose, `len` is not zero, the descriptor is open for the call and
         // the offset is zero. The result is checked before use.
-        let p = unsafe { mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE, file.as_raw_fd(), 0) };
+        let p = unsafe {
+            mmap(
+                std::ptr::null_mut(),
+                len,
+                PROT_READ,
+                MAP_PRIVATE,
+                file.as_raw_fd(),
+                0,
+            )
+        };
         if p as isize == -1 {
             return Err(io::Error::last_os_error());
         }
-        Ok(Map { ptr: p as *const u8, len })
+        Ok(Map {
+            ptr: p as *const u8,
+            len,
+        })
     }
 
     /// The mapped bytes.
@@ -83,7 +105,11 @@ fn cpath(p: &Path) -> io::Result<CString> {
 
 #[cfg(target_vendor = "apple")]
 fn check(rc: c_int) -> io::Result<()> {
-    if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }
 
 /// Whether a host error says that the file system cannot clone or swap folders (HFS+ and exFAT).
@@ -122,7 +148,11 @@ mod apple {
             position: u32,
             options: c_int,
         ) -> c_int;
-        pub(super) fn removexattr(path: *const c_char, name: *const c_char, options: c_int) -> c_int;
+        pub(super) fn removexattr(
+            path: *const c_char,
+            name: *const c_char,
+            options: c_int,
+        ) -> c_int;
     }
 }
 
@@ -167,7 +197,11 @@ pub(crate) fn get_guest_name(host: &Path) -> io::Result<Option<Vec<u8>>> {
         return Ok(Some(buf));
     }
     let e = io::Error::last_os_error();
-    if e.raw_os_error() == Some(apple::ENOATTR) { Ok(None) } else { Err(e) }
+    if e.raw_os_error() == Some(apple::ENOATTR) {
+        Ok(None)
+    } else {
+        Err(e)
+    }
 }
 
 /// Stores `guest` as the guest name of `host`, or removes the name when `guest` is `None`.
@@ -177,11 +211,20 @@ pub(crate) fn set_guest_name(host: &Path, guest: Option<&[u8]>) -> io::Result<()
     match guest {
         // SAFETY: the path and the name are NUL-terminated strings, and `g` has `g.len()` readable bytes.
         Some(g) => check(unsafe {
-            apple::setxattr(p.as_ptr(), GUEST_NAME_ATTR.as_ptr(), g.as_ptr().cast(), g.len(), 0, apple::XATTR_NOFOLLOW)
+            apple::setxattr(
+                p.as_ptr(),
+                GUEST_NAME_ATTR.as_ptr(),
+                g.as_ptr().cast(),
+                g.len(),
+                0,
+                apple::XATTR_NOFOLLOW,
+            )
         }),
         None => {
             // SAFETY: the path and the name are NUL-terminated strings that live for the call.
-            let rc = unsafe { apple::removexattr(p.as_ptr(), GUEST_NAME_ATTR.as_ptr(), apple::XATTR_NOFOLLOW) };
+            let rc = unsafe {
+                apple::removexattr(p.as_ptr(), GUEST_NAME_ATTR.as_ptr(), apple::XATTR_NOFOLLOW)
+            };
             match check(rc) {
                 Err(e) if e.raw_os_error() == Some(apple::ENOATTR) => Ok(()),
                 other => other,
@@ -211,7 +254,11 @@ pub(crate) fn get_guest_name(_host: &Path) -> io::Result<Option<Vec<u8>>> {
 /// Removing a name always works. Storing one is refused, because only Apple platforms have the attribute.
 #[cfg(not(target_vendor = "apple"))]
 pub(crate) fn set_guest_name(_host: &Path, guest: Option<&[u8]>) -> io::Result<()> {
-    if guest.is_some() { Err(io::Error::from(io::ErrorKind::Unsupported)) } else { Ok(()) }
+    if guest.is_some() {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    } else {
+        Ok(())
+    }
 }
 
 /// The entry of a guest function that the host looked up by its mangled name (`set_guest_sym`).
@@ -227,7 +274,8 @@ pub(crate) fn release_sdk_mount(is_mounted: GuestFn, unmount: GuestFn, name: u64
     // SAFETY: `set_guest_sym` makes the host answer with the entries of the SDK functions of these exact mangled
     // names, which have these signatures. The guest is native code in this process, so a guest address is callable.
     unsafe {
-        let is_mounted: extern "C" fn(u64) -> u32 = std::mem::transmute::<usize, _>(is_mounted.0 as usize);
+        let is_mounted: extern "C" fn(u64) -> u32 =
+            std::mem::transmute::<usize, _>(is_mounted.0 as usize);
         if is_mounted(name) & 0xFF == 0 {
             return false;
         }
@@ -246,7 +294,9 @@ mod tests {
     fn a_mapped_file_reads_as_its_bytes() {
         let dir = crate::testutil::scratch("sys-map");
         let path = dir.join("f");
-        File::create(&path).and_then(|mut f| f.write_all(b"hello romfs")).unwrap();
+        File::create(&path)
+            .and_then(|mut f| f.write_all(b"hello romfs"))
+            .unwrap();
         let f = File::open(&path).unwrap();
         let m = Map::new(&f, 11).unwrap();
         assert_eq!(m.as_slice(), b"hello romfs");

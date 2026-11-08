@@ -137,10 +137,19 @@ pub fn pick_mode(modes: &[ModeInfo], current: &ModeInfo, want_hz: f64) -> Option
         .filter(|(_, m)| {
             m.usable
                 && (m.width, m.height, m.pixel_width, m.pixel_height)
-                    == (current.width, current.height, current.pixel_width, current.pixel_height)
+                    == (
+                        current.width,
+                        current.height,
+                        current.pixel_width,
+                        current.pixel_height,
+                    )
                 && (m.hz - want_hz).abs() <= 1.0
         })
-        .min_by(|a, b| (a.1.hz - want_hz).abs().total_cmp(&(b.1.hz - want_hz).abs()))
+        .min_by(|a, b| {
+            (a.1.hz - want_hz)
+                .abs()
+                .total_cmp(&(b.1.hz - want_hz).abs())
+        })
         .map(|(i, _)| i)
 }
 
@@ -155,7 +164,12 @@ pub fn refresh_choices(display: u32) -> Vec<f64> {
         .filter(|m| {
             m.usable
                 && (m.width, m.height, m.pixel_width, m.pixel_height)
-                    == (current.width, current.height, current.pixel_width, current.pixel_height)
+                    == (
+                        current.width,
+                        current.height,
+                        current.pixel_width,
+                        current.pixel_height,
+                    )
                 && m.hz > 0.0
         })
         .map(|m| m.hz)
@@ -213,7 +227,8 @@ fn configure(display: DisplayId, mode: &Mode) -> Result<(), String> {
         return Err(format!("CGBeginDisplayConfiguration failed ({err})"));
     }
     // SAFETY: `config` is the open configuration, `mode` is a live mode of this display, and null options are valid.
-    let err = unsafe { CGConfigureDisplayWithDisplayMode(config, display, mode.0, std::ptr::null()) };
+    let err =
+        unsafe { CGConfigureDisplayWithDisplayMode(config, display, mode.0, std::ptr::null()) };
     if err != 0 {
         // SAFETY: `config` is open and not completed.
         unsafe { CGCancelDisplayConfiguration(config) };
@@ -237,11 +252,20 @@ pub fn switch_refresh(display: u32, want_hz: f64) -> Result<Option<ModeSwitch>, 
     }
     let modes = all_modes(display);
     let infos: Vec<ModeInfo> = modes.iter().map(Mode::info).collect();
-    let i = pick_mode(&infos, &cur, want_hz)
-        .ok_or_else(|| format!("the display has no mode of {want_hz} Hz at {}x{}", cur.width, cur.height))?;
+    let i = pick_mode(&infos, &cur, want_hz).ok_or_else(|| {
+        format!(
+            "the display has no mode of {want_hz} Hz at {}x{}",
+            cur.width, cur.height
+        )
+    })?;
     let to = modes.get(i).ok_or("mode index")?;
     configure(display, to)?;
-    Ok(Some(ModeSwitch { display, old: Some(old), to_hz: infos.get(i).map_or(want_hz, |m| m.hz), from_hz: cur.hz }))
+    Ok(Some(ModeSwitch {
+        display,
+        old: Some(old),
+        to_hz: infos.get(i).map_or(want_hz, |m| m.hz),
+        from_hz: cur.hz,
+    }))
 }
 
 /// The switch that the host made, kept so that the exit path can restore it.
@@ -249,13 +273,17 @@ static ACTIVE: Mutex<Option<ModeSwitch>> = Mutex::new(None);
 
 /// Keeps `switch` until [`restore_active`]. An earlier one is restored first.
 pub fn keep_active(switch: ModeSwitch) {
-    let mut g = ACTIVE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut g = ACTIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *g = Some(switch);
 }
 
 /// Puts the mode back that [`keep_active`] holds. The host calls it when the application ends.
 pub fn restore_active() {
-    let mut g = ACTIVE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut g = ACTIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(mut s) = g.take() {
         s.restore();
     }
@@ -266,13 +294,26 @@ mod tests {
     use super::*;
 
     fn mode(w: usize, hz: f64) -> ModeInfo {
-        ModeInfo { width: w, height: 1440, pixel_width: w, pixel_height: 1440, hz, usable: true }
+        ModeInfo {
+            width: w,
+            height: 1440,
+            pixel_width: w,
+            pixel_height: 1440,
+            hz,
+            usable: true,
+        }
     }
 
     #[test]
     fn the_nearest_mode_of_the_same_size_wins() {
         let cur = mode(2560, 144.0);
-        let modes = [mode(1920, 120.0), mode(2560, 60.0), mode(2560, 119.88), mode(2560, 120.0), mode(2560, 144.0)];
+        let modes = [
+            mode(1920, 120.0),
+            mode(2560, 60.0),
+            mode(2560, 119.88),
+            mode(2560, 120.0),
+            mode(2560, 144.0),
+        ];
         assert_eq!(pick_mode(&modes, &cur, 120.0), Some(3));
         assert_eq!(pick_mode(&modes, &cur, 100.0), None);
     }

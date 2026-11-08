@@ -350,7 +350,11 @@ impl IndirectCommandBuffer {
                 // SAFETY: the slot is below the bind count and the offset is inside the buffer (checked above).
                 // The ICB keeps the buffer alive and it is resident.
                 unsafe {
-                    cmd.setVertexBuffer_offset_atIndex(&buffer.raw, *offset as usize, *index as usize)
+                    cmd.setVertexBuffer_offset_atIndex(
+                        &buffer.raw,
+                        *offset as usize,
+                        *index as usize,
+                    )
                 };
                 self.keep().push(Keep::new(buffer.clone()));
             }

@@ -137,10 +137,17 @@ pub fn service_mask(names: &[String]) -> Result<u64> {
 fn zero_bss(mem: &GuestMemory, m: &Module) -> Result<()> {
     let start = m.bss_offset();
     let Some(seg) = m.segment_at(start) else {
-        return Err(HostError::Load(format!("module {}: the bss is in no segment", m.name)));
+        return Err(HostError::Load(format!(
+            "module {}: the bss is in no segment",
+            m.name
+        )));
     };
-    let file_end = seg.offset.saturating_add_unsigned(seg.file_size.div_ceil(PAGE) * PAGE);
-    let end = i64::try_from(start.saturating_add(m.bss_size)).unwrap_or(i64::MAX).min(file_end);
+    let file_end = seg
+        .offset
+        .saturating_add_unsigned(seg.file_size.div_ceil(PAGE) * PAGE);
+    let end = i64::try_from(start.saturating_add(m.bss_size))
+        .unwrap_or(i64::MAX)
+        .min(file_end);
     let Ok(start_i) = i64::try_from(start) else {
         return Ok(());
     };
@@ -170,7 +177,9 @@ fn apply_relocations(
     let plan = reloc::plan(m, image, &mut |name| r.find(name))?;
     for w in &plan.writes {
         if !m.writable(w.offset, 8) {
-            let seg = m.segment_at(w.offset).map_or("no segment", |s| s.name.as_str());
+            let seg = m
+                .segment_at(w.offset)
+                .map_or("no segment", |s| s.name.as_str());
             return Err(HostError::Load(format!(
                 "module {}: a relocation targets offset {:#x} in {seg}, which is not writable",
                 m.name, w.offset
@@ -189,13 +198,23 @@ fn apply_relocations(
                 m.name
             )));
         }
-        Some(offset) => Some(ModuleInit { module: m.name.clone(), offset, addr: m.base + offset }),
+        Some(offset) => Some(ModuleInit {
+            module: m.name.clone(),
+            offset,
+            addr: m.base + offset,
+        }),
         None => None,
     };
     Ok((plan.counts.undefined, init))
 }
 
-fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Import], r: &Resolver, optional: &[String]) -> Result<()> {
+fn fill_imports(
+    mem: &GuestMemory,
+    m: &Module,
+    imports: &[Import],
+    r: &Resolver,
+    optional: &[String],
+) -> Result<()> {
     let mut weak_missing: Vec<&str> = Vec::new();
     for s in imports {
         if s.slot % 8 != 0 || !m.writable(s.slot, 8) {
@@ -222,7 +241,12 @@ fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Import], r: &Resolver,
     }
     if !weak_missing.is_empty() {
         weak_missing.dedup();
-        let shown = weak_missing.iter().take(8).copied().collect::<Vec<_>>().join(", ");
+        let shown = weak_missing
+            .iter()
+            .take(8)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ");
         eprintln!(
             "nxkit-host: module {}: {} weak imports have no provider and are 0: {shown}{}",
             m.name,
@@ -270,11 +294,15 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
 /// [`OUNCE_SPEC`], else the Switch. For the Switch 2 it also looks for the constants of NVN2 in the code of the `sdk`.
 /// A game without an `sdk` module counts as one of the Switch.
 fn find_platform(game: &Game) {
-    let Some(m) = game.modules.iter().find(|m| m.name == "sdk") else { return };
+    let Some(m) = game.modules.iter().find(|m| m.name == "sdk") else {
+        return;
+    };
     let ro_start = m.base + m.rodata.offset;
     let ro_end = m.base + m.bss_offset() + m.bss_size;
-    let ounce = nxkit_abi::guest::with_slice(ro_start, ro_end.saturating_sub(ro_start), |b| contains(b, OUNCE_SPEC))
-        .unwrap_or(false);
+    let ounce = nxkit_abi::guest::with_slice(ro_start, ro_end.saturating_sub(ro_start), |b| {
+        contains(b, OUNCE_SPEC)
+    })
+    .unwrap_or(false);
     if !ounce {
         return;
     }
@@ -316,7 +344,13 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
                 l.imports.len()
             )));
         }
-        fill_imports(mem, m, &l.imports, &resolver, &game.settings.optional_imports)?;
+        fill_imports(
+            mem,
+            m,
+            &l.imports,
+            &resolver,
+            &game.settings.optional_imports,
+        )?;
         mem.res.protect(m.base + m.key_page, PAGE, PROT_R)?;
     }
     drop(images);

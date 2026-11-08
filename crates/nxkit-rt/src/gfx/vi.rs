@@ -98,7 +98,12 @@ pub(crate) fn present_crop(window: Rect, texture: Option<(u32, u32)>) -> Rect {
         });
         return window;
     }
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 /// The frames that the history keeps.
@@ -122,14 +127,25 @@ struct Frames {
 
 impl Frames {
     const fn new() -> Self {
-        Self { count: 0, ring: [Entry { frame: 0, queued_ns: 0, seen_ns: 0 }; HISTORY] }
+        Self {
+            count: 0,
+            ring: [Entry {
+                frame: 0,
+                queued_ns: 0,
+                seen_ns: 0,
+            }; HISTORY],
+        }
     }
 
     /// Counts a present at the guest time `now`. The result is its frame number, which starts at 1.
     fn queue(&mut self, now: u64) -> u64 {
         self.count += 1;
         let frame = self.count;
-        self.ring[frame as usize % HISTORY] = Entry { frame, queued_ns: now, seen_ns: 0 };
+        self.ring[frame as usize % HISTORY] = Entry {
+            frame,
+            queued_ns: now,
+            seen_ns: 0,
+        };
         frame
     }
 
@@ -182,7 +198,10 @@ extern "C" fn initialize() {}
 
 /// `nn::vi::OpenDefaultDisplay(Display **out)`: the host returns a static object.
 extern "C" fn open_default_display(out: u64) -> u32 {
-    checked("nn::vi::OpenDefaultDisplay", guest::write_u64(out, addr(&DISPLAY)));
+    checked(
+        "nn::vi::OpenDefaultDisplay",
+        guest::write_u64(out, addr(&DISPLAY)),
+    );
     RES_OK
 }
 
@@ -240,7 +259,10 @@ extern "C" fn create_layer_settings(out: u64, disp: u64, settings: u64) -> u32 {
 /// `nn::vi::GetNativeWindow(void **out, Layer *layer)`: the handle that goes to the NVN window builder. The host
 /// returns a static object.
 extern "C" fn get_native_window(out: u64, _layer: u64) -> u32 {
-    checked("nn::vi::GetNativeWindow", guest::write_u64(out, addr(&NATIVE)));
+    checked(
+        "nn::vi::GetNativeWindow",
+        guest::write_u64(out, addr(&NATIVE)),
+    );
     RES_OK
 }
 
@@ -259,7 +281,10 @@ extern "C" fn set_layer_crop(_layer: u64, x: u32, y: u32, w: u32, h: u32) -> u32
 /// `nn::vi::SetLayerScalingMode(Layer *layer, ScalingMode mode)`: the present of the host scales the picture itself.
 /// Super Mario Odyssey sets the mode and the SDK version uses the vi service objects that the host never made.
 extern "C" fn set_layer_scaling_mode(_layer: u64, mode: u32) -> u32 {
-    log(format_args!("vi::SetLayerScalingMode {} (ignored)", mode as i32));
+    log(format_args!(
+        "vi::SetLayerScalingMode {} (ignored)",
+        mode as i32
+    ));
     RES_OK
 }
 
@@ -297,7 +322,10 @@ extern "C" fn list_frame_history(out: u64, n: u32, _layer: u64) -> u32 {
     };
     for (i, r) in records.iter().enumerate() {
         for (j, v) in r.iter().enumerate() {
-            checked(NAME, guest::write_u64(out + i as u64 * FRAME_INFO + j as u64 * 8, *v));
+            checked(
+                NAME,
+                guest::write_u64(out + i as u64 * FRAME_INFO + j as u64 * 8, *v),
+            );
         }
     }
     if !records.is_empty() {
@@ -315,7 +343,10 @@ extern "C" fn list_frame_history(out: u64, n: u32, _layer: u64) -> u32 {
 /// zero. Rhythm Heaven Groove (SDK 21) asks for it at start. The game reads a u32 kind and, when it is 2 or more,
 /// 0x14 more bytes that it hands on. The SDK version calls through the vi service object that the host never made.
 extern "C" fn get_default_display_panel_identifier(out: u64) -> u32 {
-    checked("nn::vi::GetDefaultDisplayPanelIdentifier", guest::fill(out, 0x18, 0));
+    checked(
+        "nn::vi::GetDefaultDisplayPanelIdentifier",
+        guest::fill(out, 0x18, 0),
+    );
     RES_OK
 }
 
@@ -368,7 +399,10 @@ extern "C" fn query_display_hdr_status(on: u64, fmt: u64, peak: u64, _disp: u64)
 /// game reads it only when HDR is on.
 extern "C" fn query_display_hdr_paper_white(nits: u64, _disp: u64) -> u32 {
     if nits != 0 {
-        checked("nn::vi::QueryDisplayHdrPaperWhite", guest::write_u16(nits, 203));
+        checked(
+            "nn::vi::QueryDisplayHdrPaperWhite",
+            guest::write_u16(nits, 203),
+        );
     }
     RES_OK
 }
@@ -399,7 +433,8 @@ static MAX_RES_NOTE: AtomicBool = AtomicBool::new(false);
 /// answers 1 too.
 extern "C" fn query_display_buffer_max_resolution(out: u64, _disp: u64) -> u32 {
     log_once_with(&MAX_RES_NOTE, || {
-        "vi::QueryDisplayBufferMaxResolution: 1920x1080 (the size of the display is not known)".to_string()
+        "vi::QueryDisplayBufferMaxResolution: 1920x1080 (the size of the display is not known)"
+            .to_string()
     });
     if out != 0 {
         checked(
@@ -514,7 +549,12 @@ mod tests {
     use crate::nvn::abi::testing;
 
     fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
-        Rect { x, y, width, height }
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// The layer state is global, so one test holds it.
@@ -534,7 +574,10 @@ mod tests {
         assert_eq!(layer_size(), Some((1280, 720)));
 
         set_layer_crop(0, 0, 0, 1280, 720);
-        assert_eq!(present_crop(rect(0, 0, 0, 0), Some((1920, 1080))), rect(0, 0, 1280, 720));
+        assert_eq!(
+            present_crop(rect(0, 0, 0, 0), Some((1920, 1080))),
+            rect(0, 0, 1280, 720)
+        );
         assert_eq!(
             present_crop(rect(1, 2, 3, 4), Some((1920, 1080))),
             rect(1, 2, 3, 4),
@@ -546,7 +589,10 @@ mod tests {
             "a crop that does not fit shows the whole texture"
         );
         set_layer_crop(0, u32::MAX, 0, 10, 10);
-        assert_eq!(present_crop(rect(0, 0, 0, 0), Some((1920, 1080))), rect(0, 0, 0, 0));
+        assert_eq!(
+            present_crop(rect(0, 0, 0, 0), Some((1920, 1080))),
+            rect(0, 0, 0, 0)
+        );
     }
 
     #[test]
@@ -568,7 +614,11 @@ mod tests {
         assert_eq!(all[0], [2, 10, 10_000, 50_000, 50_000]);
         assert_eq!(all[7][1], 3);
         assert_eq!(f.list(2, 60_000, |ns| ns).len(), 2);
-        assert_eq!(f.list(1, 60_000, |ns| ns)[0][3], 50_000, "the time of the first sight stays");
+        assert_eq!(
+            f.list(1, 60_000, |ns| ns)[0][3],
+            50_000,
+            "the time of the first sight stays"
+        );
         assert!(Frames::new().list(8, 1, |ns| ns).is_empty());
     }
 

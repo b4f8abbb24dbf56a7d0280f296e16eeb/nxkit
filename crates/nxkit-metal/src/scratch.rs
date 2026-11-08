@@ -108,7 +108,13 @@ impl Scratch {
             }
             // SAFETY: `[start, start + len)` is inside the block of this thread, which `alloc` took from the
             // buffer under the lock. No other thread owns that range, and `data` is a separate allocation.
-            unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), lease.ptr.add(start as usize), data.len()) };
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    lease.ptr.add(start as usize),
+                    data.len(),
+                )
+            };
             lease.cursor = start + len;
             Some(lease.address + start)
         });

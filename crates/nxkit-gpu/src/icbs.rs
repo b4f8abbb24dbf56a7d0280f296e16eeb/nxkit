@@ -162,7 +162,12 @@ impl Icbs {
     }
 }
 
-fn build(sh: &Shared<'_>, pc: &PassCtx, draws: &[Arc<DrawDetail>], signature: u64) -> Option<Entry> {
+fn build(
+    sh: &Shared<'_>,
+    pc: &PassCtx,
+    draws: &[Arc<DrawDetail>],
+    signature: u64,
+) -> Option<Entry> {
     let mut arena = Arena::new(sh.ctx, DRAW_ARENA_BYTES * draws.len() as u64).ok()?;
     let mut cmds: Vec<Vec<IcbCommand>> = Vec::with_capacity(draws.len());
     let mut skipped = Vec::new();

@@ -279,7 +279,11 @@ mod tests {
     use super::*;
 
     fn layout(handheld: bool, ids: u32, connected: u8) -> Layout {
-        Layout { handheld, ids, connected }
+        Layout {
+            handheld,
+            ids,
+            connected,
+        }
     }
 
     #[test]
@@ -318,14 +322,27 @@ mod tests {
     #[test]
     fn sticks_press_direction_buttons_past_the_threshold() {
         assert_eq!(stick_buttons(0, 0, 0, 0), 0);
-        assert_eq!(stick_buttons(-0x4001, 0x4001, 0, 0), btn::STICK_L_LEFT | btn::STICK_L_UP);
+        assert_eq!(
+            stick_buttons(-0x4001, 0x4001, 0, 0),
+            btn::STICK_L_LEFT | btn::STICK_L_UP
+        );
         assert_eq!(stick_buttons(0x4000, 0, 0, 0), 0);
-        assert_eq!(stick_buttons(0, 0, 0x4001, -0x4001), btn::STICK_R_RIGHT | btn::STICK_R_DOWN);
+        assert_eq!(
+            stick_buttons(0, 0, 0x4001, -0x4001),
+            btn::STICK_R_RIGHT | btn::STICK_R_DOWN
+        );
     }
 
     #[test]
     fn the_state_has_the_horizon_layout() {
-        let s = NpadState { buttons: 0x0102, lx: -5, ly: 6, rx: 7, ry: -8, attributes: 0x15 };
+        let s = NpadState {
+            buttons: 0x0102,
+            lx: -5,
+            ly: 6,
+            rx: 7,
+            ry: -8,
+            attributes: 0x15,
+        };
         let b = s.to_bytes(0x1_0001);
         assert_eq!(&b[0..8], &0x1_0001i64.to_le_bytes());
         assert_eq!(&b[8..16], &0x0102u64.to_le_bytes());
@@ -336,8 +353,14 @@ mod tests {
 
     #[test]
     fn the_keyboard_adds_to_the_controller() {
-        let pad = RawPad { buttons: btn::A, axes: [0.5, 0.0, 0.0, 0.0] };
-        let keys = RawKeys { buttons: btn::B, sticks: [-32767, 0, 0, 0] };
+        let pad = RawPad {
+            buttons: btn::A,
+            axes: [0.5, 0.0, 0.0, 0.0],
+        };
+        let keys = RawKeys {
+            buttons: btn::B,
+            sticks: [-32767, 0, 0, 0],
+        };
         let s = build_state(style::FULL_KEY, &pad, Some(&keys));
         assert_eq!(s.buttons & (btn::A | btn::B), btn::A | btn::B);
         assert_eq!(s.lx, -32767);
@@ -352,8 +375,14 @@ mod tests {
 
     #[test]
     fn merging_takes_the_larger_deflection() {
-        let a = RawPad { buttons: btn::A, axes: [0.2, -0.9, 0.0, 0.0] };
-        let b = RawPad { buttons: btn::B, axes: [-0.5, 0.3, 0.0, 0.0] };
+        let a = RawPad {
+            buttons: btn::A,
+            axes: [0.2, -0.9, 0.0, 0.0],
+        };
+        let b = RawPad {
+            buttons: btn::B,
+            axes: [-0.5, 0.3, 0.0, 0.0],
+        };
         let m = merge(&[a, b]);
         assert_eq!(m.buttons, btn::A | btn::B);
         assert_eq!(m.axes, [-0.5, -0.9, 0.0, 0.0]);

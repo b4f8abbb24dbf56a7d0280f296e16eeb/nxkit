@@ -18,17 +18,31 @@ impl TargetView {
     /// Decodes the private 16-byte NVN view layout emitted by the runtime.
     pub fn from_words(words: [u32; 4]) -> Self {
         let flags = words[0] & 0xff;
-        let level = if flags & 1 != 0 { words[0] >> 16 & 31 } else { 0 };
+        let level = if flags & 1 != 0 {
+            words[0] >> 16 & 31
+        } else {
+            0
+        };
         let layer = if flags & 2 != 0 { words[1] >> 16 } else { 0 };
-        let format = if flags & 4 != 0 { (words[1] & 0x1ff) << 21 | 1 << 30 } else { 0 };
+        let format = if flags & 4 != 0 {
+            (words[1] & 0x1ff) << 21 | 1 << 30
+        } else {
+            0
+        };
         Self(level | layer << 5 | format)
     }
     /// The mip level written by the attachment.
-    pub fn level(self) -> u32 { self.0 & 31 }
+    pub fn level(self) -> u32 {
+        self.0 & 31
+    }
     /// The array layer or cube face written by the attachment.
-    pub fn layer(self) -> u32 { self.0 >> 5 & 0xffff }
+    pub fn layer(self) -> u32 {
+        self.0 >> 5 & 0xffff
+    }
     /// A format override; `None` uses the texture format.
-    pub fn format(self) -> Option<i32> { (self.0 & (1 << 30) != 0).then_some((self.0 >> 21 & 0x1ff) as i32) }
+    pub fn format(self) -> Option<i32> {
+        (self.0 & (1 << 30) != 0).then_some((self.0 >> 21 & 0x1ff) as i32)
+    }
 }
 
 /// The attachments that are set at one time.
@@ -166,7 +180,12 @@ impl CmdStream {
     /// patches only those. A stream that is changed afterwards is appended command by command until it is sealed again.
     pub fn seal(&mut self) {
         self.span_at.clear();
-        let at = self.cmds.iter().enumerate().filter(|(_, c)| has_span(c)).map(|(i, _)| i as u32);
+        let at = self
+            .cmds
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| has_span(c))
+            .map(|(i, _)| i as u32);
         self.span_at.extend(at);
         self.sealed = self.cmds.len();
     }
@@ -299,8 +318,14 @@ mod tests {
         let r = a.push_list(&[t(1), t(2)]);
         let w = a.push_list(&[t(3)]);
         a.cmds.push(Cmd::Barrier(1));
-        a.cmds.push(Cmd::Draw { state: DrawState::default(), reads: r });
-        a.cmds.push(Cmd::Dispatch { reads: r, writes: w });
+        a.cmds.push(Cmd::Draw {
+            state: DrawState::default(),
+            reads: r,
+        });
+        a.cmds.push(Cmd::Dispatch {
+            reads: r,
+            writes: w,
+        });
         a.cmds.push(Cmd::Present(t(9)));
         let mut sealed = CmdStream::new();
         sealed.lists = a.lists.clone();
@@ -344,7 +369,10 @@ mod tests {
     #[test]
     fn render_views_decode_mips_layers_and_optional_formats() {
         let view = TargetView::from_words([0x01020007, 0x00050025, 1, 0]);
-        assert_eq!((view.level(), view.layer(), view.format()), (2, 5, Some(0x25)));
+        assert_eq!(
+            (view.level(), view.layer(), view.format()),
+            (2, 5, Some(0x25))
+        );
         let identity = TargetView::from_words([0, u32::MAX, u32::MAX, u32::MAX]);
         assert_eq!(identity, TargetView::default());
     }

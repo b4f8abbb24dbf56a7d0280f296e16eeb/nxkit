@@ -31,7 +31,9 @@ pub(crate) fn diag(cat: &str) -> bool {
 /// the `img` pictures are written into it.
 pub(crate) fn diag_dir() -> &'static PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| std::env::var_os("NXKIT_DIAG_DIR").map_or_else(|| PathBuf::from("/tmp/fmap"), PathBuf::from))
+    DIR.get_or_init(|| {
+        std::env::var_os("NXKIT_DIAG_DIR").map_or_else(|| PathBuf::from("/tmp/fmap"), PathBuf::from)
+    })
 }
 
 /// The knobs, by name. Each one changes what the encoder does, for experiments while debugging a game. They are not
@@ -97,14 +99,19 @@ struct Knobs {
 fn knobs() -> &'static Knobs {
     static K: OnceLock<Knobs> = OnceLock::new();
     K.get_or_init(|| Knobs {
-        flags: AtomicU32::new(set_pass_options(parse_knobs(&std::env::var("NXKIT_KNOB").unwrap_or_default()))),
+        flags: AtomicU32::new(set_pass_options(parse_knobs(
+            &std::env::var("NXKIT_KNOB").unwrap_or_default(),
+        ))),
         file: std::env::var_os("NXKIT_KNOB_FILE").map(PathBuf::from),
     })
 }
 
 /// Hands the two knobs of the pass optimiser to `nxkit-nvn`, which makes the plan. Returns `flags`.
 fn set_pass_options(flags: u32) -> u32 {
-    nxkit_nvn::passes::set_options(flags & knob_bit("nopassmerge") == 0, flags & knob_bit("noloadstore") == 0);
+    nxkit_nvn::passes::set_options(
+        flags & knob_bit("nopassmerge") == 0,
+        flags & knob_bit("noloadstore") == 0,
+    );
     flags
 }
 
@@ -113,7 +120,9 @@ fn knob_bit(name: &str) -> u32 {
 }
 
 fn parse_knobs(list: &str) -> u32 {
-    list.split(',').map(|s| knob_bit(s.trim())).fold(0, |a, b| a | b)
+    list.split(',')
+        .map(|s| knob_bit(s.trim()))
+        .fold(0, |a, b| a | b)
 }
 
 /// The pass range `[lo, hi)` of the `nobar` file.
@@ -133,14 +142,21 @@ pub(crate) fn nobar(index: usize) -> bool {
 /// and without the `nobar` file it costs one failed open.
 pub(crate) fn refresh_knobs() {
     if let Ok(mut r) = NOBAR.lock() {
-        *r = std::fs::read_to_string(diag_dir().join("nobar")).ok().and_then(|t| {
-            let mut it = t.split_whitespace().filter_map(|w| w.parse::<usize>().ok());
-            Some((it.next()?, it.next()?))
-        });
+        *r = std::fs::read_to_string(diag_dir().join("nobar"))
+            .ok()
+            .and_then(|t| {
+                let mut it = t.split_whitespace().filter_map(|w| w.parse::<usize>().ok());
+                Some((it.next()?, it.next()?))
+            });
     }
     let k = knobs();
-    if let Some(value) = k.file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()) {
-        k.flags.store(set_pass_options(parse_knobs(&value)), Ordering::Relaxed);
+    if let Some(value) = k
+        .file
+        .as_ref()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+    {
+        k.flags
+            .store(set_pass_options(parse_knobs(&value)), Ordering::Relaxed);
     }
 }
 
@@ -150,7 +166,12 @@ pub(crate) fn paint_programs() -> &'static [String] {
     static KEYS: OnceLock<Vec<String>> = OnceLock::new();
     KEYS.get_or_init(|| {
         std::env::var("NXKIT_PAINT_FS")
-            .map(|v| v.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default()
     })
 }
@@ -195,7 +216,9 @@ pub(crate) fn tex_match(format: Format, width: u32, height: u32, layers: u32) ->
     let Some(f) = tex_filter() else { return true };
     f.size.is_none_or(|s| s == [width, height])
         && f.layers.is_none_or(|l| l == layers)
-        && f.format.as_ref().is_none_or(|n| *n == format!("{format:?}"))
+        && f.format
+            .as_ref()
+            .is_none_or(|n| *n == format!("{format:?}"))
 }
 
 /// The frames between two sampled frames.
@@ -279,7 +302,10 @@ mod tests {
             assert_eq!(knob_bit(k), 1 << i);
         }
         assert_eq!(knob_bit("unknown"), 0);
-        assert_eq!(parse_knobs("nocull, noeq"), knob_bit("nocull") | knob_bit("noeq"));
+        assert_eq!(
+            parse_knobs("nocull, noeq"),
+            knob_bit("nocull") | knob_bit("noeq")
+        );
     }
 }
 
@@ -295,7 +321,12 @@ pub(crate) fn skipped_program(key: &str) -> bool {
     static KEYS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     let keys = KEYS.get_or_init(|| {
         std::env::var("NXKIT_SKIP_PROGRAMS")
-            .map(|v| v.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect())
+            .map(|v| {
+                v.split(',')
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+                    .collect()
+            })
             .unwrap_or_default()
     });
     !keys.is_empty() && keys.iter().any(|k| k == key)

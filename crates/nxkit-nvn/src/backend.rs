@@ -21,9 +21,9 @@
 use std::fmt;
 
 use crate::cmdbuf::CommandHandle;
+use crate::descriptors::Descriptors;
 use crate::frame::Frame;
 use crate::front::FlushReason;
-use crate::descriptors::Descriptors;
 use crate::passes::PassPlan;
 use crate::resource::{ResourceTable, TexId, TextureRecord};
 use crate::tic::Tsc;

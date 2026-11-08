@@ -86,7 +86,12 @@ fn pattern(l: Level) -> Option<Retained<CHHapticPattern>> {
             PULSE,
         );
         let events = NSArray::from_retained_slice(&[event]);
-        CHHapticPattern::initWithEvents_parameters_error(CHHapticPattern::alloc(), &events, &parameters(l)).ok()
+        CHHapticPattern::initWithEvents_parameters_error(
+            CHHapticPattern::alloc(),
+            &events,
+            &parameters(l),
+        )
+        .ok()
     }
 }
 
@@ -160,9 +165,14 @@ impl Haptics {
                 GCHapticsLocalityDefault,
             )
         };
-        let has = |want: &GCHapticsLocality| names.iter().any(|n| n.to_string() == want.to_string());
+        let has =
+            |want: &GCHapticsLocality| names.iter().any(|n| n.to_string() == want.to_string());
         self.split = has(left) && has(right);
-        let localities = if self.split { vec![left, right] } else { vec![default] };
+        let localities = if self.split {
+            vec![left, right]
+        } else {
+            vec![default]
+        };
         let mut engines = Vec::new();
         for locality in localities {
             // SAFETY: the locality is one of GameController's constants.
@@ -178,7 +188,13 @@ impl Haptics {
             if started.is_err() {
                 return false;
             }
-            engines.push(Engine { engine, current: None, previous: None, pulse_end: 0.0, level: Level::default() });
+            engines.push(Engine {
+                engine,
+                current: None,
+                previous: None,
+                pulse_end: 0.0,
+                level: Level::default(),
+            });
         }
         self.engines = engines;
         true
@@ -187,7 +203,8 @@ impl Haptics {
     /// Plays the levels. Engines start with the first level above silence. A failing engine is dropped and tried
     /// again after 1, 2 and 4 seconds, then given up.
     pub(crate) fn update(&mut self, controller: &GCController, levels: &PlayerLevels) {
-        let silent = levels.mixed.intensity <= 0.0 && levels.motors.iter().all(|m| m.intensity <= 0.0);
+        let silent =
+            levels.mixed.intensity <= 0.0 && levels.motors.iter().all(|m| m.intensity <= 0.0);
         if self.engines.is_empty() {
             if silent || self.gave_up() || self.retry_at.is_some_and(|t| Instant::now() < t) {
                 return;
@@ -197,8 +214,16 @@ impl Haptics {
                 return;
             }
         }
-        let wanted = if self.split { levels.motors.to_vec() } else { vec![levels.mixed] };
-        let failed = self.engines.iter_mut().zip(wanted).any(|(e, l)| drive(e, l).is_err());
+        let wanted = if self.split {
+            levels.motors.to_vec()
+        } else {
+            vec![levels.mixed]
+        };
+        let failed = self
+            .engines
+            .iter_mut()
+            .zip(wanted)
+            .any(|(e, l)| drive(e, l).is_err());
         if failed {
             self.fail();
         } else if !silent {

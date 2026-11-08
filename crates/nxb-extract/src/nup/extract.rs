@@ -200,7 +200,11 @@ pub(crate) fn control(n: &Nup, k: &Package, fallback: Option<&Package>, out: &Pa
 /// The version to take (`version`, else the newest update, else the base game), its package and its RomFS folder
 /// (the package's own, else the base game's), with the engine's lines about the choice. The package must have
 /// `exefs/main` and `exefs/main.npdm` of the container's program ID.
-pub(crate) fn pick(n: &Nup, s: &super::Scan, version: Option<u32>) -> Result<(u32, Package, u32, Vec<String>)> {
+pub(crate) fn pick(
+    n: &Nup,
+    s: &super::Scan,
+    version: Option<u32>,
+) -> Result<(u32, Package, u32, Vec<String>)> {
     let file = n
         .path
         .file_name()

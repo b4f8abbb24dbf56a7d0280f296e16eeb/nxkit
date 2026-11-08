@@ -309,19 +309,26 @@ impl Frame {
             let mut sent = false;
             if let Some(min) = timed {
                 // The closure only calls `presentAfterMinimumDuration:`, which leaves no Rust state half done when it throws.
-                let r = objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.presentAfterMinimumDuration(min)));
+                let r = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+                    drawable.presentAfterMinimumDuration(min)
+                }));
                 match r {
                     Ok(()) => sent = true,
                     Err(e) => {
                         crate::present::set_timed_present(None);
-                        eprintln!("nxkit-metal: timed presents are off: presentAfterMinimumDuration threw {e:?}");
+                        eprintln!(
+                            "nxkit-metal: timed presents are off: presentAfterMinimumDuration threw {e:?}"
+                        );
                     }
                 }
             }
             if !sent {
                 // The closure only calls `present`, which leaves no Rust state half done when it throws.
-                if let Err(e) = objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.present())) {
-                    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if let Err(e) =
+                    objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.present()))
+                {
+                    static SHOWN: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
                     if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 4 {
                         eprintln!("nxkit-metal: [RED] present threw {e:?}");
                     }

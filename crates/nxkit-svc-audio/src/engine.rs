@@ -182,7 +182,8 @@ pub(crate) fn mixer() -> &'static Arc<Mixer> {
 
 /// Reads `ch` interleaved PCM16 channels per frame from `bytes` into stereo `dst`, times `gain`.
 fn convert(bytes: &[u8], ch: usize, gain: f32, dst: &mut [f32]) {
-    let rd = |f: &[u8], j: usize| -> f32 { f32::from(i16::from_le_bytes([f[2 * j], f[2 * j + 1]])) };
+    let rd =
+        |f: &[u8], j: usize| -> f32 { f32::from(i16::from_le_bytes([f[2 * j], f[2 * j + 1]])) };
     let frame = 2 * ch.max(1);
     for (i, f) in bytes.chunks_exact(frame).enumerate() {
         let (l, r) = match ch {
@@ -190,7 +191,10 @@ fn convert(bytes: &[u8], ch: usize, gain: f32, dst: &mut [f32]) {
             6 => {
                 // front left, front right, center, LFE, back left, back right, with the default downmix coefficients
                 let c = rd(f, 2) * 0.7071 + rd(f, 3) * 0.2512;
-                (rd(f, 0) + c + rd(f, 4) * 0.7071, rd(f, 1) + c + rd(f, 5) * 0.7071)
+                (
+                    rd(f, 0) + c + rd(f, 4) * 0.7071,
+                    rd(f, 1) + c + rd(f, 5) * 0.7071,
+                )
             }
             _ => (rd(f, 0), rd(f, 1)),
         };
@@ -202,14 +206,18 @@ fn convert(bytes: &[u8], ch: usize, gain: f32, dst: &mut [f32]) {
 impl Mixer {
     /// Sets the master gain and whether to skip the device.
     pub(crate) fn configure(&self, master: f32, silent: bool) {
-        self.master.store(master.max(0.0).to_bits(), Ordering::Relaxed);
+        self.master
+            .store(master.max(0.0).to_bits(), Ordering::Relaxed);
         self.force_silent.store(silent, Ordering::Relaxed);
     }
 
     /// Opens an output. Returns its index, or `None` when all slots are in use.
     pub(crate) fn open(&self, channels: u32, notify: Notify) -> Option<usize> {
         let _g = self.alloc.lock().ok()?;
-        let idx = self.slots.iter().position(|s| !s.open.load(Ordering::Acquire))?;
+        let idx = self
+            .slots
+            .iter()
+            .position(|s| !s.open.load(Ordering::Acquire))?;
         let s = &self.slots[idx];
         s.lock_busy();
         s.drain_to_released();
@@ -275,18 +283,24 @@ impl Mixer {
 
     /// The state: `STARTED` or `STOPPED`.
     pub(crate) fn state(&self, idx: usize) -> u32 {
-        self.slots.get(idx).map_or(STOPPED, |s| s.state.load(Ordering::Acquire))
+        self.slots
+            .get(idx)
+            .map_or(STOPPED, |s| s.state.load(Ordering::Acquire))
     }
 
     /// The channel count of the output.
     pub(crate) fn channels(&self, idx: usize) -> u32 {
-        self.slots.get(idx).map_or(2, |s| s.channels.load(Ordering::Relaxed))
+        self.slots
+            .get(idx)
+            .map_or(2, |s| s.channels.load(Ordering::Relaxed))
     }
 
     /// Queues a buffer. Returns false when the queue is full. One game thread at a time appends to an output, as the
     /// SDK's `AppendAudioOutBuffer` requires, so the queue needs no lock.
     pub(crate) fn append(&self, idx: usize, b: Buf) -> bool {
-        let Some(s) = self.slots.get(idx) else { return false };
+        let Some(s) = self.slots.get(idx) else {
+            return false;
+        };
         let n = s.app_seq.load(Ordering::Relaxed);
         s.tokens[(n % QMAX as u64) as usize].store(b.token, Ordering::Release);
         if !s.pending.push(b) {
@@ -307,20 +321,31 @@ impl Mixer {
 
     /// Whether a buffer with this token is in flight. It scans at most `QMAX` entries and is only for a game that asks.
     pub(crate) fn contains(&self, idx: usize, token: u64) -> bool {
-        let Some(s) = self.slots.get(idx) else { return false };
+        let Some(s) = self.slots.get(idx) else {
+            return false;
+        };
         let rel = s.rel_seq.load(Ordering::Acquire);
-        let n = s.app_seq.load(Ordering::Acquire).saturating_sub(rel).min(QMAX as u64);
-        (0..n).any(|k| s.tokens[((rel + k) % QMAX as u64) as usize].load(Ordering::Acquire) == token)
+        let n = s
+            .app_seq
+            .load(Ordering::Acquire)
+            .saturating_sub(rel)
+            .min(QMAX as u64);
+        (0..n)
+            .any(|k| s.tokens[((rel + k) % QMAX as u64) as usize].load(Ordering::Acquire) == token)
     }
 
     /// Buffers appended and not yet played to the end, the playing one included.
     pub(crate) fn queued(&self, idx: usize) -> u32 {
-        self.slots.get(idx).map_or(0, |s| s.queued.load(Ordering::Acquire))
+        self.slots
+            .get(idx)
+            .map_or(0, |s| s.queued.load(Ordering::Acquire))
     }
 
     /// Frames played since the open.
     pub(crate) fn played(&self, idx: usize) -> u64 {
-        self.slots.get(idx).map_or(0, |s| s.played.load(Ordering::Relaxed))
+        self.slots
+            .get(idx)
+            .map_or(0, |s| s.played.load(Ordering::Relaxed))
     }
 
     /// Sets the gain of the output.
@@ -333,7 +358,9 @@ impl Mixer {
 
     /// The gain of the output.
     pub(crate) fn volume(&self, idx: usize) -> f32 {
-        self.slots.get(idx).map_or(1.0, |s| f32::from_bits(s.vol.load(Ordering::Relaxed)))
+        self.slots
+            .get(idx)
+            .map_or(1.0, |s| f32::from_bits(s.vol.load(Ordering::Relaxed)))
     }
 
     /// Fills `out` (interleaved stereo) with the sum of the started outputs. Runs on the device thread: no lock, no
@@ -398,7 +425,8 @@ impl Mixer {
                     mem::with_host(addr + pos, len, |bytes| convert(bytes, ch, gain, dst));
                     true
                 } else {
-                    guest::with_slice(addr + pos, len, |bytes| convert(bytes, ch, gain, dst)).is_ok()
+                    guest::with_slice(addr + pos, len, |bytes| convert(bytes, ch, gain, dst))
+                        .is_ok()
                 };
                 if ok {
                     s.cur_pos.store(pos + k as u64 * fb, Ordering::Relaxed);
@@ -439,7 +467,9 @@ impl Mixer {
             return;
         }
         if self.force_silent.load(Ordering::Relaxed) {
-            eprintln!("nxkit-audio: the device is off by configuration, a silent sink paces the outputs");
+            eprintln!(
+                "nxkit-audio: the device is off by configuration, a silent sink paces the outputs"
+            );
             self.spawn_silent();
             *out = OutState::Silent;
             return;
@@ -451,7 +481,9 @@ impl Mixer {
                 *out = OutState::Device(o);
             }
             Err(e) => {
-                eprintln!("nxkit-audio: [RED] the output unit did not start ({e}), a silent sink paces the outputs");
+                eprintln!(
+                    "nxkit-audio: [RED] the output unit did not start ({e}), a silent sink paces the outputs"
+                );
                 self.spawn_silent();
                 *out = OutState::Silent;
             }
@@ -460,31 +492,38 @@ impl Mixer {
 
     fn spawn_silent(&self) {
         let m = Arc::clone(mixer());
-        let r = std::thread::Builder::new().name("nxkit-audio-silent".into()).spawn::<_, ()>(move || {
-            let mut buf = vec![0.0f32; 480 * 2];
-            let step = Duration::from_millis(10);
-            let mut next = Instant::now() + step;
-            loop {
-                m.render(&mut buf);
-                let now = Instant::now();
-                if next > now {
-                    std::thread::sleep(next - now);
+        let r = std::thread::Builder::new()
+            .name("nxkit-audio-silent".into())
+            .spawn::<_, ()>(move || {
+                let mut buf = vec![0.0f32; 480 * 2];
+                let step = Duration::from_millis(10);
+                let mut next = Instant::now() + step;
+                loop {
+                    m.render(&mut buf);
+                    let now = Instant::now();
+                    if next > now {
+                        std::thread::sleep(next - now);
+                    }
+                    next += step;
                 }
-                next += step;
-            }
-        });
+            });
         if let Err(e) = r {
             host::fatal(&format!("the silent sink thread did not start: {e}"));
         }
     }
 
     fn ensure_notifier(&self) {
-        let Ok(mut started) = self.notifier.lock() else { return };
+        let Ok(mut started) = self.notifier.lock() else {
+            return;
+        };
         if *started {
             return;
         }
         let m = Arc::clone(mixer());
-        match std::thread::Builder::new().name("nxkit-audio-notify".into()).spawn(move || m.notify_loop()) {
+        match std::thread::Builder::new()
+            .name("nxkit-audio-notify".into())
+            .spawn(move || m.notify_loop())
+        {
             Ok(_) => *started = true,
             Err(e) => host::fatal(&format!("the audio notifier thread did not start: {e}")),
         }
@@ -513,13 +552,17 @@ impl Mixer {
                 let u = s.underruns.load(Ordering::Relaxed);
                 if u > 0 && (reported[i] == 0 || u >= reported[i].saturating_mul(10)) {
                     reported[i] = u;
-                    eprintln!("nxkit-audio: output {i} ran dry {u} times (the game did not append in time)");
+                    eprintln!(
+                        "nxkit-audio: output {i} ran dry {u} times (the game did not append in time)"
+                    );
                 }
             }
             let f = self.faults.load(Ordering::Relaxed);
             if f != faults_seen {
                 faults_seen = f;
-                eprintln!("nxkit-audio: [RED] {f} buffers pointed outside guest memory or overflowed the released queue");
+                eprintln!(
+                    "nxkit-audio: [RED] {f} buffers pointed outside guest memory or overflowed the released queue"
+                );
             }
             if !join_logged {
                 if let Ok(out) = self.out.lock() {
@@ -527,9 +570,13 @@ impl Mixer {
                         if let Some(st) = o.join_status() {
                             join_logged = true;
                             if st == 0 {
-                                eprintln!("nxkit-audio: the audio thread joined the os_workgroup of the device");
+                                eprintln!(
+                                    "nxkit-audio: the audio thread joined the os_workgroup of the device"
+                                );
                             } else {
-                                eprintln!("nxkit-audio: [RED] os_workgroup_join returned {st}, the audio thread is outside the workgroup");
+                                eprintln!(
+                                    "nxkit-audio: [RED] os_workgroup_join returned {st}, the audio thread is outside the workgroup"
+                                );
                             }
                         }
                     }

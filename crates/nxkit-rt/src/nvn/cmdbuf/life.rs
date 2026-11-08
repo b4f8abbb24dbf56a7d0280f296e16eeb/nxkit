@@ -40,13 +40,22 @@ extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
             return Err(other("the command memory starts outside its pool"));
         }
         if n > v.size - off {
-            crate::diag!("DIAG cmdmem clipped cb {c:#x} requested {n} available {} poolsize {} off {off}", v.size - off, v.size);
+            crate::diag!(
+                "DIAG cmdmem clipped cb {c:#x} requested {n} available {} poolsize {} off {off}",
+                v.size - off,
+                v.size
+            );
         }
         // Games pass max(measured size, 512) for prerecorded slots near the pool end, and real NVN does not check the range. The
         // recorder writes only inside the given bytes, so the part past the pool is cut off and recording overflows as usual.
         let n = n.min(v.size - off);
         let host = v.mem + off;
-        crate::diag!("DIAG add cmdmem cb {c:#x} pool {memory_pool:#x} off {off:#x} host {host:#x} n {n:#x} poolmem {:#x} size {:#x} flags {:#x}", v.mem, v.size, v.flags);
+        crate::diag!(
+            "DIAG add cmdmem cb {c:#x} pool {memory_pool:#x} off {off:#x} host {host:#x} n {n:#x} poolmem {:#x} size {:#x} flags {:#x}",
+            v.mem,
+            v.size,
+            v.flags
+        );
         super::seam::validate_region(host, n)?;
         with_recorder(c, |r| {
             sync_in(c, r)?;
@@ -177,11 +186,15 @@ extern "C" fn control_size(c: u64) -> u64 {
 }
 
 extern "C" fn get_copy_row_stride(c: u64) -> i64 {
-    guard("nvnCommandBufferGetCopyRowStride", || Obj(c).i64(O_ROW_STRIDE))
+    guard("nvnCommandBufferGetCopyRowStride", || {
+        Obj(c).i64(O_ROW_STRIDE)
+    })
 }
 
 extern "C" fn get_copy_image_stride(c: u64) -> i64 {
-    guard("nvnCommandBufferGetCopyImageStride", || Obj(c).i64(O_IMAGE_STRIDE))
+    guard("nvnCommandBufferGetCopyImageStride", || {
+        Obj(c).i64(O_IMAGE_STRIDE)
+    })
 }
 
 /// The functions that NVN defines for a hint that the host has no use for. Nothing is recorded.
@@ -271,7 +284,10 @@ mod tests {
         initialize(c, 0);
         Obj(c).set_i64(O_ROW_STRIDE, 256).unwrap();
         Obj(c).set_i64(O_IMAGE_STRIDE, 65536).unwrap();
-        assert_eq!((get_copy_row_stride(c), get_copy_image_stride(c)), (256, 65536));
+        assert_eq!(
+            (get_copy_row_stride(c), get_copy_image_stride(c)),
+            (256, 65536)
+        );
     }
 
     #[test]

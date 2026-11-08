@@ -26,7 +26,14 @@ fn texture(tex: u64) -> AbiResult<u64> {
     seam().texture_address(tex)
 }
 
-extern "C" fn set_render_targets(c: u64, n: i32, colors: u64, views: u64, depth: u64, depth_view: u64) {
+extern "C" fn set_render_targets(
+    c: u64,
+    n: i32,
+    colors: u64,
+    views: u64,
+    depth: u64,
+    depth_view: u64,
+) {
     let name = "nvnCommandBufferSetRenderTargets";
     guard(name, || {
         let (_, n) = span(0, n, MAX_COLOR as u32)?;
@@ -42,7 +49,14 @@ extern "C" fn set_render_targets(c: u64, n: i32, colors: u64, views: u64, depth:
             }
         }
         let depth_addr = if depth != 0 { texture(depth)? } else { 0 };
-        emit_rec(name, c, Record::SetTargets { color, depth: depth_addr });
+        emit_rec(
+            name,
+            c,
+            Record::SetTargets {
+                color,
+                depth: depth_addr,
+            },
+        );
         for (i, v) in view.iter().enumerate().take(n as usize) {
             if *v != 0 {
                 target_view(name, c, i as u16, *v)?;
@@ -67,7 +81,13 @@ fn clear_color(name: &'static str, c: u64, index: i32, rgba: u64, mask: i32, kin
         let (slot, _) = span(index, 1, MAX_COLOR as u32)?;
         let mut w = Words::new();
         w.u32(mask as u32)?.load(rgba, 16)?;
-        emit(name, c, ExtCode::ClearColor, slot as u16 | kind << 8, w.as_slice());
+        emit(
+            name,
+            c,
+            ExtCode::ClearColor,
+            slot as u16 | kind << 8,
+            w.as_slice(),
+        );
         Ok(())
     });
 }
@@ -84,13 +104,24 @@ extern "C" fn clear_color_ui(c: u64, index: i32, rgba: u64, mask: i32) {
     clear_color("nvnCommandBufferClearColorui", c, index, rgba, mask, 2);
 }
 
-extern "C" fn clear_depth_stencil(c: u64, depth: f32, depth_mask: u32, stencil: i32, stencil_mask: i32) {
+extern "C" fn clear_depth_stencil(
+    c: u64,
+    depth: f32,
+    depth_mask: u32,
+    stencil: i32,
+    stencil_mask: i32,
+) {
     emit(
         "nvnCommandBufferClearDepthStencil",
         c,
         ExtCode::ClearDepthStencil,
         0,
-        &[depth.to_bits(), u32::from(arg_bool(depth_mask)), stencil as u32, stencil_mask as u32],
+        &[
+            depth.to_bits(),
+            u32::from(arg_bool(depth_mask)),
+            stencil as u32,
+            stencil_mask as u32,
+        ],
     );
 }
 
@@ -133,11 +164,23 @@ fn non_null(p: u64, what: &str) -> AbiResult<u64> {
 }
 
 extern "C" fn clear_texture_f(c: u64, tex: u64, view: u64, region: u64, rgba: u64, mask: i32) {
-    clear_texture("nvnCommandBufferClearTexture", c, [tex, view, region, rgba], mask, 0);
+    clear_texture(
+        "nvnCommandBufferClearTexture",
+        c,
+        [tex, view, region, rgba],
+        mask,
+        0,
+    );
 }
 
 extern "C" fn clear_texture_ui(c: u64, tex: u64, view: u64, region: u64, rgba: u64, mask: i32) {
-    clear_texture("nvnCommandBufferClearTextureui", c, [tex, view, region, rgba], mask, 2);
+    clear_texture(
+        "nvnCommandBufferClearTextureui",
+        c,
+        [tex, view, region, rgba],
+        mask,
+        2,
+    );
 }
 
 extern "C" fn copy_buffer_to_buffer(c: u64, src: u64, dst: u64, n: u64, flags: i32) {
@@ -170,7 +213,14 @@ fn copy_with_buffer(
     });
 }
 
-extern "C" fn copy_buffer_to_texture(c: u64, src: u64, tex: u64, view: u64, region: u64, flags: i32) {
+extern "C" fn copy_buffer_to_texture(
+    c: u64,
+    src: u64,
+    tex: u64,
+    view: u64,
+    region: u64,
+    flags: i32,
+) {
     copy_with_buffer(
         "nvnCommandBufferCopyBufferToTexture",
         ExtCode::CopyBufferToTexture,
@@ -181,7 +231,14 @@ extern "C" fn copy_buffer_to_texture(c: u64, src: u64, tex: u64, view: u64, regi
     );
 }
 
-extern "C" fn copy_texture_to_buffer(c: u64, tex: u64, view: u64, region: u64, dst: u64, flags: i32) {
+extern "C" fn copy_texture_to_buffer(
+    c: u64,
+    tex: u64,
+    view: u64,
+    region: u64,
+    dst: u64,
+    flags: i32,
+) {
     copy_with_buffer(
         "nvnCommandBufferCopyTextureToBuffer",
         ExtCode::CopyTextureToBuffer,
@@ -205,7 +262,9 @@ extern "C" fn copy_texture_to_texture(
     let name = "nvnCommandBufferCopyTextureToTexture";
     guard(name, || {
         let mut w = Words::new();
-        w.u64(texture(src)?)?.u64(texture(dst)?)?.u32(flags as u32)?;
+        w.u64(texture(src)?)?
+            .u64(texture(dst)?)?
+            .u32(flags as u32)?;
         if src_view != 0 {
             w.load(src_view, VIEW_BYTES)?;
         }
@@ -241,14 +300,26 @@ extern "C" fn downsample_plain(c: u64, src: u64, dst: u64) {
 }
 
 extern "C" fn downsample_view(c: u64, src: u64, sv: u64, dst: u64, dv: u64) {
-    downsample("nvnCommandBufferDownsampleTextureView", c, (src, dst), (sv, dv));
+    downsample(
+        "nvnCommandBufferDownsampleTextureView",
+        c,
+        (src, dst),
+        (sv, dv),
+    );
 }
 
 extern "C" fn discard_color(c: u64, index: i32) {
     let name = "nvnCommandBufferDiscardColor";
     guard(name, || {
         let (i, _) = span(index, 1, MAX_COLOR as u32)?;
-        emit_rec(name, c, Record::Discard { color: 1 << i, depth: false });
+        emit_rec(
+            name,
+            c,
+            Record::Discard {
+                color: 1 << i,
+                depth: false,
+            },
+        );
         Ok(())
     });
 }
@@ -257,12 +328,19 @@ extern "C" fn discard_depth_stencil(c: u64) {
     emit_rec(
         "nvnCommandBufferDiscardDepthStencil",
         c,
-        Record::Discard { color: 0, depth: true },
+        Record::Discard {
+            color: 0,
+            depth: true,
+        },
     );
 }
 
 extern "C" fn barrier(c: u64, bits: i32) {
-    emit_rec("nvnCommandBufferBarrier", c, Record::Barrier(bits as u32 & 0xff));
+    emit_rec(
+        "nvnCommandBufferBarrier",
+        c,
+        Record::Barrier(bits as u32 & 0xff),
+    );
 }
 
 extern "C" fn fence_sync(c: u64, sync: u64, cond: i32, flags: i32) {
@@ -281,7 +359,14 @@ extern "C" fn signal_event(c: u64, event: u64, mode: i32, location: i32, flags: 
         c,
         ExtCode::SignalEvent,
         0,
-        &[lo(event), hi(event), mode as u32, location as u32, flags as u32, value],
+        &[
+            lo(event),
+            hi(event),
+            mode as u32,
+            location as u32,
+            flags as u32,
+            value,
+        ],
     );
 }
 
@@ -315,7 +400,13 @@ extern "C" fn report_counter(c: u64, kind: i32, addr: u64) {
 }
 
 extern "C" fn reset_counter(c: u64, kind: i32) {
-    emit("nvnCommandBufferResetCounter", c, ExtCode::ResetCounter, 0, &[kind as u32]);
+    emit(
+        "nvnCommandBufferResetCounter",
+        c,
+        ExtCode::ResetCounter,
+        0,
+        &[kind as u32],
+    );
 }
 
 /// Push constants in chunks. `compute` tells which stage kind they are for.
@@ -329,14 +420,18 @@ fn push(name: &'static str, c: u64, compute: bool, a: [u64; 4]) {
             return Ok(());
         }
         let data = non_null(data, "push constant data")?;
-        if off.checked_add(n).is_none_or(|end| end > u64::from(u32::MAX)) {
+        if off
+            .checked_add(n)
+            .is_none_or(|end| end > u64::from(u32::MAX))
+        {
             return Err(other("the push constants do not fit"));
         }
         let mut done = 0;
         while done < n {
             let len = PUSH_CHUNK.min(n - done);
             let mut w = Words::new();
-            w.u32((off + done) as u32)?.load(data + done, len as usize)?;
+            w.u32((off + done) as u32)?
+                .load(data + done, len as usize)?;
             let arg = u16::from(compute) | (len as u16) << 1;
             emit(name, c, ExtCode::Push, arg, w.as_slice());
             done += len;
@@ -346,11 +441,21 @@ fn push(name: &'static str, c: u64, compute: bool, a: [u64; 4]) {
 }
 
 extern "C" fn push_graphics_constants(c: u64, w: u64, off: u64, n: u64, data: u64) {
-    push("nvnCommandBufferPushGraphicsConstants", c, false, [w, off, n, data]);
+    push(
+        "nvnCommandBufferPushGraphicsConstants",
+        c,
+        false,
+        [w, off, n, data],
+    );
 }
 
 extern "C" fn push_compute_constants(c: u64, w: u64, off: u64, n: u64, data: u64) {
-    push("nvnCommandBufferPushComputeConstants", c, true, [w, off, n, data]);
+    push(
+        "nvnCommandBufferPushComputeConstants",
+        c,
+        true,
+        [w, off, n, data],
+    );
 }
 
 extern "C" fn update_uniform_buffer(c: u64, buf: u64, size: u64, off: u64, n: u64, data: u64) {
@@ -364,7 +469,10 @@ extern "C" fn update_uniform_buffer(c: u64, buf: u64, size: u64, off: u64, n: u6
         while done < n {
             let len = UNIFORM_CHUNK.min(n - done);
             let mut w = Words::new();
-            w.u64(buf)?.u64(size)?.u64(off + done)?.load(data + done, len as usize)?;
+            w.u64(buf)?
+                .u64(size)?
+                .u64(off + done)?
+                .load(data + done, len as usize)?;
             emit(name, c, ExtCode::UpdateUniform, len as u16, w.as_slice());
             done += len;
         }

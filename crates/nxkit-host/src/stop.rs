@@ -31,7 +31,10 @@ pub fn request(why: &str) {
         cell().store(true, Ordering::Release);
         std::thread::spawn(|| {
             std::thread::sleep(GRACE);
-            eprintln!("nxkit-host: the window did not stop in {} s, ending the process", GRACE.as_secs());
+            eprintln!(
+                "nxkit-host: the window did not stop in {} s, ending the process",
+                GRACE.as_secs()
+            );
             std::process::exit(0);
         });
     });

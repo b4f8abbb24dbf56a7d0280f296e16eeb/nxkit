@@ -33,7 +33,8 @@ use nxkit_nvn::mem::GuestMem;
 use nxkit_nvn::record::{NO_HANDLE, Record, deferred_handle};
 
 use crate::detail::{
-    ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage, TextureBind, UboDetail,
+    ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage,
+    TextureBind, UboDetail,
 };
 use crate::draws::FastMap;
 use objects::{Blends, Raster, StencilValues};
@@ -354,9 +355,16 @@ impl Walker {
                 // The template cache does not follow image binds, so a recording that binds one is not a template.
                 self.track.truncated();
             }
-            Record::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
+            Record::BindTexturesDeferred {
+                first,
+                count,
+                src,
+                tex_base,
+                samp_base,
+            } => {
                 for k in 0..count {
-                    let handle = deferred_handle(&*mem, src, k, tex_base, samp_base).map_or(0, |(_, _, h)| h);
+                    let handle = deferred_handle(&*mem, src, k, tex_base, samp_base)
+                        .map_or(0, |(_, _, h)| h);
                     let slot = usize::from(first) + usize::from(k);
                     if let Some(t) = st.texture.get_mut(slot) {
                         *t = handle;
@@ -371,7 +379,8 @@ impl Walker {
             Record::Draw => self.out.draws.push(Arc::new(empty_draw())),
             Record::Dispatch => {
                 let d = self.dispatch(&*mem, st, [0; 3]);
-                self.track.patches_of(&d.textures, self.out.dispatches.len(), true);
+                self.track
+                    .patches_of(&d.textures, self.out.dispatches.len(), true);
                 self.out.dispatches.push(d);
             }
             Record::Ext(x) => self.ext(mem, st, &x),
@@ -477,11 +486,19 @@ fn bank(st: &State, bank: usize) -> &[u64] {
 
 /// The number of texture handles of the bank that are bound.
 pub(super) fn texture_count(st: &State, bank_index: usize) -> usize {
-    bank(st, bank_index).iter().filter(|h| **h != NO_HANDLE).count()
+    bank(st, bank_index)
+        .iter()
+        .filter(|h| **h != NO_HANDLE)
+        .count()
 }
 
 /// Adds the texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) that are bound to `out`.
-pub(super) fn textures_into(st: &State, bank_index: usize, stage: Stage, out: &mut Vec<TextureBind>) {
+pub(super) fn textures_into(
+    st: &State,
+    bank_index: usize,
+    stage: Stage,
+    out: &mut Vec<TextureBind>,
+) {
     out.extend(
         bank(st, bank_index)
             .iter()
@@ -497,13 +514,20 @@ pub(super) fn textures_into(st: &State, bank_index: usize, stage: Stage, out: &m
 
 /// Adds the image handles of the bank (same layout as the textures) that are bound to `out`.
 pub(super) fn images_into(st: &State, bank_index: usize, stage: Stage, out: &mut Vec<TextureBind>) {
-    let slots = st.image.get(bank_index * 32..bank_index * 32 + 32).unwrap_or(&[]);
+    let slots = st
+        .image
+        .get(bank_index * 32..bank_index * 32 + 32)
+        .unwrap_or(&[]);
     out.extend(
         slots
             .iter()
             .enumerate()
             .filter(|(_, h)| **h != NO_HANDLE)
-            .map(|(i, handle)| TextureBind { stage, slot: i as u32, handle: *handle }),
+            .map(|(i, handle)| TextureBind {
+                stage,
+                slot: i as u32,
+                handle: *handle,
+            }),
     );
 }
 

@@ -95,7 +95,9 @@ impl Bits {
     }
 
     fn has(&self, bit: usize) -> bool {
-        self.0.get(bit / 64).is_some_and(|w| w >> (bit % 64) & 1 != 0)
+        self.0
+            .get(bit / 64)
+            .is_some_and(|w| w >> (bit % 64) & 1 != 0)
     }
 
     fn set(&mut self, bit: usize) {
@@ -351,10 +353,12 @@ impl Scalars {
             && (0..2).all(|f| {
                 (!has(sc::STENCIL_READ + f) || st.stencil.read[f] == self.stencil.read[f])
                     && (!has(sc::STENCIL_WRITE + f) || st.stencil.write[f] == self.stencil.write[f])
-                    && (!has(sc::STENCIL_REF + f) || st.stencil.reference[f] == self.stencil.reference[f])
+                    && (!has(sc::STENCIL_REF + f)
+                        || st.stencil.reference[f] == self.stencil.reference[f])
             })
             && (!has(sc::POLYGON)
-                || (r.cull, r.front_face, r.polygon_mode, r.offset_on) == (o.cull, o.front_face, o.polygon_mode, o.offset_on))
+                || (r.cull, r.front_face, r.polygon_mode, r.offset_on)
+                    == (o.cull, o.front_face, o.polygon_mode, o.offset_on))
             && (!has(sc::MULTISAMPLE) || r.alpha_to_coverage == o.alpha_to_coverage)
             && (!has(sc::OFFSET) || bits3(r.offset) == bits3(o.offset))
             && (!has(sc::CLAMP) || r.clamp == o.clamp)
@@ -390,7 +394,8 @@ impl Scalars {
         }
         if has(sc::POLYGON) {
             let (r, s) = (&mut st.raster, &self.raster);
-            (r.cull, r.front_face, r.polygon_mode, r.offset_on) = (s.cull, s.front_face, s.polygon_mode, s.offset_on);
+            (r.cull, r.front_face, r.polygon_mode, r.offset_on) =
+                (s.cull, s.front_face, s.polygon_mode, s.offset_on);
         }
         if has(sc::MULTISAMPLE) {
             st.raster.alpha_to_coverage = self.raster.alpha_to_coverage;
@@ -618,13 +623,23 @@ impl Track {
 
     /// The deferred source for the handle `k` of a bind.
     pub(super) fn source(src: u64, k: u8, tex_base: u32, samp_base: u32, handle: u64) -> DepSrc {
-        DepSrc { src, k, tex_base, samp_base, handle }
+        DepSrc {
+            src,
+            k,
+            tex_base,
+            samp_base,
+            handle,
+        }
     }
 
     /// Logs an inline update at the current ends of the draws and dispatches.
     pub(super) fn update(&mut self, ext: &Ext, draws: usize, dispatches: usize) {
         if self.tracking() {
-            self.upd_log.push(Upd { ext: *ext, draws: draws as u32, dispatches: dispatches as u32 });
+            self.upd_log.push(Upd {
+                ext: *ext,
+                draws: draws as u32,
+                dispatches: dispatches as u32,
+            });
         }
     }
 
@@ -640,10 +655,20 @@ impl Track {
                 Stage::Compute => 2,
                 Stage::Task | Stage::Mesh => 3,
             };
-            let dep = self.tex_dep.get(bank * 32 + t.slot as usize).copied().unwrap_or(NO_DEP);
+            let dep = self
+                .tex_dep
+                .get(bank * 32 + t.slot as usize)
+                .copied()
+                .unwrap_or(NO_DEP);
             if dep != NO_DEP {
                 let slot = (bank * 32 + t.slot as usize) as u8;
-                self.patches.push(Patch { idx: idx as u32, dispatch, pos: pos as u16, dep, slot });
+                self.patches.push(Patch {
+                    idx: idx as u32,
+                    dispatch,
+                    pos: pos as u16,
+                    dep,
+                    slot,
+                });
             }
         }
     }
@@ -692,7 +717,9 @@ fn texture_value(handle: u64, prov: u128, slot: usize) -> u64 {
 }
 
 fn attribute_value(a: Option<(u32, u32, u32)>) -> u64 {
-    a.map_or(0, |(f, o, s)| 1 << 63 | u64::from(f) | u64::from(o) << 8 | u64::from(s) << 40)
+    a.map_or(0, |(f, o, s)| {
+        1 << 63 | u64::from(f) | u64::from(o) << 8 | u64::from(s) << 40
+    })
 }
 
 impl Key {
@@ -708,7 +735,11 @@ impl Key {
                     while at < len && needs.has(start + at) {
                         at += 1;
                     }
-                    segs.push(Seg { kind, from: from as u16, n: (at - from) as u16 });
+                    segs.push(Seg {
+                        kind,
+                        from: from as u16,
+                        n: (at - from) as u16,
+                    });
                 } else {
                     at += 1;
                 }
@@ -731,18 +762,41 @@ impl Key {
             let (from, n) = (usize::from(s.from), usize::from(s.n));
             match s.kind {
                 Kind::Program => vals.extend_from_slice(&st.program[from..from + n]),
-                Kind::VertexBuffer => st.vertex_buffer[from..from + n].iter().for_each(|(a, b)| vals.extend([*a, *b])),
-                Kind::Ubo(b) => st.ubo[usize::from(b)][from..from + n].iter().for_each(|(a, s)| vals.extend([*a, u64::from(*s)])),
-                Kind::Sbo(b) => st.sbuf[usize::from(b)][from..from + n].iter().for_each(|(a, s)| vals.extend([*a, u64::from(*s)])),
-                Kind::Attribute => vals.extend(st.attribute[from..from + n].iter().map(|a| attribute_value(*a))),
-                Kind::Stream => vals.extend(st.stream[from..from + n].iter().map(|(a, b)| u64::from(*a) | u64::from(*b) << 32)),
+                Kind::VertexBuffer => st.vertex_buffer[from..from + n]
+                    .iter()
+                    .for_each(|(a, b)| vals.extend([*a, *b])),
+                Kind::Ubo(b) => st.ubo[usize::from(b)][from..from + n]
+                    .iter()
+                    .for_each(|(a, s)| vals.extend([*a, u64::from(*s)])),
+                Kind::Sbo(b) => st.sbuf[usize::from(b)][from..from + n]
+                    .iter()
+                    .for_each(|(a, s)| vals.extend([*a, u64::from(*s)])),
+                Kind::Attribute => vals.extend(
+                    st.attribute[from..from + n]
+                        .iter()
+                        .map(|a| attribute_value(*a)),
+                ),
+                Kind::Stream => vals.extend(
+                    st.stream[from..from + n]
+                        .iter()
+                        .map(|(a, b)| u64::from(*a) | u64::from(*b) << 32),
+                ),
                 Kind::Blend => vals.extend((from..from + n).map(|i| st.blends.raw(i))),
-                Kind::Texture => vals.extend((from..from + n).map(|i| texture_value(st.texture[i], prov, i))),
+                Kind::Texture => {
+                    vals.extend((from..from + n).map(|i| texture_value(st.texture[i], prov, i)))
+                }
             }
         }
-        let groups = (0..32).filter(|g| needs.has(SC + g)).fold(0u32, |m, g| m | 1 << g);
+        let groups = (0..32)
+            .filter(|g| needs.has(SC + g))
+            .fold(0u32, |m, g| m | 1 << g);
         let digest = vals.iter().fold(0, |h, v| mix(h, *v));
-        Self { segs, vals, scalars: Scalars::of(st, groups), digest }
+        Self {
+            segs,
+            vals,
+            scalars: Scalars::of(st, groups),
+            digest,
+        }
     }
 
     /// The digest that `st` has for the fields of the key. It equals `self.digest` when `st` matches.
@@ -763,7 +817,10 @@ impl Key {
                         mix(mix(h, a), u64::from(z))
                     }
                     Kind::Attribute => mix(h, attribute_value(st.attribute[f])),
-                    Kind::Stream => mix(h, u64::from(st.stream[f].0) | u64::from(st.stream[f].1) << 32),
+                    Kind::Stream => mix(
+                        h,
+                        u64::from(st.stream[f].0) | u64::from(st.stream[f].1) << 32,
+                    ),
                     Kind::Blend => mix(h, st.blends.raw(f)),
                     Kind::Texture => mix(h, texture_value(st.texture[f], prov, f)),
                 };
@@ -783,15 +840,24 @@ impl Key {
                     Kind::Program => (self.vals[k + i] == st.program[f], 1),
                     Kind::VertexBuffer => {
                         let (a, b) = st.vertex_buffer[f];
-                        (self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == b, 2)
+                        (
+                            self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == b,
+                            2,
+                        )
                     }
                     Kind::Ubo(b) => {
                         let (a, z) = st.ubo[usize::from(b)][f];
-                        (self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == u64::from(z), 2)
+                        (
+                            self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == u64::from(z),
+                            2,
+                        )
                     }
                     Kind::Sbo(b) => {
                         let (a, z) = st.sbuf[usize::from(b)][f];
-                        (self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == u64::from(z), 2)
+                        (
+                            self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == u64::from(z),
+                            2,
+                        )
                     }
                     Kind::Attribute => (attribute_value(st.attribute[f]) == self.vals[k + i], 1),
                     Kind::Stream => {
@@ -811,7 +877,11 @@ impl Key {
                 _ => 1,
             };
         }
-        if self.scalars.matches(st) { "nothing".into() } else { format!("scalars {:#x}", self.scalars.groups) }
+        if self.scalars.matches(st) {
+            "nothing".into()
+        } else {
+            format!("scalars {:#x}", self.scalars.groups)
+        }
     }
 
     /// Whether `st` has the values of the key.
@@ -824,27 +894,64 @@ impl Key {
                 Kind::Program => (self.vals[k..k + n] == st.program[from..from + n], 1),
                 Kind::VertexBuffer => {
                     let fields = &st.vertex_buffer[from..from + n];
-                    (fields.iter().enumerate().all(|(i, (a, b))| pair(k + 2 * i, *a, *b)), 2)
+                    (
+                        fields
+                            .iter()
+                            .enumerate()
+                            .all(|(i, (a, b))| pair(k + 2 * i, *a, *b)),
+                        2,
+                    )
                 }
                 Kind::Ubo(b) => {
                     let fields = &st.ubo[usize::from(b)][from..from + n];
-                    (fields.iter().enumerate().all(|(i, (a, s))| pair(k + 2 * i, *a, u64::from(*s))), 2)
+                    (
+                        fields
+                            .iter()
+                            .enumerate()
+                            .all(|(i, (a, s))| pair(k + 2 * i, *a, u64::from(*s))),
+                        2,
+                    )
                 }
                 Kind::Sbo(b) => {
                     let fields = &st.sbuf[usize::from(b)][from..from + n];
-                    (fields.iter().enumerate().all(|(i, (a, s))| pair(k + 2 * i, *a, u64::from(*s))), 2)
+                    (
+                        fields
+                            .iter()
+                            .enumerate()
+                            .all(|(i, (a, s))| pair(k + 2 * i, *a, u64::from(*s))),
+                        2,
+                    )
                 }
                 Kind::Attribute => {
                     let fields = &st.attribute[from..from + n];
-                    (fields.iter().zip(&self.vals[k..k + n]).all(|(a, v)| attribute_value(*a) == *v), 1)
+                    (
+                        fields
+                            .iter()
+                            .zip(&self.vals[k..k + n])
+                            .all(|(a, v)| attribute_value(*a) == *v),
+                        1,
+                    )
                 }
                 Kind::Stream => {
                     let fields = &st.stream[from..from + n];
-                    (fields.iter().zip(&self.vals[k..k + n]).all(|((a, b), v)| u64::from(*a) | u64::from(*b) << 32 == *v), 1)
+                    (
+                        fields
+                            .iter()
+                            .zip(&self.vals[k..k + n])
+                            .all(|((a, b), v)| u64::from(*a) | u64::from(*b) << 32 == *v),
+                        1,
+                    )
                 }
-                Kind::Blend => ((from..from + n).zip(&self.vals[k..k + n]).all(|(i, v)| st.blends.raw(i) == *v), 1),
+                Kind::Blend => (
+                    (from..from + n)
+                        .zip(&self.vals[k..k + n])
+                        .all(|(i, v)| st.blends.raw(i) == *v),
+                    1,
+                ),
                 Kind::Texture => (
-                    (from..from + n).zip(&self.vals[k..k + n]).all(|(i, v)| texture_value(st.texture[i], prov, i) == *v),
+                    (from..from + n)
+                        .zip(&self.vals[k..k + n])
+                        .all(|(i, v)| texture_value(st.texture[i], prov, i) == *v),
                     1,
                 ),
             };
@@ -878,7 +985,11 @@ fn walkmiss(why: String, templates: usize) {
     if *n % 20000 == 0 {
         let mut v: Vec<_> = map.iter().collect();
         v.sort_by(|a, b| b.1.cmp(a.1));
-        let top: Vec<String> = v.iter().take(15).map(|(k, c)| format!("{k}: {c}")).collect();
+        let top: Vec<String> = v
+            .iter()
+            .take(15)
+            .map(|(k, c)| format!("{k}: {c}"))
+            .collect();
         eprintln!("DIAG walkmiss after {n}: {}", top.join(" | "));
     }
 }
@@ -1009,7 +1120,10 @@ pub(crate) struct Invalidations {
 impl Invalidations {
     /// Queues `[start, end)`.
     pub(crate) fn push(&self, start: u64, end: u64) {
-        self.ranges.lock().unwrap_or_else(PoisonError::into_inner).push((start, end));
+        self.ranges
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((start, end));
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -1057,7 +1171,11 @@ impl Produced {
     fn diff(&self, other: &Produced) -> Option<String> {
         fn first<T: PartialEq + std::fmt::Debug>(name: &str, a: &[T], b: &[T]) -> Option<String> {
             if a.len() != b.len() {
-                return Some(format!("{name}: {} entries cached, {} walked", a.len(), b.len()));
+                return Some(format!(
+                    "{name}: {} entries cached, {} walked",
+                    a.len(),
+                    b.len()
+                ));
             }
             let i = a.iter().zip(b).position(|(x, y)| x != y)?;
             Some(format!("{name}[{i}]: cached {:?}, walked {:?}", a[i], b[i]))
@@ -1068,7 +1186,9 @@ impl Produced {
             .or_else(|| first("copies", &self.copies, &other.copies))
             .or_else(|| first("reports", &self.reports, &other.reports))
             .or_else(|| first("updated", &self.updated, &other.updated))
-            .or_else(|| (self.state != other.state).then(|| "the state after the walk differs".to_owned()))
+            .or_else(|| {
+                (self.state != other.state).then(|| "the state after the walk differs".to_owned())
+            })
     }
 }
 
@@ -1154,14 +1274,25 @@ impl Walker {
             self.cache.clear();
             static LOGGED: AtomicBool = AtomicBool::new(false);
             if !LOGGED.swap(true, Ordering::Relaxed) {
-                eprintln!("nxkit-gpu: walker template mismatch at handle {handle:#x}, using the uncached walk: {why}");
+                eprintln!(
+                    "nxkit-gpu: walker template mismatch at handle {handle:#x}, using the uncached walk: {why}"
+                );
             }
-            assert!(!under_test(), "walker template mismatch at handle {handle:#x}: {why}");
+            assert!(
+                !under_test(),
+                "walker template mismatch at handle {handle:#x}: {why}"
+            );
         }
     }
 
     /// Walks the recording at `handle` that a call record names, from a template when one fits.
-    pub(super) fn run_nested<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32) {
+    pub(super) fn run_nested<M: GuestMem>(
+        &mut self,
+        mem: &mut M,
+        st: &mut State,
+        handle: u64,
+        depth: u32,
+    ) {
         if !self.cache_on || self.bypass {
             self.walk_records(mem, st, handle, depth);
             return;
@@ -1192,13 +1323,35 @@ impl Walker {
     /// Plays the template, takes everything back, walks the recording without templates and compares. The uncached
     /// result stays. This finds the recording whose template is wrong, where [`Walker::verify_top`] only finds the
     /// top-level recording.
-    fn play_verified<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32, t: &mut Template) {
+    fn play_verified<M: GuestMem>(
+        &mut self,
+        mem: &mut M,
+        st: &mut State,
+        handle: u64,
+        depth: u32,
+        t: &mut Template,
+    ) {
         let pre = st.clone();
         let updated = self.updated.clone();
         let snaps = self.snaps.get_mut().clone();
         let marks = self.marks();
-        let tracked = (self.track.dep_list.len(), self.track.patches.len(), self.track.upd_log.len(), self.track.tex_dep, self.track.prov);
-        let parent = self.track.open.last().map(|p| (p.needs, p.written, p.programs.clone(), p.spans.clone(), p.height, p.truncated));
+        let tracked = (
+            self.track.dep_list.len(),
+            self.track.patches.len(),
+            self.track.upd_log.len(),
+            self.track.tex_dep,
+            self.track.prov,
+        );
+        let parent = self.track.open.last().map(|p| {
+            (
+                p.needs,
+                p.written,
+                p.programs.clone(),
+                p.spans.clone(),
+                p.height,
+                p.truncated,
+            )
+        });
         let counters = self.counters;
         let outer = self.undo.replace(Vec::new());
         self.play(mem, st, t);
@@ -1220,8 +1373,17 @@ impl Walker {
         self.track.upd_log.truncate(tracked.2);
         self.track.tex_dep = tracked.3;
         self.track.prov = tracked.4;
-        if let (Some(p), Some((needs, written, programs, spans, height, truncated))) = (self.track.open.last_mut(), parent) {
-            (p.needs, p.written, p.programs, p.spans, p.height, p.truncated) = (needs, written, programs, spans, height, truncated);
+        if let (Some(p), Some((needs, written, programs, spans, height, truncated))) =
+            (self.track.open.last_mut(), parent)
+        {
+            (
+                p.needs,
+                p.written,
+                p.programs,
+                p.spans,
+                p.height,
+                p.truncated,
+            ) = (needs, written, programs, spans, height, truncated);
         }
         self.undo = Some(Vec::new());
         self.bypass = true;
@@ -1239,9 +1401,14 @@ impl Walker {
             self.cache.clear();
             static LOGGED: AtomicBool = AtomicBool::new(false);
             if !LOGGED.swap(true, Ordering::Relaxed) {
-                eprintln!("nxkit-gpu: walker template mismatch for the recording {handle:#x} at depth {depth}: {why}");
+                eprintln!(
+                    "nxkit-gpu: walker template mismatch for the recording {handle:#x} at depth {depth}: {why}"
+                );
             }
-            assert!(!under_test(), "walker template mismatch for the recording {handle:#x} at depth {depth}: {why}");
+            assert!(
+                !under_test(),
+                "walker template mismatch for the recording {handle:#x} at depth {depth}: {why}"
+            );
         }
     }
 
@@ -1268,7 +1435,10 @@ impl Walker {
                 continue;
             }
             if t.epoch != epoch {
-                if t.programs.iter().all(|(p, g)| self.programs.generation(*p) == *g) {
+                if t.programs
+                    .iter()
+                    .all(|(p, g)| self.programs.generation(*p) == *g)
+                {
                     t.epoch = epoch;
                 } else {
                     stale |= 1 << i;
@@ -1304,8 +1474,19 @@ impl Walker {
 
     /// Walks the recording and keeps a template of it.
     /// A cold handle (`keep` false) is tracked the same way, but its template is not made.
-    fn build<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32, keep: bool) {
-        let mut entry = self.track.pool.pop().unwrap_or_else(|| Box::new(State::default()));
+    fn build<M: GuestMem>(
+        &mut self,
+        mem: &mut M,
+        st: &mut State,
+        handle: u64,
+        depth: u32,
+        keep: bool,
+    ) {
+        let mut entry = self
+            .track
+            .pool
+            .pop()
+            .unwrap_or_else(|| Box::new(State::default()));
         (*entry).clone_from(st);
         let open = Open {
             needs: Bits::NONE,
@@ -1328,7 +1509,14 @@ impl Walker {
         };
         self.counters.walk_misses += 1;
         if let Some(p) = self.track.open.last_mut() {
-            p.absorb(&f.needs, &f.written, f.programs.iter().copied(), &f.spans, f.height, f.truncated);
+            p.absorb(
+                &f.needs,
+                &f.written,
+                f.programs.iter().copied(),
+                &f.spans,
+                f.height,
+                f.truncated,
+            );
         }
         if f.truncated || !keep {
             self.track.pool.push(f.entry);
@@ -1347,13 +1535,23 @@ impl Walker {
         let dispatches_v = self.out.dispatches[m.dispatches..].to_vec();
         let updates: Vec<Upd> = self.track.upd_log[f.upd0..]
             .iter()
-            .map(|u| Upd { ext: u.ext, draws: u.draws - draws, dispatches: u.dispatches - dispatches })
+            .map(|u| Upd {
+                ext: u.ext,
+                draws: u.draws - draws,
+                dispatches: u.dispatches - dispatches,
+            })
             .collect();
-        let rebase = |p: &Patch| Patch { idx: p.idx - if p.dispatch { dispatches } else { draws }, ..*p };
+        let rebase = |p: &Patch| Patch {
+            idx: p.idx - if p.dispatch { dispatches } else { draws },
+            ..*p
+        };
         let patches = self.track.patches[f.patch0..]
             .iter()
             .filter(|p| p.dep as usize >= f.dep0)
-            .map(|p| Patch { dep: p.dep - f.dep0 as u32, ..rebase(p) })
+            .map(|p| Patch {
+                dep: p.dep - f.dep0 as u32,
+                ..rebase(p)
+            })
             .collect();
         let inherited = self.track.patches[f.patch0..]
             .iter()
@@ -1380,7 +1578,9 @@ impl Walker {
                 TEX..SC => {
                     let slot = bit - TEX;
                     match self.track.tex_dep[slot] {
-                        d if d != NO_DEP && d as usize >= f.dep0 => Delta::TextureDeferred(slot as u8, d - f.dep0 as u32),
+                        d if d != NO_DEP && d as usize >= f.dep0 => {
+                            Delta::TextureDeferred(slot as u8, d - f.dep0 as u32)
+                        }
                         _ => Delta::Texture(slot as u8, st.texture[slot]),
                     }
                 }
@@ -1391,7 +1591,11 @@ impl Walker {
             };
             delta.push(d);
         }
-        let ranges = if updates.is_empty() { ranges_of(&draws_v, &dispatches_v) } else { Vec::new() };
+        let ranges = if updates.is_empty() {
+            ranges_of(&draws_v, &dispatches_v)
+        } else {
+            Vec::new()
+        };
         let mut spans = f.spans.clone();
         spans.sort_unstable();
         let mut merged: Vec<(u64, u64)> = Vec::with_capacity(spans.len());
@@ -1407,7 +1611,11 @@ impl Walker {
             key,
             height: f.height,
             epoch: self.programs.epoch(),
-            programs: f.programs.iter().map(|p| (*p, self.programs.generation(*p))).collect(),
+            programs: f
+                .programs
+                .iter()
+                .map(|p| (*p, self.programs.generation(*p)))
+                .collect(),
             spans: merged,
             draws: draws_v,
             dispatches: dispatches_v,
@@ -1430,7 +1638,8 @@ impl Walker {
         let dep_base = self.track.dep_list.len();
         let mut moved = false;
         for d in &mut t.deferred {
-            let handle = deferred_handle(&*mem, d.src, d.k, d.tex_base, d.samp_base).map_or(0, |(_, _, h)| h);
+            let handle = deferred_handle(&*mem, d.src, d.k, d.tex_base, d.samp_base)
+                .map_or(0, |(_, _, h)| h);
             moved |= handle != d.handle;
             self.track.dep_list.push(DepSrc { handle, ..*d });
         }
@@ -1449,7 +1658,8 @@ impl Walker {
         }
         if self.track.tracking() {
             for u in &t.updates {
-                self.track.update(&u.ext, d0 + u.draws as usize, p0 + u.dispatches as usize);
+                self.track
+                    .update(&u.ext, d0 + u.draws as usize, p0 + u.dispatches as usize);
             }
             for p in &t.patches {
                 let base = if p.dispatch { p0 } else { d0 };
@@ -1461,21 +1671,39 @@ impl Walker {
             }
             for p in &t.inherited {
                 let base = if p.dispatch { p0 } else { d0 };
-                let dep = self.track.tex_dep.get(usize::from(p.slot)).copied().unwrap_or(NO_DEP);
+                let dep = self
+                    .track
+                    .tex_dep
+                    .get(usize::from(p.slot))
+                    .copied()
+                    .unwrap_or(NO_DEP);
                 if dep != NO_DEP {
-                    self.track.patches.push(Patch { idx: (base + p.idx as usize) as u32, dep, ..*p });
+                    self.track.patches.push(Patch {
+                        idx: (base + p.idx as usize) as u32,
+                        dep,
+                        ..*p
+                    });
                 }
             }
         }
         self.apply_delta(st, t, dep_base);
         if let Some(parent) = self.track.open.last_mut() {
-            parent.absorb(&t.needs, &t.written, t.programs.iter().map(|(p, _)| *p), &t.spans, t.height, false);
+            parent.absorb(
+                &t.needs,
+                &t.written,
+                t.programs.iter().map(|(p, _)| *p),
+                &t.spans,
+                t.height,
+                false,
+            );
         }
     }
 
     /// Whether the uniform buffer ranges of a template without updates still have the snapshots that its draws hold.
     fn ranges_hold<M: GuestMem>(&self, mem: &M, t: &Template) -> bool {
-        t.ranges.iter().all(|((a, s), snap)| same(&self.snapshot(mem, *a, *s), snap))
+        t.ranges
+            .iter()
+            .all(|((a, s), snap)| same(&self.snapshot(mem, *a, *s), snap))
     }
 
     /// Plays the draws and dispatches in the order of the walk, with the inline updates between them. A draw whose
@@ -1512,7 +1740,10 @@ impl Walker {
 
     /// The draw with the snapshots that its uniform buffers have now.
     fn fresh_draw<M: GuestMem>(&self, mem: &M, a: &Arc<DrawDetail>) -> Arc<DrawDetail> {
-        if a.ubos.iter().all(|u| same(&self.snapshot(mem, u.address, u.size), &u.snapshot)) {
+        if a.ubos
+            .iter()
+            .all(|u| same(&self.snapshot(mem, u.address, u.size), &u.snapshot))
+        {
             return a.clone();
         }
         let mut d = (**a).clone();
@@ -1538,13 +1769,23 @@ impl Walker {
             let pos = usize::from(p.pos);
             if p.dispatch {
                 let at = p0 + p.idx as usize;
-                if let Some(x) = self.out.dispatches.get_mut(at).filter(|x| x.textures[pos].handle != handle) {
+                if let Some(x) = self
+                    .out
+                    .dispatches
+                    .get_mut(at)
+                    .filter(|x| x.textures[pos].handle != handle)
+                {
                     x.textures[pos].handle = handle;
                     t.dispatches[p.idx as usize].textures[pos].handle = handle;
                 }
             } else {
                 let at = d0 + p.idx as usize;
-                if let Some(a) = self.out.draws.get_mut(at).filter(|a| a.textures[pos].handle != handle) {
+                if let Some(a) = self
+                    .out
+                    .draws
+                    .get_mut(at)
+                    .filter(|a| a.textures[pos].handle != handle)
+                {
                     let mut d = (**a).clone();
                     d.textures[pos].handle = handle;
                     *a = Arc::new(d);
@@ -1637,7 +1878,11 @@ mod tests {
     }
 
     fn viewport(width: f32) -> Record {
-        ext(ExtCode::Viewport, 0, &[0, 0, width.to_bits(), 90f32.to_bits()])
+        ext(
+            ExtCode::Viewport,
+            0,
+            &[0, 0, width.to_bits(), 90f32.to_bits()],
+        )
     }
 
     fn ubo(slot: u16, addr: u64, size: u32) -> Record {
@@ -1651,7 +1896,11 @@ mod tests {
     }
 
     fn attribute(location: u32, format: u32, stream: u32) -> Record {
-        ext(ExtCode::VertexState, 0, &[location, 1, format | stream << 27])
+        ext(
+            ExtCode::VertexState,
+            0,
+            &[location, 1, format | stream << 27],
+        )
     }
 
     fn stream(index: u32, stride: u32) -> Record {
@@ -1672,7 +1921,11 @@ mod tests {
 
     fn update(buffer: u64, size: u32, offset: u32, value: u32) -> Record {
         let [lo, hi] = halves(buffer);
-        ext(ExtCode::UpdateUniform, 4, &[lo, hi, size, 0, offset, 0, value])
+        ext(
+            ExtCode::UpdateUniform,
+            4,
+            &[lo, hi, size, 0, offset, 0, value],
+        )
     }
 
     fn blend(target: u32, factor: u32) -> Record {
@@ -1685,7 +1938,13 @@ mod tests {
     }
 
     fn deferred(first: u8, count: u8, src: u64) -> Record {
-        Record::BindTexturesDeferred { first, count, src, tex_base: 0, samp_base: 0 }
+        Record::BindTexturesDeferred {
+            first,
+            count,
+            src,
+            tex_base: 0,
+            samp_base: 0,
+        }
     }
 
     /// A model recording: its own buffers and vertex layout, then `draws` draws.
@@ -1712,7 +1971,11 @@ mod tests {
             let map = AddressMap::new(HOST, GPU, SIZE).unwrap();
             let mut w = Walker::new(Default::default(), map);
             w.program_set(PROG, &keys(1, 2));
-            Self { mem: VecMem::new(HOST, SIZE as usize), w, at: CODE }
+            Self {
+                mem: VecMem::new(HOST, SIZE as usize),
+                w,
+                at: CODE,
+            }
         }
 
         fn put_at(&mut self, at: u64, recs: &[Record]) -> u64 {
@@ -1799,7 +2062,10 @@ mod tests {
             assert_eq!(a.clears, b.clears);
             assert_eq!(a.copies, b.copies);
             assert_eq!(a.reports, b.reports);
-            assert_eq!(self.cached.bytes(HOST, 0x4000), self.plain.bytes(HOST, 0x4000));
+            assert_eq!(
+                self.cached.bytes(HOST, 0x4000),
+                self.plain.bytes(HOST, 0x4000)
+            );
             (a, counters)
         }
     }
@@ -1810,7 +2076,20 @@ mod tests {
         macro_rules! check {
             ($($f:ident),*) => { $(if a.$f != b.$f { out.push(format!("{}: {:?} against {:?}", stringify!($f), a.$f, b.$f)); })* };
         }
-        check!(program, blend, write_masks, depth_stencil, raster, topology, attributes, streams, args, ubos, sbufs, dynamic);
+        check!(
+            program,
+            blend,
+            write_masks,
+            depth_stencil,
+            raster,
+            topology,
+            attributes,
+            streams,
+            args,
+            ubos,
+            sbufs,
+            dynamic
+        );
         if a.textures != b.textures {
             let slots: Vec<String> = a
                 .textures
@@ -1819,13 +2098,23 @@ mod tests {
                 .filter(|(x, y)| x != y)
                 .map(|(x, y)| format!("slot {} {} against {}", x.slot, x.handle, y.handle))
                 .collect();
-            out.push(format!("textures ({} against {}): {}", a.textures.len(), b.textures.len(), slots.join(", ")));
+            out.push(format!(
+                "textures ({} against {}): {}",
+                a.textures.len(),
+                b.textures.len(),
+                slots.join(", ")
+            ));
         }
         out.join("; ")
     }
 
     fn keys(vertex: u8, fragment: u8) -> [StageKey; 2] {
-        let stage = |index: u8, k: u8| StageKey { index, key: Some(ShaderKey([k; 8])), code: 0, code_len: 0 };
+        let stage = |index: u8, k: u8| StageKey {
+            index,
+            key: Some(ShaderKey([k; 8])),
+            code: 0,
+            code_len: 0,
+        };
         [stage(0, vertex), stage(1, fragment)]
     }
 
@@ -1839,15 +2128,33 @@ mod tests {
     fn a_nested_recording_plays_from_its_template() {
         for_both(|p| {
             let child = p.put(&model(UBO_AT, 2));
-            let top = p.put(&[program(PROG), viewport(100.0), Record::Call(child), Record::Call(child), draw(), viewport(200.0), Record::Call(child)]);
+            let top = p.put(&[
+                program(PROG),
+                viewport(100.0),
+                Record::Call(child),
+                Record::Call(child),
+                draw(),
+                viewport(200.0),
+                Record::Call(child),
+            ]);
             let (d, c) = p.frame(&[top]);
             assert_eq!(d.draws.len(), 7);
-            assert_eq!((c.walk_hits, c.walk_misses, c.draws_from_template), (1, 2, 2));
+            assert_eq!(
+                (c.walk_hits, c.walk_misses, c.draws_from_template),
+                (1, 2, 2)
+            );
             let (d, c) = p.frame(&[top]);
             assert_eq!(d.draws.len(), 7);
-            assert_eq!((c.walk_hits, c.walk_misses, c.draws_from_template), (3, 0, 6));
+            assert_eq!(
+                (c.walk_hits, c.walk_misses, c.draws_from_template),
+                (3, 0, 6)
+            );
             assert_eq!(p.cached.w.cache.templates(child), 2);
-            assert!(c.records < 12, "a hit does not read the records of the callee: {}", c.records);
+            assert!(
+                c.records < 12,
+                "a hit does not read the records of the callee: {}",
+                c.records
+            );
             assert_eq!(d.draws[0].dynamic.viewport[2], 100.0);
             assert_eq!(d.draws[6].dynamic.viewport[2], 200.0);
         });
@@ -1871,12 +2178,20 @@ mod tests {
                 rig.w.program_set(OTHER, &keys(5, 6));
             }
             let child = p.put(&[draw(), clear(), dispatch()]);
-            let first = vec![program(PROG), viewport(10.0), Record::BindTexture { slot: 3, handle: 7 }, Record::Call(child)];
+            let first = vec![
+                program(PROG),
+                viewport(10.0),
+                Record::BindTexture { slot: 3, handle: 7 },
+                Record::Call(child),
+            ];
             let calls = [
                 first.clone(),
                 first.clone(),
                 vec![viewport(20.0), Record::Call(child)],
-                vec![Record::BindTexture { slot: 3, handle: 8 }, Record::Call(child)],
+                vec![
+                    Record::BindTexture { slot: 3, handle: 8 },
+                    Record::Call(child),
+                ],
                 vec![program(OTHER), Record::Call(child)],
                 first,
             ];
@@ -1902,7 +2217,10 @@ mod tests {
                 blend(2, 5),
                 stencil_ref(2, 12),
                 ext(ExtCode::Setting, Setting::CopyRowStride as u16, &[256, 0]),
-                Record::BindTexture { slot: 40, handle: 11 },
+                Record::BindTexture {
+                    slot: 40,
+                    handle: 11,
+                },
             ]);
             let top = p.put(&[Record::Call(child), draw(), dispatch()]);
             for _ in 0..3 {
@@ -1930,13 +2248,42 @@ mod tests {
             let top = p.put(&[Record::Call(mid), Record::Call(mid)]);
             let (d, c) = p.frame(&[top]);
             assert_eq!((c.walk_hits, c.walk_misses), (1, 2));
-            assert_eq!(d.draws[0].textures.iter().map(|t| t.handle).collect::<Vec<_>>(), [5, 6]);
-            for values in [(5, 6, 7), (5, 6, 7), (9, 6, 7), (9, 10, 11), (9, 10, 11), (0, 0, 0), (5, 6, 7)] {
+            assert_eq!(
+                d.draws[0]
+                    .textures
+                    .iter()
+                    .map(|t| t.handle)
+                    .collect::<Vec<_>>(),
+                [5, 6]
+            );
+            for values in [
+                (5, 6, 7),
+                (5, 6, 7),
+                (9, 6, 7),
+                (9, 10, 11),
+                (9, 10, 11),
+                (0, 0, 0),
+                (5, 6, 7),
+            ] {
                 set(p, values.0, values.1, values.2);
                 let (d, c) = p.frame(&[top]);
                 assert_eq!(c.walk_hits, 2, "{values:?}");
-                assert_eq!(d.draws[3].textures.iter().map(|t| t.handle).collect::<Vec<_>>(), [values.0, values.1]);
-                assert_eq!(d.draws[2].textures.iter().map(|t| t.handle).collect::<Vec<_>>(), [values.0, values.1]);
+                assert_eq!(
+                    d.draws[3]
+                        .textures
+                        .iter()
+                        .map(|t| t.handle)
+                        .collect::<Vec<_>>(),
+                    [values.0, values.1]
+                );
+                assert_eq!(
+                    d.draws[2]
+                        .textures
+                        .iter()
+                        .map(|t| t.handle)
+                        .collect::<Vec<_>>(),
+                    [values.0, values.1]
+                );
                 assert_eq!(d.dispatches[1].textures[0].handle, values.2);
             }
         });
@@ -1969,7 +2316,12 @@ mod tests {
     fn a_partial_update_with_a_rewritten_tail_gets_a_new_snapshot() {
         for_both(|p| {
             let mut m = vec![ubo(0, UBO_AT, 64), update(UBO_AT, 64, 16, 0xaabbccdd)];
-            m.extend([vertex_buffer(0, GPU + 0x2000, 256), attribute(0, 0x0a, 0), stream(0, 16), draw()]);
+            m.extend([
+                vertex_buffer(0, GPU + 0x2000, 256),
+                attribute(0, 0x0a, 0),
+                stream(0, 16),
+                draw(),
+            ]);
             let child = p.put(&m);
             let top = p.put(&[program(PROG), Record::Call(child), Record::Call(child)]);
             for round in 0u8..4 {
@@ -2001,7 +2353,10 @@ mod tests {
             assert!(d.draws[0].ubos[0].snapshot.is_none());
             let (d, c) = p.frame(&[later]);
             assert_eq!(c.walk_hits, 1);
-            assert_eq!(&d.draws[0].ubos[0].snapshot.as_ref().unwrap()[..4], &0x01020304u32.to_le_bytes());
+            assert_eq!(
+                &d.draws[0].ubos[0].snapshot.as_ref().unwrap()[..4],
+                &0x01020304u32.to_le_bytes()
+            );
             p.frame(&[top, later, top]);
         });
     }
@@ -2010,7 +2365,13 @@ mod tests {
     fn an_update_between_draws_gives_each_draw_the_bytes_it_saw() {
         for_both(|p| {
             let mut m = model(UBO_AT, 1);
-            m.extend([update(UBO_AT, 64, 0, 1), draw(), dispatch(), update(UBO_AT, 64, 0, 2), draw()]);
+            m.extend([
+                update(UBO_AT, 64, 0, 1),
+                draw(),
+                dispatch(),
+                update(UBO_AT, 64, 0, 2),
+                draw(),
+            ]);
             let child = p.put(&m);
             let top = p.put(&[program(PROG), Record::Call(child)]);
             for round in 0..3 {
@@ -2091,7 +2452,10 @@ mod tests {
             p.frame(&[top]);
             assert_eq!(p.cached.w.cache.templates(child), 0);
             let (d, c) = p.frame(&[top]);
-            assert_eq!((c.cold_walks as usize, c.walk_misses as usize, d.draws.len()), (n, n, n));
+            assert_eq!(
+                (c.cold_walks as usize, c.walk_misses as usize, d.draws.len()),
+                (n, n, n)
+            );
         });
     }
 
@@ -2106,7 +2470,12 @@ mod tests {
             }
             let (first, last) = (chain[chain.len() - 1], chain[0]);
             let mid = chain[chain.len() - 4];
-            let top = p.put(&[Record::Call(mid), Record::Call(first), Record::Call(mid), Record::Call(last)]);
+            let top = p.put(&[
+                Record::Call(mid),
+                Record::Call(first),
+                Record::Call(mid),
+                Record::Call(last),
+            ]);
             for _ in 0..3 {
                 p.frame(&[top]);
             }
@@ -2149,7 +2518,10 @@ mod tests {
         use nxkit_nvn::front::FrontEnd;
         use nxkit_nvn::space::LinearSpace;
 
-        let mut f = FrontEnd::new(LinearSpace::new(HOST, GPU, SIZE).unwrap(), VecMem::new(HOST, SIZE as usize));
+        let mut f = FrontEnd::new(
+            LinearSpace::new(HOST, GPU, SIZE).unwrap(),
+            VecMem::new(HOST, SIZE as usize),
+        );
         let mut rig = Rig::new();
         let region = [0, 0, 0, 4, 4, 1];
         let words: Vec<u32> = [0x2000, 0, 0x100, 0, 0].into_iter().chain(region).collect();
@@ -2164,17 +2536,23 @@ mod tests {
             ext(ExtCode::CopyBufferToTexture, 0, &words),
             Record::Copy { src: 0, dst: 0 },
         ];
-        let record = |f: &mut FrontEnd<LinearSpace, VecMem>, cb: usize, at: u64, recs: &[Record]| {
-            f.add_command_memory(cb, at, 4096).unwrap();
-            f.begin_recording(cb).unwrap();
-            for r in recs {
-                f.write(cb, *r).unwrap();
-            }
-            f.end_recording(cb).unwrap()
-        };
+        let record =
+            |f: &mut FrontEnd<LinearSpace, VecMem>, cb: usize, at: u64, recs: &[Record]| {
+                f.add_command_memory(cb, at, 4096).unwrap();
+                f.begin_recording(cb).unwrap();
+                for r in recs {
+                    f.write(cb, *r).unwrap();
+                }
+                f.end_recording(cb).unwrap()
+            };
         let child = record(&mut f, 0, CODE, &child_recs);
         rig.put_at(CODE, &child_recs);
-        let top_recs = [Record::Call(child.0), draw(), Record::Call(child.0), Record::Call(child.0)];
+        let top_recs = [
+            Record::Call(child.0),
+            draw(),
+            Record::Call(child.0),
+            Record::Call(child.0),
+        ];
         let top = record(&mut f, 1, CODE + 0x1000, &top_recs);
         rig.put_at(CODE + 0x1000, &top_recs);
         for round in 0..3 {
@@ -2191,11 +2569,22 @@ mod tests {
                 }
             }
             let (d, c) = rig.frame(&[top.0]);
-            assert_eq!((d.draws.len(), d.clears.len(), d.dispatches.len(), d.copies.len()), (n[0], n[1], n[2], n[3]));
+            assert_eq!(
+                (
+                    d.draws.len(),
+                    d.clears.len(),
+                    d.dispatches.len(),
+                    d.copies.len()
+                ),
+                (n[0], n[1], n[2], n[3])
+            );
             assert_eq!(n, [7, 3, 3, 12]);
             assert_eq!(c.walk_hits, if round == 0 { 2 } else { 3 });
             let ords = crate::draws::ordinals(f.frame());
-            assert_eq!(ords.last().map(|o| (o.draw, o.copy)), Some((n[0] as u32, n[3] as u32 - 1)));
+            assert_eq!(
+                ords.last().map(|o| (o.draw, o.copy)),
+                Some((n[0] as u32, n[3] as u32 - 1))
+            );
         }
     }
 
@@ -2204,7 +2593,10 @@ mod tests {
 
     impl Lcg {
         fn next(&mut self, n: u64) -> u64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (self.0 >> 33) % n
         }
     }
@@ -2222,21 +2614,50 @@ mod tests {
             5 => stream(r.next(3) as u32, 4 * (1 + r.next(3) as u32)),
             6 => blend(r.next(3) as u32, 1 + r.next(3) as u32),
             7 => stencil_ref(1 + r.next(3) as u32, r.next(3) as u32),
-            8 => Record::BindTexture { slot: r.next(70) as u8, handle: r.next(3) },
+            8 => Record::BindTexture {
+                slot: r.next(70) as u8,
+                handle: r.next(3),
+            },
             9 => deferred(r.next(40) as u8, 1 + r.next(3) as u8, SRC),
-            10 => deferred(60 + r.next(8) as u8, 1 + r.next(3) as u8, SRC + 8 * r.next(3)),
+            10 => deferred(
+                60 + r.next(8) as u8,
+                1 + r.next(3) as u8,
+                SRC + 8 * r.next(3),
+            ),
             11 => update(buffer, 64, 4 * r.next(8) as u32, r.next(100) as u32),
             12 => dispatch(),
             13 => clear(),
-            14 => ext(ExtCode::Setting, Setting::DepthClamp as u16, &[r.next(2) as u32]),
+            14 => ext(
+                ExtCode::Setting,
+                Setting::DepthClamp as u16,
+                &[r.next(2) as u32],
+            ),
             15 => ext(ExtCode::Scissor, 0, &[0, 0, 5 + r.next(3) as u32, 6]),
             16 => ext(ExtCode::State, 1, &[r.next(256) as u32]),
             17 => ext(ExtCode::State, 5, &[r.next(4) as u32, 0]),
-            18 => ext(ExtCode::Setting, Setting::BlendColor as u16, &[r.next(2) as u32, 0, 0, 0]),
-            19 => ext(ExtCode::Setting, Setting::StencilMask as u16, &[3, r.next(3) as u32]),
-            20 | 21 if !callees.is_empty() => Record::Call(callees[r.next(callees.len() as u64) as usize]),
-            22 => ext(ExtCode::Setting, Setting::CopyRowStride as u16, &[64 * r.next(3) as u32, 0]),
-            23 => ext(ExtCode::CopyBufferToTexture, 0, &[1, 0, 2, 0, 0, 0, 0, 0, 4, 4, 1]),
+            18 => ext(
+                ExtCode::Setting,
+                Setting::BlendColor as u16,
+                &[r.next(2) as u32, 0, 0, 0],
+            ),
+            19 => ext(
+                ExtCode::Setting,
+                Setting::StencilMask as u16,
+                &[3, r.next(3) as u32],
+            ),
+            20 | 21 if !callees.is_empty() => {
+                Record::Call(callees[r.next(callees.len() as u64) as usize])
+            }
+            22 => ext(
+                ExtCode::Setting,
+                Setting::CopyRowStride as u16,
+                &[64 * r.next(3) as u32, 0],
+            ),
+            23 => ext(
+                ExtCode::CopyBufferToTexture,
+                0,
+                &[1, 0, 2, 0, 0, 0, 0, 0, 4, 4, 1],
+            ),
             _ => draw(),
         }
     }
@@ -2254,7 +2675,9 @@ mod tests {
             for _ in 0..4 {
                 let new: Vec<u64> = (0..6)
                     .map(|_| {
-                        let recs: Vec<Record> = (0..2 + r.next(10)).map(|_| random_record(&mut r, &handles)).collect();
+                        let recs: Vec<Record> = (0..2 + r.next(10))
+                            .map(|_| random_record(&mut r, &handles))
+                            .collect();
                         p.put(&recs)
                     })
                     .collect();
@@ -2351,7 +2774,10 @@ mod tests {
         let mut b = a.clone();
         b.ubo[1][3] = (0x10, 4);
         assert!(!key.matches(&b, 0));
-        assert!(!Key::of(&needs, &a, 1 << 5).matches(&a, 0), "the provenance of a texture is part of the key");
+        assert!(
+            !Key::of(&needs, &a, 1 << 5).matches(&a, 0),
+            "the provenance of a texture is part of the key"
+        );
         assert!(Key::of(&needs, &a, 1 << 5).matches(&a, 1 << 5));
     }
 

@@ -10,7 +10,9 @@
 //! error (`EAGAIN`, `EBADF`) shows through `GetLastError` and `nnsocketGetLastErrno` only.
 
 use super::neg1;
-use super::socket::{self, close, down, errno, event_fd, event_fd_read, event_fd_write, poll, select};
+use super::socket::{
+    self, close, down, errno, event_fd, event_fd_read, event_fd_write, poll, select,
+};
 
 /// A call that fails: -1 and `ENETDOWN`.
 extern "C" fn fail_int() -> i32 {

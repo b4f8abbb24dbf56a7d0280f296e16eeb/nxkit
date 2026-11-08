@@ -24,8 +24,8 @@ use nxkit_abi::ipc::{Handled, Request, Response, Service};
 
 /// The language codes in the order of `SetLanguage` of libnx.
 const LANGUAGES: [&str; 18] = [
-    "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru", "zh-TW", "en-GB", "fr-CA",
-    "es-419", "zh-Hans", "zh-Hant", "pt-BR",
+    "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru", "zh-TW", "en-GB",
+    "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR",
 ];
 
 /// The console language for a list of preferred language tags (BCP 47, such as macOS's `de-DE` or `zh-Hans-CN`), best

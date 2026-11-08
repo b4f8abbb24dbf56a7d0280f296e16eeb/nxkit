@@ -78,7 +78,9 @@ static CONFIG: RwLock<Option<Config>> = RwLock::new(None);
 
 /// Gives the service its settings. The host calls it once before the game starts.
 pub fn init(config: &Config) {
-    *CONFIG.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.clone());
+    *CONFIG
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.clone());
 }
 
 /// Who learns that the service wrote guest memory itself (a picture into a native image), so that the GPU loads the
@@ -98,7 +100,10 @@ pub(crate) fn guest_wrote(addr: u64, len: u64) {
 }
 
 pub(crate) fn config() -> Option<Config> {
-    CONFIG.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    CONFIG
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 /// The functions that replace the methods of `movie::Decoder` and the decoder service of `nn::codec`.

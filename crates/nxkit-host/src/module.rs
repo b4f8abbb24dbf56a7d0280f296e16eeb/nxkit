@@ -122,7 +122,9 @@ impl Module {
     /// The segment that holds the offset, if any.
     pub fn segment_at(&self, offset: u64) -> Option<&Segment> {
         let off = i64::try_from(offset).ok()?;
-        self.segments.iter().find(|s| off >= s.offset && off < s.offset.saturating_add_unsigned(s.size))
+        self.segments
+            .iter()
+            .find(|s| off >= s.offset && off < s.offset.saturating_add_unsigned(s.size))
     }
 
     /// Whether `[offset, offset + len)` lies in one writable segment.
@@ -145,7 +147,10 @@ impl Module {
     pub fn check(&self) -> Result<()> {
         let n = &self.name;
         if self.base % PAGE != 0 || self.size == 0 {
-            return Err(bad(format!("module {n}: base {:#x} is not page aligned or size is 0", self.base)));
+            return Err(bad(format!(
+                "module {n}: base {:#x} is not page aligned or size is 0",
+                self.base
+            )));
         }
         if self.segments.is_empty() {
             return Err(bad(format!("module {n}: no segments")));
@@ -154,21 +159,40 @@ impl Module {
         for s in &self.segments {
             let top = s.offset.saturating_add_unsigned(s.size);
             if s.offset % PAGE as i64 != 0 || s.size == 0 || s.size % PAGE != 0 {
-                return Err(bad(format!("module {n}: segment {} is not 16K aligned", s.name)));
+                return Err(bad(format!(
+                    "module {n}: segment {} is not 16K aligned",
+                    s.name
+                )));
             }
             if s.file_size > s.size {
-                return Err(bad(format!("module {n}: segment {} has more file bytes than memory", s.name)));
+                return Err(bad(format!(
+                    "module {n}: segment {} has more file bytes than memory",
+                    s.name
+                )));
             }
             if s.offset < end {
-                return Err(bad(format!("module {n}: segment {} overlaps the one before it or is out of order", s.name)));
+                return Err(bad(format!(
+                    "module {n}: segment {} overlaps the one before it or is out of order",
+                    s.name
+                )));
             }
             end = top;
         }
         if end != self.size as i64 {
-            return Err(bad(format!("module {n}: size {:#x} is not the end of the last segment {end:#x}", self.size)));
+            return Err(bad(format!(
+                "module {n}: size {:#x} is not the end of the last segment {end:#x}",
+                self.size
+            )));
         }
-        let lowest = self.segments.iter().map(|s| s.offset).min().unwrap_or(0).min(0);
-        if self.low != lowest || self.span != self.size.wrapping_add_signed(self.low.wrapping_neg()) {
+        let lowest = self
+            .segments
+            .iter()
+            .map(|s| s.offset)
+            .min()
+            .unwrap_or(0)
+            .min(0);
+        if self.low != lowest || self.span != self.size.wrapping_add_signed(self.low.wrapping_neg())
+        {
             return Err(bad(format!(
                 "module {n}: low {:#x} and span {:#x} do not fit the segments (lowest offset {lowest:#x}, end {end:#x})",
                 self.low, self.span
@@ -176,22 +200,35 @@ impl Module {
         }
         let bss_end = self.bss_offset().saturating_add(self.bss_size);
         if !self.writable(self.data.offset, bss_end.saturating_sub(self.data.offset)) {
-            return Err(bad(format!("module {n}: data and bss are not in one writable segment")));
+            return Err(bad(format!(
+                "module {n}: data and bss are not in one writable segment"
+            )));
         }
         if self.key_page % PAGE != 0 || !self.writable(self.key_page, PAGE) {
-            return Err(bad(format!("module {n}: key page {:#x} is not aligned or not in a writable segment", self.key_page)));
+            return Err(bad(format!(
+                "module {n}: key page {:#x} is not aligned or not in a writable segment",
+                self.key_page
+            )));
         }
-        if self.entry.is_some_and(|e| self.segment_at(e).is_none_or(|s| s.prot != Prot::Exec)) {
-            return Err(bad(format!("module {n}: the entry is not in an r-x segment")));
+        if self
+            .entry
+            .is_some_and(|e| self.segment_at(e).is_none_or(|s| s.prot != Prot::Exec))
+        {
+            return Err(bad(format!(
+                "module {n}: the entry is not in an r-x segment"
+            )));
         }
         if self.patch.size > 0 {
             let inside = self.segments.iter().any(|s| {
                 s.prot == Prot::Exec
                     && s.offset <= self.patch.offset
-                    && self.patch.offset.saturating_add_unsigned(self.patch.size) <= s.offset.saturating_add_unsigned(s.size)
+                    && self.patch.offset.saturating_add_unsigned(self.patch.size)
+                        <= s.offset.saturating_add_unsigned(s.size)
             });
             if !inside {
-                return Err(bad(format!("module {n}: the patch area is not inside an r-x segment")));
+                return Err(bad(format!(
+                    "module {n}: the patch area is not inside an r-x segment"
+                )));
             }
         }
         Ok(())
@@ -237,7 +274,10 @@ pub fn parse(v: &Value, i: usize) -> Result<Module> {
     let ctx = format!("module {name}");
     let entry = match v.get("entry") {
         None | Some(Value::Null) => None,
-        Some(e) => Some(e.as_u64().ok_or_else(|| bad(format!("{ctx}: \"entry\" is not a number")))?),
+        Some(e) => Some(
+            e.as_u64()
+                .ok_or_else(|| bad(format!("{ctx}: \"entry\" is not a number")))?,
+        ),
     };
     let segments = field(v, "segments", &ctx)?
         .as_array()
@@ -321,7 +361,10 @@ mod tests {
         assert!(m.writable(0x20000, 0x10));
         assert!(!m.writable(0x10, 0x10));
         assert!(!m.writable(0x20000, 0x40000));
-        assert_eq!(m.segment_at(0).map(|s| s.name.as_str()), Some("__NX_MAIN_TEXT"));
+        assert_eq!(
+            m.segment_at(0).map(|s| s.name.as_str()),
+            Some("__NX_MAIN_TEXT")
+        );
     }
 
     #[test]
@@ -341,7 +384,10 @@ mod tests {
 
     #[test]
     fn a_patch_area_outside_the_segments_is_refused() {
-        let s = FAR.replace("\"patch\": {\"offset\": -131072", "\"patch\": {\"offset\": -262144");
+        let s = FAR.replace(
+            "\"patch\": {\"offset\": -131072",
+            "\"patch\": {\"offset\": -262144",
+        );
         let m = json::parse(&s).ok().and_then(|v| parse(&v, 0).ok());
         assert!(m.is_some_and(|m| m.check().is_err()));
     }
@@ -349,7 +395,10 @@ mod tests {
     #[test]
     fn moving_a_module_keeps_the_offsets() {
         let m = far().and_then(|m| m.moved(0x4000));
-        assert!(m.as_ref().is_some_and(|m| m.base == 0x1_0000_0400_00 + 0x4000));
+        assert!(
+            m.as_ref()
+                .is_some_and(|m| m.base == 0x1_0000_0400_00 + 0x4000)
+        );
         assert!(m.is_some_and(|m| m.start() == 0x1_0000_0400_00 + 0x4000 - 0x2_0000));
     }
 }

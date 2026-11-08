@@ -57,7 +57,9 @@ impl KeyFrame {
         };
         vec![
             1, // version
-            0, 0, 0, // flags
+            0,
+            0,
+            0, // flags
             self.profile,
             0, // level: not given by the header
             (self.bit_depth << 4) | (chroma << 1) | u8::from(self.full_range),
@@ -183,7 +185,10 @@ mod testing {
     }
 
     pub(crate) fn key_frame_bytes(color_space: u32, full: u32, w: u32, h: u32) -> Vec<u8> {
-        let mut w_ = Writer { bytes: vec![], n: 0 };
+        let mut w_ = Writer {
+            bytes: vec![],
+            n: 0,
+        };
         w_.put(2, 2); // frame_marker
         w_.put(0, 2); // profile 0
         w_.put(0, 1); // show_existing_frame
@@ -197,7 +202,6 @@ mod testing {
         w_.put(h - 1, 16);
         w_.bytes
     }
-
 }
 
 #[cfg(test)]
@@ -209,7 +213,8 @@ mod tests {
 
     #[test]
     fn reads_the_size_and_colour_of_a_profile_0_key_frame() {
-        let k = parse_key_frame(&key_frame_bytes(2, 0, 1920, 1080)).unwrap_or_else(|| unreachable!());
+        let k =
+            parse_key_frame(&key_frame_bytes(2, 0, 1920, 1080)).unwrap_or_else(|| unreachable!());
         assert_eq!((k.width, k.height), (1920, 1080));
         assert_eq!((k.profile, k.bit_depth), (0, 8));
         assert!(k.is_nv12());
@@ -219,8 +224,10 @@ mod tests {
 
     #[test]
     fn an_undeclared_colour_space_follows_the_height() {
-        let hd = parse_key_frame(&key_frame_bytes(0, 0, 1280, 720)).unwrap_or_else(|| unreachable!());
-        let sd = parse_key_frame(&key_frame_bytes(0, 1, 640, 480)).unwrap_or_else(|| unreachable!());
+        let hd =
+            parse_key_frame(&key_frame_bytes(0, 0, 1280, 720)).unwrap_or_else(|| unreachable!());
+        let sd =
+            parse_key_frame(&key_frame_bytes(0, 1, 640, 480)).unwrap_or_else(|| unreachable!());
         assert_eq!(hd.nv12_colorspace(), 3);
         assert_eq!(sd.nv12_colorspace(), 2);
     }
@@ -236,7 +243,8 @@ mod tests {
 
     #[test]
     fn the_vpcc_payload_has_twelve_bytes_and_the_stream_values() {
-        let k = parse_key_frame(&key_frame_bytes(2, 0, 1920, 1080)).unwrap_or_else(|| unreachable!());
+        let k =
+            parse_key_frame(&key_frame_bytes(2, 0, 1920, 1080)).unwrap_or_else(|| unreachable!());
         let v = k.vpcc();
         assert_eq!(v.len(), 12);
         assert_eq!(&v[..4], &[1, 0, 0, 0]);

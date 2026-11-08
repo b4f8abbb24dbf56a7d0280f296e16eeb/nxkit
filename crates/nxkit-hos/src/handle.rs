@@ -17,7 +17,7 @@ const INDEX_BITS: u32 = 15;
 /// Whether `value` has the shape of a kernel handle: a generation above 0 (bit 15 or higher set), or a pseudo handle.
 /// A lock word that names a smaller value names an SDK thread tag instead: the Switch 2 SDK writes its own thread
 /// tags (0x51, 0x52, ...) into lock words, where older SDKs wrote the thread's handle.
-pub fn is_handle(value: u32) -> bool {
+pub(crate) fn is_handle(value: u32) -> bool {
     value >> INDEX_BITS != 0
 }
 const INDEX_MASK: u32 = (1 << INDEX_BITS) - 1;

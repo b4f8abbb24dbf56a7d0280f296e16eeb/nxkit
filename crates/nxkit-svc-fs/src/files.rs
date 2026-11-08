@@ -34,7 +34,10 @@ pub(crate) const ENTRY_SIZE: usize = 0x310;
 
 enum Backing {
     Mapped(Map),
-    Host { file: std::fs::File, txn: Option<Arc<Txn>> },
+    Host {
+        file: std::fs::File,
+        txn: Option<Arc<Txn>>,
+    },
 }
 
 /// An open file.
@@ -74,7 +77,8 @@ impl File {
             Backing::Mapped(m) => {
                 let start = usize::try_from(offset).map_err(|_| FAIL)?;
                 let src = m.as_slice().get(start..start + n as usize).ok_or(FAIL)?;
-                guest::with_slice_mut(addr, n, |dst| dst.copy_from_slice(src)).map_err(guest_fault)?;
+                guest::with_slice_mut(addr, n, |dst| dst.copy_from_slice(src))
+                    .map_err(guest_fault)?;
             }
             Backing::Host { file, .. } => {
                 guest::with_slice_mut(addr, n, |dst| read_full(file, dst, offset))
@@ -88,7 +92,9 @@ impl File {
     /// Writes `size` bytes from the guest buffer at `addr` to `offset`. A write that fails poisons the save, so the
     /// half-written state is never committed.
     pub(crate) fn write(&self, offset: i64, addr: u64, size: u64) -> u32 {
-        let Backing::Host { file, txn } = &self.backing else { return FAIL };
+        let Backing::Host { file, txn } = &self.backing else {
+            return FAIL;
+        };
         if self.mode & (MODE_WRITE | MODE_APPEND) == 0 {
             return FAIL;
         }
@@ -116,8 +122,12 @@ impl File {
 
     /// Sets the size of the file.
     pub(crate) fn set_size(&self, size: i64) -> u32 {
-        let Backing::Host { file, txn } = &self.backing else { return FAIL };
-        let Ok(size) = u64::try_from(size) else { return FAIL };
+        let Backing::Host { file, txn } = &self.backing else {
+            return FAIL;
+        };
+        let Ok(size) = u64::try_from(size) else {
+            return FAIL;
+        };
         if self.mode & (MODE_WRITE | MODE_APPEND) == 0 {
             return FAIL;
         }
@@ -184,7 +194,12 @@ impl Dir {
                 continue;
             }
             let name = names::guest_name(&self.path, &physical).map_err(|e| from_io(&e))?;
-            return entry_bytes(&name, meta.is_dir(), if meta.is_dir() { 0 } else { meta.len() }).map(Some);
+            return entry_bytes(
+                &name,
+                meta.is_dir(),
+                if meta.is_dir() { 0 } else { meta.len() },
+            )
+            .map(Some);
         }
         Ok(None)
     }
@@ -194,7 +209,9 @@ impl Dir {
         let mut it = lock(&self.iter);
         let mut count = 0i64;
         while count < max {
-            let Some(entry) = self.next_entry(&mut it)? else { break };
+            let Some(entry) = self.next_entry(&mut it)? else {
+                break;
+            };
             guest::write(addr + count as u64 * ENTRY_SIZE as u64, &entry).map_err(guest_fault)?;
             count += 1;
         }
@@ -237,7 +254,10 @@ impl Fs {
                 .write(write)
                 .open(&host)
                 .map_err(|e| from_io(&e))?;
-            Backing::Host { file: f, txn: mount.txn.clone() }
+            Backing::Host {
+                file: f,
+                txn: mount.txn.clone(),
+            }
         };
         Ok(self.files.insert(Arc::new(File { mode, backing })))
     }
@@ -249,7 +269,11 @@ impl Fs {
 
     /// Closes the file of `handle`.
     pub(crate) fn close_file(&self, handle: u64) -> u32 {
-        if self.files.remove(handle).is_some() { OK } else { FAIL }
+        if self.files.remove(handle).is_some() {
+            OK
+        } else {
+            FAIL
+        }
     }
 
     /// Opens the directory `path`. `mode` has the bits `DIR_DIRECTORIES` and `DIR_FILES`.
@@ -262,7 +286,11 @@ impl Fs {
             return Err(PATH_NOT_FOUND);
         }
         let iter = std::fs::read_dir(&host).map_err(|e| from_io(&e))?;
-        Ok(self.dirs.insert(Arc::new(Dir { path: host, mode, iter: Mutex::new(iter) })))
+        Ok(self.dirs.insert(Arc::new(Dir {
+            path: host,
+            mode,
+            iter: Mutex::new(iter),
+        })))
     }
 
     /// The open directory of `handle`.
@@ -272,7 +300,11 @@ impl Fs {
 
     /// Closes the directory of `handle`.
     pub(crate) fn close_dir(&self, handle: u64) -> u32 {
-        if self.dirs.remove(handle).is_some() { OK } else { FAIL }
+        if self.dirs.remove(handle).is_some() {
+            OK
+        } else {
+            FAIL
+        }
     }
 }
 
@@ -313,7 +345,10 @@ mod tests {
         let fs = Fs::new(cfg);
         assert_eq!(fs.mount_rom(b"rom"), OK);
         assert_eq!(fs.open_file(b"rom:/a.bin", MODE_WRITE).err(), Some(FAIL));
-        assert_eq!(fs.open_file(b"rom:/missing.bin", MODE_READ).err(), Some(PATH_NOT_FOUND));
+        assert_eq!(
+            fs.open_file(b"rom:/missing.bin", MODE_READ).err(),
+            Some(PATH_NOT_FOUND)
+        );
         assert_eq!(fs.open_file(b"rom:/a.bin", 0).err(), Some(FAIL));
     }
 
@@ -323,9 +358,15 @@ mod tests {
         std::fs::create_dir(cfg.romfs.join("d")).unwrap();
         let fs = Fs::new(cfg);
         assert_eq!(fs.mount_rom(b"rom"), OK);
-        assert_eq!(fs.open_file(b"rom:/d", MODE_READ).err(), Some(PATH_NOT_FOUND));
+        assert_eq!(
+            fs.open_file(b"rom:/d", MODE_READ).err(),
+            Some(PATH_NOT_FOUND)
+        );
         assert!(fs.open_dir(b"rom:/d", DIR_FILES).is_ok());
-        assert_eq!(fs.open_dir(b"rom:/missing", DIR_FILES).err(), Some(PATH_NOT_FOUND));
+        assert_eq!(
+            fs.open_dir(b"rom:/missing", DIR_FILES).err(),
+            Some(PATH_NOT_FOUND)
+        );
     }
 
     #[test]
@@ -354,7 +395,9 @@ mod tests {
         let fs = Fs::new(cfg);
         assert_eq!(fs.mount_rom(b"rom"), OK);
         let g = Guest::new(64);
-        let f = fs.file(fs.open_file(b"rom:/a.bin", MODE_READ).unwrap()).unwrap();
+        let f = fs
+            .file(fs.open_file(b"rom:/a.bin", MODE_READ).unwrap())
+            .unwrap();
         assert_eq!(f.read(2, g.addr(), 4), Ok(4));
         assert_eq!(g.bytes(0, 4), b"2345");
         assert_eq!(f.read(8, g.addr(), 16), Ok(2));
@@ -381,7 +424,9 @@ mod tests {
         assert_eq!(f.size(), Ok(4));
         assert_eq!(f.write(-1, g.addr(), 1), FAIL);
         assert_eq!(f.mode(), MODE_READ | MODE_WRITE);
-        let read_only = fs.file(fs.open_file(b"tmp:/w.bin", MODE_READ).unwrap()).unwrap();
+        let read_only = fs
+            .file(fs.open_file(b"tmp:/w.bin", MODE_READ).unwrap())
+            .unwrap();
         assert_eq!(read_only.write(0, g.addr(), 1), FAIL);
     }
 
@@ -392,7 +437,12 @@ mod tests {
         std::fs::write(fs.cfg.temp.join("w.bin"), b"ab").unwrap();
         let g = Guest::new(16);
         g.put(0, b"cd");
-        let f = fs.file(fs.open_file(b"tmp:/w.bin", MODE_WRITE | MODE_APPEND).unwrap()).unwrap();
+        let f = fs
+            .file(
+                fs.open_file(b"tmp:/w.bin", MODE_WRITE | MODE_APPEND)
+                    .unwrap(),
+            )
+            .unwrap();
         assert_eq!(f.write(0, g.addr(), 2), OK);
         assert_eq!(std::fs::read(fs.cfg.temp.join("w.bin")).unwrap(), b"abcd");
     }

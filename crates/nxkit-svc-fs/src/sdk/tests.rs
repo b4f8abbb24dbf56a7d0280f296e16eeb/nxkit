@@ -20,7 +20,11 @@ fn names_are_unique_and_are_fs_names() {
 #[test]
 fn the_functions_that_hle_fs_hooks_are_all_there() {
     let all = big_exports();
-    assert!(exports().iter().all(|e| e.name == "_ZN2nn2fs24InitializeForApplicationEv"));
+    assert!(
+        exports()
+            .iter()
+            .all(|e| e.name == "_ZN2nn2fs24InitializeForApplicationEv")
+    );
     for n in [
         "_ZN2nn2fs8MountRomEPKcPvm",
         "_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci",
@@ -38,7 +42,11 @@ fn the_functions_that_hle_fs_hooks_are_all_there() {
 fn the_romfs_is_mounted_opened_and_read() {
     global();
     let g = Guest::new(0x1000);
-    let (rom, path, bad) = (g.cstr(0, "sdkrom"), g.cstr(0x40, "sdkrom:/a.bin"), g.cstr(0x80, "sdkrom:/nope.bin"));
+    let (rom, path, bad) = (
+        g.cstr(0, "sdkrom"),
+        g.cstr(0x40, "sdkrom:/a.bin"),
+        g.cstr(0x80, "sdkrom:/nope.bin"),
+    );
     assert_eq!(mount::is_mounted(rom), 0);
     assert_eq!(mount::mount_rom(rom, 0, 0), OK);
     assert_eq!(mount::is_mounted(rom), 1);
@@ -79,7 +87,10 @@ fn a_directory_of_the_romfs_is_listed() {
     assert_eq!(mount::mount_rom(g.cstr(0, "sdkrom2"), 0, 0), OK);
     let (out, count) = (g.addr() + 0x100, g.addr() + 0x108);
     let root = g.cstr(0x40, "sdkrom2:/");
-    assert_eq!(file::open_directory(out, root, (DIR_DIRECTORIES | DIR_FILES) as i32), OK);
+    assert_eq!(
+        file::open_directory(out, root, (DIR_DIRECTORIES | DIR_FILES) as i32),
+        OK
+    );
     let h = g.u64_at(0x100);
     assert_eq!(file::get_directory_entry_count(count, h), OK);
     assert_eq!(g.u64_at(0x108), 2);
@@ -103,7 +114,10 @@ fn a_directory_of_the_romfs_is_listed() {
     assert_eq!(g.u32_at(0x110), 0);
     assert_eq!(file::get_entry_type(ty, g.cstr(0x50, "sdkrom2:/a.bin")), OK);
     assert_eq!(g.u32_at(0x110), 1);
-    assert_eq!(file::get_entry_type(ty, g.cstr(0x50, "sdkrom2:/none")), PATH_NOT_FOUND);
+    assert_eq!(
+        file::get_entry_type(ty, g.cstr(0x50, "sdkrom2:/none")),
+        PATH_NOT_FOUND
+    );
 }
 
 #[test]
@@ -116,8 +130,14 @@ fn add_on_content_has_a_size_and_a_mount() {
     assert_eq!(mount::query_aoc_cache(out, 9), OK);
     assert_eq!(g.u64_at(0x100), 0x1000);
     assert_eq!(mount::mount_aoc(g.cstr(0, "sdkaoc"), 1, 0, 0), OK);
-    assert_eq!(mount::mount_aoc(g.cstr(0x20, "sdkaoc9"), 9, 0, 0), TARGET_NOT_FOUND);
-    assert_eq!(file::open_file(out, g.cstr(0x40, "sdkaoc:/x.bin"), MODE_READ as i32), OK);
+    assert_eq!(
+        mount::mount_aoc(g.cstr(0x20, "sdkaoc9"), 9, 0, 0),
+        TARGET_NOT_FOUND
+    );
+    assert_eq!(
+        file::open_file(out, g.cstr(0x40, "sdkaoc:/x.bin"), MODE_READ as i32),
+        OK
+    );
 }
 
 #[test]
@@ -152,7 +172,10 @@ fn temporary_storage_is_written_renamed_and_deleted() {
     let (out, path) = (g.addr() + 0x100, g.cstr(0x40, "sdktmp:/f.bin"));
     assert_eq!(file::create_file(path, 0), OK);
     assert_eq!(file::create_file(path, 0), PATH_EXISTS);
-    assert_eq!(file::open_file(out, path, (MODE_READ | MODE_WRITE) as i32), OK);
+    assert_eq!(
+        file::open_file(out, path, (MODE_READ | MODE_WRITE) as i32),
+        OK
+    );
     let h = g.u64_at(0x100);
     g.put(0x300, b"saved");
     assert_eq!(file::write_file(h, 0, g.addr() + 0x300, 5, 0), OK);
@@ -183,7 +206,12 @@ fn a_save_is_written_and_committed() {
     assert_eq!(file::create_file(path, 4), OK);
     assert!(!fs.save_dir().join("option.sav").exists());
     assert_eq!(mount::commit(g.cstr(0, "sdksave")), OK);
-    assert_eq!(std::fs::metadata(fs.save_dir().join("option.sav")).unwrap().len(), 4);
+    assert_eq!(
+        std::fs::metadata(fs.save_dir().join("option.sav"))
+            .unwrap()
+            .len(),
+        4
+    );
     assert_eq!(fs.commit_count(), before + 1);
     let names = g.addr() + 0x200;
     let first = g.cstr(0x300, "sdksave");

@@ -58,9 +58,9 @@ pub use guestos::{
     nxkit_kernel_set_deterministic, nxkit_kernel_set_guest_sym,
 };
 pub use kernel::{
-    attach_main_thread, kernel, NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRoleRule, NxkitThreadEntry,
-    nxkit_kernel_dump_stats, nxkit_kernel_init, nxkit_kernel_set_thread_name,
-    nxkit_kernel_thread_tls, nxkit_svc,
+    NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRoleRule, NxkitThreadEntry,
+    attach_main_thread, kernel, nxkit_kernel_dump_stats, nxkit_kernel_init,
+    nxkit_kernel_set_thread_name, nxkit_kernel_thread_tls, nxkit_svc,
 };
 
 /// A service that nxkit can run. The bit of a service in the mask is its index in `nxtitle::Service::ALL`.
@@ -133,14 +133,26 @@ pub fn entries() -> &'static [Entry] {
         let mut table = Vec::new();
         table.extend(mapped(nxkit_svc_fs::exports(), Service::Fs, false));
         table.extend(mapped(nxkit_svc_fs::big_stack_exports(), Service::Fs, true));
-        table.extend(mapped(nxkit_svc_offline::exports(), Service::Offline, false));
+        table.extend(mapped(
+            nxkit_svc_offline::exports(),
+            Service::Offline,
+            false,
+        ));
         table.extend(mapped(nxkit_svc_input::exports(), Service::Input, false));
         table.extend(mapped(nxkit_svc_video::exports(), Service::Video, false));
         table.extend(mapped(nxkit_svc_audio::exports(), Service::Audio, false));
-        table.extend(mapped(nxkit_svc_audio::big_stack_exports(), Service::Audio, true));
+        table.extend(mapped(
+            nxkit_svc_audio::big_stack_exports(),
+            Service::Audio,
+            true,
+        ));
         table.extend(mapped(nxkit_svc_pacing::exports(), Service::Pacing, false));
         table.extend(mapped(nxkit_svc_system::exports(), Service::System, false));
-        table.extend(mapped(nxkit_svc_system::big_stack_exports(), Service::System, true));
+        table.extend(mapped(
+            nxkit_svc_system::big_stack_exports(),
+            Service::System,
+            true,
+        ));
         table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,
@@ -154,7 +166,11 @@ pub fn entries() -> &'static [Entry] {
 }
 
 /// The exports of one service crate as entries of `service`.
-fn mapped(exports: Vec<nxkit_abi::export::Export>, service: Service, big_stack: bool) -> impl Iterator<Item = Entry> {
+fn mapped(
+    exports: Vec<nxkit_abi::export::Export>,
+    service: Service,
+    big_stack: bool,
+) -> impl Iterator<Item = Entry> {
     exports.into_iter().map(move |e| Entry {
         name: e.name,
         service,
@@ -179,7 +195,9 @@ pub fn find_big_in(table: &[Entry], mask: u64, name: &[u8]) -> Option<usize> {
 fn find_kind(table: &[Entry], mask: u64, name: &[u8], big_stack: bool) -> Option<usize> {
     table
         .iter()
-        .find(|e| e.big_stack == big_stack && e.service.bit() & mask != 0 && e.name.as_bytes() == name)
+        .find(|e| {
+            e.big_stack == big_stack && e.service.bit() & mask != 0 && e.name.as_bytes() == name
+        })
         .map(|e| e.addr)
 }
 
@@ -333,7 +351,10 @@ mod tests {
         t[0].big_stack = true;
         let fs = Service::Fs.bit();
         assert_eq!(find_in(&t, fs, b"_ZN2nn3fs5ProbeEj"), None);
-        assert_eq!(find_big_in(&t, fs, b"_ZN2nn3fs5ProbeEj"), Some(probe_addr()));
+        assert_eq!(
+            find_big_in(&t, fs, b"_ZN2nn3fs5ProbeEj"),
+            Some(probe_addr())
+        );
         assert_eq!(find_big_in(&t, 0, b"_ZN2nn3fs5ProbeEj"), None);
     }
 

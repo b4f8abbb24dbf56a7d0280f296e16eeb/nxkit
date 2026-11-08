@@ -226,7 +226,8 @@ impl ComputePass<'_> {
     /// Names the encoder for Instruments and the Metal debugger.
     pub fn set_label(&self, label: &str) {
         use objc2_metal::MTL4CommandEncoder as _;
-        self.enc.setLabel(Some(&objc2_foundation::NSString::from_str(label)));
+        self.enc
+            .setLabel(Some(&objc2_foundation::NSString::from_str(label)));
     }
 
     /// Keeps a value alive until the GPU finished the command buffer.
@@ -464,9 +465,9 @@ impl ComputePass<'_> {
         }
         // Scratch blocks start at a multiple of `SCRATCH_ALIGN`, which is a multiple of every block size.
         let (bytes, per_image) = box_layout(texture, region, (0, bytes_per_row, 0))?;
-        let (buffer, offset) = scratch
-            .locate(address, bytes)
-            .ok_or(MetalError::Invalid("the scratch range is not in one buffer"))?;
+        let (buffer, offset) = scratch.locate(address, bytes).ok_or(MetalError::Invalid(
+            "the scratch range is not in one buffer",
+        ))?;
         let layout = (offset, bytes_per_row, 0);
         // SAFETY: `box_layout` checked the box and the layout against the texture, and `locate` checked that
         // `[offset, offset + bytes)` is inside `buffer`. The texture is retained below and the buffer is owned by the

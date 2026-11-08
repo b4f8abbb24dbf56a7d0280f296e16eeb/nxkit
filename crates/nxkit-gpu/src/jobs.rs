@@ -9,12 +9,23 @@
 use std::collections::VecDeque;
 use std::sync::{Mutex, PoisonError};
 
-fn worker<I, T>(queue: &Mutex<VecDeque<(usize, I)>>, out: &Mutex<Vec<Option<T>>>, f: &(impl Fn(I) -> T + Sync)) {
+fn worker<I, T>(
+    queue: &Mutex<VecDeque<(usize, I)>>,
+    out: &Mutex<Vec<Option<T>>>,
+    f: &(impl Fn(I) -> T + Sync),
+) {
     loop {
-        let next = queue.lock().unwrap_or_else(PoisonError::into_inner).pop_front();
+        let next = queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front();
         let Some((i, item)) = next else { return };
         let r = f(item);
-        if let Some(slot) = out.lock().unwrap_or_else(PoisonError::into_inner).get_mut(i) {
+        if let Some(slot) = out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(i)
+        {
             *slot = Some(r);
         }
     }
@@ -22,7 +33,11 @@ fn worker<I, T>(queue: &Mutex<VecDeque<(usize, I)>>, out: &Mutex<Vec<Option<T>>>
 
 /// Runs `f` for each item on up to `threads` threads: the caller and threads of the process's encode pool
 /// (`nxkit_metal::thread::Pool`). The results come back in the order of the items.
-pub(crate) fn run_all<I: Send, T: Send>(threads: usize, items: Vec<I>, f: impl Fn(I) -> T + Sync) -> Vec<T> {
+pub(crate) fn run_all<I: Send, T: Send>(
+    threads: usize,
+    items: Vec<I>,
+    f: impl Fn(I) -> T + Sync,
+) -> Vec<T> {
     let n = items.len();
     if threads <= 1 || n <= 1 {
         return items.into_iter().map(f).collect();
@@ -31,7 +46,11 @@ pub(crate) fn run_all<I: Send, T: Send>(threads: usize, items: Vec<I>, f: impl F
     let out: Mutex<Vec<Option<T>>> = Mutex::new((0..n).map(|_| None).collect());
     let task = || worker(&queue, &out, &f);
     nxkit_metal::thread::Pool::global().run(threads.min(n) - 1, &task);
-    out.into_inner().unwrap_or_else(PoisonError::into_inner).into_iter().flatten().collect()
+    out.into_inner()
+        .unwrap_or_else(PoisonError::into_inner)
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Cuts `weights` (one per pass) into at most `parts` runs of neighbouring passes with similar total weight.

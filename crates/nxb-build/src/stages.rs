@@ -43,8 +43,13 @@ pub(crate) fn run_nodes(
             (Some(r), 0, _) => {
                 let r = r.clone();
                 Work::Turn(Box::new(move || {
-                    let note =
-                        crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
+                    let note = crate::rewrite::ensure_with(
+                        &b.engine,
+                        &b.profile.0,
+                        &b.work,
+                        &b.package,
+                        Some(p),
+                    )?;
                     crate::boot::run::after_rewrite(a, b, p)?;
                     Ok(format!(
                         "reused: {r}{}",

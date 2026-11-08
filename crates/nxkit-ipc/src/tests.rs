@@ -179,8 +179,16 @@ fn sm_gives_a_session_for_a_registered_service() {
         assert_eq!(&data[..4], 42u32.to_le_bytes());
         assert!(ipc.stop().is_none());
         let counts = ipc.counts();
-        assert!(counts.iter().any(|c| c.interface == "Echo" && c.command == 1 && c.count == 1));
-        assert!(counts.iter().any(|c| c.interface == "sm:" && c.command == 1));
+        assert!(
+            counts
+                .iter()
+                .any(|c| c.interface == "Echo" && c.command == 1 && c.count == 1)
+        );
+        assert!(
+            counts
+                .iter()
+                .any(|c| c.interface == "sm:" && c.command == 1)
+        );
         assert!(ipc.dump().contains("Echo\t1\t1"));
     });
 }
@@ -236,7 +244,11 @@ fn an_object_outside_a_domain_is_a_new_session() {
         let child = session_at(moved[0]);
         let (_, out) = send(&*child, mem, &request(1, &1u32.to_le_bytes()));
         assert_eq!(&reply_result(&out).1[..4], 2u32.to_le_bytes());
-        assert!(ipc.counts().iter().any(|c| c.interface == "Child" || c.interface == "Echo"));
+        assert!(
+            ipc.counts()
+                .iter()
+                .any(|c| c.interface == "Child" || c.interface == "Echo")
+        );
     });
 }
 
@@ -261,7 +273,11 @@ fn a_domain_keeps_its_objects_by_id() {
         let (_, out) = send(&*s, mem, &domain_request(2, 1, &1u32.to_le_bytes()));
         let p = hipc::parse(&out).unwrap();
         assert_eq!(&p.raw[32..36], 2u32.to_le_bytes());
-        assert!(ipc.counts().iter().any(|c| c.interface == "Child" && c.command == 1));
+        assert!(
+            ipc.counts()
+                .iter()
+                .any(|c| c.interface == "Child" && c.command == 1)
+        );
 
         // A request for an object that does not exist stops the game.
         let (rc, _) = send(&*s, mem, &domain_request(9, 1, &[0; 4]));
@@ -275,7 +291,11 @@ fn the_pointer_buffer_size_is_zero() {
         let ipc = ipc();
         let (_, h) = get_service(&ipc, mem, b"echo\0\0\0\0");
         let s = session_at(h.unwrap());
-        let (rc, out) = send(&*s, mem, &control(cmif::CONTROL_QUERY_POINTER_BUFFER_SIZE, &[]));
+        let (rc, out) = send(
+            &*s,
+            mem,
+            &control(cmif::CONTROL_QUERY_POINTER_BUFFER_SIZE, &[]),
+        );
         assert_eq!(rc, 0);
         assert_eq!(&reply_result(&out).1[..2], [0, 0]);
     });
@@ -283,8 +303,14 @@ fn the_pointer_buffer_size_is_zero() {
 
 #[test]
 fn two_services_with_one_name_are_an_error() {
-    let a = Named { name: "echo", root: Arc::new(Echo("A")) };
-    let b = Named { name: "echo", root: Arc::new(Echo("B")) };
+    let a = Named {
+        name: "echo",
+        root: Arc::new(Echo("A")),
+    };
+    let b = Named {
+        name: "echo",
+        root: Arc::new(Echo("B")),
+    };
     assert_eq!(Ipc::new(vec![a, b]).err(), Some(DuplicateService("echo")));
 }
 

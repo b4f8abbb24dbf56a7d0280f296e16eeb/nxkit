@@ -58,7 +58,11 @@ impl AudioOutManager {
         // The sample format is PCM16.
         rsp.push_u32(2);
         rsp.push_u32(mixer().state(idx));
-        rsp.objects.push(Arc::new(AudioOutIface { idx, writable, readable }));
+        rsp.objects.push(Arc::new(AudioOutIface {
+            idx,
+            writable,
+            readable,
+        }));
     }
 }
 
@@ -107,12 +111,31 @@ impl AudioOutIface {
         };
         let mut ub = [0u8; USER_BUFFER];
         if b.size < USER_BUFFER as u64 || guest::read(b.addr, &mut ub).is_err() {
-            eprintln!("nxkit-audio: [RED] audout: the AudioUserBuffer at {:#x} is not readable", b.addr);
+            eprintln!(
+                "nxkit-audio: [RED] audout: the AudioUserBuffer at {:#x} is not readable",
+                b.addr
+            );
             rsp.result = RES_FAIL;
             return;
         }
-        let le = |o: usize| u64::from_le_bytes([ub[o], ub[o + 1], ub[o + 2], ub[o + 3], ub[o + 4], ub[o + 5], ub[o + 6], ub[o + 7]]);
-        let buf = Buf { token: tag, addr: le(8), size: le(0x18), host: false };
+        let le = |o: usize| {
+            u64::from_le_bytes([
+                ub[o],
+                ub[o + 1],
+                ub[o + 2],
+                ub[o + 3],
+                ub[o + 4],
+                ub[o + 5],
+                ub[o + 6],
+                ub[o + 7],
+            ])
+        };
+        let buf = Buf {
+            token: tag,
+            addr: le(8),
+            size: le(0x18),
+            host: false,
+        };
         if !mixer().append(self.idx, buf) {
             eprintln!("nxkit-audio: [RED] audout: the buffer queue is full, the buffer is dropped");
             rsp.result = RES_FAIL;
@@ -120,17 +143,24 @@ impl AudioOutIface {
     }
 
     fn released(&self, req: &Request<'_>, rsp: &mut Response) {
-        let room = req.buffer(BufferKind::Receive, 0).map_or(0, |b| (b.size / 8) as usize);
+        let room = req
+            .buffer(BufferKind::Receive, 0)
+            .map_or(0, |b| (b.size / 8) as usize);
         let mut tags: Vec<u8> = Vec::new();
         let mut n = 0u32;
         while (n as usize) < room {
-            let Some(b) = mixer().released(self.idx) else { break };
+            let Some(b) = mixer().released(self.idx) else {
+                break;
+            };
             tags.extend_from_slice(&b.token.to_le_bytes());
             n += 1;
         }
         if let Some(b) = req.buffer(BufferKind::Receive, 0) {
             if !tags.is_empty() && guest::write(b.addr, &tags).is_err() {
-                eprintln!("nxkit-audio: [RED] audout: the released buffer list at {:#x} is not writable", b.addr);
+                eprintln!(
+                    "nxkit-audio: [RED] audout: the released buffer list at {:#x} is not writable",
+                    b.addr
+                );
             }
         }
         rsp.push_u32(n);
@@ -162,7 +192,10 @@ impl Service for AudioOutIface {
                 m.purge(self.idx);
                 rsp.push_u32(u32::from(any));
             }
-            12 => m.set_volume(self.idx, f32::from_bits(req.u32_at(0).unwrap_or(1.0f32.to_bits()))),
+            12 => m.set_volume(
+                self.idx,
+                f32::from_bits(req.u32_at(0).unwrap_or(1.0f32.to_bits())),
+            ),
             13 => rsp.push_u32(m.volume(self.idx).to_bits()),
             _ => return Handled::Unknown,
         }

@@ -1,11 +1,13 @@
 //! Readers of the state objects for the command buffer group. The values of the enums are the raw NVN values.
 
 use super::{
-    AbiResult, BL_ADV, BL_ADV_DST_FREE, BL_ADV_NPM, BL_ADV_OVL, BL_DST_A, BL_DST_RGB, BL_EQ_A, BL_EQ_RGB, BL_SRC_A,
-    BL_SRC_RGB, BL_TARGET, BLEND, COLOR, COLOR_ALPHA_FUNC, COLOR_BLEND_EN, COLOR_LOGIC_OP, DS, DS_DF, DS_DT, DS_DW,
-    DS_FAIL_B, DS_FAIL_F, DS_SF_B, DS_SF_F, DS_ST, DS_ZFAIL_B, DS_ZFAIL_F, DS_ZPASS_B, DS_ZPASS_F, MS_A2C, MS_A2C_DITHER,
-    MS_C2C_EN, MS_C2C_OUT, MS_COV_MOD, MS_ENABLE, MS_RASTER, MS_SAMPLES, MS_SL_EN, MS_SL_GRID, Obj, PO_CULL, PO_FRONT,
-    PO_MODE, PO_OFFSET, POLY, VA, VA_FMT, VA_OFFSET, VA_STREAM, VS_DIVISOR, VS_STRIDE, byte, load, unpack,
+    AbiResult, BL_ADV, BL_ADV_DST_FREE, BL_ADV_NPM, BL_ADV_OVL, BL_DST_A, BL_DST_RGB, BL_EQ_A,
+    BL_EQ_RGB, BL_SRC_A, BL_SRC_RGB, BL_TARGET, BLEND, COLOR, COLOR_ALPHA_FUNC, COLOR_BLEND_EN,
+    COLOR_LOGIC_OP, DS, DS_DF, DS_DT, DS_DW, DS_FAIL_B, DS_FAIL_F, DS_SF_B, DS_SF_F, DS_ST,
+    DS_ZFAIL_B, DS_ZFAIL_F, DS_ZPASS_B, DS_ZPASS_F, MS_A2C, MS_A2C_DITHER, MS_C2C_EN, MS_C2C_OUT,
+    MS_COV_MOD, MS_ENABLE, MS_RASTER, MS_SAMPLES, MS_SL_EN, MS_SL_GRID, Obj, PO_CULL, PO_FRONT,
+    PO_MODE, PO_OFFSET, POLY, VA, VA_FMT, VA_OFFSET, VA_STREAM, VS_DIVISOR, VS_STRIDE, byte, load,
+    unpack,
 };
 
 /// A blend state.
@@ -68,7 +70,11 @@ pub(crate) struct ChannelMaskState {
 impl ChannelMaskState {
     /// The channels of render target `i`, 0 for an index above 7.
     pub(crate) fn channels(&self, i: u32) -> u8 {
-        if i < 8 { (self.mask >> (4 * i) & 0xf) as u8 } else { 0 }
+        if i < 8 {
+            (self.mask >> (4 * i) & 0xf) as u8
+        } else {
+            0
+        }
     }
 
     /// Bit n is set when render target n has at least one channel to write.
@@ -195,7 +201,9 @@ pub(crate) fn color(s: u64) -> AbiResult<ColorState> {
 
 /// Reads the `NVNchannelMaskState` at the guest address `s`.
 pub(crate) fn channel_mask(s: u64) -> AbiResult<ChannelMaskState> {
-    Ok(ChannelMaskState { mask: Obj(s).u32(0)? })
+    Ok(ChannelMaskState {
+        mask: Obj(s).u32(0)?,
+    })
 }
 
 /// Reads the `NVNdepthStencilState` at the guest address `s`.

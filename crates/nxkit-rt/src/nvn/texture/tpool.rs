@@ -36,7 +36,8 @@ extern "C" fn initialize(tp: u64, memory_pool: u64, off: i64, n: i32) -> u32 {
             (memory_pool, off),
             n,
             |base, count, host| {
-                gpu("nvnTexturePoolInitialize").with_front(|f| f.add_texture_pool(base, count, host))
+                gpu("nvnTexturePoolInitialize")
+                    .with_front(|f| f.add_texture_pool(base, count, host))
             },
         )
     })
@@ -60,7 +61,10 @@ fn register(name: &'static str, tp: u64, id: i32, t: u64, v: u64) -> AbiResult<(
     }
     let tv = view::texture_view(v, tex.swizzle)?;
     let g = gpu(name);
-    let (registered, dropped) = g.with_front(|f| f.register_texture(slot.id, tex.id, tv).map(|r| (r, f.take_dropped())))?;
+    let (registered, dropped) = g.with_front(|f| {
+        f.register_texture(slot.id, tex.id, tv)
+            .map(|r| (r, f.take_dropped()))
+    })?;
     for id in dropped {
         g.backend().texture_finalized(id);
     }
@@ -85,7 +89,9 @@ extern "C" fn get_memory_pool(tp: u64) -> u64 {
 }
 
 extern "C" fn get_memory_offset(tp: u64) -> i64 {
-    guard("nvnTexturePoolGetMemoryOffset", || pool::memory_offset_of(tp))
+    guard("nvnTexturePoolGetMemoryOffset", || {
+        pool::memory_offset_of(tp)
+    })
 }
 
 extern "C" fn get_size(tp: u64) -> i32 {

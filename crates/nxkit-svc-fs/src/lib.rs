@@ -82,7 +82,9 @@ pub(crate) fn fs() -> Option<&'static Fs> {
     if fs.is_none() {
         static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !NOTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            eprintln!("[RED] nxkit-svc-fs: the game used the file system before init was called, so every call fails");
+            eprintln!(
+                "[RED] nxkit-svc-fs: the game used the file system before init was called, so every call fails"
+            );
         }
     }
     fs
@@ -107,5 +109,8 @@ pub fn big_stack_exports() -> Vec<Export> {
 /// The IPC services of this crate: `fsp-srv`. The root interface reaches the service at the time of a command, so
 /// [`init`] may come before or after this call.
 pub fn services() -> Vec<Named> {
-    vec![Named { name: "fsp-srv", root: Arc::new(ipc::FspSrv::new()) }]
+    vec![Named {
+        name: "fsp-srv",
+        root: Arc::new(ipc::FspSrv::new()),
+    }]
 }

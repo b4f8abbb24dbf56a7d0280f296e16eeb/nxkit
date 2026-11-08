@@ -475,12 +475,18 @@ pub(crate) struct Dec {
 }
 
 /// Decodes one packet on a thread with a big stack, because the caller can be a guest thread with 8 KB.
-fn decode_big(codec: Codec, stream: &mut Stream, data: &[u8]) -> Result<Option<Arc<Frame>>, String> {
+fn decode_big(
+    codec: Codec,
+    stream: &mut Stream,
+    data: &[u8],
+) -> Result<Option<Arc<Frame>>, String> {
     std::thread::scope(|s| {
-        let job = std::thread::Builder::new().stack_size(DECODE_STACK).spawn_scoped(s, || match codec {
-            Codec::Av1 => decode_av1(stream, crate::backend::open_av1, data),
-            _ => decode_packet(stream, crate::backend::open, data),
-        });
+        let job = std::thread::Builder::new()
+            .stack_size(DECODE_STACK)
+            .spawn_scoped(s, || match codec {
+                Codec::Av1 => decode_av1(stream, crate::backend::open_av1, data),
+                _ => decode_packet(stream, crate::backend::open, data),
+            });
         match job {
             Ok(h) => h
                 .join()
@@ -519,7 +525,11 @@ impl Dec {
 
     /// Registers buffer `i`, which is acquirable at once.
     pub(crate) fn register(&mut self, i: u32, pool: Option<PoolRef>, pidx: u32) -> u32 {
-        trace(format_args!("dec {} register {i} pool idx {pidx} native {}", self.id, pool.as_ref().is_some_and(|p| lock(p).native)));
+        trace(format_args!(
+            "dec {} register {i} pool idx {pidx} native {}",
+            self.id,
+            pool.as_ref().is_some_and(|p| lock(p).native)
+        ));
         let Some(s) = self.slots.get_mut(i as usize) else {
             red(&format!(
                 "nn::codec: register of buffer {i}, a decoder has {BUFS}"
@@ -603,7 +613,13 @@ impl Dec {
         eos: bool,
         fx: &mut Effects,
     ) -> Result<u64, u32> {
-        trace(format_args!("dec {} submit {} bytes ts {ts} eos {eos} (held {}, pend {:?})", self.id, data.len(), self.held.len(), self.pend));
+        trace(format_args!(
+            "dec {} submit {} bytes ts {ts} eos {eos} (held {}, pend {:?})",
+            self.id,
+            data.len(),
+            self.held.len(),
+            self.pend
+        ));
         if self.held.len() >= HOLD {
             if self.refused < 4 {
                 self.refused += 1;
@@ -714,7 +730,12 @@ impl Dec {
     /// The oldest acquirable buffer and its sync handle.
     pub(crate) fn acquire(&mut self) -> Result<(u32, SyncHandle), u32> {
         let i = self.fifo.pop_front().ok_or(NONE);
-        trace(format_args!("dec {} acquire -> {i:?} (fifo {:?}, held {})", self.id, self.fifo, self.held.len()));
+        trace(format_args!(
+            "dec {} acquire -> {i:?} (fifo {:?}, held {})",
+            self.id,
+            self.fifo,
+            self.held.len()
+        ));
         let i = i?;
         let generation = self.slots.get(i as usize).map_or(0, |s| s.generation);
         Ok((
@@ -730,7 +751,12 @@ impl Dec {
 
     /// The buffer waits for the next picture and can be acquired again.
     pub(crate) fn release(&mut self, i: u32, fx: &mut Effects) {
-        trace(format_args!("dec {} release {i} (held {}, pend {:?})", self.id, self.held.len(), self.pend));
+        trace(format_args!(
+            "dec {} release {i} (held {}, pend {:?})",
+            self.id,
+            self.held.len(),
+            self.pend
+        ));
         match self.slots.get_mut(i as usize) {
             Some(s) if s.reg => {
                 s.generation = s.generation.wrapping_add(1);
@@ -759,7 +785,10 @@ impl Dec {
     /// The width, height, time and end of stream flag of the picture in buffer `i`. [`NONE`] until it is filled.
     pub(crate) fn properties(&self, i: u32) -> Result<(u16, u16, i64, bool), u32> {
         let s = self.slots.get(i as usize).ok_or(BAD)?;
-        trace(format_args!("dec {} properties {i} filled {}", self.id, s.filled));
+        trace(format_args!(
+            "dec {} properties {i} filled {}",
+            self.id, s.filled
+        ));
         if s.filled {
             Ok((s.w, s.h, s.ts, s.eos))
         } else {
@@ -848,7 +877,11 @@ pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u
     eprintln!(
         "[codec] {} decoder {id}: {w}x{h}, input format {input}, output format {output} ({} on the host)",
         codec.name(),
-        if codec == Codec::Av1 { "VideoToolbox or rav1d" } else { "VideoToolbox" }
+        if codec == Codec::Av1 {
+            "VideoToolbox or rav1d"
+        } else {
+            "VideoToolbox"
+        }
     );
     0
 }
@@ -890,7 +923,10 @@ pub(crate) fn apply(dec: u32, event: u64, fx: Effects) {
 /// Whether the picture that `s` waits for is in its buffer. A handle that the host did not make reads as signalled.
 pub(crate) fn sync_reached(s: &SyncHandle) -> bool {
     let r = sync_reached_in(s);
-    trace(format_args!("sync dec {} idx {} gen {} reached {r}", s.dec, s.idx, s.generation));
+    trace(format_args!(
+        "sync dec {} idx {} gen {} reached {r}",
+        s.dec, s.idx, s.generation
+    ));
     r
 }
 

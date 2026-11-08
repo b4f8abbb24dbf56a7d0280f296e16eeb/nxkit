@@ -5,21 +5,21 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSArray, NSURL};
 use objc2_metal::{
-    MTL4AlphaToCoverageState, MTL4Archive, MTL4BlendState, MTL4Compiler, MTL4CompilerDescriptor, MTL4CompilerTaskOptions,
-    MTL4ComputePipelineDescriptor, MTL4IndirectCommandBufferSupportState, MTL4LibraryDescriptor,
-    MTL4LibraryFunctionDescriptor, MTL4MeshRenderPipelineDescriptor, MTL4PipelineDataSetSerializer,
-    MTL4PipelineDataSetSerializerConfiguration, MTL4PipelineDataSetSerializerDescriptor,
-    MTL4RenderPipelineDescriptor, MTLBlendFactor, MTLBlendOperation, MTLColorWriteMask,
-    MTLComputePipelineState, MTLDevice, MTLLibrary, MTLPixelFormat, MTLPrimitiveTopologyClass,
-    MTLRenderPipelineState,
+    MTL4AlphaToCoverageState, MTL4Archive, MTL4BlendState, MTL4Compiler, MTL4CompilerDescriptor,
+    MTL4CompilerTaskOptions, MTL4ComputePipelineDescriptor, MTL4IndirectCommandBufferSupportState,
+    MTL4LibraryDescriptor, MTL4LibraryFunctionDescriptor, MTL4MeshRenderPipelineDescriptor,
+    MTL4PipelineDataSetSerializer, MTL4PipelineDataSetSerializerConfiguration,
+    MTL4PipelineDataSetSerializerDescriptor, MTL4RenderPipelineDescriptor, MTLBlendFactor,
+    MTLBlendOperation, MTLColorWriteMask, MTLComputePipelineState, MTLDevice, MTLLibrary,
+    MTLPixelFormat, MTLPrimitiveTopologyClass, MTLRenderPipelineState,
 };
 
 use crate::device::{Context, RawCompiler, ns};
@@ -151,7 +151,10 @@ impl<'a> RenderPipelineDesc<'a> {
         Self {
             vertex,
             fragment,
-            colors: color_formats.iter().map(|f| Some(ColorTarget::new(*f))).collect(),
+            colors: color_formats
+                .iter()
+                .map(|f| Some(ColorTarget::new(*f)))
+                .collect(),
             vertex_layout: VertexDescriptor::default(),
             topology: TopologyClass::Triangle,
             sample_count: 1,
@@ -273,7 +276,9 @@ impl PipelineCache {
                 .device()
                 .newArchiveWithURL_error(&NSURL::fileURLWithPath(&ns(p)))
                 .map_err(|e| create("pipeline archive", e.localizedDescription()))?;
-            options.setLookupArchives(Some(&NSArray::from_retained_slice(std::slice::from_ref(&a))));
+            options.setLookupArchives(Some(&NSArray::from_retained_slice(std::slice::from_ref(
+                &a,
+            ))));
             archive_obj = Some(a);
             loaded_archive = true;
         }
@@ -376,7 +381,9 @@ impl PipelineCache {
     /// group of the pipeline's state set at a time. Costs up to nine archive lookups, so call it for a diagnostic.
     pub fn explain_miss(&self, desc: &RenderPipelineDesc<'_>) -> Result<MissWhy> {
         let mut why = MissWhy::default();
-        let Some(a) = &self.archive else { return Ok(why) };
+        let Some(a) = &self.archive else {
+            return Ok(why);
+        };
         let ask = |group: Option<&str>| -> Result<bool> {
             let d = self.render_descriptor(desc)?;
             assume_defaults(&d);
@@ -406,7 +413,10 @@ impl PipelineCache {
     }
 
     /// The Metal descriptor of a render pipeline.
-    fn render_descriptor(&self, desc: &RenderPipelineDesc<'_>) -> Result<Retained<MTL4RenderPipelineDescriptor>> {
+    fn render_descriptor(
+        &self,
+        desc: &RenderPipelineDesc<'_>,
+    ) -> Result<Retained<MTL4RenderPipelineDescriptor>> {
         let d = MTL4RenderPipelineDescriptor::new();
         let vf = desc.vertex.0.function(desc.vertex.1)?;
         d.setVertexFunctionDescriptor(Some(&vf));
@@ -459,7 +469,11 @@ impl PipelineCache {
 
     /// Like [`PipelineCache::mesh`], and tells where the pipeline came from. The build's archive has no mesh pipeline,
     /// so the answer is `Cached` or `Compiled`.
-    pub fn mesh_traced(&self, key: u64, desc: &MeshPipelineDesc<'_>) -> Result<(RenderPipeline, Source)> {
+    pub fn mesh_traced(
+        &self,
+        key: u64,
+        desc: &MeshPipelineDesc<'_>,
+    ) -> Result<(RenderPipeline, Source)> {
         if let Some(Entry::Render(p)) = self.lookup(key)? {
             return Ok((p, Source::Cached));
         }
@@ -599,8 +613,16 @@ impl PipelineCache {
 }
 
 /// The state groups [`PipelineCache::explain_miss`] asks about.
-const GROUPS: [&str; 8] =
-    ["topology", "samples", "alpha-to-coverage", "vertex-layout", "color-formats", "blend", "write-mask", "icb"];
+const GROUPS: [&str; 8] = [
+    "topology",
+    "samples",
+    "alpha-to-coverage",
+    "vertex-layout",
+    "color-formats",
+    "blend",
+    "write-mask",
+    "icb",
+];
 
 /// The state the build's archive assumes: eight unspecialized colour attachments, no vertex layout, no class, one
 /// sample, no alpha to coverage, no ICB support (`plan::script_text_with` of `nxb-archive`).

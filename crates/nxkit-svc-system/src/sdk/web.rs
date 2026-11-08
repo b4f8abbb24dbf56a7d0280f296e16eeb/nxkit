@@ -32,7 +32,10 @@ struct Session {
     ready_messages: u32,
 }
 
-static SESSION: Mutex<Session> = Mutex::new(Session { phase: Phase::Idle, ready_messages: 0 });
+static SESSION: Mutex<Session> = Mutex::new(Session {
+    phase: Phase::Idle,
+    ready_messages: 0,
+});
 static CHANGED: Condvar = Condvar::new();
 
 fn open(phase: Phase) -> bool {
@@ -124,7 +127,10 @@ extern "C" fn session_finalize(_this: u64) {
 
 /// `OfflineWebSession::Start(SystemEventType**, const ShowOfflineHtmlPageArg&)`.
 extern "C" fn session_start(_this: u64, event_out: u64, arg: u64) -> u32 {
-    super::log(&format!("web: offline page {} (no web view, the stand-in answers)", document_path(arg)));
+    super::log(&format!(
+        "web: offline page {} (no web view, the stand-in answers)",
+        document_path(arg)
+    ));
     start();
     put_u64(event_out, EXIT_EVENT.addr(0x100));
     0
@@ -176,7 +182,10 @@ extern "C" fn session_wait_for_exit(_this: u64, rv: u64) -> u32 {
 
 /// `ShowOfflineHtmlPage(OfflineHtmlPageReturnValue*, const ShowOfflineHtmlPageArg&)`: fails, no page is shown.
 extern "C" fn show_page(_rv: u64, arg: u64) -> u32 {
-    super::log(&format!("web::ShowOfflineHtmlPage {}: no page shown", document_path(arg)));
+    super::log(&format!(
+        "web::ShowOfflineHtmlPage {}: no page shown",
+        document_path(arg)
+    ));
     RES_FAIL
 }
 

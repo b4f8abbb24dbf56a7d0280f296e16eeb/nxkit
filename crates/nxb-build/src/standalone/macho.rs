@@ -24,7 +24,14 @@ pub struct Seg<'a> {
     pub exec: bool,
 }
 
-fn segment_cmd(name: &str, addr: u64, vmsize: u64, fileoff: u64, filesize: u64, prot: u32) -> Vec<u8> {
+fn segment_cmd(
+    name: &str,
+    addr: u64,
+    vmsize: u64,
+    fileoff: u64,
+    filesize: u64,
+    prot: u32,
+) -> Vec<u8> {
     let mut n = [0u8; 16];
     n[..name.len()].copy_from_slice(name.as_bytes());
     let mut c = Vec::with_capacity(SEGMENT_CMD);
@@ -56,16 +63,25 @@ pub fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     let mut end = 0u64;
     for s in segs {
         if s.name.is_empty() || s.name.len() > 16 || !s.name.is_ascii() {
-            return Err(format!("macho: segment name {:?} is not 1 to 16 ASCII bytes", s.name));
+            return Err(format!(
+                "macho: segment name {:?} is not 1 to 16 ASCII bytes",
+                s.name
+            ));
         }
         if s.addr % PAGE != 0 || s.mem_size % PAGE != 0 || s.mem_size == 0 {
             return Err(format!("macho: segment {} is not 16K aligned", s.name));
         }
         if (s.data.len() as u64) > s.mem_size {
-            return Err(format!("macho: segment {} has more bytes than memory", s.name));
+            return Err(format!(
+                "macho: segment {} has more bytes than memory",
+                s.name
+            ));
         }
         if s.addr < end {
-            return Err(format!("macho: segment {} overlaps the one before it or is out of order", s.name));
+            return Err(format!(
+                "macho: segment {} overlaps the one before it or is out of order",
+                s.name
+            ));
         }
         end = s.addr + s.mem_size;
     }
@@ -77,7 +93,14 @@ pub fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     let mut off = PAGE;
     for s in segs {
         let file = (s.data.len() as u64).div_ceil(PAGE) * PAGE;
-        cmds.push(segment_cmd(s.name, s.addr, s.mem_size, off, file, if s.exec { 5 } else { 3 }));
+        cmds.push(segment_cmd(
+            s.name,
+            s.addr,
+            s.mem_size,
+            off,
+            file,
+            if s.exec { 5 } else { 3 },
+        ));
         body.extend_from_slice(s.data);
         body.resize(body.len() + (file as usize - s.data.len()), 0);
         off += file;
@@ -106,7 +129,16 @@ pub fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     if off > u64::from(u32::MAX) {
         return Err("macho: the file is larger than 4 GiB".into());
     }
-    let mut out = words(&[0xfeed_facf, 0x0100_000c, 0, 6, cmds.len() as u32, size as u32, 0x0010_0085, 0]);
+    let mut out = words(&[
+        0xfeed_facf,
+        0x0100_000c,
+        0,
+        6,
+        cmds.len() as u32,
+        size as u32,
+        0x0010_0085,
+        0,
+    ]);
     for c in &cmds {
         out.extend_from_slice(c);
     }
@@ -128,8 +160,20 @@ mod tests {
     fn writes_a_header_and_the_segment_bytes() {
         let code = [0x40, 0x05, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6];
         let segs = [
-            Seg { name: "__NX_A_TEXT", addr: 0x100_0001_0000, data: &code, mem_size: PAGE, exec: true },
-            Seg { name: "__NX_A_DATA", addr: 0x100_0001_4000, data: b"hello", mem_size: 3 * PAGE, exec: false },
+            Seg {
+                name: "__NX_A_TEXT",
+                addr: 0x100_0001_0000,
+                data: &code,
+                mem_size: PAGE,
+                exec: true,
+            },
+            Seg {
+                name: "__NX_A_DATA",
+                addr: 0x100_0001_4000,
+                data: b"hello",
+                mem_size: 3 * PAGE,
+                exec: false,
+            },
         ];
         let f = write(&segs, [7; 16]).unwrap();
         assert_eq!(u32at(&f, 0), 0xfeed_facf);
@@ -141,7 +185,13 @@ mod tests {
 
     #[test]
     fn refuses_bad_input() {
-        let s = |name, addr| Seg { name, addr, data: &[], mem_size: PAGE, exec: false };
+        let s = |name, addr| Seg {
+            name,
+            addr,
+            data: &[],
+            mem_size: PAGE,
+            exec: false,
+        };
         assert!(write(&[], [0; 16]).is_err());
         assert!(write(&[s("__THIS_NAME_IS_TOO_LONG", 0x1_0000)], [0; 16]).is_err());
         assert!(write(&[s("__A", 0x1_0001)], [0; 16]).is_err());

@@ -154,7 +154,9 @@ fn read_stage(index: usize, data: u64, control: u64, settings: &Settings) -> Abi
 
 /// The host address of the code at the GPU address `data`. None when no memory pool holds it.
 fn code_host(data: u64, len: u32) -> Option<u64> {
-    let host = gpu("nvnProgramSetShaders").host_address(data, u64::from(len)).ok()?;
+    let host = gpu("nvnProgramSetShaders")
+        .host_address(data, u64::from(len))
+        .ok()?;
     guest::check(host, u64::from(len)).ok()?;
     Some(host)
 }
@@ -199,7 +201,10 @@ pub(crate) fn stages_of(name: &str, program: u64) -> Option<Vec<StageKey>> {
             let Some(host) = code_host(s.code, s.code_len) else {
                 fatal(
                     name,
-                    format_args!("the code of a shader stage at GPU address {:#x} is in no memory pool", s.code),
+                    format_args!(
+                        "the code of a shader stage at GPU address {:#x} is in no memory pool",
+                        s.code
+                    ),
                 )
             };
             match code_key(&s.key_bytes, host, s.code_len) {
@@ -251,7 +256,9 @@ fn set_shaders(name: &'static str, p: u64, n: i32, sd: u64, stride: u64) -> AbiR
 }
 
 extern "C" fn program_builder_set_defaults(b: u64) {
-    guard("nvnProgramBuilderSetDefaults", || Obj(b).zero(used::PROGRAM_BUILDER));
+    guard("nvnProgramBuilderSetDefaults", || {
+        Obj(b).zero(used::PROGRAM_BUILDER)
+    });
 }
 
 extern "C" fn program_builder_set_device(b: u64, dev: u64) {

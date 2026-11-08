@@ -120,9 +120,13 @@ impl View {
     /// value.
     fn same(&self, o: &Self) -> bool {
         let both = |bit: u8, eq: bool| self.has(bit) == o.has(bit) && (!self.has(bit) || eq);
-        both(SET_LEVELS, (self.base_level, self.levels) == (o.base_level, o.levels))
-            && both(SET_LAYERS, (self.first_layer, self.layers) == (o.first_layer, o.layers))
-            && both(SET_FORMAT, self.format == o.format)
+        both(
+            SET_LEVELS,
+            (self.base_level, self.levels) == (o.base_level, o.levels),
+        ) && both(
+            SET_LAYERS,
+            (self.first_layer, self.layers) == (o.first_layer, o.layers),
+        ) && both(SET_FORMAT, self.format == o.format)
             && both(SET_TARGET, self.target == o.target)
             && both(SET_SWIZZLE, self.swizzle == o.swizzle)
             && both(SET_MODE, self.bits >> MODE_SHIFT == o.bits >> MODE_SHIFT)
@@ -342,9 +346,15 @@ mod tests {
         set_format(v, 0x25);
         set_target(v, 4);
         assert!(set(get_levels(v, a, b)));
-        assert_eq!((Obj(a).i32(0).expect("a"), Obj(b).i32(0).expect("b")), (2, 3));
+        assert_eq!(
+            (Obj(a).i32(0).expect("a"), Obj(b).i32(0).expect("b")),
+            (2, 3)
+        );
         assert!(set(get_layers(v, a, b)));
-        assert_eq!((Obj(a).i32(0).expect("a"), Obj(b).i32(0).expect("b")), (4, 5));
+        assert_eq!(
+            (Obj(a).i32(0).expect("a"), Obj(b).i32(0).expect("b")),
+            (4, 5)
+        );
         assert!(set(get_format(v, a)));
         assert_eq!(Obj(a).i32(0).expect("format"), 0x25);
         assert!(set(get_target(v, a)));
@@ -361,7 +371,10 @@ mod tests {
         assert_eq!(Obj(out).i32(12).expect("a"), 5);
         set_swizzle(v, 5, 4, 3, 2);
         assert!(set(get_swizzle(v, out, 0, 0, out + 12)));
-        assert_eq!((Obj(out).i32(0).expect("r"), Obj(out).i32(12).expect("a")), (5, 2));
+        assert_eq!(
+            (Obj(out).i32(0).expect("r"), Obj(out).i32(12).expect("a")),
+            (5, 2)
+        );
     }
 
     #[test]
@@ -401,12 +414,21 @@ mod tests {
         set_format(v, 0x25);
         set_target(v, 1);
         let t = texture_view(v, [5, 4, 3, 2]).expect("view");
-        assert_eq!((t.base_level, t.levels, t.base_layer, t.layers), (1, 2, 3, 4));
+        assert_eq!(
+            (t.base_level, t.levels, t.base_layer, t.layers),
+            (1, 2, 3, 4)
+        );
         assert_eq!(t.format, Some(0x25));
         assert_eq!(t.target, Some(Target::D2));
         assert_eq!(t.swizzle, [5, 4, 3, 2]);
         set_swizzle(v, 0, 1, 2, 3);
-        assert_eq!(texture_view(v, [5, 4, 3, 2]).expect("view").swizzle, [0, 1, 2, 3]);
-        assert_eq!(texture_view(0, [2, 3, 4, 5]).expect("view"), TextureView::identity());
+        assert_eq!(
+            texture_view(v, [5, 4, 3, 2]).expect("view").swizzle,
+            [0, 1, 2, 3]
+        );
+        assert_eq!(
+            texture_view(0, [2, 3, 4, 5]).expect("view"),
+            TextureView::identity()
+        );
     }
 }

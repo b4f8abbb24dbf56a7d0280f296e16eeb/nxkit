@@ -47,7 +47,10 @@ mod imp {
             }
             // SAFETY: `dispatch_time` only computes a number. `raw` is a live semaphore.
             unsafe {
-                let deadline = dispatch_time(0, i64::try_from(ms.saturating_mul(1_000_000)).unwrap_or(i64::MAX));
+                let deadline = dispatch_time(
+                    0,
+                    i64::try_from(ms.saturating_mul(1_000_000)).unwrap_or(i64::MAX),
+                );
                 dispatch_semaphore_wait(self.raw, deadline);
             }
         }
@@ -85,7 +88,10 @@ mod imp {
         /// Waits for a signal for up to `ms` milliseconds.
         pub fn wait_ms(&self, ms: u64) {
             if let Ok(c) = self.count.lock() {
-                if let Ok((mut c, _)) = self.cv.wait_timeout_while(c, Duration::from_millis(ms), |c| *c == 0) {
+                if let Ok((mut c, _)) =
+                    self.cv
+                        .wait_timeout_while(c, Duration::from_millis(ms), |c| *c == 0)
+                {
                     *c = c.saturating_sub(1);
                 }
             }

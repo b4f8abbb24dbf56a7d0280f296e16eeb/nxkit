@@ -31,7 +31,9 @@ pub(super) extern "C" fn mount_rom_plain(name: u64) -> u32 {
 
 pub(super) extern "C" fn mount_rom_index(name: u64, index: i32, _cache: u64, _size: u64) -> u32 {
     if index != 0 {
-        eprintln!("[RED] nxkit-svc-fs: MountRom with program index {index}: the host has the romfs of this program only");
+        eprintln!(
+            "[RED] nxkit-svc-fs: MountRom with program index {index}: the host has the romfs of this program only"
+        );
     }
     run_text(name, |fs, n| fs.mount_rom(n))
 }
@@ -75,7 +77,9 @@ pub(super) extern "C" fn is_mounted(name: u64) -> u32 {
 }
 
 pub(super) extern "C" fn is_path_mounted(path: u64) -> u32 {
-    let (Ok(p), Some(fs)) = (text(path), crate::fs()) else { return 0 };
+    let (Ok(p), Some(fs)) = (text(path), crate::fs()) else {
+        return 0;
+    };
     let p = names::fwd_slashes(&p);
     u32::from(names::split_mount(&p).is_some_and(|(n, _)| fs.find(n).is_some()))
 }
@@ -159,7 +163,9 @@ pub(super) extern "C" fn is_save_existing(_uid: u64) -> u32 {
 }
 
 pub(super) extern "C" fn mount_save_read_only(_name: u64, app: u64, _uid: u64) -> u32 {
-    eprintln!("[RED] nxkit-svc-fs: read-only mount of the save data of program {app:016x}: the host has none");
+    eprintln!(
+        "[RED] nxkit-svc-fs: read-only mount of the save data of program {app:016x}: the host has none"
+    );
     TARGET_NOT_FOUND
 }
 
@@ -169,7 +175,11 @@ pub(super) extern "C" fn mount_save(name: u64, _uid: u64) -> u32 {
 
 pub(super) extern "C" fn mount_device_save(name: u64) -> u32 {
     run_text(name, |fs, n| {
-        let dir = if fs.cfg.separate_device_save { fs.device_save_dir() } else { fs.save_dir() };
+        let dir = if fs.cfg.separate_device_save {
+            fs.device_save_dir()
+        } else {
+            fs.save_dir()
+        };
         fs.mount_save(n, &dir)
     })
 }
@@ -187,10 +197,14 @@ pub(super) extern "C" fn commit_option(name: u64, _option: u64) -> u32 {
 }
 
 pub(super) extern "C" fn commit_list(names: u64, count: i32) -> u32 {
-    let Ok(count) = u64::try_from(count) else { return FAIL };
+    let Ok(count) = u64::try_from(count) else {
+        return FAIL;
+    };
     let mut list = Vec::new();
     for i in 0..count {
-        let Ok(p) = guest::read_u64(names + 8 * i) else { return FAIL };
+        let Ok(p) = guest::read_u64(names + 8 * i) else {
+            return FAIL;
+        };
         match text(p) {
             Ok(t) => list.push(t),
             Err(r) => return r,
@@ -205,7 +219,9 @@ static UNMOUNT_NOTED: AtomicBool = AtomicBool::new(false);
 /// game mounted through the SDK) is released there, through the guest symbol lookup the host sets with
 /// `set_guest_sym`. The SDK's `Unmount` aborts on a name it does not hold, so `IsMounted` runs first.
 pub(super) extern "C" fn unmount(name: u64) {
-    let (Ok(n), Some(fs)) = (text(name), crate::fs()) else { return };
+    let (Ok(n), Some(fs)) = (text(name), crate::fs()) else {
+        return;
+    };
     if fs.find(&n).is_some() {
         return;
     }
@@ -222,7 +238,10 @@ pub(super) extern "C" fn unmount(name: u64) {
         return;
     };
     if crate::sys::release_sdk_mount(is_mounted, unmount, name) {
-        eprintln!("nxkit-svc-fs: Unmount of {}: in the SDK's own mount table, released there", String::from_utf8_lossy(&n));
+        eprintln!(
+            "nxkit-svc-fs: Unmount of {}: in the SDK's own mount table, released there",
+            String::from_utf8_lossy(&n)
+        );
     }
 }
 

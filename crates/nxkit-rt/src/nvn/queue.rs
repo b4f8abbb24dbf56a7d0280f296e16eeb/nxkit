@@ -153,7 +153,9 @@ extern "C" fn queue_get_error(_q: u64, _info: u64) -> u32 {
 }
 
 extern "C" fn queue_submit_commands(q: u64, n: i32, handles: u64) {
-    super::frametime::timed(super::frametime::Part::Submit, || submit_commands_in(q, n, handles));
+    super::frametime::timed(super::frametime::Part::Submit, || {
+        submit_commands_in(q, n, handles)
+    });
 }
 
 fn submit_commands_in(q: u64, n: i32, handles: u64) {
@@ -187,7 +189,9 @@ extern "C" fn queue_finish(_q: u64) {
 /// frame `n - 1`: it is judged against the larger hold of the two, at least one 60 Hz vsync.
 fn snap_view(presents: u64) -> Option<nxkit_svc_pacing::load::SnapView> {
     let n = presents.checked_sub(8).filter(|n| *n > 1)?;
-    let k = nxkit_nvn::screen::hold(n).max(nxkit_nvn::screen::hold(n - 1)).max(1);
+    let k = nxkit_nvn::screen::hold(n)
+        .max(nxkit_nvn::screen::hold(n - 1))
+        .max(1);
     Some(nxkit_svc_pacing::load::SnapView {
         presented: nxkit_nvn::screen::shown_at(n),
         before: nxkit_nvn::screen::shown_at(n - 1),
@@ -212,14 +216,24 @@ fn pace_present(now_ns: u64) {
         low_power: false,
         perf: None,
     };
-    let Ok(done) = nxkit_svc_pacing::frame_presented(&sample) else { return };
+    let Ok(done) = nxkit_svc_pacing::frame_presented(&sample) else {
+        return;
+    };
     if let Ok(k) = nxkit_svc_pacing::hold() {
         nxkit_nvn::screen::set_hold(presents, u32::try_from(k).unwrap_or(0));
     }
     for e in done.outcome.iter().flat_map(|o| &o.events) {
         match e {
-            nxkit_svc_pacing::load::Event::HoldChanged { from, to, why, cost, .. } => {
-                eprintln!("nxkit-pacing: frame step: hold {from} -> {to} ({why:?}, cost {cost:.2} vsyncs)");
+            nxkit_svc_pacing::load::Event::HoldChanged {
+                from,
+                to,
+                why,
+                cost,
+                ..
+            } => {
+                eprintln!(
+                    "nxkit-pacing: frame step: hold {from} -> {to} ({why:?}, cost {cost:.2} vsyncs)"
+                );
             }
             nxkit_svc_pacing::load::Event::Window { held, seconds } => match seconds {
                 Some((game, real)) => eprintln!(
@@ -234,7 +248,9 @@ fn pace_present(now_ns: u64) {
 }
 
 extern "C" fn queue_present_texture(q: u64, w: u64, index: i32) {
-    super::frametime::timed(super::frametime::Part::Present, || present_texture_in(q, w, index));
+    super::frametime::timed(super::frametime::Part::Present, || {
+        present_texture_in(q, w, index)
+    });
 }
 
 fn present_texture_in(_q: u64, w: u64, index: i32) {

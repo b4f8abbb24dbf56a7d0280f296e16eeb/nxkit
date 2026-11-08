@@ -7,7 +7,9 @@ const ZST: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 
 #[test]
 fn a_compressed_file_outside_the_groups_is_left_alone() {
-    let p = Profile::from_game_tsv("shader_groups\t/Shader/=shader /Effect/=effect\nshader_scope\tgroups\n");
+    let p = Profile::from_game_tsv(
+        "shader_groups\t/Shader/=shader /Effect/=effect\nshader_scope\tgroups\n",
+    );
     // in a group: read, compressed or not
     assert!(p.reads("/Shader/a.bfsha.zs", &ZST));
     assert!(p.reads("/Effect/x/b.byml.zs", &ZST));

@@ -169,7 +169,8 @@ pub(crate) mod testutil {
     pub(crate) fn guest_memory() -> (u64, MutexGuard<'static, ()>) {
         static BLOCK: OnceLock<u64> = OnceLock::new();
         let guard = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-        let base = *BLOCK.get_or_init(|| Box::leak(vec![0u64; WORDS].into_boxed_slice()).as_ptr() as u64);
+        let base =
+            *BLOCK.get_or_init(|| Box::leak(vec![0u64; WORDS].into_boxed_slice()).as_ptr() as u64);
         guest::set_range(base, BYTES);
         let _ = guest::fill(base, BYTES, 0);
         (base, guard)
@@ -206,7 +207,11 @@ mod tests {
 
     #[test]
     fn touches_are_accepted_at_any_time() {
-        set_touches(&[Touch { id: 0, x: 0.5, y: 0.5 }]);
+        set_touches(&[Touch {
+            id: 0,
+            x: 0.5,
+            y: 0.5,
+        }]);
         set_touches(&[]);
     }
 }

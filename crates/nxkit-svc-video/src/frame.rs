@@ -35,12 +35,27 @@ impl Frame {
     /// A picture from NV12 bytes in memory. `colorspace` is the `nv12-colorspace` of the SDK: 1 BT.601 limited,
     /// 2 BT.601 full, 3 BT.709 limited, 4 BT.709 full.
     pub fn from_nv12(width: u32, height: u32, colorspace: u32, planes: Nv12) -> Frame {
-        Frame { width, height, colorspace, pixels: Pixels::Memory(planes) }
+        Frame {
+            width,
+            height,
+            colorspace,
+            pixels: Pixels::Memory(planes),
+        }
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn from_buffer(width: u32, height: u32, colorspace: u32, buffer: crate::sys::vt::PixelBuffer) -> Frame {
-        Frame { width, height, colorspace, pixels: Pixels::Buffer(buffer) }
+    pub(crate) fn from_buffer(
+        width: u32,
+        height: u32,
+        colorspace: u32,
+        buffer: crate::sys::vt::PixelBuffer,
+    ) -> Frame {
+        Frame {
+            width,
+            height,
+            colorspace,
+            pixels: Pixels::Buffer(buffer),
+        }
     }
 
     /// Width in pixels.
@@ -64,13 +79,23 @@ impl Frame {
     pub fn copy_nv12(&self, dst: &mut [u8], stride: usize, slice: usize) -> Result<(), String> {
         let need = stride * slice * 3 / 2;
         if dst.len() < need {
-            return Err(format!("the destination holds {} bytes, a {stride}x{slice} NV12 picture needs {need}", dst.len()));
+            return Err(format!(
+                "the destination holds {} bytes, a {stride}x{slice} NV12 picture needs {need}",
+                dst.len()
+            ));
         }
         let (w, h) = (self.width as usize, self.height as usize);
         let mut copy = |y: &[u8], ys: usize, uv: &[u8], uvs: usize| {
             let (dy, duv) = dst.split_at_mut(stride * slice);
             copy_rows(y, ys, dy, stride, w.min(stride), h.min(slice));
-            copy_rows(uv, uvs, duv, stride, (w.div_ceil(2) * 2).min(stride), h.div_ceil(2).min(slice / 2));
+            copy_rows(
+                uv,
+                uvs,
+                duv,
+                stride,
+                (w.div_ceil(2) * 2).min(stride),
+                h.div_ceil(2).min(slice / 2),
+            );
         };
         match &self.pixels {
             Pixels::Memory(m) => {
@@ -90,7 +115,12 @@ impl Frame {
         let mut all = vec![0u8; stride * slice * 3 / 2];
         self.copy_nv12(&mut all, stride, slice)?;
         let uv = all.split_off(stride * slice);
-        Ok(Nv12 { y: all, y_stride: stride, uv, uv_stride: stride })
+        Ok(Nv12 {
+            y: all,
+            y_stride: stride,
+            uv,
+            uv_stride: stride,
+        })
     }
 
     /// The picture as RGBA bytes, `width * 4` bytes a row and `height` rows, by the colour space of the picture. A
@@ -99,17 +129,33 @@ impl Frame {
         let planes = self.to_nv12()?;
         let (w, h) = (width as usize, height as usize);
         let mut out = vec![0u8; w * h * 4];
-        crate::yuv::nv12_to_rgba(&planes, self.width as usize, self.height as usize, self.colorspace, &mut out, w, h);
+        crate::yuv::nv12_to_rgba(
+            &planes,
+            self.width as usize,
+            self.height as usize,
+            self.colorspace,
+            &mut out,
+            w,
+            h,
+        );
         Ok(out)
     }
 }
 
 /// Copies `rows` rows of `len` bytes from `src` to `dst`. A source that is too short for a row ends the copy.
-fn copy_rows(src: &[u8], src_stride: usize, dst: &mut [u8], dst_stride: usize, len: usize, rows: usize) {
+fn copy_rows(
+    src: &[u8],
+    src_stride: usize,
+    dst: &mut [u8],
+    dst_stride: usize,
+    len: usize,
+    rows: usize,
+) {
     for r in 0..rows {
         let s = r * src_stride;
         let d = r * dst_stride;
-        let (Some(from), Some(to)) = (src.get(s..s + len.min(src_stride)), dst.get_mut(d..d + len)) else {
+        let (Some(from), Some(to)) = (src.get(s..s + len.min(src_stride)), dst.get_mut(d..d + len))
+        else {
             return;
         };
         to[..from.len()].copy_from_slice(from);
@@ -123,7 +169,17 @@ mod tests {
     fn picture(w: usize, h: usize) -> Frame {
         let y: Vec<u8> = (0..w * h).map(|i| (i % 251) as u8).collect();
         let uv: Vec<u8> = (0..w * h.div_ceil(2)).map(|i| (i % 241) as u8).collect();
-        Frame::from_nv12(w as u32, h as u32, 3, Nv12 { y, y_stride: w, uv, uv_stride: w })
+        Frame::from_nv12(
+            w as u32,
+            h as u32,
+            3,
+            Nv12 {
+                y,
+                y_stride: w,
+                uv,
+                uv_stride: w,
+            },
+        )
     }
 
     #[test]

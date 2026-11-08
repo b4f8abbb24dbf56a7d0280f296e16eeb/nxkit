@@ -28,7 +28,9 @@ impl Service for IStorage {
         match req.command {
             // Read: offset s64 at 0, length s64 at 8, the bytes go to the receive buffer
             0 => {
-                let (Ok(offset), Ok(length), Ok(buf)) = (arg_u64(req, 0), arg_u64(req, 8), out_buffer(req, 0)) else {
+                let (Ok(offset), Ok(length), Ok(buf)) =
+                    (arg_u64(req, 0), arg_u64(req, 8), out_buffer(req, 0))
+                else {
                     return answer(rsp, FAIL);
                 };
                 let n = length.min(buf.size);
@@ -69,7 +71,10 @@ impl ISaveDataInfoReader {
             e[0x30..0x38].copy_from_slice(&SPACE.to_le_bytes());
             e
         });
-        ISaveDataInfoReader { entry, done: AtomicBool::new(false) }
+        ISaveDataInfoReader {
+            entry,
+            done: AtomicBool::new(false),
+        }
     }
 }
 
@@ -82,7 +87,9 @@ impl Service for ISaveDataInfoReader {
         if req.command != 0 {
             return Handled::Unknown;
         }
-        let Ok(buf) = out_buffer(req, 0) else { return answer(rsp, FAIL) };
+        let Ok(buf) = out_buffer(req, 0) else {
+            return answer(rsp, FAIL);
+        };
         let listed = match &self.entry {
             Some(e) if buf.size >= INFO_SIZE as u64 && !self.done.swap(true, Ordering::Relaxed) => {
                 if guest::write(buf.addr, e).is_err() {

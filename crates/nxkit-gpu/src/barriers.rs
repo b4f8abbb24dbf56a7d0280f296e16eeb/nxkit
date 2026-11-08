@@ -82,7 +82,13 @@ mod tests {
         rt.color[0] = Some(TexId(1));
         rec.cmds.push(Cmd::SetRenderTargets(rt));
         let reads = rec.push_list(&[TexId(0)]);
-        rec.cmds.push(Cmd::Draw { state: nxkit_nvn::frame::DrawState { color_write: 1, ..Default::default() }, reads });
+        rec.cmds.push(Cmd::Draw {
+            state: nxkit_nvn::frame::DrawState {
+                color_write: 1,
+                ..Default::default()
+            },
+            reads,
+        });
         let mut frame = Frame::default();
         frame.append(&rec);
         let mut table = ResourceTable::new();
@@ -99,12 +105,24 @@ mod tests {
             packaged_block: None,
         };
         for i in 0..2 {
-            table.create(desc, nxkit_nvn::space::GpuAddr::new(0x10_0000 + i * 0x1000).unwrap()).unwrap();
+            table
+                .create(
+                    desc,
+                    nxkit_nvn::space::GpuAddr::new(0x10_0000 + i * 0x1000).unwrap(),
+                )
+                .unwrap();
         }
         let mut plan = PassPlan::default();
         Analyser::new().analyse(&frame, &table, &mut plan).unwrap();
-        let render = plan.passes.iter().position(|p| p.kind == PassKind::Render).unwrap();
-        for (vertex, want) in [(false, Stages::FRAGMENT), (true, Stages::VERTEX | Stages::FRAGMENT)] {
+        let render = plan
+            .passes
+            .iter()
+            .position(|p| p.kind == PassKind::Render)
+            .unwrap();
+        for (vertex, want) in [
+            (false, Stages::FRAGMENT),
+            (true, Stages::VERTEX | Stages::FRAGMENT),
+        ] {
             let mut state = BarrierState::default();
             state.seed(TexId(0), Stages::FRAGMENT);
             let mut vs = vec![false; plan.passes.len()];

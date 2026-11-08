@@ -207,16 +207,25 @@ extern "C" fn builder_set_border_color(b: u64, c: u64) {
     guard("nvnSamplerBuilderSetBorderColor", || {
         let mut v = [0u8; 16];
         Obj(c).read(0, &mut v)?;
-        edit(b, B_PARAMS, |p| p[P_BORDER..P_BORDER + 16].copy_from_slice(&v))
+        edit(b, B_PARAMS, |p| {
+            p[P_BORDER..P_BORDER + 16].copy_from_slice(&v)
+        })
     });
 }
 
 extern "C" fn builder_set_border_colori(b: u64, c: u64) {
     guard("nvnSamplerBuilderSetBorderColori", || {
         let o = Obj(c);
-        let v = [o.i32(0)? as f32, o.i32(4)? as f32, o.i32(8)? as f32, o.i32(12)? as f32];
+        let v = [
+            o.i32(0)? as f32,
+            o.i32(4)? as f32,
+            o.i32(8)? as f32,
+            o.i32(12)? as f32,
+        ];
         edit(b, B_PARAMS, |p| {
-            v.iter().enumerate().for_each(|(i, x)| put_f32(p, P_BORDER + 4 * i, *x));
+            v.iter()
+                .enumerate()
+                .for_each(|(i, x)| put_f32(p, P_BORDER + 4 * i, *x));
         })
     });
 }
@@ -224,9 +233,16 @@ extern "C" fn builder_set_border_colori(b: u64, c: u64) {
 extern "C" fn builder_set_border_colorui(b: u64, c: u64) {
     guard("nvnSamplerBuilderSetBorderColorui", || {
         let o = Obj(c);
-        let v = [o.u32(0)? as f32, o.u32(4)? as f32, o.u32(8)? as f32, o.u32(12)? as f32];
+        let v = [
+            o.u32(0)? as f32,
+            o.u32(4)? as f32,
+            o.u32(8)? as f32,
+            o.u32(12)? as f32,
+        ];
         edit(b, B_PARAMS, |p| {
-            v.iter().enumerate().for_each(|(i, x)| put_f32(p, P_BORDER + 4 * i, *x));
+            v.iter()
+                .enumerate()
+                .for_each(|(i, x)| put_f32(p, P_BORDER + 4 * i, *x));
         })
     });
 }
@@ -421,7 +437,9 @@ extern "C" fn pool_get_memory_pool(sp: u64) -> u64 {
 }
 
 extern "C" fn pool_get_memory_offset(sp: u64) -> i64 {
-    guard("nvnSamplerPoolGetMemoryOffset", || pool::memory_offset_of(sp))
+    guard("nvnSamplerPoolGetMemoryOffset", || {
+        pool::memory_offset_of(sp)
+    })
 }
 
 extern "C" fn pool_get_size(sp: u64) -> i32 {
@@ -489,7 +507,10 @@ mod tests {
             (4, 1, 1, 1, 1)
         );
         assert_eq!((t.compare_mode, t.compare_func, t.reduction), (0, 2, 0));
-        assert_eq!((t.lod_min, t.lod_max, t.lod_bias, t.aniso), (-1000.0, 1000.0, 0.0, 1.0));
+        assert_eq!(
+            (t.lod_min, t.lod_max, t.lod_bias, t.aniso),
+            (-1000.0, 1000.0, 0.0, 1.0)
+        );
         assert_eq!(t.border, [0.0; 4]);
     }
 
@@ -515,7 +536,10 @@ mod tests {
         assert_eq!((t.min_filter, t.mag_filter), (5, 1));
         assert_eq!((t.wrap_s, t.wrap_t, t.wrap_r), (2, 3, 4));
         assert_eq!((t.compare_mode, t.compare_func, t.reduction), (1, 3, 2));
-        assert_eq!((t.lod_min, t.lod_max, t.lod_bias, t.aniso), (0.5, 7.0, -0.25, 8.0));
+        assert_eq!(
+            (t.lod_min, t.lod_max, t.lod_bias, t.aniso),
+            (0.5, 7.0, -0.25, 8.0)
+        );
         assert_eq!(t.border, [-1.0, 2.0, 3.0, 4.0]);
         assert_eq!(sampler_get_lod_bias(s), -0.25);
         assert_eq!(sampler_get_reduction_filter(s), 2);

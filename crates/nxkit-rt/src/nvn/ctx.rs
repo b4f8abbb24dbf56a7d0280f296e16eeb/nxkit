@@ -254,7 +254,8 @@ impl Gpu {
     /// recordings there. It takes no lock of the front end. Every write that the front end learns about goes through
     /// here, and so does the end of a recording ([`Front::recorded`]).
     pub(crate) fn invalidated(&self, start: u64, len: u64) {
-        self.backend.recording_invalidated(start, start.saturating_add(len));
+        self.backend
+            .recording_invalidated(start, start.saturating_add(len));
     }
 
     /// Tells the front end that the guest wrote `len` bytes at the host address `start`, without taking its lock. The
@@ -302,13 +303,9 @@ impl Gpu {
         let fence = Fence(self.flushed() + 1);
         front.end_frame(reason)?;
         let (frame, plan, table, descriptors) = front.flush_parts();
-        let sent = self.backend.flush_frame(
-            frame,
-            plan,
-            reason,
-            fence,
-            FlushCx { table, descriptors },
-        );
+        let sent =
+            self.backend
+                .flush_frame(frame, plan, reason, fence, FlushCx { table, descriptors });
         front.begin_frame();
         self.flushed.store(fence.0, Ordering::Release);
         sent?;
@@ -376,7 +373,9 @@ impl Gpu {
                 })
             });
             let failed = super::frametime::sub(2, || {
-                handles.iter().find_map(|h| front.submit_on(queue as usize, *h).err())
+                handles
+                    .iter()
+                    .find_map(|h| front.submit_on(queue as usize, *h).err())
             });
             if let Some(w) = walk
                 && let Err(p) = super::frametime::sub(3, || w.join())

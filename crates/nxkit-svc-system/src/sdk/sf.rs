@@ -61,7 +61,10 @@ fn slot(handle: u32) -> Option<&'static Session> {
 
 fn new_session(name: u64, domain: u32, camera: bool) -> u32 {
     for (i, s) in SESSIONS.iter().enumerate() {
-        if s.used.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        if s.used
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
             s.name.store(name, Ordering::Release);
             s.domain.store(domain, Ordering::Release);
             s.seen.store(0, Ordering::Release);
@@ -76,14 +79,19 @@ fn new_session(name: u64, domain: u32, camera: bool) -> u32 {
 extern "C" fn create_camera_context(out: u64) -> u32 {
     let h = new_session(pack("camera"), 0, true);
     put_u32(out, h);
-    log(&format!("sf: camera context, host session {h:#x} (no camera)"));
+    log(&format!(
+        "sf: camera context, host session {h:#x} (no camera)"
+    ));
     0
 }
 
 /// `ConnectToHipcService(Handle*, const char* name)`.
 extern "C" fn connect(out: u64, name: u64) -> u32 {
     let given = super::get_cstr(name, 8);
-    let served = config().sf_services.iter().find(|s| given.as_bytes().starts_with(s.as_bytes()) && s.len() <= 8);
+    let served = config()
+        .sf_services
+        .iter()
+        .find(|s| given.as_bytes().starts_with(s.as_bytes()) && s.len() <= 8);
     match served {
         Some(s) => {
             let h = new_session(pack(s), 0, false);
@@ -91,7 +99,9 @@ extern "C" fn connect(out: u64, name: u64) -> u32 {
             0
         }
         None => {
-            log(&format!("sf: the game connects to service {given} itself, which the host does not serve"));
+            log(&format!(
+                "sf: the game connects to service {given} itself, which the host does not serve"
+            ));
             NOT_REGISTERED
         }
     }
@@ -100,7 +110,9 @@ extern "C" fn connect(out: u64, name: u64) -> u32 {
 extern "C" fn close_session(handle: u32) {
     match slot(handle) {
         Some(s) => s.used.store(false, Ordering::Release),
-        None => log(&format!("sf: CloseClientSessionHandle on {handle:#x}, not a host session")),
+        None => log(&format!(
+            "sf: CloseClientSessionHandle on {handle:#x}, not a host session"
+        )),
     }
 }
 
@@ -128,7 +140,11 @@ extern "C" fn duplicate(out: u64, handle: u32) -> u32 {
     let Some(s) = slot(handle) else {
         return super::RES_FAIL;
     };
-    let h = new_session(s.name.load(Ordering::Acquire), s.domain.load(Ordering::Acquire), s.camera.load(Ordering::Acquire));
+    let h = new_session(
+        s.name.load(Ordering::Acquire),
+        s.domain.load(Ordering::Acquire),
+        s.camera.load(Ordering::Acquire),
+    );
     put_u32(out, h);
     0
 }
@@ -146,7 +162,9 @@ fn answer(s: &Session, cmd: u32) -> (u32, u32) {
         },
         29 => (NO_CAMERA, 0),
         _ => {
-            log_once_with(&CAMERA_LOG, || format!("sf: camera command {cmd} answered {NO_CAMERA:#x} (no camera device)"));
+            log_once_with(&CAMERA_LOG, || {
+                format!("sf: camera command {cmd} answered {NO_CAMERA:#x} (no camera device)")
+            });
             (NO_CAMERA, 0)
         }
     }
@@ -184,7 +202,11 @@ extern "C" fn send_sync_request(handle: u32, msg: u64, size: u64) -> u32 {
     if header + 16 > size || data + u64::from(ndw) * 4 > size {
         return INVALID_HANDLE;
     }
-    let (magic, version, cmd) = (get_u32(msg + header), get_u32(msg + header + 4), get_u32(msg + header + 8));
+    let (magic, version, cmd) = (
+        get_u32(msg + header),
+        get_u32(msg + header + 4),
+        get_u32(msg + header + 8),
+    );
     if kind == 2 {
         return SESSION_CLOSED;
     }
@@ -215,7 +237,10 @@ extern "C" fn send_sync_request(handle: u32, msg: u64, size: u64) -> u32 {
     put_u32(out + 8, result);
     let key = (object & 0xff) << 16 | (cmd & 0xffff);
     if s.seen.swap(key + 1, Ordering::AcqRel) != key + 1 {
-        log(&format!("sf: object {object} command {cmd}: {}", if result == 0 { "success" } else { "fails" }));
+        log(&format!(
+            "sf: object {object} command {cmd}: {}",
+            if result == 0 { "success" } else { "fails" }
+        ));
     }
     0
 }

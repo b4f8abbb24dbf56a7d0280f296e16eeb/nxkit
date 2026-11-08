@@ -84,7 +84,11 @@ impl Pool {
     pub fn global() -> &'static Pool {
         static POOL: std::sync::OnceLock<Pool> = std::sync::OnceLock::new();
         POOL.get_or_init(|| Pool {
-            state: std::sync::Mutex::new(Shared { task: None, running: 0, panicked: false }),
+            state: std::sync::Mutex::new(Shared {
+                task: None,
+                running: 0,
+                panicked: false,
+            }),
             work: std::sync::Condvar::new(),
             done: std::sync::Condvar::new(),
             started: std::sync::Mutex::new(0),
@@ -103,7 +107,9 @@ impl Pool {
         // SAFETY: only the lifetime is erased. `run` clears the task and waits until no helper runs it before it
         // returns, so no helper uses the pointer after the borrow of `task` ends.
         let ptr = TaskPtr(unsafe {
-            std::mem::transmute::<*const (dyn Fn() + Sync + '_), *const (dyn Fn() + Sync + 'static)>(task)
+            std::mem::transmute::<*const (dyn Fn() + Sync + '_), *const (dyn Fn() + Sync + 'static)>(
+                task,
+            )
         });
         lock(&self.state).task = Some((ptr, helpers));
         self.work.notify_all();
@@ -111,7 +117,10 @@ impl Pool {
         let mut st = lock(&self.state);
         st.task = None;
         while st.running > 0 {
-            st = self.done.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
+            st = self
+                .done
+                .wait(st)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
         let helper_panicked = std::mem::take(&mut st.panicked);
         drop(st);
@@ -127,7 +136,11 @@ impl Pool {
         let mut started = lock(&self.started);
         while *started < n {
             let name = format!("nxkit-encode-{}", *started + 1);
-            if std::thread::Builder::new().name(name).spawn(move || self.helper()).is_err() {
+            if std::thread::Builder::new()
+                .name(name)
+                .spawn(move || self.helper())
+                .is_err()
+            {
                 return;
             }
             *started += 1;
@@ -148,11 +161,16 @@ impl Pool {
                         st.running += 1;
                         break ptr;
                     }
-                    st = self.work.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
+                    st = self
+                        .work
+                        .wait(st)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                 }
             };
             // SAFETY: `run` keeps the task alive until `running` is back to zero.
-            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { (*ptr.0)() })).is_ok();
+            let ok =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { (*ptr.0)() }))
+                    .is_ok();
             let mut st = lock(&self.state);
             st.running -= 1;
             st.panicked |= !ok;

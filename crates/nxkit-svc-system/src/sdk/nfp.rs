@@ -4,7 +4,7 @@
 //! console does with no amiibo at hand. Every operation that needs a tag returns the result "tag not found". The
 //! `nn::nfc` library answers as a console whose NFC is switched off.
 
-use super::{log, log_once, put_u32, put_u8, put_u64, put_zero, zero};
+use super::{log, log_once, put_u8, put_u32, put_u64, put_zero, zero};
 use crate::event;
 use crate::seams::seams;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

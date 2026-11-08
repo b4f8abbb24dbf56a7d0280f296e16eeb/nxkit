@@ -12,8 +12,9 @@ pub type Fill = Box<dyn FnMut(&mut [f32]) + Send>;
 mod imp {
     use super::Fill;
     use objc2_audio_toolbox::{
-        AudioComponentDescription, AudioComponentFindNext, AudioComponentInstance, AudioComponentInstanceNew,
-        AudioOutputUnitStart, AudioUnitGetProperty, AudioUnitInitialize, AudioUnitSetProperty,
+        AudioComponentDescription, AudioComponentFindNext, AudioComponentInstance,
+        AudioComponentInstanceNew, AudioOutputUnitStart, AudioUnitGetProperty, AudioUnitInitialize,
+        AudioUnitSetProperty,
     };
     use objc2_core_audio::{AudioObjectGetPropertyData, AudioObjectPropertyAddress};
     use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription};
@@ -38,7 +39,12 @@ mod imp {
         fn AudioObjectAddPropertyListener(
             object: u32,
             address: *const AudioObjectPropertyAddress,
-            listener: unsafe extern "C" fn(u32, u32, *const AudioObjectPropertyAddress, *mut c_void) -> i32,
+            listener: unsafe extern "C" fn(
+                u32,
+                u32,
+                *const AudioObjectPropertyAddress,
+                *mut c_void,
+            ) -> i32,
             data: *mut c_void,
         ) -> i32;
         fn AudioObjectSetPropertyData(
@@ -62,19 +68,37 @@ mod imp {
 
     /// Counts the times the device's IO thread missed its deadline. The listener runs on a notification thread of
     /// Core Audio, not on the IO thread. Each overload is an audible gap, whatever the samples were.
-    unsafe extern "C" fn overload(_object: u32, _n: u32, _addresses: *const AudioObjectPropertyAddress, _data: *mut c_void) -> i32 {
+    unsafe extern "C" fn overload(
+        _object: u32,
+        _n: u32,
+        _addresses: *const AudioObjectPropertyAddress,
+        _data: *mut c_void,
+    ) -> i32 {
         let n = OVERLOADS.fetch_add(1, Ordering::Relaxed) + 1;
-        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() % 1_000_000);
         eprintln!("nxkit-audio: the output device missed its deadline (overload {n}) at t {ms}");
         0
     }
 
     fn device_u32(device: u32, selector: u32) -> Option<u32> {
-        let addr = AudioObjectPropertyAddress { mSelector: selector, mScope: SCOPE_HAL_GLOBAL, mElement: 0 };
+        let addr = AudioObjectPropertyAddress {
+            mSelector: selector,
+            mScope: SCOPE_HAL_GLOBAL,
+            mElement: 0,
+        };
         let (mut v, mut size) = (0u32, 4u32);
         // SAFETY: `v` has the 4 bytes the call writes and `size` says so.
         let st = unsafe {
-            AudioObjectGetPropertyData(device, &addr, 0, std::ptr::null(), &mut size, NonNull::from(&mut v).cast::<c_void>())
+            AudioObjectGetPropertyData(
+                device,
+                &addr,
+                0,
+                std::ptr::null(),
+                &mut size,
+                NonNull::from(&mut v).cast::<c_void>(),
+            )
         };
         (st == 0).then_some(v)
     }
@@ -82,28 +106,55 @@ mod imp {
     /// Logs the transport and the IO buffer of the device, sets the buffer from `NXKIT_AUDIO_DEVICE_FRAMES`, and listens
     /// for overloads of the device.
     fn watch_device(device: u32) {
-        if let Some(frames) = std::env::var("NXKIT_AUDIO_DEVICE_FRAMES").ok().and_then(|v| v.parse::<u32>().ok()) {
-            let addr = AudioObjectPropertyAddress { mSelector: SELECTOR_BUFFER_FRAMES, mScope: SCOPE_HAL_GLOBAL, mElement: 0 };
+        if let Some(frames) = std::env::var("NXKIT_AUDIO_DEVICE_FRAMES")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            let addr = AudioObjectPropertyAddress {
+                mSelector: SELECTOR_BUFFER_FRAMES,
+                mScope: SCOPE_HAL_GLOBAL,
+                mElement: 0,
+            };
             // SAFETY: `frames` is the 4 bytes that the property takes.
             let st = unsafe {
-                AudioObjectSetPropertyData(device, &addr, 0, std::ptr::null(), 4, std::ptr::from_ref(&frames).cast::<c_void>())
+                AudioObjectSetPropertyData(
+                    device,
+                    &addr,
+                    0,
+                    std::ptr::null(),
+                    4,
+                    std::ptr::from_ref(&frames).cast::<c_void>(),
+                )
             };
             if st != 0 {
-                eprintln!("nxkit-audio: the device refused an IO buffer of {frames} frames (status {st})");
+                eprintln!(
+                    "nxkit-audio: the device refused an IO buffer of {frames} frames (status {st})"
+                );
             }
         }
         let transport = device_u32(device, SELECTOR_TRANSPORT).map_or_else(
             || "?".to_string(),
-            |t| t.to_be_bytes().iter().map(|b| char::from(*b)).collect::<String>(),
+            |t| {
+                t.to_be_bytes()
+                    .iter()
+                    .map(|b| char::from(*b))
+                    .collect::<String>()
+            },
         );
         let frames = device_u32(device, SELECTOR_BUFFER_FRAMES).unwrap_or(0);
         eprintln!(
             "nxkit-audio: the output device has transport '{transport}' and an IO buffer of {frames} frames ({:.1} ms)",
             f64::from(frames) / 48.0
         );
-        let addr = AudioObjectPropertyAddress { mSelector: SELECTOR_OVERLOAD, mScope: SCOPE_HAL_GLOBAL, mElement: 0 };
+        let addr = AudioObjectPropertyAddress {
+            mSelector: SELECTOR_OVERLOAD,
+            mScope: SCOPE_HAL_GLOBAL,
+            mElement: 0,
+        };
         // SAFETY: the listener is a plain function that lives for the process, and it uses no data.
-        let st = unsafe { AudioObjectAddPropertyListener(device, &addr, overload, std::ptr::null_mut()) };
+        let st = unsafe {
+            AudioObjectAddPropertyListener(device, &addr, overload, std::ptr::null_mut())
+        };
         if st != 0 {
             eprintln!("nxkit-audio: no overload listener on the output device (status {st})");
         }
@@ -169,7 +220,11 @@ mod imp {
     }
 
     fn check(what: &str, status: i32) -> Result<(), String> {
-        if status == 0 { Ok(()) } else { Err(format!("{what} failed with status {status}")) }
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!("{what} failed with status {status}"))
+        }
     }
 
     fn default_device() -> Result<u32, String> {
@@ -217,7 +272,9 @@ mod imp {
             }
             let mut unit: AudioComponentInstance = std::ptr::null_mut();
             // SAFETY: `comp` is a live component and `unit` receives the instance.
-            check("create the output unit", unsafe { AudioComponentInstanceNew(comp, &mut unit) })?;
+            check("create the output unit", unsafe {
+                AudioComponentInstanceNew(comp, &mut unit)
+            })?;
 
             // SAFETY: `device` is 4 bytes, as `CurrentDevice` needs.
             check("set the output device", unsafe {
@@ -241,7 +298,8 @@ mod imp {
                 mBitsPerChannel: 32,
                 mReserved: 0,
             };
-            let fmt_size = u32::try_from(std::mem::size_of::<AudioStreamBasicDescription>()).unwrap_or(40);
+            let fmt_size =
+                u32::try_from(std::mem::size_of::<AudioStreamBasicDescription>()).unwrap_or(40);
             // SAFETY: `fmt` is a complete stream description of `fmt_size` bytes.
             check("set the stream format", unsafe {
                 AudioUnitSetProperty(
@@ -277,7 +335,9 @@ mod imp {
                 )
             })?;
             // SAFETY: the unit is fully configured.
-            check("initialize the output unit", unsafe { AudioUnitInitialize(unit) })?;
+            check("initialize the output unit", unsafe {
+                AudioUnitInitialize(unit)
+            })?;
 
             let mut wg: *mut c_void = std::ptr::null_mut();
             let mut size: u32 = 8;
@@ -295,11 +355,17 @@ mod imp {
             if st == 0 {
                 ctx.workgroup.store(wg, Ordering::Release);
             } else {
-                eprintln!("nxkit-audio: the output unit has no os_workgroup (status {st}), the audio thread stays outside it");
+                eprintln!(
+                    "nxkit-audio: the output unit has no os_workgroup (status {st}), the audio thread stays outside it"
+                );
             }
             // SAFETY: the unit is initialized.
-            check("start the output unit", unsafe { AudioOutputUnitStart(unit) })?;
-            Ok(Output { ctx: std::ptr::from_ref(ctx) })
+            check("start the output unit", unsafe {
+                AudioOutputUnitStart(unit)
+            })?;
+            Ok(Output {
+                ctx: std::ptr::from_ref(ctx),
+            })
         }
 
         /// The result of `os_workgroup_join` once the first callback ran, or `None` before that.

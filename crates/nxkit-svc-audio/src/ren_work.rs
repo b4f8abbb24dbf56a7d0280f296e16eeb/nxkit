@@ -17,7 +17,9 @@ fn le_u32(p: &[u8], o: usize) -> Option<u32> {
 /// The work buffer size for the renderer parameter `p` (at least 0x40 bytes), or 0 when the revision is unknown or a
 /// field is out of range. Revisions 1 to 15 are known. SDK 8 keeps the revision at +0x38 and SDK 9 and later at +0x34.
 pub(crate) fn service_work_size(p: &[u8]) -> usize {
-    let Some(mut revision) = le_u32(p, 0x34) else { return 0 };
+    let Some(mut revision) = le_u32(p, 0x34) else {
+        return 0;
+    };
     if revision & 0xff_ffff != 0x56_4552 {
         revision = le_u32(p, 0x38).unwrap_or(0);
     }
@@ -39,13 +41,19 @@ pub(crate) fn service_work_size(p: &[u8]) -> usize {
         }
         *slot = v as usize;
     }
-    let (mix, sub, voices, sinks, effects, perf, splitters, dest) = (n[2], n[3], n[4], n[5], n[6], n[7], n[9], n[10]);
+    let (mix, sub, voices, sinks, effects, perf, splitters, dest) =
+        (n[2], n[3], n[4], n[5], n[6], n[7], n[9], n[10]);
     let mixes = sub + 1;
     let mut size = align(((sinks + sub) * 0x3c0 + n[1] * 4) * (mix + 6), 64);
     size += align(mix * 4, 64) + sub * 0x400 + mixes * 0x940 + align(mixes * 8, 16);
-    size += voices * 0x1d0 + align(voices * if r >= 15 { 0x238 } else { 0x220 }, 16) + align(voices * 8, 16);
+    size += voices * 0x1d0
+        + align(voices * if r >= 15 { 0x238 } else { 0x220 }, 16)
+        + align(voices * 8, 16);
     if r >= 2 {
-        let graph = mixes * mixes * 4 + mixes * 12 + 2 * align(mixes, 64) / 8 + align(mixes * mixes, 64) / 8;
+        let graph = mixes * mixes * 4
+            + mixes * 12
+            + 2 * align(mixes, 64) / 8
+            + align(mixes * mixes, 64) / 8;
         size += align(graph, 16);
         let per_dest = if r >= 12 {
             if r >= 15 { 0x130 } else { 8 }
@@ -62,7 +70,11 @@ pub(crate) fn service_work_size(p: &[u8]) -> usize {
         size += align(dest * if r >= 14 { 0xe0 } else { 0x80 }, 64);
     }
     size = align(size + if r >= 9 { effects * 0x80 } else { 0 }, 64);
-    size += (sinks + sub) * 0x280 + effects * if r >= 9 { 0x530 } else { 0x4b0 } + sinks * 0x170 + voices * 0x100 + 0x40;
+    size += (sinks + sub) * 0x280
+        + effects * if r >= 9 { 0x530 } else { 0x4b0 }
+        + sinks * 0x170
+        + voices * 0x100
+        + 0x40;
     if perf != 0 {
         let per = if r >= 5 { 0x18 } else { 0x10 };
         let frame = (sub + voices + sinks + effects + 1) * per + if r >= 5 { 0x990 } else { 0x658 };

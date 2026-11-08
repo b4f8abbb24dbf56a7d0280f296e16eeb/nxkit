@@ -12,7 +12,9 @@ use std::time::Duration;
 use nxkit_abi::export::Export;
 use nxkit_abi::guest;
 
-use crate::decoder::{Decoder, ERR_BAD_ARG, ERR_NO_IMPL, ERR_START, ERR_STOP, IN_CAP, Io, OUT_COUNT};
+use crate::decoder::{
+    Decoder, ERR_BAD_ARG, ERR_NO_IMPL, ERR_START, ERR_STOP, IN_CAP, Io, OUT_COUNT,
+};
 use crate::guest_api::{Fns, fns};
 use crate::{Host, config, pacing};
 
@@ -83,7 +85,9 @@ fn construct(this: u64, kind: u32, format: u32, mode: u32, out_align: u32) {
         }
     };
     if guest::write_u64(this, f.vtable).is_err() || guest::write_u64(this + 8, 0).is_err() {
-        red(&format!("the decoder object at {this:#x} is outside guest memory"));
+        red(&format!(
+            "the decoder object at {this:#x} is outside guest memory"
+        ));
         return;
     }
     let Some(cfg) = config() else {
@@ -91,19 +95,27 @@ fn construct(this: u64, kind: u32, format: u32, mode: u32, out_align: u32) {
         return;
     };
     if kind != TYPE_VP9 {
-        red(&format!("decoder type {kind} is not implemented, only VP9 (3). Every call on it answers {ERR_NO_IMPL:#x}"));
+        red(&format!(
+            "decoder type {kind} is not implemented, only VP9 (3). Every call on it answers {ERR_NO_IMPL:#x}"
+        ));
         return;
     }
     let format_ok = format == FORMAT_NV12 || (format == FORMAT_ABGR && mode == MODE_TEXTURE);
     if !format_ok || (mode != MODE_CPU && mode != MODE_TEXTURE) {
-        red(&format!("output format {format} in mode {mode} is not implemented, only NV12 and ABGR in native texture mode"));
+        red(&format!(
+            "output format {format} in mode {mode} is not implemented, only NV12 and ABGR in native texture mode"
+        ));
         return;
     }
     if mode == MODE_TEXTURE && cfg.sink.is_none() {
-        red("the game asks for decoder output in native textures and the host gave no texture sink");
+        red(
+            "the game asks for decoder output in native textures and the host gave no texture sink",
+        );
         return;
     }
-    let io = Arc::new(GuestIo { host: Arc::clone(&cfg.host) });
+    let io = Arc::new(GuestIo {
+        host: Arc::clone(&cfg.host),
+    });
     let decoder = match Decoder::new(io, crate::backend::open) {
         Ok(d) => d,
         Err(e) => {
@@ -112,7 +124,14 @@ fn construct(this: u64, kind: u32, format: u32, mode: u32, out_align: u32) {
         }
     };
     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
-    registry().insert(handle, Arc::new(Object { decoder, mode, out_align }));
+    registry().insert(
+        handle,
+        Arc::new(Object {
+            decoder,
+            mode,
+            out_align,
+        }),
+    );
     if guest::write_u64(this + 8, handle).is_err() {
         registry().remove(&handle);
     }
@@ -252,14 +271,27 @@ extern "C" fn get_input_buffer(this: u64, index: i32, buffer: u64) -> u32 {
     0
 }
 
-extern "C" fn send_input_buffer_for_decode(this: u64, index: i32, offset: i32, size: i32, pts: i64, flags: u32) -> u32 {
+extern "C" fn send_input_buffer_for_decode(
+    this: u64,
+    index: i32,
+    offset: i32,
+    size: i32,
+    pts: i64,
+    flags: u32,
+) -> u32 {
     let Some(o) = object(this) else {
         return ERR_NO_IMPL;
     };
     o.decoder.send_input(index, offset, size, pts, flags)
 }
 
-extern "C" fn acquire_output_buffer_index(this: u64, index: u64, pts: u64, flags: u64, left: u64) -> u32 {
+extern "C" fn acquire_output_buffer_index(
+    this: u64,
+    index: u64,
+    pts: u64,
+    flags: u64,
+    left: u64,
+) -> u32 {
     let Some(o) = object(this) else {
         return ERR_NO_IMPL;
     };
@@ -344,7 +376,11 @@ extern "C" fn get_output_buffer_size(this: u64, size: u64, mode: u64) -> u32 {
     }
     let fmt = o.decoder.format();
     let bytes = fmt.width as i64 * fmt.height as i64 * 3 / 2;
-    let reported = if o.out_align != 0 { o.out_align } else { o.mode };
+    let reported = if o.out_align != 0 {
+        o.out_align
+    } else {
+        o.mode
+    };
     if guest::write_i32(size, bytes as i32).is_err() || guest::write_u32(mode, reported).is_err() {
         return ERR_BAD_ARG;
     }
@@ -360,7 +396,9 @@ fn output_to_memory(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
     let data = (f.data)(buffer);
     let capacity = (f.capacity)(buffer) as usize;
     if data == 0 || capacity < need {
-        red(&format!("the output buffer of the game holds {capacity} bytes, a picture needs {need}"));
+        red(&format!(
+            "the output buffer of the game holds {capacity} bytes, a picture needs {need}"
+        ));
         return ERR_BAD_ARG;
     }
     let picture = o.decoder.picture(index);
@@ -383,7 +421,9 @@ fn output_to_memory(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
             ERR_BAD_ARG
         }
         Err(fault) => {
-            red(&format!("the output buffer of the game is not usable: {fault}"));
+            red(&format!(
+                "the output buffer of the game is not usable: {fault}"
+            ));
             ERR_BAD_ARG
         }
     }
@@ -398,12 +438,16 @@ fn output_to_texture(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
     let texture = (f.data)(buffer);
     let capacity = (f.capacity)(buffer);
     if texture == 0 || capacity < 8 {
-        red(&format!("the buffer of the game in native texture mode holds {capacity} bytes and needs 8 for a texture object"));
+        red(&format!(
+            "the buffer of the game in native texture mode holds {capacity} bytes and needs 8 for a texture object"
+        ));
         return ERR_BAD_ARG;
     }
     if let Some(p) = o.decoder.picture(index) {
         if let Err(e) = sink.present(texture, &p) {
-            red(&format!("a picture cannot go into the texture at {texture:#x}: {e}"));
+            red(&format!(
+                "a picture cannot go into the texture at {texture:#x}: {e}"
+            ));
             return ERR_BAD_ARG;
         }
     }
@@ -411,7 +455,9 @@ fn output_to_texture(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
         let sync = nvn_sync(buffer);
         if sync != 0 {
             if let Err(e) = sink.signal_sync(sync) {
-                red(&format!("the sync object at {sync:#x} cannot be signalled: {e}"));
+                red(&format!(
+                    "the sync object at {sync:#x} cannot be signalled: {e}"
+                ));
             }
         }
     }
@@ -448,7 +494,12 @@ extern "C" fn get_output_buffer(this: u64, index: i32, buffer: u64) -> u32 {
     output_buffer(this, index, buffer, 0)
 }
 
-extern "C" fn get_output_buffer_with_format(this: u64, index: i32, buffer: u64, media_data: u64) -> u32 {
+extern "C" fn get_output_buffer_with_format(
+    this: u64,
+    index: i32,
+    buffer: u64,
+    media_data: u64,
+) -> u32 {
     output_buffer(this, index, buffer, media_data)
 }
 
@@ -470,31 +521,85 @@ extern "C" fn get_last_error(_this: u64) -> u32 {
 /// The functions that this service gives the game.
 pub(crate) fn table() -> Vec<Export> {
     vec![
-        Export::new("_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi", ctor_full as usize),
-        Export::new("_ZN5movie7DecoderC2ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi", ctor_full as usize),
-        Export::new("_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE", ctor_no_priority as usize),
-        Export::new("_ZN5movie7DecoderC2ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE", ctor_no_priority as usize),
-        Export::new("_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatE", ctor_sdk3 as usize),
-        Export::new("_ZN5movie7DecoderC2ENS_11DecoderTypeENS_19DecoderOutputFormatE", ctor_sdk3 as usize),
+        Export::new(
+            "_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi",
+            ctor_full as usize,
+        ),
+        Export::new(
+            "_ZN5movie7DecoderC2ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi",
+            ctor_full as usize,
+        ),
+        Export::new(
+            "_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE",
+            ctor_no_priority as usize,
+        ),
+        Export::new(
+            "_ZN5movie7DecoderC2ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE",
+            ctor_no_priority as usize,
+        ),
+        Export::new(
+            "_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatE",
+            ctor_sdk3 as usize,
+        ),
+        Export::new(
+            "_ZN5movie7DecoderC2ENS_11DecoderTypeENS_19DecoderOutputFormatE",
+            ctor_sdk3 as usize,
+        ),
         Export::new("_ZN5movie7DecoderD0Ev", dtor_delete as usize),
         Export::new("_ZN5movie7DecoderD1Ev", dtor as usize),
         Export::new("_ZN5movie7DecoderD2Ev", dtor as usize),
-        Export::new("_ZN5movie7Decoder9ConfigureEPNS_9MediaDataE", configure as usize),
-        Export::new("_ZN5movie7Decoder20RegisterClientEventsEPNS_13DecoderEventsE", register_client_events as usize),
+        Export::new(
+            "_ZN5movie7Decoder9ConfigureEPNS_9MediaDataE",
+            configure as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder20RegisterClientEventsEPNS_13DecoderEventsE",
+            register_client_events as usize,
+        ),
         Export::new("_ZN5movie7Decoder5StartEv", start as usize),
         Export::new("_ZN5movie7Decoder4StopEv", stop as usize),
         Export::new("_ZN5movie7Decoder5ResetEv", reset as usize),
         Export::new("_ZN5movie7Decoder5FlushEv", flush as usize),
-        Export::new("_ZN5movie7Decoder23AcquireInputBufferIndexEPiS1_", acquire_input_buffer_index as usize),
-        Export::new("_ZN5movie7Decoder14GetInputBufferEiPNS_6BufferE", get_input_buffer as usize),
-        Export::new("_ZN5movie7Decoder24SendInputBufferForDecodeEiiilj", send_input_buffer_for_decode as usize),
-        Export::new("_ZN5movie7Decoder24AcquireOutputBufferIndexEPiPlPjS1_", acquire_output_buffer_index as usize),
-        Export::new("_ZN5movie7Decoder15GetOutputFormatEPNS_9MediaDataE", get_output_format as usize),
-        Export::new("_ZN5movie7Decoder21GetOutputBufferFormatEiPNS_9MediaDataE", get_output_buffer_format as usize),
-        Export::new("_ZN5movie7Decoder19GetOutputBufferSizeEPiS1_", get_output_buffer_size as usize),
-        Export::new("_ZN5movie7Decoder15GetOutputBufferEiPNS_6BufferE", get_output_buffer as usize),
-        Export::new("_ZN5movie7Decoder15GetOutputBufferEiPNS_6BufferEPNS_9MediaDataE", get_output_buffer_with_format as usize),
-        Export::new("_ZN5movie7Decoder24ReleaseOutputBufferIndexEi", release_output_buffer_index as usize),
+        Export::new(
+            "_ZN5movie7Decoder23AcquireInputBufferIndexEPiS1_",
+            acquire_input_buffer_index as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder14GetInputBufferEiPNS_6BufferE",
+            get_input_buffer as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder24SendInputBufferForDecodeEiiilj",
+            send_input_buffer_for_decode as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder24AcquireOutputBufferIndexEPiPlPjS1_",
+            acquire_output_buffer_index as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder15GetOutputFormatEPNS_9MediaDataE",
+            get_output_format as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder21GetOutputBufferFormatEiPNS_9MediaDataE",
+            get_output_buffer_format as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder19GetOutputBufferSizeEPiS1_",
+            get_output_buffer_size as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder15GetOutputBufferEiPNS_6BufferE",
+            get_output_buffer as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder15GetOutputBufferEiPNS_6BufferEPNS_9MediaDataE",
+            get_output_buffer_with_format as usize,
+        ),
+        Export::new(
+            "_ZN5movie7Decoder24ReleaseOutputBufferIndexEi",
+            release_output_buffer_index as usize,
+        ),
         Export::new("_ZN5movie7Decoder12GetLastErrorEv", get_last_error as usize),
     ]
 }
@@ -511,6 +616,9 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(names.len(), n);
-        assert!(t.iter().all(|e| e.addr != 0 && e.name.starts_with("_ZN5movie7Decoder")));
+        assert!(
+            t.iter()
+                .all(|e| e.addr != 0 && e.name.starts_with("_ZN5movie7Decoder"))
+        );
     }
 }

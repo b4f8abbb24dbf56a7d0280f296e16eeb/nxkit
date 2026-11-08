@@ -14,7 +14,8 @@ fn bits(v: u64, at: u32, n: u32) -> u32 {
 }
 
 fn pair(words: &[u32]) -> u64 {
-    u64::from(words.first().copied().unwrap_or(0)) | u64::from(words.get(1).copied().unwrap_or(0)) << 32
+    u64::from(words.first().copied().unwrap_or(0))
+        | u64::from(words.get(1).copied().unwrap_or(0)) << 32
 }
 
 /// The blend state that the walker keeps: one object per target.
@@ -101,7 +102,11 @@ pub(super) struct StencilValues {
 
 impl Default for StencilValues {
     fn default() -> Self {
-        Self { read: [0xff; 2], write: [0xff; 2], reference: [0; 2] }
+        Self {
+            read: [0xff; 2],
+            write: [0xff; 2],
+            reference: [0; 2],
+        }
     }
 }
 
@@ -112,7 +117,10 @@ impl StencilValues {
     }
 
     fn faces(face: u32) -> impl Iterator<Item = usize> {
-        [(FRONT, 0), (BACK, 1)].into_iter().filter(move |(f, _)| face & f != 0).map(|(_, i)| i)
+        [(FRONT, 0), (BACK, 1)]
+            .into_iter()
+            .filter(move |(f, _)| face & f != 0)
+            .map(|(_, i)| i)
     }
 
     pub(super) fn set_read(&mut self, face: u32, mask: u32) {
@@ -224,6 +232,15 @@ mod tests {
         let v: u64 = 1 | 1 << 1 | 3 << 2 | 1 << 6 | 8 << 7 | 2 << 15 | 3 << 19 | 4 << 23;
         let d = depth_stencil(&[v as u32, (v >> 32) as u32], &StencilValues::default());
         assert!(d.depth_test && d.depth_write && d.stencil_test);
-        assert_eq!((d.depth_func, d.front.func, d.front.fail, d.front.depth_fail, d.front.pass), (3, 8, 2, 3, 4));
+        assert_eq!(
+            (
+                d.depth_func,
+                d.front.func,
+                d.front.fail,
+                d.front.depth_fail,
+                d.front.pass
+            ),
+            (3, 8, 2, 3, 4)
+        );
     }
 }

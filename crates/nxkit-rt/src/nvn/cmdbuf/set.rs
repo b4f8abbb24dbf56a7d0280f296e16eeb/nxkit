@@ -41,12 +41,23 @@ extern "C" fn set_viewport(c: u64, x: i32, y: i32, w: i32, h: i32) {
         c,
         ExtCode::Viewport,
         0,
-        &[(x as f32).to_bits(), (y as f32).to_bits(), (w as f32).to_bits(), (h as f32).to_bits()],
+        &[
+            (x as f32).to_bits(),
+            (y as f32).to_bits(),
+            (w as f32).to_bits(),
+            (h as f32).to_bits(),
+        ],
     );
 }
 
 /// Records `n` entries of `bytes` bytes each from a guest array, one record for each.
-fn array(name: &'static str, c: u64, code: ExtCode, (first, n): (i32, i32), (data, bytes): (u64, usize)) {
+fn array(
+    name: &'static str,
+    c: u64,
+    code: ExtCode,
+    (first, n): (i32, i32),
+    (data, bytes): (u64, usize),
+) {
     guard(name, || -> AbiResult<()> {
         let (first, n) = span(first, n, VIEWPORTS)?;
         for k in 0..n {
@@ -59,7 +70,13 @@ fn array(name: &'static str, c: u64, code: ExtCode, (first, n): (i32, i32), (dat
 }
 
 extern "C" fn set_viewports(c: u64, first: i32, n: i32, v: u64) {
-    array("nvnCommandBufferSetViewports", c, ExtCode::Viewport, (first, n), (v, 16));
+    array(
+        "nvnCommandBufferSetViewports",
+        c,
+        ExtCode::Viewport,
+        (first, n),
+        (v, 16),
+    );
 }
 
 extern "C" fn set_scissor(c: u64, x: i32, y: i32, w: i32, h: i32) {
@@ -73,7 +90,13 @@ extern "C" fn set_scissor(c: u64, x: i32, y: i32, w: i32, h: i32) {
 }
 
 extern "C" fn set_scissors(c: u64, first: i32, n: i32, v: u64) {
-    array("nvnCommandBufferSetScissors", c, ExtCode::Scissor, (first, n), (v, 16));
+    array(
+        "nvnCommandBufferSetScissors",
+        c,
+        ExtCode::Scissor,
+        (first, n),
+        (v, 16),
+    );
 }
 
 extern "C" fn set_depth_range(c: u64, near: f32, far: f32) {
@@ -87,12 +110,24 @@ extern "C" fn set_depth_range(c: u64, near: f32, far: f32) {
 }
 
 extern "C" fn set_depth_ranges(c: u64, first: i32, n: i32, v: u64) {
-    array("nvnCommandBufferSetDepthRanges", c, ExtCode::DepthRange, (first, n), (v, 8));
+    array(
+        "nvnCommandBufferSetDepthRanges",
+        c,
+        ExtCode::DepthRange,
+        (first, n),
+        (v, 8),
+    );
 }
 
 /// `SetViewportSwizzles`: four swizzles for each viewport.
 extern "C" fn set_viewport_swizzles(c: u64, first: i32, n: i32, v: u64) {
-    array("nvnCommandBufferSetViewportSwizzles", c, ExtCode::ViewportSwizzle, (first, n), (v, 16));
+    array(
+        "nvnCommandBufferSetViewportSwizzles",
+        c,
+        ExtCode::ViewportSwizzle,
+        (first, n),
+        (v, 16),
+    );
 }
 
 extern "C" fn set_blend_color(c: u64, rgba: u64) {
@@ -106,27 +141,57 @@ extern "C" fn set_blend_color(c: u64, rgba: u64) {
 }
 
 extern "C" fn set_stencil_value_mask(c: u64, face: i32, v: i32) {
-    setting("nvnCommandBufferSetStencilValueMask", c, Setting::StencilValueMask, &[face as u32, v as u32]);
+    setting(
+        "nvnCommandBufferSetStencilValueMask",
+        c,
+        Setting::StencilValueMask,
+        &[face as u32, v as u32],
+    );
 }
 
 extern "C" fn set_stencil_mask(c: u64, face: i32, v: i32) {
-    setting("nvnCommandBufferSetStencilMask", c, Setting::StencilMask, &[face as u32, v as u32]);
+    setting(
+        "nvnCommandBufferSetStencilMask",
+        c,
+        Setting::StencilMask,
+        &[face as u32, v as u32],
+    );
 }
 
 extern "C" fn set_stencil_ref(c: u64, face: i32, v: i32) {
-    setting("nvnCommandBufferSetStencilRef", c, Setting::StencilRef, &[face as u32, v as u32]);
+    setting(
+        "nvnCommandBufferSetStencilRef",
+        c,
+        Setting::StencilRef,
+        &[face as u32, v as u32],
+    );
 }
 
 extern "C" fn set_line_width(c: u64, w: f32) {
-    setting("nvnCommandBufferSetLineWidth", c, Setting::LineWidth, &[w.to_bits()]);
+    setting(
+        "nvnCommandBufferSetLineWidth",
+        c,
+        Setting::LineWidth,
+        &[w.to_bits()],
+    );
 }
 
 extern "C" fn set_point_size(c: u64, s: f32) {
-    setting("nvnCommandBufferSetPointSize", c, Setting::PointSize, &[s.to_bits()]);
+    setting(
+        "nvnCommandBufferSetPointSize",
+        c,
+        Setting::PointSize,
+        &[s.to_bits()],
+    );
 }
 
 extern "C" fn set_alpha_ref(c: u64, r: f32) {
-    setting("nvnCommandBufferSetAlphaRef", c, Setting::AlphaRef, &[r.to_bits()]);
+    setting(
+        "nvnCommandBufferSetAlphaRef",
+        c,
+        Setting::AlphaRef,
+        &[r.to_bits()],
+    );
 }
 
 extern "C" fn set_depth_clamp(c: u64, on: u32) {
@@ -152,23 +217,48 @@ extern "C" fn set_primitive_restart(c: u64, on: u32, index: i32) {
 }
 
 extern "C" fn set_rasterizer_discard(c: u64, on: u32) {
-    flag("nvnCommandBufferSetRasterizerDiscard", c, Setting::RasterizerDiscard, on);
+    flag(
+        "nvnCommandBufferSetRasterizerDiscard",
+        c,
+        Setting::RasterizerDiscard,
+        on,
+    );
 }
 
 extern "C" fn set_sample_mask(c: u64, mask: i32) {
-    setting("nvnCommandBufferSetSampleMask", c, Setting::SampleMask, &[mask as u32]);
+    setting(
+        "nvnCommandBufferSetSampleMask",
+        c,
+        Setting::SampleMask,
+        &[mask as u32],
+    );
 }
 
 extern "C" fn set_tiled_cache_action(c: u64, action: i32) {
-    setting("nvnCommandBufferSetTiledCacheAction", c, Setting::TiledCacheAction, &[action as u32]);
+    setting(
+        "nvnCommandBufferSetTiledCacheAction",
+        c,
+        Setting::TiledCacheAction,
+        &[action as u32],
+    );
 }
 
 extern "C" fn set_tiled_cache_tile_size(c: u64, w: i32, h: i32) {
-    setting("nvnCommandBufferSetTiledCacheTileSize", c, Setting::TiledCacheTileSize, &[w as u32, h as u32]);
+    setting(
+        "nvnCommandBufferSetTiledCacheTileSize",
+        c,
+        Setting::TiledCacheTileSize,
+        &[w as u32, h as u32],
+    );
 }
 
 extern "C" fn set_render_enable(c: u64, on: u32) {
-    flag("nvnCommandBufferSetRenderEnable", c, Setting::RenderEnable, on);
+    flag(
+        "nvnCommandBufferSetRenderEnable",
+        c,
+        Setting::RenderEnable,
+        on,
+    );
 }
 
 extern "C" fn set_render_enable_conditional(c: u64, mode: i32, addr: u64) {
@@ -181,7 +271,12 @@ extern "C" fn set_render_enable_conditional(c: u64, mode: i32, addr: u64) {
 }
 
 extern "C" fn set_conservative_raster_enable(c: u64, on: u32) {
-    flag("nvnCommandBufferSetConservativeRasterEnable", c, Setting::ConservativeRaster, on);
+    flag(
+        "nvnCommandBufferSetConservativeRasterEnable",
+        c,
+        Setting::ConservativeRaster,
+        on,
+    );
 }
 
 extern "C" fn set_copy_row_stride(c: u64, v: i64) {

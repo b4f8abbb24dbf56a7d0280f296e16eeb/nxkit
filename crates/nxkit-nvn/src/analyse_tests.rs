@@ -366,10 +366,16 @@ fn changing_only_a_render_view_starts_a_new_pass() {
     targets.color[0] = Some(c);
     let mut stream = CmdStream::new();
     stream.cmds.push(Cmd::SetRenderTargets(targets));
-    stream.cmds.push(Cmd::Draw { state: paint(), reads: Span::default() });
+    stream.cmds.push(Cmd::Draw {
+        state: paint(),
+        reads: Span::default(),
+    });
     targets.views[0] = TargetView::from_words([2, 1 << 16, 1, 0]);
     stream.cmds.push(Cmd::SetRenderTargets(targets));
-    stream.cmds.push(Cmd::Draw { state: paint(), reads: Span::default() });
+    stream.cmds.push(Cmd::Draw {
+        state: paint(),
+        reads: Span::default(),
+    });
     f.frame.append(&stream);
     f.an.analyse(&f.frame, &f.table, &mut f.plan).unwrap();
     assert_eq!(f.plan.passes.len(), 2);
@@ -485,7 +491,10 @@ fn a_render_pass_between_dispatches_keeps_them_apart() {
     f.rec.dispatch();
     f.run().unwrap();
     let kinds: Vec<_> = f.plan.passes.iter().map(|p| p.kind).collect();
-    assert_eq!(kinds, [PassKind::Compute, PassKind::Render, PassKind::Compute]);
+    assert_eq!(
+        kinds,
+        [PassKind::Compute, PassKind::Render, PassKind::Compute]
+    );
 }
 
 #[test]
@@ -582,8 +591,12 @@ fn draws_that_repeat_the_previous_draw_give_the_same_plan() {
         "the frame has repeated draws to share"
     );
     let (mut plain, mut coalesced) = (PassPlan::new(), PassPlan::new());
-    Analyser::new().analyse(&f.frame, &f.table, &mut plain).unwrap();
-    Analyser::new().analyse(&shared, &f.table, &mut coalesced).unwrap();
+    Analyser::new()
+        .analyse(&f.frame, &f.table, &mut plain)
+        .unwrap();
+    Analyser::new()
+        .analyse(&shared, &f.table, &mut coalesced)
+        .unwrap();
     assert!(plain.passes.len() > 2);
     assert_eq!(format!("{plain:?}"), format!("{coalesced:?}"));
 }
@@ -608,7 +621,9 @@ fn an_analyser_that_ran_before_gives_the_plan_of_a_fresh_one() {
     f.rec.draw(depth_draw());
     f.run().unwrap();
     let mut fresh = PassPlan::new();
-    Analyser::new().analyse(&f.frame, &f.table, &mut fresh).unwrap();
+    Analyser::new()
+        .analyse(&f.frame, &f.table, &mut fresh)
+        .unwrap();
     assert_eq!(format!("{:?}", f.plan), format!("{fresh:?}"));
     assert_eq!(f.plan.attachments[1].store, StoreAction::DontCare);
     assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
@@ -647,7 +662,10 @@ fn passes_around_a_dropped_pass_merge() {
 }
 
 fn depth_free_blend() -> DrawState {
-    DrawState { blend: true, ..paint() }
+    DrawState {
+        blend: true,
+        ..paint()
+    }
 }
 
 #[test]
@@ -688,7 +706,10 @@ fn a_texture_that_starts_dead_for_many_frames_stops_being_stored() {
     assert_eq!(f.plan.attachments[0].store, StoreAction::Store);
     scratch_frames(&mut f, c, 130, None);
     let a = f.plan.attachments[0];
-    assert_eq!((a.load, a.store), (LoadAction::Clear, StoreAction::DontCare));
+    assert_eq!(
+        (a.load, a.store),
+        (LoadAction::Clear, StoreAction::DontCare)
+    );
     assert!(!a.memoryless);
     assert_eq!(f.plan.stats.stores_learned_dead, 1);
     assert_eq!(f.plan.stats.bytes_learned_dead, COLOR_BYTES);
@@ -712,5 +733,8 @@ fn the_merge_report_counts_default_loads() {
     f.rec.draw(paint());
     f.run().unwrap();
     let r = crate::passmerge::MergeReport::of(&f.frame, &f.plan);
-    assert_eq!((r.render, r.one_draw, r.empty, r.load_default), (1, 1, 0, 1));
+    assert_eq!(
+        (r.render, r.one_draw, r.empty, r.load_default),
+        (1, 1, 0, 1)
+    );
 }

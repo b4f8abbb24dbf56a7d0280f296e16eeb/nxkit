@@ -5,7 +5,6 @@
 //! while the encode runs. It encodes from a [`Snapshot`] that holds only the records and descriptors that one frame
 //! names.
 
-
 use nxkit_nvn::descriptors::{Descriptors, MAX_TEXTURE_ID, TextureSlot};
 use nxkit_nvn::error::{NvnError, Result};
 use nxkit_nvn::frame::Frame;

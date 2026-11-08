@@ -239,13 +239,18 @@ impl Bindings {
     /// The action of a source.
     #[cfg(test)]
     pub(crate) fn get(&self, source: Source) -> Option<Action> {
-        self.list.iter().find(|(s, _)| *s == source).map(|(_, a)| *a)
+        self.list
+            .iter()
+            .find(|(s, _)| *s == source)
+            .map(|(_, a)| *a)
     }
 
     /// Binds the sources of `key` to `action`, or unbinds them for `none`. The old action of each source goes.
     pub(crate) fn rebind(&mut self, key: &str, action_name: &str) -> Result<(), String> {
-        let sources = sources(key).ok_or_else(|| format!("unknown key or mouse button \"{key}\""))?;
-        let action = action(action_name).map_err(|()| format!("unknown action \"{action_name}\" for \"{key}\""))?;
+        let sources =
+            sources(key).ok_or_else(|| format!("unknown key or mouse button \"{key}\""))?;
+        let action = action(action_name)
+            .map_err(|()| format!("unknown action \"{action_name}\" for \"{key}\""))?;
         self.list.retain(|(s, _)| !sources.contains(s));
         if let Some(a) = action {
             self.list.extend(sources.into_iter().map(|s| (s, a)));
@@ -256,7 +261,10 @@ impl Bindings {
     /// Applies the pairs of an input file in order. Each pair that does not parse is skipped and its message is
     /// returned.
     pub(crate) fn rebind_all(&mut self, pairs: &[(String, String)]) -> Vec<String> {
-        pairs.iter().filter_map(|(k, a)| self.rebind(k, a).err()).collect()
+        pairs
+            .iter()
+            .filter_map(|(k, a)| self.rebind(k, a).err())
+            .collect()
     }
 
     /// The buttons and the stick deflections of the held keys and mouse buttons. Opposite directions cancel.
@@ -333,9 +341,18 @@ mod tests {
         assert_eq!(sources("0"), Some(vec![Source::Key(0x27)]));
         assert_eq!(sources("f12"), Some(vec![Source::Key(0x45)]));
         assert_eq!(sources("f13"), None);
-        assert_eq!(sources("shift"), Some(vec![Source::Key(0xe1), Source::Key(0xe5)]));
-        assert_eq!(sources("wheel"), Some(vec![Source::WheelUp, Source::WheelDown]));
-        assert_eq!(sources("mouse_middle"), Some(vec![Source::Mouse(mouse::MIDDLE)]));
+        assert_eq!(
+            sources("shift"),
+            Some(vec![Source::Key(0xe1), Source::Key(0xe5)])
+        );
+        assert_eq!(
+            sources("wheel"),
+            Some(vec![Source::WheelUp, Source::WheelDown])
+        );
+        assert_eq!(
+            sources("mouse_middle"),
+            Some(vec![Source::Mouse(mouse::MIDDLE)])
+        );
         assert_eq!(sources("hyper"), None);
     }
 
@@ -398,7 +415,15 @@ mod tests {
     fn the_mouse_buttons_and_the_wheel() {
         let b = Bindings::pc();
         let read = |buttons, wheel_up, wheel_down| {
-            b.read(&KeySet::default(), MouseButtons { buttons, wheel_up, wheel_down }).buttons
+            b.read(
+                &KeySet::default(),
+                MouseButtons {
+                    buttons,
+                    wheel_up,
+                    wheel_down,
+                },
+            )
+            .buttons
         };
         assert_eq!(read(mouse::LEFT, false, false), btn::Y);
         assert_eq!(read(mouse::RIGHT, false, false), btn::ZL);
@@ -412,9 +437,22 @@ mod tests {
     fn rebinding_replaces_the_old_action() {
         let mut b = Bindings::pc();
         assert!(b.rebind("F", "rstick").is_ok());
-        assert_eq!(b.get(Source::Key(usage::letter(b'f'))), Some(Action::Button(btn::STICK_R)));
+        assert_eq!(
+            b.get(Source::Key(usage::letter(b'f'))),
+            Some(Action::Button(btn::STICK_R))
+        );
         assert!(b.rebind("mouse4", "ls_up").is_ok());
-        assert_eq!(b.read(&KeySet::default(), MouseButtons { buttons: mouse::BACK, ..Default::default() }).sticks[1], FULL);
+        assert_eq!(
+            b.read(
+                &KeySet::default(),
+                MouseButtons {
+                    buttons: mouse::BACK,
+                    ..Default::default()
+                }
+            )
+            .sticks[1],
+            FULL
+        );
         assert!(b.rebind("shift", "none").is_ok());
         assert_eq!(b.get(Source::Key(usage::LEFT_SHIFT)), None);
         assert_eq!(b.get(Source::Key(usage::RIGHT_SHIFT)), None);
@@ -429,7 +467,10 @@ mod tests {
             ("x".to_owned(), "y".to_owned()),
         ]);
         assert_eq!(errors.len(), 2);
-        assert_eq!(b.get(Source::Key(usage::letter(b'x'))), Some(Action::Button(btn::Y)));
+        assert_eq!(
+            b.get(Source::Key(usage::letter(b'x'))),
+            Some(Action::Button(btn::Y))
+        );
     }
 
     #[test]

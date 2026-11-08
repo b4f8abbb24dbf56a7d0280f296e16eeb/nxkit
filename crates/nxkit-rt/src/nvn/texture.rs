@@ -306,16 +306,49 @@ macro_rules! getter {
     };
 }
 
-getter!(get_flags, "nvnTextureGetFlags", i32, FLAGS, u32, |v| v as i32);
-getter!(get_width, "nvnTextureGetWidth", i32, WIDTH, u32, |v| v as i32);
-getter!(get_height, "nvnTextureGetHeight", i32, HEIGHT, u32, |v| v as i32);
-getter!(get_depth, "nvnTextureGetDepth", i32, DEPTH, u32, |v| v as i32);
-getter!(get_levels, "nvnTextureGetLevels", i32, LEVELS, u32, |v| v as i32);
+getter!(get_flags, "nvnTextureGetFlags", i32, FLAGS, u32, |v| v
+    as i32);
+getter!(get_width, "nvnTextureGetWidth", i32, WIDTH, u32, |v| v
+    as i32);
+getter!(get_height, "nvnTextureGetHeight", i32, HEIGHT, u32, |v| v
+    as i32);
+getter!(get_depth, "nvnTextureGetDepth", i32, DEPTH, u32, |v| v
+    as i32);
+getter!(get_levels, "nvnTextureGetLevels", i32, LEVELS, u32, |v| v
+    as i32);
 getter!(get_format, "nvnTextureGetFormat", i32, FORMAT, i32, |v| v);
-getter!(get_stride, "nvnTextureGetStride", i64, STRIDE, u32, i64::from);
-getter!(get_memory_pool, "nvnTextureGetMemoryPool", u64, POOL, u64, |v| v);
-getter!(get_memory_offset, "nvnTextureGetMemoryOffset", i64, OFF, i64, |v| v);
-getter!(get_texture_address, "nvnTextureGetTextureAddress", u64, ADDRESS, u64, |v| v);
+getter!(
+    get_stride,
+    "nvnTextureGetStride",
+    i64,
+    STRIDE,
+    u32,
+    i64::from
+);
+getter!(
+    get_memory_pool,
+    "nvnTextureGetMemoryPool",
+    u64,
+    POOL,
+    u64,
+    |v| v
+);
+getter!(
+    get_memory_offset,
+    "nvnTextureGetMemoryOffset",
+    i64,
+    OFF,
+    i64,
+    |v| v
+);
+getter!(
+    get_texture_address,
+    "nvnTextureGetTextureAddress",
+    u64,
+    ADDRESS,
+    u64,
+    |v| v
+);
 
 /// The GPU address of the storage of the texture at the guest address `t`, which is the address that a record names
 /// the texture by. It reads the guest object and takes no lock.
@@ -328,7 +361,14 @@ pub(crate) fn storage_address(t: u64) -> AbiResult<u64> {
 pub(crate) fn texture_id(t: u64) -> AbiResult<TexId> {
     field(t, |o| o.u32(ID)).map(TexId)
 }
-getter!(get_storage_size, "nvnTextureGetStorageSize", i32, SIZE, u64, |v| v as i32);
+getter!(
+    get_storage_size,
+    "nvnTextureGetStorageSize",
+    i32,
+    SIZE,
+    u64,
+    |v| v as i32
+);
 
 fn byte(t: u64, at: u64) -> AbiResult<i32> {
     field(t, |o| {

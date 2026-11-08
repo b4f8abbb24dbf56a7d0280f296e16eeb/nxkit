@@ -226,7 +226,9 @@ pub(crate) fn call_guest8(addr: u64, args: [u64; 6], more: [u64; 2]) -> u64 {
     };
     // SAFETY: as in `call_guest`. The two extra arguments fill the seventh and eighth register.
     let f: Guest = unsafe { std::mem::transmute::<usize, Guest>(addr) };
-    f(args[0], args[1], args[2], args[3], args[4], args[5], more[0], more[1])
+    f(
+        args[0], args[1], args[2], args[3], args[4], args[5], more[0], more[1],
+    )
 }
 
 #[cfg(test)]

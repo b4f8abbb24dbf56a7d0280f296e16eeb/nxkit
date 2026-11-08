@@ -41,8 +41,13 @@ fn service(rsp: &mut Response) -> Option<&'static Fs> {
 
 /// The path in buffer `n`. A pointer buffer is the usual case, and a send buffer is accepted too.
 fn path_arg(req: &Request<'_>, n: u32) -> Result<Vec<u8>, u32> {
-    let b = req.buffer(BufferKind::Pointer, n).or_else(|| req.buffer(BufferKind::Send, n)).ok_or(FAIL)?;
-    let max = usize::try_from(b.size).unwrap_or(usize::MAX).min(MAX_NAME + 1);
+    let b = req
+        .buffer(BufferKind::Pointer, n)
+        .or_else(|| req.buffer(BufferKind::Send, n))
+        .ok_or(FAIL)?;
+    let max = usize::try_from(b.size)
+        .unwrap_or(usize::MAX)
+        .min(MAX_NAME + 1);
     match guest::read_cstr(b.addr, max) {
         Ok(v) if v.len() <= MAX_NAME => Ok(v),
         _ => Err(FAIL),
@@ -51,7 +56,9 @@ fn path_arg(req: &Request<'_>, n: u32) -> Result<Vec<u8>, u32> {
 
 /// The buffer the game receives data in.
 fn out_buffer(req: &Request<'_>, n: u32) -> Result<Buffer, u32> {
-    req.buffer(BufferKind::Receive, n).or_else(|| req.buffer(BufferKind::ReceiveList, n)).ok_or(FAIL)
+    req.buffer(BufferKind::Receive, n)
+        .or_else(|| req.buffer(BufferKind::ReceiveList, n))
+        .ok_or(FAIL)
 }
 
 /// The buffer the game sends data in.

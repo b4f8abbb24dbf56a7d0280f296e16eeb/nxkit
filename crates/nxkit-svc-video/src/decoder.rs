@@ -137,7 +137,11 @@ impl State {
         self.epoch += 1;
         let now = Instant::now();
         for s in &mut self.inputs {
-            *s = if *s == InSlot::Held { InSlot::Stale(now) } else { InSlot::Free };
+            *s = if *s == InSlot::Held {
+                InSlot::Stale(now)
+            } else {
+                InSlot::Free
+            };
         }
         self.pending.clear();
         self.ready.clear();
@@ -172,7 +176,10 @@ unsafe impl Sync for Memory {}
 impl Memory {
     fn new(len: usize) -> Memory {
         let slice: Box<[u8]> = vec![0u8; len].into_boxed_slice();
-        Memory { ptr: Box::into_raw(slice).cast::<u8>(), len }
+        Memory {
+            ptr: Box::into_raw(slice).cast::<u8>(),
+            len,
+        }
     }
 
     fn read(&self, offset: usize, size: usize) -> Vec<u8> {
@@ -237,14 +244,23 @@ impl Decoder {
             events_ptr: 0,
             logged: 0,
         };
-        let shared = Arc::new(Shared { state: Mutex::new(state), cv: Condvar::new(), io, open, mem: Memory::new(IN_COUNT * IN_CAP) });
+        let shared = Arc::new(Shared {
+            state: Mutex::new(state),
+            cv: Condvar::new(),
+            io,
+            open,
+            mem: Memory::new(IN_COUNT * IN_CAP),
+        });
         let for_thread = Arc::clone(&shared);
         let handle = std::thread::Builder::new()
             .name("nxkit-video".to_string())
             .stack_size(2 << 20)
             .spawn(move || worker(&for_thread))
             .map_err(|e| format!("cannot start the video decoder thread: {e}"))?;
-        Ok(Decoder { shared, worker: Mutex::new(Some(handle)) })
+        Ok(Decoder {
+            shared,
+            worker: Mutex::new(Some(handle)),
+        })
     }
 
     /// `Configure`: the size from the container, if no picture format went out yet.
@@ -262,7 +278,11 @@ impl Decoder {
         let mut st = lock(&self.shared.state);
         st.events_ptr = entries;
         for i in 0..4 {
-            let p = if entries == 0 { None } else { self.shared.io.read_u64(entries + 8 * i as u64) };
+            let p = if entries == 0 {
+                None
+            } else {
+                self.shared.io.read_u64(entries + 8 * i as u64)
+            };
             st.events[i] = p.filter(|&p| self.shared.io.event_ok(p)).unwrap_or(0);
         }
     }
@@ -313,10 +333,17 @@ impl Decoder {
                 let soonest = st
                     .inputs
                     .iter()
-                    .filter_map(|s| if let InSlot::Stale(t) = s { Some(*t + STALE) } else { None })
+                    .filter_map(|s| {
+                        if let InSlot::Stale(t) = s {
+                            Some(*t + STALE)
+                        } else {
+                            None
+                        }
+                    })
                     .min();
                 if let Some(t) = soonest {
-                    self.shared.schedule(&st, 0, t.saturating_duration_since(now));
+                    self.shared
+                        .schedule(&st, 0, t.saturating_duration_since(now));
                 }
                 Err(ERR_NO_INPUT)
             }
@@ -332,8 +359,20 @@ impl Decoder {
     }
 
     /// `SendInputBufferForDecode`. Returns 0 or an error code.
-    pub(crate) fn send_input(&self, index: i32, offset: i32, size: i32, pts: i64, flags: u32) -> u32 {
-        if index < 0 || index as usize >= IN_COUNT || offset < 0 || size < 0 || offset as usize + size as usize > IN_CAP {
+    pub(crate) fn send_input(
+        &self,
+        index: i32,
+        offset: i32,
+        size: i32,
+        pts: i64,
+        flags: u32,
+    ) -> u32 {
+        if index < 0
+            || index as usize >= IN_COUNT
+            || offset < 0
+            || size < 0
+            || offset as usize + size as usize > IN_CAP
+        {
             return ERR_BAD_ARG;
         }
         let i = index as usize;
@@ -353,7 +392,11 @@ impl Decoder {
             st.in_eos = true;
         }
         // An end-of-stream packet without a timestamp or with a full buffer carries no picture.
-        let size = if eos && (pts < 0 || size as usize >= IN_CAP) { 0 } else { size as usize };
+        let size = if eos && (pts < 0 || size as usize >= IN_CAP) {
+            0
+        } else {
+            size as usize
+        };
         let data = self.shared.mem.read(i * IN_CAP + offset as usize, size);
         let key = parse_key_frame(&data);
         if let Some(k) = &key {
@@ -373,7 +416,12 @@ impl Decoder {
                 st.height = DEFAULT_HEIGHT;
             }
         }
-        st.pending.push_back(Packet { index: i, pts, flags, data });
+        st.pending.push_back(Packet {
+            index: i,
+            pts,
+            flags,
+            data,
+        });
         self.shared.cv.notify_all();
         drop(st);
         if first {
@@ -400,15 +448,26 @@ impl Decoder {
     pub(crate) fn format(&self) -> Format {
         let st = lock(&self.shared.state);
         Format {
-            width: if st.width == 0 { DEFAULT_WIDTH } else { st.width },
-            height: if st.height == 0 { DEFAULT_HEIGHT } else { st.height },
+            width: if st.width == 0 {
+                DEFAULT_WIDTH
+            } else {
+                st.width
+            },
+            height: if st.height == 0 {
+                DEFAULT_HEIGHT
+            } else {
+                st.height
+            },
             colorspace: st.colorspace,
         }
     }
 
     /// The picture of output slot `index`, which is `None` for an end-of-stream output.
     pub(crate) fn picture(&self, index: usize) -> Option<Arc<Frame>> {
-        lock(&self.shared.state).out.get(index).and_then(|o| o.pic.clone())
+        lock(&self.shared.state)
+            .out
+            .get(index)
+            .and_then(|o| o.pic.clone())
     }
 
     /// A picture of slot `index` went into the game's texture. Slots that were rendered before and that the game does
@@ -472,7 +531,11 @@ impl Shared {
     /// The event object for client event `i`. The client's struct is read again each time: a game registers it before
     /// it fills it, and the entry that was an event at registration is the fallback.
     fn event(&self, st: &State, i: usize) -> Option<u64> {
-        let live = if st.events_ptr == 0 { None } else { self.io.read_u64(st.events_ptr + 8 * i as u64) };
+        let live = if st.events_ptr == 0 {
+            None
+        } else {
+            self.io.read_u64(st.events_ptr + 8 * i as u64)
+        };
         match live {
             Some(p) if self.io.event_ok(p) => Some(p),
             _ => Some(st.events[i]).filter(|&p| p != 0),
@@ -633,7 +696,11 @@ mod tests {
 
     impl MockIo {
         fn new() -> Arc<MockIo> {
-            Arc::new(MockIo { signals: Mutex::new(vec![]), jobs: Mutex::new(vec![]), defers: AtomicUsize::new(0) })
+            Arc::new(MockIo {
+                signals: Mutex::new(vec![]),
+                jobs: Mutex::new(vec![]),
+                defers: AtomicUsize::new(0),
+            })
         }
 
         fn run_jobs(&self) {
@@ -664,7 +731,12 @@ mod tests {
 
     impl Backend for MockBackend {
         fn decode(&mut self, _packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
-            let planes = Nv12 { y: vec![0; 16 * 16], y_stride: 16, uv: vec![128; 16 * 8], uv_stride: 16 };
+            let planes = Nv12 {
+                y: vec![0; 16 * 16],
+                y_stride: 16,
+                uv: vec![128; 16 * 8],
+                uv_stride: 16,
+            };
             Ok(Some(Arc::new(Frame::from_nv12(16, 16, 3, planes))))
         }
     }
@@ -712,7 +784,14 @@ mod tests {
         let (idx, pts, flags, left) = wait_output(&d);
         assert_eq!((pts, flags, left), (1234, 0, 0));
         assert!(d.picture(idx as usize).is_some());
-        assert_eq!(d.format(), Format { width: 1920, height: 1080, colorspace: 3 });
+        assert_eq!(
+            d.format(),
+            Format {
+                width: 1920,
+                height: 1080,
+                colorspace: 3
+            }
+        );
         io.run_jobs();
         assert!(!lock(&io.signals).is_empty());
     }

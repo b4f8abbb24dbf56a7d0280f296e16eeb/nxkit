@@ -74,7 +74,13 @@ fn cstr(d: &[u8], o: usize) -> Result<String, String> {
 
 /// The number of dynamic symbols: `nchain` of `DT_HASH`, else the last chain of `DT_GNU_HASH`, else the distance
 /// from the symbol table to the string table.
-fn symbol_count(d: &[u8], hash: Option<usize>, gnu: Option<usize>, symtab: usize, strtab: usize) -> Result<usize, String> {
+fn symbol_count(
+    d: &[u8],
+    hash: Option<usize>,
+    gnu: Option<usize>,
+    symtab: usize,
+    strtab: usize,
+) -> Result<usize, String> {
     if let Some(h) = hash {
         return Ok(u32at(d, h + 4)? as usize);
     }
@@ -101,10 +107,9 @@ fn symbol_count(d: &[u8], hash: Option<usize>, gnu: Option<usize>, symtab: usize
         }
         return Ok(i);
     }
-    strtab
-        .checked_sub(symtab)
-        .map(|n| n / 24)
-        .ok_or_else(|| "dynamic section: no hash table and the string table is before the symbol table".to_string())
+    strtab.checked_sub(symtab).map(|n| n / 24).ok_or_else(|| {
+        "dynamic section: no hash table and the string table is before the symbol table".to_string()
+    })
 }
 
 /// Reads the imports and exports of the module whose flat image is `image`.
@@ -120,7 +125,8 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
         if tag == DT_NULL {
             break;
         }
-        tags.entry(tag).or_insert(u64at(image, dynamic + i * 16 + 8)? as usize);
+        tags.entry(tag)
+            .or_insert(u64at(image, dynamic + i * 16 + 8)? as usize);
     }
     let need = |t: u64, what: &str| {
         tags.get(&t)
@@ -148,7 +154,13 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
             .ok_or("symbol table: outside the image")?;
         let other = *image.get(o + 5).ok_or("symbol table: outside the image")?;
         let value = u64at(image, o + 8)?;
-        syms.push((cstr(image, strtab + name)?, shndx != 0, value, info >> 4, other & 3 != 0));
+        syms.push((
+            cstr(image, strtab + name)?,
+            shndx != 0,
+            value,
+            info >> 4,
+            other & 3 != 0,
+        ));
     }
     let mut out = Symbols::default();
     for (name, defined, value, bind, hidden) in syms.iter().skip(1) {
@@ -165,7 +177,11 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
         };
         for i in 0..len / 24 {
             let o = start + i * 24;
-            let (slot, info, addend) = (u64at(image, o)?, u64at(image, o + 8)?, u64at(image, o + 16)?);
+            let (slot, info, addend) = (
+                u64at(image, o)?,
+                u64at(image, o + 8)?,
+                u64at(image, o + 16)?,
+            );
             let (sym, kind) = ((info >> 32) as usize, info & 0xffff_ffff);
             if kind == R_NONE {
                 continue;
@@ -176,7 +192,11 @@ pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
                 out.imports.push(Import {
                     name: name.clone(),
                     slot,
-                    addend: if kind == R_JUMP_SLOT { 0 } else { addend as i64 },
+                    addend: if kind == R_JUMP_SLOT {
+                        0
+                    } else {
+                        addend as i64
+                    },
                     weak: *bind == STB_WEAK,
                 });
             }

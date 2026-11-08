@@ -55,7 +55,11 @@ impl Actions {
             let learned = !local && crate::passes::loadstore_on() && self.streak[i] >= LEARN_FRAMES;
             self.learned[i] = learned;
             self.evidence[i] = if local { Live::No } else { Live::Assumed };
-            self.live[i] = if local || learned { Live::No } else { Live::Assumed };
+            self.live[i] = if local || learned {
+                Live::No
+            } else {
+                Live::Assumed
+            };
             self.single[i] = rec.is_some_and(|r| r.desc.levels <= 1 && r.desc.depth <= 1);
             self.touched.push(i as u32);
         }

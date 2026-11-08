@@ -81,7 +81,13 @@ fn hash(parent: u32, name: &[u8]) -> u32 {
 /// The folders and files below `root`, in the order of their entries. A folder is visited after the folders before it,
 /// so the scan needs no recursion.
 fn scan(root: &Path) -> io::Result<Vec<Node>> {
-    let mut nodes = vec![Node { parent: 0, name: Vec::new(), path: root.to_path_buf(), dirs: Vec::new(), files: Vec::new() }];
+    let mut nodes = vec![Node {
+        parent: 0,
+        name: Vec::new(),
+        path: root.to_path_buf(),
+        dirs: Vec::new(),
+        files: Vec::new(),
+    }];
     let mut i = 0;
     while i < nodes.len() {
         let dir = nodes[i].path.clone();
@@ -89,16 +95,30 @@ fn scan(root: &Path) -> io::Result<Vec<Node>> {
         for e in std::fs::read_dir(&dir)? {
             let physical = e?.file_name();
             let path = dir.join(&physical);
-            found.push((names::guest_name(&dir, &physical)?, path.clone(), std::fs::metadata(&path)?));
+            found.push((
+                names::guest_name(&dir, &physical)?,
+                path.clone(),
+                std::fs::metadata(&path)?,
+            ));
         }
         found.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, path, meta) in found {
             if meta.is_dir() {
                 let child = nodes.len();
                 nodes[i].dirs.push(child);
-                nodes.push(Node { parent: i, name, path, dirs: Vec::new(), files: Vec::new() });
+                nodes.push(Node {
+                    parent: i,
+                    name,
+                    path,
+                    dirs: Vec::new(),
+                    files: Vec::new(),
+                });
             } else {
-                nodes[i].files.push(FileRec { name, path, size: meta.len() });
+                nodes[i].files.push(FileRec {
+                    name,
+                    path,
+                    size: meta.len(),
+                });
             }
         }
         i += 1;
@@ -169,14 +189,29 @@ impl Image {
             let parent = offset32(dir_off[n.parent])?;
             put32(&mut meta, at, parent);
             put32(&mut meta, at + 4, next_dir[i]);
-            put32(&mut meta, at + 8, n.dirs.first().map_or(Ok(NONE), |&c| offset32(dir_off[c]))?);
-            put32(&mut meta, at + 12, n.files.first().map_or(Ok(NONE), |_| offset32(file_off[i][0]))?);
+            put32(
+                &mut meta,
+                at + 8,
+                n.dirs.first().map_or(Ok(NONE), |&c| offset32(dir_off[c]))?,
+            );
+            put32(
+                &mut meta,
+                at + 12,
+                n.files
+                    .first()
+                    .map_or(Ok(NONE), |_| offset32(file_off[i][0]))?,
+            );
             put32(&mut meta, at + 20, offset32(n.name.len() as u64)?);
-            meta[(at + DIR_ENTRY) as usize..(at + DIR_ENTRY) as usize + n.name.len()].copy_from_slice(&n.name);
+            meta[(at + DIR_ENTRY) as usize..(at + DIR_ENTRY) as usize + n.name.len()]
+                .copy_from_slice(&n.name);
             let own = offset32(dir_off[i])?;
             let bucket = u64::from(hash(parent, &n.name)) % dir_buckets;
             let slot = dir_hash_at + 4 * bucket;
-            let head = u32::from_le_bytes(meta[slot as usize..slot as usize + 4].try_into().map_err(|_| io::ErrorKind::InvalidData)?);
+            let head = u32::from_le_bytes(
+                meta[slot as usize..slot as usize + 4]
+                    .try_into()
+                    .map_err(|_| io::ErrorKind::InvalidData)?,
+            );
             put32(&mut meta, at + 16, head);
             put32(&mut meta, slot, own);
 
@@ -191,13 +226,22 @@ impl Image {
                 put64(&mut meta, at + 8, start);
                 put64(&mut meta, at + 16, f.size);
                 put32(&mut meta, at + 28, offset32(f.name.len() as u64)?);
-                meta[(at + FILE_ENTRY) as usize..(at + FILE_ENTRY) as usize + f.name.len()].copy_from_slice(&f.name);
+                meta[(at + FILE_ENTRY) as usize..(at + FILE_ENTRY) as usize + f.name.len()]
+                    .copy_from_slice(&f.name);
                 let bucket = u64::from(hash(offset32(dir_off[i])?, &f.name)) % file_buckets;
                 let slot = file_hash_at + 4 * bucket;
-                let head = u32::from_le_bytes(meta[slot as usize..slot as usize + 4].try_into().map_err(|_| io::ErrorKind::InvalidData)?);
+                let head = u32::from_le_bytes(
+                    meta[slot as usize..slot as usize + 4]
+                        .try_into()
+                        .map_err(|_| io::ErrorKind::InvalidData)?,
+                );
                 put32(&mut meta, at + 24, head);
                 put32(&mut meta, slot, own);
-                files.push(Placed { start: data_at + start, size: f.size, path: f.path.clone() });
+                files.push(Placed {
+                    start: data_at + start,
+                    size: f.size,
+                    path: f.path.clone(),
+                });
             }
         }
 
@@ -218,7 +262,12 @@ impl Image {
             put64(&mut meta, 8 * k as u64, v);
         }
         put64(&mut meta, 8 * 9, data_at);
-        Ok(Image { meta, files, size: data_at + cursor, work })
+        Ok(Image {
+            meta,
+            files,
+            size: data_at + cursor,
+            work,
+        })
     }
 
     /// The size of the image.
@@ -233,7 +282,9 @@ impl Image {
 
     /// Fills `out` from `offset`. The range must lie inside the image. Bytes between two files read as zero.
     pub(crate) fn read(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
-        let end = offset.checked_add(out.len() as u64).ok_or(io::ErrorKind::InvalidInput)?;
+        let end = offset
+            .checked_add(out.len() as u64)
+            .ok_or(io::ErrorKind::InvalidInput)?;
         if end > self.size {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
         }
@@ -276,7 +327,8 @@ mod tests {
 
     /// Finds a file by its hash chain, as a game that parses the image does.
     fn find_file(img: &Image, parent: u32, name: &[u8]) -> Option<(u64, u64)> {
-        let (hash_at, hash_size, meta_at) = (u64_at(img, 0x28), u64_at(img, 0x30), u64_at(img, 0x38));
+        let (hash_at, hash_size, meta_at) =
+            (u64_at(img, 0x28), u64_at(img, 0x30), u64_at(img, 0x38));
         let buckets = hash_size / 4;
         let mut off = u32_at(img, hash_at + 4 * (u64::from(hash(parent, name)) % buckets));
         while off != NONE {
@@ -320,11 +372,17 @@ mod tests {
         img.read(data_at + off, &mut buf).unwrap();
         assert_eq!(&buf, b"AAAA");
 
-        let (dir_hash, dir_hash_size, dir_meta) = (u64_at(&img, 8), u64_at(&img, 16), u64_at(&img, 24));
+        let (dir_hash, dir_hash_size, dir_meta) =
+            (u64_at(&img, 8), u64_at(&img, 16), u64_at(&img, 24));
         let name = b"Pack";
         let root_off = 0u32;
-        let mut at = u32_at(&img, dir_hash + 4 * (u64::from(hash(root_off, name)) % (dir_hash_size / 4)));
-        while at != NONE && &img.meta[(dir_meta + u64::from(at) + DIR_ENTRY) as usize..][..4] != name {
+        let mut at = u32_at(
+            &img,
+            dir_hash + 4 * (u64::from(hash(root_off, name)) % (dir_hash_size / 4)),
+        );
+        while at != NONE
+            && &img.meta[(dir_meta + u64::from(at) + DIR_ENTRY) as usize..][..4] != name
+        {
             at = u32_at(&img, dir_meta + u64::from(at) + 16);
         }
         assert_ne!(at, NONE);

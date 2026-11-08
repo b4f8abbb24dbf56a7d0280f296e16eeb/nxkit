@@ -1,8 +1,8 @@
 //! Scratch folders for the tests.
 
 use crate::Config;
-use std::path::PathBuf;
 use nxkit_abi::guest;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
 

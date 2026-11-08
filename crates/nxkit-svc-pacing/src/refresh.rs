@@ -52,12 +52,28 @@ fn even_multiple(refresh: f64, target: u32) -> Option<u32> {
 pub fn plan_ticks(refresh_hz: f64, target_fps: u32, free_rate: bool, adaptive: bool) -> TickPlan {
     let target = target_fps.max(1);
     if adaptive {
-        return TickPlan { link_hz: target, ticks_per_frame: 1, fps: target, exact: true, switch_to: None };
+        return TickPlan {
+            link_hz: target,
+            ticks_per_frame: 1,
+            fps: target,
+            exact: true,
+            switch_to: None,
+        };
     }
-    let refresh = if refresh_hz.is_finite() && refresh_hz > 0.0 { refresh_hz } else { f64::from(target) };
+    let refresh = if refresh_hz.is_finite() && refresh_hz > 0.0 {
+        refresh_hz
+    } else {
+        f64::from(target)
+    };
     let link = refresh.round().max(1.0) as u32;
     if let Some(n) = even_multiple(refresh, target) {
-        return TickPlan { link_hz: link, ticks_per_frame: n, fps: target, exact: true, switch_to: None };
+        return TickPlan {
+            link_hz: link,
+            ticks_per_frame: n,
+            fps: target,
+            exact: true,
+            switch_to: None,
+        };
     }
     let ratio = refresh / f64::from(target);
     let below = (ratio.floor() as u32).max(1);
@@ -65,11 +81,27 @@ pub fn plan_ticks(refresh_hz: f64, target_fps: u32, free_rate: bool, adaptive: b
         // The candidates are the even splits just below and above the ratio; the nearer rate to the target wins.
         let rate = |m: u32| refresh / f64::from(m);
         let miss = |m: u32| (rate(m) - f64::from(target)).abs();
-        let m = if miss(below) <= miss(below + 1) { below } else { below + 1 };
-        return TickPlan { link_hz: link, ticks_per_frame: m, fps: rate(m).round() as u32, exact: true, switch_to: None };
+        let m = if miss(below) <= miss(below + 1) {
+            below
+        } else {
+            below + 1
+        };
+        return TickPlan {
+            link_hz: link,
+            ticks_per_frame: m,
+            fps: rate(m).round() as u32,
+            exact: true,
+            switch_to: None,
+        };
     }
     let n = (ratio.round() as u32).max(1);
-    TickPlan { link_hz: target, ticks_per_frame: 1, fps: target, exact: false, switch_to: Some(target * n) }
+    TickPlan {
+        link_hz: target,
+        ticks_per_frame: 1,
+        fps: target,
+        exact: false,
+        switch_to: Some(target * n),
+    }
 }
 
 /// Measures the tick rate of the display link from the target times of its ticks.
@@ -138,7 +170,10 @@ mod tests {
     #[test]
     fn a_60_fps_game_takes_two_ticks_at_120_hz() {
         let p = plan_ticks(120.0, 60, false, false);
-        assert_eq!((p.link_hz, p.ticks_per_frame, p.fps, p.exact, p.switch_to), (120, 2, 60, true, None));
+        assert_eq!(
+            (p.link_hz, p.ticks_per_frame, p.fps, p.exact, p.switch_to),
+            (120, 2, 60, true, None)
+        );
     }
 
     #[test]
@@ -151,13 +186,19 @@ mod tests {
     fn a_fixed_rate_game_on_144_hz_is_not_exact_and_names_120() {
         let p = plan_ticks(144.0, 60, false, false);
         assert!(!p.exact);
-        assert_eq!((p.link_hz, p.ticks_per_frame, p.switch_to), (60, 1, Some(120)));
+        assert_eq!(
+            (p.link_hz, p.ticks_per_frame, p.switch_to),
+            (60, 1, Some(120))
+        );
     }
 
     #[test]
     fn a_free_rate_game_on_144_hz_runs_at_72() {
         let p = plan_ticks(144.0, 60, true, false);
-        assert_eq!((p.link_hz, p.ticks_per_frame, p.fps, p.exact), (144, 2, 72, true));
+        assert_eq!(
+            (p.link_hz, p.ticks_per_frame, p.fps, p.exact),
+            (144, 2, 72, true)
+        );
     }
 
     #[test]

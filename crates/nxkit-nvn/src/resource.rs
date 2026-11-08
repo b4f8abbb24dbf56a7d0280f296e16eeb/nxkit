@@ -140,7 +140,11 @@ impl ResourceTable {
             .range((a, 0)..=(a, u32::MAX))
             .rev()
             .map(|(_, id)| *id)
-            .find(|id| self.records.get(id.0 as usize).is_some_and(|r| r.alive && r.desc == desc));
+            .find(|id| {
+                self.records
+                    .get(id.0 as usize)
+                    .is_some_and(|r| r.alive && r.desc == desc)
+            });
         if let Some(id) = same {
             self.get_mut(id)?.refs += 1;
             return Ok((id, true));
@@ -255,7 +259,12 @@ impl ResourceTable {
 
     /// Sets the residency of a texture and of its exact aliases. With `epoch` set, nothing changes when a CPU write hit
     /// the texture since the record had that epoch.
-    fn set_alias_residency(&mut self, id: TexId, residency: Residency, epoch: Option<u32>) -> Result<()> {
+    fn set_alias_residency(
+        &mut self,
+        id: TexId,
+        residency: Residency,
+        epoch: Option<u32>,
+    ) -> Result<()> {
         let record = self.get(id)?;
         if epoch.is_some_and(|e| e != record.write_epoch) {
             return Ok(());

@@ -22,7 +22,12 @@ pub(crate) struct Pointer {
 
 impl Pointer {
     pub(crate) fn new(config: LookConfig) -> Pointer {
-        Pointer { look: Look::new(config), buttons: 0, wheel_up: WheelPress::default(), wheel_down: WheelPress::default() }
+        Pointer {
+            look: Look::new(config),
+            buttons: 0,
+            wheel_up: WheelPress::default(),
+            wheel_down: WheelPress::default(),
+        }
     }
 
     /// Lets go of every button and stops the camera.
@@ -35,7 +40,11 @@ impl Pointer {
 
     /// The buttons and wheel presses at `now`.
     pub(crate) fn buttons(&self, now: Instant) -> MouseButtons {
-        MouseButtons { buttons: self.buttons, wheel_up: self.wheel_up.held(now), wheel_down: self.wheel_down.held(now) }
+        MouseButtons {
+            buttons: self.buttons,
+            wheel_up: self.wheel_up.held(now),
+            wheel_down: self.wheel_down.held(now),
+        }
     }
 
     /// The camera stick at `now`.
@@ -78,7 +87,13 @@ pub(crate) fn moved(dx: f32, dy: f32) {
 /// A button went down or up.
 pub(crate) fn button(number: u8, down: bool) {
     let bit = button_bit(number);
-    with(|p| if down { p.buttons |= bit } else { p.buttons &= !bit });
+    with(|p| {
+        if down {
+            p.buttons |= bit
+        } else {
+            p.buttons &= !bit
+        }
+    });
 }
 
 /// The wheel turned by `dy`, positive away from the user.

@@ -34,7 +34,12 @@ impl VibrationValue {
     /// The value from the 16 bytes the game wrote.
     pub(crate) fn from_bytes(b: &[u8; 16]) -> VibrationValue {
         let f = |i: usize| f32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
-        VibrationValue { amp_low: f(0), freq_low: f(4), amp_high: f(8), freq_high: f(12) }
+        VibrationValue {
+            amp_low: f(0),
+            freq_low: f(4),
+            amp_high: f(8),
+            freq_high: f(12),
+        }
     }
 
     /// The 16 bytes of the value.
@@ -50,9 +55,19 @@ impl VibrationValue {
     /// Amplitudes in 0 to 1 (a value that is not finite is 0) and frequencies in 40 to 1250 Hz. A frequency that is
     /// not finite or not positive is the default of its band.
     pub(crate) fn sanitized(self) -> VibrationValue {
-        let amp = |a: f32| if a.is_finite() { a.clamp(0.0, 1.0) } else { 0.0 };
+        let amp = |a: f32| {
+            if a.is_finite() {
+                a.clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        };
         let freq = |f: f32, default: f32| {
-            if f.is_finite() && f > 0.0 { f.clamp(FREQ_MIN, FREQ_MAX) } else { default }
+            if f.is_finite() && f > 0.0 {
+                f.clamp(FREQ_MIN, FREQ_MAX)
+            } else {
+                default
+            }
         };
         VibrationValue {
             amp_low: amp(self.amp_low),
@@ -83,20 +98,35 @@ pub(crate) fn level(values: &[VibrationValue], gain: f32) -> Level {
         power += lo + hi;
         weighted += lo * (v.freq_low / FREQ_MIN).ln() + hi * (v.freq_high / FREQ_MIN).ln();
     }
-    let gain = if gain.is_finite() && gain >= 0.0 { gain } else { 1.0 };
+    let gain = if gain.is_finite() && gain >= 0.0 {
+        gain
+    } else {
+        1.0
+    };
     let intensity = (power.sqrt() * gain).min(1.0);
     let sharpness = if power > 0.0 {
         (weighted / (power * (FREQ_MAX / FREQ_MIN).ln())).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    Level { intensity, sharpness }
+    Level {
+        intensity,
+        sharpness,
+    }
 }
 
 /// The intensity that the controller gets: nothing at or below `min`, then 0 to 1 above it.
 pub(crate) fn controller_level(x: f32, min: f32) -> f32 {
-    let min = if min.is_finite() { min.clamp(0.0, 0.99) } else { 0.0 };
-    if x <= min { 0.0 } else { ((x - min) / (1.0 - min)).min(1.0) }
+    let min = if min.is_finite() {
+        min.clamp(0.0, 0.99)
+    } else {
+        0.0
+    };
+    if x <= min {
+        0.0
+    } else {
+        ((x - min) / (1.0 - min)).min(1.0)
+    }
 }
 
 /// The levels of one player: each motor alone, for a controller with a left and a right engine, and both motors
@@ -117,7 +147,9 @@ pub(crate) struct Rumble {
 
 impl Default for Rumble {
     fn default() -> Self {
-        Rumble { values: [[VibrationValue::IDLE; 2]; PLAYERS] }
+        Rumble {
+            values: [[VibrationValue::IDLE; 2]; PLAYERS],
+        }
     }
 }
 
@@ -153,7 +185,10 @@ impl Rumble {
         let Some(p) = self.values.get(player) else {
             return PlayerLevels::default();
         };
-        let map = |l: Level| Level { intensity: controller_level(l.intensity, min), sharpness: l.sharpness };
+        let map = |l: Level| Level {
+            intensity: controller_level(l.intensity, min),
+            sharpness: l.sharpness,
+        };
         PlayerLevels {
             motors: [map(level(&p[0..1], gain)), map(level(&p[1..2], gain))],
             mixed: map(level(&p[..], gain)),
@@ -166,13 +201,24 @@ mod tests {
     use super::*;
 
     fn v(al: f32, fl: f32, ah: f32, fh: f32) -> VibrationValue {
-        VibrationValue { amp_low: al, freq_low: fl, amp_high: ah, freq_high: fh }
+        VibrationValue {
+            amp_low: al,
+            freq_low: fl,
+            amp_high: ah,
+            freq_high: fh,
+        }
     }
 
     #[test]
     fn idle_is_silent() {
         let l = level(&[VibrationValue::IDLE], 1.0);
-        assert_eq!(l, Level { intensity: 0.0, sharpness: 0.0 });
+        assert_eq!(
+            l,
+            Level {
+                intensity: 0.0,
+                sharpness: 0.0
+            }
+        );
     }
 
     #[test]

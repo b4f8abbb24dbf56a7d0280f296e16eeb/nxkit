@@ -13,7 +13,9 @@
 //! older C interface of `codec.rs`. The queues of a decoder live on the host. A packet and its PCM pass through one
 //! scratch block of guest memory, which is safe because `Execute` holds the state lock for the whole decode.
 
-use super::codec::{give_block, soft_decode, soft_fini, soft_init, soft_reset, soft_work_size, take_block};
+use super::codec::{
+    give_block, soft_decode, soft_fini, soft_init, soft_reset, soft_work_size, take_block,
+};
 use super::{fatal, get_bytes, get_i32, get_u64, log, put_bytes, put_i32, put_u64, put_zero};
 use crate::event::{self, Block, guest_alloc};
 use crate::sys::{call_guest, call_guest7};
@@ -72,13 +74,19 @@ struct State {
     work: Vec<(u64, u64)>,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { mgrs: BTreeMap::new(), decs: BTreeMap::new(), work: Vec::new() });
+static STATE: Mutex<State> = Mutex::new(State {
+    mgrs: BTreeMap::new(),
+    decs: BTreeMap::new(),
+    work: Vec::new(),
+});
 
 /// The id of the manager at `gm`. A manager that the host did not initialize stops the game.
 fn mgr_id(gm: u64) -> u64 {
     let id = get_u64(gm);
     if id == 0 {
-        fatal(&format!("Opus decoder manager {gm:#x} was not initialized by the host"));
+        fatal(&format!(
+            "Opus decoder manager {gm:#x} was not initialized by the host"
+        ));
     }
     id
 }
@@ -87,14 +95,18 @@ fn mgr_of<'a>(s: &'a mut State, gm: u64) -> (u64, &'a mut Mgr) {
     let id = mgr_id(gm);
     match s.mgrs.get_mut(&id) {
         Some(m) => (id, m),
-        None => fatal(&format!("Opus decoder manager {gm:#x} was not initialized by the host")),
+        None => fatal(&format!(
+            "Opus decoder manager {gm:#x} was not initialized by the host"
+        )),
     }
 }
 
 fn dec_of<'a>(s: &'a mut State, gd: u64) -> &'a mut Dec {
     match s.decs.get_mut(&gd) {
         Some(d) => d,
-        None => fatal(&format!("Opus decoder {gd:#x} was not initialized by the host")),
+        None => fatal(&format!(
+            "Opus decoder {gd:#x} was not initialized by the host"
+        )),
     }
 }
 
@@ -129,10 +141,27 @@ extern "C" fn work_size(_rate: u32, _channels: u32, _frame: u64, _decoders: u32,
 /// `InitializeHardwareOpusDecoderManager(manager*, SystemEventType*, rate, channels, TimeSpan frame, decoders, io,
 /// work, size)`. The ninth argument is on the stack and unused. The SDK creates the event and the game destroys it after
 /// the finalize.
-extern "C" fn mgr_initialize(gm: u64, ev: u64, _rate: u32, _channels: u32, _frame: u64, _decoders: u32, io: u32, _work: u64) -> u32 {
+extern "C" fn mgr_initialize(
+    gm: u64,
+    ev: u64,
+    _rate: u32,
+    _channels: u32,
+    _frame: u64,
+    _decoders: u32,
+    io: u32,
+    _work: u64,
+) -> u32 {
     event::bind(ev, true);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    lock(&STATE).mgrs.insert(id, Mgr { event: ev, io_total: io as i32, io_used: 0, decs: Vec::new() });
+    lock(&STATE).mgrs.insert(
+        id,
+        Mgr {
+            event: ev,
+            io_total: io as i32,
+            io_used: 0,
+            decs: Vec::new(),
+        },
+    );
     put_u64(gm, id);
     0
 }
@@ -168,17 +197,34 @@ extern "C" fn dec_initialize(gd: u64, rate: u32, channels: u32, _frame: u64, gm:
     if s.decs.contains_key(&gd) {
         drop_decoder(&mut s, gd);
     }
-    let ws = call_guest(soft_work_size(), [u64::from(rate), u64::from(channels), 0, 0, 0, 0]);
+    let ws = call_guest(
+        soft_work_size(),
+        [u64::from(rate), u64::from(channels), 0, 0, 0, 0],
+    );
     let soft = take_block();
     let work = take_work(&mut s, ws);
-    let r = call_guest(soft_init(), [soft, u64::from(rate), u64::from(channels), work, ws, 0]) as u32;
+    let r = call_guest(
+        soft_init(),
+        [soft, u64::from(rate), u64::from(channels), work, ws, 0],
+    ) as u32;
     if r != 0 {
         give_block(soft);
         s.work.push((ws, work));
         return r;
     }
     put_u64(gd, soft);
-    s.decs.insert(gd, Dec { mgr: id, soft, work, work_size: ws, channels, wait: VecDeque::new(), done: VecDeque::new() });
+    s.decs.insert(
+        gd,
+        Dec {
+            mgr: id,
+            soft,
+            work,
+            work_size: ws,
+            channels,
+            wait: VecDeque::new(),
+            done: VecDeque::new(),
+        },
+    );
     if let Some(m) = s.mgrs.get_mut(&id) {
         m.decs.push(gd);
     }
@@ -188,7 +234,9 @@ extern "C" fn dec_initialize(gd: u64, rate: u32, channels: u32, _frame: u64, gm:
 /// Removes the manager decoder at `gd`, finalizes its software state and returns its buffers. Gives false when `gd` is
 /// not a manager decoder.
 fn drop_decoder(s: &mut State, gd: u64) -> bool {
-    let Some(mut d) = s.decs.remove(&gd) else { return false };
+    let Some(mut d) = s.decs.remove(&gd) else {
+        return false;
+    };
     clear(&mut s.mgrs, &mut d);
     if let Some(m) = s.mgrs.get_mut(&d.mgr) {
         m.decs.retain(|x| *x != gd);
@@ -210,7 +258,9 @@ pub(super) fn finalize_decoder(gd: u64) -> bool {
 pub(super) fn reset_decoder(gd: u64) -> bool {
     let mut s = lock(&STATE);
     let State { mgrs, decs, .. } = &mut *s;
-    let Some(d) = decs.get_mut(&gd) else { return false };
+    let Some(d) = decs.get_mut(&gd) else {
+        return false;
+    };
     clear(mgrs, d);
     call_guest(soft_reset(), [d.soft, 0, 0, 0, 0, 0]);
     true
@@ -227,12 +277,16 @@ extern "C" fn enqueue(gd: u64, consumed: u64, input: u64, in_size: u64) -> u32 {
     }
     let n = in_size as usize;
     if in_size < 8 || n > MAX_PACKET {
-        log(&format!("[RED] codec: Opus packet of {in_size} bytes enqueued"));
+        log(&format!(
+            "[RED] codec: Opus packet of {in_size} bytes enqueued"
+        ));
         return RES_OPUS;
     }
     let packet = get_bytes(input, n);
     // The game checks the free count first, so a full pool is an error of the game.
-    let Some(m) = s.mgrs.get_mut(&mid) else { return RES_OPUS };
+    let Some(m) = s.mgrs.get_mut(&mid) else {
+        return RES_OPUS;
+    };
     if m.io_used >= m.io_total {
         return RES_OPUS;
     }
@@ -275,17 +329,33 @@ fn decode(d: &Dec, scratch: u64, pkt: &[u8]) -> Done {
     put_bytes(scratch + PKT_AT, pkt);
     put_zero(scratch + OUT_AT, 16);
     let (used, samples) = (scratch + OUT_AT, scratch + OUT_AT + 8);
-    let a = [d.soft, used, samples, scratch + PCM_AT, MAX_PCM as u64, scratch + PKT_AT];
+    let a = [
+        d.soft,
+        used,
+        samples,
+        scratch + PCM_AT,
+        MAX_PCM as u64,
+        scratch + PKT_AT,
+    ];
     let res = call_guest7(soft_decode(), a, pkt.len() as u64) as u32;
     let got = get_i32(samples);
     let bytes = got.max(0) as usize * d.channels as usize * 2;
     if res == 0 && got > 0 && bytes <= MAX_PCM {
-        return Done { pcm: get_bytes(scratch + PCM_AT, bytes), samples: got };
+        return Done {
+            pcm: get_bytes(scratch + PCM_AT, bytes),
+            samples: got,
+        };
     }
     if REFUSED.fetch_add(1, Ordering::Relaxed) < 4 {
-        log(&format!("[RED] codec: software Opus decode of a {}-byte packet failed ({res:#x}), silence instead", pkt.len()));
+        log(&format!(
+            "[RED] codec: software Opus decode of a {}-byte packet failed ({res:#x}), silence instead",
+            pkt.len()
+        ));
     }
-    Done { pcm: vec![0; SILENCE_SAMPLES as usize * d.channels as usize * 2], samples: SILENCE_SAMPLES }
+    Done {
+        pcm: vec![0; SILENCE_SAMPLES as usize * d.channels as usize * 2],
+        samples: SILENCE_SAMPLES,
+    }
 }
 
 /// `DequeuePcmInterleavedDataFromHardwareOpusDecoder(decoder*, int* samples, short* out, size_t out_size)`.
@@ -294,17 +364,26 @@ extern "C" fn dequeue(gd: u64, samples: u64, out: u64, out_size: u64) -> u32 {
     let mut s = lock(&STATE);
     let State { mgrs, decs, .. } = &mut *s;
     let Some(d) = decs.get_mut(&gd) else {
-        fatal(&format!("Opus decoder {gd:#x} was not initialized by the host"));
+        fatal(&format!(
+            "Opus decoder {gd:#x} was not initialized by the host"
+        ));
     };
     if d.mgr == 0 {
         return RES_OPUS;
     }
-    let Some(front) = d.done.front() else { return RES_OPUS };
+    let Some(front) = d.done.front() else {
+        return RES_OPUS;
+    };
     if front.pcm.len() as u64 > out_size {
-        log(&format!("[RED] codec: a {}-byte Opus frame for a {out_size}-byte buffer", front.pcm.len()));
+        log(&format!(
+            "[RED] codec: a {}-byte Opus frame for a {out_size}-byte buffer",
+            front.pcm.len()
+        ));
         return RES_OPUS;
     }
-    let Some(r) = d.done.pop_front() else { return RES_OPUS };
+    let Some(r) = d.done.pop_front() else {
+        return RES_OPUS;
+    };
     if let Some(m) = mgrs.get_mut(&d.mgr) {
         m.io_used -= 1;
     }

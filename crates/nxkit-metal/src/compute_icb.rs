@@ -209,7 +209,9 @@ impl ComputeIndirectCommandBuffer {
             }
             ComputeIcbCommand::SetKernelBuffer { index, buffer } => {
                 if *index >= self.max_kernel {
-                    return Err(MetalError::Invalid("the kernel buffer slot is out of range"));
+                    return Err(MetalError::Invalid(
+                        "the kernel buffer slot is out of range",
+                    ));
                 }
                 if buffer.offset >= buffer.guest.len() {
                     return Err(MetalError::Invalid(
@@ -252,8 +254,9 @@ impl ComputeIndirectCommandBuffer {
                     size3(*groups),
                     size3(*threads),
                 ),
-            ComputeIcbCommand::DispatchThreads { grid, threads } => cmd
-                .concurrentDispatchThreads_threadsPerThreadgroup(size3(*grid), size3(*threads)),
+            ComputeIcbCommand::DispatchThreads { grid, threads } => {
+                cmd.concurrentDispatchThreads_threadsPerThreadgroup(size3(*grid), size3(*threads))
+            }
             ComputeIcbCommand::Barrier => cmd.setBarrier(),
         }
         Ok(())

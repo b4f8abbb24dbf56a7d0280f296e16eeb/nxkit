@@ -31,8 +31,15 @@ impl IFileSystem {
         path_arg(req, n).map(|p| self.full(&p))
     }
 
-    fn with_path(&self, req: &Request<'_>, rsp: &mut Response, f: impl FnOnce(&Fs, &[u8]) -> u32) -> Handled {
-        let Some(fs) = service(rsp) else { return Handled::Done };
+    fn with_path(
+        &self,
+        req: &Request<'_>,
+        rsp: &mut Response,
+        f: impl FnOnce(&Fs, &[u8]) -> u32,
+    ) -> Handled {
+        let Some(fs) = service(rsp) else {
+            return Handled::Done;
+        };
         rsp.result = match self.path(req, 0) {
             Ok(p) => f(fs, &p),
             Err(r) => r,
@@ -41,8 +48,12 @@ impl IFileSystem {
     }
 
     fn open_file(&self, req: &Request<'_>, rsp: &mut Response) -> Handled {
-        let Some(fs) = service(rsp) else { return Handled::Done };
-        let (Some(mode), Ok(path)) = (req.u32_at(0), self.path(req, 0)) else { return answer(rsp, FAIL) };
+        let Some(fs) = service(rsp) else {
+            return Handled::Done;
+        };
+        let (Some(mode), Ok(path)) = (req.u32_at(0), self.path(req, 0)) else {
+            return answer(rsp, FAIL);
+        };
         match fs.open_file(&path, mode) {
             Ok(handle) => {
                 rsp.objects.push(Arc::new(IFile::new(fs, handle)));
@@ -53,8 +64,12 @@ impl IFileSystem {
     }
 
     fn open_directory(&self, req: &Request<'_>, rsp: &mut Response) -> Handled {
-        let Some(fs) = service(rsp) else { return Handled::Done };
-        let (Some(filter), Ok(path)) = (req.u32_at(0), self.path(req, 0)) else { return answer(rsp, FAIL) };
+        let Some(fs) = service(rsp) else {
+            return Handled::Done;
+        };
+        let (Some(filter), Ok(path)) = (req.u32_at(0), self.path(req, 0)) else {
+            return answer(rsp, FAIL);
+        };
         match fs.open_dir(&path, filter & (DIR_DIRECTORIES | DIR_FILES)) {
             Ok(handle) => {
                 rsp.objects.push(Arc::new(IDirectory::new(fs, handle)));
@@ -74,7 +89,9 @@ impl Service for IFileSystem {
         match req.command {
             0 => {
                 // option u32 at 0, size s64 at 8
-                let Ok(size) = arg_u64(req, 8) else { return answer(rsp, FAIL) };
+                let Ok(size) = arg_u64(req, 8) else {
+                    return answer(rsp, FAIL);
+                };
                 self.with_path(req, rsp, |fs, p| fs.create_file(p, size as i64))
             }
             1 => self.with_path(req, rsp, |fs, p| fs.delete_file(p)),
@@ -82,7 +99,9 @@ impl Service for IFileSystem {
             3 => self.with_path(req, rsp, |fs, p| fs.delete_dir(p)),
             4 => self.with_path(req, rsp, |fs, p| fs.delete_dir_recursively(p)),
             5 | 6 => {
-                let Some(fs) = service(rsp) else { return Handled::Done };
+                let Some(fs) = service(rsp) else {
+                    return Handled::Done;
+                };
                 rsp.result = match (self.path(req, 0), self.path(req, 1)) {
                     (Ok(from), Ok(to)) => fs.rename(&from, &to, req.command == 6),
                     _ => FAIL,
@@ -90,7 +109,9 @@ impl Service for IFileSystem {
                 Handled::Done
             }
             7 => {
-                let Some(fs) = service(rsp) else { return Handled::Done };
+                let Some(fs) = service(rsp) else {
+                    return Handled::Done;
+                };
                 match self.path(req, 0).and_then(|p| fs.entry_type(&p)) {
                     Ok(t) => rsp.push_u32(t as u32),
                     Err(r) => rsp.result = r,
@@ -100,7 +121,9 @@ impl Service for IFileSystem {
             8 => self.open_file(req, rsp),
             9 => self.open_directory(req, rsp),
             10 => {
-                let Some(fs) = service(rsp) else { return Handled::Done };
+                let Some(fs) = service(rsp) else {
+                    return Handled::Done;
+                };
                 rsp.result = fs.commit(&self.mount);
                 Handled::Done
             }

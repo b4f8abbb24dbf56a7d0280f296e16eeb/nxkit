@@ -25,7 +25,14 @@ mod acc {
             id: isize,
             n: usize,
         );
-        pub(super) fn vDSP_vsmul(a: *const f32, ia: isize, b: *const f32, c: *mut f32, ic: isize, n: usize);
+        pub(super) fn vDSP_vsmul(
+            a: *const f32,
+            ia: isize,
+            b: *const f32,
+            c: *mut f32,
+            ic: isize,
+            n: usize,
+        );
     }
 }
 

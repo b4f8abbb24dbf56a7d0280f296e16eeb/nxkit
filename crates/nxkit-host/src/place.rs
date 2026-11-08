@@ -76,7 +76,13 @@ fn read_images(game: &Game) -> Result<Vec<Vec<u8>>> {
 
 /// Maps read and write anonymous memory over every part of `[from, to)` that no segment of the library covers. A failure
 /// gives back what it mapped.
-fn fill_gaps(res: &Reservation, segs: &[MachSegment], slide: i64, from: u64, to: u64) -> Result<()> {
+fn fill_gaps(
+    res: &Reservation,
+    segs: &[MachSegment],
+    slide: i64,
+    from: u64,
+    to: u64,
+) -> Result<()> {
     let mut spans: Vec<(u64, u64)> = segs
         .iter()
         .map(|s| {
@@ -130,7 +136,11 @@ fn attempt(game: &Game, dylib: &Dylib) -> Result<std::result::Result<Mapped, Str
     let moved = game.moved(image.slide)?;
     let floor = segs
         .iter()
-        .map(|s| s.vmaddr.wrapping_add_signed(image.slide).wrapping_add(s.vmsize))
+        .map(|s| {
+            s.vmaddr
+                .wrapping_add_signed(image.slide)
+                .wrapping_add(s.vmsize)
+        })
         .max()
         .unwrap_or(0);
     let layout = layout::plan(&moved, floor)?;
@@ -152,9 +162,16 @@ fn attempt(game: &Game, dylib: &Dylib) -> Result<std::result::Result<Mapped, Str
         return Ok(Err(e.to_string()));
     }
     if image.slide != 0 {
-        eprintln!("nxkit-host: dyld moved the library by {:#x}, the loader relocates the modules", image.slide);
+        eprintln!(
+            "nxkit-host: dyld moved the library by {:#x}, the loader relocates the modules",
+            image.slide
+        );
     }
-    Ok(Ok(Mapped { game: moved, layout, res }))
+    Ok(Ok(Mapped {
+        game: moved,
+        layout,
+        res,
+    }))
 }
 
 fn via_dylib(game: &Game) -> Result<std::result::Result<(Mapped, Dylib), String>> {
@@ -187,7 +204,8 @@ pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
     }
     hints.push(layout::FALLBACK_BASE + start % layout::REGION_ALIGN);
     let accept = |got: u64| {
-        got.checked_add(len).is_some_and(|e| e <= layout::SPACE_END) && got.wrapping_sub(start) % layout::REGION_ALIGN == 0
+        got.checked_add(len).is_some_and(|e| e <= layout::SPACE_END)
+            && got.wrapping_sub(start) % layout::REGION_ALIGN == 0
     };
     let res = sys::reserve_where(&hints, len, accept).map_err(|e| {
         HostError::Memory(format!(
@@ -208,7 +226,10 @@ pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
             layout.all.len
         )));
     }
-    eprintln!("nxkit-host: the guest moved by {slide:#x} to {:#x}", res.base());
+    eprintln!(
+        "nxkit-host: the guest moved by {slide:#x} to {:#x}",
+        res.base()
+    );
     Ok((res, moved, layout))
 }
 
@@ -254,7 +275,10 @@ fn open_code_file(game: &Game) -> Result<CodeFile> {
 fn via_file_map(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
     let code = open_code_file(game)?;
     sys::add_file_signature(&code.file, code.sig.0, code.sig.1).map_err(|e| {
-        HostError::Load(format!("{}: the system does not take the code signature: {e}", game.dylib.display()))
+        HostError::Load(format!(
+            "{}: the system does not take the code signature: {e}",
+            game.dylib.display()
+        ))
     })?;
     let (res, game, layout) = reserve_guest(game)?;
     for (m, image) in game.modules.iter().zip(images) {
@@ -262,7 +286,10 @@ fn via_file_map(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
             let at = m.segment_addr(s);
             if s.prot == Prot::Exec {
                 let found = code.segs.iter().find(|x| x.name == s.name).ok_or_else(|| {
-                    HostError::Load(format!("module {}: the library has no segment {}", m.name, s.name))
+                    HostError::Load(format!(
+                        "module {}: the library has no segment {}",
+                        m.name, s.name
+                    ))
                 })?;
                 if found.filesize > 0 {
                     res.map_file_exec(at, found.filesize, &code.file, found.fileoff)?;
@@ -274,7 +301,10 @@ fn via_file_map(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
                 .zip(usize::try_from(s.file_offset + s.file_size).ok())
                 .and_then(|(a, b)| image.get(a..b))
                 .ok_or_else(|| {
-                    HostError::Load(format!("module {}: segment {} lies outside the image file", m.name, s.name))
+                    HostError::Load(format!(
+                        "module {}: segment {} lies outside the image file",
+                        m.name, s.name
+                    ))
                 })?;
             res.copy_in(at, bytes)?;
         }

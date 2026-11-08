@@ -10,7 +10,8 @@
 //! the scaled textures with compute stages, as the plain upload does, so the barrier planner treats both alike.
 
 use nxkit_metal::{
-    BATCHES_IN_FLIGHT, CommandBuffer, ComputeCommand, Context, PipelineCache, Resampler, Texture, TextureDesc,
+    BATCHES_IN_FLIGHT, CommandBuffer, ComputeCommand, Context, PipelineCache, Resampler, Texture,
+    TextureDesc,
 };
 
 use crate::draws::FastMap;
@@ -91,7 +92,10 @@ impl ScaledUploads {
                     nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::TextureCreate, what);
                     crate::tex_skip(what)
                 })?;
-                list.push(Entry { tex: tex.clone(), used: self.frame });
+                list.push(Entry {
+                    tex: tex.clone(),
+                    used: self.frame,
+                });
                 tex
             }
         };
@@ -136,10 +140,16 @@ impl ScaledUploads {
             let mut ok = true;
             for slice in 0..p.slices {
                 for level in 0..p.levels {
-                    if let Err(e) = self.resampler.encode(&mut pass, &p.staging, &p.target, level, slice) {
+                    if let Err(e) = self
+                        .resampler
+                        .encode(&mut pass, &p.staging, &p.target, level, slice)
+                    {
                         nxkit_nvn::diag::note(
                             nxkit_nvn::diag::Reason::UploadFailed,
-                            format_args!("scale {:?} level {level} slice {slice}: {e}", p.target.desc().format),
+                            format_args!(
+                                "scale {:?} level {level} slice {slice}: {e}",
+                                p.target.desc().format
+                            ),
                         );
                         ok = false;
                     }

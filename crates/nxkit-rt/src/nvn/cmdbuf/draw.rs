@@ -26,12 +26,25 @@ extern "C" fn draw_arrays(c: u64, mode: i32, first: i32, n: i32) {
     );
 }
 
-extern "C" fn draw_arrays_instanced(c: u64, mode: i32, first: i32, n: i32, base_instance: i32, instances: i32) {
+extern "C" fn draw_arrays_instanced(
+    c: u64,
+    mode: i32,
+    first: i32,
+    n: i32,
+    base_instance: i32,
+    instances: i32,
+) {
     draw(
         "nvnCommandBufferDrawArraysInstanced",
         c,
         DrawKind::ArraysInstanced,
-        &[mode as u32, first as u32, n as u32, base_instance as u32, instances as u32],
+        &[
+            mode as u32,
+            first as u32,
+            n as u32,
+            base_instance as u32,
+            instances as u32,
+        ],
     );
 }
 
@@ -44,7 +57,14 @@ extern "C" fn draw_arrays_indirect(c: u64, mode: i32, indirect: u64) {
     );
 }
 
-fn elements(name: &'static str, c: u64, a: [i32; 3], index: u64, vertex: i32, (base, count): (i32, i32)) {
+fn elements(
+    name: &'static str,
+    c: u64,
+    a: [i32; 3],
+    index: u64,
+    vertex: i32,
+    (base, count): (i32, i32),
+) {
     draw(
         name,
         c,
@@ -63,11 +83,32 @@ fn elements(name: &'static str, c: u64, a: [i32; 3], index: u64, vertex: i32, (b
 }
 
 extern "C" fn draw_elements(c: u64, mode: i32, ty: i32, n: i32, index: u64) {
-    elements("nvnCommandBufferDrawElements", c, [mode, ty, n], index, 0, (0, 1));
+    elements(
+        "nvnCommandBufferDrawElements",
+        c,
+        [mode, ty, n],
+        index,
+        0,
+        (0, 1),
+    );
 }
 
-extern "C" fn draw_elements_base_vertex(c: u64, mode: i32, ty: i32, n: i32, index: u64, vertex: i32) {
-    elements("nvnCommandBufferDrawElementsBaseVertex", c, [mode, ty, n], index, vertex, (0, 1));
+extern "C" fn draw_elements_base_vertex(
+    c: u64,
+    mode: i32,
+    ty: i32,
+    n: i32,
+    index: u64,
+    vertex: i32,
+) {
+    elements(
+        "nvnCommandBufferDrawElementsBaseVertex",
+        c,
+        [mode, ty, n],
+        index,
+        vertex,
+        (0, 1),
+    );
 }
 
 extern "C" fn draw_elements_instanced(
@@ -95,7 +136,14 @@ extern "C" fn draw_elements_indirect(c: u64, mode: i32, ty: i32, index: u64, ind
         "nvnCommandBufferDrawElementsIndirect",
         c,
         DrawKind::ElementsIndirect,
-        &[mode as u32, ty as u32, lo(index), hi(index), lo(indirect), hi(indirect)],
+        &[
+            mode as u32,
+            ty as u32,
+            lo(index),
+            hi(index),
+            lo(indirect),
+            hi(indirect),
+        ],
     );
 }
 
@@ -155,7 +203,12 @@ extern "C" fn multi_draw_elements_indirect_count(
 }
 
 extern "C" fn draw_mesh_tasks(c: u64, first: u32, count: u32) {
-    draw("nvnCommandBufferDrawMeshTasks", c, DrawKind::MeshTasks, &[first, count]);
+    draw(
+        "nvnCommandBufferDrawMeshTasks",
+        c,
+        DrawKind::MeshTasks,
+        &[first, count],
+    );
 }
 
 extern "C" fn draw_mesh_tasks_indirect(c: u64, indirect: u64) {
@@ -192,7 +245,13 @@ extern "C" fn draw_texture(c: u64, handle: u64, dst: u64, src: u64) {
 }
 
 extern "C" fn dispatch_compute(c: u64, x: u32, y: u32, z: u32) {
-    emit("nvnCommandBufferDispatchCompute", c, ExtCode::Dispatch, 0, &[x, y, z]);
+    emit(
+        "nvnCommandBufferDispatchCompute",
+        c,
+        ExtCode::Dispatch,
+        0,
+        &[x, y, z],
+    );
 }
 
 extern "C" fn dispatch_compute_indirect(c: u64, indirect: u64) {
@@ -239,7 +298,13 @@ extern "C" fn bind_transform_feedback_buffers(c: u64, first: i32, n: i32, ranges
 }
 
 fn feedback(name: &'static str, c: u64, what: u16, control: u64) {
-    emit(name, c, ExtCode::TransformFeedback, what, &[lo(control), hi(control)]);
+    emit(
+        name,
+        c,
+        ExtCode::TransformFeedback,
+        what,
+        &[lo(control), hi(control)],
+    );
 }
 
 extern "C" fn begin_transform_feedback(c: u64, control: u64) {
@@ -291,8 +356,16 @@ mod tests {
     #[test]
     fn the_draw_table_has_every_draw_function() {
         let names: Vec<_> = procs().into_iter().map(|(n, _)| n).collect();
-        for n in ["DrawArrays", "DrawElementsInstanced", "DispatchComputeIndirect", "DrawTexture"] {
-            assert!(names.contains(&format!("nvnCommandBuffer{n}").as_str()), "{n}");
+        for n in [
+            "DrawArrays",
+            "DrawElementsInstanced",
+            "DispatchComputeIndirect",
+            "DrawTexture",
+        ] {
+            assert!(
+                names.contains(&format!("nvnCommandBuffer{n}").as_str()),
+                "{n}"
+            );
         }
     }
 }

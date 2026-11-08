@@ -2,8 +2,8 @@
 //! The host has one built-in speaker with two channels.
 
 use crate::host;
-use crate::util::put_name;
 use crate::util::ex;
+use crate::util::put_name;
 use nxkit_abi::export::Export;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -74,18 +74,70 @@ extern "C" fn notify_switch(ev: u64) {
 
 /// Adds the exports of this module.
 pub(crate) fn exports(v: &mut Vec<Export>) {
-    ex!(v, "_ZN2nn5audio25ListAudioOutputDeviceNameEPNS0_15AudioDeviceNameEi", list_names);
-    ex!(v, "_ZN2nn5audio30GetActiveAudioOutputDeviceNameEPNS0_15AudioDeviceNameE", active_name);
-    ex!(v, "_ZN2nn5audio19ListAudioDeviceNameEPNS0_15AudioDeviceNameEi", list_names);
-    ex!(v, "_ZN2nn5audio24GetActiveAudioDeviceNameEPNS0_15AudioDeviceNameE", active_name);
-    ex!(v, "_ZN2nn5audio41GetActiveAudioDeviceChannelCountForOutputEv", channels);
-    ex!(v, "_ZN2nn5audio26SetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameEf", set_volume);
-    ex!(v, "_ZN2nn5audio26GetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameE", get_volume);
-    ex!(v, "_ZN2nn5audio40SetDeviceOutputVolumeAutoTuneModeEnabledEb", set_autotune);
-    ex!(v, "_ZN2nn5audio39IsDeviceOutputVolumeAutoTuneModeEnabledEv", is_autotune);
-    ex!(v, "_ZN2nn5audio39AcquireAudioDeviceNotificationForOutputEPNS_2os11SystemEventE", notify_output);
-    ex!(v, "_ZN2nn5audio36AcquireAudioOutputDeviceNotificationEPNS_2os11SystemEventE", notify_output);
-    ex!(v, "_ZN2nn5audio38AcquireAudioDeviceNotificationForInputEPNS_2os11SystemEventE", notify_input);
-    ex!(v, "_ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE", notify_switch);
+    ex!(
+        v,
+        "_ZN2nn5audio25ListAudioOutputDeviceNameEPNS0_15AudioDeviceNameEi",
+        list_names
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio30GetActiveAudioOutputDeviceNameEPNS0_15AudioDeviceNameE",
+        active_name
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio19ListAudioDeviceNameEPNS0_15AudioDeviceNameEi",
+        list_names
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio24GetActiveAudioDeviceNameEPNS0_15AudioDeviceNameE",
+        active_name
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio41GetActiveAudioDeviceChannelCountForOutputEv",
+        channels
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio26SetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameEf",
+        set_volume
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio26GetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameE",
+        get_volume
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio40SetDeviceOutputVolumeAutoTuneModeEnabledEb",
+        set_autotune
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio39IsDeviceOutputVolumeAutoTuneModeEnabledEv",
+        is_autotune
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio39AcquireAudioDeviceNotificationForOutputEPNS_2os11SystemEventE",
+        notify_output
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio36AcquireAudioOutputDeviceNotificationEPNS_2os11SystemEventE",
+        notify_output
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio38AcquireAudioDeviceNotificationForInputEPNS_2os11SystemEventE",
+        notify_input
+    );
+    ex!(
+        v,
+        "_ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE",
+        notify_switch
+    );
     ex!(v, "_ZN2nn5audio21GetActiveChannelCountEv", channels);
 }

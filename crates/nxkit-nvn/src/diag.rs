@@ -18,7 +18,12 @@ pub fn on(cat: &str) -> bool {
     static V: OnceLock<Option<Vec<String>>> = OnceLock::new();
     let v = V.get_or_init(|| {
         let raw = std::env::var("NXKIT_DIAG").unwrap_or_default();
-        let list: Vec<String> = raw.split(',').map(str::trim).filter(|c| !c.is_empty()).map(String::from).collect();
+        let list: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(String::from)
+            .collect();
         (!list.iter().any(|c| c == "all")).then_some(list)
     });
     v.as_ref().is_none_or(|list| list.iter().any(|c| c == cat))
@@ -31,7 +36,9 @@ pub fn first(counter: &AtomicU32, max: u32) -> bool {
 
 /// True every `every`th call with `counter`, starting with the first.
 pub fn every(counter: &AtomicU32, every: u32) -> bool {
-    counter.fetch_add(1, Ordering::Relaxed).is_multiple_of(every.max(1))
+    counter
+        .fetch_add(1, Ordering::Relaxed)
+        .is_multiple_of(every.max(1))
 }
 
 /// Whether the health report is on (`NXKIT_DIAG=health`).
@@ -223,7 +230,10 @@ fn keep(why: Reason, example: fmt::Arguments<'_>) {
     if list.len() < EXAMPLES {
         let mut text = example.to_string();
         if text.len() > EXAMPLE_BYTES {
-            let end = (0..=EXAMPLE_BYTES).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+            let end = (0..=EXAMPLE_BYTES)
+                .rev()
+                .find(|i| text.is_char_boundary(*i))
+                .unwrap_or(0);
             text.truncate(end);
             text.push_str("...");
         }
@@ -244,9 +254,9 @@ pub fn frame_end(frame: u64) {
     if !health_on() {
         return;
     }
-    let fresh = Reason::ALL.iter().any(|r| {
-        COUNTERS.reported[*r as usize].load(Ordering::Relaxed) == 0 && total(*r) != 0
-    });
+    let fresh = Reason::ALL
+        .iter()
+        .any(|r| COUNTERS.reported[*r as usize].load(Ordering::Relaxed) == 0 && total(*r) != 0);
     if fresh || frame.is_multiple_of(REPORT_EVERY) {
         eprint!("{}", report(frame));
     }
@@ -265,7 +275,13 @@ pub fn report(frame: u64) -> String {
         }
         lines += 1;
         let new = if before == 0 { " NEW" } else { "" };
-        let _ = write!(out, "health:   {:<24} {:>10} {:>10}{new}", r.name(), total - before, total);
+        let _ = write!(
+            out,
+            "health:   {:<24} {:>10} {:>10}{new}",
+            r.name(),
+            total - before,
+            total
+        );
         if let Some(ex) = samples.get(*r as usize).filter(|e| !e.is_empty()) {
             let _ = write!(out, "  e.g. {}", ex.join(" | "));
         }
@@ -275,8 +291,15 @@ pub fn report(frame: u64) -> String {
         return format!("health: clean (frame {frame})\n");
     }
     let losses = Reason::ALL.iter().any(|r| r.is_loss() && total(*r) != 0);
-    let head = if losses { "work was dropped" } else { "clean apart from culled draws" };
-    format!("health: frame {frame}: {head}\nhealth:   {:<24} {:>10} {:>10}\n{out}", "reason", "since last", "total")
+    let head = if losses {
+        "work was dropped"
+    } else {
+        "clean apart from culled draws"
+    };
+    format!(
+        "health: frame {frame}: {head}\nhealth:   {:<24} {:>10} {:>10}\n{out}",
+        "reason", "since last", "total"
+    )
 }
 
 #[cfg(test)]
@@ -299,6 +322,11 @@ mod tests {
         assert!(text.contains("NEW"), "{text}");
         let again = report(600);
         assert!(again.contains("upload.linear-refused"), "{again}");
-        assert!(!again.lines().any(|l| l.contains("upload.linear-refused") && l.contains("NEW")), "{again}");
+        assert!(
+            !again
+                .lines()
+                .any(|l| l.contains("upload.linear-refused") && l.contains("NEW")),
+            "{again}"
+        );
     }
 }

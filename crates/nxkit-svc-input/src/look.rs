@@ -38,7 +38,11 @@ pub struct LookConfig {
 
 impl Default for LookConfig {
     fn default() -> Self {
-        LookConfig { sensitivity: 1.0, invert_y: false, deadzone: 0.12 }
+        LookConfig {
+            sensitivity: 1.0,
+            invert_y: false,
+            deadzone: 0.12,
+        }
     }
 }
 
@@ -46,7 +50,8 @@ impl LookConfig {
     /// The settings with every value in its range. A value that is not finite takes the default.
     pub(crate) fn clamped(self) -> LookConfig {
         let d = LookConfig::default();
-        let fix = |v: f32, lo: f32, hi: f32, def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
+        let fix =
+            |v: f32, lo: f32, hi: f32, def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
         LookConfig {
             sensitivity: fix(self.sensitivity, 0.05, 20.0, d.sensitivity),
             invert_y: self.invert_y,
@@ -68,7 +73,12 @@ pub(crate) struct Look {
 
 impl Look {
     pub(crate) fn new(config: LookConfig) -> Look {
-        Look { config: config.clamped(), pending: [0.0; 2], level: [0.0; 2], last: None }
+        Look {
+            config: config.clamped(),
+            pending: [0.0; 2],
+            level: [0.0; 2],
+            last: None,
+        }
     }
 
     /// Adds the motion of one mouse event, in points with y down.
@@ -164,7 +174,10 @@ mod tests {
     fn steady(l: &mut Look, t: &mut Instant, speed: [f32; 2], frames: u32) -> [f32; 2] {
         let mut s = [0.0; 2];
         for _ in 0..frames {
-            l.push(speed[0] * FRAME.as_secs_f32(), speed[1] * FRAME.as_secs_f32());
+            l.push(
+                speed[0] * FRAME.as_secs_f32(),
+                speed[1] * FRAME.as_secs_f32(),
+            );
             *t += FRAME;
             s = l.sample(*t);
         }
@@ -179,7 +192,10 @@ mod tests {
 
     #[test]
     fn a_steady_motion_settles_on_its_speed() {
-        let (mut l, mut t) = look(LookConfig { deadzone: 0.0, ..LookConfig::default() });
+        let (mut l, mut t) = look(LookConfig {
+            deadzone: 0.0,
+            ..LookConfig::default()
+        });
         let s = steady(&mut l, &mut t, [750.0, 0.0], 20);
         assert!((s[0] - 0.5).abs() < 0.01, "{s:?}");
         assert_eq!(s[1], 0.0);
@@ -189,7 +205,10 @@ mod tests {
     fn mouse_up_is_stick_up_unless_inverted() {
         let (mut l, mut t) = look(LookConfig::default());
         assert!(steady(&mut l, &mut t, [0.0, -300.0], 10)[1] > 0.0);
-        let (mut l, mut t) = look(LookConfig { invert_y: true, ..LookConfig::default() });
+        let (mut l, mut t) = look(LookConfig {
+            invert_y: true,
+            ..LookConfig::default()
+        });
         assert!(steady(&mut l, &mut t, [0.0, -300.0], 10)[1] < 0.0);
     }
 
@@ -203,7 +222,10 @@ mod tests {
 
     #[test]
     fn the_stick_stays_in_the_unit_circle() {
-        let (mut l, mut t) = look(LookConfig { sensitivity: 20.0, ..LookConfig::default() });
+        let (mut l, mut t) = look(LookConfig {
+            sensitivity: 20.0,
+            ..LookConfig::default()
+        });
         let [x, y] = steady(&mut l, &mut t, [5000.0, 5000.0], 10);
         assert!((x * x + y * y).sqrt() <= 1.0001);
     }
@@ -217,8 +239,15 @@ mod tests {
 
     #[test]
     fn sensitivity_scales_the_deflection() {
-        let (mut a, mut ta) = look(LookConfig { deadzone: 0.0, ..LookConfig::default() });
-        let (mut b, mut tb) = look(LookConfig { deadzone: 0.0, sensitivity: 2.0, ..LookConfig::default() });
+        let (mut a, mut ta) = look(LookConfig {
+            deadzone: 0.0,
+            ..LookConfig::default()
+        });
+        let (mut b, mut tb) = look(LookConfig {
+            deadzone: 0.0,
+            sensitivity: 2.0,
+            ..LookConfig::default()
+        });
         let sa = steady(&mut a, &mut ta, [300.0, 0.0], 20)[0];
         let sb = steady(&mut b, &mut tb, [300.0, 0.0], 20)[0];
         assert!((sb - 2.0 * sa).abs() < 0.01, "{sa} {sb}");
@@ -233,8 +262,20 @@ mod tests {
 
     #[test]
     fn bad_settings_are_limited() {
-        let c = LookConfig { sensitivity: f32::NAN, invert_y: true, deadzone: 3.0 }.clamped();
-        assert_eq!(c, LookConfig { sensitivity: 1.0, invert_y: true, deadzone: 0.9 });
+        let c = LookConfig {
+            sensitivity: f32::NAN,
+            invert_y: true,
+            deadzone: 3.0,
+        }
+        .clamped();
+        assert_eq!(
+            c,
+            LookConfig {
+                sensitivity: 1.0,
+                invert_y: true,
+                deadzone: 0.9
+            }
+        );
     }
 
     #[test]

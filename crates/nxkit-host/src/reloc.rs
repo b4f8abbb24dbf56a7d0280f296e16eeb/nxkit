@@ -96,19 +96,25 @@ impl Image<'_> {
     }
 
     fn u64_at(&self, off: u64) -> Result<u64> {
-        let b = self.read(off, 8).ok_or_else(|| err(self.m, format!("offset {off:#x} is outside the image")))?;
+        let b = self
+            .read(off, 8)
+            .ok_or_else(|| err(self.m, format!("offset {off:#x} is outside the image")))?;
         Ok(u64::from_le_bytes(b.try_into().unwrap_or_default()))
     }
 
     fn u32_at(&self, off: u64) -> Result<u32> {
-        let b = self.read(off, 4).ok_or_else(|| err(self.m, format!("offset {off:#x} is outside the image")))?;
+        let b = self
+            .read(off, 4)
+            .ok_or_else(|| err(self.m, format!("offset {off:#x} is outside the image")))?;
         Ok(u32::from_le_bytes(b.try_into().unwrap_or_default()))
     }
 
     fn name_at(&self, off: u64) -> Result<String> {
         let mut out = Vec::new();
         for i in 0..MAX_NAME {
-            let b = self.read(off + i, 1).ok_or_else(|| err(self.m, "a symbol name leaves the image"))?;
+            let b = self
+                .read(off + i, 1)
+                .ok_or_else(|| err(self.m, "a symbol name leaves the image"))?;
             let c = b.first().copied().unwrap_or(0);
             if c == 0 {
                 return Ok(String::from_utf8_lossy(&out).into_owned());
@@ -171,7 +177,10 @@ fn relr(img: &Image, d: &Dynamic, base: u64, plan: &mut Plan) -> Result<()> {
     for i in 0..d.relrsz / 8 {
         let e = img.u64_at(d.relr + 8 * i)?;
         if e & 1 == 0 {
-            plan.writes.push(Write { offset: e, value: img.u64_at(e)?.wrapping_add(base) });
+            plan.writes.push(Write {
+                offset: e,
+                value: img.u64_at(e)?.wrapping_add(base),
+            });
             plan.counts.relr += 1;
             next = Some(e + 8);
             continue;
@@ -182,7 +191,10 @@ fn relr(img: &Image, d: &Dynamic, base: u64, plan: &mut Plan) -> Result<()> {
         for bit in 0..63u64 {
             if (e >> (bit + 1)) & 1 == 1 {
                 let off = at + 8 * bit;
-                plan.writes.push(Write { offset: off, value: img.u64_at(off)?.wrapping_add(base) });
+                plan.writes.push(Write {
+                    offset: off,
+                    value: img.u64_at(off)?.wrapping_add(base),
+                });
                 plan.counts.relr += 1;
             }
         }
@@ -215,9 +227,14 @@ fn symbols(
                 let s = d.symtab + SYM_SIZE * sym;
                 let (name_at, info_byte, other, shndx) = (
                     img.u32_at(s)?,
-                    img.read(s + 4, 1).and_then(|b| b.first().copied()).unwrap_or(0),
-                    img.read(s + 5, 1).and_then(|b| b.first().copied()).unwrap_or(0),
-                    img.read(s + 6, 2).map_or(0, |b| u16::from_le_bytes(b.try_into().unwrap_or_default())),
+                    img.read(s + 4, 1)
+                        .and_then(|b| b.first().copied())
+                        .unwrap_or(0),
+                    img.read(s + 5, 1)
+                        .and_then(|b| b.first().copied())
+                        .unwrap_or(0),
+                    img.read(s + 6, 2)
+                        .map_or(0, |b| u16::from_le_bytes(b.try_into().unwrap_or_default())),
                 );
                 if sym != 0 && shndx == 0 {
                     plan.counts.undefined += 1;
@@ -232,9 +249,18 @@ fn symbols(
                     lookup(&img.name_at(d.strtab + u64::from(name_at))?)?.unwrap_or(own)
                 };
                 plan.counts.symbols += 1;
-                if kind == R_JUMP_SLOT { v } else { v.wrapping_add(addend) }
+                if kind == R_JUMP_SLOT {
+                    v
+                } else {
+                    v.wrapping_add(addend)
+                }
             }
-            other => return Err(err(img.m, format!("type {other} at offset {offset:#x} is not supported"))),
+            other => {
+                return Err(err(
+                    img.m,
+                    format!("type {other} at offset {offset:#x} is not supported"),
+                ));
+            }
         };
         plan.writes.push(Write { offset, value });
     }
@@ -245,7 +271,11 @@ fn symbols(
 ///
 /// `image` is the file of the module. `lookup` gives the address that a symbol that the module defines binds to, or
 /// `None` when the module's own definition applies. Every target must lie in a writable segment.
-pub fn plan(m: &Module, image: &[u8], lookup: &mut dyn FnMut(&str) -> Result<Option<u64>>) -> Result<Plan> {
+pub fn plan(
+    m: &Module,
+    image: &[u8],
+    lookup: &mut dyn FnMut(&str) -> Result<Option<u64>>,
+) -> Result<Plan> {
     let img = Image { m, bytes: image };
     let mut p = Plan::default();
     let Some(d) = dynamic(&img)? else {
@@ -263,7 +293,13 @@ pub fn plan(m: &Module, image: &[u8], lookup: &mut dyn FnMut(&str) -> Result<Opt
     }
     for w in &p.writes {
         if w.offset % 8 != 0 || !m.writable(w.offset, 8) {
-            return Err(err(m, format!("the target {:#x} is not an aligned slot in a writable segment", w.offset)));
+            return Err(err(
+                m,
+                format!(
+                    "the target {:#x} is not an aligned slot in a writable segment",
+                    w.offset
+                ),
+            ));
         }
     }
     Ok(p)
@@ -307,7 +343,11 @@ mod tests {
             put(&mut b, 0x208 + 16 * i, *v);
         }
         // RELA: RELATIVE with addend 0x9000, GLOB_DAT of the defined symbol 1, ABS64 of the undefined symbol 2.
-        let rela = [(0x8000u64, u64::from(R_RELATIVE), 0x9000u64), (0x8008, (1 << 32) | u64::from(R_GLOB_DAT), 0x10), (0x8010, (2 << 32) | u64::from(R_ABS64), 0)];
+        let rela = [
+            (0x8000u64, u64::from(R_RELATIVE), 0x9000u64),
+            (0x8008, (1 << 32) | u64::from(R_GLOB_DAT), 0x10),
+            (0x8010, (2 << 32) | u64::from(R_ABS64), 0),
+        ];
         for (i, (o, info, a)) in rela.iter().enumerate() {
             put(&mut b, 0x400 + 24 * i, *o);
             put(&mut b, 0x408 + 24 * i, *info);
@@ -355,7 +395,15 @@ mod tests {
         assert_eq!(at(0x8028), Some(0x20 + 0x1_0000_0000));
         assert_eq!(at(0x8030), None);
         assert_eq!(at(0x8038), Some(0x30 + 0x1_0000_0000));
-        assert_eq!(p.counts, Counts { relative: 1, relr: 3, symbols: 2, undefined: 1 });
+        assert_eq!(
+            p.counts,
+            Counts {
+                relative: 1,
+                relr: 3,
+                symbols: 2,
+                undefined: 1
+            }
+        );
         assert_eq!(p.init, Some(0x1000));
     }
 
@@ -364,7 +412,10 @@ mod tests {
         let (a, b) = (module(0x1_0000_0000), module(0x1_0000_8000));
         let (Some(a), Some(b)) = (a, b) else { return };
         let img = image();
-        let (pa, pb) = (plan(&a, &img, &mut |_| Ok(None)), plan(&b, &img, &mut |_| Ok(None)));
+        let (pa, pb) = (
+            plan(&a, &img, &mut |_| Ok(None)),
+            plan(&b, &img, &mut |_| Ok(None)),
+        );
         let (Ok(pa), Ok(pb)) = (pa, pb) else { return };
         assert_eq!(pa.writes.len(), pb.writes.len());
         for (x, y) in pa.writes.iter().zip(&pb.writes) {

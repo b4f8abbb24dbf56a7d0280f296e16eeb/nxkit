@@ -25,7 +25,10 @@ macro_rules! shop_page {
 
 shop_page!(add_on_content_list, "ShowShopAddOnContentList");
 shop_page!(application_information, "ShowShopApplicationInformation");
-shop_page!(application_upgrade, "ShowShopApplicationInformationForUpgrade");
+shop_page!(
+    application_upgrade,
+    "ShowShopApplicationInformationForUpgrade"
+);
 shop_page!(subscription_list, "ShowShopSubscriptionList");
 shop_page!(consumable_list, "ShowShopConsumableItemList");
 shop_page!(consumable_detail, "ShowShopConsumableItemDetail");

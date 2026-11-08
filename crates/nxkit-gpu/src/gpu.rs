@@ -70,7 +70,12 @@ impl Default for GpuConfig {
 }
 
 /// The objects that every command buffer of a frame keeps alive until the GPU is done with it.
-type Keep = (Vec<Texture>, Arc<DataBuffer>, Arc<DataBuffer>, Option<Arc<DataBuffer>>);
+type Keep = (
+    Vec<Texture>,
+    Arc<DataBuffer>,
+    Arc<DataBuffer>,
+    Option<Arc<DataBuffer>>,
+);
 
 /// The frame encoder.
 pub struct Gpu {
@@ -416,25 +421,51 @@ impl Gpu {
             .iter()
             .flat_map(|d| {
                 [
-                    (Some(&*d.program.vertex).filter(|k| !k.is_empty()), true, crate::detail::Stage::Vertex, &d.textures),
-                    (d.program.fragment.as_deref(), false, crate::detail::Stage::Fragment, &d.textures),
-                    (d.program.task.as_deref(), false, crate::detail::Stage::Task, &d.textures),
-                    (d.program.mesh.as_deref(), false, crate::detail::Stage::Mesh, &d.textures),
+                    (
+                        Some(&*d.program.vertex).filter(|k| !k.is_empty()),
+                        true,
+                        crate::detail::Stage::Vertex,
+                        &d.textures,
+                    ),
+                    (
+                        d.program.fragment.as_deref(),
+                        false,
+                        crate::detail::Stage::Fragment,
+                        &d.textures,
+                    ),
+                    (
+                        d.program.task.as_deref(),
+                        false,
+                        crate::detail::Stage::Task,
+                        &d.textures,
+                    ),
+                    (
+                        d.program.mesh.as_deref(),
+                        false,
+                        crate::detail::Stage::Mesh,
+                        &d.textures,
+                    ),
                 ]
             })
-            .chain(
-                detail
-                    .dispatches
-                    .iter()
-                    .map(|d| (Some(d.program.as_str()), false, crate::detail::Stage::Compute, &d.textures)),
-            );
+            .chain(detail.dispatches.iter().map(|d| {
+                (
+                    Some(d.program.as_str()),
+                    false,
+                    crate::detail::Stage::Compute,
+                    &d.textures,
+                )
+            }));
         for (key, vertex, stage, binds) in stages {
             let Some(key) = key else { continue };
             if binds.is_empty() {
                 continue;
             }
             for &(reg, k) in declared_views(&mut self.fit_decl, &self.programs, key, vertex) {
-                let Some(h) = binds.iter().find(|t| t.stage == stage && t.slot == reg).map(|t| t.handle) else {
+                let Some(h) = binds
+                    .iter()
+                    .find(|t| t.stage == stage && t.slot == reg)
+                    .map(|t| t.handle)
+                else {
                     continue;
                 };
                 if h != 0 && handles.map.contains_key(&h) {
@@ -443,16 +474,29 @@ impl Gpu {
             }
         }
         for (h, k) in needed {
-            let Ok((slot, _)) = view.resolve(h) else { continue };
-            let Some(res) = textures.get(&slot.texture) else { continue };
-            let Ok(base) = self.store.view(slot.texture, res, &slot.header, stats) else { continue };
+            let Ok((slot, _)) = view.resolve(h) else {
+                continue;
+            };
+            let Some(res) = textures.get(&slot.texture) else {
+                continue;
+            };
+            let Ok(base) = self.store.view(slot.texture, res, &slot.header, stats) else {
+                continue;
+            };
             if base.desc().kind == k {
                 continue;
             }
-            if let Ok(t) = self.store.view_as(slot.texture, res, &slot.header, Some(k), stats) {
+            if let Ok(t) = self
+                .store
+                .view_as(slot.texture, res, &slot.header, Some(k), stats)
+            {
                 static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
                 if crate::diag("fit") && crate::diag::first(&SHOWN, 300) {
-                    eprintln!("DIAG fit handle {h:#x} {:?} {:?} -> {k:?}", slot.texture, base.desc().kind);
+                    eprintln!(
+                        "DIAG fit handle {h:#x} {:?} {:?} -> {k:?}",
+                        slot.texture,
+                        base.desc().kind
+                    );
                 }
                 handles.fits.insert((h, k), t.gpu_resource_id());
                 handles.keep.push(t);
@@ -468,7 +512,10 @@ impl Gpu {
         static SEEN: Mutex<Option<FastMap<u64, u64>>> = Mutex::new(None);
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let mut buf = vec![0u8; rec.layout.size as usize];
-        let off = rec.address.get().wrapping_sub(self.guest.address_map().gpu_base());
+        let off = rec
+            .address
+            .get()
+            .wrapping_sub(self.guest.address_map().gpu_base());
         if self.guest.read(off, &mut buf).is_err() {
             return;
         }
@@ -477,12 +524,18 @@ impl Gpu {
         let h = h.finish();
         let mut g = SEEN.lock().unwrap_or_else(PoisonError::into_inner);
         let key = rec.address.get();
-        if g.get_or_insert_with(FastMap::default).insert(key, h).is_some_and(|old| old != h)
+        if g.get_or_insert_with(FastMap::default)
+            .insert(key, h)
+            .is_some_and(|old| old != h)
             && crate::diag::first(&SHOWN, 200)
         {
             eprintln!(
                 "DIAG stale {id:?} {:?} {}x{} addr {key:#x} changed, residency {:?} needs upload {}",
-                res.desc.format, res.desc.width, res.desc.height, rec.residency, TextureStore::needs_upload(res, rec)
+                res.desc.format,
+                res.desc.width,
+                res.desc.height,
+                rec.residency,
+                TextureStore::needs_upload(res, rec)
             );
         }
     }
@@ -529,13 +582,18 @@ impl Gpu {
                         .is_some_and(|off| self.guest.read(off, &mut head).is_ok());
                     eprintln!(
                         "DIAG bc {id:?} {}x{} {:?} residency {:?} size {} guest_read {read} head {head:02x?}",
-                        res.desc.width, res.desc.height, res.desc.format, rec.residency, rec.layout.size
+                        res.desc.width,
+                        res.desc.height,
+                        res.desc.format,
+                        rec.residency,
+                        rec.layout.size
                     );
                 }
             }
         }
         if crate::diag("hnd") {
-            static SEEN: std::sync::Mutex<Vec<(u64, TexId, u64)>> = std::sync::Mutex::new(Vec::new());
+            static SEEN: std::sync::Mutex<Vec<(u64, TexId, u64)>> =
+                std::sync::Mutex::new(Vec::new());
             let key = (handle, id, 0u64);
             if let Ok(mut seen) = SEEN.lock() {
                 if !seen.contains(&key) && seen.len() < 2000 {
@@ -543,13 +601,24 @@ impl Gpu {
                     let v = tex_view.desc();
                     eprintln!(
                         "DIAG hnd {handle} {id:?} backing {}x{} {:?} scaled {} view {}x{} {:?} kind {:?}",
-                        res.desc.width, res.desc.height, res.desc.format, res.scaled, v.width, v.height, v.format, v.kind
+                        res.desc.width,
+                        res.desc.height,
+                        res.desc.format,
+                        res.scaled,
+                        v.width,
+                        v.height,
+                        v.format,
+                        v.kind
                     );
                     if matches!(v.kind, nxkit_metal::TextureKind::Cube) {
                         eprintln!(
                             "DIAG hnd cube {handle} {id:?} swizzle {:?} view {:?} levels {}+{} backing_levels {} identity_view {}",
-                            slot.header.view.swizzle, slot.header.view.format, slot.header.view.base_level, slot.header.view.levels,
-                            res.desc.mip_levels, tex_view.gpu_resource_id() == res.tex.gpu_resource_id()
+                            slot.header.view.swizzle,
+                            slot.header.view.format,
+                            slot.header.view.base_level,
+                            slot.header.view.levels,
+                            res.desc.mip_levels,
+                            tex_view.gpu_resource_id() == res.tex.gpu_resource_id()
                         );
                     }
                 }
@@ -591,20 +660,29 @@ impl Gpu {
         let mut backings: FastSet<TexId> = FastSet::default();
         let (mut planned, mut over_budget) = (0u64, 0u32);
         for (_, id) in order {
-            let (Some(res), Ok(rec)) = (textures.get(&id), view.record(id)) else { continue };
+            let (Some(res), Ok(rec)) = (textures.get(&id), view.record(id)) else {
+                continue;
+            };
             if res.desc.storage == nxkit_metal::Storage::Memoryless || copied_back.contains(&id) {
                 continue;
             }
-            let Some(flags) = self.copyback.candidate(id, rec) else { continue };
+            let Some(flags) = self.copyback.candidate(id, rec) else {
+                continue;
+            };
             let (start, end) = (rec.address.get(), rec.end());
-            if backings.contains(&res.barrier_id) || ranges.iter().any(|&(s, e)| s < end && start < e) {
+            if backings.contains(&res.barrier_id)
+                || ranges.iter().any(|&(s, e)| s < end && start < e)
+            {
                 continue;
             }
             if planned + rec.layout.size > crate::copyback::budget() {
                 over_budget += 1;
                 nxkit_nvn::diag::note(
                     nxkit_nvn::diag::Reason::CopybackOverBudget,
-                    format_args!("{id:?} {:?} {}x{} {} bytes", res.desc.format, res.desc.width, res.desc.height, rec.layout.size),
+                    format_args!(
+                        "{id:?} {:?} {}x{} {} bytes",
+                        res.desc.format, res.desc.width, res.desc.height, rec.layout.size
+                    ),
                 );
                 continue;
             }
@@ -613,8 +691,13 @@ impl Gpu {
             ranges.push((start, end));
             items.push((id, rec, res, &dirty[&id].0, flags));
         }
-        let args: Vec<_> = items.iter().map(|(_, rec, res, d, _)| (*rec, *res, *d)).collect();
-        let results = self.transfer.copy_back_many(cb, scratch, &self.guest, &args);
+        let args: Vec<_> = items
+            .iter()
+            .map(|(_, rec, res, d, _)| (*rec, *res, *d))
+            .collect();
+        let results = self
+            .transfer
+            .copy_back_many(cb, scratch, &self.guest, &args);
         let (mut done, mut done_ranges) = (Vec::new(), Vec::new());
         let (mut bytes, mut refused) = (0u64, 0u32);
         for ((id, rec, res, d, flags), r) in items.iter().zip(results) {
@@ -634,8 +717,15 @@ impl Gpu {
                     stats.skip(why);
                     let what = format_args!(
                         "{id:?} {:?} {}x{} layers {} levels {} scaled {} widened {} linear {} stride {}: {why:?}",
-                        res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers,
-                        res.desc.mip_levels, res.scaled, res.widened, rec.layout.linear, rec.desc.stride
+                        res.desc.format,
+                        res.desc.width,
+                        res.desc.height,
+                        res.desc.array_layers,
+                        res.desc.mip_levels,
+                        res.scaled,
+                        res.widened,
+                        rec.layout.linear,
+                        rec.desc.stride
                     );
                     nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::CopybackRefused, what);
                     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -648,7 +738,8 @@ impl Gpu {
         if !items.is_empty() {
             stats.compute_passes += 1;
         }
-        self.copyback.log_frame(done.len() as u32, bytes, refused, over_budget);
+        self.copyback
+            .log_frame(done.len() as u32, bytes, refused, over_budget);
         (done, done_ranges)
     }
 
@@ -725,21 +816,23 @@ impl Gpu {
                 .filter_map(|u| u.snapshot.clone())
                 .collect();
             let scratch = scratch.clone();
-            std::thread::Builder::new().name("nxkit-preload".into()).spawn(move || {
-                // Every uniform snapshot of the frame goes to the scratch memory once. The chunks then only look the
-                // addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
-                // every draw by all chunk threads.
-                let mut preloaded: FastMap<usize, u64> = FastMap::default();
-                for bytes in &snaps {
-                    let key = bytes.as_ptr() as usize;
-                    if !preloaded.contains_key(&key)
-                        && let Ok(a) = scratch.push(bytes)
-                    {
-                        preloaded.insert(key, a);
+            std::thread::Builder::new()
+                .name("nxkit-preload".into())
+                .spawn(move || {
+                    // Every uniform snapshot of the frame goes to the scratch memory once. The chunks then only look the
+                    // addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
+                    // every draw by all chunk threads.
+                    let mut preloaded: FastMap<usize, u64> = FastMap::default();
+                    for bytes in &snaps {
+                        let key = bytes.as_ptr() as usize;
+                        if !preloaded.contains_key(&key)
+                            && let Ok(a) = scratch.push(bytes)
+                        {
+                            preloaded.insert(key, a);
+                        }
                     }
-                }
-                preloaded
-            })
+                    preloaded
+                })
         };
         mark(t0, "ring");
         let mut uses = collect_uses(frame, plan);
@@ -774,12 +867,15 @@ impl Gpu {
                     }
                 }
                 for t in co {
-                    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    static SHOWN: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
                     if pin.insert(t)
                         && crate::diag("copyback")
                         && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 50
                     {
-                        eprintln!("DIAG copyback pins {t:?} at the native size, it shares a pass with a copied-back texture");
+                        eprintln!(
+                            "DIAG copyback pins {t:?} at the native size, it shares a pass with a copied-back texture"
+                        );
                     }
                 }
                 for id in pin {
@@ -806,8 +902,7 @@ impl Gpu {
         }
         mark(t0, "uses+ensure");
         let t_resolve = Instant::now();
-        let mut handles =
-            self.resolve_handles(view, detail, scale, &mut textures, &mut stats);
+        let mut handles = self.resolve_handles(view, detail, scale, &mut textures, &mut stats);
         let t_fit = Instant::now();
         self.fit_handles(view, detail, &textures, &mut handles, &mut stats);
         crate::images::resolve(
@@ -842,7 +937,11 @@ impl Gpu {
                 continue;
             }
             let extra = pass_images.get(i).map_or(&[][..], |x| x.writes.as_slice());
-            for id in touch(frame, plan, p).writes.into_iter().chain(extra.iter().copied()) {
+            for id in touch(frame, plan, p)
+                .writes
+                .into_iter()
+                .chain(extra.iter().copied())
+            {
                 let memoryless = textures
                     .get(&id)
                     .is_none_or(|r| r.desc.storage == nxkit_metal::Storage::Memoryless);
@@ -859,7 +958,9 @@ impl Gpu {
             }
             if p.kind == PassKind::Render {
                 for a in plan.attachments_of(p) {
-                    let Some((d, _)) = dirty.get_mut(&a.tex) else { continue };
+                    let Some((d, _)) = dirty.get_mut(&a.tex) else {
+                        continue;
+                    };
                     let three_d = textures
                         .get(&a.tex)
                         .is_some_and(|r| r.desc.kind == nxkit_metal::TextureKind::D3);
@@ -895,7 +996,9 @@ impl Gpu {
                 // The guest layout has the native size: a staging texture takes it and a kernel scales it.
                 let wait = self.copyback.upload_waits(rec);
                 let t_up = Instant::now();
-                let r = self.transfer.upload_scaled(first, &scratch, &self.guest, rec, res, wait);
+                let r = self
+                    .transfer
+                    .upload_scaled(first, &scratch, &self.guest, rec, res, wait);
                 stats.upload_ns += nanos(t_up, Instant::now());
                 match r {
                     Ok(()) => scaled_queued.push((*id, res.barrier_id)),
@@ -906,7 +1009,14 @@ impl Gpu {
                 }
                 continue;
             }
-            if crate::diag("stale") && crate::diag::tex_match(res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers) {
+            if crate::diag("stale")
+                && crate::diag::tex_match(
+                    res.desc.format,
+                    res.desc.width,
+                    res.desc.height,
+                    res.desc.array_layers,
+                )
+            {
                 self.stale_diag(*id, rec, res);
             }
             if !TextureStore::needs_upload(res, rec) {
@@ -914,17 +1024,29 @@ impl Gpu {
             }
             let wait = self.copyback.upload_waits(rec);
             let t_up = Instant::now();
-            let r = self.transfer.upload(first, &scratch, &self.guest, rec, res, wait);
+            let r = self
+                .transfer
+                .upload(first, &scratch, &self.guest, rec, res, wait);
             stats.upload_ns += nanos(t_up, Instant::now());
             static UPLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             if crate::diag("upload")
                 && crate::diag::tex_filtered()
-                && crate::diag::tex_match(res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers)
+                && crate::diag::tex_match(
+                    res.desc.format,
+                    res.desc.width,
+                    res.desc.height,
+                    res.desc.array_layers,
+                )
                 && crate::diag::first(&UPLOADS, 200)
             {
                 eprintln!(
                     "DIAG upload {id:?} {:?} {}x{} residency {:?} scaled {} linear {}: {:?}",
-                    res.desc.format, res.desc.width, res.desc.height, rec.residency, res.scaled, rec.layout.linear,
+                    res.desc.format,
+                    res.desc.width,
+                    res.desc.height,
+                    rec.residency,
+                    res.scaled,
+                    rec.layout.linear,
                     r.as_ref().err()
                 );
             }
@@ -952,7 +1074,8 @@ impl Gpu {
                 if lost == 0 {
                     deswizzled.push(id);
                 }
-                self.barriers.seed(barrier_id, Stages::DISPATCH | Stages::BLIT);
+                self.barriers
+                    .seed(barrier_id, Stages::DISPATCH | Stages::BLIT);
             }
         }
 
@@ -965,11 +1088,15 @@ impl Gpu {
         mark(t0, "ords+kpass");
         let t_barrier = Instant::now();
         let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
-        let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples, &pass_images);
+        let barrier_plan = self
+            .barriers
+            .plan(frame, plan, &aliases, &vertex_samples, &pass_images);
         stats.barrier_ns = nanos(t_barrier, Instant::now());
         {
             static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            if crate::diag("barr") && N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 120 == 0 {
+            if crate::diag("barr")
+                && N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 120 == 0
+            {
                 let d = barrier_plan.distance;
                 eprintln!(
                     "DIAG barr distance to the work waited for: earlier frame {} | 1 {} | 2 {} | 3-5 {} | more {} (of {} barriers)",
@@ -1055,12 +1182,18 @@ impl Gpu {
         CHUNKS.with(|c| *c.borrow_mut() = timings);
         let (mirrored, mirrored_ranges) = match rest.last_mut() {
             Some(cb) if !dirty.is_empty() => {
-                {
-                    let t_cb = Instant::now();
-                    let r = self.copy_back_written(cb, &scratch, view, &textures, &dirty, &copied_back, &mut stats);
-                    PHASES.with(|p| p.borrow_mut()[1] = nanos(t_cb, Instant::now()));
-                    r
-                }
+                let t_cb = Instant::now();
+                let r = self.copy_back_written(
+                    cb,
+                    &scratch,
+                    view,
+                    &textures,
+                    &dirty,
+                    &copied_back,
+                    &mut stats,
+                );
+                PHASES.with(|p| p.borrow_mut()[1] = nanos(t_cb, Instant::now()));
+                r
             }
             _ => Default::default(),
         };
@@ -1117,9 +1250,16 @@ fn pass_shape_diag(
     }
     let mut by_draws = std::collections::BTreeMap::<&str, u32>::new();
     let mut by_size = std::collections::BTreeMap::<String, (u32, u32)>::new();
-    for p in plan.passes.iter().filter(|p| p.kind == nxkit_nvn::passes::PassKind::Render) {
+    for p in plan
+        .passes
+        .iter()
+        .filter(|p| p.kind == nxkit_nvn::passes::PassKind::Render)
+    {
         let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
-        let draws = cmds.iter().filter(|c| matches!(c, nxkit_nvn::frame::Cmd::Draw { .. })).count();
+        let draws = cmds
+            .iter()
+            .filter(|c| matches!(c, nxkit_nvn::frame::Cmd::Draw { .. }))
+            .count();
         let bucket = match draws {
             0 => "0 (clears)",
             1 => "1",
@@ -1133,7 +1273,10 @@ fn pass_shape_diag(
             .attachments_of(p)
             .first()
             .and_then(|a| textures.get(&a.tex))
-            .map_or_else(|| "?".to_string(), |r| format!("{}x{} {:?}", r.desc.width, r.desc.height, r.desc.format));
+            .map_or_else(
+                || "?".to_string(),
+                |r| format!("{}x{} {:?}", r.desc.width, r.desc.height, r.desc.format),
+            );
         let e = by_size.entry(size).or_default();
         e.0 += 1;
         e.1 += draws as u32;
@@ -1142,13 +1285,28 @@ fn pass_shape_diag(
     if std::env::var_os("NXKIT_PASS_LIST").is_some() {
         for (i, p) in plan.passes.iter().enumerate() {
             let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
-            let draws = cmds.iter().filter(|c| matches!(c, nxkit_nvn::frame::Cmd::Draw { .. })).count();
+            let draws = cmds
+                .iter()
+                .filter(|c| matches!(c, nxkit_nvn::frame::Cmd::Draw { .. }))
+                .count();
             let atts: Vec<String> = plan
                 .attachments_of(p)
                 .iter()
-                .filter_map(|a| textures.get(&a.tex).map(|r| format!("{}x{} {:?} {:?}/{:?}", r.desc.width, r.desc.height, r.desc.format, a.load, a.store)))
+                .filter_map(|a| {
+                    textures.get(&a.tex).map(|r| {
+                        format!(
+                            "{}x{} {:?} {:?}/{:?}",
+                            r.desc.width, r.desc.height, r.desc.format, a.load, a.store
+                        )
+                    })
+                })
                 .collect();
-            eprintln!("DIAG pass {i:3} {:?} {:?} draws {draws} cmds {} {atts:?}", p.kind, p.begin, cmds.len());
+            eprintln!(
+                "DIAG pass {i:3} {:?} {:?} draws {draws} cmds {} {atts:?}",
+                p.kind,
+                p.begin,
+                cmds.len()
+            );
         }
     }
     let mut v: Vec<_> = by_size.into_iter().collect();
@@ -1168,7 +1326,9 @@ fn hitch_diag(s: &EncodeStats, draws: usize) {
     if s.encode_ns < 7_000_000 && s.pipeline_builds == 0 && s.textures_created == 0 {
         return;
     }
-    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() % 1_000_000);
     let phases = PHASES.with(|p| *p.borrow());
     let chunks = CHUNKS.with(|c| {
         c.borrow()
@@ -1235,7 +1395,12 @@ struct ImgDumpEntry {
 impl Gpu {
     /// `NXKIT_DIAG=imgdump`: every 120th frame notes the textures of its dispatches, and three frames later reads nine
     /// pixels of each and prints how many are not black, so a chain of compute passes shows where it turns black.
-    fn imgdump_step(&mut self, view: &dyn EncodeView, detail: &FrameDetail, textures: &FastMap<TexId, Res>) {
+    fn imgdump_step(
+        &mut self,
+        view: &dyn EncodeView,
+        detail: &FrameDetail,
+        textures: &FastMap<TexId, Res>,
+    ) {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if !*ON.get_or_init(|| crate::diag("imgdump")) {
             return;
@@ -1243,15 +1408,29 @@ impl Gpu {
         self.frames_encoded += 1;
         let n = self.frames_encoded;
         while self.imgdump.front().is_some_and(|(f, _)| f + 3 <= n) {
-            let Some((f, entries)) = self.imgdump.pop_front() else { break };
+            let Some((f, entries)) = self.imgdump.pop_front() else {
+                break;
+            };
             for e in entries {
                 let d = e.tex.desc();
-                let pts: Vec<[u32; 2]> = (1..4).flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4])).collect();
+                let pts: Vec<[u32; 2]> = (1..4)
+                    .flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4]))
+                    .collect();
                 let px = e.tex.debug_read_raw(&self.ctx, &pts);
-                let lit = px.as_ref().map_or(0, |p| p.iter().filter(|v| v.iter().any(|b| *b != 0)).count());
+                let lit = px.as_ref().map_or(0, |p| {
+                    p.iter().filter(|v| v.iter().any(|b| *b != 0)).count()
+                });
                 eprintln!(
                     "DIAG imgdump frame {f} dispatch {} {} groups {:?} {} slot {} {:?} {}x{} {:?}: lit {lit}/9 first {:?}",
-                    e.dispatch, e.program, e.groups, e.kind, e.slot, e.id, d.width, d.height, d.format,
+                    e.dispatch,
+                    e.program,
+                    e.groups,
+                    e.kind,
+                    e.slot,
+                    e.id,
+                    d.width,
+                    d.height,
+                    d.format,
                     px.as_ref().and_then(|p| p.get(4).cloned())
                 );
             }
@@ -1263,8 +1442,12 @@ impl Gpu {
         for (i, d) in detail.dispatches.iter().enumerate() {
             for (kind, list) in [("img", &d.images), ("tex", &d.textures)] {
                 for b in list {
-                    let Ok((slot, _)) = view.resolve(b.handle) else { continue };
-                    let Some(res) = textures.get(&slot.texture) else { continue };
+                    let Ok((slot, _)) = view.resolve(b.handle) else {
+                        continue;
+                    };
+                    let Some(res) = textures.get(&slot.texture) else {
+                        continue;
+                    };
                     entries.push(ImgDumpEntry {
                         dispatch: i,
                         program: d.program.clone(),
@@ -1327,10 +1510,19 @@ fn vertex_sampling_passes(
             let n = p
                 .cmds
                 .clone()
-                .filter(|i| matches!(frame.cmds.get(*i as usize), Some(nxkit_nvn::frame::Cmd::Draw { .. })))
+                .filter(|i| {
+                    matches!(
+                        frame.cmds.get(*i as usize),
+                        Some(nxkit_nvn::frame::Cmd::Draw { .. })
+                    )
+                })
                 .count();
             detail.draws.get(first..first + n).is_none_or(|draws| {
-                draws.iter().any(|d| d.textures.iter().any(|t| t.stage == crate::detail::Stage::Vertex))
+                draws.iter().any(|d| {
+                    d.textures
+                        .iter()
+                        .any(|t| t.stage == crate::detail::Stage::Vertex)
+                })
             })
         })
         .collect()
@@ -1363,9 +1555,16 @@ fn kpass_diag(
         if kind_render {
             renders += 1;
             let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
-            let draws = cmds.iter().filter(|c| matches!(c, Cmd::Draw { .. })).count();
+            let draws = cmds
+                .iter()
+                .filter(|c| matches!(c, Cmd::Draw { .. }))
+                .count();
             let reason = if draws != 1 {
-                Some(if draws == 0 { "no draw" } else { "several draws" })
+                Some(if draws == 0 {
+                    "no draw"
+                } else {
+                    "several draws"
+                })
             } else {
                 let first = ords.get(p.cmds.start as usize).map_or(0, |o| o.draw) as usize;
                 let atts = plan.attachments_of(p);
@@ -1378,8 +1577,12 @@ fn kpass_diag(
                     None => Some("no detail"),
                     Some(d) => {
                         let small_geometry = match d.args {
-                            DrawArgs::Arrays { count, instances, .. } => count <= 6 && instances <= 1,
-                            DrawArgs::Indexed { count, instances, .. } => count <= 6 && instances <= 1,
+                            DrawArgs::Arrays {
+                                count, instances, ..
+                            } => count <= 6 && instances <= 1,
+                            DrawArgs::Indexed {
+                                count, instances, ..
+                            } => count <= 6 && instances <= 1,
                             _ => false,
                         };
                         let ds = &d.depth_stencil;
@@ -1399,11 +1602,16 @@ fn kpass_diag(
                                 || matches!(r.desc.format, F::Rgba8UnormSrgb | F::Bgra8UnormSrgb)
                         }) {
                             Some("format")
-                        } else if colors.iter().any(|r| u64::from(r.desc.width) * u64::from(r.desc.height) > MAX_PX) {
+                        } else if colors
+                            .iter()
+                            .any(|r| u64::from(r.desc.width) * u64::from(r.desc.height) > MAX_PX)
+                        {
                             Some("larger than 512x512")
                         } else {
                             if let Some(r) = colors.first() {
-                                *sizes.entry(format!("{}x{}", r.desc.width, r.desc.height)).or_default() += 1;
+                                *sizes
+                                    .entry(format!("{}x{}", r.desc.width, r.desc.height))
+                                    .or_default() += 1;
                             }
                             None
                         }

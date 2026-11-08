@@ -17,7 +17,8 @@ use std::sync::{Mutex, OnceLock};
 /// the next frame do not reach the frame on the GPU. See `docs/plans/fence-overlap.md`.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1")) || crate::knob("overlap")
+    *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))
+        || crate::knob("overlap")
 }
 
 use crate::detail::{DrawArgs, FrameDetail, UboDetail};
@@ -113,11 +114,16 @@ impl Overlap {
                 let h = buf.chunks(8).fold(0xcbf2_9ce4_8422_2325u64, |h, c| {
                     let mut w = [0u8; 8];
                     w[..c.len()].copy_from_slice(c);
-                    (h ^ u64::from_le_bytes(w)).wrapping_mul(0x100_0000_01b3).rotate_left(23)
+                    (h ^ u64::from_le_bytes(w))
+                        .wrapping_mul(0x100_0000_01b3)
+                        .rotate_left(23)
                 });
                 s.bound[kind] += len;
                 s.bound_n[kind] += 1;
-                if s.hashes.insert((addr, len, kind as u8), h).is_some_and(|old| old != h) {
+                if s.hashes
+                    .insert((addr, len, kind as u8), h)
+                    .is_some_and(|old| old != h)
+                {
                     s.changed[kind] += len;
                     s.changed_n[kind] += 1;
                 }
@@ -125,13 +131,21 @@ impl Overlap {
             let mut dynamic = false;
             for p in pages(addr, len) {
                 *read.entry(p).or_default() |= 1 << kind;
-                dynamic |= s.flushed.get(&p).is_some_and(|f| frame.saturating_sub(*f) < DYNAMIC_FRAMES);
+                dynamic |= s
+                    .flushed
+                    .get(&p)
+                    .is_some_and(|f| frame.saturating_sub(*f) < DYNAMIC_FRAMES);
             }
             if dynamic {
                 s.copy[kind] += len;
             }
         };
-        let ubos = |list: &Vec<UboDetail>| list.iter().filter(|u| u.snapshot.is_none()).map(|u| (u.address, u64::from(u.size))).collect::<Vec<_>>();
+        let ubos = |list: &Vec<UboDetail>| {
+            list.iter()
+                .filter(|u| u.snapshot.is_none())
+                .map(|u| (u.address, u64::from(u.size)))
+                .collect::<Vec<_>>()
+        };
         for d in &detail.draws {
             for (a, l) in ubos(&d.ubos) {
                 add(&mut s, 0, a, l);
@@ -147,7 +161,13 @@ impl Overlap {
                 let used = verts.map_or(STREAM_BYTES, |v| v * u64::from(st.stride.max(1)));
                 add(&mut s, 2, st.address, st.size.min(used).min(STREAM_BYTES));
             }
-            if let DrawArgs::Indexed { index_type, address, count, .. } = d.args {
+            if let DrawArgs::Indexed {
+                index_type,
+                address,
+                count,
+                ..
+            } = d.args
+            {
                 add(&mut s, 3, address, u64::from(count) << index_type.min(2));
             }
         }
@@ -163,7 +183,11 @@ impl Overlap {
             let mut sample: Vec<u64> = read.keys().map(|p| p * PAGE).collect();
             sample.sort_unstable();
             let n = sample.len();
-            let picks: Vec<String> = sample.iter().step_by((n / 12).max(1)).map(|a| format!("{a:#x}")).collect();
+            let picks: Vec<String> = sample
+                .iter()
+                .step_by((n / 12).max(1))
+                .map(|a| format!("{a:#x}"))
+                .collect();
             eprintln!("DIAG overlap read pages {n}: {}", picks.join(" "));
         }
         if s.hashes.len() > 200_000 {
@@ -174,13 +198,22 @@ impl Overlap {
         s.frames += 1;
         s.frame += 1;
         let keep = s.frame;
-        s.flushed.retain(|_, f| keep.saturating_sub(*f) < DYNAMIC_FRAMES);
+        s.flushed
+            .retain(|_, f| keep.saturating_sub(*f) < DYNAMIC_FRAMES);
         if s.frames >= REPORT_EVERY {
             let n = s.frames as f64;
             let per = |v: u64| v as f64 / n;
             let kb = |v: u64| v as f64 / n / 1024.0;
-            let copy: Vec<String> = KINDS.iter().zip(s.copy).map(|(k, v)| format!("{k} {:.0} KiB", kb(v))).collect();
-            let race: Vec<String> = KINDS.iter().zip(s.racing).map(|(k, v)| format!("{k} {:.1}", per(v))).collect();
+            let copy: Vec<String> = KINDS
+                .iter()
+                .zip(s.copy)
+                .map(|(k, v)| format!("{k} {:.0} KiB", kb(v)))
+                .collect();
+            let race: Vec<String> = KINDS
+                .iter()
+                .zip(s.racing)
+                .map(|(k, v)| format!("{k} {:.1}", per(v)))
+                .collect();
             let content: Vec<String> = (0..4)
                 .map(|k| {
                     format!(

@@ -23,7 +23,13 @@ const TIME_POINT_LEN: u64 = 0x18;
 /// `ClaimPeriodicBenefitWithUserSystemClock(PeriodicBenefitClaimContext*, const ClockSnapshot&, const TimeSpan&,
 /// const TimeSpan&, const CheckCalendarTimeCallback*)`: periodic benefit claim (time service session check); the
 /// SDK's detail implementation compares the snapshots.
-extern "C" fn claim_periodic_benefit(ctx: u64, snapshot: u64, max_penalty: u64, acceptable: u64, callback: u64) -> u64 {
+extern "C" fn claim_periodic_benefit(
+    ctx: u64,
+    snapshot: u64,
+    max_penalty: u64,
+    acceptable: u64,
+    callback: u64,
+) -> u64 {
     let mut addr = DETAIL_CLAIM_ADDR.load(Ordering::Relaxed);
     if addr == 0 {
         addr = guest_sym(DETAIL_CLAIM).unwrap_or_else(|| {
@@ -32,7 +38,10 @@ extern "C" fn claim_periodic_benefit(ctx: u64, snapshot: u64, max_penalty: u64, 
         DETAIL_CLAIM_ADDR.store(addr, Ordering::Relaxed);
     }
     let r = call_guest(addr, [ctx, snapshot, max_penalty, acceptable, callback, 0]);
-    log(&format!("time: periodic benefit claim → {}", r & 0xffff_ffff));
+    log(&format!(
+        "time: periodic benefit claim → {}",
+        r & 0xffff_ffff
+    ));
     r
 }
 

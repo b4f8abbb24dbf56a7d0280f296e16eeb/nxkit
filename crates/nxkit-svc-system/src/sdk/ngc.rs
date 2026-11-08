@@ -40,9 +40,18 @@ extern "C" fn mask(_this: u64, masked: u64, _text: u64, _region: u32) -> u32 {
 /// The methods that get a host version, by name.
 fn host_methods() -> [(&'static str, usize); 9] {
     [
-        ("_ZN2nn3ngc15ProfanityFilterD1Ev", nothing as *const () as usize),
-        ("_ZN2nn3ngc15ProfanityFilterD0Ev", nothing as *const () as usize),
-        ("_ZN2nn3ngc15ProfanityFilter8FinalizeEv", nothing as *const () as usize),
+        (
+            "_ZN2nn3ngc15ProfanityFilterD1Ev",
+            nothing as *const () as usize,
+        ),
+        (
+            "_ZN2nn3ngc15ProfanityFilterD0Ev",
+            nothing as *const () as usize,
+        ),
+        (
+            "_ZN2nn3ngc15ProfanityFilter8FinalizeEv",
+            nothing as *const () as usize,
+        ),
         (CHECK_UTF8, check as *const () as usize),
         (CHECK_CHAR16, check as *const () as usize),
         (CHECK_UTF16, check as *const () as usize),
@@ -62,7 +71,8 @@ fn build() -> u64 {
         return 0;
     }
     let methods = host_methods();
-    let known: Vec<(Option<u64>, usize)> = methods.iter().map(|(n, f)| (guest_sym(n), *f)).collect();
+    let known: Vec<(Option<u64>, usize)> =
+        methods.iter().map(|(n, f)| (guest_sym(n), *f)).collect();
     put_u64(base, get_u64(sdk));
     put_u64(base + 8, get_u64(sdk + 8));
     let mut slots = 0u64;
@@ -72,12 +82,20 @@ fn build() -> u64 {
         if slot < 0x10000 {
             break;
         }
-        let host = known.iter().find(|(a, _)| *a == Some(slot)).map(|(_, f)| *f);
+        let host = known
+            .iter()
+            .find(|(a, _)| *a == Some(slot))
+            .map(|(_, f)| *f);
         named += usize::from(host.is_some());
-        put_u64(base + 16 + 8 * slots, host.unwrap_or(zero as *const () as usize) as u64);
+        put_u64(
+            base + 16 + 8 * slots,
+            host.unwrap_or(zero as *const () as usize) as u64,
+        );
         slots += 1;
     }
-    log(&format!("ngc: ProfanityFilter host vtable of {slots} slots, {named} matched to methods"));
+    log(&format!(
+        "ngc: ProfanityFilter host vtable of {slots} slots, {named} matched to methods"
+    ));
     base + 16
 }
 

@@ -32,7 +32,9 @@ static MIN_STAY_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 /// shows each frame for exactly its period, whatever rate the display runs at in that moment. `None` turns it off.
 /// Metal can refuse the call on a drawable of the display link. The first refusal turns timed presents off again.
 pub fn set_timed_present(secs: Option<f64>) {
-    let us = secs.filter(|s| s.is_finite() && *s > 0.0).map_or(0, |s| (s * 1e6).round() as u64);
+    let us = secs
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map_or(0, |s| (s * 1e6).round() as u64);
     MIN_STAY_US.store(us, std::sync::atomic::Ordering::Relaxed);
 }
 

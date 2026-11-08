@@ -76,7 +76,11 @@ pub(crate) struct IpcSession {
 }
 
 /// A new session for `root`, which belongs to the service `service`.
-pub(crate) fn new_session(inner: &Arc<Inner>, service: &'static str, root: Arc<dyn Service>) -> Arc<dyn Session> {
+pub(crate) fn new_session(
+    inner: &Arc<Inner>,
+    service: &'static str,
+    root: Arc<dyn Service>,
+) -> Arc<dyn Session> {
     Arc::new(IpcSession::new(inner.clone(), service, root))
 }
 
@@ -115,7 +119,11 @@ impl IpcSession {
     /// A handle for a new session of `iface`, which the response moves to the game.
     fn handle_for(&self, iface: Arc<dyn Service>, command: u32) -> Result<u32, ResultCode> {
         let Some(k) = kernel() else {
-            return Err(self.stop(iface.name(), command, "the kernel is not registered".to_string()));
+            return Err(self.stop(
+                iface.name(),
+                command,
+                "the kernel is not registered".to_string(),
+            ));
         };
         let session = new_session(&self.inner, self.link.service, iface);
         k.add_session(session)
@@ -142,12 +150,29 @@ impl IpcSession {
                 self.closed.store(true, Ordering::Release);
                 return Err(RESULT_SESSION_CLOSED);
             }
-            hipc::TYPE_REQUEST | hipc::TYPE_REQUEST_CONTEXT | hipc::TYPE_LEGACY_REQUEST => self.request_message(&parsed)?,
-            hipc::TYPE_CONTROL | hipc::TYPE_CONTROL_CONTEXT | hipc::TYPE_LEGACY_CONTROL => self.control_message(&parsed)?,
-            other => return Err(self.stop(root, 0, format!("the HIPC message type {other} is not served"))),
+            hipc::TYPE_REQUEST | hipc::TYPE_REQUEST_CONTEXT | hipc::TYPE_LEGACY_REQUEST => {
+                self.request_message(&parsed)?
+            }
+            hipc::TYPE_CONTROL | hipc::TYPE_CONTROL_CONTEXT | hipc::TYPE_LEGACY_CONTROL => {
+                self.control_message(&parsed)?
+            }
+            other => {
+                return Err(self.stop(
+                    root,
+                    0,
+                    format!("the HIPC message type {other} is not served"),
+                ));
+            }
         };
         if reply.len() > len {
-            return Err(self.stop(root, 0, format!("the reply has {} bytes and the message buffer {len}", reply.len())));
+            return Err(self.stop(
+                root,
+                0,
+                format!(
+                    "the reply has {} bytes and the message buffer {len}",
+                    reply.len()
+                ),
+            ));
         }
         guest::write(message, &reply).map_err(|f| self.stop(root, 0, f.to_string()))?;
         Ok(())
@@ -183,7 +208,11 @@ impl IpcSession {
                     Some(o) => in_objects.push(o),
                     None => {
                         drop(dom);
-                        return Err(self.stop(root_name, call.command, format!("the request passes the unknown object {id}")));
+                        return Err(self.stop(
+                            root_name,
+                            call.command,
+                            format!("the request passes the unknown object {id}"),
+                        ));
                     }
                 }
             }
@@ -192,7 +221,11 @@ impl IpcSession {
                 None => {
                     drop(dom);
                     let id = call.object_id;
-                    return Err(self.stop(root_name, call.command, format!("the request is for the unknown object {id}")));
+                    return Err(self.stop(
+                        root_name,
+                        call.command,
+                        format!("the request is for the unknown object {id}"),
+                    ));
                 }
             }
         } else {
@@ -212,7 +245,11 @@ impl IpcSession {
         };
         let mut rsp = Response::default();
         if target.handle(&req, &mut rsp) == Handled::Unknown {
-            return Err(self.stop(iface, call.command, "the command is not implemented".to_string()));
+            return Err(self.stop(
+                iface,
+                call.command,
+                "the command is not implemented".to_string(),
+            ));
         }
         if rsp.result != 0 {
             return Ok(hipc::encode(&Reply {
@@ -245,7 +282,8 @@ impl IpcSession {
     /// A control request: it is for the session and not for an interface.
     fn control_message(&self, p: &Parsed<'_>) -> Result<Vec<u8>, ResultCode> {
         let root_name = self.link.root.name();
-        let call = cmif::parse_session(p.raw).map_err(|e| self.stop(root_name, 0, e.to_string()))?;
+        let call =
+            cmif::parse_session(p.raw).map_err(|e| self.stop(root_name, 0, e.to_string()))?;
         self.inner.counters.hit(CONTROL, call.command);
         let ok = |data: &[u8], moved: &[u32]| {
             hipc::encode(&Reply {
@@ -267,23 +305,38 @@ impl IpcSession {
                 Ok(ok(&1u32.to_le_bytes(), &[]))
             }
             cmif::CONTROL_COPY_FROM_DOMAIN => {
-                let id = call.data.get(..4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                let id = call
+                    .data
+                    .get(..4)
+                    .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
                 let object = id.and_then(|id| lock(&self.link.domain).get(id));
                 let Some(object) = object else {
-                    return Err(self.stop(CONTROL, call.command, format!("CopyFromCurrentDomain names the unknown object {id:?}")));
+                    return Err(self.stop(
+                        CONTROL,
+                        call.command,
+                        format!("CopyFromCurrentDomain names the unknown object {id:?}"),
+                    ));
                 };
                 let h = self.handle_for(object, call.command)?;
                 Ok(ok(&[], &[h]))
             }
             cmif::CONTROL_CLONE | cmif::CONTROL_CLONE_EX => {
                 let Some(k) = kernel() else {
-                    return Err(self.stop(CONTROL, call.command, "the kernel is not registered".to_string()));
+                    return Err(self.stop(
+                        CONTROL,
+                        call.command,
+                        "the kernel is not registered".to_string(),
+                    ));
                 };
                 let h = k.add_session(Arc::new(self.clone_session()))?;
                 Ok(ok(&[], &[h]))
             }
             cmif::CONTROL_QUERY_POINTER_BUFFER_SIZE => Ok(ok(&0u16.to_le_bytes(), &[])),
-            other => Err(self.stop(CONTROL, other, "the control command is not served".to_string())),
+            other => Err(self.stop(
+                CONTROL,
+                other,
+                "the control command is not served".to_string(),
+            )),
         }
     }
 }

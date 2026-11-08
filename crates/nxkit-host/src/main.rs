@@ -7,8 +7,14 @@ fn main() {
     use nxkit_host::run::Options;
 
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: nxkit-host [--fullscreen] <run folder>\n       nxkit-host probe <run folder>";
-    let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    let usage =
+        "usage: nxkit-host [--fullscreen] <run folder>\n       nxkit-host probe <run folder>";
+    let result = match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["probe", root] => nxkit_host::probe::run(&PathBuf::from(*root)),
         ["--fullscreen", root] | [root, "--fullscreen"] => nxkit_host::run::run(&Options {
             root: PathBuf::from(*root),

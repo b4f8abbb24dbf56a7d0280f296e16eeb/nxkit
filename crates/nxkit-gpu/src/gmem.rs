@@ -105,7 +105,11 @@ pub(crate) fn build_table(pools: impl IntoIterator<Item = (u64, u64, u64)>) -> T
             bytes[at..at + 4].copy_from_slice(&hint.to_le_bytes());
         }
     }
-    Table { bytes, ranges, over }
+    Table {
+        bytes,
+        ranges,
+        over,
+    }
 }
 
 /// The memory pools of the game, and the table built from them.
@@ -141,7 +145,12 @@ impl Gmem {
         if len == 0 {
             return;
         }
-        let stale: Vec<u64> = self.pools.range(..end).filter(|(s, e)| **s < end && **e > start).map(|(s, _)| *s).collect();
+        let stale: Vec<u64> = self
+            .pools
+            .range(..end)
+            .filter(|(s, e)| **s < end && **e > start)
+            .map(|(s, _)| *s)
+            .collect();
         for s in stale {
             self.pools.remove(&s);
         }
@@ -164,7 +173,11 @@ impl Gmem {
         delta: impl Fn(u64, u64) -> Option<u64>,
     ) -> Option<Arc<DataBuffer>> {
         if self.built != self.generation {
-            let t = build_table(self.pools.iter().filter_map(|(s, e)| delta(*s, *e - *s).map(|d| (*s, *e, d))));
+            let t = build_table(
+                self.pools
+                    .iter()
+                    .filter_map(|(s, e)| delta(*s, *e - *s).map(|d| (*s, *e, d))),
+            );
             if t.over != 0 {
                 note_n(Reason::GmemPoolsOver, u64::from(t.over));
             }
@@ -173,7 +186,12 @@ impl Gmem {
                     self.buffer = Some(Arc::new(b));
                     self.ranges = Arc::new(t.ranges);
                     if crate::diag("gmem") {
-                        eprintln!("DIAG gmem table of {} ranges (pools {}, over {})", self.ranges.len() - 1, self.pools.len(), t.over);
+                        eprintln!(
+                            "DIAG gmem table of {} ranges (pools {}, over {})",
+                            self.ranges.len() - 1,
+                            self.pools.len(),
+                            t.over
+                        );
                     }
                 }
                 Err(e) => {
@@ -207,9 +225,17 @@ impl Gmem {
         for r in self.logs.drain(region) {
             if let Err(at) = self.learned.binary_search(&r) {
                 self.learned.insert(at, r);
-                note(Reason::GmemPoolWritten, format_args!("{:#x}..{:#x}", r.0, r.1));
+                note(
+                    Reason::GmemPoolWritten,
+                    format_args!("{:#x}..{:#x}", r.0, r.1),
+                );
                 if crate::diag("gmem") {
-                    eprintln!("DIAG gmem shaders wrote the pool {:#x}..{:#x} ({} learned)", r.0, r.1, self.learned.len());
+                    eprintln!(
+                        "DIAG gmem shaders wrote the pool {:#x}..{:#x} ({} learned)",
+                        r.0,
+                        r.1,
+                        self.learned.len()
+                    );
                 }
             }
         }
@@ -230,7 +256,10 @@ pub(crate) struct GmemLogs {
 impl GmemLogs {
     fn new(ctx: &Context) -> Result<Self, nxkit_metal::MetalError> {
         Ok(Self {
-            buffer: DataBuffer::new(ctx, LOG_BYTES * u64::from(LOGS_PER_BATCH) * BATCHES_IN_FLIGHT as u64)?,
+            buffer: DataBuffer::new(
+                ctx,
+                LOG_BYTES * u64::from(LOGS_PER_BATCH) * BATCHES_IN_FLIGHT as u64,
+            )?,
             used: Default::default(),
             tables: Mutex::new(Default::default()),
         })
@@ -251,12 +280,15 @@ impl GmemLogs {
         } else {
             n
         };
-        self.buffer.gpu_address() + (region as u64 * u64::from(LOGS_PER_BATCH) + u64::from(slot)) * LOG_BYTES
+        self.buffer.gpu_address()
+            + (region as u64 * u64::from(LOGS_PER_BATCH) + u64::from(slot)) * LOG_BYTES
     }
 
     /// Reads and clears the logs of `region`. Returns the ranges of the entries with a bit set, sorted.
     pub(crate) fn drain(&self, region: usize) -> Vec<(u64, u64)> {
-        let used = self.used[region].swap(0, Ordering::AcqRel).min(LOGS_PER_BATCH);
+        let used = self.used[region]
+            .swap(0, Ordering::AcqRel)
+            .min(LOGS_PER_BATCH);
         let table = self.tables.lock().unwrap_or_else(PoisonError::into_inner)[region].take();
         let mut seen = vec![0u32; ENTRIES / 32];
         let base = region as u64 * u64::from(LOGS_PER_BATCH) * LOG_BYTES;
@@ -328,16 +360,36 @@ mod tests {
     #[test]
     fn the_table_has_the_layout_of_the_abi() {
         let mib = 1u64 << 20;
-        let t = build_table([(0x10 * mib, 0x14 * mib, 0), (0x40 * mib, 0x41 * mib, 0x1000)]);
+        let t = build_table([
+            (0x10 * mib, 0x14 * mib, 0),
+            (0x40 * mib, 0x41 * mib, 0x1000),
+        ]);
         assert_eq!(t.bytes.len(), 8192 * 32);
         // entry 0 is empty, unused entries start at !0
         assert_eq!(&t.bytes[..32], &[0u8; 32]);
         assert_eq!(u64_at(&t.bytes, 3 * 32), u64::MAX);
         assert_eq!(u64_at(&t.bytes, 3 * 32 + 8), 0);
         // entry 1 and 2: start, end, delta
-        assert_eq!((u64_at(&t.bytes, 32), u64_at(&t.bytes, 40), u64_at(&t.bytes, 48)), (0x10 * mib, 0x14 * mib, 0));
-        assert_eq!((u64_at(&t.bytes, 64), u64_at(&t.bytes, 72), u64_at(&t.bytes, 80)), (0x40 * mib, 0x41 * mib, 0x1000));
-        assert_eq!(t.ranges, vec![(0, 0), (0x10 * mib, 0x14 * mib), (0x40 * mib, 0x41 * mib)]);
+        assert_eq!(
+            (
+                u64_at(&t.bytes, 32),
+                u64_at(&t.bytes, 40),
+                u64_at(&t.bytes, 48)
+            ),
+            (0x10 * mib, 0x14 * mib, 0)
+        );
+        assert_eq!(
+            (
+                u64_at(&t.bytes, 64),
+                u64_at(&t.bytes, 72),
+                u64_at(&t.bytes, 80)
+            ),
+            (0x40 * mib, 0x41 * mib, 0x1000)
+        );
+        assert_eq!(
+            t.ranges,
+            vec![(0, 0), (0x10 * mib, 0x14 * mib), (0x40 * mib, 0x41 * mib)]
+        );
     }
 
     #[test]
@@ -380,7 +432,9 @@ mod tests {
 
     #[test]
     fn pools_replace_the_pools_they_overlap() {
-        let Ok(ctx) = Context::system_default() else { return };
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
         let mut g = Gmem::new(&ctx).unwrap();
         g.add_pool(0x1000, 0x1000);
         g.add_pool(0x1800, 0x1000);
@@ -391,7 +445,9 @@ mod tests {
 
     #[test]
     fn logs_come_back_through_the_table_of_their_batch() {
-        let Ok(ctx) = Context::system_default() else { return };
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
         let g = Gmem::new(&ctx).unwrap();
         let logs = g.logs();
         logs.begin(1, Arc::new(vec![(0, 0), (0x100, 0x200), (0x300, 0x400)]));
@@ -399,7 +455,9 @@ mod tests {
         let b = logs.take(1);
         assert_eq!(b - a, LOG_BYTES);
         // the shader of the second draw stored through entry 2
-        logs.buffer.write(b - logs.buffer.gpu_address(), &4u32.to_le_bytes()).unwrap();
+        logs.buffer
+            .write(b - logs.buffer.gpu_address(), &4u32.to_le_bytes())
+            .unwrap();
         assert_eq!(logs.drain(1), vec![(0x300, 0x400)]);
         // drained and cleared
         assert!(logs.drain(1).is_empty());

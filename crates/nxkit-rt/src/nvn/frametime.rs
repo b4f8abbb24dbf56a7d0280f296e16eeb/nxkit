@@ -114,6 +114,11 @@ fn close(end: u64) {
         ms(sum[2]),
         ms(rest),
         ms(gap),
-        SUB_NAMES.iter().zip(subs).map(|(n, v)| format!("{n} {:.2}", ms(v))).collect::<Vec<_>>().join(" "),
+        SUB_NAMES
+            .iter()
+            .zip(subs)
+            .map(|(n, v)| format!("{n} {:.2}", ms(v)))
+            .collect::<Vec<_>>()
+            .join(" "),
     );
 }

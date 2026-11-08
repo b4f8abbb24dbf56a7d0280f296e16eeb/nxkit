@@ -4,7 +4,7 @@
 //!
 //! The vi vsync event (`nn::vi::GetDisplayVsyncEvent`) is left out. The pacing crate exports it.
 
-use super::{get_i64, nothing, put_bytes, put_f32, put_u64, put_zero, RES_FAIL};
+use super::{RES_FAIL, get_i64, nothing, put_bytes, put_f32, put_u64, put_zero};
 use crate::config;
 use crate::event::{self, Block};
 use crate::sys;
@@ -80,7 +80,10 @@ extern "C" fn network_task_event(_task: u64) -> u64 {
 
 /// `GetIndirectImageMemoryRequirement(size_t*, size_t*, int, int)`: RGBA8 linear, 4 KB aligned.
 extern "C" fn indirect_image_requirement(size: u64, align: u64, w: u32, h: u32) -> u32 {
-    let (w, h) = (u64::from((w as i32).max(0) as u32), u64::from((h as i32).max(0) as u32));
+    let (w, h) = (
+        u64::from((w as i32).max(0) as u32),
+        u64::from((h as i32).max(0) as u32),
+    );
     put_u64(size, (w * h * 4 + 0xfff) & !0xfff);
     put_u64(align, 0x1000);
     0

@@ -53,7 +53,9 @@ struct Cb {
 static CB: OnceLock<Cb> = OnceLock::new();
 
 fn guest_sym(name: &str) -> usize {
-    let (Some(cb), Ok(c)) = (CB.get(), CString::new(name)) else { return 0 };
+    let (Some(cb), Ok(c)) = (CB.get(), CString::new(name)) else {
+        return 0;
+    };
     (cb.guest_sym)(c.as_ptr())
 }
 
@@ -74,7 +76,8 @@ fn dup_readable_handle(h: u32) -> u32 {
 }
 
 fn spawn_guest_thread(entry: extern "C" fn(u64), arg: u64, prio: i32, stack: usize) -> u64 {
-    CB.get().map_or(0, |cb| (cb.spawn_guest_thread)(entry, arg, prio, stack))
+    CB.get()
+        .map_or(0, |cb| (cb.spawn_guest_thread)(entry, arg, prio, stack))
 }
 
 fn join_guest_thread(t: u64) {
@@ -97,9 +100,14 @@ fn fatal(msg: &str) {
 ///
 /// `host` is NULL or points to a valid [`NxkitAudioHost`]. `cfg` is NULL or points to a valid [`NxkitAudioConfig`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nxkit_audio_init(host: *const NxkitAudioHost, cfg: *const NxkitAudioConfig) -> i32 {
+pub unsafe extern "C" fn nxkit_audio_init(
+    host: *const NxkitAudioHost,
+    cfg: *const NxkitAudioConfig,
+) -> i32 {
     // SAFETY: the caller promises that a non-NULL `host` is valid.
-    let Some(h) = (unsafe { host.as_ref() }) else { return 0 };
+    let Some(h) = (unsafe { host.as_ref() }) else {
+        return 0;
+    };
     let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g)) = (
         h.guest_sym,
         h.bind_system_event,
@@ -134,7 +142,10 @@ pub unsafe extern "C" fn nxkit_audio_init(host: *const NxkitAudioHost, cfg: *con
     });
     // SAFETY: the caller promises that a non-NULL `cfg` is valid.
     let config = match unsafe { cfg.as_ref() } {
-        Some(c) => Config { master_volume: c.master_volume, silent_sink: c.silent_sink != 0 },
+        Some(c) => Config {
+            master_volume: c.master_volume,
+            silent_sink: c.silent_sink != 0,
+        },
         None => Config::default(),
     };
     nxkit_svc_audio::init(&config);

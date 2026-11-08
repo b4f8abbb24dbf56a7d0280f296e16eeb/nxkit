@@ -14,11 +14,14 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSEvent, NSResponder,
-    NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
+    NSEvent, NSResponder, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowDelegate,
+    NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSActivityOptions, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo, NSString};
+use objc2_foundation::{
+    NSActivityOptions, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo, NSString,
+};
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
 use super::mouse;
@@ -96,12 +99,16 @@ fn target_screen(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
             Ok(_) => None,
             Err(_) => {
                 let want = want.to_lowercase();
-                screens.iter().find(|s| s.localizedName().to_string().to_lowercase().contains(&want))
+                screens
+                    .iter()
+                    .find(|s| s.localizedName().to_string().to_lowercase().contains(&want))
             }
         };
         match found {
             Some(s) => return Some(s),
-            None => eprintln!("nxkit-host: NXKIT_SCREEN={want} matches no screen, using the main screen"),
+            None => eprintln!(
+                "nxkit-host: NXKIT_SCREEN={want} matches no screen, using the main screen"
+            ),
         }
     }
     NSScreen::mainScreen(mtm)
@@ -137,7 +144,10 @@ fn screen_facts(s: &NSScreen) -> ScreenFacts {
 /// (`refresh.rs`), not its highest one: the game's own pacing picks the frames it renders, and the link ticks at a rate
 /// that holds each frame an exact number of ticks.
 fn screen_interval(mtm: MainThreadMarker, window: Option<&NSWindow>) -> FrameInterval {
-    match window.and_then(|w| w.screen()).or_else(|| target_screen(mtm)) {
+    match window
+        .and_then(|w| w.screen())
+        .or_else(|| target_screen(mtm))
+    {
         Some(s) => FrameInterval::from_hz(refresh::apply(&screen_facts(&s)).link_hz),
         None => FrameInterval::Hz60,
     }
@@ -310,9 +320,11 @@ define_class!(
 
         #[unsafe(method(windowDidResize:))]
         fn window_did_resize(&self, _n: &NSNotification) {
-            if let (Some(p), Some(w), Some(v)) =
-                (self.presenter().get(), self.window().get(), self.view().get())
-            {
+            if let (Some(p), Some(w), Some(v)) = (
+                self.presenter().get(),
+                self.window().get(),
+                self.view().get(),
+            ) {
                 let (width, height) = drawable_size(w, v);
                 p.resize(width, height);
             }
@@ -402,7 +414,8 @@ pub fn run(
     stop: Arc<AtomicBool>,
     ready: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    let mtm = MainThreadMarker::new().ok_or_else(|| HostError::App("the window must start on the main thread".into()))?;
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| HostError::App("the window must start on the main thread".into()))?;
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 
@@ -460,7 +473,12 @@ pub fn run(
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks { inner: hooks, stop });
-    let link = Rc::new(DisplayLink::new(mtm, &presenter, screen_interval(mtm, None), link_hooks));
+    let link = Rc::new(DisplayLink::new(
+        mtm,
+        &presenter,
+        screen_interval(mtm, None),
+        link_hooks,
+    ));
     let _ = delegate.link().set(link);
 
     match target_screen(mtm) {
@@ -483,8 +501,10 @@ pub fn run(
     // A game is latency critical and interactive whether its window is in front or not. Without the activity, macOS
     // treated the process as a background app while another window had the focus (App Nap, timer coalescing, a lower
     // scheduling class), and the frame rate fell. It also keeps the system from idle sleep while the game runs.
-    let _activity = NSProcessInfo::processInfo()
-        .beginActivityWithOptions_reason(NSActivityOptions::UserInteractive, &NSString::from_str("a game runs"));
+    let _activity = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+        NSActivityOptions::UserInteractive,
+        &NSString::from_str("a game runs"),
+    );
     ready()?;
     app.run();
     nxkit_metal::display::restore_active();

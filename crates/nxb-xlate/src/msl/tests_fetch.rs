@@ -400,16 +400,26 @@ fn a_scaled_texture_binding_names_its_render_scale_entry() {
     });
     let t = translated(&b, &Options::default());
     let r = t.libraries[0].reflection.as_ref().expect("reflection");
-    let tex = r.bindings.iter().find(|b| b.msl_name == "fp_t2d_3").expect("tex");
+    let tex = r
+        .bindings
+        .iter()
+        .find(|b| b.msl_name == "fp_t2d_3")
+        .expect("tex");
     assert_eq!(tex.rscale, Some(3));
-    assert_eq!(tex.to_value().get("rscale").and_then(Value::as_i64), Some(3));
+    assert_eq!(
+        tex.to_value().get("rscale").and_then(Value::as_i64),
+        Some(3)
+    );
 }
 
 #[test]
 fn the_support_buffer_constants_match_the_front_end() {
     use crate::msl::abi::{SUPPORT_RENDER_SCALE, SUPPORT_RENDER_SCALES, SUPPORT_SIZE};
     use crate::translation::props::support_buffer as sb;
-    assert_eq!(SUPPORT_RENDER_SCALE as i32, sb::GRAPHICS_RENDER_SCALE_OFFSET);
+    assert_eq!(
+        SUPPORT_RENDER_SCALE as i32,
+        sb::GRAPHICS_RENDER_SCALE_OFFSET
+    );
     assert_eq!(SUPPORT_RENDER_SCALES as i32, sb::RENDER_SCALE_MAX_COUNT);
     assert_eq!(SUPPORT_SIZE as i32, sb::REQUIRED_SIZE);
 }

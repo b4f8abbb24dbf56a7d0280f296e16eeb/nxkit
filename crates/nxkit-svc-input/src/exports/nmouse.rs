@@ -92,9 +92,18 @@ pub(super) fn list() -> Vec<Export> {
             "_ZN2nn3hid16InitializeNmouseEPvmiiNS0_17NmousePointerTypeE",
             initialize_with_type as usize,
         ),
-        Export::new("_ZN2nn3hid22SetNmousePointerRangesEii", set_pointer_ranges as usize),
-        Export::new("_ZN2nn3hid22GetNmousePointerRangesEPiS1_", get_pointer_ranges as usize),
-        Export::new("_ZN2nn3hid21GetMergedNmouseHandleEPNS0_12NmouseHandleE", get_merged_handle as usize),
+        Export::new(
+            "_ZN2nn3hid22SetNmousePointerRangesEii",
+            set_pointer_ranges as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid22GetNmousePointerRangesEPiS1_",
+            get_pointer_ranges as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid21GetMergedNmouseHandleEPNS0_12NmouseHandleE",
+            get_merged_handle as usize,
+        ),
         Export::new(
             "_ZN2nn3hid16GetNmouseTypeSetEPNS_4util10BitFlagSetILi32ENS0_10NmouseTypeEEENS0_12NmouseHandleE",
             get_type_set as usize,
@@ -103,9 +112,18 @@ pub(super) fn list() -> Vec<Export> {
             "_ZN2nn3hid15GetNmouseStatesEPiPNS0_11NmouseStateEiNS0_12NmouseHandleE",
             get_states as usize,
         ),
-        Export::new("_ZN2nn3hid19EnableNmousePointerENS0_12NmouseHandleEb", enable_pointer as usize),
-        Export::new("_ZN2nn3hid24SetNmousePointerPositionENS0_12NmouseHandleEii", set_pointer_position as usize),
-        Export::new("_ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE", get_jcms_handle as usize),
+        Export::new(
+            "_ZN2nn3hid19EnableNmousePointerENS0_12NmouseHandleEb",
+            enable_pointer as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid24SetNmousePointerPositionENS0_12NmouseHandleEii",
+            set_pointer_position as usize,
+        ),
+        Export::new(
+            "_ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE",
+            get_jcms_handle as usize,
+        ),
     ];
     v.extend(stub_list());
     v

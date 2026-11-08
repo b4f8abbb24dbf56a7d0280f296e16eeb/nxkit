@@ -53,8 +53,8 @@ mod pipeline;
 mod policy;
 mod present;
 mod render;
-mod residency;
 mod resample;
+mod residency;
 mod sampler;
 mod scale;
 mod schedule;
@@ -79,7 +79,9 @@ pub use deswizzle::{DESWIZZLE_MSL, DeswizzleParams, Deswizzler, Swizzler};
 pub use device::{Context, autorelease_pool};
 pub use encode::CommandBuffer;
 pub use error::{MetalError, Result};
-pub use format::{BcKind, Format, FormatClass, IndexType, LoadAction, Primitive, SampleType, StoreAction};
+pub use format::{
+    BcKind, Format, FormatClass, IndexType, LoadAction, Primitive, SampleType, StoreAction,
+};
 pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
@@ -96,8 +98,8 @@ pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
     StencilAttachment, Viewport,
 };
-pub use residency::ResidentGuard;
 pub use resample::{RESAMPLE_MSL, Resampler};
+pub use residency::ResidentGuard;
 pub use sampler::{Border, Filter, MipFilter, Reduction, Sampler, SamplerDesc, Wrap};
 pub use scale::{
     MAX_SCALE, METALFX_RATIO, MIN_SCALE, RenderScale, SCALE_STEP, ScaleChoice, ScaleInput,

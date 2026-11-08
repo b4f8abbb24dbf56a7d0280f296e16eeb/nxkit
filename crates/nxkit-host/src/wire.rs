@@ -54,7 +54,9 @@ fn clear_system_event(event: u64) {
 }
 
 fn dup_readable_handle(handle: u32) -> u32 {
-    need_kernel("dup_readable_handle").duplicate_readable_handle(handle).unwrap_or(0)
+    need_kernel("dup_readable_handle")
+        .duplicate_readable_handle(handle)
+        .unwrap_or(0)
 }
 
 fn fatal(message: &str) {
@@ -64,7 +66,8 @@ fn fatal(message: &str) {
 /// The bind of the pacing service: the event of the game's `SystemEventType`, and the handle of its writable end.
 pub(crate) fn pacing_bind(event: u64) -> Result<u32, u32> {
     let k = kernel().ok_or(BIND_REFUSED)?;
-    k.bind_system_event(event, false).map_err(|_| BIND_REFUSED)?;
+    k.bind_system_event(event, false)
+        .map_err(|_| BIND_REFUSED)?;
     Ok(k.system_event_writable_handle(event))
 }
 
@@ -74,13 +77,20 @@ struct Threads {
     live: Vec<(u64, GuestThread, Arc<AtomicBool>)>,
 }
 
-static THREADS: Mutex<Threads> = Mutex::new(Threads { next: 1, live: Vec::new() });
+static THREADS: Mutex<Threads> = Mutex::new(Threads {
+    next: 1,
+    live: Vec::new(),
+});
 
 fn threads() -> std::sync::MutexGuard<'static, Threads> {
     THREADS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn spawn(body: impl FnOnce() + Send + 'static, priority: i32, stack: u64) -> Option<(u64, Arc<AtomicBool>)> {
+fn spawn(
+    body: impl FnOnce() + Send + 'static,
+    priority: i32,
+    stack: u64,
+) -> Option<(u64, Arc<AtomicBool>)> {
     let done = Arc::new(AtomicBool::new(false));
     let flag = done.clone();
     let thread = GuestThread::spawn(
@@ -130,7 +140,10 @@ fn audio_spawn(entry: extern "C" fn(u64), arg: u64, priority: i32, stack: usize)
 fn audio_join(id: u64) {
     let thread = {
         let mut t = threads();
-        t.live.iter().position(|(i, _, _)| *i == id).map(|k| t.live.swap_remove(k).1)
+        t.live
+            .iter()
+            .position(|(i, _, _)| *i == id)
+            .map(|k| t.live.swap_remove(k).1)
     };
     if let Some(thread) = thread {
         if let Err(why) = thread.join() {
@@ -193,11 +206,17 @@ pub(crate) fn set_handheld(on: bool) {
 
 /// The npad id of player 1: the handheld npad in handheld mode, else the first full key npad.
 fn connected_npad() -> u32 {
-    if HANDHELD.load(Ordering::Relaxed) { 0x20 } else { 0 }
+    if HANDHELD.load(Ordering::Relaxed) {
+        0x20
+    } else {
+        0
+    }
 }
 
 fn text_input(_: &TextRequest) -> Option<String> {
-    stop::fatal("system seam text_input is not wired (the software keyboard has no host window yet)")
+    stop::fatal(
+        "system seam text_input is not wired (the software keyboard has no host window yet)",
+    )
 }
 
 fn nro_load(_: u64, _: u32) -> Option<u64> {
@@ -235,5 +254,8 @@ pub(crate) fn system_seams() -> nxkit_svc_system::Seams {
 
 /// The hooks with which the input service binds and signals its events.
 pub(crate) fn input_hooks() -> nxkit_svc_input::SystemEventHooks {
-    nxkit_svc_input::SystemEventHooks { bind: bind_system_event, signal: signal_system_event }
+    nxkit_svc_input::SystemEventHooks {
+        bind: bind_system_event,
+        signal: signal_system_event,
+    }
 }

@@ -68,13 +68,20 @@ fn take_slot() -> Result<usize> {
         let mut cur = word.load(Ordering::Relaxed);
         while cur != u64::MAX {
             let bit = (!cur).trailing_zeros();
-            match word.compare_exchange_weak(cur, cur | (1 << bit), Ordering::AcqRel, Ordering::Relaxed) {
+            match word.compare_exchange_weak(
+                cur,
+                cur | (1 << bit),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
                 Ok(_) => return Ok(w * 64 + bit as usize),
                 Err(now) => cur = now,
             }
         }
     }
-    Err(HostError::Memory(format!("more than {GATE_SLOTS} guest threads at the same time")))
+    Err(HostError::Memory(format!(
+        "more than {GATE_SLOTS} guest threads at the same time"
+    )))
 }
 
 fn give_slot(k: usize) {
@@ -105,7 +112,12 @@ impl ThreadEnv {
                 return Err(e);
             }
         };
-        let mut env = ThreadEnv { slot, tlr: 0, gate_stack, gate_stack_len: len };
+        let mut env = ThreadEnv {
+            slot,
+            tlr: 0,
+            gate_stack,
+            gate_stack_len: len,
+        };
         match env.fill(k) {
             Ok(()) => Ok(env),
             Err(e) => {

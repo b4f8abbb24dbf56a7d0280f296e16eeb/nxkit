@@ -45,7 +45,12 @@ pub struct InputFile {
 impl Default for InputFile {
     fn default() -> Self {
         let c = Config::default();
-        InputFile { keyboard: c.keyboard, mouse_capture: c.mouse_capture, look: c.look, binds: Vec::new() }
+        InputFile {
+            keyboard: c.keyboard,
+            mouse_capture: c.mouse_capture,
+            look: c.look,
+            binds: Vec::new(),
+        }
     }
 }
 
@@ -76,7 +81,9 @@ impl InputFile {
         match v.get("titles") {
             None => {}
             Some(Value::Object(titles)) => {
-                let own = titles.iter().find(|(id, _)| id.eq_ignore_ascii_case(title_id));
+                let own = titles
+                    .iter()
+                    .find(|(id, _)| id.eq_ignore_ascii_case(title_id));
                 if let Some((id, section)) = own {
                     warnings.extend(self.section(section, &format!("titles.{id}.")));
                 }
@@ -95,7 +102,9 @@ impl InputFile {
             match (key.as_str(), value) {
                 ("titles", _) if at.is_empty() => {}
                 ("keyboard", Value::Bool(b)) => self.keyboard = *b,
-                ("mouse", Value::Object(_)) => warnings.extend(self.mouse(value, &format!("{at}mouse."))),
+                ("mouse", Value::Object(_)) => {
+                    warnings.extend(self.mouse(value, &format!("{at}mouse.")))
+                }
                 ("bind", Value::Object(pairs)) => {
                     for (k, a) in pairs {
                         match a.as_str() {
@@ -132,7 +141,11 @@ impl InputFile {
 pub fn paths(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
-        out.push(PathBuf::from(home).join("Library/Application Support/nxkit").join(FILE));
+        out.push(
+            PathBuf::from(home)
+                .join("Library/Application Support/nxkit")
+                .join(FILE),
+        );
     }
     out.push(root.join(FILE));
     out
@@ -150,7 +163,11 @@ pub fn load(root: &Path, title_id: &str) -> (InputFile, Vec<String>) {
             Ok(v) => file.read(&v, title_id),
             Err(e) => vec![e.to_string()],
         };
-        warnings.extend(found.into_iter().map(|w| format!("{}: {w}", path.display())));
+        warnings.extend(
+            found
+                .into_iter()
+                .map(|w| format!("{}: {w}", path.display())),
+        );
     }
     let bad = nxkit_svc_input::bind_errors(&file.binds);
     warnings.extend(bad.into_iter().map(|w| format!("bind: {w}, skipped")));
@@ -186,9 +203,22 @@ mod tests {
                 "bind": {"f": "rstick", "mouse4": "zr"}}"#,
         );
         assert!(w.is_empty(), "{w:?}");
-        assert_eq!(f.look, LookConfig { sensitivity: 2.0, invert_y: true, deadzone: 0.2 });
+        assert_eq!(
+            f.look,
+            LookConfig {
+                sensitivity: 2.0,
+                invert_y: true,
+                deadzone: 0.2
+            }
+        );
         assert!(!f.mouse_capture);
-        assert_eq!(f.binds, vec![("f".to_owned(), "rstick".to_owned()), ("mouse4".to_owned(), "zr".to_owned())]);
+        assert_eq!(
+            f.binds,
+            vec![
+                ("f".to_owned(), "rstick".to_owned()),
+                ("mouse4".to_owned(), "zr".to_owned())
+            ]
+        );
     }
 
     #[test]
@@ -206,7 +236,8 @@ mod tests {
 
     #[test]
     fn unknown_keys_and_wrong_types_warn() {
-        let (f, w) = read(r#"{"mouse": {"speed": 1, "invert_y": 1}, "bind": {"f": 3}, "rumble": true}"#);
+        let (f, w) =
+            read(r#"{"mouse": {"speed": 1, "invert_y": 1}, "bind": {"f": 3}, "rumble": true}"#);
         assert_eq!(w.len(), 4, "{w:?}");
         assert_eq!(f, InputFile::default());
         let (_, w) = read("[1]");
@@ -232,7 +263,13 @@ mod tests {
     fn load_reads_the_run_folder() {
         let dir = std::env::temp_dir().join(format!("nxkit-input-{}", std::process::id()));
         assert!(std::fs::create_dir_all(&dir).is_ok());
-        assert!(std::fs::write(dir.join(FILE), r#"{"mouse": {"sensitivity": 4}, "bind": {"x": "jump"}}"#).is_ok());
+        assert!(
+            std::fs::write(
+                dir.join(FILE),
+                r#"{"mouse": {"sensitivity": 4}, "bind": {"x": "jump"}}"#
+            )
+            .is_ok()
+        );
         let (f, w) = load(&dir, BOTW);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(f.look.sensitivity, 4.0);

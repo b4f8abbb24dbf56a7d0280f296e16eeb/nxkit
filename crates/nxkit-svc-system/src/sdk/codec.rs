@@ -42,23 +42,71 @@ macro_rules! soft {
 }
 
 soft!(soft_ctor, "_ZN2nn5codec11OpusDecoderC1Ev");
-soft!(soft_work_size, "_ZN2nn5codec28GetOpusDecoderWorkBufferSizeEii");
-soft!(soft_init, "_ZN2nn5codec21InitializeOpusDecoderEPNS0_15OpusDecoderTypeEiiPvm");
-soft!(soft_fini, "_ZN2nn5codec19FinalizeOpusDecoderEPNS0_15OpusDecoderTypeE");
-soft!(soft_rate, "_ZN2nn5codec24GetOpusDecoderSampleRateEPKNS0_15OpusDecoderTypeE");
-soft!(soft_channels, "_ZN2nn5codec26GetOpusDecoderChannelCountEPKNS0_15OpusDecoderTypeE");
-soft!(soft_reset, "_ZN2nn5codec16ResetOpusDecoderEPNS0_15OpusDecoderTypeE");
-soft!(soft_decode, "_ZN2nn5codec21DecodeOpusInterleavedEPNS0_15OpusDecoderTypeEPmPiPsmPKvm");
+soft!(
+    soft_work_size,
+    "_ZN2nn5codec28GetOpusDecoderWorkBufferSizeEii"
+);
+soft!(
+    soft_init,
+    "_ZN2nn5codec21InitializeOpusDecoderEPNS0_15OpusDecoderTypeEiiPvm"
+);
+soft!(
+    soft_fini,
+    "_ZN2nn5codec19FinalizeOpusDecoderEPNS0_15OpusDecoderTypeE"
+);
+soft!(
+    soft_rate,
+    "_ZN2nn5codec24GetOpusDecoderSampleRateEPKNS0_15OpusDecoderTypeE"
+);
+soft!(
+    soft_channels,
+    "_ZN2nn5codec26GetOpusDecoderChannelCountEPKNS0_15OpusDecoderTypeE"
+);
+soft!(
+    soft_reset,
+    "_ZN2nn5codec16ResetOpusDecoderEPNS0_15OpusDecoderTypeE"
+);
+soft!(
+    soft_decode,
+    "_ZN2nn5codec21DecodeOpusInterleavedEPNS0_15OpusDecoderTypeEPmPiPsmPKvm"
+);
 soft!(ms_ctor, "_ZN2nn5codec22OpusMultiStreamDecoderC1Ev");
-soft!(ms_work_size, "_ZN2nn5codec39GetOpusMultiStreamDecoderWorkBufferSizeEiiii");
-soft!(ms_init, "_ZN2nn5codec32InitializeOpusMultiStreamDecoderEPNS0_26OpusMultiStreamDecoderTypeEiiiiPKhPvm");
-soft!(ms_fini, "_ZN2nn5codec30FinalizeOpusMultiStreamDecoderEPNS0_26OpusMultiStreamDecoderTypeE");
-soft!(ms_rate, "_ZN2nn5codec35GetOpusMultiStreamDecoderSampleRateEPKNS0_26OpusMultiStreamDecoderTypeE");
-soft!(ms_channels, "_ZN2nn5codec37GetOpusMultiStreamDecoderChannelCountEPKNS0_26OpusMultiStreamDecoderTypeE");
-soft!(ms_total, "_ZN2nn5codec41GetOpusMultiStreamDecoderTotalStreamCountEPKNS0_26OpusMultiStreamDecoderTypeE");
-soft!(ms_stereo, "_ZN2nn5codec42GetOpusMultiStreamDecoderStereoStreamCountEPKNS0_26OpusMultiStreamDecoderTypeE");
-soft!(ms_reset, "_ZN2nn5codec27ResetOpusMultiStreamDecoderEPNS0_26OpusMultiStreamDecoderTypeE");
-soft!(ms_decode, "_ZN2nn5codec32DecodeOpusMultiStreamInterleavedEPNS0_26OpusMultiStreamDecoderTypeEPmPiPsmPKvm");
+soft!(
+    ms_work_size,
+    "_ZN2nn5codec39GetOpusMultiStreamDecoderWorkBufferSizeEiiii"
+);
+soft!(
+    ms_init,
+    "_ZN2nn5codec32InitializeOpusMultiStreamDecoderEPNS0_26OpusMultiStreamDecoderTypeEiiiiPKhPvm"
+);
+soft!(
+    ms_fini,
+    "_ZN2nn5codec30FinalizeOpusMultiStreamDecoderEPNS0_26OpusMultiStreamDecoderTypeE"
+);
+soft!(
+    ms_rate,
+    "_ZN2nn5codec35GetOpusMultiStreamDecoderSampleRateEPKNS0_26OpusMultiStreamDecoderTypeE"
+);
+soft!(
+    ms_channels,
+    "_ZN2nn5codec37GetOpusMultiStreamDecoderChannelCountEPKNS0_26OpusMultiStreamDecoderTypeE"
+);
+soft!(
+    ms_total,
+    "_ZN2nn5codec41GetOpusMultiStreamDecoderTotalStreamCountEPKNS0_26OpusMultiStreamDecoderTypeE"
+);
+soft!(
+    ms_stereo,
+    "_ZN2nn5codec42GetOpusMultiStreamDecoderStereoStreamCountEPKNS0_26OpusMultiStreamDecoderTypeE"
+);
+soft!(
+    ms_reset,
+    "_ZN2nn5codec27ResetOpusMultiStreamDecoderEPNS0_26OpusMultiStreamDecoderTypeE"
+);
+soft!(
+    ms_decode,
+    "_ZN2nn5codec32DecodeOpusMultiStreamInterleavedEPNS0_26OpusMultiStreamDecoderTypeEPmPiPsmPKvm"
+);
 
 /// A block for a new decoder: one from the free list, else a new one.
 pub(super) fn take_block() -> u64 {
@@ -79,7 +127,10 @@ pub(super) fn take_block() -> u64 {
 /// Gives a block back. A full list drops the block, which stays allocated.
 pub(super) fn give_block(b: u64) {
     for slot in &FREE_LIST {
-        if slot.compare_exchange(0, b, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        if slot
+            .compare_exchange(0, b, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
             return;
         }
     }
@@ -89,7 +140,9 @@ pub(super) fn give_block(b: u64) {
 fn state_of(hw: u64) -> u64 {
     let s = get_u64(hw);
     if s == 0 {
-        fatal(&format!("Opus decoder {hw:#x} was not initialized by the host"));
+        fatal(&format!(
+            "Opus decoder {hw:#x} was not initialized by the host"
+        ));
     }
     s
 }
@@ -115,14 +168,20 @@ extern "C" fn construct(this: u64) {
 
 /// `GetHardwareOpusDecoderWorkBufferSize(int rate, int channels[, int option])`.
 extern "C" fn work_size(rate: u32, channels: u32) -> u64 {
-    call_guest(soft_work_size(), [u64::from(rate), u64::from(channels), 0, 0, 0, 0])
+    call_guest(
+        soft_work_size(),
+        [u64::from(rate), u64::from(channels), 0, 0, 0, 0],
+    )
 }
 
 /// `InitializeHardwareOpusDecoder(type*, rate, channels, work, size, option)`.
 extern "C" fn initialize(hw: u64, rate: u32, channels: u32, work: u64, size: u64) -> u32 {
     let s = get_u64(hw);
     let s = if s == 0 { make_state(hw) } else { s };
-    call_guest(soft_init(), [s, u64::from(rate), u64::from(channels), work, size, 0]) as u32
+    call_guest(
+        soft_init(),
+        [s, u64::from(rate), u64::from(channels), work, size, 0],
+    ) as u32
 }
 
 extern "C" fn finalize(hw: u64) {
@@ -153,7 +212,15 @@ extern "C" fn reset(hw: u64) {
 
 /// `DecodeOpusInterleavedWithHardware(type*, size_t* consumed, int* samples, short* out, size_t out_size, const void* in,
 /// size_t in_size)`.
-extern "C" fn decode(hw: u64, consumed: u64, samples: u64, out: u64, out_size: u64, input: u64, in_size: u64) -> u32 {
+extern "C" fn decode(
+    hw: u64,
+    consumed: u64,
+    samples: u64,
+    out: u64,
+    out_size: u64,
+    input: u64,
+    in_size: u64,
+) -> u32 {
     let args = [state_of(hw), consumed, samples, out, out_size, input];
     // The seventh argument goes in the next register of the software call, so the call has seven arguments.
     decode_with(soft_decode(), args, in_size)
@@ -171,17 +238,43 @@ extern "C" fn ms_construct(this: u64) {
 
 /// `GetHardwareOpusMultiStreamDecoderWorkBufferSize(rate, channels, streams, stereo[, option])`.
 extern "C" fn ms_work(rate: u32, channels: u32, streams: u32, stereo: u32) -> u64 {
-    call_guest(ms_work_size(), [u64::from(rate), u64::from(channels), u64::from(streams), u64::from(stereo), 0, 0])
+    call_guest(
+        ms_work_size(),
+        [
+            u64::from(rate),
+            u64::from(channels),
+            u64::from(streams),
+            u64::from(stereo),
+            0,
+            0,
+        ],
+    )
 }
 
 /// `InitializeHardwareOpusMultiStreamDecoder(type*, rate, channels, streams, stereo, mapping, work, size[, option])`.
 /// The ninth argument, the option, is on the stack and unused.
-extern "C" fn ms_initialize(hw: u64, rate: u32, channels: u32, streams: u32, stereo: u32, mapping: u64, work: u64, size: u64) -> u32 {
+extern "C" fn ms_initialize(
+    hw: u64,
+    rate: u32,
+    channels: u32,
+    streams: u32,
+    stereo: u32,
+    mapping: u64,
+    work: u64,
+    size: u64,
+) -> u32 {
     let s = get_u64(hw);
     let s = if s == 0 { make_state(hw) } else { s };
     crate::sys::call_guest8(
         ms_init(),
-        [s, u64::from(rate), u64::from(channels), u64::from(streams), u64::from(stereo), mapping],
+        [
+            s,
+            u64::from(rate),
+            u64::from(channels),
+            u64::from(streams),
+            u64::from(stereo),
+            mapping,
+        ],
         [work, size],
     ) as u32
 }
@@ -211,8 +304,20 @@ extern "C" fn ms_reset_decoder(hw: u64) {
     call_guest(ms_reset(), [state_of(hw), 0, 0, 0, 0, 0]);
 }
 
-extern "C" fn ms_decode_frame(hw: u64, consumed: u64, samples: u64, out: u64, out_size: u64, input: u64, in_size: u64) -> u32 {
-    decode_with(ms_decode(), [state_of(hw), consumed, samples, out, out_size, input], in_size)
+extern "C" fn ms_decode_frame(
+    hw: u64,
+    consumed: u64,
+    samples: u64,
+    out: u64,
+    out_size: u64,
+    input: u64,
+    in_size: u64,
+) -> u32 {
+    decode_with(
+        ms_decode(),
+        [state_of(hw), consumed, samples, out, out_size, input],
+        in_size,
+    )
 }
 
 table! {

@@ -12,8 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
-    ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format, MeshPipelineDesc,
-    PipelineCache, RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source, TopologyClass,
+    ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format,
+    MeshPipelineDesc, PipelineCache, RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source,
+    TopologyClass,
 };
 
 use crate::detail::{AttributeDetail, BlendDetail, DrawDetail, ProgramRef};
@@ -79,7 +80,11 @@ impl Last {
             && self.targets == *targets
             && self.attributes == d.attributes
             && self.streams.len() == d.streams.len()
-            && self.streams.iter().zip(&d.streams).all(|(m, s)| *m == (s.index, s.stride, s.divisor))
+            && self
+                .streams
+                .iter()
+                .zip(&d.streams)
+                .all(|(m, s)| *m == (s.index, s.stride, s.divisor))
     }
 }
 
@@ -183,7 +188,9 @@ const COMPILE_THREADS: usize = 2;
 fn async_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // The unit tests build synchronously, so a call returns its pipeline.
-    *ON.get_or_init(|| !cfg!(test) && std::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0"))
+    *ON.get_or_init(|| {
+        !cfg!(test) && std::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0")
+    })
 }
 
 /// The point size fallback of [`build_render`] has this key.
@@ -197,7 +204,11 @@ fn build_render(
     key: u64,
     desc: &mut RenderPipelineDesc<'_>,
 ) -> Result<(RenderPipeline, Source), nxkit_metal::MetalError> {
-    if fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+    if fallbacks
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(&key)
+    {
         desc.topology = TopologyClass::Unspecified;
         return cache.render_traced(key ^ FALLBACK_KEY, desc);
     }
@@ -209,15 +220,28 @@ fn build_render(
         let pipeline = cache.render_traced(key ^ FALLBACK_KEY, desc)?;
         // Remember the successful variant. Retrying the rejected descriptor for every draw invokes the Metal compiler
         // thousands of times per frame even though the fallback itself is cached.
-        fallbacks.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
+        fallbacks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key);
         Ok(pipeline)
     })
 }
 
 impl Builds {
     /// Queues `job` once per key. The threads start with the first job.
-    fn start(self: &Arc<Self>, cache: &Arc<PipelineCache>, fallbacks: &Arc<Mutex<FastSet<u64>>>, job: Job) {
-        if !self.pending.lock().unwrap_or_else(PoisonError::into_inner).insert(job.key) {
+    fn start(
+        self: &Arc<Self>,
+        cache: &Arc<PipelineCache>,
+        fallbacks: &Arc<Mutex<FastSet<u64>>>,
+        job: Job,
+    ) {
+        if !self
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(job.key)
+        {
             return;
         }
         let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
@@ -225,22 +249,28 @@ impl Builds {
             let (tx, rx) = std::sync::mpsc::channel::<Job>();
             let rx = Arc::new(Mutex::new(rx));
             for i in 0..COMPILE_THREADS {
-                let (rx, me, cache, fallbacks) = (rx.clone(), self.clone(), cache.clone(), fallbacks.clone());
-                let _ = std::thread::Builder::new().name(format!("nxkit-pipeline-{i}")).spawn(move || {
-                    nxkit_metal::thread::set_utility();
-                    loop {
-                        let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
-                        let Ok(job) = next else { return };
-                        me.run(&cache, &fallbacks, &job);
-                    }
-                });
+                let (rx, me, cache, fallbacks) =
+                    (rx.clone(), self.clone(), cache.clone(), fallbacks.clone());
+                let _ = std::thread::Builder::new()
+                    .name(format!("nxkit-pipeline-{i}"))
+                    .spawn(move || {
+                        nxkit_metal::thread::set_utility();
+                        loop {
+                            let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
+                            let Ok(job) = next else { return };
+                            me.run(&cache, &fallbacks, &job);
+                        }
+                    });
             }
             *queue = Some(tx);
         }
         if let Some(tx) = queue.as_ref()
             && let Err(e) = tx.send(job)
         {
-            self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&e.0.key);
+            self.pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&e.0.key);
         }
     }
 
@@ -267,9 +297,15 @@ impl Builds {
         };
         if let Err(e) = built {
             pipe_failed(format_args!("{}: {e}", job.what));
-            self.failed.lock().unwrap_or_else(PoisonError::into_inner).insert(job.key);
+            self.failed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(job.key);
         }
-        self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&job.key);
+        self.pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&job.key);
     }
 }
 
@@ -313,7 +349,10 @@ impl Pipelines {
         icb: bool,
     ) -> Result<(RenderPipeline, u64), Skip> {
         let hit = LAST_PIPELINE.with(|l| {
-            l.borrow().as_ref().filter(|m| m.matches(self.id, d, targets, icb)).map(|m| (m.pipeline.clone(), m.key))
+            l.borrow()
+                .as_ref()
+                .filter(|m| m.matches(self.id, d, targets, icb))
+                .map(|m| (m.pipeline.clone(), m.key))
         });
         if let Some(hit) = hit {
             return Ok(hit);
@@ -330,7 +369,11 @@ impl Pipelines {
                 blend: d.blend,
                 write_masks: d.write_masks,
                 attributes: d.attributes.clone(),
-                streams: d.streams.iter().map(|s| (s.index, s.stride, s.divisor)).collect(),
+                streams: d
+                    .streams
+                    .iter()
+                    .map(|s| (s.index, s.stride, s.divisor))
+                    .collect(),
                 pipeline: pipeline.clone(),
                 key,
             });
@@ -347,7 +390,8 @@ impl Pipelines {
         icb: bool,
     ) -> Result<(RenderPipeline, u64), Skip> {
         let class = translate::primitive(d.topology).ok_or(Skip::Primitive)?.1;
-        let flat = crate::knob("flat") && targets.colors.len() >= 4
+        let flat = crate::knob("flat")
+            && targets.colors.len() >= 4
             && targets.colors[..4].iter().all(Option::is_some)
             && fs.is_some_and(|f| f.colors.as_deref() == Some(&[0, 1, 2, 3]));
         let flat_lib = if flat {
@@ -362,7 +406,9 @@ impl Pipelines {
                 "#).map_err(|_| Skip::Pipeline)?);
             }
             library.clone()
-        } else { None };
+        } else {
+            None
+        };
         let paint_dir = crate::knob("paintdir");
         let paint = (crate::knob("paint") || paint_dir)
             && targets.colors.len() == 1
@@ -370,7 +416,11 @@ impl Pipelines {
             && fs.is_some()
             && {
                 let keys = crate::diag::paint_programs();
-                keys.is_empty() || d.program.fragment.as_deref().is_some_and(|f| keys.iter().any(|k| k == f))
+                keys.is_empty()
+                    || d.program
+                        .fragment
+                        .as_deref()
+                        .is_some_and(|f| keys.iter().any(|k| k == f))
             };
         let paint_lib = if paint {
             let mut library = self.paint.lock().unwrap_or_else(PoisonError::into_inner);
@@ -384,25 +434,35 @@ impl Pipelines {
                 "#).map_err(|_| Skip::Pipeline)?);
             }
             library.clone()
-        } else { None };
+        } else {
+            None
+        };
         let mut desc = RenderPipelineDesc::new(
             (&vs.lib, vs.entry.as_str()),
             paint_lib
                 .as_ref()
-                .map(|lib| (lib, if paint_dir { "paint_dir" } else { "paint_magenta" }))
+                .map(|lib| {
+                    (
+                        lib,
+                        if paint_dir {
+                            "paint_dir"
+                        } else {
+                            "paint_magenta"
+                        },
+                    )
+                })
                 .or_else(|| flat_lib.as_ref().map(|lib| (lib, "flat_gbuffer")))
                 .or_else(|| fs.map(|f| (&f.lib, fragment_entry(f, targets)))),
             &[],
         );
         desc.colors = color_targets(d, fs, targets);
-        desc.vertex_layout =
-            translate::vertex_descriptor(d, &vs.inputs).map_err(|e| {
-                nxkit_nvn::diag::example(
-                    nxkit_nvn::diag::Reason::SkipFormat,
-                    format_args!("vertex {e:?} vs {:?}", d.program.vertex),
-                );
-                Skip::Format
-            })?;
+        desc.vertex_layout = translate::vertex_descriptor(d, &vs.inputs).map_err(|e| {
+            nxkit_nvn::diag::example(
+                nxkit_nvn::diag::Reason::SkipFormat,
+                format_args!("vertex {e:?} vs {:?}", d.program.vertex),
+            );
+            Skip::Format
+        })?;
         desc.topology = class;
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;
@@ -424,11 +484,24 @@ impl Pipelines {
         paint_dir.hash(&mut h);
         let key = h.finish();
         if async_on() && !icb {
-            let fallback = self.topology_fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key);
-            if let Some(p) = self.cache.cached_render(if fallback { key ^ FALLBACK_KEY } else { key }) {
+            let fallback = self
+                .topology_fallbacks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains(&key);
+            if let Some(p) =
+                self.cache
+                    .cached_render(if fallback { key ^ FALLBACK_KEY } else { key })
+            {
                 return Ok((p, key));
             }
-            if self.builds.failed.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+            if self
+                .builds
+                .failed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains(&key)
+            {
                 return Err(Skip::Pipeline);
             }
             let job = Job {
@@ -444,7 +517,8 @@ impl Pipelines {
                     alpha_to_coverage: desc.alpha_to_coverage,
                 }),
             };
-            self.builds.start(&self.cache, &self.topology_fallbacks, job);
+            self.builds
+                .start(&self.cache, &self.topology_fallbacks, job);
             return Err(Skip::Pending);
         }
         let what = || format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str()));
@@ -486,7 +560,13 @@ impl Pipelines {
         if let Some(p) = self.cache.cached_render(key) {
             return Ok((p, key));
         }
-        if self.builds.failed.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+        if self
+            .builds
+            .failed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(&key)
+        {
             return Err(Skip::Pipeline);
         }
         let job = MeshJob {
@@ -509,8 +589,13 @@ impl Pipelines {
             )
         };
         if async_on() {
-            let job = Job { key, what: what(), kind: JobKind::Mesh(job) };
-            self.builds.start(&self.cache, &self.topology_fallbacks, job);
+            let job = Job {
+                key,
+                what: what(),
+                kind: JobKind::Mesh(job),
+            };
+            self.builds
+                .start(&self.cache, &self.topology_fallbacks, job);
             return Err(Skip::Pending);
         }
         let (p, source) = self
@@ -559,13 +644,22 @@ impl Pipelines {
     /// The depth and stencil state object of a description, made once.
     pub(crate) fn depth_stencil(&self, d: &DepthStencilDesc) -> Result<DepthStencilState, Skip> {
         let hit = LAST_DEPTH.with(|l| {
-            l.borrow().as_ref().filter(|m| m.owner == self.id && m.desc == *d).map(|m| m.state.clone())
+            l.borrow()
+                .as_ref()
+                .filter(|m| m.owner == self.id && m.desc == *d)
+                .map(|m| m.state.clone())
         });
         if let Some(s) = hit {
             return Ok(s);
         }
         let state = self.depth_stencil_uncached(d)?;
-        LAST_DEPTH.with(|l| *l.borrow_mut() = Some(LastDepth { owner: self.id, desc: *d, state: state.clone() }));
+        LAST_DEPTH.with(|l| {
+            *l.borrow_mut() = Some(LastDepth {
+                owner: self.id,
+                desc: *d,
+                state: state.clone(),
+            })
+        });
         Ok(state)
     }
 
@@ -583,14 +677,19 @@ impl Pipelines {
 
 /// The colour targets of a pipeline: the formats of the pass with the blend state and write mask of the draw. A target
 /// that the fragment shader does not write, or every target without a fragment shader, keeps its contents.
-fn color_targets(d: &DrawDetail, fs: Option<&StageProgram>, targets: &Targets) -> Vec<Option<nxkit_metal::ColorTarget>> {
+fn color_targets(
+    d: &DrawDetail,
+    fs: Option<&StageProgram>,
+    targets: &Targets,
+) -> Vec<Option<nxkit_metal::ColorTarget>> {
     targets
         .colors
         .iter()
         .enumerate()
         .map(|(i, f)| {
             let format = (*f)?;
-            let written = fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
+            let written =
+                fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
             let blend = d.blend.get(i).copied().unwrap_or_default();
             let mask = d.write_masks.get(i).copied().unwrap_or(0xF);
             Some(translate::color_target(format, &blend, mask, written))
@@ -603,15 +702,27 @@ fn fragment_entry<'a>(fs: &'a StageProgram, targets: &Targets) -> &'a str {
     let mut integer = 0u8;
     for (slot, format) in targets.colors.iter().enumerate() {
         let Some(format) = format else { continue };
-        if fs.colors.as_ref().is_some_and(|colors| !colors.contains(&(slot as u8))) { continue }
+        if fs
+            .colors
+            .as_ref()
+            .is_some_and(|colors| !colors.contains(&(slot as u8)))
+        {
+            continue;
+        }
         present |= 1 << slot;
-        if crate::format_map::is_integer(*format) { integer |= 1 << slot; }
+        if crate::format_map::is_integer(*format) {
+            integer |= 1 << slot;
+        }
     }
     if integer != 0 {
         if integer == present {
-            if let Some(entry) = &fs.entry_uint { return entry }
+            if let Some(entry) = &fs.entry_uint {
+                return entry;
+            }
         } else if let Some((entry, mask)) = &fs.entry_mixed {
-            if mask & present == integer { return entry }
+            if mask & present == integer {
+                return entry;
+            }
         }
     }
     &fs.entry
@@ -624,8 +735,13 @@ mod tests {
 
     #[test]
     fn a_rejected_topology_uses_the_cached_successful_variant() {
-        let Ok(ctx) = Context::system_default() else { return };
-        let lib = ShaderLibrary::from_source(&ctx, "point-size", r#"
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let lib = ShaderLibrary::from_source(
+            &ctx,
+            "point-size",
+            r#"
 #include <metal_stdlib>
 using namespace metal;
 struct V { float4 position [[position]]; float size [[point_size]]; };
@@ -634,33 +750,88 @@ fragment float4 fs() { return float4(1); }
 fragment uint4 fs_u() { return uint4(1); }
 struct Mixed { uint4 integer [[color(0)]]; float4 color [[color(1)]]; };
 fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
-"#).unwrap();
-        let stage = |entry: &str| StageProgram { lib: lib.clone(), entry: entry.into(), entry_uint: None, entry_mixed: None, binds: vec![],
-            arg_bytes: 0, inputs: vec![], colors: Some(vec![0]), threadgroup: [1;3], c1: vec![], mesh: None };
+"#,
+        )
+        .unwrap();
+        let stage = |entry: &str| StageProgram {
+            lib: lib.clone(),
+            entry: entry.into(),
+            entry_uint: None,
+            entry_mixed: None,
+            binds: vec![],
+            arg_bytes: 0,
+            inputs: vec![],
+            colors: Some(vec![0]),
+            threadgroup: [1; 3],
+            c1: vec![],
+            mesh: None,
+        };
         let vs = stage("vs");
         let mut fs = stage("fs");
-        let draw = DrawDetail { program: ProgramRef { vertex: "point-size".into(), fragment: Some("fs".into()), task: None, mesh: None },
-            blend: Default::default(), write_masks: [15;8], depth_stencil: Default::default(),
-            raster: Default::default(), topology: 4, attributes: vec![], streams: vec![],
-            args: DrawArgs::Arrays { first: 0, count: 3, instances: 1, base_instance: 0 },
-            ubos: vec![], sbufs: vec![], textures: vec![], images: vec![], dynamic: Default::default() };
-        let targets = Targets { colors: vec![Some(Format::Rgba8Unorm)], samples: 1 };
+        let draw = DrawDetail {
+            program: ProgramRef {
+                vertex: "point-size".into(),
+                fragment: Some("fs".into()),
+                task: None,
+                mesh: None,
+            },
+            blend: Default::default(),
+            write_masks: [15; 8],
+            depth_stencil: Default::default(),
+            raster: Default::default(),
+            topology: 4,
+            attributes: vec![],
+            streams: vec![],
+            args: DrawArgs::Arrays {
+                first: 0,
+                count: 3,
+                instances: 1,
+                base_instance: 0,
+            },
+            ubos: vec![],
+            sbufs: vec![],
+            textures: vec![],
+            images: vec![],
+            dynamic: Default::default(),
+        };
+        let targets = Targets {
+            colors: vec![Some(Format::Rgba8Unorm)],
+            samples: 1,
+        };
         let pipelines = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
-        let (_, key) = pipelines.render(&draw, &vs, Some(&fs), &targets, false).unwrap();
+        let (_, key) = pipelines
+            .render(&draw, &vs, Some(&fs), &targets, false)
+            .unwrap();
         assert!(pipelines.topology_fallbacks.lock().unwrap().contains(&key));
         for _ in 0..10 {
-            assert_eq!(pipelines.render(&draw, &vs, Some(&fs), &targets, false).unwrap().1, key);
+            assert_eq!(
+                pipelines
+                    .render(&draw, &vs, Some(&fs), &targets, false)
+                    .unwrap()
+                    .1,
+                key
+            );
         }
         // The ten repeats are answered by the thread memo and never reach the cache.
         assert_eq!(pipelines.counts(), (1, 0));
         fs.entry_uint = Some("fs_u".into());
-        let integer = Targets { colors: vec![Some(Format::Rgba16Uint)], samples: 1 };
+        let integer = Targets {
+            colors: vec![Some(Format::Rgba16Uint)],
+            samples: 1,
+        };
         assert_eq!(fragment_entry(&fs, &integer), "fs_u");
-        pipelines.render(&draw, &vs, Some(&fs), &integer, false).unwrap();
+        pipelines
+            .render(&draw, &vs, Some(&fs), &integer, false)
+            .unwrap();
         fs.colors = Some(vec![0, 1]);
         fs.entry_mixed = Some(("fs_m".into(), 1));
-        let mixed = Targets { colors: vec![Some(Format::Rgba16Uint), Some(Format::Rgba8Unorm)], samples: 1 };
+        let mixed = Targets {
+            colors: vec![Some(Format::Rgba16Uint), Some(Format::Rgba8Unorm)],
+            samples: 1,
+        };
         assert_eq!(fragment_entry(&fs, &mixed), "fs_m");
-        pipelines.render(&draw, &vs, Some(&fs), &mixed, false).unwrap();
+        pipelines
+            .render(&draw, &vs, Some(&fs), &mixed, false)
+            .unwrap();
     }
 }

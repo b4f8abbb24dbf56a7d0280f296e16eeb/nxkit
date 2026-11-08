@@ -365,7 +365,10 @@ impl CommandBuffer {
         match fragment_table {
             Some(ft) => {
                 // The mesh stage takes the place of the vertex stage, so it shares its table.
-                enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Vertex | MTLRenderStages::Mesh);
+                enc.setArgumentTable_atStages(
+                    Some(&table.raw),
+                    MTLRenderStages::Vertex | MTLRenderStages::Mesh,
+                );
                 enc.setArgumentTable_atStages(Some(&ft.raw), MTLRenderStages::Fragment);
                 self.retain(ft.clone());
             }
@@ -388,7 +391,12 @@ impl CommandBuffer {
     }
 
     /// Writes `desc` into the reusable descriptor `pd`. The attachments of the previous pass are emptied first.
-    fn fill_pass(&mut self, pd: &mut PassDescriptor, desc: &RenderPassDesc, first: &Texture) -> Result<()> {
+    fn fill_pass(
+        &mut self,
+        pd: &mut PassDescriptor,
+        desc: &RenderPassDesc,
+        first: &Texture,
+    ) -> Result<()> {
         pd.reset();
         let rp = &pd.raw;
         let slots = rp.colorAttachments();
@@ -438,7 +446,13 @@ impl CommandBuffer {
         // The render area is the smallest attachment, as in NVN.
         let td = first.desc();
         let (mut w, mut h) = (td.width, td.height);
-        for t in desc.colors.iter().flatten().map(|c| &c.texture).chain(desc.depth.as_ref().map(|d| &d.texture)) {
+        for t in desc
+            .colors
+            .iter()
+            .flatten()
+            .map(|c| &c.texture)
+            .chain(desc.depth.as_ref().map(|d| &d.texture))
+        {
             let d = t.desc();
             w = w.min(d.width);
             h = h.min(d.height);
@@ -461,7 +475,12 @@ pub(crate) struct PassDescriptor {
 
 impl PassDescriptor {
     fn new() -> Self {
-        Self { raw: MTL4RenderPassDescriptor::new(), colors: 0, depth: false, stencil: false }
+        Self {
+            raw: MTL4RenderPassDescriptor::new(),
+            colors: 0,
+            depth: false,
+            stencil: false,
+        }
     }
 
     /// Empties the attachments that the previous pass set.
@@ -504,7 +523,11 @@ fn check_indirect(addr: u64) -> Result<()> {
 }
 
 fn size3(v: [u32; 3]) -> MTLSize {
-    MTLSize { width: v[0] as usize, height: v[1] as usize, depth: v[2] as usize }
+    MTLSize {
+        width: v[0] as usize,
+        height: v[1] as usize,
+        depth: v[2] as usize,
+    }
 }
 
 fn threads(n: u32) -> MTLSize {
@@ -515,7 +538,8 @@ impl RenderPass<'_> {
     /// Binds `table` at the object stage, for the task shaders of mesh draws. The pass keeps the table until it ends.
     /// A later call replaces it.
     pub fn set_object_table(&mut self, table: &ArgumentTable) {
-        self.enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Object);
+        self.enc
+            .setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Object);
         self.cb.retain(table.clone());
         self.object_table = Some(table.clone());
     }
@@ -528,7 +552,8 @@ impl RenderPass<'_> {
     /// Names the encoder for Instruments and the Metal debugger.
     pub fn set_label(&self, label: &str) {
         use objc2_metal::MTL4CommandEncoder as _;
-        self.enc.setLabel(Some(&objc2_foundation::NSString::from_str(label)));
+        self.enc
+            .setLabel(Some(&objc2_foundation::NSString::from_str(label)));
     }
 
     /// Encodes one command.
@@ -691,12 +716,16 @@ impl RenderPass<'_> {
                     );
                 }
             }
-            RenderCommand::DrawIndirect { primitive, indirect_addr } => {
+            RenderCommand::DrawIndirect {
+                primitive,
+                indirect_addr,
+            } => {
                 self.need_pipeline()?;
                 check_indirect(*indirect_addr)?;
                 // The GPU reads the arguments when the draw runs. A wrong address makes the GPU fault, which is not a
                 // memory safety matter for the host; the alignment is checked above.
-                self.enc.drawPrimitives_indirectBuffer(primitive.to_mtl(), *indirect_addr);
+                self.enc
+                    .drawPrimitives_indirectBuffer(primitive.to_mtl(), *indirect_addr);
             }
             RenderCommand::DrawIndexedIndirect {
                 primitive,
@@ -708,7 +737,9 @@ impl RenderPass<'_> {
                 self.need_pipeline()?;
                 check_indirect(*indirect_addr)?;
                 if !index_addr.is_multiple_of(index_type.bytes()) {
-                    return Err(MetalError::Invalid("the index buffer is not aligned to its index width"));
+                    return Err(MetalError::Invalid(
+                        "the index buffer is not aligned to its index width",
+                    ));
                 }
                 // The length that Metal gets is a whole number of indices.
                 let bytes = *index_bytes - *index_bytes % index_type.bytes();
@@ -725,18 +756,27 @@ impl RenderPass<'_> {
                     );
                 }
             }
-            RenderCommand::DrawMeshThreadgroups { groups, object_threads, mesh_threads } => {
+            RenderCommand::DrawMeshThreadgroups {
+                groups,
+                object_threads,
+                mesh_threads,
+            } => {
                 self.need_pipeline()?;
                 if groups.contains(&0) {
                     return Ok(());
                 }
-                self.enc.drawMeshThreadgroups_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
-                    size3(*groups),
-                    threads(*object_threads),
-                    threads(*mesh_threads),
-                );
+                self.enc
+                    .drawMeshThreadgroups_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                        size3(*groups),
+                        threads(*object_threads),
+                        threads(*mesh_threads),
+                    );
             }
-            RenderCommand::DrawMeshThreadgroupsIndirect { indirect_addr, object_threads, mesh_threads } => {
+            RenderCommand::DrawMeshThreadgroupsIndirect {
+                indirect_addr,
+                object_threads,
+                mesh_threads,
+            } => {
                 self.need_pipeline()?;
                 check_indirect(*indirect_addr)?;
                 self.enc.drawMeshThreadgroupsWithIndirectBuffer_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(

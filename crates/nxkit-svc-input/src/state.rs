@@ -9,7 +9,10 @@ use crate::bind::Bindings;
 use crate::config::Config;
 use crate::keys::{KEYBOARD_STATE_SIZE, KeySet};
 use crate::motion::{MotionMap, MotionState, SixAxisData};
-use crate::npad::{Layout, NpadState, PLAYERS, RawKeys, RawPad, STATE_SIZE, build_state, id_bit, merge, pick, to_stick};
+use crate::npad::{
+    Layout, NpadState, PLAYERS, RawKeys, RawPad, STATE_SIZE, build_state, id_bit, merge, pick,
+    to_stick,
+};
 use crate::pointer;
 use crate::rumble::{Rumble, VibrationValue};
 use crate::seam;
@@ -125,7 +128,9 @@ impl Input {
 
     /// Looks up the controllers when the last lookup is older than 100 ms. The first call always looks.
     pub(crate) fn refresh(&mut self) {
-        let due = self.last_refresh.is_none_or(|t| t.elapsed() >= REFRESH_EVERY);
+        let due = self
+            .last_refresh
+            .is_none_or(|t| t.elapsed() >= REFRESH_EVERY);
         if !due {
             return;
         }
@@ -141,7 +146,9 @@ impl Input {
                     seam::signal(*event);
                 }
             }
-            if let (Some((writable, _)), Some(kernel)) = (self.style_event, nxkit_abi::kernel::kernel()) {
+            if let (Some((writable, _)), Some(kernel)) =
+                (self.style_event, nxkit_abi::kernel::kernel())
+            {
                 let _ = kernel.signal_event(writable);
             }
         }
@@ -150,7 +157,11 @@ impl Input {
     /// Which npad ids exist now.
     pub(crate) fn layout(&mut self) -> Layout {
         self.refresh();
-        Layout { handheld: self.config.handheld, ids: self.ids, connected: self.slots.mask() }
+        Layout {
+            handheld: self.config.handheld,
+            ids: self.ids,
+            connected: self.slots.mask(),
+        }
     }
 
     /// Replaces the supported ids by the ones of a `SetSupportedNpadIdType` call. A change puts every motor to idle.
@@ -230,27 +241,42 @@ impl Input {
             return SixAxisData::rest();
         };
         let now = Instant::now();
-        let mut dt = track.last.map_or(0.0, |t| now.duration_since(t).as_secs_f32());
+        let mut dt = track
+            .last
+            .map_or(0.0, |t| now.duration_since(t).as_secs_f32());
         if dt > MOTION_STALE {
             track.state = MotionState::default();
             dt = 0.0;
         }
-        track.state.update(&self.map, acc, rot, dt, self.config.motion_gain);
+        track
+            .state
+            .update(&self.map, acc, rot, dt, self.config.motion_gain);
         track.last = Some(now);
         track.state.data()
     }
 
     /// The bytes of `n` six-axis states of a player, newest first. All are the same reading. The sampling number
     /// counts 5 ms steps of the service clock.
-    pub(crate) fn six_axis_states(&mut self, player: usize, n: usize) -> Vec<[u8; SIX_AXIS_STATE_SIZE]> {
+    pub(crate) fn six_axis_states(
+        &mut self,
+        player: usize,
+        n: usize,
+    ) -> Vec<[u8; SIX_AXIS_STATE_SIZE]> {
         let data = self.six_axis(player);
         let newest = (self.now_ns() / SIX_AXIS_SAMPLE_NS) as i64;
-        (0..n).map(|i| six_axis_bytes(&data, newest - i as i64)).collect()
+        (0..n)
+            .map(|i| six_axis_bytes(&data, newest - i as i64))
+            .collect()
     }
 
     /// True when the player's controller does not turn.
     pub(crate) fn at_rest(&mut self, player: usize) -> bool {
-        self.six_axis(player).gyro.iter().map(|g| g.abs()).sum::<f32>() < REST_LIMIT
+        self.six_axis(player)
+            .gyro
+            .iter()
+            .map(|g| g.abs())
+            .sum::<f32>()
+            < REST_LIMIT
     }
 
     /// Stores the value of a motor and plays it. An unchanged value does nothing.
@@ -272,7 +298,9 @@ impl Input {
         if !self.config.rumble {
             return;
         }
-        let levels = self.rumble.levels(player, self.config.gain(), self.config.min());
+        let levels = self
+            .rumble
+            .levels(player, self.config.gain(), self.config.min());
         self.platform.rumble(player, &levels);
     }
 
@@ -298,7 +326,11 @@ impl Input {
 
     /// The bytes of a `MouseState`. Only the buttons are filled. Position, delta and wheel are 0.
     pub(crate) fn mouse_state(&mut self) -> [u8; MOUSE_STATE_SIZE] {
-        let buttons = if crate::focused() { self.platform.read_mouse() } else { None };
+        let buttons = if crate::focused() {
+            self.platform.read_mouse()
+        } else {
+            None
+        };
         self.mouse_sampling += 1;
         let mut b = [0u8; MOUSE_STATE_SIZE];
         b[0..8].copy_from_slice(&self.mouse_sampling.to_le_bytes());
@@ -310,7 +342,11 @@ impl Input {
 
     /// The six-axis states behind a `SixAxisSensorHandle`: byte 0 is the bit number of the style, byte 1 the npad id.
     /// Empty when the handle is not connected.
-    pub(crate) fn six_axis_handle_states(&mut self, handle: u32, n: usize) -> Vec<[u8; SIX_AXIS_STATE_SIZE]> {
+    pub(crate) fn six_axis_handle_states(
+        &mut self,
+        handle: u32,
+        n: usize,
+    ) -> Vec<[u8; SIX_AXIS_STATE_SIZE]> {
         let layout = self.layout();
         let (bit, id) = (handle & 0xff, handle >> 8 & 0xff);
         if bit >= 32 || layout.style_of(id) >> bit & 1 == 0 {
@@ -391,7 +427,11 @@ impl Input {
 
     /// The gesture states, newest first. Gestures come from the touch screen, so only in handheld mode.
     pub(crate) fn gestures(&mut self, n: usize) -> Vec<[u8; GESTURE_STATE_SIZE]> {
-        if self.config.handheld { self.touch.gestures(n, self.now_ns()) } else { Vec::new() }
+        if self.config.handheld {
+            self.touch.gestures(n, self.now_ns())
+        } else {
+            Vec::new()
+        }
     }
 
     /// The answer of the controller applet: the result code, the player count and the id of player 1. The applet
@@ -403,7 +443,11 @@ impl Input {
         if max > 0 && count > i32::from(max) {
             count = i32::from(max);
         }
-        (if canceled { CONTROLLER_CANCELED } else { 0 }, count, layout.connected_id())
+        (
+            if canceled { CONTROLLER_CANCELED } else { 0 },
+            count,
+            layout.connected_id(),
+        )
     }
 
     /// Renews the rumble pulses. The host calls this on each display tick.
@@ -429,15 +473,24 @@ mod tests {
     fn no_controller_gives_player_one_a_state() {
         let mut i = input();
         let s = i.npad_state(0, crate::npad::style::FULL_KEY);
-        assert_eq!(s.attributes, crate::npad::attributes_for(crate::npad::style::FULL_KEY));
+        assert_eq!(
+            s.attributes,
+            crate::npad::attributes_for(crate::npad::style::FULL_KEY)
+        );
         assert_eq!(s.buttons, 0);
     }
 
     #[test]
     fn a_style_mismatch_is_all_zero() {
         let mut i = input();
-        assert_eq!(i.npad_state(0, crate::npad::style::HANDHELD), NpadState::default());
-        assert_eq!(i.npad_state(3, crate::npad::style::FULL_KEY), NpadState::default());
+        assert_eq!(
+            i.npad_state(0, crate::npad::style::HANDHELD),
+            NpadState::default()
+        );
+        assert_eq!(
+            i.npad_state(3, crate::npad::style::FULL_KEY),
+            NpadState::default()
+        );
     }
 
     #[test]
@@ -445,7 +498,9 @@ mod tests {
         let mut i = input();
         let a = i.npad_states(0, crate::npad::style::FULL_KEY, 3);
         let b = i.npad_states(0, crate::npad::style::FULL_KEY, 1);
-        let s = |x: &[u8; STATE_SIZE]| i64::from_le_bytes([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]]);
+        let s = |x: &[u8; STATE_SIZE]| {
+            i64::from_le_bytes([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]])
+        };
         assert_eq!(s(&a[0]), s(&a[1]) + 1);
         assert_eq!(s(&a[1]), s(&a[2]) + 1);
         assert_eq!(s(&b[0]), s(&a[0]) + 1);

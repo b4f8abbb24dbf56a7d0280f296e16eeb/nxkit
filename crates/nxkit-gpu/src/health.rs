@@ -30,7 +30,10 @@ pub(crate) fn frame(n: u64, stats: &EncodeStats) {
     for (why, count) in SKIPS.iter().zip(stats.skipped) {
         note_n(*why, u64::from(count));
     }
-    note_n(Reason::UploadScaledLost, u64::from(stats.scaled_upload_lost));
+    note_n(
+        Reason::UploadScaledLost,
+        u64::from(stats.scaled_upload_lost),
+    );
     note_n(Reason::UploadScaled, u64::from(stats.scaled_uploads));
     frame_end(n);
 }

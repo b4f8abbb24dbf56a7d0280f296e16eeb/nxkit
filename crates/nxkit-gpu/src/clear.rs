@@ -9,7 +9,11 @@ use nxkit_metal::Format;
 #[derive(Clone, Copy)]
 enum Layout {
     /// Unsigned normalised bytes. The count is the channels and `swap` puts blue first.
-    Unorm8 { channels: usize, swap: bool, srgb: bool },
+    Unorm8 {
+        channels: usize,
+        swap: bool,
+        srgb: bool,
+    },
     /// Half floats.
     Float16 { channels: usize },
     /// Single floats.
@@ -24,7 +28,11 @@ enum Layout {
 
 fn layout(format: Format) -> Option<Layout> {
     use Format::*;
-    let unorm = |channels, swap, srgb| Layout::Unorm8 { channels, swap, srgb };
+    let unorm = |channels, swap, srgb| Layout::Unorm8 {
+        channels,
+        swap,
+        srgb,
+    };
     Some(match format {
         Rgba8Unorm => unorm(4, false, false),
         Rgba8UnormSrgb => unorm(4, false, true),
@@ -38,11 +46,26 @@ fn layout(format: Format) -> Option<Layout> {
         R32Float => Layout::Float32 { channels: 1 },
         Rg32Float => Layout::Float32 { channels: 2 },
         Rgba32Float => Layout::Float32 { channels: 4 },
-        R8Uint => Layout::Uint { channels: 1, bytes: 1 },
-        Rgba8Uint => Layout::Uint { channels: 4, bytes: 1 },
-        R32Uint => Layout::Uint { channels: 1, bytes: 4 },
-        Rg32Uint => Layout::Uint { channels: 2, bytes: 4 },
-        Rgba32Uint => Layout::Uint { channels: 4, bytes: 4 },
+        R8Uint => Layout::Uint {
+            channels: 1,
+            bytes: 1,
+        },
+        Rgba8Uint => Layout::Uint {
+            channels: 4,
+            bytes: 1,
+        },
+        R32Uint => Layout::Uint {
+            channels: 1,
+            bytes: 4,
+        },
+        Rg32Uint => Layout::Uint {
+            channels: 2,
+            bytes: 4,
+        },
+        Rgba32Uint => Layout::Uint {
+            channels: 4,
+            bytes: 4,
+        },
         Rg11B10Float => Layout::Rg11B10,
         Rgb10A2Unorm => Layout::Rgb10A2,
         _ => return None,
@@ -73,12 +96,20 @@ fn small_float(v: f32, mantissa: u32) -> u32 {
 /// A linear value as an 8 bit sRGB code.
 fn srgb8(v: f32) -> u8 {
     let v = if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) };
-    let e = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+    let e = if v <= 0.003_130_8 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
     (e * 255.0 + 0.5) as u8
 }
 
 fn unorm8(v: f32) -> u8 {
-    if v.is_nan() { 0 } else { (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8 }
+    if v.is_nan() {
+        0
+    } else {
+        (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+    }
 }
 
 /// The IEEE half float of `v`, rounded to nearest even.
@@ -112,10 +143,18 @@ pub(crate) fn half(v: f32) -> u16 {
 /// One texel of `format` that holds `color`, for a clear of `kind` (0 for `f32` bits, 2 for `u32` values) with the
 /// NVN channel `mask`. The error says why the clear cannot be done as a fill: the format is not supported, the kind
 /// does not suit the format, or the mask leaves a channel of the format alone.
-pub(crate) fn texel(format: Format, kind: u32, color: [u32; 4], mask: u32) -> Result<Vec<u8>, &'static str> {
+pub(crate) fn texel(
+    format: Format,
+    kind: u32,
+    color: [u32; 4],
+    mask: u32,
+) -> Result<Vec<u8>, &'static str> {
     let l = layout(format).ok_or("the format has no clear packing")?;
     let channels = match l {
-        Layout::Unorm8 { channels, .. } | Layout::Float16 { channels } | Layout::Float32 { channels } | Layout::Uint { channels, .. } => channels,
+        Layout::Unorm8 { channels, .. }
+        | Layout::Float16 { channels }
+        | Layout::Float32 { channels }
+        | Layout::Uint { channels, .. } => channels,
         Layout::Rg11B10 => 3,
         Layout::Rgb10A2 => 4,
     };
@@ -130,15 +169,27 @@ pub(crate) fn texel(format: Format, kind: u32, color: [u32; 4], mask: u32) -> Re
     let f = |i: usize| f32::from_bits(color[i]);
     let mut out = Vec::with_capacity(16);
     match l {
-        Layout::Unorm8 { channels, swap, srgb } => {
+        Layout::Unorm8 {
+            channels,
+            swap,
+            srgb,
+        } => {
             for c in 0..channels {
                 let src = if swap && c < 3 { 2 - c } else { c };
                 // Alpha stays linear in an sRGB format.
-                out.push(if srgb && src < 3 { srgb8(f(src)) } else { unorm8(f(src)) });
+                out.push(if srgb && src < 3 {
+                    srgb8(f(src))
+                } else {
+                    unorm8(f(src))
+                });
             }
         }
-        Layout::Float16 { channels } => (0..channels).for_each(|c| out.extend(half(f(c)).to_le_bytes())),
-        Layout::Float32 { channels } => (0..channels).for_each(|c| out.extend(color[c].to_le_bytes())),
+        Layout::Float16 { channels } => {
+            (0..channels).for_each(|c| out.extend(half(f(c)).to_le_bytes()))
+        }
+        Layout::Float32 { channels } => {
+            (0..channels).for_each(|c| out.extend(color[c].to_le_bytes()))
+        }
         Layout::Uint { channels, bytes } => {
             for c in 0..channels {
                 let v = color[c].min(if bytes == 1 { 0xff } else { u32::MAX });
@@ -150,8 +201,13 @@ pub(crate) fn texel(format: Format, kind: u32, color: [u32; 4], mask: u32) -> Re
             out.extend(w.to_le_bytes());
         }
         Layout::Rgb10A2 => {
-            let q = |v: f32, max: f32| (if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) } * max + 0.5) as u32;
-            let w = q(f(0), 1023.0) | q(f(1), 1023.0) << 10 | q(f(2), 1023.0) << 20 | q(f(3), 3.0) << 30;
+            let q = |v: f32, max: f32| {
+                (if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) } * max + 0.5) as u32
+            };
+            let w = q(f(0), 1023.0)
+                | q(f(1), 1023.0) << 10
+                | q(f(2), 1023.0) << 20
+                | q(f(3), 3.0) << 30;
             out.extend(w.to_le_bytes());
         }
     }
@@ -169,11 +225,20 @@ mod tests {
     #[test]
     fn eight_bit_colours_round_clamp_and_swap() {
         let c = f([1.0, 0.5, -1.0, 0.25]);
-        assert_eq!(texel(Format::Rgba8Unorm, 0, c, 0xf).unwrap(), [255, 128, 0, 64]);
-        assert_eq!(texel(Format::Bgra8Unorm, 0, c, 0xf).unwrap(), [0, 128, 255, 64]);
+        assert_eq!(
+            texel(Format::Rgba8Unorm, 0, c, 0xf).unwrap(),
+            [255, 128, 0, 64]
+        );
+        assert_eq!(
+            texel(Format::Bgra8Unorm, 0, c, 0xf).unwrap(),
+            [0, 128, 255, 64]
+        );
         assert_eq!(texel(Format::R8Unorm, 0, c, 1).unwrap(), [255]);
         assert_eq!(texel(Format::Rg8Unorm, 0, c, 3).unwrap(), [255, 128]);
-        assert_eq!(texel(Format::Rgba8Unorm, 0, f([f32::NAN, 2.0, 0.0, 1.0]), 0xf).unwrap(), [0, 255, 0, 255]);
+        assert_eq!(
+            texel(Format::Rgba8Unorm, 0, f([f32::NAN, 2.0, 0.0, 1.0]), 0xf).unwrap(),
+            [0, 255, 0, 255]
+        );
     }
 
     #[test]
@@ -186,7 +251,10 @@ mod tests {
     fn float_formats_keep_their_bits_or_convert() {
         let c = f([1.0, -2.0, 0.5, 65504.0]);
         assert_eq!(texel(Format::Rgba32Float, 0, c, 0xf).unwrap().len(), 16);
-        assert_eq!(texel(Format::R32Float, 0, c, 1).unwrap(), 1.0f32.to_le_bytes());
+        assert_eq!(
+            texel(Format::R32Float, 0, c, 1).unwrap(),
+            1.0f32.to_le_bytes()
+        );
         let h = texel(Format::Rgba16Float, 0, c, 0xf).unwrap();
         assert_eq!(h, [0x00, 0x3c, 0x00, 0xc0, 0x00, 0x38, 0xff, 0x7b]);
         assert_eq!(half(f32::INFINITY), 0x7c00);
@@ -204,7 +272,10 @@ mod tests {
     fn integer_formats_take_the_uint_kind_and_clamp() {
         let c = [300, 2, 3, 4];
         assert_eq!(texel(Format::Rgba8Uint, 2, c, 0xf).unwrap(), [255, 2, 3, 4]);
-        assert_eq!(texel(Format::R32Uint, 2, c, 1).unwrap(), 300u32.to_le_bytes());
+        assert_eq!(
+            texel(Format::R32Uint, 2, c, 1).unwrap(),
+            300u32.to_le_bytes()
+        );
         assert!(texel(Format::R32Uint, 0, c, 1).is_err());
         assert!(texel(Format::Rgba8Unorm, 2, c, 0xf).is_err());
     }
@@ -215,10 +286,20 @@ mod tests {
         assert!(texel(Format::Rgba8Unorm, 0, c, 0x7).is_err());
         assert!(texel(Format::R8Unorm, 0, c, 0x6).is_err());
         assert!(texel(Format::Rg8Unorm, 0, c, 0xf).is_ok());
-        let w = u32::from_le_bytes(texel(Format::Rgb10A2Unorm, 0, f([1.0, 0.0, 0.5, 1.0]), 0xf).unwrap().try_into().unwrap());
+        let w = u32::from_le_bytes(
+            texel(Format::Rgb10A2Unorm, 0, f([1.0, 0.0, 0.5, 1.0]), 0xf)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!(w & 0x3ff, 1023);
         assert_eq!(w >> 30, 3);
-        let w = u32::from_le_bytes(texel(Format::Rg11B10Float, 0, f([1.0, 0.0, 2.0, 0.0]), 0x7).unwrap().try_into().unwrap());
+        let w = u32::from_le_bytes(
+            texel(Format::Rg11B10Float, 0, f([1.0, 0.0, 2.0, 0.0]), 0x7)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!(w & 0x7ff, 15 << 6);
         assert_eq!(w >> 22, 16 << 5);
         assert!(texel(Format::Rgba8Unorm, 1, c, 0xf).is_err());

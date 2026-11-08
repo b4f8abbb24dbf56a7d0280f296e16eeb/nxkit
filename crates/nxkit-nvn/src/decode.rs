@@ -299,7 +299,9 @@ const TAG_SHIFT: u32 = 40;
 /// An id that does not fit leaves the word untagged.
 pub fn tag_address(addr: u64, id: TexId) -> u64 {
     match u64::from(id.0).checked_add(1) {
-        Some(tag) if tag < 1 << (64 - TAG_SHIFT) && addr < 1 << TAG_SHIFT => addr | tag << TAG_SHIFT,
+        Some(tag) if tag < 1 << (64 - TAG_SHIFT) && addr < 1 << TAG_SHIFT => {
+            addr | tag << TAG_SHIFT
+        }
         _ => addr,
     }
 }
@@ -375,7 +377,11 @@ fn collect(live: u128, slots: &[Option<TexId>; MAX_BINDINGS], out: &mut Vec<TexI
 /// Sets or clears the bit of `slot` in `live` after the slot got `value`.
 fn mark(live: &mut u128, slot: usize, value: Option<TexId>) {
     let bit = 1u128 << slot;
-    *live = if value.is_some() { *live | bit } else { *live & !bit };
+    *live = if value.is_some() {
+        *live | bit
+    } else {
+        *live & !bit
+    };
 }
 
 fn delta_slots(mask: u128, slots: &[Option<TexId>; MAX_BINDINGS]) -> Slots {
@@ -492,10 +498,18 @@ impl Builder {
                 self.sets.tex |= 1 << slot;
                 self.tex_list = None;
             }
-            Record::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
+            Record::BindTexturesDeferred {
+                first,
+                count,
+                src,
+                tex_base,
+                samp_base,
+            } => {
                 for k in 0..count {
                     let slot = usize::from(first) + usize::from(k);
-                    let Some(at) = self.st.tex.get(slot).map(|_| src + 8 * u64::from(k)) else { break };
+                    let Some(at) = self.st.tex.get(slot).map(|_| src + 8 * u64::from(k)) else {
+                        break;
+                    };
                     let (raw, handle) = match deferred_handle(cx.mem, src, k, tex_base, samp_base) {
                         Ok((_, raw, h)) => (raw, h),
                         Err(_) => (0, 0),
@@ -545,7 +559,10 @@ impl Builder {
                     // without textures keeps the count of copy commands equal to that of the entries.
                     _ => {
                         self.unresolved += 1;
-                        self.stream.cmds.push(Cmd::Copy { src: None, dst: None });
+                        self.stream.cmds.push(Cmd::Copy {
+                            src: None,
+                            dst: None,
+                        });
                     }
                 }
             }
@@ -648,7 +665,10 @@ pub fn summary<M: GuestMem>(
     }
     s.checked = (cx.table.epoch(), cx.desc.epoch());
     cache.stats.unresolved += u64::from(s.unresolved);
-    crate::diag::note_n(crate::diag::Reason::DecodeUnresolved, u64::from(s.unresolved));
+    crate::diag::note_n(
+        crate::diag::Reason::DecodeUnresolved,
+        u64::from(s.unresolved),
+    );
     Ok(cache.insert(handle, s))
 }
 
@@ -696,7 +716,9 @@ fn decode<M: GuestMem>(
                 );
                 static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
                 if crate::diag::on("decode") && crate::diag::first(&SHOWN, 50) {
-                    eprintln!("DIAG decode fail handle {handle:#x} from {from:#x} pos {pos:#x} spans {spans:x?}: {e}");
+                    eprintln!(
+                        "DIAG decode fail handle {handle:#x} from {from:#x} pos {pos:#x} spans {spans:x?}: {e}"
+                    );
                 }
                 return Err(e);
             }
@@ -710,7 +732,11 @@ fn decode<M: GuestMem>(
                 let clock = crate::prof::Clock::start();
                 let s = finish(b, inherited, spans);
                 let p = &mut cache.prof;
-                (p.ns_apply, p.ns_splice, p.records) = (p.ns_apply + ns_apply, p.ns_splice + ns_splice, p.records + records);
+                (p.ns_apply, p.ns_splice, p.records) = (
+                    p.ns_apply + ns_apply,
+                    p.ns_splice + ns_splice,
+                    p.records + records,
+                );
                 p.ns_finish += clock.ns();
                 return Ok(s);
             }
@@ -751,7 +777,12 @@ fn finish(mut b: Builder, inherited: &State, spans: Vec<Range<u64>>) -> Summary 
     if b.own_refs || b.children.len() > 1 {
         dedup_refs(&mut b.refs);
     }
-    let deferred = b.refs.iter().copied().filter(|r| matches!(r, Ref::Deferred(..))).collect();
+    let deferred = b
+        .refs
+        .iter()
+        .copied()
+        .filter(|r| matches!(r, Ref::Deferred(..)))
+        .collect();
     b.stream.seal();
     let (st, sets) = (&b.st, &b.sets);
     let delta = Delta {

@@ -4,7 +4,9 @@ use nxkit_abi::export::Export;
 use std::ffi::CStr;
 
 fn find(all: &[Export], name: &[u8]) -> Option<usize> {
-    all.iter().find(|e| e.name.as_bytes() == name).map(|e| e.addr)
+    all.iter()
+        .find(|e| e.name.as_bytes() == name)
+        .map(|e| e.addr)
 }
 
 fn entries_with(f: &str) -> Vec<usize> {
@@ -12,10 +14,7 @@ fn entries_with(f: &str) -> Vec<usize> {
     NAMES
         .iter()
         .filter(|(_, id)| *id == f)
-        .map(|(n, _)| {
-            find(&all, n.as_bytes())
-                .unwrap_or_else(|| panic!("{n} is not in the table"))
-        })
+        .map(|(n, _)| find(&all, n.as_bytes()).unwrap_or_else(|| panic!("{n} is not in the table")))
         .collect()
 }
 

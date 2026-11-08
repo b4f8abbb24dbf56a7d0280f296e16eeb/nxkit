@@ -91,7 +91,10 @@ impl StopSlot {
     }
 
     fn get(&self) -> Option<Stop> {
-        self.first.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.first
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -183,7 +186,11 @@ impl Ipc {
 impl Server for Ipc {
     fn connect_port(&self, name: &str) -> Result<Arc<dyn Session>, ResultCode> {
         if name == SM_PORT {
-            return Ok(session::new_session(&self.inner, SM_PORT, self.inner.sm.clone()));
+            return Ok(session::new_session(
+                &self.inner,
+                SM_PORT,
+                self.inner.sm.clone(),
+            ));
         }
         self.inner.stop.record(Stop {
             service: name.to_string(),

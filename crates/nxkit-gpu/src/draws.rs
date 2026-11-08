@@ -139,10 +139,7 @@ pub(crate) enum Geom {
         base_instance: u32,
     },
     /// An indirect draw: the GPU reads the arguments from guest memory at `indirect`.
-    Indirect {
-        primitive: Primitive,
-        indirect: u64,
-    },
+    Indirect { primitive: Primitive, indirect: u64 },
     /// An indexed indirect draw. `index_bytes` is the guest memory from `address` to its end.
     IndexedIndirect {
         primitive: Primitive,
@@ -295,11 +292,21 @@ pub(crate) fn prepare(
 
 /// The cull mode of a draw. NVN culls both faces with `FRONT_AND_BACK`, which Metal cannot.
 pub(crate) fn cull_of(d: &DrawDetail) -> Result<CullMode, Skip> {
-    translate::cull(if crate::knob("nocull") { 0 } else { d.raster.cull }).ok_or(Skip::Cull)
+    translate::cull(if crate::knob("nocull") {
+        0
+    } else {
+        d.raster.cull
+    })
+    .ok_or(Skip::Cull)
 }
 
 /// The depth, stencil and raster state of a draw in a pass, with the depth and stencil state object.
-pub(crate) fn fixed(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, cull: CullMode) -> Result<Fixed, Skip> {
+pub(crate) fn fixed(
+    sh: &Shared<'_>,
+    pc: &PassCtx,
+    d: &DrawDetail,
+    cull: CullMode,
+) -> Result<Fixed, Skip> {
     let mut ds = d.depth_stencil;
     ds.depth_test &= pc.has_depth;
     ds.depth_write &= pc.has_depth;
@@ -323,7 +330,11 @@ pub(crate) fn fixed(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, cull: CullMod
     }
     let depth_stencil_desc = translate::depth_stencil(&ds);
     let depth_stencil = sh.pipelines.depth_stencil(&depth_stencil_desc)?;
-    let [factor, units, clamp] = if crate::knob("nooffset") { [0.0; 3] } else { d.raster.depth_bias.unwrap_or([0.0; 3]) };
+    let [factor, units, clamp] = if crate::knob("nooffset") {
+        [0.0; 3]
+    } else {
+        d.raster.depth_bias.unwrap_or([0.0; 3])
+    };
     Ok(Fixed {
         cull,
         depth_stencil,
@@ -343,7 +354,12 @@ pub(crate) fn fixed(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, cull: CullMod
     })
 }
 
-fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive, sink: &mut dyn Sink) -> Result<(Geom, u32), Skip> {
+fn geometry(
+    sh: &Shared<'_>,
+    d: &DrawDetail,
+    primitive: Primitive,
+    sink: &mut dyn Sink,
+) -> Result<(Geom, u32), Skip> {
     Ok(match d.args {
         DrawArgs::Arrays {
             first,
@@ -373,7 +389,10 @@ fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive, sink: &mut dy
             let (it, address) = if index_type == 0 {
                 (IndexType::U16, widen_u8_indices(sh, address, count, sink)?)
             } else {
-                (translate::index_type(index_type).ok_or(Skip::Index)?, address)
+                (
+                    translate::index_type(index_type).ok_or(Skip::Index)?,
+                    address,
+                )
             };
             if index_type != 0
                 && sh
@@ -400,13 +419,32 @@ fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive, sink: &mut dy
         // The GPU reads the first instance with the arguments, so the driver block of an indirect draw has 0.
         DrawArgs::ArraysIndirect { indirect } => {
             indirect_args(sh, indirect, 16)?;
-            (Geom::Indirect { primitive, indirect }, 0)
+            (
+                Geom::Indirect {
+                    primitive,
+                    indirect,
+                },
+                0,
+            )
         }
-        DrawArgs::IndexedIndirect { index_type, address, indirect } => {
+        DrawArgs::IndexedIndirect {
+            index_type,
+            address,
+            indirect,
+        } => {
             let it = translate::index_type(index_type).ok_or(Skip::Index)?;
             indirect_args(sh, indirect, 20)?;
             let index_bytes = index_room(sh, address)?;
-            (Geom::IndexedIndirect { primitive, index_type: it, address, index_bytes, indirect }, 0)
+            (
+                Geom::IndexedIndirect {
+                    primitive,
+                    index_type: it,
+                    address,
+                    index_bytes,
+                    indirect,
+                },
+                0,
+            )
         }
         DrawArgs::MultiIndirectCount { index, max, .. } => {
             let index = match index {
@@ -416,30 +454,51 @@ fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive, sink: &mut dy
                 }
                 None => None,
             };
-            (Geom::MultiIndirect { primitive, index, draws: max.min(crate::indirect::MAX_MULTI) }, 0)
+            (
+                Geom::MultiIndirect {
+                    primitive,
+                    index,
+                    draws: max.min(crate::indirect::MAX_MULTI),
+                },
+                0,
+            )
         }
-        DrawArgs::MeshTasks { .. } | DrawArgs::MeshTasksIndirect { .. } => return Err(Skip::Detail),
+        DrawArgs::MeshTasks { .. } | DrawArgs::MeshTasksIndirect { .. } => {
+            return Err(Skip::Detail);
+        }
     })
 }
 
 /// Reads `count` 8-bit indices at the guest GPU address `addr`, widens them to 16 bits and puts them into the sink.
 /// Returns the address of the 16-bit indices.
-fn widen_u8_indices(sh: &Shared<'_>, addr: u64, count: u32, sink: &mut dyn Sink) -> Result<u64, Skip> {
+fn widen_u8_indices(
+    sh: &Shared<'_>,
+    addr: u64,
+    count: u32,
+    sink: &mut dyn Sink,
+) -> Result<u64, Skip> {
     let off = sh
         .guest_offset(addr, u64::from(count))
         .ok_or_else(|| crate::buf_skip(format_args!("8-bit index addr {addr:#x} count {count}")))?;
     let mut bytes = vec![0u8; count as usize];
-    sh.guest
-        .read(off, &mut bytes)
-        .map_err(|_| crate::buf_skip(format_args!("8-bit index addr {addr:#x} count {count}: unreadable")))?;
-    let wide: Vec<u8> = bytes.iter().flat_map(|&b| u16::from(b).to_le_bytes()).collect();
+    sh.guest.read(off, &mut bytes).map_err(|_| {
+        crate::buf_skip(format_args!(
+            "8-bit index addr {addr:#x} count {count}: unreadable"
+        ))
+    })?;
+    let wide: Vec<u8> = bytes
+        .iter()
+        .flat_map(|&b| u16::from(b).to_le_bytes())
+        .collect();
     sink.put(&wide)
 }
 
 /// Checks that `bytes` of indirect arguments at `addr` lie in guest memory at a 4 byte aligned address.
 pub(crate) fn indirect_args(sh: &Shared<'_>, addr: u64, bytes: u64) -> Result<(), Skip> {
     if !addr.is_multiple_of(4) || sh.guest_offset(addr, bytes).is_none() {
-        return Err(crate::buf_skip(format_args!("indirect arguments addr {addr:#x} bytes {bytes}")));
+        return Err(crate::buf_skip(format_args!(
+            "indirect arguments addr {addr:#x} bytes {bytes}"
+        )));
     }
     Ok(())
 }
@@ -447,6 +506,8 @@ pub(crate) fn indirect_args(sh: &Shared<'_>, addr: u64, bytes: u64) -> Result<()
 /// The bytes of guest memory from the index buffer at `addr` to its end. An indirect draw takes its index count from
 /// the GPU, so the encoder gives Metal all of it; Metal reads an index past it as 0.
 fn index_room(sh: &Shared<'_>, addr: u64) -> Result<u64, Skip> {
-    let off = sh.guest_offset(addr, 1).ok_or_else(|| crate::buf_skip(format_args!("index addr {addr:#x}")))?;
+    let off = sh
+        .guest_offset(addr, 1)
+        .ok_or_else(|| crate::buf_skip(format_args!("index addr {addr:#x}")))?;
     Ok((sh.guest.address_map().len() - off).min(u64::from(u32::MAX)))
 }

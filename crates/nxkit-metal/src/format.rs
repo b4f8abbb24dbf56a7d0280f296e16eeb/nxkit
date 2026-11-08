@@ -314,22 +314,33 @@ impl Format {
     /// The type a shader sees when it reads the format. Stencil counts as unsigned.
     pub fn sample_type(self) -> SampleType {
         match self {
-            Self::R8Uint | Self::R16Uint | Self::R32Uint | Self::Rg8Uint | Self::Rg16Uint | Self::Rg32Uint
-            | Self::Rgba8Uint | Self::Rgba16Uint | Self::Rgba32Uint | Self::Rgb10A2Uint | Self::Stencil8 => {
-                SampleType::Uint
-            }
-            Self::R8Sint | Self::R16Sint | Self::R32Sint | Self::Rg8Sint | Self::Rg16Sint | Self::Rg32Sint
-            | Self::Rgba8Sint | Self::Rgba16Sint | Self::Rgba32Sint => SampleType::Sint,
+            Self::R8Uint
+            | Self::R16Uint
+            | Self::R32Uint
+            | Self::Rg8Uint
+            | Self::Rg16Uint
+            | Self::Rg32Uint
+            | Self::Rgba8Uint
+            | Self::Rgba16Uint
+            | Self::Rgba32Uint
+            | Self::Rgb10A2Uint
+            | Self::Stencil8 => SampleType::Uint,
+            Self::R8Sint
+            | Self::R16Sint
+            | Self::R32Sint
+            | Self::Rg8Sint
+            | Self::Rg16Sint
+            | Self::Rg32Sint
+            | Self::Rgba8Sint
+            | Self::Rgba16Sint
+            | Self::Rgba32Sint => SampleType::Sint,
             _ => SampleType::Float,
         }
     }
 
     /// True for a depth format, with or without stencil.
     pub fn is_depth(self) -> bool {
-        matches!(
-            self.class(),
-            FormatClass::Depth | FormatClass::DepthStencil
-        )
+        matches!(self.class(), FormatClass::Depth | FormatClass::DepthStencil)
     }
 
     /// True when the format has a stencil aspect.

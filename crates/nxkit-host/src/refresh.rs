@@ -32,15 +32,25 @@ pub struct Request {
 impl Request {
     /// The request of `settings` and the environment. `NXKIT_SET_REFRESH` and `NXKIT_TIMED_PRESENT` win over the keys.
     pub fn from_settings(settings: &Settings) -> Self {
-        let env_refresh = std::env::var("NXKIT_SET_REFRESH").ok().and_then(|v| v.trim().parse::<u32>().ok());
-        let set_refresh = env_refresh.or((settings.set_refresh > 0).then_some(settings.set_refresh)).filter(|hz| *hz > 0);
-        let timed = std::env::var("NXKIT_TIMED_PRESENT").ok().and_then(|v| match v.trim() {
-            "1" => Some(true),
-            "0" => Some(false),
-            _ => None,
-        });
+        let env_refresh = std::env::var("NXKIT_SET_REFRESH")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok());
+        let set_refresh = env_refresh
+            .or((settings.set_refresh > 0).then_some(settings.set_refresh))
+            .filter(|hz| *hz > 0);
+        let timed = std::env::var("NXKIT_TIMED_PRESENT")
+            .ok()
+            .and_then(|v| match v.trim() {
+                "1" => Some(true),
+                "0" => Some(false),
+                _ => None,
+            });
         Self {
-            target_fps: if settings.fps_target == 0 { 60 } else { settings.fps_target.min(60) },
+            target_fps: if settings.fps_target == 0 {
+                60
+            } else {
+                settings.fps_target.min(60)
+            },
             free_rate: settings.fps_free,
             set_refresh,
             timed,
@@ -72,7 +82,12 @@ struct State {
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
-    request: Request { target_fps: 60, free_rate: false, set_refresh: None, timed: None },
+    request: Request {
+        target_fps: 60,
+        free_rate: false,
+        set_refresh: None,
+        timed: None,
+    },
     plan: None,
     announced: String::new(),
     tried: Vec::new(),
@@ -88,7 +103,9 @@ pub fn generation() -> u64 {
 }
 
 fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Sets what is asked for. The host calls it once before the window opens.
@@ -106,7 +123,14 @@ fn refresh_of(facts: &ScreenFacts) -> (f64, &'static str) {
     if let Some(hz) = facts.display.and_then(display::current_refresh_hz) {
         return (hz, "CoreGraphics mode");
     }
-    (f64::from(facts.max_fps.max(1)), if facts.adaptive { "adaptive, highest rate" } else { "NSScreen" })
+    (
+        f64::from(facts.max_fps.max(1)),
+        if facts.adaptive {
+            "adaptive, highest rate"
+        } else {
+            "NSScreen"
+        },
+    )
 }
 
 /// Plans for `facts`. It switches the display when `NXKIT_SET_REFRESH` asks, tells the pacing service the rates, turns
@@ -122,7 +146,10 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
         st.tried.push((id, want));
         match display::switch_refresh(id, f64::from(want)) {
             Ok(Some(sw)) => {
-                note = format!("; switched the display from {:.2} Hz to {:.2} Hz, restored at exit", sw.from_hz, sw.to_hz);
+                note = format!(
+                    "; switched the display from {:.2} Hz to {:.2} Hz, restored at exit",
+                    sw.from_hz, sw.to_hz
+                );
                 display::keep_active(sw);
             }
             Ok(None) => note = format!("; the display shows {want} Hz already"),
@@ -133,14 +160,28 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
     let plan = refresh::plan_ticks(hz, req.target_fps, req.free_rate, facts.adaptive);
     let fps = plan.fps as f32;
     // The service takes the link rate and the vsync rate of the game, so that a frame step of N vsyncs holds N * ticks.
-    let _ = nxkit_svc_pacing::set_rates(plan.link_hz as f32, if plan.fps == req.target_fps { VSYNC_HZ } else { fps });
+    let _ = nxkit_svc_pacing::set_rates(
+        plan.link_hz as f32,
+        if plan.fps == req.target_fps {
+            VSYNC_HZ
+        } else {
+            fps
+        },
+    );
     nxkit_svc_pacing::set_screen_hz(hz.round() as u32);
-    nxkit_nvn::screen::set_refresh_hz(if facts.adaptive { f64::from(plan.link_hz) } else { hz });
+    nxkit_nvn::screen::set_refresh_hz(if facts.adaptive {
+        f64::from(plan.link_hz)
+    } else {
+        hz
+    });
     let timed = req.timed.unwrap_or(facts.adaptive);
     nxkit_metal::set_timed_present(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
     let mut hint = String::new();
     if !plan.exact {
-        let choices = facts.display.map(display::refresh_choices).unwrap_or_default();
+        let choices = facts
+            .display
+            .map(display::refresh_choices)
+            .unwrap_or_default();
         let near = display::even_choice(&choices, req.target_fps, hz);
         let pick = near.map_or(plan.switch_to.map(f64::from), Some);
         if let Some(p) = pick {
@@ -161,7 +202,11 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
         plan.fps,
         if plan.exact { "" } else { " (uneven)" },
         if timed { ", timed presents" } else { "" },
-        if req.free_rate && plan.fps != req.target_fps { ", free frame rate" } else { "" },
+        if req.free_rate && plan.fps != req.target_fps {
+            ", free frame rate"
+        } else {
+            ""
+        },
     );
     if line != st.announced {
         eprintln!("{line}");
@@ -180,12 +225,19 @@ pub fn note_measured(measured_hz: f64) -> Option<f64> {
     let mut st = state();
     let plan = st.plan?;
     let rounded = measured_hz.round() as u32;
-    if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz)) || rounded == st.reported || rounded == 0 {
+    if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz))
+        || rounded == st.reported
+        || rounded == 0
+    {
         return None;
     }
     st.reported = rounded;
     let req = st.request;
-    let vsync = if plan.fps == req.target_fps { VSYNC_HZ } else { plan.fps as f32 };
+    let vsync = if plan.fps == req.target_fps {
+        VSYNC_HZ
+    } else {
+        plan.fps as f32
+    };
     let _ = nxkit_svc_pacing::set_rates(rounded as f32, vsync);
     eprintln!(
         "nxkit-host: the display link ticks at {measured_hz:.1} Hz, not the {} Hz that was asked for, so a frame holds {:.1} ticks per vsync now",
@@ -201,7 +253,12 @@ mod tests {
 
     #[test]
     fn the_request_takes_the_target_from_the_settings() {
-        let s = Settings { fps_target: 30, fps_free: true, set_refresh: 120, ..Settings::default() };
+        let s = Settings {
+            fps_target: 30,
+            fps_free: true,
+            set_refresh: 120,
+            ..Settings::default()
+        };
         let r = Request::from_settings(&s);
         assert_eq!((r.target_fps, r.free_rate), (30, true));
         // The environment may set the variable in the run of the tests; only the key is checked when it does not.

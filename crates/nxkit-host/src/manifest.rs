@@ -112,7 +112,8 @@ pub(crate) fn bad(m: impl Into<String>) -> HostError {
 }
 
 pub(crate) fn field<'a>(v: &'a Value, key: &str, ctx: &str) -> Result<&'a Value> {
-    v.get(key).ok_or_else(|| bad(format!("{ctx}: missing \"{key}\"")))
+    v.get(key)
+        .ok_or_else(|| bad(format!("{ctx}: missing \"{key}\"")))
 }
 
 pub(crate) fn num(v: &Value, key: &str, ctx: &str) -> Result<u64> {
@@ -222,7 +223,9 @@ impl Game {
         };
         let page = num(&v, "page_size", ctx)?;
         if page != PAGE {
-            return Err(bad(format!("\"page_size\" is {page:#x}, this host runs with {PAGE:#x}")));
+            return Err(bad(format!(
+                "\"page_size\" is {page:#x}, this host runs with {PAGE:#x}"
+            )));
         }
         game.check()?;
         Ok(game)
@@ -243,8 +246,12 @@ impl Game {
             .modules
             .iter()
             .map(|m| {
-                m.moved(delta)
-                    .ok_or_else(|| bad(format!("module {} leaves the address space when moved by {delta:#x}", m.name)))
+                m.moved(delta).ok_or_else(|| {
+                    bad(format!(
+                        "module {} leaves the address space when moved by {delta:#x}",
+                        m.name
+                    ))
+                })
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Game {
@@ -261,7 +268,11 @@ impl Game {
         if self.modules.is_empty() {
             return Err(bad("\"modules\" is empty"));
         }
-        let mut spans: Vec<(u64, u64, &str)> = self.modules.iter().map(|m| (m.start(), m.end(), m.name.as_str())).collect();
+        let mut spans: Vec<(u64, u64, &str)> = self
+            .modules
+            .iter()
+            .map(|m| (m.start(), m.end(), m.name.as_str()))
+            .collect();
         spans.sort_unstable();
         for w in spans.windows(2) {
             if w[0].1 > w[1].0 {
@@ -281,7 +292,10 @@ impl Game {
 
     /// The DLC folders as `(index, absolute path)`, in the order of `game.json`.
     pub fn aoc_dirs(&self) -> Vec<(u32, PathBuf)> {
-        self.aoc.iter().map(|a| (a.index, self.path(&a.path))).collect()
+        self.aoc
+            .iter()
+            .map(|a| (a.index, self.path(&a.path)))
+            .collect()
     }
 }
 
@@ -300,7 +314,9 @@ pub fn read_imports(path: &Path) -> Result<Vec<Import>> {
 /// Parses the text of a list file.
 pub fn parse_slots(src: &str) -> Result<Vec<Slot>> {
     let v = json::parse(src)?;
-    let a = v.as_array().ok_or_else(|| bad("the list is not an array"))?;
+    let a = v
+        .as_array()
+        .ok_or_else(|| bad("the list is not an array"))?;
     a.iter()
         .map(|e| {
             Ok(Slot {
@@ -314,7 +330,9 @@ pub fn parse_slots(src: &str) -> Result<Vec<Slot>> {
 /// Parses the text of an import list file.
 pub fn parse_imports(src: &str) -> Result<Vec<Import>> {
     let v = json::parse(src)?;
-    let a = v.as_array().ok_or_else(|| bad("the list is not an array"))?;
+    let a = v
+        .as_array()
+        .ok_or_else(|| bad("the list is not an array"))?;
     a.iter()
         .map(|e| {
             Ok(Import {
@@ -414,7 +432,9 @@ mod tests {
 
     #[test]
     fn reads_the_aoc_folders() {
-        let r = parse("\"aoc\": [{\"index\": 1, \"title_id\": \"01007EF00011F001\", \"version\": 196608, \"path\": \"aoc/1\"}],");
+        let r = parse(
+            "\"aoc\": [{\"index\": 1, \"title_id\": \"01007EF00011F001\", \"version\": 196608, \"path\": \"aoc/1\"}],",
+        );
         assert!(r.is_ok(), "{:?}", r.as_ref().err());
         let Ok(g) = r else { return };
         assert_eq!(g.aoc_dirs(), vec![(1, PathBuf::from("/x/aoc/1"))]);
@@ -422,14 +442,30 @@ mod tests {
 
     #[test]
     fn reads_a_list() {
-        let l = parse_slots(r#"[{"name": "_ZN2nn2os5SleepE", "slot": "0x40"}]"#).unwrap_or_default();
-        assert_eq!(l, vec![Slot { name: "_ZN2nn2os5SleepE".into(), slot: 0x40 }]);
+        let l =
+            parse_slots(r#"[{"name": "_ZN2nn2os5SleepE", "slot": "0x40"}]"#).unwrap_or_default();
+        assert_eq!(
+            l,
+            vec![Slot {
+                name: "_ZN2nn2os5SleepE".into(),
+                slot: 0x40
+            }]
+        );
     }
 
     #[test]
     fn reads_an_import_list_with_addend_and_weak() {
-        let l = parse_imports(r#"[{"name": "f", "slot": "0x40", "addend": -8, "weak": true}]"#).unwrap_or_default();
-        assert_eq!(l, vec![Import { name: "f".into(), slot: 0x40, addend: -8, weak: true }]);
+        let l = parse_imports(r#"[{"name": "f", "slot": "0x40", "addend": -8, "weak": true}]"#)
+            .unwrap_or_default();
+        assert_eq!(
+            l,
+            vec![Import {
+                name: "f".into(),
+                slot: 0x40,
+                addend: -8,
+                weak: true
+            }]
+        );
         assert!(parse_imports(r#"[{"name": "f", "slot": 64}]"#).is_err());
     }
 }

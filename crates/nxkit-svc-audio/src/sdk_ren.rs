@@ -21,9 +21,11 @@ const P_DEVICE: usize = 0x2c;
 const P_MODE: usize = 0x30;
 const PAGE: u64 = 0x1000;
 
-const WORK_SIZE: &str = "_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE";
+const WORK_SIZE: &str =
+    "_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE";
 const OPEN_EV: &str = "_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleEPNS_2os11SystemEventERKNS0_22AudioRendererParameterEPvm";
-const OPEN: &str = "_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleERKNS0_22AudioRendererParameterEPvm";
+const OPEN: &str =
+    "_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleERKNS0_22AudioRendererParameterEPvm";
 const CLOSE: &str = "_ZN2nn5audio18CloseAudioRendererENS0_19AudioRendererHandleE";
 const UP_ALLOC: &str = "_ZN2nn5audio6server16UpsamplerManager8AllocateEv";
 const UPDATE: &str = "_ZN2nn5audio6server17AudioRenderSystem6UpdateEPvmS3_mPKvm";
@@ -35,9 +37,11 @@ static S_OPEN: Sym = Sym::new(OPEN);
 static S_CLOSE: Sym = Sym::new(CLOSE);
 static S_UP_ALLOC: Sym = Sym::new(UP_ALLOC);
 static S_DESTROY: Sym = Sym::new("_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE");
-static S_ATTACH: Sym =
-    Sym::new("_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE");
-static S_READABLE: Sym = Sym::new("_ZN2nn2os30GetReadableHandleOfSystemEventEPKNS0_15SystemEventTypeE");
+static S_ATTACH: Sym = Sym::new(
+    "_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE",
+);
+static S_READABLE: Sym =
+    Sym::new("_ZN2nn2os30GetReadableHandleOfSystemEventEPKNS0_15SystemEventTypeE");
 
 /// Work buffers that the host allocated for the CPU renderer, by renderer object. Close frees them.
 static OWNED: ObjMap<Arc<Vec<u8>>> = ObjMap::new();
@@ -76,13 +80,19 @@ fn rev_set(ev: u64, obj: u64) {
 }
 
 fn rev_find(obj: u64) -> Option<u64> {
-    lk(&REVS).iter().flatten().find(|s| s.obj == obj).map(|s| s.ev.as_ptr() as u64)
+    lk(&REVS)
+        .iter()
+        .flatten()
+        .find(|s| s.obj == obj)
+        .map(|s| s.ev.as_ptr() as u64)
 }
 
 fn read_param(param: u64) -> [u8; P_SIZE] {
     let mut p = [0u8; P_SIZE];
     if guest::read(param, &mut p).is_err() {
-        host::fatal(&format!("audren: the renderer parameter at {param:#x} is not readable"));
+        host::fatal(&format!(
+            "audren: the renderer parameter at {param:#x} is not readable"
+        ));
     }
     p
 }
@@ -104,10 +114,16 @@ extern "C" fn h_work_size(param: u64) -> u64 {
     let src = read_param(param);
     let p = cpu_manual(&src);
     let n = call(S_WORK_SIZE.addr(), args(&[p.as_ptr() as u64])) as usize;
-    let service = if i32_at(&src, P_DEVICE) == 0 { service_work_size(&p) } else { 0 };
+    let service = if i32_at(&src, P_DEVICE) == 0 {
+        service_work_size(&p)
+    } else {
+        0
+    };
     let guest_n = if service != 0 { service } else { n };
     if !WORK_LOGGED.swap(true, Ordering::Relaxed) {
-        eprintln!("nxkit-audio: audren: work buffer guest {guest_n:#x}, local CPU and manual renderer {n:#x}");
+        eprintln!(
+            "nxkit-audio: audren: work buffer guest {guest_n:#x}, local CPU and manual renderer {n:#x}"
+        );
     }
     guest_n as u64
 }
@@ -150,7 +166,9 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
         let service = service_work_size(&p);
         let guest_need = if service != 0 { service } else { need };
         if (sz as usize) < guest_need {
-            eprintln!("nxkit-audio: [RED] audren: work buffer {sz:#x} is smaller than the service requirement {guest_need:#x}");
+            eprintln!(
+                "nxkit-audio: [RED] audren: work buffer {sz:#x} is smaller than the service requirement {guest_need:#x}"
+            );
             return RES_FAIL;
         }
         if need > sz as usize {
@@ -158,18 +176,29 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
             work = aligned;
             sz = need as u64;
             owned = Some(v);
-            eprintln!("nxkit-audio: audren: the host backs the local renderer work buffer {work:#x}+{sz:#x}");
+            eprintln!(
+                "nxkit-audio: audren: the host backs the local renderer work buffer {work:#x}+{sz:#x}"
+            );
         }
     }
     // The SDK keeps the event it gets until Close. The game's own object may go away, so the SDK gets one of the host.
-    let sev = if ev != 0 && device == 0 { rev_take() } else { None };
+    let sev = if ev != 0 && device == 0 {
+        rev_take()
+    } else {
+        None
+    };
     if ev != 0 && device == 0 && sev.is_none() {
-        eprintln!("nxkit-audio: [RED] audren: all renderer events are in use: the SDK keeps the game's event, which must outlive the renderer");
+        eprintln!(
+            "nxkit-audio: [RED] audren: all renderer events are in use: the SDK keeps the game's event, which must outlive the renderer"
+        );
     }
     T_IN_OPEN.with(|t| t.set(true));
     let pp = p.as_ptr() as u64;
     let r = if ev != 0 {
-        call(S_OPEN_EV.addr(), args(&[handle, sev.unwrap_or(ev), pp, work, sz])) as u32
+        call(
+            S_OPEN_EV.addr(),
+            args(&[handle, sev.unwrap_or(ev), pp, work, sz]),
+        ) as u32
     } else {
         call(S_OPEN.addr(), args(&[handle, pp, work, sz])) as u32
     };
@@ -216,7 +245,10 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
         }
     };
     let Some(ren) = ren else {
-        eprintln!("nxkit-audio: [RED] audren: more than {} renderers: this one is not rendered", crate::ren_state::AR_MAX);
+        eprintln!(
+            "nxkit-audio: [RED] audren: more than {} renderers: this one is not rendered",
+            crate::ren_state::AR_MAX
+        );
         return r;
     };
     eprintln!("nxkit-audio: audren: renderer {} opened", ren.idx);
@@ -258,7 +290,11 @@ extern "C" fn h_close(obj: u64, state: u64) {
 
 /// `UpsamplerManager::Allocate`: a DeviceSink below 48 kHz gets no upsampler with CPU rendering, the host resamples.
 extern "C" fn h_up_alloc(mgr: u64) -> u64 {
-    if mgr == 0 { 0 } else { call(S_UP_ALLOC.addr(), args(&[mgr])) }
+    if mgr == 0 {
+        0
+    } else {
+        call(S_UP_ALLOC.addr(), args(&[mgr]))
+    }
 }
 
 /// Adds the renderer take-overs to `v`.

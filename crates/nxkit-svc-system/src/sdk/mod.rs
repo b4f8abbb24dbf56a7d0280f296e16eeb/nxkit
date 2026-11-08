@@ -298,6 +298,10 @@ mod tests {
 
     #[test]
     fn the_vsync_event_belongs_to_the_pacing_crate() {
-        assert!(all().iter().all(|e| !e.name.contains("GetDisplayVsyncEvent")));
+        assert!(
+            all()
+                .iter()
+                .all(|e| !e.name.contains("GetDisplayVsyncEvent"))
+        );
     }
 }

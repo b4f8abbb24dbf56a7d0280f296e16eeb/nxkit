@@ -68,7 +68,10 @@ extern "C" fn show_application_error() {
 /// failed online call (Pokémon Sword, SDK 7.3.2).
 extern "C" fn show_network_service_error(code: u64) {
     let _applet = AppletGuard::new("error");
-    log(&format!("game asks to show a network service error: {}", code_text(code)));
+    log(&format!(
+        "game asks to show a network service error: {}",
+        code_text(code)
+    ));
 }
 
 /// `web::ShowLobbyPage(LobbyPageReturnValue*, const ShowLobbyPageArg&)`: online lobby web applet (cut).

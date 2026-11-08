@@ -111,7 +111,10 @@ impl Gesture {
         let mut b = [0u8; GESTURE_STATE_SIZE];
         b[0..8].copy_from_slice(&self.sampling.to_le_bytes());
         b[8..16].copy_from_slice(&self.context.to_le_bytes());
-        for (i, v) in [self.kind, self.direction, self.x, self.y, self.dx, self.dy].into_iter().enumerate() {
+        for (i, v) in [self.kind, self.direction, self.x, self.y, self.dx, self.dy]
+            .into_iter()
+            .enumerate()
+        {
             b[16 + 4 * i..20 + 4 * i].copy_from_slice(&v.to_le_bytes());
         }
         b[40..44].copy_from_slice(&self.vx.to_le_bytes());
@@ -197,7 +200,12 @@ impl Touches {
             if !w.down {
                 w.pending = true;
             }
-            *w = Watch { down: true, pending: w.pending, x: t.x, y: t.y };
+            *w = Watch {
+                down: true,
+                pending: w.pending,
+                x: t.x,
+                y: t.y,
+            };
             let f = &mut self.fingers[id];
             if f.phase == Phase::Lifted && f.reported {
                 f.again = true;
@@ -233,7 +241,11 @@ impl Touches {
         let max = max.clamp(1, FINGERS);
         let mut out = vec![0u8; TOUCH_HEADER_SIZE + TOUCH_STATE_SIZE * max];
         self.sampling += 1;
-        let delta = if self.last_read_ns != 0 { now_ns.saturating_sub(self.last_read_ns) as i64 } else { 0 };
+        let delta = if self.last_read_ns != 0 {
+            now_ns.saturating_sub(self.last_read_ns) as i64
+        } else {
+            0
+        };
         self.last_read_ns = now_ns;
         let mut k = 0;
         for id in 0..FINGERS {
@@ -263,7 +275,12 @@ impl Touches {
             s[28..32].copy_from_slice(&30i32.to_le_bytes());
             if attributes & 2 != 0 {
                 if f.again {
-                    *f = Finger { phase: Phase::Down, x: f.again_x, y: f.again_y, ..Finger::default() };
+                    *f = Finger {
+                        phase: Phase::Down,
+                        x: f.again_x,
+                        y: f.again_y,
+                        ..Finger::default()
+                    };
                 } else {
                     f.phase = Phase::Empty;
                 }
@@ -306,11 +323,16 @@ impl Touches {
         let mut g = self.sample_fingers();
         let le = self.newest();
         let ltype = le.map_or(kind::IDLE, |e| e.kind);
-        let dt = if self.updated_ns != 0 { now.saturating_sub(self.updated_ns) as f32 / 1e9 } else { 0.0 };
+        let dt = if self.updated_ns != 0 {
+            now.saturating_sub(self.updated_ns) as f32 / 1e9
+        } else {
+            0.0
+        };
         if g.n > 0 && g.n == self.last.n && !self.slop_left {
             let n = g.n as usize;
             let out = (0..n).any(|i| {
-                (g.pt[i][0] - self.went_down.pt[i][0]).abs() > SLOP || (g.pt[i][1] - self.went_down.pt[i][1]).abs() > SLOP
+                (g.pt[i][0] - self.went_down.pt[i][0]).abs() > SLOP
+                    || (g.pt[i][1] - self.went_down.pt[i][1]).abs() > SLOP
             });
             if out {
                 self.slop_left = true;
@@ -327,7 +349,10 @@ impl Touches {
         }
         self.force = false;
         let le_or = le.unwrap_or_default();
-        let mut s = Gesture { sampling: le.map_or(1, |e| e.sampling + 1), ..Gesture::default() };
+        let mut s = Gesture {
+            sampling: le.map_or(1, |e| e.sampling + 1),
+            ..Gesture::default()
+        };
         let mut ty = kind::IDLE;
         let mut attributes = 0u32;
         if g.n > 0 {
@@ -355,7 +380,11 @@ impl Touches {
                 self.pan_dt = dt;
                 if (g.dist - self.last.dist).abs() > 0.5 {
                     ty = kind::PINCH;
-                    s.scale = if self.last.dist > 0.0 { g.dist / self.last.dist } else { 1.0 };
+                    s.scale = if self.last.dist > 0.0 {
+                        g.dist / self.last.dist
+                    } else {
+                        1.0
+                    };
                 }
                 let turn = ((g.angle - self.last.angle) / (1.0 + g.angle * self.last.angle)).atan();
                 if turn.abs() > 0.015 {
@@ -387,7 +416,11 @@ impl Touches {
                 }
                 kind::PAN => {
                     let t = self.pan_dt + dt;
-                    let (vx, vy) = if t > 0.0 { (le_or.dx as f32 / t, le_or.dy as f32 / t) } else { (0.0, 0.0) };
+                    let (vx, vy) = if t > 0.0 {
+                        (le_or.dx as f32 / t, le_or.dy as f32 / t)
+                    } else {
+                        (0.0, 0.0)
+                    };
                     self.force = true;
                     if vx.hypot(vy) <= 400.0 {
                         ty = kind::COMPLETE;
@@ -399,7 +432,11 @@ impl Touches {
                         s.dx = le_or.dx;
                         s.dy = le_or.dy;
                         s.direction = if s.dx.abs() > s.dy.abs() {
-                            if s.dx > 0 { direction::RIGHT } else { direction::LEFT }
+                            if s.dx > 0 {
+                                direction::RIGHT
+                            } else {
+                                direction::LEFT
+                            }
                         } else if s.dy > 0 {
                             direction::DOWN
                         } else {
@@ -491,12 +528,21 @@ mod tests {
         t.apply(&[at(0.5, 0.5)]);
         let a = t.gestures(16, 1_000_000);
         assert_eq!(a.len(), 1);
-        assert_eq!(i32::from_le_bytes([a[0][16], a[0][17], a[0][18], a[0][19]]), kind::TOUCH);
+        assert_eq!(
+            i32::from_le_bytes([a[0][16], a[0][17], a[0][18], a[0][19]]),
+            kind::TOUCH
+        );
         t.apply(&[]);
         let b = t.gestures(16, 2_000_000);
-        assert_eq!(i32::from_le_bytes([b[0][16], b[0][17], b[0][18], b[0][19]]), kind::TAP);
+        assert_eq!(
+            i32::from_le_bytes([b[0][16], b[0][17], b[0][18], b[0][19]]),
+            kind::TAP
+        );
         let c = t.gestures(16, 3_000_000);
-        assert_eq!(i32::from_le_bytes([c[0][16], c[0][17], c[0][18], c[0][19]]), kind::COMPLETE);
+        assert_eq!(
+            i32::from_le_bytes([c[0][16], c[0][17], c[0][18], c[0][19]]),
+            kind::COMPLETE
+        );
     }
 
     #[test]
@@ -507,7 +553,9 @@ mod tests {
         t.apply(&[]);
         let g = t.gestures(16, 2);
         assert!(g.len() >= 2);
-        let s = |b: &[u8; GESTURE_STATE_SIZE]| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+        let s = |b: &[u8; GESTURE_STATE_SIZE]| {
+            i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+        };
         assert_eq!(s(&g[0]), s(&g[1]) + 1);
     }
 

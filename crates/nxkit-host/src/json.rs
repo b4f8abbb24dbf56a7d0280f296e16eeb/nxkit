@@ -70,7 +70,9 @@ impl Value {
         match self {
             Value::Int(i) => Some(*i),
             Value::Str(s) => match s.strip_prefix('-') {
-                Some(rest) => parse_u64(rest).and_then(|v| i64::try_from(v).ok()).map(|v| -v),
+                Some(rest) => parse_u64(rest)
+                    .and_then(|v| i64::try_from(v).ok())
+                    .map(|v| -v),
                 None => parse_u64(s).and_then(|v| i64::try_from(v).ok()),
             },
             _ => None,
@@ -300,7 +302,10 @@ mod tests {
         assert_eq!(a[1].as_i64(), Some(-2));
         assert_eq!(a[2].as_str(), Some("x\u{e9}\n"));
         assert_eq!(v.get("e").and_then(Value::as_u64), Some(16));
-        assert_eq!(v.get("b").and_then(|b| b.get("c")), Some(&Value::Bool(true)));
+        assert_eq!(
+            v.get("b").and_then(|b| b.get("c")),
+            Some(&Value::Bool(true))
+        );
     }
 
     #[test]

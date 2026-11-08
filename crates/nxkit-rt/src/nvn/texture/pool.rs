@@ -83,7 +83,9 @@ impl DescPools {
     ) -> AbiResult<u32> {
         let (mem_pool, off) = memory;
         if n <= 0 || off < 0 || mem_pool == 0 {
-            eprintln!("[RED] NVN {name}: bad arguments (pool {mem_pool:#x}, offset {off:#x}, {n} descriptors)");
+            eprintln!(
+                "[RED] NVN {name}: bad arguments (pool {mem_pool:#x}, offset {off:#x}, {n} descriptors)"
+            );
             return Ok(0);
         }
         let count = n as u32;
@@ -96,7 +98,10 @@ impl DescPools {
             );
             return Ok(0);
         }
-        if (off as u64).checked_add(bytes).is_none_or(|end| end > p.size) {
+        if (off as u64)
+            .checked_add(bytes)
+            .is_none_or(|end| end > p.size)
+        {
             eprintln!(
                 "[RED] NVN {name}: {count} descriptors at offset {off:#x} do not fit the memory pool of {:#x} bytes",
                 p.size
@@ -160,7 +165,9 @@ impl DescPools {
         }
         let mem = memory_pool::view(o.u64(OFF_POOL)?)?.mem;
         if mem == 0 {
-            return Err(other("the memory pool of the descriptor pool has no storage"));
+            return Err(other(
+                "the memory pool of the descriptor pool has no storage",
+            ));
         }
         Ok(Slot {
             id: base + id as u32,
@@ -207,8 +214,16 @@ mod tests {
             added.push((base, count));
             Ok(())
         };
-        assert_eq!(pools.initialize("t", a, (mp, 0), 300, &mut add).expect("a"), 1);
-        assert_eq!(pools.initialize("t", b, (mp, 0x4000), 16, &mut add).expect("b"), 1);
+        assert_eq!(
+            pools.initialize("t", a, (mp, 0), 300, &mut add).expect("a"),
+            1
+        );
+        assert_eq!(
+            pools
+                .initialize("t", b, (mp, 0x4000), 16, &mut add)
+                .expect("b"),
+            1
+        );
         assert_eq!(added, vec![(0, 300), (512, 16)]);
         assert_eq!(pools.base(b).expect("base"), 512);
     }
@@ -223,10 +238,14 @@ mod tests {
             added += 1;
             Ok(())
         };
-        pools.initialize("t", a, (mp, 0), 64, &mut add).expect("first");
+        pools
+            .initialize("t", a, (mp, 0), 64, &mut add)
+            .expect("first");
         assert_eq!(pools.finalize(a).expect("finalize"), Some((0, 64)));
         assert!(pools.base(a).is_err());
-        pools.initialize("t", a, (mp, 0), 64, &mut add).expect("second");
+        pools
+            .initialize("t", a, (mp, 0), 64, &mut add)
+            .expect("second");
         assert_eq!(pools.base(a).expect("base"), 0);
         assert_eq!(added, 1);
     }
@@ -237,8 +256,12 @@ mod tests {
         let mp = memory_pool_object(0x10000);
         let mem = Obj(mp).u64(8).expect("mem");
         let (a, b) = (testing::alloc(0x20), testing::alloc(0x20));
-        pools.initialize("t", a, (mp, 0), 8, |_, _, _| Ok(())).expect("a");
-        pools.initialize("t", b, (mp, 0x1000), 8, |_, _, _| Ok(())).expect("b");
+        pools
+            .initialize("t", a, (mp, 0), 8, |_, _, _| Ok(()))
+            .expect("a");
+        pools
+            .initialize("t", b, (mp, 0x1000), 8, |_, _, _| Ok(()))
+            .expect("b");
         assert_eq!(
             pools.slot(b, 3).expect("slot"),
             Slot {
@@ -255,7 +278,9 @@ mod tests {
         let mp = memory_pool_object(0x1000);
         let a = testing::alloc(0x20);
         assert_eq!(
-            pools.initialize("t", a, (mp, 0), 1000, |_, _, _| Ok(())).expect("init"),
+            pools
+                .initialize("t", a, (mp, 0), 1000, |_, _, _| Ok(()))
+                .expect("init"),
             0
         );
     }

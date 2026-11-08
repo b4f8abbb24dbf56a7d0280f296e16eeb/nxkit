@@ -56,7 +56,9 @@ pub(crate) fn read_in(req: &Request<'_>, n: u32, max: usize) -> Option<Vec<u8>> 
 /// Writes `data` to the `n`-th output buffer, cut to the size of the buffer. Gives the number of bytes written.
 pub(crate) fn write_out(req: &Request<'_>, n: u32, data: &[u8]) -> Option<usize> {
     let b = out_buf(req, n)?;
-    let len = usize::try_from(b.size).unwrap_or(usize::MAX).min(data.len());
+    let len = usize::try_from(b.size)
+        .unwrap_or(usize::MAX)
+        .min(data.len());
     guest::write(b.addr, &data[..len]).ok()?;
     Some(len)
 }

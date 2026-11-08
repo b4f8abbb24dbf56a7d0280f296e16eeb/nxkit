@@ -24,7 +24,11 @@ pub struct Fault {
 
 impl std::fmt::Display for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "guest access of {} bytes at {:#x} is outside guest memory", self.len, self.addr)
+        write!(
+            f,
+            "guest access of {} bytes at {:#x} is outside guest memory",
+            self.len, self.addr
+        )
     }
 }
 

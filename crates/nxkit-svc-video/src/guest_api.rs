@@ -26,7 +26,8 @@ pub(crate) struct Fns {
 }
 
 fn symbol(host: &dyn Host, name: &str) -> Result<usize, String> {
-    host.resolve(name).ok_or_else(|| format!("the SDK symbol {name} is missing in this game"))
+    host.resolve(name)
+        .ok_or_else(|| format!("the SDK symbol {name} is missing in this game"))
 }
 
 fn either(host: &dyn Host, first: &str, second: &str) -> Result<usize, String> {
@@ -40,7 +41,11 @@ fn load(host: &dyn Host) -> Result<Fns, String> {
     let set_data = symbol(host, "_ZN5movie6Buffer18SetDataAndCapacityEPvm")?;
     let set_range = symbol(host, "_ZN5movie6Buffer8SetRangeEii")?;
     let data = either(host, "_ZNK5movie6Buffer4DataEv", "_ZN5movie6Buffer4DataEv")?;
-    let capacity = either(host, "_ZNK5movie6Buffer8CapacityEv", "_ZN5movie6Buffer8CapacityEv")?;
+    let capacity = either(
+        host,
+        "_ZNK5movie6Buffer8CapacityEv",
+        "_ZN5movie6Buffer8CapacityEv",
+    )?;
     let set_int32 = symbol(host, "_ZN5movie9MediaData8SetInt32EPKci")?;
     let set_rect = symbol(host, "_ZN5movie9MediaData7SetRectEPKciiii")?;
     let find_int32 = symbol(host, "_ZNK5movie9MediaData9FindInt32EPKcPi")?;
@@ -57,9 +62,17 @@ fn load(host: &dyn Host) -> Result<Fns, String> {
             set_range: std::mem::transmute::<usize, extern "C" fn(u64, i32, i32)>(set_range),
             data: std::mem::transmute::<usize, extern "C" fn(u64) -> u64>(data),
             capacity: std::mem::transmute::<usize, extern "C" fn(u64) -> u64>(capacity),
-            set_int32: std::mem::transmute::<usize, extern "C" fn(u64, *const c_char, i32) -> u32>(set_int32),
-            set_rect: std::mem::transmute::<usize, extern "C" fn(u64, *const c_char, i32, i32, i32, i32) -> u32>(set_rect),
-            find_int32: std::mem::transmute::<usize, extern "C" fn(u64, *const c_char, *mut i32) -> u32>(find_int32),
+            set_int32: std::mem::transmute::<usize, extern "C" fn(u64, *const c_char, i32) -> u32>(
+                set_int32,
+            ),
+            set_rect: std::mem::transmute::<
+                usize,
+                extern "C" fn(u64, *const c_char, i32, i32, i32, i32) -> u32,
+            >(set_rect),
+            find_int32: std::mem::transmute::<
+                usize,
+                extern "C" fn(u64, *const c_char, *mut i32) -> u32,
+            >(find_int32),
             signal_event: std::mem::transmute::<usize, extern "C" fn(u64)>(signal_event),
             delete: std::mem::transmute::<usize, extern "C" fn(u64)>(delete),
             nvn_sync: nvn_sync.map(|a| std::mem::transmute::<usize, extern "C" fn(u64) -> u64>(a)),
@@ -78,15 +91,26 @@ pub(crate) struct OsFns {
 }
 
 fn load_os(host: &dyn Host) -> Result<OsFns, String> {
-    let destroy = symbol(host, "_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE")?;
-    let try_wait = symbol(host, "_ZN2nn2os18TryWaitSystemEventEPNS0_15SystemEventTypeE")?;
-    let holder = symbol(host, "_ZN2nn2os25InitializeMultiWaitHolderEPNS0_19MultiWaitHolderTypeEPNS0_15SystemEventTypeE")?;
+    let destroy = symbol(
+        host,
+        "_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE",
+    )?;
+    let try_wait = symbol(
+        host,
+        "_ZN2nn2os18TryWaitSystemEventEPNS0_15SystemEventTypeE",
+    )?;
+    let holder = symbol(
+        host,
+        "_ZN2nn2os25InitializeMultiWaitHolderEPNS0_19MultiWaitHolderTypeEPNS0_15SystemEventTypeE",
+    )?;
     // SAFETY: each address is the entry of the `nn::os` function of the symbol, which takes pointers (here guest
     // addresses) in the first registers and gives a `bool` in `w0`, read as a `u32` that the caller masks.
     unsafe {
         Ok(OsFns {
             destroy_system_event: std::mem::transmute::<usize, extern "C" fn(u64)>(destroy),
-            try_wait_system_event: std::mem::transmute::<usize, extern "C" fn(u64) -> u32>(try_wait),
+            try_wait_system_event: std::mem::transmute::<usize, extern "C" fn(u64) -> u32>(
+                try_wait,
+            ),
             init_multi_wait_holder: std::mem::transmute::<usize, extern "C" fn(u64, u64)>(holder),
         })
     }

@@ -11,8 +11,12 @@ use std::path::{Component, Path, PathBuf};
 
 /// The path of an entry below `dest`. A name with `..`, a drive or an absolute part is refused.
 fn target(dest: &Path, e: &RomEntry) -> Result<PathBuf, String> {
-    let p = std::str::from_utf8(&e.path)
-        .map_err(|_| format!("RomFS path is not UTF-8: {}", String::from_utf8_lossy(&e.path)))?;
+    let p = std::str::from_utf8(&e.path).map_err(|_| {
+        format!(
+            "RomFS path is not UTF-8: {}",
+            String::from_utf8_lossy(&e.path)
+        )
+    })?;
     let mut out = dest.to_path_buf();
     for c in Path::new(p.trim_start_matches('/')).components() {
         match c {
@@ -24,7 +28,11 @@ fn target(dest: &Path, e: &RomEntry) -> Result<PathBuf, String> {
 }
 
 /// Writes every file of the image below `dest`. Returns the number of files and bytes.
-pub fn unpack(img: &Path, dest: &Path, mut each: impl FnMut(u64, u64)) -> Result<(usize, u64), String> {
+pub fn unpack(
+    img: &Path,
+    dest: &Path,
+    mut each: impl FnMut(u64, u64),
+) -> Result<(usize, u64), String> {
     const CHUNK: u64 = 8 << 20;
     let s = FileStorage::open(img).map_err(|e| e.to_string())?;
     let files = crate::host::survey_extract::image_files(&s, img)?;
@@ -44,13 +52,17 @@ pub fn unpack(img: &Path, dest: &Path, mut each: impl FnMut(u64, u64)) -> Result
         let mut at = 0u64;
         while at < e.size {
             let n = CHUNK.min(e.size - at);
-            let buf = s.read_vec(e.offset + at, n as usize).map_err(|x| x.to_string())?;
-            out.write_all(&buf).map_err(|x| format!("{}: {x}", path.display()))?;
+            let buf = s
+                .read_vec(e.offset + at, n as usize)
+                .map_err(|x| x.to_string())?;
+            out.write_all(&buf)
+                .map_err(|x| format!("{}: {x}", path.display()))?;
             at += n;
             done += n;
             each(done, total);
         }
-        out.flush().map_err(|x| format!("{}: {x}", path.display()))?;
+        out.flush()
+            .map_err(|x| format!("{}: {x}", path.display()))?;
     }
     Ok((files.len(), total))
 }
@@ -142,7 +154,10 @@ mod tests {
     #[test]
     fn entries_stay_below_the_folder() {
         let d = Path::new("/x/romfs");
-        assert_eq!(target(d, &entry("/Pack/a.pack")).unwrap(), d.join("Pack/a.pack"));
+        assert_eq!(
+            target(d, &entry("/Pack/a.pack")).unwrap(),
+            d.join("Pack/a.pack")
+        );
         assert!(target(d, &entry("/../etc/passwd")).is_err());
     }
 }

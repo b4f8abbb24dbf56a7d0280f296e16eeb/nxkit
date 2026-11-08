@@ -5,17 +5,23 @@ use std::ffi::c_void;
 use std::ptr;
 use std::sync::{Mutex, Once};
 
-use objc2_core_foundation::{CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, Type, kCFAllocatorNull};
+use objc2_core_foundation::{
+    CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, Type, kCFAllocatorNull,
+};
 use objc2_core_media::{
-    CMBlockBuffer, CMSampleBuffer, CMTime, CMVideoFormatDescription, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
-    kCMVideoCodecType_AV1, kCMVideoCodecType_VP9,
+    CMBlockBuffer, CMSampleBuffer, CMTime, CMVideoFormatDescription,
+    kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms, kCMVideoCodecType_AV1,
+    kCMVideoCodecType_VP9,
 };
 use objc2_core_video::{
-    CVImageBuffer, CVPixelBuffer, CVPixelBufferLockFlags, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey,
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+    CVImageBuffer, CVPixelBuffer, CVPixelBufferLockFlags, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey,
+    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
 };
 use objc2_video_toolbox::{
-    VTDecodeFrameFlags, VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession, VTIsHardwareDecodeSupported,
+    VTDecodeFrameFlags, VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord,
+    VTDecompressionSession, VTIsHardwareDecodeSupported,
     VTRegisterSupplementalVideoDecoderIfAvailable,
 };
 
@@ -58,10 +64,16 @@ impl PixelBuffer {
     }
 
     /// Calls `f` with the luma plane, its stride, the chroma plane and its stride while the buffer is locked.
-    pub(crate) fn with_planes<R>(&self, f: impl FnOnce(&[u8], usize, &[u8], usize) -> R) -> Result<R, String> {
+    pub(crate) fn with_planes<R>(
+        &self,
+        f: impl FnOnce(&[u8], usize, &[u8], usize) -> R,
+    ) -> Result<R, String> {
         let pb: &CVPixelBuffer = &self.0;
         if pb.plane_count() != 2 {
-            return Err(format!("the pixel buffer has {} planes, NV12 has 2", pb.plane_count()));
+            return Err(format!(
+                "the pixel buffer has {} planes, NV12 has 2",
+                pb.plane_count()
+            ));
         }
         let _lock = Locked::new(pb)?;
         let (ys, uvs) = (pb.bytes_per_row_of_plane(0), pb.bytes_per_row_of_plane(1));
@@ -73,7 +85,10 @@ impl PixelBuffer {
         // SAFETY: the buffer is locked, so each plane address is valid for `bytes per row * rows` bytes until `_lock`
         // drops, and nothing writes to a buffer that the decoder has handed out.
         let (y, uv) = unsafe {
-            (std::slice::from_raw_parts(yp as *const u8, ys * yh), std::slice::from_raw_parts(uvp as *const u8, uvs * uvh))
+            (
+                std::slice::from_raw_parts(yp as *const u8, ys * yh),
+                std::slice::from_raw_parts(uvp as *const u8, uvs * uvh),
+            )
         };
         Ok(f(y, ys, uv, uvs))
     }
@@ -99,7 +114,9 @@ unsafe extern "C-unwind" fn on_frame(
     let out = unsafe { &*(refcon as *const Mutex<Out>) };
     let Ok(mut out) = out.lock() else { return };
     out.status = status;
-    out.buffer = image.and_then(|i| i.downcast_ref::<CVPixelBuffer>()).map(|p| PixelBuffer(p.retain()));
+    out.buffer = image
+        .and_then(|i| i.downcast_ref::<CVPixelBuffer>())
+        .map(|p| PixelBuffer(p.retain()));
 }
 
 fn register_vp9() {
@@ -142,7 +159,15 @@ impl Session {
             ));
         }
         register_vp9();
-        Session::open("VP9", kCMVideoCodecType_VP9, "vpcC", &key.vpcc(), key.width, key.height, key.full_range)
+        Session::open(
+            "VP9",
+            kCMVideoCodecType_VP9,
+            "vpcC",
+            &key.vpcc(),
+            key.width,
+            key.height,
+            key.full_range,
+        )
     }
 
     /// Opens a session for an AV1 stream with the sequence header `seq`. The stream must be 8-bit 4:2:0, and this Mac
@@ -154,7 +179,15 @@ impl Session {
                 seq.profile, seq.bit_depth, seq.subsampling_x as u8, seq.subsampling_y as u8
             ));
         }
-        Session::open("AV1", kCMVideoCodecType_AV1, "av1C", &seq.av1c(), seq.max_width, seq.max_height, seq.full_range)
+        Session::open(
+            "AV1",
+            kCMVideoCodecType_AV1,
+            "av1C",
+            &seq.av1c(),
+            seq.max_width,
+            seq.max_height,
+            seq.full_range,
+        )
     }
 
     fn open(
@@ -176,14 +209,27 @@ impl Session {
         let atom_value: &CFType = &atom;
         let atoms = CFDictionary::<CFString, CFType>::from_slices(&[&*atom_key], &[atom_value]);
         // SAFETY: reads a constant that CoreMedia exports.
-        let extensions_key = unsafe { kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms };
+        let extensions_key =
+            unsafe { kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms };
         let atoms_value: &CFType = &atoms;
-        let extensions = CFDictionary::<CFString, CFType>::from_slices(&[extensions_key], &[atoms_value]);
+        let extensions =
+            CFDictionary::<CFString, CFType>::from_slices(&[extensions_key], &[atoms_value]);
         let mut format = None;
         // SAFETY: every reference is live for the call and `format` is `None` as the function needs.
-        let status = unsafe { CMVideoFormatDescription::new(None, codec, width_i, height_i, Some(&extensions), &mut format) };
+        let status = unsafe {
+            CMVideoFormatDescription::new(
+                None,
+                codec,
+                width_i,
+                height_i,
+                Some(&extensions),
+                &mut format,
+            )
+        };
         let Some(format) = format.filter(|_| status == 0) else {
-            return Err(format!("CMVideoFormatDescriptionCreate failed with OSStatus {status}"));
+            return Err(format!(
+                "CMVideoFormatDescriptionCreate failed with OSStatus {status}"
+            ));
         };
 
         let pixel_format = if full_range {
@@ -194,12 +240,21 @@ impl Session {
         let number = CFNumber::new_u32(pixel_format);
         let surface = CFDictionary::<CFString, CFType>::from_slices(&[], &[]);
         // SAFETY: reads constants that CoreVideo exports.
-        let (k_format, k_metal, k_surface) =
-            unsafe { (kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferIOSurfacePropertiesKey) };
+        let (k_format, k_metal, k_surface) = unsafe {
+            (
+                kCVPixelBufferPixelFormatTypeKey,
+                kCVPixelBufferMetalCompatibilityKey,
+                kCVPixelBufferIOSurfacePropertiesKey,
+            )
+        };
         let values: [&CFType; 3] = [&number, CFBoolean::new(true), &surface];
-        let attrs = CFDictionary::<CFString, CFType>::from_slices(&[k_format, k_metal, k_surface], &values);
+        let attrs =
+            CFDictionary::<CFString, CFType>::from_slices(&[k_format, k_metal, k_surface], &values);
 
-        let out = Box::new(Mutex::new(Out { status: 0, buffer: None }));
+        let out = Box::new(Mutex::new(Out {
+            status: 0,
+            buffer: None,
+        }));
         let record = VTDecompressionOutputCallbackRecord {
             decompressionOutputCallback: Some(on_frame),
             decompressionOutputRefCon: &*out as *const Mutex<Out> as *mut c_void,
@@ -207,11 +262,28 @@ impl Session {
         let mut session = None;
         // SAFETY: the format and the attributes are live for the call. The callback gets the refcon of `out`, which
         // this struct keeps alive until `drop` invalidates the session.
-        let status = unsafe { VTDecompressionSession::new(None, &format, None, Some(&attrs), Some(&record), &mut session) };
-        let Some(session) = session.filter(|_| status == 0) else {
-            return Err(format!("VTDecompressionSessionCreate failed with OSStatus {status}"));
+        let status = unsafe {
+            VTDecompressionSession::new(
+                None,
+                &format,
+                None,
+                Some(&attrs),
+                Some(&record),
+                &mut session,
+            )
         };
-        Ok(Session { name, session, format, out, pixel_format })
+        let Some(session) = session.filter(|_| status == 0) else {
+            return Err(format!(
+                "VTDecompressionSessionCreate failed with OSStatus {status}"
+            ));
+        };
+        Ok(Session {
+            name,
+            session,
+            format,
+            out,
+            pixel_format,
+        })
     }
 
     /// Decodes one packet. `Ok(None)` when the packet shows no picture, for example a frame that only updates
@@ -226,18 +298,42 @@ impl Session {
         // SAFETY: `data` outlives the block buffer, which is dropped at the end of this function. The null allocator
         // keeps CoreMedia from freeing memory it does not own.
         let status = unsafe {
-            CMBlockBuffer::with_memory_block(None, data.as_mut_ptr().cast(), len, kCFAllocatorNull, None, 0, len, 0, &mut block)
+            CMBlockBuffer::with_memory_block(
+                None,
+                data.as_mut_ptr().cast(),
+                len,
+                kCFAllocatorNull,
+                None,
+                0,
+                len,
+                0,
+                &mut block,
+            )
         };
         let Some(block) = block.filter(|_| status == 0) else {
-            return Err(format!("CMBlockBufferCreateWithMemoryBlock failed with OSStatus {status}"));
+            return Err(format!(
+                "CMBlockBufferCreateWithMemoryBlock failed with OSStatus {status}"
+            ));
         };
         let mut sample = None;
         // SAFETY: the block buffer and the format are live. One sample of `len` bytes, no timing entries.
         let status = unsafe {
-            CMSampleBuffer::new_ready(None, Some(&block), Some(&self.format), 1, 0, ptr::null(), 1, &len, &mut sample)
+            CMSampleBuffer::new_ready(
+                None,
+                Some(&block),
+                Some(&self.format),
+                1,
+                0,
+                ptr::null(),
+                1,
+                &len,
+                &mut sample,
+            )
         };
         let Some(sample) = sample.filter(|_| status == 0) else {
-            return Err(format!("CMSampleBufferCreateReady failed with OSStatus {status}"));
+            return Err(format!(
+                "CMSampleBufferCreateReady failed with OSStatus {status}"
+            ));
         };
 
         if let Ok(mut o) = self.out.lock() {
@@ -245,15 +341,28 @@ impl Session {
             o.buffer = None;
         }
         // SAFETY: the sample is live. With no flags the decoder emits every frame before it returns.
-        let status = unsafe { self.session.decode_frame(&sample, VTDecodeFrameFlags::empty(), ptr::null_mut(), None) };
+        let status = unsafe {
+            self.session
+                .decode_frame(&sample, VTDecodeFrameFlags::empty(), ptr::null_mut(), None)
+        };
         if status != 0 {
-            return Err(format!("VTDecompressionSessionDecodeFrame failed with OSStatus {status}"));
+            return Err(format!(
+                "VTDecompressionSessionDecodeFrame failed with OSStatus {status}"
+            ));
         }
-        let mut o = self.out.lock().map_err(|_| "the decoder callback panicked".to_string())?;
+        let mut o = self
+            .out
+            .lock()
+            .map_err(|_| "the decoder callback panicked".to_string())?;
         if o.status != 0 {
-            return Err(format!("the {} decoder reported OSStatus {}", self.name, o.status));
+            return Err(format!(
+                "the {} decoder reported OSStatus {}",
+                self.name, o.status
+            ));
         }
-        let Some(buffer) = o.buffer.take() else { return Ok(None) };
+        let Some(buffer) = o.buffer.take() else {
+            return Ok(None);
+        };
         let pb: &CVPixelBuffer = &buffer.0;
         if pb.pixel_format_type() != self.pixel_format || pb.plane_count() != 2 {
             return Err(format!(
