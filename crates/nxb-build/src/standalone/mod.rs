@@ -488,6 +488,17 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {
+        // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
+        // failed move stops the build with the old app and its save in place.
+        let old_save = out.join("Contents/Resources/nxkit/save");
+        if old_save.is_dir() {
+            let new_save = run_dir.join("save");
+            if new_save.exists() {
+                return Err(format!("{}: the new app already has a save folder", new_save.display()));
+            }
+            std::fs::rename(&old_save, &new_save).map_err(|e| io(&new_save, e))?;
+            p.say(&format!("save: kept from the old app ({})", new_save.display()));
+        }
         let _ = std::fs::remove_dir_all(&out);
         std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
         Ok(((), out.display().to_string()))
