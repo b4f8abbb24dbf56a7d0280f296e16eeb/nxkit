@@ -22,7 +22,7 @@ use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
 use nxkit_nvn::resource::TexId;
 
 use crate::bindless::{ArgsMemo, ScratchSink};
-use crate::detail::{ClearDetail, DynamicDetail, RecordingRun};
+use crate::detail::{ClearDetail, DrawArgs, DynamicDetail, RecordingRun};
 use crate::draws::{Geom, PassCtx, Prep, Shared, prepare};
 use crate::indirect::Prepass;
 use crate::pipelines::Targets;
@@ -90,6 +90,38 @@ fn clear_of(sh: &Shared<'_>, pass: &Pass, slot: Slot) -> ClearDetail {
         }
     }
     ClearDetail::default()
+}
+
+/// True when the first draw of the pass visibly paints every texel of colour slot `slot` of an attachment of
+/// `size` (after the scale `scale`): a full-screen triangle (or quad) with no vertex input, a viewport and a scissor
+/// that hold the target, all four channels written, no blending, no depth or stencil test, no alpha to coverage.
+/// Then the old contents are never read and a `Load` is wasted. The shader could still discard a fragment, and the
+/// geometry of a vertex shader without input could still be small, so only the `coverload` knob uses this.
+fn first_draw_covers(sh: &Shared<'_>, pass: &Pass, slot: u8, size: [u32; 2], scale: f32) -> bool {
+    let Some(d) = draw_range(sh, pass).next().and_then(|n| sh.detail.draws.get(n as usize)) else { return false };
+    let vertices_ok = matches!(
+        (d.topology, d.args),
+        (4, DrawArgs::Arrays { count: 3 | 6, instances: 1, .. }) | (5, DrawArgs::Arrays { count: 4, instances: 1, .. })
+    );
+    let [x, y, w, h] = d.dynamic.viewport.map(|v| v * scale);
+    let holds = |x0: f32, y0: f32, w0: f32, h0: f32| {
+        x0 <= 0.5 && y0 <= 0.5 && x0 + w0 >= size[0] as f32 - 0.5 && y0 + h0 >= size[1] as f32 - 0.5
+    };
+    let scissor_ok = d.dynamic.scissor.is_none_or(|[sx, sy, sw, shh]| {
+        holds(sx as f32 * scale, sy as f32 * scale, sw as f32 * scale, shh as f32 * scale)
+    });
+    let i = usize::from(slot).min(7);
+    vertices_ok
+        && d.attributes.is_empty()
+        && d.streams.is_empty()
+        && holds(x, y, w, h)
+        && scissor_ok
+        && d.write_masks[i] & 0xf == 0xf
+        && !d.blend[i].enable
+        && !d.depth_stencil.depth_test
+        && !d.depth_stencil.stencil_test
+        && !d.raster.alpha_to_coverage
+        && d.raster.polygon_mode == 2
 }
 
 fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
@@ -169,7 +201,22 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         if res.scaled {
             scale = sh.scale;
         }
-        let (l, s) = (load(a.load, mem), store(a.store, mem));
+        let mut l = load(a.load, mem);
+        // A colour load that only the default rule asks for goes when the draw covers the target.
+        if let Slot::Color(n) = a.slot
+            && a.load_is_default()
+            && !mem
+            && l == MLoad::Load
+        {
+            let covers = first_draw_covers(sh, pass, n, [d.width, d.height], if res.scaled { sh.scale } else { 1.0 });
+            if crate::diag("passmerge") && crate::diag::sampled() {
+                eprintln!("DIAG passmerge cover cmds {:?} slot {n} {}x{} first draw covers {covers}", pass.cmds, d.width, d.height);
+            }
+            if covers && crate::knob("coverload") {
+                l = MLoad::DontCare;
+            }
+        }
+        let s = store(a.store, mem);
         let clear = clear_of(sh, pass, a.slot);
         match a.slot {
             Slot::Color(n) => colors.push((

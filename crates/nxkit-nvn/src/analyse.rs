@@ -1,14 +1,17 @@
 //! The render pass inference, first half: cut the frame into passes and merge them.
 //!
-//! The scan goes forward over the recorded commands and does five things.
+//! The scan goes forward over the recorded commands and does six things.
 //! - It cuts the stream when the attachments change, when a barrier comes, when other work (compute, copy, present)
 //!   comes, and when a full clear hits an attachment that the pass already used.
 //! - It notes for each attachment how the pass starts (a full clear, a discard, a read of the old contents).
 //! - It does not cut for a copy without a texture on either side (a uniform update, a buffer copy or a buffer clear).
 //!   The encoder does not run such a copy on the GPU, so it needs no pass of its own. The same rule lets compute
 //!   dispatches on both sides of it share one pass.
-//! - It merges a pass into the pass before it when both have the same attachments, only a barrier separates them,
-//!   and the second pass does not sample an attachment of the first.
+//! - It merges a pass into the pass before it when both have the same attachments, only a barrier or a change of the
+//!   target set (that left the attachments equal) separates them, and the second pass does not sample an attachment
+//!   of the first.
+//! - It drops a render pass that has no draw and no clear (a discard alone). Such a pass does nothing, and the state
+//!   before it comes back, so the passes around it can merge or group.
 //! - It hands the result to a second step that picks the load and store actions.
 //!
 //! A clear under a scissor is a partial clear. It does not cut the pass. The old contents stay in use.
@@ -41,6 +44,15 @@ struct Scan<'a> {
     /// The state and the reads of the draw just before, while no other command came between. A draw that repeats
     /// them changes nothing in the plan.
     last_draw: Option<(DrawState, Span)>,
+    /// `pending`, `barrier` and `foreign` as they were when the open render pass began, to put them back when the pass
+    /// turns out empty.
+    before_open: (Boundary, Option<u32>, Option<PassKind>),
+}
+
+/// True under `NXKIT_DIAG=passmerge` (or `all`).
+fn merge_diag() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::diag::on("passmerge"))
 }
 
 /// True under `NXKIT_DIAG=stats` (or `all`).
@@ -73,6 +85,7 @@ impl Analyser {
             foreign: None,
             barrier: None,
             last_draw: None,
+            before_open: (Boundary::Start, None, None),
         };
         for (i, cmd) in frame.cmds.iter().enumerate() {
             s.step(i as u32, *cmd)?;
@@ -82,6 +95,10 @@ impl Analyser {
         self.frames += 1;
         if stats_diag() && self.frames % 30 == 1 {
             eprintln!("nxkit-nvn: pass frame {}: {}", self.frames, plan.stats.describe());
+        }
+        if merge_diag() && self.frames % 30 == 1 {
+            let r = crate::passmerge::MergeReport::of(frame, plan);
+            eprintln!("DIAG passmerge frame {}: {}", self.frames, r.describe());
         }
         Ok(())
     }
@@ -180,6 +197,7 @@ impl Scan<'_> {
         if self.rt.is_empty() {
             return Err(NvnError::NoTarget(0));
         }
+        self.before_open = (self.pending, self.barrier, self.foreign);
         let p = &mut *self.plan;
         let start = p.attachments.len();
         for (slot, tex) in slots(&self.rt) {
@@ -317,6 +335,10 @@ impl Scan<'_> {
             return;
         }
         self.open = false;
+        if crate::passes::merge_on() && self.is_empty(end) {
+            self.drop_empty();
+            return;
+        }
         let p = &mut *self.plan;
         let n = p.passes.len() - 1;
         p.passes[n].cmds.end = end;
@@ -328,11 +350,39 @@ impl Scan<'_> {
             merge(p, n - 1, n);
         }
     }
+
+    /// True when the open render pass, which ends before command `end`, has no draw and no clear.
+    fn is_empty(&self, end: u32) -> bool {
+        let start = self.plan.passes.last().map_or(0, |p| p.cmds.start);
+        self.frame.cmds.get(start as usize..end as usize).is_some_and(|cmds| {
+            !cmds.iter().any(|c| {
+                matches!(c, Cmd::Draw { .. } | Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. })
+            })
+        })
+    }
+
+    /// Takes the open render pass out of the plan and puts the scan back in the state before it.
+    fn drop_empty(&mut self) {
+        let p = &mut *self.plan;
+        let Some(pass) = p.passes.pop() else { return };
+        p.attachments.truncate(pass.attachments.start);
+        p.reads.truncate(pass.reads.start);
+        p.writes.truncate(pass.writes.start);
+        p.stats.render_begins.remove(pass.begin);
+        p.stats.empty_dropped += 1;
+        (self.pending, self.barrier, self.foreign) = self.before_open;
+    }
 }
 
 fn can_merge(p: &PassPlan, a: usize, b: usize) -> bool {
     let (pa, pb) = (&p.passes[a], &p.passes[b]);
-    if pa.kind != PassKind::Render || !matches!(pb.begin, Boundary::Barrier(_)) {
+    let begins_apart = match pb.begin {
+        Boundary::Barrier(_) => true,
+        // The target set changed and left the attachments equal, or a pass between them was dropped.
+        Boundary::Targets => crate::passes::merge_on(),
+        _ => false,
+    };
+    if pa.kind != PassKind::Render || !begins_apart {
         return false;
     }
     let (xa, xb) = (
@@ -373,6 +423,7 @@ fn merge(p: &mut PassPlan, a: usize, b: usize) {
     p.attachments.truncate(rb.start);
     let q = p.passes.swap_remove(b);
     p.stats.render_begins.remove(q.begin);
+    p.stats.merged_after_targets += u32::from(q.begin == Boundary::Targets);
     p.passes[a].cmds.end = q.cmds.end;
     p.passes[a].reads.end = q.reads.end;
 }

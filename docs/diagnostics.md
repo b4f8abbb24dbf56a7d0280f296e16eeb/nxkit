@@ -90,6 +90,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `hitch` | gpu | each frame whose encode took 7 ms or more or that built pipelines or textures, with the wall clock in ms, to put next to the late frames of `NXKIT_PACE_DIAG` | each such frame | low |
 | `kpass` | gpu | the render passes that could run as compute dispatches (`docs/plans/kernel-passes.md`, step 0), the runs of them, and why the others cannot | every 300 frames | low |
 | `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
+| `passmerge` | nvn, gpu | what the pass plan still leaves: render passes (with one draw, empty), neighbours with equal attachments that stayed apart and why (clear, sampled, other), pairs split by a compute or copy pass and how many of them touch none of the textures, loads that are `Load` only by the default rule, attachments no draw wrote, stores kept only by assumption, and (from the encoder) whether the first draw of such a load covers the whole target | every 30 frames (nvn line), sampled frames (cover lines) | low |
 | `passes` | gpu | the render passes of a frame by their number of draws and by the size of their first attachment | every 300 frames | low |
 | `indirect` | gpu | draw records without arguments (transform feedback, `DrawTexture` or unknown draw kinds) | at powers of two per kind | low |
 | `mesh` | gpu | the mesh and indirect draws of the frame (`EncodeStats::kinds`): encoded and skipped by reason for each class (mesh, mesh-indirect, indirect, multi-indirect-count), the Metal draws they became, the compute pre-passes and their records, and what was clamped. The first frame with such draws prints the line without the category. `stats` turns it on too. | every 30 frames | low |
@@ -114,6 +115,9 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `nosnap` | With the overlap on, the uniform buffers are not copied. The picture is wrong; it measures what the copies cost. |
 | `vsbar` | A render pass that samples what an earlier pass wrote holds its vertex stage too, also when no vertex shader of the pass samples (the behaviour before). |
 | `nosnapsbuf` | With the overlap on, storage buffers that draws only read use the buffer itself instead of the walk's copy (the behaviour before; the dialog text of Breath of the Wild then flies in). |
+| `nopassmerge` | The pass plan keeps render passes with no draw and no clear, and merges only after a barrier (the behaviour before). Not wrong, only slower: it compares the frame time. |
+| `noloadstore` | The pass plan does not learn dead stores of textures that start every frame with a clear. Not wrong in a game that behaves; it compares the frame time. |
+| `coverload` | Opt in. A colour attachment whose first draw visibly covers the whole target (full-screen triangle, no vertex input, full viewport, no blend or test) is loaded as `DontCare`. A fragment shader that discards would show garbage. |
 | `nobarrier` | Gives no pass a barrier. The picture is wrong; it measures what the barriers cost the GPU. |
 
 ## The render health report
