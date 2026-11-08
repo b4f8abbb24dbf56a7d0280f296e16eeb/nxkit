@@ -281,6 +281,9 @@ pub(crate) fn compute_pass(
         return;
     };
     stats.compute_passes += 1;
+    if crate::diag::gpu_labels() {
+        cp.set_label(&format!("c{index} n{}", pass.cmds.len()));
+    }
     if let Some(dep) = sh.barriers.before.get(index).copied().flatten() {
         if cp.encode(&ComputeCommand::Depend(dep)).is_err() {
             stats.skip(Skip::Encode);

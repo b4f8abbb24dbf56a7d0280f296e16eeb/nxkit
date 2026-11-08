@@ -223,6 +223,12 @@ fn size3(v: [u32; 3]) -> MTLSize {
 }
 
 impl ComputePass<'_> {
+    /// Names the encoder for Instruments and the Metal debugger.
+    pub fn set_label(&self, label: &str) {
+        use objc2_metal::MTL4CommandEncoder as _;
+        self.enc.setLabel(Some(&objc2_foundation::NSString::from_str(label)));
+    }
+
     /// Keeps a value alive until the GPU finished the command buffer.
     pub fn retain(&mut self, v: impl Any) {
         self.cb.retain(v);

@@ -224,6 +224,8 @@ impl BarrierState {
                     before: mine,
                     visibility: Visibility::Device,
                 })
+            } else if crate::knob("nobarrier") {
+                None
             } else {
                 dep
             };

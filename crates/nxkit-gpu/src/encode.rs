@@ -778,6 +778,12 @@ pub(crate) fn render_pass(
         return lost(stats, Skip::Encode);
     };
     stats.render_passes += 1;
+    if crate::diag::gpu_labels() {
+        let first = s.desc.colors.iter().flatten().map(|c| c.texture.desc()).next()
+            .or_else(|| s.desc.depth.as_ref().map(|d| d.texture.desc()));
+        let what = first.map_or_else(String::new, |d| format!("{}x{} {:?}", d.width, d.height, d.format));
+        rp.set_label(&format!("r{index} {what} d{}", range.len()));
+    }
     if let Some(dep) = sh.barriers.before.get(index).copied().flatten() {
         if rp.encode(&RenderCommand::Depend(dep)).is_err() {
             stats.skipped[Skip::Encode as usize] += 1;

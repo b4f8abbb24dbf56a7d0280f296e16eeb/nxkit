@@ -27,6 +27,8 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_SCALE` | The render scale of render targets. The default is 1.0. |
 | `NXKIT_WALK_CACHE=1` | Turns on the template cache of the walker. It is off by default, because in Breath of the Wild it costs more than it saves. |
 | `NXKIT_SCREEN` | The screen of the window, by its index (0 is the built-in one) or a part of its name, for example `XB273U`. The frame step takes the refresh rate of that screen. |
+| `NXKIT_GPU_LABELS=1` | Names the encoder of each pass (pass index, first attachment, draws) for the Metal debugger. Instruments does not show the labels of Metal 4 encoders. |
+| `NXKIT_PASS_LIST=1` | With `NXKIT_DIAG=passes`: also prints every pass of the frame with its attachments and their load and store actions. |
 | `NXKIT_PACE_DIAG=1` | Prints, every 120 presents, the mean frame interval, pacing wait, CPU cost and GPU time in vsyncs, and the state of the frame step. |
 | `NXKIT_VERIFY_CACHE=1` | Walks every recording again without the template cache and compares the result. This is slow. |
 | `NXKIT_COPYBACK=0` | Turns off the copy-back of GPU-written textures in CPU-visible pools. |
@@ -99,6 +101,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `paintdir` | Same as `paint`, but the colour is the absolute value of the first varying. |
 | `cubearr` | Makes a cube view as a cube array. |
 | `allbar` | Gives every pass a full barrier from all earlier work. This is the same as a `nobar` range that covers every pass. |
+| `nobarrier` | Gives no pass a barrier. The picture is wrong; it measures what the barriers cost the GPU. |
 
 ## The render health report
 

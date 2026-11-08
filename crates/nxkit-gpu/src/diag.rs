@@ -55,6 +55,8 @@ const KNOBS: &[&str] = &[
     "cubearr",
     // Every pass gets a full barrier from all earlier work.
     "allbar",
+    // No pass gets a barrier. Wrong on purpose: it measures what the barriers cost the GPU.
+    "nobarrier",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
@@ -250,4 +252,10 @@ mod tests {
         assert_eq!(knob_bit("unknown"), 0);
         assert_eq!(parse_knobs("nocull, noeq"), knob_bit("nocull") | knob_bit("noeq"));
     }
+}
+
+/// `NXKIT_GPU_LABELS=1`: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
+pub(crate) fn gpu_labels() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NXKIT_GPU_LABELS").is_ok_and(|v| v == "1"))
 }

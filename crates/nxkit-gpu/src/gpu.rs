@@ -946,6 +946,18 @@ fn pass_shape_diag(
         e.1 += draws as u32;
     }
     eprintln!("DIAG passes by draws: {by_draws:?}");
+    if std::env::var_os("NXKIT_PASS_LIST").is_some() {
+        for (i, p) in plan.passes.iter().enumerate() {
+            let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
+            let draws = cmds.iter().filter(|c| matches!(c, nxkit_nvn::frame::Cmd::Draw { .. })).count();
+            let atts: Vec<String> = plan
+                .attachments_of(p)
+                .iter()
+                .filter_map(|a| textures.get(&a.tex).map(|r| format!("{}x{} {:?} {:?}/{:?}", r.desc.width, r.desc.height, r.desc.format, a.load, a.store)))
+                .collect();
+            eprintln!("DIAG pass {i:3} {:?} {:?} draws {draws} cmds {} {atts:?}", p.kind, p.begin, cmds.len());
+        }
+    }
     let mut v: Vec<_> = by_size.into_iter().collect();
     v.sort_by(|a, b| b.1.0.cmp(&a.1.0));
     for (size, (n, draws)) in v.iter().take(20) {
