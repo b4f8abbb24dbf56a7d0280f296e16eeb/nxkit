@@ -55,30 +55,6 @@ pub fn unpack(img: &Path, dest: &Path, mut each: impl FnMut(u64, u64)) -> Result
     Ok((files.len(), total))
 }
 
-/// Puts the files of an overlay folder (patched RomFS files at their RomFS paths, see `resource_patch::overlay`) over
-/// the unpacked RomFS in `dest`: each is a new file, never a write through an existing one. The overlay's stamp file
-/// is not a RomFS file and stays out.
-pub(super) fn overlay_onto(overlay: &Path, dest: &Path) -> Result<(), String> {
-    let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
-    let mut stack = vec![PathBuf::new()];
-    while let Some(rel) = stack.pop() {
-        let here = overlay.join(&rel);
-        for e in std::fs::read_dir(&here).map_err(|e| io(&here, e))? {
-            let e = e.map_err(|e| io(&here, e))?;
-            let r = rel.join(e.file_name());
-            if e.file_type().map_err(|x| io(&e.path(), x))?.is_dir() {
-                std::fs::create_dir_all(dest.join(&r)).map_err(|x| io(&dest.join(&r), x))?;
-                stack.push(r);
-            } else if !rel.as_os_str().is_empty() || e.file_name() != ".resource-patches" {
-                let to = dest.join(&r);
-                let _ = std::fs::remove_file(&to);
-                std::fs::copy(e.path(), &to).map_err(|x| io(&to, x))?;
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Puts every file of the folder `src` into `dest` (replaced) without copying bytes: a hard link, or where that fails
 /// (another volume) `std::fs::copy`, which clones on APFS. The files of a build's work folder are written once and
 /// never rewritten in place, so the app and the work folder can share them. A file the `overlay` folder also has

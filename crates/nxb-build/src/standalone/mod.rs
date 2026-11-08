@@ -190,6 +190,40 @@ fn unpack(p: &Say, img: &Path, dest: &Path, what: &str) -> Result<(usize, u64), 
     })
 }
 
+/// Unpacks the image `img` into the folder `dest` unless `dest` already holds this image: a key file beside the
+/// folder records the image's size and change time. A new image is unpacked into a temporary folder that then takes
+/// the place of the old one, so an interrupted unpack is never reused. The folder's files are linked into apps and
+/// never written in place.
+fn unpack_once(p: &Say, img: &Path, dest: &Path, what: &str) -> Result<(), String> {
+    let meta = std::fs::metadata(img).map_err(|e| format!("{}: {e}", img.display()))?;
+    let changed = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos());
+    let key = format!("{} {changed}\n", meta.len());
+    let key_file = {
+        let mut n = dest.as_os_str().to_owned();
+        n.push(".key");
+        PathBuf::from(n)
+    };
+    if dest.is_dir() && std::fs::read_to_string(&key_file).is_ok_and(|k| k == key) {
+        p.say(&format!("{what}: reused"));
+        return Ok(());
+    }
+    let tmp = {
+        let mut n = dest.as_os_str().to_owned();
+        n.push(".tmp");
+        PathBuf::from(n)
+    };
+    let _ = std::fs::remove_file(&key_file);
+    unpack(p, img, &tmp, what)?;
+    let _ = std::fs::remove_dir_all(dest);
+    std::fs::rename(&tmp, dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    std::fs::write(&key_file, key).map_err(|e| format!("{}: {e}", key_file.display()))?;
+    Ok(())
+}
+
 /// Links the files of the folder `from` into `dest`, reporting the bytes.
 /// Files of `overlay` (patched ones) are taken from there.
 fn link(
@@ -340,11 +374,10 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         let (files, bytes) = if nup {
             link(p, a.threads, &ver_dir.join("romfs"), patched.as_deref(), &run_dir.join("romfs"), "linking RomFS")?
         } else {
-            let r = unpack(p, &img, &run_dir.join("romfs"), "unpacking RomFS")?;
-            if let Some(o) = &patched {
-                romfs::overlay_onto(o, &run_dir.join("romfs"))?;
-            }
-            r
+            // the image is unpacked once beside the extract and linked into each app, like a NUP's folder
+            let loose = ver_dir.join("romfs");
+            unpack_once(p, &img, &loose, "unpacking RomFS")?;
+            link(p, a.threads, &loose, patched.as_deref(), &run_dir.join("romfs"), "linking RomFS")?
         };
         let marker = run_dir.join("romfs").join(t.st.romfs_marker.trim_start_matches('/'));
         if !marker.exists() {
@@ -363,7 +396,9 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
                 link(p, a.threads, &ver_dir.join(&rel), None, &run_dir.join(&rel), "linking DLC")?;
             } else {
                 let from = work.join("aoc").join(format!("{index}.img"));
-                unpack(p, &from, &run_dir.join(&rel), "unpacking DLC")?;
+                let loose = work.join("aoc").join(index.to_string());
+                unpack_once(p, &from, &loose, "unpacking DLC")?;
+                link(p, a.threads, &loose, None, &run_dir.join(&rel), "linking DLC")?;
             }
             aoc.push(manifest::Aoc { index, title_id: *tid, version: *v, path: rel });
         }
