@@ -52,6 +52,7 @@ pub fn structure_geometry_compute(
         textures: tex_info(t.rm.get_texture_descriptors(true)),
         images: tex_info(t.rm.get_image_descriptors(true)),
         uses_frag_coord: features & feature::FRAG_COORD_XY != 0,
+        scaled: Vec::new(),
         frag_out_map: tc.definitions.omap_targets as i64,
         geometry_stride: stride as i64,
     };

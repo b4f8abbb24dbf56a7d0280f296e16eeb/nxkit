@@ -264,10 +264,11 @@ pub(crate) fn prepare(
     };
     let vertex_args = crate::bindless::fill_args(&vs, &inputs(Stage::Vertex), &sh.env, sink)?;
     let fragment_args = match &fs {
-        Some(f) => Some(crate::bindless::fill_args(
+        Some(f) => Some(crate::bindless::fill_args_scaled(
             f,
             &inputs(Stage::Fragment),
             &sh.env,
+            pc.scale,
             sink,
         )?),
         None => None,

@@ -29,6 +29,18 @@ pub enum HelperName {
     TextureSizeUnscale = 13,
 }
 
+/// A texture or image whose coordinates or size the render scale changes. The reflection tells the host which scale to
+/// write for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScaleUse {
+    /// An image, not a texture.
+    pub image: bool,
+    /// The binding of the resource.
+    pub binding: i64,
+    /// The descriptor index the helper function reads. The scale is `render_scale[1 + index]`.
+    pub index: i32,
+}
+
 const FIELD_FRAGMENT_RENDER_SCALE_COUNT: i32 = 4;
 const FIELD_RENDER_SCALE: i32 = 5;
 
@@ -37,6 +49,8 @@ pub struct Hfm {
     pub functions: Vec<Option<Function>>,
     pub(crate) ids: HashMap<i32, i32>,
     stage: ShaderStage,
+    /// The resources that a scale helper was called for, each once.
+    pub scaled: Vec<ScaleUse>,
 }
 
 impl Hfm {
@@ -45,6 +59,14 @@ impl Hfm {
             functions: vec![None; function_count],
             ids: HashMap::new(),
             stage,
+            scaled: Vec::new(),
+        }
+    }
+
+    /// Notes that a scale helper reads the scale of a resource.
+    pub fn note_scaled(&mut self, u: ScaleUse) {
+        if !self.scaled.contains(&u) {
+            self.scaled.push(u);
         }
     }
 

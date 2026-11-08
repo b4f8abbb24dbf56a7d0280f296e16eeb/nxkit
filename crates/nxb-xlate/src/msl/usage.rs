@@ -55,6 +55,8 @@ pub struct Usage {
     pub calls: bool,
     /// Constant buffer bindings read at the constant vec4 index 100, component 1 (the base instance).
     pub base_inst: BTreeSet<i32>,
+    /// The program reads `render_scale[0]` of the support buffer (the pixel position is divided by the pass scale).
+    pub pass_scale: bool,
 }
 
 /// The constant operand `a`, if it is one.
@@ -82,6 +84,10 @@ pub fn collect(info: &StructInfo) -> Usage {
                 if let Some(b) = o.sources.first().and_then(|s| const_of(ast, *s)) {
                     u.cb.insert(b);
                     let at = |i: usize| o.sources.get(i).and_then(|s| const_of(ast, *s));
+                    // `support_buffer` is binding 0, `render_scale` its field 5.
+                    if b == 0 && o.sources.len() == 3 && at(1) == Some(5) && at(2) == Some(0) {
+                        u.pass_scale = true;
+                    }
                     if o.sources.len() == 4
                         && inst == Inst::Load
                         && at(2) == Some(100)

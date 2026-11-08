@@ -1,6 +1,6 @@
 //! `TexturePass` (render scale of texel fetches and texture sizes, the other parts are disabled by the host answers).
 use super::XformCtx;
-use super::helper::HelperName;
+use super::helper::{HelperName, ScaleUse};
 use crate::ir::{Block, Inst, Ir, NodeId, StorageKind};
 use crate::opt::Env;
 use crate::opt::tex::{self, BINDLESS, INT_COORDS};
@@ -60,7 +60,9 @@ fn texel_fetch_scale(
     let inst = ir.op(node).inst;
     let is_bindless = t.flags & BINDLESS != 0;
     let int_coords = t.flags & INT_COORDS != 0;
-    let is_image = inst == Inst::ImageLoad;
+    // Loads, stores and atomics of an image take the coordinate of the scaled image. A store of a native size
+    // coordinate fills one texel of each scale by scale block (see docs/nxkit-gpu.md).
+    let is_image = matches!(inst, Inst::ImageLoad | Inst::ImageStore | Inst::ImageAtomic);
     let is_indexed = env.rm.is_array_of_textures_or_images(t.binding, is_image);
     if !((inst == Inst::TextureSample || is_image)
         && (int_coords || is_image)
@@ -80,6 +82,11 @@ fn texel_fetch_scale(
     } else {
         env.rm.find_texture_descriptor_index(t.binding)
     };
+    ctx.hfm.note_scaled(ScaleUse {
+        image: is_image,
+        binding: i64::from(t.binding),
+        index: sampler_index,
+    });
     let coords_count = dimensions(t.ty)?;
     let coords_index = if is_bindless { 1 } else { 0 };
     let mut added = 0;
@@ -124,6 +131,11 @@ fn texture_size_unscale(
         .hfm
         .get_or_create_function_id(ir, HelperName::TextureSizeUnscale)?;
     let sampler_index = env.rm.find_texture_descriptor_index(t.binding);
+    ctx.hfm.note_scaled(ScaleUse {
+        image: false,
+        binding: i64::from(t.binding),
+        index: sampler_index,
+    });
     for index in (0..ir.op(node).dests.len()).rev() {
         let dest = ir.op(node).dests[index].ok_or("null destination")?;
         let unscaled = ir.local();

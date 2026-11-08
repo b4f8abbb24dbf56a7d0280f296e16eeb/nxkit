@@ -171,6 +171,15 @@ pub const BORDER_SAMPLERS: u32 = 32;
 pub const BORDER_K: u32 = 0x10;
 /// The suffix of a twin sampler member's name.
 pub const BORDER_TWIN: &str = "_w";
+/// The support buffer: byte offset of `render_scale[0]`. Entry 0 is the render scale of the pass. Entry `1 + i` is the
+/// scale of the texture or image with descriptor index `i` (`rscale` of a binding is that array index). Each entry is
+/// a float, 16 bytes apart (std140).
+pub const SUPPORT_RENDER_SCALE: u32 = 192;
+/// The entries of `render_scale`: the pass, 64 textures and 8 images.
+pub const SUPPORT_RENDER_SCALES: u32 = 73;
+/// Bytes of the support buffer the shader may read. The host writes `frag_scale_count` (byte 176) as 0, so a vertex
+/// and a pixel shader number their entries alike.
+pub const SUPPORT_SIZE: u32 = 1392;
 /// The name of the border block's member in the argument buffer.
 pub const BORDER_MEMBER: &str = "dm_border";
 /// The fragment argument table's binding of the logic op block.

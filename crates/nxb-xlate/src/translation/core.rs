@@ -245,6 +245,7 @@ pub fn structure_context(
         textures: tex_info(t.rm.get_texture_descriptors(true)),
         images: tex_info(t.rm.get_image_descriptors(true)),
         uses_frag_coord: features & feature::FRAG_COORD_XY != 0,
+        scaled: t.hfm.scaled.clone(),
         frag_out_map: tc.definitions.omap_targets as i64,
         geometry_stride: 0,
     };

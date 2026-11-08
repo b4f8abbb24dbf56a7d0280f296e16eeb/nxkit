@@ -259,6 +259,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         notes,
         drv_unfillable: super::refl::unfillable(&reads, stage_name),
         drv_reads: reads,
+        pass_scale: usage.pass_scale,
         bindings: res.bindings.clone(),
         vertex_inputs: facts::vertex_inputs(&plan),
         vs_pad,

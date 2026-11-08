@@ -278,6 +278,18 @@ impl Builder<'_> {
         b.elem = Some(elem.to_string());
     }
 
+    /// The `render_scale` index of a texture or image that a scale helper reads (`ScaleUse`), or `None`.
+    fn rscale(&self, image: bool, d: &TextureDef) -> Option<u32> {
+        if d.array_length != 1 {
+            return None;
+        }
+        self.program
+            .scaled
+            .iter()
+            .find(|u| u.image == image && u.binding == i64::from(d.binding))
+            .and_then(|u| u32::try_from(1 + u.index).ok())
+    }
+
     fn texture(&mut self, d: &TextureDef) -> R<()> {
         if let Some(slot) = geom::helper_slot(&d.name) {
             let b = self.member(geom::TOPOLOGY_TYPE, &d.name, 1, Kind::Geometry);
@@ -324,6 +336,7 @@ impl Builder<'_> {
         let elem = texture_type(d.ty, comp, None)?;
         let pooled = pool::decode(&info, false, d.array_length);
         let sized = self.usage.sized.contains(&key);
+        let rscale = self.rscale(false, d);
         if let Some(dec) = &pooled {
             self.pool_member(&d.name, &elem, dec);
         } else {
@@ -335,6 +348,7 @@ impl Builder<'_> {
             dec.apply(b);
             b.fetch1d = fetch1d;
             b.fetch1d_size = fetch1d && sized;
+            b.rscale = rscale;
         }
         let mut sampler = None;
         let needs = !d.separate && self.usage.sampled.contains(&key);
@@ -379,9 +393,11 @@ impl Builder<'_> {
         };
         let ty = arrayed(texture_type(d.ty, comp, Some(acc))?, d.array_length)?;
         let dec = decode(&info, true, false, false, d.array_length != 1);
+        let rscale = self.rscale(true, d);
         let b = self.member(&ty, &d.name, d.array_length, dec.kind);
         dec.apply(b);
         b.atomic = u.atomic;
+        b.rscale = rscale;
         if self.usage.interlock && (u.write || u.atomic) {
             self.ordered();
         }
