@@ -31,6 +31,7 @@ pub mod front;
 pub mod layout;
 pub mod mem;
 pub mod passes;
+pub mod prof;
 pub mod record;
 pub mod resource;
 pub mod screen;

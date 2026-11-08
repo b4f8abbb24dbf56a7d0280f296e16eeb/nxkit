@@ -68,6 +68,8 @@ pub struct RecCache {
     longest: u64,
     /// The counters.
     pub stats: CacheStats,
+    /// The counters and clocks of `NXKIT_DIAG=decodeprof`.
+    pub prof: crate::prof::DecodeProf,
 }
 
 impl RecCache {
@@ -123,7 +125,11 @@ impl RecCache {
                 found?
             }
         };
-        if !list[i].refs.iter().all(|r| r.holds(table, desc, mem)) {
+        let clock = crate::prof::Clock::start();
+        let ok = Self::still_holds(&mut list[i], table, desc, mem, &mut self.prof);
+        self.prof.ns_refs += clock.ns();
+        if !ok {
+            self.prof.dropped += 1;
             list.remove(i);
             e.recent = 0;
             self.stats.revalidations += 1;
@@ -134,6 +140,31 @@ impl RecCache {
         list[i].hits = list[i].hits.saturating_add(1);
         self.stats.hits += 1;
         Some(i)
+    }
+
+    /// True when every resolution of the summary is still the same. A texture address or a handle can only resolve to
+    /// something else when a texture or a pool slot changed, and both count their changes, so a summary that was
+    /// checked at the current counts is not walked again. A deferred bind reads guest memory, which changes without
+    /// notice, so those are always read.
+    fn still_holds(
+        s: &mut Summary,
+        table: &ResourceTable,
+        desc: &Descriptors,
+        mem: &impl crate::mem::GuestMem,
+        prof: &mut crate::prof::DecodeProf,
+    ) -> bool {
+        let stamp = (table.epoch(), desc.epoch());
+        if s.checked == stamp {
+            prof.epoch_skips += 1;
+        } else {
+            prof.refs_checked += s.refs.len() as u64;
+            let same = s.refs.iter().all(|r| matches!(r, crate::decode::Ref::Deferred(..)) || r.holds(table, desc, mem));
+            if !same {
+                return false;
+            }
+            s.checked = stamp;
+        }
+        s.deferred.iter().all(|r| r.holds(table, desc, mem))
     }
 
     /// Keeps a summary and returns its index. A new recording drops the summaries of the memory that it overwrote.

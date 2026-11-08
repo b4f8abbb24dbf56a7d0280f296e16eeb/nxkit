@@ -66,12 +66,21 @@ pub struct ResourceTable {
     /// the residency of each written texture walked all of them every frame (in Breath of the Wild as long as the
     /// whole encode, and growing with the play time). Every other change of a residency drops the entry.
     group_residency: std::collections::HashMap<(u64, crate::layout::TextureDesc), Residency>,
+    /// Counts the changes that can make an address resolve to another texture: a texture made or removed. A cached
+    /// summary that was checked at this value need not check its addresses again ([`ResourceTable::epoch`]).
+    epoch: u64,
 }
 
 impl ResourceTable {
     /// An empty table.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A counter that changes whenever [`texture_at`](crate::decode::texture_at) could answer differently: when a texture
+    /// is created or finalized. A CPU write, a residency change or a frame-local flag does not change it.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// The number of ids that were given out, including finalised textures.
@@ -110,6 +119,7 @@ impl ResourceTable {
             refs: 1,
         });
         self.by_address.insert((address.get(), id.0), id);
+        self.epoch += 1;
         self.group_residency.remove(&(address.get(), desc));
         self.largest = self.largest.max(layout.size);
         Ok(id)
@@ -157,6 +167,7 @@ impl ResourceTable {
         r.alive = false;
         let key = (r.address.get(), id.0);
         self.by_address.remove(&key);
+        self.epoch += 1;
         Ok(())
     }
 

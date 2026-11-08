@@ -26,9 +26,16 @@ use crate::resource::{ResourceTable, TexId};
 pub struct Analyser {
     actions: Actions,
     frames: u64,
+    /// Per texture id: the render pass (by `stamp`) whose read list already holds it.
+    seen: Vec<u32>,
+    /// The number of the render pass that is open now. It counts up over all frames.
+    stamp: u32,
 }
 
 struct Scan<'a> {
+    /// See [`Analyser::seen`] and [`Analyser::stamp`].
+    seen: &'a mut Vec<u32>,
+    stamp: &'a mut u32,
     frame: &'a Frame,
     table: &'a ResourceTable,
     plan: &'a mut PassPlan,
@@ -64,6 +71,8 @@ impl Analyser {
     ) -> Result<()> {
         plan.clear();
         let mut s = Scan {
+            seen: &mut self.seen,
+            stamp: &mut self.stamp,
             frame,
             table,
             plan,
@@ -212,6 +221,11 @@ impl Scan<'_> {
             writes: p.writes.len()..p.writes.len(),
         });
         p.stats.render_begins.add(self.pending);
+        *self.stamp = self.stamp.wrapping_add(1);
+        if *self.stamp == 0 {
+            self.seen.fill(0);
+            *self.stamp = 1;
+        }
         self.barrier = None;
         self.open = true;
         self.foreign = None;
@@ -297,9 +311,15 @@ impl Scan<'_> {
                 a.discard_end = false;
             }
         }
-        let start = self.plan.passes[cur].reads.start;
+        // A texture goes into the reads of the pass once. The stamp of the open pass replaces a search of its reads.
+        let stamp = *self.stamp;
         for &t in self.frame.list(reads) {
-            if !self.plan.reads[start..].contains(&t) {
+            let i = t.0 as usize;
+            if self.seen.len() <= i {
+                self.seen.resize(i + 1, 0);
+            }
+            if self.seen[i] != stamp {
+                self.seen[i] = stamp;
                 self.plan.reads.push(t);
             }
             if let Some(a) = self.plan.attachments[range.clone()]

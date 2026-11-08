@@ -34,7 +34,7 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_AUDIO_CLICKS=1` | Prints every jump at the border of two rendered audio blocks that is much larger than any step inside them (what a click sounds like), with the wall clock in ms. |
 | `NXKIT_AUDIO_DEVICE_FRAMES` | The IO buffer of the audio output device in frames. Without it the device keeps its own (the log names its transport and buffer at the start). |
 | `NXKIT_PACE_DIAG=1` | Prints, every 120 presents, the mean frame interval, pacing wait, CPU cost and GPU time in vsyncs, and the state of the frame step. |
-| `NXKIT_VERIFY_CACHE=1` | Walks every recording again without the template cache and compares the result. This is slow. |
+| `NXKIT_VERIFY_CACHE=1` | Walks every recording again without the template cache and compares the result. This is slow. The NVN front end does the same for its summaries: every submit decodes the recording again with an empty cache and compares the commands, the texture lists and the state delta with the cached summary. A difference prints a line and fails the submit. |
 | `NXKIT_COPYBACK=0` | Turns off the copy-back of GPU-written textures in CPU-visible pools. |
 | `NXKIT_COPYBACK_MAX_MB` | The most storage that one frame copies back. The default is 128. |
 
@@ -58,6 +58,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `stats` | nvn, gpu | the encode counters, the walker counters, why the render passes start, and the decode time and the counters of the decode cache | every 30 frames, the decode every 300 submits | low |
 | `walkprof` | gpu | the walk of one submit: time in reading records, in the other records, in the detail of draws, in snapshots and in allocation (the clock reads make the walk slower), the records, draws and dispatches, the snapshots by kind (per-submit map, not copied, copied, shared with an earlier copy, fresh buffers, KiB), the heap blocks of the draws, and the banks of a draw that equal those of the draw before | first 200 submits, then every 20th | medium |
 | `cmd` | rt | each command buffer call: add memory, begin, end, call, memory queries, submits, clipped memory and overflow blocks | first 2000 per call site | medium |
+| `decodeprof` | nvn | where the time of a submit goes: lookups, hits, misses, call depth, records read, commands appended, and the time of the cache lookup (with the check of the references), of a miss (records, splices, end of decode) and of the append to the frame. Hits that skipped the check of their references are counted. The clocks read the time twice per step, so the numbers include that cost. | every 300 submits | low |
 | `decode` | nvn | a record that the decoder could not read, with the recording and its spans | first 50 | low |
 | `tex` | gpu | why a texture was not resolved or created, and the unresolved handles of each draw | first 300, and 400 distinct draws | low |
 | `buf` | gpu | a vertex, index or uniform buffer outside guest memory | first 300 | low |

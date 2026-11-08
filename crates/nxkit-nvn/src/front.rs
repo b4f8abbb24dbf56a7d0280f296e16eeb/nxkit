@@ -365,8 +365,23 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             .cache
             .entry(handle.0, i)
             .ok_or(NvnError::BadRecord("summary is missing"))?;
+        if verify_decode() {
+            verify(&cx, handle.0, inherited, s)?;
+        }
+        let clock = crate::prof::Clock::start();
         inherited.apply(&s.delta);
         self.frame.append(&s.stream);
+        if crate::prof::on() {
+            let n = s.stream.cmds.len() as u64;
+            let p = &mut self.cache.prof;
+            p.cmds += n;
+            p.ns_append += clock.ns();
+            p.submits += 1;
+            if p.submits >= crate::prof::REPORT_EVERY {
+                eprintln!("nxkit-nvn: {}", p.describe());
+                *p = Default::default();
+            }
+        }
         Ok(())
     }
 
@@ -463,4 +478,29 @@ fn decode_diag(ns: u64, c: crate::cache::CacheStats, textures: (usize, usize)) {
             textures.1
         );
     }
+}
+
+/// `NXKIT_VERIFY_CACHE=1`: decodes every submitted recording again with an empty cache and
+/// compares it with the summary that the cache gave. This is slow.
+fn verify_decode() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"))
+}
+
+/// Fails when the cached summary differs from a fresh decode under the same inherited state.
+fn verify<M: GuestMem>(cx: &Ctx<M>, handle: u64, inherited: &State, cached: &crate::decode::Summary) -> Result<()> {
+    let mut fresh = RecCache::new();
+    let i = summary(&mut fresh, cx, handle, inherited, 0)?;
+    let Some(f) = fresh.entry(handle, i) else { return Ok(()) };
+    let same = f.stream.cmds == cached.stream.cmds
+        && f.stream.lists == cached.stream.lists
+        && f.needs == cached.needs
+        && f.delta == cached.delta
+        && f.draws == cached.draws
+        && f.blockers == cached.blockers;
+    if !same {
+        eprintln!("nxkit-nvn: NXKIT_VERIFY_CACHE: the cached summary of recording {handle:#x} differs from a fresh decode");
+        return Err(NvnError::BadRecord("cached summary differs from a fresh decode"));
+    }
+    Ok(())
 }
