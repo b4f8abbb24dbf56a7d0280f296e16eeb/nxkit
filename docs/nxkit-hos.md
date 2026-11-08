@@ -18,7 +18,7 @@ The host makes the reservation and gives the kernel its base and size. The layou
 - The stack region.
 - The alias region, at the end.
 
-The map records the state, permission and attribute of each block and answers `QueryMemory`. The kernel asks the host to change page protection through `HostSpace`. `sys::HostMemory` is the implementation over the Mac's virtual memory. `MapMemory` of host-page aligned ranges uses `mach_vm_remap`, so both addresses see the same bytes. Other ranges are copied, and `UnmapMemory` copies back.
+The map records the state, permission and attribute of each block and answers `QueryMemory`. `SetMemoryAttribute` takes the uncached bit (8) and the permission lock bit (0x10, R58). The kernel asks the host to change page protection through `HostSpace`. The attribute bits do not change the host pages. `sys::HostMemory` is the implementation over the Mac's virtual memory. `MapMemory` of host-page aligned ranges uses `mach_vm_remap`, so both addresses see the same bytes. Other ranges are copied, and `UnmapMemory` copies back.
 
 A thread has one slot of 0x4000 bytes in the thread-local area. The first slot is the user exception context. A slot holds:
 

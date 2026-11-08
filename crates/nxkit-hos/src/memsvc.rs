@@ -18,7 +18,7 @@ use crate::thread::lock;
 /// `SetHeapSize` takes multiples of 2 MiB.
 const HEAP_ALIGN: u64 = 0x20_0000;
 /// The attribute bits that `SetMemoryAttribute` may change.
-const CHANGEABLE_ATTR: u32 = attr::UNCACHED;
+const CHANGEABLE_ATTR: u32 = attr::UNCACHED | attr::PERMISSION_LOCKED;
 
 /// Checks that `addr` and `size` name whole pages and do not wrap. Returns the range.
 pub(crate) fn page_range(addr: u64, size: u64) -> KResultOr<(u64, u64)> {
@@ -91,8 +91,8 @@ impl Kernel {
         Ok(base)
     }
 
-    /// `SetMemoryPermission`: the range must be normal or code-data memory that is not locked. The new permission is
-    /// none, read or read and write.
+    /// `SetMemoryPermission`: the range must be normal or code-data memory that is not locked and has no permission
+    /// lock. The new permission is none, read or read and write.
     pub(crate) fn set_memory_permission(&self, addr: u64, size: u64, new: u32) -> KResultOr<()> {
         let vm = self.vm()?;
         let (start, end) = page_range(addr, size)?;
@@ -101,7 +101,8 @@ impl Kernel {
         }
         let mut sp = lock(&vm.space);
         let ok = |b: &Block| {
-            matches!(b.state, state::NORMAL | state::CODE_DATA) && b.attr & attr::LOCKED == 0
+            matches!(b.state, state::NORMAL | state::CODE_DATA)
+                && b.attr & (attr::LOCKED | attr::PERMISSION_LOCKED) == 0
         };
         if !sp.map.all(start, end, ok) {
             return Err(KResult::INVALID_CURRENT_MEMORY);
@@ -113,7 +114,11 @@ impl Kernel {
         Ok(())
     }
 
-    /// `SetMemoryAttribute`: only the uncached bit can change. A bit of `value` outside `mask` is a bad combination.
+    /// `SetMemoryAttribute`, after Atmosphere Mesosphere (`svc_memory.cpp` and `KPageTableBase::SetMemoryAttribute`,
+    /// from memory and not checked). The mask holds only the uncached bit (8) and the permission lock bit (0x10),
+    /// and `value` holds no bit outside the mask. The permission lock can be set and never cleared. A range with the
+    /// uncached bit in the mask needs normal or code-data memory. A range with the lock bit in the mask needs code or
+    /// code-data memory. Memory with the `LOCKED` attribute is refused. The host changes nothing for either bit.
     pub(crate) fn set_memory_attribute(
         &self,
         addr: u64,
@@ -123,12 +128,19 @@ impl Kernel {
     ) -> KResultOr<()> {
         let vm = self.vm()?;
         let (start, end) = page_range(addr, size)?;
-        if mask & !CHANGEABLE_ATTR != 0 || value & !mask != 0 {
+        if mask & !CHANGEABLE_ATTR != 0
+            || (mask | value) != mask
+            || mask & attr::PERMISSION_LOCKED != value & attr::PERMISSION_LOCKED
+        {
             return Err(KResult::INVALID_COMBINATION);
         }
         let mut sp = lock(&vm.space);
         let ok = |b: &Block| {
-            matches!(b.state, state::NORMAL | state::CODE_DATA) && b.attr & attr::LOCKED == 0
+            let uncached =
+                mask & attr::UNCACHED == 0 || matches!(b.state, state::NORMAL | state::CODE_DATA);
+            let lockable = mask & attr::PERMISSION_LOCKED == 0
+                || matches!(b.state, state::CODE | state::CODE_DATA);
+            uncached && lockable && b.attr & attr::LOCKED == 0
         };
         if !sp.map.all(start, end, ok) {
             return Err(KResult::INVALID_CURRENT_MEMORY);

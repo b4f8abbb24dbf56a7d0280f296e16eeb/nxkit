@@ -11,7 +11,7 @@
 //! |---|---|---|
 //! | 0x01 | SetHeapSize | done, `memsvc.rs` |
 //! | 0x02 | SetMemoryPermission | done, `memsvc.rs` |
-//! | 0x03 | SetMemoryAttribute | done, `memsvc.rs` |
+//! | 0x03 | SetMemoryAttribute | done, `memsvc.rs`. It sets the uncached and the permission lock bits |
 //! | 0x04 | MapMemory | done, `memsvc.rs` |
 //! | 0x05 | UnmapMemory | done, `memsvc.rs` |
 //! | 0x06 | QueryMemory | done, `memsvc.rs` |

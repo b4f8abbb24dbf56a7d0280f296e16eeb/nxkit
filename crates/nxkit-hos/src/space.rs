@@ -34,6 +34,8 @@ pub(crate) mod perm {
 pub(crate) mod attr {
     pub(crate) const LOCKED: u32 = 1;
     pub(crate) const UNCACHED: u32 = 8;
+    /// Set once by `SetMemoryAttribute`, never cleared. The host does nothing for it.
+    pub(crate) const PERMISSION_LOCKED: u32 = 0x10;
 }
 
 /// A range of pages with the same properties.
