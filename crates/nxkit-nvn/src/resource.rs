@@ -59,6 +59,11 @@ pub struct ResourceTable {
     records: Vec<TextureRecord>,
     by_address: BTreeMap<(u64, u32), TexId>,
     largest: u64,
+    /// The residency that every live texture with this address and description has, while that is known. A game
+    /// that initializes texture objects again and again over the same storage piles up exact aliases, and setting
+    /// the residency of each written texture walked all of them every frame (in Breath of the Wild as long as the
+    /// whole encode, and growing with the play time). Every other change of a residency drops the entry.
+    group_residency: std::collections::HashMap<(u64, crate::layout::TextureDesc), Residency>,
 }
 
 impl ResourceTable {
@@ -102,6 +107,7 @@ impl ResourceTable {
             alive: true,
         });
         self.by_address.insert((address.get(), id.0), id);
+        self.group_residency.remove(&(address.get(), desc));
         self.largest = self.largest.max(layout.size);
         Ok(id)
     }
@@ -165,6 +171,7 @@ impl ResourceTable {
             // writes over them (BotW's terrain height and material arrays, rendered on the GPU each frame,
             // came out flat). nxnative treats flushes the same way, except for games whose profile asks.
             if r.end() > lo && (texels || r.residency != Residency::GpuNewer) {
+                self.group_residency.remove(&(r.address.get(), r.desc));
                 r.residency = Residency::GuestNewer;
                 r.write_epoch = r.write_epoch.wrapping_add(1);
                 hit[keep] = hit[i];
@@ -204,6 +211,10 @@ impl ResourceTable {
             return Ok(());
         }
         let (addr, desc) = (record.address.get(), record.desc);
+        if self.group_residency.get(&(addr, desc)) == Some(&residency) {
+            return Ok(());
+        }
+        self.group_residency.insert((addr, desc), residency);
         for (_, alias) in self.by_address.range((addr, 0)..=(addr, u32::MAX)) {
             let r = &mut self.records[alias.0 as usize];
             if r.residency != residency && r.desc == desc {
@@ -387,5 +398,23 @@ mod tests {
         let mut t = ResourceTable::new();
         assert!(t.create(rgba(64, 64), at((1 << 40) - 0x100)).is_err());
         assert!(t.create(rgba(0, 64), at(0)).is_err());
+    }
+
+    #[test]
+    fn exact_aliases_share_the_residency_after_a_cpu_write_too() {
+        let mut t = ResourceTable::new();
+        let a = t.create(rgba(16, 16), at(0x10_0000)).unwrap();
+        let b = t.create(rgba(16, 16), at(0x10_0000)).unwrap();
+        t.gpu_wrote(a).unwrap();
+        assert_eq!(t.get(b).unwrap().residency, Residency::GpuNewer);
+        let mut hit = Vec::new();
+        t.texels_written(at(0x10_0000), 16, &mut hit);
+        assert_eq!(t.get(a).unwrap().residency, Residency::GuestNewer);
+        t.gpu_wrote(b).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::GpuNewer);
+        let c = t.create(rgba(16, 16), at(0x10_0000)).unwrap();
+        assert_eq!(t.get(c).unwrap().residency, Residency::GpuNewer);
+        t.synced(a).unwrap();
+        assert_eq!(t.get(c).unwrap().residency, Residency::InSync);
     }
 }

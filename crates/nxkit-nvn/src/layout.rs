@@ -16,7 +16,7 @@ pub const FLAG_LINEAR_RENDER_TARGET: u32 = 0x40;
 pub const FLAG_MINIMAL_LAYOUT: u32 = 0x200;
 
 /// `NVNtextureTarget`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Target {
     /// `NVN_TEXTURE_TARGET_1D`.
     D1 = 0,
@@ -63,7 +63,7 @@ impl Target {
 }
 
 /// What the game gives to `nvnTextureBuilder*`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextureDesc {
     /// The target.
     pub target: Target,
