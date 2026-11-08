@@ -93,7 +93,6 @@ pub(crate) fn buf_skip(what: std::fmt::Arguments<'_>) -> stats::Skip {
 
 mod backend;
 mod barr;
-mod capture;
 mod clear;
 mod copyback;
 mod barriers;

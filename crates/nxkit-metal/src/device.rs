@@ -6,11 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_foundation::{NSString, NSURL};
+use objc2_foundation::NSString;
 use objc2_metal::{
-    MTL4CommandQueue, MTL4Compiler, MTL4CompilerDescriptor, MTLAllocation, MTLCaptureDescriptor,
-    MTLCaptureDestination, MTLCaptureManager, MTLCreateSystemDefaultDevice, MTLDevice,
-    MTLResidencySet, MTLResidencySetDescriptor,
+    MTL4CommandQueue, MTL4Compiler, MTL4CompilerDescriptor, MTLAllocation,
+    MTLCreateSystemDefaultDevice, MTLDevice, MTLResidencySet, MTLResidencySetDescriptor,
 };
 
 use crate::error::{MetalError, Result, create};
@@ -86,34 +85,6 @@ impl Context {
 
     pub(crate) fn compiler(&self) -> &RawCompiler {
         &self.inner.compiler
-    }
-
-    /// Starts a GPU capture of everything the device runs. The result is a `.gputrace` document at `path`, which
-    /// Xcode opens. The path must not exist yet. Metal only captures command buffers that are committed between this
-    /// call and [`Context::capture_stop`]. The process needs `MTL_CAPTURE_ENABLED=1` in its environment.
-    pub fn capture_start(&self, path: &str) -> Result<()> {
-        // SAFETY: the shared capture manager is a process wide singleton that Metal documents as thread safe.
-        let manager = unsafe { MTLCaptureManager::sharedCaptureManager() };
-        if !manager.supportsDestination(MTLCaptureDestination::GPUTraceDocument) {
-            return Err(MetalError::Invalid(
-                "GPU trace capture is off, start the process with MTL_CAPTURE_ENABLED=1",
-            ));
-        }
-        let descriptor = MTLCaptureDescriptor::new();
-        descriptor.set_capture_device(&self.inner.device);
-        descriptor.setDestination(MTLCaptureDestination::GPUTraceDocument);
-        let url = NSURL::fileURLWithPath(&NSString::from_str(path));
-        descriptor.setOutputURL(Some(&url));
-        manager
-            .startCaptureWithDescriptor_error(&descriptor)
-            .map_err(|e| create("gpu capture", &e.localizedDescription().to_string()))
-    }
-
-    /// Ends the capture that [`Context::capture_start`] began and writes the document.
-    pub fn capture_stop(&self) {
-        // SAFETY: see `capture_start`.
-        let manager = unsafe { MTLCaptureManager::sharedCaptureManager() };
-        manager.stopCapture();
     }
 
     /// The name of the GPU.

@@ -586,13 +586,7 @@ impl Gpu {
         detail: &FrameDetail,
         scale: f32,
     ) -> Result<EncodeReport> {
-        let capturing = crate::capture::begin(&self.ctx);
-        let result = nxkit_metal::autorelease_pool(|| self.encode_frame_inner(frame, plan, view, detail, scale));
-        if capturing {
-            let _ = self.wait();
-            crate::capture::end(&self.ctx);
-        }
-        result
+        nxkit_metal::autorelease_pool(|| self.encode_frame_inner(frame, plan, view, detail, scale))
     }
 
     fn encode_frame_inner(

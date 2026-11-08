@@ -3,7 +3,6 @@
 //! The contract with the build stage is in `docs/nxkit-host.md`. Only the modules `sys` and `gate` use `unsafe`
 //! (`docs/architecture.md`, rule 5). The parts that talk to macOS exist on macOS only.
 
-pub mod diag_crash;
 pub mod error;
 #[cfg(target_os = "macos")]
 pub mod frames;

@@ -30,12 +30,6 @@ extern "C" fn finalize(c: u64) {
 }
 
 extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
-    if crate::diag_on() {
-        let fp: u64;
-        unsafe { std::arch::asm!("mov {}, x29", out(reg) fp) };
-        let glr = unsafe { *((fp + 8) as *const u64) };
-        eprintln!("DIAG add cmdmem lr {glr:#x}");
-    }
     guard("nvnCommandBufferAddCommandMemory", || {
         let v = pool::view(memory_pool)?;
         let off = u64::try_from(off).map_err(|_| other("the command memory offset is negative"))?;
@@ -45,8 +39,8 @@ extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
         if off >= v.size {
             return Err(other("the command memory starts outside its pool"));
         }
-        if std::env::var_os("NXKIT_CMDMEM_DIAG").is_some() && n > v.size - off {
-            eprintln!("DIAG cmdmem clipped cb {c:#x} requested {n} available {} poolsize {} off {off}", v.size - off, v.size);
+        if n > v.size - off {
+            crate::diag!("DIAG cmdmem clipped cb {c:#x} requested {n} available {} poolsize {} off {off}", v.size - off, v.size);
         }
         // Games pass max(measured size, 512) for prerecorded slots near the pool end, and real NVN does not check the range. The
         // recorder writes only inside the given bytes, so the part past the pool is cut off and recording overflows as usual.
@@ -103,13 +97,7 @@ extern "C" fn begin_recording(c: u64) {
     guard("nvnCommandBufferBeginRecording", || {
         with_recorder(c, |r| {
             sync_in(c, r)?;
-            let tlr = nxkit_hos::current_thread().map_or(0, |t| t.tlr());
-            let (obj, tag, id) = if tlr != 0 {
-                let obj = unsafe { *((tlr + 0x1f8) as *const u64) };
-                let tag = if obj != 0 { unsafe { *((obj + 0x1b0) as *const u32) } } else { 0xdead };
-                (obj, tag, unsafe { *((tlr + 0x110) as *const u32) })
-            } else { (0, 0, 0) };
-            crate::diag!("DIAG begin cb {c:#x} tlr {tlr:#x} obj {obj:#x} tag {tag:#x} id {id:#x}");
+            crate::diag!("DIAG begin cb {c:#x}");
             r.buf.begin_recording()?;
             sync_out(c, r)
         })?;

@@ -116,7 +116,6 @@ impl Kernel {
                     stack_size: 0,
                     body: launcher.body(regs[1], regs[2], regs[3]),
                 };
-                if std::env::var_os("DIAG_CORE").is_some() { eprintln!("DIAG create entry {:#x} prio {} core {}", regs[1], w(4) as i32, w(5) as i32); }
                 match self.create_thread(spec) {
                     Ok(h) => {
                         regs[0] = 0;
@@ -142,11 +141,11 @@ impl Kernel {
                 }
                 Err(e) => regs[0] = u64::from(e.raw()),
             },
-            0x0F => { if std::env::var_os("DIAG_CORE").is_some() { eprintln!("DIAG setcore by {} h {:#x} ideal {} mask {:#x}", cur.id, w(0), w(1) as i32, regs[2]); } set(
+            0x0F => set(
                 regs,
                 self.set_thread_core_mask(cur, w(0), w(1) as i32, regs[2]),
-            ) }
-            0x10 => { regs[0] = u64::from(self.current_processor_number(cur)); if std::env::var_os("DIAG_CORE").is_some() { eprintln!("DIAG core thread {} -> {}", cur.id, regs[0]); } }
+            ),
+            0x10 => regs[0] = u64::from(self.current_processor_number(cur)),
             0x11 => set(regs, self.signal_event(w(0))),
             0x12 => set(regs, self.clear_event(w(0))),
             0x16 => set(regs, self.close_handle(w(0))),

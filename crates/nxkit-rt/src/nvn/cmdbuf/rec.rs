@@ -188,9 +188,9 @@ fn retrying<T>(
         match t {
             Try::Done(v) => return Ok(v),
             Try::Need(need, hook) => {
-                if std::env::var_os("NXKIT_CMDMEM_DIAG").is_some() {
+                if crate::diag_on() {
                     let (used, free, cursor) = with_recorder(cb, |r| Ok((r.buf.used(), r.buf.free(), r.buf.cursor())))?;
-                    eprintln!("DIAG cmdmem cb {cb:#x} attempt {attempt} need {need} used {used} free {free} cursor {cursor:?} hook {hook:?}");
+                    crate::diag!("DIAG cmdmem cb {cb:#x} attempt {attempt} need {need} used {used} free {free} cursor {cursor:?} hook {hook:?}");
                 }
                 if attempt > MAX_CALLBACKS {
                     break;
