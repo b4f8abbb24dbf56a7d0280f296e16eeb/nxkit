@@ -21,9 +21,13 @@
 //! last flush when the frame is empty, and the number of the next flush otherwise. [`Gpu::wait`] flushes the frame first
 //! when the fence is the one of the open frame, so a CPU wait never waits for a flush that nobody will make. A wait with
 //! a timeout of zero flushes too, so a game that polls does not wait for ever.
+//!
+//! A backend may encode a flushed frame on a thread of its own. [`Backend::wait_fence`] and [`Backend::wait_idle`] then
+//! wait for that thread, and [`Backend::settle`] brings the texture table up to date before the front end reads the
+//! residency of a texture (`nvnTextureReadTexels`). [`Backend::flush_frame`] settles the frame before it.
 
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 

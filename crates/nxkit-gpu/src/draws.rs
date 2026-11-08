@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use nxkit_metal::{
-    Context, CullMode, DepthBias, DepthClip, DepthStencilDesc, DepthStencilState, FillMode, GuestMemory, IndexType, Primitive,
-    RenderPipeline, Winding,
+    Context, CullMode, DepthBias, DepthClip, DepthStencilDesc, DepthStencilState, FillMode,
+    GuestMemory, IndexType, Primitive, RenderPipeline, Winding,
 };
-use nxkit_nvn::passes::PassPlan;
 use nxkit_nvn::frame::{Cmd, Frame};
-use nxkit_nvn::resource::{ResourceTable, TexId};
+use nxkit_nvn::passes::PassPlan;
+use nxkit_nvn::resource::TexId;
 
 use crate::barriers::BarrierPlan;
 use crate::bindless::{Env, Sink, StageInputs};
@@ -22,6 +22,7 @@ use crate::detail::{DrawArgs, DrawDetail, FrameDetail, RecordingRun, Stage};
 use crate::icbs::Icbs;
 use crate::pipelines::{Pipelines, Targets};
 use crate::programs::Programs;
+use crate::snapshot::EncodeView;
 use crate::stats::Skip;
 use crate::textures::Res;
 use crate::translate;
@@ -72,8 +73,9 @@ pub(crate) struct Shared<'a> {
     pub(crate) frame: &'a Frame,
     pub(crate) plan: &'a PassPlan,
     pub(crate) detail: &'a FrameDetail,
-    pub(crate) table: &'a ResourceTable,
-    pub(crate) textures: &'a HashMap<TexId, Res>,
+    pub(crate) table: &'a dyn EncodeView,
+    pub(crate) textures: &'a FastMap<TexId, Res>,
+    pub(crate) texture_store: &'a crate::textures::TextureStore,
     pub(crate) programs: &'a Programs,
     pub(crate) pipelines: &'a Pipelines,
     pub(crate) env: Env<'a>,

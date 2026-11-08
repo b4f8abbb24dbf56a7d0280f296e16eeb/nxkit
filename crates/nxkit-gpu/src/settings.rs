@@ -18,6 +18,9 @@ pub struct GpuSettings {
     pub threads: usize,
     /// The factor of the render size over the size the game asks for. 2.0 renders a 1080p game at 4K.
     pub scale: f32,
+    /// Encode the frames on a thread of their own (`game.json` key `enc_thread`). The environment variable
+    /// `NXKIT_ENC_THREAD=1` turns it on too.
+    pub enc_thread: bool,
 }
 
 impl Default for GpuSettings {
@@ -28,6 +31,7 @@ impl Default for GpuSettings {
             collect_archive: false,
             threads: 0,
             scale: 2.0,
+            enc_thread: false,
         }
     }
 }

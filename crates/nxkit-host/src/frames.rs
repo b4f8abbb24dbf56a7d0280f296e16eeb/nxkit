@@ -30,12 +30,17 @@ const ARCHIVE: &str = "pipelines.mtl4archive";
 /// The folder of the translated shaders in the run folder.
 const SHADERS: &str = "shaders";
 
-/// The settings of the GPU backend, from the keys of `game.json` that the encoder uses.
+/// The settings of the GPU backend, from the keys of `game.json` that the encoder uses. `enc_thread` moves the encode
+/// of each frame to a thread of its own.
 pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
     GpuSettings {
         shader_dir: root.join(SHADERS),
         archive: settings.pso_mtl4.then(|| root.join(ARCHIVE)),
-        threads: if settings.enc_thread { 0 } else { 1 },
+        // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
+        threads: std::env::var("NXKIT_ENCODE_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+        // Scaling is off until every attachment of a pass gets the same scale decision.
+        scale: std::env::var("NXKIT_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
+        enc_thread: settings.enc_thread,
         ..GpuSettings::default()
     }
 }

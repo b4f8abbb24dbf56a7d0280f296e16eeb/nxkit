@@ -320,7 +320,7 @@ pub(crate) fn cpu_read(
     let mut done = Vec::new();
     for i in pass.cmds.clone() {
         let Some(Cmd::CpuRead(id)) = sh.frame.cmds.get(i as usize).copied() else { continue };
-        let (Ok(rec), Some(res)) = (sh.table.get(id), sh.textures.get(&id)) else { continue };
+        let (Ok(rec), Some(res)) = (sh.table.record(id), sh.textures.get(&id)) else { continue };
         let written_here = sh.first_write.get(&id).is_some_and(|w| *w < index);
         if !(rec.residency == Residency::GpuNewer || written_here) || done.contains(&id) {
             continue;

@@ -17,13 +17,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use nxkit_metal::{
-    ArchiveConfig, BatchRing, CommandBuffer, CommandBufferStats, Context, DataBuffer, GobOrder, GuestMemory, Metrics,
-    MetalError, Result, Scratch, Stages, SubmittedBatch, Texture,
+    ArchiveConfig, BatchRing, CommandBuffer, CommandBufferStats, Context, DataBuffer, GobOrder,
+    GuestMemory, MetalError, Metrics, Result, Scratch, Stages, SubmittedBatch, Texture,
 };
-use nxkit_nvn::descriptors::Descriptors;
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::{PassKind, PassPlan};
-use nxkit_nvn::resource::{ResourceTable, TexId};
+use nxkit_nvn::resource::TexId;
 
 use crate::barriers::{BarrierState, touch};
 use crate::bindless::{Bindless, Env, Handles, Resolved};
@@ -35,9 +34,10 @@ use crate::jobs;
 use crate::passes::{compute_pass, cpu_read};
 use crate::pipelines::Pipelines;
 use crate::programs::Programs;
+use crate::snapshot::EncodeView;
 use crate::stats::{EncodeReport, EncodeStats, Skip};
 use crate::textures::{Res, TextureStore, Use};
-use crate::upload::Transfer;
+use crate::upload::{Dirty, Transfer};
 
 /// What the caller chooses when it makes a [`Gpu`].
 #[derive(Clone, Debug)]
@@ -88,9 +88,9 @@ pub struct Gpu {
 
 /// How each texture of the frame is used. A texture is memoryless only when every attachment use says so and no
 /// command samples, copies, presents or reads it.
-fn collect_uses(frame: &Frame, plan: &PassPlan) -> HashMap<TexId, Use> {
-    let mut other: HashSet<TexId> = HashSet::new();
-    let mut read_back: HashSet<TexId> = HashSet::new();
+pub(crate) fn collect_uses(frame: &Frame, plan: &PassPlan) -> FastMap<TexId, Use> {
+    let mut other: FastSet<TexId> = FastSet::default();
+    let mut read_back: FastSet<TexId> = FastSet::default();
     for c in &frame.cmds {
         match *c {
             Cmd::Draw { reads, .. } => other.extend(frame.list(reads).iter().copied()),
@@ -288,11 +288,10 @@ impl Gpu {
 
     fn resolve_handles(
         &mut self,
-        table: &ResourceTable,
-        descriptors: &Descriptors,
+        view: &dyn EncodeView,
         detail: &FrameDetail,
         scale: f32,
-        textures: &mut HashMap<TexId, Res>,
+        textures: &mut FastMap<TexId, Res>,
         stats: &mut EncodeStats,
     ) -> Handles {
         let mut out = Handles::default();
@@ -308,7 +307,7 @@ impl Gpu {
             if out.map.contains_key(&handle) {
                 continue;
             }
-            match self.resolve_one(table, descriptors, handle, scale, textures, stats) {
+            match self.resolve_one(view, handle, scale, textures, stats) {
                 Ok((r, view)) => {
                     self.bindless.publish(handle, r);
                     out.map.insert(handle, r);
@@ -406,15 +405,31 @@ impl Gpu {
     /// Encodes a held frame and submits it.
     ///
     /// `frame` and `plan` come from `nxkit-nvn` (`Frame` and `analyse`). `detail` carries what the commands of the
-    /// frame bound, `descriptors` resolves texture handles. `scale` is the factor for textures that are rendered
+    /// frame bound, `view` gives the texture records and resolves texture handles. `scale` is the factor for textures that are rendered
     /// into (2.0 for 1080p to 4K, 1.0 for none). The call returns when the command buffers are committed. The GPU
     /// runs on. Call [`Gpu::wait`] before the CPU reads a texture that the report lists in `copied_back`.
     pub fn encode_frame(
         &mut self,
         frame: &Frame,
         plan: &PassPlan,
-        table: &ResourceTable,
-        descriptors: &Descriptors,
+        view: &dyn EncodeView,
+        detail: &FrameDetail,
+        scale: f32,
+    ) -> Result<EncodeReport> {
+        let capturing = crate::capture::begin(&self.ctx);
+        let result = nxkit_metal::autorelease_pool(|| self.encode_frame_inner(frame, plan, view, detail, scale));
+        if capturing {
+            let _ = self.wait();
+            crate::capture::end(&self.ctx);
+        }
+        result
+    }
+
+    fn encode_frame_inner(
+        &mut self,
+        frame: &Frame,
+        plan: &PassPlan,
+        view: &dyn EncodeView,
         detail: &FrameDetail,
         scale: f32,
     ) -> Result<EncodeReport> {
@@ -433,9 +448,9 @@ impl Gpu {
         for (id, u) in &uses {
             self.store.note(*id, *u);
         }
-        let mut textures: HashMap<TexId, Res> = HashMap::new();
+        let mut textures: FastMap<TexId, Res> = FastMap::default();
         for (id, u) in &uses {
-            match table.get(*id) {
+            match view.record(*id) {
                 Ok(rec) => match self.store.ensure(rec, scale, *u, &mut stats) {
                     Ok(r) => {
                         textures.insert(*id, r);
@@ -485,10 +500,13 @@ impl Gpu {
         };
 
         let mut deswizzled = Vec::new();
-        let (first, rest) = batch.buffers().split_first_mut().ok_or(MetalError::Invalid("the batch has no buffers"))?;
+        let (first, rest) = batch
+            .buffers()
+            .split_first_mut()
+            .ok_or(MetalError::Invalid("the batch has no buffers"))?;
         first.retain(keep.clone());
         for (id, res) in &textures {
-            let Ok(rec) = table.get(*id) else { continue };
+            let Ok(rec) = view.record(*id) else { continue };
             if res.scaled && rec.residency == nxkit_nvn::resource::Residency::GuestNewer {
                 stats.scaled_upload_lost += 1;
             }
@@ -614,8 +632,9 @@ impl Gpu {
             frame,
             plan,
             detail,
-            table,
+            table: view,
             textures: &textures,
+            texture_store: &self.store,
             programs: &self.programs,
             pipelines: &self.pipelines,
             env: Env {

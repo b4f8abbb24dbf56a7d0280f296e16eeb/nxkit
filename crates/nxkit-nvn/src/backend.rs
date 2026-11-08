@@ -169,6 +169,12 @@ pub trait Backend: Send + Sync {
     /// The game presents a window texture. The frame that drew it was flushed before this call.
     fn present(&self, present: Present) -> BackendResult<()>;
 
+    /// Brings `table` up to date with the frames that were flushed. A backend that encodes on another thread waits for
+    /// the frame in flight and applies what the GPU did to the texture records ([`ResourceTable::gpu_wrote`] and
+    /// [`ResourceTable::synced`]). The front end calls it before it reads the residency of a texture. The default
+    /// does nothing, because [`Backend::flush_frame`] applies the result at once.
+    fn settle(&self, _table: &mut ResourceTable) {}
+
     /// Waits until `fence` is done or `timeout_ns` nanoseconds pass. `u64::MAX` waits without a limit.
     fn wait_fence(&self, fence: Fence, timeout_ns: u64) -> WaitResult;
 

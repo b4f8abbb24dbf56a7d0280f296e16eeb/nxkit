@@ -217,7 +217,11 @@ fn read_texels(name: &str, t: u64, view: u64, region: u64, dst: u64, row: i64, i
     let Some(p) = plan(&t, view, region, row, img)? else {
         return Ok(());
     };
-    let residency = gpu(name).with_front(|f| Ok(f.resources().get(t.id)?.residency))?;
+    let g = gpu(name);
+    let residency = g.with_front(|f| {
+        g.backend().settle(f.resources_mut());
+        Ok(f.resources().get(t.id)?.residency)
+    })?;
     if residency == Residency::GpuNewer {
         return Err(other(
             "the GPU wrote this texture and the backend has no readback, so the CPU cannot read it",

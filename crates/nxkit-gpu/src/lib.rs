@@ -101,6 +101,7 @@ mod blit;
 mod bindless;
 pub mod detail;
 mod draws;
+mod encthread;
 mod encode;
 mod format_map;
 mod guest;
@@ -113,6 +114,7 @@ mod passes;
 mod pipelines;
 mod programs;
 mod settings;
+pub mod snapshot;
 pub mod stats;
 mod textures;
 mod translate;
@@ -122,4 +124,14 @@ mod walk;
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use settings::GpuSettings;
+pub use snapshot::{EncodeView, Live, Snapshot};
 pub use stats::{EncodeReport, EncodeStats, Skip};
+
+/// Diagnostics only: whether `NXKIT_WATCH_TEX` (a comma separated list of texture ids) names `id`.
+pub(crate) fn watched(id: nxkit_nvn::resource::TexId) -> bool {
+    static IDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let ids = IDS.get_or_init(|| {
+        std::env::var("NXKIT_WATCH_TEX").map(|v| v.split(',').map(|s| s.trim().to_owned()).collect()).unwrap_or_default()
+    });
+    !ids.is_empty() && ids.iter().any(|s| *s == format!("{}", id.0))
+}
