@@ -299,9 +299,15 @@ impl Frame {
                     });
                 p.drawable.addPresentedHandler(&presented);
             }
-            match p.at {
-                Some(at) => p.drawable.presentAtTime(at),
-                None => p.drawable.present(),
+            // A drawable of `CAMetalDisplayLink` is shown at the target time of its tick, and `presentAtTime:`
+            // raises `CAMetalDrawableInvalidOperation` on it. `p.at` stays for the pacing statistics.
+            let drawable = p.drawable.clone();
+            // SAFETY: the closure only calls `present`, which leaves no Rust state half done when it throws.
+            if let Err(e) = unsafe { objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.present())) } {
+                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 4 {
+                    eprintln!("nxkit-metal: [RED] present threw {e:?}");
+                }
             }
             drop(p.keep);
         }
