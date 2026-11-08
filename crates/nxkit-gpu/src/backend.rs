@@ -303,6 +303,29 @@ impl GpuBackend {
     }
 }
 
+/// Drops `v` on a thread of its own. The detail of a frame holds thousands of draws; freeing them took about a millisecond
+/// of the game's render thread at the end of every frame.
+fn drop_later<T: Send + 'static>(v: T) {
+    type Sender = std::sync::mpsc::Sender<Box<dyn Send>>;
+    static TX: OnceLock<Option<Mutex<Sender>>> = OnceLock::new();
+    let tx = TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Box<dyn Send>>();
+        let spawned = std::thread::Builder::new()
+            .name("nxkit-drop".into())
+            .spawn(move || rx.into_iter().for_each(drop));
+        spawned.ok().map(|_| Mutex::new(tx))
+    });
+    let v: Box<dyn Send> = Box::new(v);
+    match tx {
+        Some(tx) => {
+            if let Err(e) = locked(tx).send(v) {
+                drop(e.0);
+            }
+        }
+        None => drop(v),
+    }
+}
+
 /// Whether `NXKIT_DIAG` asks for the periodic counters.
 fn stats_diag() -> bool {
     static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -355,8 +378,8 @@ impl Backend for GpuBackend {
         handles: &'a [CommandHandle],
         _origin_lower_left: bool,
     ) -> Option<Deferred<'a>> {
-        let mut walker = locked(&self.walker);
         Some(Box::new(move || {
+            let mut walker = locked(&self.walker);
             let mut mem = GuestView(self.guest.clone());
             walker.submit(&mut mem, queue, handles);
         }))
@@ -404,7 +427,9 @@ impl Backend for GpuBackend {
                 return settled.error.map_or(Ok(()), |e| Err(BackendError(e)));
             }
         }
-        self.flush_sync(frame, plan, fence, &detail, cx)
+        let r = self.flush_sync(frame, plan, fence, &detail, cx);
+        drop_later(detail);
+        r
     }
 
     fn settle(&self, table: &mut ResourceTable) {

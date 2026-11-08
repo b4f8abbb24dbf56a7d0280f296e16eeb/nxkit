@@ -40,6 +40,9 @@ use crate::stats::{EncodeReport, EncodeStats, Skip};
 use crate::textures::{Res, TextureStore, Use};
 use crate::upload::{Dirty, Transfer};
 
+/// The chunks of passes that the encoder makes for each thread (see `jobs::run_all`).
+const CHUNKS_PER_THREAD: usize = 1;
+
 /// What the caller chooses when it makes a [`Gpu`].
 #[derive(Clone, Debug)]
 pub struct GpuConfig {
@@ -223,7 +226,7 @@ impl Gpu {
             transfer,
             icbs: Mutex::new(Icbs::default()),
             barriers: BarrierState::default(),
-            ring: BatchRing::new(ctx, threads + 1)?,
+            ring: BatchRing::new(ctx, threads * CHUNKS_PER_THREAD + 1)?,
             threads,
             last: None,
             pools: Vec::new(),
@@ -750,6 +753,7 @@ impl Gpu {
             }
         }
 
+        pass_shape_diag(frame, plan, &textures);
         let ends = if plan.passes.is_empty() {
             Vec::new()
         } else {
@@ -758,7 +762,7 @@ impl Gpu {
                 .iter()
                 .map(|p| p.cmds.len() as u32 + 1)
                 .collect();
-            jobs::split(&weights, self.threads)
+            jobs::split(&weights, self.threads * CHUNKS_PER_THREAD)
         };
         let mut batch = self.ring.begin(1 + ends.len())?;
         let scratch = batch.scratch();
@@ -903,5 +907,48 @@ impl Gpu {
             mirrored,
             stats,
         })
+    }
+}
+
+/// `NXKIT_DIAG=passes`: every 300 frames, the render passes of the frame by the number of draws and by the size of
+/// their first attachment, to see which passes make the encoder boundaries of the GPU.
+fn pass_shape_diag(
+    frame: &nxkit_nvn::frame::Frame,
+    plan: &nxkit_nvn::passes::PassPlan,
+    textures: &crate::draws::FastMap<nxkit_nvn::resource::TexId, Res>,
+) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    if !crate::diag("passes") || N.fetch_add(1, Ordering::Relaxed) % 300 != 150 {
+        return;
+    }
+    let mut by_draws = std::collections::BTreeMap::<&str, u32>::new();
+    let mut by_size = std::collections::BTreeMap::<String, (u32, u32)>::new();
+    for p in plan.passes.iter().filter(|p| p.kind == nxkit_nvn::passes::PassKind::Render) {
+        let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
+        let draws = cmds.iter().filter(|c| matches!(c, nxkit_nvn::frame::Cmd::Draw { .. })).count();
+        let bucket = match draws {
+            0 => "0 (clears)",
+            1 => "1",
+            2 => "2",
+            3..=10 => "3-10",
+            11..=100 => "11-100",
+            _ => ">100",
+        };
+        *by_draws.entry(bucket).or_default() += 1;
+        let size = plan
+            .attachments_of(p)
+            .first()
+            .and_then(|a| textures.get(&a.tex))
+            .map_or_else(|| "?".to_string(), |r| format!("{}x{} {:?}", r.desc.width, r.desc.height, r.desc.format));
+        let e = by_size.entry(size).or_default();
+        e.0 += 1;
+        e.1 += draws as u32;
+    }
+    eprintln!("DIAG passes by draws: {by_draws:?}");
+    let mut v: Vec<_> = by_size.into_iter().collect();
+    v.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    for (size, (n, draws)) in v.iter().take(20) {
+        eprintln!("DIAG passes {n:4} with {draws:5} draws into {size}");
     }
 }
