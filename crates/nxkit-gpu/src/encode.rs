@@ -12,9 +12,10 @@
 use std::sync::PoisonError;
 
 use nxkit_metal::{
-    ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, DepthAttachment, DepthBias, DepthClip,
-    DepthStencilDesc, FillMode, LoadAction as MLoad, MetalError, RenderCommand, RenderPass, RenderPassDesc, Scissor,
-    Scratch, StencilAttachment, Storage, StoreAction as MStore, Viewport, Winding,
+    ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, DepthAttachment, DepthBias,
+    DepthClip, DepthStencilDesc, FillMode, LoadAction as MLoad, MetalError, RenderCommand,
+    RenderPass, RenderPassDesc, Scissor, Scratch, StencilAttachment, Storage,
+    StoreAction as MStore, Viewport, Winding,
 };
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
@@ -36,7 +37,10 @@ pub(crate) struct Tables {
 impl Tables {
     /// Makes the pair. A translated shader binds at most 31 buffers and no textures, since textures are bindless.
     pub(crate) fn new(ctx: &Context) -> Result<Self, MetalError> {
-        Ok(Self { vertex: ArgumentTable::new(ctx, 31, 0)?, fragment: ArgumentTable::new(ctx, 31, 0)? })
+        Ok(Self {
+            vertex: ArgumentTable::new(ctx, 31, 0)?,
+            fragment: ArgumentTable::new(ctx, 31, 0)?,
+        })
     }
 }
 
@@ -54,7 +58,11 @@ fn load(a: LoadAction, memoryless: bool) -> MLoad {
 }
 
 fn store(a: StoreAction, memoryless: bool) -> MStore {
-    if memoryless || a == StoreAction::DontCare { MStore::DontCare } else { MStore::Store }
+    if memoryless || a == StoreAction::DontCare {
+        MStore::DontCare
+    } else {
+        MStore::Store
+    }
 }
 
 /// The clear values that a pass starts with. The analysis cut the pass at the first full clear of a slot, so the
@@ -62,7 +70,13 @@ fn store(a: StoreAction, memoryless: bool) -> MStore {
 fn clear_of(sh: &Shared<'_>, pass: &Pass, slot: Slot) -> ClearDetail {
     for i in pass.cmds.clone() {
         let hit = match (sh.frame.cmds.get(i as usize), slot) {
-            (Some(Cmd::ClearColor { slot: s, full: true }), Slot::Color(n)) => *s == n,
+            (
+                Some(Cmd::ClearColor {
+                    slot: s,
+                    full: true,
+                }),
+                Slot::Color(n),
+            ) => *s == n,
             (Some(Cmd::ClearDepthStencil { full: true }), Slot::Depth) => true,
             _ => false,
         };
@@ -337,25 +351,58 @@ impl Tracker {
 
     fn scissor(&self, s: Option<[u32; 4]>, scale: f32) -> Scissor {
         let [w, h] = self.size;
-        let Some([x, y, sw, sh]) = s else { return Scissor { x: 0, y: 0, width: w, height: h } };
+        let Some([x, y, sw, sh]) = s else {
+            return Scissor {
+                x: 0,
+                y: 0,
+                width: w,
+                height: h,
+            };
+        };
         let up = |v: u32| (v as f32 * scale).round() as u32;
-        let (x, y) = (up(x).min(w.saturating_sub(1)), up(y).min(h.saturating_sub(1)));
-        Scissor { x, y, width: up(sw).max(1).min((w - x).max(1)), height: up(sh).max(1).min((h - y).max(1)) }
+        let (x, y) = (
+            up(x).min(w.saturating_sub(1)),
+            up(y).min(h.saturating_sub(1)),
+        );
+        Scissor {
+            x,
+            y,
+            width: up(sw).max(1).min((w - x).max(1)),
+            height: up(sh).max(1).min((h - y).max(1)),
+        }
     }
 
     /// Sets the viewport, the scissor rectangle, the stencil reference, the blend colour and the cull mode.
-    fn dynamic(&mut self, rp: &mut RenderPass<'_>, pc: &PassCtx, d: &DynamicDetail, cull: CullMode) -> Result<(), MetalError> {
+    fn dynamic(
+        &mut self,
+        rp: &mut RenderPass<'_>,
+        pc: &PassCtx,
+        d: &DynamicDetail,
+        cull: CullMode,
+    ) -> Result<(), MetalError> {
         let last = self.dynamic;
         if last.is_none_or(|l| l.viewport != d.viewport || l.depth_range != d.depth_range) {
             let [x, y, w, h] = d.viewport.map(|v| f64::from(v * pc.scale));
             let [near, far] = d.depth_range.map(f64::from);
-            rp.encode(&RenderCommand::SetViewport(Viewport { x, y, width: w, height: h, z_near: near, z_far: far }))?;
+            rp.encode(&RenderCommand::SetViewport(Viewport {
+                x,
+                y,
+                width: w,
+                height: h,
+                z_near: near,
+                z_far: far,
+            }))?;
         }
         if last.is_none_or(|l| l.scissor != d.scissor) {
-            rp.encode(&RenderCommand::SetScissor(self.scissor(d.scissor, pc.scale)))?;
+            rp.encode(&RenderCommand::SetScissor(
+                self.scissor(d.scissor, pc.scale),
+            ))?;
         }
         if last.is_none_or(|l| l.stencil_ref != d.stencil_ref) {
-            rp.encode(&RenderCommand::SetStencilRef { front: d.stencil_ref[0], back: d.stencil_ref[1] })?;
+            rp.encode(&RenderCommand::SetStencilRef {
+                front: d.stencil_ref[0],
+                back: d.stencil_ref[1],
+            })?;
         }
         if last.is_none_or(|l| l.blend_color != d.blend_color) {
             rp.encode(&RenderCommand::SetBlendColor(d.blend_color))?;
@@ -420,32 +467,47 @@ fn emit(
     for (slot, addr) in &p.streams {
         let at = *slot as usize;
         if tr.streams.get(at).copied().flatten() != Some(*addr) {
-            rp.encode(&RenderCommand::SetBuffer { index: *slot, gpu_addr: *addr })?;
+            rp.encode(&RenderCommand::SetBuffer {
+                index: *slot,
+                gpu_addr: *addr,
+            })?;
             if let Some(c) = tr.streams.get_mut(at) {
                 *c = Some(*addr);
             }
         }
     }
     rp.encode(&match p.geom {
-        Geom::Arrays { primitive, first, count, instances, base_instance } => RenderCommand::Draw {
+        Geom::Arrays {
+            primitive,
+            first,
+            count,
+            instances,
+            base_instance,
+        } => RenderCommand::Draw {
             primitive,
             first_vertex: first,
             vertex_count: count,
             instance_count: instances,
             base_instance,
         },
-        Geom::Indexed { primitive, index_type, address, count, instances, base_vertex, base_instance } => {
-            RenderCommand::DrawIndexed {
-                primitive,
-                index_type,
-                index_addr: address,
-                index_bytes: u64::from(count) * index_type.bytes(),
-                index_count: count,
-                instance_count: instances,
-                base_vertex,
-                base_instance,
-            }
-        }
+        Geom::Indexed {
+            primitive,
+            index_type,
+            address,
+            count,
+            instances,
+            base_vertex,
+            base_instance,
+        } => RenderCommand::DrawIndexed {
+            primitive,
+            index_type,
+            index_addr: address,
+            index_bytes: u64::from(count) * index_type.bytes(),
+            index_count: count,
+            instance_count: instances,
+            base_vertex,
+            base_instance,
+        },
     })
 }
 
@@ -753,13 +815,27 @@ fn run_icb(
     stats: &mut EncodeStats,
 ) -> bool {
     let first = run.first_draw as usize;
-    let Some(draws) = sh.detail.draws.get(first..first + run.draws as usize) else { return false };
-    let built = sh.icbs.lock().unwrap_or_else(PoisonError::into_inner).get(sh, pc, run, draws);
-    let (Some(d0), Some(b)) = (draws.first(), built) else { return false };
-    let Some(cull) = translate::cull(d0.raster.cull) else { return false };
-    let go = tr
-        .dynamic(rp, pc, &d0.dynamic, cull)
-        .and_then(|()| rp.encode(&RenderCommand::ExecuteIcb { icb: b.icb, first: 0, count: b.slots }));
+    let Some(draws) = sh.detail.draws.get(first..first + run.draws as usize) else {
+        return false;
+    };
+    let built = sh
+        .icbs
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(sh, pc, run, draws);
+    let (Some(d0), Some(b)) = (draws.first(), built) else {
+        return false;
+    };
+    let Some(cull) = translate::cull(d0.raster.cull) else {
+        return false;
+    };
+    let go = tr.dynamic(rp, pc, &d0.dynamic, cull).and_then(|()| {
+        rp.encode(&RenderCommand::ExecuteIcb {
+            icb: b.icb,
+            first: 0,
+            count: b.slots,
+        })
+    });
     if go.is_err() {
         stats.skipped[Skip::Encode as usize] += run.draws;
         return true;

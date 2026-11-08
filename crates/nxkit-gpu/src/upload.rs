@@ -34,7 +34,10 @@ fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLay
     }
     let d = &rec.desc;
     let info = format_info(d.format).map_err(|_| Skip::Format)?;
-    let (bw, bh) = (u32::from(info.block_w).max(1), u32::from(info.block_h).max(1));
+    let (bw, bh) = (
+        u32::from(info.block_w).max(1),
+        u32::from(info.block_h).max(1),
+    );
     let (width, height, depth, layers) = match d.target {
         Target::D1 => (d.width, 1, 1, 1),
         Target::D1Array => (d.width, 1, 1, d.height.max(1)),
@@ -58,7 +61,10 @@ fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLay
 }
 
 fn guest_offset(rec: &TextureRecord, guest: &GuestMemory) -> Result<u64, Skip> {
-    rec.address.get().checked_sub(guest.address_map().gpu_base()).ok_or(Skip::Buffer)
+    rec.address
+        .get()
+        .checked_sub(guest.address_map().gpu_base())
+        .ok_or(Skip::Buffer)
 }
 
 fn extent(d: &TextureDesc, level: u32) -> [u32; 3] {
@@ -66,7 +72,11 @@ fn extent(d: &TextureDesc, level: u32) -> [u32; 3] {
 }
 
 impl Transfer {
-    pub(crate) fn new(ctx: &Context, cache: &PipelineCache, order: GobOrder) -> nxkit_metal::Result<Self> {
+    pub(crate) fn new(
+        ctx: &Context,
+        cache: &PipelineCache,
+        order: GobOrder,
+    ) -> nxkit_metal::Result<Self> {
         Ok(Self {
             ctx: ctx.clone(),
             deswizzler: Deswizzler::new(ctx, cache)?,
@@ -121,7 +131,11 @@ impl Transfer {
         res: &Res,
     ) -> Result<(), Skip> {
         let d = res.desc;
-        let slices = if d.kind == TextureKind::D3 { 1 } else { d.slice_count() };
+        let slices = if d.kind == TextureKind::D3 {
+            1
+        } else {
+            d.slice_count()
+        };
         for slice in 0..slices {
             for level in 0..d.mip_levels {
                 let region = TextureRegion::whole(level, slice, extent(&d, level));
@@ -284,9 +298,17 @@ impl Transfer {
         let _gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
         let surf = surface(rec, res, self.order)?;
         let base = guest_offset(rec, guest)?;
-        let mut pass = cb.begin_compute_pass(self.swizzler.table()).map_err(|_| Skip::Transfer)?;
-        let mut r = pass.encode(&ComputeCommand::WaitForEarlierPasses).map_err(|_| Skip::Transfer);
-        let slices = if d.kind == TextureKind::D3 { 1 } else { d.slice_count() };
+        let mut pass = cb
+            .begin_compute_pass(self.swizzler.table())
+            .map_err(|_| Skip::Transfer)?;
+        let mut r = pass
+            .encode(&ComputeCommand::WaitForEarlierPasses)
+            .map_err(|_| Skip::Transfer);
+        let slices = if d.kind == TextureKind::D3 {
+            1
+        } else {
+            d.slice_count()
+        };
         'all: for slice in 0..slices {
             for level in 0..d.mip_levels {
                 if r.is_err() {

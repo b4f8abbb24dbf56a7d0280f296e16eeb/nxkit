@@ -268,7 +268,13 @@ impl Pipelines {
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;
         desc.support_icb = icb;
         let mut h = DefaultHasher::new();
-        (&d.program.vertex, d.program.fragment.as_deref(), targets, icb).hash(&mut h);
+        (
+            &d.program.vertex,
+            d.program.fragment.as_deref(),
+            targets,
+            icb,
+        )
+            .hash(&mut h);
         desc.colors.hash(&mut h);
         desc.vertex_layout.hash(&mut h);
         class.hash(&mut h);

@@ -120,7 +120,13 @@ pub(crate) struct PassCtx {
 /// The geometry of a draw in Metal terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Geom {
-    Arrays { primitive: Primitive, first: u32, count: u32, instances: u32, base_instance: u32 },
+    Arrays {
+        primitive: Primitive,
+        first: u32,
+        count: u32,
+        instances: u32,
+        base_instance: u32,
+    },
     Indexed {
         primitive: Primitive,
         index_type: IndexType,
@@ -170,7 +176,9 @@ pub(crate) fn prepare(
         Some(k) => Some(sh.programs.stage(k, false)?),
         None => None,
     };
-    let (pipeline, key) = sh.pipelines.render(d, &vs, fs.as_deref(), &pc.targets, icb)?;
+    let (pipeline, key) = sh
+        .pipelines
+        .render(d, &vs, fs.as_deref(), &pc.targets, icb)?;
     let mut ds = d.depth_stencil;
     ds.depth_test &= pc.has_depth;
     ds.depth_write &= pc.has_depth;
@@ -243,8 +251,16 @@ pub(crate) fn prepare(
         cull,
         winding: translate::winding(d.raster.front_face),
         fill: translate::fill(d.raster.polygon_mode),
-        bias: DepthBias { constant: units, slope_scale: factor, clamp },
-        clip: if d.raster.depth_clamp { DepthClip::Clamp } else { DepthClip::Clip },
+        bias: DepthBias {
+            constant: units,
+            slope_scale: factor,
+            clamp,
+        },
+        clip: if d.raster.depth_clamp {
+            DepthClip::Clamp
+        } else {
+            DepthClip::Clip
+        },
         geom,
     })
 }

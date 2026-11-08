@@ -57,7 +57,9 @@ impl Default for GpuConfig {
     fn default() -> Self {
         Self {
             shader_dir: PathBuf::from("shaders"),
-            threads: std::thread::available_parallelism().map_or(2, |n| n.get()).min(6),
+            threads: std::thread::available_parallelism()
+                .map_or(2, |n| n.get())
+                .min(6),
             archive: ArchiveConfig::default(),
             gob_order: GobOrder::default(),
         }
@@ -155,10 +157,14 @@ fn run_chunk_inner(
         return (stats, copied);
     };
     for index in range {
-        let Some(pass) = sh.plan.passes.get(index) else { continue };
+        let Some(pass) = sh.plan.passes.get(index) else {
+            continue;
+        };
         match pass.kind {
             PassKind::Render => render_pass(sh, cb, &tables, scratch, index, pass, &mut stats),
-            PassKind::Compute | PassKind::Copy => compute_pass(sh, cb, &tables, scratch, index, pass, &mut stats),
+            PassKind::Compute | PassKind::Copy => {
+                compute_pass(sh, cb, &tables, scratch, index, pass, &mut stats)
+            }
             PassKind::CpuRead => copied.extend(cpu_read(sh, cb, scratch, index, pass, &mut stats)),
             PassKind::Sync | PassKind::Present => {}
         }
@@ -269,23 +275,35 @@ impl Gpu {
 
     /// Names the recordings that `RecCache::icb_candidates` found. Only runs of these recordings get an ICB.
     pub fn set_icb_candidates(&self, handles: impl IntoIterator<Item = u64>) {
-        self.icbs.lock().unwrap_or_else(PoisonError::into_inner).set_candidates(handles);
+        self.icbs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_candidates(handles);
     }
 
     /// The cache dropped the summary of a recording, so its ICB is built again at the next use.
     pub fn recording_dropped(&self, handle: u64) {
-        self.icbs.lock().unwrap_or_else(PoisonError::into_inner).drop_recording(handle);
+        self.icbs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drop_recording(handle);
     }
 
     /// The number of ICBs that are alive.
     pub fn icb_count(&self) -> usize {
-        self.icbs.lock().unwrap_or_else(PoisonError::into_inner).len()
+        self.icbs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     /// Forgets the programs and the ICBs, for example after the shader directory changed. The pipelines stay.
     pub fn reload_shaders(&self) {
         self.programs.clear();
-        self.icbs.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        self.icbs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// The counters of the command buffers: CPU encode time and GPU time (R16).
@@ -672,7 +690,9 @@ impl Gpu {
                 continue;
             }
             for id in touch(frame, plan, p).writes {
-                let memoryless = textures.get(&id).is_none_or(|r| r.desc.storage == nxkit_metal::Storage::Memoryless);
+                let memoryless = textures
+                    .get(&id)
+                    .is_none_or(|r| r.desc.storage == nxkit_metal::Storage::Memoryless);
                 if !memoryless && first_write.insert(id, i).is_none() {
                     gpu_wrote.push(id);
                 }
@@ -702,7 +722,11 @@ impl Gpu {
         let ends = if plan.passes.is_empty() {
             Vec::new()
         } else {
-            let weights: Vec<u32> = plan.passes.iter().map(|p| p.cmds.len() as u32 + 1).collect();
+            let weights: Vec<u32> = plan
+                .passes
+                .iter()
+                .map(|p| p.cmds.len() as u32 + 1)
+                .collect();
             jobs::split(&weights, self.threads)
         };
         let mut batch = self.ring.begin(1 + ends.len())?;

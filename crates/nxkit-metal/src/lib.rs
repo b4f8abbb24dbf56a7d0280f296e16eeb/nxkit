@@ -51,9 +51,9 @@ mod policy;
 mod present;
 mod render;
 mod residency;
+mod sampler;
 mod scale;
 mod schedule;
-mod sampler;
 mod scratch;
 mod state;
 mod stats;
@@ -92,12 +92,12 @@ pub use render::{
     StencilAttachment, Viewport,
 };
 pub use residency::ResidentGuard;
+pub use sampler::{Border, Filter, MipFilter, Reduction, Sampler, SamplerDesc, Wrap};
 pub use scale::{
-    METALFX_RATIO, MAX_SCALE, MIN_SCALE, RenderScale, SCALE_STEP, ScaleChoice, ScaleInput,
+    MAX_SCALE, METALFX_RATIO, MIN_SCALE, RenderScale, SCALE_STEP, ScaleChoice, ScaleInput,
     UpscaleMode, choose_render_scale,
 };
 pub use schedule::{Shown, TickAction, TickScheduler};
-pub use sampler::{Border, Filter, MipFilter, Reduction, Sampler, SamplerDesc, Wrap};
 pub use scratch::{SCRATCH_ALIGN, Scratch};
 pub use state::{
     BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, DepthBias, DepthClip,

@@ -260,8 +260,13 @@ impl Walker {
 
     fn apply<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, rec: Record) {
         match rec {
-            Record::ClearColor { slot } if slot < MAX_COLOR => self.out.clears.push(ClearDetail::default()),
-            Record::ClearDepthStencil => self.out.clears.push(ClearDetail { depth: 1.0, ..ClearDetail::default() }),
+            Record::ClearColor { slot } if slot < MAX_COLOR => {
+                self.out.clears.push(ClearDetail::default())
+            }
+            Record::ClearDepthStencil => self.out.clears.push(ClearDetail {
+                depth: 1.0,
+                ..ClearDetail::default()
+            }),
             Record::BindTexture { slot, handle } => {
                 if let Some(t) = st.texture.get_mut(usize::from(slot)) {
                     *t = handle;

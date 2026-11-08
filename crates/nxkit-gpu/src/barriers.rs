@@ -87,7 +87,10 @@ pub(crate) fn pass_stages(kind: PassKind) -> Stages {
 
 /// What a pass reads and writes.
 pub(crate) fn touch(frame: &Frame, plan: &PassPlan, p: &Pass) -> Touch {
-    let mut t = Touch { sampled: plan.reads_of(p).to_vec(), ..Touch::default() };
+    let mut t = Touch {
+        sampled: plan.reads_of(p).to_vec(),
+        ..Touch::default()
+    };
     t.reads.extend_from_slice(&t.sampled);
     for a in plan.attachments_of(p) {
         t.writes.push(a.tex);
@@ -165,7 +168,10 @@ impl BarrierState {
         let mut out = BarrierPlan::default();
         let mut first = true;
         for p in &plan.passes {
-            if !matches!(p.kind, PassKind::Render | PassKind::Compute | PassKind::Copy) {
+            if !matches!(
+                p.kind,
+                PassKind::Render | PassKind::Compute | PassKind::Copy
+            ) {
                 out.before.push(None);
                 continue;
             }
@@ -252,7 +258,8 @@ impl BarrierState {
     /// Drops the hazards that a barrier after `stages` covers.
     fn cover(&mut self, stages: Stages) {
         let covered = |s: Option<Stages>| s.is_none_or(|s| (s | stages) == stages);
-        self.pending.retain(|_, h| !(covered(h.write) && covered(h.read)));
+        self.pending
+            .retain(|_, h| !(covered(h.write) && covered(h.read)));
         for h in self.pending.values_mut() {
             if covered(h.write) {
                 h.write = None;

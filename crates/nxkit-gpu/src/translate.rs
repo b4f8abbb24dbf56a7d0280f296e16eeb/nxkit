@@ -129,12 +129,20 @@ pub(crate) fn cull(nvn: u32) -> Option<CullMode> {
 
 /// `NVNfrontFace`.
 pub(crate) fn winding(nvn: u32) -> Winding {
-    if nvn == 0 { Winding::Clockwise } else { Winding::CounterClockwise }
+    if nvn == 0 {
+        Winding::Clockwise
+    } else {
+        Winding::CounterClockwise
+    }
 }
 
 /// `NVNpolygonMode`. Metal has fill and lines. Points are drawn as lines.
 pub(crate) fn fill(nvn: u32) -> FillMode {
-    if nvn == 2 { FillMode::Fill } else { FillMode::Lines }
+    if nvn == 2 {
+        FillMode::Fill
+    } else {
+        FillMode::Lines
+    }
 }
 
 fn stencil_face(s: &StencilDetail) -> StencilFace {
@@ -168,7 +176,12 @@ pub(crate) fn depth_stencil(d: &DepthStencilDetail) -> DepthStencilDesc {
 
 /// The colour target of a draw for a target of `format`. Integer formats never blend. `written` is false when the
 /// shader does not write the output, and then the mask is zero.
-pub(crate) fn color_target(format: Format, blend: &BlendDetail, mask: u8, written: bool) -> ColorTarget {
+pub(crate) fn color_target(
+    format: Format,
+    blend: &BlendDetail,
+    mask: u8,
+    written: bool,
+) -> ColorTarget {
     let mut t = ColorTarget::new(format);
     t.write_mask = if written { mask & 0xF } else { 0 };
     if blend.enable && !is_integer(format) {
@@ -278,14 +291,24 @@ fn border(c: [f32; 4]) -> Border {
 
 /// The sampler of a sampler header. The filter values are `NVNminFilter` and `NVNmagFilter`.
 pub(crate) fn sampler(t: &Tsc) -> SamplerDesc {
-    let linear = |v: u8| if v == 1 { Filter::Linear } else { Filter::Nearest };
+    let linear = |v: u8| {
+        if v == 1 {
+            Filter::Linear
+        } else {
+            Filter::Nearest
+        }
+    };
     let mip = match t.min_filter {
         2 | 3 => MipFilter::Nearest,
         4 | 5 => MipFilter::Linear,
         _ => MipFilter::None,
     };
     SamplerDesc {
-        min: if t.min_filter & 1 == 1 { Filter::Linear } else { Filter::Nearest },
+        min: if t.min_filter & 1 == 1 {
+            Filter::Linear
+        } else {
+            Filter::Nearest
+        },
         mag: linear(t.mag_filter),
         mip,
         wrap: [wrap(t.wrap_s), wrap(t.wrap_t), wrap(t.wrap_r)],
@@ -337,12 +360,20 @@ mod tests {
 
     #[test]
     fn integer_targets_do_not_blend() {
-        let b = BlendDetail { enable: true, src_rgb: 5, dst_rgb: 6, ..BlendDetail::default() };
+        let b = BlendDetail {
+            enable: true,
+            src_rgb: 5,
+            dst_rgb: 6,
+            ..BlendDetail::default()
+        };
         let t = color_target(Format::Rgba8Unorm, &b, 0xF, true);
         assert!(t.blend.is_some());
         let t = color_target(Format::Rgba8Uint, &b, 0xF, true);
         assert!(t.blend.is_none());
-        assert_eq!(color_target(Format::Rgba8Unorm, &b, 0xF, false).write_mask, 0);
+        assert_eq!(
+            color_target(Format::Rgba8Unorm, &b, 0xF, false).write_mask,
+            0
+        );
     }
 
     #[test]
@@ -363,8 +394,14 @@ mod tests {
             border: [0.0, 0.0, 0.0, 1.0],
         };
         let s = sampler(&t);
-        assert_eq!((s.min, s.mag, s.mip), (Filter::Linear, Filter::Linear, MipFilter::Linear));
-        assert_eq!(s.wrap, [Wrap::Repeat, Wrap::ClampToEdge, Wrap::ClampToBorder]);
+        assert_eq!(
+            (s.min, s.mag, s.mip),
+            (Filter::Linear, Filter::Linear, MipFilter::Linear)
+        );
+        assert_eq!(
+            s.wrap,
+            [Wrap::Repeat, Wrap::ClampToEdge, Wrap::ClampToBorder]
+        );
         assert_eq!(s.border, Border::OpaqueBlack);
         assert_eq!(s.max_anisotropy, 4);
     }

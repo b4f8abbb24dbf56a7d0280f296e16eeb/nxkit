@@ -124,7 +124,10 @@ impl Walker {
                 if slot < MAX_COLOR {
                     let kind = x.arg >> 8;
                     let c = |i: usize| clear_value(kind, x.word(1 + i));
-                    self.out.clears.push(ClearDetail { color: [c(0), c(1), c(2), c(3)], ..ClearDetail::default() });
+                    self.out.clears.push(ClearDetail {
+                        color: [c(0), c(1), c(2), c(3)],
+                        ..ClearDetail::default()
+                    });
                 }
             }
             ExtCode::ClearDepthStencil => {
@@ -408,11 +411,20 @@ impl Walker {
 fn draw_args(x: &Ext) -> Option<(u32, DrawArgs)> {
     let kind = x.arg;
     if kind == DrawKind::Arrays as u16 {
-        let args = DrawArgs::Arrays { first: x.word(1), count: x.word(2), instances: 1, base_instance: 0 };
+        let args = DrawArgs::Arrays {
+            first: x.word(1),
+            count: x.word(2),
+            instances: 1,
+            base_instance: 0,
+        };
         Some((x.word(0), args))
     } else if kind == DrawKind::ArraysInstanced as u16 {
-        let args =
-            DrawArgs::Arrays { first: x.word(1), count: x.word(2), base_instance: x.word(3), instances: x.word(4) };
+        let args = DrawArgs::Arrays {
+            first: x.word(1),
+            count: x.word(2),
+            base_instance: x.word(3),
+            instances: x.word(4),
+        };
         Some((x.word(0), args))
     } else if kind == DrawKind::Elements as u16 {
         let args = DrawArgs::Indexed {

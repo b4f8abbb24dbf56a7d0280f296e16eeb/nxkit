@@ -458,7 +458,10 @@ impl Backend for GpuBackend {
     fn acquire(&self, _window: u64, _index: u32) {
         let mut pending = locked(&self.pending);
         while pending.len() >= MAX_PENDING {
-            let (guard, timeout) = self.freed.wait_timeout(pending, ACQUIRE_WAIT).unwrap_or_else(PoisonError::into_inner);
+            let (guard, timeout) = self
+                .freed
+                .wait_timeout(pending, ACQUIRE_WAIT)
+                .unwrap_or_else(PoisonError::into_inner);
             pending = guard;
             if timeout.timed_out() {
                 pending.remove(0);
@@ -513,7 +516,10 @@ impl TickSink for GpuBackend {
         };
         let texture = {
             let mut pending = locked(&self.pending);
-            let found = pending.iter().position(|p| p.number == number).map(|i| pending.remove(i).texture);
+            let found = pending
+                .iter()
+                .position(|p| p.number == number)
+                .map(|i| pending.remove(i).texture);
             pending.retain(|p| p.number > number);
             self.freed.notify_all();
             found

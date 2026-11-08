@@ -134,7 +134,11 @@ pub(crate) fn describe(
         shader_read: !memoryless,
         shader_write: exact && !depth_like && !compressed && !memoryless,
         render_target,
-        storage: if memoryless { Storage::Memoryless } else { Storage::Private },
+        storage: if memoryless {
+            Storage::Memoryless
+        } else {
+            Storage::Private
+        },
     };
     Ok((desc, !exact))
 }

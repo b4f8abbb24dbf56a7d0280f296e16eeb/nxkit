@@ -60,7 +60,14 @@ fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut impl Hasher) {
     d.write_masks.hash(h);
     d.depth_stencil.hash(h);
     let r = &d.raster;
-    (r.cull, r.front_face, r.polygon_mode, r.depth_clamp, r.alpha_to_coverage).hash(h);
+    (
+        r.cull,
+        r.front_face,
+        r.polygon_mode,
+        r.depth_clamp,
+        r.alpha_to_coverage,
+    )
+        .hash(h);
     r.depth_bias.map(|b| b.map(f32::to_bits)).hash(h);
     d.topology.hash(h);
     d.attributes.hash(h);
@@ -69,7 +76,11 @@ fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut impl Hasher) {
     d.ubos.hash(h);
     for t in &d.textures {
         t.hash(h);
-        sh.env.handles.get(&t.handle).map(|r| (r.texture, r.sampler)).hash(h);
+        sh.env
+            .handles
+            .get(&t.handle)
+            .map(|r| (r.texture, r.sampler))
+            .hash(h);
     }
 }
 
@@ -132,10 +143,20 @@ impl Icbs {
         }
         let sig = signature(sh, pc, draws);
         if let Some(e) = self.entries.get(&run.handle).filter(|e| e.signature == sig) {
-            return Some(Built { icb: e.icb.clone(), slots: e.slots, skipped: e.skipped.clone(), rebuilt: false });
+            return Some(Built {
+                icb: e.icb.clone(),
+                slots: e.slots,
+                skipped: e.skipped.clone(),
+                rebuilt: false,
+            });
         }
         let e = build(sh, pc, draws, sig)?;
-        let b = Built { icb: e.icb.clone(), slots: e.slots, skipped: e.skipped.clone(), rebuilt: true };
+        let b = Built {
+            icb: e.icb.clone(),
+            slots: e.slots,
+            skipped: e.skipped.clone(),
+            rebuilt: true,
+        };
         self.entries.insert(run.handle, e);
         Some(b)
     }
@@ -156,7 +177,10 @@ fn build(sh: &Shared<'_>, pc: &PassCtx, draws: &[Arc<DrawDetail>], signature: u6
     }
     let desc = IcbDesc {
         max_commands: cmds.len() as u32,
-        inherit: Inherit { cull: true, ..Inherit::NOTHING },
+        inherit: Inherit {
+            cull: true,
+            ..Inherit::NOTHING
+        },
         max_vertex_buffers: 31,
         max_fragment_buffers: 31,
     };
@@ -164,13 +188,26 @@ fn build(sh: &Shared<'_>, pc: &PassCtx, draws: &[Arc<DrawDetail>], signature: u6
     for (slot, c) in cmds.iter().enumerate() {
         icb.encode(slot as u32, c).ok()?;
     }
-    Some(Entry { icb, signature, slots: cmds.len() as u32, skipped })
+    Some(Entry {
+        icb,
+        signature,
+        slots: cmds.len() as u32,
+        skipped,
+    })
 }
 
-fn slot_commands(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, arena: &mut Arena) -> Result<Vec<IcbCommand>, Skip> {
+fn slot_commands(
+    sh: &Shared<'_>,
+    pc: &PassCtx,
+    d: &DrawDetail,
+    arena: &mut Arena,
+) -> Result<Vec<IcbCommand>, Skip> {
     let p = prepare(sh, pc, d, arena, true)?;
     let buffer = |addr: u64| -> Result<IcbBuffer, Skip> {
-        Ok(IcbBuffer { guest: sh.guest.clone(), offset: sh.guest_offset(addr, 1).ok_or(Skip::Buffer)? })
+        Ok(IcbBuffer {
+            guest: sh.guest.clone(),
+            offset: sh.guest_offset(addr, 1).ok_or(Skip::Buffer)?,
+        })
     };
     let data = |addr: u64| (arena.buffer.clone(), arena.offset_of(addr));
     let mut c = vec![IcbCommand::SetPipeline(p.pipeline.clone())];
@@ -209,24 +246,36 @@ fn slot_commands(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, arena: &mut Aren
     c.push(IcbCommand::SetWinding(p.winding));
     c.push(IcbCommand::SetFillMode(p.fill));
     c.push(match p.geom {
-        Geom::Arrays { primitive, first, count, instances, base_instance } => IcbCommand::Draw {
+        Geom::Arrays {
+            primitive,
+            first,
+            count,
+            instances,
+            base_instance,
+        } => IcbCommand::Draw {
             primitive,
             first_vertex: first,
             vertex_count: count,
             instance_count: instances,
             base_instance,
         },
-        Geom::Indexed { primitive, index_type, address, count, instances, base_vertex, base_instance } => {
-            IcbCommand::DrawIndexed {
-                primitive,
-                index_type,
-                indices: buffer(address)?,
-                index_count: count,
-                instance_count: instances,
-                base_vertex,
-                base_instance,
-            }
-        }
+        Geom::Indexed {
+            primitive,
+            index_type,
+            address,
+            count,
+            instances,
+            base_vertex,
+            base_instance,
+        } => IcbCommand::DrawIndexed {
+            primitive,
+            index_type,
+            indices: buffer(address)?,
+            index_count: count,
+            instance_count: instances,
+            base_vertex,
+            base_instance,
+        },
     });
     Ok(c)
 }
