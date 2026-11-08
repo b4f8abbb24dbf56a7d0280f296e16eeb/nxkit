@@ -60,8 +60,10 @@ pub(crate) struct Resolved {
 /// The handles that a frame resolved, and the Metal objects behind them. The command buffers keep the textures alive.
 #[derive(Default)]
 pub(crate) struct Handles {
-    pub(crate) map: HashMap<u64, Resolved>,
+    pub(crate) map: crate::draws::FastMap<u64, Resolved>,
     pub(crate) keep: Vec<Texture>,
+    /// Views of a handle in the texture type that a shader declares, where it differs from the descriptor's.
+    pub(crate) fits: crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
 }
 
 /// A place that takes bytes and returns the GPU address of the copy.
@@ -311,9 +313,13 @@ pub(crate) struct StageInputs<'a> {
 
 /// What the argument buffers need besides the bindings.
 pub(crate) struct Env<'a> {
-    pub(crate) handles: &'a HashMap<u64, Resolved>,
+    pub(crate) handles: &'a crate::draws::FastMap<u64, Resolved>,
+    /// The views of [`Handles::fits`].
+    pub(crate) fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
     pub(crate) pools: (u64, u64),
     pub(crate) default_sampler: u64,
+    /// The support buffer and the zero buffer, from [`Bindless::statics`].
+    pub(crate) statics: (u64, u64),
 }
 
 fn put_u64(buf: &mut [u8], at: usize, v: u64) {
@@ -418,8 +424,13 @@ fn build_args_in(
     for b in &p.binds {
         let at = 8 * b.arg_id as usize;
         let v = match b.kind {
-            BindKind::Cbuf => ubos.iter().find(|(s, _, _)| *s == b.reg).map_or(0, |(_, a, _)| *a),
-            BindKind::Tex => handle_of(b.reg).and_then(|h| env.handles.get(&h)).map_or(0, |r| r.texture),
+            BindKind::Cbuf => ubos.iter().find(|(s, _, _)| *s == b.reg).map_or(env.statics.1, |(_, a, _)| *a),
+            BindKind::Tex => handle_of(b.reg).map_or(0, |h| {
+                b.dim
+                    .and_then(|k| env.fits.get(&(h, k)).copied())
+                    .or_else(|| env.handles.get(&h).map(|r| r.texture))
+                    .unwrap_or(0)
+            }),
             BindKind::Samp | BindKind::SampTex => handle_of(b.reg)
                 .and_then(|h| env.handles.get(&h))
                 .map_or(env.default_sampler, |r| r.sampler),

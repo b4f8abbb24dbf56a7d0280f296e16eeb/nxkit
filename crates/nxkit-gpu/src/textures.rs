@@ -83,20 +83,33 @@ fn scaled_size(v: u32, scale: f32) -> u32 {
 }
 
 /// The Metal description of a record at `scale` (1.0 for an unscaled texture).
-pub(crate) fn describe(rec: &TextureRecord, scale: f32, u: Use) -> Result<(TextureDesc, bool), Skip> {
+pub(crate) fn describe(
+    rec: &TextureRecord,
+    scale: f32,
+    u: Use,
+) -> Result<(TextureDesc, bool), Skip> {
     let d = &rec.desc;
     let mapped = texture_format(d.format).ok_or(Skip::Format)?;
-    let kind = kind_of(d.target).ok_or(Skip::Format)?;
+    // Cube textures are 2D arrays of their faces, so that a shader may read them as a cube, a cube array or a 2D
+    // array: Metal makes a cube array view only of a 2D array.
+    let kind = match kind_of(d.target).ok_or(Skip::Format)? {
+        TextureKind::Cube | TextureKind::CubeArray => TextureKind::D2Array,
+        k => k,
+    };
     let format = mapped.format();
     let info = format_info(d.format).map_err(|_| Skip::Format)?;
-    let depth_like = matches!(info.aspects, Aspects::Depth | Aspects::Stencil | Aspects::DepthStencil);
+    let depth_like = matches!(
+        info.aspects,
+        Aspects::Depth | Aspects::Stencil | Aspects::DepthStencil
+    );
     let (width, height, depth, layers) = match d.target {
         Target::D1 => (d.width, 1, 1, 1),
         Target::D1Array => (d.width, 1, 1, d.height.max(1)),
-        Target::D2 | Target::Rectangle | Target::D2Multisample | Target::Cubemap => (d.width, d.height, 1, 1),
+        Target::D2 | Target::Rectangle | Target::D2Multisample => (d.width, d.height, 1, 1),
+        Target::Cubemap => (d.width, d.height, 1, 6),
         Target::D2Array | Target::D2MultisampleArray => (d.width, d.height, 1, d.depth.max(1)),
         Target::D3 => (d.width, d.height, d.depth.max(1), 1),
-        Target::CubemapArray => (d.width, d.height, 1, (d.depth / 6).max(1)),
+        Target::CubemapArray => (d.width, d.height, 1, (d.depth / 6).max(1) * 6),
         Target::Buffer => return Err(Skip::Format),
     };
     let (width, height) = (scaled_size(width, scale), scaled_size(height, scale));
@@ -290,25 +303,37 @@ impl TextureStore {
     }
 
     /// The Metal texture that a sampler descriptor sees: the texture itself, or a view for the levels, layers and
-    /// format of the descriptor. The channel swizzle of the descriptor has no Metal view equivalent here.
-    pub(crate) fn view(&self, id: TexId, res: &Res, tic: &Tic, stats: &mut EncodeStats) -> Result<Texture, Skip> {
-        if tic.view.swizzle != [2, 3, 4, 5] {
-            stats.swizzle_ignored += 1;
-        }
+    /// format and channel swizzle of the descriptor.
+    pub(crate) fn view(
+        &self,
+        id: TexId,
+        res: &Res,
+        tic: &Tic,
+        stats: &mut EncodeStats,
+    ) -> Result<Texture, Skip> {
+        self.view_as(id, res, tic, None, stats)
+    }
+
+    /// The view of [`TextureStore::view`] with the texture type `forced` instead of the one of the descriptor: the
+    /// type that a shader declares for the binding. A 2D view shows the first layer of the range, a 2D array view the
+    /// whole range, a cube view the first cube and a cube array view the whole cubes of the range.
+    pub(crate) fn view_as(
+        &self,
+        id: TexId,
+        res: &Res,
+        tic: &Tic,
+        forced: Option<TextureKind>,
+        _stats: &mut EncodeStats,
+    ) -> Result<Texture, Skip> {
         let d = res.desc;
-        let levels = if tic.view.levels == 0 { d.mip_levels } else { u32::from(tic.view.levels) };
+        let levels = if tic.view.levels == 0 {
+            d.mip_levels
+        } else {
+            u32::from(tic.view.levels)
+        };
         let first_level = u32::from(tic.view.base_level).min(d.mip_levels - 1);
         let level_count = levels.min(d.mip_levels - first_level).max(1);
-        let cube = matches!(d.kind, TextureKind::Cube | TextureKind::CubeArray);
-        // The layer range of a cube view is not mapped. The view shows all cubes.
-        let slices = if cube { d.slice_count() / 6 } else { d.slice_count() };
-        let (first_slice, slice_count) = if cube {
-            (0, slices)
-        } else {
-            let first = u32::from(tic.view.base_layer).min(slices - 1);
-            let count = if tic.view.layers == 0 { slices } else { u32::from(tic.view.layers) };
-            (first, count.min(slices - first).max(1))
-        };
+        let slices = d.slice_count();
         let format = match tic.view.format.and_then(texture_format) {
             Some(Mapped::Exact(f))
                 if f.block_bytes() == d.format.block_bytes()
@@ -319,33 +344,67 @@ impl TextureStore {
             }
             _ => d.format,
         };
-        // The shader declares a 2D or a 2D array texture by the target of the descriptor. A one layer view of an array
-        // is 2D, and a texture without layers can be an array of one.
-        let mut kind = d.kind;
-        let mut slice_count = slice_count;
-        if matches!(d.kind, TextureKind::D2 | TextureKind::D2Array) {
-            match kind_of(tic.view.target.unwrap_or(tic.target)) {
-                Some(TextureKind::D2) => {
-                    kind = TextureKind::D2;
-                    slice_count = 1;
-                }
-                Some(TextureKind::D2Array) => kind = TextureKind::D2Array,
-                _ => {}
-            }
+        let wanted = forced.or_else(|| kind_of(tic.view.target.unwrap_or(tic.target)));
+        let mut kind = match (d.kind, wanted) {
+            (TextureKind::D3, _) => TextureKind::D3,
+            (_, Some(TextureKind::D3)) | (_, None) => d.kind,
+            (_, Some(k)) => k,
+        };
+        if matches!(kind, TextureKind::Cube | TextureKind::CubeArray) && slices < 6 {
+            kind = TextureKind::D2Array;
         }
+        if kind == TextureKind::Cube && crate::knob("cubearr") && slices >= 6 {
+            kind = TextureKind::CubeArray;
+        }
+        // A cube view counts its layers in cubes, as the hardware's texture header does. `view_swizzled` takes the
+        // first face of a cube and the first cube of a cube array.
+        let base = u32::from(tic.view.base_layer);
+        let count = u32::from(tic.view.layers);
+        let (first_slice, slice_count) = match kind {
+            TextureKind::D3 => (0, 1),
+            TextureKind::D2 => (base.min(slices - 1), 1),
+            TextureKind::D2Array => {
+                let first = base.min(slices - 1);
+                let n = if count == 0 { slices - first } else { count.min(slices - first) };
+                (first, n.max(1))
+            }
+            TextureKind::Cube => {
+                let cubes = slices / 6;
+                (base.min(cubes - 1) * 6, 1)
+            }
+            TextureKind::CubeArray => {
+                let cubes = slices / 6;
+                let first = base.min(cubes - 1);
+                let n = if count == 0 { cubes - first } else { count.min(cubes - first) };
+                (first, n.max(1))
+            }
+        };
+        let full = match kind {
+            TextureKind::Cube => slice_count == 1 && slices == 6,
+            TextureKind::CubeArray => slice_count * 6 == slices,
+            _ => slice_count == slices,
+        };
         let identity = first_level == 0
             && level_count == d.mip_levels
             && first_slice == 0
-            && slice_count == slices
+            && full
             && format == d.format
-            && kind == d.kind;
+            && kind == d.kind
+            && tic.view.swizzle == [2, 3, 4, 5];
         if identity || d.storage == Storage::Memoryless {
             return Ok(res.tex.clone());
         }
         let key: ViewKey = (
-            id,
             res.generation,
-            [first_level, level_count, first_slice, slice_count, format_key(format), kind as u32],
+            [
+                first_level,
+                level_count,
+                first_slice,
+                slice_count,
+                format_key(format),
+                kind as u32,
+                u32::from_le_bytes(tic.view.swizzle),
+            ],
         );
         let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(v) = views.get(&key) {
@@ -353,8 +412,13 @@ impl TextureStore {
         }
         let v = res
             .tex
-            .view(&ViewDesc { format, kind, first_level, level_count, first_slice, slice_count })
-            .map_err(|_| Skip::Texture)?;
+            .view_swizzled(&ViewDesc { format, kind, first_level, level_count, first_slice, slice_count }, tic.view.swizzle)
+            .map_err(|e| {
+                crate::tex_skip(format_args!(
+                    "view {id:?} {:?} -> {format:?} {kind:?} l{first_level}+{level_count} s{first_slice}+{slice_count}: {e:?}",
+                    d
+                ))
+            })?;
         views.insert(key, v.clone());
         Ok(v)
     }

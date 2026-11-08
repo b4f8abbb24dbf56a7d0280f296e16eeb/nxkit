@@ -41,6 +41,22 @@ pub(crate) struct Bind {
     pub(crate) kind: BindKind,
     /// The slot, from `reg` of the reflection. A null `reg` gives 0.
     pub(crate) reg: u32,
+    /// The texture type that the shader declares for a `tex` member, from its `msl_type`.
+    pub(crate) dim: Option<nxkit_metal::TextureKind>,
+}
+
+/// The texture type of an MSL argument type such as `texture2d_array<float>`.
+fn declared_dim(msl_type: &str) -> Option<nxkit_metal::TextureKind> {
+    use nxkit_metal::TextureKind as K;
+    let base = msl_type.split('<').next()?.trim();
+    Some(match base {
+        "texture2d" | "depth2d" | "texture1d" => K::D2,
+        "texture2d_array" | "depth2d_array" | "texture1d_array" => K::D2Array,
+        "texturecube" | "depthcube" => K::Cube,
+        "texturecube_array" | "depthcube_array" => K::CubeArray,
+        "texture3d" => K::D3,
+        _ => return None,
+    })
 }
 
 /// A shader function with its bindings.
@@ -166,8 +182,18 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         let arg_id = u32::try_from(arg_id).map_err(|_| Skip::Program)?;
         let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
         let reg = u32::try_from(reg).map_err(|_| Skip::Program)?;
-        arg_bytes = arg_bytes.max(arg_id.checked_add(1).ok_or(Skip::Program)?.saturating_mul(8));
-        binds.push(Bind { arg_id, kind, reg });
+        arg_bytes = arg_bytes.max(
+            arg_id
+                .checked_add(1)
+                .ok_or(Skip::Program)?
+                .saturating_mul(8),
+        );
+        let dim = if kind == BindKind::Tex {
+            b.get("msl_type").and_then(Json::as_str).and_then(declared_dim)
+        } else {
+            None
+        };
+        binds.push(Bind { arg_id, kind, reg, dim });
     }
     let inputs = if vertex {
         json.get("vertex_inputs")

@@ -71,6 +71,9 @@ pub struct Gpu {
     ctx: Context,
     guest: Arc<GuestMemory>,
     programs: Programs,
+    /// The texture types that each shader declares for its texture bindings, by program key (fragment and compute
+    /// first, vertex second), for [`Gpu::fit_handles`].
+    fit_decl: [FastMap<String, Vec<(u32, nxkit_metal::TextureKind)>>; 2],
     pipelines: Pipelines,
     bindless: Bindless,
     store: TextureStore,
@@ -161,6 +164,35 @@ fn run_chunk_inner(
     (stats, copied)
 }
 
+/// The nanoseconds from `from` to `to`.
+fn nanos(from: Instant, to: Instant) -> u64 {
+    u64::try_from(to.duration_since(from).as_nanos()).unwrap_or(u64::MAX)
+}
+
+/// The texture types that the shader of `key` declares, as (slot, type). The list is cached by key and borrowed.
+fn declared_views<'a>(
+    decl: &'a mut [FastMap<String, Vec<(u32, nxkit_metal::TextureKind)>>; 2],
+    programs: &crate::programs::Programs,
+    key: &str,
+    vertex: bool,
+) -> &'a [(u32, nxkit_metal::TextureKind)] {
+    let map = &mut decl[usize::from(vertex)];
+    if !map.contains_key(key) {
+        let v = programs
+            .stage(key, vertex)
+            .map(|p| {
+                p.binds
+                    .iter()
+                    .filter(|b| b.kind == crate::programs::BindKind::Tex)
+                    .filter_map(|b| b.dim.map(|k| (b.reg, k)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        map.insert(key.to_owned(), v);
+    }
+    map.get(key).map_or(&[][..], Vec::as_slice)
+}
+
 impl Gpu {
     /// Makes the encoder with the default configuration. The shader directory is `shaders` in the working directory.
     pub fn new(ctx: &Context, guest: Arc<GuestMemory>) -> Result<Self> {
@@ -176,6 +208,7 @@ impl Gpu {
             ctx: ctx.clone(),
             guest,
             programs: Programs::new(ctx, config.shader_dir),
+            fit_decl: [FastMap::default(), FastMap::default()],
             pipelines,
             bindless: Bindless::new(ctx)?,
             store: TextureStore::new(ctx),
@@ -268,7 +301,9 @@ impl Gpu {
             .iter()
             .flat_map(|d| d.textures.iter())
             .chain(detail.dispatches.iter().flat_map(|d| d.textures.iter()))
-            .map(|t| t.handle);
+            .map(|t| t.handle)
+            // Handle 0 is a slot the game left empty. The binding reads it as the null texture.
+            .filter(|&h| h != 0);
         for handle in wanted {
             if out.map.contains_key(&handle) {
                 continue;
@@ -285,19 +320,80 @@ impl Gpu {
         out
     }
 
+    /// Makes the views that the shaders of the frame declare for their texture bindings when they differ from the
+    /// view of the descriptor (a cube read as a cube array, a 2D array read as 2D). Metal reads a texture of another
+    /// type than the argument declares as one fixed value.
+    fn fit_handles(
+        &mut self,
+        view: &dyn EncodeView,
+        detail: &FrameDetail,
+        textures: &FastMap<TexId, Res>,
+        handles: &mut Handles,
+        stats: &mut EncodeStats,
+    ) {
+        let mut needed: FastSet<(u64, nxkit_metal::TextureKind)> = FastSet::default();
+        let stages = detail
+            .draws
+            .iter()
+            .flat_map(|d| {
+                [
+                    (Some(&*d.program.vertex), true, crate::detail::Stage::Vertex, &d.textures),
+                    (d.program.fragment.as_deref(), false, crate::detail::Stage::Fragment, &d.textures),
+                ]
+            })
+            .chain(
+                detail
+                    .dispatches
+                    .iter()
+                    .map(|d| (Some(d.program.as_str()), false, crate::detail::Stage::Compute, &d.textures)),
+            );
+        for (key, vertex, stage, binds) in stages {
+            let Some(key) = key else { continue };
+            if binds.is_empty() {
+                continue;
+            }
+            for &(reg, k) in declared_views(&mut self.fit_decl, &self.programs, key, vertex) {
+                let Some(h) = binds.iter().find(|t| t.stage == stage && t.slot == reg).map(|t| t.handle) else {
+                    continue;
+                };
+                if h != 0 && handles.map.contains_key(&h) {
+                    needed.insert((h, k));
+                }
+            }
+        }
+        for (h, k) in needed {
+            let Ok((slot, _)) = view.resolve(h) else { continue };
+            let Some(res) = textures.get(&slot.texture) else { continue };
+            let Ok(base) = self.store.view(slot.texture, res, &slot.header, stats) else { continue };
+            if base.desc().kind == k {
+                continue;
+            }
+            if let Ok(t) = self.store.view_as(slot.texture, res, &slot.header, Some(k), stats) {
+                if crate::diag("fit") {
+                    eprintln!("DIAG fit handle {h:#x} {:?} {:?} -> {k:?}", slot.texture, base.desc().kind);
+                }
+                handles.fits.insert((h, k), t.gpu_resource_id());
+                handles.keep.push(t);
+            }
+        }
+    }
+
     fn resolve_one(
         &mut self,
-        table: &ResourceTable,
-        descriptors: &Descriptors,
+        view: &dyn EncodeView,
         handle: u64,
         scale: f32,
-        textures: &mut HashMap<TexId, Res>,
+        textures: &mut FastMap<TexId, Res>,
         stats: &mut EncodeStats,
     ) -> std::result::Result<(Resolved, Texture), Skip> {
-        let (slot, tsc) = descriptors.resolve(handle).map_err(|_| Skip::Texture)?;
+        let (slot, tsc) = view
+            .resolve(handle)
+            .map_err(|e| crate::tex_skip(format_args!("handle {handle:#x}: {e:?}")))?;
         let id = slot.texture;
         if !textures.contains_key(&id) {
-            let rec = table.get(id).map_err(|_| Skip::Texture)?;
+            let rec = view.record(id).map_err(|e| {
+                crate::tex_skip(format_args!("handle {handle:#x} tex {id:?}: {e:?}"))
+            })?;
             let res = self.store.ensure(rec, scale, Use::default(), stats)?;
             textures.insert(id, res);
         }
@@ -346,10 +442,16 @@ impl Gpu {
                     }
                     Err(why) => stats.skip(why),
                 },
-                Err(_) => stats.skip(Skip::Texture),
+                Err(e) => stats.skip(crate::tex_skip(format_args!("use {id:?}: {e:?}"))),
             }
         }
-        let handles = self.resolve_handles(table, descriptors, detail, scale, &mut textures, &mut stats);
+        let t_resolve = Instant::now();
+        let mut handles =
+            self.resolve_handles(view, detail, scale, &mut textures, &mut stats);
+        let t_fit = Instant::now();
+        self.fit_handles(view, detail, &textures, &mut handles, &mut stats);
+        stats.resolve_ns = nanos(t_resolve, t_fit);
+        stats.fit_ns = nanos(t_fit, Instant::now());
         drop(self.store.take_retired());
         self.store.trim_views();
 
@@ -518,8 +620,10 @@ impl Gpu {
             pipelines: &self.pipelines,
             env: Env {
                 handles: &handles.map,
+                fits: &handles.fits,
                 pools: self.bindless.pools(),
                 default_sampler: self.bindless.default_sampler_id(),
+                statics: self.bindless.statics(),
             },
             guest: &self.guest,
             icbs: &self.icbs,

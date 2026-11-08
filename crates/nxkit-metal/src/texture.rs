@@ -7,7 +7,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSRange;
 use objc2_metal::{
     MTLDevice, MTLOrigin, MTLRegion, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
-    MTLTextureType, MTLTextureUsage,
+    MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
 };
 
 use crate::device::Context;
@@ -376,6 +376,14 @@ impl Texture {
 
     /// Makes a view of this texture. The view keeps the texture alive and shares its residency.
     pub fn view(&self, v: &ViewDesc) -> Result<Texture> {
+        self.view_swizzled(v, [2, 3, 4, 5])
+    }
+
+    /// Makes a view with channel selectors: 0 zero, 1 one, 2 red, 3 green, 4 blue and 5 alpha.
+    pub fn view_swizzled(&self, v: &ViewDesc, channels: [u8; 4]) -> Result<Texture> {
+        if channels.iter().any(|c| *c > 5) {
+            return Err(MetalError::Invalid("invalid texture channel selector"));
+        }
         let d = self.inner.desc;
         if !d.allow_views && v.format != d.format {
             return Err(MetalError::Invalid(
@@ -423,7 +431,7 @@ impl Texture {
         let raw = unsafe {
             self.inner
                 .raw
-                .newTextureViewWithPixelFormat_textureType_levels_slices(
+                .newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
                     v.format.to_mtl(),
                     v.kind.to_mtl(),
                     NSRange::new(v.first_level as usize, v.level_count as usize),
@@ -435,6 +443,12 @@ impl Texture {
                             slices as usize
                         },
                     ),
+                    MTLTextureSwizzleChannels {
+                        red: MTLTextureSwizzle(channels[0]),
+                        green: MTLTextureSwizzle(channels[1]),
+                        blue: MTLTextureSwizzle(channels[2]),
+                        alpha: MTLTextureSwizzle(channels[3]),
+                    },
                 )
         }
         .ok_or_else(|| create("texture view", "newTextureView returned nil"))?;

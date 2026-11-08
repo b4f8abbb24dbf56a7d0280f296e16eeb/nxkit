@@ -51,6 +51,171 @@ kernel void add_words(constant P& p [[buffer(0)]], uint i [[thread_position_in_g
 }
 "#;
 
+#[test]
+fn scratch_growth_preserves_live_gpu_addresses_and_reuses_chunks() {
+    let Some(ctx) = ctx() else { return };
+    let scratch = nxkit_metal::Scratch::new(&ctx, 256).unwrap();
+    let a = scratch.push(&[1; 256]).unwrap();
+    let b = scratch.push(&[2; 512]).unwrap();
+    let c = scratch.push(&[3; 256]).unwrap();
+    let g = guest(&ctx, MIB);
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let lib = ShaderLibrary::from_source(&ctx, "add", ADD_MSL).unwrap();
+    let pipe = cache.compute(10, &lib, "add_words").unwrap();
+    let table = ArgumentTable::new(&ctx, 1, 0).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    for (i, src) in [a, b, c].iter().enumerate() {
+        let dst = g.gpu_address_of_offset(i as u64 * 256, 256).unwrap();
+        let args = frame.scratch().push(&params(*src, dst, 64, 0)).unwrap();
+        let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
+        pass.encode(&ComputeCommand::SetPipeline(pipe.clone()))
+            .unwrap();
+        pass.encode(&ComputeCommand::SetBuffer {
+            index: 0,
+            gpu_addr: args,
+        })
+        .unwrap();
+        pass.encode(&ComputeCommand::DispatchThreads {
+            grid: [64, 1, 1],
+            threads: [64, 1, 1],
+        })
+        .unwrap();
+        pass.end();
+    }
+    ctx.commit_residency();
+    frame.submit().unwrap().wait().unwrap();
+    let mut out = [0; 768];
+    g.read(0, &mut out).unwrap();
+    assert_eq!(&out[..256], &[1; 256]);
+    assert_eq!(&out[256..512], &[2; 256]);
+    assert_eq!(&out[512..], &[3; 256]);
+    scratch.reset();
+    assert_eq!(scratch.push(&[4; 256]).unwrap(), a);
+    assert_eq!(scratch.push(&[5; 512]).unwrap(), b);
+    assert_eq!(scratch.push(&[6; 256]).unwrap(), c);
+}
+
+#[test]
+fn constant_vertex_attribute_compiles_with_zero_step_rate() {
+    use nxkit_metal::{StepFunction, VertexAttribute, VertexFormat, VertexLayout};
+    let Some(ctx) = ctx() else { return };
+    let lib = ShaderLibrary::from_source(
+        &ctx,
+        "constant_attribute",
+        r#"
+        #include <metal_stdlib>
+        using namespace metal;
+        struct In { float4 value [[attribute(7)]]; };
+        vertex float4 vs(In in [[stage_in]], uint id [[vertex_id]]) {
+            return float4(float(id), 0, 0, 1) + in.value;
+        }
+    "#,
+    )
+    .unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let mut desc = RenderPipelineDesc::new((&lib, "vs"), None, &[]);
+    desc.vertex_layout.attributes.push((
+        7,
+        VertexAttribute {
+            format: VertexFormat::Float4,
+            offset: 0,
+            buffer: 30,
+        },
+    ));
+    desc.vertex_layout.layouts.push(VertexLayout {
+        buffer: 30,
+        stride: 16,
+        step: StepFunction::Constant,
+        step_rate: 0,
+    });
+    cache.render(17, &desc).unwrap();
+}
+
+#[test]
+fn single_channel_font_view_swizzles_to_white_with_red_as_alpha() {
+    use nxkit_metal::{DataBuffer, TextureKind, ViewDesc};
+    let Some(ctx) = ctx() else { return };
+    let mut desc = TextureDesc::compute_2d(1, 1, Format::R8Unorm);
+    desc.allow_views = true;
+    let tex = Texture::new(&ctx, desc).unwrap();
+    let input = Arc::new(DataBuffer::new(&ctx, 1).unwrap());
+    input.write(0, &[128]).unwrap();
+    let view = tex
+        .view_swizzled(
+            &ViewDesc {
+                format: Format::R8Unorm,
+                kind: TextureKind::D2,
+                first_level: 0,
+                level_count: 1,
+                first_slice: 0,
+                slice_count: 1,
+            },
+            [1, 1, 1, 2],
+        )
+        .unwrap();
+    let output = Arc::new(DataBuffer::new(&ctx, 16).unwrap());
+    let lib = ShaderLibrary::from_source(&ctx, "font_swizzle", r#"
+        #include <metal_stdlib>
+        using namespace metal;
+        kernel void sample_font(device float4* out [[buffer(0)]], texture2d<float> tex [[texture(0)]]) {
+            constexpr sampler s(coord::normalized, filter::nearest);
+            out[0] = tex.sample(s, float2(0.5));
+        }
+    "#).unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let pipeline = cache.compute(99, &lib, "sample_font").unwrap();
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    {
+        let mut cp = frame.commands().begin_compute_pass(&table).unwrap();
+        cp.encode(&ComputeCommand::CopyBufferToTexture {
+            buffer: input,
+            offset: 0,
+            bytes_per_row: 1,
+            texture: tex,
+            region: nxkit_metal::TextureRegion::whole(0, 0, [1; 3]),
+        })
+        .unwrap();
+        cp.encode(&ComputeCommand::Depend(
+            nxkit_metal::Dependency::within_pass(
+                nxkit_metal::Use::CopyWrite,
+                nxkit_metal::Use::ComputeRead,
+            ),
+        ))
+        .unwrap();
+        cp.encode(&ComputeCommand::SetPipeline(pipeline)).unwrap();
+        cp.encode(&ComputeCommand::SetBuffer {
+            index: 0,
+            gpu_addr: output.gpu_address(),
+        })
+        .unwrap();
+        cp.encode(&ComputeCommand::SetTexture {
+            index: 0,
+            texture: view,
+        })
+        .unwrap();
+        cp.encode(&ComputeCommand::DispatchThreads {
+            grid: [1; 3],
+            threads: [1; 3],
+        })
+        .unwrap();
+        cp.retain(output.clone());
+        cp.end();
+    }
+    ctx.commit_residency();
+    frame.submit().unwrap().wait().unwrap();
+    let mut bytes = [0; 16];
+    output.read(0, &mut bytes).unwrap();
+    let rgba: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
+    assert_eq!(&rgba[..3], &[1.0; 3]);
+    assert!((rgba[3] - 128.0 / 255.0).abs() < 0.0001);
+}
+
 fn params(src: u64, dst: u64, count: u32, add: u32) -> Vec<u8> {
     let mut b = Vec::new();
     b.extend(src.to_le_bytes());
