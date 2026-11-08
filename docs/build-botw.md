@@ -19,7 +19,7 @@ The build needs three kinds of files. All of them are NSP files.
 | DLC The Master Trials | `[01007EF00011F001]` | no |
 | DLC The Champions' Ballad | `[01007EF00011F002]` | no |
 
-The build finds each file by the title ID in its name and by the content of the file. Keep the tags in square brackets in the names. The text around the tags does not matter. These are the names of the files in `/Volumes/NX/games/Zelda Breath of the Wild [01007EF00011E000]/`:
+The build finds each file by the title ID in its name and by the content of the file. Keep the tags in square brackets in the names. The text around the tags does not matter. These are the names of the files in `<games>/Zelda Breath of the Wild [01007EF00011E000]/`:
 
 ```text
 The Legend of Zelda Breath of the Wild [01007EF00011E000][v0] (13.48 GB).nsp
@@ -30,7 +30,7 @@ The Legend of Zelda Breath of the Wild [DLC The Champions Ballad] [01007EF00011F
 
 Put the files you want in one folder. The build reads every NSP in that folder. The title module of Breath of the Wild is made for the update `v1114112`. If the folder has another update, the build does not use it and says so. If the folder has no update `v1114112`, the build stops.
 
-The keys file is `/Volumes/NX/keys/prod.keys`.
+The keys file is `<keys>/prod.keys`.
 
 ## Steps
 
@@ -46,18 +46,18 @@ The keys file is `/Volumes/NX/keys/prod.keys`.
 
    ```sh
    target/release/nxb build --dry-run \
-     "/Volumes/NX/games/Zelda Breath of the Wild [01007EF00011E000]" \
-     -k /Volumes/NX/keys/prod.keys --platform mac
+     "<games>/Zelda Breath of the Wild [01007EF00011E000]" \
+     -k <keys>/prod.keys --platform mac
    ```
 
    The output lists the base game, the update and the DLC it found, the paths and the seven stages. Check that each file is there.
 
-3. Run the build. Give the output and the work folder on a disk with enough free space, so that nothing is written to `/Volumes/NX`. The work folder takes many GB:
+3. Run the build. Give the output and the work folder on a disk with enough free space, so that nothing is written to the disk with the game files. The work folder takes many GB:
 
    ```sh
    target/release/nxb build \
-     "/Volumes/NX/games/Zelda Breath of the Wild [01007EF00011E000]" \
-     -k /Volumes/NX/keys/prod.keys --platform mac \
+     "<games>/Zelda Breath of the Wild [01007EF00011E000]" \
+     -k <keys>/prod.keys --platform mac \
      -o "$HOME/Games/Breath of the Wild.app" \
      --work-dir "$HOME/Games/botw-work"
    ```

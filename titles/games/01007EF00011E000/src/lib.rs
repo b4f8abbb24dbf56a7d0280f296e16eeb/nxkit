@@ -22,8 +22,8 @@
 
 use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks,
-    Service, Settings, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime,
+    RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -183,7 +183,7 @@ impl BuildHooks for Botw {
 }
 
 const THREAD_NOTE: &str = "the thread names and priorities are guesses from the engine's usual layout and are not \
-                           read from the game. Checked on 2026-11-07 and nothing found: /Volumes/NX holds NSPs and no \
+                           read from the game. Checked on 2026-11-07 and nothing found: the game folder holds NSPs and no \
                            extracted main NSO, and nxnative logs and notes name no BotW thread (only that the main thread \
                            and two workers on cores 1 and 2 poll one job queue). A thread dump of a run (nxkit-hos \
                            `dump_stats`) or the strings of the extracted main NSO checks them.";
@@ -338,6 +338,10 @@ mod tests {
         assert_eq!(s.modules.len(), 3);
         assert!(s.modules.iter().all(|(_, id)| id.len() == 32));
         assert!(s.nvn_functions.evidence.is_checked());
-        assert!(BOTW.rewrite_rules().unwrap().contains("scope = \"01007EF00011E000\""));
+        assert!(
+            BOTW.rewrite_rules()
+                .unwrap()
+                .contains("scope = \"01007EF00011E000\"")
+        );
     }
 }
