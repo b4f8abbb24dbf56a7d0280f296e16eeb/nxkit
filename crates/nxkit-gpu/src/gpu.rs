@@ -832,10 +832,21 @@ impl Gpu {
             .iter()
             .map(|(id, res)| (*id, res.barrier_id))
             .collect();
-        let t_barrier = Instant::now();
-        let barrier_plan = self.barriers.plan(frame, plan, &aliases);
-        stats.barrier_ns = nanos(t_barrier, Instant::now());
         let ords = ordinals(frame);
+        let t_barrier = Instant::now();
+        let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
+        let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples);
+        stats.barrier_ns = nanos(t_barrier, Instant::now());
+        {
+            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if crate::diag("barr") && N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 120 == 0 {
+                let d = barrier_plan.distance;
+                eprintln!(
+                    "DIAG barr distance to the work waited for: earlier frame {} | 1 {} | 2 {} | 3-5 {} | more {} (of {} barriers)",
+                    d[0], d[1], d[2], d[3], d[4], barrier_plan.emitted
+                );
+            }
+        }
         let run_at: FastMap<u32, RecordingRun> =
             detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
         // Every uniform snapshot of the frame goes to the scratch memory once, here on one thread. The chunks then only
@@ -1091,4 +1102,32 @@ struct ChunkTiming {
 thread_local! {
     /// The chunks of the last encode on this thread, for `NXKIT_DIAG=hitch`.
     static CHUNKS: std::cell::RefCell<Vec<ChunkTiming>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// For each pass, whether one of its draws binds a texture in the vertex stage. Only such a render pass has to hold its
+/// vertex stage until an earlier pass wrote what it samples; the others let their vertex work overlap the fragment work
+/// before them.
+fn vertex_sampling_passes(
+    frame: &Frame,
+    plan: &PassPlan,
+    detail: &FrameDetail,
+    ords: &[crate::draws::Ordinal],
+) -> Vec<bool> {
+    plan.passes
+        .iter()
+        .map(|p| {
+            if p.kind != nxkit_nvn::passes::PassKind::Render {
+                return false;
+            }
+            let first = ords.get(p.cmds.start as usize).map_or(0, |o| o.draw) as usize;
+            let n = p
+                .cmds
+                .clone()
+                .filter(|i| matches!(frame.cmds.get(*i as usize), Some(nxkit_nvn::frame::Cmd::Draw { .. })))
+                .count();
+            detail.draws.get(first..first + n).is_none_or(|draws| {
+                draws.iter().any(|d| d.textures.iter().any(|t| t.stage == crate::detail::Stage::Vertex))
+            })
+        })
+        .collect()
 }

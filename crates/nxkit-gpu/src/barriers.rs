@@ -67,12 +67,51 @@ mod tests {
         let mut state = BarrierState::default();
         state.seed(TexId(1), Stages::FRAGMENT);
         let aliases: FastMap<TexId, TexId> = [(TexId(2), TexId(1))].into_iter().collect();
-        let barriers = state.plan(&frame, &plan, &aliases);
+        let barriers = state.plan(&frame, &plan, &aliases, &[]);
         assert_eq!(barriers.emitted, 1);
         let dep = barriers.before[0].unwrap();
         assert_eq!(dep.after, Stages::FRAGMENT);
         assert_eq!(dep.before, Stages::DISPATCH);
         assert_eq!(dep.visibility, Visibility::Device);
+    }
+
+    #[test]
+    fn a_render_pass_holds_its_vertex_stage_only_when_a_vertex_shader_samples() {
+        let mut rec = nxkit_nvn::frame::CmdStream::new();
+        let mut rt = nxkit_nvn::frame::RtSet::default();
+        rt.color[0] = Some(TexId(1));
+        rec.cmds.push(Cmd::SetRenderTargets(rt));
+        let reads = rec.push_list(&[TexId(0)]);
+        rec.cmds.push(Cmd::Draw { state: nxkit_nvn::frame::DrawState { color_write: 1, ..Default::default() }, reads });
+        let mut frame = Frame::default();
+        frame.append(&rec);
+        let mut table = ResourceTable::new();
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: nxkit_nvn::layout::Target::D2,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 4,
+            height: 4,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
+        };
+        for i in 0..2 {
+            table.create(desc, nxkit_nvn::space::GpuAddr::new(0x10_0000 + i * 0x1000).unwrap()).unwrap();
+        }
+        let mut plan = PassPlan::default();
+        Analyser::new().analyse(&frame, &table, &mut plan).unwrap();
+        let render = plan.passes.iter().position(|p| p.kind == PassKind::Render).unwrap();
+        for (vertex, want) in [(false, Stages::FRAGMENT), (true, Stages::VERTEX | Stages::FRAGMENT)] {
+            let mut state = BarrierState::default();
+            state.seed(TexId(0), Stages::FRAGMENT);
+            let mut vs = vec![false; plan.passes.len()];
+            vs[render] = vertex;
+            let barriers = state.plan(&frame, &plan, &FastMap::default(), &vs);
+            assert_eq!(barriers.before[render].unwrap().before, want);
+        }
     }
 }
 
@@ -116,6 +155,8 @@ pub(crate) fn touch(frame: &Frame, plan: &PassPlan, p: &Pass) -> Touch {
 struct Hazard {
     write: Option<Stages>,
     read: Option<Stages>,
+    /// The index of the last pass of this frame that wrote or read the texture, for `NXKIT_DIAG=barr`.
+    last: Option<usize>,
 }
 
 fn join(a: Option<Stages>, b: Stages) -> Option<Stages> {
@@ -137,6 +178,10 @@ pub(crate) struct BarrierPlan {
     pub(crate) emitted: u32,
     /// Boundaries between encoded passes without a barrier.
     pub(crate) avoided: u32,
+    /// With `NXKIT_DIAG=barr`: the barriers by the distance in passes to the nearest pass whose work they wait for
+    /// (unknown or an earlier frame, 1, 2, 3 to 5, more). Only a barrier with independent passes in between could let
+    /// them overlap with finer dependencies.
+    pub(crate) distance: [u32; 5],
 }
 
 impl BarrierState {
@@ -164,10 +209,11 @@ impl BarrierState {
         frame: &Frame,
         plan: &PassPlan,
         aliases: &FastMap<TexId, TexId>,
+        vertex_samples: &[bool],
     ) -> BarrierPlan {
         let mut out = BarrierPlan::default();
         let mut first = true;
-        for p in &plan.passes {
+        for (index, p) in plan.passes.iter().enumerate() {
             if !matches!(
                 p.kind,
                 PassKind::Render | PassKind::Compute | PassKind::Copy
@@ -184,13 +230,28 @@ impl BarrierState {
                 mine
             };
             let mut writes_involved = false;
+            let mut nearest: Option<usize> = None;
+            let mut note = |h: &Hazard| {
+                if let Some(l) = h.last {
+                    nearest = Some(nearest.map_or(l, |n: usize| n.max(l)));
+                }
+            };
             for id in &t.reads {
                 let sampled = t.sampled.contains(id);
                 let id = aliases.get(id).unwrap_or(id);
+                if let Some(h) = self.pending.get(id).filter(|h| h.write.is_some()) {
+                    note(h);
+                }
                 if let Some(w) = self.pending.get(id).and_then(|h| h.write) {
                     after = join(after, w);
                     writes_involved = true;
-                    if sampled {
+                    // A sampled texture holds the vertex stage too only when a vertex shader of the pass samples.
+                    // Holding it always kept the vertex work of every render pass from overlapping the fragment
+                    // work before it.
+                    let vertex = p.kind != PassKind::Render
+                        || crate::knob("vsbar")
+                        || vertex_samples.get(index).copied().unwrap_or(true);
+                    if sampled && vertex {
                         before = before | mine;
                     }
                 }
@@ -198,6 +259,9 @@ impl BarrierState {
             for id in &t.writes {
                 let id = aliases.get(id).unwrap_or(id);
                 if let Some(h) = self.pending.get(id) {
+                    if h.write.is_some() || h.read.is_some() {
+                        note(h);
+                    }
                     for s in [h.write, h.read].into_iter().flatten() {
                         after = join(after, s);
                     }
@@ -229,6 +293,17 @@ impl BarrierState {
             } else {
                 dep
             };
+            if dep.is_some() && crate::diag("barr") {
+                let d = nearest.map_or(0, |n| index.saturating_sub(n));
+                let bucket = match d {
+                    0 => 0,
+                    1 => 1,
+                    2 => 2,
+                    3..=5 => 3,
+                    _ => 4,
+                };
+                out.distance[bucket] += 1;
+            }
             match dep {
                 Some(_) => out.emitted += 1,
                 None if !first => out.avoided += 1,
@@ -241,6 +316,7 @@ impl BarrierState {
             for id in &t.writes {
                 let id = aliases.get(id).unwrap_or(id);
                 let h = self.pending.entry(*id).or_default();
+                h.last = Some(index);
                 h.write = join(
                     h.write,
                     if p.kind == PassKind::Render {
@@ -253,6 +329,7 @@ impl BarrierState {
             for id in &t.reads {
                 let id = aliases.get(id).unwrap_or(id);
                 let h = self.pending.entry(*id).or_default();
+                h.last = Some(index);
                 h.read = join(h.read, mine);
             }
             out.before.push(dep);

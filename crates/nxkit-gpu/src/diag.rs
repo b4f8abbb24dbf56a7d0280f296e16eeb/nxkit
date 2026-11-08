@@ -64,6 +64,9 @@ const KNOBS: &[&str] = &[
     "overlap",
     // With the overlap on, the uniform buffers are not copied. Wrong on purpose: it measures what the copies cost.
     "nosnap",
+    // A render pass that samples what an earlier pass wrote holds its vertex stage too, also when no vertex shader of
+    // it samples (the behaviour before the barriers looked at the stages of the bindings).
+    "vsbar",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

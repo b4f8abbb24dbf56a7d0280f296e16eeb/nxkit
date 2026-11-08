@@ -110,6 +110,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `nowait` | `nvnSyncWait` returns at once. The game may write memory that the frame on the GPU reads; it measures what the wait costs. |
 | `overlap` | The same as `NXKIT_OVERLAP=1`, switched while the game runs. |
 | `nosnap` | With the overlap on, the uniform buffers are not copied. The picture is wrong; it measures what the copies cost. |
+| `vsbar` | A render pass that samples what an earlier pass wrote holds its vertex stage too, also when no vertex shader of the pass samples (the behaviour before). |
 | `nobarrier` | Gives no pass a barrier. The picture is wrong; it measures what the barriers cost the GPU. |
 
 ## The render health report
