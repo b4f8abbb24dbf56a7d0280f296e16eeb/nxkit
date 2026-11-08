@@ -6,14 +6,22 @@
 //! the HID shared memory for games that read it directly (R40). The host calls [`tick`] on each display tick, which
 //! renews the rumble pulses and writes the shared memory.
 //!
+//! Player 1 also gets the keyboard and the mouse in the PC layout of [`bind`] (R63). The keys are read at the call
+//! like a controller. The mouse comes from the events of the host window through [`mouse_moved`], [`mouse_button`]
+//! and [`mouse_wheel`], because its motion cannot be read at a call. The keyboard and the mouse add to a controller,
+//! so they only change the state while a key or button is held or the mouse moves.
+//!
 //! Where the Mac has no GameController, the platform layer reports no devices.
 
+mod bind;
 mod config;
 mod exports;
 mod ipc;
 mod keys;
+mod look;
 mod motion;
 mod npad;
+mod pointer;
 mod rumble;
 mod seam;
 mod shmem;
@@ -29,6 +37,7 @@ use nxkit_abi::export::Export;
 use nxkit_abi::ipc::Named;
 
 pub use config::Config;
+pub use look::LookConfig;
 pub use seam::{SystemEventHooks, set_system_event_hooks};
 pub use touch::Touch;
 
@@ -50,6 +59,13 @@ pub(crate) fn with<R>(f: impl FnOnce(&mut Input) -> R) -> R {
 /// not set up uses [`Config::default`].
 pub fn init(config: &Config) {
     with(|input| *input = Input::new(config));
+    pointer::reset(config.look);
+    MOUSE_CAPTURE.store(config.keyboard && config.mouse_capture, Ordering::Relaxed);
+}
+
+/// The messages of the `(key, action)` pairs of [`Config::binds`] that do not parse. The service skips them.
+pub fn bind_errors(pairs: &[(String, String)]) -> Vec<String> {
+    bind::Bindings::pc().rebind_all(pairs)
 }
 
 /// The `nn::hid` and `nn::kpr` functions that the game gets in place of the SDK's own.
@@ -73,10 +89,53 @@ static FOCUSED: AtomicBool = AtomicBool::new(true);
 /// button, so a key that was held at the loss is released.
 pub fn set_focus(focused: bool) {
     FOCUSED.store(focused, Ordering::Relaxed);
+    if !focused {
+        mouse_release();
+    }
 }
 
 pub(crate) fn focused() -> bool {
     FOCUSED.load(Ordering::Relaxed)
+}
+
+static CONTROLLER: AtomicBool = AtomicBool::new(false);
+
+/// True when a game controller is connected, as of the last lookup. The window frees the mouse while one is.
+pub fn controller_connected() -> bool {
+    CONTROLLER.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_controller_connected(connected: bool) {
+    CONTROLLER.store(connected, Ordering::Relaxed);
+}
+
+static MOUSE_CAPTURE: AtomicBool = AtomicBool::new(false);
+
+/// True when the window may hold the mouse for the game: the service is set up with keyboard and mouse and with
+/// [`Config::mouse_capture`].
+pub fn mouse_capture() -> bool {
+    MOUSE_CAPTURE.load(Ordering::Relaxed)
+}
+
+/// The held mouse moved by `dx`, `dy` points, x right and y down. It turns the camera stick of player 1.
+pub fn mouse_moved(dx: f64, dy: f64) {
+    pointer::moved(dx as f32, dy as f32);
+}
+
+/// A mouse button went down or up. `number` is the AppKit button number: 0 left, 1 right, 2 middle, 3 and 4 the
+/// side buttons.
+pub fn mouse_button(number: u8, down: bool) {
+    pointer::button(number, down);
+}
+
+/// The wheel turned by `dy`, positive away from the user. A notch is a short press of its binding.
+pub fn mouse_wheel(dy: f64) {
+    pointer::wheel(dy as f32);
+}
+
+/// The window let go of the mouse: every button is up and the camera stops.
+pub fn mouse_release() {
+    pointer::with(pointer::Pointer::release);
 }
 
 /// The display tick. It looks up the controllers, renews the rumble pulses and writes the HID shared memory when a
@@ -133,6 +192,16 @@ mod tests {
     fn tick_without_shared_memory_does_nothing() {
         let (_base, _guard) = guest_memory();
         tick();
+    }
+
+    #[test]
+    fn mouse_events_are_accepted_at_any_time() {
+        mouse_moved(3.0, -2.0);
+        mouse_button(0, true);
+        mouse_wheel(1.0);
+        mouse_release();
+        assert!(bind_errors(&[("f".to_owned(), "zr".to_owned())]).is_empty());
+        assert_eq!(bind_errors(&[("f".to_owned(), "jump".to_owned())]).len(), 1);
     }
 
     #[test]

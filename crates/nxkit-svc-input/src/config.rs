@@ -1,5 +1,7 @@
 //! The settings of the input service.
 
+use crate::bind::Bindings;
+use crate::look::LookConfig;
 use crate::motion::MotionMap;
 
 /// What the host tells the input service at start.
@@ -22,8 +24,16 @@ pub struct Config {
     pub motion_axes: String,
     /// True when the acceleration of the platform has the opposite sign, so that a flat controller reads +1 on z.
     pub motion_acc_flip: bool,
-    /// Keyboard and mouse through `GCKeyboard` and `GCMouse`.
+    /// Keyboard and mouse: the keys through `GCKeyboard`, the mouse through the events of the host window (R63).
     pub keyboard: bool,
+    /// The mouse camera: sensitivity, inverted y and the dead zone of the game.
+    pub look: LookConfig,
+    /// Changes to the PC layout, as `(key, action)` pairs in the order of the input file, for example `("f", "rstick")`
+    /// or `("mouse_left", "none")`. The names are those of `bind.rs`. A pair that does not parse is skipped, see
+    /// [`crate::bind_errors`].
+    pub binds: Vec<(String, String)>,
+    /// The window holds and hides the mouse while it has the focus and no controller is connected.
+    pub mouse_capture: bool,
     /// The pad layout of the title: `simple`, `full` or `touch`. The service keeps it for the controller front end.
     pub pad_layout: String,
 }
@@ -40,12 +50,22 @@ impl Default for Config {
             motion_axes: "x,y,z".to_owned(),
             motion_acc_flip: false,
             keyboard: true,
+            look: LookConfig::default(),
+            binds: Vec::new(),
+            mouse_capture: true,
             pad_layout: "simple".to_owned(),
         }
     }
 }
 
 impl Config {
+    /// The PC layout with the changes of `binds`.
+    pub(crate) fn bindings(&self) -> Bindings {
+        let mut b = Bindings::pc();
+        let _ = b.rebind_all(&self.binds);
+        b
+    }
+
     /// The motion map. A malformed axes string gives the identity.
     pub(crate) fn motion_map(&self) -> MotionMap {
         let map = MotionMap::parse(&self.motion_axes).unwrap_or_default();
@@ -70,7 +90,7 @@ mod tests {
     #[test]
     fn the_defaults_play_rumble_and_motion() {
         let c = Config::default();
-        assert!(c.rumble && c.motion && c.keyboard && !c.handheld);
+        assert!(c.rumble && c.motion && c.keyboard && c.mouse_capture && !c.handheld);
         assert_eq!(c.motion_map(), MotionMap::default());
     }
 
@@ -85,5 +105,19 @@ mod tests {
     fn a_bad_axes_string_gives_the_identity() {
         let c = Config { motion_axes: "q".to_owned(), ..Config::default() };
         assert_eq!(c.motion_map(), MotionMap::default());
+    }
+
+    #[test]
+    fn binds_change_the_pc_layout() {
+        use crate::bind::{Action, Source};
+        use crate::keys::usage;
+        use crate::npad::btn;
+        let c = Config {
+            binds: vec![("f".to_owned(), "x".to_owned()), ("nope".to_owned(), "a".to_owned())],
+            ..Config::default()
+        };
+        let b = c.bindings();
+        assert_eq!(b.get(Source::Key(usage::letter(b'f'))), Some(Action::Button(btn::X)));
+        assert_eq!(b.get(Source::Key(usage::letter(b'e'))), Some(Action::Button(btn::A)));
     }
 }

@@ -5,10 +5,12 @@
 
 use std::time::{Duration, Instant};
 
+use crate::bind::Bindings;
 use crate::config::Config;
 use crate::keys::{KEYBOARD_STATE_SIZE, KeySet};
 use crate::motion::{MotionMap, MotionState, SixAxisData};
-use crate::npad::{Layout, NpadState, PLAYERS, RawPad, STATE_SIZE, build_state, id_bit, merge};
+use crate::npad::{Layout, NpadState, PLAYERS, RawKeys, RawPad, STATE_SIZE, build_state, id_bit, merge, pick, to_stick};
+use crate::pointer;
 use crate::rumble::{Rumble, VibrationValue};
 use crate::seam;
 use crate::shmem::SharedMemory;
@@ -56,6 +58,7 @@ pub(crate) fn six_axis_bytes(d: &SixAxisData, sampling: i64) -> [u8; SIX_AXIS_ST
 /// Everything the service knows.
 pub(crate) struct Input {
     pub(crate) config: Config,
+    bindings: Bindings,
     map: MotionMap,
     platform: Platform,
     slots: Slots,
@@ -90,6 +93,7 @@ impl Input {
     pub(crate) fn new(config: &Config) -> Input {
         Input {
             config: config.clone(),
+            bindings: config.bindings(),
             map: config.motion_map(),
             platform: Platform::new(config),
             slots: Slots::default(),
@@ -128,6 +132,7 @@ impl Input {
         self.last_refresh = Some(Instant::now());
         self.platform.refresh(&mut self.slots);
         let mask = self.slots.mask();
+        crate::set_controller_connected(mask != 0);
         if mask != self.announced {
             let changed = mask ^ self.announced;
             self.announced = mask;
@@ -186,12 +191,22 @@ impl Input {
             return NpadState::default();
         };
         let pad = self.raw_pad(player, layout.one_player());
-        let keys = if player == 0 && self.config.keyboard {
-            self.platform.read_keys().map(|k| k.to_pad())
-        } else {
-            None
-        };
+        let keys = (player == 0 && self.config.keyboard).then(|| self.keyboard_mouse());
         build_state(style, &pad, keys.as_ref())
+    }
+
+    /// What the keyboard and the mouse give player 1 in the layout of the title: the bound buttons and sticks, and
+    /// the mouse camera on the right stick. Nothing while the window has no focus.
+    fn keyboard_mouse(&self) -> RawKeys {
+        if !crate::focused() {
+            return RawKeys::default();
+        }
+        let now = Instant::now();
+        let (mouse, look) = pointer::with(|p| (p.buttons(now), p.look(now)));
+        let mut raw = self.bindings.read(&self.keys(), mouse);
+        raw.sticks[2] = pick(raw.sticks[2], to_stick(look[0]));
+        raw.sticks[3] = pick(raw.sticks[3], to_stick(look[1]));
+        raw
     }
 
     /// The bytes of `n` states of the npad `id`, newest first. Each read advances the sampling number. The

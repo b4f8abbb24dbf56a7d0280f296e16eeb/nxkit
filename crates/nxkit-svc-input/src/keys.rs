@@ -1,20 +1,32 @@
-//! Keyboard keys as USB HID usage ids, the nxnative key map for player 1 and the `KeyboardState` layout.
+//! Keyboard keys as USB HID usage ids and the `KeyboardState` layout. The layout of player 1 is in `bind`.
 //!
 //! The usage ids are those of the USB HID usage table (page 7), which `nn::hid::KeyboardKey` also uses as bit
 //! numbers. The platform layer reads `GCKeyboard` by key code and sets the bit of the matching usage here, so no
 //! number of a `GCKeyCode` is assumed.
 
-use crate::npad::{RawKeys, btn};
-
 /// Usage ids that the map and the platform layer use.
 pub(crate) mod usage {
     /// `a` is 0x04, so a letter is `A + (c - 'a')`.
     pub(crate) const A: u8 = 0x04;
+    pub(crate) const ONE: u8 = 0x1e;
+    pub(crate) const ZERO: u8 = 0x27;
     pub(crate) const RETURN: u8 = 0x28;
     pub(crate) const ESCAPE: u8 = 0x29;
     pub(crate) const BACKSPACE: u8 = 0x2a;
     pub(crate) const TAB: u8 = 0x2b;
     pub(crate) const SPACE: u8 = 0x2c;
+    pub(crate) const HYPHEN: u8 = 0x2d;
+    pub(crate) const EQUAL: u8 = 0x2e;
+    pub(crate) const OPEN_BRACKET: u8 = 0x2f;
+    pub(crate) const CLOSE_BRACKET: u8 = 0x30;
+    pub(crate) const BACKSLASH: u8 = 0x31;
+    pub(crate) const SEMICOLON: u8 = 0x33;
+    pub(crate) const QUOTE: u8 = 0x34;
+    pub(crate) const GRAVE: u8 = 0x35;
+    pub(crate) const COMMA: u8 = 0x36;
+    pub(crate) const PERIOD: u8 = 0x37;
+    pub(crate) const SLASH: u8 = 0x38;
+    pub(crate) const CAPS_LOCK: u8 = 0x39;
     pub(crate) const F1: u8 = 0x3a;
     pub(crate) const DELETE_FORWARD: u8 = 0x4c;
     pub(crate) const RIGHT: u8 = 0x4f;
@@ -94,65 +106,6 @@ impl KeySet {
         }
         b
     }
-
-    /// What the keyboard gives player 1, as nxnative maps it. J K U I are A B X Y, F and G are the stick clicks,
-    /// Q and E are L and R, Z and C are ZL and ZR, Return is Plus and Tab is Minus. The arrows are the D-pad, or the
-    /// right stick while Shift is held. W A S D are the left stick.
-    pub(crate) fn to_pad(&self) -> RawKeys {
-        const LETTERS: [(u8, u64); 10] = [
-            (b'j', btn::A),
-            (b'k', btn::B),
-            (b'u', btn::X),
-            (b'i', btn::Y),
-            (b'f', btn::STICK_L),
-            (b'g', btn::STICK_R),
-            (b'q', btn::L),
-            (b'e', btn::R),
-            (b'z', btn::ZL),
-            (b'c', btn::ZR),
-        ];
-        let mut buttons = 0;
-        for (c, b) in LETTERS {
-            if self.get(usage::letter(c)) {
-                buttons |= b;
-            }
-        }
-        if self.get(usage::RETURN) {
-            buttons |= btn::PLUS;
-        }
-        if self.get(usage::TAB) {
-            buttons |= btn::MINUS;
-        }
-        let axis = |neg: bool, pos: bool| match (neg, pos) {
-            (true, false) => -32767,
-            (false, true) => 32767,
-            _ => 0,
-        };
-        let shift = self.modifiers() & modifier::SHIFT != 0;
-        let (left, right, up, down) = (
-            self.get(usage::LEFT),
-            self.get(usage::RIGHT),
-            self.get(usage::UP),
-            self.get(usage::DOWN),
-        );
-        let mut sticks = [
-            axis(self.get(usage::letter(b'a')), self.get(usage::letter(b'd'))),
-            axis(self.get(usage::letter(b's')), self.get(usage::letter(b'w'))),
-            0,
-            0,
-        ];
-        if shift {
-            sticks[2] = axis(left, right);
-            sticks[3] = axis(down, up);
-        } else {
-            for (on, b) in [(left, btn::LEFT), (up, btn::UP), (right, btn::RIGHT), (down, btn::DOWN)] {
-                if on {
-                    buttons |= b;
-                }
-            }
-        }
-        RawKeys { buttons, sticks }
-    }
 }
 
 #[cfg(test)]
@@ -172,30 +125,6 @@ mod tests {
         assert_eq!(usage::letter(b'a'), 0x04);
         assert_eq!(usage::letter(b'j'), 0x0d);
         assert_eq!(usage::letter(b'z'), 0x1d);
-    }
-
-    #[test]
-    fn the_gamepad_keys() {
-        let k = keys(&[usage::letter(b'j'), usage::letter(b'e'), usage::RETURN, usage::TAB]).to_pad();
-        assert_eq!(k.buttons, btn::A | btn::R | btn::PLUS | btn::MINUS);
-        assert_eq!(k.sticks, [0; 4]);
-    }
-
-    #[test]
-    fn wasd_is_the_left_stick() {
-        let k = keys(&[usage::letter(b'w'), usage::letter(b'a')]).to_pad();
-        assert_eq!(k.sticks, [-32767, 32767, 0, 0]);
-        let k = keys(&[usage::letter(b'w'), usage::letter(b's')]).to_pad();
-        assert_eq!(k.sticks[1], 0);
-    }
-
-    #[test]
-    fn arrows_are_the_dpad_and_with_shift_the_right_stick() {
-        let k = keys(&[usage::UP, usage::LEFT]).to_pad();
-        assert_eq!(k.buttons, btn::UP | btn::LEFT);
-        let k = keys(&[usage::UP, usage::LEFT, usage::LEFT_SHIFT]).to_pad();
-        assert_eq!(k.buttons, 0);
-        assert_eq!(k.sticks, [0, 0, -32767, 32767]);
     }
 
     #[test]
