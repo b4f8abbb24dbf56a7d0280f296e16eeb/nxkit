@@ -16,13 +16,13 @@
 //! The upscaler choice has no answer yet, so the core default applies. The seed list for the prepare step is
 //! `pso_manifest.tsv` in `seedds/nxnative` `dm/games/0400486024DEC000/`.
 
-// The game's dynamic resolution is a module of its own, with its own rules.
-// mod resolution;
-
 use nxtitle::{
     BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks, Service,
     Settings, Standalone, Title, TitleId,
 };
+
+/// The fixed resolution scale (a resource patch at build time).
+mod resolution;
 
 /// The title module.
 pub struct Oot;
@@ -176,6 +176,10 @@ impl BuildHooks for Oot {
 
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/0400486024DEC000.toml"))
+    }
+
+    fn resource_patches(&self) -> &'static [Fact<nxtitle::ResourcePatch>] {
+        resolution::PATCHES
     }
 }
 

@@ -31,6 +31,7 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `shader_role` | `BuildHooks` | what a shader does for the frame, for example the game's own upscaler |
 | `seeds` | `BuildHooks` | shaders to prepare before the first frame |
 | `rewrite_rules` | `BuildHooks` | rewriter rules as TOML text |
+| `resource_patches` | `BuildHooks` | edits of one member of a game archive that `nxb build` applies to the app's RomFS, by a build option (`--resource-patch <option>=<value>`) or the patch's default. Lists of all layers add up |
 | `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting. `nxb build` writes the need `vertex_stream_null_bind` with the setting `ignore` as the key of that name in `settings` of `game.json`. |
 | `upscaler` | `RuntimeHooks` | keep the game's upscaler, render at the output size, or use MetalFX |
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
@@ -84,6 +85,18 @@ The Nintendo Switch 2 game on NVN2, family `agl`. The records are in `seedds/nxn
 - The NVN function list is not a hand list. The title module gives an empty list, and the build takes the `nvn…` names in the read-only data of the modules: 774 names in v131072 (738 in `main`, 36 more in `sdk`). That is what the game can fetch through the NVN loader, more than one route calls.
 - `fps_target 60` needs the frame ratio stub of nxnative's `patches.py` (`MATCH_FRAME_STEP`). It is the one rule of `rules/0400486024DEC000.toml`, a `frame-step` rule for main build `e0f3ccfaf50065ae4ea01eb5aeb13b1a`: at `main+0x6e6cc4` (`fdiv s8,s1,s0`) the ratio becomes the host's step × base rate / 60. The game steps its time by that ratio, so the pacing is the display's. The dynamic resolution stub of the same file is a separate change.
 - The `.nup` of v131072 is one standalone update: 186,587 RomFS files, 26.2 GB. 146,000 files (23.2 GB) are stored raw and 40,600 (3.0 GB) as one zstd frame each. The build writes the RomFS as a folder in one pass with the shader split (no `RomFS.img`), and links the files into the app.
+
+### Fixed resolution
+
+`nxb build ... --resource-patch resolution-scale=<scale>` pins the dynamic-resolution scale, with `0 < scale <= 1`.
+Without the option, or with `resolution-scale=stock`, the game keeps its dynamic resolution. The finding is
+ComicBit's (v0lumehi/nxkit#22): in v131072 the two resolution palettes share ten `f32` words in the ModelSceneExtensionParam
+of `Pack/Bootup.Nin_Ounce_NVN2.pack.zs`, a SARC compressed with the dictionary `pack.zsdic` of `Pack/ZsDic.pack.zs`.
+The build decodes the archive, checks the SHA-256 of the archive, the dictionary and the member, writes the scale into
+the ten words and stores the SARC again as a zstd frame of raw blocks. No compressor and no native library are needed.
+The patched package is `<work>/resources/<package>`, a clone of `extract/<package>` in which only that archive is new.
+An archive of another version is left as it is, with a warning, and the build goes on. A fixed scale does not promise
+a frame rate. A higher scale is more GPU work.
 
 Open questions:
 

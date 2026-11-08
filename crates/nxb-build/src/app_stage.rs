@@ -45,7 +45,7 @@ pub(crate) fn stage_app(
         host: w.join("tools/dmhost"),
         companion: companion.clone(),
         patched: patched.clone(),
-        romfs: ex.join("RomFS.img"),
+        romfs: crate::resource_patch::package_dir(a, b, &|m| p.say(m), &ex)?.join("RomFS.img"),
         msl: crate::layer::msl_dir(b)?,
         msl_name: None,
         tables,
@@ -118,7 +118,7 @@ pub(crate) fn stage_app(
                 || nxb_pack::appstage::stage_and_sign(&plan, &b.out, &o),
             )
             .map(|r| format!("{} files staged and signed", r.files))
-                .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())
         }
     }?;
     // `--mac-sign <identity>`: signed again with it (the staged app carries the ad-hoc signature)

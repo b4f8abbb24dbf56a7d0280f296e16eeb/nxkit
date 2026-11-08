@@ -1,18 +1,19 @@
-//! A zstd decoder (RFC 8878), std only, for frames without a dictionary (`zstd -d`). Written here because the
-//! workspace has no zstd crate offline (deps.toml O14 allows one reviewed external, none is available), it belongs in
-//! `nxb-codec` once its owner takes it. Checksums are skipped (the Python's `zstd -d` checks them, a damaged frame
-//! almost always fails structurally first).
+//! A zstd decoder (RFC 8878), std only, with dictionaries, and [`raw_frame`], a writer of raw-block frames. Written
+//! here as the workspace has no zstd crate offline (deps.toml O14), it belongs in `nxb-codec` once its owner takes it.
+//! Checksums are skipped: a damaged frame almost always fails structurally first.
 
 use crate::SplitError;
 
 mod dict;
 mod huf;
+mod raw;
 mod stream;
 #[cfg(test)]
 mod tests;
 
 pub use dict::{Dicts, decompress_dict, dict_id};
 use huf::Huf;
+pub use raw::raw_frame;
 pub use stream::*;
 
 pub(crate) fn err(m: &str) -> SplitError {
@@ -482,8 +483,7 @@ fn block(d: &[u8], st: &mut State, out: &mut Vec<u8>, frame_start: usize) -> R<(
 /// terabytes. Larger outputs are `Unsupported` (the reference step decodes them).
 pub const DEFAULT_LIMIT: usize = 1 << 30;
 
-/// Decompresses every frame of `d` (skippable frames skipped). A frame naming a dictionary, or more than
-/// [`DEFAULT_LIMIT`] bytes of output, is `Unsupported`.
+/// Every frame of `d` decoded, skippable ones skipped. A dictionary frame or output over [`DEFAULT_LIMIT`] is `Unsupported`.
 pub fn decompress(d: &[u8]) -> R<Vec<u8>> {
     frames(d, DEFAULT_LIMIT, &Dicts::new(), |n| {
         SplitError::Unsupported(format!("zstd output over {n} bytes"))

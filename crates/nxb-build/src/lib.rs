@@ -40,6 +40,7 @@ pub mod order;
 pub mod pipeline;
 mod programs;
 mod provisional;
+mod resource_patch;
 pub mod rewrite;
 mod stages;
 mod standalone;

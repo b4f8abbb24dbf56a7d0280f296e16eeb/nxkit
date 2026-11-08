@@ -169,10 +169,11 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
         }
         None => "none".into(),
     };
-    let romfs = if ex.join("RomFS.img").is_file() {
-        ex.join("RomFS.img")
+    let rx = crate::resource_patch::package_dir(a, b, &|m| eprintln!("{m}"), &ex)?;
+    let romfs = if rx.join("RomFS.img").is_file() {
+        rx.join("RomFS.img")
     } else {
-        ex.join("RomFS")
+        rx.join("RomFS")
     };
     Ok(ipa::Inputs {
         engine: b.engine.clone(),

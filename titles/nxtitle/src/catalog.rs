@@ -1,8 +1,8 @@
 //! The catalog: families and titles, and how they are composed for one game.
 
 use crate::{
-    BuildHooks, Fact, Family, LimitRule, Match, Need, PaceProfile, Pacing, Runtime, RuntimeHooks,
-    Seed, Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
+    BuildHooks, Fact, Family, LimitRule, Match, Need, PaceProfile, Pacing, ResourcePatch, Runtime,
+    RuntimeHooks, Seed, Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -174,6 +174,16 @@ impl Resolved {
             .collect();
         v.reverse();
         v
+    }
+
+    /// The resource patches of the family, then the title's.
+    pub fn resource_patches(&self) -> Vec<Fact<ResourcePatch>> {
+        let hooks: Vec<_> = self.build_hooks().collect();
+        hooks
+            .into_iter()
+            .rev()
+            .flat_map(|h| h.resource_patches().iter().copied())
+            .collect()
     }
 
     /// The needs of the family, then the title's.
