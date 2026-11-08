@@ -35,6 +35,7 @@ nxkit-svc-audio = { path = "crates/nxkit-svc-audio" }
 nxkit-svc-pacing = { path = "crates/nxkit-svc-pacing" }
 nxkit-metal = { path = "crates/nxkit-metal" }
 nxkit-gpu = { path = "crates/nxkit-gpu" }
+nxkit-ndve = { path = "crates/nxkit-ndve" }
 nxkit-host = { path = "crates/nxkit-host" }
 nxkit-svc-system = { path = "crates/nxkit-svc-system" }
 nxtitle = { path = "titles/nxtitle" }
