@@ -5,6 +5,7 @@ use super::types::{literal, msl_type};
 use crate::ir::OperandType;
 use crate::structured::ast::{A, BlockType, Kind};
 use crate::structured::types::AggType;
+use std::collections::BTreeSet;
 
 impl Em<'_> {
     /// The signature parameters of a helper function: its arguments and the shared parameters.
@@ -55,12 +56,21 @@ impl Em<'_> {
         if i == 0 && self.kill() {
             self.raw(&format!("bool {} = false;", super::facts_ps::KILL));
         }
+        let mut decls = Vec::new();
         for l in locals {
             let Kind::Operand { var_type, .. } = self.info.ast.kind(l) else {
                 return Err("local is not an operand".into());
             };
             let ty = *var_type;
-            self.raw(&format!("{} v{} = {};", msl_type(ty)?, l.0, literal(ty, 0)));
+            decls.push((msl_type(ty)?, l, literal(ty, 0)));
+        }
+        let bare = if self.opt.plain_decls {
+            BTreeSet::new()
+        } else {
+            super::decls::uninit(self.info, i, &self.shared.skip)
+        };
+        for d in super::decls::lines(&decls, &bare, self.opt.plain_decls) {
+            self.raw(&d);
         }
         self.cur = Some(main);
         self.children(main)?;

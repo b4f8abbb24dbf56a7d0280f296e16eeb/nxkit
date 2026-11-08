@@ -3,7 +3,7 @@
 use super::half::half_lanes;
 use super::operand::*;
 use crate::emit::alu::conv::{emit_f2f, emit_f2i, emit_i2f};
-use crate::emit::alu::helper::{flush_denormal, get_fp_comparison, get_pred_logical_op};
+use crate::emit::alu::helper::{flush_denormal_pair, get_fp_comparison, get_pred_logical_op};
 use crate::ir::Opd;
 use crate::ir::emitter::{FP32, FP64};
 use crate::ir::ops::regtype;
@@ -94,9 +94,13 @@ pub(super) fn fmnmx(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
-/// `AFtz`: bit 80 of FSET and FSETP is `.FTZ`.
-fn a_ftz(ctx: &mut Ctx, x: &AmpOp, v: Opd) -> Opd {
-    if x.bit(80) { flush_denormal(ctx, v) } else { v }
+/// `AFtz`: bit 80 of FSET and FSETP is `.FTZ`. Both operands are flushed, except one that a constant shields.
+fn a_ftz(ctx: &mut Ctx, x: &AmpOp, a: Opd, b: Opd) -> (Opd, Opd) {
+    if x.bit(80) {
+        flush_denormal_pair(ctx, a, b)
+    } else {
+        (a, b)
+    }
 }
 
 pub(super) fn fset(ctx: &mut Ctx) -> R {
@@ -104,8 +108,7 @@ pub(super) fn fset(ctx: &mut Ctx) -> R {
     let (a, b) = second(ctx, &x, false, true, true)?;
     let fa = float(ctx, &a)?;
     let fb = float(ctx, &b)?;
-    let fa = a_ftz(ctx, &x, fa);
-    let fb = a_ftz(ctx, &x, fb);
+    let (fa, fb) = a_ftz(ctx, &x, fa, fb);
     let res = get_fp_comparison(ctx, FComp(x.bits(76, 80)), fa, fb, FP32)?;
     let p = pred(ctx, &x, 87, 90, false);
     let res = get_pred_logical_op(ctx, BoolOp(x.bits(74, 76)), res, p);
@@ -121,8 +124,7 @@ pub(super) fn fsetp(ctx: &mut Ctx) -> R {
     let (a, b) = second(ctx, &x, false, true, true)?;
     let fa = float(ctx, &a)?;
     let fb = float(ctx, &b)?;
-    let fa = a_ftz(ctx, &x, fa);
-    let fb = a_ftz(ctx, &x, fb);
+    let (fa, fb) = a_ftz(ctx, &x, fa, fb);
     let cmp = get_fp_comparison(ctx, FComp(x.bits(76, 80)), fa, fb, FP32)?;
     let p = pred(ctx, &x, 87, 90, false);
     let bop = BoolOp(x.bits(74, 76));

@@ -229,7 +229,7 @@ pub fn run_pass(ir: &mut Ir, res: &dyn Resources, n: NodeId) -> Result<(), Strin
             need(2)?;
             R::F(f(0) - f(1))
         }
-        Inst::IsNan => {
+        x if x == Inst::IsNan || x == fp(Inst::IsNan) => {
             need(1)?;
             R::I(b(f(0).is_nan()))
         }

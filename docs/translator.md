@@ -163,11 +163,32 @@ A and B are half matrices. C, D and the slots are float matrices, so the product
 Ampere does the same. Apple's half `simdgroup_matrix` product rounds to half after each step. On an M2 Max it gives infinity when a partial sum is larger than 65504, and its error grows with cancellation.
 A chain keeps FP32 in its slot from one call to the next. Ampere rounds D to half after each call, so the result of a chain can be more accurate than on the Switch.
 
+## Output size
+
+The shaders of a big Ampere title are far larger than those of a Maxwell title: the median `_b` library is 120 KB of MSL against 33 KB, and the median pixel library 118 KB against 13 KB. The text is plain code. The raw global memory helpers, the bindless lookups, the HMMA blocks and the task and mesh payload are each below 1% of it. What fills the text:
+
+| part | share of the text before the changes |
+|---|---|
+| declarations of the locals (`float v12 = 0.0f;`, one per IR value) | 25 to 32% |
+| arithmetic, constant buffer reads and casts | 35 to 50% |
+| copies `v = v` (the lowering of phi values) | 3 to 7% |
+| compare scaffolding (`.FTZ` flush, `isnan`) | 2 to 5% |
+| a vertex library: the whole main function once for each of `main0`, `main0_z`, `main0_gs` (and `_l`, `_lz`) | 2/3 of the library |
+
+These choices keep the text short:
+
+- A local that has one assignment and no read before it, inside the block of the assignment, has no initial value, and the locals of one type and value share a declaration (`msl/decls.rs`). The lean geometry kernel reads the declarations line by line and keeps the old form (`Options.plain_decls`).
+- The entries of a vertex library call one function `dm_body_main0`. It returns `out` without the depth fix. Each entry adds only its tail: the depth fix, the layer, the capture of `main0_gs`. `main0_discard` and `main0_tf` keep their own body.
+- A `.FTZ` comparison flushes an operand only when the other operand cannot decide the result for a denormal as it does for zero. A NaN, an infinity or any normal constant is such an operand, so a comparison with a literal needs no flush (`flush_denormal_pair`).
+- The constant folding folds `isnan` of a constant. The pass matched the integer form of the instruction only, so the float form never folded, and `isnan(0.96f)` stayed in the text.
+
+The effect on a sample of 190 shaders of Ocarina of Time: the `_b` text is 44% smaller (vertex 75%, pixel 20%, compute 24%). The optimized IR of a vertex library is 50% smaller, of a pixel library 0.4% smaller. The `metallib` stays as large as it was (within 2%), because `metallib` inlines the body function into every entry again, and Apple's back end sees the same code for a pipeline. The gain is in the front end: the own front end and `air-opt` take about 3 times less time for a vertex library, and the translation store and the `.metal` files shrink. Compile time of a pipeline and the size of the library can only fall with fewer operations in the entry that the pipeline uses.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.17`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.18`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 

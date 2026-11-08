@@ -54,6 +54,9 @@ pub struct Options {
     /// Pixel shaders: write the `_bf` library of a shader without a rewritable sample too (the profile's fetch list
     /// says so).
     pub fetch_outputs_only: bool,
+    /// Declare every local on a line of its own, with its zero value. The text transform of the lean geometry kernel
+    /// reads the declarations line by line (see `geom_lean`).
+    pub plain_decls: bool,
 }
 
 /// The reads of the driver constant banks.

@@ -136,6 +136,11 @@ fn kernel(
     let mut s = structure_job(&j, code)?;
     s.job.key = job.key.clone();
     let stride = s.program.geometry_stride;
+    // The lean transform reads the text of the kernel, one declaration to a line.
+    let opt = &Options {
+        plain_decls: true,
+        ..opt.clone()
+    };
     let mut done = library::build(&s, ctx, opt)?;
     if done.libraries.len() != 1 {
         return Err("geometry kernel with more than one library".into());

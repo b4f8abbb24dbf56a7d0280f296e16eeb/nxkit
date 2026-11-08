@@ -143,7 +143,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     let vx = match shader {
         Shader::Vertex => {
             let w = res.bindings.iter().any(facts::writes);
-            Some(variant::vertex::bodies(&mut em, &plan, main.clone(), w)?)
+            Some(variant::vertex::bodies(&mut em, &plan, w)?)
         }
         _ => None,
     };

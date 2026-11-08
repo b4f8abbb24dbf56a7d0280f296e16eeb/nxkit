@@ -25,6 +25,21 @@ fn fset_ftz_flushes_both_operands() {
     assert!(ftz.contains("#800000"));
 }
 
+/// `FSET.GT.FTZ R1, R2, imm` with PT as the predicate input. `imm` is the 19 top bits of the float.
+fn fset_imm(imm: u64) -> u64 {
+    0x3000u64 << 48 | 1 | 2 << 8 | imm << 20 | PRED7 | 7 << 39 | 4 << 48 | 1 << 55
+}
+
+#[test]
+fn fset_ftz_against_a_normal_constant_needs_no_flush() {
+    // 0.5: a denormal is on the same side of it as zero, so the register needs no flush
+    let normal = maxwell_cs_text(&[fset_imm(0x3f000)]).expect("emit");
+    assert_eq!(count(&normal, "10025"), 0, "{normal}");
+    // 0.0: a denormal is not on the same side as zero, so the register is flushed
+    let zero = maxwell_cs_text(&[fset_imm(0)]).expect("emit");
+    assert_eq!(count(&zero, "10025"), 1, "{zero}");
+}
+
 #[test]
 fn ldc_is_selects_among_the_runtime_banks() {
     // LDC R1, c[3][R2 + 0x10] with .IS: the bank is 3 + (R2 >> 16), the offset R2 & 0xffff. The banks are c1 and c3.

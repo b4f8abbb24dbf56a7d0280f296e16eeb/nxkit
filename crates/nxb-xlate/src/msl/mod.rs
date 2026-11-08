@@ -9,7 +9,7 @@
 ///
 /// Bump the number whenever a change alters the MSL text or the reflection for an unchanged input: a new emitter
 /// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
-pub const TRANSLATOR_ID: &str = "msl-2.17";
+pub const TRANSLATOR_ID: &str = "msl-2.18";
 
 pub mod abi;
 #[cfg(test)]
@@ -19,6 +19,7 @@ pub mod args;
 mod bind_tests;
 pub mod buffers;
 pub mod control;
+mod decls;
 pub mod emit;
 pub mod entry;
 pub mod facts;
@@ -204,6 +205,7 @@ fn options(stage: &str, code: &[u8], ctx: &Context<'_>) -> Options {
         visibility_counter: stage == "vs" && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
         dual_source: ctx.dual_source,
         fetch_outputs_only: ctx.fetch_outputs_only,
+        plain_decls: false,
     }
 }
 

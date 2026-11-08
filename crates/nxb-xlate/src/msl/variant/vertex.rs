@@ -1,5 +1,7 @@
 //! The extra entries of a vertex library: `main0_z`, `main0_discard`, `main0_l`, `main0_lz` and `main0_gs`.
 //!
+//! The main function is written once, as the body function `dm_body_main0`. It returns `out` without the depth fix.
+//! Every entry but `main0_discard` is a short function that calls it and then adds its own tail.
 //! The base entry `main0` ends with the depth fix of the GL convention. `main0_z` ends without it, for a host that
 //! keeps the Maxwell depth range. `main0_discard` has no outputs and runs the stores to buffers and images only.
 //! `main0_l` and `main0_lz` return the layer a shader packs into an integer store of a user output.
@@ -7,7 +9,7 @@
 
 use super::super::args;
 use super::super::emit::{Em, R};
-use super::super::entry::{EntryName, Param, StageIn, entry_text};
+use super::super::entry::{EntryName, Form, Param, StageIn, call_text, entry_text};
 use super::super::io::Plan;
 use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
@@ -20,28 +22,20 @@ pub const CAPTURE_WORDS: u32 = 144;
 
 /// The layer entries.
 pub struct Layer {
-    /// The body of `main0_l`.
-    pub l: String,
-    /// The body of `main0_lz`.
-    pub lz: String,
     /// The user output location the layer comes from.
     pub loc: i32,
     /// The component.
     pub comp: i32,
 }
 
-/// The bodies of the entries of a vertex library.
+/// The bodies of a vertex library.
 pub struct Bodies {
-    /// The body of `main0`.
-    pub main: String,
-    /// The body of `main0_z`.
-    pub z: String,
+    /// The body function `dm_body_main0`: the main function with `return out;` at every return.
+    pub shared: String,
     /// The body of `main0_discard`, when the shader writes buffers or images.
     pub discard: Option<String>,
     /// The layer entries.
     pub layer: Option<Layer>,
-    /// The body of `main0_gs`.
-    pub gs: String,
 }
 
 fn member_name(m: &str) -> &str {
@@ -83,16 +77,11 @@ fn layer_source(em: &Em<'_>) -> Option<(i32, i32)> {
     best.map(|b| (b.2, b.3))
 }
 
-/// Emit the bodies of the entries again with their tails. `main` is the body of `main0`.
-pub fn bodies(em: &mut Em<'_>, plan: &Plan, main: String, writes_memory: bool) -> R<Bodies> {
+/// Emit the shared body and the body of `main0_discard` with their tails.
+pub fn bodies(em: &mut Em<'_>, plan: &Plan, writes_memory: bool) -> R<Bodies> {
     let notes = em.notes.len();
     let layer_src = em.layer_src.len();
-    let tail = |depth_fix: bool, last: &str| {
-        let mut l = plan.vertex_epilogue(depth_fix);
-        l.push(last.to_string());
-        l
-    };
-    let z = emit_with(em, tail(false, "return out;"))?;
+    let shared = emit_with(em, vec!["return out;".to_string()])?;
     let discard = if writes_memory {
         Some(emit_with(em, vec!["return;".to_string()])?)
     } else {
@@ -101,34 +90,16 @@ pub fn bodies(em: &mut Em<'_>, plan: &Plan, main: String, writes_memory: bool) -
     let has_instance = plan.builtins.iter().any(|b| b.name == "gl_InstanceIndex");
     let layer = match layer_source(em) {
         Some((loc, comp)) if has_instance && !plan.layer && (0..4).contains(&comp) => {
-            let ret = format!(
-                "return dm_layer_out(out, as_type<uint>(out.loc{loc}.{}));",
-                ["x", "y", "z", "w"][comp as usize]
-            );
-            Some(Layer {
-                l: emit_with(em, tail(true, &ret))?,
-                lz: emit_with(em, tail(false, &ret))?,
-                loc,
-                comp,
-            })
+            Some(Layer { loc, comp })
         }
         _ => None,
     };
-    let gs = emit_with(
-        em,
-        vec![
-            "dm_capture(dm_gs, dm_p, out);".to_string(),
-            "return;".to_string(),
-        ],
-    )?;
     em.notes.truncate(notes);
     em.layer_src.truncate(layer_src);
     Ok(Bodies {
-        main,
-        z,
+        shared,
         discard,
         layer,
-        gs,
     })
 }
 
@@ -237,7 +208,7 @@ pub struct Frame<'a> {
     pub plain_only: bool,
 }
 
-/// The text of the entries of a vertex library.
+/// The text of the entries of a vertex library: the body function, then the entries that call it.
 pub fn entries(
     s: &Structured,
     res: &args::Res,
@@ -245,30 +216,51 @@ pub fn entries(
     b: &Bodies,
     f: &Frame<'_>,
 ) -> R<String> {
+    let shader = super::super::emit::Shader::Vertex;
+    let body = EntryName {
+        form: Form::Body { inline: false },
+        stage_in: f.stage_in,
+        extra: f.extra,
+        pro: f.pro,
+        ..EntryName::new("main0")
+    };
     let mk = |name: &'static str, ret: Option<&'static str>| EntryName {
         ret,
         stage_in: f.stage_in,
         extra: f.extra,
-        pro: f.pro,
         ..EntryName::new(name)
     };
-    let shader = super::super::emit::Shader::Vertex;
-    let mut t = String::new();
-    let mut put = |e: &EntryName<'_>, body: &str| -> R<()> {
-        t.push_str(&entry_text(s, e, shader, res, plan, body)?);
-        Ok(())
+    let mut t = entry_text(s, &body, shader, res, plan, &b.shared)?;
+    let call = |e: &EntryName<'_>, tail: &[String]| call_text(e, &body, shader, res, plan, tail);
+    let ret = ["return out;".to_string()];
+    let fix = |last: &str| {
+        let mut l = plan.vertex_epilogue(true);
+        l.push(last.to_string());
+        l
     };
-    put(&mk("main0", None), &b.main)?;
-    put(&mk("main0_z", None), &b.z)?;
+    t.push_str(&call(&mk("main0", None), &fix("return out;"))?);
+    t.push_str(&call(&mk("main0_z", None), &ret)?);
     if f.plain_only {
         return Ok(t);
     }
     if let Some(d) = &b.discard {
-        put(&mk("main0_discard", Some("void")), d)?;
+        t.push_str(&entry_text(
+            s,
+            &mk("main0_discard", Some("void")),
+            shader,
+            res,
+            plan,
+            d,
+        )?);
     }
     if let Some(l) = &b.layer {
-        put(&mk("main0_l", Some("main0l_out")), &l.l)?;
-        put(&mk("main0_lz", Some("main0l_out")), &l.lz)?;
+        let last = format!(
+            "return dm_layer_out(out, as_type<uint>(out.loc{}.{}));",
+            l.loc,
+            ["x", "y", "z", "w"][l.comp as usize]
+        );
+        t.push_str(&call(&mk("main0_l", Some("main0l_out")), &fix(&last))?);
+        t.push_str(&call(&mk("main0_lz", Some("main0l_out")), &[last])?);
     }
     let (vid, iid) = (
         ("gl_VertexIndex", "uint", "vertex_id"),
@@ -303,7 +295,7 @@ pub fn entries(
         pro: &pro,
         ..EntryName::new("main0_gs")
     };
-    put(&gs, &b.gs)?;
+    t.push_str(&call(&gs, &["dm_capture(dm_gs, dm_p, out);".to_string()])?);
     Ok(t)
 }
 

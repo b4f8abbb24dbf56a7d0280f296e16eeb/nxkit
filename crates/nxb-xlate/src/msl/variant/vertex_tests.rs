@@ -56,6 +56,33 @@ fn z_entry_has_no_depth_fix() {
 }
 
 #[test]
+fn the_entries_call_one_body_function() {
+    let t = layer_program().translate();
+    let msl = &t.libraries[0].msl;
+    // the main function is written once, and every entry calls it
+    assert_eq!(msl.matches("static main0_out dm_body_main0(").count(), 1);
+    assert_eq!(msl.matches("main0_out out = {};").count(), 1);
+    for name in ["main0", "main0_z", "main0_l", "main0_lz", "main0_gs"] {
+        let e = entry(msl, name);
+        assert_eq!(e.matches("dm_body_main0(").count(), 1, "{name}\n{e}");
+        assert!(e.lines().count() <= 10, "{name} is a short function\n{e}");
+    }
+    // the depth fix follows the call in the entries that have it
+    let m = entry(msl, "main0");
+    assert!(m.find("dm_body_main0(") < m.find(ZFIX), "{m}");
+    assert!(!msl.contains("dm_body_main0(") || !entry(msl, "dm_body_main0").contains(ZFIX));
+}
+
+#[test]
+fn the_body_function_returns_without_the_depth_fix() {
+    let t = simple().translate();
+    let msl = &t.libraries[0].msl;
+    let body = entry(msl, "dm_body_main0");
+    assert!(!body.contains(ZFIX), "{body}");
+    assert!(body.trim_end().ends_with("return out;\n}"), "{body}");
+}
+
+#[test]
 fn capture_entry_writes_the_outputs_to_the_buffer() {
     let t = simple().translate();
     let msl = &t.libraries[0].msl;

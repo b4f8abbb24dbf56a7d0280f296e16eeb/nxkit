@@ -186,3 +186,37 @@ fn removing_a_use_keeps_a_producer_whose_other_result_is_in_use() {
     remove_node(&mut ir, &mut block, 2);
     assert!(ir.data(coord).use_ops.is_empty());
 }
+
+#[test]
+fn the_is_nan_of_a_constant_is_folded_and_drops_out_of_an_or() {
+    use crate::ir::{Block, StorageKind};
+    use crate::opt::fold::fp;
+    struct NoRes;
+    impl crate::opt::Resources for NoRes {
+        fn try_get_constant_buffer_slot(&self, _: i32) -> Option<i32> {
+            None
+        }
+    }
+    let mut ir = Ir::default();
+    let x = ir.local();
+    let src = ir.const_(7);
+    let n0 = ir.new_op(Inst::Copy, StorageKind::None, Some(x), &[src]);
+    let c = ir.const_f(0.96);
+    let (nan_c, or) = (ir.local(), ir.local());
+    let n1 = ir.new_op(fp(Inst::IsNan), StorageKind::None, Some(nan_c), &[c]);
+    let n2 = ir.new_op(Inst::BitwiseOr, StorageKind::None, Some(or), &[x, nan_c]);
+    let sink = ir.local();
+    let n3 = ir.new_op(Inst::Copy, StorageKind::None, Some(sink), &[or]);
+    let mut blocks = [Block {
+        ops: vec![n0, n1, n2, n3],
+        ..Block::default()
+    }];
+    run_optimization_passes(&mut ir, &mut blocks, &NoRes).expect("passes");
+    assert!(
+        !blocks[0]
+            .ops
+            .iter()
+            .any(|n| ir.is_op(*n) && ir.op(*n).inst == fp(Inst::IsNan)),
+        "the is-nan of a constant is gone"
+    );
+}

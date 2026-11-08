@@ -43,7 +43,7 @@ fn emit_fset(ctx: &mut Ctx, a: Opd, b: Opd, p: FsetArgs) -> R {
     let a = ctx.fp_abs_neg_t(a, p.abs_a, p.neg_a, fp);
     let b = ctx.fp_abs_neg_t(b, p.abs_b, p.neg_b, fp);
     let (a, b) = if p.ftz {
-        (flush_denormal(ctx, a), flush_denormal(ctx, b))
+        flush_denormal_pair(ctx, a, b)
     } else {
         (a, b)
     };
@@ -84,7 +84,7 @@ fn emit_fsetp(ctx: &mut Ctx, a: Opd, b: Opd, p: FsetpArgs) -> R {
     let a = ctx.fp_abs_neg_t(a, p.abs_a, p.neg_a, fp);
     let b = ctx.fp_abs_neg_t(b, p.abs_b, p.neg_b, fp);
     let (a, b) = if p.ftz {
-        (flush_denormal(ctx, a), flush_denormal(ctx, b))
+        flush_denormal_pair(ctx, a, b)
     } else {
         (a, b)
     };

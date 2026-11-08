@@ -22,6 +22,29 @@ pub fn flush_denormal(ctx: &mut EmitterContext<'_, '_>, v: Opd) -> Opd {
     ctx.conditional_select(less, zero, v)
 }
 
+/// True when a constant operand (already flushed) decides a comparison the same way for a denormal and for zero.
+///
+/// That holds for NaN, for an infinity and for any normal number: a denormal lies between zero and the constant's
+/// magnitude, exactly like zero does, so the flush of the other operand cannot change the result.
+fn shields_flush(ctx: &EmitterContext<'_, '_>, v: Opd) -> bool {
+    if ctx.ir.ty(v) != crate::ir::ops::OperandType::Constant {
+        return false;
+    }
+    let f = ctx.ir.as_float(v);
+    f.is_nan() || f.is_infinite() || f.is_normal()
+}
+
+/// `FlushDenormal` on both operands of a `.FTZ` comparison.
+///
+/// The flush of one operand is left out when the other operand is a constant that shields it (`shields_flush`).
+/// A comparison against a literal is the common case, and the flush costs three operations.
+pub fn flush_denormal_pair(ctx: &mut EmitterContext<'_, '_>, a: Opd, b: Opd) -> (Opd, Opd) {
+    let (sa, sb) = (shields_flush(ctx, a), shields_flush(ctx, b));
+    let fa = if sb { a } else { flush_denormal(ctx, a) };
+    let fb = if sa { b } else { flush_denormal(ctx, b) };
+    (fa, fb)
+}
+
 /// `GetIntMin(IDstFmt)`.
 pub fn get_int_min_d(t: IDstFmt) -> Result<i64, String> {
     Ok(match t {

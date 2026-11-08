@@ -67,6 +67,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
+- The MSL of a shader is smaller. A local without a read before its one assignment has no initial value, the locals of one type share a declaration, the entries of a vertex library call one body function instead of each carrying a copy of it, a `.FTZ` comparison with a normal constant flushes nothing, and the `isnan` of a constant is folded. A vertex library is about 75% smaller, a pixel or compute library about 20%. The metallib and the pipelines stay as large as before. `TRANSLATOR_ID` is `msl-2.18`, so the store translates the shaders again.
 - `MAX_RECORD_BYTES` of `nxkit-nvn` is 120. The memory callback of a command buffer runs with no lock held.
 ## 0.9.3 - 2026-11-08
 

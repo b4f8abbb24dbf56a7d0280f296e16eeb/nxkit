@@ -205,7 +205,7 @@ pub(super) fn shared_params(
 }
 
 /// The parameters of a function: the standard ones, with the stage input of the entry, then its own.
-fn all_params(e: &EntryName<'_>, res: &args::Res, plan: &io::Plan) -> Vec<Param> {
+pub(super) fn all_params(e: &EntryName<'_>, res: &args::Res, plan: &io::Plan) -> Vec<Param> {
     let mut ps = params(res, plan);
     match e.stage_in {
         StageIn::Standard => {}
@@ -327,6 +327,39 @@ pub(super) fn entry_text(
     }
     if has_out {
         t.push_str("    return out;\n");
+    }
+    t.push_str("}\n");
+    Ok(t)
+}
+
+/// The text of an entry function that calls the body function `dm_body_<body.name>` and then runs `tail`.
+///
+/// The body function is the one `entry_text` writes for `body` with `Form::Body`. The entry has the parameters of
+/// `e`, passes those of `body` on and keeps the result as `out`, so `tail` can change it before the return.
+/// The statements of `e.pro` come before the call.
+pub(super) fn call_text(
+    e: &EntryName<'_>,
+    body: &EntryName<'_>,
+    shader: Shader,
+    res: &args::Res,
+    plan: &io::Plan,
+    tail: &[String],
+) -> R<String> {
+    let ret = e.ret.unwrap_or("main0_out");
+    let full: Vec<String> = all_params(e, res, plan).iter().map(Param::full).collect();
+    let (_, call) = params_decl(&all_params(body, res, plan));
+    let mut t = format!(
+        "{} {ret} {}({})\n{{\n",
+        kind(shader),
+        e.name,
+        full.join(", ")
+    );
+    for l in e.pro {
+        let _ = writeln!(t, "    {l}");
+    }
+    let _ = writeln!(t, "    main0_out out = dm_body_{}({call});", body.name);
+    for l in tail {
+        let _ = writeln!(t, "    {l}");
     }
     t.push_str("}\n");
     Ok(t)
