@@ -21,6 +21,7 @@
 pub mod file;
 pub mod fingerprint;
 pub mod half;
+pub mod kernels;
 pub mod msl;
 pub mod net;
 pub mod pack;
