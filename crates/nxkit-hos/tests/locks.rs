@@ -98,7 +98,7 @@ fn a_word_that_changed_returns_at_once_and_errors_are_the_kernels() {
     );
     assert_eq!(w.contended(), 0);
     assert_eq!(
-        w.kernel.arbitrate_lock(&w.main, 0x1234, lock, me),
+        w.kernel.arbitrate_lock(&w.main, 0x1_9234, lock, me),
         Err(KResult::INVALID_HANDLE)
     );
     assert_eq!(
@@ -153,4 +153,22 @@ fn many_threads_share_one_guest_mutex_without_a_lost_update() {
         "the run must have contended"
     );
     let _ = Timeout::Infinite;
+}
+
+#[test]
+fn sdk_thread_tags_in_the_lock_word_are_not_handles() {
+    // The Switch 2 SDK writes its own thread tags (0x51, 0x52, ...) into lock words instead of thread handles. A tag
+    // is not checked against the handle table; the word alone decides, and the waiter's tag is handed the lock.
+    let w = world();
+    let lock = w.addr(0);
+    let (owner_tag, waiter_tag) = (0x51u32, 0x52u32);
+    w.store(0, owner_tag | WAITERS_BIT);
+    let k = w.kernel.clone();
+    let h = w.spawn("waiter", 44, 1, move |t| {
+        assert_eq!(k.arbitrate_lock(t, owner_tag, lock, waiter_tag), Ok(()));
+    });
+    w.wait_until("lock wait", || w.contended() == 1);
+    assert_eq!(w.kernel.arbitrate_unlock(lock), Ok(()));
+    w.join(&[h]);
+    assert_eq!(w.load(0), waiter_tag, "the waiter's tag owns the lock");
 }

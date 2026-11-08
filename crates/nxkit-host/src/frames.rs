@@ -38,7 +38,13 @@ const SHADERS: &str = "shaders";
 pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
     GpuSettings {
         shader_dir: root.join(SHADERS),
-        archive: settings.pso_mtl4.then(|| root.join(ARCHIVE)),
+        // The archive is loaded whenever the build made one: `pso_mtl4` came from the engine's profiles, and a title
+        // without it (Ocarina of Time) left its 4.8 GB archive unused. The setting still turns it on for an app whose
+        // archive sits elsewhere.
+        archive: {
+            let path = root.join(ARCHIVE);
+            (settings.pso_mtl4 || path.is_file()).then_some(path)
+        },
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
         threads: std::env::var("NXKIT_ENCODE_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
         // Scaling is off until every attachment of a pass gets the same scale decision.

@@ -13,6 +13,7 @@ pub mod layout;
 pub mod macho;
 pub mod manifest;
 pub mod module;
+pub mod npdm;
 pub mod reloc;
 pub mod settings;
 pub mod stop;

@@ -591,6 +591,7 @@ pub fn kernel_init(thread_entry: nxkit_rt::NxkitThreadEntry, layout: &Layout, ga
         process_id: 0,
         process_exit: None,
         memory: &memory,
+        core_mask: crate::npdm::core_mask(game).unwrap_or(0),
     };
     // SAFETY: `config`, `memory` and `modules` are valid for the call and there are no rules. The reservation is mapped
     // and registered with `nxkit_abi::guest` before any svc runs.

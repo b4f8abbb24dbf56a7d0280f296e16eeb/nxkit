@@ -113,7 +113,12 @@ impl Kernel {
     ) -> KResultOr<()> {
         self.svc_enter(cur);
         aligned(addr, 4)?;
-        self.thread_by_handle(owner)?;
+        // A kernel handle must name a thread, as on the console. A smaller value is an SDK thread tag: the lock word
+        // alone decides whether to wait, and the tag finds its thread only for lending the priority.
+        if crate::handle::is_handle(owner) {
+            self.thread_by_handle(owner)?;
+        }
+        self.learn_tag(cur, tag);
         cur.parker.prepare();
         let mut g = self.locks.lock(addr);
         if self.load32(addr)? != owner | WAITERS_BIT {
@@ -167,6 +172,7 @@ impl Kernel {
         self.svc_enter(cur);
         aligned(lock_addr, 4)?;
         aligned(key, 4)?;
+        self.learn_tag(cur, tag);
         cur.parker.prepare();
         let mut cg = self.condvars.lock(key);
         if !self.mem.store32(key, 1) {

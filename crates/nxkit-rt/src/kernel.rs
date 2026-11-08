@@ -62,6 +62,9 @@ pub struct NxkitKernelConfig {
     pub process_exit: Option<extern "C" fn(code: u32)>,
     /// The memory model, or NULL when the kernel does not model memory (no memory svc, `GetInfo` or IPC svc).
     pub memory: *const NxkitMemoryConfig,
+    /// The cores the process may use, one bit per core, from the NPDM's thread info capability, or 0 for the
+    /// default (cores 0 to 2, as on the Switch). Switch 2 programs may use more.
+    pub core_mask: u64,
 }
 
 /// One module (an NSO) in the front region of the reservation.
@@ -201,6 +204,9 @@ pub unsafe extern "C" fn nxkit_kernel_init(config: *const NxkitKernelConfig) -> 
         on_close: Some(nxkit_svc_system::on_handle_closed),
         ..Config::default()
     };
+    if c.core_mask != 0 {
+        cfg.core_mask = c.core_mask;
+    }
     if let Some(entry) = c.thread_entry {
         cfg.launcher = Some(Arc::new(CLauncher {
             entry,
@@ -293,9 +299,9 @@ fn main_thread(c: &NxkitKernelConfig) -> Result<Option<MainThread>, String> {
             c.main_thread_priority
         ));
     }
-    if !(0..=3).contains(&c.main_thread_core) && c.main_thread_core != -2 {
+    if !(0..=63).contains(&c.main_thread_core) && c.main_thread_core != -2 {
         return Err(format!(
-            "main_thread_core {} is not 0 to 3 or -2",
+            "main_thread_core {} is not 0 to 63 or -2",
             c.main_thread_core
         ));
     }
@@ -411,7 +417,39 @@ pub unsafe extern "C" fn nxkit_svc(number: u32, regs: *mut u64) -> i32 {
     };
     // SAFETY: the caller promises eight writable registers.
     let regs = unsafe { &mut *regs.cast::<SvcRegs>() };
-    i32::from(kernel.dispatch_svc(&cur, number, regs))
+    let args = *regs;
+    let handled = kernel.dispatch_svc(&cur, number, regs);
+    svc_diag(number, &args, regs, handled);
+    i32::from(handled)
+}
+
+/// `NXKIT_DIAG=svc`: one line for each svc that returns an error (at most 400), with its arguments, to find the call
+/// behind a game's abort.
+fn svc_diag(number: u32, args: &SvcRegs, regs: &SvcRegs, handled: bool) {
+    use std::sync::OnceLock;
+    use std::sync::atomic::AtomicU32;
+    static ON: OnceLock<bool> = OnceLock::new();
+    static SHOWN: AtomicU32 = AtomicU32::new(0);
+    if !*ON.get_or_init(|| nxkit_nvn::diag::on("svc")) {
+        return;
+    }
+    let result = regs[0] as u32;
+    // CreateThread, StartThread, ExitThread and CloseHandle are always shown: a lock that names an unknown owner needs
+    // the life of its handles. Svcs that return a value instead of a result (GetSystemTick, GetCurrentProcessorNumber)
+    // are left out.
+    let always = matches!(number, 0x08 | 0x09 | 0x0A | 0x16);
+    if (handled && result == 0 && !always) || matches!(number, 0x10 | 0x1E) {
+        return;
+    }
+    if SHOWN.fetch_add(1, Ordering::Relaxed) >= 400 {
+        return;
+    }
+    eprintln!(
+        "DIAG svc {number:#04x} {} result {result:#x} out {:#x} args {:x?}",
+        if handled { "returned" } else { "not handled" },
+        regs[1],
+        &args[..6]
+    );
 }
 
 /// Gives the thread `handle` the name the game set, so its role is chosen again. Returns the result code.

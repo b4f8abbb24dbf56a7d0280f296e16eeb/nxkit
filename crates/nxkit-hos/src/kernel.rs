@@ -144,6 +144,9 @@ pub struct Kernel {
     pub(crate) vm: Option<Vm>,
     pub(crate) resource_limit: OnceLock<u32>,
     pub(crate) system_events: SystemEvents,
+    /// The threads by the lock tag they gave when they waited, for tags that are not kernel handles (see
+    /// [`crate::handle::is_handle`]).
+    pub(crate) tags: Mutex<std::collections::HashMap<u32, Weak<Thread>>>,
 }
 
 impl Kernel {
@@ -184,6 +187,7 @@ impl Kernel {
             vm,
             resource_limit: OnceLock::new(),
             system_events: SystemEvents::default(),
+            tags: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -397,7 +401,7 @@ impl Kernel {
             return None;
         }
         let waiter = cur.applied_qos()?;
-        let owner = self.thread_by_handle(owner).ok()?;
+        let owner = self.lock_owner(owner)?;
         let lower = owner.applied_qos().is_none_or(|q| q.raw() < waiter.raw());
         if !lower || owner.state() != ThreadState::Started {
             return None;
@@ -428,6 +432,22 @@ impl Kernel {
         match self.handles.get(handle) {
             Some(KObject::Thread(t)) => Ok(t),
             _ => Err(KResult::INVALID_HANDLE),
+        }
+    }
+
+    /// The thread a lock word names: a kernel handle, or a tag the thread gave when it waited.
+    pub(crate) fn lock_owner(&self, owner: u32) -> Option<Arc<Thread>> {
+        if crate::handle::is_handle(owner) {
+            self.thread_by_handle(owner).ok()
+        } else {
+            lock(&self.tags).get(&owner).and_then(Weak::upgrade)
+        }
+    }
+
+    /// Notes that `t` uses `tag` in lock words, when the tag is not a kernel handle.
+    pub(crate) fn learn_tag(&self, t: &Arc<Thread>, tag: u32) {
+        if tag != 0 && !crate::handle::is_handle(tag) {
+            lock(&self.tags).insert(tag, Arc::downgrade(t));
         }
     }
 
