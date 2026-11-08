@@ -258,11 +258,38 @@ fn the_hmma_helper_touches_a_slot_only_for_a_chain() {
         "{body}"
     );
     assert!(
-        writes[1]
-            .trim_start()
-            .starts_with("if (dslot) { acc[k] = c0;"),
+        writes[1].trim_start().starts_with("if (dslot) {")
+            && writes[1].contains("acc[k] = c0; acc[k + 1] = c1;"),
         "{body}"
     );
+}
+
+/// D is f16 in hardware after every HMMA, so a chain's accumulator slot is rounded to half before it is written, in the
+/// registers (`thread_elements`) without a scratch round trip. The accumulator is still FP32 across both K = 8 halves.
+#[test]
+fn the_hmma_helper_rounds_a_slot_to_half() {
+    let m = msl(&hmma_sample());
+    let body = &m[m.find("fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    let line = body
+        .lines()
+        .find(|l| l.contains("if (dslot)"))
+        .expect("dslot");
+    let round0 = line
+        .find("c0.thread_elements()[1] = float(half(c0.thread_elements()[1]));")
+        .expect("round c0");
+    let round1 = line
+        .find("c1.thread_elements()[1] = float(half(c1.thread_elements()[1]));")
+        .expect("round c1");
+    let store = line.find("acc[k] = c0;").expect("store");
+    assert!(round0 < round1 && round1 < store, "{line}");
+    // the rounding comes after both K = 8 products and adds no memory traffic or barrier before the slot store
+    let sum = body
+        .find("simdgroup_multiply_accumulate(c0, am[1], b1, c0);")
+        .expect("second half");
+    assert!(sum < body.find(line).unwrap(), "{body}");
+    assert_eq!(line.matches("simdgroup_barrier").count(), 1, "{line}");
+    assert_eq!(body.matches("thread_elements").count(), 8, "{body}");
 }
 
 /// The compute sample that calls the shared store helper `name` for `sm0` with a byte offset and a value.
