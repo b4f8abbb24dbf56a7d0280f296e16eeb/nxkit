@@ -94,8 +94,11 @@ pub struct EncodeStats {
     pub textures_rescaled: u32,
     /// Textures deswizzled from guest memory.
     pub uploads: u32,
-    /// Textures swizzled back to guest memory.
+    /// Textures swizzled back to guest memory: for a CPU read, or because the frame wrote a texture whose storage
+    /// the CPU can access (`copyback`).
     pub copybacks: u32,
+    /// Texel bytes that the copy-backs wrote into guest memory.
+    pub copyback_bytes: u64,
     /// Texture views whose channel swizzle is not the identity. Metal views here carry no swizzle, so it is ignored.
     pub swizzle_ignored: u32,
     /// Textures that are scaled and had guest data that is not copied into them.
@@ -143,6 +146,7 @@ impl EncodeStats {
         self.textures_rescaled += o.textures_rescaled;
         self.uploads += o.uploads;
         self.copybacks += o.copybacks;
+        self.copyback_bytes += o.copyback_bytes;
         self.swizzle_ignored += o.swizzle_ignored;
         self.scaled_upload_lost += o.scaled_upload_lost;
         self.encode_ns += o.encode_ns;
@@ -166,6 +170,11 @@ pub struct EncodeReport {
     /// Textures that the frame swizzled back to guest memory for a CPU read. The caller calls
     /// `ResourceTable::synced` for each after `Gpu::wait`.
     pub copied_back: Vec<TexId>,
+    /// Textures that the GPU wrote and that the end of the frame copies back into guest memory, because their storage
+    /// lies in a memory pool the CPU can access. The copy runs on the GPU after the passes of the frame, so the caller
+    /// calls `ResourceTable::synced_at` (after `gpu_wrote_at`) for each without a wait: any later GPU read of the
+    /// guest memory, and any CPU read after a fence wait, sees the copy.
+    pub mirrored: Vec<TexId>,
     /// The counters.
     pub stats: EncodeStats,
 }

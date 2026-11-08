@@ -143,6 +143,13 @@ impl BarrierState {
         h.write = join(h.write, stages);
     }
 
+    /// Notes a texture that work after the passes of the frame read (a copy-back at the end of the last command
+    /// buffer), so the next pass that writes it waits for that read.
+    pub(crate) fn note_read(&mut self, tex: TexId, stages: Stages) {
+        let h = self.pending.entry(tex).or_default();
+        h.read = join(h.read, stages);
+    }
+
     /// Forgets a texture (the game finalized it).
     pub(crate) fn forget(&mut self, tex: TexId) {
         self.pending.remove(&tex);

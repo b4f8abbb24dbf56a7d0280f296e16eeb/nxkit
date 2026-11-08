@@ -2,7 +2,7 @@
 //!
 //! A texture in `GuestNewer` state goes into Metal with the block-linear deswizzle kernel before its first use in the
 //! frame. A render target stays in Metal. It goes back to guest memory with the swizzle kernel when the frame has a CPU
-//! read of it.
+//! read of it, or at the end of a frame that wrote it when its storage lies in a pool the CPU can access (`copyback`).
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -95,9 +95,15 @@ impl Transfer {
         let base = guest_offset(rec, guest)?;
         let d = res.desc;
         let compressed = matches!(d.format, Format::Bc(_) | Format::Astc { .. });
-        let mut pass = cb.begin_compute_pass(self.deswizzler.table()).map_err(|_| Skip::Transfer)?;
+        let mut pass = cb
+            .begin_compute_pass(self.deswizzler.table())
+            .map_err(|_| Skip::Transfer)?;
+        if wait && pass.encode(&ComputeCommand::WaitForEarlierPasses).is_err() {
+            pass.end();
+            return Err(Skip::Transfer);
+        }
         let r = if compressed {
-            self.upload_compressed(&mut pass, scratch, guest, base, &surf, res)
+            self.upload_compressed(&mut pass, scratch, guest, base, &surf, rec, res)
         } else {
             self.upload_plain(&mut pass, scratch, guest, base, &surf, res)
         };
@@ -295,5 +301,364 @@ impl Transfer {
         }
         pass.end();
         r
+    }
+
+    /// Encodes the copy-back of the parts of `items` that the frame wrote into guest memory, all in one compute pass
+    /// that waits for the earlier work of the queue (the passes of this frame and of the frames before). A
+    /// block-linear texture goes through the swizzle kernel, a pitch-linear one is a plain copy of its rows. The
+    /// result of each item is the number of texel bytes it copied, or why it was refused. A refused item may have
+    /// written part of its storage.
+    pub(crate) fn copy_back_many(
+        &self,
+        cb: &mut CommandBuffer,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        items: &[(&TextureRecord, &Res, &Dirty)],
+    ) -> Vec<Result<u64, Skip>> {
+        if items.is_empty() {
+            return Vec::new();
+        }
+        let _gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
+        let Ok(mut pass) = cb.begin_compute_pass(self.swizzler.table()) else {
+            return vec![Err(Skip::Transfer); items.len()];
+        };
+        if pass.encode(&ComputeCommand::WaitForEarlierPasses).is_err() {
+            pass.end();
+            return vec![Err(Skip::Transfer); items.len()];
+        }
+        let out = items
+            .iter()
+            .map(|(rec, res, dirty)| self.copy_back_one(&mut pass, scratch, guest, rec, res, dirty))
+            .collect();
+        pass.end();
+        out
+    }
+
+    fn copy_back_one(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        rec: &TextureRecord,
+        res: &Res,
+        dirty: &Dirty,
+    ) -> Result<u64, Skip> {
+        let d = res.desc;
+        if res.widened || res.scaled || d.format.is_compressed() || d.format.is_depth() || d.format.has_stencil() {
+            return Err(Skip::Transfer);
+        }
+        let base = guest_offset(rec, guest)?;
+        let bpp = u64::from(d.format.block_bytes());
+        let bytes = |level: u32| {
+            let [w, h, z] = extent(&d, level);
+            u64::from(w) * u64::from(h) * u64::from(z) * bpp
+        };
+        if rec.layout.linear {
+            // NVN linear textures have one level and one layer (see `upload_linear`).
+            if d.kind == TextureKind::D3 || d.mip_levels != 1 || d.array_layers != 1 || rec.desc.stride == 0 {
+                return Err(Skip::Transfer);
+            }
+            pass.encode(&ComputeCommand::CopyTextureRegionToGuest {
+                texture: res.tex.clone(),
+                region: TextureRegion::whole(0, 0, extent(&d, 0)),
+                guest: guest.clone(),
+                offset: base,
+                bytes_per_row: rec.desc.stride,
+                bytes_per_image: 0,
+            })
+            .map_err(|_| Skip::Transfer)?;
+            return Ok(bytes(0));
+        }
+        let surf = surface(rec, res, self.order)?;
+        let slices = if d.kind == TextureKind::D3 { 1 } else { d.slice_count() };
+        let mut total = 0;
+        for (level, slice) in dirty.parts(d.mip_levels, slices) {
+            let region = TextureRegion::whole(level, slice, extent(&d, level));
+            self.swizzler
+                .encode_region(pass, scratch, guest, base, &surf, &res.tex, &region)
+                .map_err(|_| Skip::Transfer)?;
+            total += bytes(level);
+        }
+        Ok(total)
+    }
+}
+
+/// The levels and slices of a texture that a frame wrote, for its copy-back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Dirty {
+    /// Every level and slice (a dispatch, a copy, a 3D attachment).
+    All,
+    /// These (level, slice) pairs: the attachment views of the render passes.
+    Parts(Vec<(u32, u32)>),
+}
+
+impl Default for Dirty {
+    fn default() -> Self {
+        Self::Parts(Vec::new())
+    }
+}
+
+impl Dirty {
+    /// Adds one level and slice.
+    pub(crate) fn add(&mut self, level: u32, slice: u32) {
+        if let Self::Parts(v) = self
+            && !v.contains(&(level, slice))
+        {
+            v.push((level, slice));
+        }
+    }
+
+    /// True when nothing was written.
+    pub(crate) fn is_empty(&self) -> bool {
+        matches!(self, Self::Parts(v) if v.is_empty())
+    }
+
+    /// The (level, slice) pairs inside a texture of `levels` levels and `slices` slices, in order.
+    pub(crate) fn parts(&self, levels: u32, slices: u32) -> Vec<(u32, u32)> {
+        match self {
+            Self::All => (0..slices).flat_map(|s| (0..levels).map(move |l| (l, s))).collect(),
+            Self::Parts(v) => {
+                let mut v: Vec<_> = v.iter().copied().filter(|&(l, s)| l < levels && s < slices).collect();
+                v.sort_unstable_by_key(|&(l, s)| (s, l));
+                v
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nxkit_metal::{ArchiveConfig, ArgumentTable, DataBuffer, FrameRing, ShaderLibrary};
+    use nxkit_nvn::{resource::ResourceTable, space::GpuAddr};
+
+    /// Uploads `desc` from a pattern in guest memory, clears the memory, copies `dirty` back and returns the
+    /// pattern, the guest bytes after the copy-back and the record.
+    fn round_trip(desc: nxkit_nvn::layout::TextureDesc, dirty: &Dirty) -> Option<(Vec<u8>, Vec<u8>, TextureRecord)> {
+        let ctx = match Context::system_default() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("skipped: no usable Metal 4 device ({e})");
+                return None;
+            }
+        };
+        let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
+        let mut resources = ResourceTable::new();
+        let id = resources
+            .create(desc, GpuAddr::new(guest.address_map().gpu_base() + 0x1000).unwrap())
+            .unwrap();
+        let rec = *resources.get(id).unwrap();
+        let size = rec.layout.size as usize;
+        let pattern: Vec<u8> = (0..size).map(|i| (i * 7 + i / 251) as u8 | 1).collect();
+        guest.write(0x1000, &pattern).unwrap();
+        let mut store = crate::textures::TextureStore::new(&ctx);
+        let res = store
+            .ensure(&rec, 1.0, crate::textures::Use::default(), &mut Default::default())
+            .unwrap();
+        let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+        let transfer = Transfer::new(&ctx, &cache, GobOrder::Tegra).unwrap();
+        let mut ring = FrameRing::new(&ctx).unwrap();
+        let mut frame = ring.begin().unwrap();
+        let scratch = frame.scratch();
+        transfer
+            .upload(frame.commands(), &scratch, &guest, &rec, &res, false)
+            .unwrap();
+        ctx.commit_residency();
+        frame.submit().unwrap().wait().unwrap();
+        guest.write(0x1000, &vec![0; size]).unwrap();
+        let mut frame = ring.begin().unwrap();
+        let scratch = frame.scratch();
+        let results = transfer.copy_back_many(frame.commands(), &scratch, &guest, &[(&rec, &res, dirty)]);
+        assert!(results[0].is_ok(), "{results:?}");
+        ctx.commit_residency();
+        frame.submit().unwrap().wait().unwrap();
+        let mut out = vec![0; size];
+        guest.read(0x1000, &mut out).unwrap();
+        Some((pattern, out, rec))
+    }
+
+    #[test]
+    fn copy_back_writes_the_dirty_levels_and_layers_of_a_block_linear_array() {
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: Target::D2Array,
+            format: 0x06,
+            flags: 0,
+            samples: 0,
+            width: 64,
+            height: 64,
+            depth: 3,
+            levels: 2,
+            stride: 0,
+            packaged_block: None,
+        };
+        let mut dirty = Dirty::default();
+        dirty.add(0, 0);
+        dirty.add(1, 2);
+        let Some((pattern, out, rec)) = round_trip(desc, &dirty) else { return };
+        // Both levels fill whole GOB blocks, so every byte of a level is a texel.
+        let level = |l: u32| {
+            let lo = desc.level_offset(l).unwrap();
+            let len = (64u64 >> l) * (64u64 >> l) * 2;
+            (lo, len)
+        };
+        for slice in 0..3u64 {
+            for l in 0..2 {
+                let (lo, len) = level(l);
+                let at = (slice * rec.layout.layer_size + lo) as usize;
+                let got = &out[at..at + len as usize];
+                if dirty.parts(2, 3).contains(&(l, slice as u32)) {
+                    assert_eq!(got, &pattern[at..at + len as usize], "level {l} slice {slice}");
+                } else {
+                    assert!(got.iter().all(|b| *b == 0), "level {l} slice {slice} was written");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn copy_back_writes_the_rows_of_a_pitch_linear_texture() {
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: Target::D2,
+            format: 0x25,
+            flags: nxkit_nvn::layout::FLAG_LINEAR_RENDER_TARGET,
+            samples: 0,
+            width: 20,
+            height: 8,
+            depth: 1,
+            levels: 1,
+            stride: 128,
+            packaged_block: None,
+        };
+        let Some((pattern, out, _)) = round_trip(desc, &Dirty::All) else { return };
+        for row in 0..8 {
+            let at = row * 128;
+            assert_eq!(&out[at..at + 80], &pattern[at..at + 80], "row {row}");
+            assert!(out[at + 80..at + 128].iter().all(|b| *b == 0), "the padding of row {row} was written");
+        }
+    }
+
+    #[test]
+    fn compressed_upload_preserves_every_mip_and_array_layer() {
+        let ctx = match Context::system_default() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("skipped: no usable Metal 4 device ({e})");
+                return;
+            }
+        };
+        let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: Target::D2Array,
+            format: 0x41,
+            flags: 0,
+            samples: 0,
+            width: 20,
+            height: 12,
+            depth: 2,
+            levels: 5,
+            stride: 0,
+            packaged_block: None,
+        };
+        let mut resources = ResourceTable::new();
+        let id = resources
+            .create(desc, GpuAddr::new(guest.address_map().gpu_base()).unwrap())
+            .unwrap();
+        let rec = resources.get(id).unwrap();
+        // Every block in a level has a constant BC1 colour, with a distinct colour in each level and layer.
+        for slice in 0u32..2 {
+            for level in 0..5 {
+                let color = if slice == 0 {
+                    (31u16 - level as u16) << 11
+                } else {
+                    (63u16 - level as u16) << 5
+                };
+                let block = [color as u8, (color >> 8) as u8, 0, 0, 0, 0, 0, 0];
+                let lo = desc.level_offset(level).unwrap();
+                let hi = desc.level_offset(level + 1).unwrap();
+                let bytes: Vec<u8> = block.into_iter().cycle().take((hi - lo) as usize).collect();
+                guest
+                    .write(u64::from(slice) * rec.layout.layer_size + lo, &bytes)
+                    .unwrap();
+            }
+        }
+        let mut store = crate::textures::TextureStore::new(&ctx);
+        let res = store
+            .ensure(
+                rec,
+                1.0,
+                crate::textures::Use::default(),
+                &mut Default::default(),
+            )
+            .unwrap();
+        let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+        let transfer = Transfer::new(&ctx, &cache, GobOrder::Tegra).unwrap();
+        let output = Arc::new(DataBuffer::new(&ctx, 10 * 16).unwrap());
+        let lib = ShaderLibrary::from_source(&ctx, "sample_mips", r#"
+            #include <metal_stdlib>
+            using namespace metal;
+            kernel void sample_mips(device float4* dst [[buffer(0)]], texture2d_array<float> tex [[texture(0)]],
+                uint2 gid [[thread_position_in_grid]]) {
+                constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::nearest, mip_filter::nearest);
+                dst[gid.y * 5 + gid.x] = tex.sample(s, float2(0.5), gid.y, level(float(gid.x)));
+            }
+        "#).unwrap();
+        let pipeline = cache.compute(123, &lib, "sample_mips").unwrap();
+        let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+        let mut ring = FrameRing::new(&ctx).unwrap();
+        let mut frame = ring.begin().unwrap();
+        let scratch = frame.scratch();
+        transfer
+            .upload(frame.commands(), &scratch, &guest, rec, &res, false)
+            .unwrap();
+        {
+            let mut cp = frame.commands().begin_compute_pass(&table).unwrap();
+            cp.encode(&ComputeCommand::Depend(Dependency::between(
+                Use::CopyWrite,
+                Use::ComputeRead,
+            )))
+            .unwrap();
+            cp.encode(&ComputeCommand::SetPipeline(pipeline)).unwrap();
+            cp.encode(&ComputeCommand::SetBuffer {
+                index: 0,
+                gpu_addr: output.gpu_address(),
+            })
+            .unwrap();
+            cp.encode(&ComputeCommand::SetTexture {
+                index: 0,
+                texture: res.tex.clone(),
+            })
+            .unwrap();
+            cp.encode(&ComputeCommand::DispatchThreads {
+                grid: [5, 2, 1],
+                threads: [5, 2, 1],
+            })
+            .unwrap();
+            cp.retain(output.clone());
+            cp.end();
+        }
+        ctx.commit_residency();
+        frame.submit().unwrap().wait().unwrap();
+        let mut bytes = [0; 160];
+        output.read(0, &mut bytes).unwrap();
+        for slice in 0..2 {
+            for level in 0..5 {
+                let at = (slice * 5 + level) * 16;
+                let rgba: Vec<f32> = bytes[at..at + 16]
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .collect();
+                let expected = if slice == 0 {
+                    (31 - level) as f32 / 31.0
+                } else {
+                    (63 - level) as f32 / 63.0
+                };
+                assert!(
+                    (rgba[slice] - expected).abs() < 0.005,
+                    "slice {slice} mip {level}: {rgba:?}, expected {expected}"
+                );
+                assert_eq!(rgba[1 - slice], 0.0);
+                assert_eq!(rgba[3], 1.0);
+            }
+        }
     }
 }

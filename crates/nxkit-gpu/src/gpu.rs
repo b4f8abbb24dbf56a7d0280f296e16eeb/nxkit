@@ -26,6 +26,7 @@ use nxkit_nvn::resource::TexId;
 
 use crate::barriers::{BarrierState, touch};
 use crate::bindless::{Bindless, Env, Handles, Resolved};
+use crate::copyback::CopyBack;
 use crate::detail::{FrameDetail, RecordingRun};
 use crate::draws::{Shared, ordinals};
 use crate::encode::{Tables, render_pass};
@@ -84,6 +85,7 @@ pub struct Gpu {
     threads: usize,
     last: Option<SubmittedBatch>,
     pools: Vec<(u64, u64)>,
+    copyback: CopyBack,
 }
 
 /// How each texture of the frame is used. A texture is memoryless only when every attachment use says so and no
@@ -219,6 +221,7 @@ impl Gpu {
             threads,
             last: None,
             pools: Vec::new(),
+            copyback: CopyBack::default(),
         })
     }
 
@@ -230,6 +233,20 @@ impl Gpu {
             self.pools.push((gpu_addr, len));
         }
         Ok(())
+    }
+
+    /// Tells the encoder about a memory pool of the game and its `NVNmemoryPoolFlags`, like
+    /// [`Gpu::register_pool`]. A texture that a frame writes and whose storage lies in a pool the CPU can access is
+    /// copied back into guest memory at the end of the frame (see `copyback`).
+    pub fn register_memory_pool(&mut self, gpu_addr: u64, len: u64, flags: u32) -> Result<()> {
+        self.register_pool(gpu_addr, len)?;
+        self.copyback.add_pool(gpu_addr, len, flags);
+        Ok(())
+    }
+
+    /// The game finalised the memory pool at `gpu_addr`. Its textures are no longer copied back.
+    pub fn unregister_memory_pool(&mut self, gpu_addr: u64) {
+        self.copyback.remove_pool(gpu_addr);
     }
 
     /// The pools that were registered, as (GPU address, length).
@@ -283,7 +300,11 @@ impl Gpu {
 
     /// Waits until the GPU finished the last submitted frame. The result is `None` when nothing was submitted.
     pub fn wait(&mut self) -> Result<Option<CommandBufferStats>> {
-        self.last.take().map(|b| b.wait()).transpose()
+        let r = self.last.take().map(|b| b.wait()).transpose();
+        if r.is_ok() {
+            self.copyback.idle();
+        }
+        r
     }
 
     fn resolve_handles(
@@ -397,9 +418,140 @@ impl Gpu {
             textures.insert(id, res);
         }
         let res = textures.get(&id).ok_or(Skip::Texture)?;
-        let view = self.store.view(id, res, &slot.header, stats)?;
+        let tex_view = self.store.view(id, res, &slot.header, stats)?;
+        if crate::diag("barr") {
+            crate::barr::note(handle, id);
+        }
+        if crate::diag("bc") && res.desc.format.is_compressed() {
+            static SEEN_BC: std::sync::Mutex<Vec<TexId>> = std::sync::Mutex::new(Vec::new());
+            if let (Ok(rec), Ok(mut seen)) = (view.record(id), SEEN_BC.lock()) {
+                if !seen.contains(&id) && seen.len() < 200 {
+                    seen.push(id);
+                    let map = self.guest.address_map();
+                    let mut head = vec![0u8; 32.min(rec.layout.size as usize)];
+                    let read = rec
+                        .address
+                        .get()
+                        .checked_sub(map.gpu_base())
+                        .is_some_and(|off| self.guest.read(off, &mut head).is_ok());
+                    eprintln!(
+                        "DIAG bc {id:?} {}x{} {:?} residency {:?} size {} guest_read {read} head {head:02x?}",
+                        res.desc.width, res.desc.height, res.desc.format, rec.residency, rec.layout.size
+                    );
+                }
+            }
+        }
+        if crate::diag("hnd") {
+            static SEEN: std::sync::Mutex<Vec<(u64, TexId, u64)>> = std::sync::Mutex::new(Vec::new());
+            let key = (handle, id, 0u64);
+            if let Ok(mut seen) = SEEN.lock() {
+                if !seen.contains(&key) && seen.len() < 40000 {
+                    seen.push(key);
+                    let v = tex_view.desc();
+                    eprintln!(
+                        "DIAG hnd {handle} {id:?} backing {}x{} {:?} scaled {} view {}x{} {:?} kind {:?}",
+                        res.desc.width, res.desc.height, res.desc.format, res.scaled, v.width, v.height, v.format, v.kind
+                    );
+                    if matches!(v.kind, nxkit_metal::TextureKind::Cube) {
+                        eprintln!(
+                            "DIAG hnd cube {handle} {id:?} swizzle {:?} view {:?} levels {}+{} backing_levels {} identity_view {}",
+                            slot.header.view.swizzle, slot.header.view.format, slot.header.view.base_level, slot.header.view.levels,
+                            res.desc.mip_levels, tex_view.gpu_resource_id() == res.tex.gpu_resource_id()
+                        );
+                    }
+                }
+            }
+        }
         let sampler = self.bindless.sampler(tsc)?;
-        Ok((Resolved { texture: view.gpu_resource_id(), sampler }, view))
+        Ok((
+            Resolved {
+                texture: tex_view.gpu_resource_id(),
+                sampler,
+            },
+            tex_view,
+        ))
+    }
+
+    /// Encodes, at the end of `cb` (the last command buffer of the frame), the copy-back of the written textures
+    /// whose storage the CPU can access. The result is the textures copied back and their storage ranges.
+    #[allow(clippy::too_many_arguments)]
+    fn copy_back_written(
+        &mut self,
+        cb: &mut CommandBuffer,
+        scratch: &Scratch,
+        view: &dyn EncodeView,
+        textures: &FastMap<TexId, Res>,
+        dirty: &FastMap<TexId, (Dirty, usize)>,
+        copied_back: &[TexId],
+        stats: &mut EncodeStats,
+    ) -> (Vec<TexId>, Vec<(u64, u64)>) {
+        // The last writer first: of two textures over the same storage, the one written last is copied back.
+        let mut order: Vec<(usize, TexId)> = dirty
+            .iter()
+            .filter(|(_, (d, _))| !d.is_empty())
+            .map(|(id, (_, last))| (*last, *id))
+            .collect();
+        order.sort_unstable_by(|a, b| b.cmp(a));
+        let mut items = Vec::new();
+        let mut ranges: Vec<(u64, u64)> = Vec::new();
+        let mut backings: FastSet<TexId> = FastSet::default();
+        let (mut planned, mut over_budget) = (0u64, 0u32);
+        for (_, id) in order {
+            let (Some(res), Ok(rec)) = (textures.get(&id), view.record(id)) else { continue };
+            if res.desc.storage == nxkit_metal::Storage::Memoryless || copied_back.contains(&id) {
+                continue;
+            }
+            let Some(flags) = self.copyback.candidate(id, rec) else { continue };
+            let (start, end) = (rec.address.get(), rec.end());
+            if backings.contains(&res.barrier_id) || ranges.iter().any(|&(s, e)| s < end && start < e) {
+                continue;
+            }
+            if planned + rec.layout.size > crate::copyback::budget() {
+                over_budget += 1;
+                continue;
+            }
+            planned += rec.layout.size;
+            backings.insert(res.barrier_id);
+            ranges.push((start, end));
+            items.push((id, rec, res, &dirty[&id].0, flags));
+        }
+        let args: Vec<_> = items.iter().map(|(_, rec, res, d, _)| (*rec, *res, *d)).collect();
+        let results = self.transfer.copy_back_many(cb, scratch, &self.guest, &args);
+        let (mut done, mut done_ranges) = (Vec::new(), Vec::new());
+        let (mut bytes, mut refused) = (0u64, 0u32);
+        for ((id, rec, res, d, flags), r) in items.iter().zip(results) {
+            match r {
+                Ok(n) => {
+                    stats.copybacks += 1;
+                    stats.copyback_bytes += n;
+                    bytes += n;
+                    done.push(*id);
+                    done_ranges.push((rec.address.get(), rec.end()));
+                    self.barriers
+                        .note_read(res.barrier_id, Stages::DISPATCH | Stages::BLIT);
+                    self.copyback.log_first(*id, rec, res, *flags, d, n);
+                }
+                Err(why) => {
+                    refused += 1;
+                    stats.skip(why);
+                    if crate::diag("copyback") {
+                        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                        if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 100 {
+                            eprintln!(
+                                "DIAG copyback refused {id:?} {:?} {}x{} layers {} levels {} scaled {} widened {} linear {} stride {}: {why:?}",
+                                res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers,
+                                res.desc.mip_levels, res.scaled, res.widened, rec.layout.linear, rec.desc.stride
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        if !items.is_empty() {
+            stats.compute_passes += 1;
+        }
+        self.copyback.log_frame(done.len() as u32, bytes, refused, over_budget);
+        (done, done_ranges)
     }
 
     /// Encodes a held frame and submits it.
@@ -444,7 +596,45 @@ impl Gpu {
         let mut stats = EncodeStats::default();
         let builds_before = self.pipelines.counts().0;
 
-        let uses = collect_uses(frame, plan);
+        let mut uses = collect_uses(frame, plan);
+        self.copyback.note_presented(frame);
+        // A render target that is copied back stays at the native size: the copy-back needs the guest layout. The
+        // other attachments of its passes stay at the native size too, since a pass renders at one scale.
+        if crate::copyback::enabled() {
+            let mut pin: FastSet<TexId> = uses
+                .iter()
+                .filter(|(id, u)| {
+                    u.attachment
+                        && view
+                            .record(**id)
+                            .is_ok_and(|rec| self.copyback.candidate(**id, rec).is_some())
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            if !pin.is_empty() {
+                let mut co = Vec::new();
+                for p in plan.passes.iter().filter(|p| p.kind == PassKind::Render) {
+                    let atts = plan.attachments_of(p);
+                    if atts.iter().any(|a| pin.contains(&a.tex)) {
+                        co.extend(atts.iter().map(|a| a.tex).filter(|t| !pin.contains(t)));
+                    }
+                }
+                for t in co {
+                    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    if pin.insert(t)
+                        && crate::diag("copyback")
+                        && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 50
+                    {
+                        eprintln!("DIAG copyback pins {t:?} at the native size, it shares a pass with a copied-back texture");
+                    }
+                }
+                for id in pin {
+                    if let Some(u) = uses.get_mut(&id) {
+                        u.cpu_read = true;
+                    }
+                }
+            }
+        }
         for (id, u) in &uses {
             self.store.note(*id, *u);
         }
@@ -470,16 +660,41 @@ impl Gpu {
         drop(self.store.take_retired());
         self.store.trim_views();
 
-        let mut first_write: HashMap<TexId, usize> = HashMap::new();
+        let mut first_write: FastMap<TexId, usize> = FastMap::default();
         let mut gpu_wrote: Vec<TexId> = Vec::new();
+        // The levels and layers that the frame wrote, and the last pass that wrote them, for the copy-back.
+        let mut dirty: FastMap<TexId, (Dirty, usize)> = FastMap::default();
         for (i, p) in plan.passes.iter().enumerate() {
-            if !matches!(p.kind, PassKind::Render | PassKind::Compute | PassKind::Copy) {
+            if !matches!(
+                p.kind,
+                PassKind::Render | PassKind::Compute | PassKind::Copy
+            ) {
                 continue;
             }
             for id in touch(frame, plan, p).writes {
                 let memoryless = textures.get(&id).is_none_or(|r| r.desc.storage == nxkit_metal::Storage::Memoryless);
                 if !memoryless && first_write.insert(id, i).is_none() {
                     gpu_wrote.push(id);
+                }
+                if !memoryless && crate::copyback::enabled() {
+                    let e = dirty.entry(id).or_default();
+                    e.1 = i;
+                    if p.kind != PassKind::Render {
+                        e.0 = Dirty::All;
+                    }
+                }
+            }
+            if p.kind == PassKind::Render {
+                for a in plan.attachments_of(p) {
+                    let Some((d, _)) = dirty.get_mut(&a.tex) else { continue };
+                    let three_d = textures
+                        .get(&a.tex)
+                        .is_some_and(|r| r.desc.kind == nxkit_metal::TextureKind::D3);
+                    if three_d {
+                        *d = Dirty::All;
+                    } else if a.store == nxkit_nvn::passes::StoreAction::Store {
+                        d.add(a.view.level(), a.view.layer());
+                    }
                 }
             }
         }
@@ -546,7 +761,12 @@ impl Gpu {
             if !TextureStore::needs_upload(res, rec) {
                 continue;
             }
-            match self.transfer.upload(first, &scratch, &self.guest, rec, res) {
+            let wait = self.copyback.upload_waits(rec);
+            let r = self.transfer.upload(first, &scratch, &self.guest, rec, res, wait);
+            if tile {
+                eprintln!("DIAG hmup {id:?} upload {:?}", r.as_ref().err());
+            }
+            match r {
                 Ok(()) => {
                     stats.uploads += 1;
                     stats.compute_passes += 1;
@@ -674,7 +894,14 @@ impl Gpu {
             stats.add(&s);
             copied_back.extend(copied);
         }
+        let (mirrored, mirrored_ranges) = match rest.last_mut() {
+            Some(cb) if !dirty.is_empty() => {
+                self.copy_back_written(cb, &scratch, view, &textures, &dirty, &copied_back, &mut stats)
+            }
+            _ => Default::default(),
+        };
 
+        stats.chunks_ns = chunks_ns;
         stats.barriers_emitted = barrier_plan.emitted;
         stats.barriers_avoided = barrier_plan.avoided;
         stats.command_buffers = 1 + ends.len() as u32;
@@ -686,6 +913,77 @@ impl Gpu {
         let submitted = batch.submit()?;
         let number = submitted.number();
         self.last = Some(submitted);
-        Ok(EncodeReport { batch: number, deswizzled, gpu_wrote, copied_back, stats })
+        self.copyback.submitted(number, &mirrored_ranges);
+        if lum || (crate::diag("hmcap") && crate::lum::pending()) {
+            let _ = self.wait();
+            crate::lum::dump(&self.ctx);
+            if crate::diag("hmcap") {
+                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                for (id, r) in &textures {
+                    let d = r.desc;
+                    if d.kind != nxkit_metal::TextureKind::D2 || d.format != nxkit_metal::Format::R16Unorm || d.width != 256 {
+                        continue;
+                    }
+                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) > 30 {
+                        break;
+                    }
+                    let pts: Vec<[u32; 2]> = (1..4).flat_map(|j| (1..4).map(move |i| [64 * i, 64 * j])).collect();
+                    let px = r.tex.debug_read_raw(&self.ctx, &pts).unwrap_or_default();
+                    let res = view.record(*id).ok().map(|x| x.residency);
+                    eprintln!("DIAG hmtile {id:?} {:?} gpu {:02x?}", res, px);
+                }
+            }
+        }
+        if crate::diag("hmread") && lum {
+            let _ = self.wait();
+            for (id, r) in &textures {
+                let d = r.desc;
+                if !(d.kind == nxkit_metal::TextureKind::D2Array && d.array_layers == 8 && d.width >= 256) {
+                    continue;
+                }
+                if let Ok(rec) = view.record(*id) {
+                    let map = self.guest.address_map();
+                    let size = rec.layout.size;
+                    let base = rec.address.get().checked_sub(map.gpu_base());
+                    let mut nz_pages = 0;
+                    let pages = size.div_ceil(4096);
+                    let mut buf = [0u8; 256];
+                    if let Some(base) = base {
+                        for p in 0..pages {
+                            if self.guest.read(base + p * 4096, &mut buf).is_ok() && buf.iter().any(|b| *b != 0) {
+                                nz_pages += 1;
+                            }
+                        }
+                    }
+                    eprintln!(
+                        "DIAG hmread {id:?} guest {:#x} size {size} pages with data {nz_pages}/{pages} residency {:?} layout {:?}",
+                        rec.address.get(), rec.residency, rec.layout
+                    );
+                }
+                for layer in 0..d.array_layers {
+                    let v = nxkit_metal::ViewDesc {
+                        format: d.format,
+                        kind: nxkit_metal::TextureKind::D2,
+                        first_level: 0,
+                        level_count: 1,
+                        first_slice: layer,
+                        slice_count: 1,
+                    };
+                    let Ok(t) = r.tex.view(&v) else { continue };
+                    let pts: Vec<[u32; 2]> = (1..4).flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4])).collect();
+                    let px = t.debug_read_raw(&self.ctx, &pts).unwrap_or_default();
+                    let nz = px.iter().filter(|p| p.iter().any(|b| *b != 0)).count();
+                    eprintln!("DIAG hmread {id:?} {}x{} {:?} layer {layer} nonzero {nz}/9 {:02x?}", d.width, d.height, d.format, px.first());
+                }
+            }
+        }
+        Ok(EncodeReport {
+            batch: number,
+            deswizzled,
+            gpu_wrote,
+            copied_back,
+            mirrored,
+            stats,
+        })
     }
 }

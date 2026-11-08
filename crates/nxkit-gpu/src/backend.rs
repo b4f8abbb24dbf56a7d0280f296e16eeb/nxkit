@@ -337,14 +337,28 @@ impl Backend for GpuBackend {
 
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()> {
         let gpu_addr = self.guest.gpu_address(pool.host, pool.len).map_err(fail)?;
-        locked(&self.gpu).register_pool(gpu_addr, pool.len).map_err(fail)
+        locked(&self.gpu)
+            .register_memory_pool(gpu_addr, pool.len, pool.flags)
+            .map_err(fail)
     }
 
-    fn unregister_pool(&self, _host: u64) {}
+    fn unregister_pool(&self, host: u64) {
+        if let Ok(gpu_addr) = self.guest.gpu_address(host, 1) {
+            locked(&self.gpu).unregister_memory_pool(gpu_addr);
+        }
+    }
 
-    fn submit(&self, queue: u64, handles: &[CommandHandle], _origin_lower_left: bool) {
-        let mut mem = GuestView(self.guest.clone());
-        locked(&self.walker).submit(&mut mem, queue, handles);
+    fn submit<'a>(
+        &'a self,
+        queue: u64,
+        handles: &'a [CommandHandle],
+        _origin_lower_left: bool,
+    ) -> Option<Deferred<'a>> {
+        let mut walker = locked(&self.walker);
+        Some(Box::new(move || {
+            let mut mem = GuestView(self.guest.clone());
+            walker.submit(&mut mem, queue, handles);
+        }))
     }
 
     fn flush_frame(
