@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
     ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format,
@@ -99,12 +99,123 @@ thread_local! {
 pub(crate) struct Pipelines {
     id: u64,
     ctx: Context,
-    cache: PipelineCache,
+    cache: Arc<PipelineCache>,
     depth: Mutex<FastMap<DepthStencilDesc, DepthStencilState>>,
     flat: Mutex<Option<ShaderLibrary>>,
     /// The shader of the `paint` knobs.
     paint: Mutex<Option<ShaderLibrary>>,
-    topology_fallbacks: Mutex<FastSet<u64>>,
+    topology_fallbacks: Arc<Mutex<FastSet<u64>>>,
+    /// Render pipelines that compile on the background threads, and those that failed there.
+    builds: Arc<Builds>,
+}
+
+/// The state of the background compiles (`NXKIT_PIPELINE_ASYNC`, on by default).
+#[derive(Default)]
+struct Builds {
+    pending: Mutex<FastSet<u64>>,
+    failed: Mutex<FastSet<u64>>,
+    queue: Mutex<Option<std::sync::mpsc::Sender<Job>>>,
+}
+
+/// A render pipeline to compile in the background, with an owned copy of its description.
+struct Job {
+    key: u64,
+    vertex: (ShaderLibrary, String),
+    fragment: Option<(ShaderLibrary, String)>,
+    colors: Vec<Option<nxkit_metal::ColorTarget>>,
+    vertex_layout: nxkit_metal::VertexDescriptor,
+    topology: TopologyClass,
+    sample_count: u32,
+    alpha_to_coverage: bool,
+    what: String,
+}
+
+/// The threads that compile render pipelines in the background.
+const COMPILE_THREADS: usize = 2;
+
+/// Whether a render pipeline that the cache lacks compiles in the background (`NXKIT_PIPELINE_ASYNC=0` turns it off).
+/// The draw is left out until it is ready, a frame or two, instead of stalling the encode for the 5 to 30 ms of the
+/// compile.
+fn async_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    // The unit tests build synchronously, so a call returns its pipeline.
+    *ON.get_or_init(|| !cfg!(test) && std::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0"))
+}
+
+/// The point size fallback of [`build_render`] has this key.
+const FALLBACK_KEY: u64 = 0x9e37_79b9_7f4a_7c15;
+
+/// Builds a render pipeline. NVN writes the point size of every draw; Metal refuses a point size write for a line or
+/// triangle class, so such a pipeline is built again without a class, and the key is remembered in `fallbacks`.
+fn build_render(
+    cache: &PipelineCache,
+    fallbacks: &Mutex<FastSet<u64>>,
+    key: u64,
+    desc: &mut RenderPipelineDesc<'_>,
+) -> Result<RenderPipeline, nxkit_metal::MetalError> {
+    if fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+        desc.topology = TopologyClass::Unspecified;
+        return cache.render(key ^ FALLBACK_KEY, desc);
+    }
+    cache.render(key, desc).or_else(|e| {
+        if desc.topology == TopologyClass::Point || !e.to_string().contains("point size") {
+            return Err(e);
+        }
+        desc.topology = TopologyClass::Unspecified;
+        let pipeline = cache.render(key ^ FALLBACK_KEY, desc)?;
+        // Remember the successful variant. Retrying the rejected descriptor for every draw invokes the Metal compiler
+        // thousands of times per frame even though the fallback itself is cached.
+        fallbacks.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
+        Ok(pipeline)
+    })
+}
+
+impl Builds {
+    /// Queues `job` once per key. The threads start with the first job.
+    fn start(self: &Arc<Self>, cache: &Arc<PipelineCache>, fallbacks: &Arc<Mutex<FastSet<u64>>>, job: Job) {
+        if !self.pending.lock().unwrap_or_else(PoisonError::into_inner).insert(job.key) {
+            return;
+        }
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        if queue.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let rx = Arc::new(Mutex::new(rx));
+            for i in 0..COMPILE_THREADS {
+                let (rx, me, cache, fallbacks) = (rx.clone(), self.clone(), cache.clone(), fallbacks.clone());
+                let _ = std::thread::Builder::new().name(format!("nxkit-pipeline-{i}")).spawn(move || {
+                    loop {
+                        let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
+                        let Ok(job) = next else { return };
+                        me.run(&cache, &fallbacks, &job);
+                    }
+                });
+            }
+            *queue = Some(tx);
+        }
+        if let Some(tx) = queue.as_ref()
+            && let Err(e) = tx.send(job)
+        {
+            self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&e.0.key);
+        }
+    }
+
+    fn run(&self, cache: &PipelineCache, fallbacks: &Mutex<FastSet<u64>>, job: &Job) {
+        let mut desc = RenderPipelineDesc::new(
+            (&job.vertex.0, job.vertex.1.as_str()),
+            job.fragment.as_ref().map(|(l, e)| (l, e.as_str())),
+            &[],
+        );
+        desc.colors = job.colors.clone();
+        desc.vertex_layout = job.vertex_layout.clone();
+        desc.topology = job.topology;
+        desc.sample_count = job.sample_count;
+        desc.alpha_to_coverage = job.alpha_to_coverage;
+        if let Err(e) = build_render(cache, fallbacks, job.key, &mut desc) {
+            pipe_failed(format_args!("render {}: {e}", job.what));
+            self.failed.lock().unwrap_or_else(PoisonError::into_inner).insert(job.key);
+        }
+        self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&job.key);
+    }
 }
 
 impl Pipelines {
@@ -115,11 +226,12 @@ impl Pipelines {
         Ok(Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             ctx: ctx.clone(),
-            cache: PipelineCache::new(ctx, archive)?,
+            cache: Arc::new(PipelineCache::new(ctx, archive)?),
             depth: Mutex::new(FastMap::default()),
             flat: Mutex::new(None),
             paint: Mutex::new(None),
-            topology_fallbacks: Mutex::new(FastSet::default()),
+            topology_fallbacks: Arc::new(Mutex::new(FastSet::default())),
+            builds: Arc::new(Builds::default()),
         })
     }
 
@@ -266,27 +378,29 @@ impl Pipelines {
         paint.hash(&mut h);
         paint_dir.hash(&mut h);
         let key = h.finish();
-        // NVN writes the point size of every draw. Metal refuses a point size write for a line or triangle class,
-        // so such a pipeline is built again without a class.
-        const FALLBACK_KEY: u64 = 0x9e37_79b9_7f4a_7c15;
-        let fallback = self.topology_fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key);
-        let p = if fallback {
-            desc.topology = TopologyClass::Unspecified;
-            self.cache.render(key ^ FALLBACK_KEY, &desc)
-        } else {
-            self.cache.render(key, &desc).or_else(|e| {
-                if desc.topology == TopologyClass::Point || !e.to_string().contains("point size") {
-                    return Err(e);
-                }
-                desc.topology = TopologyClass::Unspecified;
-                let pipeline = self.cache.render(key ^ FALLBACK_KEY, &desc)?;
-                // Remember the successful variant. Retrying the rejected descriptor for every draw invokes the
-                // Metal compiler thousands of times per frame even though the fallback itself is cached.
-                self.topology_fallbacks.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
-                Ok(pipeline)
-            })
-        };
-        let p = p.map_err(|e| {
+        if async_on() && !icb {
+            let fallback = self.topology_fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key);
+            if let Some(p) = self.cache.cached_render(if fallback { key ^ FALLBACK_KEY } else { key }) {
+                return Ok((p, key));
+            }
+            if self.builds.failed.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+                return Err(Skip::Pipeline);
+            }
+            let job = Job {
+                key,
+                vertex: (desc.vertex.0.clone(), desc.vertex.1.to_string()),
+                fragment: desc.fragment.map(|(l, e)| (l.clone(), e.to_string())),
+                colors: desc.colors.clone(),
+                vertex_layout: desc.vertex_layout.clone(),
+                topology: desc.topology,
+                sample_count: desc.sample_count,
+                alpha_to_coverage: desc.alpha_to_coverage,
+                what: format!("{} / {:?}", vs.entry, fs.map(|f| f.entry.as_str())),
+            };
+            self.builds.start(&self.cache, &self.topology_fallbacks, job);
+            return Err(Skip::Pending);
+        }
+        let p = build_render(&self.cache, &self.topology_fallbacks, key, &mut desc).map_err(|e| {
             pipe_failed(format_args!("render {} / {:?}: {e}", vs.entry, fs.map(|f| f.entry.as_str())))
         })?;
         Ok((p, key))

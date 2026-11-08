@@ -22,6 +22,7 @@ const SKIPS: [Reason; Skip::COUNT] = [
     Reason::SkipCopy,
     Reason::SkipTransfer,
     Reason::SkipEncode,
+    Reason::SkipPending,
 ];
 
 /// Counts what frame `n` left out and prints the report when it is due.
@@ -54,6 +55,7 @@ mod tests {
             Skip::Copy,
             Skip::Transfer,
             Skip::Encode,
+            Skip::Pending,
         ];
         assert_eq!(all.len(), Skip::COUNT);
         for s in all {

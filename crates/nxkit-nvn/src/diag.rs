@@ -98,6 +98,9 @@ reasons! {
     SkipTransfer => "skip.transfer",
     /// Encoder: Metal refused an encoded command (`Skip::Encode`).
     SkipEncode => "skip.encode",
+    /// Encoder: the pipeline still compiles on a background thread, the draw waits for it (`Skip::Pending`). It is
+    /// a draw that shows a frame or two late, not a loss.
+    SkipPending => "skip.pending",
     /// Walker: a draw record without draw arguments (an indirect or unknown draw kind), so the draw has no detail.
     DrawNoArgs => "walk.draw-no-args",
     /// Walker: a draw without a vertex stage in the bound program.
@@ -136,7 +139,7 @@ reasons! {
 impl Reason {
     /// False for a reason that counts work that the hardware does not do either.
     pub fn is_loss(self) -> bool {
-        self != Reason::SkipCull
+        self != Reason::SkipCull && self != Reason::SkipPending
     }
 }
 

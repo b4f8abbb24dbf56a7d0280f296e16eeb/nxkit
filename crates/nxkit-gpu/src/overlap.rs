@@ -17,7 +17,7 @@ use std::sync::{Mutex, OnceLock};
 /// the next frame do not reach the frame on the GPU. See `docs/plans/fence-overlap.md`.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))
+    *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1")) || crate::knob("overlap")
 }
 
 use crate::detail::{DrawArgs, FrameDetail, UboDetail};

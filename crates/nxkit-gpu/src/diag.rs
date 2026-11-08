@@ -60,6 +60,10 @@ const KNOBS: &[&str] = &[
     // `nvnSyncWait` returns at once and does not wait for the GPU. Wrong on purpose: the game may write memory that the
     // frame on the GPU still reads. It measures what the wait for the newest fence costs.
     "nowait",
+    // The same as `NXKIT_OVERLAP=1`, switched while the game runs, to compare both at one place.
+    "overlap",
+    // With the overlap on, the uniform buffers are not copied. Wrong on purpose: it measures what the copies cost.
+    "nosnap",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

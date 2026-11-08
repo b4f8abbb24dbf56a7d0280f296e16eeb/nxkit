@@ -34,11 +34,13 @@ pub enum Skip {
     Transfer,
     /// Metal refused an encoded command.
     Encode,
+    /// The pipeline is still compiling on a background thread. The draw is left out until it is ready.
+    Pending,
 }
 
 impl Skip {
     /// The number of reasons.
-    pub const COUNT: usize = 14;
+    pub const COUNT: usize = 15;
 
     /// The reason as a short name for logs.
     pub fn name(self) -> &'static str {
@@ -57,6 +59,7 @@ impl Skip {
             Self::Copy => "copy",
             Self::Transfer => "transfer",
             Self::Encode => "encode",
+            Self::Pending => "pending",
         }
     }
 }

@@ -915,6 +915,7 @@ impl Gpu {
         stats.command_buffers = 1 + ends.len() as u32;
         stats.pipeline_builds = self.pipelines.counts().0.saturating_sub(builds_before) as u32;
         stats.encode_ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        hitch_diag(&stats, detail.draws.len());
 
         // ICBs and argument buffers made during the encode join the residency set before the commit.
         self.ctx.commit_residency();
@@ -991,4 +992,28 @@ fn pass_shape_diag(
     for (size, (n, draws)) in v.iter().take(20) {
         eprintln!("DIAG passes {n:4} with {draws:5} draws into {size}");
     }
+}
+
+/// `NXKIT_DIAG=hitch`: a line for each frame whose encode took long or that built pipelines or textures, with the wall
+/// clock in milliseconds, to put it next to the late frames of `NXKIT_PACE_DIAG`.
+fn hitch_diag(s: &EncodeStats, draws: usize) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::diag("hitch")) {
+        return;
+    }
+    if s.encode_ns < 7_000_000 && s.pipeline_builds == 0 && s.textures_created == 0 {
+        return;
+    }
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+    eprintln!(
+        "DIAG hitch t {ms} encode {:.2} ms chunks {:.2} ms pipelines {} textures {} uploads {} copybacks {} passes {}+{} draws {draws}",
+        s.encode_ns as f64 / 1e6,
+        s.chunks_ns as f64 / 1e6,
+        s.pipeline_builds,
+        s.textures_created,
+        s.uploads,
+        s.copybacks,
+        s.render_passes,
+        s.compute_passes,
+    );
 }

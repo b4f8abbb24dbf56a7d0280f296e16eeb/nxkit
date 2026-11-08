@@ -371,6 +371,10 @@ fn kmax_diag(cfg: &LoadConfig, hz: i32, cap: u32) -> String {
 
 fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
     let k = fs.k;
+    if std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1") && shown > f64::from(k.max(1)) + 0.25 {
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+        eprintln!("nxkit-pacing: late t {ms} hold {k}: shown {shown:.2} cpu {:.2} gpu {gpu:.2} vsyncs", shown - wait);
+    }
     use std::sync::{Mutex, OnceLock};
     static ON: OnceLock<bool> = OnceLock::new();
     static SUM: Mutex<[f64; 5]> = Mutex::new([0.0; 5]);

@@ -330,6 +330,14 @@ impl PipelineCache {
         Ok(p)
     }
 
+    /// The render pipeline under `key` when the cache already holds it. Nothing is compiled.
+    pub fn cached_render(&self, key: u64) -> Option<RenderPipeline> {
+        match self.lookup(key) {
+            Ok(Some(Entry::Render(p))) => Some(p),
+            _ => None,
+        }
+    }
+
     fn lookup(&self, key: u64) -> Result<Option<Entry>> {
         let map = self
             .entries
