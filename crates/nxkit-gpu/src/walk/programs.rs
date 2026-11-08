@@ -1,7 +1,7 @@
 //! The programs that the game gave to the backend, and what each of their stages is.
 //!
-//! `Backend::program_set` gives the keys of the stages of a program. The type of a stage (vertex, fragment, compute)
-//! is in the `stage` field of the `_b.json` of the shader step. The walker reads it once for each key.
+//! `Backend::program_set` gives the keys of the stages of a program. The type of a stage (vertex, fragment, compute,
+//! task, mesh) is in the `stage` field of the `_b.json` of the shader step. The walker reads it once for each key.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +17,10 @@ pub(super) enum Kind {
     Vertex,
     Fragment,
     Compute,
+    /// An NVN2 task shader: the object function of a mesh pipeline.
+    Task,
+    /// An NVN2 mesh shader.
+    Mesh,
     Other,
 }
 
@@ -122,10 +126,14 @@ impl Programs {
     fn read_kind(&self, key: &str) -> Option<Kind> {
         let text = std::fs::read_to_string(self.dir.join(format!("{key}_b.json"))).ok()?;
         let json = parse(&text)?;
-        Some(match json.get("stage").and_then(Json::as_str)? {
+        // A task or mesh shader is translated as a compute job with a `mesh_stage`. Its kind names the stage.
+        let mesh = json.get("mesh_stage").and_then(|m| m.get("kind")).and_then(Json::as_str);
+        Some(match mesh.or(json.get("stage").and_then(Json::as_str))? {
             "vs" => Kind::Vertex,
             "ps" => Kind::Fragment,
             "cs" => Kind::Compute,
+            "ts" => Kind::Task,
+            "ms" => Kind::Mesh,
             _ => Kind::Other,
         })
     }

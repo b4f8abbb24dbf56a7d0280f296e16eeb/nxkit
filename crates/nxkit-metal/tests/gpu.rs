@@ -1121,3 +1121,93 @@ fn an_uncompressed_view_of_a_compressed_texture_is_an_error() {
     });
     assert!(matches!(view, Err(MetalError::Invalid(_))));
 }
+
+const MESH_MSL: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+struct V { float4 position [[position]]; };
+using M = metal::mesh<V, void, 3, 1, metal::topology::triangle>;
+[[mesh]] void ms(M out, uint t [[thread_index_in_threadgroup]]) {
+    if (t == 0) {
+        out.set_primitive_count(1);
+        out.set_vertex(0, V{float4(-1, -1, 0, 1)});
+        out.set_vertex(1, V{float4(3, -1, 0, 1)});
+        out.set_vertex(2, V{float4(-1, 3, 0, 1)});
+        out.set_index(0, 0);
+        out.set_index(1, 1);
+        out.set_index(2, 2);
+    }
+}
+fragment float4 green() { return float4(0, 1, 0, 1); }
+vertex V full(uint id [[vertex_id]]) {
+    float2 p = float2((id << 1) & 2, id & 2);
+    return {float4(p * 2 - 1, 0, 1)};
+}
+"#;
+
+#[test]
+fn a_mesh_pipeline_draws_a_grid_and_a_depth_only_one_builds() {
+    let Some(ctx) = ctx() else { return };
+    let lib = ShaderLibrary::from_source(&ctx, "mesh", MESH_MSL).unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let desc = |fragment| nxkit_metal::MeshPipelineDesc {
+        object: None,
+        mesh: (&lib, "ms"),
+        fragment,
+        colors: vec![Some(nxkit_metal::ColorTarget::new(Format::Rgba8Unorm))],
+        sample_count: 1,
+        alpha_to_coverage: false,
+        object_threads: 0,
+        mesh_threads: 1,
+        payload_bytes: 0,
+    };
+    let pipeline = cache.mesh(31, &desc(Some((&lib, "green")))).unwrap();
+    cache.mesh(32, &desc(None)).unwrap();
+    let target = shared_target(&ctx, 16, 16);
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let pass_desc = RenderPassDesc {
+        colors: vec![Some(ColorAttachment { depth_plane: 0, texture: target.clone(), load: LoadAction::Clear,
+            store: StoreAction::Store, clear: [0.0; 4], memoryless: false })],
+        depth: None,
+        stencil: None,
+    };
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let mut pass = frame.commands().begin_render_pass(&pass_desc, &table).unwrap();
+    pass.encode(&RenderCommand::SetPipeline(pipeline)).unwrap();
+    pass.encode(&RenderCommand::DrawMeshThreadgroups { groups: [1, 1, 1], object_threads: 1, mesh_threads: 1 }).unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    assert!(pixels(&target, 16, 16).as_chunks::<4>().0.iter().all(|p| *p == [0, 255, 0, 255]));
+}
+
+#[test]
+fn an_indirect_draw_reads_its_arguments_on_the_gpu() {
+    let Some(ctx) = ctx() else { return };
+    let lib = ShaderLibrary::from_source(&ctx, "mesh", MESH_MSL).unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let pipeline = cache
+        .render(33, &RenderPipelineDesc::new((&lib, "full"), Some((&lib, "green")), &[Format::Rgba8Unorm]))
+        .unwrap();
+    let args = nxkit_metal::DataBuffer::new(&ctx, 256).unwrap();
+    // vertex count, instance count, first vertex, first instance
+    let words: Vec<u8> = [3u32, 1, 0, 0].iter().flat_map(|w| w.to_le_bytes()).collect();
+    args.write(0, &words).unwrap();
+    let target = shared_target(&ctx, 16, 16);
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let pass_desc = RenderPassDesc {
+        colors: vec![Some(ColorAttachment { depth_plane: 0, texture: target.clone(), load: LoadAction::Clear,
+            store: StoreAction::Store, clear: [0.0; 4], memoryless: false })],
+        depth: None,
+        stencil: None,
+    };
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let mut pass = frame.commands().begin_render_pass(&pass_desc, &table).unwrap();
+    pass.encode(&RenderCommand::SetPipeline(pipeline)).unwrap();
+    assert!(pass.encode(&RenderCommand::DrawIndirect { primitive: Primitive::Triangle, indirect_addr: args.gpu_address() + 2 }).is_err());
+    pass.encode(&RenderCommand::DrawIndirect { primitive: Primitive::Triangle, indirect_addr: args.gpu_address() }).unwrap();
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    assert!(pixels(&target, 16, 16).as_chunks::<4>().0.iter().all(|p| *p == [0, 255, 0, 255]));
+}

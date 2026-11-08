@@ -394,8 +394,10 @@ impl Gpu {
             .iter()
             .flat_map(|d| {
                 [
-                    (Some(&*d.program.vertex), true, crate::detail::Stage::Vertex, &d.textures),
+                    (Some(&*d.program.vertex).filter(|k| !k.is_empty()), true, crate::detail::Stage::Vertex, &d.textures),
                     (d.program.fragment.as_deref(), false, crate::detail::Stage::Fragment, &d.textures),
+                    (d.program.task.as_deref(), false, crate::detail::Stage::Task, &d.textures),
+                    (d.program.mesh.as_deref(), false, crate::detail::Stage::Mesh, &d.textures),
                 ]
             })
             .chain(
@@ -1227,6 +1229,7 @@ fn kpass_diag(
                         let small_geometry = match d.args {
                             DrawArgs::Arrays { count, instances, .. } => count <= 6 && instances <= 1,
                             DrawArgs::Indexed { count, instances, .. } => count <= 6 && instances <= 1,
+                            _ => false,
                         };
                         let ds = &d.depth_stencil;
                         if !small_geometry {

@@ -138,6 +138,43 @@ pub(crate) enum Geom {
         base_vertex: i32,
         base_instance: u32,
     },
+    /// An indirect draw: the GPU reads the arguments from guest memory at `indirect`.
+    Indirect {
+        primitive: Primitive,
+        indirect: u64,
+    },
+    /// An indexed indirect draw. `index_bytes` is the guest memory from `address` to its end.
+    IndexedIndirect {
+        primitive: Primitive,
+        index_type: IndexType,
+        address: u64,
+        index_bytes: u64,
+        indirect: u64,
+    },
+    /// The `draws` indirect draws of a multi-draw. The compute pre-pass of the render pass (`indirect`) copies their
+    /// arguments, with zeros past the count, [`crate::indirect::RECORD`] bytes apart.
+    MultiIndirect {
+        primitive: Primitive,
+        /// The index type, the address of index 0 and the bytes to the end of guest memory of an elements draw.
+        index: Option<(IndexType, u64, u64)>,
+        draws: u32,
+    },
+    /// A task and mesh draw of `count` workgroups. `first` is the GPU address of the first workgroup of each grid of
+    /// at most [`crate::mesh::MAX_GRID`] workgroups, 16 bytes apart. A draw with a task shader is one grid.
+    Mesh {
+        first: u64,
+        count: u32,
+        object_threads: u32,
+        mesh_threads: u32,
+        task: bool,
+    },
+    /// An indirect task and mesh draw. The pre-pass of the render pass turns `{count, first}` into `splits` grids.
+    MeshIndirect {
+        splits: u32,
+        object_threads: u32,
+        mesh_threads: u32,
+        task: bool,
+    },
 }
 
 /// A draw that is ready to encode.
@@ -146,8 +183,11 @@ pub(crate) struct Prep {
     pub(crate) key: u64,
     pub(crate) depth_stencil: DepthStencilState,
     pub(crate) depth_stencil_desc: DepthStencilDesc,
+    /// The argument buffer of the vertex stage, or of the mesh stage of a mesh draw.
     pub(crate) vertex_args: u64,
     pub(crate) fragment_args: Option<u64>,
+    /// The argument buffer of the task shader of a mesh draw.
+    pub(crate) object_args: Option<u64>,
     /// The buffer slot and guest GPU address of each vertex stream.
     pub(crate) streams: Vec<(u32, u64)>,
     pub(crate) cull: CullMode,
@@ -158,6 +198,17 @@ pub(crate) struct Prep {
     pub(crate) geom: Geom,
 }
 
+/// The fixed function state of a draw in Metal terms.
+pub(crate) struct Fixed {
+    pub(crate) cull: CullMode,
+    pub(crate) depth_stencil: DepthStencilState,
+    pub(crate) depth_stencil_desc: DepthStencilDesc,
+    pub(crate) winding: Winding,
+    pub(crate) fill: FillMode,
+    pub(crate) bias: DepthBias,
+    pub(crate) clip: DepthClip,
+}
+
 /// Translates a draw. `icb` asks for a pipeline that an indirect command buffer can use.
 pub(crate) fn prepare(
     sh: &Shared<'_>,
@@ -166,12 +217,14 @@ pub(crate) fn prepare(
     sink: &mut dyn Sink,
     icb: bool,
 ) -> Result<Prep, Skip> {
-    let cull = translate::cull(if crate::knob("nocull") {
-        0
-    } else {
-        d.raster.cull
-    })
-    .ok_or(Skip::Cull)?;
+    // An ICB holds direct draws of vertex pipelines only.
+    if icb && (d.args.is_mesh() || d.args.is_indirect()) {
+        return Err(Skip::Encode);
+    }
+    if d.args.is_mesh() {
+        return crate::mesh::prepare(sh, pc, d, sink);
+    }
+    let cull = cull_of(d)?;
     let (primitive, _) = translate::primitive(d.topology).ok_or(Skip::Primitive)?;
     let vs = sh.programs.stage(&d.program.vertex, true)?;
     let fs = match &d.program.fragment {
@@ -181,29 +234,7 @@ pub(crate) fn prepare(
     let (pipeline, key) = sh
         .pipelines
         .render(d, &vs, fs.as_deref(), &pc.targets, icb)?;
-    let mut ds = d.depth_stencil;
-    ds.depth_test &= pc.has_depth;
-    ds.depth_write &= pc.has_depth;
-    ds.stencil_test &= pc.has_stencil;
-    if diag_depth() {
-        static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-        let key = format!(
-            "{ds:?} range {:?} depth {} stencil {}",
-            d.dynamic.depth_range, pc.has_depth, pc.has_stencil
-        );
-        if let Ok(mut s) = SEEN.lock() {
-            if s.len() < 40 && !s.contains(&key) {
-                eprintln!("DIAG depth draw {key}");
-                s.push(key);
-            }
-        }
-    }
-    if crate::knob("nodepth") {
-        ds.depth_test = false;
-        ds.stencil_test = false;
-    }
-    let depth_stencil_desc = translate::depth_stencil(&ds);
-    let depth_stencil = sh.pipelines.depth_stencil(&depth_stencil_desc)?;
+    let f = fixed(sh, pc, d, cull)?;
     let (geom, base_instance) = geometry(sh, d, primitive)?;
     let mut streams = Vec::with_capacity(d.streams.len());
     for s in &d.streams {
@@ -241,16 +272,59 @@ pub(crate) fn prepare(
         )?),
         None => None,
     };
-    let [factor, units, clamp] = if crate::knob("nooffset") { [0.0; 3] } else { d.raster.depth_bias.unwrap_or([0.0; 3]) };
     Ok(Prep {
         pipeline,
         key,
-        depth_stencil,
-        depth_stencil_desc,
+        depth_stencil: f.depth_stencil,
+        depth_stencil_desc: f.depth_stencil_desc,
         vertex_args,
         fragment_args,
+        object_args: None,
         streams,
+        cull: f.cull,
+        winding: f.winding,
+        fill: f.fill,
+        bias: f.bias,
+        clip: f.clip,
+        geom,
+    })
+}
+
+/// The cull mode of a draw. NVN culls both faces with `FRONT_AND_BACK`, which Metal cannot.
+pub(crate) fn cull_of(d: &DrawDetail) -> Result<CullMode, Skip> {
+    translate::cull(if crate::knob("nocull") { 0 } else { d.raster.cull }).ok_or(Skip::Cull)
+}
+
+/// The depth, stencil and raster state of a draw in a pass, with the depth and stencil state object.
+pub(crate) fn fixed(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, cull: CullMode) -> Result<Fixed, Skip> {
+    let mut ds = d.depth_stencil;
+    ds.depth_test &= pc.has_depth;
+    ds.depth_write &= pc.has_depth;
+    ds.stencil_test &= pc.has_stencil;
+    if diag_depth() {
+        static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let key = format!(
+            "{ds:?} range {:?} depth {} stencil {}",
+            d.dynamic.depth_range, pc.has_depth, pc.has_stencil
+        );
+        if let Ok(mut s) = SEEN.lock() {
+            if s.len() < 40 && !s.contains(&key) {
+                eprintln!("DIAG depth draw {key}");
+                s.push(key);
+            }
+        }
+    }
+    if crate::knob("nodepth") {
+        ds.depth_test = false;
+        ds.stencil_test = false;
+    }
+    let depth_stencil_desc = translate::depth_stencil(&ds);
+    let depth_stencil = sh.pipelines.depth_stencil(&depth_stencil_desc)?;
+    let [factor, units, clamp] = if crate::knob("nooffset") { [0.0; 3] } else { d.raster.depth_bias.unwrap_or([0.0; 3]) };
+    Ok(Fixed {
         cull,
+        depth_stencil,
+        depth_stencil_desc,
         winding: translate::winding(d.raster.front_face),
         fill: translate::fill(d.raster.polygon_mode),
         bias: DepthBias {
@@ -263,7 +337,6 @@ pub(crate) fn prepare(
         } else {
             DepthClip::Clip
         },
-        geom,
     })
 }
 
@@ -314,5 +387,42 @@ fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive) -> Result<(Ge
                 base_instance,
             )
         }
+        // The GPU reads the first instance with the arguments, so the driver block of an indirect draw has 0.
+        DrawArgs::ArraysIndirect { indirect } => {
+            indirect_args(sh, indirect, 16)?;
+            (Geom::Indirect { primitive, indirect }, 0)
+        }
+        DrawArgs::IndexedIndirect { index_type, address, indirect } => {
+            let it = translate::index_type(index_type).ok_or(Skip::Index)?;
+            indirect_args(sh, indirect, 20)?;
+            let index_bytes = index_room(sh, address)?;
+            (Geom::IndexedIndirect { primitive, index_type: it, address, index_bytes, indirect }, 0)
+        }
+        DrawArgs::MultiIndirectCount { index, max, .. } => {
+            let index = match index {
+                Some((ty, address)) => {
+                    let it = translate::index_type(ty).ok_or(Skip::Index)?;
+                    Some((it, address, index_room(sh, address)?))
+                }
+                None => None,
+            };
+            (Geom::MultiIndirect { primitive, index, draws: max.min(crate::indirect::MAX_MULTI) }, 0)
+        }
+        DrawArgs::MeshTasks { .. } | DrawArgs::MeshTasksIndirect { .. } => return Err(Skip::Detail),
     })
+}
+
+/// Checks that `bytes` of indirect arguments at `addr` lie in guest memory at a 4 byte aligned address.
+pub(crate) fn indirect_args(sh: &Shared<'_>, addr: u64, bytes: u64) -> Result<(), Skip> {
+    if !addr.is_multiple_of(4) || sh.guest_offset(addr, bytes).is_none() {
+        return Err(crate::buf_skip(format_args!("indirect arguments addr {addr:#x} bytes {bytes}")));
+    }
+    Ok(())
+}
+
+/// The bytes of guest memory from the index buffer at `addr` to its end. An indirect draw takes its index count from
+/// the GPU, so the encoder gives Metal all of it; Metal reads an index past it as 0.
+fn index_room(sh: &Shared<'_>, addr: u64) -> Result<u64, Skip> {
+    let off = sh.guest_offset(addr, 1).ok_or_else(|| crate::buf_skip(format_args!("index addr {addr:#x}")))?;
+    Ok((sh.guest.address_map().len() - off).min(u64::from(u32::MAX)))
 }

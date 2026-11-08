@@ -105,7 +105,7 @@ impl ArgsMemo {
         let m = match inp.stage {
             Stage::Vertex => &mut self.stages[0],
             Stage::Fragment => &mut self.stages[1],
-            Stage::Compute => return None,
+            Stage::Compute | Stage::Task | Stage::Mesh => return None,
         };
         m.next.clear();
         m.next.push(p as *const StageProgram as u64);
@@ -139,7 +139,7 @@ impl ArgsMemo {
         let m = match stage {
             Stage::Vertex => &mut self.stages[0],
             Stage::Fragment => &mut self.stages[1],
-            Stage::Compute => return,
+            Stage::Compute | Stage::Task | Stage::Mesh => return,
         };
         m.addr = addr;
         m.valid = true;
@@ -378,6 +378,7 @@ fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubo_addr: &[(u32, u64, u32)
         }
     }
     put_u32(b, DRV_BASE_INSTANCE, inp.base_instance);
+    crate::mesh::storage_table(b, inp);
     if let Some(g) = inp.groups {
         for (i, v) in g.iter().enumerate() {
             put_u32(b, DRV_DISPATCH + 4 * i, *v);

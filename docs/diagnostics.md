@@ -91,7 +91,8 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `kpass` | gpu | the render passes that could run as compute dispatches (`docs/plans/kernel-passes.md`, step 0), the runs of them, and why the others cannot | every 300 frames | low |
 | `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
 | `passes` | gpu | the render passes of a frame by their number of draws and by the size of their first attachment | every 300 frames | low |
-| `indirect` | gpu | draw records without arguments (indirect or unknown draw kinds) | at powers of two per kind | low |
+| `indirect` | gpu | draw records without arguments (transform feedback, `DrawTexture` or unknown draw kinds) | at powers of two per kind | low |
+| `mesh` | gpu | the mesh and indirect draws of the frame (`EncodeStats::kinds`): encoded and skipped by reason for each class (mesh, mesh-indirect, indirect, multi-indirect-count), the Metal draws they became, the compute pre-passes and their records, and what was clamped. The first frame with such draws prints the line without the category. `stats` turns it on too. | every 30 frames | low |
 
 ## Knobs (`NXKIT_KNOB`)
 
@@ -161,9 +162,9 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `skip.transfer` | encoder | An upload or a copy-back failed. Look at `upload.*` and `copyback.*`. |
 | `skip.encode` | encoder | Metal refused an encoded command. |
 | `skip.pending` | encoder | The pipeline still compiles on a background thread. The draw shows a frame or two later. It is not a loss. |
-| `walk.draw-no-args` | walker | A draw record without draw arguments (an indirect or unknown draw kind). The draw gets an empty detail. |
-| `walk.draw-no-vertex` | walker | The bound program has no vertex stage. |
-| `walk.stage-ignored` | walker | A geometry or tessellation stage. The encoder runs the vertex and fragment stages only. It counts once per program key. |
+| `walk.draw-no-args` | walker | A draw record without draw arguments (transform feedback, `DrawTexture` or an unknown draw kind). The draw gets an empty detail. |
+| `walk.draw-no-vertex` | walker | The bound program has no vertex stage, or a mesh draw finds no program with a mesh stage. |
+| `walk.stage-ignored` | walker | A geometry or tessellation stage. The encoder runs the vertex, fragment, task and mesh stages only. It counts once per program key. |
 | `decode.unresolved` | decoder | A texture handle or address in a recording names no texture. It counts once per decoded recording. A recording that the cache answers does not count again. |
 | `decode.bad-record` | decoder | A record could not be read. The rest of the recording is lost. |
 | `tex.handle-unresolved` | encoder | A texture handle has no descriptor or no texture record. This is the case of a pool slot that points to a dropped texture. |

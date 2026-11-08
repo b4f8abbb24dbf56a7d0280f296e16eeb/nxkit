@@ -71,6 +71,28 @@ fn declared_dim(msl_type: &str) -> Option<nxkit_metal::TextureKind> {
     })
 }
 
+/// Which mesh pipeline stage a task or mesh shader is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MeshKind {
+    /// A task shader, the object function.
+    Task,
+    /// A mesh shader, the mesh function.
+    Mesh,
+}
+
+/// The `mesh_stage` of the reflection of a task or mesh shader (`nxb-xlate` `msl::mesh::reflect`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MeshInfo {
+    /// The stage.
+    pub(crate) kind: MeshKind,
+    /// The threads of a workgroup.
+    pub(crate) threads: u32,
+    /// The bytes of the payload that a task shader writes and its mesh shader reads.
+    pub(crate) payload: u32,
+    /// For a mesh shader: it reads the payload of a task shader. Without one it reads the first workgroup of the draw.
+    pub(crate) task: bool,
+}
+
 /// A shader function with its bindings.
 pub(crate) struct StageProgram {
     /// The library.
@@ -92,6 +114,8 @@ pub(crate) struct StageProgram {
     pub(crate) threadgroup: [u32; 3],
     /// The shader's own constant segment `c[1]`, padded to 16 bytes. Empty when the shader has none.
     pub(crate) c1: Vec<u8>,
+    /// The mesh stage of a task or mesh shader. `None` for the other stages.
+    pub(crate) mesh: Option<MeshInfo>,
 }
 
 impl StageProgram {
@@ -289,6 +313,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         }
         c1.resize(c1.len().next_multiple_of(16).max(16), 0);
     }
+    let mesh = json.get("mesh_stage").map(read_mesh).transpose()?;
     Ok(StageProgram {
         lib,
         entry,
@@ -301,5 +326,23 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         colors,
         threadgroup,
         c1,
+        mesh,
+    })
+}
+
+/// Reads the `mesh_stage` object of a task or mesh library.
+fn read_mesh(m: &Json) -> Result<MeshInfo, Skip> {
+    let kind = match m.get("kind").and_then(Json::as_str) {
+        Some("ts") => MeshKind::Task,
+        Some("ms") => MeshKind::Mesh,
+        _ => return Err(Skip::Program),
+    };
+    let int = |k: &str| m.get(k).and_then(Json::as_i64).and_then(|v| u32::try_from(v).ok());
+    let threads = int("threads").filter(|t| (1..=1024).contains(t)).ok_or(Skip::Program)?;
+    Ok(MeshInfo {
+        kind,
+        threads,
+        payload: int("payload").unwrap_or(0),
+        task: m.get("task").and_then(Json::as_bool).unwrap_or(false),
     })
 }

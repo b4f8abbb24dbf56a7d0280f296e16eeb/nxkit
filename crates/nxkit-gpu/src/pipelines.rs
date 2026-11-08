@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
-    ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format,
+    ArchiveConfig, ComputePipeline, Context, DepthStencilDesc, DepthStencilState, Format, MeshPipelineDesc,
     PipelineCache, RenderPipeline, RenderPipelineDesc, ShaderLibrary, TopologyClass,
 };
 
@@ -104,6 +104,8 @@ pub(crate) struct Pipelines {
     flat: Mutex<Option<ShaderLibrary>>,
     /// The shader of the `paint` knobs.
     paint: Mutex<Option<ShaderLibrary>>,
+    /// The libraries of the host's own kernels, by name.
+    host: Mutex<FastMap<&'static str, ShaderLibrary>>,
     topology_fallbacks: Arc<Mutex<FastSet<u64>>>,
     /// Render pipelines that compile on the background threads, and those that failed there.
     builds: Arc<Builds>,
@@ -117,9 +119,20 @@ struct Builds {
     queue: Mutex<Option<std::sync::mpsc::Sender<Job>>>,
 }
 
-/// A render pipeline to compile in the background, with an owned copy of its description.
+/// A pipeline to compile in the background, with an owned copy of its description.
 struct Job {
     key: u64,
+    what: String,
+    kind: JobKind,
+}
+
+enum JobKind {
+    Render(RenderJob),
+    Mesh(MeshJob),
+}
+
+/// A render pipeline of vertex and fragment stages.
+struct RenderJob {
     vertex: (ShaderLibrary, String),
     fragment: Option<(ShaderLibrary, String)>,
     colors: Vec<Option<nxkit_metal::ColorTarget>>,
@@ -127,7 +140,38 @@ struct Job {
     topology: TopologyClass,
     sample_count: u32,
     alpha_to_coverage: bool,
-    what: String,
+}
+
+/// A mesh pipeline: object, mesh and fragment stages.
+struct MeshJob {
+    object: Option<(ShaderLibrary, String)>,
+    mesh: (ShaderLibrary, String),
+    fragment: Option<(ShaderLibrary, String)>,
+    colors: Vec<Option<nxkit_metal::ColorTarget>>,
+    sample_count: u32,
+    alpha_to_coverage: bool,
+    object_threads: u32,
+    mesh_threads: u32,
+    payload_bytes: u32,
+}
+
+impl MeshJob {
+    fn desc(&self) -> MeshPipelineDesc<'_> {
+        fn fun((l, e): &(ShaderLibrary, String)) -> (&ShaderLibrary, &str) {
+            (l, e.as_str())
+        }
+        MeshPipelineDesc {
+            object: self.object.as_ref().map(fun),
+            mesh: fun(&self.mesh),
+            fragment: self.fragment.as_ref().map(fun),
+            colors: self.colors.clone(),
+            sample_count: self.sample_count,
+            alpha_to_coverage: self.alpha_to_coverage,
+            object_threads: self.object_threads,
+            mesh_threads: self.mesh_threads,
+            payload_bytes: self.payload_bytes,
+        }
+    }
 }
 
 /// The threads that compile render pipelines in the background.
@@ -201,18 +245,24 @@ impl Builds {
     }
 
     fn run(&self, cache: &PipelineCache, fallbacks: &Mutex<FastSet<u64>>, job: &Job) {
-        let mut desc = RenderPipelineDesc::new(
-            (&job.vertex.0, job.vertex.1.as_str()),
-            job.fragment.as_ref().map(|(l, e)| (l, e.as_str())),
-            &[],
-        );
-        desc.colors = job.colors.clone();
-        desc.vertex_layout = job.vertex_layout.clone();
-        desc.topology = job.topology;
-        desc.sample_count = job.sample_count;
-        desc.alpha_to_coverage = job.alpha_to_coverage;
-        if let Err(e) = build_render(cache, fallbacks, job.key, &mut desc) {
-            pipe_failed(format_args!("render {}: {e}", job.what));
+        let built = match &job.kind {
+            JobKind::Render(r) => {
+                let mut desc = RenderPipelineDesc::new(
+                    (&r.vertex.0, r.vertex.1.as_str()),
+                    r.fragment.as_ref().map(|(l, e)| (l, e.as_str())),
+                    &[],
+                );
+                desc.colors = r.colors.clone();
+                desc.vertex_layout = r.vertex_layout.clone();
+                desc.topology = r.topology;
+                desc.sample_count = r.sample_count;
+                desc.alpha_to_coverage = r.alpha_to_coverage;
+                build_render(cache, fallbacks, job.key, &mut desc).map(|_| ())
+            }
+            JobKind::Mesh(m) => cache.mesh(job.key, &m.desc()).map(|_| ()),
+        };
+        if let Err(e) = built {
+            pipe_failed(format_args!("{}: {e}", job.what));
             self.failed.lock().unwrap_or_else(PoisonError::into_inner).insert(job.key);
         }
         self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&job.key);
@@ -231,6 +281,7 @@ impl Pipelines {
             depth: Mutex::new(FastMap::default()),
             flat: Mutex::new(None),
             paint: Mutex::new(None),
+            host: Mutex::new(FastMap::default()),
             topology_fallbacks: Arc::new(Mutex::new(FastSet::default())),
             builds: Arc::new(Builds::default()),
         })
@@ -339,18 +390,7 @@ impl Pipelines {
                 .or_else(|| fs.map(|f| (&f.lib, fragment_entry(f, targets)))),
             &[],
         );
-        for (i, f) in targets.colors.iter().enumerate() {
-            let Some(format) = *f else {
-                desc.colors.push(None);
-                continue;
-            };
-            let written =
-                fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
-            let blend = d.blend.get(i).copied().unwrap_or_default();
-            let mask = d.write_masks.get(i).copied().unwrap_or(0xF);
-            desc.colors
-                .push(Some(translate::color_target(format, &blend, mask, written)));
-        }
+        desc.colors = color_targets(d, fs, targets);
         desc.vertex_layout =
             translate::vertex_descriptor(d, &vs.inputs).map_err(|e| {
                 nxkit_nvn::diag::example(
@@ -389,14 +429,16 @@ impl Pipelines {
             }
             let job = Job {
                 key,
-                vertex: (desc.vertex.0.clone(), desc.vertex.1.to_string()),
-                fragment: desc.fragment.map(|(l, e)| (l.clone(), e.to_string())),
-                colors: desc.colors.clone(),
-                vertex_layout: desc.vertex_layout.clone(),
-                topology: desc.topology,
-                sample_count: desc.sample_count,
-                alpha_to_coverage: desc.alpha_to_coverage,
-                what: format!("{} / {:?}", vs.entry, fs.map(|f| f.entry.as_str())),
+                what: format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str())),
+                kind: JobKind::Render(RenderJob {
+                    vertex: (desc.vertex.0.clone(), desc.vertex.1.to_string()),
+                    fragment: desc.fragment.map(|(l, e)| (l.clone(), e.to_string())),
+                    colors: desc.colors.clone(),
+                    vertex_layout: desc.vertex_layout.clone(),
+                    topology: desc.topology,
+                    sample_count: desc.sample_count,
+                    alpha_to_coverage: desc.alpha_to_coverage,
+                }),
             };
             self.builds.start(&self.cache, &self.topology_fallbacks, job);
             return Err(Skip::Pending);
@@ -405,6 +447,95 @@ impl Pipelines {
             pipe_failed(format_args!("render {} / {:?}: {e}", vs.entry, fs.map(|f| f.entry.as_str())))
         })?;
         Ok((p, key))
+    }
+
+    /// The mesh pipeline of a task and mesh draw. `ts` is the task shader, when the program has one, and `fs` the pixel
+    /// shader; without one the pipeline draws depth only. The pipeline compiles in the background like a render
+    /// pipeline: until it is ready the draw is left out with `Skip::Pending`.
+    pub(crate) fn mesh(
+        &self,
+        d: &DrawDetail,
+        ts: Option<&StageProgram>,
+        ms: &StageProgram,
+        fs: Option<&StageProgram>,
+        targets: &Targets,
+    ) -> Result<(RenderPipeline, u64), Skip> {
+        let colors = color_targets(d, fs, targets);
+        let fragment = fs.map(|f| (&f.lib, fragment_entry(f, targets)));
+        let info = |p: &StageProgram| p.mesh.ok_or(Skip::Program);
+        let mi = info(ms)?;
+        let ti = ts.map(info).transpose()?;
+        let mut h = DefaultHasher::new();
+        (
+            "mesh",
+            d.program.task.as_deref(),
+            d.program.mesh.as_deref(),
+            d.program.fragment.as_deref(),
+            fragment.map(|(_, e)| e),
+            targets,
+        )
+            .hash(&mut h);
+        colors.hash(&mut h);
+        d.raster.alpha_to_coverage.hash(&mut h);
+        let key = h.finish();
+        if let Some(p) = self.cache.cached_render(key) {
+            return Ok((p, key));
+        }
+        if self.builds.failed.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+            return Err(Skip::Pipeline);
+        }
+        let job = MeshJob {
+            object: ts.map(|t| (t.lib.clone(), t.entry.clone())),
+            mesh: (ms.lib.clone(), ms.entry.clone()),
+            fragment: fragment.map(|(l, e)| (l.clone(), e.to_owned())),
+            colors,
+            sample_count: targets.samples,
+            alpha_to_coverage: d.raster.alpha_to_coverage,
+            object_threads: ti.map_or(0, |t| t.threads),
+            mesh_threads: mi.threads,
+            payload_bytes: ti.map_or(0, |t| t.payload),
+        };
+        let what = || {
+            format!(
+                "mesh task {:?} mesh {:?} fragment {:?}",
+                d.program.task.as_deref(),
+                d.program.mesh.as_deref(),
+                d.program.fragment.as_deref()
+            )
+        };
+        if async_on() {
+            let job = Job { key, what: what(), kind: JobKind::Mesh(job) };
+            self.builds.start(&self.cache, &self.topology_fallbacks, job);
+            return Err(Skip::Pending);
+        }
+        let p = self.cache.mesh(key, &job.desc()).map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
+        Ok((p, key))
+    }
+
+    /// The compute pipeline of one of the host's own kernels: `entry` of the MSL `source`, compiled once under `name`.
+    pub(crate) fn host_compute(
+        &self,
+        name: &'static str,
+        source: &str,
+        entry: &str,
+    ) -> Result<ComputePipeline, Skip> {
+        let lib = {
+            let mut libs = self.host.lock().unwrap_or_else(PoisonError::into_inner);
+            match libs.get(name) {
+                Some(l) => l.clone(),
+                None => {
+                    let l = ShaderLibrary::from_source(&self.ctx, name, source)
+                        .map_err(|e| pipe_failed(format_args!("host kernel {name}: {e}")))?;
+                    libs.insert(name, l.clone());
+                    l
+                }
+            }
+        };
+        let mut h = DefaultHasher::new();
+        ("host", name, entry).hash(&mut h);
+        self.cache
+            .compute(h.finish(), &lib, entry)
+            .map_err(|e| pipe_failed(format_args!("host kernel {name}: {e}")))
     }
 
     /// The compute pipeline of a program.
@@ -439,6 +570,23 @@ impl Pipelines {
         map.insert(*d, s.clone());
         Ok(s)
     }
+}
+
+/// The colour targets of a pipeline: the formats of the pass with the blend state and write mask of the draw. A target
+/// that the fragment shader does not write, or every target without a fragment shader, keeps its contents.
+fn color_targets(d: &DrawDetail, fs: Option<&StageProgram>, targets: &Targets) -> Vec<Option<nxkit_metal::ColorTarget>> {
+    targets
+        .colors
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let format = (*f)?;
+            let written = fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
+            let blend = d.blend.get(i).copied().unwrap_or_default();
+            let mask = d.write_masks.get(i).copied().unwrap_or(0xF);
+            Some(translate::color_target(format, &blend, mask, written))
+        })
+        .collect()
 }
 
 fn fragment_entry<'a>(fs: &'a StageProgram, targets: &Targets) -> &'a str {
@@ -479,10 +627,10 @@ struct Mixed { uint4 integer [[color(0)]]; float4 color [[color(1)]]; };
 fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
 "#).unwrap();
         let stage = |entry: &str| StageProgram { lib: lib.clone(), entry: entry.into(), entry_uint: None, entry_mixed: None, binds: vec![],
-            arg_bytes: 0, inputs: vec![], colors: Some(vec![0]), threadgroup: [1;3], c1: vec![] };
+            arg_bytes: 0, inputs: vec![], colors: Some(vec![0]), threadgroup: [1;3], c1: vec![], mesh: None };
         let vs = stage("vs");
         let mut fs = stage("fs");
-        let draw = DrawDetail { program: ProgramRef { vertex: "point-size".into(), fragment: Some("fs".into()) },
+        let draw = DrawDetail { program: ProgramRef { vertex: "point-size".into(), fragment: Some("fs".into()), task: None, mesh: None },
             blend: Default::default(), write_masks: [15;8], depth_stencil: Default::default(),
             raster: Default::default(), topology: 4, attributes: vec![], streams: vec![],
             args: DrawArgs::Arrays { first: 0, count: 3, instances: 1, base_instance: 0 },

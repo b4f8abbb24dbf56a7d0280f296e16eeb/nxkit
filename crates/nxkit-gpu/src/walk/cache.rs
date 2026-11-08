@@ -54,7 +54,7 @@ const MAX_HANDLES: usize = 1 << 16;
 /// The value of `Track::tex_dep` for a slot that no deferred bind set.
 const NO_DEP: u32 = u32::MAX;
 
-const WORDS: usize = 6;
+const WORDS: usize = 7;
 
 /// A set of fields of the walker state. One bit is one slot or one group of values.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -136,8 +136,8 @@ impl Bits {
 const P: usize = 0;
 const VB: usize = P + 6;
 const UBO: usize = VB + STREAMS;
-const SBO: usize = UBO + 48;
-const ATTR: usize = SBO + 48;
+const SBO: usize = UBO + 16 * super::BANKS;
+const ATTR: usize = SBO + 16 * super::BANKS;
 const STREAM: usize = ATTR + super::ATTRIBUTES;
 const BLEND: usize = STREAM + STREAMS;
 const TEX: usize = BLEND + 8;
@@ -183,7 +183,7 @@ pub(super) const fn attribute_bit(location: usize) -> usize {
     ATTR + location
 }
 
-/// The bit of the uniform buffer `slot` of the bank (0 vertex, 1 fragment, 2 compute).
+/// The bit of the uniform buffer `slot` of the bank (0 vertex, 1 fragment, 2 compute, 3 task, 4 mesh).
 pub(super) const fn ubo_bit(bank: usize, slot: usize) -> usize {
     UBO + bank * 16 + slot
 }
@@ -233,6 +233,12 @@ pub(super) const DRAW_READS: Bits = Bits::range(BLEND, 8)
         sc::SCISSOR,
         sc::BLEND_COLOR,
     ]));
+
+/// What a mesh draw reads besides [`DRAW_READS`]: the buffers of the task and mesh banks and the texture bank that the
+/// two stages share.
+pub(super) const MESH_READS: Bits = Bits::range(UBO + 48, 32)
+    .or(Bits::range(SBO + 48, 32))
+    .or(Bits::range(TEX + 96, 32));
 
 /// What a dispatch reads of the state, apart from its program.
 pub(super) const DISPATCH_READS: Bits = Bits::range(UBO + 32, 16)
@@ -632,6 +638,7 @@ impl Track {
                 Stage::Vertex => 0,
                 Stage::Fragment => 1,
                 Stage::Compute => 2,
+                Stage::Task | Stage::Mesh => 3,
             };
             let dep = self.tex_dep.get(bank * 32 + t.slot as usize).copied().unwrap_or(NO_DEP);
             if dep != NO_DEP {
@@ -709,10 +716,10 @@ impl Key {
         };
         run(Kind::Program, P, 6);
         run(Kind::VertexBuffer, VB, STREAMS);
-        for bank in 0..3 {
+        for bank in 0..super::BANKS as u8 {
             run(Kind::Ubo(bank), UBO + 16 * usize::from(bank), 16);
         }
-        for bank in 0..3 {
+        for bank in 0..super::BANKS as u8 {
             run(Kind::Sbo(bank), SBO + 16 * usize::from(bank), 16);
         }
         run(Kind::Attribute, ATTR, super::ATTRIBUTES);
