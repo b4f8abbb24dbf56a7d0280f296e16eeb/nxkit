@@ -11,8 +11,9 @@
 //! free list of 64 slots and the next decoder takes it again. nxnative keeps the state in a map under a lock.
 //! The size of the game's type does not matter, because the type is only an 8-byte handle here.
 //!
-//! The SDK 21 asynchronous decoder manager (`InitializeHardwareOpusDecoderManager` and the enqueue and execute
-//! functions) is not taken over.
+//! A decoder of the SDK 21 asynchronous manager (`codec_mgr.rs`) has the address of its software state in its first 8
+//! bytes too. So the getters and the decode call of this file serve it. Its finalize and reset go to `codec_mgr.rs`
+//! first.
 
 use super::{fatal, get_u64, put_u64, put_zero};
 use crate::event::guest_alloc;
@@ -30,7 +31,7 @@ static FREE_LIST: [AtomicU64; FREE] = [const { AtomicU64::new(0) }; FREE];
 /// The address of a function of the game, looked up once.
 macro_rules! soft {
     ($fn:ident, $name:literal) => {
-        fn $fn() -> u64 {
+        pub(super) fn $fn() -> u64 {
             static CELL: OnceLock<Option<u64>> = OnceLock::new();
             match CELL.get_or_init(|| guest_sym($name)) {
                 Some(a) => *a,
@@ -60,7 +61,7 @@ soft!(ms_reset, "_ZN2nn5codec27ResetOpusMultiStreamDecoderEPNS0_26OpusMultiStrea
 soft!(ms_decode, "_ZN2nn5codec32DecodeOpusMultiStreamInterleavedEPNS0_26OpusMultiStreamDecoderTypeEPmPiPsmPKvm");
 
 /// A block for a new decoder: one from the free list, else a new one.
-fn take_block() -> u64 {
+pub(super) fn take_block() -> u64 {
     for slot in &FREE_LIST {
         let b = slot.swap(0, Ordering::AcqRel);
         if b != 0 {
@@ -76,7 +77,7 @@ fn take_block() -> u64 {
 }
 
 /// Gives a block back. A full list drops the block, which stays allocated.
-fn give_block(b: u64) {
+pub(super) fn give_block(b: u64) {
     for slot in &FREE_LIST {
         if slot.compare_exchange(0, b, Ordering::AcqRel, Ordering::Acquire).is_ok() {
             return;
@@ -125,6 +126,9 @@ extern "C" fn initialize(hw: u64, rate: u32, channels: u32, work: u64, size: u64
 }
 
 extern "C" fn finalize(hw: u64) {
+    if super::codec_mgr::finalize_decoder(hw) {
+        return;
+    }
     let s = drop_state(hw);
     if s != 0 {
         call_guest(soft_fini(), [s, 0, 0, 0, 0, 0]);
@@ -141,6 +145,9 @@ extern "C" fn channel_count(hw: u64) -> u32 {
 }
 
 extern "C" fn reset(hw: u64) {
+    if super::codec_mgr::reset_decoder(hw) {
+        return;
+    }
     call_guest(soft_reset(), [state_of(hw), 0, 0, 0, 0, 0]);
 }
 

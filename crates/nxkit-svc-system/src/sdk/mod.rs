@@ -28,6 +28,7 @@ mod account;
 mod aoc;
 mod chat;
 mod codec;
+mod codec_mgr;
 mod diag;
 mod font;
 mod friends;
@@ -83,6 +84,7 @@ pub(crate) fn all() -> Vec<Export> {
     v.extend(sf::exports());
     v.extend(nvdrv::exports());
     v.extend(codec::exports());
+    v.extend(codec_mgr::exports());
     v
 }
 
