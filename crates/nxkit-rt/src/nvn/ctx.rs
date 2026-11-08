@@ -133,6 +133,12 @@ pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), Inst
     let space = LinearSpace::new(base, backend.gpu_base(), len).map_err(InstallError::Space)?;
     GPU.set(Gpu::new(space, backend, settings))
         .map_err(|_| InstallError::AlreadyInstalled)?;
+    // The video service writes decoded pictures into native images itself; the textures over them load again.
+    nxkit_svc_video::set_guest_write_hook(|addr, len| {
+        if let Some(g) = GPU.get() {
+            g.guest_wrote_deferred(addr, len);
+        }
+    });
     super::wire::wire();
     Ok(())
 }

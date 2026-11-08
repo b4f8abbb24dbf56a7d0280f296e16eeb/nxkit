@@ -195,6 +195,8 @@ fn pool_native_write(p: &Pool, i: u32, frame: &Frame) {
             let _ = guest::write(dst + (y * stride) as u64, line);
         }
     }
+    // The game does not write this memory, so the GPU would not see the new picture otherwise (a black movie).
+    crate::guest_wrote(dst, each);
 }
 
 static POOLS: Mutex<BTreeMap<u32, PoolRef>> = Mutex::new(BTreeMap::new());

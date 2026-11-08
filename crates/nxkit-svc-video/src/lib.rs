@@ -81,6 +81,22 @@ pub fn init(config: &Config) {
     *CONFIG.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.clone());
 }
 
+/// Who learns that the service wrote guest memory itself (a picture into a native image), so that the GPU loads the
+/// texture over it again. The GPU front end sets it; without it the GPU keeps the texture it uploaded first.
+static GUEST_WRITE: std::sync::OnceLock<fn(u64, u64)> = std::sync::OnceLock::new();
+
+/// Sets the function that is told `(address, length)` of every guest range the service writes.
+pub fn set_guest_write_hook(f: fn(u64, u64)) {
+    let _ = GUEST_WRITE.set(f);
+}
+
+/// Tells the hook that the service wrote `[addr, addr + len)`.
+pub(crate) fn guest_wrote(addr: u64, len: u64) {
+    if let Some(f) = GUEST_WRITE.get() {
+        f(addr, len);
+    }
+}
+
 pub(crate) fn config() -> Option<Config> {
     CONFIG.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
