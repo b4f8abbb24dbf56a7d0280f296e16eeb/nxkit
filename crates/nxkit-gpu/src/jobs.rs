@@ -2,14 +2,12 @@
 //!
 //! The frame is cut into chunks of passes. Each chunk goes into its own Metal command buffer. [`run_all`] runs one
 //! closure for each chunk on up to `threads` threads and returns the results in the order of the chunks. The caller
-//! thread takes part, so one thread means no spawn at all. The threads live for one call. A frame at 60 Hz spawns a
-//! handful of threads, which is small against the encode time of a frame. They run at the user-interactive QoS class:
-//! at the default class the system often put them on the efficiency cores, and the caller waited about a third of the
-//! chunk time for the slowest one.
+//! thread takes part, so one thread means no other thread at all. The other threads come from a pool that lives for
+//! the whole process and runs at the user-interactive QoS class. Threads made for each call started so late under load
+//! that the caller ran most chunks alone, one after the other.
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, PoisonError};
-use std::thread;
 
 fn worker<I, T>(queue: &Mutex<VecDeque<(usize, I)>>, out: &Mutex<Vec<Option<T>>>, f: &(impl Fn(I) -> T + Sync)) {
     loop {
@@ -22,7 +20,8 @@ fn worker<I, T>(queue: &Mutex<VecDeque<(usize, I)>>, out: &Mutex<Vec<Option<T>>>
     }
 }
 
-/// Runs `f` for each item on up to `threads` threads. The results come back in the order of the items.
+/// Runs `f` for each item on up to `threads` threads: the caller and threads of the process's encode pool
+/// (`nxkit_metal::thread::Pool`). The results come back in the order of the items.
 pub(crate) fn run_all<I: Send, T: Send>(threads: usize, items: Vec<I>, f: impl Fn(I) -> T + Sync) -> Vec<T> {
     let n = items.len();
     if threads <= 1 || n <= 1 {
@@ -30,15 +29,8 @@ pub(crate) fn run_all<I: Send, T: Send>(threads: usize, items: Vec<I>, f: impl F
     }
     let queue = Mutex::new(items.into_iter().enumerate().collect::<VecDeque<_>>());
     let out: Mutex<Vec<Option<T>>> = Mutex::new((0..n).map(|_| None).collect());
-    thread::scope(|s| {
-        for _ in 1..threads.min(n) {
-            s.spawn(|| {
-                nxkit_metal::thread::set_user_interactive();
-                worker(&queue, &out, &f)
-            });
-        }
-        worker(&queue, &out, &f);
-    });
+    let task = || worker(&queue, &out, &f);
+    nxkit_metal::thread::Pool::global().run(threads.min(n) - 1, &task);
     out.into_inner().unwrap_or_else(PoisonError::into_inner).into_iter().flatten().collect()
 }
 
@@ -71,6 +63,15 @@ mod tests {
     fn results_keep_the_order_of_the_items() {
         let out = run_all(4, (0..50u32).collect(), |i| i * 2);
         assert_eq!(out, (0..50u32).map(|i| i * 2).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_pool_serves_many_calls_with_borrows() {
+        for round in 0..200u32 {
+            let base = vec![round; 8];
+            let out = run_all(6, (0..8usize).collect(), |i| base[i] + i as u32);
+            assert_eq!(out, (0..8u32).map(|i| round + i).collect::<Vec<_>>());
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use objc2::rc::Retained;
@@ -179,7 +179,8 @@ pub struct PipelineCache {
     serializer: Option<Retained<ProtocolObject<dyn MTL4PipelineDataSetSerializer>>>,
     options: Retained<MTL4CompilerTaskOptions>,
     loaded_archive: bool,
-    entries: Mutex<HashMap<u64, Entry>>,
+    /// A read-write lock: every encode thread looks pipelines up at once, and they are built rarely.
+    entries: RwLock<HashMap<u64, Entry>>,
     hits: AtomicU64,
     builds: AtomicU64,
 }
@@ -221,7 +222,7 @@ impl PipelineCache {
             serializer,
             options,
             loaded_archive,
-            entries: Mutex::new(HashMap::new()),
+            entries: RwLock::new(HashMap::new()),
             hits: AtomicU64::new(0),
             builds: AtomicU64::new(0),
         })
@@ -341,7 +342,7 @@ impl PipelineCache {
     fn lookup(&self, key: u64) -> Result<Option<Entry>> {
         let map = self
             .entries
-            .lock()
+            .read()
             .map_err(|_| MetalError::Invalid("pipeline cache lock poisoned"))?;
         let found = map.get(&key).map(|e| match e {
             Entry::Compute(p) => Entry::Compute(p.clone()),
@@ -356,7 +357,7 @@ impl PipelineCache {
     fn insert(&self, key: u64, e: Entry) -> Result<()> {
         self.builds.fetch_add(1, Ordering::Relaxed);
         self.entries
-            .lock()
+            .write()
             .map_err(|_| MetalError::Invalid("pipeline cache lock poisoned"))?
             .insert(key, e);
         Ok(())

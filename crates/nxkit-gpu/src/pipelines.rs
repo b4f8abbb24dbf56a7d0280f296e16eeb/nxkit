@@ -183,6 +183,7 @@ impl Builds {
             for i in 0..COMPILE_THREADS {
                 let (rx, me, cache, fallbacks) = (rx.clone(), self.clone(), cache.clone(), fallbacks.clone());
                 let _ = std::thread::Builder::new().name(format!("nxkit-pipeline-{i}")).spawn(move || {
+                    nxkit_metal::thread::set_utility();
                     loop {
                         let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
                         let Ok(job) = next else { return };

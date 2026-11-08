@@ -6,7 +6,7 @@
 //! Member `arg_id` sits at byte `8 * arg_id` and holds a resource ID or a GPU address.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use nxkit_metal::{Context, ShaderLibrary, VertexFormat};
 
@@ -105,8 +105,9 @@ type ProgramMap = crate::draws::FastMap<String, Result<Arc<StageProgram>, Skip>>
 pub(crate) struct Programs {
     ctx: Context,
     dir: PathBuf,
-    /// One map per reading of the vertex inputs (index 1 for vertex), so that a lookup by `&str` allocates nothing.
-    cache: Mutex<[ProgramMap; 2]>,
+    /// One map per reading of the vertex inputs (index 1 for vertex), so that a lookup by `&str` allocates nothing. A
+    /// read-write lock: every draw of every encode thread reads it, and a `Mutex` made them wait for each other.
+    cache: RwLock<[ProgramMap; 2]>,
 }
 
 impl Programs {
@@ -114,13 +115,13 @@ impl Programs {
         Self {
             ctx: ctx.clone(),
             dir,
-            cache: Mutex::new([ProgramMap::default(), ProgramMap::default()]),
+            cache: RwLock::new([ProgramMap::default(), ProgramMap::default()]),
         }
     }
 
     /// The program of `key`. `vertex` selects the reading of the vertex inputs. The result is cached, also a failure.
     pub(crate) fn stage(&self, key: &str, vertex: bool) -> Result<Arc<StageProgram>, Skip> {
-        if let Some(r) = self.cache.lock().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].get(key) {
+        if let Some(r) = self.cache.read().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].get(key) {
             return r.clone();
         }
         let r = self.load(key, vertex).map(Arc::new);
@@ -132,13 +133,13 @@ impl Programs {
                 eprintln!("DIAG prog {what}");
             }
         }
-        self.cache.lock().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].insert(key.to_owned(), r.clone());
+        self.cache.write().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].insert(key.to_owned(), r.clone());
         r
     }
 
     /// Forgets all programs, for example after the shader directory changed.
     pub(crate) fn clear(&self) {
-        for m in self.cache.lock().unwrap_or_else(PoisonError::into_inner).iter_mut() {
+        for m in self.cache.write().unwrap_or_else(PoisonError::into_inner).iter_mut() {
             m.clear();
         }
     }
