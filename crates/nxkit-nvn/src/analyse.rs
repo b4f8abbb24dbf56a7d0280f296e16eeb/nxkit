@@ -1,9 +1,12 @@
 //! The render pass inference, first half: cut the frame into passes and merge them.
 //!
-//! The scan goes forward over the recorded commands and does four things.
+//! The scan goes forward over the recorded commands and does five things.
 //! - It cuts the stream when the attachments change, when a barrier comes, when other work (compute, copy, present)
 //!   comes, and when a full clear hits an attachment that the pass already used.
 //! - It notes for each attachment how the pass starts (a full clear, a discard, a read of the old contents).
+//! - It does not cut for a copy without a texture on either side (a uniform update, a buffer copy or a buffer clear).
+//!   The encoder does not run such a copy on the GPU, so it needs no pass of its own. The same rule lets compute
+//!   dispatches on both sides of it share one pass.
 //! - It merges a pass into the pass before it when both have the same attachments, only a barrier separates them,
 //!   and the second pass does not sample an attachment of the first.
 //! - It hands the result to a second step that picks the load and store actions.
@@ -22,6 +25,7 @@ use crate::resource::{ResourceTable, TexId};
 #[derive(Debug, Default)]
 pub struct Analyser {
     actions: Actions,
+    frames: u64,
 }
 
 struct Scan<'a> {
@@ -32,6 +36,19 @@ struct Scan<'a> {
     open: bool,
     pending: Boundary,
     foreign: Option<PassKind>,
+    /// The bits of the barriers that came since the last pass started.
+    barrier: Option<u32>,
+    /// The state and the reads of the draw just before, while no other command came between. A draw that repeats
+    /// them changes nothing in the plan.
+    last_draw: Option<(DrawState, Span)>,
+}
+
+/// True under `NXKIT_DIAG=stats` (or `all`).
+fn stats_diag() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "stats" || c == "all"))
+    })
 }
 
 impl Analyser {
@@ -56,12 +73,19 @@ impl Analyser {
             open: false,
             pending: Boundary::Start,
             foreign: None,
+            barrier: None,
+            last_draw: None,
         };
         for (i, cmd) in frame.cmds.iter().enumerate() {
             s.step(i as u32, *cmd)?;
         }
         s.close_render(frame.cmds.len() as u32);
-        self.actions.assign(table, plan)
+        self.actions.assign(table, plan)?;
+        self.frames += 1;
+        if stats_diag() && self.frames % 30 == 1 {
+            eprintln!("nxkit-nvn: pass frame {}: {}", self.frames, plan.stats.describe());
+        }
+        Ok(())
     }
 }
 
@@ -75,6 +99,9 @@ fn slots(rt: &RtSet) -> impl Iterator<Item = (Slot, TexId)> + '_ {
 
 impl Scan<'_> {
     fn step(&mut self, i: u32, cmd: Cmd) -> Result<()> {
+        if !matches!(cmd, Cmd::Draw { .. }) {
+            self.last_draw = None;
+        }
         match cmd {
             Cmd::SetRenderTargets(set) => {
                 if set != self.rt {
@@ -90,6 +117,7 @@ impl Scan<'_> {
             Cmd::Barrier(bits) => {
                 self.close_render(i);
                 self.foreign = None;
+                self.barrier = Some(self.barrier.unwrap_or(0) | bits);
                 if let Boundary::Barrier(old) = self.pending {
                     self.pending = Boundary::Barrier(old | bits);
                 }
@@ -98,6 +126,7 @@ impl Scan<'_> {
                 let (r, w) = (self.frame.list(reads), self.frame.list(writes));
                 self.foreign_pass(i, PassKind::Compute, r, w);
             }
+            Cmd::Copy { src: None, dst: None } => self.plan.stats.buffer_copies_absorbed += 1,
             Cmd::Copy { src, dst } => {
                 let (r, w) = (src.as_slice(), dst.as_slice());
                 self.foreign_pass(i, PassKind::Copy, r, w);
@@ -116,9 +145,19 @@ impl Scan<'_> {
         let grouped = self.foreign == Some(kind) && p.passes.last().is_some_and(|l| l.kind == kind);
         if !grouped {
             let (r, w) = (p.reads.len(), p.writes.len());
+            let begin = match self.barrier.take() {
+                Some(bits) => Boundary::Barrier(bits),
+                None if p.passes.is_empty() => Boundary::Start,
+                None => Boundary::Foreign,
+            };
+            let counts = match kind {
+                PassKind::Compute => &mut p.stats.compute_begins,
+                _ => &mut p.stats.other_begins,
+            };
+            counts.add(begin);
             p.passes.push(Pass {
                 kind,
-                begin: Boundary::Foreign,
+                begin,
                 cmds: i..i,
                 attachments: p.attachments.len()..p.attachments.len(),
                 reads: r..r,
@@ -174,6 +213,8 @@ impl Scan<'_> {
             reads: p.reads.len()..p.reads.len(),
             writes: p.writes.len()..p.writes.len(),
         });
+        p.stats.render_begins.add(self.pending);
+        self.barrier = None;
         self.open = true;
         self.foreign = None;
         // a barrier with no bits is the neutral state while a pass runs
@@ -234,7 +275,11 @@ impl Scan<'_> {
     }
 
     fn draw(&mut self, i: u32, st: DrawState, reads: Span) -> Result<()> {
+        if self.last_draw == Some((st, reads)) {
+            return Ok(());
+        }
         self.open_render(i)?;
+        self.last_draw = Some((st, reads));
         let cur = self.plan.passes.len() - 1;
         let range = self.plan.passes[cur].attachments.clone();
         for a in &mut self.plan.attachments[range.clone()] {
@@ -329,6 +374,7 @@ fn merge(p: &mut PassPlan, a: usize, b: usize) {
     }
     p.attachments.truncate(rb.start);
     let q = p.passes.swap_remove(b);
+    p.stats.render_begins.remove(q.begin);
     p.passes[a].cmds.end = q.cmds.end;
     p.passes[a].reads.end = q.reads.end;
 }

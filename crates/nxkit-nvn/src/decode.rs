@@ -446,7 +446,12 @@ impl Builder {
                 self.blockers |= BLOCK_COPY;
                 match (self.addr(cx, src), self.addr(cx, dst)) {
                     (Some(src), Some(dst)) => self.stream.cmds.push(Cmd::Downsample { src, dst }),
-                    _ => self.unresolved += 1,
+                    // The walker of the encoder gives one detail entry for every downsample record. A copy
+                    // without textures keeps the count of copy commands equal to that of the entries.
+                    _ => {
+                        self.unresolved += 1;
+                        self.stream.cmds.push(Cmd::Copy { src: None, dst: None });
+                    }
                 }
             }
             Record::Barrier(bits) => {

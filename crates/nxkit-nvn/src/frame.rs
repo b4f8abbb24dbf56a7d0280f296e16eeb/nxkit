@@ -176,7 +176,7 @@ impl CmdStream {
 }
 
 /// All commands between two presents.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Frame {
     /// The commands in submit order.
     pub cmds: Vec<Cmd>,

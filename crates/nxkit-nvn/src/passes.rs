@@ -62,7 +62,7 @@ pub enum Boundary {
     Targets,
     /// A barrier with these bits came before the pass.
     Barrier(u32),
-    /// Another kind of work came before the pass.
+    /// Another kind of work came before the pass, with no barrier in between.
     Foreign,
     /// A full clear of an attachment that the pass before had already used.
     FullClear,
@@ -110,9 +110,58 @@ pub struct Pass {
     pub(crate) writes: Range<usize>,
 }
 
+/// How many passes of one group start for each [`Boundary`] reason.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BoundaryCounts {
+    /// Passes that start the frame.
+    pub start: u32,
+    /// Passes that start because the attachments changed.
+    pub targets: u32,
+    /// Passes that start after a barrier.
+    pub barrier: u32,
+    /// Passes that start after another kind of work.
+    pub foreign: u32,
+    /// Passes that start because of a full clear of a used attachment.
+    pub full_clear: u32,
+}
+
+impl BoundaryCounts {
+    fn slot(&mut self, b: Boundary) -> &mut u32 {
+        match b {
+            Boundary::Start => &mut self.start,
+            Boundary::Targets => &mut self.targets,
+            Boundary::Barrier(_) => &mut self.barrier,
+            Boundary::Foreign => &mut self.foreign,
+            Boundary::FullClear => &mut self.full_clear,
+        }
+    }
+
+    pub(crate) fn add(&mut self, b: Boundary) {
+        *self.slot(b) += 1;
+    }
+
+    pub(crate) fn remove(&mut self, b: Boundary) {
+        let n = self.slot(b);
+        *n = n.saturating_sub(1);
+    }
+
+    /// The sum over all reasons.
+    pub fn total(&self) -> u32 {
+        self.start + self.targets + self.barrier + self.foreign + self.full_clear
+    }
+}
+
 /// The counters that the host reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PassStats {
+    /// Why the render passes start, after the merge.
+    pub render_begins: BoundaryCounts,
+    /// Why the compute passes start.
+    pub compute_begins: BoundaryCounts,
+    /// Why the copy, sync, present and CPU read passes start.
+    pub other_begins: BoundaryCounts,
+    /// Copies without a texture on either side. They are no pass boundary and the encoder does not run them.
+    pub buffer_copies_absorbed: u32,
     /// Render passes before the merge.
     pub render_passes_before_merge: u32,
     /// Render passes after the merge.
@@ -134,7 +183,7 @@ pub struct PassStats {
 }
 
 /// The passes of one frame. The vectors are reused from frame to frame.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PassPlan {
     /// The passes in order.
     pub passes: Vec<Pass>,
@@ -144,6 +193,31 @@ pub struct PassPlan {
     pub(crate) writes: Vec<TexId>,
     /// The counters.
     pub stats: PassStats,
+}
+
+impl PassStats {
+    /// One line with the boundary counters, for `NXKIT_DIAG=stats`.
+    pub fn describe(&self) -> String {
+        let group = |name: &str, c: &BoundaryCounts| {
+            format!(
+                "{name} {} (start {} targets {} barrier {} foreign {} full_clear {})",
+                c.total(),
+                c.start,
+                c.targets,
+                c.barrier,
+                c.foreign,
+                c.full_clear
+            )
+        };
+        format!(
+            "{}, {}, {}, render before merge {}, buffer copies absorbed {}",
+            group("render", &self.render_begins),
+            group("compute", &self.compute_begins),
+            group("other", &self.other_begins),
+            self.render_passes_before_merge,
+            self.buffer_copies_absorbed
+        )
+    }
 }
 
 impl PassPlan {
