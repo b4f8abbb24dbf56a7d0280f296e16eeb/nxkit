@@ -322,6 +322,11 @@ impl Gpu {
         self.store.get(id).map(|r| r.tex.clone())
     }
 
+    /// The newest batch that went to the GPU, to wait for it without this lock.
+    pub fn last_submitted(&self) -> Option<SubmittedBatch> {
+        self.last.clone()
+    }
+
     /// Waits until the GPU finished the batch before the newest one, and leaves the newest one running.
     pub fn wait_older(&mut self) -> Result<Option<CommandBufferStats>> {
         self.older.take().map(|b| b.wait()).transpose()
@@ -353,8 +358,11 @@ impl Gpu {
             .map(|t| t.handle)
             // Handle 0 is a slot the game left empty. The binding reads it as the null texture.
             .filter(|&h| h != 0);
+        // Each handle is resolved once a frame, also when it fails: a handle that does not resolve is bound by many
+        // draws, and trying it again for each of them cost a millisecond in heavy frames.
+        let mut seen: FastSet<u64> = FastSet::default();
         for handle in wanted {
-            if out.map.contains_key(&handle) {
+            if !seen.insert(handle) {
                 continue;
             }
             match self.resolve_one(view, handle, scale, textures, stats) {
@@ -648,6 +656,7 @@ impl Gpu {
         let diag_frame = crate::diag::begin_frame();
         let lum = crate::lum::begin();
         let t0 = Instant::now();
+        MARKS.with(|m| m.borrow_mut().clear());
         let scale = if scale.is_finite() && scale > 0.0 {
             scale
         } else {
@@ -656,6 +665,48 @@ impl Gpu {
         let mut stats = EncodeStats::default();
         let builds_before = self.pipelines.counts().0;
 
+        // The batch comes first, so that the uniform snapshots go to its scratch memory on a helper thread while this
+        // one resolves the textures; the chunks need both.
+        let ends = if plan.passes.is_empty() {
+            Vec::new()
+        } else {
+            let weights: Vec<u32> = plan
+                .passes
+                .iter()
+                .map(|p| p.cmds.len() as u32 + 1)
+                .collect();
+            jobs::split(&weights, self.threads * CHUNKS_PER_THREAD)
+        };
+        let t_ring = Instant::now();
+        let mut batch = self.ring.begin(1 + ends.len())?;
+        PHASES.with(|p| p.borrow_mut()[0] = nanos(t_ring, Instant::now()));
+        let scratch = batch.scratch();
+        let preload = {
+            let snaps: Vec<Arc<[u8]>> = detail
+                .draws
+                .iter()
+                .flat_map(|d| d.ubos.iter().chain(d.sbufs.iter()))
+                .chain(detail.dispatches.iter().flat_map(|d| d.ubos.iter()))
+                .filter_map(|u| u.snapshot.clone())
+                .collect();
+            let scratch = scratch.clone();
+            std::thread::Builder::new().name("nxkit-preload".into()).spawn(move || {
+                // Every uniform snapshot of the frame goes to the scratch memory once. The chunks then only look the
+                // addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
+                // every draw by all chunk threads.
+                let mut preloaded: FastMap<usize, u64> = FastMap::default();
+                for bytes in &snaps {
+                    let key = bytes.as_ptr() as usize;
+                    if !preloaded.contains_key(&key)
+                        && let Ok(a) = scratch.push(bytes)
+                    {
+                        preloaded.insert(key, a);
+                    }
+                }
+                preloaded
+            })
+        };
+        mark(t0, "ring");
         let mut uses = collect_uses(frame, plan);
         self.copyback.note_presented(frame);
         // A render target that is copied back stays at the native size: the copy-back needs the guest layout. The
@@ -710,6 +761,7 @@ impl Gpu {
                 Err(e) => stats.skip(crate::tex_skip(format_args!("use {id:?}: {e:?}"))),
             }
         }
+        mark(t0, "uses+ensure");
         let t_resolve = Instant::now();
         let mut handles =
             self.resolve_handles(view, detail, scale, &mut textures, &mut stats);
@@ -720,6 +772,7 @@ impl Gpu {
         drop(self.store.take_retired());
         self.store.trim_views();
 
+        mark(t0, "resolve+fit");
         let mut first_write: FastMap<TexId, usize> = FastMap::default();
         let mut gpu_wrote: Vec<TexId> = Vec::new();
         // The levels and layers that the frame wrote, and the last pass that wrote them, for the copy-back.
@@ -762,20 +815,7 @@ impl Gpu {
         }
 
         pass_shape_diag(frame, plan, &textures);
-        let ends = if plan.passes.is_empty() {
-            Vec::new()
-        } else {
-            let weights: Vec<u32> = plan
-                .passes
-                .iter()
-                .map(|p| p.cmds.len() as u32 + 1)
-                .collect();
-            jobs::split(&weights, self.threads * CHUNKS_PER_THREAD)
-        };
-        let t_ring = Instant::now();
-        let mut batch = self.ring.begin(1 + ends.len())?;
-        PHASES.with(|p| p.borrow_mut()[0] = nanos(t_ring, Instant::now()));
-        let scratch = batch.scratch();
+        mark(t0, "pre-ring");
         let keep: Arc<Keep> = {
             let (a, b) = self.bindless.pool_buffers();
             let mut all: Vec<Texture> = textures.values().map(|r| r.tex.clone()).collect();
@@ -832,8 +872,10 @@ impl Gpu {
             .iter()
             .map(|(id, res)| (*id, res.barrier_id))
             .collect();
+        mark(t0, "pre-ords");
         let ords = ordinals(frame);
         kpass_diag(frame, plan, detail, &ords, &textures);
+        mark(t0, "ords+kpass");
         let t_barrier = Instant::now();
         let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
         let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples);
@@ -848,28 +890,14 @@ impl Gpu {
                 );
             }
         }
+        mark(t0, "barriers");
         let run_at: FastMap<u32, RecordingRun> =
             detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
-        // Every uniform snapshot of the frame goes to the scratch memory once, here on one thread. The chunks then only
-        // look the addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
-        // every draw by all chunk threads.
-        let mut preloaded: FastMap<usize, u64> = FastMap::default();
-        let ubo_snaps = detail
-            .draws
-            .iter()
-            .flat_map(|d| d.ubos.iter())
-            .chain(detail.dispatches.iter().flat_map(|d| d.ubos.iter()))
-            .filter_map(|u| u.snapshot.as_ref());
-        for bytes in ubo_snaps {
-            {
-                let key = bytes.as_ptr() as usize;
-                if !preloaded.contains_key(&key)
-                    && let Ok(a) = scratch.push(bytes)
-                {
-                    preloaded.insert(key, a);
-                }
-            }
-        }
+        let preloaded: FastMap<usize, u64> = match preload {
+            Ok(h) => h.join().unwrap_or_default(),
+            Err(_) => FastMap::default(),
+        };
+        mark(t0, "preload");
         let uploaded = Mutex::new(FastMap::default());
         let sh = Shared {
             ctx: &self.ctx,
@@ -909,6 +937,7 @@ impl Gpu {
             })
             .collect();
         let items: Vec<(&mut CommandBuffer, Range<usize>)> = rest.iter_mut().zip(ranges).collect();
+        mark(t0, "pre-chunks");
         let t_chunks = Instant::now();
         let results = jobs::run_all(self.threads, items, |(cb, range)| {
             let (start, cpu0) = (Instant::now(), nxkit_metal::thread::cpu_time_ns());
@@ -948,6 +977,7 @@ impl Gpu {
         stats.barriers_avoided = barrier_plan.avoided;
         stats.command_buffers = 1 + ends.len() as u32;
         stats.pipeline_builds = self.pipelines.counts().0.saturating_sub(builds_before) as u32;
+        mark(t0, "chunk-end");
         stats.encode_ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
         hitch_diag(&stats, detail.draws.len());
 
@@ -1062,6 +1092,19 @@ fn hitch_diag(s: &EncodeStats, draws: usize) {
             .collect::<Vec<_>>()
             .join(" ")
     });
+    let marks = MARKS.with(|m| {
+        let m = m.borrow();
+        let mut last = 0;
+        m.iter()
+            .map(|(n, at)| {
+                let d = at - last;
+                last = *at;
+                format!("{n} {:.2}", d as f64 / 1e6)
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    eprintln!("DIAG hitch steps: {marks}");
     if s.chunks_ns > 5_000_000 {
         eprintln!("DIAG hitch chunks (passes +start wall/cpu ms): {chunks}");
     }
@@ -1085,7 +1128,14 @@ fn hitch_diag(s: &EncodeStats, draws: usize) {
     );
 }
 
+/// Notes the time since `t0` under `name`, for the `hitch` line.
+fn mark(t0: Instant, name: &'static str) {
+    MARKS.with(|m| m.borrow_mut().push((name, nanos(t0, Instant::now()))));
+}
+
 thread_local! {
+    /// The steps of the last encode on this thread and the time since its start, for `NXKIT_DIAG=hitch`.
+    static MARKS: std::cell::RefCell<Vec<(&'static str, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The time of the phases of the last encode on this thread, for `NXKIT_DIAG=hitch`: the wait for a free batch, the
     /// copy-back, the residency commit and the submit.
     static PHASES: std::cell::RefCell<[u64; 4]> = const { std::cell::RefCell::new([0; 4]) };

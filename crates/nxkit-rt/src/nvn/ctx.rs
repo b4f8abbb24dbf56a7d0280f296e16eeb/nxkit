@@ -369,9 +369,11 @@ impl Gpu {
                     run();
                 })
             });
-            let failed = handles.iter().find_map(|h| front.submit_on(queue as usize, *h).err());
+            let failed = super::frametime::sub(2, || {
+                handles.iter().find_map(|h| front.submit_on(queue as usize, *h).err())
+            });
             if let Some(w) = walk
-                && let Err(p) = w.join()
+                && let Err(p) = super::frametime::sub(3, || w.join())
             {
                 std::panic::resume_unwind(p);
             }
@@ -386,9 +388,9 @@ impl Gpu {
         {
             let mut front = self.lock();
             front.present(present.texture);
-            self.flush_locked(&mut front, FlushReason::Present)?;
+            super::frametime::sub(0, || self.flush_locked(&mut front, FlushReason::Present))?;
         }
-        Ok(self.backend.present(present)?)
+        Ok(super::frametime::sub(1, || self.backend.present(present))?)
     }
 
     /// The number that the front end uses for the command buffer at the guest address `addr`. The same address gives the

@@ -90,6 +90,10 @@ extern "C" fn sync_finalize(s: u64) {
 extern "C" fn sync_set_debug_label(_s: u64, _label: u64) {}
 
 extern "C" fn sync_wait(s: u64, timeout: u64) -> u32 {
+    super::frametime::timed(super::frametime::Part::Wait, || sync_wait_in(s, timeout))
+}
+
+fn sync_wait_in(s: u64, timeout: u64) -> u32 {
     guard("nvnSyncWait", || {
         let o = Obj(s);
         let fenced = o.u32(OFF_FENCED)?;

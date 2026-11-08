@@ -153,6 +153,10 @@ extern "C" fn queue_get_error(_q: u64, _info: u64) -> u32 {
 }
 
 extern "C" fn queue_submit_commands(q: u64, n: i32, handles: u64) {
+    super::frametime::timed(super::frametime::Part::Submit, || submit_commands_in(q, n, handles));
+}
+
+fn submit_commands_in(q: u64, n: i32, handles: u64) {
     guard("nvnQueueSubmitCommands", || {
         let n =
             usize::try_from(n).map_err(|_| other(format!("the command count {n} is negative")))?;
@@ -172,7 +176,9 @@ extern "C" fn queue_submit_commands(q: u64, n: i32, handles: u64) {
 extern "C" fn queue_flush(_q: u64) {}
 
 extern "C" fn queue_finish(_q: u64) {
-    guard("nvnQueueFinish", || gpu("nvnQueueFinish").finish());
+    super::frametime::timed(super::frametime::Part::Wait, || {
+        guard("nvnQueueFinish", || gpu("nvnQueueFinish").finish());
+    });
 }
 
 /// What the screen showed of the present 8 back from `presents`, the one before it and how long it was to stay. The
@@ -227,7 +233,11 @@ fn pace_present(now_ns: u64) {
     }
 }
 
-extern "C" fn queue_present_texture(_q: u64, w: u64, index: i32) {
+extern "C" fn queue_present_texture(q: u64, w: u64, index: i32) {
+    super::frametime::timed(super::frametime::Part::Present, || present_texture_in(q, w, index));
+}
+
+fn present_texture_in(_q: u64, w: u64, index: i32) {
     guard("nvnQueuePresentTexture", || {
         let Some(view) = window::present_view(w, index)? else {
             log_once(

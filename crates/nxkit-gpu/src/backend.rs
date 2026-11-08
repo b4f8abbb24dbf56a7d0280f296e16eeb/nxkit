@@ -80,6 +80,14 @@ pub struct GpuBackend {
     blit_failed: AtomicBool,
     /// The encoder thread, when `enc_thread` is on.
     enc: Option<Encoder>,
+    /// The newest fence that was flushed.
+    flushed: AtomicU64,
+    /// With the encoder thread: the batches on the GPU with the fence of their frame, so that a wait for the GPU needs
+    /// no lock that the encoder holds.
+    inflight: Mutex<std::collections::VecDeque<(u64, nxkit_metal::SubmittedBatch)>>,
+    /// Whether the last encoded frame copied textures back to CPU memory. The overlap then waits in full, because the
+    /// next frame likely copies back too and the CPU reads what it copied.
+    copied_recent: AtomicBool,
 }
 
 impl GpuBackend {
@@ -125,6 +133,9 @@ impl GpuBackend {
                 last_gpu: Mutex::new(None),
                 blit_failed: AtomicBool::new(false),
                 enc,
+                flushed: AtomicU64::new(0),
+                inflight: Mutex::new(std::collections::VecDeque::new()),
+                copied_recent: AtomicBool::new(false),
             }
         }))
     }
@@ -203,7 +214,26 @@ impl GpuBackend {
     /// Encodes a job and waits for the copy-back that its report asks for. The result tells the front end what to change
     /// in its table.
     fn encode_job(&self, job: &Job) -> Result<TableUpdate, String> {
-        let result = locked(&self.gpu).encode_frame(&job.frame, &job.plan, &job.snapshot, &job.detail, self.scale);
+        let (result, submitted) = {
+            let mut gpu = locked(&self.gpu);
+            let r = gpu.encode_frame(&job.frame, &job.plan, &job.snapshot, &job.detail, self.scale);
+            (r, gpu.last_submitted())
+        };
+        if let Some(b) = submitted {
+            let mut q = locked(&self.inflight);
+            if q.back().is_none_or(|(_, last)| last.number() != b.number()) {
+                q.push_back((job.fence.0, b));
+            }
+            while q.len() > 8 {
+                q.pop_front();
+            }
+        }
+        if let Ok(r) = &result {
+            self.copied_recent.store(!r.copied_back.is_empty(), Ordering::Release);
+            if crate::diag("frame") && job.fence.0 % 60 == 0 {
+                eprintln!("DIAG frame copyback fence {} copied_back {}", job.fence.0, r.copied_back.len());
+            }
+        }
         self.hold_counters(job.fence, &job.detail);
         self.encoded.fetch_max(job.fence.0, Ordering::AcqRel);
         let report = result.map_err(|e| e.to_string())?;
@@ -238,6 +268,9 @@ impl GpuBackend {
         // Only the state at the end of the frame is set: a texture that is synced in this frame is not first marked
         // as written. Nothing reads the state in between, and setting both every frame made every texture that is
         // copied back flip twice a frame, which defeated the alias cache of the table.
+        if crate::diag("frame") && fence.0 % 60 == 0 {
+            eprintln!("DIAG frame copyback fence {} copied_back {} (sync)", fence.0, report.copied_back.len());
+        }
         if !report.copied_back.is_empty() {
             self.drain();
         }
@@ -283,6 +316,7 @@ impl GpuBackend {
             .texture(present.texture)
             .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
         let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
+        encpace::ready(number);
         if crate::diag("present") && number % 120 == 1 {
             eprintln!(
                 "DIAG present id {:?} {}x{} {:?}",
@@ -404,6 +438,7 @@ impl Backend for GpuBackend {
         fence: Fence,
         cx: FlushCx<'_>,
     ) -> BackendResult<()> {
+        self.flushed.fetch_max(fence.0, Ordering::AcqRel);
         let mut detail = {
             let mut walker = locked(&self.walker);
             let counters = walker.take_counters();
@@ -453,6 +488,7 @@ impl Backend for GpuBackend {
     }
 
     fn present(&self, present: Present) -> BackendResult<()> {
+        encpace::asked();
         match &self.enc {
             Some(enc) if enc.send(Msg::Present(present)) => Ok(()),
             _ => self.present_now(present),
@@ -479,6 +515,41 @@ impl Backend for GpuBackend {
                     }
                     Ok(None) => {}
                     Err(_) => return WaitResult::Failed,
+                }
+                self.write_counters(older);
+                self.done.fetch_max(older, Ordering::AcqRel);
+            }
+            return WaitResult::Done;
+        }
+        // The same with the encoder thread: the frame before the newest must be encoded and finished on the GPU. The
+        // wait goes to the batch itself, not through the lock that the encoder holds while it encodes the newest frame.
+        if crate::overlap::on()
+            && let Some(enc) = &self.enc
+            && fence.0 > 1
+            && fence.0 == self.flushed.load(Ordering::Acquire)
+            && !self.copied_recent.load(Ordering::Acquire)
+        {
+            let older = fence.0 - 1;
+            if older > self.done.load(Ordering::Acquire) {
+                let reached = || self.encoded.load(Ordering::Acquire) >= older;
+                if !enc.wait_for(reached) || enc.has_error() {
+                    return WaitResult::Failed;
+                }
+                let batches: Vec<_> = {
+                    let mut q = locked(&self.inflight);
+                    let n = q.iter().take_while(|(f, _)| *f <= older).count();
+                    q.drain(..n).collect()
+                };
+                let mut last = None;
+                for (_, b) in &batches {
+                    match b.wait() {
+                        Ok(stats) => last = Some(stats),
+                        Err(_) => return WaitResult::Failed,
+                    }
+                }
+                if let Some(stats) = last {
+                    *locked(&self.last_gpu) = Some((stats.gpu_start_s, stats.gpu_end_s));
+                    nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                 }
                 self.write_counters(older);
                 self.done.fetch_max(older, Ordering::AcqRel);
@@ -581,6 +652,7 @@ impl TickSink for GpuBackend {
             Shown::Game { frame } => frame,
             Shown::Interpolated { to, .. } => to,
         };
+        encpace::shown(number, locked(&self.pending).len());
         let texture = {
             let mut pending = locked(&self.pending);
             let found = pending
@@ -646,6 +718,59 @@ impl TickSink for GpuBackend {
             if !self.blit_failed.swap(true, Ordering::Relaxed) {
                 eprintln!("nxkit-gpu: the present failed: {e}");
             }
+        }
+    }
+}
+
+/// `NXKIT_DIAG=encpace`: for every 60th frame, the time from the game's present to the end of its encode and from there
+/// to the tick that shows it, to see where a deeper pipeline loses time.
+mod encpace {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+
+    const N: usize = 256;
+    static ASKED: AtomicU64 = AtomicU64::new(0);
+    static AT_ASK: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+    static AT_READY: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+
+    fn on() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| crate::diag("encpace"))
+    }
+
+    fn now() -> u64 {
+        static BASE: OnceLock<Instant> = OnceLock::new();
+        u64::try_from(BASE.get_or_init(Instant::now).elapsed().as_micros()).unwrap_or(0)
+    }
+
+    /// The game presented its next frame.
+    pub(super) fn asked() {
+        if on() {
+            let n = ASKED.fetch_add(1, Ordering::Relaxed) + 1;
+            AT_ASK[n as usize % N].store(now(), Ordering::Relaxed);
+        }
+    }
+
+    /// Frame `n` is encoded and queued for the screen.
+    pub(super) fn ready(n: u64) {
+        if on() {
+            AT_READY[n as usize % N].store(now(), Ordering::Relaxed);
+        }
+    }
+
+    /// A tick shows frame `n`, with `pending` frames queued.
+    pub(super) fn shown(n: u64, pending: usize) {
+        if on() && n % 60 == 0 {
+            let t = now();
+            let ask = AT_ASK[n as usize % N].load(Ordering::Relaxed);
+            let ready = AT_READY[n as usize % N].load(Ordering::Relaxed);
+            eprintln!(
+                "DIAG encpace frame {n}: present->ready {:.2} ms, ready->shown {:.2} ms, asked {} pending {pending}",
+                ready.saturating_sub(ask) as f64 / 1e3,
+                t.saturating_sub(ready) as f64 / 1e3,
+                ASKED.load(Ordering::Relaxed),
+            );
         }
     }
 }

@@ -198,7 +198,8 @@ pub struct Batch {
     t0: Instant,
 }
 
-/// A batch that is on the GPU.
+/// A batch that is on the GPU. A clone waits for the same batch.
+#[derive(Clone)]
 pub struct SubmittedBatch {
     number: u64,
     done: Arc<Completion>,
