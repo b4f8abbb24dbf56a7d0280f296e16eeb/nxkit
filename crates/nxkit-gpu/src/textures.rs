@@ -114,9 +114,13 @@ pub(crate) fn describe(
     };
     let (width, height) = (scaled_size(width, scale), scaled_size(height, scale));
     let max_levels = 32 - width.max(height).max(depth).leading_zeros();
-    let render_target = u.attachment;
-    let memoryless = u.memoryless && render_target && !u.cpu_read;
     let compressed = matches!(format, Format::Bc(_) | Format::Astc { .. });
+    // A texture that the frame only samples can share storage with one that another frame renders into: the game
+    // makes texture objects for the same memory again, and the store shares a Metal texture between records only
+    // when their descriptions match. So every texture that Metal can render into gets the usage, and a record that
+    // is sampled first sees what a later render target of the same memory wrote.
+    let render_target = u.attachment || (!compressed && format != Format::Rgb9E5Float);
+    let memoryless = u.memoryless && u.attachment && !u.cpu_read;
     let exact = matches!(mapped, Mapped::Exact(_));
     let desc = TextureDesc {
         kind,
