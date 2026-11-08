@@ -24,7 +24,7 @@ use crate::gates::{self, GateTable};
 use crate::layout::PAGE;
 use crate::manifest::{self, Game, Import, Slot};
 use crate::memory::GuestMemory;
-use crate::module::Module;
+use crate::module::{Module, Prot};
 use crate::place::{Placed, Placement};
 use crate::reloc;
 use crate::seams;
@@ -41,12 +41,23 @@ pub struct Loaded {
     pub game: Game,
     /// How the modules were placed.
     pub placement: Placement,
-    /// The address of the entry point of the main module.
-    pub entry: u64,
+    /// The `DT_INIT` function of each module that has one, in module order.
+    pub inits: Vec<ModuleInit>,
     /// Every export of every module, by Switch mangled name, as a guest address.
     pub exports: HashMap<String, u64>,
     /// The library, when dyld placed the modules. It stays open for the life of the process.
     pub dylib: Option<Dylib>,
+}
+
+/// The `DT_INIT` function of one module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleInit {
+    /// The name of the module.
+    pub module: String,
+    /// The offset from the module base.
+    pub offset: u64,
+    /// The guest address.
+    pub addr: u64,
 }
 
 struct Lists {
@@ -146,8 +157,14 @@ fn fill_key_page(mem: &GuestMemory, m: &Module, keys: &Keys) -> Result<()> {
     Ok(())
 }
 
-/// Applies the relocations of the image and returns how many of them name an undefined symbol.
-fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) -> Result<usize> {
+/// Applies the relocations of the image. It returns how many of them name an undefined symbol, and the `DT_INIT`
+/// function of the module.
+fn apply_relocations(
+    mem: &GuestMemory,
+    m: &Module,
+    image: &[u8],
+    r: &Resolver,
+) -> Result<(usize, Option<ModuleInit>)> {
     let plan = reloc::plan(m, image, &mut |name| r.find(name))?;
     for w in &plan.writes {
         if !m.writable(w.offset, 8) {
@@ -163,7 +180,17 @@ fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) 
         "nxkit-host: module {}: {} relative, {} relr, {} symbol relocations, {} left to the imports",
         m.name, plan.counts.relative, plan.counts.relr, plan.counts.symbols, plan.counts.undefined
     );
-    Ok(plan.counts.undefined)
+    let init = match plan.init {
+        Some(offset) if m.segment_at(offset).is_none_or(|s| s.prot != Prot::Exec) => {
+            return Err(HostError::Load(format!(
+                "module {}: DT_INIT {offset:#x} is not in an r-x segment",
+                m.name
+            )));
+        }
+        Some(offset) => Some(ModuleInit { module: m.name.clone(), offset, addr: m.base + offset }),
+        None => None,
+    };
+    Ok((plan.counts.undefined, init))
 }
 
 fn fill_imports(mem: &GuestMemory, m: &Module, imports: &[Import], r: &Resolver, optional: &[String]) -> Result<()> {
@@ -248,10 +275,12 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
         exports: &exports,
         big: &big,
     };
+    let mut inits = Vec::new();
     for ((m, l), image) in game.modules.iter().zip(&lists).zip(&images) {
         zero_bss(mem, m)?;
         fill_key_page(mem, m, &keys)?;
-        let undefined = apply_relocations(mem, m, image, &resolver)?;
+        let (undefined, init) = apply_relocations(mem, m, image, &resolver)?;
+        inits.extend(init);
         if undefined != l.imports.len() {
             return Err(HostError::Load(format!(
                 "module {}: the image has {undefined} relocations of undefined symbols and the import list has {} slots",
@@ -266,12 +295,8 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     let main = game.main_module()?;
     tsd_check(mem, main, &keys)?;
     gate::install(load_gates(&game)?)?;
-    let Some(offset) = main.entry else {
-        return Err(HostError::Manifest(format!("module {} has no entry", main.name)));
-    };
-    let entry = main.base + offset;
     Ok(Loaded {
-        entry,
+        inits,
         exports,
         placement,
         dylib,

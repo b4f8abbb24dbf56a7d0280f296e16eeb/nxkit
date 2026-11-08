@@ -19,6 +19,10 @@ pub mod stop;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod bigstack;
+
+/// The boot of the SDK on the main guest thread.
+#[cfg(target_os = "macos")]
+pub mod boot;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod gate;

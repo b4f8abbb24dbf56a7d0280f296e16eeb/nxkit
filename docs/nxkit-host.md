@@ -1,6 +1,6 @@
 # nxkit-host
 
-`nxkit-host` is the main program of nxkit. It reads a run folder, puts the game's rewritten code into memory, answers the game's svc calls and runs the window. This page is the contract between the build stage (`nxb build`) and the host. The decisions are R18 and R45 to R47c in [decisions.md](decisions.md#part-3-runtime-decisions).
+`nxkit-host` is the main program of nxkit. It reads a run folder, puts the game's rewritten code into memory, answers the game's svc calls and runs the window. This page is the contract between the build stage (`nxb build`) and the host. The decisions are R18, R45 to R47c and R57 in [decisions.md](decisions.md#part-3-runtime-decisions).
 
 ## Command line
 
@@ -50,7 +50,7 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `image` | The rewritten flat image. Byte 0 belongs to `base`. The loader reads it for the data segments and the relocations. |
 | `imports` | A JSON list of `{ "name", "slot", "addend", "weak" }`, one entry for each relocation of an undefined symbol in the image, in the order of the relocation tables. `slot` is the offset from `base` of an 8-byte slot in a writable segment. The host stores the address of the name plus `addend`. `addend` is 0 for a `JUMP_SLOT`. `weak` is `true` for a weak undefined symbol. The host stops if the image has another number of undefined relocations than the list has entries. |
 | `exports` | A JSON list of `{ "name", "slot" }`. `slot` is the offset of the symbol. Only global and weak symbols that the module defines and that are not hidden are listed. |
-| `entry` | The offset of the entry point. Exactly one module has it. |
+| `entry` | Exactly one module has it, and that module is the main module. The host does not start there. The offset 0 of a module is its header (R57). |
 | `key_page` | The offset of the key page. The page is 0x4000 bytes (`KEY_PAGE_OFF` of the rewriter). |
 | `gates` | The gate list of the rewriter for this module (`<name>.gates.tsv`). |
 | `segments` | The segments of the library for this module, lowest offset first. Each has `name`, `offset` (negative for the patch of a far layout), `size` (a multiple of 0x4000), `file_offset` and `file_size` (the bytes in `image`) and `prot` (`r-x` or `rw-`). |
@@ -152,7 +152,9 @@ For each module:
 4. The import slots are filled. A name comes first from the functions of the enabled services (`nxkit_rt::entries()`), then from the exports of the modules. A name that nothing provides stops the host with the module and the name (R15), unless it is in `settings.optional_imports`. Then it gets 0 and a line on stderr.
 5. The key page becomes read-only.
 
-Then the host checks the thread-specific data, reads the gate lists with the real bases and installs the gate table. The entry is the real base of the main module plus its `entry`.
+The relocation pass also reads `DT_INIT` from the dynamic section. A module without `DT_INIT` has none. The offset must lie in an `r-x` segment. The host keeps the real address of each one in module order.
+
+Then the host checks the thread-specific data, reads the gate lists with the real bases and installs the gate table.
 
 ## Gates and threads
 
@@ -169,7 +171,7 @@ The key page has four 8-byte entries. Entry `i` is `8 * key` of a pthread key, s
 
 Each guest thread owns a slot `k` in a pool of 1024. The host takes a free slot with one atomic operation and holds no lock. Slot `k` is a 0x4000 byte block in the reservation, a gate stub and a gate stack of 1 MiB. The stub loads the top of the gate stack, saves the registers `x0` to `x30`, calls the kernel's svc table with the number and `x0` to `x7`, writes the results back and returns to the guest. The gate runs on its own stack, so a guest stack of a few KiB is enough.
 
-A thread enters the guest through `nxkit_thread_enter` and leaves through ExitThread or by returning from its entry function. The main thread runs on a host thread named `guest-main`. It attaches to the kernel with the priority and the core of the NPDM and starts the module entry on the main stack with `x0 = 0` and `x1 = 0xFFFF8000`. The threads that the game creates run through `thread_entry` of `nxkit_kernel_init`.
+A thread enters the guest through `nxkit_thread_enter` and leaves through ExitThread or by returning from its entry function. The main thread runs on a host thread named `guest-main`. It attaches to the kernel with the priority and the core of the NPDM and runs the boot sequence on the main stack (see Start of the game). The threads that the game creates run through `thread_entry` of `nxkit_kernel_init`.
 
 ### Big stack
 
@@ -190,6 +192,24 @@ AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` 
 
 At most two frames are in flight on the GPU. The backend presents at the target presentation time of the tick. The game renders at the native size of the display. No title asks for MetalFX.
 
+## Start of the game
+
+The main guest thread does the work of `rtld` and `nn::init::Start` (R57). The sequence follows `dm/host/main.c` of nxnative (checked 2026-11-08). The thread calls each guest function with `gate::enter` on the top of the main stack. The call returns when the function returns. Each step prints `>>> <name>` on stderr.
+
+| Step | Call |
+| --- | --- |
+| 1 | `_init_libc0()` |
+| 2 | `nnosInitialize(handle, 0)`. `handle` is the kernel handle of the main thread, which `attach_main_thread` returns. |
+| 3 | `_init_libc1()` |
+| 4 | `nninitInitializeSdkModule()` |
+| 5 | `nn::os::SetHostArgc(1)` and `nn::os::SetHostArgv(argv)`. `argv` is `{ "game", NULL }` in host memory, which is never freed. |
+| 6 | `nninitStartup()` |
+| 7 | `_init_libc2()` |
+| 8 | The `DT_INIT` function of each module, in module order. A module without one is skipped. The log line is `>>> DT_INIT <module> +<offset>`. |
+| 9 | `nnMain()`. The line `nnMain returned` follows its end. |
+
+The host finds the guest functions in the export lists of the modules. A missing symbol stops the host before the window opens. The message names the symbol (R15). When `nnMain` returns, the host stops.
+
 ## Startup order
 
 1. Read `game.json`.
@@ -198,7 +218,7 @@ At most two frames are in flight on the GPU. The backend presents at the target 
 4. Register the IPC server and start the services that `game.json` names.
 5. Finish the load: relocations, imports and gates. Then set the symbol lookup of the game.
 6. Open the window and the display link.
-7. Start the main guest thread and run the loop.
+7. Start the main guest thread, which runs the boot sequence above, and run the loop.
 
 ## The probe
 

@@ -33,8 +33,8 @@ pub fn register_kernel() -> Result<()> {
 }
 
 /// Makes the calling host thread the main thread of the guest, with the priority, the core and the stack size of the
-/// NPDM that the kernel got at its start.
-pub fn attach_main_thread() -> Result<()> {
+/// NPDM that the kernel got at its start. It returns the kernel handle of the main thread.
+pub fn attach_main_thread() -> Result<u32> {
     nxkit_rt::attach_main_thread().map_err(HostError::App)
 }
 

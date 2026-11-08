@@ -13,13 +13,11 @@ use std::ffi::c_void;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::boot::Boot;
 use crate::error::{HostError, Result};
 use crate::gate::{self, GATE_SLOTS, GATE_STACK_SIZE};
 use crate::layout::PAGE;
 use crate::{seams, stop, sys};
-
-/// The pseudo handle of the current thread.
-const CURRENT_THREAD: u64 = 0xFFFF_8000;
 
 /// The four pthread keys. The index of a key is its place in the key page.
 #[derive(Debug, Clone, Copy)]
@@ -154,16 +152,22 @@ pub extern "C" fn guest_thread_entry(entry: u64, arg: u64, stack_top: u64, _user
 }
 
 /// Starts the main guest thread on a host thread of its own. The thread attaches to the kernel with the priority and
-/// the core of the NPDM, which the kernel got at its start, then runs `entry` on `stack_top`.
-pub fn start_main(entry: u64, stack_top: u64) -> Result<()> {
+/// the core of the NPDM, which the kernel got at its start. Then it runs the boot of the SDK and `nnMain` on `stack_top`
+/// (R57). The handle that the attach returns is the `x0` of `nnosInitialize`.
+pub fn start_main(boot: Boot, stack_top: u64) -> Result<()> {
     std::thread::Builder::new()
         .name("guest-main".into())
         .spawn(move || {
-            if let Err(e) = seams::attach_main_thread() {
-                stop::fatal(&format!("cannot attach the main guest thread: {e}"));
-            }
-            if let Err(e) = run(entry, 0, CURRENT_THREAD, stack_top) {
-                stop::fatal(&format!("cannot run the main guest thread: {e}"));
+            let handle = match seams::attach_main_thread() {
+                Ok(h) => h,
+                Err(e) => stop::fatal(&format!("cannot attach the main guest thread: {e}")),
+            };
+            match ThreadEnv::new() {
+                Ok(env) => {
+                    boot.run(handle, stack_top);
+                    env.release();
+                }
+                Err(e) => stop::fatal(&format!("cannot run the main guest thread: {e}")),
             }
             stop::request("the main guest thread ended");
         })

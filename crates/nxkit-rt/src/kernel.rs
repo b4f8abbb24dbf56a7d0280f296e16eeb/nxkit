@@ -266,15 +266,16 @@ pub fn kernel() -> Option<&'static Arc<Kernel>> {
 }
 
 /// Attaches the calling host thread as the main guest thread, with the priority, core and stack size of the NPDM that
-/// [`nxkit_kernel_init`] got. The host calls it on the thread that runs the game, before guest code. Gives the
-/// reason when the kernel is missing or has no main thread.
-pub fn attach_main_thread() -> Result<(), String> {
+/// [`nxkit_kernel_init`] got. The host calls it on the thread that runs the game, before guest code. Returns the
+/// kernel handle of the main thread, a real entry of the handle table and not the pseudo handle of the current
+/// thread. Gives the reason when the kernel is missing or has no main thread.
+pub fn attach_main_thread() -> Result<u32, String> {
     let kernel = KERNEL
         .get()
         .ok_or_else(|| "the kernel is not started".to_owned())?;
     kernel
         .attach_main_thread("")
-        .map(|_| ())
+        .map(|t| t.handle())
         .map_err(|e| format!("the main thread did not attach: {e:?}"))
 }
 

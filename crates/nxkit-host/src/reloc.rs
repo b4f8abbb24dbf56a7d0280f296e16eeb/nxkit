@@ -18,6 +18,7 @@ const DT_STRTAB: u64 = 5;
 const DT_SYMTAB: u64 = 6;
 const DT_RELA: u64 = 7;
 const DT_RELASZ: u64 = 8;
+const DT_INIT: u64 = 12;
 const DT_JMPREL: u64 = 23;
 const DT_RELRSZ: u64 = 35;
 const DT_RELR: u64 = 36;
@@ -62,6 +63,8 @@ pub struct Plan {
     pub writes: Vec<Write>,
     /// How many of each kind.
     pub counts: Counts,
+    /// The offset of the `DT_INIT` function from the module base, or `None` when the module has none.
+    pub init: Option<u64>,
 }
 
 fn err(m: &Module, what: impl std::fmt::Display) -> HostError {
@@ -126,6 +129,7 @@ struct Dynamic {
     relrsz: u64,
     symtab: u64,
     strtab: u64,
+    init: Option<u64>,
 }
 
 /// Finds the dynamic section through the `MOD0` header. A module without one has nothing to relocate.
@@ -155,6 +159,7 @@ fn dynamic(img: &Image) -> Result<Option<Dynamic>> {
             DT_RELRSZ => d.relrsz = val,
             DT_SYMTAB => d.symtab = val,
             DT_STRTAB => d.strtab = val,
+            DT_INIT => d.init = Some(val),
             _ => {}
         }
     }
@@ -246,6 +251,7 @@ pub fn plan(m: &Module, image: &[u8], lookup: &mut dyn FnMut(&str) -> Result<Opt
     let Some(d) = dynamic(&img)? else {
         return Ok(p);
     };
+    p.init = d.init;
     if d.relr != 0 {
         relr(&img, &d, m.base, &mut p)?;
     }
@@ -293,6 +299,7 @@ mod tests {
             (DT_RELRSZ, 16),
             (DT_SYMTAB, 0x700),
             (DT_STRTAB, 0x800),
+            (DT_INIT, 0x1000),
             (DT_NULL, 0),
         ];
         for (i, (t, v)) in dynamic.iter().enumerate() {
@@ -349,6 +356,7 @@ mod tests {
         assert_eq!(at(0x8030), None);
         assert_eq!(at(0x8038), Some(0x30 + 0x1_0000_0000));
         assert_eq!(p.counts, Counts { relative: 1, relr: 3, symbols: 2, undefined: 1 });
+        assert_eq!(p.init, Some(0x1000));
     }
 
     #[test]
@@ -389,6 +397,6 @@ mod tests {
         let m = module(0x1_0000_0000);
         let Some(m) = m else { return };
         let p = plan(&m, &vec![0u8; 0xc000], &mut |_| Ok(None));
-        assert!(p.is_ok_and(|p| p.writes.is_empty()));
+        assert!(p.is_ok_and(|p| p.writes.is_empty() && p.init.is_none()));
     }
 }

@@ -4,7 +4,7 @@
 //! reservation holds everything, registered with `nxkit_abi::guest`. The GPU buffer over it comes next, and then the
 //! guard page. 3. Start the kernel. 4. Register the kernel and
 //! the IPC server and start the services. 5. Finish the load: relocations, imports and gates. 6. Open the window.
-//! 7. Start the main guest thread. 8. Run the AppKit loop until the game or the window stops.
+//! 7. Start the main guest thread, which boots the SDK and runs `nnMain` (R57). 8. Run the AppKit loop until the game or the window stops.
 //!
 //! The patches of the title are not applied here. The build applied them to the images (R2).
 
@@ -15,6 +15,7 @@ use nxkit_metal::Context;
 
 use crate::error::{HostError, Result};
 use crate::sys::appkit::{self, AppEvents, WindowConfig};
+use crate::boot::Boot;
 use crate::manifest::Game;
 use crate::{guestsym, loader, place, seams, stop, sys, thread};
 
@@ -70,13 +71,13 @@ pub fn run(opts: &Options) -> Result<()> {
 
     let mut loaded = loader::load(placed, mask)?;
     eprintln!(
-        "nxkit-host: {} modules loaded ({:?}), entry {:#x}, {} exports",
+        "nxkit-host: {} modules loaded ({:?}), {} exports",
         loaded.game.modules.len(),
         loaded.placement,
-        loaded.entry,
         loaded.exports.len()
     );
     guestsym::set(std::mem::take(&mut loaded.exports));
+    let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
     let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
     let window = WindowConfig {
@@ -84,9 +85,9 @@ pub fn run(opts: &Options) -> Result<()> {
         size: None,
         fullscreen: opts.fullscreen,
     };
-    let (entry, stack_top) = (loaded.entry, layout.main_stack.end());
+    let stack_top = layout.main_stack.end();
     let result = appkit::run(&window, &ctx, hooks, Arc::new(Events), stop::flag(), move || {
-        thread::start_main(entry, stack_top)
+        thread::start_main(boot, stack_top)
     });
     drop(loaded);
     result
