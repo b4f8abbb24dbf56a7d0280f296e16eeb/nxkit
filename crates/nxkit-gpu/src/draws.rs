@@ -262,6 +262,7 @@ pub(crate) fn prepare(
         images: &d.images,
         base_instance,
         groups: None,
+        push: d.push.as_deref(),
     };
     let vertex_args = crate::bindless::fill_args(&vs, &inputs(Stage::Vertex), &sh.env, sink)?;
     let fragment_args = match &fs {

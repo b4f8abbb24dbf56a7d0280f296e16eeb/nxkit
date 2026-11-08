@@ -83,6 +83,8 @@ pub(super) struct State {
     image: [u64; TEXTURE_SLOTS],
     /// `SetCopyRowStride` and `SetCopyImageStride` of the command buffer. 0 is tightly packed.
     copy_strides: [u64; 2],
+    /// The push constants of the graphics and the compute stages (bank 24, 0x100 bytes each), shared until changed.
+    push: [Option<std::sync::Arc<[u8]>>; 2],
 }
 
 impl Default for State {
@@ -106,6 +108,7 @@ impl Default for State {
             texture: [NO_HANDLE; TEXTURE_SLOTS],
             image: [NO_HANDLE; TEXTURE_SLOTS],
             copy_strides: [0; 2],
+            push: [None, None],
         }
     }
 }
@@ -390,6 +393,7 @@ impl Walker {
         }
         DispatchDetail {
             program,
+            push: st.push[1].clone(),
             groups,
             ubos: self.ubos(mem, st, 2, Stage::Compute),
             sbufs: sbufs(st, 2, Stage::Compute),
@@ -408,6 +412,7 @@ fn empty_key() -> Arc<str> {
 /// The detail of a draw that cannot run. It keeps the ordinals of the draws after it.
 fn empty_draw() -> DrawDetail {
     DrawDetail {
+        push: None,
         program: ProgramRef {
             vertex: empty_key(),
             fragment: None,

@@ -114,6 +114,8 @@ pub(crate) struct Bind {
     pub(crate) dim: Option<nxkit_metal::TextureKind>,
     /// Whether the shader may write an `sbuf` member (`rw` of the reflection; a missing `rw` counts as written).
     pub(crate) rw: bool,
+    /// The constant bank of a `drvcb` member: 0 and 2 are the driver block, 24 the push constants.
+    pub(crate) bank: u32,
     /// The entry of the support buffer's `render_scale` array this member needs. A `tex` member names the entry of its
     /// texture's scale (`rscale` of the reflection). A `support` member has `Some(0)` when the shader reads the scale
     /// of the pass.
@@ -350,7 +352,8 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             let atomic = b.get("atomic").and_then(Json::as_bool).unwrap_or(false);
             declared_img(b.get("msl_type").and_then(Json::as_str).unwrap_or(""), atomic)
         });
-        binds.push(Bind { arg_id, kind, reg, dim, rw, rscale, img });
+        let bank = b.get("bank").and_then(Json::as_i64).and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
+        binds.push(Bind { arg_id, kind, reg, dim, rw, rscale, img, bank });
     }
     let inputs = if vertex {
         json.get("vertex_inputs")

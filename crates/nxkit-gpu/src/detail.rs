@@ -276,6 +276,8 @@ pub struct DynamicDetail {
 pub struct DrawDetail {
     /// The shaders.
     pub program: ProgramRef,
+    /// The graphics push constants (`nvnCommandBufferPushGraphicsConstants`, bank 24), when any were pushed.
+    pub push: Option<std::sync::Arc<[u8]>>,
     /// The blend state of each colour target.
     pub blend: [BlendDetail; 8],
     /// The colour write mask of each target: bit 0 red to bit 3 alpha.
@@ -377,6 +379,8 @@ pub struct CopyDetail {
 pub struct DispatchDetail {
     /// The key of the compute shader.
     pub program: String,
+    /// The compute push constants (`nvnCommandBufferPushComputeConstants`, bank 24), when any were pushed.
+    pub push: Option<std::sync::Arc<[u8]>>,
     /// The threadgroups.
     pub groups: [u32; 3],
     /// The uniform buffers.

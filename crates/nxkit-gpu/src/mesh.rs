@@ -150,6 +150,7 @@ pub(crate) fn prepare(
         images: &d.images,
         base_instance: 0,
         groups: None,
+        push: d.push.as_deref(),
     };
     let mesh_args = crate::bindless::fill_args(&ms, &inputs(Stage::Mesh), &sh.env, sink)?;
     let object_args = match &ts {
@@ -229,6 +230,7 @@ mod tests {
             images: &[],
             base_instance: 0,
             groups: None,
+            push: None,
         };
         let mut b = vec![0u8; 0xA00];
         storage_table(&mut b, &inp);

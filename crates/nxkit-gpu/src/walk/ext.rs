@@ -46,6 +46,9 @@ fn clear_value(kind: u16, bits: u32) -> f32 {
     }
 }
 
+/// Bytes of a push constant block (the translator's `PUSH_SIZE`).
+const PUSH_BYTES: usize = 0x100;
+
 impl Walker {
     pub(super) fn ext<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, x: &Ext) {
         match x.code {
@@ -127,6 +130,20 @@ impl Walker {
             ExtCode::CopyBufferToTexture | ExtCode::CopyTextureToBuffer | ExtCode::CopyTextureToTexture => {
                 self.track.read(&cache::COPY_READS);
                 self.out.copies.push(copy_detail(st, x));
+            }
+            // Push constants: the first word is the byte offset, then `arg >> 1` bytes; bit 0 of `arg` is compute.
+            ExtCode::Push => {
+                let (compute, len) = (x.arg & 1 != 0, usize::from(x.arg >> 1));
+                let w = x.words();
+                let off = w.first().copied().unwrap_or(0) as usize;
+                let bytes: Vec<u8> = w.iter().skip(1).flat_map(|v| v.to_le_bytes()).take(len).collect();
+                let slot = &mut st.push[usize::from(compute)];
+                let mut block: Vec<u8> = slot.as_deref().map_or_else(|| vec![0; PUSH_BYTES], <[u8]>::to_vec);
+                if let Some(dst) = block.get_mut(off..(off + bytes.len()).min(PUSH_BYTES)) {
+                    let n = dst.len();
+                    dst.copy_from_slice(&bytes[..n]);
+                }
+                *slot = Some(block.into());
             }
             ExtCode::UpdateUniform => {
                 self.out.copies.push(CopyDetail::default());
@@ -408,6 +425,7 @@ impl Walker {
             return self.mesh_draw(mem, st, args);
         }
         let mut d = empty_draw();
+        d.push = st.push[0].clone();
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let show =
             || crate::diag("prog") && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40;
@@ -508,6 +526,7 @@ impl Walker {
     /// textures of the bank they share and those of the fragment stage. It has no vertex input.
     fn mesh_draw<M: GuestMem>(&mut self, mem: &M, st: &State, args: DrawArgs) -> DrawDetail {
         let mut d = empty_draw();
+        d.push = st.push[0].clone();
         for s in [MESH, TASK, 1, 0] {
             self.track.program(s, st.program[s]);
         }

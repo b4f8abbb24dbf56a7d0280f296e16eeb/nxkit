@@ -84,6 +84,10 @@ pub struct Gpu {
     img_decl: crate::images::Decls,
     /// The memory pools and the raw global memory table (`gmem.rs`).
     gmem: crate::gmem::Gmem,
+    /// `NXKIT_DIAG=imgdump`: the textures that dispatches read and write in a sampled frame, read back a few frames
+    /// later, when the GPU is done with them.
+    imgdump: std::collections::VecDeque<(u64, Vec<ImgDumpEntry>)>,
+    frames_encoded: u64,
     pipelines: Pipelines,
     bindless: Bindless,
     store: TextureStore,
@@ -229,6 +233,8 @@ impl Gpu {
             fit_decl: [FastMap::default(), FastMap::default()],
             img_decl: [FastMap::default(), FastMap::default()],
             gmem: crate::gmem::Gmem::new(ctx)?,
+            imgdump: std::collections::VecDeque::new(),
+            frames_encoded: 0,
             pipelines,
             bindless: Bindless::new(ctx)?,
             store: TextureStore::new(ctx),
@@ -821,6 +827,7 @@ impl Gpu {
         self.store.trim_views();
 
         mark(t0, "resolve+fit");
+        self.imgdump_step(view, detail, &textures);
         let ords = ordinals(frame);
         let pass_images = crate::images::pass_images(frame, plan, &ords, &image_uses.per_draw);
         let mut first_write: FastMap<TexId, usize> = FastMap::default();
@@ -1212,6 +1219,66 @@ fn hitch_diag(s: &EncodeStats, draws: usize) {
         s.render_passes,
         s.compute_passes,
     );
+}
+
+/// One texture that a dispatch of a sampled frame read (`tex`) or wrote (`img`), for `NXKIT_DIAG=imgdump`.
+struct ImgDumpEntry {
+    dispatch: usize,
+    program: String,
+    groups: [u32; 3],
+    kind: &'static str,
+    slot: u32,
+    id: TexId,
+    tex: Texture,
+}
+
+impl Gpu {
+    /// `NXKIT_DIAG=imgdump`: every 120th frame notes the textures of its dispatches, and three frames later reads nine
+    /// pixels of each and prints how many are not black, so a chain of compute passes shows where it turns black.
+    fn imgdump_step(&mut self, view: &dyn EncodeView, detail: &FrameDetail, textures: &FastMap<TexId, Res>) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ON.get_or_init(|| crate::diag("imgdump")) {
+            return;
+        }
+        self.frames_encoded += 1;
+        let n = self.frames_encoded;
+        while self.imgdump.front().is_some_and(|(f, _)| f + 3 <= n) {
+            let Some((f, entries)) = self.imgdump.pop_front() else { break };
+            for e in entries {
+                let d = e.tex.desc();
+                let pts: Vec<[u32; 2]> = (1..4).flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4])).collect();
+                let px = e.tex.debug_read_raw(&self.ctx, &pts);
+                let lit = px.as_ref().map_or(0, |p| p.iter().filter(|v| v.iter().any(|b| *b != 0)).count());
+                eprintln!(
+                    "DIAG imgdump frame {f} dispatch {} {} groups {:?} {} slot {} {:?} {}x{} {:?}: lit {lit}/9 first {:?}",
+                    e.dispatch, e.program, e.groups, e.kind, e.slot, e.id, d.width, d.height, d.format,
+                    px.as_ref().and_then(|p| p.get(4).cloned())
+                );
+            }
+        }
+        if !n.is_multiple_of(120) {
+            return;
+        }
+        let mut entries = Vec::new();
+        for (i, d) in detail.dispatches.iter().enumerate() {
+            for (kind, list) in [("img", &d.images), ("tex", &d.textures)] {
+                for b in list {
+                    let Ok((slot, _)) = view.resolve(b.handle) else { continue };
+                    let Some(res) = textures.get(&slot.texture) else { continue };
+                    entries.push(ImgDumpEntry {
+                        dispatch: i,
+                        program: d.program.clone(),
+                        groups: d.groups,
+                        kind,
+                        slot: b.slot,
+                        id: slot.texture,
+                        tex: res.tex.clone(),
+                    });
+                }
+            }
+        }
+        self.imgdump.push_back((n, entries));
+    }
 }
 
 /// Notes the time since `t0` under `name`, for the `hitch` line.

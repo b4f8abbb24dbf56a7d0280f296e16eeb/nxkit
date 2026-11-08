@@ -129,6 +129,8 @@ impl ArgsMemo {
         m.next.push(p as *const StageProgram as u64);
         m.next.push(u64::from(inp.base_instance));
         m.next.push(u64::from(pass_scale.to_bits()));
+        // The push constants are shared until the game pushes again, so their address names their content.
+        m.next.push(inp.push.map_or(0, |b| b.as_ptr() as u64));
         let mark = m.next.len();
         m.next.push(0);
         for u in inp.ubos.iter().filter(|u| u.stage == inp.stage) {
@@ -362,6 +364,9 @@ impl Bindless {
 }
 
 /// What a stage of one draw or dispatch binds.
+/// The constant bank that holds push constants (the translator's `PUSH_BANK`).
+const PUSH_BANK: u32 = 24;
+
 pub(crate) struct StageInputs<'a> {
     pub(crate) stage: Stage,
     pub(crate) ubos: &'a [UboDetail],
@@ -370,6 +375,8 @@ pub(crate) struct StageInputs<'a> {
     pub(crate) images: &'a [TextureBind],
     pub(crate) base_instance: u32,
     pub(crate) groups: Option<[u32; 3]>,
+    /// The push constants of the draw or dispatch (bank 24), when it has any.
+    pub(crate) push: Option<&'a [u8]>,
 }
 
 /// What the argument buffers need besides the bindings.
@@ -565,6 +572,11 @@ fn build_args_in(
                 .map_or(env.default_sampler, |r| r.sampler),
             BindKind::TexPool => env.pools.0,
             BindKind::SampPool => env.pools.1,
+            // Bank 24 is the push constant block; banks 0 and 2 are the driver block.
+            BindKind::DrvCb if b.bank == PUSH_BANK => match inp.push {
+                Some(push) => sink.put(push)?,
+                None => env.statics.1,
+            },
             BindKind::DrvCb => {
                 drv_block(drv, inp, ubos);
                 sink.put(drv)?

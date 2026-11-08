@@ -288,3 +288,15 @@ pub(crate) fn gpu_labels() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var("NXKIT_GPU_LABELS").is_ok_and(|v| v == "1"))
 }
+
+/// `NXKIT_SKIP_PROGRAMS=<key>,<key>`: dispatches whose compute shader has one of these keys are not run. A debugging aid
+/// to find which pass of a chain turns a picture black.
+pub(crate) fn skipped_program(key: &str) -> bool {
+    static KEYS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let keys = KEYS.get_or_init(|| {
+        std::env::var("NXKIT_SKIP_PROGRAMS")
+            .map(|v| v.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect())
+            .unwrap_or_default()
+    });
+    !keys.is_empty() && keys.iter().any(|k| k == key)
+}

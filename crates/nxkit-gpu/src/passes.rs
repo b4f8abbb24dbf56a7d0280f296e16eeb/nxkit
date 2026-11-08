@@ -18,6 +18,9 @@ use crate::stats::{EncodeStats, Skip};
 
 fn dispatch(sh: &Shared<'_>, cp: &mut ComputePass<'_>, scratch: &Scratch, n: u32) -> Result<(), Skip> {
     let dd = sh.detail.dispatches.get(n as usize).ok_or(Skip::Detail)?;
+    if crate::diag::skipped_program(&dd.program) {
+        return Err(Skip::Encode);
+    }
     let p = sh.programs.stage(&dd.program, false)?;
     let pipeline = sh.pipelines.compute(&dd.program, &p)?;
     let inputs = StageInputs {
@@ -28,6 +31,7 @@ fn dispatch(sh: &Shared<'_>, cp: &mut ComputePass<'_>, scratch: &Scratch, n: u32
         images: &dd.images,
         base_instance: 0,
         groups: Some(dd.groups),
+        push: dd.push.as_deref(),
     };
     let args = fill_args(&p, &inputs, &sh.env, &mut ScratchSink::new(scratch, sh.uploaded, None).with_preloaded(sh.preloaded))?;
     let enc = |cp: &mut ComputePass<'_>, c| cp.encode(&c).map_err(|_| Skip::Encode);
