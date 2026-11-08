@@ -273,6 +273,32 @@ extern "C" fn input_filled(_g: u64) -> i32 {
     0
 }
 
+/// The SDK passes the calls below to the `Impl` pointer of the stream, which is null for a type that never opened. Only
+/// `GetInputStreamState` answers a null `Impl` itself. The Legend of Zelda: Ocarina of Time asks the state of its two
+/// microphone streams, purges them when they are not started and reads their statistics each update. It opens them only
+/// when a virtual input device is listed, so here never. Each call answers without touching the guest object.
+///
+/// Input stream, never open: closed (0).
+extern "C" fn input_state(_g: u64) -> i32 {
+    0
+}
+
+/// Input stream, never open: nothing buffered.
+extern "C" fn input_purge(_g: u64) {}
+
+/// Input stream, never open: none.
+extern "C" fn input_count(_g: u64) -> i32 {
+    0
+}
+
+/// Input stream, never open: 1.
+extern "C" fn input_get_gain(_g: u64) -> f32 {
+    1.0
+}
+
+/// Input stream, never open: nothing to ramp.
+extern "C" fn input_set_gain(_g: u64, _gain: f32, _ramp: i64) {}
+
 /// `StreamFormat`: 12 bytes, returned in registers.
 #[repr(C)]
 #[allow(dead_code)]
@@ -327,4 +353,11 @@ pub(crate) fn exports(v: &mut Vec<Export>, big: &mut Vec<Export>) {
     ex!(v, "_ZN2nn5audio15ReadInputStreamEPNS0_15InputStreamTypeEPvi", input_read);
     ex!(v, "_ZN2nn5audio30GetInputStreamFilledFrameCountEPKNS0_15InputStreamTypeE", input_filled);
     ex!(v, "_ZN2nn5audio20GetInputStreamFormatEPKNS0_15InputStreamTypeE", input_format);
+    ex!(v, "_ZN2nn5audio19GetInputStreamStateEPKNS0_15InputStreamTypeE", input_state);
+    ex!(v, "_ZN2nn5audio16PurgeInputStreamEPNS0_15InputStreamTypeE", input_purge);
+    ex!(v, "_ZN2nn5audio24GetInputStreamStatisticsEPNS0_15InputStreamTypeEb", statistics);
+    ex!(v, "_ZN2nn5audio28GetInputStreamFreeFrameCountEPKNS0_15InputStreamTypeE", input_count);
+    ex!(v, "_ZN2nn5audio32GetInputStreamCapacityFrameCountEPKNS0_15InputStreamTypeE", input_count);
+    ex!(v, "_ZN2nn5audio18GetInputStreamGainEPKNS0_15InputStreamTypeE", input_get_gain);
+    ex!(v, "_ZN2nn5audio18SetInputStreamGainEPNS0_15InputStreamTypeEfNS_8TimeSpanE", input_set_gain);
 }
