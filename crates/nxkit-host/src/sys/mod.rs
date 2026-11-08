@@ -6,6 +6,16 @@
 pub mod appkit;
 mod mouse;
 
+/// The user's preferred languages of macOS (`NSLocale.preferredLanguages`), best first, such as `de-DE`.
+pub fn preferred_languages() -> Vec<String> {
+    objc2::rc::autoreleasepool(|_| {
+        objc2_foundation::NSLocale::preferredLanguages()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    })
+}
+
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::fs::File;
 use std::os::fd::AsRawFd;

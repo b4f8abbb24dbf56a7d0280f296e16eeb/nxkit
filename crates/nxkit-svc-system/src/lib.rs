@@ -37,6 +37,7 @@ mod tz;
 mod util;
 
 pub use sdk::quit;
+pub use set::console_language;
 pub use seams::{Seams, TextRequest, set_seams};
 pub use state::{Focus, push_message, set_focus, set_operation_mode};
 

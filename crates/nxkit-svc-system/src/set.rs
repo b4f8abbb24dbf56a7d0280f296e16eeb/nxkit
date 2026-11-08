@@ -28,6 +28,43 @@ const LANGUAGES: [&str; 18] = [
     "es-419", "zh-Hans", "zh-Hant", "pt-BR",
 ];
 
+/// The console language for a list of preferred language tags (BCP 47, such as macOS's `de-DE` or `zh-Hans-CN`), best
+/// first: the first tag with a console language wins, else `en-US`. An exact console tag is taken as it is; otherwise
+/// the language decides, with the region or script where the console tells them apart.
+pub fn console_language<'a>(preferred: impl IntoIterator<Item = &'a str>) -> &'static str {
+    for tag in preferred {
+        let tag = tag.trim().replace('_', "-");
+        if let Some(l) = LANGUAGES.iter().find(|l| l.eq_ignore_ascii_case(&tag)) {
+            return l;
+        }
+        let mut parts = tag.split('-');
+        let lang = parts.next().unwrap_or("").to_ascii_lowercase();
+        let rest: Vec<String> = parts.map(str::to_ascii_lowercase).collect();
+        let has = |x: &str| rest.iter().any(|r| r == x);
+        let pick = match lang.as_str() {
+            "ja" => "ja",
+            "en" if has("gb") || has("ie") || has("au") || has("nz") => "en-GB",
+            "en" => "en-US",
+            "fr" if has("ca") => "fr-CA",
+            "fr" => "fr",
+            "de" => "de",
+            "it" => "it",
+            "es" if has("es") || rest.is_empty() => "es",
+            "es" => "es-419",
+            "zh" if has("hant") || has("tw") || has("hk") || has("mo") => "zh-Hant",
+            "zh" => "zh-Hans",
+            "ko" => "ko",
+            "nl" => "nl",
+            "pt" if has("br") => "pt-BR",
+            "pt" => "pt",
+            "ru" => "ru",
+            _ => continue,
+        };
+        return pick;
+    }
+    "en-US"
+}
+
 /// The 8-byte `LanguageCode` of a tag such as `en-US`: the characters in a little-endian integer.
 pub(crate) fn language_code(tag: &str) -> u64 {
     let mut b = [0u8; 8];
@@ -138,6 +175,23 @@ impl Service for Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferred_tags_map_to_console_languages() {
+        assert_eq!(console_language(["de-DE"]), "de");
+        assert_eq!(console_language(["de_AT"]), "de");
+        assert_eq!(console_language(["en-GB"]), "en-GB");
+        assert_eq!(console_language(["en-AU"]), "en-GB");
+        assert_eq!(console_language(["en"]), "en-US");
+        assert_eq!(console_language(["zh-Hans-CN"]), "zh-Hans");
+        assert_eq!(console_language(["zh-Hant-TW"]), "zh-Hant");
+        assert_eq!(console_language(["es-MX"]), "es-419");
+        assert_eq!(console_language(["pt-BR"]), "pt-BR");
+        assert_eq!(console_language(["fr-CA"]), "fr-CA");
+        assert_eq!(console_language(["sv-SE", "it-IT"]), "it");
+        assert_eq!(console_language(["sv-SE"]), "en-US");
+        assert_eq!(console_language([]), "en-US");
+    }
 
     #[test]
     fn a_language_code_is_the_tag_in_a_little_endian_integer() {

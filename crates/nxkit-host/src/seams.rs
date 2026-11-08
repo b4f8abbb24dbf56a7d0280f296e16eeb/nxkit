@@ -143,6 +143,17 @@ fn game_env(settings: &Settings) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The console language: `NXKIT_LANGUAGE` (a tag such as `de` or `en-GB`) when it is set, else the first of the Mac's
+/// preferred languages that the console has, else `en-US`.
+fn console_language() -> String {
+    let env = std::env::var("NXKIT_LANGUAGE").ok().filter(|v| !v.trim().is_empty());
+    let mac = crate::sys::preferred_languages();
+    let tags: Vec<&str> = env.as_deref().into_iter().chain(mac.iter().map(String::as_str)).collect();
+    let lang = nxkit_svc_system::console_language(tags.iter().copied());
+    eprintln!("nxkit-host: console language {lang} (preferred {tags:?})");
+    lang.to_owned()
+}
+
 /// Starts the service crates with the configuration of the game. The services are the names in `game.services`.
 ///
 /// Every crate gets typed values from `game.json`: fs the romfs, the title ID and the DLC folder, system the launch
@@ -184,6 +195,7 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
             shared_font: s.shared_font.as_ref().map(|f| game.path(Path::new(f))).filter(|p| p.is_file()),
             shared_font_decode: s.shared_font_decode,
             sf_services: s.sf_services.clone(),
+            language: console_language(),
             ..nxkit_svc_system::Config::default()
         });
         nxkit_svc_system::set_seams(wire::system_seams());
