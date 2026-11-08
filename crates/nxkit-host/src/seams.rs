@@ -107,7 +107,13 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
     let target = s.fps_target;
     let step = match (target, page.is_some()) {
         (0, _) => StepMode::Own,
-        (30 | 60, true) => StepMode::Vsyncs(target),
+        // The load-driven step decides the hold from the cost of the frames and writes the step into the state
+        // page, so the game steps by the time each frame stays on screen (nxnative's frame step).
+        (30 | 60, true) => {
+            let mut load = LoadConfig::new(target).map_err(|e| HostError::Manifest(e.to_string()))?;
+            load.hold = s.fps_hold;
+            StepMode::Load(load)
+        }
         (t, true) if t > 60 => StepMode::Variable(t),
         (t, _) => {
             let mut load = LoadConfig::new(t).map_err(|e| HostError::Manifest(e.to_string()))?;
@@ -118,7 +124,8 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
     Ok(nxkit_svc_pacing::Config {
         bind_system_event: wire::pacing_bind,
         state_page: page,
-        display_hz: 60.0,
+        // The display link of the window ticks at 120 Hz (`frames.rs`), the Switch's vsync is 60 Hz.
+        display_hz: 120.0,
         vsync_hz: 60.0,
         step,
         limits: None,

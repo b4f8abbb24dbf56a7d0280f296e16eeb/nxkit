@@ -93,7 +93,13 @@ pub(super) fn acquire(name: &'static str, w: u64, sync_obj: u64, idx: u64) -> Ab
         0
     };
     // The backend may block here until the display can take another frame. The lock is not held.
-    gpu(name).backend().acquire(w, index);
+    let g = gpu(name);
+    let start = (g.settings().clock_ns)();
+    g.backend().acquire(w, index);
+    let waited = (g.settings().clock_ns)().saturating_sub(start);
+    // The frame step takes the first acquire after a present as the start of the frame, and the wait off its cost.
+    // Later acquires of the same frame are ignored there. `Err` means the pacing service is not running.
+    let _ = nxkit_svc_pacing::frame_started_waited(start, waited);
     if sync_obj != 0 {
         sync::set_acquire_fence(Obj(sync_obj))?;
     }

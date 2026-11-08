@@ -175,6 +175,41 @@ extern "C" fn queue_finish(_q: u64) {
     guard("nvnQueueFinish", || gpu("nvnQueueFinish").finish());
 }
 
+/// Tells the frame step that a frame was presented, and logs what it decided: the hold of the frames on screen and the
+/// step that the game gets, and every 1800 presents the game time against the real time.
+fn pace_present(now_ns: u64) {
+    static PRESENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let presents = PRESENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let sample = nxkit_svc_pacing::PresentSample {
+        presents,
+        now_ns,
+        gpu_ms: None,
+        snap: None,
+        screen_hz: 120,
+        link_active: true,
+        movie: false,
+        thermal: 0,
+        low_power: false,
+        perf: None,
+    };
+    let Ok(done) = nxkit_svc_pacing::frame_presented(&sample) else { return };
+    for e in done.outcome.iter().flat_map(|o| &o.events) {
+        match e {
+            nxkit_svc_pacing::load::Event::HoldChanged { from, to, why, cost, .. } => {
+                eprintln!("nxkit-pacing: frame step: hold {from} -> {to} ({why:?}, cost {cost:.2} vsyncs)");
+            }
+            nxkit_svc_pacing::load::Event::Window { held, seconds } => match seconds {
+                Some((game, real)) => eprintln!(
+                    "nxkit-pacing: frame step: game time {game:.2} s in {real:.2} s ({:.3} of real time), held {held:?}",
+                    if *real > 0.0 { game / real } else { 0.0 }
+                ),
+                None => eprintln!("nxkit-pacing: frame step: held {held:?}"),
+            },
+            other => eprintln!("nxkit-pacing: frame step: {other:?}"),
+        }
+    }
+}
+
 extern "C" fn queue_present_texture(_q: u64, w: u64, index: i32) {
     guard("nvnQueuePresentTexture", || {
         let Some(view) = window::present_view(w, index)? else {
@@ -200,7 +235,9 @@ extern "C" fn queue_present_texture(_q: u64, w: u64, index: i32) {
             texture,
             interval: view.interval,
             crop,
-        })
+        })?;
+        pace_present((g.settings().clock_ns)());
+        Ok(())
     });
 }
 
