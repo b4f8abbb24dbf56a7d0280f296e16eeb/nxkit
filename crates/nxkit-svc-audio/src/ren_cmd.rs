@@ -394,9 +394,14 @@ pub(crate) fn capture(lay: &mut Layout, cap: &mut Cap, idx: usize, cl: &[u8], ds
     for i in 0..ncmd {
         let ok = cl.get(pos..).filter(|q| hdr.ok(q));
         let Some(q) = ok else {
-            if !lay.malformed_logged {
+            static MALFORMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = MALFORMED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if !lay.malformed_logged || n.is_power_of_two() {
                 lay.malformed_logged = true;
-                eprintln!("nxkit-audio: [RED] audren: command {i} of the command list is malformed (offset {pos:#x}, list {:#x} bytes)", cl.len());
+                eprintln!(
+                    "nxkit-audio: [RED] audren: command {i} of the command list is malformed (offset {pos:#x}, list {:#x} bytes), the frame is silent ({n} so far)",
+                    cl.len()
+                );
             }
             return 0;
         };

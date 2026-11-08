@@ -70,6 +70,11 @@ pub(crate) struct Ren {
     pub(crate) cap: Mutex<Cap>,
     /// The command layout and the timing of this renderer. Only the thread that renders takes it.
     pub(crate) lay: Mutex<Lay>,
+    /// Held for a whole render: command generation, processing and the read of the output. The render thread and a
+    /// catch-up render on the game's update thread share the renderer's command buffer; when one generated a new list
+    /// while the other still processed or read its own, that list came out malformed and its 5 ms block silent, which
+    /// clicked.
+    pub(crate) render: Mutex<()>,
     pub(crate) renders: AtomicU64,
     pub(crate) updates: AtomicU64,
     pub(crate) catchups: AtomicU64,
@@ -92,6 +97,7 @@ impl Ren {
             cq_cv: Condvar::new(),
             cap: Mutex::new(Cap::new()),
             lay: Mutex::new(Lay::new()),
+            render: Mutex::new(()),
             renders: AtomicU64::new(0),
             updates: AtomicU64::new(0),
             catchups: AtomicU64::new(0),

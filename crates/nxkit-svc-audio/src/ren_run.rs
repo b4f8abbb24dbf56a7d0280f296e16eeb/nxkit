@@ -124,6 +124,7 @@ static RENDER: OnceLock<Render> = OnceLock::new();
 /// into `out`, which holds the stereo samples afterwards. `out` is empty when `want` is false or the frame made no
 /// sound. Returns the result code.
 fn render_once(a: &Ren, sys: u64, want: bool, out: &mut Vec<i16>) -> u32 {
+    let _one = lk(&a.render);
     let r = RENDER.get_or_init(Render::load);
     out.clear();
     let sdk20 = r.sdk20;
@@ -242,6 +243,7 @@ extern "C" fn render_main(idx: u64) {
     m.start(out);
     eprintln!("nxkit-audio: audren: render thread {} started ({} buffers in flight, paced by the output)", a.idx, blocks.len());
     let exec = EXEC.addr();
+    let mut clicks = Clicks::default();
     while a.is_open() {
         // Wait for the output to hand a block back. It signals each release.
         while free.is_empty() {
@@ -256,6 +258,7 @@ extern "C" fn render_main(idx: u64) {
         }
         let Some(bi) = free.pop() else { break };
         let from_queue = a.pop_cq();
+        let from_queue_flag = from_queue.is_some();
         let blk = &mut blocks[bi];
         let n = match from_queue {
             Some(f) => fill(blk, &f),
@@ -266,6 +269,7 @@ extern "C" fn render_main(idx: u64) {
                 fill(blk, &f)
             }
         };
+        clicks.check(&blk[..n * 2], from_queue_flag);
         let b = Buf { token: bi as u64, addr: blk.as_ptr() as u64, size: (n * 4) as u64, host: true };
         if !m.append(out, b) {
             free.push(bi);
@@ -305,6 +309,11 @@ fn catch_up(a: &Ren, sys: u64) {
     drop(q);
     if full {
         // Still full, so the output stopped. Render anyway and discard the output.
+        static DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+        if n.is_power_of_two() {
+            eprintln!("nxkit-audio: audren: renderer {}: catch-up queue full, frame discarded ({n} so far)", a.idx);
+        }
         render_once(a, sys, false, &mut Vec::new());
     } else {
         // A catch-up frame happens only when the game updated twice without a render in between, so this allocation is
@@ -338,4 +347,43 @@ pub(crate) extern "C" fn h_update(sys: u64, o: u64, on: u64, p: u64, pn: u64, in
     a.last_r.store(a.renders.load(Ordering::Acquire), Ordering::Release);
     a.updated.store(true, Ordering::Release);
     res
+}
+
+/// `NXKIT_AUDIO_CLICKS=1`: finds jumps at the borders of the rendered blocks that are much larger than any step inside
+/// the blocks around them, which is what a click sounds like, and prints each with the wall clock in ms (to put next
+/// to the late frames of `NXKIT_PACE_DIAG`), whether the block was a catch-up frame, and the time since the last block.
+#[derive(Default)]
+struct Clicks {
+    last: Option<[i16; 2]>,
+    at: Option<Instant>,
+    found: u32,
+}
+
+impl Clicks {
+    fn check(&mut self, blk: &[i16], catch_up: bool) {
+        static ON: OnceLock<bool> = OnceLock::new();
+        if !*ON.get_or_init(|| std::env::var("NXKIT_AUDIO_CLICKS").is_ok_and(|v| v == "1")) || blk.len() < 4 {
+            return;
+        }
+        let now = Instant::now();
+        let inner = blk
+            .chunks_exact(2)
+            .zip(blk.chunks_exact(2).skip(1))
+            .map(|(a, b)| (i32::from(b[0]) - i32::from(a[0])).abs().max((i32::from(b[1]) - i32::from(a[1])).abs()))
+            .max()
+            .unwrap_or(0);
+        if let Some(prev) = self.last {
+            let jump = (i32::from(blk[0]) - i32::from(prev[0])).abs().max((i32::from(blk[1]) - i32::from(prev[1])).abs());
+            if jump > 2000 && jump > 3 * inner.max(1) && self.found < 2000 {
+                self.found += 1;
+                let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+                let gap = self.at.map_or(0.0, |t| now.duration_since(t).as_secs_f64() * 1e3);
+                eprintln!(
+                    "nxkit-audio: click t {ms}: jump {jump} (largest step inside {inner}), catch-up {catch_up}, {gap:.1} ms since the last block"
+                );
+            }
+        }
+        self.last = Some([blk[blk.len() - 2], blk[blk.len() - 1]]);
+        self.at = Some(now);
+    }
 }

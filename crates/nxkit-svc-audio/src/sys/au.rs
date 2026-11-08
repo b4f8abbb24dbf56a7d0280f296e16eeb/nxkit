@@ -35,6 +35,78 @@ mod imp {
 
     unsafe extern "C" {
         fn os_workgroup_join(wg: *mut c_void, token: *mut u64) -> i32;
+        fn AudioObjectAddPropertyListener(
+            object: u32,
+            address: *const AudioObjectPropertyAddress,
+            listener: unsafe extern "C" fn(u32, u32, *const AudioObjectPropertyAddress, *mut c_void) -> i32,
+            data: *mut c_void,
+        ) -> i32;
+        fn AudioObjectSetPropertyData(
+            object: u32,
+            address: *const AudioObjectPropertyAddress,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: u32,
+            data: *const c_void,
+        ) -> i32;
+    }
+
+    /// `kAudioDevicePropertyBufferFrameSize`.
+    const SELECTOR_BUFFER_FRAMES: u32 = 0x6673_697a;
+    /// `kAudioDevicePropertyTransportType`.
+    const SELECTOR_TRANSPORT: u32 = 0x7472_616e;
+    /// `kAudioDeviceProcessorOverload`.
+    const SELECTOR_OVERLOAD: u32 = 0x6f76_6572;
+
+    static OVERLOADS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// Counts the times the device's IO thread missed its deadline. The listener runs on a notification thread of
+    /// Core Audio, not on the IO thread. Each overload is an audible gap, whatever the samples were.
+    unsafe extern "C" fn overload(_object: u32, _n: u32, _addresses: *const AudioObjectPropertyAddress, _data: *mut c_void) -> i32 {
+        let n = OVERLOADS.fetch_add(1, Ordering::Relaxed) + 1;
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+        eprintln!("nxkit-audio: the output device missed its deadline (overload {n}) at t {ms}");
+        0
+    }
+
+    fn device_u32(device: u32, selector: u32) -> Option<u32> {
+        let addr = AudioObjectPropertyAddress { mSelector: selector, mScope: SCOPE_HAL_GLOBAL, mElement: 0 };
+        let (mut v, mut size) = (0u32, 4u32);
+        // SAFETY: `v` has the 4 bytes the call writes and `size` says so.
+        let st = unsafe {
+            AudioObjectGetPropertyData(device, &addr, 0, std::ptr::null(), &mut size, NonNull::from(&mut v).cast::<c_void>())
+        };
+        (st == 0).then_some(v)
+    }
+
+    /// Logs the transport and the IO buffer of the device, sets the buffer from `NXKIT_AUDIO_DEVICE_FRAMES`, and listens
+    /// for overloads of the device.
+    fn watch_device(device: u32) {
+        if let Some(frames) = std::env::var("NXKIT_AUDIO_DEVICE_FRAMES").ok().and_then(|v| v.parse::<u32>().ok()) {
+            let addr = AudioObjectPropertyAddress { mSelector: SELECTOR_BUFFER_FRAMES, mScope: SCOPE_HAL_GLOBAL, mElement: 0 };
+            // SAFETY: `frames` is the 4 bytes that the property takes.
+            let st = unsafe {
+                AudioObjectSetPropertyData(device, &addr, 0, std::ptr::null(), 4, std::ptr::from_ref(&frames).cast::<c_void>())
+            };
+            if st != 0 {
+                eprintln!("nxkit-audio: the device refused an IO buffer of {frames} frames (status {st})");
+            }
+        }
+        let transport = device_u32(device, SELECTOR_TRANSPORT).map_or_else(
+            || "?".to_string(),
+            |t| t.to_be_bytes().iter().map(|b| char::from(*b)).collect::<String>(),
+        );
+        let frames = device_u32(device, SELECTOR_BUFFER_FRAMES).unwrap_or(0);
+        eprintln!(
+            "nxkit-audio: the output device has transport '{transport}' and an IO buffer of {frames} frames ({:.1} ms)",
+            f64::from(frames) / 48.0
+        );
+        let addr = AudioObjectPropertyAddress { mSelector: SELECTOR_OVERLOAD, mScope: SCOPE_HAL_GLOBAL, mElement: 0 };
+        // SAFETY: the listener is a plain function that lives for the process, and it uses no data.
+        let st = unsafe { AudioObjectAddPropertyListener(device, &addr, overload, std::ptr::null_mut()) };
+        if st != 0 {
+            eprintln!("nxkit-audio: no overload listener on the output device (status {st})");
+        }
     }
 
     /// The callback context. It is boxed and never freed, because the unit runs until the process ends.
@@ -130,6 +202,7 @@ mod imp {
         /// Opens the default output device at 48 kHz stereo `f32`, joins its workgroup and starts it.
         pub fn start(fill: Fill) -> Result<Output, String> {
             let device = default_device()?;
+            watch_device(device);
             let desc = AudioComponentDescription {
                 componentType: 0x6175_6f75,
                 componentSubType: 0x6168_616c,
