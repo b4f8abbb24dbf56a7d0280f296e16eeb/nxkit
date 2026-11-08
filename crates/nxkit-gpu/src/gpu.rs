@@ -831,10 +831,24 @@ impl Gpu {
             .split_first_mut()
             .ok_or(MetalError::Invalid("the batch has no buffers"))?;
         first.retain(keep.clone());
+        self.transfer.begin_frame();
+        let mut scaled_queued = Vec::new();
         for (id, res) in &textures {
             let Ok(rec) = view.record(*id) else { continue };
-            if res.scaled && rec.residency == nxkit_nvn::resource::Residency::GuestNewer {
-                stats.scaled_upload_lost += 1;
+            if TextureStore::needs_scaled_upload(res, rec) {
+                // The guest layout has the native size: a staging texture takes it and a kernel scales it.
+                let wait = self.copyback.upload_waits(rec);
+                let t_up = Instant::now();
+                let r = self.transfer.upload_scaled(first, &scratch, &self.guest, rec, res, wait);
+                stats.upload_ns += nanos(t_up, Instant::now());
+                match r {
+                    Ok(()) => scaled_queued.push((*id, res.barrier_id)),
+                    Err(why) => {
+                        stats.scaled_upload_lost += 1;
+                        stats.skip(why);
+                    }
+                }
+                continue;
             }
             if crate::diag("stale") && crate::diag::tex_match(res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers) {
                 self.stale_diag(*id, rec, res);
@@ -867,6 +881,22 @@ impl Gpu {
                         .seed(res.barrier_id, Stages::DISPATCH | Stages::BLIT);
                 }
                 Err(why) => stats.skip(why),
+            }
+        }
+
+        if !scaled_queued.is_empty() {
+            let (scaled, lost) = self.transfer.flush_scaled(first);
+            stats.scaled_uploads += scaled;
+            stats.uploads += scaled;
+            stats.scaled_upload_lost += lost;
+            stats.compute_passes += 1;
+            // The scaling writes the texture with compute stages, like the plain upload. A texture that lost part of
+            // its write still changed, so every queued texture gets the seed.
+            for (id, barrier_id) in scaled_queued {
+                if lost == 0 {
+                    deswizzled.push(id);
+                }
+                self.barriers.seed(barrier_id, Stages::DISPATCH | Stages::BLIT);
             }
         }
 

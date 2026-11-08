@@ -7,7 +7,8 @@
 //! frame or an earlier one (a texture that was an attachment once stays one), and no CPU read of it has been seen. The
 //! game creates its output-size targets and renders into them, so they become attachments and with that scaled. A
 //! texture that the game only uploads is never an attachment and keeps its size. A texture that the CPU reads back
-//! stays at its size for good, because the guest memory has the unscaled bytes.
+//! stays at its size for good, because the guest memory has the unscaled bytes. So does a texture that the CPU writes
+//! often and the GPU renders rarely (`Heat`): every write would need a staging upload and a scale.
 
 use crate::draws::{FastMap, FastSet};
 use std::sync::{Mutex, PoisonError};
@@ -53,6 +54,28 @@ pub(crate) struct Use {
 
 type ViewKey = (u64, [u32; 7]);
 
+/// How often the CPU writes a texture and the GPU renders into it, in frames that use the texture.
+#[derive(Clone, Copy, Debug, Default)]
+struct Heat {
+    /// Frames in which the guest copy was newer.
+    writes: u32,
+    /// Frames in which a render pass had it as an attachment.
+    renders: u32,
+}
+
+/// The CPU writes a texture in at least this many frames before it can stay native.
+const HEAT_MIN_WRITES: u32 = 8;
+/// ... and in at least this many times as many frames as the GPU renders into it.
+const HEAT_RATIO: u32 = 4;
+
+impl Heat {
+    /// True for a texture that is written much more often than it is rendered: scaling it costs an upload and a scale
+    /// per write and buys little.
+    fn mostly_cpu(self) -> bool {
+        self.writes >= HEAT_MIN_WRITES && self.writes / HEAT_RATIO >= self.renders
+    }
+}
+
 /// The textures by id.
 pub(crate) struct TextureStore {
     ctx: Context,
@@ -60,6 +83,9 @@ pub(crate) struct TextureStore {
     aliases: FastMap<(u64, TextureDesc), Res>,
     attachments: FastSet<TexId>,
     pinned: FastSet<TexId>,
+    /// The CPU-written, rarely rendered textures, which stay at the native size for good.
+    native: FastSet<TexId>,
+    heat: FastMap<TexId, Heat>,
     next_generation: u64,
     views: Mutex<FastMap<ViewKey, Texture>>,
     retired: Vec<Texture>,
@@ -190,6 +216,8 @@ impl TextureStore {
             aliases: FastMap::default(),
             attachments: FastSet::default(),
             pinned: FastSet::default(),
+            native: FastSet::default(),
+            heat: FastMap::default(),
             next_generation: 1,
             views: Mutex::new(FastMap::default()),
             retired: Vec::new(),
@@ -214,7 +242,10 @@ impl TextureStore {
 
     /// True when the texture is scaled at `scale`.
     pub(crate) fn is_scaled(&self, id: TexId, scale: f32) -> bool {
-        scale != 1.0 && self.attachments.contains(&id) && !self.pinned.contains(&id)
+        scale != 1.0
+            && self.attachments.contains(&id)
+            && !self.pinned.contains(&id)
+            && !self.native.contains(&id)
     }
 
     /// The texture of `id` in the shape the frame needs. A texture with another description is made again.
@@ -226,6 +257,15 @@ impl TextureStore {
         stats: &mut EncodeStats,
     ) -> Result<Res, Skip> {
         let id = rec.id;
+        if scale != 1.0 && !self.native.contains(&id) {
+            let h = self.heat.entry(id).or_default();
+            h.writes += u32::from(rec.residency == Residency::GuestNewer);
+            h.renders += u32::from(u.attachment);
+            if h.mostly_cpu() {
+                self.native.insert(id);
+                stats.textures_kept_native += 1;
+            }
+        }
         u.attachment |= self.attachments.contains(&id);
         let scaled = self.is_scaled(id, scale);
         let (desc, widened) = describe(rec, if scaled { scale } else { 1.0 }, u)?;
@@ -327,6 +367,8 @@ impl TextureStore {
         }
         self.attachments.remove(&id);
         self.pinned.remove(&id);
+        self.native.remove(&id);
+        self.heat.remove(&id);
     }
 
     /// The textures that were replaced. The caller drops them when the GPU is done with them.
@@ -465,6 +507,15 @@ impl TextureStore {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|(generation, _), _| live.contains(generation));
+    }
+
+    /// True when the guest bytes of a scaled texture have to go into it through a staging texture of the native size
+    /// and a GPU scale. Only a CPU write counts. A texture that became scaled this frame is new and empty either way.
+    pub(crate) fn needs_scaled_upload(res: &Res, rec: &TextureRecord) -> bool {
+        res.scaled
+            && !res.widened
+            && res.desc.storage != Storage::Memoryless
+            && rec.residency == Residency::GuestNewer
     }
 
     /// True when the guest bytes have to go into the Metal texture before the frame uses it.

@@ -41,6 +41,7 @@ mod json;
 mod passes;
 mod pipelines;
 mod programs;
+mod scaled;
 mod settings;
 pub mod snapshot;
 pub mod stats;

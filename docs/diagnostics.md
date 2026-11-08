@@ -173,7 +173,8 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `tex.view-failed` | encoder | Metal did not create a view. For example, a view between a compressed and an uncompressed format, or a type that the texture cannot be seen as. |
 | `upload.failed` | encoder | The deswizzle or the copy of a texture upload failed. The examples include the error of the kernel, for example "the texture is not usable by the kernel" for a Depth16 upload. |
 | `upload.linear-refused` | encoder | A pitch-linear texture with layers, levels, 3D or no stride. Only one level and one layer are copied. |
-| `upload.scaled-lost` | encoder | Guest data that does not reach a scaled texture. |
+| `upload.scaled-lost` | encoder | Guest data that does not reach a scaled texture: the texture has no scaling kernel (depth, stencil, compressed, 3D, shared-exponent formats) or the staging upload failed. Scaled colour textures take the staged upload and count as `upload.scaled`. |
+| `upload.scaled` | encoder | Guest data that reached a scaled texture through a native-size staging texture and a GPU scale. This is not a loss and does not make the report unclean. A high count means the CPU writes a texture that the GPU renders at the scaled size, every frame. `EncodeStats.textures_kept_native` counts the textures the store keeps native for that reason. |
 | `copyback.refused` | encoder | A GPU-written texture in CPU-visible memory that could not be copied back. The CPU reads stale bytes. |
 | `copyback.over-budget` | encoder | A copy-back that was left out because the frame went over `NXKIT_COPYBACK_MAX_MB`. |
 | `program.failed` | encoder | A program that did not load. It counts once per key. |

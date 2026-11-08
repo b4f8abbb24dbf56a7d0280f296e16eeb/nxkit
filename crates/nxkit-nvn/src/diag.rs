@@ -126,6 +126,9 @@ reasons! {
     UploadLinearRefused => "upload.linear-refused",
     /// Upload: guest data that does not reach a scaled texture.
     UploadScaledLost => "upload.scaled-lost",
+    /// Upload: guest data that reached a scaled texture through a staging texture and a GPU scale. This is not a
+    /// loss; it shows how often the CPU writes a texture that the GPU renders at the scaled size.
+    UploadScaled => "upload.scaled",
     /// Copy-back: a GPU-written texture in CPU-visible memory that is not copied back.
     CopybackRefused => "copyback.refused",
     /// Copy-back: a texture left out because the frame went over `NXKIT_COPYBACK_MAX_MB`.
@@ -139,7 +142,7 @@ reasons! {
 impl Reason {
     /// False for a reason that counts work that the hardware does not do either.
     pub fn is_loss(self) -> bool {
-        self != Reason::SkipCull && self != Reason::SkipPending
+        self != Reason::SkipCull && self != Reason::SkipPending && self != Reason::UploadScaled
     }
 }
 
