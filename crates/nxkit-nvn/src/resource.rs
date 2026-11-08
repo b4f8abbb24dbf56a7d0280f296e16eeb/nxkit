@@ -44,6 +44,8 @@ pub struct TextureRecord {
     /// before it applies what the GPU did ([`ResourceTable::gpu_wrote_at`]).
     pub write_epoch: u32,
     alive: bool,
+    /// The texture objects of the game that name this record (`ResourceTable::create_shared`).
+    refs: u32,
 }
 
 impl TextureRecord {
@@ -105,11 +107,48 @@ impl ResourceTable {
             frame_local: false,
             write_epoch: 0,
             alive: true,
+            refs: 1,
         });
         self.by_address.insert((address.get(), id.0), id);
         self.group_residency.remove(&(address.get(), desc));
         self.largest = self.largest.max(layout.size);
         Ok(id)
+    }
+
+    /// Like [`ResourceTable::create`], but a live texture with the same address and description is shared: its id
+    /// comes back with `true`, and it counts one more texture object. On the hardware such objects are the same
+    /// texture. A game that makes texture objects and never finalizes them (temporary views, objects on the stack)
+    /// then keeps one record alive per address and description, not one per object: Breath of the Wild had over
+    /// 200000 live records after a few minutes, 30000 of them at one address, and every walk over the aliases of an
+    /// address grew with the play time.
+    pub fn create_shared(&mut self, desc: TextureDesc, address: GpuAddr) -> Result<(TexId, bool)> {
+        let layout = desc.layout()?;
+        address.offset(layout.size)?;
+        let a = address.get();
+        let same = self
+            .by_address
+            .range((a, 0)..=(a, u32::MAX))
+            .rev()
+            .map(|(_, id)| *id)
+            .find(|id| self.records.get(id.0 as usize).is_some_and(|r| r.alive && r.desc == desc));
+        if let Some(id) = same {
+            self.get_mut(id)?.refs += 1;
+            return Ok((id, true));
+        }
+        Ok((self.create(desc, address)?, false))
+    }
+
+    /// Drops one texture object of a record that [`ResourceTable::create_shared`] shared. True when it was the last
+    /// one, so that the caller finalizes the texture.
+    pub fn release_ref(&mut self, id: TexId) -> Result<bool> {
+        let r = self.get_mut(id)?;
+        r.refs = r.refs.saturating_sub(1);
+        Ok(r.refs == 0)
+    }
+
+    /// The records made so far and the live ones.
+    pub fn counts(&self) -> (usize, usize) {
+        (self.records.len(), self.by_address.len())
     }
 
     /// Removes a texture. Its id is not used again.
@@ -416,5 +455,22 @@ mod tests {
         assert_eq!(t.get(c).unwrap().residency, Residency::GpuNewer);
         t.synced(a).unwrap();
         assert_eq!(t.get(c).unwrap().residency, Residency::InSync);
+    }
+
+    #[test]
+    fn objects_of_the_same_texture_share_one_record_until_the_last_goes() {
+        let mut t = ResourceTable::new();
+        let (a, shared) = t.create_shared(rgba(16, 16), at(0x20_0000)).unwrap();
+        assert!(!shared);
+        let (b, shared) = t.create_shared(rgba(16, 16), at(0x20_0000)).unwrap();
+        assert_eq!((b, shared), (a, true));
+        let (c, shared) = t.create_shared(rgba(32, 32), at(0x20_0000)).unwrap();
+        assert!(!shared && c != a);
+        assert!(!t.release_ref(a).unwrap());
+        assert!(t.release_ref(a).unwrap());
+        t.finalize(a).unwrap();
+        assert!(t.get(a).is_err());
+        let (d, shared) = t.create_shared(rgba(16, 16), at(0x20_0000)).unwrap();
+        assert!(!shared && d != a);
     }
 }

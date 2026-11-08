@@ -155,9 +155,15 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
 
     /// Creates a texture in guest memory. This is `nvnTextureInitialize`.
     pub fn create_texture(&mut self, desc: TextureDesc, host_address: u64) -> Result<TexId> {
+        Ok(self.create_texture_shared(desc, host_address)?.0)
+    }
+
+    /// Like [`FrontEnd::create_texture`]. A live texture with the same address and description is shared and comes back
+    /// with `true` (see [`ResourceTable::create_shared`]); the backend already knows it.
+    pub fn create_texture_shared(&mut self, desc: TextureDesc, host_address: u64) -> Result<(TexId, bool)> {
         let size = desc.layout()?.size;
         let address = self.space.gpu_address(host_address, size)?;
-        self.table.create(desc, address)
+        self.table.create_shared(desc, address)
     }
 
     /// Destroys a texture. This is `nvnTextureFinalize`.
@@ -167,6 +173,10 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     /// it and goes when the last slot is registered with another texture.
     /// The result is false while the record lives on; [`FrontEnd::take_dropped`] gives it when it goes.
     pub fn finalize_texture(&mut self, id: TexId) -> Result<bool> {
+        // Another texture object still names the record.
+        if !self.table.release_ref(id)? {
+            return Ok(false);
+        }
         if self.descriptors.has_slots(id) {
             self.table.get(id)?;
             if !self.orphans.contains(&id) {
@@ -350,7 +360,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         let inherited = self.queues.entry(queue).or_default();
         let t0 = std::time::Instant::now();
         let i = summary(&mut self.cache, &cx, handle.0, inherited, 0)?;
-        decode_diag(t0.elapsed().as_nanos() as u64, self.cache.stats);
+        decode_diag(t0.elapsed().as_nanos() as u64, self.cache.stats, self.table.counts());
         let s = self
             .cache
             .entry(handle.0, i)
@@ -435,7 +445,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
 }
 
 /// `NXKIT_DIAG=stats`: the time of the decode of the submits and the counters of its cache, every 300 submits.
-fn decode_diag(ns: u64, c: crate::cache::CacheStats) {
+fn decode_diag(ns: u64, c: crate::cache::CacheStats, textures: (usize, usize)) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     static NS: AtomicU64 = AtomicU64::new(0);
@@ -446,6 +456,11 @@ fn decode_diag(ns: u64, c: crate::cache::CacheStats) {
     let n = N.fetch_add(1, Ordering::Relaxed) + 1;
     if n % 300 == 0 {
         NS.store(0, Ordering::Relaxed);
-        eprintln!("nxkit-nvn: decode {:.2} ms per submit (mean of 300), cache {c:?}", total as f64 / 300.0 / 1e6);
+        eprintln!(
+            "nxkit-nvn: decode {:.2} ms per submit (mean of 300), texture records {} ({} live), cache {c:?}",
+            total as f64 / 300.0 / 1e6,
+            textures.0,
+            textures.1
+        );
     }
 }

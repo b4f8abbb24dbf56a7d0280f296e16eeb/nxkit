@@ -210,9 +210,12 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
         let host = p.mem + built.off as u64;
         let g = gpu(name);
         let (id, address) = g.with_front(|f| {
-            let id = f.create_texture(built.desc, host)?;
+            let (id, shared) = f.create_texture_shared(built.desc, host)?;
             let record = f.resources().get(id)?;
-            g.backend().texture_created(record);
+            // A shared record is a texture that the backend has, with contents that must stay.
+            if !shared {
+                g.backend().texture_created(record);
+            }
             Ok((id, record.address.get()))
         })?;
         g.textures.insert(t, id);
