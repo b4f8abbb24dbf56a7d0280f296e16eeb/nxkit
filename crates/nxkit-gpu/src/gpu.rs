@@ -910,16 +910,15 @@ impl Gpu {
         mark(t0, "ords+kpass");
         let t_barrier = Instant::now();
         let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
-        let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples);
+        let uses = crate::hazards::pass_uses(frame, plan, detail, &ords, &self.programs, view);
+        let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples, &uses);
         stats.barrier_ns = nanos(t_barrier, Instant::now());
         {
             static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             if crate::diag("barr") && N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 120 == 0 {
-                let d = barrier_plan.distance;
-                eprintln!(
-                    "DIAG barr distance to the work waited for: earlier frame {} | 1 {} | 2 {} | 3-5 {} | more {} (of {} barriers)",
-                    d[0], d[1], d[2], d[3], d[4], barrier_plan.emitted
-                );
+                for line in barrier_plan.describe() {
+                    eprintln!("{line}");
+                }
             }
         }
         mark(t0, "barriers");

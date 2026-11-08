@@ -13,9 +13,9 @@ use std::sync::PoisonError;
 
 use nxkit_metal::{
     ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, DepthAttachment, DepthBias,
-    DepthClip, DepthStencilDesc, Dependency, FillMode, LoadAction as MLoad, MetalError, RenderCommand,
-    RenderPass, RenderPassDesc, Scissor, Scratch, Scope, Stages, StencilAttachment, Storage,
-    StoreAction as MStore, Viewport, Visibility, Winding,
+    DepthClip, DepthStencilDesc, FillMode, LoadAction as MLoad, MetalError, RenderCommand,
+    RenderPass, RenderPassDesc, Scissor, Scratch, StencilAttachment, Storage,
+    StoreAction as MStore, Viewport, Winding,
 };
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
@@ -941,19 +941,14 @@ pub(crate) fn render_pass(
             stats.skipped[Skip::Encode as usize] += 1;
         }
     }
-    // The barrier planner follows textures only, and it holds the vertex and fragment stages. An indirect draw reads
-    // arguments that a dispatch or a copy wrote (culling), the pre-pass wrote the copies, and a task or mesh shader
-    // reads storage buffers and textures in stages that the planner does not hold. Such a pass waits for them.
+    // An indirect draw reads arguments that the pre-pass copied, and a task or mesh shader reads in stages that the
+    // planner does not model for the pre-pass. `barriers::gpu_driven` says what such a pass waits for.
     if pre.gpu_driven {
-        let dep = Dependency {
-            scope: Scope::FromEarlierPasses,
-            after: Stages::DISPATCH | Stages::BLIT | Stages::FRAGMENT,
-            before: Stages::VERTEX | Stages::OBJECT | Stages::MESH,
-            visibility: Visibility::Device,
-        };
-        match rp.encode(&RenderCommand::Depend(dep)) {
-            Ok(()) => stats.barriers_emitted += 1,
-            Err(_) => stats.skipped[Skip::Encode as usize] += 1,
+        if let Some(dep) = crate::barriers::gpu_driven(!pre.copies.is_empty()) {
+            match rp.encode(&RenderCommand::Depend(dep)) {
+                Ok(()) => stats.barriers_emitted += 1,
+                Err(_) => stats.skipped[Skip::Encode as usize] += 1,
+            }
         }
     }
     let mut tr = Tracker::new(s.pc.size);

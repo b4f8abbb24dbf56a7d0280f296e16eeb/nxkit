@@ -31,6 +31,42 @@ impl Stages {
     pub const MESH: Self = Self(32);
     /// Every stage.
     pub const ALL: Self = Self(63);
+    /// No stage.
+    pub const NONE: Self = Self(0);
+    /// Each single stage, in bit order. [`Stages::index`] of the n-th one is n.
+    pub const EACH: [Self; 6] = [
+        Self::VERTEX,
+        Self::FRAGMENT,
+        Self::DISPATCH,
+        Self::BLIT,
+        Self::OBJECT,
+        Self::MESH,
+    ];
+
+    /// True when every stage of `other` is in this set.
+    pub fn contains(self, other: Self) -> bool {
+        other.0 & !self.0 == 0
+    }
+
+    /// True when the two sets share a stage.
+    pub fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    /// True when the set is empty.
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The stages of this set that are not in `other`.
+    pub fn minus(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    /// The position in [`Stages::EACH`] of a single stage (the lowest one of a set).
+    pub fn index(self) -> usize {
+        self.0.trailing_zeros().min(5) as usize
+    }
 
     fn to_mtl(self) -> MTLStages {
         let mut s = MTLStages::empty();

@@ -70,6 +70,9 @@ const KNOBS: &[&str] = &[
     // With the overlap on, the storage buffers that draws only read use the buffer itself instead of the walk's copy
     // (the behaviour before; the CPU's writes for the next frame then race with the GPU).
     "nosnapsbuf",
+    // The barrier planner of before the hazard analysis: textures only, one `after` set per pass, the stages of the
+    // pass kind. Switch to it to compare.
+    "oldbarriers",
     // With the overlap and the encoder thread, a wait for the newest frame waits for the frame two back.
     "overlap2",
     // The pass plan keeps render passes that do nothing, and does not merge across a dropped pass or a change of the
