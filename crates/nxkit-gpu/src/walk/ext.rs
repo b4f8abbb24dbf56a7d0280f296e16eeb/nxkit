@@ -5,11 +5,16 @@ use std::sync::Arc;
 use nxkit_nvn::ext::{DrawKind, Ext, ExtCode, Setting, StateKind};
 use nxkit_nvn::mem::GuestMem;
 
-use super::objects::{self, write_masks};
+use super::cache::{self, sc};
+use super::objects::{self, Blends, StencilValues, write_masks};
 use super::programs::Kind;
-use super::{ATTRIBUTES, MAX_COLOR, State, STREAMS, UBOS, Walker, empty_draw, textures};
+use super::{
+    ATTRIBUTES, MAX_COLOR, STREAMS, State, UBOS, Walker, bound_count, empty_draw, sbufs_into,
+    texture_count, textures_into,
+};
 use crate::detail::{
-    AttributeDetail, ClearDetail, DrawArgs, DrawDetail, DynamicDetail, ProgramRef, Stage, StreamDetail, UboDetail,
+    AttributeDetail, ClearDetail, CopyDetail, CopyKind, DrawArgs, DrawDetail, DynamicDetail, ProgramRef, Stage,
+    StreamDetail, UboDetail,
 };
 
 /// The `NVNshaderStage` values that have uniform buffers here, as the slot in `State::ubo`.
@@ -43,30 +48,74 @@ impl Walker {
                 for (s, p) in st.program.iter_mut().enumerate() {
                     if bits >> s & 1 != 0 {
                         *p = program;
+                        self.track.write(cache::program_bit(s));
                     }
                 }
             }
             ExtCode::VertexBuffer => {
                 if let Some(v) = st.vertex_buffer.get_mut(usize::from(x.arg)) {
                     *v = (x.word64(0), x.word64(2));
+                    self.track.write(cache::vertex_buffer_bit(usize::from(x.arg)));
                 }
             }
             ExtCode::UniformBuffer => {
                 let slot = usize::from(x.arg & 0xff);
                 if let (Some(stage), true) = (ubo_stage(x.arg >> 8), slot < UBOS) {
-                    st.ubo[stage][slot] = (x.word64(0), x.word64(2).min(u64::from(u32::MAX)) as u32);
+                    st.ubo[stage][slot] =
+                        (x.word64(0), x.word64(2).min(u64::from(u32::MAX)) as u32);
+                    self.track.write(cache::ubo_bit(stage, slot));
                 }
             }
-            ExtCode::Viewport if x.arg == 0 => st.viewport = [f(x, 0), f(x, 1), f(x, 2), f(x, 3)],
-            ExtCode::DepthRange if x.arg == 0 => st.depth_range = [f(x, 0), f(x, 1)],
+            ExtCode::StorageBuffer => {
+                let slot = usize::from(x.arg & 0xff);
+                if let (Some(stage), true) = (ubo_stage(x.arg >> 8), slot < UBOS) {
+                    st.sbuf[stage][slot] =
+                        (x.word64(0), x.word64(2).min(u64::from(u32::MAX)) as u32);
+                    self.track.write(cache::sbo_bit(stage, slot));
+                }
+            }
+            ExtCode::Viewport if x.arg == 0 => {
+                st.viewport = [f(x, 0), f(x, 1), f(x, 2), f(x, 3)];
+                self.track.write(cache::scalar_bit(sc::VIEWPORT));
+            }
+            ExtCode::DepthRange if x.arg == 0 => {
+                st.depth_range = [f(x, 0), f(x, 1)];
+                self.track.write(cache::scalar_bit(sc::DEPTH_RANGE));
+            }
             ExtCode::Scissor if x.arg == 0 => {
                 let v = |i: usize| x.word(i) as i32;
-                st.scissor = Some([v(0).max(0) as u32, v(1).max(0) as u32, v(2).max(0) as u32, v(3).max(0) as u32]);
+                st.scissor = Some([
+                    v(0).max(0) as u32,
+                    v(1).max(0) as u32,
+                    v(2).max(0) as u32,
+                    v(3).max(0) as u32,
+                ]);
+                self.track.write(cache::scalar_bit(sc::SCISSOR));
             }
             ExtCode::State => self.state_object(st, x),
-            ExtCode::VertexState => vertex_state(st, x),
-            ExtCode::Setting => setting(st, x),
-            ExtCode::UpdateUniform => self.update_uniform(mem, x),
+            ExtCode::TargetView if crate::diag("target") => {
+                static VIEWS: std::sync::Mutex<Vec<(u16, [u32; 4])>> = std::sync::Mutex::new(Vec::new());
+                let value = (x.arg, [x.word(0), x.word(1), x.word(2), x.word(3)]);
+                if let Ok(mut views) = VIEWS.lock() {
+                    if views.len() < 80 && !views.contains(&value) {
+                        eprintln!("DIAG target view {value:x?}"); views.push(value);
+                    }
+                }
+            }
+            ExtCode::VertexState => self.vertex_state(st, x),
+            ExtCode::Setting => self.setting(st, x),
+            ExtCode::ClearBuffer
+            | ExtCode::CopyBufferToBuffer
+            | ExtCode::DownsampleView => self.out.copies.push(CopyDetail::default()),
+            ExtCode::ClearTexture => self.out.copies.push(clear_detail(x)),
+            ExtCode::CopyBufferToTexture | ExtCode::CopyTextureToBuffer | ExtCode::CopyTextureToTexture => {
+                self.track.read(&cache::COPY_READS);
+                self.out.copies.push(copy_detail(st, x));
+            }
+            ExtCode::UpdateUniform => {
+                self.out.copies.push(CopyDetail::default());
+                self.update_uniform(mem, x);
+            }
             ExtCode::ClearColor => {
                 let slot = (x.arg & 0xff) as u8;
                 if slot < MAX_COLOR {
@@ -98,11 +147,17 @@ impl Walker {
             }
             ExtCode::Draw => {
                 let d = self.draw(&*mem, st, x);
-                self.out.draws.push(d);
+                self.track.patches_of(&d.textures, self.out.draws.len(), false);
+                self.out.draws.push(Arc::new(d));
             }
             ExtCode::Dispatch => {
-                let groups = if x.arg == 0 { [x.word(0), x.word(1), x.word(2)] } else { [0; 3] };
+                let groups = if x.arg == 0 {
+                    [x.word(0), x.word(1), x.word(2)]
+                } else {
+                    [0; 3]
+                };
                 let d = self.dispatch(&*mem, st, groups);
+                self.track.patches_of(&d.textures, self.out.dispatches.len(), true);
                 self.out.dispatches.push(d);
             }
             _ => {}
@@ -115,25 +170,65 @@ impl Walker {
         };
         let w = x.words();
         match kind {
-            StateKind::Blend => st.blends.set_blend(w),
-            StateKind::Color => st.blends.set_color(w),
-            StateKind::ChannelMask => st.masks = write_masks(w),
-            StateKind::Multisample => st.raster.set_multisample(w),
-            StateKind::Polygon => st.raster.set_polygon(w),
-            StateKind::DepthStencil => st.depth_stencil = [x.word(0), x.word(1)],
+            StateKind::Blend => {
+                st.blends.set_blend(w);
+                self.track.write(cache::blend_bit(Blends::target(w)));
+            }
+            StateKind::Color => {
+                st.blends.set_color(w);
+                self.track.write(cache::scalar_bit(sc::BLEND_ENABLE));
+            }
+            StateKind::ChannelMask => {
+                st.masks = write_masks(w);
+                self.track.write(cache::scalar_bit(sc::MASKS));
+            }
+            StateKind::Multisample => {
+                st.raster.set_multisample(w);
+                self.track.write(cache::scalar_bit(sc::MULTISAMPLE));
+            }
+            StateKind::Polygon => {
+                st.raster.set_polygon(w);
+                self.track.write(cache::scalar_bit(sc::POLYGON));
+            }
+            StateKind::DepthStencil => {
+                st.depth_stencil = [x.word(0), x.word(1)];
+                self.track.write(cache::scalar_bit(sc::DEPTH_STENCIL));
+            }
         }
     }
 
     /// The command writes its bytes into the buffer when the GPU runs it. The walker writes them now and remembers the
     /// range, so that the draws that bind it get the bytes they saw.
     fn update_uniform<M: GuestMem>(&mut self, mem: &mut M, x: &Ext) {
+        self.track.update(x, self.out.draws.len(), self.out.dispatches.len());
+        let mut bytes = std::mem::take(&mut self.update_bytes);
+        self.write_update(mem, x, &mut bytes);
+        self.update_bytes = bytes;
+    }
+
+    /// Writes the bytes of an update record through `bytes` and records the range.
+    pub(super) fn write_update<M: GuestMem>(&mut self, mem: &mut M, x: &Ext, bytes: &mut Vec<u8>) {
         let (buffer, offset, len) = (x.word64(0), x.word64(4), usize::from(x.arg));
         let at = buffer.saturating_add(offset);
-        let bytes: Vec<u8> = x.words().get(6..).unwrap_or(&[]).iter().flat_map(|w| w.to_le_bytes()).take(len).collect();
+        bytes.clear();
+        bytes.extend(
+            x.words()
+                .get(6..)
+                .unwrap_or(&[])
+                .iter()
+                .flat_map(|w| w.to_le_bytes())
+                .take(len),
+        );
         let Ok(host) = self.map.host_address(at, bytes.len() as u64) else {
             return;
         };
-        if mem.write(host, &bytes).is_err() {
+        if let Some(log) = &mut self.undo {
+            let mut old = vec![0u8; bytes.len()];
+            if mem.read(host, &mut old).is_ok() {
+                log.push((host, old));
+            }
+        }
+        if mem.write(host, bytes).is_err() {
             return;
         }
         let end = at + bytes.len() as u64;
@@ -332,17 +427,51 @@ fn draw_args(x: &Ext) -> Option<(u32, DrawArgs)> {
 }
 
 /// A chunk of vertex attribute (argument 0) or vertex stream (argument 1) states.
-fn vertex_state(st: &mut State, x: &Ext) {
-    let (first, count) = (x.word(0) as usize, x.word(1) as usize);
-    for i in 0..count {
-        let at = first + i;
-        if x.arg == 0 {
-            if let Some(slot) = st.attribute.get_mut(at) {
-                let (format, offset, stream) = objects::attribute(x.word(2 + i));
-                *slot = (format != 0).then_some((format, offset, stream));
+impl Walker {
+    fn vertex_state(&mut self, st: &mut State, x: &Ext) {
+        let (first, count) = (x.word(0) as usize, x.word(1) as usize);
+        for i in 0..count {
+            let at = first + i;
+            if x.arg == 0 {
+                if let Some(slot) = st.attribute.get_mut(at) {
+                    let (format, offset, stream) = objects::attribute(x.word(2 + i));
+                    *slot = (format != 0).then_some((format, offset, stream));
+                    self.track.write(cache::attribute_bit(at));
+                }
+            } else if let Some(slot) = st.stream.get_mut(at) {
+                *slot = (x.word(2 + 2 * i), x.word(3 + 2 * i));
+                self.track.write(cache::stream_bit(at));
             }
-        } else if let Some(slot) = st.stream.get_mut(at) {
-            *slot = (x.word(2 + 2 * i), x.word(3 + 2 * i));
+        }
+    }
+
+    fn setting(&mut self, st: &mut State, x: &Ext) {
+        let kind = x.arg;
+        let mut set = |group: usize| self.track.write(cache::scalar_bit(group));
+        if kind == Setting::BlendColor as u16 {
+            st.blend_color = [f(x, 0), f(x, 1), f(x, 2), f(x, 3)];
+            set(sc::BLEND_COLOR);
+        } else if kind == Setting::StencilValueMask as u16 {
+            st.stencil.set_read(x.word(0), x.word(1));
+            faces(x.word(0), sc::STENCIL_READ, &mut set);
+        } else if kind == Setting::StencilMask as u16 {
+            st.stencil.set_write(x.word(0), x.word(1));
+            faces(x.word(0), sc::STENCIL_WRITE, &mut set);
+        } else if kind == Setting::StencilRef as u16 {
+            st.stencil.set_ref(x.word(0), x.word(1));
+            faces(x.word(0), sc::STENCIL_REF, &mut set);
+        } else if kind == Setting::PolygonOffsetClamp as u16 {
+            st.raster.offset = [f(x, 0), f(x, 1), f(x, 2)];
+            set(sc::OFFSET);
+        } else if kind == Setting::CopyRowStride as u16 {
+            st.copy_strides[0] = stride(x);
+            set(sc::STRIDE_ROW);
+        } else if kind == Setting::CopyImageStride as u16 {
+            st.copy_strides[1] = stride(x);
+            set(sc::STRIDE_IMAGE);
+        } else if kind == Setting::DepthClamp as u16 {
+            st.raster.clamp = x.word(0) != 0;
+            set(sc::CLAMP);
         }
     }
 }

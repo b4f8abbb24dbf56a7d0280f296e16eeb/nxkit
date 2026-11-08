@@ -73,8 +73,8 @@ fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut impl Hasher) {
     }
 }
 
-fn signature(sh: &Shared<'_>, pc: &PassCtx, draws: &[DrawDetail]) -> u64 {
-    let mut h = DefaultHasher::new();
+fn signature(sh: &Shared<'_>, pc: &PassCtx, draws: &[Arc<DrawDetail>]) -> u64 {
+    let mut h = foldhash::fast::FixedState::default().build_hasher();
     (&pc.targets, pc.has_depth, pc.has_stencil).hash(&mut h);
     for d in draws {
         hash_draw(sh, d, &mut h);
@@ -83,8 +83,10 @@ fn signature(sh: &Shared<'_>, pc: &PassCtx, draws: &[DrawDetail]) -> u64 {
 }
 
 /// True when the draws of a run can share one set of encoder state.
-fn uniform(draws: &[DrawDetail]) -> bool {
-    let Some(first) = draws.first() else { return false };
+fn uniform(draws: &[Arc<DrawDetail>]) -> bool {
+    let Some(first) = draws.first() else {
+        return false;
+    };
     draws.iter().all(|d| {
         d.dynamic == first.dynamic
             && d.raster.cull == first.raster.cull
@@ -118,7 +120,13 @@ impl Icbs {
 
     /// The ICB of a run, built or built again when needed. `None` when the run gets no ICB and the caller encodes
     /// its draws one by one.
-    pub(crate) fn get(&mut self, sh: &Shared<'_>, pc: &PassCtx, run: &RecordingRun, draws: &[DrawDetail]) -> Option<Built> {
+    pub(crate) fn get(
+        &mut self,
+        sh: &Shared<'_>,
+        pc: &PassCtx,
+        run: &RecordingRun,
+        draws: &[Arc<DrawDetail>],
+    ) -> Option<Built> {
         if !self.candidates.contains(&run.handle) || draws.len() < 2 || !uniform(draws) {
             return None;
         }
@@ -133,7 +141,7 @@ impl Icbs {
     }
 }
 
-fn build(sh: &Shared<'_>, pc: &PassCtx, draws: &[DrawDetail], signature: u64) -> Option<Entry> {
+fn build(sh: &Shared<'_>, pc: &PassCtx, draws: &[Arc<DrawDetail>], signature: u64) -> Option<Entry> {
     let mut arena = Arena::new(sh.ctx, DRAW_ARENA_BYTES * draws.len() as u64).ok()?;
     let mut cmds: Vec<Vec<IcbCommand>> = Vec::with_capacity(draws.len());
     let mut skipped = Vec::new();

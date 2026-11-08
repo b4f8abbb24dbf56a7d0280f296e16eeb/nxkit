@@ -10,7 +10,12 @@
 //! state of the caller, and what the callee sets stays set. The state of a queue stays across submits.
 //!
 //! A walk runs when the queue submits, because the game may write the command memory again after the submit.
+//!
+//! A game replays the recordings of its models in every frame, so a call to a recording that the walker saw before plays
+//! a template of its earlier walk (see `cache`). `NXKIT_WALK_CACHE=0` turns the templates off and
+//! `NXKIT_VERIFY_CACHE=1` walks every recording a second time without them and compares.
 
+mod cache;
 mod ext;
 mod objects;
 mod programs;
@@ -31,6 +36,8 @@ use crate::draws::FastMap;
 use objects::{Blends, Raster, StencilValues};
 use programs::Programs;
 
+pub(crate) use cache::Invalidations;
+
 const MAX_CALL_DEPTH: u32 = 8;
 const MAX_RECORDS: u32 = 1 << 20;
 const MAX_COLOR: u8 = 8;
@@ -42,6 +49,7 @@ const UBOS: usize = 16;
 const COMPUTE: usize = 5;
 
 /// The state of one queue between its draws.
+#[derive(Clone, PartialEq)]
 pub(super) struct State {
     program: [u64; 6],
     vertex_buffer: [(u64, u64); STREAMS],
@@ -87,24 +95,80 @@ impl Default for State {
     }
 }
 
+/// What the walker did since the last [`Walker::take_counters`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct WalkCounters {
+    /// `submit` calls.
+    pub(crate) submits: u32,
+    /// Recordings handed to `submit`.
+    pub(crate) recordings: u32,
+    /// Records read, calls included.
+    pub(crate) records: u64,
+    /// Draws and dispatches that the walk produced.
+    pub(crate) draws: u32,
+    pub(crate) dispatches: u32,
+    /// Nanoseconds that `submit` took.
+    pub(crate) ns: u64,
+    /// Nested recordings that a template played instead of a walk.
+    pub(crate) walk_hits: u32,
+    /// Nested recordings that were walked, and gave a template unless they were cut by a limit.
+    pub(crate) walk_misses: u32,
+    /// Draws that came from a template, without a walk.
+    pub(crate) draws_from_template: u32,
+    /// Handles whose templates were dropped because the game wrote their memory.
+    pub(crate) invalidations: u32,
+    /// Templates dropped because a handle had too many.
+    pub(crate) evictions: u32,
+    /// Walks whose template result differed from the uncached walk (only with the verification on).
+    pub(crate) verify_mismatches: u32,
+}
+
 /// Reads recordings into the detail of the frame that is being built.
 pub(crate) struct Walker {
+    counters: WalkCounters,
     programs: Programs,
-    queues: HashMap<u64, State>,
+    queues: FastMap<u64, State>,
     out: FrameDetail,
     map: AddressMap,
     /// The GPU ranges that `UpdateUniformBuffer` wrote. A draw that binds an overlapping range gets a snapshot.
     updated: Vec<(u64, u64)>,
+    /// The last snapshot of each uniform buffer range. An update that overlaps a range drops its snapshot.
+    snaps: std::cell::RefCell<FastMap<(u64, u32), Option<Arc<[u8]>>>>,
+    /// The bytes of the uniform update that is being written. It keeps its capacity between updates.
+    update_bytes: Vec<u8>,
+    cache: cache::Cache,
+    track: cache::Track,
+    invalidations: Arc<Invalidations>,
+    scratch_ranges: Vec<(u64, u64)>,
+    /// Whether nested recordings play from templates. `NXKIT_WALK_CACHE=0` turns it off.
+    cache_on: bool,
+    /// Walks each recording again without the cache and compares (`NXKIT_VERIFY_CACHE=1`, and always in tests).
+    verify: bool,
+    /// Set during the uncached walk of the verification.
+    bypass: bool,
+    /// The old bytes of the guest memory that `write_update` replaced, while the verification runs.
+    undo: Option<Vec<(u64, Vec<u8>)>>,
 }
 
 impl Walker {
     pub(crate) fn new(shader_dir: PathBuf, map: AddressMap) -> Self {
         Self {
+            counters: WalkCounters::default(),
             programs: Programs::new(shader_dir),
-            queues: HashMap::new(),
+            queues: FastMap::default(),
             out: FrameDetail::default(),
             map,
             updated: Vec::new(),
+            snaps: std::cell::RefCell::new(FastMap::default()),
+            update_bytes: Vec::new(),
+            cache: cache::Cache::default(),
+            track: cache::Track::new(),
+            invalidations: Arc::new(Invalidations::default()),
+            scratch_ranges: Vec::new(),
+            cache_on: std::env::var("NXKIT_WALK_CACHE").map_or(true, |v| v != "0"),
+            verify: cfg!(test) || std::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
+            bypass: false,
+            undo: None,
         }
     }
 
@@ -117,12 +181,38 @@ impl Walker {
     }
 
     /// Walks `handles` on `queue`.
-    pub(crate) fn submit<M: GuestMem>(&mut self, mem: &mut M, queue: u64, handles: &[CommandHandle]) {
+    pub(crate) fn submit<M: GuestMem>(
+        &mut self,
+        mem: &mut M,
+        queue: u64,
+        handles: &[CommandHandle],
+    ) {
+        let started = std::time::Instant::now();
+        self.drain_invalidations();
+        let (draws, dispatches) = (self.out.draws.len(), self.out.dispatches.len());
+        // CPU writes between submits do not have UpdateUniform records to invalidate cached snapshots.
+        self.snaps.get_mut().clear();
         let mut st = self.queues.remove(&queue).unwrap_or_default();
         for h in handles {
-            self.run(mem, &mut st, h.0, 0);
+            // The copy strides belong to one command buffer and start again at zero in each recording.
+            st.copy_strides = [0; 2];
+            self.walk_top(mem, &mut st, h.0);
         }
         self.queues.insert(queue, st);
+        let c = &mut self.counters;
+        c.submits += 1;
+        c.recordings += handles.len() as u32;
+        c.draws += (self.out.draws.len() - draws) as u32;
+        c.dispatches += (self.out.dispatches.len() - dispatches) as u32;
+        c.ns += u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    }
+
+    /// The counters since the last call.
+    pub(crate) fn take_counters(&mut self) -> WalkCounters {
+        let mut c = std::mem::take(&mut self.counters);
+        c.invalidations = std::mem::take(&mut self.cache.invalidations);
+        c.evictions = std::mem::take(&mut self.cache.evictions);
+        c
     }
 
     /// The detail of the commands since the last call. The walker starts the next frame empty.
@@ -130,15 +220,29 @@ impl Walker {
         std::mem::take(&mut self.out)
     }
 
+    /// Walks the recording at `handle`. A call record plays the recording of its callee, from a template when one fits.
     fn run<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32) {
         if depth > MAX_CALL_DEPTH {
+            self.track.truncated();
             return;
         }
+        if depth == 0 {
+            self.walk_records(mem, st, handle, depth);
+        } else {
+            self.run_nested(mem, st, handle, depth);
+        }
+    }
+
+    /// Reads the records from `handle` to the end, and follows jumps and calls.
+    fn walk_records<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32) {
         let mut pos = handle;
         for _ in 0..MAX_RECORDS {
             let Ok((rec, size)) = Record::read(&*mem, pos) else {
+                self.track.span(pos, pos + 8);
                 return;
             };
+            self.track.span(pos, pos + u64::from(size));
+            self.counters.records += 1;
             match rec {
                 Record::End => return,
                 Record::Jump(to) => {
@@ -146,10 +250,12 @@ impl Walker {
                     continue;
                 }
                 Record::Call(h) => self.run(mem, st, h, depth + 1),
+                Record::Ext(x) => self.ext(mem, st, &x),
                 other => self.apply(mem, st, other),
             }
             pos += u64::from(size);
         }
+        self.track.truncated();
     }
 
     fn apply<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, rec: Record) {
@@ -171,8 +277,13 @@ impl Walker {
         }
     }
 
-    fn dispatch<M: GuestMem>(&self, mem: &M, st: &State, groups: [u32; 3]) -> DispatchDetail {
-        let program = self.programs.find(st.program[COMPUTE], programs::Kind::Compute).unwrap_or_default().to_owned();
+    fn dispatch<M: GuestMem>(&mut self, mem: &M, st: &State, groups: [u32; 3]) -> DispatchDetail {
+        self.track.program(COMPUTE, st.program[COMPUTE]);
+        self.track.read(&cache::DISPATCH_READS);
+        let program = self
+            .programs
+            .find(st.program[COMPUTE], programs::Kind::Compute)
+            .map_or_else(String::new, |k| k.to_string());
         DispatchDetail {
             program,
             groups,

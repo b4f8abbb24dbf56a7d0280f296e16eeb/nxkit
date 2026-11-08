@@ -220,6 +220,7 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
             guest::with_slice(built.packaged_data, layout.size, |data| {
                 guest::write(host, data)
             })??;
+            g.invalidated(host, layout.size);
             g.with_front(|f| f.guest_wrote(host, layout.size).map(|_| ()))?;
         }
         Tex {

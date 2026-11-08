@@ -18,13 +18,40 @@ fn pair(words: &[u32]) -> u64 {
 }
 
 /// The blend state that the walker keeps: one object per target.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Blends {
     raw: [u64; 8],
     enable: u8,
 }
 
 impl Blends {
+    /// The target that an `NVNblendState` object sets.
+    pub(super) fn target(words: &[u32]) -> usize {
+        bits(pair(words), 0, 3) as usize
+    }
+
+    /// The object of a target as the walker keeps it.
+    pub(super) fn raw(&self, target: usize) -> u64 {
+        self.raw.get(target).copied().unwrap_or(0)
+    }
+
+    /// Sets the object of a target.
+    pub(super) fn set_raw(&mut self, target: usize, v: u64) {
+        if let Some(r) = self.raw.get_mut(target) {
+            *r = v;
+        }
+    }
+
+    /// The blend enable bits of the targets.
+    pub(super) fn enable(&self) -> u8 {
+        self.enable
+    }
+
+    /// Sets the blend enable bits.
+    pub(super) fn set_enable(&mut self, v: u8) {
+        self.enable = v;
+    }
+
     /// `NVNblendState`. The target is in the object.
     pub(super) fn set_blend(&mut self, words: &[u32]) {
         let v = pair(words);
@@ -65,7 +92,7 @@ pub(super) fn write_masks(words: &[u32]) -> [u8; 8] {
 }
 
 /// The stencil masks and references that settings give.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct StencilValues {
     pub(super) read: [u8; 2],
     pub(super) write: [u8; 2],
@@ -79,6 +106,11 @@ impl Default for StencilValues {
 }
 
 impl StencilValues {
+    /// The faces of an `NVNface` value as bits: bit 0 is the front face and bit 1 the back face.
+    pub(super) fn face_bits(face: u32) -> u8 {
+        Self::faces(face).fold(0, |m, i| m | 1 << i)
+    }
+
     fn faces(face: u32) -> impl Iterator<Item = usize> {
         [(FRONT, 0), (BACK, 1)].into_iter().filter(move |(f, _)| face & f != 0).map(|(_, i)| i)
     }
@@ -118,7 +150,7 @@ pub(super) fn depth_stencil(words: &[u32], s: &StencilValues) -> DepthStencilDet
 }
 
 /// The raster state that the objects and settings give.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Raster {
     pub(super) cull: u32,
     pub(super) front_face: u32,

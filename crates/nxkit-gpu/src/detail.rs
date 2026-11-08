@@ -330,11 +330,11 @@ pub struct RecordingRun {
 /// The detail of a frame.
 #[derive(Clone, Debug, Default)]
 pub struct FrameDetail {
-    /// One entry per `Cmd::Draw`.
-    pub draws: Vec<DrawDetail>,
+    /// One entry per `Cmd::Draw`. A draw that a walker template produced is shared with the template.
+    pub draws: Vec<Arc<DrawDetail>>,
     /// One entry per `Cmd::ClearColor` and `Cmd::ClearDepthStencil`, in command order. May be empty.
     pub clears: Vec<ClearDetail>,
-    /// One entry per `Cmd::Copy`. May be empty.
+    /// One entry per `Cmd::Copy` and `Cmd::Downsample`, in command order. May be empty.
     pub copies: Vec<CopyDetail>,
     /// One entry per `Cmd::Dispatch`. May be empty.
     pub dispatches: Vec<DispatchDetail>,

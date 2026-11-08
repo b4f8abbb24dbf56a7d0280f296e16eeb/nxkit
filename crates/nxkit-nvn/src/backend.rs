@@ -183,6 +183,12 @@ pub trait Backend: Send + Sync {
     /// A program was finalised (`nvnProgramFinalize`). The default does nothing.
     fn program_released(&self, _program: u64) {}
 
+    /// The game wrote the host memory `[start, end)`: it ended a recording that lives there, flushed a mapped range or
+    /// wrote a texture. The front end drops the summaries of the recordings in that memory, and a backend that keeps
+    /// what it read from recordings drops them too. The call may come from any thread, also while the front lock is held,
+    /// so it must not take a lock that a submit holds. The default does nothing.
+    fn recording_invalidated(&self, _start: u64, _end: u64) {}
+
     /// The game set the window origin or the depth mode of its device. The default does nothing.
     fn device_modes(&self, _origin_lower_left: bool, _depth_zero_to_one: bool) {}
 

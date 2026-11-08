@@ -29,16 +29,41 @@ struct Stage {
 /// The stages of each program.
 pub(super) struct Programs {
     dir: PathBuf,
-    kinds: HashMap<String, Kind>,
-    by_program: HashMap<u64, Vec<Stage>>,
+    kinds: FastMap<String, Kind>,
+    by_program: FastMap<u64, Vec<Stage>>,
+    /// Counts the changes of each program. A template that looked a program up is stale when the count moved.
+    generations: FastMap<u64, u64>,
+    /// Counts every change of any program, so that a template checks its programs only after a change.
+    epoch: u64,
 }
 
 impl Programs {
     pub(super) fn new(dir: PathBuf) -> Self {
-        Self { dir, kinds: HashMap::new(), by_program: HashMap::new() }
+        Self {
+            dir,
+            kinds: FastMap::default(),
+            by_program: FastMap::default(),
+            generations: FastMap::default(),
+            epoch: 0,
+        }
     }
 
-    /// Replaces the stages of `program`. A stage without a key is left out.
+    /// The number of changes of any program so far.
+    pub(super) fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// The number of changes of `program` so far.
+    pub(super) fn generation(&self, program: u64) -> u64 {
+        self.generations.get(&program).copied().unwrap_or(0)
+    }
+
+    fn changed(&mut self, program: u64) {
+        self.epoch += 1;
+        *self.generations.entry(program).or_default() += 1;
+    }
+
+    /// Replaces the stages of `program`. A stage without a key is left out. The same stages again change nothing.
     pub(super) fn set(&mut self, program: u64, keys: &[StageKey]) {
         let stages = keys
             .iter()
@@ -47,12 +72,26 @@ impl Programs {
                 let kind = self.kind(&key, s.index);
                 Some(Stage { key, kind })
             })
-            .collect();
+            .collect::<Vec<Stage>>();
+        if self.by_program.get(&program) == Some(&stages) {
+            return;
+        }
         self.by_program.insert(program, stages);
+        self.changed(program);
     }
 
     pub(super) fn release(&mut self, program: u64) {
-        self.by_program.remove(&program);
+        if self.by_program.remove(&program).is_some() {
+            self.changed(program);
+        }
+    }
+
+    /// The stages of `program` as text, for diagnostics.
+    pub(super) fn describe(&self, program: u64) -> String {
+        match self.by_program.get(&program) {
+            None => format!("unknown ({} programs known)", self.by_program.len()),
+            Some(v) => format!("{:?}", v.iter().map(|s| (&*s.key, s.kind)).collect::<Vec<_>>()),
+        }
     }
 
     /// The key of the stage of `kind` in `program`.

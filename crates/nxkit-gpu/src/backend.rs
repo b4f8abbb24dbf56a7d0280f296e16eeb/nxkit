@@ -52,6 +52,8 @@ pub struct GpuBackend {
     guest: Arc<GuestMemory>,
     gpu: Mutex<Gpu>,
     walker: Mutex<Walker>,
+    /// The memory writes that the walker has not seen yet. It has a lock of its own, so a write never waits for a walk.
+    invalidations: Arc<Invalidations>,
     scale: f32,
     /// The last fence whose frame was encoded.
     encoded: AtomicU64,
@@ -212,6 +214,10 @@ impl Backend for GpuBackend {
 
     fn program_released(&self, program: u64) {
         locked(&self.walker).program_released(program);
+    }
+
+    fn recording_invalidated(&self, start: u64, end: u64) {
+        self.invalidations.push(start, end);
     }
 
     fn acquire(&self, _window: u64, _index: u32) {

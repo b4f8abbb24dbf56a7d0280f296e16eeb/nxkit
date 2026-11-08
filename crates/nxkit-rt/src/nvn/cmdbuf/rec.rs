@@ -225,7 +225,11 @@ pub(super) fn end(name: &'static str, cb: u64) -> u64 {
             Err(NvnError::OutOfCommandMemory { need }) => Ok(Try::Need(need, r.hook)),
             Err(e) => Err(e.into()),
         })?;
-        gpu(name).lock().recorded(&rec.spans);
+        let g = gpu(name);
+        for span in &rec.spans {
+            g.invalidated(span.start, span.end - span.start);
+        }
+        g.lock().recorded(&rec.spans);
         Ok(rec.handle.0)
     })
 }
