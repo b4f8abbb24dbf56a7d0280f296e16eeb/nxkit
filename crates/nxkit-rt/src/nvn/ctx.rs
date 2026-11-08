@@ -139,6 +139,12 @@ pub(crate) fn gpu(name: &str) -> &'static Gpu {
         .unwrap_or_else(|| fatal(name, "no GPU backend is installed"))
 }
 
+/// The settings of the installed context. None before [`install`]. The SDK take-overs of `gfx` read the API version
+/// with it and must not end the game when no context exists.
+pub(crate) fn settings_if_installed() -> Option<&'static Settings> {
+    GPU.get().map(Gpu::settings)
+}
+
 /// The command buffer numbers: a number for each live guest `NVNcommandBuffer`, with the numbers of released ones to reuse.
 #[derive(Debug, Default)]
 struct CommandBufferIds {
