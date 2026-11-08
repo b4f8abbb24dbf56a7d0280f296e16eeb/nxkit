@@ -319,3 +319,97 @@ op = "put"
 at = 23518304
 why = "KIDS frame task: the frame-rate object's steps × its fps × vsyncs per update / 60 (state page target fps; 0 = as the game sets them)"
 items = ["b:23518304:L0+164:0"]
+
+[[rule.step]]
+op = "site"
+at = 8748412
+original = "4a050011"
+
+[[rule.step]]
+op = "site"
+at = 8748448
+original = "4a050051"
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+252"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107990033
+
+[[rule.step]]
+op = "word"
+word = 1895827007
+
+[[rule.step]]
+op = "word"
+word = 1409286241
+
+[[rule.step]]
+op = "word"
+word = 4181727761
+
+[[rule.step]]
+op = "word"
+word = 922746961
+
+[[rule.step]]
+op = "word"
+word = 285214026
+
+[[rule.step]]
+op = "b"
+from = "L0+280"
+to = "8748416"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 8748412
+why = "event cutscene's frame: stepped on every other update at a 60 fps cap (state page vsyncs per update; 30 fps frames, as on the Switch)"
+items = ["b:8748412:L0+252:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+284"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107990033
+
+[[rule.step]]
+op = "word"
+word = 1895827007
+
+[[rule.step]]
+op = "word"
+word = 1409286241
+
+[[rule.step]]
+op = "word"
+word = 4181727761
+
+[[rule.step]]
+op = "word"
+word = 922746961
+
+[[rule.step]]
+op = "word"
+word = 1358955850
+
+[[rule.step]]
+op = "b"
+from = "L0+312"
+to = "8748452"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 8748448
+why = "event cutscene's frames left: stepped on every other update at a 60 fps cap (state page vsyncs per update; 30 fps frames, as on the Switch)"
+items = ["b:8748448:L0+284:0"]

@@ -4,78 +4,31 @@
 //! with the tool: `rewrite-rules` next to the executable (the release archive), or `data/rewrite-rules` of a checkout.
 //! `NXB_REWRITE_RULES` (a folder of rule files) and `NXB_REWRITE_PATCHES` (the snapshot they come from, made by
 //! `tools/gen_rewrite_patches.py`) override them, and a `rewrite_patches.tsv` beside `patch_nso.py` is the last
-//! resort. The port refuses (`nxb rewrite` gives exit code 4 so that the caller runs the reference script, and `nxb build`
-//! stops at the rewrite with the same message and exit code 1) when the engine is not the one this port was checked against: the rewriter's Python files, the patch files and `game.tsv` must hash as the snapshot says,
-//! `DM_GAMES_DIR` must be empty, and an unreplayable frame step stub is
-//! unsupported. A game with `.nrr` files gets its collected NROs rewritten too (see [`ensure`]).
+//! resort. The engine's Python files are read as they are, with no expected hashes. The port refuses (`nxb rewrite` gives exit code 4 so
+//! that the caller runs the reference script, and `nxb build` stops at the rewrite with the same message and exit
+//! code 1) when a patch file differs from the snapshot or is missing in it, `DM_GAMES_DIR` must be empty, and an
+//! unreplayable frame step stub is unsupported. A game with `.nrr` files gets its collected NROs rewritten too (see [`ensure`]).
 
 use std::path::{Path, PathBuf};
 
 use nxb_model::sha256;
 use nxb_rewrite::{Options, RewriteError, patches::PatchTable, rewrite};
 
-/// The SHA-256 of the engine files (`dm/tools`) this port was checked against: the engine at its pinned commit
-/// (nxnative `88c7e03f`). The first `SOURCES` of them are the ones `build_src.sha256` lists, in the script's order.
-/// When one differs, `nxb rewrite` stops with exit code 4 naming the file and both hashes, and `nxb build` stops at
-/// the rewrite with the same message and exit code 1: the rewriter is checked against the new engine files (diff them, port what
-/// changed, run the oracle on real modules) and these pins are updated with it, never skipped.
-const PINNED: [(&str, &str); 13] = [
-    (
-        "patch_nso.py",
-        "6ca3aeeda9cb608f2298926f546b7ab3488afba9dcd23ebcce0077fe2b84f009",
-    ),
-    (
-        "nso.py",
-        "58537c0eb57008f5f856da5502b5fde1290dedee9c09d14ac6b1615c1e77886b",
-    ),
-    (
-        "nso_code.py",
-        "fda401560ff836fdf25a3100f94157ba02fb63e181f84ffb29ccaa6ed3417a82",
-    ),
-    (
-        "nso_asm.py",
-        "ae1b3d83bec3720fd6c806b2c8caa559a5652ac333ad44c5e3e6ef091deb7d20",
-    ),
-    (
-        "ue_cvar.py",
-        "8f6c2129316be791376a84a57595d870cdcf23950213a772a6233c28f57e4220",
-    ),
-    (
-        "ue_malloc.py",
-        "9c2d28076b79cff87c0f30295e4e9a8c32ba2194c0c2620522eb4cd60ee66c3c",
-    ),
-    (
-        "fps_target.py",
-        "9ca20da648881beab2f94e4194dfbafcece9fa79655623ce15166704bf012647",
-    ),
-    (
-        "ue_region.py",
-        "3b2a12e97839a3505e68614ede5faf3f411f262fe527675f87c8c1a43105b675",
-    ),
-    (
-        "ue_ring.py",
-        "01835663846cff75a6bb287bb7724e842323b79b74c19d818f7dbf7873cea082",
-    ),
-    (
-        "snowdrop_pools.py",
-        "3c1cca822fbe3f0b3614489d3a50da23dd5dace6a00c4d639a9a0e4fc2095b0c",
-    ),
-    (
-        "loader_census.py",
-        "1de24790659556b4b7d14fae4ad0347cc02898920fb32db6966e67711501f81f",
-    ),
-    (
-        "nso_match.py",
-        "abf5d48242650455dd87ce9f57c777084c869f2fabb243350fac3ec86cfb2496",
-    ),
-    (
-        "nso_syms.py",
-        "5d2c5c0437f9578050382a561e93f78738b368d85ba4b04dc3bd2ef1a9c9bcb2",
-    ),
+/// The engine files (`dm/tools`) that `build_src.sha256` lists, in the script's order, with the hashes of the engine
+/// at hand. A missing one is an error; nothing about their content is expected.
+const SOURCES: [&str; 11] = [
+    "patch_nso.py",
+    "nso.py",
+    "nso_code.py",
+    "nso_asm.py",
+    "ue_cvar.py",
+    "ue_malloc.py",
+    "fps_target.py",
+    "ue_region.py",
+    "ue_ring.py",
+    "snowdrop_pools.py",
+    "loader_census.py",
 ];
-
-/// How many of [`PINNED`] go into `build_src.sha256`.
-const SOURCES: usize = 11;
 
 /// Exit code of a rewrite outside this port's contract (the script runs instead).
 pub const UNSUPPORTED: i32 = 4;
@@ -159,7 +112,7 @@ pub fn rules_main(args: &[String]) -> i32 {
     }
 }
 
-/// The engine's patch snapshot, checked against the engine's files.
+/// The engine's patch snapshot, checked against the engine's patch files.
 pub struct Engine {
     table: PatchTable,
     /// `(SHA-256, path relative to dm/tools)` as `build_src.sha256` lists them.
@@ -204,19 +157,17 @@ impl Engine {
                 }
             }
         };
-        for (rel, want) in PINNED {
-            let have = file_sha(&tools.join(rel)).map_err(un)?;
-            if have != want {
-                return Err(un(format!(
-                    "{rel} of the engine ({}) differs from the version this rewriter was checked against (pinned sha256 {want}, engine sha256 {have}): the engine changed, the rewriter must be checked against it and the pins updated",
-                    tools.display()
-                )));
-            }
+        Engine::with_table(engine, table)
+    }
+
+    /// Checks the patch files against `table` and reads the hashes of the engine's files.
+    fn with_table(engine: &Path, table: PatchTable) -> Result<Engine, Fail> {
+        let un = |m: String| Fail::Unsupported(m);
+        let tools = engine.join("dm/tools");
+        let mut sources: Vec<(String, String)> = Vec::with_capacity(SOURCES.len());
+        for rel in SOURCES {
+            sources.push((file_sha(&tools.join(rel)).map_err(un)?, rel.to_string()));
         }
-        let mut sources: Vec<(String, String)> = PINNED[..SOURCES]
-            .iter()
-            .map(|(r, h)| ((*h).to_string(), (*r).to_string()))
-            .collect();
         for (rel, want) in &table.files {
             if file_sha(&tools.join(rel)).map_err(un)? != *want {
                 return Err(un(format!(
@@ -443,8 +394,8 @@ fn stopped(why: &str) -> String {
 /// A game with `.nrr` files in its RomFS also gets its NROs rewritten (`nro0.patched.bin` and so on, and the
 /// manifest `nro.tsv` beside them, as the script does) when the script has collected them into `nro_<package>`
 /// before or `nxb-nro` collects them now (the script's collection, ported). Returns a note for the console, or `None`
-/// when the work folder already holds the patched modules. A case this port does not support (an engine whose
-/// pinned files differ, a module outside the rewriter's contract) is an error: the build stops here with the message
+/// when the work folder already holds the patched modules. A case this port does not support (a module
+/// outside the rewriter's contract) is an error: the build stops here with the message
 /// of `nxb rewrite` (exit code 4 there), it does not go on without the patched modules.
 pub fn ensure(
     engine: &Path,
@@ -572,7 +523,10 @@ pub fn ensure_with(
 
 #[cfg(test)]
 mod tests {
-    use super::{PatchTable, collected_nros, ensure, read_rules, shipped_rules};
+    use super::{
+        Engine, Fail, PatchTable, SOURCES, collected_nros, ensure, file_sha, read_rules,
+        shipped_rules,
+    };
 
     #[test]
     fn shipped_rules_are_found_and_equal_the_shipped_snapshot() {
@@ -590,6 +544,28 @@ mod tests {
             regenerated.len() + 2,
             std::fs::read_dir(&dir).expect("dir").count()
         );
+    }
+
+    #[test]
+    fn the_engine_files_are_read_as_they_are() {
+        let d = std::env::temp_dir().join(format!("nxb-engine-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let tools = d.join("dm/tools");
+        std::fs::create_dir_all(&tools).expect("dir");
+        for rel in SOURCES {
+            std::fs::write(tools.join(rel), format!("# {rel} of any engine")).expect("file");
+        }
+        let eng = Engine::with_table(&d, PatchTable::default()).expect("the engine is used");
+        assert_eq!(eng.sources.len(), SOURCES.len());
+        let (sha, rel) = &eng.sources[0];
+        assert_eq!(rel, "patch_nso.py");
+        assert_eq!(*sha, file_sha(&tools.join("patch_nso.py")).expect("hash"));
+        std::fs::remove_file(tools.join("nso.py")).expect("remove");
+        assert!(matches!(
+            Engine::with_table(&d, PatchTable::default()),
+            Err(Fail::Unsupported(_))
+        ));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

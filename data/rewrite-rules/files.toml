@@ -18,7 +18,7 @@ sha256 = "c6f75e654922ec671d03dc699162e73badbbd57c32d33d79ab73f076280f1f88"
 
 [[file]]
 path = "../games/01002B00111A2000/patches.py"
-sha256 = "8b7ac03d94ed6b355daf2aab457722bfad31276ef08d89d761ef4a7f56fa8daf"
+sha256 = "1762b3fc099cbd67cfb6b61f5c97841bcdabebc891536b4842a344929be77627"
 
 [[file]]
 path = "../games/0100317013770000/patches.py"
@@ -155,6 +155,10 @@ sha256 = "1a7ffeceec1642a37dd269b94f010804e71c7b8a6ab695c77de15a6646f742ab"
 [[file]]
 path = "../games/0100217023F6C000/game.tsv"
 sha256 = "3de9f0afec250e442ed5df8382fbb3f6ca4fe90786abe3e6643634ba53d98fe6"
+
+[[file]]
+path = "../games/0100276009872000/game.tsv"
+sha256 = "c704df6c24f880a4f1ae9fd0dc44f56ce08d6f575b5e09ac8b8f888a836611f6"
 
 [[file]]
 path = "../games/010028600EBDA000/game.tsv"
@@ -346,7 +350,7 @@ sha256 = "b3479e5338c27d972cd36f2330fad4ee1fdaffe47a497756764587ca4ffda3b8"
 
 [[file]]
 path = "../games/01006A800016E000/game.tsv"
-sha256 = "9aed584b18bcc81f79b29227259f5f4579ef0b5a69d597a7f2801ebed4704c0b"
+sha256 = "f46009cfb14f1197e8227b9e4e4413626feaf75dd723495146afb1c4c0f6e47c"
 
 [[file]]
 path = "../games/01006BB00C6F0000/game.tsv"
@@ -437,6 +441,10 @@ path = "../games/01008F6008C5E000/game.tsv"
 sha256 = "0e2333f1c89c9b95f6cc6da3e8636128583c216097951f5ee5d2e616ea93356f"
 
 [[file]]
+path = "../games/01008F701C074000/game.tsv"
+sha256 = "ed14e4a3fac94b05ef172b7b2b929f718920f43119cc2a01eafde80527aa4e5e"
+
+[[file]]
 path = "../games/010092B0091D0000/game.tsv"
 sha256 = "14c59f5a3c675419c0c1e3b8771e911c80a1d82e5eebb5d420c606e478ea116c"
 
@@ -491,6 +499,10 @@ sha256 = "15c3060c89fad8f3e58ffe98d0badd0c9fe4905c00ab8b899df6017b811f0752"
 [[file]]
 path = "../games/0100A6301214E000/game.tsv"
 sha256 = "f7404f94ecdaa8ad3e6650dc9c4997ce82f20230ae418babb6bce1b22a494a2f"
+
+[[file]]
+path = "../games/0100A7C01B792000/game.tsv"
+sha256 = "405e27f619e5926c83eb16c369da169f7f7a41dd38e23e7b538a8a13064b99da"
 
 [[file]]
 path = "../games/0100A83022A22000/game.tsv"

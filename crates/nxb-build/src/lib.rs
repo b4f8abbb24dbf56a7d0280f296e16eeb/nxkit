@@ -15,8 +15,8 @@
 //! `--program N` builds one program of a multi-program application as a game of its own. For `mac-app` and `mac`, the
 //! profile's other programs are built that way first (`programs`).
 //!
-//! The rewrite (`patch_nso.py`) is made by [`rewrite`] when the work folder has no `patched_<package>` and the engine
-//! is the one the port was checked against (otherwise the build stops at the rewrite with the message of `nxb rewrite`, which exits with code 4: there is no fallback to a later stage without the patched modules). Not ported yet,
+//! The rewrite (`patch_nso.py`) is made by [`rewrite`] when the work folder has no `patched_<package>`, with the engine's own
+//! files (a case outside the port's contract stops the build at the rewrite with the message of `nxb rewrite`, which exits with code 4: there is no fallback to a later stage without the patched modules). Not ported yet,
 //! taken from the work folder (the Python build's outputs) and named in the plan: the survey and profile steps. The
 //! shader step is an existing library folder (`--shaders`, or the work folder's `shader/cache/b-<chain>`), running the
 //! lead's `shaderbuild build` as a process from here is not wired yet.

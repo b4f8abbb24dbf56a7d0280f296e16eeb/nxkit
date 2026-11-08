@@ -385,7 +385,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     let aoc = dlc(a, b, p)?;
     let note =
         crate::rewrite::ensure_with(&b.engine, &b.profile.0, &b.work, &b.package, Some(p))?;
-    // the rewrite is skipped when this engine is not the one the port was checked against: without rewritten modules
+    // the rewrite is skipped when this engine's rules are outside the port's contract: without rewritten modules
     // the app cannot be made, and saying so here is clearer than the app stage's missing file
     let patched = b.work.join(format!("patched_{}", b.package));
     let has_modules = std::fs::read_dir(&patched).is_ok_and(|d| {
@@ -396,7 +396,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         return Err(crate::exit::fail(
             4,
             format!(
-                "unsupported: no rewritten modules in {} and the Rust rewrite does not apply to this engine (its patch rules differ from the ones the port was checked against, or the game has files the port cannot collect)",
+                "unsupported: no rewritten modules in {} and the Rust rewrite does not apply to this engine (its patch files differ from the snapshot of the rules, or the game has files the port cannot collect)",
                 patched.display()
             ),
         ));

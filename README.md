@@ -65,7 +65,8 @@ more titles.
 | iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
 | Shader step translator | MSL written by the Rust translator | not compared byte for byte with the reference build scripts. One game looked the same in a check by eye |
-| Rewrite (`nxb rewrite`), current engine `88c7e03f` (0.6.2) | 6 real modules of one title and 11 synthetic main modules | all output files are byte-identical in 6 of 6. The 11 synthetic modules are identical too |
+| Rewrite (`nxb rewrite`), current engine `f25fa956` | 13 real modules of three titles, 4 synthetic main modules with frame step stubs or cuts, and the 24 synthetic modules of `ue_ring` and `ue_region` | all output files are byte-identical in 12 of 12. One more module stops in the script and in `nxb rewrite` with the same assertion and no output. The 4 synthetic modules are identical. The expected results of the 24 modules do not change |
+| Rewrite (`nxb rewrite`), engine `88c7e03f` (0.6.2) | 6 real modules of one title and 11 synthetic main modules | all output files are byte-identical in 6 of 6. The 11 synthetic modules are identical too |
 | Rewrite (`nxb rewrite`), script of 0.5.1 | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. The script changed after this comparison |
 | Rewrite (`nxb rewrite`), earlier script | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also. The script changed after this comparison |
 | Profile files, survey and `nxb profile` (0.5.1) | 1,115 tables of 145 profiles, 11 extractions, 6 surveys | read and write of the tables: 1,115 of 1,115. Guess: 11 of 11. Survey and provisional profile: 6 of 6. Registered profile check: 10 of 10 |
@@ -114,11 +115,11 @@ The first estimate in the table is the sum of the measured stages, and it does n
 - The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and then only the raw path runs.
 - The pipeline archive uses Apple tools. "Equal" means that the loader finds each base library.
 - The app stage puts about 58,000 loose library files in the app. The reference script packs one image file. The host reads the two forms. `DMSH_IOS_PULL=0` is not ported.
-- The rewrite step is checked against the script of the engine `88c7e03f` on 6 real modules and 11 synthetic modules.
+- The rewrite step is checked against the script of the engine `f25fa956` on 13 real modules of three titles and 28 synthetic modules.
   The finders for Unreal and Snowdrop have no real positive sample. The layouts of three more titles and some frame step stubs are checked with synthetic files only.
   Three more titles were not checked again with the current script.
-- Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
-  `nxb rewrite` stops with exit code 4, and `nxb build` stops at the rewrite step with exit code 1. The message gives the two hashes.
+- Each change of the engine can change the rules. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases.
+  The rewriter has no table of expected engine hashes: it reads the engine's files as they are. A patch file that differs from the rule snapshot still stops the rewrite (exit code 4 for `nxb rewrite`, 1 for `nxb build`).
 - Not supported in `nxb extract` and `nxb split` alone (exit code 4 with a named message): Oodle formats, LZ5. `nxb build` decodes them in the Mac host.
   The file table of a CRA archive is read from the NROs in `DM_NRO_DIR`. Without a table the split stops with a named message. The CRA reader was checked with a synthetic NRO and archive only.
   The base game of a sparse program is read only with its update NSP (`--updates-only`). Without the update it stops with exit code 4, as in the reference.
@@ -228,7 +229,7 @@ Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs
 | code | meaning |
 |---|---|
 | 0 | done |
-| 1 | error. Also a rewrite stage that stops because the engine files differ from the pinned files |
+| 1 | error. Also a rewrite stage that stops outside the port's contract (see the rewrite notes) |
 | 2 | incorrect arguments |
 | 3 | damaged data |
 | 4 | not supported. Run the reference step |
