@@ -257,6 +257,16 @@ pub struct Ctx<'a, M: GuestMem> {
     pub desc: &'a Descriptors,
 }
 
+/// The GPU address of `NXKIT_WATCH_ADDR` (hex, `0x` optional): the decoder prints the texture that each record word at
+/// that address resolves to. Diagnostics only.
+fn watch_addr() -> Option<u64> {
+    static ADDR: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *ADDR.get_or_init(|| {
+        let v = std::env::var("NXKIT_WATCH_ADDR").ok()?;
+        u64::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()
+    })
+}
+
 /// The bit where a record word keeps the texture id above the GPU address. Texture storage ends below 2^40.
 const TAG_SHIFT: u32 = 40;
 
@@ -355,9 +365,9 @@ impl Builder {
             return None;
         }
         let t = texture_at(cx.table, a);
-        if a & ((1 << TAG_SHIFT) - 1) == 0x15981c4e00 && std::env::var_os("NXKIT_WATCH_ADDR").is_some() {
+        if watch_addr().is_some_and(|w| w == a & ((1 << TAG_SHIFT) - 1)) {
             static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 30 {
+            if crate::diag::first(&SHOWN, 30) {
                 eprintln!("DIAG watch addr word {a:#x} -> {t:?}");
             }
         }
@@ -585,6 +595,7 @@ pub fn summary<M: GuestMem>(
     cache.stats.misses += 1;
     let s = decode(cache, cx, handle, inherited, depth)?;
     cache.stats.unresolved += u64::from(s.unresolved);
+    crate::diag::note_n(crate::diag::Reason::DecodeUnresolved, u64::from(s.unresolved));
     Ok(cache.insert(handle, s))
 }
 
@@ -620,7 +631,14 @@ fn decode<M: GuestMem>(
         let (rec, size) = match Record::read(cx.mem, pos) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("DIAG decode fail handle {handle:#x} from {from:#x} pos {pos:#x} spans {spans:x?}");
+                crate::diag::note(
+                    crate::diag::Reason::DecodeBadRecord,
+                    format_args!("recording {handle:#x} record at {pos:#x}: {e}"),
+                );
+                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if crate::diag::on("decode") && crate::diag::first(&SHOWN, 50) {
+                    eprintln!("DIAG decode fail handle {handle:#x} from {from:#x} pos {pos:#x} spans {spans:x?}: {e}");
+                }
                 return Err(e);
             }
         };

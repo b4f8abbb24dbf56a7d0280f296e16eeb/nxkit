@@ -108,6 +108,13 @@ impl Programs {
             1 => Kind::Fragment,
             _ => Kind::Other,
         });
+        if kind == Kind::Other {
+            // A geometry or tessellation stage. The encoder runs the vertex and fragment stages only.
+            nxkit_nvn::diag::note(
+                nxkit_nvn::diag::Reason::StageIgnored,
+                format_args!("program stage {key} (slot {index})"),
+            );
+        }
         self.kinds.insert(key.to_owned(), kind);
         kind
     }

@@ -82,6 +82,13 @@ fn scaled_size(v: u32, scale: f32) -> u32 {
     ((v as f32 * scale).round() as u32).max(1)
 }
 
+/// Whether the `life` category prints the creation or the end of a Metal texture of this description: it has to pass
+/// `NXKIT_DIAG_TEX`, and at most 300 lines are printed.
+fn life_diag(format: Format, width: u32, height: u32, layers: u32) -> bool {
+    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    crate::diag("life") && crate::diag::tex_match(format, width, height, layers) && crate::diag::first(&SHOWN, 300)
+}
+
 /// The Metal description of a record at `scale` (1.0 for an unscaled texture).
 pub(crate) fn describe(
     rec: &TextureRecord,
@@ -89,10 +96,17 @@ pub(crate) fn describe(
     u: Use,
 ) -> Result<(TextureDesc, bool), Skip> {
     let d = &rec.desc;
-    let mapped = texture_format(d.format).ok_or(Skip::Format)?;
+    let unsupported = |what: &str| {
+        nxkit_nvn::diag::note(
+            nxkit_nvn::diag::Reason::FormatUnsupported,
+            format_args!("{what} {:?} {:?} {}x{}x{}", d.format, d.target, d.width, d.height, d.depth),
+        );
+        Skip::Format
+    };
+    let mapped = texture_format(d.format).ok_or_else(|| unsupported("format"))?;
     // Cube textures are 2D arrays of their faces, so that a shader may read them as a cube, a cube array or a 2D
     // array: Metal makes a cube array view only of a 2D array.
-    let kind = match kind_of(d.target).ok_or(Skip::Format)? {
+    let kind = match kind_of(d.target).ok_or_else(|| unsupported("target"))? {
         TextureKind::Cube | TextureKind::CubeArray => TextureKind::D2Array,
         k => k,
     };
@@ -110,7 +124,7 @@ pub(crate) fn describe(
         Target::D2Array | Target::D2MultisampleArray => (d.width, d.height, 1, d.depth.max(1)),
         Target::D3 => (d.width, d.height, d.depth.max(1), 1),
         Target::CubemapArray => (d.width, d.height, 1, (d.depth / 6).max(1) * 6),
-        Target::Buffer => return Err(Skip::Format),
+        Target::Buffer => return Err(unsupported("target")),
     };
     let (width, height) = (scaled_size(width, scale), scaled_size(height, scale));
     let max_levels = 32 - width.max(height).max(depth).leading_zeros();
@@ -160,7 +174,11 @@ impl TextureStore {
         let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(texture) = views.get(&key) { return Ok(texture.clone()) }
         let texture = res.tex.view(&ViewDesc { format, kind, first_level: view.level(), level_count: 1,
-            first_slice: slice, slice_count: 1 }).map_err(|e| crate::tex_skip(format_args!("attachment view {view:?} of {d:?}: {e}")))?;
+            first_slice: slice, slice_count: 1 }).map_err(|e| {
+            let what = format_args!("attachment view {view:?} of {d:?}: {e}");
+            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::ViewCreate, what);
+            crate::tex_skip(what)
+        })?;
         views.insert(key, texture.clone());
         Ok(texture)
     }
@@ -227,13 +245,14 @@ impl TextureStore {
                 ..alias.clone()
             }
         } else {
-            if crate::diag("contain") {
+            static CONTAIN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if crate::diag("contain") && CONTAIN.load(std::sync::atomic::Ordering::Relaxed) < 300 {
                 let (a0, a1) = (rec.address.get(), rec.address.get() + rec.layout.size);
                 let mut spans = self.spans.lock().unwrap_or_else(PoisonError::into_inner);
                 for &(b0, b1, other, od) in spans.iter() {
                     let inside = a0 >= b0 && a1 <= b1 && (a0, a1) != (b0, b1);
                     let around = b0 >= a0 && b1 <= a1 && (a0, a1) != (b0, b1);
-                    if (inside || around) && other != id {
+                    if (inside || around) && other != id && crate::diag::first(&CONTAIN, 300) {
                         eprintln!(
                             "DIAG contain {} new {id:?} {:?} {}x{}x{} l{} {:?} [{a0:#x}+{:#x}] {} old {other:?} {:?} {}x{}x{} l{} {:?} [{b0:#x}+{:#x}] off {:#x}",
                             if inside { "inside" } else { "around" },
@@ -248,9 +267,10 @@ impl TextureStore {
                     spans.push((a0, a1, id, desc));
                 }
             }
+            static SPLIT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             if crate::diag("split") {
                 for ((a, other), r) in &self.aliases {
-                    if *a == rec.address.get() {
+                    if *a == rec.address.get() && crate::diag::first(&SPLIT, 300) {
                         eprintln!(
                             "DIAG split addr {a:#x} new {id:?} {:?} {}x{}x{} l{} {:?} rt {} | old {:?} {:?} {}x{}x{} l{} {:?} rt {}",
                             desc.kind, desc.width, desc.height, desc.array_layers, desc.mip_levels, desc.format, desc.render_target,
@@ -259,15 +279,18 @@ impl TextureStore {
                     }
                 }
             }
-            if crate::diag("arr") && desc.array_layers == 8 && desc.width >= 256 {
+            if life_diag(desc.format, desc.width, desc.height, desc.array_layers) {
                 eprintln!(
-                    "DIAG arr new metal texture {id:?} at {:#x} {:?} {}x{} gen {} (entry had {:?})",
+                    "DIAG life new metal texture {id:?} at {:#x} {:?} {}x{} gen {} (entry had {:?})",
                     rec.address.get(), desc.format, desc.width, desc.height, self.next_generation,
                     self.entries.get(&id).map(|r| r.generation)
                 );
             }
-            let tex = Texture::new(&self.ctx, desc)
-                .map_err(|e| crate::tex_skip(format_args!("new {id:?} {desc:?}: {e:?}")))?;
+            let tex = Texture::new(&self.ctx, desc).map_err(|e| {
+                let what = format_args!("new {id:?} {desc:?}: {e:?}");
+                nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::TextureCreate, what);
+                crate::tex_skip(what)
+            })?;
             let generation = self.next_generation;
             self.next_generation += 1;
             let r = Res {
@@ -291,11 +314,9 @@ impl TextureStore {
 
     /// Forgets the Metal texture of `id` (the game created or finalized the texture again).
     pub(crate) fn invalidate(&mut self, id: TexId) {
-        if crate::diag("arr") {
-            if let Some(r) = self.entries.get(&id) {
-                if r.desc.array_layers == 8 && r.desc.width >= 256 {
-                    eprintln!("DIAG arr invalidate {id:?} gen {} {:?} {}x{}", r.generation, r.desc.format, r.desc.width, r.desc.height);
-                }
+        if let Some(r) = self.entries.get(&id) {
+            if life_diag(r.desc.format, r.desc.width, r.desc.height, r.desc.array_layers) {
+                eprintln!("DIAG life invalidate {id:?} gen {} {:?} {}x{}", r.generation, r.desc.format, r.desc.width, r.desc.height);
             }
         }
         if let Some(old) = self.entries.remove(&id) {
@@ -422,10 +443,12 @@ impl TextureStore {
             .tex
             .view_swizzled(&ViewDesc { format, kind, first_level, level_count, first_slice, slice_count }, tic.view.swizzle)
             .map_err(|e| {
-                crate::tex_skip(format_args!(
+                let what = format_args!(
                     "view {id:?} {:?} -> {format:?} {kind:?} l{first_level}+{level_count} s{first_slice}+{slice_count}: {e:?}",
                     d
-                ))
+                );
+                nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::ViewCreate, what);
+                crate::tex_skip(what)
             })?;
         views.insert(key, v.clone());
         Ok(v)

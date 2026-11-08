@@ -174,7 +174,9 @@ impl CopyBack {
         self.textures += u64::from(textures);
         self.bytes += bytes;
         let n = self.frames;
-        if crate::diag("copyback") && (n <= 20 || n.is_multiple_of(300) || refused != 0 || over_budget != 0) && n < 100_000 {
+        static LOSSES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let loss = (refused != 0 || over_budget != 0) && crate::diag::first(&LOSSES, 100);
+        if crate::diag("copyback") && (n <= 20 || n.is_multiple_of(300) || loss) {
             eprintln!(
                 "DIAG copyback frame {n}: {textures} textures {} KiB, refused {refused}, over budget {over_budget}; total {} textures {} MiB",
                 bytes >> 10,

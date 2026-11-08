@@ -27,17 +27,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Whether `NXKIT_DIAG` names the `cmd` category (or `all`): the per-command-buffer lines are written only then.
 pub fn diag_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("NXKIT_DIAG")
-            .map(|v| v.split(',').any(|c| c == "cmd" || c == "all"))
-            .unwrap_or(false)
-    })
+    *ON.get_or_init(|| nxkit_nvn::diag::on("cmd"))
 }
 
-/// `eprintln!` behind the `cmd` category of `NXKIT_DIAG`.
+/// The lines that one call site of [`diag!`] writes at most.
+pub const DIAG_LINES: u32 = 2000;
+
+/// `eprintln!` behind the `cmd` category of `NXKIT_DIAG`, at most [`DIAG_LINES`] lines per call site.
 #[macro_export]
 macro_rules! diag {
-    ($($t:tt)*) => { if $crate::diag_on() { eprintln!($($t)*); } };
+    ($($t:tt)*) => {
+        if $crate::diag_on() {
+            static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if nxkit_nvn::diag::first(&SHOWN, $crate::DIAG_LINES) {
+                eprintln!($($t)*);
+            }
+        }
+    };
 }
 
 mod audio;

@@ -27,6 +27,15 @@ pub(crate) struct Transfer {
     gate: Mutex<()>,
 }
 
+/// Counts a failed upload for the health report and prints it under the `upload` category (at most 300 lines).
+fn upload_failed(what: std::fmt::Arguments<'_>) {
+    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::UploadFailed, what);
+    if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
+        eprintln!("DIAG upload failed {what}");
+    }
+}
+
 /// The block-linear layout of a record, in blocks.
 fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLayout, Skip> {
     if rec.layout.linear {
@@ -101,6 +110,26 @@ impl Transfer {
         if rec.layout.linear {
             return self.upload_linear(cb, guest, rec, res, wait);
         }
+        let r = self.upload_block_linear(cb, scratch, guest, rec, res, wait);
+        if let Err(why) = r {
+            let d = res.desc;
+            upload_failed(format_args!(
+                "{:?} {:?} {}x{}x{} levels {} layers {}: {why:?}",
+                d.format, d.kind, d.width, d.height, d.depth, d.mip_levels, d.array_layers
+            ));
+        }
+        r
+    }
+
+    fn upload_block_linear(
+        &self,
+        cb: &mut CommandBuffer,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        rec: &TextureRecord,
+        res: &Res,
+        wait: bool,
+    ) -> Result<(), Skip> {
         let surf = surface(rec, res, self.order)?;
         let base = guest_offset(rec, guest)?;
         let d = res.desc;
@@ -142,12 +171,11 @@ impl Transfer {
                 self.deswizzler
                     .encode_region(pass, scratch, guest, base, surf, &res.tex, &region)
                     .map_err(|e| {
-                        if crate::diag("hmcap") {
-                            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 20 {
-                                eprintln!("DIAG upfail {:?} {}x{} lvl {level} slice {slice}: {e:?}", d.format, d.width, d.height);
-                            }
-                        }
+                        // The caller counts the failure. This keeps what the kernel said as an example.
+                        nxkit_nvn::diag::example(
+                            nxkit_nvn::diag::Reason::UploadFailed,
+                            format_args!("{:?} {}x{} level {level} slice {slice}: {e}", d.format, d.width, d.height),
+                        );
                         Skip::Transfer
                     })?;
             }
@@ -166,19 +194,37 @@ impl Transfer {
         wait: bool,
     ) -> Result<(), Skip> {
         let d = res.desc;
+        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         if d.kind == TextureKind::D3 || d.mip_levels != 1 || d.array_layers != 1 || rec.desc.stride == 0 {
-            if crate::diag("linear") {
-                eprintln!("DIAG linear refused {:?} {}x{}x{} levels {} layers {} stride {} fmt {:#x}",
-                    d.kind, d.width, d.height, d.depth, d.mip_levels, d.array_layers, rec.desc.stride, rec.desc.format);
+            let what = format_args!(
+                "{:?} {:?} {}x{}x{} levels {} layers {} stride {}",
+                d.format, d.kind, d.width, d.height, d.depth, d.mip_levels, d.array_layers, rec.desc.stride
+            );
+            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::UploadLinearRefused, what);
+            if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
+                eprintln!("DIAG upload linear refused {what}");
             }
             return Err(Skip::Transfer);
         }
-        if crate::diag("linear") {
-            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 400 {
-                eprintln!("DIAG linear ok {:?} {}x{} stride {} fmt {:#x}", d.format, d.width, d.height, rec.desc.stride, rec.desc.format);
-            }
+        if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
+            eprintln!("DIAG upload linear {:?} {}x{} stride {}", d.format, d.width, d.height, rec.desc.stride);
         }
+        let r = self.copy_linear(cb, guest, rec, res, wait);
+        if let Err(why) = r {
+            upload_failed(format_args!("linear {:?} {}x{} stride {}: {why:?}", d.format, d.width, d.height, rec.desc.stride));
+        }
+        r
+    }
+
+    fn copy_linear(
+        &self,
+        cb: &mut CommandBuffer,
+        guest: &Arc<GuestMemory>,
+        rec: &TextureRecord,
+        res: &Res,
+        wait: bool,
+    ) -> Result<(), Skip> {
+        let d = res.desc;
         let base = guest_offset(rec, guest)?;
         let mut pass = cb
             .begin_compute_pass(self.deswizzler.table())

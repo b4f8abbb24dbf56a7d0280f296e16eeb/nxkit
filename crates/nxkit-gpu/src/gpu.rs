@@ -407,12 +407,40 @@ impl Gpu {
                 continue;
             }
             if let Ok(t) = self.store.view_as(slot.texture, res, &slot.header, Some(k), stats) {
-                if crate::diag("fit") {
+                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if crate::diag("fit") && crate::diag::first(&SHOWN, 300) {
                     eprintln!("DIAG fit handle {h:#x} {:?} {:?} -> {k:?}", slot.texture, base.desc().kind);
                 }
                 handles.fits.insert((h, k), t.gpu_resource_id());
                 handles.keep.push(t);
             }
+        }
+    }
+
+    /// The `stale` category: hashes the guest bytes of a texture every frame and prints when they changed, with the
+    /// residency that the front end has for it. A change while the texture is not `GuestNewer` is a CPU write that the
+    /// front end did not see. It reads the whole texture, so `NXKIT_DIAG_TEX` should narrow it down.
+    fn stale_diag(&self, id: TexId, rec: &nxkit_nvn::resource::TextureRecord, res: &Res) {
+        use std::hash::{Hash, Hasher};
+        static SEEN: Mutex<Option<FastMap<u64, u64>>> = Mutex::new(None);
+        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let mut buf = vec![0u8; rec.layout.size as usize];
+        let off = rec.address.get().wrapping_sub(self.guest.address_map().gpu_base());
+        if self.guest.read(off, &mut buf).is_err() {
+            return;
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        buf.hash(&mut h);
+        let h = h.finish();
+        let mut g = SEEN.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = rec.address.get();
+        if g.get_or_insert_with(FastMap::default).insert(key, h).is_some_and(|old| old != h)
+            && crate::diag::first(&SHOWN, 200)
+        {
+            eprintln!(
+                "DIAG stale {id:?} {:?} {}x{} addr {key:#x} changed, residency {:?} needs upload {}",
+                res.desc.format, res.desc.width, res.desc.height, rec.residency, TextureStore::needs_upload(res, rec)
+            );
         }
     }
 
@@ -424,13 +452,17 @@ impl Gpu {
         textures: &mut FastMap<TexId, Res>,
         stats: &mut EncodeStats,
     ) -> std::result::Result<(Resolved, Texture), Skip> {
-        let (slot, tsc) = view
-            .resolve(handle)
-            .map_err(|e| crate::tex_skip(format_args!("handle {handle:#x}: {e:?}")))?;
+        let (slot, tsc) = view.resolve(handle).map_err(|e| {
+            let what = format_args!("handle {handle:#x}: {e:?}");
+            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::HandleUnresolved, what);
+            crate::tex_skip(what)
+        })?;
         let id = slot.texture;
         if !textures.contains_key(&id) {
             let rec = view.record(id).map_err(|e| {
-                crate::tex_skip(format_args!("handle {handle:#x} tex {id:?}: {e:?}"))
+                let what = format_args!("handle {handle:#x} tex {id:?}: {e:?}");
+                nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::HandleUnresolved, what);
+                crate::tex_skip(what)
             })?;
             let res = self.store.ensure(rec, scale, Use::default(), stats)?;
             textures.insert(id, res);
@@ -463,7 +495,7 @@ impl Gpu {
             static SEEN: std::sync::Mutex<Vec<(u64, TexId, u64)>> = std::sync::Mutex::new(Vec::new());
             let key = (handle, id, 0u64);
             if let Ok(mut seen) = SEEN.lock() {
-                if !seen.contains(&key) && seen.len() < 40000 {
+                if !seen.contains(&key) && seen.len() < 2000 {
                     seen.push(key);
                     let v = tex_view.desc();
                     eprintln!(
@@ -526,6 +558,10 @@ impl Gpu {
             }
             if planned + rec.layout.size > crate::copyback::budget() {
                 over_budget += 1;
+                nxkit_nvn::diag::note(
+                    nxkit_nvn::diag::Reason::CopybackOverBudget,
+                    format_args!("{id:?} {:?} {}x{} {} bytes", res.desc.format, res.desc.width, res.desc.height, rec.layout.size),
+                );
                 continue;
             }
             planned += rec.layout.size;
@@ -552,15 +588,15 @@ impl Gpu {
                 Err(why) => {
                     refused += 1;
                     stats.skip(why);
-                    if crate::diag("copyback") {
-                        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                        if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 100 {
-                            eprintln!(
-                                "DIAG copyback refused {id:?} {:?} {}x{} layers {} levels {} scaled {} widened {} linear {} stride {}: {why:?}",
-                                res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers,
-                                res.desc.mip_levels, res.scaled, res.widened, rec.layout.linear, rec.desc.stride
-                            );
-                        }
+                    let what = format_args!(
+                        "{id:?} {:?} {}x{} layers {} levels {} scaled {} widened {} linear {} stride {}: {why:?}",
+                        res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers,
+                        res.desc.mip_levels, res.scaled, res.widened, rec.layout.linear, rec.desc.stride
+                    );
+                    nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::CopybackRefused, what);
+                    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    if crate::diag("copyback") && crate::diag::first(&N, 100) {
+                        eprintln!("DIAG copyback refused {what}");
                     }
                 }
             }
@@ -598,6 +634,7 @@ impl Gpu {
         scale: f32,
     ) -> Result<EncodeReport> {
         crate::refresh_knobs();
+        let diag_frame = crate::diag::begin_frame();
         let lum = crate::lum::begin();
         let t0 = Instant::now();
         let scale = if scale.is_finite() && scale > 0.0 {
@@ -743,46 +780,25 @@ impl Gpu {
             if res.scaled && rec.residency == nxkit_nvn::resource::Residency::GuestNewer {
                 stats.scaled_upload_lost += 1;
             }
-            let tile = crate::diag("hmcap")
-                && res.desc.kind == nxkit_metal::TextureKind::D2
-                && res.desc.format == nxkit_metal::Format::R16Unorm
-                && res.desc.width == 256;
-            if crate::diag("linstale") && rec.layout.linear {
-                use std::hash::{Hash, Hasher};
-                static SEEN: std::sync::Mutex<Option<FastMap<u64, u64>>> = std::sync::Mutex::new(None);
-                let mut buf = vec![0u8; rec.layout.size as usize];
-                let off = rec.address.get().wrapping_sub(self.guest.address_map().gpu_base());
-                if self.guest.read(off, &mut buf).is_ok() {
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    buf.hash(&mut h);
-                    let h = h.finish();
-                    let mut g = SEEN.lock().unwrap();
-                    let m = g.get_or_insert_with(FastMap::default);
-                    let key = rec.address.get();
-                    if let Some(old) = m.insert(key, h) {
-                        if old != h {
-                            eprintln!("DIAG hmstale {id:?} {:?} {}x{} addr {key:#x} changed, residency {:?} needs {}", res.desc.format, res.desc.width, res.desc.height, rec.residency, TextureStore::needs_upload(res, rec));
-                        }
-                    }
-                }
-            }
-            if tile {
-                static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 {
-                    eprintln!(
-                        "DIAG hmup {id:?} res {:?} scaled {} widened {} fresh {} storage {:?} needs {}",
-                        rec.residency, res.scaled, res.widened, res.fresh, res.desc.storage,
-                        TextureStore::needs_upload(res, rec)
-                    );
-                }
+            if crate::diag("stale") && crate::diag::tex_match(res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers) {
+                self.stale_diag(*id, rec, res);
             }
             if !TextureStore::needs_upload(res, rec) {
                 continue;
             }
             let wait = self.copyback.upload_waits(rec);
             let r = self.transfer.upload(first, &scratch, &self.guest, rec, res, wait);
-            if tile {
-                eprintln!("DIAG hmup {id:?} upload {:?}", r.as_ref().err());
+            static UPLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if crate::diag("upload")
+                && crate::diag::tex_filtered()
+                && crate::diag::tex_match(res.desc.format, res.desc.width, res.desc.height, res.desc.array_layers)
+                && crate::diag::first(&UPLOADS, 200)
+            {
+                eprintln!(
+                    "DIAG upload {id:?} {:?} {}x{} residency {:?} scaled {} linear {}: {:?}",
+                    res.desc.format, res.desc.width, res.desc.height, rec.residency, res.scaled, rec.layout.linear,
+                    r.as_ref().err()
+                );
             }
             match r {
                 Ok(()) => {
@@ -800,64 +816,6 @@ impl Gpu {
             .iter()
             .map(|(id, res)| (*id, res.barrier_id))
             .collect();
-        if crate::diag("prov") && crate::lum::active() {
-            let keys: Vec<String> = std::fs::read_to_string("/tmp/fmap/terrain_keys.txt")
-                .map(|t| t.lines().map(str::to_owned).collect())
-                .unwrap_or_default();
-            let mut start: Vec<TexId> = Vec::new();
-            for d in &detail.draws {
-                if !keys.iter().any(|k| d.program.vertex.starts_with(k.as_str())) {
-                    continue;
-                }
-                for t in d.textures.iter().filter(|t| t.handle != 0 && t.stage == crate::detail::Stage::Vertex && t.slot == 0) {
-                    if let Ok((slot, _)) = view.resolve(t.handle) {
-                        if !start.contains(&slot.texture) {
-                            start.push(slot.texture);
-                        }
-                    }
-                }
-            }
-            let touches: Vec<_> = plan.passes.iter().map(|p| crate::barriers::touch(frame, plan, p)).collect();
-            let mut frontier = start.clone();
-            let mut seen: Vec<TexId> = Vec::new();
-            for depth in 0..4 {
-                let mut next = Vec::new();
-                for id in frontier.drain(..) {
-                    if seen.contains(&id) {
-                        continue;
-                    }
-                    seen.push(id);
-                    let desc = textures.get(&id).map(|r| (r.desc.kind, r.desc.width, r.desc.height, r.desc.array_layers, r.desc.format));
-                    let res = view.record(id).ok().map(|r| (r.residency, r.address.get()));
-                    let writers: Vec<usize> = touches.iter().enumerate().filter(|(_, t)| t.writes.contains(&id)).map(|(i, _)| i).collect();
-                    eprintln!("DIAG prov depth {depth} {id:?} {desc:?} {res:?} writers {writers:?}");
-                    for w in writers.iter().take(6) {
-                        let p = &plan.passes[*w];
-                        let reads: Vec<_> = touches[*w].sampled.iter().map(|r| (*r, textures.get(r).map(|x| (x.desc.width, x.desc.format)))).collect();
-                        eprintln!("DIAG prov   pass {w} {:?} cmds {:?} reads {reads:?}", p.kind, p.cmds);
-                        next.extend(touches[*w].sampled.iter().copied());
-                    }
-                }
-                frontier = next;
-            }
-        }
-        if crate::diag("hm") {
-            static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            let is_hm = |id: &TexId| {
-                textures.get(id).is_some_and(|r| {
-                    r.desc.kind == nxkit_metal::TextureKind::D2Array && r.desc.array_layers == 8 && r.desc.width >= 256
-                })
-            };
-            for (i, p) in plan.passes.iter().enumerate() {
-                let t = crate::barriers::touch(frame, plan, p);
-                let hit: Vec<_> = t.writes.iter().filter(|id| is_hm(id)).collect();
-                if !hit.is_empty() && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 300 {
-                    let fmt: Vec<_> = hit.iter().map(|id| (**id, textures.get(id).map(|r| (r.desc.width, r.desc.format)))).collect();
-                    let atts: Vec<_> = plan.attachments_of(p).iter().map(|a| (a.tex, a.slot, a.view.level(), a.view.layer(), a.load, a.store)).collect();
-                    eprintln!("DIAG hm pass {i} {:?} cmds {:?} writes {fmt:?} atts {atts:?}", p.kind, p.cmds);
-                }
-            }
-        }
         let t_barrier = Instant::now();
         let barrier_plan = self.barriers.plan(frame, plan, &aliases);
         stats.barrier_ns = nanos(t_barrier, Instant::now());
@@ -932,69 +890,11 @@ impl Gpu {
         let number = submitted.number();
         self.last = Some(submitted);
         self.copyback.submitted(number, &mirrored_ranges);
-        if lum || (crate::diag("hmcap") && crate::lum::pending()) {
+        if lum {
             let _ = self.wait();
             crate::lum::dump(&self.ctx);
-            if crate::diag("hmcap") {
-                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                for (id, r) in &textures {
-                    let d = r.desc;
-                    if d.kind != nxkit_metal::TextureKind::D2 || d.format != nxkit_metal::Format::R16Unorm || d.width != 256 {
-                        continue;
-                    }
-                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) > 30 {
-                        break;
-                    }
-                    let pts: Vec<[u32; 2]> = (1..4).flat_map(|j| (1..4).map(move |i| [64 * i, 64 * j])).collect();
-                    let px = r.tex.debug_read_raw(&self.ctx, &pts).unwrap_or_default();
-                    let res = view.record(*id).ok().map(|x| x.residency);
-                    eprintln!("DIAG hmtile {id:?} {:?} gpu {:02x?}", res, px);
-                }
-            }
         }
-        if crate::diag("hmread") && lum {
-            let _ = self.wait();
-            for (id, r) in &textures {
-                let d = r.desc;
-                if !(d.kind == nxkit_metal::TextureKind::D2Array && d.array_layers == 8 && d.width >= 256) {
-                    continue;
-                }
-                if let Ok(rec) = view.record(*id) {
-                    let map = self.guest.address_map();
-                    let size = rec.layout.size;
-                    let base = rec.address.get().checked_sub(map.gpu_base());
-                    let mut nz_pages = 0;
-                    let pages = size.div_ceil(4096);
-                    let mut buf = [0u8; 256];
-                    if let Some(base) = base {
-                        for p in 0..pages {
-                            if self.guest.read(base + p * 4096, &mut buf).is_ok() && buf.iter().any(|b| *b != 0) {
-                                nz_pages += 1;
-                            }
-                        }
-                    }
-                    eprintln!(
-                        "DIAG hmread {id:?} guest {:#x} size {size} pages with data {nz_pages}/{pages} residency {:?} layout {:?}",
-                        rec.address.get(), rec.residency, rec.layout
-                    );
-                }
-                for layer in 0..d.array_layers {
-                    let v = nxkit_metal::ViewDesc {
-                        format: d.format,
-                        kind: nxkit_metal::TextureKind::D2,
-                        first_level: 0,
-                        level_count: 1,
-                        first_slice: layer,
-                        slice_count: 1,
-                    };
-                    let Ok(t) = r.tex.view(&v) else { continue };
-                    let pts: Vec<[u32; 2]> = (1..4).flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4])).collect();
-                    let px = t.debug_read_raw(&self.ctx, &pts).unwrap_or_default();
-                    let nz = px.iter().filter(|p| p.iter().any(|b| *b != 0)).count();
-                    eprintln!("DIAG hmread {id:?} {}x{} {:?} layer {layer} nonzero {nz}/9 {:02x?}", d.width, d.height, d.format, px.first());
-                }
-            }
-        }
+        crate::health::frame(diag_frame, &stats);
         Ok(EncodeReport {
             batch: number,
             deswizzled,

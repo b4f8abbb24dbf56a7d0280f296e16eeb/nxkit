@@ -21,6 +21,7 @@ pub mod cache;
 pub mod cmdbuf;
 pub mod decode;
 pub mod descriptors;
+pub mod diag;
 pub mod entries;
 pub mod error;
 pub mod ext;

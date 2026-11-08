@@ -1,16 +1,15 @@
-//! The `lum` diagnostic. Every 300th frame it copies nine pixels immediately after each stored colour pass. Reading
-//! those snapshots after completion preserves each pass's output even when later passes overwrite its target.
+//! The `lum` diagnostic. On each sampled frame (one in 300, see `crate::diag::sampled`) it copies nine pixels
+//! immediately after each stored colour pass that passes `NXKIT_DIAG_TEX`. Reading those snapshots after completion
+//! preserves each pass's output even when later passes overwrite its target. With `img` too, targets of 640 texels and
+//! wider are sampled on a 96x54 grid and written as pictures into `<NXKIT_DIAG_DIR>/img`.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use nxkit_metal::{
     ArgumentTable, CommandBuffer, ComputeCommand, Context, Dependency, Format, Scope, Stages,
     Storage, Texture, TextureKind, TextureRegion, Use, Visibility,
 };
 use nxkit_nvn::resource::TexId;
-
-const EVERY: u32 = 300;
 
 /// The sample grid of the `img` diagnostic for the main resolution: columns and rows of one-texel copies that make a
 /// coarse picture of a full size target.
@@ -22,7 +21,7 @@ const GRID: [u32; 2] = [96, 54];
 fn grid(width: u32, height: u32) -> [u32; 2] {
     if !crate::diag("img") {
         [3, 3]
-    } else if width == 1600 && height == 900 {
+    } else if width >= 640 && height >= 360 {
         GRID
     } else if (8..=64).contains(&width) && (4..=64).contains(&height) {
         [width, height]
@@ -31,17 +30,16 @@ fn grid(width: u32, height: u32) -> [u32; 2] {
     }
 }
 
-static FRAME: AtomicU32 = AtomicU32::new(0);
 static TARGETS: Mutex<Vec<(u32, TexId, [u32; 2], Texture)>> = Mutex::new(Vec::new());
 
-/// Starts a frame. True when this frame is sampled.
+/// True when the current frame is sampled. The caller starts the frame with `crate::diag::begin_frame` first.
 pub(crate) fn begin() -> bool {
-    crate::diag("lum") && FRAME.fetch_add(1, Ordering::Relaxed) % EVERY == EVERY / 2
+    active()
 }
 
 /// True while the current frame is sampled.
 pub(crate) fn active() -> bool {
-    crate::diag("lum") && FRAME.load(Ordering::Relaxed).wrapping_sub(1) % EVERY == EVERY / 2
+    crate::diag("lum") && crate::diag::sampled()
 }
 
 /// Saves pixels before another pass can overwrite the target. This changes GPU scheduling only on sampled frames.
@@ -109,11 +107,6 @@ pub(crate) fn capture(
     }
 }
 
-/// True when snapshots wait for [`dump`].
-pub(crate) fn pending() -> bool {
-    TARGETS.lock().is_ok_and(|t| !t.is_empty())
-}
-
 /// Prints the noted targets in command order. The GPU has to be done with the frame.
 pub(crate) fn dump(ctx: &Context) {
     let mut all = match TARGETS.lock() {
@@ -123,7 +116,7 @@ pub(crate) fn dump(ctx: &Context) {
     all.sort_by_key(|(c, _, _, _)| *c);
     eprintln!(
         "DIAG lum frame {} passes {}",
-        FRAME.load(Ordering::Relaxed),
+        crate::diag::frame(),
         all.len()
     );
     for (cmd, id, size, tex) in all {
@@ -174,11 +167,12 @@ fn rgb(f: Format, b: &[u8]) -> [f32; 3] {
     c.map(|v| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 })
 }
 
-/// Writes the sampled texels of a full size target as a binary PPM under `/tmp/fmap/img`.
+/// Writes the sampled texels of a full size target as a binary PPM under `<NXKIT_DIAG_DIR>/img`.
 fn write_picture(cmd: u32, id: TexId, format: Format, g: [u32; 2], px: &[Vec<u8>]) {
     use std::io::Write;
-    let _ = std::fs::create_dir_all("/tmp/fmap/img");
-    let name = format!("/tmp/fmap/img/cmd{cmd:05}-tex{}-{format:?}.ppm", id.0);
+    let dir = crate::diag::diag_dir().join("img");
+    let _ = std::fs::create_dir_all(&dir);
+    let name = dir.join(format!("cmd{cmd:05}-tex{}-{format:?}.ppm", id.0));
     let Ok(mut file) = std::fs::File::create(&name) else { return };
     let _ = write!(file, "P6\n{} {}\n255\n", g[0], g[1]);
     let mut bytes = Vec::with_capacity(px.len() * 3);

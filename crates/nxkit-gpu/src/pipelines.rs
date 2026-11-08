@@ -21,7 +21,16 @@ use crate::programs::StageProgram;
 use crate::stats::Skip;
 use crate::translate;
 
-static PIPE_SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Counts a pipeline that Metal did not build for the health report and prints it under the `pipe` category (at most
+/// 300 lines). Gives back `Skip::Pipeline`.
+fn pipe_failed(what: std::fmt::Arguments<'_>) -> Skip {
+    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::PipelineFailed, what);
+    if crate::diag("pipe") && crate::diag::first(&SHOWN, 300) {
+        eprintln!("DIAG pipe {what}");
+    }
+    Skip::Pipeline
+}
 
 /// The formats of the colour attachments of a pass by slot, and its sample count.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -93,10 +102,8 @@ pub(crate) struct Pipelines {
     cache: PipelineCache,
     depth: Mutex<FastMap<DepthStencilDesc, DepthStencilState>>,
     flat: Mutex<Option<ShaderLibrary>>,
-    /// The shader of the `paint` knob, which colours every draw into a single HDR target.
+    /// The shader of the `paint` knobs.
     paint: Mutex<Option<ShaderLibrary>>,
-    /// The shader of the `cubesrc` knobs, which replaces the cube map filter of one program.
-    cubetest: Mutex<Option<ShaderLibrary>>,
     topology_fallbacks: Mutex<FastSet<u64>>,
 }
 
@@ -112,7 +119,6 @@ impl Pipelines {
             depth: Mutex::new(FastMap::default()),
             flat: Mutex::new(None),
             paint: Mutex::new(None),
-            cubetest: Mutex::new(None),
             topology_fallbacks: Mutex::new(FastSet::default()),
         })
     }
@@ -189,12 +195,15 @@ impl Pipelines {
             }
             library.clone()
         } else { None };
-        let hm_paint = crate::knob("hmpaint")
-            && matches!(d.program.fragment.as_deref(), Some("c89a615879087250" | "9a08f70c2775ebe7" | "b7193064f1aa1bdb" | "13540660ad78e484"));
-        let paint = hm_paint || (crate::knob("paint") || crate::knob("paintdir"))
+        let paint_dir = crate::knob("paintdir");
+        let paint = (crate::knob("paint") || paint_dir)
             && targets.colors.len() == 1
-            && targets.colors[0] == Some(Format::Rg11B10Float)
-            && fs.is_some();
+            && targets.colors[0].is_some()
+            && fs.is_some()
+            && {
+                let keys = crate::diag::paint_programs();
+                keys.is_empty() || d.program.fragment.as_deref().is_some_and(|f| keys.iter().any(|k| k == f))
+            };
         let paint_lib = if paint {
             let mut library = self.paint.lock().unwrap_or_else(PoisonError::into_inner);
             if library.is_none() {
@@ -203,50 +212,18 @@ impl Pipelines {
                     using namespace metal;
                     struct In { float4 loc0 [[user(locn0)]]; };
                     fragment float4 paint_magenta() { return float4(8.0, 0.0, 8.0, 1.0); }
-                    fragment float4 paint_half() { return float4(0.5, 0.5, 0.5, 0.5); }
                     fragment float4 paint_dir(In in [[stage_in]]) { return float4(abs(in.loc0.xyz), 1.0); }
-                "#).map_err(|_| Skip::Pipeline)?);
-            }
-            library.clone()
-        } else { None };
-        let cube_test = d.program.fragment.as_deref() == Some("6b1f4b90672b2caf")
-            && (crate::knob("cubesrc") || crate::knob("cubesrcs"));
-        let cube_lib = if cube_test {
-            let mut library = self.cubetest.lock().unwrap_or_else(PoisonError::into_inner);
-            if library.is_none() {
-                *library = Some(ShaderLibrary::from_source(&self.ctx, "nxkit-cubetest", r#"
-                    #include <metal_stdlib>
-                    using namespace metal;
-                    struct In { float4 loc0 [[user(locn0)]]; };
-                    struct Args {
-                        constant float4* c3 [[id(0)]];
-                        texturecube<float> t [[id(1)]];
-                        sampler s [[id(2)]];
-                        sampler sw [[id(3)]];
-                        constant uint* border [[id(4)]];
-                    };
-                    float3 face(float4 l) { float3 d = l.xyz; return d / max(max(abs(d.x), abs(d.y)), abs(d.z)); }
-                    fragment float4 cube_fixed(In in [[stage_in]], constant Args& a [[buffer(0)]]) {
-                        constexpr sampler cs(filter::nearest, mip_filter::none, address::clamp_to_edge);
-                        return a.t.sample(cs, face(in.loc0)) + float4(0.2, 0.0, 0.0, 0.0);
-                    }
-                    fragment float4 cube_bound(In in [[stage_in]], constant Args& a [[buffer(0)]]) {
-                        return a.t.sample(a.s, face(in.loc0), level(0)) + float4(0.2, 0.0, 0.0, 0.0);
-                    }
                 "#).map_err(|_| Skip::Pipeline)?);
             }
             library.clone()
         } else { None };
         let mut desc = RenderPipelineDesc::new(
             (&vs.lib, vs.entry.as_str()),
-            cube_lib
+            paint_lib
                 .as_ref()
-                .map(|lib| (lib, if crate::knob("cubesrcs") { "cube_bound" } else { "cube_fixed" }))
-                .or_else(|| paint_lib
-                .as_ref()
-                .map(|lib| (lib, if hm_paint { "paint_half" } else if crate::knob("paintdir") { "paint_dir" } else { "paint_magenta" }))
+                .map(|lib| (lib, if paint_dir { "paint_dir" } else { "paint_magenta" }))
                 .or_else(|| flat_lib.as_ref().map(|lib| (lib, "flat_gbuffer")))
-                .or_else(|| fs.map(|f| (&f.lib, fragment_entry(f, targets))))),
+                .or_else(|| fs.map(|f| (&f.lib, fragment_entry(f, targets)))),
             &[],
         );
         for (i, f) in targets.colors.iter().enumerate() {
@@ -281,7 +258,7 @@ impl Pipelines {
         d.raster.alpha_to_coverage.hash(&mut h);
         flat.hash(&mut h);
         paint.hash(&mut h);
-        cube_test.hash(&mut h);
+        paint_dir.hash(&mut h);
         let key = h.finish();
         // NVN writes the point size of every draw. Metal refuses a point size write for a line or triangle class,
         // so such a pipeline is built again without a class.
@@ -304,16 +281,7 @@ impl Pipelines {
             })
         };
         let p = p.map_err(|e| {
-            if crate::diag("pipe")
-                && PIPE_SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 300
-            {
-                eprintln!(
-                    "DIAG pipe render {} / {:?}: {e}",
-                    vs.entry,
-                    fs.map(|f| f.entry.as_str())
-                );
-            }
-            Skip::Pipeline
+            pipe_failed(format_args!("render {} / {:?}: {e}", vs.entry, fs.map(|f| f.entry.as_str())))
         })?;
         Ok((p, key))
     }
@@ -324,14 +292,7 @@ impl Pipelines {
         ("compute", key).hash(&mut h);
         self.cache
             .compute(h.finish(), &p.lib, &p.entry)
-            .map_err(|e| {
-                if crate::diag("pipe")
-                    && PIPE_SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 300
-                {
-                    eprintln!("DIAG pipe compute {}: {e}", p.entry);
-                }
-                Skip::Pipeline
-            })
+            .map_err(|e| pipe_failed(format_args!("compute {}: {e}", p.entry)))
     }
 
     /// The depth and stencil state object of a description, made once.
@@ -352,14 +313,8 @@ impl Pipelines {
         if let Some(s) = map.get(d) {
             return Ok(s.clone());
         }
-        let s = DepthStencilState::new(&self.ctx, d).map_err(|e| {
-            if crate::diag("pipe")
-                && PIPE_SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 300
-            {
-                eprintln!("DIAG pipe depth-stencil: {e}");
-            }
-            Skip::Pipeline
-        })?;
+        let s = DepthStencilState::new(&self.ctx, d)
+            .map_err(|e| pipe_failed(format_args!("depth-stencil {d:?}: {e}")))?;
         map.insert(*d, s.clone());
         Ok(s)
     }

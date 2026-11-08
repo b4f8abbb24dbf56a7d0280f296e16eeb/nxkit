@@ -258,10 +258,10 @@ impl GpuBackend {
             );
         }
         let diag = stats_diag();
-        if crate::diag("pixelall") {
+        if crate::diag("pixelall") && n.is_multiple_of(10) {
             let st = &report.stats;
             eprintln!(
-                "FR {n} bar {:?} draws {} passes {}/{} created {} rescaled {} uploads {} copybacks {} skipped {} {:?}",
+                "DIAG pixelall frame {n} bar {:?} draws {} passes {}/{} created {} rescaled {} uploads {} copybacks {} skipped {} {:?}",
                 crate::nobar_range(), st.draws, st.render_passes, st.compute_passes, st.textures_created, st.textures_rescaled,
                 st.uploads, st.copybacks, st.skipped_total(), st.skipped
             );
@@ -531,14 +531,14 @@ impl TickSink for GpuBackend {
         if crate::diag("present") && PRESENT_DIAG[2].load(Ordering::Relaxed) % 300 == 1 {
             eprintln!("DIAG present texture {:?}", texture.desc());
         }
-        if crate::diag("pixelall") {
+        if crate::diag("pixelall") && PRESENT_DIAG[2].load(Ordering::Relaxed).is_multiple_of(10) {
             let d = texture.desc();
             let pts: Vec<[u32; 2]> = (1..4)
                 .flat_map(|j| (1..4).map(move |i| [d.width * i / 4, d.height * j / 4]))
                 .collect();
             let px = texture.debug_read(&self.ctx, &pts).unwrap_or_default();
             let lit = px.iter().filter(|p| p[0] | p[1] | p[2] > 8).count();
-            eprintln!("PX {} lit {lit}", PRESENT_DIAG[2].load(Ordering::Relaxed));
+            eprintln!("DIAG pixelall present {} lit {lit}/9", PRESENT_DIAG[2].load(Ordering::Relaxed));
         }
         if crate::diag("pixel") && PRESENT_DIAG[2].load(Ordering::Relaxed) % 60 == 1 {
             let d = texture.desc();

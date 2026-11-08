@@ -46,9 +46,7 @@ struct Scan<'a> {
 /// True under `NXKIT_DIAG=stats` (or `all`).
 fn stats_diag() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "stats" || c == "all"))
-    })
+    *ON.get_or_init(|| crate::diag::on("stats"))
 }
 
 impl Analyser {

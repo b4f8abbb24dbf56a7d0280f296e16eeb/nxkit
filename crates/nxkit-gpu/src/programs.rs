@@ -125,8 +125,11 @@ impl Programs {
         }
         let r = self.load(key, vertex).map(Arc::new);
         if let Err(e) = &r {
+            // Counted once per key: the failure is cached.
+            let what = format_args!("{key} vertex={vertex}: {e:?}");
+            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::ProgramFailed, what);
             if crate::diag("prog") {
-                eprintln!("DIAG prog {key} vertex={vertex}: {e:?}");
+                eprintln!("DIAG prog {what}");
             }
         }
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].insert(key.to_owned(), r.clone());

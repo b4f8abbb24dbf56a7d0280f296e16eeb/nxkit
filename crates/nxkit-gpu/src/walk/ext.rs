@@ -101,7 +101,8 @@ impl Walker {
                 let value = (x.arg, [x.word(0), x.word(1), x.word(2), x.word(3)]);
                 if let Ok(mut views) = VIEWS.lock() {
                     if views.len() < 80 && !views.contains(&value) {
-                        eprintln!("DIAG target view {value:x?}"); views.push(value);
+                        eprintln!("DIAG target view {value:x?}");
+                        views.push(value);
                     }
                 }
             }
@@ -319,26 +320,23 @@ impl Walker {
         let show =
             || crate::diag("prog") && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40;
         let Some((topology, args)) = draw_args(x) else {
-            if crate::diag("indirect") {
-                static K: [std::sync::atomic::AtomicU32; 16] = [const { std::sync::atomic::AtomicU32::new(0) }; 16];
-                let n = K[usize::from(x.arg) & 15].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if n.is_power_of_two() {
-                    eprintln!("DIAG indirect kind {} dropped {} times, program {:x?}", x.arg, n + 1, st.program);
-                }
-            }
-            if show() {
-                eprintln!("DIAG draw: no draw args, kind {}", x.arg);
+            nxkit_nvn::diag::note(
+                nxkit_nvn::diag::Reason::DrawNoArgs,
+                format_args!("draw kind {} program {:x?}", x.arg, st.program),
+            );
+            static K: [std::sync::atomic::AtomicU32; 16] = [const { std::sync::atomic::AtomicU32::new(0) }; 16];
+            let n = K[usize::from(x.arg) & 15].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if crate::diag("indirect") && n.is_power_of_two() {
+                eprintln!("DIAG indirect kind {} dropped {} times, program {:x?}", x.arg, n + 1, st.program);
             }
             return d;
         };
         self.track.program(0, st.program[0]);
         let Some(vertex) = self.programs.find(st.program[0], Kind::Vertex) else {
+            let what = format_args!("programs {:x?}, stages of [0]: {}", st.program, self.programs.describe(st.program[0]));
+            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::DrawNoVertex, what);
             if show() {
-                eprintln!(
-                    "DIAG draw: no vertex stage, programs {:x?}, stages of [0]: {}",
-                    st.program,
-                    self.programs.describe(st.program[0])
-                );
+                eprintln!("DIAG draw: no vertex stage, {what}");
             }
             return d;
         };

@@ -214,11 +214,14 @@ impl BarrierState {
                     Visibility::None
                 },
             });
+            // The `allbar` knob and the `nobar` file give the pass a full barrier: it waits for every stage of the
+            // earlier work. The stages before the barrier must be ones that this kind of pass runs, Metal refuses
+            // the others.
             let dep = if crate::knob("allbar") || crate::nobar(out.before.len()) {
                 Some(Dependency {
                     scope: Scope::FromEarlierPasses,
                     after: Stages::ALL,
-                    before: Stages::ALL,
+                    before: mine,
                     visibility: Visibility::Device,
                 })
             } else {

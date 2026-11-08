@@ -118,7 +118,7 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         match distinct_color_slots(&color_aliases, written) {
             Ok(selected) => selected,
             Err(why) => {
-                if crate::diag("target") && crate::lum::active() {
+                if crate::diag("target") && crate::diag::sampled() {
                     eprintln!("DIAG alias conflict cmds {:?} attachments {:?}", pass.cmds, color_aliases);
                     for n in draw_range(sh, pass) {
                         if let Some(d) = sh.detail.draws.get(n as usize) {
@@ -142,41 +142,20 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         let res = sh.textures.get(&a.tex).ok_or(Skip::Texture)?;
         let texture = sh.texture_store.target_view(res, a.view)?;
         let d = texture.desc();
-        if crate::diag("cube") && d.width <= 128 && d.format == nxkit_metal::Format::Rg11B10Float {
-            static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-            let line = format!(
-                "DIAG cube pass cmds {:?} {:?} {:?} {}x{} {:?} level {} layer {} load {:?} store {:?}",
-                pass.cmds, a.slot, a.tex, d.width, d.height, d.kind, a.view.level(), a.view.layer(), a.load, a.store
-            );
-            if let Ok(mut seen) = SEEN.lock() {
-                let key = format!("{:?}{:?}{}{}", a.tex, a.slot, a.view.level(), a.view.layer());
-                if !seen.contains(&key) && seen.len() < 3000 {
-                    seen.push(key);
-                    eprintln!("{line}");
-                }
-            }
-        }
-        if crate::diag("draw") && crate::lum::active() && d.width == 1600 && d.height == 900 {
-            eprintln!("DIAG attachment {:?} {:?} backing {:?} {:?} cmds {:?}", a.slot, a.tex, res.barrier_id, d.format, pass.cmds);
+        if crate::diag("draw") && crate::diag::sampled() && crate::diag::tex_match(d.format, d.width, d.height, d.array_layers) {
+            eprintln!("DIAG attachment {:?} {:?} backing {:?} {:?} {}x{} cmds {:?}", a.slot, a.tex, res.barrier_id, d.format, d.width, d.height, pass.cmds);
         }
         // The game encodes block compressed textures on the GPU by rendering into them. Metal cannot render into a
         // compressed format, so such a pass is left out.
         if matches!(a.slot, Slot::Color(_)) && (d.format.is_compressed() || d.format.is_depth()) {
-            if crate::diag("target") {
-                eprintln!("DIAG target not renderable {:?}", d.format);
-            }
+            target_diag(format_args!("not renderable {:?} {}x{} cmds {:?}", d.format, d.width, d.height, pass.cmds));
             return Err(Skip::Format);
         }
         let mem = d.storage == Storage::Memoryless;
         // Attachments of different sizes render into the smallest one, as in NVN.
         let s = size.get_or_insert([d.width, d.height]);
         if *s != [d.width, d.height] {
-            if crate::diag("target") {
-                eprintln!(
-                    "DIAG target size mismatch {:?} vs {}x{} slot {:?}",
-                    s, d.width, d.height, a.slot
-                );
-            }
+            target_diag(format_args!("size mismatch {:?} vs {}x{} slot {:?}", s, d.width, d.height, a.slot));
             *s = [s[0].min(d.width), s[1].min(d.height)];
         }
         if res.scaled {
@@ -235,16 +214,11 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
     }
     colors.sort_by_key(|(n, _)| *n);
     if colors.windows(2).any(|w| w[0].0 == w[1].0) {
-        if crate::diag("target") {
-            eprintln!(
-                "DIAG target twice {:?}",
-                colors.iter().map(|(n, _)| *n).collect::<Vec<_>>()
-            );
-        }
+        target_diag(format_args!("twice {:?}", colors.iter().map(|(n, _)| *n).collect::<Vec<_>>()));
         return Err(Skip::Target);
     }
-    if size.is_none() && crate::diag("target") {
-        eprintln!("DIAG target none");
+    if size.is_none() {
+        target_diag(format_args!("none, cmds {:?}", pass.cmds));
     }
     let size = size.ok_or(Skip::Target)?;
     // NVN allows empty colour slots between attachments. They stay empty in the pass and in the pipeline.
@@ -278,7 +252,9 @@ fn distinct_color_slots<K: Copy + Eq + std::fmt::Debug>(colors: &[(u8, K, bool)]
         let aliases: Vec<_> = colors.iter().filter(|c| c.1 == backing).collect();
         let writers: Vec<_> = aliases.iter().filter(|c| written & (1 << c.0) != 0).collect();
         if writers.len() > 1 {
-            if crate::diag("target") && crate::lum::active() { eprintln!("DIAG target competing aliases {backing:?} written {written:#x}"); }
+            if crate::diag("target") && crate::diag::sampled() {
+                eprintln!("DIAG target competing aliases {backing:?} written {written:#x}");
+            }
             return Err(Skip::Target);
         }
         let winner = writers.first().map(|c| c.0)
@@ -289,9 +265,29 @@ fn distinct_color_slots<K: Copy + Eq + std::fmt::Debug>(colors: &[(u8, K, bool)]
     Ok(selected)
 }
 
+/// Prints a line of the `target` category, at most 300.
+fn target_diag(what: std::fmt::Arguments<'_>) {
+    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if crate::diag("target") && crate::diag::first(&SHOWN, 300) {
+        eprintln!("DIAG target {what}");
+    }
+}
+
 thread_local! {
-    /// True while the encoded render pass writes a terrain array (the `hm` diagnostic).
-    static HM_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// True while the encoded render pass has an attachment that passes `NXKIT_DIAG_TEX`, or always without it. The
+    /// per-draw categories print the draws of such passes only.
+    static FOCUS_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// The most lines that one per-draw category prints on one sampled frame.
+const DRAW_LINES: u32 = 2000;
+
+/// Whether a per-draw category prints this draw: on sampled frames, in focused passes, within [`DRAW_LINES`].
+fn draw_diag(cat: &str, budget: &std::sync::atomic::AtomicU64) -> bool {
+    crate::diag(cat)
+        && crate::diag::sampled()
+        && FOCUS_PASS.with(std::cell::Cell::get)
+        && crate::diag::sample_budget(budget, DRAW_LINES)
 }
 
 fn draw_range(sh: &Shared<'_>, pass: &Pass) -> std::ops::Range<u32> {
@@ -525,7 +521,8 @@ fn draw(
     let Some(d) = sh.detail.draws.get(n as usize) else {
         return stats.skip(Skip::Detail);
     };
-    if crate::diag("draw") && crate::lum::active() && pc.size == [1600, 900] {
+    static DRAW_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if draw_diag("draw", &DRAW_SHOWN) {
         eprintln!(
             "DIAG draw {n} vs {} fs {:?} args {:?} depth {:?} raster {:?} masks {:?} blend {:?} inputs {:?} streams {:?} ubos {:?} textures {:?}",
             d.program.vertex,
@@ -550,203 +547,9 @@ fn draw(
             d.textures
         );
     }
-    if crate::diag("cube")
-        && crate::lum::active()
-        && pc.size[0] <= 128
-        && pc.targets.colors.first().copied().flatten() == Some(nxkit_metal::Format::Rg11B10Float)
-    {
-        static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-        let key = format!("{n}{:?}{:?}{:?}", d.program.fragment, d.args, pc.size);
-        if let Ok(mut seen) = SEEN.lock() {
-            if !seen.contains(&key) && seen.len() < 3000 {
-                seen.push(key);
-                let unresolved: Vec<_> = d
-                    .textures
-                    .iter()
-                    .filter(|t| t.handle != 0 && !sh.env.handles.contains_key(&t.handle))
-                    .map(|t| t.handle)
-                    .collect();
-                eprintln!(
-                    "DIAG cube draw {n} size {:?} vs {} fs {:?} args {:?} depth {}/{}/{} cull {} masks0 {} blend0 {:?} vp {:?} sc {:?} tex {} unresolved {unresolved:?}",
-                    pc.size, d.program.vertex, d.program.fragment, d.args,
-                    d.depth_stencil.depth_test, d.depth_stencil.depth_write, d.depth_stencil.depth_func,
-                    d.raster.cull, d.write_masks[0], d.blend.first().map(|b| (b.enable, b.src_rgb, b.dst_rgb)),
-                    d.dynamic.viewport, d.dynamic.scissor, d.textures.len()
-                );
-                let floats = |addr: u64, count: usize| -> Vec<f32> {
-                    let mut bytes = vec![0u8; count * 4];
-                    match sh.guest_offset(addr, bytes.len() as u64) {
-                        Some(off) if sh.guest.read(off, &mut bytes).is_ok() => bytes
-                            .chunks_exact(4)
-                            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                            .collect(),
-                        _ => Vec::new(),
-                    }
-                };
-                for u in d.ubos.iter().filter(|u| u.slot <= 1) {
-                    let live = floats(u.address, (u.size as usize / 4).min(80));
-                    let snap: Vec<f32> = u
-                        .snapshot
-                        .as_ref()
-                        .map(|b| b.chunks_exact(4).take(80).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
-                        .unwrap_or_default();
-                    eprintln!(
-                        "DIAG cube ubo {n} {:?} slot {} addr {:#x} size {} live {live:?} snap {snap:?}",
-                        u.stage, u.slot, u.address, u.size
-                    );
-                }
-                eprintln!(
-                    "DIAG cube tex {n} {:?}",
-                    d.textures.iter().filter(|t| t.handle != 0).map(|t| (t.stage, t.slot, t.handle)).collect::<Vec<_>>()
-                );
-                for st in d.streams.iter().take(2) {
-                    eprintln!(
-                        "DIAG cube stream {n} index {} addr {:#x} size {} stride {} floats {:?} attrs {:?}",
-                        st.index, st.address, st.size, st.stride, floats(st.address, 12), d.attributes
-                    );
-                }
-            }
-        }
-    }
-    if crate::diag("hmsrc") && HM_PASS.with(std::cell::Cell::get) {
-        static SEEN: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
-        for t in d.textures.iter().filter(|t| t.handle != 0 && t.stage == crate::detail::Stage::Fragment && t.slot == 0) {
-            let Ok((slot, _)) = sh.table.resolve(t.handle) else { continue };
-            let Ok(rec) = sh.table.record(slot.texture) else { continue };
-            let Ok(mut seen) = SEEN.lock() else { break };
-            if seen.contains(&slot.texture.0) || seen.len() > 400 {
-                continue;
-            }
-            seen.push(slot.texture.0);
-            let map = sh.guest.address_map();
-            let mut nz = 0;
-            let mut buf = [0u8; 256];
-            let pages = rec.layout.size.div_ceil(4096);
-            let mut per_layer = vec![0u32; rec.layout.layers.max(1) as usize];
-            if let Some(base) = rec.address.get().checked_sub(map.gpu_base()) {
-                for p in 0..pages {
-                    if sh.guest.read(base + p * 4096, &mut buf).is_ok() && buf.iter().any(|b| *b != 0) {
-                        nz += 1;
-                        let l = (p * 4096 / rec.layout.layer_size.max(1)) as usize;
-                        if let Some(c) = per_layer.get_mut(l) {
-                            *c += 1;
-                        }
-                    }
-                }
-            }
-            eprintln!("DIAG hmsrc per layer pages with data {per_layer:?}");
-            eprintln!(
-                "DIAG hmsrc draw {n} fs {:?} src {:?} {:#x} {:?} {}x{}x{} residency {:?} guest pages with data {nz}/{pages} tic base_layer {} layers {} base_level {}",
-                d.program.fragment, slot.texture, rec.address.get(), rec.desc.format, rec.desc.width, rec.desc.height, rec.desc.depth,
-                rec.residency, slot.header.view.base_layer, slot.header.view.layers, slot.header.view.base_level
-            );
-        }
-    }
-    if crate::diag("hm") && HM_PASS.with(std::cell::Cell::get) {
-        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 60 {
-            let tex: Vec<_> = d
-                .textures
-                .iter()
-                .filter(|t| t.handle != 0)
-                .map(|t| {
-                    let info = sh.table.resolve(t.handle).ok().map(|(slot, _)| {
-                        let res = sh.textures.get(&slot.texture).map(|r| (r.desc.kind, r.desc.width, r.desc.height, r.desc.array_layers, r.desc.format));
-                        let rec = sh.table.record(slot.texture).ok().map(|r| r.residency);
-                        (slot.texture, res, rec)
-                    });
-                    (t.stage, t.slot, info)
-                })
-                .collect();
-            eprintln!(
-                "DIAG hm draw {n} size {:?} vs {} fs {:?} args {:?} masks0 {} blend0 {:?} depth {}/{} tex {tex:?}",
-                pc.size, d.program.vertex, d.program.fragment, d.args, d.write_masks[0],
-                d.blend.first().map(|b| (b.enable, b.src_rgb, b.dst_rgb)), d.depth_stencil.depth_test, d.depth_stencil.depth_func
-            );
-        }
-    }
-    if crate::diag("terr") {
-        static KEYS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-        let keys = KEYS.get_or_init(|| {
-            std::fs::read_to_string("/tmp/fmap/terrain_keys.txt")
-                .map(|t| t.lines().map(str::to_owned).collect())
-                .unwrap_or_default()
-        });
-        if keys.iter().any(|k| d.program.vertex.starts_with(k.as_str())) {
-            static SEEN: std::sync::Mutex<Vec<(String, u64)>> = std::sync::Mutex::new(Vec::new());
-            for t in d.textures.iter().filter(|t| t.handle != 0) {
-                let key = (format!("{}{:?}{}", d.program.vertex, t.stage, t.slot), t.handle);
-                let Ok(mut seen) = SEEN.lock() else { break };
-                if seen.contains(&key) || seen.len() > 400 {
-                    continue;
-                }
-                seen.push(key);
-                let info = sh.table.resolve(t.handle).ok().map(|(slot, _)| {
-                    let res = sh.textures.get(&slot.texture).map(|r| {
-                        (r.desc.kind, r.desc.width, r.desc.height, r.desc.array_layers, r.desc.mip_levels, r.desc.format, r.scaled)
-                    });
-                    let rec = sh.table.record(slot.texture).ok().map(|r| (r.residency, r.desc.target, r.desc.depth));
-                    (slot.texture, slot.header.target, slot.header.view.target, slot.header.view.base_layer, slot.header.view.layers, res, rec)
-                });
-                eprintln!(
-                    "DIAG terr vs {} fs {:?} {:?} slot {} handle {:#x} fit {:?} -> {:?}",
-                    &d.program.vertex[..16.min(d.program.vertex.len())],
-                    d.program.fragment.as_deref().map(|f| &f[..16.min(f.len())]),
-                    t.stage, t.slot, t.handle,
-                    sh.env.handles.get(&t.handle).map(|r| r.texture != 0),
-                    info
-                );
-            }
-        }
-    }
-    if crate::diag("ubo") && crate::lum::active() && pc.size == [1600, 900] && n >= 2168 {
-        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        for u in d.ubos.iter().filter(|u| u.snapshot.is_some() || u.size >= 4096) {
-            if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 400 {
-                break;
-            }
-            let mut live = vec![0u8; (u.size as usize).min(1 << 16)];
-            let read = match sh.guest_offset(u.address, live.len() as u64) {
-                Some(off) => sh.guest.read(off, &mut live).is_ok(),
-                None => false,
-            };
-            let nz_live = if read { live.iter().filter(|b| **b != 0).count() } else { usize::MAX };
-            let nz_snap = u.snapshot.as_ref().map_or(usize::MAX, |b| b.iter().filter(|x| **x != 0).count());
-            let head: Vec<f32> = u
-                .snapshot
-                .as_ref()
-                .map(|b| b.chunks_exact(4).take(8).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
-                .unwrap_or_default();
-            eprintln!(
-                "DIAG ubo draw {n} {:?} slot {} size {} snapshot {:?} nz_snap {nz_snap} nz_live {nz_live} head {head:?}",
-                u.stage, u.slot, u.size, u.snapshot.as_ref().map(|b| b.len())
-            );
-        }
-    }
-    if crate::diag("geom") && crate::lum::active() && pc.size == [1600, 900] && n % 150 == 0 {
-        let floats = |addr: u64, count: usize| -> Vec<f32> {
-            let mut bytes = vec![0u8; count * 4];
-            match sh.guest_offset(addr, bytes.len() as u64) {
-                Some(off) if sh.guest.read(off, &mut bytes).is_ok() => {
-                    bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
-                }
-                _ => Vec::new(),
-            }
-        };
-        if let Some(s0) = d.streams.first() {
-            eprintln!("DIAG geom draw {n} stream0 {:?} pos {:?}", d.attributes.first(), floats(s0.address, 9));
-        }
-        for u in d.ubos.iter().filter(|u| u.slot <= 2 && matches!(u.stage, crate::detail::Stage::Vertex)) {
-            let n_floats = 24.min(u.size as usize / 4);
-            let live = floats(u.address, n_floats);
-            let snap: Vec<f32> = u
-                .snapshot
-                .as_ref()
-                .map(|b| b.chunks_exact(4).take(n_floats).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
-                .unwrap_or_default();
-            eprintln!("DIAG geom draw {n} ubo{} size {} live {live:?} snapshot {snap:?}", u.slot, u.size);
-        }
-        eprintln!("DIAG geom draw {n} viewport {:?} depth_range {:?} scissor {:?}", d.dynamic.viewport, d.dynamic.depth_range, d.dynamic.scissor);
+    static UBO_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if draw_diag("ubo", &UBO_SHOWN) {
+        ubo_diag(sh, n, d);
     }
     if crate::diag("tex") {
         let unresolved: Vec<_> = d
@@ -770,7 +573,7 @@ fn draw(
         }
     }
     let p = prepare(sh, pc, d, &mut ScratchSink::new(scratch, sh.uploaded, Some(memo)), false);
-    if crate::diag("pixel") && pc.size == [1920, 1080] {
+    if crate::diag("pixel") && crate::diag::sampled() && FOCUS_PASS.with(std::cell::Cell::get) {
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 97 == 0 {
             eprintln!(
@@ -802,6 +605,36 @@ fn draw(
     match emit(rp, tr, pc, &d.dynamic, &p, stats) {
         Ok(()) => stats.draws += 1,
         Err(_) => stats.skip(Skip::Encode),
+    }
+}
+
+/// The `ubo` category: the uniform buffers of draw `n` as the guest memory holds them now and as the snapshot of the
+/// walk holds them, and the first floats of its first two vertex streams.
+fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
+    let floats = |addr: u64, count: usize| -> Vec<f32> {
+        let mut bytes = vec![0u8; count * 4];
+        match sh.guest_offset(addr, bytes.len() as u64) {
+            Some(off) if sh.guest.read(off, &mut bytes).is_ok() => {
+                bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+            }
+            _ => Vec::new(),
+        }
+    };
+    for u in &d.ubos {
+        let count = (u.size as usize / 4).min(16);
+        let snap: Option<Vec<f32>> = u.snapshot.as_ref().map(|b| {
+            b.chunks_exact(4).take(count).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+        });
+        eprintln!(
+            "DIAG ubo draw {n} {:?} slot {} addr {:#x} size {} live {:?} snapshot {snap:?}",
+            u.stage, u.slot, u.address, u.size, floats(u.address, count)
+        );
+    }
+    for st in d.streams.iter().take(2) {
+        eprintln!(
+            "DIAG ubo draw {n} stream {} addr {:#x} stride {} floats {:?}",
+            st.index, st.address, st.stride, floats(st.address, 8)
+        );
     }
 }
 
@@ -863,17 +696,17 @@ pub(crate) fn render_pass(
     stats: &mut EncodeStats,
 ) {
     let range = draw_range(sh, pass);
-    if crate::diag("hm") || crate::diag("hmsrc") || crate::diag("hmcap") {
-        let hm = sh.plan.attachments_of(pass).iter().any(|a| {
+    if crate::diag::tex_filtered() {
+        let focus = sh.plan.attachments_of(pass).iter().any(|a| {
             sh.textures.get(&a.tex).is_some_and(|r| {
-                r.desc.kind == nxkit_metal::TextureKind::D2Array && r.desc.array_layers == 8 && r.desc.width >= 256
+                crate::diag::tex_match(r.desc.format, r.desc.width, r.desc.height, r.desc.array_layers)
             })
         });
-        HM_PASS.with(|c| c.set(hm));
+        FOCUS_PASS.with(|c| c.set(focus));
     }
     let lost =
         |stats: &mut EncodeStats, why: Skip| stats.skipped[why as usize] += range.len() as u32;
-    if crate::diag("barr") && crate::lum::active() {
+    if crate::diag("barr") && crate::diag::sampled() {
         let known: std::collections::HashSet<TexId> = sh
             .plan
             .reads_of(pass)
@@ -960,7 +793,7 @@ pub(crate) fn render_pass(
         n += 1;
     }
     rp.end();
-    if crate::lum::active() || (crate::diag("hmcap") && HM_PASS.with(std::cell::Cell::get)) {
+    if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
         for a in sh.plan.attachments_of(pass) {
             if matches!(a.slot, Slot::Color(_)) && a.store == StoreAction::Store {
                 if let Slot::Color(slot) = a.slot {

@@ -322,7 +322,6 @@ impl Record {
         let arg = u16::from_le_bytes([h[2], h[3]]);
         let size = u32::from_le_bytes([h[4], h[5], h[6], h[7]]);
         if size < HEADER_BYTES || size % 8 != 0 || size as usize > MAX_RECORD_BYTES {
-            eprintln!("DIAG bad record at {host:#x}: header {h:02x?}");
             return Err(NvnError::BadRecord("size"));
         }
         if !whole {

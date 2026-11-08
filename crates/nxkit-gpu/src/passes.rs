@@ -39,9 +39,12 @@ fn scaled(v: [u32; 3], s: f32) -> [u32; 3] {
     [(v[0] as f32 * s).round() as u32, (v[1] as f32 * s).round() as u32, v[2]]
 }
 
+/// Prints a refused copy under the `copy` category (at most 400 lines), keeps it as an example of the health report
+/// and gives back `Skip::Copy`.
 fn copy_skip(what: std::fmt::Arguments<'_>) -> Skip {
     static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    if crate::diag("copy") && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 400 {
+    nxkit_nvn::diag::example(nxkit_nvn::diag::Reason::SkipCopy, what);
+    if crate::diag("copy") && crate::diag::first(&SHOWN, 400) {
         eprintln!("DIAG copy {what}");
     }
     Skip::Copy
@@ -175,12 +178,15 @@ fn copy_buffer(sh: &Shared<'_>, cp: &mut ComputePass<'_>, cmd: Cmd, c: &CopyDeta
 
 fn copy(sh: &Shared<'_>, cp: &mut ComputePass<'_>, scratch: &Scratch, cmd: Cmd, n: u32) -> Result<(), Skip> {
     let entry = sh.detail.copies.get(n as usize);
-    if crate::diag("tcopy") {
-        let arr = |t: Option<TexId>| {
-            t.and_then(|t| sh.textures.get(&t)).is_some_and(|r| r.desc.array_layers == 8 && r.desc.width >= 256)
+    static TCOPY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if crate::diag("tcopy") && crate::diag::tex_filtered() {
+        let hit = |t: Option<TexId>| {
+            t.and_then(|t| sh.textures.get(&t)).is_some_and(|r| {
+                crate::diag::tex_match(r.desc.format, r.desc.width, r.desc.height, r.desc.array_layers)
+            })
         };
         if let Cmd::Copy { src, dst } = cmd {
-            if arr(src) || arr(dst) {
+            if (hit(src) || hit(dst)) && crate::diag::first(&TCOPY, 300) {
                 let f = |t: Option<TexId>| t.and_then(|t| sh.textures.get(&t).map(|r| (t, r.desc.width, r.desc.format)));
                 eprintln!("DIAG tcopy src {:?} dst {:?} detail {:?}", f(src), f(dst), entry);
             }
@@ -288,7 +294,7 @@ pub(crate) fn compute_pass(
             (PassKind::Copy, Cmd::Copy { .. } | Cmd::Downsample { .. }) => copy(sh, &mut cp, scratch, cmd, ord.copy),
             _ => Ok(()),
         };
-        if crate::diag("comp") && crate::lum::active() {
+        if crate::diag("comp") && crate::diag::sampled() {
             if let (PassKind::Compute, Some(dd)) = (pass.kind, sh.detail.dispatches.get(ord.dispatch as usize)) {
                 eprintln!(
                     "DIAG comp pass {index} cmd {i} program {:?} groups {:?} textures {} sbufs {} result {:?}",
