@@ -49,6 +49,12 @@ A called recording gets its summary under the state that the caller has at the c
 - A texture address or a handle resolves to something else, for example a texture pool slot that is registered again: the summary is dropped at the next lookup and decoded again.
 - One handle keeps at most 16 summaries.
 
+**Checking a hit.** A summary lists the addresses and handles that it resolved. A hit has to prove that they still name the same textures. `ResourceTable::epoch` and `Descriptors::epoch` count the changes that can alter an answer (a texture made or finalized, a pool slot that gets another texture or loses its texture). A summary remembers the pair of counts at which its references last held. When the pair is the same, the hit skips the check. A deferred bind reads guest memory, which changes without notice, so those references (`Summary::deferred`) are read on every hit. A summary with no references of its own and one called summary takes the references of that one without a new dedupe.
+
+**Appending a hit.** `CmdStream::seal` notes which commands hold a span when the summary is made. `Frame::append` and `CmdStream::splice` then copy the commands in one block and patch only those, and not even those when the frame lists were empty. A stream that nobody sealed (a hand-built one) is appended command by command, with the same result. The frame still holds its own copy of the commands, because the backend reads `Frame::cmds`. Sharing segments of the summaries without a copy would change that type.
+
+**Profile and check.** `NXKIT_DIAG=decodeprof` prints the mean per submit of the lookups, hits, misses, call depth, records and the time of each step ([diagnostics](diagnostics.md)). `NXKIT_VERIFY_CACHE=1` decodes each submitted recording again with an empty cache and fails the submit when the commands, the texture lists, the needs or the state delta differ from the cached summary.
+
 `CacheStats` counts hits, misses, invalidations, revalidations, evictions and unresolved handles.
 
 ### The frame
@@ -72,6 +78,8 @@ NVN has no render passes. Metal needs them. `Analyser` cuts the recorded frame i
 - Compute, copy, downsample, fence, present and CPU readback each end the render pass. Neighbours of the same kind form one pass.
 - A full clear of an attachment that the pass already used starts a new pass.
 - A clear under a scissor does not end the pass. The old contents stay in use, so the load action is `Load`.
+
+The scan keeps a stamp for each texture id that says which render pass already holds it in its read list, so a draw does not search the reads of its pass for each texture. The stamp counts up with each render pass.
 
 ### Merge
 

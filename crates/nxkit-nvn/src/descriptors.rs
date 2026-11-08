@@ -56,6 +56,8 @@ pub struct Descriptors {
     /// registered again with another texture, so a reader checks the slot.
     slots_of: Vec<Vec<u32>>,
     samplers: Vec<Option<Tsc>>,
+    /// Counts the changes that can make a handle name another texture ([`Descriptors::epoch`]).
+    epoch: u64,
 }
 
 fn add_pool(pools: &mut Vec<PoolRange>, new: PoolRange, max_id: u32) -> Result<()> {
@@ -83,6 +85,12 @@ impl Descriptors {
     /// Empty pools.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A counter that changes whenever [`Descriptors::resolve`] could name another texture: when a slot gets a different
+    /// texture, or loses it. Registering the texture a slot already holds, or a sampler, does not change it.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// Adds a texture pool of `count` slots from id `base`, with its header memory at `memory`.
@@ -141,12 +149,14 @@ impl Descriptors {
         let r = table.get(texture)?;
         let header = Tic::for_texture(&r.desc, r.address, view)?;
         let slot = TextureSlot { texture, header };
-        if let Some(old) = self.textures[id as usize].replace(slot) {
-            if old.texture != texture {
-                if let Some(slots) = self.slots_of.get_mut(old.texture.0 as usize) {
-                    slots.retain(|&s| s != id);
-                }
-            }
+        let old = self.textures[id as usize].replace(slot);
+        if old.is_none_or(|o| o.texture != texture) {
+            self.epoch += 1;
+        }
+        if let Some(old) = old.filter(|o| o.texture != texture)
+            && let Some(slots) = self.slots_of.get_mut(old.texture.0 as usize)
+        {
+            slots.retain(|&s| s != id);
         }
         let index = texture.0 as usize;
         if self.slots_of.len() <= index {
@@ -207,6 +217,7 @@ impl Descriptors {
             let s = &mut self.textures[id as usize];
             if s.as_ref().is_some_and(|slot| slot.texture == texture) {
                 *s = None;
+                self.epoch += 1;
             }
         }
     }

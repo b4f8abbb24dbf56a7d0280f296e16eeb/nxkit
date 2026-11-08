@@ -98,3 +98,26 @@ fn a_present_goes_behind_the_submitted_commands() {
     assert!(matches!(cmds[0], Cmd::Draw { .. }));
     assert!(matches!(cmds[1], Cmd::Present(t) if t == c));
 }
+
+#[test]
+fn a_hit_skips_the_check_of_its_references_until_a_texture_changes() {
+    let mut f = fe();
+    with_pools(&mut f);
+    let (a, b) = (tex(&mut f, 0x10_0000), tex(&mut f, 0x20_0000));
+    f.register_texture(1, a, TextureView::identity()).unwrap();
+    let rec = record(&mut f, CMD, &[bind(2, 1), Record::Draw]);
+    f.submit(rec).unwrap();
+    f.submit(rec).unwrap();
+    assert_eq!(f.cache().prof.epoch_skips, 1);
+    // the same texture in the same slot changes nothing
+    f.register_texture(1, a, TextureView::identity()).unwrap();
+    f.submit(rec).unwrap();
+    assert_eq!(f.cache().prof.epoch_skips, 2);
+    // another texture in the slot: the summary is dropped and decoded again
+    f.register_texture(1, b, TextureView::identity()).unwrap();
+    f.submit(rec).unwrap();
+    assert_eq!(f.cache_stats().revalidations, 1);
+    let last = f.frame().cmds.last().copied();
+    let Some(Cmd::Draw { reads, .. }) = last else { panic!("no draw") };
+    assert_eq!(f.frame().list(reads), [b]);
+}

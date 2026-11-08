@@ -142,6 +142,10 @@ pub struct CmdStream {
     pub cmds: Vec<Cmd>,
     /// The shared texture lists.
     pub lists: Vec<TexId>,
+    /// The indices of the commands that hold a [`Span`], valid when `sealed` equals `cmds.len()` ([`CmdStream::seal`]).
+    span_at: Vec<u32>,
+    /// The number of commands that `span_at` covers.
+    sealed: usize,
 }
 
 impl CmdStream {
@@ -154,14 +158,22 @@ impl CmdStream {
     pub fn clear(&mut self) {
         self.cmds.clear();
         self.lists.clear();
+        self.span_at.clear();
+        self.sealed = 0;
+    }
+
+    /// Notes which commands hold a span, so that appending this stream to another copies the commands in one block and
+    /// patches only those. A stream that is changed afterwards is appended command by command until it is sealed again.
+    pub fn seal(&mut self) {
+        self.span_at.clear();
+        let at = self.cmds.iter().enumerate().filter(|(_, c)| has_span(c)).map(|(i, _)| i as u32);
+        self.span_at.extend(at);
+        self.sealed = self.cmds.len();
     }
 
     /// Appends another stream. Its spans move behind the lists of this stream.
     pub fn splice(&mut self, other: &CmdStream) {
-        let base = self.lists.len() as u32;
-        self.lists.extend_from_slice(&other.lists);
-        self.cmds
-            .extend(other.cmds.iter().map(|c| rebase(*c, base)));
+        append(&mut self.cmds, &mut self.lists, other);
     }
 
     /// Adds a list and returns its span.
@@ -198,14 +210,35 @@ impl Frame {
 
     /// Appends a command buffer. Its spans move to the shared list. The stream stays valid, so the game can submit it again.
     pub fn append(&mut self, s: &CmdStream) {
-        let base = self.lists.len() as u32;
-        self.lists.extend_from_slice(&s.lists);
-        self.cmds.extend(s.cmds.iter().map(|c| rebase(*c, base)));
+        append(&mut self.cmds, &mut self.lists, s);
     }
 
     /// The textures of a span.
     pub fn list(&self, s: Span) -> &[TexId] {
         &self.lists[s.start as usize..(s.start + s.len) as usize]
+    }
+}
+
+fn has_span(c: &Cmd) -> bool {
+    matches!(c, Cmd::Draw { .. } | Cmd::Dispatch { .. })
+}
+
+/// Appends the commands and lists of `s`, with the spans moved behind the lists already there. A sealed stream is
+/// copied in one block and only its span commands are patched, and not even those when the lists were empty.
+fn append(cmds: &mut Vec<Cmd>, lists: &mut Vec<TexId>, s: &CmdStream) {
+    let base = lists.len() as u32;
+    lists.extend_from_slice(&s.lists);
+    if s.sealed != s.cmds.len() {
+        cmds.extend(s.cmds.iter().map(|c| rebase(*c, base)));
+        return;
+    }
+    let at = cmds.len();
+    cmds.extend_from_slice(&s.cmds);
+    if base != 0 {
+        for &i in &s.span_at {
+            let c = &mut cmds[at + i as usize];
+            *c = rebase(*c, base);
+        }
     }
 }
 
@@ -258,6 +291,34 @@ mod tests {
         assert_eq!(spans[1].start, 2);
         assert_eq!(f.list(spans[1]), [t(1), t(2)]);
         assert_eq!(a.cmds.len(), 1);
+    }
+
+    #[test]
+    fn a_sealed_stream_appends_like_an_unsealed_one() {
+        let mut a = CmdStream::new();
+        let r = a.push_list(&[t(1), t(2)]);
+        let w = a.push_list(&[t(3)]);
+        a.cmds.push(Cmd::Barrier(1));
+        a.cmds.push(Cmd::Draw { state: DrawState::default(), reads: r });
+        a.cmds.push(Cmd::Dispatch { reads: r, writes: w });
+        a.cmds.push(Cmd::Present(t(9)));
+        let mut sealed = CmdStream::new();
+        sealed.lists = a.lists.clone();
+        sealed.cmds = a.cmds.clone();
+        sealed.seal();
+        for pre in [0usize, 3] {
+            let (mut x, mut y) = (Frame::new(), Frame::new());
+            for _ in 0..pre {
+                x.lists.push(t(7));
+                y.lists.push(t(7));
+            }
+            x.append(&a);
+            x.append(&a);
+            y.append(&sealed);
+            y.append(&sealed);
+            assert_eq!(x.cmds, y.cmds);
+            assert_eq!(x.lists, y.lists);
+        }
     }
 
     #[test]

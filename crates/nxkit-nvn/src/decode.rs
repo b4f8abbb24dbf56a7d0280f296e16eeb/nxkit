@@ -265,6 +265,10 @@ pub struct Summary {
     pub unresolved: u32,
     /// How often the cache gave this summary.
     pub hits: u32,
+    /// The `(texture table, descriptor pools)` epochs at which `refs` last held. See [`RecCache::find`].
+    pub(crate) checked: (u64, u64),
+    /// The deferred binds among `refs`. They read guest memory, so a hit reads them again every time.
+    pub(crate) deferred: Vec<Ref>,
 }
 
 /// What the decoder reads.
@@ -350,6 +354,12 @@ struct Builder {
     tex_live: u128,
     /// The bit of each image slot of `st.img` that holds a texture.
     img_live: u128,
+    /// True when the recording itself resolved something, so that `refs` has entries of its own.
+    own_refs: bool,
+    /// Time of the records and of the splices, for `NXKIT_DIAG=decodeprof`.
+    ns_apply: u64,
+    ns_splice: u64,
+    records: u64,
 }
 
 /// The distinct textures of the slots that `live` marks, in slot order.
@@ -392,6 +402,7 @@ impl Builder {
             }
         }
         self.refs.push(Ref::Addr(a, t));
+        self.own_refs = true;
         t
     }
 
@@ -404,6 +415,7 @@ impl Builder {
             self.unresolved += 1;
         }
         self.refs.push(Ref::Handle(h, t));
+        self.own_refs = true;
         t
     }
 
@@ -489,6 +501,7 @@ impl Builder {
                         Err(_) => (0, 0),
                     };
                     self.refs.push(Ref::Deferred(at, raw));
+                    self.own_refs = true;
                     let t = self.handle(cx, handle);
                     self.st.tex[slot] = t;
                     mark(&mut self.tex_live, slot, t);
@@ -560,6 +573,12 @@ impl Builder {
     }
 
     fn splice(&mut self, handle: u64, c: &Summary) {
+        let clock = crate::prof::Clock::start();
+        self.splice_in(handle, c);
+        self.ns_splice += clock.ns();
+    }
+
+    fn splice_in(&mut self, handle: u64, c: &Summary) {
         let (n, s) = (&c.needs, &self.sets);
         self.needs.targets |= n.targets && !s.targets;
         self.needs.scissor |= n.scissor && !s.scissor;
@@ -609,11 +628,25 @@ pub fn summary<M: GuestMem>(
     inherited: &State,
     depth: u32,
 ) -> Result<usize> {
-    if let Some(i) = cache.find(handle, inherited, cx.table, cx.desc, cx.mem) {
+    let clock = crate::prof::Clock::start();
+    let found = cache.find(handle, inherited, cx.table, cx.desc, cx.mem);
+    let p = &mut cache.prof;
+    p.ns_find += clock.ns();
+    p.lookups += 1;
+    p.depth_sum += u64::from(depth);
+    p.depth_max = p.depth_max.max(depth);
+    if let Some(i) = found {
+        p.hits += 1;
         return Ok(i);
     }
+    p.misses += 1;
     cache.stats.misses += 1;
-    let s = decode(cache, cx, handle, inherited, depth)?;
+    let clock = crate::prof::Clock::start();
+    let mut s = decode(cache, cx, handle, inherited, depth)?;
+    if depth == 0 {
+        cache.prof.ns_miss += clock.ns();
+    }
+    s.checked = (cx.table.epoch(), cx.desc.epoch());
     cache.stats.unresolved += u64::from(s.unresolved);
     crate::diag::note_n(crate::diag::Reason::DecodeUnresolved, u64::from(s.unresolved));
     Ok(cache.insert(handle, s))
@@ -644,10 +677,16 @@ fn decode<M: GuestMem>(
         tex_list: None,
         img_list: None,
         scratch: Vec::new(),
+        own_refs: false,
+        ns_apply: 0,
+        ns_splice: 0,
+        records: 0,
     };
     let mut spans = Vec::new();
     let (mut pos, mut from) = (handle, handle);
     for _ in 0..MAX_RECORDS {
+        let clock = crate::prof::Clock::start();
+        b.records += 1;
         let (rec, size) = match Record::read(cx.mem, pos) {
             Ok(v) => v,
             Err(e) => {
@@ -666,7 +705,14 @@ fn decode<M: GuestMem>(
         match rec {
             Record::End => {
                 spans.push(from..next);
-                return Ok(finish(b, inherited, spans));
+                b.ns_apply += clock.ns();
+                let (ns_apply, ns_splice, records) = (b.ns_apply, b.ns_splice, b.records);
+                let clock = crate::prof::Clock::start();
+                let s = finish(b, inherited, spans);
+                let p = &mut cache.prof;
+                (p.ns_apply, p.ns_splice, p.records) = (p.ns_apply + ns_apply, p.ns_splice + ns_splice, p.records + records);
+                p.ns_finish += clock.ns();
+                return Ok(s);
             }
             Record::Jump(to) => {
                 spans.push(from..next);
@@ -674,12 +720,16 @@ fn decode<M: GuestMem>(
                 continue;
             }
             Record::Call(h) => {
+                b.ns_apply += clock.ns();
                 let i = summary(cache, cx, h, &b.st, depth + 1)?;
                 if let Some(c) = cache.entry(h, i) {
                     b.splice(h, c);
                 }
             }
-            other => b.apply(cx, other),
+            other => {
+                b.apply(cx, other);
+                b.ns_apply += clock.ns();
+            }
         }
         pos = next;
     }
@@ -697,7 +747,12 @@ fn dedup_refs(refs: &mut Vec<Ref>) {
 }
 
 fn finish(mut b: Builder, inherited: &State, spans: Vec<Range<u64>>) -> Summary {
-    dedup_refs(&mut b.refs);
+    // The references of one called summary are unique already. Only a mix of sources can repeat.
+    if b.own_refs || b.children.len() > 1 {
+        dedup_refs(&mut b.refs);
+    }
+    let deferred = b.refs.iter().copied().filter(|r| matches!(r, Ref::Deferred(..))).collect();
+    b.stream.seal();
     let (st, sets) = (&b.st, &b.sets);
     let delta = Delta {
         targets: sets.targets.then_some(st.targets),
@@ -719,5 +774,7 @@ fn finish(mut b: Builder, inherited: &State, spans: Vec<Range<u64>>) -> Summary 
         draws: b.draws,
         unresolved: b.unresolved,
         hits: 0,
+        checked: (u64::MAX, u64::MAX),
+        deferred,
     }
 }
