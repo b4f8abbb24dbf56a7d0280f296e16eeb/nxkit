@@ -182,6 +182,18 @@ Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below 
 - `nvnTextureWriteTexels` and `nvnTextureReadTexels` work in place in the storage of the texture (R52). A linear texture has one level and one layer. The GOB order is always the one of the Tegra X1.
 - The state objects have the sizes of the NVN headers. The readers for the command buffer are `state::blend`, `state::color`, `state::channel_mask`, `state::depth_stencil`, `state::multisample`, `state::polygon`, `state::vertex_attrib` and `state::vertex_stream`. The command buffer also uses `texture::pool_base`, `sampler::pool_base` and `texture::id_of`.
 
+## Graphics take-overs of the SDK
+
+Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN that nxnative takes over with `HLE_FORCE`. They are guest exports of the `gpu` service, not entries of the NVN proc table. Each source file of nxnative has one module. A check on 2026-11-08 of the files `dm/gfx/hle_nv.c`, `dm/gfx/hle_vi.c` and `dm/gfx/nvn/hle_nvn.c` gave 47 names.
+
+- `gfx::nv` has 8 names: the allocator and devtools allocator callbacks, `nv::InitializeGraphics` and `nv::FinalizeGraphics`, `nv::InitCheck`, `nn::gs::sdk::CheckGraphicsSystemInitialized` and the two memory info calls. The module records the callbacks and the pool of the game. `nv::InitCheck` ends the game with `[RED]` when `nv::InitializeGraphics` was not called.
+- `gfx::vi` has 31 `nn::vi` names. The display, the layer and the native window are static objects of the host. The native window handle goes to `nvnWindowBuilderSetNativeWindow`, which stores it and never reads it, so any non-null pointer works. `OpenDisplay` accepts only the name `Default`.
+- `nn::vi::SetLayerCrop` records the crop. The present uses the crop of the window when it has one. Otherwise it uses the crop of the layer when it fits the window texture. A crop that does not fit is logged once with `[RED]` and the whole texture is shown.
+- `nvnQueuePresentTexture` counts a frame of the layer. `nn::vi::GetLatestFrameNumber` reports the count. `nn::vi::ListFrameHistory` lists the last 8 frames, newest first, with 5 `u64` for each: the status, the frame number, the queue tick and the present tick twice.
+- The HDR, VRR and extended swap interval calls report SDR output and no VRR.
+- `gfx::native_image` has the 8 names of `nvnNativeImage*` and `nvnTextureInitializeFromNativeImage`. A texture on a native image is a linear texture over a memory pool of the picture memory of `nxkit-svc-video`. The pool and the scratch builders are in the 0x200 bytes of the `NVNnativeImage` of the game. The layout is in the doc comment of `native_image.rs`.
+- `nn::vi::GetDisplayVsyncEvent` is in `nxkit-svc-pacing` and `nn::vi::GetIndirectImageMemoryRequirement` is in `nxkit-svc-system`. `gfx` does not have them.
+
 ## Limits
 
 - The crate takes typed values. The raw guest arguments of an NVN call are read in `nxkit-rt`.
@@ -190,7 +202,11 @@ Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below 
 - A function that nxnative does not implement, and a sparse `nvnMemoryPoolMapVirtual` request, end the game with the name of the function. The `nvnDlss*` functions are in this group.
 - `nvnDeviceGetInteger` has no table for the Switch 2 device. The entry 0x5F is not checked against a source.
 - The host does not use the queue memory of a queue builder. It stores the sizes and the pointer.
-- The layer crop of the Switch video interface (`vi`) does not exist. A window without a crop presents the whole texture.
+- `Present.crop` holds the crop of the window, or the crop of the `vi` layer when the window has none. The blit of `nxkit-gpu` does not read it, so a crop does not change the picture. This is unverified on a running game.
+- The layer size of `nn::vi::CreateLayer(w, h)` is recorded and no presenter reads it. A present shows the picture in the shape of the window texture.
+- The frame history of the layer counts a frame as shown from the first `nn::vi::ListFrameHistory` call that sees it, because `Backend` reports no present time. Its ticks run at 19.2 MHz. An SDK of the Switch 2 counts at another rate. The host cannot tell the SDK apart.
+- `nv::GetGraphicsMemoryInfo` writes 0x20 bytes when the NVN API major is 53 or less and 0x40 bytes otherwise. A game of SDK 10 or older that does not set `nvn_api` in `game.json` gets 0x40 bytes. This is unverified.
+- `nn::vi::QueryDisplayBufferMaxResolution` answers 1920x1080 in both operation modes. The host has no fact of the size of the display.
 - The dirty range tracking of nxnative for pools is not ported. `nvnMemoryPoolFlushMappedRange` tells the front end that the guest wrote the range, and the invalidate call does nothing.
 - A copy or compute pass is not moved out of a render pass, so some merges are missed.
 - Memory aliasing between buffers and textures is not tracked. A buffer copy does not touch a texture of the same memory.
