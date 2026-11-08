@@ -276,6 +276,12 @@ fn slot_commands(
             base_vertex,
             base_instance,
         },
+        // `prepare` refuses the indirect and mesh draws for an ICB.
+        Geom::Indirect { .. }
+        | Geom::IndexedIndirect { .. }
+        | Geom::MultiIndirect { .. }
+        | Geom::Mesh { .. }
+        | Geom::MeshIndirect { .. } => return Err(Skip::Encode),
     });
     Ok(c)
 }

@@ -19,15 +19,24 @@ pub enum Stage {
     Fragment,
     /// The compute stage.
     Compute,
+    /// The task stage of NVN2 (the object stage of a Metal mesh pipeline).
+    Task,
+    /// The mesh stage of NVN2.
+    Mesh,
 }
 
 /// The shaders of a draw, as the keys of the shader step. A key names `<key>_b.metallib` and `<key>_b.json`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProgramRef {
-    /// The key of the vertex shader. The walker shares one allocation per key between all draws.
+    /// The key of the vertex shader. The walker shares one allocation per key between all draws. Empty for a mesh
+    /// draw.
     pub vertex: Arc<str>,
     /// The key of the fragment shader. A draw without one writes depth only.
     pub fragment: Option<Arc<str>>,
+    /// The key of the task shader of a mesh draw, when the program has one.
+    pub task: Option<Arc<str>>,
+    /// The key of the mesh shader of a mesh draw. `None` for every other draw.
+    pub mesh: Option<Arc<str>>,
 }
 
 /// The blend state of one colour target (`NVNblendFunc` and `NVNblendEquation` values).
@@ -157,6 +166,66 @@ pub enum DrawArgs {
         /// The first instance.
         base_instance: u32,
     },
+    /// `nvnCommandBufferDrawArraysIndirect`: the GPU reads `{count, instances, first, base instance}` at `indirect`.
+    ArraysIndirect {
+        /// The GPU address of the arguments.
+        indirect: u64,
+    },
+    /// `nvnCommandBufferDrawElementsIndirect`: the GPU reads `{count, instances, first index, base vertex, base
+    /// instance}` at `indirect`.
+    IndexedIndirect {
+        /// `NVNindexType`: 0 byte, 1 short, 2 int.
+        index_type: u32,
+        /// The GPU address of index 0.
+        address: u64,
+        /// The GPU address of the arguments.
+        indirect: u64,
+    },
+    /// `nvnCommandBufferMultiDraw{Arrays,Elements}IndirectCount`: up to `max` draws, draw `i` reads its arguments at
+    /// `indirect + i * stride` and runs only while `i` is below the `u32` at `count`.
+    MultiIndirectCount {
+        /// The index type and the GPU address of index 0 of an elements draw, `None` for arrays.
+        index: Option<(u32, u64)>,
+        /// The GPU address of the arguments of draw 0.
+        indirect: u64,
+        /// The GPU address of the draw count.
+        count: u64,
+        /// The most draws.
+        max: u32,
+        /// The bytes from the arguments of one draw to the next.
+        stride: u64,
+    },
+    /// `nvnCommandBufferDrawMeshTasks`: `count` workgroups from `first`, of the task shader or, without one, of the
+    /// mesh shader.
+    MeshTasks {
+        /// The first workgroup.
+        first: u32,
+        /// The number of workgroups.
+        count: u32,
+    },
+    /// `nvnCommandBufferDrawMeshTasksIndirect`: the GPU reads `{count, first}` at `indirect`.
+    MeshTasksIndirect {
+        /// The GPU address of the arguments.
+        indirect: u64,
+    },
+}
+
+impl DrawArgs {
+    /// True for a mesh draw.
+    pub fn is_mesh(&self) -> bool {
+        matches!(self, Self::MeshTasks { .. } | Self::MeshTasksIndirect { .. })
+    }
+
+    /// True when the GPU reads the arguments from memory when the draw runs.
+    pub fn is_indirect(&self) -> bool {
+        matches!(
+            self,
+            Self::ArraysIndirect { .. }
+                | Self::IndexedIndirect { .. }
+                | Self::MultiIndirectCount { .. }
+                | Self::MeshTasksIndirect { .. }
+        )
+    }
 }
 
 /// A uniform buffer binding.

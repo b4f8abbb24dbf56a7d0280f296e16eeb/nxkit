@@ -141,7 +141,7 @@ impl Overlap {
             }
             let verts = match d.args {
                 DrawArgs::Arrays { first, count, .. } => Some(u64::from(first) + u64::from(count)),
-                DrawArgs::Indexed { .. } => None,
+                _ => None,
             };
             for st in &d.streams {
                 let used = verts.map_or(STREAM_BYTES, |v| v * u64::from(st.stride.max(1)));

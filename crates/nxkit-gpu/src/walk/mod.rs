@@ -47,16 +47,25 @@ const TEXTURE_SLOTS: usize = 128;
 const STREAMS: usize = 16;
 const ATTRIBUTES: usize = 32;
 const UBOS: usize = 16;
+/// The buffer banks: vertex, fragment, compute, task and mesh.
+const BANKS: usize = 5;
 /// The stage index of `NVNshaderStage` for compute.
 const COMPUTE: usize = 5;
+/// The program slots and buffer banks of the NVN2 task and mesh stages. The recorder puts the task and mesh stages
+/// (6 and 7) into the slots of the tessellation stages (3 and 4).
+const TASK: usize = 3;
+const MESH: usize = 4;
+/// The texture bank that the task and mesh stages share with the other stages that are not vertex, fragment or
+/// compute.
+const MESH_TEXTURES: usize = 3;
 
 /// The state of one queue between its draws.
 #[derive(Clone, PartialEq)]
 pub(super) struct State {
     program: [u64; 6],
     vertex_buffer: [(u64, u64); STREAMS],
-    ubo: [[(u64, u32); UBOS]; 3],
-    sbuf: [[(u64, u32); UBOS]; 3],
+    ubo: [[(u64, u32); UBOS]; BANKS],
+    sbuf: [[(u64, u32); UBOS]; BANKS],
     attribute: [Option<(u32, u32, u32)>; ATTRIBUTES],
     stream: [(u32, u32); STREAMS],
     blends: Blends,
@@ -78,8 +87,8 @@ impl Default for State {
         Self {
             program: [0; 6],
             vertex_buffer: [(0, 0); STREAMS],
-            ubo: [[(0, 0); UBOS]; 3],
-            sbuf: [[(0, 0); UBOS]; 3],
+            ubo: [[(0, 0); UBOS]; BANKS],
+            sbuf: [[(0, 0); UBOS]; BANKS],
             attribute: [None; ATTRIBUTES],
             stream: [(0, 0); STREAMS],
             blends: Blends::default(),
@@ -334,6 +343,8 @@ fn empty_draw() -> DrawDetail {
         program: ProgramRef {
             vertex: empty_key(),
             fragment: None,
+            task: None,
+            mesh: None,
         },
         blend: Default::default(),
         write_masks: [0xf; 8],
@@ -360,8 +371,8 @@ pub(super) fn bound_count(bank: &[(u64, u32); UBOS]) -> usize {
     bank.iter().filter(|(a, s)| *a != 0 && *s != 0).count()
 }
 
-/// Adds the storage buffers of the bank (0 vertex, 1 fragment, 2 compute) that are bound to `out`. The shader reads
-/// and writes them in place, so they carry no snapshot.
+/// Adds the storage buffers of the bank (0 vertex, 1 fragment, 2 compute, 3 task, 4 mesh) that are bound to `out`. The
+/// shader reads and writes them in place, so they carry no snapshot.
 pub(super) fn sbufs_into(st: &State, bank: usize, stage: Stage, out: &mut Vec<UboDetail>) {
     out.extend(
         st.sbuf[bank]
@@ -378,14 +389,14 @@ pub(super) fn sbufs_into(st: &State, bank: usize, stage: Stage, out: &mut Vec<Ub
     );
 }
 
-/// The storage buffers of the bank (0 vertex, 1 fragment, 2 compute) that are bound.
+/// The storage buffers of the bank (0 vertex, 1 fragment, 2 compute, 3 task, 4 mesh) that are bound.
 pub(super) fn sbufs(st: &State, bank: usize, stage: Stage) -> Vec<UboDetail> {
     let mut out = Vec::with_capacity(bound_count(&st.sbuf[bank]));
     sbufs_into(st, bank, stage, &mut out);
     out
 }
 
-/// The 32 texture handles of the bank (0 vertex, 1 fragment, 2 compute).
+/// The 32 texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages).
 fn bank(st: &State, bank: usize) -> &[u64] {
     st.texture.get(bank * 32..bank * 32 + 32).unwrap_or(&[])
 }
@@ -395,7 +406,7 @@ pub(super) fn texture_count(st: &State, bank_index: usize) -> usize {
     bank(st, bank_index).iter().filter(|h| **h != NO_HANDLE).count()
 }
 
-/// Adds the texture handles of the bank (0 vertex, 1 fragment, 2 compute) that are bound to `out`.
+/// Adds the texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) that are bound to `out`.
 pub(super) fn textures_into(st: &State, bank_index: usize, stage: Stage, out: &mut Vec<TextureBind>) {
     out.extend(
         bank(st, bank_index)
@@ -410,7 +421,7 @@ pub(super) fn textures_into(st: &State, bank_index: usize, stage: Stage, out: &m
     );
 }
 
-/// The texture handles of the bank (0 vertex, 1 fragment, 2 compute) that are bound.
+/// The texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) that are bound.
 fn textures(st: &State, bank_index: usize, stage: Stage) -> Vec<TextureBind> {
     let mut out = Vec::with_capacity(texture_count(st, bank_index));
     textures_into(st, bank_index, stage, &mut out);

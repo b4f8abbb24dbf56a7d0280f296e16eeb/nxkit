@@ -32,8 +32,10 @@ mod guest;
 mod health;
 mod gpu;
 mod icbs;
+mod indirect;
 mod jobs;
 mod lum;
+mod mesh;
 mod overlap;
 mod json;
 mod passes;
@@ -51,5 +53,5 @@ pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use settings::GpuSettings;
 pub use snapshot::{EncodeView, Live, Snapshot};
-pub use stats::{EncodeReport, EncodeStats, Skip};
+pub use stats::{DrawClass, EncodeReport, EncodeStats, KindStats, Skip};
 

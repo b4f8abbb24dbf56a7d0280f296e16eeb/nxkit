@@ -57,6 +57,18 @@ No bind call runs for each texture. Vertex streams are bound with `SetBuffer` at
 
 `RecCache::icb_candidates` names the recordings that are stable. A run of draws from such a recording is encoded once into an `IndirectCommandBuffer` and executed with `ExecuteIcb` in later frames. A run qualifies when it has two draws or more, its viewport, scissor, stencil reference and blend colour are the same for all draws, and it binds no uniform buffer that the guest rewrote. The ICB holds pipeline, argument buffers, vertex buffers, depth stencil, bias, clip, winding, fill mode and the draws. The encoder sets viewport, scissor, stencil reference and blend colour outside the ICB. The signature of an ICB is a hash of the draw details, the resolved resource IDs and the targets. A different signature builds the ICB again. `recording_dropped` removes it. The state after an `ExecuteIcb` is treated as undefined, so the encoder sets its state again.
 
+## Mesh and indirect draws
+
+The walker details every draw kind but transform feedback and `DrawTexture`. `DrawArgs` has the indirect address, the index buffer, the count buffer, the maximum and the stride of each kind. A mesh draw names its task, mesh and fragment shaders in `ProgramRef` and binds the buffers of the task and mesh stages (banks 3 and 4 of the walker, the slots of the tessellation stages that the recorder gives NVN2 stages 6 and 7) and the textures of the bank they share. A `BindProgram` with stage bit 6 or 7 sets the task or mesh slot. The task and mesh stages read the addresses of their storage buffers from the c0 tables at 0x670 and 0x770 (`mesh::storage_table`, called from the driver block fill).
+
+- `DrawArraysIndirect` and `DrawElementsIndirect` draw with Metal's indirect draws straight from guest memory. NVN's argument records have the layouts of `MTLDrawPrimitivesIndirectArguments` and `MTLDrawIndexedPrimitivesIndirectArguments`.
+- `MultiDraw{Arrays,Elements}IndirectCount` and `DrawMeshTasksIndirect` go through a compute pre-pass (`indirect.rs`) before the render pass. It copies the records of a multi-draw, zeros past the GPU-written count, and turns the `{count, first}` of an indirect mesh draw into Metal's `{x, y, z}` grid with the first workgroup after it. The render pass draws from the copies. The CPU never waits for the GPU. An ICB would need the same kernel and GPU encoding of the whole draw state, so the pre-pass is the simpler choice. A multi-draw copies at most 4096 draws.
+- A mesh draw runs a Metal mesh pipeline (`Pipelines::mesh`, built in the background like a render pipeline, `skip.pending` until it is ready). The task shader is the object function, the mesh shader the mesh function. Metal needs a fragment function, so a program without a pixel shader gets an empty one and draws depth only. The mesh stage shares the argument table of the vertex stage and the object stage has its own. The first workgroup of the draw is at buffer 29 of the stage that starts the grid.
+- Without a task shader the grid is the mesh grid, at most 1024 threadgroups wide. A larger draw is cut into grids of 1024 with their own first workgroup (at most 64 grids). An indirect draw without a task shader gets 16 grids from the pre-pass, and those past the count are empty.
+- A render pass with an indirect or mesh draw waits for the earlier dispatches, copies and fragment work before its vertex, object and mesh stages, because the barrier planner follows textures only.
+
+`EncodeStats::kinds` counts these draws by class, encoded and skipped by reason, with the Metal draws they became, the pre-passes and their records, and what was clamped (`NXKIT_DIAG=mesh`).
+
 ## Barriers only where data flows (R19)
 
 `barriers.rs` tracks, for each texture, the stages that wrote it and the stages that read it. Before a pass it emits one `Dependency` only when the pass reads something that an earlier pass wrote, or writes something that an earlier pass wrote or read. The `after` stages are the stages of the earlier writers and the `before` stage is the first stage that needs the data (fragment for a render pass that samples in the fragment stage). A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.
@@ -98,7 +110,9 @@ The encoder has opt-in diagnostics (`NXKIT_DIAG`), knobs for experiments (`NXKIT
 The walker leaves some of the detail out:
 
 - `FrameDetail.copies` and `runs` stay empty. A copy uses the whole first level and no draw runs as an ICB.
-- Images and storage buffers are not in the detail. Indirect, mesh and `DrawTexture` draws are placeholders without a binding.
+- Images are not in the detail. Transform feedback and `DrawTexture` draws are placeholders without a binding.
+- An indirect draw puts base instance 0 into the driver block, because the GPU reads the real one with the arguments.
+- The arguments of an indirect draw must be final when its render pass starts. A draw of the same pass that writes them through a storage buffer is not seen.
 - The multisample state reads only alpha to coverage.
 - `UpdateUniform` writes into guest memory when the walker reads it. A frame that the GPU still runs can read the new data.
 

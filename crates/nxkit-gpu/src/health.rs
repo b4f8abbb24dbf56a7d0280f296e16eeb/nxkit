@@ -40,25 +40,8 @@ mod tests {
 
     #[test]
     fn each_skip_has_the_reason_of_its_name() {
-        let all = [
-            Skip::Detail,
-            Skip::Program,
-            Skip::Binding,
-            Skip::Primitive,
-            Skip::Index,
-            Skip::Format,
-            Skip::Target,
-            Skip::Cull,
-            Skip::Texture,
-            Skip::Pipeline,
-            Skip::Buffer,
-            Skip::Copy,
-            Skip::Transfer,
-            Skip::Encode,
-            Skip::Pending,
-        ];
-        assert_eq!(all.len(), Skip::COUNT);
-        for s in all {
+        for (i, s) in Skip::ALL.into_iter().enumerate() {
+            assert_eq!(s as usize, i);
             assert_eq!(SKIPS[s as usize].name(), format!("skip.{}", s.name()));
         }
     }

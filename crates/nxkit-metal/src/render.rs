@@ -7,8 +7,8 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSRange;
 use objc2_metal::{
     MTL4CommandBuffer, MTL4CommandEncoder, MTL4RenderCommandEncoder, MTL4RenderPassDescriptor,
-    MTL4VisibilityOptions, MTLClearColor, MTLCullMode, MTLRenderStages, MTLScissorRect, MTLStages,
-    MTLViewport,
+    MTL4VisibilityOptions, MTLClearColor, MTLCullMode, MTLRenderStages, MTLScissorRect, MTLSize,
+    MTLStages, MTLViewport,
 };
 
 use crate::barrier::{Dependency, Stages};
@@ -174,6 +174,14 @@ pub enum RenderCommand {
         /// The GPU address.
         gpu_addr: u64,
     },
+    /// Binds a GPU address to a buffer slot of the object stage table ([`RenderPass::set_object_table`]). The mesh
+    /// stage shares the table of the vertex stage, so [`RenderCommand::SetBuffer`] binds its buffers.
+    SetObjectBuffer {
+        /// The slot.
+        index: u32,
+        /// The GPU address.
+        gpu_addr: u64,
+    },
     /// Sets the viewport.
     SetViewport(Viewport),
     /// Sets the scissor rectangle.
@@ -240,6 +248,49 @@ pub enum RenderCommand {
         instance_count: u32,
         /// The first instance.
         base_instance: u32,
+    },
+    /// Draws primitives with the arguments that the GPU reads from `indirect_addr` when the draw runs: an
+    /// `MTLDrawPrimitivesIndirectArguments` (vertex count, instance count, first vertex, first instance).
+    DrawIndirect {
+        /// The topology.
+        primitive: Primitive,
+        /// The GPU address of the arguments, 4 byte aligned.
+        indirect_addr: u64,
+    },
+    /// Draws indexed primitives with the arguments that the GPU reads from `indirect_addr` when the draw runs: an
+    /// `MTLDrawIndexedPrimitivesIndirectArguments` (index count, instance count, first index, base vertex, first
+    /// instance).
+    DrawIndexedIndirect {
+        /// The topology.
+        primitive: Primitive,
+        /// The width of an index.
+        index_type: IndexType,
+        /// The GPU address of index 0.
+        index_addr: u64,
+        /// The bytes available at `index_addr`. Metal reads an index past them as 0.
+        index_bytes: u64,
+        /// The GPU address of the arguments, 4 byte aligned.
+        indirect_addr: u64,
+    },
+    /// Runs the mesh pipeline over a grid of threadgroups: the object stage, when the pipeline has one, or else the
+    /// mesh stage.
+    DrawMeshThreadgroups {
+        /// The threadgroups of the grid.
+        groups: [u32; 3],
+        /// The threads of an object threadgroup. Ignored without an object stage.
+        object_threads: u32,
+        /// The threads of a mesh threadgroup.
+        mesh_threads: u32,
+    },
+    /// Runs the mesh pipeline over the grid that the GPU reads from `indirect_addr` when the draw runs: an
+    /// `MTLDispatchThreadgroupsIndirectArguments` (three counts).
+    DrawMeshThreadgroupsIndirect {
+        /// The GPU address of the grid, 4 byte aligned.
+        indirect_addr: u64,
+        /// The threads of an object threadgroup. Ignored without an object stage.
+        object_threads: u32,
+        /// The threads of a mesh threadgroup.
+        mesh_threads: u32,
     },
     /// Draws primitives with indices from a GPU address.
     DrawIndexed {
@@ -313,13 +364,14 @@ impl CommandBuffer {
             })?;
         match fragment_table {
             Some(ft) => {
-                enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Vertex);
+                // The mesh stage takes the place of the vertex stage, so it shares its table.
+                enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Vertex | MTLRenderStages::Mesh);
                 enc.setArgumentTable_atStages(Some(&ft.raw), MTLRenderStages::Fragment);
                 self.retain(ft.clone());
             }
             None => enc.setArgumentTable_atStages(
                 Some(&table.raw),
-                MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+                MTLRenderStages::Vertex | MTLRenderStages::Mesh | MTLRenderStages::Fragment,
             ),
         }
         self.retain(table.clone());
@@ -329,6 +381,7 @@ impl CommandBuffer {
             cb: self,
             table: table.clone(),
             fragment_table: fragment_table.cloned(),
+            object_table: None,
             has_pipeline: false,
             ended: false,
         })
@@ -435,11 +488,43 @@ pub struct RenderPass<'a> {
     cb: &'a mut CommandBuffer,
     table: ArgumentTable,
     fragment_table: Option<ArgumentTable>,
+    object_table: Option<ArgumentTable>,
     has_pipeline: bool,
     ended: bool,
 }
 
+/// Checks that the GPU address of indirect arguments has the 4 byte alignment that Metal requires.
+fn check_indirect(addr: u64) -> Result<()> {
+    if addr == 0 || !addr.is_multiple_of(4) {
+        return Err(MetalError::Invalid(
+            "the indirect arguments are not at a 4 byte aligned address",
+        ));
+    }
+    Ok(())
+}
+
+fn size3(v: [u32; 3]) -> MTLSize {
+    MTLSize { width: v[0] as usize, height: v[1] as usize, depth: v[2] as usize }
+}
+
+fn threads(n: u32) -> MTLSize {
+    size3([n.max(1), 1, 1])
+}
+
 impl RenderPass<'_> {
+    /// Binds `table` at the object stage, for the task shaders of mesh draws. The pass keeps the table until it ends.
+    /// A later call replaces it.
+    pub fn set_object_table(&mut self, table: &ArgumentTable) {
+        self.enc.setArgumentTable_atStages(Some(&table.raw), MTLRenderStages::Object);
+        self.cb.retain(table.clone());
+        self.object_table = Some(table.clone());
+    }
+
+    /// True when [`RenderPass::set_object_table`] gave the pass an object stage table.
+    pub fn has_object_table(&self) -> bool {
+        self.object_table.is_some()
+    }
+
     /// Names the encoder for Instruments and the Metal debugger.
     pub fn set_label(&self, label: &str) {
         use objc2_metal::MTL4CommandEncoder as _;
@@ -466,6 +551,11 @@ impl RenderPass<'_> {
                 .ok_or(MetalError::Invalid(
                     "the pass has no separate fragment argument table",
                 ))?
+                .set_buffer(*index, *gpu_addr)?,
+            RenderCommand::SetObjectBuffer { index, gpu_addr } => self
+                .object_table
+                .as_ref()
+                .ok_or(MetalError::Invalid("the pass has no object argument table"))?
                 .set_buffer(*index, *gpu_addr)?,
             RenderCommand::SetViewport(v) => self.enc.setViewport(MTLViewport {
                 originX: v.x,
@@ -506,12 +596,15 @@ impl RenderPass<'_> {
             RenderCommand::SetDepthBounds { min, max } => {
                 self.enc.setDepthTestMinBound_maxBound(*min, *max)
             }
-            RenderCommand::Depend(d) => d.encode(&*self.enc, Stages::VERTEX | Stages::FRAGMENT)?,
+            RenderCommand::Depend(d) => d.encode(
+                &*self.enc,
+                Stages::VERTEX | Stages::FRAGMENT | Stages::OBJECT | Stages::MESH,
+            )?,
             RenderCommand::WaitForEarlierPasses => self
                 .enc
                 .barrierAfterQueueStages_beforeStages_visibilityOptions(
                     MTLStages::All,
-                    MTLStages::Vertex | MTLStages::Fragment,
+                    MTLStages::Vertex | MTLStages::Object | MTLStages::Mesh | MTLStages::Fragment,
                     MTL4VisibilityOptions::Device,
                 ),
             RenderCommand::ExecuteIcb { icb, first, count } => {
@@ -597,6 +690,60 @@ impl RenderPass<'_> {
                         *base_instance as usize,
                     );
                 }
+            }
+            RenderCommand::DrawIndirect { primitive, indirect_addr } => {
+                self.need_pipeline()?;
+                check_indirect(*indirect_addr)?;
+                // The GPU reads the arguments when the draw runs. A wrong address makes the GPU fault, which is not a
+                // memory safety matter for the host; the alignment is checked above.
+                self.enc.drawPrimitives_indirectBuffer(primitive.to_mtl(), *indirect_addr);
+            }
+            RenderCommand::DrawIndexedIndirect {
+                primitive,
+                index_type,
+                index_addr,
+                index_bytes,
+                indirect_addr,
+            } => {
+                self.need_pipeline()?;
+                check_indirect(*indirect_addr)?;
+                if !index_addr.is_multiple_of(index_type.bytes()) {
+                    return Err(MetalError::Invalid("the index buffer is not aligned to its index width"));
+                }
+                // The length that Metal gets is a whole number of indices.
+                let bytes = *index_bytes - *index_bytes % index_type.bytes();
+                // SAFETY: a pipeline is bound (`need_pipeline`), the index buffer is aligned to its index width and its
+                // length is a multiple of it (checked above). Metal reads an index past `bytes` as 0 and the GPU reads
+                // the arguments at the aligned address when the draw runs.
+                unsafe {
+                    self.enc.drawIndexedPrimitives_indexType_indexBuffer_indexBufferLength_indirectBuffer(
+                        primitive.to_mtl(),
+                        index_type.to_mtl(),
+                        *index_addr,
+                        bytes as usize,
+                        *indirect_addr,
+                    );
+                }
+            }
+            RenderCommand::DrawMeshThreadgroups { groups, object_threads, mesh_threads } => {
+                self.need_pipeline()?;
+                if groups.contains(&0) {
+                    return Ok(());
+                }
+                self.enc.drawMeshThreadgroups_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                    size3(*groups),
+                    threads(*object_threads),
+                    threads(*mesh_threads),
+                );
+            }
+            RenderCommand::DrawMeshThreadgroupsIndirect { indirect_addr, object_threads, mesh_threads } => {
+                self.need_pipeline()?;
+                check_indirect(*indirect_addr)?;
+                self.enc.drawMeshThreadgroupsWithIndirectBuffer_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                    *indirect_addr,
+                    threads(*object_threads),
+                    threads(*mesh_threads),
+                );
             }
         }
         Ok(())

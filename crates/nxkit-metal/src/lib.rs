@@ -5,7 +5,8 @@
 //!
 //! - [`Context`]: the device, the Metal 4 command queue, the compiler and the residency set.
 //! - [`GuestMemory`]: the guest memory as one no-copy `MTLBuffer`, with the address map `AddressMap`.
-//! - [`ShaderLibrary`], [`PipelineCache`]: pipelines through `MTL4Compiler`, keyed by a hash, with an archive.
+//! - [`ShaderLibrary`], [`PipelineCache`]: pipelines through `MTL4Compiler`, keyed by a hash, with an archive. A
+//!   [`MeshPipelineDesc`] gives a mesh pipeline (object, mesh and fragment stage).
 //! - [`FrameRing`], [`Frame`]: two command allocators, one per frame in flight, with timing.
 //! - [`CommandBuffer`], [`RenderPass`], [`ComputePass`]: data-driven encoding of passes.
 //! - [`IndirectCommandBuffer`]: render commands encoded once and run in a pass. The module docs list what an ICB holds.
@@ -83,8 +84,8 @@ pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInp
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, Pacer, TickSink};
 pub use pipeline::{
-    ArchiveConfig, ComputePipeline, PipelineCache, RenderPipeline, RenderPipelineDesc,
-    ShaderLibrary,
+    ArchiveConfig, ComputePipeline, MeshPipelineDesc, PipelineCache, RenderPipeline,
+    RenderPipelineDesc, ShaderLibrary,
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
 pub use present::{Drawable, PRESENT_FORMAT, Presenter};

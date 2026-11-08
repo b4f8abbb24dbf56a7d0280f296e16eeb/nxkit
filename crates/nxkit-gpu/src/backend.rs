@@ -275,6 +275,15 @@ impl GpuBackend {
         if (report.stats.skipped_total() > 0 && n < 16) || (diag && n % 30 == 0) {
             eprintln!("nxkit-gpu: frame {n}: {:?}", report.stats);
         }
+        // The mesh and indirect draws: every 30 frames under `stats` or `mesh`, and the first frame that has any.
+        let kinds = &report.stats.kinds;
+        if !kinds.is_empty() {
+            static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+            let first = FIRST.swap(false, Ordering::Relaxed);
+            if first || ((diag || crate::diag("mesh")) && n % 30 == 0) {
+                eprintln!("nxkit-gpu: frame {n}: mesh and indirect draws: {}", kinds.describe());
+            }
+        }
     }
 
     /// Keeps the Metal texture of the presented frame and tells the pacer. Runs after the encode of that frame.

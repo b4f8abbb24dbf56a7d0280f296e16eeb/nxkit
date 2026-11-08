@@ -13,9 +13,9 @@ use std::sync::PoisonError;
 
 use nxkit_metal::{
     ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, DepthAttachment, DepthBias,
-    DepthClip, DepthStencilDesc, FillMode, LoadAction as MLoad, MetalError, RenderCommand,
-    RenderPass, RenderPassDesc, Scissor, Scratch, StencilAttachment, Storage,
-    StoreAction as MStore, Viewport, Winding,
+    DepthClip, DepthStencilDesc, Dependency, FillMode, LoadAction as MLoad, MetalError, RenderCommand,
+    RenderPass, RenderPassDesc, Scissor, Scratch, Scope, Stages, StencilAttachment, Storage,
+    StoreAction as MStore, Viewport, Visibility, Winding,
 };
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
@@ -24,22 +24,26 @@ use nxkit_nvn::resource::TexId;
 use crate::bindless::{ArgsMemo, ScratchSink};
 use crate::detail::{ClearDetail, DynamicDetail, RecordingRun};
 use crate::draws::{Geom, PassCtx, Prep, Shared, prepare};
+use crate::indirect::Prepass;
 use crate::pipelines::Targets;
 use crate::stats::{EncodeStats, Skip};
 use crate::translate;
 
-/// The argument tables of one encoding task. A vertex and a fragment stage need their own table.
+/// The argument tables of one encoding task. A vertex and a fragment stage need their own table. The mesh stage of a
+/// mesh draw shares the vertex table and the object stage (a task shader) has the third.
 pub(crate) struct Tables {
     pub(crate) vertex: ArgumentTable,
     pub(crate) fragment: ArgumentTable,
+    pub(crate) object: ArgumentTable,
 }
 
 impl Tables {
-    /// Makes the pair. A translated shader binds at most 31 buffers and no textures, since textures are bindless.
+    /// Makes the tables. A translated shader binds at most 31 buffers and no textures, since textures are bindless.
     pub(crate) fn new(ctx: &Context) -> Result<Self, MetalError> {
         Ok(Self {
             vertex: ArgumentTable::new(ctx, 31, 0)?,
             fragment: ArgumentTable::new(ctx, 31, 0)?,
+            object: ArgumentTable::new(ctx, 31, 0)?,
         })
     }
 }
@@ -320,6 +324,7 @@ struct Tracker {
     dynamic: Option<DynamicDetail>,
     vertex_args: Option<u64>,
     fragment_args: Option<u64>,
+    object_args: Option<u64>,
     streams: [Option<u64>; 32],
 }
 
@@ -337,6 +342,7 @@ impl Tracker {
             dynamic: None,
             vertex_args: None,
             fragment_args: None,
+            object_args: None,
             streams: [None; 32],
         }
     }
@@ -416,12 +422,20 @@ impl Tracker {
     }
 }
 
+/// What a GPU driven draw needs besides its [`Prep`]: the table of the object stage and the records that the pre-pass
+/// of the render pass copied for it.
+struct Driven<'a> {
+    object: &'a ArgumentTable,
+    copies: Option<u64>,
+}
+
 fn emit(
     rp: &mut RenderPass<'_>,
     tr: &mut Tracker,
     pc: &PassCtx,
     d: &DynamicDetail,
     p: &Prep,
+    x: &Driven<'_>,
     stats: &mut EncodeStats,
 ) -> Result<(), MetalError> {
     if tr.pipeline != Some(p.key) {
@@ -476,7 +490,81 @@ fn emit(
             }
         }
     }
+    if let Some(a) = p.object_args.filter(|a| tr.object_args != Some(*a)) {
+        if !rp.has_object_table() {
+            rp.set_object_table(x.object);
+        }
+        rp.encode(&RenderCommand::SetObjectBuffer { index: 0, gpu_addr: a })?;
+        tr.object_args = Some(a);
+    }
+    let copies = || x.copies.ok_or(MetalError::Invalid("the pre-pass made no copy for the draw"));
+    let first_slot = crate::mesh::MESH_FIRST_SLOT;
+    // The first workgroup goes to the object stage when there is a task shader, else to the mesh stage. The slot of
+    // the mesh stage is a vertex stream slot of the vertex stage, so the tracker forgets it.
+    let first = |rp: &mut RenderPass<'_>, tr: &mut Tracker, task: bool, gpu_addr: u64| {
+        if task {
+            rp.encode(&RenderCommand::SetObjectBuffer { index: first_slot, gpu_addr })
+        } else {
+            tr.streams[first_slot as usize] = None;
+            rp.encode(&RenderCommand::SetBuffer { index: first_slot, gpu_addr })
+        }
+    };
+    match p.geom {
+        Geom::Mesh { first: at, count, object_threads, mesh_threads, task } => {
+            let n = crate::mesh::splits(count, task);
+            if !task {
+                stats.kinds.clamped += count.saturating_sub(n * crate::mesh::MAX_GRID);
+            }
+            for k in 0..n {
+                first(rp, tr, task, at + crate::mesh::FIRST_STRIDE * u64::from(k))?;
+                let groups = if task { count } else { (count - k * crate::mesh::MAX_GRID).min(crate::mesh::MAX_GRID) };
+                rp.encode(&RenderCommand::DrawMeshThreadgroups { groups: [groups, 1, 1], object_threads, mesh_threads })?;
+            }
+            stats.kinds.metal_draws += n;
+            return Ok(());
+        }
+        Geom::MeshIndirect { splits, object_threads, mesh_threads, task } => {
+            let base = copies()?;
+            for k in 0..u64::from(splits) {
+                let rec = base + crate::indirect::RECORD * k;
+                first(rp, tr, task, rec + 16)?;
+                rp.encode(&RenderCommand::DrawMeshThreadgroupsIndirect { indirect_addr: rec, object_threads, mesh_threads })?;
+            }
+            stats.kinds.metal_draws += splits;
+            return Ok(());
+        }
+        Geom::MultiIndirect { primitive, index, draws } => {
+            let base = copies()?;
+            for i in 0..u64::from(draws) {
+                let indirect_addr = base + crate::indirect::RECORD * i;
+                rp.encode(&match index {
+                    None => RenderCommand::DrawIndirect { primitive, indirect_addr },
+                    Some((index_type, index_addr, index_bytes)) => {
+                        RenderCommand::DrawIndexedIndirect { primitive, index_type, index_addr, index_bytes, indirect_addr }
+                    }
+                })?;
+            }
+            stats.kinds.metal_draws += draws;
+            return Ok(());
+        }
+        _ => {}
+    }
     rp.encode(&match p.geom {
+        Geom::Indirect { primitive, indirect } => {
+            stats.kinds.metal_draws += 1;
+            RenderCommand::DrawIndirect { primitive, indirect_addr: indirect }
+        }
+        Geom::IndexedIndirect { primitive, index_type, address, index_bytes, indirect } => {
+            stats.kinds.metal_draws += 1;
+            RenderCommand::DrawIndexedIndirect {
+                primitive,
+                index_type,
+                index_addr: address,
+                index_bytes,
+                indirect_addr: indirect,
+            }
+        }
+        Geom::Mesh { .. } | Geom::MeshIndirect { .. } | Geom::MultiIndirect { .. } => return Ok(()),
         Geom::Arrays {
             primitive,
             first,
@@ -519,6 +607,8 @@ fn draw(
     tr: &mut Tracker,
     scratch: &Scratch,
     memo: &mut ArgsMemo,
+    pre: &Prepass,
+    object: &ArgumentTable,
     n: u32,
     stats: &mut EncodeStats,
 ) {
@@ -602,13 +692,23 @@ fn draw(
             }
         }
     }
+    let copies = match pre.copies.get(&n).copied() {
+        Some(Err(why)) => return stats.skip_draw(Some(&d.args), why),
+        c => c.map(|c| c.unwrap_or_default()),
+    };
     let p = match p {
         Ok(p) => p,
-        Err(why) => return stats.skip(why),
+        Err(why) => return stats.skip_draw(Some(&d.args), why),
     };
-    match emit(rp, tr, pc, &d.dynamic, &p, stats) {
-        Ok(()) => stats.draws += 1,
-        Err(_) => stats.skip(Skip::Encode),
+    let x = Driven { object, copies };
+    match emit(rp, tr, pc, &d.dynamic, &p, &x, stats) {
+        Ok(()) => {
+            stats.draws += 1;
+            if let Some(c) = crate::stats::DrawClass::of(&d.args) {
+                stats.kinds.encoded[c as usize] += 1;
+            }
+        }
+        Err(_) => stats.skip_draw(Some(&d.args), Skip::Encode),
     }
 }
 
@@ -708,8 +808,11 @@ pub(crate) fn render_pass(
         });
         FOCUS_PASS.with(|c| c.set(focus));
     }
-    let lost =
-        |stats: &mut EncodeStats, why: Skip| stats.skipped[why as usize] += range.len() as u32;
+    let lost = |stats: &mut EncodeStats, why: Skip| {
+        for n in range.clone() {
+            stats.skip_draw(sh.detail.draws.get(n as usize).map(|d| &d.args), why);
+        }
+    };
     if crate::diag("barr") && crate::diag::sampled() {
         let known: std::collections::HashSet<TexId> = sh
             .plan
@@ -774,6 +877,8 @@ pub(crate) fn render_pass(
         Ok(s) => s,
         Err(why) => return lost(stats, why),
     };
+    // The GPU driven draws of the pass get their copied arguments before the pass starts.
+    let pre = crate::indirect::prepass(sh, cb, &tables.vertex, scratch, range.clone(), stats);
     let Ok(mut rp) = cb.begin_render_pass_split(&s.desc, &tables.vertex, &tables.fragment) else {
         return lost(stats, Skip::Encode);
     };
@@ -789,6 +894,21 @@ pub(crate) fn render_pass(
             stats.skipped[Skip::Encode as usize] += 1;
         }
     }
+    // The barrier planner follows textures only, and it holds the vertex and fragment stages. An indirect draw reads
+    // arguments that a dispatch or a copy wrote (culling), the pre-pass wrote the copies, and a task or mesh shader
+    // reads storage buffers and textures in stages that the planner does not hold. Such a pass waits for them.
+    if pre.gpu_driven {
+        let dep = Dependency {
+            scope: Scope::FromEarlierPasses,
+            after: Stages::DISPATCH | Stages::BLIT | Stages::FRAGMENT,
+            before: Stages::VERTEX | Stages::OBJECT | Stages::MESH,
+            visibility: Visibility::Device,
+        };
+        match rp.encode(&RenderCommand::Depend(dep)) {
+            Ok(()) => stats.barriers_emitted += 1,
+            Err(_) => stats.skipped[Skip::Encode as usize] += 1,
+        }
+    }
     let mut tr = Tracker::new(s.pc.size);
     let mut memo = ArgsMemo::default();
     let mut n = range.start;
@@ -799,7 +919,7 @@ pub(crate) fn render_pass(
                 continue;
             }
         }
-        draw(sh, &s.pc, &mut rp, &mut tr, scratch, &mut memo, n, stats);
+        draw(sh, &s.pc, &mut rp, &mut tr, scratch, &mut memo, &pre, &tables.object, n, stats);
         n += 1;
     }
     rp.end();

@@ -25,8 +25,12 @@ impl Stages {
     pub const DISPATCH: Self = Self(4);
     /// Copies.
     pub const BLIT: Self = Self(8);
+    /// The object stage of a mesh pipeline (an NVN task shader).
+    pub const OBJECT: Self = Self(16);
+    /// The mesh stage of a mesh pipeline.
+    pub const MESH: Self = Self(32);
     /// Every stage.
-    pub const ALL: Self = Self(15);
+    pub const ALL: Self = Self(63);
 
     fn to_mtl(self) -> MTLStages {
         let mut s = MTLStages::empty();
@@ -35,6 +39,8 @@ impl Stages {
             (Self::FRAGMENT, MTLStages::Fragment),
             (Self::DISPATCH, MTLStages::Dispatch),
             (Self::BLIT, MTLStages::Blit),
+            (Self::OBJECT, MTLStages::Object),
+            (Self::MESH, MTLStages::Mesh),
         ] {
             if self.0 & bit.0 != 0 {
                 s |= v;
