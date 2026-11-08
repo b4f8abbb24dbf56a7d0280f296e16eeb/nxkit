@@ -45,7 +45,10 @@ use crate::detail::{
 use crate::draws::FastMap;
 
 /// The most templates that one handle keeps. The least recently used goes first.
-pub(super) const MAX_PER_HANDLE: usize = 4;
+///
+/// A model recording runs once per instance and pass, with another program, uniform buffer or vertex buffer each
+/// time; BotW calls one recording with more than four states in a frame. The key digest keeps the search cheap.
+pub(super) const MAX_PER_HANDLE: usize = 32;
 /// The most handles with templates. The cache starts again when a new handle would pass it.
 const MAX_HANDLES: usize = 1 << 16;
 /// The value of `Track::tex_dep` for a slot that no deferred bind set.
@@ -640,7 +643,7 @@ impl Track {
 }
 
 /// What a run of fields in a [`Key`] is.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Program,
     VertexBuffer,
@@ -653,7 +656,7 @@ enum Kind {
 }
 
 /// A run of `n` neighbouring fields of one kind, from the index `from`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Seg {
     kind: Kind,
     from: u16,
@@ -668,6 +671,13 @@ pub(super) struct Key {
     /// The values of the runs, in order. A pair field (buffer address and size) takes two values.
     vals: Vec<u64>,
     scalars: Scalars,
+    /// [`digest`] of `vals`. A state whose digest differs does not match, without a look at the fields.
+    digest: u64,
+}
+
+/// Adds `v` to the digest `h` of the values of a key.
+fn mix(h: u64, v: u64) -> u64 {
+    (h.rotate_left(5) ^ v).wrapping_mul(0x517c_c1b7_2722_0a95)
 }
 
 fn texture_value(handle: u64, prov: u128, slot: usize) -> u64 {
@@ -724,7 +734,77 @@ impl Key {
             }
         }
         let groups = (0..32).filter(|g| needs.has(SC + g)).fold(0u32, |m, g| m | 1 << g);
-        Self { segs, vals, scalars: Scalars::of(st, groups) }
+        let digest = vals.iter().fold(0, |h, v| mix(h, *v));
+        Self { segs, vals, scalars: Scalars::of(st, groups), digest }
+    }
+
+    /// The digest that `st` has for the fields of the key. It equals `self.digest` when `st` matches.
+    fn digest_of(&self, st: &State, prov: u128) -> u64 {
+        let mut h = 0;
+        for s in &self.segs {
+            let (from, n) = (usize::from(s.from), usize::from(s.n));
+            for f in from..from + n {
+                h = match s.kind {
+                    Kind::Program => mix(h, st.program[f]),
+                    Kind::VertexBuffer => mix(mix(h, st.vertex_buffer[f].0), st.vertex_buffer[f].1),
+                    Kind::Ubo(b) => {
+                        let (a, z) = st.ubo[usize::from(b)][f];
+                        mix(mix(h, a), u64::from(z))
+                    }
+                    Kind::Sbo(b) => {
+                        let (a, z) = st.sbuf[usize::from(b)][f];
+                        mix(mix(h, a), u64::from(z))
+                    }
+                    Kind::Attribute => mix(h, attribute_value(st.attribute[f])),
+                    Kind::Stream => mix(h, u64::from(st.stream[f].0) | u64::from(st.stream[f].1) << 32),
+                    Kind::Blend => mix(h, st.blends.raw(f)),
+                    Kind::Texture => mix(h, texture_value(st.texture[f], prov, f)),
+                };
+            }
+        }
+        h
+    }
+
+    /// The first field of the key that `st` does not have, for the `walkmiss` diagnostic.
+    fn why_not(&self, st: &State, prov: u128) -> String {
+        let mut k = 0;
+        for s in &self.segs {
+            let (from, n) = (usize::from(s.from), usize::from(s.n));
+            for i in 0..n {
+                let f = from + i;
+                let (ok, width) = match s.kind {
+                    Kind::Program => (self.vals[k + i] == st.program[f], 1),
+                    Kind::VertexBuffer => {
+                        let (a, b) = st.vertex_buffer[f];
+                        (self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == b, 2)
+                    }
+                    Kind::Ubo(b) => {
+                        let (a, z) = st.ubo[usize::from(b)][f];
+                        (self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == u64::from(z), 2)
+                    }
+                    Kind::Sbo(b) => {
+                        let (a, z) = st.sbuf[usize::from(b)][f];
+                        (self.vals[k + 2 * i] == a && self.vals[k + 2 * i + 1] == u64::from(z), 2)
+                    }
+                    Kind::Attribute => (attribute_value(st.attribute[f]) == self.vals[k + i], 1),
+                    Kind::Stream => {
+                        let (a, b) = st.stream[f];
+                        (u64::from(a) | u64::from(b) << 32 == self.vals[k + i], 1)
+                    }
+                    Kind::Blend => (st.blends.raw(f) == self.vals[k + i], 1),
+                    Kind::Texture => (texture_value(st.texture[f], prov, f) == self.vals[k + i], 1),
+                };
+                let _ = width;
+                if !ok {
+                    return format!("{:?}[{f}]", s.kind);
+                }
+            }
+            k += n * match s.kind {
+                Kind::VertexBuffer | Kind::Ubo(_) | Kind::Sbo(_) => 2,
+                _ => 1,
+            };
+        }
+        if self.scalars.matches(st) { "nothing".into() } else { format!("scalars {:#x}", self.scalars.groups) }
     }
 
     /// Whether `st` has the values of the key.
@@ -780,6 +860,22 @@ struct Entry {
     keys: Vec<(u64, u64)>,
 }
 
+/// Counts why a call missed the templates of its handle (`NXKIT_DIAG=walkmiss`), and prints the most common
+/// reasons every 20000 misses.
+fn walkmiss(why: String, templates: usize) {
+    static MISSES: Mutex<Option<(u32, std::collections::HashMap<String, u32>)>> = Mutex::new(None);
+    let mut g = MISSES.lock().unwrap_or_else(PoisonError::into_inner);
+    let (n, map) = g.get_or_insert_with(Default::default);
+    *n += 1;
+    *map.entry(format!("{why} ({templates} kept)")).or_default() += 1;
+    if *n % 20000 == 0 {
+        let mut v: Vec<_> = map.iter().collect();
+        v.sort_by(|a, b| b.1.cmp(a.1));
+        let top: Vec<String> = v.iter().take(15).map(|(k, c)| format!("{k}: {c}")).collect();
+        eprintln!("DIAG walkmiss after {n}: {}", top.join(" | "));
+    }
+}
+
 /// The templates of all handles, and which memory each handle reads.
 #[derive(Default)]
 pub(super) struct Cache {
@@ -791,7 +887,17 @@ pub(super) struct Cache {
     pub(super) invalidations: u32,
     /// Templates dropped because a handle had too many, since the last `take_counters`.
     pub(super) evictions: u32,
+    /// The evictions and hits of each handle since the last `clear`.
+    churn: FastMap<u64, (u32, u32)>,
+    /// Handles that are called with more states in a frame than [`MAX_PER_HANDLE`]: a model recording that runs for
+    /// each instance with another uniform buffer. Their templates are dropped as fast as they are made, so a call
+    /// walks them without one. The walk still tracks into the template of the caller.
+    cold: FastMap<u64, ()>,
 }
+
+/// A handle with this many evictions turns cold when it had fewer than one hit per [`COLD_RATIO`] evictions.
+const COLD_AFTER: u32 = 4 * MAX_PER_HANDLE as u32;
+const COLD_RATIO: u32 = 8;
 
 impl Cache {
     /// The number of templates that `handle` has.
@@ -801,6 +907,8 @@ impl Cache {
     }
 
     pub(super) fn clear(&mut self) {
+        self.churn.clear();
+        self.cold.clear();
         self.entries.clear();
         self.by_start.clear();
         self.longest = 0;
@@ -814,6 +922,17 @@ impl Cache {
         if e.list.len() >= MAX_PER_HANDLE {
             e.list.remove(0);
             self.evictions += 1;
+            let c = self.churn.entry(handle).or_default();
+            c.0 += 1;
+            if c.0 >= COLD_AFTER && c.1 * COLD_RATIO < c.0 {
+                self.cold.insert(handle, ());
+                if let Some(e) = self.entries.remove(&handle) {
+                    for k in e.keys {
+                        self.by_start.remove(&k);
+                    }
+                }
+                return;
+            }
         }
         for &(start, end) in &t.spans {
             match self.by_start.entry((start, handle)) {
@@ -1045,6 +1164,9 @@ impl Walker {
         {
             self.counters.walk_hits += 1;
             self.counters.draws_from_template += t.draws.len() as u32;
+            if let Some(c) = self.cache.churn.get_mut(&handle) {
+                c.1 += 1;
+            }
             if self.verify {
                 self.play_verified(mem, st, handle, depth, &mut t);
             } else {
@@ -1053,7 +1175,11 @@ impl Walker {
             self.cache.put(handle, t);
             return;
         }
-        self.build(mem, st, handle, depth);
+        let keep = !self.cache.cold.contains_key(&handle);
+        if !keep {
+            self.counters.cold_walks += 1;
+        }
+        self.build(mem, st, handle, depth, keep);
     }
 
     /// Plays the template, takes everything back, walks the recording without templates and compares. The uncached
@@ -1116,10 +1242,22 @@ impl Walker {
     fn find(&mut self, st: &State, handle: u64, depth: u32) -> Option<usize> {
         let epoch = self.programs.epoch();
         let e = self.cache.entries.get_mut(&handle)?;
-        let mut stale = 0u32;
+        let mut stale = 0u64;
         let mut found = None;
-        for (i, t) in e.list.iter_mut().enumerate().rev() {
-            if depth + t.height > MAX_CALL_DEPTH {
+        // The digest of `st` for the fields of template `shape`. The templates of a handle mostly read the same fields,
+        // so it is computed once per distinct field set.
+        let mut shape: Option<(usize, u64)> = None;
+        for i in (0..e.list.len()).rev() {
+            let d = match shape {
+                Some((j, d)) if e.list[j].key.segs == e.list[i].key.segs => d,
+                _ => {
+                    let d = e.list[i].key.digest_of(st, self.track.prov);
+                    shape = Some((i, d));
+                    d
+                }
+            };
+            let t = &mut e.list[i];
+            if t.key.digest != d || depth + t.height > MAX_CALL_DEPTH {
                 continue;
             }
             if t.epoch != epoch {
@@ -1133,6 +1271,11 @@ impl Walker {
             if t.key.matches(st, self.track.prov) {
                 found = Some(i);
                 break;
+            }
+        }
+        if found.is_none() && stale == 0 && crate::diag("walkmiss") {
+            if let Some(t) = e.list.last() {
+                walkmiss(t.key.why_not(st, self.track.prov), e.list.len());
             }
         }
         if stale != 0 {
@@ -1153,7 +1296,8 @@ impl Walker {
     }
 
     /// Walks the recording and keeps a template of it.
-    fn build<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32) {
+    /// A cold handle (`keep` false) is tracked the same way, but its template is not made.
+    fn build<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32, keep: bool) {
         let mut entry = self.track.pool.pop().unwrap_or_else(|| Box::new(State::default()));
         (*entry).clone_from(st);
         let open = Open {
@@ -1179,7 +1323,7 @@ impl Walker {
         if let Some(p) = self.track.open.last_mut() {
             p.absorb(&f.needs, &f.written, f.programs.iter().copied(), &f.spans, f.height, f.truncated);
         }
-        if f.truncated {
+        if f.truncated || !keep {
             self.track.pool.push(f.entry);
             return;
         }
@@ -1901,16 +2045,17 @@ mod tests {
     }
 
     #[test]
-    fn a_handle_keeps_at_most_four_templates() {
+    fn a_handle_keeps_at_most_max_per_handle_templates() {
+        const N: usize = MAX_PER_HANDLE + 2;
         for_both(|p| {
             let child = p.put(&[draw()]);
             let calls: Vec<Record> = [program(PROG)]
                 .into_iter()
-                .chain((0..6).flat_map(|i| [viewport(10.0 + i as f32), Record::Call(child)]))
+                .chain((0..N).flat_map(|i| [viewport(10.0 + i as f32), Record::Call(child)]))
                 .collect();
             let top = p.put(&calls);
             let (_, c) = p.frame(&[top]);
-            assert_eq!((c.walk_misses, c.evictions), (6, 2));
+            assert_eq!((c.walk_misses, c.evictions), (N as u32, 2));
             assert_eq!(p.cached.w.cache.templates(child), MAX_PER_HANDLE);
             for _ in 0..3 {
                 p.frame(&[top]);
@@ -1918,11 +2063,28 @@ mod tests {
             }
             let few: Vec<Record> = [program(PROG)]
                 .into_iter()
-                .chain((2..6).flat_map(|i| [viewport(10.0 + i as f32), Record::Call(child)]))
+                .chain((2..N).flat_map(|i| [viewport(10.0 + i as f32), Record::Call(child)]))
                 .collect();
             let top = p.put(&few);
             p.frame(&[top]);
-            assert_eq!(p.frame(&[top]).1.walk_hits, 4);
+            assert_eq!(p.frame(&[top]).1.walk_hits, MAX_PER_HANDLE as u32);
+        });
+    }
+
+    #[test]
+    fn a_handle_with_more_states_than_templates_turns_cold() {
+        let n = MAX_PER_HANDLE * 6;
+        for_both(|p| {
+            let child = p.put(&[draw()]);
+            let calls: Vec<Record> = [program(PROG)]
+                .into_iter()
+                .chain((0..n).flat_map(|i| [viewport(10.0 + i as f32), Record::Call(child)]))
+                .collect();
+            let top = p.put(&calls);
+            p.frame(&[top]);
+            assert_eq!(p.cached.w.cache.templates(child), 0);
+            let (d, c) = p.frame(&[top]);
+            assert_eq!((c.cold_walks as usize, c.walk_misses as usize, d.draws.len()), (n, n, n));
         });
     }
 

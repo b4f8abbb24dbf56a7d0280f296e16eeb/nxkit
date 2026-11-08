@@ -11,9 +11,11 @@
 //!
 //! A walk runs when the queue submits, because the game may write the command memory again after the submit.
 //!
-//! A game replays the recordings of its models in every frame, so a call to a recording that the walker saw before plays
-//! a template of its earlier walk (see `cache`). `NXKIT_WALK_CACHE=0` turns the templates off and
-//! `NXKIT_VERIFY_CACHE=1` walks every recording a second time without them and compares.
+//! A game replays the recordings of its models in every frame, so a call to a recording that the walker saw before can
+//! play a template of its earlier walk (see `cache`). The templates are off by default: in Breath of the Wild the
+//! recordings with draws never repeat a state within a frame, and the walk was 5.4 ms a frame without templates against
+//! 9 ms with them. `NXKIT_WALK_CACHE=1` turns them on and `NXKIT_VERIFY_CACHE=1` walks every recording a second time
+//! without them and compares.
 
 mod cache;
 mod ext;
@@ -119,6 +121,8 @@ pub(crate) struct WalkCounters {
     pub(crate) invalidations: u32,
     /// Templates dropped because a handle had too many.
     pub(crate) evictions: u32,
+    /// Nested recordings walked without a template because their handle is cold (see `Cache::cold`).
+    pub(crate) cold_walks: u32,
     /// Walks whose template result differed from the uncached walk (only with the verification on).
     pub(crate) verify_mismatches: u32,
 }
@@ -134,13 +138,15 @@ pub(crate) struct Walker {
     updated: Vec<(u64, u64)>,
     /// The last snapshot of each uniform buffer range. An update that overlaps a range drops its snapshot.
     snaps: std::cell::RefCell<FastMap<(u64, u32), Option<Arc<[u8]>>>>,
+    /// The buffers of snapshots by size, kept for reuse (`Walker::snap_buffer`).
+    snap_pool: std::cell::RefCell<FastMap<u32, Vec<Arc<[u8]>>>>,
     /// The bytes of the uniform update that is being written. It keeps its capacity between updates.
     update_bytes: Vec<u8>,
     cache: cache::Cache,
     track: cache::Track,
     invalidations: Arc<Invalidations>,
     scratch_ranges: Vec<(u64, u64)>,
-    /// Whether nested recordings play from templates. `NXKIT_WALK_CACHE=0` turns it off.
+    /// Whether nested recordings play from templates. `NXKIT_WALK_CACHE=1` turns it on.
     cache_on: bool,
     /// Walks each recording again without the cache and compares (`NXKIT_VERIFY_CACHE=1`, and always in tests).
     verify: bool,
@@ -160,12 +166,13 @@ impl Walker {
             map,
             updated: Vec::new(),
             snaps: std::cell::RefCell::new(FastMap::default()),
+            snap_pool: std::cell::RefCell::new(FastMap::default()),
             update_bytes: Vec::new(),
             cache: cache::Cache::default(),
             track: cache::Track::new(),
             invalidations: Arc::new(Invalidations::default()),
             scratch_ranges: Vec::new(),
-            cache_on: std::env::var("NXKIT_WALK_CACHE").map_or(true, |v| v != "0"),
+            cache_on: cfg!(test) || std::env::var("NXKIT_WALK_CACHE").is_ok_and(|v| v == "1"),
             verify: cfg!(test) || std::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
             bypass: false,
             undo: None,

@@ -306,12 +306,33 @@ impl Walker {
             self.snaps.borrow_mut().insert((addr, size), None);
             return None;
         }
-        let mut buf = vec![0u8; size as usize];
         let host = self.map.host_address(addr, u64::from(size)).ok()?;
-        mem.read(host, &mut buf).ok()?;
-        let snap: Arc<[u8]> = buf.into();
+        let mut snap = self.snap_buffer(size);
+        mem.read(host, Arc::get_mut(&mut snap)?).ok()?;
+        self.keep_snap_buffer(&snap);
         self.snaps.borrow_mut().insert((addr, size), Some(snap.clone()));
         Some(snap)
+    }
+
+    /// A buffer of `size` bytes for a snapshot that nothing else holds. The buffers of snapshots whose frames were
+    /// encoded and dropped come back, so a large uniform buffer costs a copy, not a fresh allocation and its page faults.
+    fn snap_buffer(&self, size: u32) -> Arc<[u8]> {
+        let mut pool = self.snap_pool.borrow_mut();
+        let list = pool.entry(size).or_default();
+        if let Some(i) = list.iter().position(|b| Arc::strong_count(b) == 1 && Arc::weak_count(b) == 0) {
+            return list.swap_remove(i);
+        }
+        vec![0u8; size as usize].into()
+    }
+
+    /// Keeps a reference to a snapshot buffer, so it comes back once the frame that holds it is dropped.
+    fn keep_snap_buffer(&self, b: &Arc<[u8]>) {
+        const KEEP: usize = 256;
+        let mut pool = self.snap_pool.borrow_mut();
+        let list = pool.entry(b.len() as u32).or_default();
+        if list.len() < KEEP {
+            list.push(b.clone());
+        }
     }
 
     fn draw<M: GuestMem>(&mut self, mem: &M, st: &State, x: &Ext) -> DrawDetail {
