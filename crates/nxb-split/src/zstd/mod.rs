@@ -529,6 +529,14 @@ fn frames(d: &[u8], limit: usize, dicts: &Dicts, over: impl Fn(usize) -> SplitEr
         let id = d.get(at..at + did).map_or(0, |b| {
             b.iter().rev().fold(0u32, |a, &x| a << 8 | u32::from(x))
         });
+        // the frame's content size, when it says: one allocation instead of the doublings
+        let size = d.get(at + did..at + did + fcs).and_then(|b| {
+            let v = b.iter().rev().fold(0u64, |a, &x| a << 8 | u64::from(x));
+            usize::try_from(if fcs == 2 { v + 256 } else { v }).ok()
+        });
+        if let Some(n) = size.filter(|&n| fcs > 0 && n <= limit) {
+            out.reserve(n);
+        }
         at += did + fcs;
         let frame_base = out.len();
         let mut st = State {

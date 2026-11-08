@@ -166,7 +166,9 @@ impl BuildHooks for Oot {
                 ("sdk", "1643a838814f9c10c696f930ed681e7f"),
             ],
             nvn_functions: NVN_FUNCTIONS,
-            shader_groups: "/Shader/=shader /Effect/=effect /Lib/=lib /UI/=layout",
+            // the groups of nxnative's `game.tsv`: its split of the game found every file-sourced shader under them
+            shader_groups: "/Shader/=shader /Effect/=effect /Lib/=lib /Layout2Shader/=layout /Movie/=movie",
+            shader_groups_only: true,
             shader_note: "Ocarina of Time shaders",
             shader_facts: None,
             romfs_marker: "/Pack/ZsDic.pack.zs",

@@ -235,6 +235,10 @@ pub struct Standalone {
     pub nvn_functions: Fact<&'static str>,
     /// The shader groups of the shader split (`shader_groups` of a `game.tsv`: `<path part>=<group>` pairs).
     pub shader_groups: &'static str,
+    /// Whether the shaders lie only in files under `shader_groups` (`shader_scope groups`). The split then reads a
+    /// compressed file outside the groups as it is, without decoding it. Set it only when a split of the whole
+    /// game found every shader under the groups. `false`: the split decodes and scans every file.
+    pub shader_groups_only: bool,
     /// The line the shader split prints for the kind of shaders (`shader_note`).
     pub shader_note: &'static str,
     /// Hand-written shader facts, merged over the generated rows (`shader_facts_manual.tsv`).

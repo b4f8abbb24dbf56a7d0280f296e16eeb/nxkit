@@ -26,7 +26,7 @@ use crate::storage::{FileStorage, Storage};
 mod extract;
 mod unpack;
 pub use extract::{NupRequest, extract_nup, is_nup};
-pub use unpack::{UnpackRequest, Unpacked, unpack_nup};
+pub use unpack::{SplitStats, UnpackRequest, Unpacked, unpack_nup};
 
 pub(crate) const NO_DIR: u32 = 0xFFFF_FFFF;
 pub(crate) const BASE: u8 = 0;

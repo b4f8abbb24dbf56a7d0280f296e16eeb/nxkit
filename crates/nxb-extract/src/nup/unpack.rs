@@ -9,8 +9,9 @@
 
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Instant;
 
 use nxb_model::{Digest, Sha256};
 use nxb_split::SplitError;
@@ -53,6 +54,24 @@ pub struct UnpackRequest {
     pub progress: Option<Arc<crate::run::Counter>>,
 }
 
+/// What the shader split did in the pass: the counters of the stage output.
+#[derive(Clone, Debug, Default)]
+pub struct SplitStats {
+    /// Files (and their bytes in the container) the split scanned.
+    pub scanned: (u64, u64),
+    /// Files (and bytes) it left alone: compressed files outside the title's shader groups. They are written as they
+    /// are, not decoded.
+    pub skipped: (u64, u64),
+    /// Frames the scans decoded, and the bytes they produced.
+    pub decoded: (u64, u64),
+    /// Seconds the workers spent in scans, added over all workers (CPU time of the split).
+    pub scan_cpu_secs: f64,
+    /// Wall seconds of the pass that writes and scans the files.
+    pub pass_secs: f64,
+    /// Wall seconds of the archive jobs and the merge after it.
+    pub merge_secs: f64,
+}
+
 /// What [`unpack_nup`] wrote.
 #[derive(Debug, Default)]
 pub struct Unpacked {
@@ -68,6 +87,8 @@ pub struct Unpacked {
     pub notes: Vec<String>,
     /// Why the split needs the game's own decoder, when it does (the split wrote no outputs then).
     pub split_unsupported: Option<String>,
+    /// The split's counters (none without a split).
+    pub stats: Option<SplitStats>,
 }
 
 /// One file to write: its container index, the path below its root, and whether the split scans it.
@@ -185,12 +206,59 @@ fn walk(n: &Nup, d: u32) -> Result<Tree> {
     Ok((dirs, files))
 }
 
-/// Replaces `root` with an empty folder holding `dirs`.
-fn make_dirs(root: &Path, dirs: &[String]) -> Result<()> {
-    if root.exists() {
-        std::fs::remove_dir_all(root)
-            .map_err(|e| ExtractError::io(format!("remove {}", root.display()), e))?;
+/// Removes a folder with all it holds. The entries of the folders directly below `root` go on `threads` workers: the
+/// folder of an earlier unpack has some 190,000 files, and one thread takes minutes to delete them.
+fn remove_tree(root: &Path, threads: usize) -> Result<()> {
+    let werr = |p: &Path, e: std::io::Error| ExtractError::io(format!("remove {}", p.display()), e);
+    if std::fs::symlink_metadata(root).is_err() {
+        return Ok(());
     }
+    let (mut items, mut tops) = (Vec::new(), Vec::new());
+    for e in std::fs::read_dir(root).map_err(|e| werr(root, e))? {
+        let e = e.map_err(|e| werr(root, e))?;
+        let p = e.path();
+        if e.file_type().is_ok_and(|t| t.is_dir()) {
+            for c in std::fs::read_dir(&p).map_err(|e| werr(&p, e))? {
+                items.push(c.map_err(|e| werr(&p, e))?.path());
+            }
+            tops.push(p);
+        } else {
+            items.push(p);
+        }
+    }
+    let next = AtomicUsize::new(0);
+    let first: Mutex<Option<ExtractError>> = Mutex::new(None);
+    std::thread::scope(|sc| {
+        for _ in 0..threads.clamp(1, 16) {
+            sc.spawn(|| {
+                while let Some(p) = items.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let r = if p.is_dir() && !p.is_symlink() {
+                        std::fs::remove_dir_all(p)
+                    } else {
+                        std::fs::remove_file(p)
+                    };
+                    if let Err(e) = r
+                        && e.kind() != std::io::ErrorKind::NotFound
+                        && let Ok(mut g) = first.lock()
+                    {
+                        g.get_or_insert(werr(p, e));
+                    }
+                }
+            });
+        }
+    });
+    if let Some(e) = first.into_inner().ok().flatten() {
+        return Err(e);
+    }
+    for t in tops {
+        std::fs::remove_dir_all(&t).map_err(|e| werr(&t, e))?;
+    }
+    std::fs::remove_dir_all(root).map_err(|e| werr(root, e))
+}
+
+/// Replaces `root` with an empty folder holding `dirs`.
+fn make_dirs(root: &Path, dirs: &[String], threads: usize) -> Result<()> {
+    remove_tree(root, threads)?;
     std::fs::create_dir_all(root)
         .map_err(|e| ExtractError::io(format!("create {}", root.display()), e))?;
     for d in dirs {
@@ -267,7 +335,7 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     // the folders first, then the files of the version and of every DLC
     let mut jobs = Vec::new();
     let (dirs, files) = walk(&n, d)?;
-    make_dirs(&r.romfs, &dirs)?;
+    make_dirs(&r.romfs, &dirs, r.threads)?;
     let (count, bytes) = (files.len(), files.iter().map(|f| n.files[f.1].size).sum());
     for (rel, i) in files {
         jobs.push(Job {
@@ -279,10 +347,7 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     }
     let mut dlc = Vec::new();
     // no folder of an earlier unpack stays
-    if r.aoc.exists() {
-        std::fs::remove_dir_all(&r.aoc)
-            .map_err(|e| ExtractError::io(format!("remove {}", r.aoc.display()), e))?;
-    }
+    remove_tree(&r.aoc, r.threads)?;
     for (tid, pi) in &s.dlc {
         let index = u32::try_from(tid - s.app - 0x1000).map_err(|_| {
             bad(
@@ -292,7 +357,7 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
         })?;
         let root = r.aoc.join(index.to_string());
         let (dirs, files) = walk(&n, n.packages[*pi].romfs)?;
-        make_dirs(&root, &dirs)?;
+        make_dirs(&root, &dirs, r.threads)?;
         for (rel, i) in files {
             jobs.push(Job {
                 file: i,
@@ -340,11 +405,23 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     let stop = AtomicBool::new(false);
     let fatal: Mutex<Option<ExtractError>> = Mutex::new(None);
     let tmpl = t.as_ref().map(|x| &x.0);
+    // per job: whether the split scanned it (the others stay out of the lists the archive jobs and the merge see)
+    let scanned: Vec<AtomicBool> = jobs.iter().map(|_| AtomicBool::new(false)).collect();
+    let (n_scan, b_scan, n_skip, b_skip, scan_ns) = (
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+    );
+    let decoded0 = nxb_split::scanfile::decoded_totals();
+    let pass = Instant::now();
     std::thread::scope(|sc| {
         for _ in 0..r.threads.max(1) {
             sc.spawn(|| {
                 while !stop.load(Ordering::Relaxed) {
-                    let Some(job) = jobs.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                    let at = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(job) = jobs.get(at) else {
                         break;
                     };
                     let f = &n.files[job.file];
@@ -353,20 +430,33 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
                         if let (Some(t), true) = (tmpl, job.split) {
                             let label = format!("/{}", job.rel);
                             let digest = Digest(f.sha);
+                            let loose = || LooseSrc {
+                                path: job.path.clone(),
+                                size: f.size,
+                            };
+                            let head = match &data {
+                                Some(d) => d[..d.len().min(16)].to_vec(),
+                                None => (&loose() as &dyn Src).read_up(0, 16).unwrap_or_default(),
+                            };
+                            // a compressed file outside the title's shader groups stays as it was written
+                            if !t.prof.reads(&label, &head) {
+                                n_skip.fetch_add(1, Ordering::Relaxed);
+                                b_skip.fetch_add(f.size, Ordering::Relaxed);
+                                return;
+                            }
+                            let t0 = Instant::now();
                             match data {
                                 Some(d) => t.scan(&label, &d, digest),
                                 None => {
-                                    let src = LooseSrc {
-                                        path: job.path.clone(),
-                                        size: f.size,
-                                    };
-                                    let head =
-                                        (&src as &dyn Src).read_up(0, 16).unwrap_or_default();
                                     if !t.defer(&label, &head, digest) {
-                                        t.scan_with(&label, &src, digest);
+                                        t.scan_with(&label, &loose(), digest);
                                     }
                                 }
                             }
+                            scan_ns.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                            n_scan.fetch_add(1, Ordering::Relaxed);
+                            b_scan.fetch_add(f.size, Ordering::Relaxed);
+                            scanned[at].store(true, Ordering::Relaxed);
                         }
                     });
                     if let Err(e) = res {
@@ -386,12 +476,19 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     if let Some(e) = fatal.into_inner().ok().flatten() {
         return Err(e);
     }
+    let pass_secs = pass.elapsed().as_secs_f64();
 
     let mut split_unsupported = None;
+    let mut stats = None;
     if let (Some((t, main)), Some((_, outputs))) = (t.take(), &r.split) {
         let mut post: Vec<PostFile> = Vec::new();
         let mut files = Vec::new();
-        for j in jobs.iter().filter(|j| j.split) {
+        let merge = Instant::now();
+        for (j, _) in jobs
+            .iter()
+            .zip(&scanned)
+            .filter(|(_, ok)| ok.load(Ordering::Relaxed))
+        {
             let f = &n.files[j.file];
             let digest = Digest(f.sha);
             files.push((j.rel.clone(), digest));
@@ -405,7 +502,7 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
             });
         }
         post.sort_by(|a, b| a.label.cmp(&b.label));
-        let scanned = t.scanned();
+        let distinct = t.scanned();
         let res = t.post(post, r.threads).and_then(|()| {
             t.merge(
                 &[VersionIn {
@@ -419,9 +516,26 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
         });
         match res {
             Ok((_, red)) => {
+                let merge_secs = merge.elapsed().as_secs_f64();
+                let (d1, d2) = nxb_split::scanfile::decoded_totals();
+                let st = SplitStats {
+                    scanned: (n_scan.load(Ordering::Relaxed), b_scan.load(Ordering::Relaxed)),
+                    skipped: (n_skip.load(Ordering::Relaxed), b_skip.load(Ordering::Relaxed)),
+                    decoded: (d1 - decoded0.0, d2 - decoded0.1),
+                    scan_cpu_secs: scan_ns.load(Ordering::Relaxed) as f64 / 1e9,
+                    pass_secs,
+                    merge_secs,
+                };
+                let gb = |b: u64| b as f64 / 1e9;
                 notes.push(format!(
-                    "shader split: {scanned} distinct files scanned of {count}"
+                    "shader split: {distinct} distinct files scanned of {count}"
                 ));
+                notes.push(format!(
+                    "shader split counters: scanned {} files, {:.2} GB; skipped {} files, {:.2} GB (compressed, outside the shader groups); decoded {} frames, {:.2} GB; scans {:.1} s of CPU; write and scan pass {:.1} s; archive jobs and merge {:.1} s (wall)",
+                    st.scanned.0, gb(st.scanned.1), st.skipped.0, gb(st.skipped.1), st.decoded.0, gb(st.decoded.1),
+                    st.scan_cpu_secs, st.pass_secs, st.merge_secs
+                ));
+                stats = Some(st);
                 notes.extend(red);
             }
             Err(ExtractError::Unsupported(m)) => split_unsupported = Some(m),
@@ -435,5 +549,6 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
         dlc,
         notes,
         split_unsupported,
+        stats,
     })
 }
