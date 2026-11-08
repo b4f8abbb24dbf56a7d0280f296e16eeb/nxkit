@@ -69,6 +69,8 @@ pub enum CullMode {
 pub struct ColorAttachment {
     /// The texture.
     pub texture: Texture,
+    /// The depth plane when rendering a slice of a 3D texture; zero for other texture kinds.
+    pub depth_plane: u32,
     /// The action at the start.
     pub load: LoadAction,
     /// The action at the end.
@@ -112,8 +114,8 @@ pub struct StencilAttachment {
 /// The attachments of a render pass.
 #[derive(Clone, Default)]
 pub struct RenderPassDesc {
-    /// The colour attachments, in slot order.
-    pub colors: Vec<ColorAttachment>,
+    /// The colour attachments by slot. `None` leaves a slot empty, as NVN allows.
+    pub colors: Vec<Option<ColorAttachment>>,
     /// The depth attachment.
     pub depth: Option<DepthAttachment>,
     /// The stencil attachment.
@@ -289,53 +291,17 @@ impl CommandBuffer {
     ) -> Result<RenderPass<'_>> {
         let first = desc
             .colors
-            .first()
+            .iter()
+            .flatten()
+            .next()
             .map(|c| &c.texture)
             .or(desc.depth.as_ref().map(|d| &d.texture))
             .ok_or(MetalError::Invalid("a render pass needs an attachment"))?;
-        let rp = MTL4RenderPassDescriptor::new();
-        let slots = rp.colorAttachments();
-        for (i, c) in desc.colors.iter().enumerate() {
-            check_attachment(&c.texture, c.load, c.store, c.memoryless)?;
-            // SAFETY: the index is a plain slot. Metal checks the attachment limit when the encoder starts.
-            let a = unsafe { slots.objectAtIndexedSubscript(i) };
-            a.setTexture(Some(c.texture.raw()));
-            a.setLoadAction(c.load.to_mtl());
-            a.setStoreAction(c.store.to_mtl());
-            a.setClearColor(MTLClearColor {
-                red: c.clear[0],
-                green: c.clear[1],
-                blue: c.clear[2],
-                alpha: c.clear[3],
-            });
-            self.retain(c.texture.clone());
-        }
-        if let Some(d) = &desc.depth {
-            check_attachment(&d.texture, d.load, d.store, d.memoryless)?;
-            let a = rp.depthAttachment();
-            a.setTexture(Some(d.texture.raw()));
-            a.setLoadAction(d.load.to_mtl());
-            a.setStoreAction(d.store.to_mtl());
-            a.setClearDepth(d.clear);
-            self.retain(d.texture.clone());
-        }
-        if let Some(d) = &desc.stencil {
-            check_attachment(&d.texture, d.load, d.store, d.memoryless)?;
-            if !d.texture.desc().format.has_stencil() {
-                return Err(MetalError::Invalid(
-                    "the stencil texture has no stencil aspect",
-                ));
-            }
-            let a = rp.stencilAttachment();
-            a.setTexture(Some(d.texture.raw()));
-            a.setLoadAction(d.load.to_mtl());
-            a.setStoreAction(d.store.to_mtl());
-            a.setClearStencil(d.clear);
-            self.retain(d.texture.clone());
-        }
-        let td = first.desc();
-        rp.setRenderTargetWidth(td.width as usize);
-        rp.setRenderTargetHeight(td.height as usize);
+        let mut pd = self.pass_desc.take().unwrap_or_else(PassDescriptor::new);
+        let result = self.fill_pass(&mut pd, desc, first);
+        let rp = pd.raw.clone();
+        self.pass_desc = Some(pd);
+        result?;
         let enc = self
             .raw
             .renderCommandEncoderWithDescriptor(&rp)
@@ -366,6 +332,100 @@ impl CommandBuffer {
             has_pipeline: false,
             ended: false,
         })
+    }
+
+    /// Writes `desc` into the reusable descriptor `pd`. The attachments of the previous pass are emptied first.
+    fn fill_pass(&mut self, pd: &mut PassDescriptor, desc: &RenderPassDesc, first: &Texture) -> Result<()> {
+        pd.reset();
+        let rp = &pd.raw;
+        let slots = rp.colorAttachments();
+        for (i, c) in desc.colors.iter().enumerate() {
+            let Some(c) = c else { continue };
+            check_attachment(&c.texture, c.load, c.store, c.memoryless)?;
+            pd.colors = pd.colors.max(i + 1);
+            // SAFETY: the index is a plain slot. Metal checks the attachment limit when the encoder starts.
+            let a = unsafe { slots.objectAtIndexedSubscript(i) };
+            a.setTexture(Some(c.texture.raw()));
+            a.setDepthPlane(c.depth_plane as usize);
+            a.setLoadAction(c.load.to_mtl());
+            a.setStoreAction(c.store.to_mtl());
+            a.setClearColor(MTLClearColor {
+                red: c.clear[0],
+                green: c.clear[1],
+                blue: c.clear[2],
+                alpha: c.clear[3],
+            });
+            self.retain(c.texture.clone());
+        }
+        if let Some(d) = &desc.depth {
+            check_attachment(&d.texture, d.load, d.store, d.memoryless)?;
+            pd.depth = true;
+            let a = rp.depthAttachment();
+            a.setTexture(Some(d.texture.raw()));
+            a.setLoadAction(d.load.to_mtl());
+            a.setStoreAction(d.store.to_mtl());
+            a.setClearDepth(d.clear);
+            self.retain(d.texture.clone());
+        }
+        if let Some(d) = &desc.stencil {
+            check_attachment(&d.texture, d.load, d.store, d.memoryless)?;
+            if !d.texture.desc().format.has_stencil() {
+                return Err(MetalError::Invalid(
+                    "the stencil texture has no stencil aspect",
+                ));
+            }
+            pd.stencil = true;
+            let a = rp.stencilAttachment();
+            a.setTexture(Some(d.texture.raw()));
+            a.setLoadAction(d.load.to_mtl());
+            a.setStoreAction(d.store.to_mtl());
+            a.setClearStencil(d.clear);
+            self.retain(d.texture.clone());
+        }
+        // The render area is the smallest attachment, as in NVN.
+        let td = first.desc();
+        let (mut w, mut h) = (td.width, td.height);
+        for t in desc.colors.iter().flatten().map(|c| &c.texture).chain(desc.depth.as_ref().map(|d| &d.texture)) {
+            let d = t.desc();
+            w = w.min(d.width);
+            h = h.min(d.height);
+        }
+        rp.setRenderTargetWidth(w as usize);
+        rp.setRenderTargetHeight(h as usize);
+        Ok(())
+    }
+}
+
+/// A render pass descriptor that is filled again for every pass of a command buffer. Metal copies a descriptor when
+/// an encoder starts, so one object serves all passes.
+pub(crate) struct PassDescriptor {
+    raw: Retained<MTL4RenderPassDescriptor>,
+    /// The colour slots below this index may hold a texture.
+    colors: usize,
+    depth: bool,
+    stencil: bool,
+}
+
+impl PassDescriptor {
+    fn new() -> Self {
+        Self { raw: MTL4RenderPassDescriptor::new(), colors: 0, depth: false, stencil: false }
+    }
+
+    /// Empties the attachments that the previous pass set.
+    fn reset(&mut self) {
+        let slots = self.raw.colorAttachments();
+        for i in 0..self.colors {
+            // SAFETY: the index is a slot that an earlier pass set, so it is inside the attachment limit.
+            let a = unsafe { slots.objectAtIndexedSubscript(i) };
+            a.setTexture(None);
+        }
+        if self.depth {
+            self.raw.depthAttachment().setTexture(None);
+        }
+        if self.stencil {
+            self.raw.stencilAttachment().setTexture(None);
+        }
+        (self.colors, self.depth, self.stencil) = (0, false, false);
     }
 }
 

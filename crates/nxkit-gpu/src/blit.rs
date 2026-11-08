@@ -65,13 +65,13 @@ impl Blit {
             _ => self.plain.clone(),
         };
         let desc = RenderPassDesc {
-            colors: vec![ColorAttachment {
+            colors: vec![Some(ColorAttachment { depth_plane: 0,
                 texture: target,
                 load: LoadAction::DontCare,
                 store: StoreAction::Store,
                 clear: [0.0; 4],
                 memoryless: false,
-            }],
+            })],
             depth: None,
             stencil: None,
         };

@@ -118,6 +118,27 @@ pub(crate) fn describe(rec: &TextureRecord, scale: f32, u: Use) -> Result<(Textu
 }
 
 impl TextureStore {
+    /// A single renderable mip/layer. Sampling views and attachment views share the cache.
+    pub(crate) fn target_view(&self, res: &Res, view: nxkit_nvn::frame::TargetView) -> Result<Texture, Skip> {
+        let d = res.desc;
+        let format = match view.format().and_then(texture_format) {
+            Some(Mapped::Exact(format)) if !res.widened => format,
+            _ => d.format,
+        };
+        if d.kind == TextureKind::D2 && d.mip_levels == 1 && view.level() == 0 && view.layer() == 0 && format == d.format {
+            return Ok(res.tex.clone());
+        }
+        let kind = if d.kind == TextureKind::D3 { TextureKind::D3 } else { TextureKind::D2 };
+        let slice = if kind == TextureKind::D3 { 0 } else { view.layer() };
+        let key = (res.generation, [view.level(), 1, slice, 1, format_key(format), kind as u32, u32::from_le_bytes([2,3,4,5])]);
+        let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(texture) = views.get(&key) { return Ok(texture.clone()) }
+        let texture = res.tex.view(&ViewDesc { format, kind, first_level: view.level(), level_count: 1,
+            first_slice: slice, slice_count: 1 }).map_err(|e| crate::tex_skip(format_args!("attachment view {view:?} of {d:?}: {e}")))?;
+        views.insert(key, texture.clone());
+        Ok(texture)
+    }
+
     pub(crate) fn new(ctx: &Context) -> Self {
         Self {
             ctx: ctx.clone(),

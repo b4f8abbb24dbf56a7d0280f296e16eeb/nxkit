@@ -21,6 +21,8 @@ pub struct CommandBuffer {
     pub(crate) raw: RawCommandBuffer,
     retained: Vec<Keep>,
     pub(crate) encode_passes: u32,
+    /// The pass descriptor that every render pass of this command buffer fills again, and what it holds.
+    pub(crate) pass_desc: Option<crate::render::PassDescriptor>,
 }
 
 // SAFETY: a Metal 4 command buffer may be encoded on any thread, one thread at a time. `CommandBuffer` is not `Sync`,
@@ -33,6 +35,7 @@ impl CommandBuffer {
             raw,
             retained: Vec::new(),
             encode_passes: 0,
+            pass_desc: None,
         }
     }
 

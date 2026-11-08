@@ -75,6 +75,8 @@ pub struct AttachmentPlan {
     pub tex: TexId,
     /// Where it is attached.
     pub slot: Slot,
+    /// The mip, layer and format selected for this attachment.
+    pub view: crate::frame::TargetView,
     /// The size of the first mip level in bytes.
     pub bytes: u64,
     /// The chosen load action.

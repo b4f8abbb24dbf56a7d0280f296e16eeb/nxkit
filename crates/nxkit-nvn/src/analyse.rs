@@ -147,10 +147,12 @@ impl Scan<'_> {
         let start = p.attachments.len();
         for (slot, tex) in slots(&self.rt) {
             let r = self.table.get(tex)?;
-            let bytes = r.desc.level_bytes(0)?;
+            let view = self.rt.views[match slot { Slot::Color(n) => usize::from(n), Slot::Depth => MAX_COLOR }];
+            let bytes = r.desc.level_bytes(view.level())?;
             p.attachments.push(AttachmentPlan {
                 tex,
                 slot,
+                view,
                 bytes,
                 load: LoadAction::Load,
                 store: StoreAction::Store,
@@ -298,7 +300,7 @@ fn can_merge(p: &PassPlan, a: usize, b: usize) -> bool {
         || xa
             .iter()
             .zip(xb)
-            .any(|(l, r)| l.tex != r.tex || l.slot != r.slot)
+            .any(|(l, r)| l.tex != r.tex || l.slot != r.slot || l.view != r.view)
     {
         return false;
     }

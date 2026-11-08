@@ -382,6 +382,12 @@ impl Texture {
                 "the texture was not made with `allow_views`",
             ));
         }
+        // Metal aborts the process on a view between a block compressed and an uncompressed format.
+        if v.format.is_compressed() != d.format.is_compressed() {
+            return Err(MetalError::Invalid(
+                "a view cannot change between a compressed and an uncompressed format",
+            ));
+        }
         if v.format.bytes_per_pixel() != d.format.bytes_per_pixel() {
             return Err(MetalError::Invalid(
                 "a view needs the pixel size of the texture",

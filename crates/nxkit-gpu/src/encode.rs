@@ -75,17 +75,95 @@ fn clear_of(sh: &Shared<'_>, pass: &Pass, slot: Slot) -> ClearDetail {
 }
 
 fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
+    let attachments = sh.plan.attachments_of(pass);
+    let color_aliases: Vec<_> = attachments.iter().filter_map(|a| {
+        let Slot::Color(slot) = a.slot else { return None };
+        let res = sh.textures.get(&a.tex)?;
+        Some((slot, (res.barrier_id, a.view.level(), a.view.layer()), a.load == LoadAction::Clear))
+    }).collect();
+    let has_aliases = color_aliases.iter().enumerate().any(|(i, a)|
+        color_aliases[..i].iter().any(|b| a.1 == b.1));
+    let selected = if has_aliases {
+        let mut written = 0u8;
+        let mut outputs = crate::draws::FastMap::default();
+        for n in draw_range(sh, pass) {
+            let Some(d) = sh.detail.draws.get(n as usize) else { continue };
+            let Some(key) = &d.program.fragment else { continue };
+            let locations = if let Some(mask) = outputs.get(key) { *mask } else {
+                let fs = sh.programs.stage(key, false)?;
+                let mask = fs.colors.as_ref().map_or(u8::MAX, |colors| colors.iter().filter(|c| **c < 8).fold(0, |m, c| m | (1 << c)));
+                outputs.insert(key, mask);
+                mask
+            };
+            for slot in 0..8 {
+                if d.write_masks[slot] != 0 && locations & (1 << slot) != 0 {
+                    written |= 1 << slot;
+                }
+            }
+        }
+        match distinct_color_slots(&color_aliases, written) {
+            Ok(selected) => selected,
+            Err(why) => {
+                if crate::diag("target") && crate::lum::active() {
+                    eprintln!("DIAG alias conflict cmds {:?} attachments {:?}", pass.cmds, color_aliases);
+                    for n in draw_range(sh, pass) {
+                        if let Some(d) = sh.detail.draws.get(n as usize) {
+                            eprintln!("DIAG alias draw {n} fs {:?} masks {:?}", d.program.fragment, d.write_masks);
+                        }
+                    }
+                }
+                return Err(why);
+            }
+        }
+    } else { u8::MAX };
     let mut colors: Vec<(u8, ColorAttachment)> = Vec::new();
     let mut desc = RenderPassDesc::default();
     let mut size: Option<[u32; 2]> = None;
     let mut scale = 1.0;
     let mut has_stencil = false;
     for a in sh.plan.attachments_of(pass) {
+        if matches!(a.slot, Slot::Color(n) if selected & (1 << n) == 0) {
+            continue;
+        }
         let res = sh.textures.get(&a.tex).ok_or(Skip::Texture)?;
-        let d = res.desc;
+        let texture = sh.texture_store.target_view(res, a.view)?;
+        let d = texture.desc();
+        if crate::diag("cube") && d.width <= 128 && d.format == nxkit_metal::Format::Rg11B10Float {
+            static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            let line = format!(
+                "DIAG cube pass cmds {:?} {:?} {:?} {}x{} {:?} level {} layer {} load {:?} store {:?}",
+                pass.cmds, a.slot, a.tex, d.width, d.height, d.kind, a.view.level(), a.view.layer(), a.load, a.store
+            );
+            if let Ok(mut seen) = SEEN.lock() {
+                let key = format!("{:?}{:?}{}{}", a.tex, a.slot, a.view.level(), a.view.layer());
+                if !seen.contains(&key) && seen.len() < 3000 {
+                    seen.push(key);
+                    eprintln!("{line}");
+                }
+            }
+        }
+        if crate::diag("draw") && crate::lum::active() && d.width == 1600 && d.height == 900 {
+            eprintln!("DIAG attachment {:?} {:?} backing {:?} {:?} cmds {:?}", a.slot, a.tex, res.barrier_id, d.format, pass.cmds);
+        }
+        // The game encodes block compressed textures on the GPU by rendering into them. Metal cannot render into a
+        // compressed format, so such a pass is left out.
+        if matches!(a.slot, Slot::Color(_)) && (d.format.is_compressed() || d.format.is_depth()) {
+            if crate::diag("target") {
+                eprintln!("DIAG target not renderable {:?}", d.format);
+            }
+            return Err(Skip::Format);
+        }
         let mem = d.storage == Storage::Memoryless;
-        if *size.get_or_insert([d.width, d.height]) != [d.width, d.height] {
-            return Err(Skip::Target);
+        // Attachments of different sizes render into the smallest one, as in NVN.
+        let s = size.get_or_insert([d.width, d.height]);
+        if *s != [d.width, d.height] {
+            if crate::diag("target") {
+                eprintln!(
+                    "DIAG target size mismatch {:?} vs {}x{} slot {:?}",
+                    s, d.width, d.height, a.slot
+                );
+            }
+            *s = [s[0].min(d.width), s[1].min(d.height)];
         }
         if res.scaled {
             scale = sh.scale;
@@ -95,11 +173,34 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         match a.slot {
             Slot::Color(n) => colors.push((
                 n,
-                ColorAttachment { texture: res.tex.clone(), load: l, store: s, clear: clear.color.map(f64::from), memoryless: mem },
+                ColorAttachment { depth_plane: if d.kind == nxkit_metal::TextureKind::D3 { a.view.layer() } else { 0 },
+                    texture: texture.clone(),
+                    load: l,
+                    store: s,
+                    clear: clear.color.map(f64::from),
+                    memoryless: mem,
+                },
             )),
             Slot::Depth => {
+                if crate::diag("depth") {
+                    static SHOWN: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
+                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 500 < 20 {
+                        eprintln!(
+                            "DIAG depth pass {:?} {}x{} {:?} load {:?} store {:?} clear {} cmds {:?}",
+                            a.tex,
+                            d.width,
+                            d.height,
+                            d.format,
+                            a.load,
+                            a.store,
+                            clear.depth,
+                            pass.cmds
+                        );
+                    }
+                }
                 desc.depth = Some(DepthAttachment {
-                    texture: res.tex.clone(),
+                    texture: texture.clone(),
                     load: l,
                     store: s,
                     clear: f64::from(clear.depth),
@@ -108,7 +209,7 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
                 if d.format.has_stencil() {
                     has_stencil = true;
                     desc.stencil = Some(StencilAttachment {
-                        texture: res.tex.clone(),
+                        texture: texture.clone(),
                         load: l,
                         store: s,
                         clear: clear.stencil,
@@ -119,14 +220,32 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         }
     }
     colors.sort_by_key(|(n, _)| *n);
-    if colors.iter().enumerate().any(|(i, (n, _))| usize::from(*n) != i) {
+    if colors.windows(2).any(|w| w[0].0 == w[1].0) {
+        if crate::diag("target") {
+            eprintln!(
+                "DIAG target twice {:?}",
+                colors.iter().map(|(n, _)| *n).collect::<Vec<_>>()
+            );
+        }
         return Err(Skip::Target);
     }
+    if size.is_none() && crate::diag("target") {
+        eprintln!("DIAG target none");
+    }
     let size = size.ok_or(Skip::Target)?;
-    let formats = colors.iter().map(|(_, c)| Some(c.texture.desc().format)).collect();
-    desc.colors = colors.into_iter().map(|(_, c)| c).collect();
+    // NVN allows empty colour slots between attachments. They stay empty in the pass and in the pipeline.
+    let slots = colors.last().map_or(0, |(n, _)| usize::from(*n) + 1);
+    let mut formats = vec![None; slots];
+    desc.colors = vec![None; slots];
+    for (n, c) in colors {
+        formats[usize::from(n)] = Some(c.texture.desc().format);
+        desc.colors[usize::from(n)] = Some(c);
+    }
     let pc = PassCtx {
-        targets: Targets { colors: formats, samples: 1 },
+        targets: Targets {
+            colors: formats,
+            samples: 1,
+        },
         size,
         scale,
         has_depth: desc.depth.is_some(),
@@ -135,9 +254,42 @@ fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
     Ok(Setup { desc, pc })
 }
 
+/// NVN may bind a texture to several slots and select the writer with channel masks. Metal gives each attachment
+/// its own tile storage, so storing an inactive alias can overwrite the active output. Preserve the slot of the
+/// actual writer (or clear), leaving the other aliases empty rather than compacting the output locations.
+fn distinct_color_slots<K: Copy + Eq + std::fmt::Debug>(colors: &[(u8, K, bool)], written: u8) -> Result<u8, Skip> {
+    let mut selected = 0u8;
+    for (i, &(slot, backing, _)) in colors.iter().enumerate() {
+        if colors[..i].iter().any(|c| c.1 == backing) { continue }
+        let aliases: Vec<_> = colors.iter().filter(|c| c.1 == backing).collect();
+        let writers: Vec<_> = aliases.iter().filter(|c| written & (1 << c.0) != 0).collect();
+        if writers.len() > 1 {
+            if crate::diag("target") && crate::lum::active() { eprintln!("DIAG target competing aliases {backing:?} written {written:#x}"); }
+            return Err(Skip::Target);
+        }
+        let winner = writers.first().map(|c| c.0)
+            .or_else(|| aliases.iter().find(|c| c.2).map(|c| c.0))
+            .unwrap_or(slot);
+        selected |= 1 << winner;
+    }
+    Ok(selected)
+}
+
+thread_local! {
+    /// True while the encoded render pass writes a terrain array (the `hm` diagnostic).
+    static HM_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn draw_range(sh: &Shared<'_>, pass: &Pass) -> std::ops::Range<u32> {
-    let first = sh.ordinals.get(pass.cmds.start as usize).map_or(0, |o| o.draw);
-    let n = pass.cmds.clone().filter(|i| matches!(sh.frame.cmds.get(*i as usize), Some(Cmd::Draw { .. }))).count();
+    let first = sh
+        .ordinals
+        .get(pass.cmds.start as usize)
+        .map_or(0, |o| o.draw);
+    let n = pass
+        .cmds
+        .clone()
+        .filter(|i| matches!(sh.frame.cmds.get(*i as usize), Some(Cmd::Draw { .. })))
+        .count();
     first..first + n as u32
 }
 
@@ -732,4 +884,83 @@ pub(crate) fn render_pass(
         n += 1;
     }
     rp.end();
+    if crate::lum::active() || (crate::diag("hmcap") && HM_PASS.with(std::cell::Cell::get)) {
+        for a in sh.plan.attachments_of(pass) {
+            if matches!(a.slot, Slot::Color(_)) && a.store == StoreAction::Store {
+                if let Slot::Color(slot) = a.slot {
+                    let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else { continue };
+                    crate::lum::capture(
+                        sh.ctx,
+                        cb,
+                        &tables.vertex,
+                        pass.cmds.start,
+                        a.tex,
+                        &color.texture,
+                        color.depth_plane,
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nxkit_metal::{ArchiveConfig, Format, FrameRing, PipelineCache, Primitive,
+        RenderPipelineDesc, ShaderLibrary, Texture, TextureDesc};
+
+    #[test]
+    fn inactive_aliases_leave_the_original_output_locations_empty() {
+        let colors = [(0, TexId(1), false), (1, TexId(2), false),
+            (2, TexId(2), false), (3, TexId(3), false), (4, TexId(3), false)];
+        assert_eq!(distinct_color_slots(&colors, 0b01011).unwrap(), 0b01011);
+        assert_eq!(distinct_color_slots(&colors, 0b10101).unwrap(), 0b10101);
+        assert_eq!(distinct_color_slots(&[(1, TexId(2), false), (2, TexId(2), true)], 0).unwrap(), 4);
+        assert!(distinct_color_slots(&colors, 0b00110).is_err());
+    }
+
+    #[test]
+    fn an_inactive_alias_cannot_overwrite_a_rendered_color() {
+        let Ok(ctx) = Context::system_default() else { return };
+        let selected = distinct_color_slots(&[(0, TexId(1), false), (1, TexId(1), false)], 1).unwrap();
+        let lib = ShaderLibrary::from_source(&ctx, "alias-output", r#"
+#include <metal_stdlib>
+using namespace metal;
+struct V { float4 pos [[position]]; };
+vertex V vs(uint id [[vertex_id]]) {
+    float2 p = float2((id << 1) & 2, id & 2);
+    return {float4(p * 2 - 1, 0, 1)};
+}
+struct Outputs { float4 a [[color(0)]]; float4 b [[color(1)]]; };
+fragment Outputs fs() { return {float4(1,0,0,1), float4(0)}; }
+"#).unwrap();
+        let mut texture_desc = TextureDesc::render_target_2d(16, 16, Format::Rgba8Unorm);
+        texture_desc.storage = Storage::Shared;
+        let texture = Texture::new(&ctx, texture_desc).unwrap();
+        let mut pipeline_desc = RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm; 2]);
+        pipeline_desc.colors[1].as_mut().unwrap().write_mask = 0;
+        let mut colors = vec![Some(ColorAttachment { depth_plane: 0, texture: texture.clone(), load: MLoad::Clear,
+            store: MStore::Store, clear: [0.0; 4], memoryless: false }); 2];
+        for slot in 0..2 {
+            if selected & (1 << slot) == 0 {
+                colors[slot] = None;
+                pipeline_desc.colors[slot] = None;
+            }
+        }
+        let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+        let pipeline = cache.render(1, &pipeline_desc).unwrap();
+        let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+        let mut ring = FrameRing::new(&ctx).unwrap();
+        let mut frame = ring.begin().unwrap();
+        let mut pass = frame.commands().begin_render_pass(&RenderPassDesc { colors, depth: None, stencil: None }, &table).unwrap();
+        pass.encode(&RenderCommand::SetPipeline(pipeline)).unwrap();
+        pass.encode(&RenderCommand::Draw { primitive: Primitive::Triangle, first_vertex: 0,
+            vertex_count: 3, instance_count: 1, base_instance: 0 }).unwrap();
+        pass.end();
+        frame.submit().unwrap().wait().unwrap();
+        let mut pixels = vec![0; 16 * 16 * 4];
+        texture.read(16 * 4, &mut pixels).unwrap();
+        assert!(pixels.chunks_exact(4).all(|p| p == [255, 0, 0, 255]));
+    }
 }

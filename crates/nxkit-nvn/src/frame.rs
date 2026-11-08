@@ -10,6 +10,27 @@ use crate::resource::TexId;
 /// The number of colour attachments that NVN has.
 pub const MAX_COLOR: usize = 8;
 
+/// The subresource and optional format of a render attachment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TargetView(u32);
+
+impl TargetView {
+    /// Decodes the private 16-byte NVN view layout emitted by the runtime.
+    pub fn from_words(words: [u32; 4]) -> Self {
+        let flags = words[0] & 0xff;
+        let level = if flags & 1 != 0 { words[0] >> 16 & 31 } else { 0 };
+        let layer = if flags & 2 != 0 { words[1] >> 16 } else { 0 };
+        let format = if flags & 4 != 0 { (words[1] & 0x1ff) << 21 | 1 << 30 } else { 0 };
+        Self(level | layer << 5 | format)
+    }
+    /// The mip level written by the attachment.
+    pub fn level(self) -> u32 { self.0 & 31 }
+    /// The array layer or cube face written by the attachment.
+    pub fn layer(self) -> u32 { self.0 >> 5 & 0xffff }
+    /// A format override; `None` uses the texture format.
+    pub fn format(self) -> Option<i32> { (self.0 & (1 << 30) != 0).then_some((self.0 >> 21 & 0x1ff) as i32) }
+}
+
 /// The attachments that are set at one time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RtSet {
@@ -17,6 +38,8 @@ pub struct RtSet {
     pub color: [Option<TexId>; MAX_COLOR],
     /// The depth and stencil target.
     pub depth: Option<TexId>,
+    /// The colour views followed by the depth/stencil view at index 8.
+    pub views: [TargetView; MAX_COLOR + 1],
 }
 
 impl RtSet {
@@ -253,6 +276,15 @@ mod tests {
 
     #[test]
     fn a_command_is_small() {
-        assert!(std::mem::size_of::<Cmd>() <= 88);
+        assert_eq!(std::mem::size_of::<TargetView>(), 4);
+        assert!(std::mem::size_of::<Cmd>() <= 128);
+    }
+
+    #[test]
+    fn render_views_decode_mips_layers_and_optional_formats() {
+        let view = TargetView::from_words([0x01020007, 0x00050025, 1, 0]);
+        assert_eq!((view.level(), view.layer(), view.format()), (2, 5, Some(0x25)));
+        let identity = TargetView::from_words([0, u32::MAX, u32::MAX, u32::MAX]);
+        assert_eq!(identity, TargetView::default());
     }
 }

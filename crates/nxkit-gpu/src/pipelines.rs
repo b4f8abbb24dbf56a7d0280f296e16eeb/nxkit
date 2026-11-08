@@ -250,13 +250,19 @@ impl Pipelines {
             &[],
         );
         for (i, f) in targets.colors.iter().enumerate() {
-            let format = f.ok_or(Skip::Target)?;
-            let written = fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
+            let Some(format) = *f else {
+                desc.colors.push(None);
+                continue;
+            };
+            let written =
+                fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
             let blend = d.blend.get(i).copied().unwrap_or_default();
             let mask = d.write_masks.get(i).copied().unwrap_or(0xF);
-            desc.colors.push(translate::color_target(format, &blend, mask, written));
+            desc.colors
+                .push(Some(translate::color_target(format, &blend, mask, written)));
         }
-        desc.vertex_layout = translate::vertex_descriptor(d).map_err(|_| Skip::Format)?;
+        desc.vertex_layout =
+            translate::vertex_descriptor(d, &vs.inputs).map_err(|_| Skip::Format)?;
         desc.topology = class;
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;

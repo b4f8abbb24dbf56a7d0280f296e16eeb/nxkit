@@ -8,7 +8,7 @@ use nxkit_metal::{
     ArchiveConfig, ArgumentTable, ColorAttachment, ComputeCommand, Context, DeswizzleParams,
     Deswizzler, Format, FrameRing, GobOrder, GuestMemory, LoadAction, MetalError, PipelineCache,
     Presenter, Primitive, RenderCommand, RenderPassDesc, RenderPipelineDesc, ShaderLibrary,
-    StoreAction, Texture, TextureDesc,
+    StoreAction, Texture, TextureDesc, TextureKind, TextureRegion,
 };
 
 const MIB: u64 = 1024 * 1024;
@@ -380,13 +380,13 @@ fn render_clear_and_draw_then_copy_back_to_guest() {
     let mut ring = FrameRing::new(&ctx).unwrap();
     let mut frame = ring.begin().unwrap();
     let att = |t: &Texture| RenderPassDesc {
-        colors: vec![ColorAttachment {
+        colors: vec![Some(ColorAttachment { depth_plane: 0,
             texture: t.clone(),
             load: LoadAction::Clear,
             store: StoreAction::Store,
             clear: [0.0, 0.0, 1.0, 1.0],
             memoryless: false,
-        }],
+        })],
         depth: None,
         stencil: None,
     };
@@ -446,13 +446,13 @@ fn memoryless_attachment_that_stores_is_refused() {
     let mut ring = FrameRing::new(&ctx).unwrap();
     let mut frame = ring.begin().unwrap();
     let bad = RenderPassDesc {
-        colors: vec![ColorAttachment {
+        colors: vec![Some(ColorAttachment { depth_plane: 0,
             texture: t,
             load: LoadAction::Clear,
             store: StoreAction::Store,
             clear: [0.0; 4],
             memoryless: true,
-        }],
+        })],
         depth: None,
         stencil: None,
     };
@@ -515,13 +515,13 @@ fn offscreen_drawable_is_presented() {
         let drawable = presenter.acquire().unwrap();
         frame.commands().retain_drawable(&drawable);
         let desc = RenderPassDesc {
-            colors: vec![ColorAttachment {
+            colors: vec![Some(ColorAttachment { depth_plane: 0,
                 texture: drawable.texture().clone(),
                 load: LoadAction::Clear,
                 store: StoreAction::Store,
                 clear: [0.0, 1.0, 0.0, 1.0],
                 memoryless: false,
-            }],
+            })],
             depth: None,
             stencil: None,
         };
@@ -557,7 +557,9 @@ fn blend_and_depth_state_change_the_result() {
     let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
     let lib = ShaderLibrary::from_source(&ctx, "blend", BLEND_MSL).unwrap();
     let mut desc = RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]);
-    desc.colors = vec![ColorTarget::new(Format::Rgba8Unorm).with_blend(BlendState::ALPHA)];
+    desc.colors = vec![Some(
+        ColorTarget::new(Format::Rgba8Unorm).with_blend(BlendState::ALPHA),
+    )];
     let pipe = cache.render(30, &desc).unwrap();
     let blended = shared_target(&ctx, w, h);
     let rejected = shared_target(&ctx, w, h);
@@ -586,13 +588,13 @@ fn blend_and_depth_state_change_the_result() {
         base_instance: 0,
     };
     let colors = |t: &Texture| {
-        vec![ColorAttachment {
+        vec![Some(ColorAttachment { depth_plane: 0,
             texture: t.clone(),
             load: LoadAction::Clear,
             store: StoreAction::Store,
             clear: [0.0, 0.0, 1.0, 1.0],
             memoryless: false,
-        }]
+        })]
     };
     let mut pass = frame
         .commands()
@@ -662,13 +664,13 @@ fn explicit_barrier_orders_a_copy_after_a_draw_and_checks_stages() {
     let mut ring = FrameRing::new(&ctx).unwrap();
     let mut frame = ring.begin().unwrap();
     let desc = RenderPassDesc {
-        colors: vec![ColorAttachment {
+        colors: vec![Some(ColorAttachment { depth_plane: 0,
             texture: target.clone(),
             load: LoadAction::Clear,
             store: StoreAction::Store,
             clear: [0.0; 4],
             memoryless: false,
-        }],
+        })],
         ..Default::default()
     };
     let mut pass = frame.commands().begin_render_pass(&desc, &table).unwrap();
@@ -759,13 +761,13 @@ fn an_indirect_command_buffer_draws_in_a_pass_and_refuses_inherited_state() {
     let mut ring = FrameRing::new(&ctx).unwrap();
     let mut frame = ring.begin().unwrap();
     let desc = RenderPassDesc {
-        colors: vec![ColorAttachment {
+        colors: vec![Some(ColorAttachment { depth_plane: 0,
             texture: target.clone(),
             load: LoadAction::Clear,
             store: StoreAction::Store,
             clear: [0.0; 4],
             memoryless: false,
-        }],
+        })],
         ..Default::default()
     };
     let mut pass = frame.commands().begin_render_pass(&desc, &table).unwrap();
@@ -790,4 +792,55 @@ fn an_indirect_command_buffer_draws_in_a_pass_and_refuses_inherited_state() {
             .chunks(4)
             .all(|p| p == [255, 0, 0, 255])
     );
+}
+
+#[test]
+fn render_targets_select_distinct_depth_planes_of_a_volume() {
+    let Some(ctx) = ctx() else { return };
+    let mut desc = TextureDesc::render_target_2d(16, 16, Format::Rgba8Unorm);
+    desc.kind = TextureKind::D3;
+    desc.depth = 2;
+    let volume = Texture::new(&ctx, desc).unwrap();
+    let outputs = [shared_target(&ctx, 16, 16), shared_target(&ctx, 16, 16)];
+    let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    for (plane, clear) in [[1.,0.,0.,1.], [0.,1.,0.,1.]].into_iter().enumerate() {
+        frame.commands().begin_render_pass(&RenderPassDesc {
+            colors: vec![Some(ColorAttachment { texture: volume.clone(), depth_plane: plane as u32,
+                load: LoadAction::Clear, store: StoreAction::Store, clear, memoryless: false })],
+            depth: None, stencil: None,
+        }, &table).unwrap().end();
+    }
+    let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
+    pass.encode(&ComputeCommand::WaitForEarlierPasses).unwrap();
+    for (plane, dst) in outputs.iter().enumerate() {
+        pass.encode(&ComputeCommand::CopyTexture { src: volume.clone(), dst: dst.clone(),
+            src_region: TextureRegion { level: 0, slice: 0, origin: [0,0,plane as u32], size: [16,16,1] },
+            dst_level: 0, dst_slice: 0, dst_origin: [0;3] }).unwrap();
+    }
+    pass.end();
+    frame.submit().unwrap().wait().unwrap();
+    for (texture, expected) in outputs.iter().zip([[255,0,0,255], [0,255,0,255]]) {
+        assert!(pixels(texture,16,16).chunks_exact(4).all(|pixel| pixel == expected));
+    }
+}
+
+#[test]
+fn an_uncompressed_view_of_a_compressed_texture_is_an_error() {
+    let Some(ctx) = ctx() else { return };
+    let mut desc = TextureDesc::compute_2d(16, 16, Format::Bc(nxkit_metal::BcKind::Bc4Unorm));
+    desc.shader_write = false;
+    desc.storage = nxkit_metal::Storage::Private;
+    desc.allow_views = true;
+    let tex = Texture::new(&ctx, desc).unwrap();
+    let view = tex.view(&nxkit_metal::ViewDesc {
+        format: Format::Rgba16Uint,
+        kind: TextureKind::D2,
+        first_level: 0,
+        level_count: 1,
+        first_slice: 0,
+        slice_count: 1,
+    });
+    assert!(matches!(view, Err(MetalError::Invalid(_))));
 }

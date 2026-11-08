@@ -6,7 +6,7 @@
 
 use super::{Builder, Ctx};
 use crate::ext::{Ext, ExtCode, StateKind};
-use crate::frame::MAX_COLOR;
+use crate::frame::{Cmd, TargetView, MAX_COLOR};
 use crate::mem::GuestMem;
 use crate::record::Record;
 
@@ -16,6 +16,13 @@ const FIRST_SCISSOR: u16 = 0;
 impl Builder {
     pub(super) fn apply_ext<M: GuestMem>(&mut self, cx: &Ctx<M>, x: Ext) {
         match x.code {
+            ExtCode::TargetView if usize::from(x.arg) <= MAX_COLOR => {
+                self.needs.targets |= !self.sets.targets;
+                self.st.targets.views[usize::from(x.arg)] = TargetView::from_words([x.word(0), x.word(1), x.word(2), x.word(3)]);
+                self.sets.targets = true;
+                self.blockers |= super::BLOCK_TARGETS;
+                self.stream.cmds.push(Cmd::SetRenderTargets(self.st.targets));
+            }
             ExtCode::Draw => self.apply(cx, Record::Draw),
             ExtCode::Dispatch => self.apply(cx, Record::Dispatch),
             ExtCode::ClearColor => {
@@ -92,10 +99,10 @@ impl Builder {
     fn scissor<M: GuestMem>(&mut self, cx: &Ctx<M>, x: Ext) {
         self.needs.targets |= !self.sets.targets;
         let t = &self.st.targets;
-        let id = t.color.iter().flatten().next().or(t.depth.as_ref());
-        let dims = id
-            .and_then(|id| cx.table.get(*id).ok())
-            .map(|r| (r.desc.width, r.desc.height));
+        let target = t.color.iter().enumerate().find_map(|(slot, id)| id.map(|id| (slot, id)))
+            .or(t.depth.map(|id| (MAX_COLOR, id)));
+        let dims = target.and_then(|(slot, id)| cx.table.get(id).ok()
+            .map(|r| { let (w,h,_) = r.desc.level_extent(t.views[slot].level()); (w,h) }));
         let (x0, y0) = (x.word(0) as i32, x.word(1) as i32);
         let (w, h) = (x.word(2) as i32, x.word(3) as i32);
         self.st.scissor_full = dims.is_some_and(|(tw, th)| {

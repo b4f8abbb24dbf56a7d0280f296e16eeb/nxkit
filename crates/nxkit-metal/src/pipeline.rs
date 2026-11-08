@@ -125,8 +125,8 @@ pub struct RenderPipelineDesc<'a> {
     pub vertex: (&'a ShaderLibrary, &'a str),
     /// The library and function name of the fragment stage, or none for a depth-only pipeline.
     pub fragment: Option<(&'a ShaderLibrary, &'a str)>,
-    /// The colour attachments in order, with their blending.
-    pub colors: Vec<ColorTarget>,
+    /// The colour attachments by slot, with their blending. `None` is an empty slot.
+    pub colors: Vec<Option<ColorTarget>>,
     /// The vertex input. Empty when the shader fetches its own vertices.
     pub vertex_layout: VertexDescriptor,
     /// The primitive class the pipeline draws.
@@ -149,7 +149,7 @@ impl<'a> RenderPipelineDesc<'a> {
         Self {
             vertex,
             fragment,
-            colors: color_formats.iter().map(|f| ColorTarget::new(*f)).collect(),
+            colors: color_formats.iter().map(|f| Some(ColorTarget::new(*f))).collect(),
             vertex_layout: VertexDescriptor::default(),
             topology: TopologyClass::Triangle,
             sample_count: 1,
@@ -306,6 +306,7 @@ impl PipelineCache {
         });
         let colors = d.colorAttachments();
         for (i, c) in desc.colors.iter().enumerate() {
+            let Some(c) = c else { continue };
             // SAFETY: the index is a plain attachment slot. Metal checks the limit when it compiles.
             let a = unsafe { colors.objectAtIndexedSubscript(i) };
             a.setPixelFormat(c.format.to_mtl());
