@@ -7,8 +7,9 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
-    CommandBuffer, ComputeCommand, ComputePass, Context, Deswizzler, Dependency, Format, GobOrder, GuestMemory,
-    PipelineCache, Scratch, SurfaceLayout, Swizzler, Texture, TextureDesc, TextureKind, TextureRegion, Use,
+    CommandBuffer, ComputeCommand, ComputePass, Context, DataBuffer, Dependency, DeswizzleParams,
+    Deswizzler, Format, GobOrder, GuestMemory, PipelineCache, Scratch, SurfaceLayout, Swizzler,
+    TextureDesc, TextureKind, TextureRegion, Use,
 };
 use nxkit_nvn::format::format_info;
 use nxkit_nvn::layout::Target;
@@ -84,8 +85,12 @@ impl Transfer {
         guest: &Arc<GuestMemory>,
         rec: &TextureRecord,
         res: &Res,
+        wait: bool,
     ) -> Result<(), Skip> {
         let _gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
+        if rec.layout.linear {
+            return self.upload_linear(cb, guest, rec, res, wait);
+        }
         let surf = surface(rec, res, self.order)?;
         let base = guest_offset(rec, guest)?;
         let d = res.desc;
@@ -130,9 +135,54 @@ impl Transfer {
         Ok(())
     }
 
-    /// A compressed texture is deswizzled into an uncompressed texture with one texel per block and copied over.
-    /// Whether Metal accepts the copy from an unsigned integer texture into a block compressed texture of the same
-    /// block size is unverified.
+    /// A pitch-linear texture is a plain copy of its rows: guest memory holds the texels row by row, `stride` bytes
+    /// apart. NVN linear textures have one level and one layer, which is all this copies.
+    fn upload_linear(
+        &self,
+        cb: &mut CommandBuffer,
+        guest: &Arc<GuestMemory>,
+        rec: &TextureRecord,
+        res: &Res,
+        wait: bool,
+    ) -> Result<(), Skip> {
+        let d = res.desc;
+        if d.kind == TextureKind::D3 || d.mip_levels != 1 || d.array_layers != 1 || rec.desc.stride == 0 {
+            if crate::diag("linear") {
+                eprintln!("DIAG linear refused {:?} {}x{}x{} levels {} layers {} stride {} fmt {:#x}",
+                    d.kind, d.width, d.height, d.depth, d.mip_levels, d.array_layers, rec.desc.stride, rec.desc.format);
+            }
+            return Err(Skip::Transfer);
+        }
+        if crate::diag("linear") {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 400 {
+                eprintln!("DIAG linear ok {:?} {}x{} stride {} fmt {:#x}", d.format, d.width, d.height, rec.desc.stride, rec.desc.format);
+            }
+        }
+        let base = guest_offset(rec, guest)?;
+        let mut pass = cb
+            .begin_compute_pass(self.deswizzler.table())
+            .map_err(|_| Skip::Transfer)?;
+        if wait && pass.encode(&ComputeCommand::WaitForEarlierPasses).is_err() {
+            pass.end();
+            return Err(Skip::Transfer);
+        }
+        let r = pass
+            .encode(&ComputeCommand::CopyGuestToTexture {
+                guest: guest.clone(),
+                offset: base,
+                bytes_per_row: rec.desc.stride,
+                bytes_per_image: 0,
+                texture: res.tex.clone(),
+                region: TextureRegion::whole(0, 0, extent(&d, 0)),
+            })
+            .map_err(|_| Skip::Transfer);
+        pass.end();
+        r
+    }
+
+    /// Compressed blocks are deswizzled into a buffer and copied into the texture. Metal does not support a direct
+    /// integer-texture to compressed-texture copy. Each mip uses its exact block extent, including the tail levels.
     fn upload_compressed(
         &self,
         pass: &mut ComputePass<'_>,
@@ -140,48 +190,75 @@ impl Transfer {
         guest: &Arc<GuestMemory>,
         base: u64,
         surf: &SurfaceLayout,
+        rec: &TextureRecord,
         res: &Res,
     ) -> Result<(), Skip> {
         let d = res.desc;
-        let uint = Format::uint_for_block_bytes(surf.bytes_per_block).ok_or(Skip::Format)?;
-        let staging_desc = TextureDesc {
-            kind: if d.slice_count() > 1 { TextureKind::D2Array } else { TextureKind::D2 },
-            width: surf.width,
-            height: surf.height,
-            depth: 1,
-            mip_levels: d.mip_levels,
-            array_layers: d.slice_count(),
-            allow_views: true,
-            format: uint,
-            shader_read: true,
-            shader_write: true,
-            render_target: false,
-            storage: nxkit_metal::Storage::Private,
-        };
-        let staging = Texture::new(&self.ctx, staging_desc).map_err(|_| Skip::Transfer)?;
-        self.ctx.commit_residency();
-        let layout = SurfaceLayout { depth: 1, ..*surf };
-        for slice in 0..d.slice_count() {
-            for level in 0..d.mip_levels {
-                let size = staging_desc.level_extent(level);
-                let region = TextureRegion::whole(level, slice, size);
+        let info = format_info(rec.desc.format).map_err(|_| Skip::Format)?;
+        if d.kind == TextureKind::D3 {
+            return Err(Skip::Transfer);
+        }
+        // Compressed mip chains keep 1x1 blocks after reaching the block size. A mipmapped staging texture in
+        // block units cannot represent those tail levels, and rounding before shifting also loses NPOT blocks.
+        // Each level therefore gets a buffer with the exact block extent of that level.
+        for level in 0..d.mip_levels {
+            let [w, h, _] = d.level_extent(level);
+            let size = [
+                w.div_ceil(u32::from(info.block_w)),
+                h.div_ceil(u32::from(info.block_h)),
+                1,
+            ];
+            let staging = Arc::new(
+                DataBuffer::new(
+                    &self.ctx,
+                    u64::from(size[0]) * u64::from(size[1]) * u64::from(surf.bytes_per_block),
+                )
+                .map_err(|_| Skip::Transfer)?,
+            );
+            let (tile_h, _) = rec.desc.level_tiles(level).map_err(|_| Skip::Transfer)?;
+            let params = DeswizzleParams {
+                bytes_per_block: surf.bytes_per_block,
+                width: size[0],
+                height: size[1],
+                block_height: 1 << tile_h,
+                pitch: 0,
+                order: surf.order,
+            };
+            let offset = rec.desc.level_offset(level).map_err(|_| Skip::Transfer)?;
+            for slice in 0..d.slice_count() {
+                if slice != 0 {
+                    pass.encode(&ComputeCommand::Depend(Dependency::within_pass(
+                        Use::CopyRead,
+                        Use::ComputeWrite,
+                    )))
+                    .map_err(|_| Skip::Transfer)?;
+                }
                 self.deswizzler
-                    .encode_region(pass, scratch, guest, base, &layout, &staging, &region)
+                    .encode_to_buffer(
+                        pass,
+                        scratch,
+                        guest,
+                        base + u64::from(slice) * rec.layout.layer_size + offset,
+                        &staging,
+                        &params,
+                    )
                     .map_err(|_| Skip::Transfer)?;
-                pass.encode(&ComputeCommand::Depend(Dependency::within_pass(Use::ComputeWrite, Use::CopyRead)))
-                    .map_err(|_| Skip::Transfer)?;
-                pass.encode(&ComputeCommand::CopyTexture {
-                    src: staging.clone(),
-                    dst: res.tex.clone(),
-                    src_region: region,
-                    dst_level: level,
-                    dst_slice: slice,
-                    dst_origin: [0, 0, 0],
+                pass.encode(&ComputeCommand::Depend(Dependency::within_pass(
+                    Use::ComputeWrite,
+                    Use::CopyRead,
+                )))
+                .map_err(|_| Skip::Transfer)?;
+                pass.encode(&ComputeCommand::CopyBufferToTexture {
+                    buffer: staging.clone(),
+                    offset: 0,
+                    bytes_per_row: size[0] * surf.bytes_per_block,
+                    texture: res.tex.clone(),
+                    region: TextureRegion::whole(level, slice, [w, h, 1]),
                 })
                 .map_err(|_| Skip::Transfer)?;
             }
+            pass.retain(staging);
         }
-        pass.retain(staging);
         Ok(())
     }
 

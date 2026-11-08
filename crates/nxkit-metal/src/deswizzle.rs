@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::blocklinear::{KernelParams, LevelLayout};
 use crate::compute::{ComputeCommand, ComputePass};
+use crate::databuf::DataBuffer;
 use crate::device::Context;
 use crate::error::{MetalError, Result};
 use crate::format::Format;
@@ -102,6 +103,14 @@ kernel void deswizzle3d(constant Params& p [[buffer(0)]],
     dst.write(load_block(block_ptr(p, b), p.bytes_per_block), b);
 }
 
+kernel void deswizzle_buffer(constant Params& p [[buffer(0)]], device uchar* dst [[buffer(1)]],
+                            uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.ew || gid.y >= p.eh) { return; }
+    uint3 b = uint3(gid.x, gid.y, 0);
+    store_block(dst + (ulong(gid.y) * p.ew + gid.x) * p.bytes_per_block,
+                p.bytes_per_block, load_block(block_ptr(p, b), p.bytes_per_block));
+}
+
 kernel void swizzle2d(constant Params& p [[buffer(0)]],
                       texture2d<uint, access::read> src [[texture(0)]],
                       uint3 gid [[thread_position_in_grid]]) {
@@ -130,6 +139,7 @@ struct Kernels {
     d3: ComputePipeline,
     table: ArgumentTable,
     direction: Direction,
+    buffer: Option<ComputePipeline>,
 }
 
 impl Kernels {
@@ -142,8 +152,13 @@ impl Kernels {
         Ok(Self {
             d2: cache.compute(k, &lib, n2)?,
             d3: cache.compute(k + 1, &lib, n3)?,
-            table: ArgumentTable::new(ctx, 1, 1)?,
+            table: ArgumentTable::new(ctx, 2, 1)?,
             direction,
+            buffer: if direction == Direction::ToTexture {
+                Some(cache.compute(KEY + 4, &lib, "deswizzle_buffer")?)
+            } else {
+                None
+            },
         })
     }
 
@@ -330,6 +345,57 @@ impl Deswizzler {
     /// The table that a compute pass must be started with to use the `encode` calls.
     pub fn table(&self) -> &ArgumentTable {
         &self.k.table
+    }
+
+    /// Deswizzles a whole 2D level into a tightly packed buffer. Compressed blocks use this path before a
+    /// buffer-to-texture copy, because Metal cannot copy an integer texture directly into a compressed texture.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_to_buffer(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        guest_offset: u64,
+        dst: &Arc<DataBuffer>,
+        params: &DeswizzleParams,
+    ) -> Result<()> {
+        let level = params.level()?;
+        let size =
+            u64::from(params.width) * u64::from(params.height) * u64::from(params.bytes_per_block);
+        if size > dst.len() {
+            return Err(MetalError::Invalid("the deswizzle buffer is too small"));
+        }
+        let base = guest.gpu_address_of_offset(guest_offset, params.storage_bytes())?;
+        let job = KernelParams {
+            base,
+            level,
+            order: params.order,
+            bytes_per_block: params.bytes_per_block,
+            origin: [0; 3],
+            extent: [params.width, params.height, 1],
+        };
+        let args = scratch.push(&job.to_bytes())?;
+        let pipeline = self
+            .k
+            .buffer
+            .as_ref()
+            .ok_or(MetalError::Invalid("no buffer deswizzle kernel"))?;
+        pass.encode(&ComputeCommand::SetPipeline(pipeline.clone()))?;
+        pass.encode(&ComputeCommand::SetBuffer {
+            index: 0,
+            gpu_addr: args,
+        })?;
+        pass.encode(&ComputeCommand::SetBuffer {
+            index: 1,
+            gpu_addr: dst.gpu_address(),
+        })?;
+        pass.encode(&ComputeCommand::DispatchThreads {
+            grid: job.extent,
+            threads: [32, 4, 1],
+        })?;
+        pass.retain(guest.clone());
+        pass.retain(dst.clone());
+        Ok(())
     }
 
     /// Encodes the deswizzle of a box of one level and slice into `dst`.

@@ -79,8 +79,8 @@ pub enum ComputeCommand {
     Barrier,
     /// A barrier with explicit stages. The stages must be `DISPATCH` or `BLIT` on the side of this pass.
     Depend(Dependency),
-    /// Copies a box between two textures of the same sample count. A compressed texture and an unsigned integer
-    /// texture of the same bytes per block can copy to each other, with the size in blocks of the integer texture.
+    /// Copies a box between compatible textures of the same sample count. Compressed and uncompressed textures
+    /// require an intermediate buffer, rather than a direct texture copy.
     CopyTexture {
         /// The source.
         src: Texture,
@@ -306,6 +306,11 @@ impl ComputePass<'_> {
                 dst_slice,
                 dst_origin,
             } => {
+                if src.desc().format.is_compressed() != dst.desc().format.is_compressed() {
+                    return Err(MetalError::Invalid(
+                        "compressed texture copies require an intermediate buffer",
+                    ));
+                }
                 src_region.check(&src.desc())?;
                 let to = TextureRegion {
                     level: *dst_level,
@@ -316,7 +321,9 @@ impl ComputePass<'_> {
                 // The size of the destination box is not known for a block copy between formats, so only the
                 // level, slice and origin are checked here. Metal validates the box.
                 if *dst_level >= dst.desc().mip_levels || *dst_slice >= dst.desc().slice_count() {
-                    return Err(MetalError::Invalid("the destination level or slice does not exist"));
+                    return Err(MetalError::Invalid(
+                        "the destination level or slice does not exist",
+                    ));
                 }
                 let o = |v: [u32; 3]| MTLOrigin {
                     x: v[0] as usize,
