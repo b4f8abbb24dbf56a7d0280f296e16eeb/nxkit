@@ -13,14 +13,9 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 Version 0.10.0 is not released yet. It is early software. Mac on Apple silicon only.
 
-| game | title ID | state |
-|---|---|---|
-| The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | plays at 60 fps with saves |
-| The Legend of Zelda: Ocarina of Time (Switch 2) | `0400486024DEC000` | boots to the title. The opening movie plays at about 43 fps: its upscaling network costs about 16 ms of GPU time (see [docs/plans/ndve-native.md](docs/plans/ndve-native.md)) |
-| Animal Crossing: New Horizons | `01006F8002326000` | title module only, not checked in this release |
-| Mario Tennis Fever | `0400D4201C6EA000` | title module only, not checked in this release |
-
-A game runs on the runtime only when it has a title module in `titles/`. The [CHANGELOG](CHANGELOG.md) lists every change.
+A game runs on the runtime only when it has a title module in `titles/games/`. A title module holds what is specific
+to one game: its memory layout, thread roles, settings and code rules. Everything else is general. Refer to
+[docs/titles.md](docs/titles.md). The [CHANGELOG](CHANGELOG.md) lists every change.
 
 ## How it works
 
