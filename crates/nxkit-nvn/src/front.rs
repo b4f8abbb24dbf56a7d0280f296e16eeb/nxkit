@@ -76,6 +76,9 @@ pub struct FrontEnd<S: GpuSpace, M: GuestMem> {
     analyser: Analyser,
     flushes: FlushStats,
     hit: Vec<TexId>,
+    /// Textures the game finalized while a pool slot still holds them.
+    orphans: Vec<TexId>,
+    dropped: Vec<TexId>,
 }
 
 impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
@@ -93,6 +96,8 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             frame: Frame::new(),
             plan: PassPlan::new(),
             analyser: Analyser::new(),
+            orphans: Vec::new(),
+            dropped: Vec::new(),
             flushes: FlushStats::default(),
             hit: Vec::new(),
         }
@@ -156,7 +161,29 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     }
 
     /// Destroys a texture. This is `nvnTextureFinalize`.
-    pub fn finalize_texture(&mut self, id: TexId) -> Result<()> {
+    ///
+    /// On the hardware a texture pool slot is a copy of the texture header in memory, so it stays usable after the
+    /// texture object is finalized: games keep sampling such slots. The record therefore lives on while a slot holds
+    /// it and goes when the last slot is registered with another texture.
+    /// The result is false while the record lives on; [`FrontEnd::take_dropped`] gives it when it goes.
+    pub fn finalize_texture(&mut self, id: TexId) -> Result<bool> {
+        if self.descriptors.has_slots(id) {
+            self.table.get(id)?;
+            if !self.orphans.contains(&id) {
+                self.orphans.push(id);
+            }
+            return Ok(false);
+        }
+        self.drop_texture(id)?;
+        Ok(true)
+    }
+
+    /// The finalized textures whose last slot went since the previous call.
+    pub fn take_dropped(&mut self) -> Vec<TexId> {
+        std::mem::take(&mut self.dropped)
+    }
+
+    fn drop_texture(&mut self, id: TexId) -> Result<()> {
         self.table.finalize(id)?;
         self.descriptors.drop_texture(id);
         self.queues.values_mut().for_each(|q| q.forget(id));
@@ -185,8 +212,18 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         texture: TexId,
         view: TextureView,
     ) -> Result<TextureSlot> {
-        self.descriptors
-            .register_texture(&self.table, id, texture, view)
+        let old = self.descriptors.texture(id).ok().map(|s| s.texture);
+        let slot = self.descriptors.register_texture(&self.table, id, texture, view)?;
+        if let Some(old) = old.filter(|&o| o != texture) {
+            if let Some(i) = self.orphans.iter().position(|&o| o == old) {
+                if !self.descriptors.has_slots(old) {
+                    self.orphans.swap_remove(i);
+                    self.drop_texture(old)?;
+                    self.dropped.push(old);
+                }
+            }
+        }
+        Ok(slot)
     }
 
     /// Registers a sampler. This is `nvnSamplerPoolRegisterSampler`.

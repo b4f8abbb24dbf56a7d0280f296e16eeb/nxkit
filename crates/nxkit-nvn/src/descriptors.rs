@@ -52,6 +52,9 @@ pub struct Descriptors {
     texture_pools: Vec<PoolRange>,
     sampler_pools: Vec<PoolRange>,
     textures: Vec<Option<TextureSlot>>,
+    /// The slots that were registered with a texture, by texture id. An entry can be stale when a slot was
+    /// registered again with another texture, so a reader checks the slot.
+    slots_of: Vec<Vec<u32>>,
     samplers: Vec<Option<Tsc>>,
 }
 
@@ -138,7 +141,21 @@ impl Descriptors {
         let r = table.get(texture)?;
         let header = Tic::for_texture(&r.desc, r.address, view)?;
         let slot = TextureSlot { texture, header };
-        self.textures[id as usize] = Some(slot);
+        if let Some(old) = self.textures[id as usize].replace(slot) {
+            if old.texture != texture {
+                if let Some(slots) = self.slots_of.get_mut(old.texture.0 as usize) {
+                    slots.retain(|&s| s != id);
+                }
+            }
+        }
+        let index = texture.0 as usize;
+        if self.slots_of.len() <= index {
+            self.slots_of.resize_with(index + 1, Vec::new);
+        }
+        let slots = &mut self.slots_of[index];
+        if !slots.contains(&id) {
+            slots.push(id);
+        }
         Ok(slot)
     }
 
@@ -176,9 +193,18 @@ impl Descriptors {
         Ok((self.texture(tex)?, self.sampler(samp)))
     }
 
+    /// True while a pool slot holds `texture`.
+    pub fn has_slots(&self, texture: TexId) -> bool {
+        self.slots_of.get(texture.0 as usize).is_some_and(|s| !s.is_empty())
+    }
+
     /// Forgets every slot that holds `texture`. The game must not use them after `nvnTextureFinalize`.
     pub fn drop_texture(&mut self, texture: TexId) {
-        for s in &mut self.textures {
+        let Some(slots) = self.slots_of.get_mut(texture.0 as usize) else {
+            return;
+        };
+        for id in slots.drain(..) {
+            let s = &mut self.textures[id as usize];
             if s.as_ref().is_some_and(|slot| slot.texture == texture) {
                 *s = None;
             }

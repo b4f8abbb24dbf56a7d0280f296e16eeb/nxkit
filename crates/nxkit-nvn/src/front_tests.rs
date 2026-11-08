@@ -289,10 +289,16 @@ fn a_handle_without_a_descriptor_binds_nothing_and_is_counted() {
     };
     assert_eq!(f.frame().list(reads), [t]);
     assert_eq!(f.cache_stats().unresolved, 1);
-    f.finalize_texture(t).unwrap();
+    // A finalized texture stays readable through its slot, as the header copy in the pool does on the hardware.
+    assert!(!f.finalize_texture(t).unwrap());
     f.begin_frame();
     f.submit(h).unwrap();
-    assert_eq!(f.cache_stats().unresolved, 3);
+    // Nothing changed for the recording, so the cached decode stands and counts nothing new.
+    assert_eq!(f.cache_stats().unresolved, 1);
+    // Registering another texture in the slot lets the finalized one go.
+    let u = tex(&mut f, 0x20_0000);
+    f.register_texture(0, u, TextureView::identity()).unwrap();
+    assert_eq!(f.take_dropped(), [t]);
 }
 
 #[test]

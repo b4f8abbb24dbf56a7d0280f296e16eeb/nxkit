@@ -168,8 +168,9 @@ impl Tex {
 fn release(name: &str, addr: u64) -> AbiResult<()> {
     let g = gpu(name);
     if let Some(id) = g.textures.remove(addr) {
-        g.with_front(|f| f.finalize_texture(id))?;
-        g.backend().texture_finalized(id);
+        if g.with_front(|f| f.finalize_texture(id))? {
+            g.backend().texture_finalized(id);
+        }
     }
     Ok(())
 }

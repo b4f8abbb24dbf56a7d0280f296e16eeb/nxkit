@@ -59,7 +59,11 @@ fn register(name: &'static str, tp: u64, id: i32, t: u64, v: u64) -> AbiResult<(
         );
     }
     let tv = view::texture_view(v, tex.swizzle)?;
-    let registered = gpu(name).with_front(|f| f.register_texture(slot.id, tex.id, tv))?;
+    let g = gpu(name);
+    let (registered, dropped) = g.with_front(|f| f.register_texture(slot.id, tex.id, tv).map(|r| (r, f.take_dropped())))?;
+    for id in dropped {
+        g.backend().texture_finalized(id);
+    }
     guest::write(slot.header, &registered.header.to_bytes()?)?;
     Ok(())
 }
