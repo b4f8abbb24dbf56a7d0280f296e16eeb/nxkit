@@ -49,6 +49,8 @@ fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Pending {
     number: u64,
     texture: Texture,
+    /// The part of the texture the game shows (`nvnWindowSetCrop`, or the vi layer crop); zero size is all of it.
+    crop: nxkit_nvn::backend::Rect,
 }
 
 /// The backend of the front end and the sink of the display ticks.
@@ -344,7 +346,7 @@ impl GpuBackend {
                 texture.desc().format
             );
         }
-        locked(&self.pending).push(Pending { number, texture });
+        locked(&self.pending).push(Pending { number, texture, crop: present.crop });
         if let Some(p) = self.pacer.get() {
             p.game_frame_ready(number);
         }
@@ -699,7 +701,7 @@ impl TickSink for GpuBackend {
             let found = pending
                 .iter()
                 .position(|p| p.number == number)
-                .map(|i| pending.remove(i).texture);
+                .map(|i| { let p = pending.remove(i); (p.texture, p.crop) });
             for p in pending.iter().filter(|p| p.number < number) {
                 nxkit_nvn::screen::shown(p.number, -1.0);
             }
@@ -708,7 +710,7 @@ impl TickSink for GpuBackend {
             self.freed.notify_all();
             found
         };
-        let Some(texture) = texture else {
+        let Some((texture, crop)) = texture else {
             return;
         };
         present_diag(2);
@@ -752,7 +754,7 @@ impl TickSink for GpuBackend {
         if matches!(shown, Shown::Game { .. }) {
             tick.drawable.on_presented(move |secs| nxkit_nvn::screen::shown(number, secs));
         }
-        let r = b.present(&texture, tick.drawable, tick.target_presentation_timestamp);
+        let r = b.present(&texture, crop, tick.drawable, tick.target_presentation_timestamp);
         if r.is_ok() {
             present_diag(3);
         }
