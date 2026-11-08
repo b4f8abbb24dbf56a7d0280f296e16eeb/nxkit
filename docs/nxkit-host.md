@@ -74,7 +74,7 @@ The title module and its family module answer the settings through their `nxtitl
 
 Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode`, `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `gpu_ts_segment`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
-Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
+Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
 Any other key goes unread, in order, to the service that the title module addressed. The core has no name for it. An engine setting is one example.
 

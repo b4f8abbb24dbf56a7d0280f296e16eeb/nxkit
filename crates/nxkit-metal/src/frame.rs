@@ -302,11 +302,29 @@ impl Frame {
             // A drawable of `CAMetalDisplayLink` is shown at the target time of its tick, and `presentAtTime:`
             // raises `CAMetalDrawableInvalidOperation` on it. `p.at` stays for the pacing statistics.
             let drawable = p.drawable.clone();
-            // SAFETY: the closure only calls `present`, which leaves no Rust state half done when it throws.
-            if let Err(e) = unsafe { objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.present())) } {
-                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 4 {
-                    eprintln!("nxkit-metal: [RED] present threw {e:?}");
+            // With timed presents on, the display keeps the frame before this one on screen for the minimum time. If
+            // Metal refuses that call for a drawable of the display link, timed presents go off for good and the
+            // plain present follows.
+            let timed = crate::present::timed_present();
+            let mut sent = false;
+            if let Some(min) = timed {
+                // The closure only calls `presentAfterMinimumDuration:`, which leaves no Rust state half done when it throws.
+                let r = objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.presentAfterMinimumDuration(min)));
+                match r {
+                    Ok(()) => sent = true,
+                    Err(e) => {
+                        crate::present::set_timed_present(None);
+                        eprintln!("nxkit-metal: timed presents are off: presentAfterMinimumDuration threw {e:?}");
+                    }
+                }
+            }
+            if !sent {
+                // The closure only calls `present`, which leaves no Rust state half done when it throws.
+                if let Err(e) = objc2::exception::catch(std::panic::AssertUnwindSafe(|| drawable.present())) {
+                    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 4 {
+                        eprintln!("nxkit-metal: [RED] present threw {e:?}");
+                    }
                 }
             }
             drop(p.keep);

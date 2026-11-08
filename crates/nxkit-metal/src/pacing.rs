@@ -37,14 +37,26 @@ pub enum FrameInterval {
     Hz60,
     /// 120 frames per second.
     Hz120,
+    /// Any other whole rate, for example 72 or 144. [`FrameInterval::from_hz`] makes it.
+    Hz(u32),
 }
 
 impl FrameInterval {
+    /// The interval for a rate in Hz, at least 1.
+    pub fn from_hz(hz: u32) -> Self {
+        match hz {
+            60 => FrameInterval::Hz60,
+            120 => FrameInterval::Hz120,
+            other => FrameInterval::Hz(other.max(1)),
+        }
+    }
+
     /// The frames per second.
     pub fn hz(self) -> f32 {
         match self {
             FrameInterval::Hz60 => 60.0,
             FrameInterval::Hz120 => 120.0,
+            FrameInterval::Hz(hz) => hz as f32,
         }
     }
 
@@ -236,6 +248,14 @@ mod tests {
     impl FrameHooks for Quiet {}
 
     #[test]
+    fn any_whole_rate_makes_an_interval() {
+        assert_eq!(FrameInterval::from_hz(60), FrameInterval::Hz60);
+        assert_eq!(FrameInterval::from_hz(120), FrameInterval::Hz120);
+        assert_eq!(FrameInterval::from_hz(144).hz(), 144.0);
+        assert_eq!(FrameInterval::from_hz(0).hz(), 1.0);
+    }
+
+    #[test]
     fn the_target_rate_is_selectable() {
         let Ok(ctx) = Context::system_default() else {
             eprintln!("skipped: no Metal device");
@@ -249,6 +269,8 @@ mod tests {
         assert_eq!(link.target_hz(), 60.0);
         link.set_interval(FrameInterval::Hz120);
         assert_eq!(link.target_hz(), 120.0);
+        link.set_interval(FrameInterval::from_hz(72));
+        assert_eq!(link.target_hz(), 72.0);
         link.set_paused(true);
     }
 }

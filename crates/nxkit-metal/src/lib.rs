@@ -15,7 +15,8 @@
 //! - [`DataBuffer`]: a persistent shared buffer for argument buffers of resource IDs and addresses.
 //! - [`Sampler`], [`Texture::gpu_resource_id`]: the resource IDs that bindless shaders read.
 //! - [`BatchRing`], [`Batch`]: a frame in several command buffers, encoded on several threads, committed in order.
-//! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at 60 or 120 Hz through `FrameHooks::display_tick`.
+//! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at any whole rate through `FrameHooks::display_tick`.
+//! - [`display`]: the refresh rate of a display mode and a switch to another one for the run.
 //! - [`Pacer`], [`TickScheduler`], [`TickSink`]: what each tick shows, by a [`PresentPlan`] from [`choose_present_plan`].
 //! - [`PacingStats`]: present time, missed ticks and the interval histogram (R16).
 //! - [`Presenter`]: a `CAMetalLayer` drawable path, with `Frame::present_at` for a tick.
@@ -38,6 +39,7 @@ mod compute_icb;
 mod databuf;
 mod deswizzle;
 mod device;
+pub mod display;
 mod encode;
 mod error;
 mod format;
@@ -88,7 +90,7 @@ pub use pipeline::{
     RenderPipelineDesc, ShaderLibrary,
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
-pub use present::{Drawable, PRESENT_FORMAT, Presenter};
+pub use present::{Drawable, PRESENT_FORMAT, Presenter, set_timed_present, timed_present};
 pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
     StencilAttachment, Viewport,

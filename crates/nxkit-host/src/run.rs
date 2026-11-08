@@ -87,6 +87,7 @@ pub fn run(opts: &Options) -> Result<()> {
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
+    crate::refresh::configure(crate::refresh::Request::from_settings(&settings));
     let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),

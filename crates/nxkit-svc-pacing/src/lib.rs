@@ -43,6 +43,7 @@ pub mod limits;
 pub mod load;
 pub mod mode;
 pub mod notice;
+pub mod refresh;
 pub mod state;
 pub mod vstep;
 pub mod vsync;

@@ -26,17 +26,39 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_ENCODE_THREADS` | The number of chunk threads of the encoder. 0, the default, picks the number from the cores. |
 | `NXKIT_SCALE` | The render scale of render targets. The default is 1.0. |
 | `NXKIT_WALK_CACHE=1` | Turns on the template cache of the walker. It is off by default, because in Breath of the Wild it costs more than it saves. |
-| `NXKIT_SCREEN` | The screen of the window, by its index (0 is the built-in one) or a part of its name, for example `XB273U`. The frame step takes the refresh rate of that screen. |
+| `NXKIT_SCREEN` | The screen the window opens on, by its index (0 is the built-in one) or a part of its name, for example `XB273U`. The refresh rate that the host uses is the one of the screen the window is on now, also after you drag it to another screen (`docs/pacing.md`). |
+| `NXKIT_SET_REFRESH=120` | Switches the display of the window to this refresh rate at the start, at the size it has, and puts the old mode back at the exit (`set_refresh` of `game.json` does the same). Use an even multiple of the frame rate: 120 for a game at 60 fps. The switch is for this process only, so the system restores the mode also after a crash. |
+| `NXKIT_TIMED_PRESENT=1` or `0` | Forces timed presents (`presentAfterMinimumDuration:`) on or off. By default they are on for a screen that adapts its refresh rate (ProMotion) and off for the others. |
 | `NXKIT_GPU_LABELS=1` | Names the encoder of each pass (pass index, first attachment, draws) for the Metal debugger. Instruments does not show the labels of Metal 4 encoders. |
 | `NXKIT_PASS_LIST=1` | With `NXKIT_DIAG=passes`: also prints every pass of the frame with its attachments and their load and store actions. |
 | `NXKIT_OVERLAP=1` | The CPU runs one frame ahead of the GPU: `nvnSyncWait` for the newest frame waits for the one before it, and every bound uniform buffer reads a copy (`docs/plans/fence-overlap.md`). |
 | `NXKIT_PIPELINE_ASYNC=0` | Builds a missing render pipeline in the encode, as before. By default it compiles on a background thread and the draw is left out until it is ready (`skip.pending`). |
 | `NXKIT_AUDIO_CLICKS=1` | Prints every jump at the border of two rendered audio blocks that is much larger than any step inside them (what a click sounds like), with the wall clock in ms. |
 | `NXKIT_AUDIO_DEVICE_FRAMES` | The IO buffer of the audio output device in frames. Without it the device keeps its own (the log names its transport and buffer at the start). |
-| `NXKIT_PACE_DIAG=1` | Prints, every 120 presents, the mean frame interval, pacing wait, CPU cost and GPU time in vsyncs, and the state of the frame step. |
+| `NXKIT_PACE_DIAG=1` | Prints, every 120 presents, the mean frame interval, pacing wait, CPU cost and GPU time in vsyncs, and the state of the frame step. In the state line, `hz` is the unit of the frame step (60 for a game at 60 fps, 120 for a target of 120). It is not the refresh rate of the screen and it does not change with it. The screen is in the `nxkit-host: screen ...` line, see below. |
 | `NXKIT_VERIFY_CACHE=1` | Walks every recording again without the template cache and compares the result. This is slow. |
 | `NXKIT_COPYBACK=0` | Turns off the copy-back of GPU-written textures in CPU-visible pools. |
 | `NXKIT_COPYBACK_MAX_MB` | The most storage that one frame copies back. The default is 128. |
+
+## The screen line and the judder line
+
+The host prints one `nxkit-host: screen` line at the start, and another one each time something in it changes: the window moves to another screen, the display mode changes, `NXKIT_SET_REFRESH` switches the mode, or the measured tick rate differs from the plan.
+
+```
+nxkit-host: screen "XB273U NV" refresh 120.00 Hz (CoreGraphics mode), link 120 Hz, 2 ticks per 60 fps frame
+nxkit-host: screen "XB273U NV" refresh 144.00 Hz (CoreGraphics mode), link 60 Hz, 1 tick per 60 fps frame (uneven); 144 Hz is not an even multiple of 60 fps, so frames alternate between two lengths (judder): set NXKIT_SET_REFRESH=120
+nxkit-host: screen "Built-in Liquid Retina XDR Display" refresh 120.00 Hz (adaptive, highest rate), link 60 Hz, 1 tick per 60 fps frame, timed presents
+```
+
+It names the screen, the refresh rate with its source (`CoreGraphics mode`, `NSScreen`, or `adaptive, highest rate`), the rate of the display link, the ticks that one game frame stays, `(uneven)` when no whole number fits, `timed presents` when they are on, and any mode switch. When the link ticks at a rate more than 4% off the plan, the host prints that too and uses the measured rate.
+
+`NXKIT_DIAG=judder` prints, every 120 shown frames, a histogram of the refreshes that each shown frame stayed, from the times of `Drawable::on_presented`:
+
+```
+DIAG judder refresh 120.00 Hz: 1x 0 2x 118 3x 2 4x 0 5x+ 0 dropped 0 mean 2.02 refreshes
+```
+
+A steady 60 fps game on 120 Hz has all frames in `2x`. Two neighbouring bins (`2x` and `3x` on 144 Hz, 60 fps) are judder. A frame in `4x` or more is a late frame. `dropped` counts the presents that the display did not show.
 
 ## Sampled frames and limits
 
@@ -87,6 +109,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `prog` | gpu | programs that did not load, unknown binding kinds, draws without a vertex stage | once per program, first 40 draws | low |
 | `pipe` | gpu | render, compute and depth-stencil states that Metal did not build | first 300 | low |
 | `overlap` | gpu | the flushes of the CPU, the dynamic pages, and per kind of buffer binding the bytes bound and the bytes changed since the last frame (`docs/plans/fence-overlap.md`) | every 120 frames | high (hashes every bound range) |
+| `judder` | nvn | the histogram of the refreshes each shown frame stayed, and the mean (see above) | every 120 shown frames | low |
 | `hitch` | gpu | each frame whose encode took 7 ms or more or that built pipelines or textures, with the wall clock in ms, to put next to the late frames of `NXKIT_PACE_DIAG` | each such frame | low |
 | `kpass` | gpu | the render passes that could run as compute dispatches (`docs/plans/kernel-passes.md`, step 0), the runs of them, and why the others cannot | every 300 frames | low |
 | `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
