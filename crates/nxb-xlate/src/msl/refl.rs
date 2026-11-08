@@ -39,6 +39,9 @@ pub struct Binding {
     pub fetch1d_size: bool,
     /// A twin sampler for border colours: its bit in the border block.
     pub border_bit: Option<u32>,
+    /// `tex`, `img`: the shader multiplies the integer coordinates of this resource by its render scale, or divides a
+    /// size query. The host writes the scale of the bound texture to `render_scale[rscale]` of the support buffer.
+    pub rscale: Option<u32>,
 }
 
 impl Binding {
@@ -65,6 +68,7 @@ impl Binding {
             fetch1d: false,
             fetch1d_size: false,
             border_bit: None,
+            rscale: None,
         }
     }
 
@@ -91,6 +95,9 @@ impl Binding {
             if let Some(v) = v {
                 e.set(k, Value::Int(i64::from(v)));
             }
+        }
+        if let Some(r) = self.rscale {
+            e.set("rscale", Value::Int(i64::from(r)));
         }
         if let Some(el) = &self.elem {
             e.set("elem", Value::str(el.clone()));
@@ -304,6 +311,9 @@ pub struct Reflection {
     pub drv_reads: Vec<DrvRead>,
     /// Driver locations the host cannot fill ([`unfillable`]).
     pub drv_unfillable: Vec<String>,
+    /// Pixel: the shader reads the pixel position, which it divides by the render scale of the pass
+    /// (`render_scale[0]` of the support buffer).
+    pub pass_scale: bool,
     /// The argument buffer members.
     pub bindings: Vec<Binding>,
     /// The vertex inputs.
@@ -373,6 +383,9 @@ impl Reflection {
                     .collect(),
             ),
         );
+        if self.pass_scale {
+            r.set("pass_scale", Value::Bool(true));
+        }
         r.set(
             "bindings",
             Value::List(self.bindings.iter().map(Binding::to_value).collect()),

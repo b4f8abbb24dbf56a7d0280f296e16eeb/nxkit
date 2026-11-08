@@ -55,6 +55,8 @@ pub(crate) struct Resolved {
     pub(crate) texture: u64,
     /// The resource ID of the sampler.
     pub(crate) sampler: u64,
+    /// The texture is stored at the render scale, not at the size the game made it.
+    pub(crate) scaled: bool,
 }
 
 /// The handles that a frame resolved, and the Metal objects behind them. The command buffers keep the textures alive.
@@ -101,7 +103,7 @@ struct StageMemo {
 impl ArgsMemo {
     /// The address of the argument buffer for `inp`, when the previous draw of the stage built it from the same
     /// inputs. A miss prepares [`ArgsMemo::store`].
-    fn lookup(&mut self, p: &StageProgram, inp: &StageInputs<'_>) -> Option<u64> {
+    fn lookup(&mut self, p: &StageProgram, inp: &StageInputs<'_>, pass_scale: f32) -> Option<u64> {
         let m = match inp.stage {
             Stage::Vertex => &mut self.stages[0],
             Stage::Fragment => &mut self.stages[1],
@@ -110,6 +112,7 @@ impl ArgsMemo {
         m.next.clear();
         m.next.push(p as *const StageProgram as u64);
         m.next.push(u64::from(inp.base_instance));
+        m.next.push(u64::from(pass_scale.to_bits()));
         let mark = m.next.len();
         m.next.push(0);
         for u in inp.ubos.iter().filter(|u| u.stage == inp.stage) {
@@ -238,10 +241,14 @@ pub(crate) struct Bindless {
 
 /// Bytes of the support buffer and of the zero buffer. 64 KiB is the largest uniform block a shader declares.
 const STATIC_BYTES: u64 = 0x10000;
-/// The offset of `render_scale[0]` in the support buffer (Ryujinx `SupportBuffer`, each field 16 byte aligned).
+/// The offset of `render_scale[0]` in the support buffer (Ryujinx `SupportBuffer`, each field 16 byte aligned). The
+/// support constants follow `nxb-xlate` `abi.rs`.
 const SUPPORT_RENDER_SCALE: u64 = 192;
-/// The entries of `render_scale`.
-const SUPPORT_RENDER_SCALES: u64 = 73;
+/// The entries of `render_scale`: entry 0 is the scale of the pass, entry `1 + i` the scale of descriptor `i`.
+pub(crate) const SUPPORT_SCALES: u32 = 73;
+const SUPPORT_RENDER_SCALES: u64 = SUPPORT_SCALES as u64;
+/// The bytes of the support buffer the shader may read. `frag_scale_count` (byte 176) stays 0.
+const SUPPORT_SIZE: usize = 1392;
 
 fn tsc_key(t: &Tsc) -> u64 {
     let mut h = foldhash::fast::FixedState::default().build_hasher();
@@ -353,6 +360,8 @@ pub(crate) struct Env<'a> {
     pub(crate) default_sampler: u64,
     /// The support buffer and the zero buffer, from [`Bindless::statics`].
     pub(crate) statics: (u64, u64),
+    /// The render scale of a scaled texture (`GpuSettings.scale`, 1 when nothing is scaled).
+    pub(crate) scale: f32,
 }
 
 fn put_u64(buf: &mut [u8], at: usize, v: u64) {
@@ -393,11 +402,51 @@ fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubo_addr: &[(u32, u64, u32)
     }
 }
 
+/// The support buffer of a stage, when a render scale is not 1. It holds the scale of the pass in `render_scale[0]` and
+/// the scale of each bound texture that the shader scales (`rscale` of its binding). The other entries stay 1.
+/// Returns false, and leaves `b` unused, when every scale is 1: the shared buffer of [`Bindless::statics`] serves then.
+fn support_block(
+    b: &mut Vec<u8>,
+    binds: &[crate::programs::Bind],
+    env: &Env<'_>,
+    pass_scale: f32,
+    handle_of: &dyn Fn(u32) -> Option<u64>,
+) -> bool {
+    let entry = |bind: &crate::programs::Bind| -> Option<(u32, f32)> {
+        let i = bind.rscale?;
+        match bind.kind {
+            BindKind::Support => Some((i, pass_scale)),
+            BindKind::Tex => {
+                let scaled = handle_of(bind.reg).and_then(|h| env.handles.get(&h)).is_some_and(|r| r.scaled);
+                Some((i, if scaled { env.scale } else { 1.0 }))
+            }
+            _ => None,
+        }
+    };
+    if !binds.iter().filter_map(entry).any(|(_, v)| v != 1.0) {
+        return false;
+    }
+    b.clear();
+    b.resize(SUPPORT_SIZE, 0);
+    for i in 0..SUPPORT_RENDER_SCALES {
+        put_f32(b, (SUPPORT_RENDER_SCALE + 16 * i) as usize, 1.0);
+    }
+    for (i, v) in binds.iter().filter_map(entry) {
+        put_f32(b, (SUPPORT_RENDER_SCALE + 16 * u64::from(i)) as usize, v);
+    }
+    true
+}
+
+fn put_f32(buf: &mut [u8], at: usize, v: f32) {
+    put_u32(buf, at, v.to_bits());
+}
+
 /// The buffers that [`build_args`] reuses from draw to draw.
 #[derive(Default)]
 struct ArgsScratch {
     args: Vec<u8>,
     drv: Vec<u8>,
+    support: Vec<u8>,
     ubos: Vec<(u32, u64, u32)>,
 }
 
@@ -414,10 +463,22 @@ pub(crate) fn fill_args(
     env: &Env<'_>,
     sink: &mut dyn Sink,
 ) -> Result<u64, Skip> {
-    if let Some(a) = sink.memo().and_then(|m| m.lookup(p, inp)) {
+    fill_args_scaled(p, inp, env, 1.0, sink)
+}
+
+/// [`fill_args`] for a stage of a render pass whose attachments have the render scale `pass_scale`. A pixel shader
+/// that divides its pixel position by the scale of the pass reads it from the support buffer.
+pub(crate) fn fill_args_scaled(
+    p: &StageProgram,
+    inp: &StageInputs<'_>,
+    env: &Env<'_>,
+    pass_scale: f32,
+    sink: &mut dyn Sink,
+) -> Result<u64, Skip> {
+    if let Some(a) = sink.memo().and_then(|m| m.lookup(p, inp, pass_scale)) {
         return Ok(a);
     }
-    let addr = build_args(p, inp, env, sink)?;
+    let addr = build_args(p, inp, env, pass_scale, sink)?;
     if let Some(m) = sink.memo() {
         m.store(inp.stage, addr);
     }
@@ -428,10 +489,11 @@ fn build_args(
     p: &StageProgram,
     inp: &StageInputs<'_>,
     env: &Env<'_>,
+    pass_scale: f32,
     sink: &mut dyn Sink,
 ) -> Result<u64, Skip> {
     let mut scratch = ARGS_SCRATCH.take();
-    let r = build_args_in(p, inp, env, sink, &mut scratch);
+    let r = build_args_in(p, inp, env, pass_scale, sink, &mut scratch);
     ARGS_SCRATCH.set(scratch);
     r
 }
@@ -440,10 +502,11 @@ fn build_args_in(
     p: &StageProgram,
     inp: &StageInputs<'_>,
     env: &Env<'_>,
+    pass_scale: f32,
     sink: &mut dyn Sink,
     scratch: &mut ArgsScratch,
 ) -> Result<u64, Skip> {
-    let ArgsScratch { args, drv, ubos } = scratch;
+    let ArgsScratch { args, drv, support, ubos } = scratch;
     args.clear();
     args.resize((p.arg_bytes as usize).max(8), 0);
     ubos.clear();
@@ -475,7 +538,13 @@ fn build_args_in(
                 sink.put(drv)?
             }
             BindKind::UboPtr => ubos.iter().find(|(s, _, _)| *s == b.reg).map_or(env.statics.1, |(_, a, _)| *a),
-            BindKind::Support => env.statics.0,
+            BindKind::Support => {
+                if support_block(support, &p.binds, env, pass_scale, &handle_of) {
+                    sink.put(support)?
+                } else {
+                    env.statics.0
+                }
+            }
             // A zero border block has no sampler bit set, so no sample is corrected.
             BindKind::Border => env.statics.1,
             // A storage buffer that is not bound reads zeros, and its writes land in the zero buffer. A buffer that the
@@ -494,4 +563,59 @@ fn build_args_in(
         put_u64(args, at, v);
     }
     sink.put(args)
+}
+
+#[cfg(test)]
+mod support_tests {
+    use super::*;
+    use crate::programs::Bind;
+
+    fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
+        Bind { arg_id: 0, kind, reg, dim: None, rw: false, rscale }
+    }
+
+    fn env<'a>(
+        handles: &'a crate::draws::FastMap<u64, Resolved>,
+        fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
+    ) -> Env<'a> {
+        Env { handles, fits, pools: (0, 0), default_sampler: 0, statics: (0, 0), scale: 2.0 }
+    }
+
+    fn entry(b: &[u8], i: usize) -> f32 {
+        let at = SUPPORT_RENDER_SCALE as usize + 16 * i;
+        f32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
+    }
+
+    #[test]
+    fn native_size_needs_no_block() {
+        let (h, f) = Default::default();
+        let binds = [bind(BindKind::Support, 0, Some(0)), bind(BindKind::Tex, 3, Some(1))];
+        let mut b = Vec::new();
+        assert!(!support_block(&mut b, &binds, &env(&h, &f), 1.0, &|_| None));
+    }
+
+    #[test]
+    fn the_pass_and_the_scaled_texture_get_their_entries() {
+        let mut h: crate::draws::FastMap<u64, Resolved> = Default::default();
+        h.insert(7, Resolved { texture: 1, sampler: 1, scaled: true });
+        h.insert(8, Resolved { texture: 2, sampler: 2, scaled: false });
+        let f = Default::default();
+        let binds = [
+            bind(BindKind::Support, 0, Some(0)),
+            bind(BindKind::Tex, 3, Some(1)),
+            bind(BindKind::Tex, 4, Some(2)),
+            bind(BindKind::Tex, 5, None),
+        ];
+        let handle = |slot: u32| match slot {
+            3 => Some(7),
+            4 => Some(8),
+            _ => None,
+        };
+        let mut b = Vec::new();
+        assert!(support_block(&mut b, &binds, &env(&h, &f), 2.0, &handle));
+        assert_eq!(b.len(), SUPPORT_SIZE);
+        assert_eq!((entry(&b, 0), entry(&b, 1), entry(&b, 2), entry(&b, 3)), (2.0, 2.0, 1.0, 1.0));
+        // frag_scale_count stays 0
+        assert_eq!(&b[176..180], &[0; 4]);
+    }
 }

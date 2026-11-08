@@ -93,6 +93,19 @@ A texture is scaled when all of these hold.
 
 A texture that the game only uploads is never an attachment and keeps its size. Viewports, scissors and copy regions between scaled targets scale with the factor. A copy between a scaled and an unscaled texture is not encoded and counts as `Skip::Copy`. A texture that becomes scaled is created again and its old contents are lost.
 
+### Shaders at a render scale
+
+A guest shader works in the pixel units the game made its targets in. The translator inserts the conversions (refer to [translator.md](translator.md)), and the host writes the factors into the support buffer of each stage (`bindless.rs`, `support_block`). Entry 0 of `render_scale` is the scale of the pass: `PassCtx.scale`, 1 when the pass renders at native size. Entry `rscale` of a `tex` binding is the scale of the texture in that slot: `GpuSettings.scale` when the texture is scaled (`Resolved.scaled`), else 1. The pixel position is thus divided by the pass scale, and integer texel fetches and size queries use the scale of their texture. `frag_scale_count` stays 0.
+
+When every factor of a stage is 1 (always so at `scale` 1), the stage binds the shared static support buffer and nothing changes at native size. Otherwise the stage gets a 1392 byte copy from the batch scratch buffer. The argument buffer memo of a pass includes the pass scale.
+
+Limits:
+
+- Only the pixel position, integer coordinates and size queries are converted. `uv = gl_FragCoord.xy * invSize` works, as the position is divided and the constant is a native size. A size that the shader gets by another path (a uniform the game wrote from the size of a scaled target, a compute thread id) stays native or scaled as it is.
+- A texture that is not a 2D texture, an array of textures, a bindless handle (`tex_ubo`, pools) and a combined handle that the shader reads at run time keep scale 1. The shader then sees the scaled texture with native coordinates.
+- Image bindings are not filled yet (`Skip::Binding`), so a compute shader with images does not run. The translator already scales image loads, stores and atomics. A store of a native coordinate writes one texel of each `scale` by `scale` block. Dispatch sizes that the game computes from the native size then cover only part of a scaled image. A rule that scales the grid when every written image has the same factor needs the image bindings in the detail first, so there is no `scalegrid` knob.
+- A copy-back and an upload of a scaled texture keep their limits (see above).
+
 ## Textures
 
 `textures.rs` makes one Metal texture for each `TexId` and keeps it while its description stays the same. A texture in `GuestNewer` state, or a new texture in `InSync` state, is deswizzled from guest memory by the `Deswizzler` in the first command buffer before the frame uses it. A scaled texture is not uploaded (counted as `scaled_upload_lost`). Render targets stay in Metal (R4). `Gpu::encode_frame` copies a texture back to guest memory with the `Swizzler` only when a `CpuRead` command names it and the GPU wrote it, in this frame or before. A scaled, compressed or widened texture is not copied back.
@@ -123,7 +136,7 @@ These are known gaps. Each shows up as a `Skip` count or is a limit of the first
 - Multisampled attachments are downgraded to one sample. The pass descriptions do not resolve.
 - The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool` and `drvcb` are filled. A program with another kind is skipped (`Skip::Binding`). The shader variants `_bv`, `_bp`, `_bx` and `_bf` and pull shaders are not used.
 - The texture view has no channel swizzle (counted as `swizzle_ignored`). A cube view ignores the layer range.
-- A texel fetch with integer coordinates and `textureSize` see the scaled size of a scaled target.
+- Texel fetches with integer coordinates and `textureSize` of a 2D texture see native units through the render scale of the support buffer. Other texture types still see the scaled size (refer to the render scale section).
 - The pool tables are written while earlier frames may still run. A frame in flight can read an entry that a later frame rewrote.
 - An unbound pool slot reads as zero.
 - The depth format is not part of the pipeline key.

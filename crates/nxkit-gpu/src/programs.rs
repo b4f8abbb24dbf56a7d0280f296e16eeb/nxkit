@@ -55,6 +55,10 @@ pub(crate) struct Bind {
     pub(crate) dim: Option<nxkit_metal::TextureKind>,
     /// Whether the shader may write an `sbuf` member (`rw` of the reflection; a missing `rw` counts as written).
     pub(crate) rw: bool,
+    /// The entry of the support buffer's `render_scale` array this member needs. A `tex` member names the entry of its
+    /// texture's scale (`rscale` of the reflection). A `support` member has `Some(0)` when the shader reads the scale
+    /// of the pass.
+    pub(crate) rscale: Option<u32>,
 }
 
 /// The texture type of an MSL argument type such as `texture2d_array<float>`.
@@ -218,6 +222,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         .unwrap_or("main0")
         .to_owned();
     let mut binds = Vec::new();
+    let pass_scale = json.get("pass_scale").and_then(Json::as_bool).unwrap_or(false);
     let mut arg_bytes = 0u32;
     for b in json.get("bindings").map(Json::as_arr).unwrap_or(&[]) {
         let kind = match b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)? {
@@ -259,7 +264,16 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             None
         };
         let rw = b.get("rw").and_then(Json::as_bool).unwrap_or(true);
-        binds.push(Bind { arg_id, kind, reg, dim, rw });
+        let rscale = match kind {
+            BindKind::Tex => b
+                .get("rscale")
+                .and_then(Json::as_i64)
+                .and_then(|v| u32::try_from(v).ok())
+                .filter(|v| *v < crate::bindless::SUPPORT_SCALES),
+            BindKind::Support => pass_scale.then_some(0),
+            _ => None,
+        };
+        binds.push(Bind { arg_id, kind, reg, dim, rw, rscale });
     }
     let inputs = if vertex {
         json.get("vertex_inputs")

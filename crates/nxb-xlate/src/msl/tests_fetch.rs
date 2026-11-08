@@ -373,3 +373,43 @@ fn metal_builds_the_fetch_variant() {
     let t = translated(&b, &Options::default());
     super::tests_ps::metal_text("fetch_bf_pos", &t.libraries[1].msl);
 }
+
+#[test]
+fn a_scaled_pixel_position_marks_the_pass_scale() {
+    let mut b = frag_pos_program(true);
+    support_buffer(&mut b);
+    let t = translated(&b, &Options::default());
+    let r = t.libraries[0].reflection.as_ref().expect("reflection");
+    assert!(r.pass_scale, "{}", t.libraries[0].msl);
+    assert_eq!(r.to_value().get("pass_scale"), Some(&Value::Bool(true)));
+    let plain = translated(&frag_pos_program(false), &Options::default());
+    let r = plain.libraries[0].reflection.as_ref().expect("reflection");
+    assert!(!r.pass_scale);
+    assert!(r.to_value().get("pass_scale").is_none());
+}
+
+#[test]
+fn a_scaled_texture_binding_names_its_render_scale_entry() {
+    let mut b = base();
+    let (u, v) = (varying(&mut b, 0), varying(&mut b, 1));
+    sample(&mut b, u, v, 0);
+    b.s.program.scaled.push(crate::xform::helper::ScaleUse {
+        image: false,
+        binding: 0,
+        index: 2,
+    });
+    let t = translated(&b, &Options::default());
+    let r = t.libraries[0].reflection.as_ref().expect("reflection");
+    let tex = r.bindings.iter().find(|b| b.msl_name == "fp_t2d_3").expect("tex");
+    assert_eq!(tex.rscale, Some(3));
+    assert_eq!(tex.to_value().get("rscale").and_then(Value::as_i64), Some(3));
+}
+
+#[test]
+fn the_support_buffer_constants_match_the_front_end() {
+    use crate::msl::abi::{SUPPORT_RENDER_SCALE, SUPPORT_RENDER_SCALES, SUPPORT_SIZE};
+    use crate::translation::props::support_buffer as sb;
+    assert_eq!(SUPPORT_RENDER_SCALE as i32, sb::GRAPHICS_RENDER_SCALE_OFFSET);
+    assert_eq!(SUPPORT_RENDER_SCALES as i32, sb::RENDER_SCALE_MAX_COUNT);
+    assert_eq!(SUPPORT_SIZE as i32, sb::REQUIRED_SIZE);
+}

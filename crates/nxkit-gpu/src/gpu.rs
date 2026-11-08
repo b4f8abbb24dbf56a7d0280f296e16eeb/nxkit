@@ -538,6 +538,7 @@ impl Gpu {
             Resolved {
                 texture: tex_view.gpu_resource_id(),
                 sampler,
+                scaled: res.scaled,
             },
             tex_view,
         ))
@@ -917,6 +918,7 @@ impl Gpu {
                 pools: self.bindless.pools(),
                 default_sampler: self.bindless.default_sampler_id(),
                 statics: self.bindless.statics(),
+                scale,
             },
             guest: &self.guest,
             icbs: &self.icbs,

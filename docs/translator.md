@@ -39,6 +39,19 @@ The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translat
 The output keeps the contract of the engine host: the argument buffer at `[[buffer(0)]]` with `[[id(n)]]` members, the entry `main0` and its extra entries,
 the library suffixes and the fields of `_b.json`. The facts in `_b.json` come from the emitter. Nothing parses MSL text.
 
+## Render scale
+
+The front end ports the render scale of Ryujinx. A pixel shader divides the pixel position by `render_scale[0]` of the `support_buffer` (binding 0). A texel fetch with integer coordinates multiplies each coordinate by the scale of its texture, and a texture size query divides by it (`xform/texture.rs`, helpers `TexelFetchScale` and `TextureSizeUnscale`). Image loads, stores and atomics of a 2D image take the same multiplication, so a store lands on the scaled image. A texture or image of another dimension, an array of textures and a bindless handle keep their coordinates. Point sampling with normalized coordinates needs no change, and neither do derivatives.
+
+`render_scale` has one float for each of 73 entries, 16 bytes apart from byte `SUPPORT_RENDER_SCALE` (192) of the support buffer. Entry 0 is the scale of the pass. Entry `1 + i` is the scale of the texture or image with descriptor index `i`. Images follow the textures. The host writes `frag_scale_count` (byte 176) as 0, so a vertex, pixel and compute shader number their entries alike. The constants are `SUPPORT_RENDER_SCALE`, `SUPPORT_RENDER_SCALES` and `SUPPORT_SIZE` in `msl/abi.rs`, and a test compares them with the front end.
+
+The reflection tells the host what to fill, so a shader that scales nothing costs nothing:
+
+- `pass_scale: true` (top level): the shader reads `render_scale[0]`.
+- `rscale: n` on a `tex` or `img` binding: a helper reads `render_scale[n]` for this resource. The host writes the scale of the bound texture there.
+
+The scaling code is in the MSL only for the operations the shader has. A shader without them has neither field.
+
 ## Entry functions
 
 `msl/entry.rs` writes one function around a translated body. `EntryName` names it: the function name, its `Form`, the return type, the stage input (`StageIn`), extra `Param`s and prologue statements. The form is an entry function or a `static` body function `dm_body_<name>` with the parameters but no attributes.
@@ -154,7 +167,7 @@ A chain keeps FP32 in its slot from one call to the next. Ampere rounds D to hal
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.16`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.17`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
