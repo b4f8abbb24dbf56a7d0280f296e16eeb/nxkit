@@ -235,7 +235,7 @@ pub(crate) fn prepare(
         .pipelines
         .render(d, &vs, fs.as_deref(), &pc.targets, icb)?;
     let f = fixed(sh, pc, d, cull)?;
-    let (geom, base_instance) = geometry(sh, d, primitive)?;
+    let (geom, base_instance) = geometry(sh, d, primitive, sink)?;
     let mut streams = Vec::with_capacity(d.streams.len());
     for s in &d.streams {
         if sh.guest_offset(s.address, s.size.max(1)).is_none() {
@@ -342,7 +342,7 @@ pub(crate) fn fixed(sh: &Shared<'_>, pc: &PassCtx, d: &DrawDetail, cull: CullMod
     })
 }
 
-fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive) -> Result<(Geom, u32), Skip> {
+fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive, sink: &mut dyn Sink) -> Result<(Geom, u32), Skip> {
     Ok(match d.args {
         DrawArgs::Arrays {
             first,
@@ -367,10 +367,17 @@ fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive) -> Result<(Ge
             base_vertex,
             base_instance,
         } => {
-            let it = translate::index_type(index_type).ok_or(Skip::Index)?;
-            if sh
-                .guest_offset(address, u64::from(count) * it.bytes())
-                .is_none()
+            // Metal has no 8-bit indices: the indices are widened to 16 bits into the batch's scratch memory, and the
+            // draw reads them there (NVN_INDEX_TYPE_UNSIGNED_BYTE, Ocarina of Time's interface and movie quads).
+            let (it, address) = if index_type == 0 {
+                (IndexType::U16, widen_u8_indices(sh, address, count, sink)?)
+            } else {
+                (translate::index_type(index_type).ok_or(Skip::Index)?, address)
+            };
+            if index_type != 0
+                && sh
+                    .guest_offset(address, u64::from(count) * it.bytes())
+                    .is_none()
             {
                 return Err(crate::buf_skip(format_args!(
                     "index addr {address:#x} count {count}"
@@ -412,6 +419,20 @@ fn geometry(sh: &Shared<'_>, d: &DrawDetail, primitive: Primitive) -> Result<(Ge
         }
         DrawArgs::MeshTasks { .. } | DrawArgs::MeshTasksIndirect { .. } => return Err(Skip::Detail),
     })
+}
+
+/// Reads `count` 8-bit indices at the guest GPU address `addr`, widens them to 16 bits and puts them into the sink.
+/// Returns the address of the 16-bit indices.
+fn widen_u8_indices(sh: &Shared<'_>, addr: u64, count: u32, sink: &mut dyn Sink) -> Result<u64, Skip> {
+    let off = sh
+        .guest_offset(addr, u64::from(count))
+        .ok_or_else(|| crate::buf_skip(format_args!("8-bit index addr {addr:#x} count {count}")))?;
+    let mut bytes = vec![0u8; count as usize];
+    sh.guest
+        .read(off, &mut bytes)
+        .map_err(|_| crate::buf_skip(format_args!("8-bit index addr {addr:#x} count {count}: unreadable")))?;
+    let wide: Vec<u8> = bytes.iter().flat_map(|&b| u16::from(b).to_le_bytes()).collect();
+    sink.put(&wide)
 }
 
 /// Checks that `bytes` of indirect arguments at `addr` lie in guest memory at a 4 byte aligned address.
