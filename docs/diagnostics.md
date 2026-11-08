@@ -25,7 +25,9 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_ENC_THREAD=1` | Encodes on a thread of its own (the `enc_thread` key of `game.json` does the same). |
 | `NXKIT_ENCODE_THREADS` | The number of chunk threads of the encoder. 0, the default, picks the number from the cores. |
 | `NXKIT_SCALE` | The render scale of render targets. The default is 1.0. |
-| `NXKIT_WALK_CACHE=0` | Turns off the template cache of the walker. |
+| `NXKIT_WALK_CACHE=1` | Turns on the template cache of the walker. It is off by default, because in Breath of the Wild it costs more than it saves. |
+| `NXKIT_SCREEN` | The screen of the window, by its index (0 is the built-in one) or a part of its name, for example `XB273U`. The frame step takes the refresh rate of that screen. |
+| `NXKIT_PACE_DIAG=1` | Prints, every 120 presents, the mean frame interval, pacing wait, CPU cost and GPU time in vsyncs, and the state of the frame step. |
 | `NXKIT_VERIFY_CACHE=1` | Walks every recording again without the template cache and compares the result. This is slow. |
 | `NXKIT_COPYBACK=0` | Turns off the copy-back of GPU-written textures in CPU-visible pools. |
 | `NXKIT_COPYBACK_MAX_MB` | The most storage that one frame copies back. The default is 128. |
@@ -47,7 +49,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | category | crate | prints | limit | cost |
 |---|---|---|---|---|
 | `health` | nvn, gpu | the render health report (see below) | every 300 frames, and when a reason counts for the first time | low |
-| `stats` | nvn, gpu | the encode counters, the walker counters and why the render passes start | every 30 frames | low |
+| `stats` | nvn, gpu | the encode counters, the walker counters, why the render passes start, and the decode time and the counters of the decode cache | every 30 frames, the decode every 300 submits | low |
 | `cmd` | rt | each command buffer call: add memory, begin, end, call, memory queries, submits, clipped memory and overflow blocks | first 2000 per call site | medium |
 | `decode` | nvn | a record that the decoder could not read, with the recording and its spans | first 50 | low |
 | `tex` | gpu | why a texture was not resolved or created, and the unresolved handles of each draw | first 300, and 400 distinct draws | low |
@@ -78,6 +80,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `bc` | gpu | the first bytes of each compressed texture in guest memory | 200 distinct | low |
 | `prog` | gpu | programs that did not load, unknown binding kinds, draws without a vertex stage | once per program, first 40 draws | low |
 | `pipe` | gpu | render, compute and depth-stencil states that Metal did not build | first 300 | low |
+| `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
 | `indirect` | gpu | draw records without arguments (indirect or unknown draw kinds) | at powers of two per kind | low |
 
 ## Knobs (`NXKIT_KNOB`)
@@ -158,6 +161,6 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `program.failed` | encoder | A program that did not load. It counts once per key. |
 | `pipeline.failed` | encoder | A render, compute or depth-stencil state that Metal did not build. It counts every attempt. |
 
-The walker counts only when it reads a record. A recording that plays from the template cache does not count again. Use `NXKIT_WALK_CACHE=0` to count every frame. With `NXKIT_VERIFY_CACHE=1`, a recording is walked twice and counts twice.
+The walker counts only when it reads a record. A recording that plays from the template cache does not count again. Without `NXKIT_WALK_CACHE=1` every frame counts. With `NXKIT_VERIFY_CACHE=1`, a recording is walked twice and counts twice.
 
 To add a reason, add it to `reasons!` in `nxkit-nvn/src/diag.rs`, call `nxkit_nvn::diag::note` where the work is dropped, and add a line to the table above.
