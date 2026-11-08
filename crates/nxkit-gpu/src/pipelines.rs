@@ -273,8 +273,42 @@ impl Pipelines {
         desc.vertex_layout.hash(&mut h);
         class.hash(&mut h);
         d.raster.alpha_to_coverage.hash(&mut h);
+        flat.hash(&mut h);
+        paint.hash(&mut h);
+        cube_test.hash(&mut h);
         let key = h.finish();
-        let p = self.cache.render(key, &desc).map_err(|_| Skip::Pipeline)?;
+        // NVN writes the point size of every draw. Metal refuses a point size write for a line or triangle class,
+        // so such a pipeline is built again without a class.
+        const FALLBACK_KEY: u64 = 0x9e37_79b9_7f4a_7c15;
+        let fallback = self.topology_fallbacks.lock().unwrap_or_else(PoisonError::into_inner).contains(&key);
+        let p = if fallback {
+            desc.topology = TopologyClass::Unspecified;
+            self.cache.render(key ^ FALLBACK_KEY, &desc)
+        } else {
+            self.cache.render(key, &desc).or_else(|e| {
+                if desc.topology == TopologyClass::Point || !e.to_string().contains("point size") {
+                    return Err(e);
+                }
+                desc.topology = TopologyClass::Unspecified;
+                let pipeline = self.cache.render(key ^ FALLBACK_KEY, &desc)?;
+                // Remember the successful variant. Retrying the rejected descriptor for every draw invokes the
+                // Metal compiler thousands of times per frame even though the fallback itself is cached.
+                self.topology_fallbacks.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
+                Ok(pipeline)
+            })
+        };
+        let p = p.map_err(|e| {
+            if crate::diag("pipe")
+                && PIPE_SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 300
+            {
+                eprintln!(
+                    "DIAG pipe render {} / {:?}: {e}",
+                    vs.entry,
+                    fs.map(|f| f.entry.as_str())
+                );
+            }
+            Skip::Pipeline
+        })?;
         Ok((p, key))
     }
 

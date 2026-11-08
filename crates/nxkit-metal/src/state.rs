@@ -165,6 +165,8 @@ mtl_enum! {
 mtl_enum! {
     /// The primitive class a pipeline draws. Metal needs it when the pipeline is built.
     TopologyClass => MTLPrimitiveTopologyClass {
+        /// No class. Metal accepts a vertex shader that writes the point size, but not layered rendering.
+        Unspecified => Unspecified,
         /// Points.
         Point => Point,
         /// Lines.
