@@ -10,6 +10,7 @@
 //! addresses.
 
 pub(crate) mod nv;
+pub(crate) mod vi;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,6 +33,7 @@ pub(crate) use table;
 pub(crate) fn exports() -> Vec<Export> {
     let mut v = Vec::new();
     v.extend(nv::exports());
+    v.extend(vi::exports());
     v
 }
 

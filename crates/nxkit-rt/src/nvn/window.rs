@@ -19,8 +19,8 @@
 //! ([`Backend::acquire`](nxkit_nvn::backend::Backend::acquire) may block until the display can take a frame).
 //! The window does not create or hold the textures. Their lifetime is the game's.
 //!
-//! The layer crop of the Switch video interface (`vi`) does not exist in nxkit. A window without a crop presents the
-//! whole texture.
+//! A window without a crop presents the crop of the layer that the game set with `nn::vi::SetLayerCrop`, or the whole
+//! texture when there is none ([`crate::gfx::vi::present_crop`]).
 
 use nxkit_nvn::backend::Rect;
 

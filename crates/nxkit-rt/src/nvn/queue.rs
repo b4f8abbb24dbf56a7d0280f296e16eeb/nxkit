@@ -192,11 +192,13 @@ extern "C" fn queue_present_texture(_q: u64, w: u64, index: i32) {
                 view.texture
             ))
         })?;
+        let crop = crate::gfx::vi::present_crop(view.crop, g.texture_extent(view.texture));
+        crate::gfx::vi::frame_queued();
         g.present(Present {
             window: w,
             texture,
             interval: view.interval,
-            crop: view.crop,
+            crop,
         })
     });
 }
