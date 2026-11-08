@@ -83,6 +83,7 @@ extern "C" fn service_init() -> u32 {
 // ---------- image preferences and pools ----------
 
 extern "C" fn pref(w: u64, h: u64, fmt: u32, mode: u32) -> Pref {
+    crate::codec::trace(format_args!("pref {w}x{h} format {fmt} mode {mode}"));
     Pref::new(u64::from(w as u16), u64::from(h as u16), fmt, mode)
 }
 
@@ -97,10 +98,12 @@ extern "C" fn pool_size(size: u64, align: u64, pref_at: u64, n: u32) -> u32 {
 }
 
 extern "C" fn pool_with_mode(t: u64, mem: u64, size: u64, pref_at: u64, n: u32, _mode: u32) -> u32 {
+    crate::codec::trace(format_args!("pool {t:#x} mem {mem:#x} size {size:#x} n {n} mode {_mode}"));
     pool_no_mode(t, mem, size, pref_at, n)
 }
 
 extern "C" fn pool_no_mode(t: u64, mem: u64, size: u64, pref_at: u64, n: u32) -> u32 {
+    crate::codec::trace(format_args!("pool {t:#x} mem {mem:#x} size {size:#x} n {n}"));
     match Pref::read(pref_at) {
         Some(p) => pool_init(t, mem, size, &p, n),
         None => BAD,
@@ -112,6 +115,7 @@ extern "C" fn pool_finalize(t: u64) {
 }
 
 extern "C" fn native_image_handle(t: u64, i: u32) -> u32 {
+    crate::codec::trace(format_args!("native image handle pool {t:#x} picture {i}"));
     pool_of(t).map_or(0, |p| native_handle(&p, i))
 }
 
@@ -146,6 +150,7 @@ extern "C" fn read_rgba(
     stride: u64,
     size: u64,
 ) -> u32 {
+    crate::codec::trace(format_args!("read rgba picture {i} {w}x{h} at {x},{y} stride {stride} size {size}"));
     static ONCE: AtomicBool = AtomicBool::new(false);
     let (x, y, w, h) = (x as u16, y as u16, u64::from(w as u16), u64::from(h as u16));
     let Some(frame) = pool_frame(t, i) else {
@@ -164,6 +169,7 @@ extern "C" fn read_rgba(
     match frame.to_rgba(w as u32, h as u32) {
         Ok(rgba) => {
             let _ = guest::write(dst, &rgba);
+            crate::guest_wrote(dst, rgba.len() as u64);
         }
         Err(e) => red(&format!("nn::codec::ReadDecoderOutputImageRgba: {e}")),
     }
@@ -217,6 +223,7 @@ extern "C" fn read_nv12(
     uvstride: u64,
     uvsize: u64,
 ) -> u32 {
+    crate::codec::trace(format_args!("read nv12 picture {i} {w}x{h} y {ydst:#x} uv {uvdst:#x}"));
     static ONCE: AtomicBool = AtomicBool::new(false);
     let (x, y, w, h) = (x as u16, y as u16, u64::from(w as u16), u64::from(h as u16));
     if x != 0 || y != 0 || ystride != w || uvstride != w || ysize < w * h || uvsize < w * h / 2 {
@@ -237,6 +244,9 @@ extern "C" fn read_nv12(
         Ok((yp, uvp)) => {
             let _ = guest::write(ydst, &yp);
             let _ = guest::write(uvdst, &uvp);
+            // The game samples these planes with its own shader: the GPU must see that the host wrote them.
+            crate::guest_wrote(ydst, yp.len() as u64);
+            crate::guest_wrote(uvdst, uvp.len() as u64);
         }
         Err(e) => red(&format!("nn::codec::ReadDecoderOutputImageNv12: {e}")),
     }

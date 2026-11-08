@@ -67,6 +67,20 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// `NXKIT_DIAG=codec` (or `all`): one line per decoder call, at most 600, to see where a player stops.
+pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static ON: OnceLock<bool> = OnceLock::new();
+    static N: AtomicU32 = AtomicU32::new(0);
+    let on = *ON.get_or_init(|| {
+        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "codec" || c == "all"))
+    });
+    if on && N.fetch_add(1, Ordering::Relaxed) < 600 {
+        eprintln!("DIAG codec {what}");
+    }
+}
+
 fn red(what: &str) {
     eprintln!("[RED] video: {what}");
 }
@@ -505,6 +519,7 @@ impl Dec {
 
     /// Registers buffer `i`, which is acquirable at once.
     pub(crate) fn register(&mut self, i: u32, pool: Option<PoolRef>, pidx: u32) -> u32 {
+        trace(format_args!("dec {} register {i} pool idx {pidx} native {}", self.id, pool.as_ref().is_some_and(|p| lock(p).native)));
         let Some(s) = self.slots.get_mut(i as usize) else {
             red(&format!(
                 "nn::codec: register of buffer {i}, a decoder has {BUFS}"
@@ -588,6 +603,7 @@ impl Dec {
         eos: bool,
         fx: &mut Effects,
     ) -> Result<u64, u32> {
+        trace(format_args!("dec {} submit {} bytes ts {ts} eos {eos} (held {}, pend {:?})", self.id, data.len(), self.held.len(), self.pend));
         if self.held.len() >= HOLD {
             if self.refused < 4 {
                 self.refused += 1;
@@ -697,7 +713,9 @@ impl Dec {
 
     /// The oldest acquirable buffer and its sync handle.
     pub(crate) fn acquire(&mut self) -> Result<(u32, SyncHandle), u32> {
-        let i = self.fifo.pop_front().ok_or(NONE)?;
+        let i = self.fifo.pop_front().ok_or(NONE);
+        trace(format_args!("dec {} acquire -> {i:?} (fifo {:?}, held {})", self.id, self.fifo, self.held.len()));
+        let i = i?;
         let generation = self.slots.get(i as usize).map_or(0, |s| s.generation);
         Ok((
             i,
@@ -712,6 +730,7 @@ impl Dec {
 
     /// The buffer waits for the next picture and can be acquired again.
     pub(crate) fn release(&mut self, i: u32, fx: &mut Effects) {
+        trace(format_args!("dec {} release {i} (held {}, pend {:?})", self.id, self.held.len(), self.pend));
         match self.slots.get_mut(i as usize) {
             Some(s) if s.reg => {
                 s.generation = s.generation.wrapping_add(1);
@@ -740,6 +759,7 @@ impl Dec {
     /// The width, height, time and end of stream flag of the picture in buffer `i`. [`NONE`] until it is filled.
     pub(crate) fn properties(&self, i: u32) -> Result<(u16, u16, i64, bool), u32> {
         let s = self.slots.get(i as usize).ok_or(BAD)?;
+        trace(format_args!("dec {} properties {i} filled {}", self.id, s.filled));
         if s.filled {
             Ok((s.w, s.h, s.ts, s.eos))
         } else {
@@ -869,6 +889,12 @@ pub(crate) fn apply(dec: u32, event: u64, fx: Effects) {
 
 /// Whether the picture that `s` waits for is in its buffer. A handle that the host did not make reads as signalled.
 pub(crate) fn sync_reached(s: &SyncHandle) -> bool {
+    let r = sync_reached_in(s);
+    trace(format_args!("sync dec {} idx {} gen {} reached {r}", s.dec, s.idx, s.generation));
+    r
+}
+
+fn sync_reached_in(s: &SyncHandle) -> bool {
     if s.magic != SYNC_MAGIC {
         static LOGGED: AtomicU32 = AtomicU32::new(0);
         if (s.magic != 0 || s.dec != 0) && LOGGED.fetch_add(1, Ordering::Relaxed) == 0 {
