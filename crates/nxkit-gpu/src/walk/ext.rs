@@ -43,6 +43,9 @@ fn clear_value(kind: u16, bits: u32) -> f32 {
 impl Walker {
     pub(super) fn ext<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, x: &Ext) {
         match x.code {
+            ExtCode::ReportCounter if matches!(x.word(0), 0 | 0x10) => {
+                self.out.reports.push(crate::detail::CounterReport { kind: x.word(0), addr: x.word64(1) });
+            }
             ExtCode::Program => {
                 let (program, bits) = (x.word64(0), x.word(2));
                 for (s, p) in st.program.iter_mut().enumerate() {

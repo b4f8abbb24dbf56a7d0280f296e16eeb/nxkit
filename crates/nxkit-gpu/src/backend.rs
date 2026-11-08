@@ -65,7 +65,14 @@ pub struct GpuBackend {
     blit: Mutex<Option<Blit>>,
     pacer: OnceLock<Arc<Pacer>>,
     reports: AtomicU64,
+    /// The timestamp reports of encoded frames that the GPU has not been seen to finish, with the fence of their
+    /// frame. [`GpuBackend::drain`] writes them.
+    counters: Mutex<Vec<(u64, crate::detail::CounterReport)>>,
+    /// The GPU start and end of the last finished frame, in seconds of the host clock.
+    last_gpu: Mutex<Option<(f64, f64)>>,
     blit_failed: AtomicBool,
+    /// The encoder thread, when `enc_thread` is on.
+    enc: Option<Encoder>,
 }
 
 impl GpuBackend {

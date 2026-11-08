@@ -341,4 +341,16 @@ pub struct FrameDetail {
     /// The runs of draws from reused recordings. Only runs with a handle that `RecCache::icb_candidates` names get
     /// an ICB.
     pub runs: Vec<RecordingRun>,
+    /// The timestamp reports of the frame (`nvnCommandBufferReportCounter`), in command order.
+    pub reports: Vec<CounterReport>,
+}
+
+/// A counter report that the GPU writes when it reaches the command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CounterReport {
+    /// The `NVNcounterType`. 0 is `TIMESTAMP` (when the work before it is done), 0x10 `TIMESTAMP_TOP` (when the
+    /// command is reached).
+    pub kind: u32,
+    /// The GPU address of the 16-byte `NVNcounterData`: the counter value, then the timestamp in GPU ticks.
+    pub addr: u64,
 }
