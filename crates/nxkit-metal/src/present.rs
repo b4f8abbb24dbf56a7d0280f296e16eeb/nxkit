@@ -24,6 +24,26 @@ use crate::texture::{Storage, Texture, TextureDesc};
 /// The pixel format of the layer.
 pub const PRESENT_FORMAT: Format = Format::Bgra8Unorm;
 
+/// The least time in microseconds that a shown frame stays before the next one may appear. 0 is off.
+static MIN_STAY_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Turns on timed presents: every frame is presented with `presentAfterMinimumDuration:` of `secs`, so the display
+/// keeps the frame before it on screen at least that long. A screen that adapts its refresh rate (ProMotion) then
+/// shows each frame for exactly its period, whatever rate the display runs at in that moment. `None` turns it off.
+/// Metal can refuse the call on a drawable of the display link. The first refusal turns timed presents off again.
+pub fn set_timed_present(secs: Option<f64>) {
+    let us = secs.filter(|s| s.is_finite() && *s > 0.0).map_or(0, |s| (s * 1e6).round() as u64);
+    MIN_STAY_US.store(us, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The minimum stay of timed presents in seconds, when they are on.
+pub fn timed_present() -> Option<f64> {
+    match MIN_STAY_US.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        us => Some(us as f64 / 1e6),
+    }
+}
+
 /// A drawable of the layer. Render into [`Drawable::texture`], then call [`Frame::present`].
 pub struct Drawable {
     texture: Texture,

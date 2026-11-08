@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use nxkit_metal::{Context, DisplayLink, DisplayTick, FrameHooks, FrameInterval, Presenter};
 use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
+use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSEvent, NSResponder,
@@ -23,6 +23,7 @@ use objc2_quartz_core::{CALayer, CAMetalLayer};
 
 use super::mouse;
 use crate::error::{HostError, Result};
+use crate::refresh::{self, ScreenFacts};
 
 /// What the window reports to the host. The calls come on the main thread.
 pub trait AppEvents: Send + Sync {
@@ -106,16 +107,39 @@ fn target_screen(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
     NSScreen::mainScreen(mtm)
 }
 
-/// The display link rate that the main screen supports. The game's own pacing (the title's frame step) picks the
-/// frames it renders. The link never asks for less than the screen can show.
-fn screen_interval(mtm: MainThreadMarker) -> FrameInterval {
-    let screen = target_screen(mtm);
-    if let Some(s) = &screen {
-        nxkit_svc_pacing::set_screen_hz(u32::try_from(s.maximumFramesPerSecond()).unwrap_or(0));
+/// The CoreGraphics display id of a screen (`NSScreenNumber` of its device description).
+fn display_id(screen: &NSScreen) -> Option<u32> {
+    // SAFETY: `deviceDescription` returns a dictionary and `objectForKey:` an optional `NSNumber`, both retained and
+    // valid for the calls below. `unsignedIntValue` is a method of `NSNumber`.
+    unsafe {
+        let desc: Retained<AnyObject> = msg_send![screen, deviceDescription];
+        let key = NSString::from_str("NSScreenNumber");
+        let number: Option<Retained<AnyObject>> = msg_send![&*desc, objectForKey: &*key];
+        let id: u32 = msg_send![&*number?, unsignedIntValue];
+        Some(id)
     }
-    match screen {
-        Some(s) if s.maximumFramesPerSecond() >= 120 => FrameInterval::Hz120,
-        _ => FrameInterval::Hz60,
+}
+
+/// What the host reads of a screen. A screen whose refresh interval can change (ProMotion, adaptive sync) has a longest
+/// interval above its shortest. `NSScreen` documents both as equal for a screen that cannot.
+fn screen_facts(s: &NSScreen) -> ScreenFacts {
+    let (min, max) = (s.minimumRefreshInterval(), s.maximumRefreshInterval());
+    ScreenFacts {
+        name: s.localizedName().to_string(),
+        display: display_id(s),
+        max_fps: u32::try_from(s.maximumFramesPerSecond()).unwrap_or(0),
+        adaptive: min > 0.0 && max > min * 1.01,
+    }
+}
+
+/// The display link rate for the screen that shows the window. Before the window is on a screen it is the screen
+/// that `NXKIT_SCREEN` names, else the main one. The link rate is the refresh rate of the current mode of that screen
+/// (`refresh.rs`), not its highest one: the game's own pacing picks the frames it renders, and the link ticks at a rate
+/// that holds each frame an exact number of ticks.
+fn screen_interval(mtm: MainThreadMarker, window: Option<&NSWindow>) -> FrameInterval {
+    match window.and_then(|w| w.screen()).or_else(|| target_screen(mtm)) {
+        Some(s) => FrameInterval::from_hz(refresh::apply(&screen_facts(&s)).link_hz),
+        None => FrameInterval::Hz60,
     }
 }
 
@@ -247,6 +271,7 @@ define_class!(
         presenter: OnceCell<Rc<Presenter>>,
         window: OnceCell<Retained<NSWindow>>,
         view: OnceCell<Retained<NSView>>,
+        link: OnceCell<Rc<DisplayLink>>,
     }
 
     // SAFETY: `NSObjectProtocol` has no extra requirements.
@@ -278,6 +303,11 @@ define_class!(
             }
         }
 
+        #[unsafe(method(windowDidChangeScreen:))]
+        fn window_did_change_screen(&self, _n: &NSNotification) {
+            self.replan();
+        }
+
         #[unsafe(method(windowDidResize:))]
         fn window_did_resize(&self, _n: &NSNotification) {
             if let (Some(p), Some(w), Some(v)) =
@@ -296,8 +326,15 @@ define_class!(
             true
         }
 
+        // A change of the display mode, the arrangement or the screens comes here.
+        #[unsafe(method(applicationDidChangeScreenParameters:))]
+        fn application_did_change_screen_parameters(&self, _n: &NSNotification) {
+            self.replan();
+        }
+
         #[unsafe(method(applicationWillTerminate:))]
         fn application_will_terminate(&self, _n: &NSNotification) {
+            nxkit_metal::display::restore_active();
             mouse::release();
             if let Some(e) = self.events().get() {
                 e.closing();
@@ -305,6 +342,20 @@ define_class!(
         }
     }
 );
+
+impl AppDelegate {
+    /// The window moved to another screen, or the mode of a screen changed: read the refresh rate of the screen the
+    /// window is on now, plan again and set the rate of the display link.
+    fn replan(&self) {
+        let (Some(window), Some(link)) = (self.window().get(), self.link().get()) else {
+            return;
+        };
+        let interval = screen_interval(MainThreadMarker::from(self), Some(window));
+        if (link.target_hz() - interval.hz()).abs() > f32::EPSILON {
+            link.set_interval(interval);
+        }
+    }
+}
 
 /// Passes every hook to the host and ends the application on the next tick after a stop request. The tick is the
 /// only code that runs on the main thread by itself, so the stop request waits for it.
@@ -400,6 +451,7 @@ pub fn run(
         presenter: OnceCell::from(presenter.clone()),
         window: OnceCell::from(window.clone()),
         view: OnceCell::from(view.clone()),
+        link: OnceCell::new(),
     });
     // SAFETY: `init` of `NSObject` on a freshly allocated instance whose ivars are set.
     let delegate: Retained<AppDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -408,7 +460,8 @@ pub fn run(
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks { inner: hooks, stop });
-    let _link = DisplayLink::new(mtm, &presenter, screen_interval(mtm), link_hooks);
+    let link = Rc::new(DisplayLink::new(mtm, &presenter, screen_interval(mtm, None), link_hooks));
+    let _ = delegate.link().set(link);
 
     match target_screen(mtm) {
         Some(screen) if std::env::var_os("NXKIT_SCREEN").is_some() => {
@@ -424,6 +477,8 @@ pub fn run(
         window.toggleFullScreen(None);
     }
     app.activate();
+    // The window is on its screen now, which may not be the one that was planned for.
+    delegate.replan();
 
     // A game is latency critical and interactive whether its window is in front or not. Without the activity, macOS
     // treated the process as a background app while another window had the focus (App Nap, timer coalescing, a lower
@@ -432,5 +487,6 @@ pub fn run(
         .beginActivityWithOptions_reason(NSActivityOptions::UserInteractive, &NSString::from_str("a game runs"));
     ready()?;
     app.run();
+    nxkit_metal::display::restore_active();
     Ok(())
 }

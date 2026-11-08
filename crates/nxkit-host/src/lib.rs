@@ -38,6 +38,8 @@ pub mod place;
 #[cfg(target_os = "macos")]
 pub mod probe;
 #[cfg(target_os = "macos")]
+pub mod refresh;
+#[cfg(target_os = "macos")]
 pub mod run;
 #[cfg(target_os = "macos")]
 pub mod seams;

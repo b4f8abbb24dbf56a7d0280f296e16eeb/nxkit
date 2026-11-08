@@ -125,7 +125,8 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
     Ok(nxkit_svc_pacing::Config {
         bind_system_event: wire::pacing_bind,
         state_page: page,
-        // The display link of the window ticks at 120 Hz (`frames.rs`), the Switch's vsync is 60 Hz.
+        // Start values. The window sets the real link rate from the refresh rate of its screen (`refresh.rs`), the
+        // Switch's vsync is 60 Hz.
         display_hz: 120.0,
         vsync_hz: 60.0,
         step,

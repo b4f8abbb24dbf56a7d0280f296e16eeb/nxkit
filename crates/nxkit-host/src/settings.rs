@@ -45,6 +45,8 @@ const TYPED: &[&str] = &[
     "optional_imports",
     "shared_font_decode",
     "sf_services",
+    "set_refresh",
+    "fps_free",
 ];
 
 /// The settings of the title module. The names follow `game.json`.
@@ -68,6 +70,12 @@ pub struct Settings {
     pub fps_max: u32,
     /// Whether the pacing holds the game at `fps_target`.
     pub fps_hold: bool,
+    /// The refresh rate in Hz that the display is switched to at the start and restored from at the exit, 0 for none
+    /// (`set_refresh`, optional). `NXKIT_SET_REFRESH` wins. It should be an even multiple of `fps_target`.
+    pub set_refresh: u32,
+    /// Whether the game accepts any frame rate, so that a screen without an even split (144 Hz) gets 72 fps instead
+    /// of judder (`fps_free`, optional).
+    pub fps_free: bool,
     /// Whether a frame snaps to the display tick.
     pub present_snap: bool,
     /// Whether pipelines come from a Metal 4 archive.
@@ -197,6 +205,8 @@ impl Settings {
             fps_target: small(v, "fps_target")?,
             fps_max: small(v, "fps_max")?,
             fps_hold: flag(v, "fps_hold")?,
+            set_refresh: v.get("set_refresh").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+            fps_free: v.get("fps_free").and_then(Value::as_bool).unwrap_or(false),
             present_snap: flag(v, "present_snap")?,
             pso_mtl4: flag(v, "pso_mtl4")?,
             enc_thread: flag(v, "enc_thread")?,
