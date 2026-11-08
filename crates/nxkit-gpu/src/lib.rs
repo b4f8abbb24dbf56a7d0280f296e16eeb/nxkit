@@ -21,6 +21,7 @@ mod barr;
 mod clear;
 mod copyback;
 mod barriers;
+mod hazards;
 mod blit;
 mod bindless;
 pub mod detail;
