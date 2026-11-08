@@ -20,6 +20,7 @@
 mod cache;
 mod ext;
 mod objects;
+mod prof;
 mod programs;
 
 use std::path::PathBuf;
@@ -147,8 +148,18 @@ pub(crate) struct Walker {
     updated: Vec<(u64, u64)>,
     /// The last snapshot of each uniform buffer range. An update that overlaps a range drops its snapshot.
     snaps: std::cell::RefCell<FastMap<(u64, u32), Option<Arc<[u8]>>>>,
-    /// The buffers of snapshots by size, kept for reuse (`Walker::snap_buffer`).
-    snap_pool: std::cell::RefCell<FastMap<u32, Vec<Arc<[u8]>>>>,
+    /// The buffers of snapshots by size, oldest first, kept for reuse (`Walker::snap_buffer`).
+    snap_pool: std::cell::RefCell<FastMap<u32, std::collections::VecDeque<Arc<[u8]>>>>,
+    /// The newest snapshot of each range in the frame. A range with the same bytes again shares its buffer.
+    frame_snaps: std::cell::RefCell<FastMap<(u64, u32), Arc<[u8]>>>,
+    /// The bytes of a range that is compared with an earlier copy. It keeps its capacity.
+    snap_tmp: std::cell::RefCell<Vec<u8>>,
+    /// Whether every bound uniform buffer gets a copy (the overlap, not the `nosnap` knob). Read once per submit,
+    /// because the knob lookup is a string search.
+    copy_all: bool,
+    /// Whether the storage buffers of a draw get a copy too (the overlap, not the `nosnapsbuf` knob).
+    snap_sbufs: bool,
+    prof: prof::Prof,
     /// The bytes of the uniform update that is being written. It keeps its capacity between updates.
     update_bytes: Vec<u8>,
     cache: cache::Cache,
@@ -176,6 +187,11 @@ impl Walker {
             updated: Vec::new(),
             snaps: std::cell::RefCell::new(FastMap::default()),
             snap_pool: std::cell::RefCell::new(FastMap::default()),
+            frame_snaps: std::cell::RefCell::new(FastMap::default()),
+            snap_tmp: std::cell::RefCell::new(Vec::new()),
+            copy_all: false,
+            snap_sbufs: false,
+            prof: prof::Prof::new(),
             update_bytes: Vec::new(),
             cache: cache::Cache::default(),
             track: cache::Track::new(),
@@ -186,6 +202,19 @@ impl Walker {
             bypass: false,
             undo: None,
         }
+        .with_knobs()
+    }
+
+    /// Reads the switches that the snapshots depend on.
+    fn with_knobs(mut self) -> Self {
+        self.read_knobs();
+        self
+    }
+
+    fn read_knobs(&mut self) {
+        let overlap = crate::overlap::on();
+        self.copy_all = overlap && !crate::knob("nosnap");
+        self.snap_sbufs = overlap && !crate::knob("nosnapsbuf");
     }
 
     pub(crate) fn program_set(&mut self, program: u64, keys: &[StageKey]) {
@@ -205,6 +234,8 @@ impl Walker {
     ) {
         let started = std::time::Instant::now();
         self.drain_invalidations();
+        self.read_knobs();
+        let records = self.counters.records;
         let (draws, dispatches) = (self.out.draws.len(), self.out.dispatches.len());
         // CPU writes between submits do not have UpdateUniform records to invalidate cached snapshots.
         self.snaps.get_mut().clear();
@@ -220,7 +251,16 @@ impl Walker {
         c.recordings += handles.len() as u32;
         c.draws += (self.out.draws.len() - draws) as u32;
         c.dispatches += (self.out.dispatches.len() - dispatches) as u32;
-        c.ns += u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        c.ns += ns;
+        if self.prof.on() {
+            let (records, draws, dispatches) = (
+                c.records - records,
+                self.out.draws.len() - draws,
+                self.out.dispatches.len() - dispatches,
+            );
+            self.prof.report(records, draws, dispatches, ns);
+        }
     }
 
     /// The counters since the last call.
@@ -233,6 +273,7 @@ impl Walker {
 
     /// The detail of the commands since the last call. The walker starts the next frame empty.
     pub(crate) fn take(&mut self) -> FrameDetail {
+        self.frame_snaps.get_mut().clear();
         std::mem::take(&mut self.out)
     }
 
@@ -253,7 +294,10 @@ impl Walker {
     fn walk_records<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32) {
         let mut pos = handle;
         for _ in 0..MAX_RECORDS {
-            let Ok((rec, size)) = Record::read(&*mem, pos) else {
+            let t = self.prof.start();
+            let read = Record::read(&*mem, pos);
+            self.prof.lap(&self.prof.read_ns, t);
+            let Ok((rec, size)) = read else {
                 self.track.span(pos, pos + 8);
                 return;
             };
@@ -266,8 +310,16 @@ impl Walker {
                     continue;
                 }
                 Record::Call(h) => self.run(mem, st, h, depth + 1),
-                Record::Ext(x) => self.ext(mem, st, &x),
-                other => self.apply(mem, st, other),
+                Record::Ext(x) => {
+                    let t = self.prof.start();
+                    self.ext(mem, st, &x);
+                    self.prof.lap(&self.prof.apply_ns, t);
+                }
+                other => {
+                    let t = self.prof.start();
+                    self.apply(mem, st, other);
+                    self.prof.lap(&self.prof.apply_ns, t);
+                }
             }
             pos += u64::from(size);
         }

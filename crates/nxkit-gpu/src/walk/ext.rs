@@ -165,9 +165,14 @@ impl Walker {
                 });
             }
             ExtCode::Draw => {
+                let t = self.prof.start();
                 let d = self.draw(&*mem, st, x);
+                self.prof.lap(&self.prof.detail_ns, t);
                 self.track.patches_of(&d.textures, self.out.draws.len(), false);
+                let t = self.prof.start();
+                self.prof.draw_built(&d);
                 self.out.draws.push(Arc::new(d));
+                self.prof.lap(&self.prof.alloc_draw_ns, t);
             }
             ExtCode::Dispatch => {
                 let groups = if x.arg == 0 {
@@ -175,7 +180,9 @@ impl Walker {
                 } else {
                     [0; 3]
                 };
+                let t = self.prof.start();
                 let d = self.dispatch(&*mem, st, groups);
+                self.prof.lap(&self.prof.detail_ns, t);
                 self.track.patches_of(&d.textures, self.out.dispatches.len(), true);
                 self.out.dispatches.push(d);
             }
@@ -306,7 +313,18 @@ impl Walker {
 
     /// The bytes of a buffer that an update touched, as the guest memory holds them now.
     pub(super) fn snapshot<M: GuestMem>(&self, mem: &M, addr: u64, size: u32) -> Option<Arc<[u8]>> {
-        if let Some(snapshot) = self.snaps.borrow().get(&(addr, size)) {
+        let t = self.prof.start();
+        let r = self.snapshot_of(mem, addr, size);
+        self.prof.lap(&self.prof.snap_ns, t);
+        r
+    }
+
+    fn snapshot_of<M: GuestMem>(&self, mem: &M, addr: u64, size: u32) -> Option<Arc<[u8]>> {
+        let p = &self.prof;
+        p.count(&p.snaps, 1);
+        let key = (addr, size);
+        if let Some(snapshot) = self.snaps.borrow().get(&key) {
+            p.count(&p.snap_hits, 1);
             return snapshot.clone();
         }
         let end = addr + u64::from(size);
@@ -314,39 +332,74 @@ impl Walker {
         // shader still reads. Copying only the updated prefix makes those reads escape the scratch allocation.
         // With the overlap on, every bound block gets its copy: the CPU may write it for the next frame while the GPU
         // still reads this one.
-        let copy_all = crate::overlap::on() && !crate::knob("nosnap");
-        if !copy_all && !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
+        if !self.copy_all && !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
             // Most bound blocks have no inline updates. Remember that result as well: scanning the update
             // history for every UBO of every draw otherwise dominates the command walker on large frames.
-            self.snaps.borrow_mut().insert((addr, size), None);
+            self.snaps.borrow_mut().insert(key, None);
+            p.count(&p.snap_none, 1);
             return None;
         }
         let host = self.map.host_address(addr, u64::from(size)).ok()?;
-        let mut snap = self.snap_buffer(size);
-        mem.read(host, Arc::get_mut(&mut snap)?).ok()?;
+        let earlier = self.frame_snaps.borrow().get(&key).cloned();
+        let snap = match earlier {
+            Some(earlier) => {
+                // The range was copied before in this frame (another submit). Read the bytes aside: when they are the
+                // same, the draws share the buffer and the upload of the frame sees one block.
+                let mut tmp = self.snap_tmp.borrow_mut();
+                tmp.resize(size as usize, 0);
+                mem.read(host, &mut tmp[..]).ok()?;
+                if tmp[..] == earlier[..] {
+                    p.count(&p.snap_shared, 1);
+                    self.snaps.borrow_mut().insert(key, Some(earlier.clone()));
+                    return Some(earlier);
+                }
+                let mut buffer = self.snap_buffer(size);
+                Arc::get_mut(&mut buffer)?.copy_from_slice(&tmp);
+                buffer
+            }
+            None => {
+                let mut buffer = self.snap_buffer(size);
+                mem.read(host, Arc::get_mut(&mut buffer)?).ok()?;
+                buffer
+            }
+        };
+        p.count(&p.snap_copied, 1);
+        p.count(&p.snap_bytes, u64::from(size));
         self.keep_snap_buffer(&snap);
-        self.snaps.borrow_mut().insert((addr, size), Some(snap.clone()));
+        self.frame_snaps.borrow_mut().insert(key, snap.clone());
+        self.snaps.borrow_mut().insert(key, Some(snap.clone()));
         Some(snap)
     }
 
     /// A buffer of `size` bytes for a snapshot that nothing else holds. The buffers of snapshots whose frames were
     /// encoded and dropped come back, so a large uniform buffer costs a copy, not a fresh allocation and its page faults.
+    /// The pool of a size is a queue in the order of issue. Frames are dropped in that order, so the oldest buffer is
+    /// the one that is free first, and one look at the front decides.
     fn snap_buffer(&self, size: u32) -> Arc<[u8]> {
-        let mut pool = self.snap_pool.borrow_mut();
-        let list = pool.entry(size).or_default();
-        if let Some(i) = list.iter().position(|b| Arc::strong_count(b) == 1 && Arc::weak_count(b) == 0) {
-            return list.swap_remove(i);
+        {
+            let mut pool = self.snap_pool.borrow_mut();
+            let ring = pool.entry(size).or_default();
+            if ring.front().is_some_and(|b| Arc::strong_count(b) == 1 && Arc::weak_count(b) == 0)
+                && let Some(b) = ring.pop_front()
+            {
+                return b;
+            }
         }
-        vec![0u8; size as usize].into()
+        let p = &self.prof;
+        let t = p.start();
+        let b: Arc<[u8]> = vec![0u8; size as usize].into();
+        p.lap(&p.alloc_snap_ns, t);
+        p.count(&p.snap_fresh, 1);
+        b
     }
 
     /// Keeps a reference to a snapshot buffer, so it comes back once the frame that holds it is dropped.
     fn keep_snap_buffer(&self, b: &Arc<[u8]>) {
-        const KEEP: usize = 256;
+        const KEEP: usize = 2048;
         let mut pool = self.snap_pool.borrow_mut();
-        let list = pool.entry(b.len() as u32).or_default();
-        if list.len() < KEEP {
-            list.push(b.clone());
+        let ring = pool.entry(b.len() as u32).or_default();
+        if ring.len() < KEEP {
+            ring.push_back(b.clone());
         }
     }
 
@@ -370,6 +423,7 @@ impl Walker {
             }
             return d;
         };
+        self.prof.banks(st);
         self.track.program(0, st.program[0]);
         let Some(vertex) = self.programs.find(st.program[0], Kind::Vertex) else {
             let what = format_args!("programs {:x?}, stages of [0]: {}", st.program, self.programs.describe(st.program[0]));
@@ -432,7 +486,7 @@ impl Walker {
         // With the overlap on, the storage buffers of a draw get a copy too: the CPU writes some of them for the next
         // frame while the GPU still draws this one (Breath of the Wild's dialog text). The encoder uses the copy only
         // for a binding that the shader does not write. Dispatches keep the buffer itself.
-        if crate::overlap::on() && !crate::knob("nosnapsbuf") {
+        if self.snap_sbufs {
             for b in &mut d.sbufs {
                 b.snapshot = self.snapshot(mem, b.address, b.size);
             }
@@ -785,6 +839,54 @@ mod tests {
         let b = w.snapshot(&mem, 0x2000, 128).unwrap();
         assert_eq!(&b[112..116], &[5, 6, 7, 8]);
         assert_eq!(&a[112..116], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_range_with_the_same_bytes_again_in_the_frame_shares_its_buffer() {
+        let map = AddressMap::new(0x1000, 0x2000, 128).unwrap();
+        let mut w = Walker::new(Default::default(), map);
+        w.copy_all = true;
+        let mut mem = VecMem::new(0x1000, 128);
+        mem.write(0x1000, &[9, 9]).unwrap();
+        let a = w.snapshot(&mem, 0x2000, 128).unwrap();
+        // The next submit asks again with the same bytes: the same buffer.
+        w.snaps.get_mut().clear();
+        let b = w.snapshot(&mem, 0x2000, 128).unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        // Other bytes give a new buffer, and the first one keeps its bytes.
+        w.snaps.get_mut().clear();
+        mem.write(0x1000, &[7, 7]).unwrap();
+        let c = w.snapshot(&mem, 0x2000, 128).unwrap();
+        assert!(!Arc::ptr_eq(&a, &c));
+        assert_eq!((&a[..2], &c[..2]), (&[9u8, 9][..], &[7u8, 7][..]));
+        // A new frame starts again.
+        w.take();
+        w.snaps.get_mut().clear();
+        let d = w.snapshot(&mem, 0x2000, 128).unwrap();
+        assert!(!Arc::ptr_eq(&c, &d));
+    }
+
+    #[test]
+    fn the_buffer_of_a_dropped_frame_comes_back_in_order() {
+        let map = AddressMap::new(0x1000, 0x2000, 128).unwrap();
+        let mut w = Walker::new(Default::default(), map);
+        w.copy_all = true;
+        let mem = VecMem::new(0x1000, 128);
+        let first = w.snapshot(&mem, 0x2000, 64).unwrap();
+        let second = w.snapshot(&mem, 0x2040, 64).unwrap();
+        let (p1, p2) = (first.as_ptr(), second.as_ptr());
+        w.take();
+        w.snaps.get_mut().clear();
+        // The frame is still held, so these are new buffers.
+        let busy = w.snapshot(&mem, 0x2000, 64).unwrap();
+        assert!(busy.as_ptr() != p1 && busy.as_ptr() != p2);
+        drop((first, second, busy));
+        w.snaps.get_mut().clear();
+        w.take();
+        let again = w.snapshot(&mem, 0x2000, 64).unwrap();
+        assert_eq!(again.as_ptr(), p1);
+        let again = w.snapshot(&mem, 0x2040, 64).unwrap();
+        assert_eq!(again.as_ptr(), p2);
     }
 
     #[test]

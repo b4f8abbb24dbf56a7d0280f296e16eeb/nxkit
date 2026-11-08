@@ -56,6 +56,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 |---|---|---|---|---|
 | `health` | nvn, gpu | the render health report (see below) | every 300 frames, and when a reason counts for the first time | low |
 | `stats` | nvn, gpu | the encode counters, the walker counters, why the render passes start, and the decode time and the counters of the decode cache | every 30 frames, the decode every 300 submits | low |
+| `walkprof` | gpu | the walk of one submit: time in reading records, in the other records, in the detail of draws, in snapshots and in allocation (the clock reads make the walk slower), the records, draws and dispatches, the snapshots by kind (per-submit map, not copied, copied, shared with an earlier copy, fresh buffers, KiB), the heap blocks of the draws, and the banks of a draw that equal those of the draw before | first 200 submits, then every 20th | medium |
 | `cmd` | rt | each command buffer call: add memory, begin, end, call, memory queries, submits, clipped memory and overflow blocks | first 2000 per call site | medium |
 | `decode` | nvn | a record that the decoder could not read, with the recording and its spans | first 50 | low |
 | `tex` | gpu | why a texture was not resolved or created, and the unresolved handles of each draw | first 300, and 400 distinct draws | low |

@@ -105,6 +105,21 @@ The encoder has opt-in diagnostics (`NXKIT_DIAG`), knobs for experiments (`NXKIT
 
 `EncodeStats` counts draws, skipped commands by reason, ICB executions and builds, pipeline switches and builds, barriers emitted and avoided, render and compute passes, command buffers, textures created, uploads, copy-backs and the CPU time of the encode in nanoseconds. The `Metrics` of the batch ring hold the GPU time of every command buffer.
 
+## Cost of the walk
+
+The walk runs on a helper thread beside the decode of the same submit, and the game thread waits for the longer of the two (`walk-join` in `NXKIT_DIAG=frame`). `NXKIT_DIAG=walkprof` prints, for each submit, the time in reading records, in the other records, in building the detail of draws, in snapshots and in allocation (see `docs/diagnostics.md`).
+
+What keeps the walk short:
+
+- Snapshots (the copies of the uniform and storage buffers that the overlap takes) come from a pool of buffers by size. The pool is a queue in the order of issue. Frames are dropped in that order, so the front buffer is the first that is free, and the check is one look. A frame that needs more buffers of one size than the pool keeps (2048) allocates the rest.
+- The newest snapshot of each range `(address, size)` is kept for the frame. A range that comes again in a later submit of the frame is read aside and compared. When the bytes are the same, the draws share the buffer (the preload of the encoder uploads one block), and no pool buffer is used.
+- The knob lookups (`overlap`, `nosnap`, `nosnapsbuf`) are read once per submit, not once per bound buffer.
+- A snapshot buffer is an `Arc<[u8]>` per range, not a slice of one block per frame. A block that several `Arc` share needs `unsafe` or a changed `UboDetail`, and the consumers (`bindless.rs`, the preload in `gpu.rs`) read `Arc<[u8]>`. The pool gives the same saving in the steady state: no allocation, no page faults.
+
+The walk of one submit stays on one thread. A recording starts from the state that the recording before it left, and an `UpdateUniform` of one recording changes the bytes that the snapshots of the next one read, so the recordings are not independent. A split would need the final state of the first half before the second half starts.
+
+`DrawDetail` keeps five vectors and an `Arc` per draw. They are shared with the encoder, so the walker cannot reuse them. The `banks equal` counter of `walkprof` shows how many banks of a draw equal those of the draw before. It is the figure to read before a dirty bit per bank is worth its code.
+
 ## Limits
 
 The walker leaves some of the detail out:
