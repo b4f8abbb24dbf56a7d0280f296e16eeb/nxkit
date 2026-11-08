@@ -8,6 +8,9 @@
 //! - `<out>/control.nacp`, `<out>/icon.jpg`: the package's control data when it carries it.
 //! - `<aoc>/<index>.img`: each DLC's RomFS (index = DLC title ID - base title ID - 0x1000).
 //!
+//! [`unpack_nup`] writes the RomFS as a folder of files instead (no image), with the shader split in the same pass:
+//! what a build without nxnative puts into the app.
+//!
 //! The container is untrusted input: every offset, size and count is checked against the file before use, names
 //! never become host paths unchecked, and every file is checked against its size and SHA-256 when it is read.
 
@@ -21,7 +24,9 @@ use crate::error::{ExtractError, Result};
 use crate::storage::{FileStorage, Storage};
 
 mod extract;
+mod unpack;
 pub use extract::{NupRequest, extract_nup, is_nup};
+pub use unpack::{SplitStats, UnpackRequest, Unpacked, unpack_nup};
 
 pub(crate) const NO_DIR: u32 = 0xFFFF_FFFF;
 pub(crate) const BASE: u8 = 0;
@@ -366,6 +371,11 @@ impl Nup {
 
     /// File `i`, decompressed and checked against its size and SHA-256.
     pub(crate) fn read(&self, i: usize) -> Result<Vec<u8>> {
+        self.read_checked(i, true)
+    }
+
+    /// File `i`, decompressed and checked against its size, and with `sha` against its SHA-256.
+    pub(crate) fn read_checked(&self, i: usize, sha: bool) -> Result<Vec<u8>> {
         let f = &self.files[i];
         let shown = String::from_utf8_lossy(&f.name).into_owned();
         let data = if f.size == 0 {
@@ -379,7 +389,7 @@ impl Nup {
                 raw
             }
         };
-        if data.len() as u64 != f.size || sha256(&data).0 != f.sha {
+        if data.len() as u64 != f.size || (sha && sha256(&data).0 != f.sha) {
             return Err(bad(
                 &self.path,
                 format!("{shown} does not match its size or SHA-256 (damaged file)"),

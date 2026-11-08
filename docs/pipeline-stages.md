@@ -88,6 +88,18 @@ Not ported at this time: the `--html` output of some titles. The base game of a 
 - The output sequence is the contract. Rows record the first occurrence. The split sorts the results in the walk sequence
   of the reference build scripts: versions, sorted paths, `main`, NROs, captures. It does not use the completion sequence.
 
+A title can say that its shaders lie only in the files under its `shader_groups` (`game.tsv` key `shader_scope groups`, from
+`Standalone::shader_groups_only` of the title module). The split of `nxb build --nup` then reads every file under a group
+as before, and every file outside the groups that is not compressed (a raw file costs one pass over bytes that are in memory
+anyway). A compressed file outside the groups (zstd, a size-prefixed zstd or LZ4 frame, gzip, Yaz0) is not decoded and not
+scanned. It is written to the RomFS as it is, raw. Without the key the split decodes and scans every file, so a title with
+unknown groups keeps the full scan. The title sets the key only after a split of the whole game found every shader under the
+groups. Ocarina of Time does so: all 42,851 file-sourced shader rows of the earlier split are under `/Shader/`, `/Effect/`, `/Lib/`,
+`/Layout2Shader/` and `/Movie/` (measured on the nxnative tables). The result for the scanned files is the same as a full
+scan. The stage output has one line of counters: files and bytes scanned and skipped, frames and bytes decoded, the CPU time
+of the scans, and the wall time of the write and scan pass and of the archive jobs and merge. The unpack also deletes the
+folder of an earlier run on all threads.
+
 Since version 0.4.0, the split reads many more container families. A format that is not ported stops the split with a named
 `Unsupported` error and exit code 4. The split never gives a silent difference.
 

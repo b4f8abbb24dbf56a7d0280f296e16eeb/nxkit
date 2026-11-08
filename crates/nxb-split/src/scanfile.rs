@@ -11,6 +11,7 @@ use crate::src::Src;
 use crate::unity::ser::Trees;
 use crate::zstd::Dicts;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// What the scan needs besides the file: the zstd dictionaries, the Unity common string table of the first main,
 /// and (in the second pass) the type trees of every bundle.
@@ -24,6 +25,23 @@ pub struct Env<'a> {
 }
 
 type R<T> = Result<T, SplitError>;
+
+static DECODED_FILES: AtomicU64 = AtomicU64::new(0);
+static DECODED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Files and bytes the scans decoded from a zstd or size-prefixed frame so far in this process (a counter for the
+/// stage output; take two readings and subtract).
+pub fn decoded_totals() -> (u64, u64) {
+    (
+        DECODED_FILES.load(Ordering::Relaxed),
+        DECODED_BYTES.load(Ordering::Relaxed),
+    )
+}
+
+fn count_decoded(bytes: usize) {
+    DECODED_FILES.fetch_add(1, Ordering::Relaxed);
+    DECODED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+}
 
 const ZST: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 const LZ4F: [u8; 4] = [0x04, 0x22, 0x4d, 0x18];
@@ -177,9 +195,9 @@ fn scan_whole(
         return finish(p, found, &var);
     }
     let mut d: Cow<'_, [u8]> = if h4 == ZST {
-        crate::zstd::decompress_dict(data, dicts)
-            .map_err(|e| zst_err(label, e))?
-            .into()
+        let v = crate::zstd::decompress_dict(data, dicts).map_err(|e| zst_err(label, e))?;
+        count_decoded(v.len());
+        v.into()
     } else {
         data.into()
     };
@@ -210,7 +228,10 @@ fn scan_whole(
         head2.get(..4) != Some(&ZST[..]) && head2.get(4..8).is_some_and(|m| m == ZST || m == LZ4F);
     if sized {
         match crate::sized::unsized_frame(&d, dicts)? {
-            crate::sized::Sized::Opened(v) => d = v.into(),
+            crate::sized::Sized::Opened(v) => {
+                count_decoded(v.len());
+                d = v.into();
+            }
             crate::sized::Sized::AsIs(why) => {
                 if let Some(w) = why {
                     notes.push(format!("[RED] {{label}}: a size-prefixed frame that did not open ({w}): the file is read as it is"));

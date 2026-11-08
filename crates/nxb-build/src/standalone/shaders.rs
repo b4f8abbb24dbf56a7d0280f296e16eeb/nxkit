@@ -33,6 +33,9 @@ pub fn profile(
         ("shader_groups", st.shader_groups.to_string()),
         ("shader_note", st.shader_note.to_string()),
     ];
+    // the split reads a compressed file outside the groups as it is (see `Profile::reads`)
+    let scope = st.shader_groups_only.then(|| ("shader_scope", "groups".to_string()));
+    let rows: Vec<_> = rows.into_iter().chain(scope).collect();
     let mut text = String::from("# Written by nxb build from the title module. Edit the title module, not this file.\n");
     for (k, v) in &rows {
         text.push_str(&format!("{k}\t{v}\n"));
@@ -149,6 +152,7 @@ mod tests {
             modules: &[],
             nvn_functions: nxtitle::Fact::new("", nxtitle::Evidence::Unverified { note: "test" }),
             shader_groups: "/Shader/=shader",
+            shader_groups_only: true,
             shader_note: "note",
             shader_facts: Some("k\t{}\n"),
             romfs_marker: "/x",
@@ -160,6 +164,7 @@ mod tests {
         let (dir, keys) = profile(&d, &st, 0x0100_0000_0000_0000, "Game").unwrap();
         let text = std::fs::read_to_string(dir.join("game.tsv")).unwrap();
         assert!(text.contains("shader_versions\tv7\n") && text.contains("title_id\t0100000000000000\n"));
+        assert!(text.contains("shader_scope\tgroups\n"));
         assert_eq!(keys.get("shader_groups").map(String::as_str), Some("/Shader/=shader"));
         assert!(dir.join("shader_facts_manual.tsv").is_file());
         std::fs::remove_dir_all(&d).unwrap();

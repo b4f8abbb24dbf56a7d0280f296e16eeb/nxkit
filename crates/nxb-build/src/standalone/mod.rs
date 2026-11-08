@@ -1,8 +1,9 @@
 //! `nxb build` for a title that has a title module: the run folder and the app without nxnative (H6, R21, R48 to R50).
 //!
-//! The stages, in order: unpack the packages (base, update, DLC), put the RomFS into the run folder, rewrite the
-//! modules, write `game.json`, link and sign `nxgame.dylib`, make the shaders and the pipeline archive, and close the
-//! bundle. A title without a module still builds through nxnative, and this path leaves it alone ([`run`] answers
+//! The stages, in order: unpack the packages (base, update, DLC) or the NUP container, put the RomFS into the run
+//! folder, rewrite the modules, write `game.json`, link and sign `nxgame.dylib`, make the shaders and the pipeline
+//! archive, and close the bundle. A NUP gives the RomFS as a folder in the extract's one pass (with the shader split),
+//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. A title without a module still builds through nxnative, and this path leaves it alone ([`run`] answers
 //! `false`).
 
 mod bundle;
@@ -14,6 +15,7 @@ mod macho;
 mod manifest;
 mod modules;
 mod npdm;
+mod nvn;
 mod romfs;
 mod shaders;
 
@@ -130,15 +132,22 @@ fn replaceable(out: &Path) -> Result<(), String> {
     ))
 }
 
-/// The extract and the split, reused while the packages are as they were.
-fn extract(a: &Args, b: &Build, p: &Say, version: u32) -> Result<String, String> {
+/// The extract and the split, reused while the packages are as they were. Packages give `RomFS.img`, a NUP gives the
+/// RomFS as a folder (`romfs/`) and no image.
+fn extract(a: &Args, b: &Build, p: &Say, version: u32, marker: &str) -> Result<String, String> {
     let dir = b.work.join("extract").join(format!("v{version}"));
+    let nup = b.src.source == Source::Nup;
     let key_file = b.work.join("extract.key");
     let key = std::iter::once(identity(&b.base))
         .chain(b.updates.iter().map(|u| identity(&u.1)))
         .collect::<Vec<_>>()
         .join(";");
-    let have = dir.join("RomFS.img").is_file()
+    let romfs = if nup {
+        dir.join("romfs").join(marker.trim_start_matches('/')).is_file()
+    } else {
+        dir.join("RomFS.img").is_file()
+    };
+    let have = romfs
         && dir.join("ExeFS/main.npdm").is_file()
         && std::fs::read_dir(b.work.join("shader/pkg")).is_ok_and(|mut d| d.next().is_some());
     let reused = have && std::fs::read_to_string(&key_file).is_ok_and(|k| k == key);
@@ -146,7 +155,12 @@ fn extract(a: &Args, b: &Build, p: &Say, version: u32) -> Result<String, String>
         "reused".to_string()
     } else {
         let _ = std::fs::remove_file(&key_file);
-        let (images, unsupported) = crate::extract_stage::packages(a, b, p)?;
+        let (text, unsupported) = if nup {
+            crate::extract_stage::nup_loose(a, b, p, version)?
+        } else {
+            let (images, why) = crate::extract_stage::packages(a, b, p)?;
+            (format!("{images} images"), why)
+        };
         if let Some(why) = unsupported {
             return Err(crate::exit::fail(
                 4,
@@ -154,7 +168,7 @@ fn extract(a: &Args, b: &Build, p: &Say, version: u32) -> Result<String, String>
             ));
         }
         std::fs::write(&key_file, &key).map_err(|e| io(&key_file, e))?;
-        format!("{images} images")
+        text
     };
     if let Some(d) = crate::extract_stage::dlc(a, b, p)? {
         text.push_str(&format!(", {d}"));
@@ -171,6 +185,19 @@ fn unpack(p: &Say, img: &Path, dest: &Path, what: &str) -> Result<(usize, u64), 
     p.counted(None, "B", &count, || {
         romfs::unpack(img, dest, |done, total| {
             count.done.store(done, std::sync::atomic::Ordering::Relaxed);
+            count.set_total(total);
+        })
+    })
+}
+
+/// Links the files of the folder `from` into `dest`, reporting the bytes.
+fn link(p: &Say, threads: usize, from: &Path, dest: &Path, what: &str) -> Result<(usize, u64), String> {
+    p.set(Update { step: Some(what), ..Default::default() });
+    let count = crate::events::Count::default();
+    p.counted(None, "B", &count, || {
+        romfs::link_tree(from, dest, threads, |done, total| {
+            // the workers report out of order
+            count.done.fetch_max(done, std::sync::atomic::Ordering::Relaxed);
             count.set_total(total);
         })
     })
@@ -208,10 +235,10 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         return Ok(false);
     };
     checks::refuse(a)?;
-    if src.source != Source::Packages {
+    if src.source == Source::Dump {
         return Err(crate::exit::fail(
             4,
-            "unsupported: a build without nxnative reads packages (NSP or XCI)",
+            "unsupported: a build without nxnative reads packages (NSP or XCI) or a NUP container, not a dump folder",
         ));
     }
     if std::env::var_os("NXB_ENGINE").is_some() {
@@ -290,18 +317,26 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let _ = std::fs::remove_dir_all(&stage_dir);
     let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
     p.plan(7);
-    stage(p, "extract", "packages and shader split", || {
-        Ok(((), extract(a, &b, p, version)?))
+    let nup = b.src.source == Source::Nup;
+    let what = if nup { "NUP and shader split" } else { "packages and shader split" };
+    stage(p, "extract", what, || {
+        Ok(((), extract(a, &b, p, version, t.st.romfs_marker)?))
     })?;
-    let exefs = work.join("extract").join(format!("v{version}/ExeFS"));
-    let img = work.join("extract").join(format!("v{version}/RomFS.img"));
+    let ver_dir = work.join("extract").join(format!("v{version}"));
+    let exefs = ver_dir.join("ExeFS");
+    let img = ver_dir.join("RomFS.img");
     let aoc = stage(p, "romfs", "RomFS", || {
-        let (files, bytes) = unpack(p, &img, &run_dir.join("romfs"), "unpacking RomFS")?;
+        // a NUP's RomFS is a folder already: its files are linked into the app, not copied
+        let (files, bytes) = if nup {
+            link(p, a.threads, &ver_dir.join("romfs"), &run_dir.join("romfs"), "linking RomFS")?
+        } else {
+            unpack(p, &img, &run_dir.join("romfs"), "unpacking RomFS")?
+        };
         let marker = run_dir.join("romfs").join(t.st.romfs_marker.trim_start_matches('/'));
         if !marker.exists() {
             return Err(format!(
                 "{}: the RomFS has no {}: it is not the game's files",
-                img.display(),
+                if nup { b.base.display() } else { img.display() },
                 t.st.romfs_marker
             ));
         }
@@ -309,9 +344,13 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
         for (tid, v, _) in &b.src.dlc {
             let index = u32::try_from(tid.wrapping_sub(b.src.app).wrapping_sub(0x1000))
                 .map_err(|_| format!("DLC {tid:016X}: its index does not fit 32 bits"))?;
-            let from = work.join("aoc").join(format!("{index}.img"));
             let rel = format!("aoc/{index}");
-            unpack(p, &from, &run_dir.join(&rel), "unpacking DLC")?;
+            if nup {
+                link(p, a.threads, &ver_dir.join(&rel), &run_dir.join(&rel), "linking DLC")?;
+            } else {
+                let from = work.join("aoc").join(format!("{index}.img"));
+                unpack(p, &from, &run_dir.join(&rel), "unpacking DLC")?;
+            }
             aoc.push(manifest::Aoc { index, title_id: *tid, version: *v, path: rel });
         }
         let note = format!("{files} files, {}, {} DLC", mib(bytes), aoc.len());
@@ -354,7 +393,11 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
             version_name: shown_version(&t),
             modules: &mods,
             services: t.services.clone(),
-            nvn_functions: manifest::nvn_list(t.st.nvn_functions.value),
+            // an empty list in the title module: the names the modules hold
+            nvn_functions: match manifest::nvn_list(t.st.nvn_functions.value) {
+                l if l.is_empty() => nvn::names(&mods),
+                l => l,
+            },
             patches: true,
             main_thread,
             aoc: &aoc,

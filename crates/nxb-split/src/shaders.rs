@@ -30,6 +30,16 @@ fn u64le(d: &[u8], o: usize) -> Option<u64> {
     Some(u64::from_le_bytes(a))
 }
 
+/// Whether `head` (a file's first bytes) starts a codec the split has to decode before it can look inside.
+fn wrapped(head: &[u8]) -> bool {
+    const ZST: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
+    const LZ4F: [u8; 4] = [0x04, 0x22, 0x4d, 0x18];
+    head.starts_with(&ZST)
+        || head.get(4..8).is_some_and(|m| m == ZST || m == LZ4F)
+        || head.starts_with(&[0x1f, 0x8b, 0x08])
+        || head.starts_with(b"Yaz0")
+}
+
 /// The per-game settings the split reads from the profile (`shader_groups`, `shader_key_skip`).
 #[derive(Clone, Debug, Default)]
 pub struct Profile {
@@ -37,6 +47,9 @@ pub struct Profile {
     pub groups: Vec<(String, String)>,
     /// Control bytes hashed as zeros: (offset, length).
     pub key_skip: (usize, usize),
+    /// `shader_scope groups`: the title says its shaders lie in the files under `groups`, so a compressed file
+    /// outside them is not decoded (see [`Profile::reads`]). Off: every file is read.
+    pub groups_only: bool,
 }
 
 impl Profile {
@@ -58,6 +71,7 @@ impl Profile {
                         .map(|(a, b)| (a.to_string(), b.to_string()))
                         .collect()
                 }
+                "shader_scope" => p.groups_only = v.trim() == "groups",
                 "shader_key_skip" => {
                     let num = |s: &str| {
                         let s = s.trim();
@@ -72,6 +86,15 @@ impl Profile {
             }
         }
         p
+    }
+
+    /// Whether the split reads the file at `label` (`/` + its path) whose first bytes are `head`. Always, unless
+    /// the profile has `shader_scope groups`: then a file outside every group is read only when its bytes are not
+    /// wrapped in a codec (zstd, a size-prefixed zstd or LZ4 frame, gzip, Yaz0), because only the decode costs much.
+    pub fn reads(&self, label: &str, head: &[u8]) -> bool {
+        !self.groups_only
+            || self.groups.iter().any(|(k, _)| label.contains(k.as_str()))
+            || !wrapped(head)
     }
 
     /// `group`: the source group of a label.

@@ -1,4 +1,5 @@
-//! Unpacks a RomFS image (`RomFS.img` of the extract stage) into a folder of files.
+//! Unpacks a RomFS image (`RomFS.img` of the extract stage) into a folder of files, or links the files of a RomFS
+//! folder (a NUP's, which the extract stage writes as files) into the app.
 //!
 //! The extract stage has already layered the base and the update, so one image is the merged RomFS. DLC images are
 //! unpacked on their own, each into its own folder (see R50).
@@ -50,6 +51,72 @@ pub fn unpack(img: &Path, dest: &Path, mut each: impl FnMut(u64, u64)) -> Result
             each(done, total);
         }
         out.flush().map_err(|x| format!("{}: {x}", path.display()))?;
+    }
+    Ok((files.len(), total))
+}
+
+/// Puts every file of the folder `src` into `dest` (replaced) without copying bytes: a hard link, or where that fails
+/// (another volume) `std::fs::copy`, which clones on APFS. The files of a build's work folder are written once and
+/// never rewritten in place, so the app and the work folder can share them. Returns the number of files and bytes.
+pub(super) fn link_tree(
+    src: &Path,
+    dest: &Path,
+    threads: usize,
+    each: impl Fn(u64, u64) + Sync,
+) -> Result<(usize, u64), String> {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    // the folders and the files, walked once
+    let (mut dirs, mut files) = (Vec::new(), Vec::new());
+    let mut stack = vec![PathBuf::new()];
+    while let Some(rel) = stack.pop() {
+        let here = src.join(&rel);
+        for e in std::fs::read_dir(&here).map_err(|e| io(&here, e))? {
+            let e = e.map_err(|e| io(&here, e))?;
+            let t = e.file_type().map_err(|x| io(&e.path(), x))?;
+            let r = rel.join(e.file_name());
+            if t.is_dir() {
+                dirs.push(r.clone());
+                stack.push(r);
+            } else if t.is_file() {
+                let size = e.metadata().map_err(|x| io(&e.path(), x))?.len();
+                files.push((r, size));
+            } else {
+                return Err(format!("{}: not a file or a folder", e.path().display()));
+            }
+        }
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest).map_err(|e| io(dest, e))?;
+    }
+    std::fs::create_dir_all(dest).map_err(|e| io(dest, e))?;
+    for d in &dirs {
+        std::fs::create_dir_all(dest.join(d)).map_err(|e| io(&dest.join(d), e))?;
+    }
+    let total: u64 = files.iter().map(|f| f.1).sum();
+    let (next, done) = (AtomicUsize::new(0), AtomicU64::new(0));
+    let fatal = std::sync::Mutex::new(None::<String>);
+    std::thread::scope(|s| {
+        for _ in 0..threads.max(1) {
+            s.spawn(|| {
+                while let Some((rel, size)) = files.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let (from, to) = (src.join(rel), dest.join(rel));
+                    let r = std::fs::hard_link(&from, &to)
+                        .or_else(|_| std::fs::copy(&from, &to).map(|_| ()))
+                        .map_err(|e| io(&from, e));
+                    if let Err(e) = r {
+                        if let Ok(mut g) = fatal.lock() {
+                            g.get_or_insert(e);
+                        }
+                        break;
+                    }
+                    each(done.fetch_add(*size, Ordering::Relaxed) + size, total);
+                }
+            });
+        }
+    });
+    if let Some(e) = fatal.into_inner().ok().flatten() {
+        return Err(e);
     }
     Ok((files.len(), total))
 }

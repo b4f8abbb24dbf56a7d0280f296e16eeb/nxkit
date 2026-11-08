@@ -169,6 +169,7 @@ impl BuildHooks for Botw {
             ],
             nvn_functions: NVN_FUNCTIONS,
             shader_groups: "/Shader/=shader /Effect/=effect /Layout/=layout /System/=gsys /Terrain/=terrain",
+            shader_groups_only: false,
             shader_note: "Breath of the Wild shaders",
             shader_facts: Some(include_str!("../shader_facts.tsv")),
             romfs_marker: "/Pack/Bootup_Graphics.pack",

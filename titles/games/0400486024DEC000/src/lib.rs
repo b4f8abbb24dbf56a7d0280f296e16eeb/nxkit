@@ -4,10 +4,25 @@
 //! family. This module holds what is known to be true for this game. `render_cond`, `tex_flush_upload` and
 //! `tex_dirty_upload` come from agl code, but Breath of the Wild does not set them, so they are here.
 //!
-//! The upscaler choice and the frame pacing have no answer yet, so the core defaults apply. The seed list for the
-//! prepare step is `pso_manifest.tsv` in `seedds/nxnative` `dm/games/0400486024DEC000/`.
+//! The game builds without nxnative ([`BuildHooks::standalone`]): update v131072, SDK 22.2.8, the modules `main`,
+//! `subsdk0` (the SDK's movie library) and `sdk`, read from a `.nup` container or from packages. The run settings are
+//! the values of nxnative's `game.tsv`. The NVN function list is not a hand list: the build reads the names from the
+//! modules' own strings (an empty list asks for that).
+//!
+//! The rewrite rules are data in `rules/0400486024DEC000.toml`: the frame ratio stub of nxnative's `patches.py`
+//! (`MATCH_FRAME_STEP`), for main build `e0f3ccfaf50065ae4ea01eb5aeb13b1a` only. The game steps its time by a frame
+//! ratio, so with the stub the host's frame step keeps game time equal to real time ([`Pacing::Display`]).
+//!
+//! The upscaler choice has no answer yet, so the core default applies. The seed list for the prepare step is
+//! `pso_manifest.tsv` in `seedds/nxnative` `dm/games/0400486024DEC000/`.
 
-use nxtitle::{BuildHooks, Evidence, Fact, Need, RuntimeHooks, Title, TitleId};
+// The game's dynamic resolution is a module of its own, with its own rules.
+// mod resolution;
+
+use nxtitle::{
+    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime, RuntimeHooks, Service,
+    Settings, Standalone, Title, TitleId,
+};
 
 /// The title module.
 pub struct Oot;
@@ -19,6 +34,70 @@ const README: Evidence = Evidence::Recorded {
     source: "seedds/nxnative dm/games/0400486024DEC000/README.md at c8bfa161",
     read: "2026-11-07",
 };
+
+const GAME_TSV: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/0400486024DEC000/game.tsv at 37f076a52168dadc86c679f483ae2e58519b3f7b",
+    read: "2026-11-08",
+};
+
+const PATCHES_PY: Evidence = Evidence::Recorded {
+    source: "seedds/nxnative dm/games/0400486024DEC000/patches.py at 37f076a52168dadc86c679f483ae2e58519b3f7b",
+    read: "2026-11-08",
+};
+
+/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The memory
+/// split is nxnative's starting split ("to be measured" in its comment): 256 MB in front, a 4 GB alias region, a
+/// 256 MB stack region and the heap region, with the Switch 2's 9 GB application pool. 48 MB of system resource, as
+/// the NPDM declares, so virtual address memory is on. The build row names no display version (`v131072` twice), so
+/// the app shows the number of the update.
+const SETTINGS: Fact<Settings> = Fact::new(
+    Settings {
+        memory: Memory {
+            reserve: 0x3_2000_0000,
+            alias: 0x1_0000_0000,
+            stack: 0x1000_0000,
+            app_pool: 0x2_4000_0000,
+            system_resource: 0x300_0000,
+            map_limit: true,
+            ..Settings::DEFAULT.memory
+        },
+        fps_target: 60,
+        pad_layout: "full",
+        render_cond: true,
+        gpu_ts_segment: true,
+        draw_barriers_game: true,
+        tex_flush_upload: true,
+        tex_dirty_upload: true,
+        ..Settings::DEFAULT
+    },
+    GAME_TSV,
+);
+
+/// No list here: the build reads the NVN function names from the modules (see the module comment).
+const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(
+    "",
+    Evidence::Unverified {
+        note: "the build lists the NVN function names in the read-only data of the modules: what the game can fetch \
+               through the NVN loader, a superset of what one play route calls. nxnative's usage.tsv of a route \
+               checks it.",
+    },
+);
+
+/// The game steps its time by a frame ratio (base rate / frame rate), and the frame ratio stub gives it the host's
+/// step. With it the game runs at the display's rate and game time stays real time.
+const PACING: Fact<Pacing> = Fact::new(Pacing::Display, PATCHES_PY);
+
+/// `fps_target 60` of `game.tsv`. `fps_hold`, `present_snap` and `present_interval` are not set there, so they are
+/// the defaults of `game.py` (on, off, game).
+const PACE_PROFILE: Fact<PaceProfile> = Fact::new(
+    PaceProfile {
+        fps_target: 60,
+        fps_hold: true,
+        present_snap: false,
+        present_interval: PresentInterval::Game,
+    },
+    GAME_TSV,
+);
 
 const NEEDS: &[Fact<Need>] = &[
     Fact::new(
@@ -77,11 +156,55 @@ const NEEDS: &[Fact<Need>] = &[
     ),
 ];
 
-impl BuildHooks for Oot {}
+impl BuildHooks for Oot {
+    fn standalone(&self) -> Option<Standalone> {
+        Some(Standalone {
+            version: 131_072,
+            modules: &[
+                ("main", "e0f3ccfaf50065ae4ea01eb5aeb13b1a"),
+                ("subsdk0", "b0110087a7b339ef74588d3bd0b4dd5d"),
+                ("sdk", "1643a838814f9c10c696f930ed681e7f"),
+            ],
+            nvn_functions: NVN_FUNCTIONS,
+            // the groups of nxnative's `game.tsv`: its split of the game found every file-sourced shader under them
+            shader_groups: "/Shader/=shader /Effect/=effect /Lib/=lib /Layout2Shader/=layout /Movie/=movie",
+            shader_groups_only: true,
+            shader_note: "Ocarina of Time shaders",
+            shader_facts: None,
+            romfs_marker: "/Pack/ZsDic.pack.zs",
+            settings: SETTINGS,
+        })
+    }
+
+    fn rewrite_rules(&self) -> Option<&'static str> {
+        Some(include_str!("../rules/0400486024DEC000.toml"))
+    }
+}
+
+/// The game builds without nxnative, so nxkit runs every service.
+const NXKIT: Fact<Runtime> = Fact::new(
+    Runtime::Nxkit,
+    Evidence::Unverified {
+        note: "the game has no nxnative path in a standalone build. A play of the title, the opening and Kokiri \
+               Forest on the Mac checks each service.",
+    },
+);
 
 impl RuntimeHooks for Oot {
     fn needs(&self) -> &'static [Fact<Need>] {
         NEEDS
+    }
+
+    fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
+        Some(NXKIT)
+    }
+
+    fn pacing(&self) -> Option<Fact<Pacing>> {
+        Some(PACING)
+    }
+
+    fn pace_profile(&self) -> Option<Fact<PaceProfile>> {
+        Some(PACE_PROFILE)
     }
 }
 
@@ -119,6 +242,35 @@ mod tests {
     #[test]
     fn every_need_has_a_record() {
         assert!(OOT.needs().iter().all(|n| n.evidence.is_checked()));
-        assert!(OOT.upscaler().is_none() && OOT.pacing().is_none());
+        assert!(OOT.upscaler().is_none());
+        assert!(OOT.pacing().is_some_and(|p| p.evidence.is_checked()));
+    }
+
+    #[test]
+    fn standalone_data_is_complete() {
+        let s = OOT.standalone().unwrap();
+        assert_eq!(s.version, 131_072);
+        assert_eq!(s.modules.len(), 3);
+        assert!(s.modules.iter().all(|(_, id)| id.len() == 32));
+        // an empty list: the build reads the names from the modules
+        assert!(s.nvn_functions.value.is_empty());
+        let m = s.settings.value.memory;
+        assert_eq!((m.reserve, m.app_pool, m.system_resource), (0x3_2000_0000, 0x2_4000_0000, 0x300_0000));
+        assert!(m.map_limit && s.settings.value.render_cond);
+    }
+
+    #[test]
+    fn the_frame_step_rule_names_its_evidence() {
+        let text = OOT.rewrite_rules().unwrap_or_default();
+        assert!(text.contains("scope = \"0400486024DEC000\""));
+        assert_eq!(text.matches("[[rule]]").count(), 1);
+        assert_eq!(text.matches("kind = \"frame-step\"").count(), 1);
+        assert_eq!(text.matches("evidence = \"seedds/nxnative ").count(), 1);
+        assert!(text.contains("build = \"e0f3ccfaf50065ae4ea01eb5aeb13b1a\""));
+    }
+
+    #[test]
+    fn nxkit_runs_every_service() {
+        assert!(Service::ALL.into_iter().all(|s| OOT.runtime(s).map(|f| f.value) == Some(Runtime::Nxkit)));
     }
 }
