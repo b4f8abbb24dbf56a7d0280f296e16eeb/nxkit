@@ -88,7 +88,7 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 
 ## Guest memory
 
-One reservation holds all guest memory. It is the guest range of `nxkit_abi::guest` and the no-copy buffer of R3. In address order it holds:
+One reservation holds all guest memory. It is the guest range of `nxkit_abi::guest`. The no-copy buffer of R3 covers the part behind the modules. In address order it holds:
 
 1. The modules, at their real addresses. A far layout starts at the patch segment below `base`.
 2. The thread blocks: 1024 blocks of 0x4000 bytes, one for each guest thread that runs at the same time. The kernel hands them out as the thread-local regions.
@@ -97,7 +97,9 @@ One reservation holds all guest memory. It is the guest range of `nxkit_abi::gue
 5. The stack region, aligned to 2 MiB. The stack of the main thread is at its start, with a guard page at the low end.
 6. The alias region, aligned to 2 MiB.
 
-The reservation is mapped read and write, and the pages are not committed until they are touched. The GPU buffer is created over it before any page becomes `PROT_NONE`, because Metal refuses a no-copy buffer over such a page. The guard page of the main stack is set after that.
+The reservation is mapped read and write, and the pages are not committed until they are touched. The GPU buffer is created before any page becomes `PROT_NONE`, because Metal refuses a no-copy buffer over such a page. The guard page of the main stack is set after that.
+
+The GPU buffer covers the memory after the modules. It starts at the first thread block and ends with the alias region. The code of the modules is mapped from a file, and a residency set over file-mapped pages makes them unreadable (measured 2026-11-08). So the buffer holds no module page. The data and bss of the modules are not GPU visible. A guest address below the buffer gives an error that names the address and says that module memory is not GPU visible. The address map of the front end uses the host range of the buffer as its base. It is an open question whether a game puts an NVN memory pool into the data or bss of a module.
 
 The whole reservation ends at or below `1 << 39`, the end of the address space that the kernel models. The host regions start behind the highest module. When dyld mapped the library, they start behind the `__LINKEDIT` segment, which lies behind the last module.
 
@@ -206,7 +208,7 @@ At most two frames are in flight on the GPU. The backend presents at the target 
 2. Whether `MAP_FIXED` and `mach_vm_allocate` with `VM_FLAGS_FIXED` get each range.
 3. The cost of a copy of the size of each module into anonymous memory, which is the cost of the data segments.
 4. Where dyld puts the segments of `nxgame.dylib`, and its slide.
-5. Whether `newBufferWithBytesNoCopy` accepts the whole reservation, made as the host makes it: read and write, below `1 << 39`, with the guard page set after the buffer.
+5. Whether `newBufferWithBytesNoCopy` accepts the memory behind the modules, made as the host makes it: read and write, below `1 << 39`, with the guard page set after the buffer.
 6. How much wired memory the system has before and after step 5.
 
 ## Seams

@@ -178,10 +178,11 @@ fn mib(bytes: u64) -> f64 {
 }
 
 /// Measurements 5 and 6: reserve the guest range the way the host does (read and write, below the 39-bit limit),
-/// wrap it as the no-copy buffer of R3 and see how much memory the system wires for it. The guard page of the main
-/// stack comes after the buffer, as in the host.
+/// wrap the part behind the modules as the no-copy buffer of R3 and see how much memory the system wires for it.
+/// The modules are not part of the buffer, because the host maps their code from a file and a residency set makes
+/// file-mapped pages unreadable. The guard page of the main stack comes after the buffer, as in the host.
 fn buffer_and_residency(game: &Game) -> Result<()> {
-    println!("5. No-copy buffer over the reservation, and 6. wired memory:");
+    println!("5. No-copy buffer over the memory behind the modules, and 6. wired memory:");
     let before = wired_bytes()?;
     let (res, _, layout) = place::reserve_guest(game)?;
     println!("   reservation {:#x} + {:#x}, read and write", res.base(), res.len());
@@ -193,12 +194,19 @@ fn buffer_and_residency(game: &Game) -> Result<()> {
         ctx.max_buffer_length() as f64 / (1u64 << 30) as f64,
         mem.res.len() as f64 / (1u64 << 30) as f64
     );
+    let gpu = mem.gpu_range();
+    println!(
+        "   GPU range {:#x} + {:#x} ({:.2} GiB), the modules below it are not GPU visible",
+        gpu.start,
+        gpu.len,
+        gpu.len as f64 / (1u64 << 30) as f64
+    );
     let t = Instant::now();
-    let wrapped = mem.res.as_guest_memory(&ctx);
+    let wrapped = mem.gpu_memory(&ctx);
     let took = t.elapsed();
     match &wrapped {
-        Ok(_) => println!("   newBufferWithBytesNoCopy over the whole range: ok in {:.2} ms", ms(took)),
-        Err(e) => println!("   newBufferWithBytesNoCopy over the whole range: failed: {e}"),
+        Ok(_) => println!("   newBufferWithBytesNoCopy over the GPU range: ok in {:.2} ms", ms(took)),
+        Err(e) => println!("   newBufferWithBytesNoCopy over the GPU range: failed: {e}"),
     }
     mem.seal()?;
     println!("   guard page of the main stack set after the buffer");

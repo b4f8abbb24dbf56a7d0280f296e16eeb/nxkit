@@ -52,7 +52,7 @@ impl fmt::Display for NvnError {
             Self::OutOfRange { addr, len } => {
                 write!(
                     f,
-                    "range {addr:#x}+{len:#x} is outside the mapped guest memory"
+                    "range {addr:#x}+{len:#x} is outside the GPU visible guest memory (the memory of the modules is not GPU visible)"
                 )
             }
             Self::TooWide(a) => write!(f, "GPU address {a:#x} does not fit in 40 bits"),

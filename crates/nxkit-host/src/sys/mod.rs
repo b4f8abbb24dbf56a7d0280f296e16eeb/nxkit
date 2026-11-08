@@ -186,17 +186,22 @@ impl Reservation {
         Ok(u64::from_le_bytes(b))
     }
 
-    /// Wraps the whole range as the buffer of the GPU backend (R3).
+    /// Wraps `[start, start + len)` of the reservation as the buffer of the GPU backend (R3).
     ///
     /// No page of the range may be `PROT_NONE` when this runs. Metal `newBufferWithBytesNoCopy` returns nil then
     /// (measured 2026-11-08). The reservation is therefore mapped read and write, which costs nothing until a page is
     /// touched. The buffer stays valid when pages become `PROT_NONE` or `PROT_RX` later.
-    pub fn as_guest_memory(&self, ctx: &nxkit_metal::Context) -> Result<nxkit_metal::GuestMemory> {
-        let base = NonNull::new(self.base as usize as *mut u8)
-            .ok_or_else(|| HostError::Memory("the reservation has no address".into()))?;
-        // SAFETY: the reservation is mapped for `len` bytes and is never unmapped or moved.
-        unsafe { nxkit_metal::GuestMemory::from_raw(ctx, base, self.len) }
-            .map_err(|e| HostError::Memory(format!("the GPU buffer over the reservation: {e}")))
+    ///
+    /// The range must hold no page that is mapped from a file. The residency set of the buffer makes such pages
+    /// unreadable (SIGBUS, measured 2026-11-08). The code of the modules is mapped from `nxgame.dylib`, so the range
+    /// starts behind the modules.
+    pub fn as_gpu_memory(&self, ctx: &nxkit_metal::Context, start: u64, len: u64) -> Result<nxkit_metal::GuestMemory> {
+        let p = self.check(start, len)?;
+        let base = NonNull::new(p.cast::<u8>())
+            .ok_or_else(|| HostError::Memory("the GPU range has no address".into()))?;
+        // SAFETY: the range lies inside the reservation, which is mapped and never unmapped or moved.
+        unsafe { nxkit_metal::GuestMemory::from_raw(ctx, base, len) }
+            .map_err(|e| HostError::Memory(format!("the GPU buffer over {start:#x} + {len:#x}: {e}")))
     }
 }
 

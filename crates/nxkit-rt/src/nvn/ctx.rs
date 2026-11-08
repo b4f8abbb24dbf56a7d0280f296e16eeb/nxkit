@@ -121,9 +121,11 @@ impl std::error::Error for InstallError {}
 static GPU: OnceLock<Gpu> = OnceLock::new();
 
 /// Installs the GPU context. The host calls it once, after `nxkit_abi::guest::set_range`.
-/// The backend gives the GPU address of the guest range ([`Backend::gpu_base`]).
+/// The backend gives the GPU address of the first byte of the memory that the GPU buffer covers
+/// ([`Backend::gpu_base`]) and, when that is less than the guest range, the host range of the buffer
+/// ([`Backend::host_range`]).
 pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), InstallError> {
-    let (base, len) = guest::range();
+    let (base, len) = backend.host_range().unwrap_or_else(guest::range);
     let space = LinearSpace::new(base, backend.gpu_base(), len).map_err(InstallError::Space)?;
     GPU.set(Gpu::new(space, backend, settings))
         .map_err(|_| InstallError::AlreadyInstalled)?;

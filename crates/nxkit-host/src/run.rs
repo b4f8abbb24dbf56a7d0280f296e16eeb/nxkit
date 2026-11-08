@@ -59,7 +59,7 @@ pub fn run(opts: &Options) -> Result<()> {
 
     // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
-    let gpu_memory = Arc::new(mem.res.as_guest_memory(&ctx)?);
+    let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
     mem.seal()?;
 
     nxkit_rt::nxkit_init(mask);

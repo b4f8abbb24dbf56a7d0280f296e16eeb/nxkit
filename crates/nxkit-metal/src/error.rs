@@ -43,7 +43,10 @@ impl fmt::Display for MetalError {
             Self::Create { what, reason } => write!(f, "cannot create {what}: {reason}"),
             Self::Compile(why) => write!(f, "shader compile failed: {why}"),
             Self::OutOfRange { addr, len } => {
-                write!(f, "range {addr:#x}+{len:#x} is outside the guest memory")
+                write!(
+                    f,
+                    "range {addr:#x}+{len:#x} is outside the GPU visible guest memory (the memory of the modules is not GPU visible)"
+                )
             }
             Self::Unaligned { value, align } => {
                 write!(f, "{value:#x} is not a multiple of {align:#x}")

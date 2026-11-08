@@ -126,6 +126,10 @@ impl Backend for GpuBackend {
         self.guest.address_map().gpu_base()
     }
 
+    fn host_range(&self) -> Option<(u64, u64)> {
+        Some((self.guest.host_base(), self.guest.len()))
+    }
+
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()> {
         let gpu_addr = self.guest.gpu_address(pool.host, pool.len).map_err(fail)?;
         locked(&self.gpu).register_pool(gpu_addr, pool.len).map_err(fail)

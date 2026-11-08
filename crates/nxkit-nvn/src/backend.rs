@@ -139,6 +139,13 @@ pub trait Backend: Send + Sync {
     /// `LinearSpace` from this value and the range of guest memory.
     fn gpu_base(&self) -> u64;
 
+    /// The host range `(base, len)` that the mapped buffer covers, when it is not the whole guest range of
+    /// `nxkit_abi::guest`. `None` means that the buffer covers the guest range, and `gpu_base` is its first byte. The
+    /// host maps the buffer behind the memory of the modules, so it answers `Some`.
+    fn host_range(&self) -> Option<(u64, u64)> {
+        None
+    }
+
     /// A memory pool appears. The range lies in the mapped guest memory.
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()>;
 
