@@ -1,6 +1,6 @@
 //! The questions a family or title answers. Every method has a default of "no opinion".
 
-use crate::{Fact, Runtime, Service};
+use crate::{Fact, ResourcePatch, Runtime, Service};
 
 /// A shader stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -262,6 +262,11 @@ pub trait BuildHooks: Sync {
     /// Rewriter rules as TOML text (`rules/*.toml` shape). Rules of all layers add up.
     fn rewrite_rules(&self) -> Option<&'static str> {
         None
+    }
+    /// Edits of game resources that the build applies to the app's RomFS when its option asks for them (or by the
+    /// patch's default). Lists of all layers add up.
+    fn resource_patches(&self) -> &'static [Fact<ResourcePatch>] {
+        &[]
     }
 }
 

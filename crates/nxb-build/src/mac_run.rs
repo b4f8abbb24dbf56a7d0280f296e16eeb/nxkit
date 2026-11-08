@@ -72,7 +72,9 @@ pub(crate) fn run_of(
             .map_err(|e| format!("{}: {e}", cwd.join(d).display()))?;
     }
     let gfx = crate::layer::gfx(b)?.name();
-    let romfs = work.join("extract").join(&b.package).join("RomFS.img");
+    let ex = work.join("extract").join(&b.package);
+    let romfs =
+        crate::resource_patch::package_dir(a, b, &|m| eprintln!("{m}"), &ex)?.join("RomFS.img");
     let lib = crate::layer::msl_dir(b)?;
     let lib = lib
         .strip_prefix(&b.work)

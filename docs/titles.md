@@ -31,6 +31,7 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `shader_role` | `BuildHooks` | what a shader does for the frame, for example the game's own upscaler |
 | `seeds` | `BuildHooks` | shaders to prepare before the first frame |
 | `rewrite_rules` | `BuildHooks` | rewriter rules as TOML text |
+| `resource_patches` | `BuildHooks` | edits of one member of a game archive that `nxb build` applies to the app's RomFS, by a build option (`--resource-patch <option>=<value>`) or the patch's default. Lists of all layers add up |
 | `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting. `nxb build` writes the need `vertex_stream_null_bind` with the setting `ignore` as the key of that name in `settings` of `game.json`. |
 | `upscaler` | `RuntimeHooks` | keep the game's upscaler, render at the output size, or use MetalFX |
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
@@ -80,6 +81,18 @@ The Nintendo Switch 2 game on NVN2, family `agl`. The records are in `seedds/nxn
 
 - The family marks the `agl_ndsr_vr` networks as the game's upscaler. The archive path that identifies them is unverified.
 - The title states `gpu_timestamps`, `draw_barriers`, `mem_map_limit`, `render_cond`, `tex_flush_upload` and `tex_dirty_upload`. The last three come from agl's depth prepass and the terrain maps the CPU writes. They are title facts, because Breath of the Wild sets none of them.
+
+### Fixed resolution
+
+`nxb build ... --resource-patch resolution-scale=<scale>` pins the dynamic-resolution scale, with `0 < scale <= 1`.
+Without the option, or with `resolution-scale=stock`, the game keeps its dynamic resolution. The finding is
+ComicBit's (v0lumehi/nxkit#22): in v131072 the two resolution palettes share ten `f32` words in the ModelSceneExtensionParam
+of `Pack/Bootup.Nin_Ounce_NVN2.pack.zs`, a SARC compressed with the dictionary `pack.zsdic` of `Pack/ZsDic.pack.zs`.
+The build decodes the archive, checks the SHA-256 of the archive, the dictionary and the member, writes the scale into
+the ten words and stores the SARC again as a zstd frame of raw blocks. No compressor and no native library are needed.
+The patched package is `<work>/resources/<package>`, a clone of `extract/<package>` in which only that archive is new.
+An archive of another version is left as it is, with a warning, and the build goes on. A fixed scale does not promise
+a frame rate. A higher scale is more GPU work.
 
 Open questions:
 

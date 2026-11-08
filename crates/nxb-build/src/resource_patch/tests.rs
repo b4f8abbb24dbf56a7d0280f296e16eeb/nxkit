@@ -1,0 +1,162 @@
+use super::*;
+
+/// A little-endian SARC with one member per (name, bytes), each at a 4-aligned data offset.
+fn sarc(members: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut names = Vec::new();
+    let mut data = Vec::new();
+    let mut sfat = Vec::new();
+    for (name, bytes) in members {
+        let attr = 0x0100_0000u32 | (names.len() / 4) as u32;
+        names.extend_from_slice(name.as_bytes());
+        names.push(0);
+        names.resize(names.len().div_ceil(4) * 4, 0);
+        data.resize(data.len().div_ceil(4) * 4, 0);
+        sfat.extend_from_slice(&[0; 4]);
+        sfat.extend_from_slice(&attr.to_le_bytes());
+        sfat.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        data.extend_from_slice(bytes);
+        sfat.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    }
+    let off = 0x14 + 0xc + sfat.len() + 8 + names.len();
+    let mut d = Vec::new();
+    d.extend_from_slice(b"SARC");
+    d.extend_from_slice(&0x14u16.to_le_bytes());
+    d.extend_from_slice(&[0xff, 0xfe]);
+    d.extend_from_slice(&((off + data.len()) as u32).to_le_bytes());
+    d.extend_from_slice(&(off as u32).to_le_bytes());
+    d.extend_from_slice(&[0; 4]);
+    d.extend_from_slice(b"SFAT");
+    d.extend_from_slice(&0xcu16.to_le_bytes());
+    d.extend_from_slice(&(members.len() as u16).to_le_bytes());
+    d.extend_from_slice(&0x65u32.to_le_bytes());
+    d.extend_from_slice(&sfat);
+    d.extend_from_slice(b"SFNT");
+    d.extend_from_slice(&8u16.to_le_bytes());
+    d.extend_from_slice(&[0; 2]);
+    d.extend_from_slice(&names);
+    d.extend_from_slice(&data);
+    d
+}
+
+const OFFSETS: &[usize] = &[4, 12];
+
+fn patch(archive: Digest, member: Digest) -> ResourcePatch {
+    ResourcePatch {
+        option: "resolution-scale",
+        about: "test",
+        archive: "Pack/Boot.pack.zs",
+        archive_sha256: archive,
+        dictionary: None,
+        member: "Dir/param.bgyml",
+        member_sha256: member,
+        edit: Edit::F32Words {
+            offsets: OFFSETS,
+            above: 0.0,
+            up_to: 1.0,
+        },
+        default: None,
+    }
+}
+
+#[test]
+fn options_pick_values_and_check_them() {
+    let p = patch(Digest([0; 32]), Digest([0; 32]));
+    let o = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    };
+    // no option, no default: nothing
+    assert!(choose(&[p], &[]).unwrap().0.is_empty());
+    let (c, w) = choose(&[p], &o(&[("resolution-scale", "0.5"), ("other", "1")])).unwrap();
+    assert_eq!(c.iter().map(|c| c.1).collect::<Vec<_>>(), [0.5]);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(choose(&[p], &o(&[("resolution-scale", "1.5")])).is_err());
+    assert!(choose(&[p], &o(&[("resolution-scale", "x")])).is_err());
+    let with_default = ResourcePatch {
+        default: Some(0.75),
+        ..p
+    };
+    assert_eq!(choose(&[with_default], &[]).unwrap().0[0].1, 0.75);
+    let stock = o(&[("resolution-scale", "stock")]);
+    assert!(choose(&[with_default], &stock).unwrap().0.is_empty());
+}
+
+#[test]
+fn the_member_words_change_and_nothing_else() {
+    let member: Vec<u8> = (0..16u8).collect();
+    let s = sarc(&[("a.bin", b"other"), ("Dir/param.bgyml", &member)]);
+    let raw = nxb_split::zstd::raw_frame(&s);
+    let p = patch(sha(&raw), sha(&member));
+    let read = |path: &str| Ok((path == "Pack/Boot.pack.zs").then(|| raw.clone()));
+    let (files, warnings) = edited(&read, &[(p, 0.5)]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(files.len(), 1);
+    let out = nxb_split::zstd::decompress(&files[0].1).unwrap();
+    assert_eq!(out.len(), s.len());
+    let r = nxb_romfs::sarc::member(&out, "Dir/param.bgyml").unwrap();
+    let mut want = member.clone();
+    for &o in OFFSETS {
+        want[o..o + 4].copy_from_slice(&0.5f32.to_le_bytes());
+    }
+    assert_eq!(&out[r.clone()], want.as_slice());
+    // the bytes outside the member are as they were
+    assert_eq!(&out[..r.start], &s[..r.start]);
+    assert_eq!(&out[r.end..], &s[r.end..]);
+}
+
+#[test]
+fn other_digests_are_skipped_with_a_warning() {
+    let member = [0u8; 16];
+    let s = sarc(&[("Dir/param.bgyml", &member)]);
+    let raw = nxb_split::zstd::raw_frame(&s);
+    let read = |_: &str| Ok(Some(raw.clone()));
+    let (files, warnings) = edited(&read, &[(patch(Digest([1; 32]), sha(&member)), 0.5)]);
+    assert!(files.is_empty() && warnings.len() == 1, "{warnings:?}");
+    let (files, warnings) = edited(&read, &[(patch(sha(&raw), Digest([1; 32])), 0.5)]);
+    assert!(files.is_empty() && warnings.len() == 1, "{warnings:?}");
+    let none = |_: &str| Ok(None);
+    let (files, warnings) = edited(&none, &[(patch(sha(&raw), sha(&member)), 0.5)]);
+    assert!(files.is_empty() && warnings.len() == 1, "{warnings:?}");
+}
+
+#[test]
+fn a_new_file_moves_to_the_end_of_the_image() {
+    // root with the files `a` (3 bytes) and `b` (2 bytes)
+    let mut idx = Vec::new();
+    for (a, b, no, nl, file) in [
+        (1u64, 2u64, 0u32, 0u16, 0u8),
+        (32, 3, 0, 1, 1),
+        (35, 2, 1, 1, 1),
+    ] {
+        idx.extend_from_slice(&a.to_le_bytes());
+        idx.extend_from_slice(&b.to_le_bytes());
+        idx.extend_from_slice(&no.to_le_bytes());
+        idx.extend_from_slice(&nl.to_le_bytes());
+        idx.extend_from_slice(&[file, 0]);
+    }
+    idx.extend_from_slice(b"ab");
+    let h = Header {
+        index_offset: 37,
+        index_len: idx.len() as u64,
+        entries: 3,
+    };
+    let mut img = h.bytes().to_vec();
+    img.extend_from_slice(b"AAABB");
+    img.extend_from_slice(&idx);
+    let d = std::env::temp_dir().join(format!("nxb-resource-patch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let p = d.join("RomFS.img");
+    std::fs::write(&p, &img).unwrap();
+    write_image(&p, &[("a".into(), b"new bytes".to_vec())]).unwrap();
+    let r = Romfs::image(&p).unwrap();
+    assert_eq!(
+        r.read("a").unwrap().as_deref(),
+        Some(b"new bytes".as_slice())
+    );
+    assert_eq!(r.read("/b").unwrap().as_deref(), Some(b"BB".as_slice()));
+    let after = std::fs::read(&p).unwrap();
+    assert_eq!(&after[32..37], b"AAABB");
+    let _ = std::fs::remove_dir_all(&d);
+}

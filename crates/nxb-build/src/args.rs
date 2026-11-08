@@ -103,6 +103,9 @@ pub struct Args {
     pub dump: Option<PathBuf>,
     /// `--aoc <package>` (repeatable): DLC packages outside the input folder.
     pub aoc: Vec<PathBuf>,
+    /// `--resource-patch <option>=<value|stock>` (repeatable): a title's resource patch with its value, `stock` for none
+    /// (`resolution-scale=0.75`).
+    pub resource_patches: Vec<(String, String)>,
 }
 
 /// `--companion-app` under its old name: compatibility alias for the reference build scripts.
@@ -136,6 +139,7 @@ const VALUE: &[&str] = &[
     "--dump",
     "--app",
     "--aoc",
+    "--resource-patch",
     "--romfs",
     "--shell-framework",
     "--team-id",
@@ -292,6 +296,16 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--nup" => a.nup = Some(v.into()),
                 "--dump" => a.dump = Some(v.into()),
                 "--aoc" => a.aoc.push(v.into()),
+                "--resource-patch" => {
+                    let (name, value) = v
+                        .split_once('=')
+                        .filter(|(n, x)| !n.is_empty() && !x.is_empty())
+                        .ok_or((
+                            2,
+                            format!("--resource-patch: {v} (expected <option>=<value>)"),
+                        ))?;
+                    a.resource_patches.push((name.into(), value.into()));
+                }
                 "--romfs" => a.romfs = Some(v),
                 "--shell-framework" => a.shell_framework = Some(v.into()),
                 "--team-id" => a.team_id = Some(v),

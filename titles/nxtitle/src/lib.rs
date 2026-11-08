@@ -22,6 +22,7 @@ mod catalog;
 mod evidence;
 mod facts;
 mod hooks;
+mod resources;
 mod runtime;
 mod settings;
 
@@ -34,7 +35,8 @@ pub use hooks::{
     ShaderView, Standalone, Upscaler,
 };
 
-pub use nxb_model::TitleId;
+pub use nxb_model::{Digest, TitleId};
+pub use resources::{Edit, ResourcePatch, ZstdDictionary};
 pub use runtime::{Runtime, Service};
 pub use settings::{Memory, Settings};
 

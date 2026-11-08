@@ -9,6 +9,8 @@
 
 use nxtitle::{BuildHooks, Evidence, Fact, Need, RuntimeHooks, Title, TitleId};
 
+mod resolution;
+
 /// The title module.
 pub struct Oot;
 
@@ -77,7 +79,11 @@ const NEEDS: &[Fact<Need>] = &[
     ),
 ];
 
-impl BuildHooks for Oot {}
+impl BuildHooks for Oot {
+    fn resource_patches(&self) -> &'static [Fact<nxtitle::ResourcePatch>] {
+        resolution::PATCHES
+    }
+}
 
 impl RuntimeHooks for Oot {
     fn needs(&self) -> &'static [Fact<Need>] {

@@ -27,6 +27,8 @@ nxb-rewrite.workspace = true
 nxb-nro.workspace = true
 nxb-profile.workspace = true
 nxb-layer.workspace = true
+nxb-romfs.workspace = true
+nxb-split.workspace = true
 nxtitle.workspace = true
 nxtitles.workspace = true
 
