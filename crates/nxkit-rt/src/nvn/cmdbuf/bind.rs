@@ -119,11 +119,7 @@ pub(super) fn bases(c: u64) -> AbiResult<Bases> {
 /// Moves the ids of a handle into the descriptor table. The texture id is bits 0 to 19, the sampler id bits 20 to
 /// 31. An id of 0 means no descriptor and stays 0.
 pub(super) fn adjust(h: u64, b: Bases, tex: bool, samp: bool) -> u64 {
-    let h = h as u32;
-    let (t, s) = (h & 0xf_ffff, h >> 20);
-    let t = if tex && t != 0 { t + b.tex } else { t };
-    let s = if samp && s != 0 { s + b.samp } else { s };
-    u64::from(s << 20 | t & 0xf_ffff)
+    nxkit_nvn::record::adjust_handle(h, b.tex, b.samp, tex, samp)
 }
 
 fn bind_handle(c: u64, kind: Kind, st: u16, index: i32, h: u64, b: Bases) -> AbiResult<()> {
@@ -180,6 +176,33 @@ extern "C" fn bind_texture(c: u64, st: i32, i: i32, h: u64) {
 extern "C" fn bind_textures(c: u64, st: i32, first: i32, n: i32, h: u64) {
     guard("nvnCommandBufferBindTextures", || {
         bind_many(c, Kind::Texture, st, first, n, h)
+    });
+}
+
+/// `nvnCommandBufferBindTexturesDeferred`: the GPU reads the `n` handles at `h` when the command runs, and the game
+/// writes them after recording. The record keeps their address, and the readers of the record take the handles from
+/// memory then.
+extern "C" fn bind_textures_deferred(c: u64, st: i32, first: i32, n: i32, h: u64) {
+    let name = "nvnCommandBufferBindTexturesDeferred";
+    guard(name, || {
+        let s = stage(st)?;
+        let (first, n) = span(first, n, HANDLES)?;
+        if n == 0 {
+            return Ok(());
+        }
+        let b = bases(c)?;
+        emit_rec(
+            name,
+            c,
+            Record::BindTexturesDeferred {
+                first: slot(s, first as i32)?,
+                count: n as u8,
+                src: h,
+                tex_base: b.tex,
+                samp_base: b.samp,
+            },
+        );
+        Ok(())
     });
 }
 
@@ -408,7 +431,7 @@ pub(super) fn procs() -> Vec<(&'static str, usize)> {
         "nvnCommandBufferBindStorageBuffers" => bind_storage_buffers as extern "C" fn(u64, i32, i32, i32, u64),
         "nvnCommandBufferBindTexture" => bind_texture as extern "C" fn(u64, i32, i32, u64),
         "nvnCommandBufferBindTextures" => bind_textures as extern "C" fn(u64, i32, i32, i32, u64),
-        "nvnCommandBufferBindTexturesDeferred" => bind_textures as extern "C" fn(u64, i32, i32, i32, u64),
+        "nvnCommandBufferBindTexturesDeferred" => bind_textures_deferred as extern "C" fn(u64, i32, i32, i32, u64),
         "nvnCommandBufferBindImage" => bind_image as extern "C" fn(u64, i32, i32, u64),
         "nvnCommandBufferBindImages" => bind_images as extern "C" fn(u64, i32, i32, i32, u64),
         "nvnCommandBufferBindSeparateTexture" => bind_separate_texture as extern "C" fn(u64, i32, i32, u64),

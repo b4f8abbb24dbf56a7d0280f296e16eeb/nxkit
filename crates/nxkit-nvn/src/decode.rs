@@ -14,7 +14,7 @@ use crate::descriptors::Descriptors;
 use crate::error::{NvnError, Result};
 use crate::frame::{Cmd, CmdStream, DrawState, RtSet, Span};
 use crate::mem::GuestMem;
-use crate::record::{NO_HANDLE, Record};
+use crate::record::{NO_HANDLE, Record, deferred_handle};
 use crate::resource::{ResourceTable, TexId};
 use crate::space::GpuAddr;
 
@@ -147,6 +147,8 @@ pub enum Ref {
     Addr(u64, Option<TexId>),
     /// A texture handle and the texture it names.
     Handle(u64, Option<TexId>),
+    /// The host address of a handle that a deferred bind reads, and the raw value it held.
+    Deferred(u64, u64),
 }
 
 /// The inherited state that a summary was made with. Only the needed parts are in it.
@@ -293,6 +295,10 @@ impl Ref {
         match *self {
             Self::Addr(a, t) => texture_at(table, a) == t,
             Self::Handle(h, t) => texture_of(desc, h) == t,
+            Self::Deferred(at, raw) => {
+                let mut b = [0u8; 8];
+                mem.read(at, &mut b).is_ok() && u64::from_le_bytes(b) == raw
+            }
         }
     }
 }
@@ -444,8 +450,26 @@ impl Builder {
                 self.sets.tex |= 1 << slot;
                 self.tex_list = None;
             }
+            Record::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
+                for k in 0..count {
+                    let slot = usize::from(first) + usize::from(k);
+                    let Some(at) = self.st.tex.get(slot).map(|_| src + 8 * u64::from(k)) else { break };
+                    let (raw, handle) = match deferred_handle(cx.mem, src, k, tex_base, samp_base) {
+                        Ok((_, raw, h)) => (raw, h),
+                        Err(_) => (0, 0),
+                    };
+                    self.refs.push(Ref::Deferred(at, raw));
+                    let t = self.handle(cx, handle);
+                    self.st.tex[slot] = t;
+                    mark(&mut self.tex_live, slot, t);
+                    self.sets.tex |= 1 << slot;
+                }
+                self.tex_list = None;
+            }
             Record::BindImage { slot, handle } => {
-                self.st.img[slot as usize] = self.handle(cx, handle);
+                let t = self.handle(cx, handle);
+                self.st.img[slot as usize] = t;
+                mark(&mut self.img_live, usize::from(slot), t);
                 self.sets.img |= 1 << slot;
                 self.img_list = None;
             }

@@ -265,13 +265,29 @@ impl Walker {
             Record::BindTexture { slot, handle } => {
                 if let Some(t) = st.texture.get_mut(usize::from(slot)) {
                     *t = handle;
+                    self.track.texture_set(usize::from(slot));
                 }
             }
-            Record::Draw => self.out.draws.push(empty_draw()),
+            Record::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
+                for k in 0..count {
+                    let handle = deferred_handle(&*mem, src, k, tex_base, samp_base).map_or(0, |(_, _, h)| h);
+                    let slot = usize::from(first) + usize::from(k);
+                    if let Some(t) = st.texture.get_mut(slot) {
+                        *t = handle;
+                        let source = cache::Track::source(src, k, tex_base, samp_base, handle);
+                        self.track.texture_deferred(slot, source);
+                    }
+                }
+            }
+            Record::Copy { .. } | Record::Downsample { .. } => {
+                self.out.copies.push(CopyDetail::default())
+            }
+            Record::Draw => self.out.draws.push(Arc::new(empty_draw())),
             Record::Dispatch => {
                 let d = self.dispatch(&*mem, st, [0; 3]);
+                self.track.patches_of(&d.textures, self.out.dispatches.len(), true);
                 self.out.dispatches.push(d);
-            },
+            }
             Record::Ext(x) => self.ext(mem, st, &x),
             _ => {}
         }

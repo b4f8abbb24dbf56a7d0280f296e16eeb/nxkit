@@ -71,6 +71,21 @@ pub enum Record {
         /// The handle.
         handle: u64,
     },
+    /// Texture handles that the GPU reads when the command runs (`nvnCommandBufferBindTexturesDeferred`). The game
+    /// records the command once and writes the handles at `src` before each submit, so a reader takes them from guest
+    /// memory when it reads the record ([`deferred_handle`]).
+    BindTexturesDeferred {
+        /// The slot of the first handle.
+        first: u8,
+        /// The number of handles.
+        count: u8,
+        /// The host address of the first handle. The handles are 8 bytes apart.
+        src: u64,
+        /// The texture descriptor base of the command buffer at recording.
+        tex_base: u32,
+        /// The sampler descriptor base of the command buffer at recording.
+        samp_base: u32,
+    },
     /// A texture handle for an image slot. [`NO_HANDLE`] unbinds.
     BindImage {
         /// The slot.
@@ -127,6 +142,7 @@ const OP_BARRIER: u16 = 15;
 const OP_SYNC: u16 = 16;
 const OP_PRESENT: u16 = 17;
 const OP_CPU_READ: u16 = 18;
+const OP_TEXTURES_DEFERRED: u16 = 19;
 
 /// A record in its bytes.
 #[derive(Clone, Copy, Debug)]
@@ -227,6 +243,12 @@ impl Record {
                 n = 1;
                 (OP_IMAGE, u16::from(slot))
             }
+            Self::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
+                words[0] = src;
+                words[1] = u64::from(tex_base) | u64::from(samp_base) << 32;
+                n = 2;
+                (OP_TEXTURES_DEFERRED, u16::from(first) | u16::from(count) << 8)
+            }
             Self::Draw => (OP_DRAW, 0),
             Self::Dispatch => (OP_DISPATCH, 0),
             Self::Copy { src, dst } => {
@@ -270,6 +292,11 @@ impl Record {
         e.len = len;
         match self {
             Self::BindTexture { slot, .. } | Self::BindImage { slot, .. } if *slot >= 128 => {
+                Err(NvnError::FieldRange("binding slot"))
+            }
+            Self::BindTexturesDeferred { first, count, .. }
+                if usize::from(*first) + usize::from(*count) > 128 =>
+            {
                 Err(NvnError::FieldRange("binding slot"))
             }
             Self::ClearColor { slot } if *slot as usize >= MAX_COLOR => {
@@ -341,6 +368,16 @@ impl Record {
                 slot: arg as u8,
                 handle: w(0)?,
             },
+            OP_TEXTURES_DEFERRED => {
+                let bases = w(1)?;
+                Self::BindTexturesDeferred {
+                    first: arg as u8,
+                    count: (arg >> 8) as u8,
+                    src: w(0)?,
+                    tex_base: bases as u32,
+                    samp_base: (bases >> 32) as u32,
+                }
+            }
             OP_DRAW => Self::Draw,
             OP_DISPATCH => Self::Dispatch,
             OP_COPY => Self::Copy {
@@ -363,6 +400,32 @@ impl Record {
         };
         Ok((rec, size))
     }
+}
+
+/// Moves the ids of a handle into the descriptor table of a command buffer. The texture id is bits 0 to 19, the
+/// sampler id bits 20 to 31. An id of 0 means no descriptor and stays 0. `tex` and `samp` say which ids move.
+pub fn adjust_handle(h: u64, tex_base: u32, samp_base: u32, tex: bool, samp: bool) -> u64 {
+    let h = h as u32;
+    let (t, s) = (h & 0xf_ffff, h >> 20);
+    let t = if tex && t != 0 { t + tex_base } else { t };
+    let s = if samp && s != 0 { s + samp_base } else { s };
+    u64::from(s << 20 | t & 0xf_ffff)
+}
+
+/// The handle `k` of a [`Record::BindTexturesDeferred`] as guest memory holds it now: the raw value at its address
+/// and the handle with the descriptor bases applied.
+pub fn deferred_handle(
+    mem: &impl GuestMem,
+    src: u64,
+    k: u8,
+    tex_base: u32,
+    samp_base: u32,
+) -> Result<(u64, u64, u64)> {
+    let at = src + 8 * u64::from(k);
+    let mut b = [0u8; 8];
+    mem.read(at, &mut b)?;
+    let raw = u64::from_le_bytes(b);
+    Ok((at, raw, adjust_handle(raw, tex_base, samp_base, true, true)))
 }
 
 #[cfg(test)]
@@ -407,6 +470,13 @@ mod tests {
             Record::BindImage {
                 slot: 0,
                 handle: NO_HANDLE,
+            },
+            Record::BindTexturesDeferred {
+                first: 96,
+                count: 32,
+                src: 0x7000_4000,
+                tex_base: 7,
+                samp_base: 3,
             },
             Record::Draw,
             Record::Dispatch,
@@ -466,6 +536,20 @@ mod tests {
             24
         );
         assert!(all().iter().all(|r| size(*r) as usize <= MAX_RECORD_BYTES));
+    }
+
+    #[test]
+    fn a_deferred_bind_reads_the_handle_that_memory_holds_now() {
+        let mut m = VecMem::new(0x7000_0000, 4096);
+        let at = 0x7000_0200;
+        m.write(at + 8, &(5u64 | 2 << 20).to_le_bytes()).unwrap();
+        assert_eq!(
+            deferred_handle(&m, at, 1, 100, 10).unwrap(),
+            (at + 8, 5 | 2 << 20, 105 | 12 << 20)
+        );
+        m.write(at + 8, &(9u64 | 2 << 20).to_le_bytes()).unwrap();
+        assert_eq!(deferred_handle(&m, at, 1, 100, 10).unwrap().2, 109 | 12 << 20);
+        assert_eq!(deferred_handle(&m, at, 0, 100, 10).unwrap().2, 0);
     }
 
     #[test]
