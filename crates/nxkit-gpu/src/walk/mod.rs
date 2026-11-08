@@ -79,6 +79,8 @@ pub(super) struct State {
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
     texture: [u64; TEXTURE_SLOTS],
+    /// The image handles by slot, in the bank layout of `texture`.
+    image: [u64; TEXTURE_SLOTS],
     /// `SetCopyRowStride` and `SetCopyImageStride` of the command buffer. 0 is tightly packed.
     copy_strides: [u64; 2],
 }
@@ -102,6 +104,7 @@ impl Default for State {
             scissor: None,
             blend_color: [0.0; 4],
             texture: [NO_HANDLE; TEXTURE_SLOTS],
+            image: [NO_HANDLE; TEXTURE_SLOTS],
             copy_strides: [0; 2],
         }
     }
@@ -341,6 +344,13 @@ impl Walker {
                     self.track.texture_set(usize::from(slot));
                 }
             }
+            Record::BindImage { slot, handle } => {
+                if let Some(t) = st.image.get_mut(usize::from(slot)) {
+                    *t = handle;
+                }
+                // The template cache does not follow image binds, so a recording that binds one is not a template.
+                self.track.truncated();
+            }
             Record::BindTexturesDeferred { first, count, src, tex_base, samp_base } => {
                 for k in 0..count {
                     let handle = deferred_handle(&*mem, src, k, tex_base, samp_base).map_or(0, |(_, _, h)| h);
@@ -373,12 +383,18 @@ impl Walker {
             .programs
             .find(st.program[COMPUTE], programs::Kind::Compute)
             .map_or_else(String::new, |k| k.to_string());
+        let images = images(st, 2, Stage::Compute);
+        if !images.is_empty() {
+            // Inherited images are not a template key.
+            self.track.truncated();
+        }
         DispatchDetail {
             program,
             groups,
             ubos: self.ubos(mem, st, 2, Stage::Compute),
             sbufs: sbufs(st, 2, Stage::Compute),
             textures: textures(st, 2, Stage::Compute),
+            images,
         }
     }
 }
@@ -414,6 +430,7 @@ fn empty_draw() -> DrawDetail {
         ubos: Vec::new(),
         sbufs: Vec::new(),
         textures: Vec::new(),
+        images: Vec::new(),
         dynamic: Default::default(),
     }
 }
@@ -471,6 +488,25 @@ pub(super) fn textures_into(st: &State, bank_index: usize, stage: Stage, out: &m
                 handle: *handle,
             }),
     );
+}
+
+/// Adds the image handles of the bank (same layout as the textures) that are bound to `out`.
+pub(super) fn images_into(st: &State, bank_index: usize, stage: Stage, out: &mut Vec<TextureBind>) {
+    let slots = st.image.get(bank_index * 32..bank_index * 32 + 32).unwrap_or(&[]);
+    out.extend(
+        slots
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| **h != NO_HANDLE)
+            .map(|(i, handle)| TextureBind { stage, slot: i as u32, handle: *handle }),
+    );
+}
+
+/// The image handles of the bank that are bound.
+fn images(st: &State, bank_index: usize, stage: Stage) -> Vec<TextureBind> {
+    let mut out = Vec::new();
+    images_into(st, bank_index, stage, &mut out);
+    out
 }
 
 /// The texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) that are bound.

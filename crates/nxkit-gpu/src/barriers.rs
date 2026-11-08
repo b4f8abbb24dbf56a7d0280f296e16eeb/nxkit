@@ -67,7 +67,7 @@ mod tests {
         let mut state = BarrierState::default();
         state.seed(TexId(1), Stages::FRAGMENT);
         let aliases: FastMap<TexId, TexId> = [(TexId(2), TexId(1))].into_iter().collect();
-        let barriers = state.plan(&frame, &plan, &aliases, &[]);
+        let barriers = state.plan(&frame, &plan, &aliases, &[], &[]);
         assert_eq!(barriers.emitted, 1);
         let dep = barriers.before[0].unwrap();
         assert_eq!(dep.after, Stages::FRAGMENT);
@@ -109,7 +109,7 @@ mod tests {
             state.seed(TexId(0), Stages::FRAGMENT);
             let mut vs = vec![false; plan.passes.len()];
             vs[render] = vertex;
-            let barriers = state.plan(&frame, &plan, &FastMap::default(), &vs);
+            let barriers = state.plan(&frame, &plan, &FastMap::default(), &vs, &[]);
             assert_eq!(barriers.before[render].unwrap().before, want);
         }
     }
@@ -210,6 +210,7 @@ impl BarrierState {
         plan: &PassPlan,
         aliases: &FastMap<TexId, TexId>,
         vertex_samples: &[bool],
+        images: &[crate::images::PassImages],
     ) -> BarrierPlan {
         let mut out = BarrierPlan::default();
         let mut first = true;
@@ -221,7 +222,13 @@ impl BarrierState {
                 out.before.push(None);
                 continue;
             }
-            let t = touch(frame, plan, p);
+            let mut t = touch(frame, plan, p);
+            // Images that fragment shaders of the pass's draws bind are not in its commands' lists.
+            if let Some(x) = images.get(index) {
+                t.reads.extend_from_slice(&x.reads);
+                t.writes.extend_from_slice(&x.writes);
+                t.reads.extend_from_slice(&x.writes);
+            }
             let mine = pass_stages(p.kind);
             let mut after: Option<Stages> = None;
             let mut before = if p.kind == PassKind::Render {

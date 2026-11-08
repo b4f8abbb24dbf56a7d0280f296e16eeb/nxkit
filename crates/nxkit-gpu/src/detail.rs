@@ -298,6 +298,8 @@ pub struct DrawDetail {
     pub sbufs: Vec<UboDetail>,
     /// The textures.
     pub textures: Vec<TextureBind>,
+    /// The storage images (`BindImage`) of the vertex and fragment stages, by `slot` of the `img` binding.
+    pub images: Vec<TextureBind>,
     /// The state outside an ICB.
     pub dynamic: DynamicDetail,
 }
@@ -383,6 +385,9 @@ pub struct DispatchDetail {
     pub sbufs: Vec<UboDetail>,
     /// The textures.
     pub textures: Vec<TextureBind>,
+    /// The storage images (`BindImage`), by `slot` of the `img` binding. `handle` is the texture id of the
+    /// descriptor, without a sampler.
+    pub images: Vec<TextureBind>,
 }
 
 /// A run of draws that came from one reused recording.

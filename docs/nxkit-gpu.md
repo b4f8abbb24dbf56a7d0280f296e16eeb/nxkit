@@ -107,7 +107,7 @@ Limits:
 
 - Only the pixel position, integer coordinates and size queries are converted. `uv = gl_FragCoord.xy * invSize` works, as the position is divided and the constant is a native size. A size that the shader gets by another path (a uniform the game wrote from the size of a scaled target, a compute thread id) stays native or scaled as it is.
 - A texture that is not a 2D texture, an array of textures, a bindless handle (`tex_ubo`, pools) and a combined handle that the shader reads at run time keep scale 1. The shader then sees the scaled texture with native coordinates.
-- Image bindings are not filled yet (`Skip::Binding`), so a compute shader with images does not run. The translator already scales image loads, stores and atomics. A store of a native coordinate writes one texel of each `scale` by `scale` block. Dispatch sizes that the game computes from the native size then cover only part of a scaled image. A rule that scales the grid when every written image has the same factor needs the image bindings in the detail first, so there is no `scalegrid` knob.
+- Image bindings are filled (see "Storage images and raw global memory"). The translator scales image loads, stores and atomics, and entry `rscale` of an `img` binding is the scale of its texture. A store of a native coordinate writes one texel of each `scale` by `scale` block. Dispatch sizes that the game computes from the native size then cover only part of a scaled image. A rule that scales the grid when every written image has the same factor can use the image binds of the detail now, but there is no `scalegrid` knob yet.
 - A copy-back and an upload of a scaled texture keep their limits (see above).
 
 ## Textures
@@ -126,6 +126,29 @@ The whole texture is scaled, not only the part the CPU wrote, because the resour
 A scaled upload counts as `uploads` and `scaled_uploads` (`upload.scaled` in the report). It is not a loss.
 
 The store also keeps a texture at the native size when the CPU writes it much more often than the GPU renders into it (`Heat` in `textures.rs`). For each texture it counts the frames with a newer guest copy (`writes`) and the frames with an attachment use (`renders`) while the scale is not 1. When `writes >= 8` and `writes / 4 >= renders`, the texture is native for good, until the game creates it again. Then it takes the plain upload and no scale. This is a heuristic, not a fact about the game: the numbers are a first guess, and `textures_kept_native` counts the decisions. A texture that is written and rendered in about every frame stays scaled.
+
+## Storage images and raw global memory
+
+### `img`
+
+The walker follows `BindImage` into `State::image` (the slot layout of the textures: bank times 32 plus the index) and puts the bound handles into `DrawDetail::images` (vertex and fragment, or task, mesh and fragment) and `DispatchDetail::images`. A recording that binds an image, or draws while one is bound, is not a walker template (`Track::truncated`). The handle is a texture id without a sampler.
+
+The reflection gives an `img` member its slot (`reg`), its type, its access (`access::read`, `write` or `read_write` in `msl_type`), an `atomic` flag and `rscale`. `images.rs` pairs the two for each stage that has image binds:
+
+1. Before the textures of the frame are made, `images::uses` finds the texture of each image. They count as used and not memoryless, and a texture with atomics gets `Use::atomic` for good (`TextureStore` remembers it).
+2. After the handles are resolved, `images::resolve` makes one view for each (handle, declared type, atomic code) with `TextureStore::image_view`: one level (the base level of the descriptor), the layers of the descriptor, no swizzle, in the declared type (`texture2d`, `texture2d_array`, `texture3d`). The resource ID goes into `Env::images`; `fill_args` writes it. An image that cannot be bound (nothing bound, a texture a shader cannot write, a view Metal refuses) writes resource ID 0 and counts `bind.img-unbound`.
+3. Atomics. Metal runs texture atomics only on `R32Uint` and `R32Sint` textures made with the atomic usage. `nxkit_metal::Texture::new` gives that usage to every shader-writable texture of those formats. With `TextureDesc::shader_atomic`, a 4 byte colour 2D or 2D array texture of another format (RGBA8, BGRA8, RG16, R32F, RGB10A2, ...) is stored as `R32Uint`, and its own format is a view over it, so rendering, sampling and the guest bytes see the same data. `Texture::atomic_view` gives the `R32Uint` or, for a shader that declares `int`, `R32Sint` view. The texture is made again, and its contents are lost, when the first atomic image use is found; a texture that atomics ran on stays atomic.
+4. Barriers and write tracking. A dispatch already lists every bound image as written (`Cmd::Dispatch::writes`). A draw does not, so `images::pass_images` collects, for each render pass, the textures its draws write (an image whose shader access is not `read`, or that has atomics) and read through images. The barrier planner treats them as writes and reads of the pass, and `gpu_wrote` and the copy-back dirty set include them (`EncodeReport::gpu_wrote`).
+
+### `gmem_map` and `gmem_log`
+
+A shader that reads a guest pointer from memory has no storage buffer for it. The translator searches the table of the memory pools and accesses `address + delta` through a physical pointer, and each store sets a bit in a write log.
+
+The table has 8192 entries of 32 bytes, sorted by start and disjoint: start (u64), end (u64, exclusive), delta (u64), a hint (u32), 4 bytes of padding. Entry 0 is empty, unused entries start at `!0`. A pool that overlaps an earlier one keeps its part past the end of the earlier one. The hint of entry `chunk & 8191` is `chunk << 13 | entry index` for each 2 MiB chunk (`chunk = address >> 21`) that lies wholly inside an entry, 0 for none. The delta is the Metal GPU address of the guest memory buffer minus the guest GPU address, from the `AddressMap`: 0 in nxkit, where the GPU address of the game is the Metal address. The pools are those of `register_memory_pool`; the table is built again, into a new buffer that the batches keep alive, when one comes or goes. A pool beyond entry 8191 is left out and counted (`gmem.pools-over`).
+
+The log is a bitmap of 8192 bits (1024 bytes): bit `i` of word `i / 32` is set by a store through entry `i`. Each draw or dispatch with a `gmem_log` binding takes a zeroed log from a ring of 1024 logs per batch slot (`gmem.logs-shared` counts the draws past that; they share the last log). When the batch ring gives the slot out again, the GPU is done with it: `Gmem::learn` reads the logs against the table that the batch bound, clears them and adds the pools to `Gpu::gmem_written_pools`. A pool is large, and the log does not say where in it a store landed, so the host does not mark textures from it. Guest memory is the buffer itself, so a store reaches it at once, and a CPU read sees it after the fence.
+
+The bindings are counted as `bind.img`, `bind.gmem-map` and `bind.gmem-log` (not losses). `NXKIT_DIAG=gmem` prints the table size and each pool learned.
 
 ## Diagnostics
 
@@ -155,7 +178,7 @@ The walk of one submit stays on one thread. A recording starts from the state th
 The walker leaves some of the detail out:
 
 - `FrameDetail.copies` and `runs` stay empty. A copy uses the whole first level and no draw runs as an ICB.
-- Images are not in the detail. Transform feedback and `DrawTexture` draws are placeholders without a binding.
+- Transform feedback and `DrawTexture` draws are placeholders without a binding.
 - An indirect draw puts base instance 0 into the driver block, because the GPU reads the real one with the arguments.
 - The arguments of an indirect draw must be final when its render pass starts. A draw of the same pass that writes them through a storage buffer is not seen.
 - The multisample state reads only alpha to coverage.
@@ -166,7 +189,7 @@ These are known gaps. Each shows up as a `Skip` count or is a limit of the first
 - Partial clears (a scissor cuts the target) are not encoded.
 - Triangle fans, quads, adjacency and patches, and byte indices, are not translated.
 - Multisampled attachments are downgraded to one sample. The pass descriptions do not resolve.
-- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool` and `drvcb` are filled. A program with another kind is skipped (`Skip::Binding`). The shader variants `_bv`, `_bp`, `_bx` and `_bf` and pull shaders are not used.
+- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool`, `drvcb`, `ubo_ptr`, `support`, `border`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`); the health report names the kind (`binding.refused`). `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bp`, `_bx` and `_bf` and pull shaders are not used.
 - The texture view has no channel swizzle (counted as `swizzle_ignored`). A cube view ignores the layer range.
 - Texel fetches with integer coordinates and `textureSize` of a 2D texture see native units through the render scale of the support buffer. Other texture types still see the scaled size (refer to the render scale section).
 - The pool tables are written while earlier frames may still run. A frame in flight can read an entry that a later frame rewrote.

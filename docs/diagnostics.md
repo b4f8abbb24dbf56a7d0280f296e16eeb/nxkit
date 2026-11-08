@@ -113,6 +113,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `bc` | gpu | the first bytes of each compressed texture in guest memory | 200 distinct | low |
 | `prog` | gpu | programs that did not load, unknown binding kinds, draws without a vertex stage | once per program, first 40 draws | low |
 | `pipe` | gpu | render, compute and depth-stencil states that Metal did not build | first 300 | low |
+| `gmem` | gpu | the size of the raw global memory table when it is built, and each pool that the write logs showed written (`docs/nxkit-gpu.md`) | each rebuild and each new pool | low |
 | `overlap` | gpu | the flushes of the CPU, the dynamic pages, and per kind of buffer binding the bytes bound and the bytes changed since the last frame (`docs/plans/fence-overlap.md`) | every 120 frames | high (hashes every bound range) |
 | `judder` | nvn | the histogram of the refreshes each shown frame stayed, and the mean (see above) | every 120 shown frames | low |
 | `hitch` | gpu | each frame whose encode took 7 ms or more or that built pipelines or textures, with the wall clock in ms, to put next to the late frames of `NXKIT_PACE_DIAG` | each such frame | low |

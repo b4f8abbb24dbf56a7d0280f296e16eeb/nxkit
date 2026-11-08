@@ -259,6 +259,7 @@ pub(crate) fn prepare(
         ubos: &d.ubos,
         sbufs: &d.sbufs,
         textures: &d.textures,
+        images: &d.images,
         base_instance,
         groups: None,
     };

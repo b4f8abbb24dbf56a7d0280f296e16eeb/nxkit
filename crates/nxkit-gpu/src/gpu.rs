@@ -70,7 +70,7 @@ impl Default for GpuConfig {
 }
 
 /// The objects that every command buffer of a frame keeps alive until the GPU is done with it.
-type Keep = (Vec<Texture>, Arc<DataBuffer>, Arc<DataBuffer>);
+type Keep = (Vec<Texture>, Arc<DataBuffer>, Arc<DataBuffer>, Option<Arc<DataBuffer>>);
 
 /// The frame encoder.
 pub struct Gpu {
@@ -80,6 +80,10 @@ pub struct Gpu {
     /// The texture types that each shader declares for its texture bindings, by program key (fragment and compute
     /// first, vertex second), for [`Gpu::fit_handles`].
     fit_decl: [FastMap<String, Vec<(u32, nxkit_metal::TextureKind)>>; 2],
+    /// The `img` members of the shaders by key, for [`crate::images`].
+    img_decl: crate::images::Decls,
+    /// The memory pools and the raw global memory table (`gmem.rs`).
+    gmem: crate::gmem::Gmem,
     pipelines: Pipelines,
     bindless: Bindless,
     store: TextureStore,
@@ -125,6 +129,7 @@ pub(crate) fn collect_uses(frame: &Frame, plan: &PassPlan) -> FastMap<TexId, Use
             attachment: true,
             memoryless: true,
             cpu_read: false,
+            atomic: false,
         });
         u.memoryless &= a.memoryless && !other.contains(&a.tex);
     }
@@ -222,6 +227,8 @@ impl Gpu {
             guest,
             programs: Programs::new(ctx, config.shader_dir),
             fit_decl: [FastMap::default(), FastMap::default()],
+            img_decl: [FastMap::default(), FastMap::default()],
+            gmem: crate::gmem::Gmem::new(ctx)?,
             pipelines,
             bindless: Bindless::new(ctx)?,
             store: TextureStore::new(ctx),
@@ -252,6 +259,7 @@ impl Gpu {
     /// copied back into guest memory at the end of the frame (see `copyback`).
     pub fn register_memory_pool(&mut self, gpu_addr: u64, len: u64, flags: u32) -> Result<()> {
         self.register_pool(gpu_addr, len)?;
+        self.gmem.add_pool(gpu_addr, len);
         self.copyback.add_pool(gpu_addr, len, flags);
         Ok(())
     }
@@ -259,6 +267,14 @@ impl Gpu {
     /// The game finalised the memory pool at `gpu_addr`. Its textures are no longer copied back.
     pub fn unregister_memory_pool(&mut self, gpu_addr: u64) {
         self.copyback.remove_pool(gpu_addr);
+        self.gmem.remove_pool(gpu_addr);
+    }
+
+    /// The pools that shaders wrote through raw global memory pointers, as the write logs of finished batches showed
+    /// (guest GPU address ranges, a whole pool each). The host does not mark textures from it: a pool is far larger
+    /// than any texture in it, and the logs do not say where in the pool the stores landed.
+    pub fn gmem_written_pools(&self) -> &[(u64, u64)] {
+        self.gmem.learned()
     }
 
     /// The pools that were registered, as (GPU address, length).
@@ -683,6 +699,16 @@ impl Gpu {
         let t_ring = Instant::now();
         let mut batch = self.ring.begin(1 + ends.len())?;
         PHASES.with(|p| p.borrow_mut()[0] = nanos(t_ring, Instant::now()));
+        // The ring waited for the batch that used this slot before, so its write logs are final.
+        let region = ((batch.number() - 1) % nxkit_metal::BATCHES_IN_FLIGHT as u64) as usize;
+        self.gmem.learn(region);
+        let map = self.guest.address_map();
+        let gmem_buf = self.gmem.refresh(&self.ctx, |start, len| {
+            let host = map.host_address(start, len).ok()?;
+            Some(map.gpu_address(host, len).ok()?.wrapping_sub(start))
+        });
+        self.gmem.logs().begin(region, self.gmem.ranges());
+        let gmem_logs = self.gmem.logs().clone();
         let scratch = batch.scratch();
         let preload = {
             let snaps: Vec<Arc<[u8]>> = detail
@@ -711,6 +737,14 @@ impl Gpu {
         };
         mark(t0, "ring");
         let mut uses = collect_uses(frame, plan);
+        // The textures the fragment shaders of draws bind as images are not in the frame's lists. They are used (not
+        // memoryless), and a texture with image atomics is made for them.
+        let image_uses = crate::images::uses(&mut self.img_decl, &self.programs, view, detail);
+        for id in &image_uses.all {
+            let u = uses.entry(*id).or_default();
+            u.memoryless = false;
+            u.atomic |= image_uses.atomic.contains(id);
+        }
         self.copyback.note_presented(frame);
         // A render target that is copied back stays at the native size: the copy-back needs the guest layout. The
         // other attachments of its passes stay at the native size too, since a pass renders at one scale.
@@ -770,12 +804,25 @@ impl Gpu {
             self.resolve_handles(view, detail, scale, &mut textures, &mut stats);
         let t_fit = Instant::now();
         self.fit_handles(view, detail, &textures, &mut handles, &mut stats);
+        crate::images::resolve(
+            &mut self.store,
+            &mut self.img_decl,
+            &self.programs,
+            view,
+            detail,
+            scale,
+            &mut textures,
+            &mut handles,
+            &mut stats,
+        );
         stats.resolve_ns = nanos(t_resolve, t_fit);
         stats.fit_ns = nanos(t_fit, Instant::now());
         drop(self.store.take_retired());
         self.store.trim_views();
 
         mark(t0, "resolve+fit");
+        let ords = ordinals(frame);
+        let pass_images = crate::images::pass_images(frame, plan, &ords, &image_uses.per_draw);
         let mut first_write: FastMap<TexId, usize> = FastMap::default();
         let mut gpu_wrote: Vec<TexId> = Vec::new();
         // The levels and layers that the frame wrote, and the last pass that wrote them, for the copy-back.
@@ -787,7 +834,8 @@ impl Gpu {
             ) {
                 continue;
             }
-            for id in touch(frame, plan, p).writes {
+            let extra = pass_images.get(i).map_or(&[][..], |x| x.writes.as_slice());
+            for id in touch(frame, plan, p).writes.into_iter().chain(extra.iter().copied()) {
                 let memoryless = textures
                     .get(&id)
                     .is_none_or(|r| r.desc.storage == nxkit_metal::Storage::Memoryless);
@@ -823,7 +871,7 @@ impl Gpu {
             let (a, b) = self.bindless.pool_buffers();
             let mut all: Vec<Texture> = textures.values().map(|r| r.tex.clone()).collect();
             all.extend(handles.keep);
-            Arc::new((all, a, b))
+            Arc::new((all, a, b, gmem_buf.clone()))
         };
 
         let mut deswizzled = Vec::new();
@@ -906,12 +954,11 @@ impl Gpu {
             .map(|(id, res)| (*id, res.barrier_id))
             .collect();
         mark(t0, "pre-ords");
-        let ords = ordinals(frame);
         kpass_diag(frame, plan, detail, &ords, &textures);
         mark(t0, "ords+kpass");
         let t_barrier = Instant::now();
         let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
-        let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples);
+        let barrier_plan = self.barriers.plan(frame, plan, &aliases, &vertex_samples, &pass_images);
         stats.barrier_ns = nanos(t_barrier, Instant::now());
         {
             static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -945,6 +992,11 @@ impl Gpu {
             env: Env {
                 handles: &handles.map,
                 fits: &handles.fits,
+                images: &handles.images,
+                gmem: crate::gmem::GmemEnv {
+                    map: gmem_buf.as_ref().map_or(0, |b| b.gpu_address()),
+                    logs: Some((&*gmem_logs, region)),
+                },
                 pools: self.bindless.pools(),
                 default_sampler: self.bindless.default_sampler_id(),
                 statics: self.bindless.statics(),

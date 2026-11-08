@@ -147,6 +147,7 @@ pub(crate) fn prepare(
         ubos: &d.ubos,
         sbufs: &d.sbufs,
         textures: &d.textures,
+        images: &d.images,
         base_instance: 0,
         groups: None,
     };
@@ -225,6 +226,7 @@ mod tests {
             ubos: &[],
             sbufs: &sbufs,
             textures: &[],
+            images: &[],
             base_instance: 0,
             groups: None,
         };

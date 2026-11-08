@@ -10,7 +10,7 @@ use super::objects::{self, Blends, StencilValues, write_masks};
 use super::programs::Kind;
 use super::{
     ATTRIBUTES, MAX_COLOR, MESH, MESH_TEXTURES, STREAMS, State, TASK, UBOS, Walker, bound_count, empty_draw,
-    sbufs_into, texture_count, textures_into,
+    images_into, sbufs_into, texture_count, textures_into,
 };
 use crate::detail::{
     AttributeDetail, ClearDetail, CopyDetail, CopyKind, DrawArgs, DrawDetail, DynamicDetail, ProgramRef, Stage,
@@ -494,6 +494,11 @@ impl Walker {
         d.textures.reserve_exact(texture_count(st, 0) + texture_count(st, 1));
         textures_into(st, 0, Stage::Vertex, &mut d.textures);
         textures_into(st, 1, Stage::Fragment, &mut d.textures);
+        images_into(st, 0, Stage::Vertex, &mut d.images);
+        images_into(st, 1, Stage::Fragment, &mut d.images);
+        if !d.images.is_empty() {
+            self.track.truncated();
+        }
         d
     }
 
@@ -541,6 +546,10 @@ impl Walker {
             sbufs_into(st, bank, stage, &mut d.sbufs);
             let textures = if stage == Stage::Fragment { 1 } else { MESH_TEXTURES };
             textures_into(st, textures, stage, &mut d.textures);
+            images_into(st, textures, stage, &mut d.images);
+        }
+        if !d.images.is_empty() {
+            self.track.truncated();
         }
         d
     }

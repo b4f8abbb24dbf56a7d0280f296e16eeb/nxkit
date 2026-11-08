@@ -25,6 +25,7 @@ fn dispatch(sh: &Shared<'_>, cp: &mut ComputePass<'_>, scratch: &Scratch, n: u32
         ubos: &dd.ubos,
         sbufs: &dd.sbufs,
         textures: &dd.textures,
+        images: &dd.images,
         base_instance: 0,
         groups: Some(dd.groups),
     };

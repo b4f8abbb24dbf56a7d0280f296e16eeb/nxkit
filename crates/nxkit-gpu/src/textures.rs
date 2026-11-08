@@ -50,6 +50,8 @@ pub(crate) struct Use {
     pub(crate) memoryless: bool,
     /// The CPU reads it.
     pub(crate) cpu_read: bool,
+    /// A shader runs image atomics on it (an `img` binding with `atomic`). It stays set for the texture.
+    pub(crate) atomic: bool,
 }
 
 type ViewKey = (u64, [u32; 7]);
@@ -83,6 +85,8 @@ pub(crate) struct TextureStore {
     aliases: FastMap<(u64, TextureDesc), Res>,
     attachments: FastSet<TexId>,
     pinned: FastSet<TexId>,
+    /// The textures that image atomics ran on, which are made with `shader_atomic` from then on.
+    atomic: FastSet<TexId>,
     /// The CPU-written, rarely rendered textures, which stay at the native size for good.
     native: FastSet<TexId>,
     heat: FastMap<TexId, Heat>,
@@ -179,6 +183,7 @@ pub(crate) fn describe(
         } else {
             Storage::Private
         },
+        shader_atomic: u.atomic && exact && !depth_like && !compressed && !memoryless,
     };
     Ok((desc, !exact))
 }
@@ -216,6 +221,7 @@ impl TextureStore {
             aliases: FastMap::default(),
             attachments: FastSet::default(),
             pinned: FastSet::default(),
+            atomic: FastSet::default(),
             native: FastSet::default(),
             heat: FastMap::default(),
             next_generation: 1,
@@ -237,6 +243,9 @@ impl TextureStore {
         }
         if u.cpu_read {
             self.pinned.insert(id);
+        }
+        if u.atomic {
+            self.atomic.insert(id);
         }
     }
 
@@ -267,6 +276,7 @@ impl TextureStore {
             }
         }
         u.attachment |= self.attachments.contains(&id);
+        u.atomic |= self.atomic.contains(&id);
         let scaled = self.is_scaled(id, scale);
         let (desc, widened) = describe(rec, if scaled { scale } else { 1.0 }, u)?;
         if let Some(r) = self.entries.get_mut(&id) {
@@ -367,6 +377,7 @@ impl TextureStore {
         }
         self.attachments.remove(&id);
         self.pinned.remove(&id);
+        self.atomic.remove(&id);
         self.native.remove(&id);
         self.heat.remove(&id);
     }
@@ -397,6 +408,37 @@ impl TextureStore {
         res: &Res,
         tic: &Tic,
         forced: Option<TextureKind>,
+        stats: &mut EncodeStats,
+    ) -> Result<Texture, Skip> {
+        self.view_impl(id, res, tic, forced, 0, stats)
+    }
+
+    /// The view a shader writes or reads as a storage image: one level (the base level of the descriptor), the layers of
+    /// the descriptor, no channel swizzle, in the texture type `kind` that the shader declares. `atomic` is
+    /// `ImgDecl::atomic_code`: 0 for a plain image, 1 or 2 for a view on which the shader runs atomics on unsigned or
+    /// signed texels (`R32Uint` or `R32Sint`, over the same bytes).
+    pub(crate) fn image_view(
+        &self,
+        id: TexId,
+        res: &Res,
+        tic: &Tic,
+        kind: TextureKind,
+        atomic: u8,
+        stats: &mut EncodeStats,
+    ) -> Result<Texture, Skip> {
+        let mut t = tic.clone();
+        t.view.levels = 1;
+        t.view.swizzle = [2, 3, 4, 5];
+        self.view_impl(id, res, &t, Some(kind), atomic, stats)
+    }
+
+    fn view_impl(
+        &self,
+        id: TexId,
+        res: &Res,
+        tic: &Tic,
+        forced: Option<TextureKind>,
+        atomic: u8,
         _stats: &mut EncodeStats,
     ) -> Result<Texture, Skip> {
         let d = res.desc;
@@ -465,7 +507,7 @@ impl TextureStore {
             && format == d.format
             && kind == d.kind
             && tic.view.swizzle == [2, 3, 4, 5];
-        if identity || d.storage == Storage::Memoryless {
+        if (identity && atomic == 0) || d.storage == Storage::Memoryless {
             return Ok(res.tex.clone());
         }
         let key: ViewKey = (
@@ -475,7 +517,7 @@ impl TextureStore {
                 level_count,
                 first_slice,
                 slice_count,
-                format_key(format),
+                format_key(format) ^ (u32::from(atomic) << 30),
                 kind as u32,
                 u32::from_le_bytes(tic.view.swizzle),
             ],
@@ -484,9 +526,13 @@ impl TextureStore {
         if let Some(v) = views.get(&key) {
             return Ok(v.clone());
         }
-        let v = res
-            .tex
-            .view_swizzled(&ViewDesc { format, kind, first_level, level_count, first_slice, slice_count }, tic.view.swizzle)
+        let vd = ViewDesc { format, kind, first_level, level_count, first_slice, slice_count };
+        let made = if atomic == 0 {
+            res.tex.view_swizzled(&vd, tic.view.swizzle)
+        } else {
+            res.tex.atomic_view(&vd, atomic == 2)
+        };
+        let v = made
             .map_err(|e| {
                 let what = format_args!(
                     "view {id:?} {:?} -> {format:?} {kind:?} l{first_level}+{level_count} s{first_slice}+{slice_count}: {e:?}",

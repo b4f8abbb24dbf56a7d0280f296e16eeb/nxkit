@@ -40,6 +40,65 @@ pub(crate) enum BindKind {
     Sbuf,
     /// `c1`: the shader's own constant segment, whose bytes the json carries.
     C1,
+    /// `img`: the resource ID of the storage image in image slot `reg`.
+    Img,
+    /// `gmem_map`: the address of the host's memory pool table (`gmem.rs`).
+    GmemMap,
+    /// `gmem_log`: the address of a zeroed write log for the draw or dispatch (`gmem.rs`).
+    GmemLog,
+}
+
+/// How a shader accesses a storage image (`access::` of its `msl_type`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ImgAccess {
+    /// `access::read`.
+    Read,
+    /// `access::write`.
+    Write,
+    /// `access::read_write`.
+    ReadWrite,
+}
+
+/// What a shader declares for an `img` member.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ImgDecl {
+    /// The access.
+    pub(crate) access: ImgAccess,
+    /// The shader runs image atomics on it (`atomic` of the reflection).
+    pub(crate) atomic: bool,
+    /// The texel type is signed integer (`texture2d<int, ...>`). Only matters with `atomic`.
+    pub(crate) signed: bool,
+}
+
+impl ImgDecl {
+    /// True when the shader may write the image.
+    pub(crate) fn writes(&self) -> bool {
+        self.atomic || self.access != ImgAccess::Read
+    }
+
+    /// The key part of the view the shader needs: 0 for a plain image, 1 for an atomic one on unsigned texels, 2 on
+    /// signed.
+    pub(crate) fn atomic_code(&self) -> u8 {
+        match (self.atomic, self.signed) {
+            (false, _) => 0,
+            (true, false) => 1,
+            (true, true) => 2,
+        }
+    }
+}
+
+/// Reads the access and the texel type from an MSL type such as `texture2d<uint, access::read_write>`.
+fn declared_img(msl_type: &str, atomic: bool) -> ImgDecl {
+    let args = msl_type.split_once('<').map_or("", |(_, r)| r);
+    let access = if args.contains("access::read_write") {
+        ImgAccess::ReadWrite
+    } else if args.contains("access::write") {
+        ImgAccess::Write
+    } else {
+        ImgAccess::Read
+    };
+    let signed = args.trim_start().starts_with("int") || args.trim_start().starts_with("short");
+    ImgDecl { access, atomic, signed }
 }
 
 /// One member of the argument buffer.
@@ -59,6 +118,8 @@ pub(crate) struct Bind {
     /// texture's scale (`rscale` of the reflection). A `support` member has `Some(0)` when the shader reads the scale
     /// of the pass.
     pub(crate) rscale: Option<u32>,
+    /// For an `img` member: what the shader declares.
+    pub(crate) img: Option<ImgDecl>,
 }
 
 /// The texture type of an MSL argument type such as `texture2d_array<float>`.
@@ -238,7 +299,19 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             "border" => BindKind::Border,
             "sbuf" => BindKind::Sbuf,
             "c1" => BindKind::C1,
+            "img" => BindKind::Img,
+            "gmem_map" => BindKind::GmemMap,
+            "gmem_log" => BindKind::GmemLog,
             other => {
+                // The reason names the kind, so the health report says which one is missing.
+                nxkit_nvn::diag::example(
+                    nxkit_nvn::diag::Reason::SkipBinding,
+                    format_args!("binding kind {other} (arg {})", b.get("arg_id").and_then(Json::as_i64).unwrap_or(-1)),
+                );
+                nxkit_nvn::diag::note(
+                    nxkit_nvn::diag::Reason::BindingRefused,
+                    format_args!("kind {other}"),
+                );
                 if crate::diag("prog") {
                     eprintln!("DIAG prog binding kind {other}");
                 }
@@ -258,14 +331,14 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
                 .ok_or(Skip::Program)?
                 .saturating_mul(8),
         );
-        let dim = if kind == BindKind::Tex {
+        let dim = if matches!(kind, BindKind::Tex | BindKind::Img) {
             b.get("msl_type").and_then(Json::as_str).and_then(declared_dim)
         } else {
             None
         };
         let rw = b.get("rw").and_then(Json::as_bool).unwrap_or(true);
         let rscale = match kind {
-            BindKind::Tex => b
+            BindKind::Tex | BindKind::Img => b
                 .get("rscale")
                 .and_then(Json::as_i64)
                 .and_then(|v| u32::try_from(v).ok())
@@ -273,7 +346,11 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             BindKind::Support => pass_scale.then_some(0),
             _ => None,
         };
-        binds.push(Bind { arg_id, kind, reg, dim, rw, rscale });
+        let img = (kind == BindKind::Img).then(|| {
+            let atomic = b.get("atomic").and_then(Json::as_bool).unwrap_or(false);
+            declared_img(b.get("msl_type").and_then(Json::as_str).unwrap_or(""), atomic)
+        });
+        binds.push(Bind { arg_id, kind, reg, dim, rw, rscale, img });
     }
     let inputs = if vertex {
         json.get("vertex_inputs")
@@ -359,4 +436,30 @@ fn read_mesh(m: &Json) -> Result<MeshInfo, Skip> {
         payload: int("payload").unwrap_or(0),
         task: m.get("task").and_then(Json::as_bool).unwrap_or(false),
     })
+}
+
+#[cfg(test)]
+mod img_tests {
+    use super::*;
+
+    #[test]
+    fn an_img_member_gives_its_access_and_texel_type() {
+        let d = declared_img("texture2d<float, access::write>", false);
+        assert_eq!((d.access, d.atomic, d.signed), (ImgAccess::Write, false, false));
+        assert!(d.writes());
+        let d = declared_img("texture2d_array<float, access::read>", false);
+        assert_eq!(d.access, ImgAccess::Read);
+        assert!(!d.writes());
+        let d = declared_img("texture2d<uint, access::read_write>", true);
+        assert_eq!((d.access, d.atomic, d.signed, d.atomic_code()), (ImgAccess::ReadWrite, true, false, 1));
+        assert_eq!(declared_img("texture3d<int, access::read_write>", true).atomic_code(), 2);
+    }
+
+    #[test]
+    fn the_image_types_of_the_shaders_map_to_texture_kinds() {
+        use nxkit_metal::TextureKind as K;
+        assert_eq!(declared_dim("texture2d<float, access::write>"), Some(K::D2));
+        assert_eq!(declared_dim("texture2d_array<float, access::read>"), Some(K::D2Array));
+        assert_eq!(declared_dim("texture3d<float, access::write>"), Some(K::D3));
+    }
 }

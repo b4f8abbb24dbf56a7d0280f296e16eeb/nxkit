@@ -643,7 +643,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
             blend: Default::default(), write_masks: [15;8], depth_stencil: Default::default(),
             raster: Default::default(), topology: 4, attributes: vec![], streams: vec![],
             args: DrawArgs::Arrays { first: 0, count: 3, instances: 1, base_instance: 0 },
-            ubos: vec![], sbufs: vec![], textures: vec![], dynamic: Default::default() };
+            ubos: vec![], sbufs: vec![], textures: vec![], images: vec![], dynamic: Default::default() };
         let targets = Targets { colors: vec![Some(Format::Rgba8Unorm)], samples: 1 };
         let pipelines = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
         let (_, key) = pipelines.render(&draw, &vs, Some(&fs), &targets, false).unwrap();

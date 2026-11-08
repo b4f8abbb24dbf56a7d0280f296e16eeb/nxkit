@@ -1241,3 +1241,36 @@ fn archive_hits_and_misses_are_told_apart() {
     eprintln!("{why:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn image_atomics_get_an_r32_view_over_a_four_byte_colour_texture() {
+    use nxkit_metal::ViewDesc;
+    let Some(ctx) = ctx() else { return };
+    let base = |format| TextureDesc {
+        kind: TextureKind::D2,
+        width: 16,
+        height: 16,
+        depth: 1,
+        mip_levels: 1,
+        array_layers: 1,
+        allow_views: true,
+        format,
+        shader_read: true,
+        shader_write: true,
+        render_target: true,
+        storage: nxkit_metal::Storage::Private,
+        shader_atomic: true,
+    };
+    let view = |format| ViewDesc { format, kind: TextureKind::D2, first_level: 0, level_count: 1, first_slice: 0, slice_count: 1 };
+    // RGBA8 is stored as R32Uint: it sees itself as RGBA8 and the atomics see R32Uint and R32Sint
+    let rgba = Texture::new(&ctx, base(Format::Rgba8Unorm)).unwrap();
+    assert_eq!(rgba.desc().format, Format::Rgba8Unorm);
+    assert_eq!(rgba.atomic_view(&view(Format::Rgba8Unorm), false).unwrap().desc().format, Format::R32Uint);
+    assert_eq!(rgba.atomic_view(&view(Format::Rgba8Unorm), true).unwrap().desc().format, Format::R32Sint);
+    // an R32Uint texture serves itself
+    let r32 = Texture::new(&ctx, base(Format::R32Uint)).unwrap();
+    assert_eq!(r32.atomic_view(&view(Format::R32Uint), false).unwrap().desc().format, Format::R32Uint);
+    // a texture made without the flag cannot
+    let plain = Texture::new(&ctx, TextureDesc { shader_atomic: false, ..base(Format::Rgba8Unorm) }).unwrap();
+    assert!(plain.atomic_view(&view(Format::Rgba8Unorm), false).is_err());
+}

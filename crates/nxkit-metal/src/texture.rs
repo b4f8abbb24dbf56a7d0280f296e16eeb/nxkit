@@ -12,7 +12,7 @@ use objc2_metal::{
 
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
-use crate::format::Format;
+use crate::format::{Format, FormatClass};
 
 /// Where the pixels of a texture live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -79,6 +79,26 @@ pub struct TextureDesc {
     pub render_target: bool,
     /// Where the pixels live.
     pub storage: Storage,
+    /// Shaders run image atomics on the texture (`Texture::atomic_view`). Metal runs texture atomics only on
+    /// `R32Uint` and `R32Sint` textures made with the atomic usage. A texture of one of those formats gets the usage
+    /// whenever `shader_write` is set. A texture of another 4 byte colour format is stored as `R32Uint` with `format`
+    /// as a view over it, so the same bytes serve both. Needs `shader_write`, `allow_views` and `Storage::Private`.
+    pub shader_atomic: bool,
+}
+
+impl TextureDesc {
+    /// True when `shader_atomic` stores this texture as `R32Uint` under a view in its own format.
+    fn atomic_alias(&self) -> bool {
+        self.shader_atomic
+            && self.shader_write
+            && self.allow_views
+            && self.storage == Storage::Private
+            && matches!(self.kind, TextureKind::D2 | TextureKind::D2Array)
+            && self.format.class() == FormatClass::Color
+            && !self.format.is_compressed()
+            && self.format.bytes_per_pixel() == 4
+            && !matches!(self.format, Format::R32Uint | Format::R32Sint)
+    }
 }
 
 impl TextureDesc {
@@ -97,6 +117,7 @@ impl TextureDesc {
             shader_write: true,
             render_target: false,
             storage: Storage::Shared,
+            shader_atomic: false,
         }
     }
 
@@ -115,6 +136,7 @@ impl TextureDesc {
             shader_write: false,
             render_target: true,
             storage: Storage::Private,
+            shader_atomic: false,
         }
     }
 }
@@ -202,6 +224,8 @@ struct Inner {
     desc: TextureDesc,
     ctx: Context,
     resident: bool,
+    /// For an atomic alias: the `R32Uint` texture under `raw`.
+    atomic_raw: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
 // SAFETY: `MTLTexture` objects are thread safe reference counted objects and `Inner` never changes them.
@@ -212,8 +236,8 @@ unsafe impl Sync for Inner {}
 impl Drop for Inner {
     fn drop(&mut self) {
         if self.resident {
-            self.ctx
-                .remove_allocation(ProtocolObject::from_ref(&*self.raw));
+            let owner = self.atomic_raw.as_ref().unwrap_or(&self.raw);
+            self.ctx.remove_allocation(ProtocolObject::from_ref(&**owner));
         }
     }
 }
@@ -244,7 +268,11 @@ impl Texture {
             d.setMipmapLevelCount(desc.mip_levels as usize);
             d.setArrayLength(desc.array_layers as usize);
         }
+        let alias = desc.atomic_alias();
         let mut usage = MTLTextureUsage::empty();
+        if desc.shader_write && (alias || matches!(desc.format, Format::R32Uint | Format::R32Sint)) {
+            usage |= MTLTextureUsage::ShaderAtomic;
+        }
         if desc.shader_read {
             usage |= MTLTextureUsage::ShaderRead;
         }
@@ -256,6 +284,9 @@ impl Texture {
         }
         if desc.allow_views {
             usage |= MTLTextureUsage::PixelFormatView;
+        }
+        if alias {
+            d.setPixelFormat(Format::R32Uint.to_mtl());
         }
         d.setUsage(usage);
         d.setStorageMode(match desc.storage {
@@ -271,7 +302,13 @@ impl Texture {
         if resident {
             ctx.add_allocation(ProtocolObject::from_ref(&*raw));
         }
-        Ok(Self::wrap(ctx, raw, desc, resident, None))
+        if alias {
+            let seen = raw
+                .newTextureViewWithPixelFormat(desc.format.to_mtl())
+                .ok_or_else(|| create("texture view", "the alias view returned nil"))?;
+            return Ok(Self::wrap(ctx, seen, desc, resident, None, Some(raw)));
+        }
+        Ok(Self::wrap(ctx, raw, desc, resident, None, None))
     }
 
     /// Wraps a texture that Metal made, for example the texture of a drawable. It does not join the residency set.
@@ -280,7 +317,7 @@ impl Texture {
         raw: Retained<ProtocolObject<dyn MTLTexture>>,
         desc: TextureDesc,
     ) -> Self {
-        Self::wrap(ctx, raw, desc, false, None)
+        Self::wrap(ctx, raw, desc, false, None, None)
     }
 
     fn wrap(
@@ -289,6 +326,7 @@ impl Texture {
         desc: TextureDesc,
         resident: bool,
         parent: Option<Texture>,
+        atomic_raw: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -297,6 +335,7 @@ impl Texture {
                 desc,
                 ctx: ctx.clone(),
                 resident,
+                atomic_raw,
             }),
         }
     }
@@ -381,6 +420,23 @@ impl Texture {
 
     /// Makes a view with channel selectors: 0 zero, 1 one, 2 red, 3 green, 4 blue and 5 alpha.
     pub fn view_swizzled(&self, v: &ViewDesc, channels: [u8; 4]) -> Result<Texture> {
+        self.view_of(v, channels, false)
+    }
+
+    /// Makes the view that a shader needs for image atomics: `R32Uint` or, with `signed`, `R32Sint`, over the levels and
+    /// slices of `v` (its `format` is ignored). The texture must be 4 bytes per pixel. A texture made with
+    /// `shader_atomic` serves any 4 byte colour format; an `R32Uint` or `R32Sint` texture serves itself.
+    pub fn atomic_view(&self, v: &ViewDesc, signed: bool) -> Result<Texture> {
+        let d = self.inner.desc;
+        let ok = d.shader_write && (self.inner.atomic_raw.is_some() || matches!(d.format, Format::R32Uint | Format::R32Sint));
+        if !ok {
+            return Err(MetalError::Invalid("the texture was not made for image atomics"));
+        }
+        let format = if signed { Format::R32Sint } else { Format::R32Uint };
+        self.view_of(&ViewDesc { format, ..*v }, [2, 3, 4, 5], true)
+    }
+
+    fn view_of(&self, v: &ViewDesc, channels: [u8; 4], atomic: bool) -> Result<Texture> {
         if channels.iter().any(|c| *c > 5) {
             return Err(MetalError::Invalid("invalid texture channel selector"));
         }
@@ -427,10 +483,10 @@ impl Texture {
                 "the view is outside the slices of the texture",
             ));
         }
+        let source = if atomic { self.inner.atomic_raw.as_ref().unwrap_or(&self.inner.raw) } else { &self.inner.raw };
         // SAFETY: the level and slice ranges are inside the texture (checked above).
         let raw = unsafe {
-            self.inner
-                .raw
+            source
                 .newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
                     v.format.to_mtl(),
                     v.kind.to_mtl(),
@@ -462,6 +518,7 @@ impl Texture {
             array_layers: v.slice_count,
             allow_views: false,
             format: v.format,
+            shader_atomic: false,
             ..d
         };
         Ok(Self::wrap(
@@ -470,6 +527,7 @@ impl Texture {
             desc,
             false,
             Some(self.clone()),
+            None,
         ))
     }
 

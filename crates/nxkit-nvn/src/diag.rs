@@ -140,6 +140,24 @@ reasons! {
     PipelineMiss => "pipeline.archive-miss",
     /// Pipelines: a render, compute or depth-stencil state that Metal did not build.
     PipelineFailed => "pipeline.failed",
+    /// Shaders: a program refused for a binding kind the encoder does not fill. The example names the kind.
+    BindingRefused => "binding.refused",
+    /// Bindings: a storage image (`img`) written into an argument buffer. A count, not a loss.
+    BindImg => "bind.img",
+    /// Bindings: an `img` member with no usable image (nothing bound, or a texture a shader cannot write). It reads
+    /// and writes nothing.
+    ImgUnbound => "bind.img-unbound",
+    /// Bindings: the raw global memory table (`gmem_map`) bound. A count, not a loss.
+    BindGmemMap => "bind.gmem-map",
+    /// Bindings: a raw global memory write log (`gmem_log`) bound. A count, not a loss.
+    BindGmemLog => "bind.gmem-log",
+    /// Raw global memory: memory pools that do not fit the 8191 entries of the table; addresses in them are not
+    /// reached.
+    GmemPoolsOver => "gmem.pools-over",
+    /// Raw global memory: more draws and dispatches with a write log than the batch has logs; they share the last one.
+    GmemLogsShared => "gmem.logs-shared",
+    /// Raw global memory: pools that shaders wrote through raw pointers, learned from the logs. Not a loss.
+    GmemPoolWritten => "gmem.pool-written",
 }
 
 impl Reason {
@@ -149,6 +167,10 @@ impl Reason {
             && self != Reason::SkipPending
             && self != Reason::UploadScaled
             && self != Reason::PipelineMiss
+            && self != Reason::BindImg
+            && self != Reason::BindGmemMap
+            && self != Reason::BindGmemLog
+            && self != Reason::GmemPoolWritten
     }
 }
 
