@@ -86,6 +86,14 @@ fn plan(t: &Tex, view: u64, region: u64, row: i64, img: i64) -> AbiResult<Option
     }))
 }
 
+/// The order inside a GOB of the console the game was built for: the GPU backend reads the storage in the same order.
+fn gob_order() -> GobOrder {
+    match nxkit_abi::platform::get() {
+        nxkit_abi::platform::Platform::Nx => GobOrder::Tegra,
+        nxkit_abi::platform::Platform::Ounce => GobOrder::Switch2,
+    }
+}
+
 /// Calls `f(storage_offset, buffer_offset, bytes)` for every run of the copy. The runs lie inside the storage.
 fn walk(
     t: &Tex,
@@ -146,7 +154,7 @@ fn walk(
                 let n = (16 - bx % 16).min(p.wb - x);
                 let at = g.base
                     + block_linear_offset(
-                        GobOrder::default(),
+                        gob_order(),
                         (bx, p.y0 + y, slice),
                         laid_out,
                         g.rows,

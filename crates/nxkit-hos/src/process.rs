@@ -24,7 +24,7 @@ impl Kernel {
         (self.config.process_exit)(0);
     }
 
-    /// `GetSystemTick`: the counter of the Switch at 19.2 MHz.
+    /// `GetSystemTick`: the system counter, 19.2 MHz on the Switch and 31.25 MHz on the Switch 2.
     pub(crate) fn system_tick(&self) -> u64 {
         sys::system_tick()
     }

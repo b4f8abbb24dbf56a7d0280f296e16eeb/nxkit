@@ -165,9 +165,10 @@ fn guest_ns() -> u64 {
     crate::nvn::ctx::settings_if_installed().map_or(0, |s| (s.clock_ns)())
 }
 
-/// The system ticks of the Switch (19.2 MHz) for a time in nanoseconds.
+/// The system ticks for a time in nanoseconds: 19.2 MHz on the Switch, 31.25 MHz on the Switch 2, as `svc
+/// GetSystemTick`.
 fn ticks(ns: u64) -> u64 {
-    (u128::from(ns) * 12 / 625) as u64
+    nxkit_abi::platform::get().ticks_from_ns(ns)
 }
 
 /// The game presents a frame: it is the next frame of the layer. Called by `nvnQueuePresentTexture`.
@@ -282,7 +283,7 @@ static HISTORY_NOTE: AtomicBool = AtomicBool::new(false);
 /// `FrameInfo` is 40 bytes: the status (2 shown with a present time, 1 queued and not shown yet), the frame number
 /// (the numbering of `GetLatestFrameNumber`), the queue tick and the present tick twice. The backend does not report
 /// when a frame reaches the screen. A frame is shown from the first call that sees it, with that time as its present
-/// time. The ticks are 19.2 MHz. An SDK of the Switch 2 counts at another rate, which the host cannot tell apart.
+/// time. The ticks are those of `svc GetSystemTick`: 19.2 MHz on the Switch, 31.25 MHz on the Switch 2.
 extern "C" fn list_frame_history(out: u64, n: u32, _layer: u64) -> u32 {
     const NAME: &str = "nn::vi::ListFrameHistory";
     let n = n as i32;
@@ -572,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ticks_run_at_19_2_mhz() {
+    fn the_ticks_run_at_19_2_mhz_on_the_switch() {
         assert_eq!(ticks(1_000_000_000), 19_200_000);
     }
 
