@@ -191,11 +191,19 @@ fn unpack(p: &Say, img: &Path, dest: &Path, what: &str) -> Result<(usize, u64), 
 }
 
 /// Links the files of the folder `from` into `dest`, reporting the bytes.
-fn link(p: &Say, threads: usize, from: &Path, dest: &Path, what: &str) -> Result<(usize, u64), String> {
+/// Files of `overlay` (patched ones) are taken from there.
+fn link(
+    p: &Say,
+    threads: usize,
+    from: &Path,
+    overlay: Option<&Path>,
+    dest: &Path,
+    what: &str,
+) -> Result<(usize, u64), String> {
     p.set(Update { step: Some(what), ..Default::default() });
     let count = crate::events::Count::default();
     p.counted(None, "B", &count, || {
-        romfs::link_tree(from, dest, threads, |done, total| {
+        romfs::link_tree(from, overlay, dest, threads, |done, total| {
             // the workers report out of order
             count.done.fetch_max(done, std::sync::atomic::Ordering::Relaxed);
             count.set_total(total);
@@ -326,11 +334,17 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let exefs = ver_dir.join("ExeFS");
     let img = ver_dir.join("RomFS.img");
     let aoc = stage(p, "romfs", "RomFS", || {
+        // title resource patches: only the patched files are new, in a folder beside the extract
+        let patched = crate::resource_patch::overlay(a, &b, &|m| p.say(m), &ver_dir, &ver_dir.join("romfs"))?;
         // a NUP's RomFS is a folder already: its files are linked into the app, not copied
         let (files, bytes) = if nup {
-            link(p, a.threads, &ver_dir.join("romfs"), &run_dir.join("romfs"), "linking RomFS")?
+            link(p, a.threads, &ver_dir.join("romfs"), patched.as_deref(), &run_dir.join("romfs"), "linking RomFS")?
         } else {
-            unpack(p, &img, &run_dir.join("romfs"), "unpacking RomFS")?
+            let r = unpack(p, &img, &run_dir.join("romfs"), "unpacking RomFS")?;
+            if let Some(o) = &patched {
+                romfs::overlay_onto(o, &run_dir.join("romfs"))?;
+            }
+            r
         };
         let marker = run_dir.join("romfs").join(t.st.romfs_marker.trim_start_matches('/'));
         if !marker.exists() {
@@ -346,7 +360,7 @@ pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
                 .map_err(|_| format!("DLC {tid:016X}: its index does not fit 32 bits"))?;
             let rel = format!("aoc/{index}");
             if nup {
-                link(p, a.threads, &ver_dir.join(&rel), &run_dir.join(&rel), "linking DLC")?;
+                link(p, a.threads, &ver_dir.join(&rel), None, &run_dir.join(&rel), "linking DLC")?;
             } else {
                 let from = work.join("aoc").join(format!("{index}.img"));
                 unpack(p, &from, &run_dir.join(&rel), "unpacking DLC")?;

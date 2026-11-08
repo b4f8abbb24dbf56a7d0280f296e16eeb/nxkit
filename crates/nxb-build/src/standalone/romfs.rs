@@ -55,11 +55,37 @@ pub fn unpack(img: &Path, dest: &Path, mut each: impl FnMut(u64, u64)) -> Result
     Ok((files.len(), total))
 }
 
+/// Puts the files of an overlay folder (patched RomFS files at their RomFS paths, see `resource_patch::overlay`) over
+/// the unpacked RomFS in `dest`: each is a new file, never a write through an existing one. The overlay's stamp file
+/// is not a RomFS file and stays out.
+pub(super) fn overlay_onto(overlay: &Path, dest: &Path) -> Result<(), String> {
+    let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    let mut stack = vec![PathBuf::new()];
+    while let Some(rel) = stack.pop() {
+        let here = overlay.join(&rel);
+        for e in std::fs::read_dir(&here).map_err(|e| io(&here, e))? {
+            let e = e.map_err(|e| io(&here, e))?;
+            let r = rel.join(e.file_name());
+            if e.file_type().map_err(|x| io(&e.path(), x))?.is_dir() {
+                std::fs::create_dir_all(dest.join(&r)).map_err(|x| io(&dest.join(&r), x))?;
+                stack.push(r);
+            } else if !rel.as_os_str().is_empty() || e.file_name() != ".resource-patches" {
+                let to = dest.join(&r);
+                let _ = std::fs::remove_file(&to);
+                std::fs::copy(e.path(), &to).map_err(|x| io(&to, x))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Puts every file of the folder `src` into `dest` (replaced) without copying bytes: a hard link, or where that fails
 /// (another volume) `std::fs::copy`, which clones on APFS. The files of a build's work folder are written once and
-/// never rewritten in place, so the app and the work folder can share them. Returns the number of files and bytes.
+/// never rewritten in place, so the app and the work folder can share them. A file the `overlay` folder also has
+/// (same relative path) is taken from there. Returns the number of files and bytes.
 pub(super) fn link_tree(
     src: &Path,
+    overlay: Option<&Path>,
     dest: &Path,
     threads: usize,
     each: impl Fn(u64, u64) + Sync,
@@ -100,7 +126,10 @@ pub(super) fn link_tree(
         for _ in 0..threads.max(1) {
             s.spawn(|| {
                 while let Some((rel, size)) = files.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    let (from, to) = (src.join(rel), dest.join(rel));
+                    let (mut from, to) = (src.join(rel), dest.join(rel));
+                    if let Some(o) = overlay.map(|o| o.join(rel)).filter(|o| o.is_file()) {
+                        from = o;
+                    }
                     let r = std::fs::hard_link(&from, &to)
                         .or_else(|_| std::fs::copy(&from, &to).map(|_| ()))
                         .map_err(|e| io(&from, e));

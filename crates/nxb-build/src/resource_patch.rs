@@ -6,6 +6,9 @@
 //! a zstd frame of raw blocks, so no compressor is needed, and the game's dictionary decoder accepts a frame without
 //! a dictionary ID. Files with other digests (another game version) are left as they are, with a warning.
 //!
+//! The standalone build does not clone the extract folder: [`overlay`] writes only the patched files into a small
+//! folder, and the romfs stage takes a file from there when the overlay has one.
+//!
 //! The patched package folder is `<work>/resources/<package>`: a clone of `extract/<package>` in which only the
 //! patched archive is new. In a `DMROMFS1` image the new archive goes after the old file data and the index moves
 //! behind it, so every other byte of the image stays as the extract stage wrote it.
@@ -175,6 +178,87 @@ pub(crate) fn package_dir(
     Ok(out)
 }
 
+/// The folder of patched RomFS files for the standalone build, or `None` when no patch applies. `ex` is the extract
+/// folder (`extract/<package>`); the RomFS is its `RomFS.img`, or the loose folder `loose` (a NUP's). The folder is
+/// `<work>/resources/<name of ex>.overlay` and holds only the new files, at their RomFS paths: nothing in `extract/`
+/// is written, and the caller takes each file from the overlay instead of the RomFS. Warnings go to `say`.
+pub(crate) fn overlay(
+    a: &Args,
+    b: &Build,
+    say: &dyn Fn(&str),
+    ex: &Path,
+    loose: &Path,
+) -> Result<Option<PathBuf>, String> {
+    let (chosen, warnings) = choices(&b.title, &a.resource_patches)?;
+    for w in &warnings {
+        say(w);
+    }
+    let work = ex.parent().and_then(Path::parent).unwrap_or(&b.work);
+    let res = work.join("resources");
+    let name = ex.file_name().map_or_else(
+        || b.package.clone(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let out = res.join(format!("{name}.overlay"));
+    let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    // an overlay of an earlier build is not used when this one has nothing to patch
+    let none = || -> Result<Option<PathBuf>, String> {
+        if out.exists() {
+            std::fs::remove_dir_all(&out).map_err(|e| io(&out, e))?;
+        }
+        Ok(None)
+    };
+    if chosen.is_empty() {
+        return none();
+    }
+    let img = ex.join("RomFS.img");
+    let romfs = if img.is_file() {
+        Romfs::image(&img)?
+    } else if loose.is_dir() {
+        Romfs::Dir(loose.to_path_buf())
+    } else {
+        say(&format!(
+            "resource patches: no RomFS in {}, the game keeps its stock resources",
+            ex.display()
+        ));
+        return none();
+    };
+    let stamp = stamp_of(&romfs, &chosen)?;
+    if std::fs::read_to_string(out.join(STAMP)).is_ok_and(|s| s == stamp) {
+        return Ok(Some(out));
+    }
+    let (files, warnings) = edited(&|path| romfs.read(path), &chosen);
+    for w in &warnings {
+        say(w);
+    }
+    if files.is_empty() {
+        return none();
+    }
+    let tmp = res.join(format!(".{name}.overlay.tmp"));
+    if tmp.exists() {
+        std::fs::remove_dir_all(&tmp).map_err(|e| io(&tmp, e))?;
+    }
+    for (path, data) in &files {
+        let f = tmp.join(path);
+        if let Some(d) = f.parent() {
+            std::fs::create_dir_all(d).map_err(|e| io(d, e))?;
+        }
+        std::fs::write(&f, data).map_err(|e| io(&f, e))?;
+    }
+    std::fs::write(tmp.join(STAMP), &stamp).map_err(|e| io(&tmp, e))?;
+    if out.exists() {
+        std::fs::remove_dir_all(&out).map_err(|e| io(&out, e))?;
+    }
+    std::fs::rename(&tmp, &out).map_err(|e| io(&out, e))?;
+    let names: Vec<&str> = files.iter().map(|f| f.0.as_str()).collect();
+    say(&format!(
+        "resource patches: {} rewritten in {}",
+        names.join(", "),
+        out.display()
+    ));
+    Ok(Some(out))
+}
+
 /// Where the files of the RomFS are read from.
 enum Romfs {
     /// A `DMROMFS1` image.
@@ -243,6 +327,17 @@ fn stamp_of(romfs: &Romfs, chosen: &[(ResourcePatch, f32)]) -> Result<String, St
             x.to_bits(),
             p.archive_sha256.to_hex()
         ));
+        // a folder's own time does not change when a file in it does: the archive's size and time do
+        if let Romfs::Dir(d) = romfs
+            && let Ok(m) = std::fs::metadata(d.join(p.archive))
+        {
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            s.push_str(&format!("{} {} {t}\n", p.archive, m.len()));
+        }
     }
     Ok(s)
 }
