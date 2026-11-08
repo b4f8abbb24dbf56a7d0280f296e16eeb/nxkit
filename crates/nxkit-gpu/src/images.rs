@@ -245,6 +245,7 @@ mod tests {
         let mut detail = FrameDetail::default();
         detail.dispatches.push(DispatchDetail {
             program: "cs".into(),
+            push: None,
             groups: [1; 3],
             ubos: vec![],
             sbufs: vec![],
@@ -253,6 +254,7 @@ mod tests {
         });
         detail.dispatches.push(DispatchDetail {
             program: "".into(),
+            push: None,
             groups: [1; 3],
             ubos: vec![],
             sbufs: vec![],

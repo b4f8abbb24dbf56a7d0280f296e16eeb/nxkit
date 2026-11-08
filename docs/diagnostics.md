@@ -32,6 +32,8 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_GPU_LABELS=1` | Names the encoder of each pass (pass index, first attachment, draws) for the Metal debugger. Instruments does not show the labels of Metal 4 encoders. |
 | `NXKIT_PASS_LIST=1` | With `NXKIT_DIAG=passes`: also prints every pass of the frame with its attachments and their load and store actions. |
 | `NXKIT_OVERLAP=1` | The CPU runs one frame ahead of the GPU: `nvnSyncWait` for the newest frame waits for the one before it, and every bound uniform buffer reads a copy (`docs/plans/fence-overlap.md`). |
+| `NXKIT_NDVE=0` | Turns the native replacement of the movie network (`nn::ndve`) off. The game's own chain of compute dispatches runs, as it does when the weights or the bindings do not match (`docs/plans/ndve-impl.md`). |
+| `NXKIT_NDVE_COMPARE=1` | With `NXKIT_DIAG=ndve`: on one movie frame in 120 (the 10th, the 130th and so on), the game's chain and the native plan both run. The plan writes copies of its pictures. Four frames later the output of the plan and the output of the game are read back and the line `DIAG ndve compare` gives the largest difference in each channel and the number of differing pixels. The game's chain is noisy (a race between lanes), so judge by the largest difference. |
 | `NXKIT_PIPELINE_ASYNC=0` | Builds a missing render pipeline in the encode, as before. By default it compiles on a background thread and the draw is left out until it is ready (`skip.pending`). |
 | `NXKIT_AV1_SOFTWARE=1` | Decodes AV1 movies on the CPU with rav1d, also on a Mac with an AV1 decoder in hardware (M3 and newer). Use it to compare the two decoders. The log line `[codec] AV1: ...` names the decoder that opened. |
 | `NXKIT_AUDIO_CLICKS=1` | Prints every jump at the border of two rendered audio blocks that is much larger than any step inside them (what a click sounds like), with the wall clock in ms. |
@@ -118,6 +120,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `judder` | nvn | the histogram of the refreshes each shown frame stayed, and the mean (see above) | every 120 shown frames | low |
 | `hitch` | gpu | each frame whose encode took 7 ms or more or that built pipelines or textures, with the wall clock in ms, to put next to the late frames of `NXKIT_PACE_DIAG` | each such frame | low |
 | `kpass` | gpu | the render passes that could run as compute dispatches (`docs/plans/kernel-passes.md`, step 0), the runs of them, and why the others cannot | every 300 frames | low |
+| `ndve` | gpu | for each distinct set of movie weights, once: the capture list of `docs/plans/ndve-native.md` section 10 (the run, and for each dispatch its key, groups, storage and uniform buffers with the offset from the blob start, push constants as words and floats, textures and images with format, size and sampler), whether the plan was built or why it was refused, and which of the game's intermediate pictures the frame reads later. Also each reason the game's chain ran instead (first 50), and the `NXKIT_NDVE_COMPARE=1` results | once per set of weights, and the compare every 120 movie frames | low (the compare reads two pictures) |
 | `walkmiss` | gpu | with `NXKIT_WALK_CACHE=1`: the field of the walker state that made a call miss the templates of its handle | every 20000 misses | medium |
 | `passmerge` | nvn, gpu | what the pass plan still leaves: render passes (with one draw, empty), neighbours with equal attachments that stayed apart and why (clear, sampled, other), pairs split by a compute or copy pass and how many of them touch none of the textures, loads that are `Load` only by the default rule, attachments no draw wrote, stores kept only by assumption, and (from the encoder) whether the first draw of such a load covers the whole target | every 30 frames (nvn line), sampled frames (cover lines) | low |
 | `passes` | gpu | the render passes of a frame by their number of draws and by the size of their first attachment | every 300 frames | low |
@@ -213,6 +216,13 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `program.failed` | encoder | A program that did not load. It counts once per key. |
 | `pipeline.archive-miss` | encoder | The archive of the build lacked a pipeline and Metal compiled it. The draw waited as `skip.pending`, so this is a hitch and not a loss. Without `NXKIT_DIAG=stats`, `health` or `pipe` it is only counted. With one on, the example says why (see "Archive coverage"). It counts the pipelines of a run without an archive too. |
 | `pipeline.failed` | encoder | A render, compute or depth-stencil state that Metal did not build. It counts every attempt. |
+
+The native replacement of a chain of dispatches (`ndve`, see `NXKIT_NDVE`) prints its own block after the report, with the same cadence, and when a counter shows up that the last block did not have. It is not in the table above, because the reasons live in `nxkit-nvn`, which knows no network:
+
+| line | meaning |
+|---|---|
+| `ndve.native` | Frames in which the plan ran in place of the game's dispatches. |
+| `ndve.fallback(reason)` | Frames in which the run was found and the game's dispatches ran. The reasons are `run` and `interleaved` (the commands around the run are not only dispatches and barriers), `binding` and `memory` (a weight buffer is not bound or lies outside guest memory), `weights` (the bytes are not the network's), `build`, `buffer`, `pipeline` and `tgmem` (the plan or its kernels could not be made), `push`, `resource` and `spec` (a texture, image or push block the plan names is not bound where the replacement expects it), `encode` (Metal refused the pass; the picture of that frame is lost). The example gives the sentence. |
 
 The walker counts only when it reads a record. A recording that plays from the template cache does not count again. Without `NXKIT_WALK_CACHE=1` every frame counts. With `NXKIT_VERIFY_CACHE=1`, a recording is walked twice and counts twice.
 

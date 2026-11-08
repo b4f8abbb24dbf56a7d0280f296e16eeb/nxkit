@@ -639,7 +639,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
             arg_bytes: 0, inputs: vec![], colors: Some(vec![0]), threadgroup: [1;3], c1: vec![], mesh: None };
         let vs = stage("vs");
         let mut fs = stage("fs");
-        let draw = DrawDetail { program: ProgramRef { vertex: "point-size".into(), fragment: Some("fs".into()), task: None, mesh: None },
+        let draw = DrawDetail { program: ProgramRef { vertex: "point-size".into(), fragment: Some("fs".into()), task: None, mesh: None }, push: None,
             blend: Default::default(), write_masks: [15;8], depth_stencil: Default::default(),
             raster: Default::default(), topology: 4, attributes: vec![], streams: vec![],
             args: DrawArgs::Arrays { first: 0, count: 3, instances: 1, base_instance: 0 },

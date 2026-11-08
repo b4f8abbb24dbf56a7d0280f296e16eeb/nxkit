@@ -640,7 +640,7 @@ mod support_tests {
     use crate::programs::Bind;
 
     fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
-        Bind { arg_id: 0, kind, reg, dim: None, rw: false, rscale, img: None }
+        Bind { arg_id: 0, bank: 0, kind, reg, dim: None, rw: false, rscale, img: None }
     }
 
     fn env<'a>(
