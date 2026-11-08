@@ -47,7 +47,7 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `span` | The memory the module maps, `size - low`. The host reserves `[base + low, base + low + span)` for the module, and it stops if `low` and `span` do not fit the segments. |
 | `text`, `rodata`, `data` | `{ "offset", "size" }` relative to `base`. The offset of `data` is a multiple of 0x4000. |
 | `bss_size` | The size of the bss. It starts at the end of `data`. |
-| `image` | The rewritten flat image. Byte 0 belongs to `base`. The copy path and the relocation step read it. |
+| `image` | The rewritten flat image. Byte 0 belongs to `base`. The loader reads it for the data segments and the relocations. |
 | `imports` | A JSON list of `{ "name", "slot", "addend", "weak" }`, one entry for each relocation of an undefined symbol in the image, in the order of the relocation tables. `slot` is the offset from `base` of an 8-byte slot in a writable segment. The host stores the address of the name plus `addend`. `addend` is 0 for a `JUMP_SLOT`. `weak` is `true` for a weak undefined symbol. The host stops if the image has another number of undefined relocations than the list has entries. |
 | `exports` | A JSON list of `{ "name", "slot" }`. `slot` is the offset of the symbol. Only global and weak symbols that the module defines and that are not hidden are listed. |
 | `entry` | The offset of the entry point. Exactly one module has it. |
@@ -126,11 +126,19 @@ The host gives these numbers and the region ranges to the kernel when it starts 
 1. The host reads every `image` file.
 2. It calls `dlopen` on `nxgame.dylib` and reads the header and the load commands of the mapped image. It checks that every `__NX_<NAME>_*` segment has the offset, size and protection of `game.json` relative to the image.
 3. dyld may slide the library. The host takes the slide, moves every module by it and reserves the rest of the guest range behind `__LINKEDIT` with an address hint. It maps read and write memory over the gaps between the segments. If the slid layout would end above `1 << 39`, the host skips this step and gives the reason in the log.
-4. If dyld refuses the library, or the range behind it is not free, the host closes the library, prints the reason and copies. It reserves the whole range, read and write, and copies each segment from `image` with `file_offset` and `file_size`. The segment is `rw-` while it is written, and then `r-x` if it is code. The reservation is made as follows. The host asks for the preferred address first if the range ends at or below `1 << 39`. Otherwise it asks for `0x70_0000_0000`, which is the only range that macOS gives below that limit. It takes the address only if the range ends at or below `1 << 39` and the slide is a multiple of 2 MiB. Then it moves every module by the slide, plans the layout again and copies at the moved addresses. It prints `nxkit-host: the guest moved by <slide> to <base>`. If the system gives no such address, the host stops and names the range. The loader relocates for the moved bases, as for a slid library.
+4. If dyld refuses the library, or the range behind it is not free, the host closes the library, prints the reason and maps the code itself. This is the file map. macOS arm64 does not run code in anonymous pages, even after `mprotect` to `r-x` (measured 2026-11-08). It runs code only from pages of a signed file. The host does these steps:
+    1. It reads the load commands of `nxgame.dylib` and checks every `__NX_<NAME>_*` segment against `game.json` by offset, size and protection. The library must have an `LC_CODE_SIGNATURE`.
+    2. It registers the signature once with `fcntl(F_ADDFILESIGS_RETURN)`.
+    3. It reserves the whole range, read and write. It asks for the preferred address first if the range ends at or below `1 << 39`. Otherwise it asks for `0x70_0000_0000`, which is the only range that macOS gives below that limit. It takes the address only if the range ends at or below `1 << 39` and the slide is a multiple of 2 MiB.
+    4. It moves every module by the slide, plans the layout again and prints `nxkit-host: the guest moved by <slide> to <base>`. If the system gives no such address, the host stops and names the range.
+    5. It maps every `r-x` segment (the text and the patch area) from the library file with `MAP_FIXED` over the reservation, at the moved address. The bytes of the file are the file bytes of the segment. The rest of the segment stays read and write and zero.
+    6. It copies each data segment from `image` with `file_offset` and `file_size`. The data stays read and write.
 
-The copy uses `mprotect` only. It has no `MAP_JIT` and signs nothing. A hardened runtime would need the entitlement `com.apple.security.cs.allow-unsigned-executable-memory`.
+    The loader relocates for the moved bases, as for a slid library. All mappings exist before the GPU buffer is created, because a `MAP_FIXED` after that would detach the pages from the buffer. A missing or unsigned library is an error with a message. There is no other way to run the code.
 
-A mismatch between the library and `game.json` is an error and never a reason to copy.
+Nothing writes into the code pages after the mapping. The loader refuses a relocation that targets a segment that is not writable.
+
+A mismatch between the library and `game.json` is an error and never a reason to map the code in another way.
 
 ### Finishing
 
@@ -196,7 +204,7 @@ At most two frames are in flight on the GPU. The backend presents at the target 
 
 1. Whether each fixed range is free in a fresh process, and whether the whole layout ends below `1 << 39`.
 2. Whether `MAP_FIXED` and `mach_vm_allocate` with `VM_FLAGS_FIXED` get each range.
-3. The cost of the copy: map, copy and `mprotect` for the size of each module.
+3. The cost of a copy of the size of each module into anonymous memory, which is the cost of the data segments.
 4. Where dyld puts the segments of `nxgame.dylib`, and its slide.
 5. Whether `newBufferWithBytesNoCopy` accepts the whole reservation, made as the host makes it: read and write, below `1 << 39`, with the guard page set after the buffer.
 6. How much wired memory the system has before and after step 5.

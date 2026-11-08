@@ -8,6 +8,8 @@ use crate::module::{Module, Prot};
 const MAGIC_64: u32 = 0xfeed_facf;
 /// `LC_SEGMENT_64`.
 const LC_SEGMENT_64: u32 = 0x19;
+/// `LC_CODE_SIGNATURE`.
+const LC_CODE_SIGNATURE: u32 = 0x1d;
 /// The size of `mach_header_64`.
 pub const HEADER_SIZE: usize = 32;
 
@@ -88,6 +90,31 @@ pub fn segments(bytes: &[u8]) -> Result<Vec<Segment>> {
         at += size;
     }
     Ok(out)
+}
+
+/// The file offset and the size of the code signature, from the header and the load commands at the start of
+/// `bytes`. `None` when the file has no `LC_CODE_SIGNATURE`.
+pub fn code_signature(bytes: &[u8]) -> Result<Option<(u32, u32)>> {
+    let end = commands_end(bytes)?;
+    if bytes.len() < end {
+        return Err(bad("load commands are cut off"));
+    }
+    let ncmds = u32_at(bytes, 16).ok_or_else(|| bad("short header"))?;
+    let mut at = HEADER_SIZE;
+    for _ in 0..ncmds {
+        let cmd = u32_at(bytes, at).ok_or_else(|| bad("short load command"))?;
+        let size = u32_at(bytes, at + 4).ok_or_else(|| bad("short load command"))? as usize;
+        if size < 8 || at + size > end {
+            return Err(bad("a load command has a bad size"));
+        }
+        if cmd == LC_CODE_SIGNATURE {
+            let off = u32_at(bytes, at + 8).ok_or_else(|| bad("short code signature command"))?;
+            let len = u32_at(bytes, at + 12).ok_or_else(|| bad("short code signature command"))?;
+            return Ok(Some((off, len)));
+        }
+        at += size;
+    }
+    Ok(None)
 }
 
 /// Checks that the library holds every segment of a module as `game.json` says. `m` has the preferred base, and
@@ -172,6 +199,20 @@ mod tests {
         assert!(verify(&m, &segs).is_err());
         segs.pop();
         assert!(verify(&m, &segs).is_err());
+    }
+
+    #[test]
+    fn finds_the_code_signature() {
+        let mut b = sample();
+        assert_eq!(code_signature(&b).ok(), Some(None));
+        let n = u32::from_le_bytes([b[16], b[17], b[18], b[19]]) + 1;
+        b[16..20].copy_from_slice(&n.to_le_bytes());
+        let size = u32::from_le_bytes([b[20], b[21], b[22], b[23]]) + 16;
+        b[20..24].copy_from_slice(&size.to_le_bytes());
+        for v in [LC_CODE_SIGNATURE, 16, 0x9000, 0x1234] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        assert_eq!(code_signature(&b).ok(), Some(Some((0x9000, 0x1234))));
     }
 
     #[test]

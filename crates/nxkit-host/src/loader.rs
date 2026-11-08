@@ -150,6 +150,13 @@ fn fill_key_page(mem: &GuestMemory, m: &Module, keys: &Keys) -> Result<()> {
 fn apply_relocations(mem: &GuestMemory, m: &Module, image: &[u8], r: &Resolver) -> Result<usize> {
     let plan = reloc::plan(m, image, &mut |name| r.find(name))?;
     for w in &plan.writes {
+        if !m.writable(w.offset, 8) {
+            let seg = m.segment_at(w.offset).map_or("no segment", |s| s.name.as_str());
+            return Err(HostError::Load(format!(
+                "module {}: a relocation targets offset {:#x} in {seg}, which is not writable",
+                m.name, w.offset
+            )));
+        }
         mem.res.write_u64(m.base + w.offset, w.value)?;
     }
     eprintln!(

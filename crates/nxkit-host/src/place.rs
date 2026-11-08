@@ -8,18 +8,23 @@
 //!
 //! The segments of the library are signed with the library, so no run time permission for unsigned code is needed.
 //!
-//! The second way is the copy. When the library cannot be used (dyld refuses it, or the range behind it is taken), the
-//! host reserves the whole range and copies each segment from the flat image file. It asks for the preferred
-//! address first. The kernel models a 39-bit address space, so the range must end at or below `1 << 39`. When the
-//! preferred range ends higher or is not free, the host takes the address that the system gives below that limit and
-//! moves the game by the difference, as it does for a slid library. This is what nxnative does: it copies code into anonymous memory and calls `mprotect` to make it executable. It uses no
-//! `MAP_JIT` and signs nothing, which works while the process has no hardened runtime. A hardened runtime needs the
-//! entitlement `com.apple.security.cs.allow-unsigned-executable-memory`, and the build of the host adds it then.
+//! The second way is the file map. macOS arm64 does not run code in anonymous pages, even after `mprotect` to `r-x`
+//! (measured 2026-11-08), so the host maps the code from the signed library itself. It reserves the whole range. It
+//! asks for the preferred address first. The kernel models a 39-bit address space, so the range must end at or below
+//! `1 << 39`. When the preferred range ends higher or is not free, the host takes the address that the system gives
+//! below that limit and moves the game by the difference, as it does for a slid library. It reads the load commands
+//! of `nxgame.dylib`, checks the segments against `game.json`, registers the code signature with `fcntl` once and maps
+//! every `r-x` segment (the text and the patch area) from the file with `MAP_FIXED` over the reservation. The data
+//! segments are copied from the image files. Nothing writes into the code pages after that, and `loader.rs` refuses
+//! a relocation that targets one. A missing or unsigned library is an error, because no other way can run code.
 //!
 //! The reservation is read and write everywhere, because Metal refuses a no-copy buffer over a `PROT_NONE` page.
 //!
 //! A library that does not match `game.json` is an error and never a reason to copy (R15). The reason for a fall back
 //! is written to the log.
+
+use std::fs::File;
+use std::os::unix::fs::FileExt;
 
 use crate::error::{HostError, Result};
 use crate::layout::{self, Layout};
@@ -27,15 +32,15 @@ use crate::macho::{self, Segment as MachSegment};
 use crate::manifest::Game;
 use crate::memory::{self, GuestMemory};
 use crate::module::Prot;
-use crate::sys::{self, Dylib, PROT_RW, PROT_RX, Reservation};
+use crate::sys::{self, Dylib, PROT_RW, Reservation};
 
 /// How the modules came to their addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
     /// dyld mapped the segments, and the library may have slid.
     Dylib,
-    /// The host copied the segments.
-    Copy,
+    /// The host copied the data segments and mapped the code from the signed library file.
+    FileMap,
 }
 
 /// The result of the placement.
@@ -207,11 +212,63 @@ pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
     Ok((res, moved, layout))
 }
 
-fn via_copy(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
+/// The library file, its segments and where its code signature is.
+struct CodeFile {
+    file: File,
+    segs: Vec<MachSegment>,
+    sig: (u64, u64),
+}
+
+/// Opens the library, reads its load commands and checks every segment of every module against `game.json`. A
+/// library that is missing, not signed or different from `game.json` is an error (R15).
+fn open_code_file(game: &Game) -> Result<CodeFile> {
+    let path = game.path(&game.dylib);
+    let missing = |e: std::io::Error| {
+        HostError::Load(format!(
+            "{}: {e}. The code of the game is mapped from this signed library, and nothing else can run it",
+            path.display()
+        ))
+    };
+    let file = File::open(&path).map_err(missing)?;
+    let mut head = [0u8; macho::HEADER_SIZE];
+    file.read_exact_at(&mut head, 0).map_err(missing)?;
+    let mut cmds = vec![0u8; macho::commands_end(&head)?];
+    file.read_exact_at(&mut cmds, 0).map_err(missing)?;
+    let segs = macho::segments(&cmds)?;
+    for m in &game.modules {
+        macho::verify(m, &segs)?;
+    }
+    let Some((off, size)) = macho::code_signature(&cmds)? else {
+        return Err(HostError::Load(format!(
+            "{} has no code signature. Sign it with `codesign -s -`, because macOS runs only signed code",
+            path.display()
+        )));
+    };
+    Ok(CodeFile {
+        file,
+        segs,
+        sig: (u64::from(off), u64::from(size)),
+    })
+}
+
+fn via_file_map(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
+    let code = open_code_file(game)?;
+    sys::add_file_signature(&code.file, code.sig.0, code.sig.1).map_err(|e| {
+        HostError::Load(format!("{}: the system does not take the code signature: {e}", game.dylib.display()))
+    })?;
     let (res, game, layout) = reserve_guest(game)?;
     for (m, image) in game.modules.iter().zip(images) {
         for s in &m.segments {
             let at = m.segment_addr(s);
+            if s.prot == Prot::Exec {
+                let found = code.segs.iter().find(|x| x.name == s.name).ok_or_else(|| {
+                    HostError::Load(format!("module {}: the library has no segment {}", m.name, s.name))
+                })?;
+                if found.filesize > 0 {
+                    res.map_file_exec(at, found.filesize, &code.file, found.fileoff)?;
+                }
+                continue;
+            }
             let bytes = usize::try_from(s.file_offset)
                 .ok()
                 .zip(usize::try_from(s.file_offset + s.file_size).ok())
@@ -219,11 +276,7 @@ fn via_copy(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
                 .ok_or_else(|| {
                     HostError::Load(format!("module {}: segment {} lies outside the image file", m.name, s.name))
                 })?;
-            res.protect(at, s.size, PROT_RW)?;
             res.copy_in(at, bytes)?;
-            if s.prot == Prot::Exec {
-                res.protect(at, s.size, PROT_RX)?;
-            }
         }
     }
     Ok(Mapped { game, layout, res })
@@ -247,12 +300,16 @@ pub fn place(game: &Game) -> Result<Placed> {
         }
         Err(reason) => reason,
     };
-    eprintln!("nxkit-host: not using {} ({reason}), copying the segments instead", game.dylib.display());
-    let m = via_copy(game, &images)?;
+    eprintln!(
+        "nxkit-host: not using {} ({reason}), copying the data segments and mapping the code from {} instead",
+        game.dylib.display(),
+        game.dylib.display()
+    );
+    let m = via_file_map(game, &images)?;
     let mem = memory::init(m.layout, m.res)?;
     Ok(Placed {
         game: m.game,
-        placement: Placement::Copy,
+        placement: Placement::FileMap,
         dylib: None,
         mem,
         images,

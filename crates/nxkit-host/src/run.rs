@@ -1,6 +1,6 @@
 //! The startup order of the host (R47).
 //!
-//! 1. Read `game.json`. 2. Place the modules: dyld maps the library, or the host copies the segments, and the one
+//! 1. Read `game.json`. 2. Place the modules: dyld maps the library, or the host maps the code from the library file and copies the data, and the one
 //! reservation holds everything, registered with `nxkit_abi::guest`. The GPU buffer over it comes next, and then the
 //! guard page. 3. Start the kernel. 4. Register the kernel and
 //! the IPC server and start the services. 5. Finish the load: relocations, imports and gates. 6. Open the window.

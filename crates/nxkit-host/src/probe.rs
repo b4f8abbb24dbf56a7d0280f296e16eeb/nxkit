@@ -1,7 +1,7 @@
 //! `nxkit-host probe <run folder>`: the measurements that R18 asks for.
 //!
 //! R18 names three: a no-copy buffer over reserved memory (5), whether residency wires the reservation (6), and
-//! whether the code loads as a Mach-O at fixed addresses (1, 2 and 4). Measurement 3 is the cost of the copy fallback.
+//! whether the code loads as a Mach-O at fixed addresses (1, 2 and 4). Measurement 3 is the cost of a copy into anonymous memory.
 //!
 //! The probe maps ranges, looks at what the system gave and frees them again. Run it in a fresh process, because
 //! what it measures is the address space of a fresh process. Measurements 5 and 6 reserve the whole guest range and
@@ -92,9 +92,9 @@ fn fixed_calls(ranges: &[(String, u64, u64)], free: &[bool]) {
     }
 }
 
-/// Measurement 3: what does the copy fallback cost for a module of the size of the game?
+/// Measurement 3: what does a copy into anonymous memory cost for a module of the size of the game?
 fn copy_cost(game: &Game) -> Result<()> {
-    println!("3. Cost of the copy fallback (map, copy, mprotect to r-x), {COPY_RUNS} runs per module:");
+    println!("3. Cost of a copy into anonymous memory (map, copy, mprotect to r-x), {COPY_RUNS} runs per module:");
     for m in &game.modules {
         let span = m.end() - m.start();
         let len = span as usize;

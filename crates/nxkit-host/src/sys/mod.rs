@@ -6,6 +6,8 @@
 pub mod appkit;
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::fs::File;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
@@ -26,6 +28,7 @@ pub const PROT_RX: i32 = 5;
 const MAP_PRIVATE: c_int = 0x2;
 const MAP_FIXED: c_int = 0x10;
 const MAP_NORESERVE: c_int = 0x40;
+const F_ADDFILESIGS_RETURN: c_int = 97;
 const MAP_ANON: c_int = 0x1000;
 const RTLD_NOW: c_int = 2;
 const RTLD_LOCAL: c_int = 4;
@@ -35,6 +38,7 @@ unsafe extern "C" {
     fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void;
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
+    fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
     fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
     fn dlerror() -> *const c_char;
@@ -136,6 +140,22 @@ impl Reservation {
         Ok(())
     }
 
+    /// Maps a range of a signed file read and execute over the reservation, with `MAP_FIXED`. macOS arm64 does not
+    /// run code in anonymous pages, so code runs only from file pages whose signature the system has seen
+    /// ([`add_file_signature`]). The pages that were there are replaced, so this must come before the GPU buffer is
+    /// created. `offset` and `len` are multiples of the page size.
+    pub fn map_file_exec(&self, addr: u64, len: u64, file: &File, offset: u64) -> Result<()> {
+        let p = self.check(addr, len)?;
+        let off = i64::try_from(offset).map_err(|_| HostError::Memory(format!("file offset {offset:#x} is too big")))?;
+        // SAFETY: the range lies inside the reservation, which this process owns. `MAP_FIXED` replaces the anonymous
+        // pages there on purpose, and nothing uses them yet.
+        let got = unsafe { mmap(p, len as usize, PROT_RX, MAP_PRIVATE | MAP_FIXED, file.as_raw_fd(), off) };
+        if got == map_failed() {
+            return Err(mem_err("mmap of the code", errno()));
+        }
+        Ok(())
+    }
+
     /// Copies bytes in. The pages must be writable.
     pub fn copy_in(&self, addr: u64, bytes: &[u8]) -> Result<()> {
         let p = self.check(addr, bytes.len() as u64)?;
@@ -178,6 +198,37 @@ impl Reservation {
         unsafe { nxkit_metal::GuestMemory::from_raw(ctx, base, self.len) }
             .map_err(|e| HostError::Memory(format!("the GPU buffer over the reservation: {e}")))
     }
+}
+
+/// The argument of `fcntl(F_ADDFILESIGS_RETURN)`, `fsignatures_t` of `<sys/fcntl.h>`. The last fields are for
+/// `F_ADDFILESIGS_INFO` and stay zero.
+#[repr(C)]
+struct FSignatures {
+    file_start: u64,
+    blob_start: *mut c_void,
+    blob_size: usize,
+    signatures_size: usize,
+    cdhash: [u8; 20],
+    hash_type: c_int,
+}
+
+/// Tells the system where the code signature of a file is, so that it runs pages that it maps from the file. The blob
+/// is at `blob_off` in the file and has `blob_size` bytes. Call it once before the first `map_file_exec`.
+pub fn add_file_signature(file: &File, blob_off: u64, blob_size: u64) -> Result<()> {
+    let mut sig = FSignatures {
+        file_start: 0,
+        blob_start: blob_off as usize as *mut c_void,
+        blob_size: blob_size as usize,
+        signatures_size: 0,
+        cdhash: [0; 20],
+        hash_type: 0,
+    };
+    // SAFETY: `sig` is a valid `fsignatures_t` that outlives the call. The kernel reads the blob from the file at the
+    // offset in `blob_start` and does not read memory at that value.
+    if unsafe { fcntl(file.as_raw_fd(), F_ADDFILESIGS_RETURN, &mut sig as *mut FSignatures) } != 0 {
+        return Err(mem_err("fcntl F_ADDFILESIGS_RETURN", errno()));
+    }
+    Ok(())
 }
 
 /// Reserves `[tail_start, end)` as address space (read and write, no commit), behind an image that dyld mapped, and returns a view
