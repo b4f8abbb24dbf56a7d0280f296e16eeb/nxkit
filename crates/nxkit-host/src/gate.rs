@@ -27,8 +27,8 @@ pub const GATE_STACK_SIZE: u64 = 1 << 20;
 const SAVE_WORDS: usize = 24;
 
 const SVC_EXIT_THREAD: u32 = 0x0A;
-const SVC_EXIT_PROCESS: u32 = 0x0B;
-const SVC_GET_SYSTEM_TICK: u32 = 0x26;
+const SVC_EXIT_PROCESS: u32 = 0x07;
+const SVC_GET_SYSTEM_TICK: u32 = 0x1E;
 
 std::arch::global_asm!(
     ".text",
@@ -320,7 +320,7 @@ fn counter() -> u64 {
     // SAFETY: `r` holds eight registers.
     let answered = unsafe { nxkit_rt::nxkit_svc(SVC_GET_SYSTEM_TICK, r.as_mut_ptr()) };
     if answered == 0 {
-        stop::fatal("the counter read needs svc GetSystemTick (0x26) and the kernel does not answer it");
+        stop::fatal("the counter read needs svc GetSystemTick (0x1E) and the kernel does not answer it");
     }
     r[0]
 }
