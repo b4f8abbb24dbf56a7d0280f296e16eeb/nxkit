@@ -19,7 +19,17 @@
 //! `nvnDeviceGetInteger` answers from a table of the values that the Switch driver reports for the NVN 55 API.
 //! The table is the one `nxnative` uses. Items 0 and 1 are the API version of the [`Settings`] and items 0x2E and
 //! 0x30 are the GPU code version of the settings. Item 0x5F (4096) is the one value that `nxnative` marks as unverified.
-//! The Switch 2 table of `nxnative` is not ported, so a game of the Switch 2 sees the Switch 1 values.
+//!
+//! A game of the Switch 2 gets the table of NVN2 (API 231) instead, up to item 0xA9. NVN2 is compiled into the game's
+//! own `sdk` module and answers most items from constants in one `switch`. The host finds that `switch` once at load
+//! ([`scan_sdk_driver`]) and answers an item from the game's own constant where the `switch` has one: the API minor
+//! and the GPU code versions move with the SDK. The table has the newest values seen as the fallback. NVN2 reads a
+//! few items from the description of the GPU at run time. These keep the Switch value below 0x60 and are 0 above it.
+
+use std::sync::OnceLock;
+
+use nxkit_abi::guest;
+use nxkit_abi::platform::{self, Platform};
 
 use super::abi::{AbiResult, Obj, arg_bool, guard, log_once, magic, ret_bool, table, used};
 use super::ctx::{Settings, gpu};
@@ -52,6 +62,125 @@ const INFO: [u32; INFO_TABLE_LEN] = [
     16384, 16384, 1, 1, 1, 1, 5, 1, 1, 1, 1, 1, 1, 16, 1024, 32, //
     4096, 65536, 65536, 256, 16384, 262144, 4096, 1, 4, 2, 0, 4096, 16384, 4096, 128, 4096,
 ];
+
+/// An item of the NVN2 table that the driver reads from the GPU at run time. The binary does not tell its value.
+const RT: i32 = -1;
+/// `NVN_DEVICE_INFO_*` items from this number on are not in the NVN2 table.
+const INFO2_LEN: usize = 0xAA;
+/// The API minor of NVN2 when the game's `sdk` gives none: the newest seen, SDK 21.4.4.
+pub const NVN2_API_MINOR: u32 = 39;
+/// The API major of NVN2.
+pub const NVN2_API_MAJOR: u32 = 231;
+
+/// The values of the NVN2 items 0 to 0xA9, from `nxnative` (`g_devinfo2`): the constants of the driver in the `sdk`
+/// of SDK 21.4.4, read statically. Items 0 and 1 are the API version 231.39, items 0x2E to 0x31 the GPU code version
+/// 201.0 to 201.20 (0xC9 is the version of the control sections of its shaders). Item 6 is 32 on NVN2. The host keeps
+/// 16 vertex bindings, which all its tables hold. [`RT`] marks an item that the driver reads from the GPU.
+#[rustfmt::skip]
+const INFO2: [i32; INFO2_LEN] = [
+    231, 39, 14, 65536, 256, 8, 16, 4, 16, 32, 16, 4, 4, 4, 32, 32, // 0x00
+    32, 256, 256, 4, 8, 512, 256, RT, RT, 4096, 16384, 16, 1024, 1024, 64, 1024, // 0x10
+    2147483647, 65535, 65535, 8, 1048576, 4096, 16, 4096, 1, 1, 1, RT, 16, RT, 201, 201, // 0x20
+    20, 0, 1, 8, 8, 4, 32, RT, RT, 128, RT, 1, 4, RT, RT, RT, // 0x30
+    RT, RT, 1, 1, 1, 1, 5, 1, 1, 1, 1, 1, 1, 16, 2048, 32, // 0x40
+    4096, 65536, 65536, 256, 16384, 262144, 4096, 1, 4, 2, 0, 4096, 16384, 4096, 128, 32, // 0x50
+    65535, 1, RT, 256, 16, 65535, 65535, 256, 1, 16, 16, 16, 1, 1, 1, 256, // 0x60
+    0, 16, 8, 16, 32, 31, 536870912, 16777216, 16777216, 1073741824, 32, 1, 64, RT, 1, 2147483647, // 0x70
+    32, 32, 4194303, 512, 256, 32, 16383, RT, 8, 0, 0, 4, 256, 16, 0, 1, // 0x80
+    31, 0, 64, 1, 58368, 24576, 0, 256, 262144, RT, RT, 0, 201, 14, 201, 20, // 0x90
+    163840, 8, 4, 256, 256, 4, 65536, 201, 5, 1, // 0xA0
+];
+
+/// Where the game's NVN2 driver keeps its `nvnDeviceGetInteger` constants: the `switch` over the items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DriverSwitch {
+    /// The guest address of the byte table: one byte per item, the case as a count of instructions from `cases`.
+    table: u64,
+    /// The guest address of the first case.
+    cases: u64,
+    /// The last item the `switch` has.
+    last: u32,
+}
+
+static DRIVER: OnceLock<Option<DriverSwitch>> = OnceLock::new();
+
+/// The signed 21-bit immediate of `adr` and `adrp`.
+fn adr_imm(w: u32) -> i64 {
+    let v = i64::from(((w >> 3) & 0x1F_FFFC) | ((w >> 29) & 3));
+    if v & 0x10_0000 != 0 { v - 0x20_0000 } else { v }
+}
+
+/// Finds the `switch` of NVN2's `nvnDeviceGetInteger` in the code of the `sdk` module. `text` is the code with the
+/// guest address of its first byte, `ro` the guest range of the read-only data, the data and the bss.
+///
+/// The driver loads the API major first and then jumps through a byte table: `mov w0, #231`, `adr` (the cases),
+/// `adrp` + `add` (the table), `ldrb`, `add .., lsl #2` and `br`, with `cmp wN, #<last item>` before it. All of them
+/// lie within 8 instructions of the `mov`. The table must lie in `ro`.
+fn find_driver_switch(text: &[u8], text_addr: u64, ro: (u64, u64)) -> Option<DriverSwitch> {
+    let t: Vec<u32> = text.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+    let at = |q: usize| text_addr + q as u64 * 4;
+    let n = t.len();
+    let mut p = 8;
+    while p + 9 < n {
+        if t[p] != 0x5280_1CE0 {
+            p += 1;
+            continue;
+        }
+        let (mut table, mut cases, mut lim, mut ldrb, mut br) = (None, None, 0u32, false, false);
+        for q in p - 8..=p + 8 {
+            let w = t[q];
+            if w & 0xFFC0_001F == 0x7100_001F {
+                lim = (w >> 10) & 0xFFF; // cmp wN, #imm
+            } else if w & 0x9F00_0000 == 0x9000_0000 && t[q + 1] & 0xFFC0_0000 == 0x9100_0000 {
+                // adrp + add
+                let page = (at(q) & !0xFFF).wrapping_add_signed(adr_imm(w) * 4096);
+                table = Some(page + u64::from((t[q + 1] >> 10) & 0xFFF));
+            } else if w & 0x9F00_0000 == 0x1000_0000 {
+                cases = Some(at(q).wrapping_add_signed(adr_imm(w))); // adr
+            } else if w & 0xFFE0_FC00 == 0x3860_6800 {
+                ldrb = true; // ldrb wK, [xT, xI]
+            } else if w & 0xFFFF_FC1F == 0xD61F_0000 {
+                br = true;
+            }
+        }
+        p += 1;
+        let (Some(table), Some(cases)) = (table, cases) else { continue };
+        if lim <= 1 || !ldrb || !br || table < ro.0 || table + u64::from(lim) >= ro.1 {
+            continue;
+        }
+        return Some(DriverSwitch { table, cases, last: lim });
+    }
+    None
+}
+
+/// Looks for the NVN2 driver in the `sdk` module of a game of the Switch 2, once. The host calls it after the load,
+/// with the guest ranges of the code and of the read-only data up to the bss. Later calls do nothing.
+pub fn scan_sdk_driver(text: (u64, u64), ro: (u64, u64)) {
+    DRIVER.get_or_init(|| {
+        let found = guest::with_slice(text.0, text.1, |b| find_driver_switch(b, text.0, ro)).ok().flatten();
+        if found.is_none() {
+            eprintln!(
+                "[RED] NVN sdk: NVN2's nvnDeviceGetInteger switch not found; the device answers the newest versions known"
+            );
+        }
+        found
+    });
+}
+
+/// The constant that the game's NVN2 driver answers for an item, if its `switch` has a constant case for it: `mov
+/// w0, #imm16` and `b`. None for a case that reads something else, and before or without [`scan_sdk_driver`].
+pub fn sdk_item(item: u32) -> Option<u32> {
+    let sw = (*DRIVER.get()?)?;
+    if item > sw.last {
+        return None;
+    }
+    let case = sw.cases + u64::from(guest::read_u8(sw.table + u64::from(item)).ok()?) * 4;
+    let (c0, c1) = (guest::read_u32(case).ok()?, guest::read_u32(case + 4).ok()?);
+    if c0 & 0xFFE0_001F != 0x5280_0000 || c1 & 0xFC00_0000 != 0x1400_0000 {
+        return None;
+    }
+    Some((c0 >> 5) & 0xFFFF)
+}
 
 extern "C" fn device_builder_set_defaults(b: u64) {
     guard("nvnDeviceBuilderSetDefaults", || {
@@ -145,24 +274,48 @@ extern "C" fn device_set_intermediate_shader_cache(_d: u64, _n: i32) {}
 
 extern "C" fn set_external_debugger_enabled(_enable: u32) {}
 
-/// The value of an `NVNdeviceInfo` item. None for an item that nxnative does not answer.
-fn info_value(item: i32, s: &Settings) -> Option<u32> {
-    match item {
-        0 => Some(s.api_major),
-        1 => Some(s.api_minor),
-        0x2E => Some(s.gpu_code.0),
-        0x30 => Some(s.gpu_code.1),
-        INFO_EXTRA => Some(256),
-        i if (0..INFO_TABLE_LEN as i32).contains(&i) => Some(INFO[i as usize]),
-        _ => None,
+/// The answer to an `NVNdeviceInfo` item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Info {
+    /// The value.
+    Value(u32),
+    /// An NVN2 item that the driver reads from the GPU at run time. The host answers 0.
+    Runtime,
+    /// An item that nxnative does not answer. The host answers 0.
+    Unknown,
+}
+
+/// The value of an `NVNdeviceInfo` item. `sdk` gives the constant of the game's own NVN2 driver for an item.
+fn info_value(item: i32, s: &Settings, p: Platform, sdk: impl Fn(u32) -> Option<u32>) -> Info {
+    let Ok(i) = usize::try_from(item) else { return Info::Unknown };
+    match (p, item) {
+        (_, 0) => Info::Value(s.api_major),
+        (_, 1) => Info::Value(s.api_minor),
+        // The Switch 2: the game's constant, then the table. A run-time item below 0x60 keeps the Switch value.
+        (Platform::Ounce, _) if i < INFO2_LEN && (INFO2[i] != RT || i >= INFO_TABLE_LEN) => match INFO2[i] {
+            RT => Info::Runtime,
+            v => Info::Value(sdk(i as u32).unwrap_or(v as u32)),
+        },
+        (_, 0x2E) => Info::Value(s.gpu_code.0),
+        (_, 0x30) => Info::Value(s.gpu_code.1),
+        (Platform::Nx, INFO_EXTRA) => Info::Value(256),
+        _ if i < INFO_TABLE_LEN => Info::Value(INFO[i]),
+        _ => Info::Unknown,
     }
 }
 
 extern "C" fn device_get_integer(_d: u64, item: i32, out: u64) {
     guard("nvnDeviceGetInteger", || {
-        match info_value(item, gpu("nvnDeviceGetInteger").settings()) {
-            Some(v) => Obj(out).set_u32(0, v),
-            None => {
+        let s = gpu("nvnDeviceGetInteger").settings();
+        match info_value(item, s, platform::get(), sdk_item) {
+            Info::Value(v) => Obj(out).set_u32(0, v),
+            Info::Runtime => {
+                eprintln!(
+                    "[RED] NVN nvnDeviceGetInteger: item {item:#x}: NVN2 reads it from the GPU at run time, not known here; the host answers 0"
+                );
+                Obj(out).set_u32(0, 0)
+            }
+            Info::Unknown => {
                 eprintln!(
                     "[RED] NVN nvnDeviceGetInteger: item {item:#x} is not known, the host answers 0"
                 );
@@ -276,14 +429,59 @@ mod tests {
             gpu_code: (1, 17),
             ..Settings::default()
         };
-        assert_eq!(info_value(0, &s), Some(60));
-        assert_eq!(info_value(1, &s), Some(1));
-        assert_eq!(info_value(0x2E, &s), Some(1));
-        assert_eq!(info_value(0x30, &s), Some(17));
-        assert_eq!(info_value(2, &s), Some(14));
-        assert_eq!(info_value(0x67, &s), Some(256));
-        assert_eq!(info_value(0x60, &s), None);
-        assert_eq!(info_value(-1, &s), None);
+        let v = |i| info_value(i, &s, Platform::Nx, |_| Some(7));
+        assert_eq!(v(0), Info::Value(60));
+        assert_eq!(v(1), Info::Value(1));
+        assert_eq!(v(0x2E), Info::Value(1));
+        assert_eq!(v(0x30), Info::Value(17));
+        assert_eq!(v(2), Info::Value(14));
+        assert_eq!(v(0x67), Info::Value(256));
+        assert_eq!(v(0x60), Info::Unknown);
+        assert_eq!(v(-1), Info::Unknown);
+    }
+
+    #[test]
+    fn the_switch_2_answers_from_the_sdk_then_from_its_table() {
+        let s = Settings {
+            api_major: NVN2_API_MAJOR,
+            api_minor: 30,
+            ..Settings::default()
+        };
+        let none = |i| info_value(i, &s, Platform::Ounce, |_| None);
+        assert_eq!(INFO2.len(), 0xAA);
+        assert_eq!(none(0), Info::Value(231));
+        assert_eq!(none(1), Info::Value(30));
+        assert_eq!(none(0x2E), Info::Value(201));
+        assert_eq!(none(0x30), Info::Value(20));
+        assert_eq!(none(0x1A), Info::Value(16384));
+        assert_eq!(none(0x67), Info::Value(256));
+        assert_eq!(none(0xA9), Info::Value(1));
+        assert_eq!(none(0xAA), Info::Unknown);
+        // A run-time item keeps the Switch value below 0x60 and is not known above it.
+        assert_eq!(none(0x17), Info::Value(2));
+        assert_eq!(none(0x62), Info::Runtime);
+        let sdk = |i| info_value(i, &s, Platform::Ounce, |item| (item == 0x30).then_some(17));
+        assert_eq!(sdk(0x30), Info::Value(17));
+        assert_eq!(sdk(1), Info::Value(30), "item 1 is the settings', which the host took from the sdk");
+    }
+
+    #[test]
+    fn the_driver_switch_is_found_from_its_instructions() {
+        // At 0x1000: 8 words of padding, then cmp w1, #0xa9 / mov w0, #231 / adr x9, +0x40 / adrp x10, 0 /
+        // add x10, x10, #0x800 / ldrb w11, [x10, x1] / add x9, x9, x11, lsl #2 / br x9, then padding.
+        let mut w = vec![0xD503_201Fu32; 8];
+        w.extend([
+            0x7102_A43F, 0x5280_1CE0, 0x1000_0209, 0x9000_000A, 0x9120_014A, 0x3861_694B,
+            0x8B0B_0929, 0xD61F_0120,
+        ]);
+        w.extend([0xD503_201F; 12]);
+        let bytes: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
+        let found = find_driver_switch(&bytes, 0x1000, (0x1800, 0x2000));
+        assert_eq!(
+            found,
+            Some(DriverSwitch { table: 0x1800, cases: 0x1000 + 10 * 4 + 0x40, last: 0xA9 })
+        );
+        assert_eq!(find_driver_switch(&bytes, 0x1000, (0x1900, 0x2000)), None, "the table lies outside the data");
     }
 
     #[test]

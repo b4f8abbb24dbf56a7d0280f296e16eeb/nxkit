@@ -41,6 +41,7 @@ pub(crate) mod window;
 
 pub use cmdbuf::{CommandSettings, set_command_settings};
 pub use ctx::{InstallError, Settings, install};
+pub use device::{NVN2_API_MAJOR, NVN2_API_MINOR, scan_sdk_driver, sdk_item};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock, PoisonError};

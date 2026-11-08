@@ -11,10 +11,12 @@
 //! nothing provides stops the load with its name (R15), unless it is weak, which stores 0 and is logged, or the title
 //! lists it in `settings.optional_imports`. The slot of an import gets the address plus the addend. The relocation
 //! plan and the import list must cover the same slots: a count that differs stops the load. Then the thread-specific
-//! data is checked and the gates are installed.
+//! data is checked and the gates are installed. Last, the `sdk` module tells which console the game was built for
+//! ([`find_platform`]).
 
 use std::collections::{HashMap, HashSet};
 
+use nxkit_abi::platform::{self, Platform};
 use nxkit_rt::{entries, find_big_in, find_in};
 
 use crate::bigstack;
@@ -255,6 +257,32 @@ fn load_gates(game: &Game) -> Result<GateTable> {
     GateTable::build(&all)
 }
 
+/// The string of the `sdk` module that marks a build for the Switch 2. Its file system access log line names the build
+/// spec: `FS_ACCESS: { sdk_version: 20.5.19, spec: Ounce }`. An SDK of the Switch says `spec: NX`.
+const OUNCE_SPEC: &[u8] = b"spec: Ounce";
+
+/// Whether `hay` holds `needle`.
+fn contains(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Sets the console of the game from its `sdk` module: the Switch 2 when the read-only data, the data or the bss holds
+/// [`OUNCE_SPEC`], else the Switch. For the Switch 2 it also looks for the constants of NVN2 in the code of the `sdk`.
+/// A game without an `sdk` module counts as one of the Switch.
+fn find_platform(game: &Game) {
+    let Some(m) = game.modules.iter().find(|m| m.name == "sdk") else { return };
+    let ro_start = m.base + m.rodata.offset;
+    let ro_end = m.base + m.bss_offset() + m.bss_size;
+    let ounce = nxkit_abi::guest::with_slice(ro_start, ro_end.saturating_sub(ro_start), |b| contains(b, OUNCE_SPEC))
+        .unwrap_or(false);
+    if !ounce {
+        return;
+    }
+    eprintln!("nxkit-host: sdk: built for the Switch 2 (spec: Ounce)");
+    platform::set(Platform::Ounce);
+    nxkit_rt::nvn::scan_sdk_driver((m.base + m.text.offset, m.text.size), (ro_start, ro_end));
+}
+
 /// Finishes the load of every module, fills the imports and installs the gates.
 ///
 /// `mask` is the set of enabled services.
@@ -295,6 +323,7 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     let main = game.main_module()?;
     tsd_check(mem, main, &keys)?;
     gate::install(load_gates(&game)?)?;
+    find_platform(&game);
     Ok(Loaded {
         inits,
         exports,

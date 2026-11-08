@@ -532,14 +532,16 @@ impl HostMemory {
     }
 }
 
-/// The Switch system tick frequency in Hz.
-pub const TICK_HZ: u64 = 19_200_000;
+/// The system tick frequency in Hz of the console the game was built for: 19.2 MHz on the Switch, 31.25 MHz on the
+/// Switch 2.
+pub fn tick_hz() -> u64 {
+    nxkit_abi::platform::get().tick_hz()
+}
 
-/// The system tick of the Switch (19.2 MHz) from the host's monotonic clock. It counts from an arbitrary start and
-/// never goes back.
+/// The system tick from the host's monotonic clock, at [`tick_hz`]. It counts from an arbitrary start and never goes
+/// back.
 pub fn system_tick() -> u64 {
-    let ns = u128::from(monotonic_ns());
-    (ns * u128::from(TICK_HZ) / 1_000_000_000) as u64
+    nxkit_abi::platform::get().ticks_from_ns(monotonic_ns())
 }
 
 #[cfg(target_vendor = "apple")]

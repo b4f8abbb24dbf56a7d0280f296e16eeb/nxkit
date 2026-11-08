@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::GpuConfig;
-use nxkit_metal::ArchiveConfig;
+use nxkit_metal::{ArchiveConfig, GobOrder};
 
 /// The settings the encoder and the present path use.
 #[derive(Clone, Debug)]
@@ -21,6 +21,8 @@ pub struct GpuSettings {
     /// Encode the frames on a thread of their own (`game.json` key `enc_thread`). The environment variable
     /// `NXKIT_ENC_THREAD=1` turns it on too.
     pub enc_thread: bool,
+    /// The order inside a GOB of the guest textures: [`GobOrder::Switch2`] for a game of the Switch 2.
+    pub gob_order: GobOrder,
 }
 
 impl Default for GpuSettings {
@@ -32,6 +34,7 @@ impl Default for GpuSettings {
             threads: 0,
             scale: 2.0,
             enc_thread: false,
+            gob_order: GobOrder::Tegra,
         }
     }
 }
@@ -46,7 +49,7 @@ impl GpuSettings {
                 load: self.archive.clone(),
                 collect: self.collect_archive,
             },
-            ..defaults
+            gob_order: self.gob_order,
         }
     }
 }

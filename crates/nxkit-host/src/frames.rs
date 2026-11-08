@@ -8,9 +8,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use nxkit_abi::platform::{self, Platform};
 use nxkit_gpu::{GpuBackend, GpuSettings};
 use nxkit_metal::{
-    Context, DisplayTick, FrameHooks, FrameInterval, FrameSource, GuestMemory, Pacer, PolicyInput, choose_present_plan,
+    Context, DisplayTick, FrameHooks, FrameInterval, FrameSource, GobOrder, GuestMemory, Pacer, PolicyInput,
+    choose_present_plan,
 };
 use nxkit_nvn::backend::Backend;
 use nxkit_rt::nvn::{self, CommandSettings};
@@ -31,7 +33,7 @@ const ARCHIVE: &str = "pipelines.mtl4archive";
 const SHADERS: &str = "shaders";
 
 /// The settings of the GPU backend, from the keys of `game.json` that the encoder uses. `enc_thread` moves the encode
-/// of each frame to a thread of its own.
+/// of each frame to a thread of its own. A game of the Switch 2 gets its order inside a GOB.
 pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
     GpuSettings {
         shader_dir: root.join(SHADERS),
@@ -41,13 +43,24 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
         // Scaling is off until every attachment of a pass gets the same scale decision.
         scale: std::env::var("NXKIT_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
         enc_thread: settings.enc_thread,
+        gob_order: match platform::get() {
+            Platform::Nx => GobOrder::Tegra,
+            Platform::Ounce => GobOrder::Switch2,
+        },
         ..GpuSettings::default()
     }
 }
 
-/// The settings of the NVN front end, from the keys of `game.json`.
+/// The settings of the NVN front end, from the keys of `game.json`. A game of the Switch 2 gets the API version of
+/// NVN2: 231 and the minor that the driver in its `sdk` answers, 39 when the `sdk` gives none. Games check it and make
+/// no graphics system on a mismatch. `nvn_api` of `game.json` wins over both.
 fn nvn_settings(settings: &Settings) -> nvn::Settings {
     let mut s = nvn::Settings::default();
+    if platform::get() == Platform::Ounce {
+        s.api_major = nvn::NVN2_API_MAJOR;
+        s.api_minor = nvn::sdk_item(1).unwrap_or(nvn::NVN2_API_MINOR);
+        eprintln!("nxkit-host: NVN2 device API {}.{} (Switch 2)", s.api_major, s.api_minor);
+    }
     if let Some((major, minor)) = settings.nvn_api {
         (s.api_major, s.api_minor) = (major, minor);
     }
