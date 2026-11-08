@@ -12,6 +12,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use nxb_obs::codes::{self, Code};
 use nxb_pyjson::Value;
 
+/// How often the plain-lines mode prints the count of a long step, in seconds.
+const LINES_INTERVAL: f64 = 30.0;
+
 /// Console mode (`--progress`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -42,6 +45,8 @@ struct Cur {
     hist: std::collections::VecDeque<(f64, u64)>,
     /// The last progress event: when, and what it said apart from the count.
     jlast: Option<(Instant, Shape)>,
+    /// When the plain-lines mode last printed the count.
+    llast: Option<Instant>,
 }
 
 /// A count update for [`Progress::set`] (fields left `None` keep their value).
@@ -466,6 +471,7 @@ impl Progress {
                     note: String::new(),
                     hist: Default::default(),
                     jlast: None,
+                    llast: None,
                 });
                 (g.0, g.1)
             }
@@ -645,6 +651,28 @@ impl Progress {
                         Value::Float((el * 1000.0).round() / 1000.0),
                     ),
                 ],
+            ));
+        }
+        // Plain lines show the count too, at most every LINES_INTERVAL, so a log (a build piped into a file) says how
+        // far a long step is, with an ETA when there is one.
+        if self.mode == Mode::Lines
+            && let Some(d) = st.done
+            && st.llast.is_none_or(|t| t.elapsed().as_secs_f64() >= LINES_INTERVAL)
+        {
+            st.llast = Some(Instant::now());
+            let of = st.total.map_or(String::new(), |t| format!(" of {t}"));
+            let pct = match st.total {
+                Some(t) if t > 0 => format!(" ({:.0}%)", 100.0 * d as f64 / t as f64),
+                _ => String::new(),
+            };
+            let left = eta(st).map_or(String::new(), |e| format!(", about {:.0} min left", (e / 60.0).ceil()));
+            lines.push(format!(
+                "[{}] [{}/{n_all}] {} · {}: {d}{of} {}{pct}{left}",
+                clock(),
+                st.k,
+                st.name,
+                st.step,
+                st.unit
             ));
         }
         drop(g);
