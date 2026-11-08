@@ -219,12 +219,21 @@ pub(crate) struct Bindless {
     default_sampler: Sampler,
     tex_pool: Arc<DataBuffer>,
     samp_pool: Arc<DataBuffer>,
-    tex_mirror: HashMap<u32, u64>,
-    samp_mirror: HashMap<u32, u64>,
+    tex_mirror: crate::draws::FastMap<u32, u64>,
+    samp_mirror: crate::draws::FastMap<u32, u64>,
+    support: Arc<DataBuffer>,
+    zero: Arc<DataBuffer>,
 }
 
+/// Bytes of the support buffer and of the zero buffer. 64 KiB is the largest uniform block a shader declares.
+const STATIC_BYTES: u64 = 0x10000;
+/// The offset of `render_scale[0]` in the support buffer (Ryujinx `SupportBuffer`, each field 16 byte aligned).
+const SUPPORT_RENDER_SCALE: u64 = 192;
+/// The entries of `render_scale`.
+const SUPPORT_RENDER_SCALES: u64 = 73;
+
 fn tsc_key(t: &Tsc) -> u64 {
-    let mut h = DefaultHasher::new();
+    let mut h = foldhash::fast::FixedState::default().build_hasher();
     (t.min_filter, t.mag_filter, t.wrap_s, t.wrap_t, t.wrap_r, t.compare_mode, t.compare_func, t.reduction)
         .hash(&mut h);
     for v in [t.lod_min, t.lod_max, t.lod_bias, t.aniso, t.border[0], t.border[1], t.border[2], t.border[3]] {
@@ -238,14 +247,21 @@ impl Bindless {
         let default_sampler = Sampler::new(ctx, &translate::sampler(&DEFAULT_TSC))?;
         let tex_bytes = POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_TEXTURE_ID) + 1);
         let samp_bytes = POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID) + 1);
+        let support = Arc::new(DataBuffer::new(ctx, STATIC_BYTES)?);
+        for i in 0..SUPPORT_RENDER_SCALES {
+            support.write(SUPPORT_RENDER_SCALE + 16 * i, &1.0f32.to_le_bytes())?;
+        }
+        let zero = Arc::new(DataBuffer::new(ctx, STATIC_BYTES)?);
         Ok(Self {
             ctx: ctx.clone(),
-            samplers: HashMap::new(),
+            samplers: Default::default(),
             default_sampler,
+            support,
+            zero,
             tex_pool: Arc::new(DataBuffer::new(ctx, tex_bytes)?),
             samp_pool: Arc::new(DataBuffer::new(ctx, samp_bytes)?),
-            tex_mirror: HashMap::new(),
-            samp_mirror: HashMap::new(),
+            tex_mirror: Default::default(),
+            samp_mirror: Default::default(),
         })
     }
 
@@ -290,6 +306,11 @@ impl Bindless {
         (self.tex_pool.gpu_address(), self.samp_pool.gpu_address())
     }
 
+    /// The GPU addresses of the support buffer (render scale 1.0, no BGRA swap) and of a buffer of zeros.
+    pub(crate) fn statics(&self) -> (u64, u64) {
+        (self.support.gpu_address(), self.zero.gpu_address())
+    }
+
     /// The pool tables, which the command buffers keep alive.
     pub(crate) fn pool_buffers(&self) -> (Arc<DataBuffer>, Arc<DataBuffer>) {
         (self.tex_pool.clone(), self.samp_pool.clone())
@@ -306,6 +327,7 @@ impl Bindless {
 pub(crate) struct StageInputs<'a> {
     pub(crate) stage: Stage,
     pub(crate) ubos: &'a [UboDetail],
+    pub(crate) sbufs: &'a [UboDetail],
     pub(crate) textures: &'a [TextureBind],
     pub(crate) base_instance: u32,
     pub(crate) groups: Option<[u32; 3]>,
@@ -436,9 +458,24 @@ fn build_args_in(
                 .map_or(env.default_sampler, |r| r.sampler),
             BindKind::TexPool => env.pools.0,
             BindKind::SampPool => env.pools.1,
-            BindKind::DrvCb => sink.put(&drv_block(inp, &ubos))?,
+            BindKind::DrvCb => {
+                drv_block(drv, inp, ubos);
+                sink.put(drv)?
+            }
+            BindKind::UboPtr => ubos.iter().find(|(s, _, _)| *s == b.reg).map_or(env.statics.1, |(_, a, _)| *a),
+            BindKind::Support => env.statics.0,
+            // A zero border block has no sampler bit set, so no sample is corrected.
+            BindKind::Border => env.statics.1,
+            // A storage buffer that is not bound reads zeros, and its writes land in the zero buffer.
+            BindKind::Sbuf => inp
+                .sbufs
+                .iter()
+                .find(|s| s.stage == inp.stage && s.slot == b.reg)
+                .map_or(env.statics.1, |s| s.address),
+            BindKind::C1 if p.c1.is_empty() => env.statics.1,
+            BindKind::C1 => sink.put(&p.c1)?,
         };
-        put_u64(&mut args, at, v);
+        put_u64(args, at, v);
     }
-    sink.put(&args)
+    sink.put(args)
 }

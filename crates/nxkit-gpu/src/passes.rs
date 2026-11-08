@@ -23,6 +23,7 @@ fn dispatch(sh: &Shared<'_>, cp: &mut ComputePass<'_>, scratch: &Scratch, n: u32
     let inputs = StageInputs {
         stage: Stage::Compute,
         ubos: &dd.ubos,
+        sbufs: &dd.sbufs,
         textures: &dd.textures,
         base_instance: 0,
         groups: Some(dd.groups),

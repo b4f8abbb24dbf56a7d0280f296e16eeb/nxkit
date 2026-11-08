@@ -225,6 +225,8 @@ pub struct DrawDetail {
     pub args: DrawArgs,
     /// The uniform buffers.
     pub ubos: Vec<UboDetail>,
+    /// The bound storage buffers. `snapshot` is always `None`.
+    pub sbufs: Vec<UboDetail>,
     /// The textures.
     pub textures: Vec<TextureBind>,
     /// The state outside an ICB.
@@ -308,6 +310,8 @@ pub struct DispatchDetail {
     pub groups: [u32; 3],
     /// The uniform buffers.
     pub ubos: Vec<UboDetail>,
+    /// The bound storage buffers. `snapshot` is always `None`.
+    pub sbufs: Vec<UboDetail>,
     /// The textures.
     pub textures: Vec<TextureBind>,
 }

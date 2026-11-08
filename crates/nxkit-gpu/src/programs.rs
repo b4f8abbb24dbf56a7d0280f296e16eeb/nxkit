@@ -30,6 +30,16 @@ pub(crate) enum BindKind {
     SampPool,
     /// `drvcb`: the address of the driver constant block.
     DrvCb,
+    /// `ubo_ptr`: compute, the GPU address of uniform buffer `reg`.
+    UboPtr,
+    /// `support`: the translator's support buffer.
+    Support,
+    /// `border`: the border colour block.
+    Border,
+    /// `sbuf`: the GPU address of storage buffer `reg`.
+    Sbuf,
+    /// `c1`: the shader's own constant segment, whose bytes the json carries.
+    C1,
 }
 
 /// One member of the argument buffer.
@@ -65,6 +75,9 @@ pub(crate) struct StageProgram {
     pub(crate) lib: ShaderLibrary,
     /// The entry function.
     pub(crate) entry: String,
+    /// Bit-preserving unsigned and mixed output variants, when the translator supplied them.
+    pub(crate) entry_uint: Option<String>,
+    pub(crate) entry_mixed: Option<(String, u8)>,
     /// The members of the argument buffer.
     pub(crate) binds: Vec<Bind>,
     /// The size of the argument buffer in bytes.
@@ -75,6 +88,8 @@ pub(crate) struct StageProgram {
     pub(crate) colors: Option<Vec<u8>>,
     /// The threadgroup size of a compute shader.
     pub(crate) threadgroup: [u32; 3],
+    /// The shader's own constant segment `c[1]`, padded to 16 bytes. Empty when the shader has none.
+    pub(crate) c1: Vec<u8>,
 }
 
 impl StageProgram {
@@ -156,15 +171,22 @@ impl Programs {
 }
 
 fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProgram, Skip> {
-    // A vertex shader that pulls its own vertices lives in a `_bp` library with another contract.
-    if matches!(json.get("pull"), Some(Json::Obj(_))) {
-        return Err(Skip::Program);
-    }
+    // A `pull` field names the extra `_bp` library that pulls its own vertices. The `_b` library keeps the stage_in
+    // contract, so the field changes nothing here.
     let raster = json.get("raster");
-    if raster.and_then(|r| r.get("primitive_id")).and_then(Json::as_i64).unwrap_or(0) != 0 {
+    if raster
+        .and_then(|r| r.get("primitive_id"))
+        .and_then(Json::as_i64)
+        .unwrap_or(0)
+        != 0
+    {
         return Err(Skip::Program);
     }
-    let entry = json.get("entry").and_then(Json::as_str).unwrap_or("main0").to_owned();
+    let entry = json
+        .get("entry")
+        .and_then(Json::as_str)
+        .unwrap_or("main0")
+        .to_owned();
     let mut binds = Vec::new();
     let mut arg_bytes = 0u32;
     for b in json.get("bindings").map(Json::as_arr).unwrap_or(&[]) {
@@ -176,9 +198,22 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             "tex_pool" => BindKind::TexPool,
             "samp_pool" => BindKind::SampPool,
             "drvcb" => BindKind::DrvCb,
-            _ => return Err(Skip::Binding),
+            "ubo_ptr" => BindKind::UboPtr,
+            "support" => BindKind::Support,
+            "border" => BindKind::Border,
+            "sbuf" => BindKind::Sbuf,
+            "c1" => BindKind::C1,
+            other => {
+                if crate::diag("prog") {
+                    eprintln!("DIAG prog binding kind {other}");
+                }
+                return Err(Skip::Binding);
+            }
         };
-        let arg_id = b.get("arg_id").and_then(Json::as_i64).ok_or(Skip::Program)?;
+        let arg_id = b
+            .get("arg_id")
+            .and_then(Json::as_i64)
+            .ok_or(Skip::Program)?;
         let arg_id = u32::try_from(arg_id).map_err(|_| Skip::Program)?;
         let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
         let reg = u32::try_from(reg).map_err(|_| Skip::Program)?;
@@ -207,11 +242,47 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         Vec::new()
     };
     let colors = raster.and_then(|r| r.get("colors")).map(|c| {
-        c.as_arr().iter().filter_map(Json::as_i64).filter_map(|v| u8::try_from(v).ok()).collect()
+        c.as_arr()
+            .iter()
+            .filter_map(Json::as_i64)
+            .filter_map(|v| u8::try_from(v).ok())
+            .collect()
     });
     let mut threadgroup = [1u32; 3];
-    for (i, v) in json.get("threadgroup_size").map(Json::as_arr).unwrap_or(&[]).iter().take(3).enumerate() {
-        threadgroup[i] = v.as_i64().and_then(|v| u32::try_from(v).ok()).unwrap_or(1).max(1);
+    for (i, v) in json
+        .get("threadgroup_size")
+        .map(Json::as_arr)
+        .unwrap_or(&[])
+        .iter()
+        .take(3)
+        .enumerate()
+    {
+        threadgroup[i] = v
+            .as_i64()
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(1)
+            .max(1);
     }
-    Ok(StageProgram { lib, entry, binds, arg_bytes, inputs, colors, threadgroup })
+    let mut c1 = Vec::new();
+    if let Some(hex) = json.get("c1").and_then(Json::as_str) {
+        let b = hex.as_bytes();
+        for pair in b.chunks(2) {
+            let s = std::str::from_utf8(pair).map_err(|_| Skip::Program)?;
+            c1.push(u8::from_str_radix(s, 16).map_err(|_| Skip::Program)?);
+        }
+        c1.resize(c1.len().next_multiple_of(16).max(16), 0);
+    }
+    Ok(StageProgram {
+        lib,
+        entry,
+        entry_uint: json.get("entry_u").and_then(Json::as_str).map(str::to_owned),
+        entry_mixed: json.get("entry_m").and_then(Json::as_str).zip(json.get("uint_mask_m").and_then(Json::as_i64))
+            .map(|(entry, mask)| (entry.to_owned(), mask as u8)),
+        binds,
+        arg_bytes,
+        inputs,
+        colors,
+        threadgroup,
+        c1,
+    })
 }

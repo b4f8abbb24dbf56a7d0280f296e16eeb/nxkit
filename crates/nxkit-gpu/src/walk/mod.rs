@@ -46,6 +46,7 @@ pub(super) struct State {
     program: [u64; 6],
     vertex_buffer: [(u64, u64); STREAMS],
     ubo: [[(u64, u32); UBOS]; 3],
+    sbuf: [[(u64, u32); UBOS]; 3],
     attribute: [Option<(u32, u32, u32)>; ATTRIBUTES],
     stream: [(u32, u32); STREAMS],
     blends: Blends,
@@ -68,6 +69,7 @@ impl Default for State {
             program: [0; 6],
             vertex_buffer: [(0, 0); STREAMS],
             ubo: [[(0, 0); UBOS]; 3],
+            sbuf: [[(0, 0); UBOS]; 3],
             attribute: [None; ATTRIBUTES],
             stream: [(0, 0); STREAMS],
             blends: Blends::default(),
@@ -174,8 +176,9 @@ impl Walker {
         DispatchDetail {
             program,
             groups,
-            ubos: self.ubos(mem, st, 2, crate::detail::Stage::Compute),
-            textures: textures(st, 2, crate::detail::Stage::Compute),
+            ubos: self.ubos(mem, st, 2, Stage::Compute),
+            sbufs: sbufs(st, 2, Stage::Compute),
+            textures: textures(st, 2, Stage::Compute),
         }
     }
 }
@@ -200,8 +203,14 @@ fn empty_draw() -> DrawDetail {
         topology: 4,
         attributes: Vec::new(),
         streams: Vec::new(),
-        args: DrawArgs::Arrays { first: 0, count: 0, instances: 0, base_instance: 0 },
+        args: DrawArgs::Arrays {
+            first: 0,
+            count: 0,
+            instances: 0,
+            base_instance: 0,
+        },
         ubos: Vec::new(),
+        sbufs: Vec::new(),
         textures: Vec::new(),
         dynamic: Default::default(),
     }
