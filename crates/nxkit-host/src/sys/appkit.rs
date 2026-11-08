@@ -14,8 +14,8 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSScreen, NSView,
-    NSWindow, NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSEvent, NSResponder,
+    NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
@@ -70,6 +70,44 @@ fn drawable_size(window: &NSWindow, view: &NSView) -> (u32, u32) {
     let scale = window.backingScaleFactor();
     let px = |v: f64| (v * scale).round().max(1.0) as u32;
     (px(b.size.width), px(b.size.height))
+}
+
+define_class!(
+    // SAFETY:
+    // - `NSView` has no subclassing requirements beyond calling its designated initialiser, which `GameView::new`
+    //   does.
+    // - `MainThreadOnly` is correct, because AppKit uses views on the main thread only.
+    // - `GameView` does not implement `Drop`.
+    /// The content view. The game reads the keyboard through GameController, so the view takes the key events of
+    /// AppKit and drops them. Without it AppKit finds no responder for a key and plays the alert sound.
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NxkitGameView"]
+    struct GameView;
+
+    impl GameView {
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(keyDown:))]
+        fn key_down(&self, _event: &NSEvent) {}
+
+        #[unsafe(method(keyUp:))]
+        fn key_up(&self, _event: &NSEvent) {}
+
+        #[unsafe(method(flagsChanged:))]
+        fn flags_changed(&self, _event: &NSEvent) {}
+    }
+);
+
+impl GameView {
+    /// A view of `frame`.
+    fn new(mtm: MainThreadMarker, frame: CGRect) -> Retained<Self> {
+        // SAFETY: `initWithFrame:` is the designated initialiser of `NSView`, called once on a fresh instance.
+        unsafe { msg_send![Self::alloc(mtm), initWithFrame: frame] }
+    }
 }
 
 define_class!(
@@ -208,12 +246,14 @@ pub fn run(
     window.setTitle(&NSString::from_str(&cfg.title));
     window.setCollectionBehavior(NSWindowCollectionBehavior::FullScreenPrimary);
 
-    let view = NSView::initWithFrame(NSView::alloc(mtm), rect);
+    let game_view = GameView::new(mtm, rect);
+    let view: Retained<NSView> = Retained::into_super(game_view);
     let layer = CAMetalLayer::new();
     let as_layer: &CALayer = &layer;
     view.setLayer(Some(as_layer));
     view.setWantsLayer(true);
     window.setContentView(Some(&view));
+    window.makeFirstResponder(Some(&view));
 
     let layer_ptr = NonNull::from(&*layer).cast::<c_void>();
     // SAFETY: `layer_ptr` points to the live `CAMetalLayer` above. The presenter retains it.
