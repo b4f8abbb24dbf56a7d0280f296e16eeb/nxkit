@@ -490,7 +490,6 @@ impl Kernel {
         let process = self.config.core_mask;
         let (ideal, mask) = match ideal {
             -2 => (0, 1u64),
-            -1 => (-1, process),
             c => {
                 let c = if c == -3 {
                     t.ideal_core.load(Ordering::Relaxed)
