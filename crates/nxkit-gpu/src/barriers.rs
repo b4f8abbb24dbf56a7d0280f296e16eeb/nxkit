@@ -27,6 +27,55 @@ pub(crate) struct Touch {
     pub(crate) writes: Vec<TexId>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nxkit_nvn::{analyse::Analyser, frame::Span, resource::ResourceTable};
+
+    #[test]
+    fn sampling_an_alias_waits_for_the_original_storage_write() {
+        let frame = Frame {
+            cmds: vec![Cmd::Dispatch {
+                reads: Span { start: 0, len: 1 },
+                writes: Span::default(),
+            }],
+            lists: vec![TexId(2)],
+        };
+        let mut plan = PassPlan::default();
+        let mut table = ResourceTable::new();
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: nxkit_nvn::layout::Target::D2,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 1,
+            height: 1,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
+        };
+        for i in 0..3 {
+            table
+                .create(
+                    desc,
+                    nxkit_nvn::space::GpuAddr::new(0x2000 + i * 4096).unwrap(),
+                )
+                .unwrap();
+        }
+        Analyser::new().analyse(&frame, &table, &mut plan).unwrap();
+        let mut state = BarrierState::default();
+        state.seed(TexId(1), Stages::FRAGMENT);
+        let aliases: FastMap<TexId, TexId> = [(TexId(2), TexId(1))].into_iter().collect();
+        let barriers = state.plan(&frame, &plan, &aliases);
+        assert_eq!(barriers.emitted, 1);
+        let dep = barriers.before[0].unwrap();
+        assert_eq!(dep.after, Stages::FRAGMENT);
+        assert_eq!(dep.before, Stages::DISPATCH);
+        assert_eq!(dep.visibility, Visibility::Device);
+    }
+}
+
 /// The stages that a pass of a kind runs.
 pub(crate) fn pass_stages(kind: PassKind) -> Stages {
     match kind {
@@ -100,7 +149,12 @@ impl BarrierState {
     }
 
     /// Plans the barriers of `plan` and updates the state.
-    pub(crate) fn plan(&mut self, frame: &Frame, plan: &PassPlan) -> BarrierPlan {
+    pub(crate) fn plan(
+        &mut self,
+        frame: &Frame,
+        plan: &PassPlan,
+        aliases: &FastMap<TexId, TexId>,
+    ) -> BarrierPlan {
         let mut out = BarrierPlan::default();
         let mut first = true;
         for p in &plan.passes {
@@ -111,18 +165,25 @@ impl BarrierState {
             let t = touch(frame, plan, p);
             let mine = pass_stages(p.kind);
             let mut after: Option<Stages> = None;
-            let mut before = if p.kind == PassKind::Render { Stages::FRAGMENT } else { mine };
+            let mut before = if p.kind == PassKind::Render {
+                Stages::FRAGMENT
+            } else {
+                mine
+            };
             let mut writes_involved = false;
             for id in &t.reads {
+                let sampled = t.sampled.contains(id);
+                let id = aliases.get(id).unwrap_or(id);
                 if let Some(w) = self.pending.get(id).and_then(|h| h.write) {
                     after = join(after, w);
                     writes_involved = true;
-                    if t.sampled.contains(id) {
+                    if sampled {
                         before = before | mine;
                     }
                 }
             }
             for id in &t.writes {
+                let id = aliases.get(id).unwrap_or(id);
                 if let Some(h) = self.pending.get(id) {
                     for s in [h.write, h.read].into_iter().flatten() {
                         after = join(after, s);
@@ -160,10 +221,19 @@ impl BarrierState {
                 self.cover(d.after);
             }
             for id in &t.writes {
+                let id = aliases.get(id).unwrap_or(id);
                 let h = self.pending.entry(*id).or_default();
-                h.write = join(h.write, if p.kind == PassKind::Render { Stages::FRAGMENT } else { mine });
+                h.write = join(
+                    h.write,
+                    if p.kind == PassKind::Render {
+                        Stages::FRAGMENT
+                    } else {
+                        mine
+                    },
+                );
             }
             for id in &t.reads {
+                let id = aliases.get(id).unwrap_or(id);
                 let h = self.pending.entry(*id).or_default();
                 h.read = join(h.read, mine);
             }

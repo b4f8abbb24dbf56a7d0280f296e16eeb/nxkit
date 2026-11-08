@@ -24,6 +24,8 @@ use crate::stats::{EncodeStats, Skip};
 /// A texture of the store as the encoder sees it.
 #[derive(Clone)]
 pub(crate) struct Res {
+    /// The stable hazard key of this backing texture, including its aliases.
+    pub(crate) barrier_id: TexId,
     /// The Metal texture.
     pub(crate) tex: Texture,
     /// The description it was made with.
@@ -49,17 +51,20 @@ pub(crate) struct Use {
     pub(crate) cpu_read: bool,
 }
 
-type ViewKey = (TexId, u64, [u32; 6]);
+type ViewKey = (u64, [u32; 7]);
 
 /// The textures by id.
 pub(crate) struct TextureStore {
     ctx: Context,
-    entries: HashMap<TexId, Res>,
-    attachments: HashSet<TexId>,
-    pinned: HashSet<TexId>,
+    entries: FastMap<TexId, Res>,
+    aliases: FastMap<(u64, TextureDesc), Res>,
+    attachments: FastSet<TexId>,
+    pinned: FastSet<TexId>,
     next_generation: u64,
-    views: Mutex<HashMap<ViewKey, Texture>>,
+    views: Mutex<FastMap<ViewKey, Texture>>,
     retired: Vec<Texture>,
+    /// The storage ranges of the textures made so far, for the `contain` diagnostic.
+    spans: Mutex<Vec<(u64, u64, TexId, TextureDesc)>>,
 }
 
 fn kind_of(t: Target) -> Option<TextureKind> {
@@ -194,11 +199,69 @@ impl TextureStore {
                 stats.textures_rescaled += 1;
             }
         }
-        let tex = Texture::new(&self.ctx, desc).map_err(|_| Skip::Texture)?;
-        let generation = self.next_generation;
-        self.next_generation += 1;
-        let r = Res { tex, desc, generation, scaled, fresh: true, widened };
-        stats.textures_created += 1;
+        let key = (rec.address.get(), desc);
+        let r = if let Some(alias) = self.aliases.get(&key) {
+            Res {
+                fresh: false,
+                ..alias.clone()
+            }
+        } else {
+            if crate::diag("contain") {
+                let (a0, a1) = (rec.address.get(), rec.address.get() + rec.layout.size);
+                let mut spans = self.spans.lock().unwrap_or_else(PoisonError::into_inner);
+                for &(b0, b1, other, od) in spans.iter() {
+                    let inside = a0 >= b0 && a1 <= b1 && (a0, a1) != (b0, b1);
+                    let around = b0 >= a0 && b1 <= a1 && (a0, a1) != (b0, b1);
+                    if (inside || around) && other != id {
+                        eprintln!(
+                            "DIAG contain {} new {id:?} {:?} {}x{}x{} l{} {:?} [{a0:#x}+{:#x}] {} old {other:?} {:?} {}x{}x{} l{} {:?} [{b0:#x}+{:#x}] off {:#x}",
+                            if inside { "inside" } else { "around" },
+                            desc.kind, desc.width, desc.height, desc.array_layers, desc.mip_levels, desc.format, a1 - a0,
+                            if inside { "of" } else { "holds" },
+                            od.kind, od.width, od.height, od.array_layers, od.mip_levels, od.format, b1 - b0,
+                            a0.abs_diff(b0)
+                        );
+                    }
+                }
+                if spans.len() < 20000 {
+                    spans.push((a0, a1, id, desc));
+                }
+            }
+            if crate::diag("split") {
+                for ((a, other), r) in &self.aliases {
+                    if *a == rec.address.get() {
+                        eprintln!(
+                            "DIAG split addr {a:#x} new {id:?} {:?} {}x{}x{} l{} {:?} rt {} | old {:?} {:?} {}x{}x{} l{} {:?} rt {}",
+                            desc.kind, desc.width, desc.height, desc.array_layers, desc.mip_levels, desc.format, desc.render_target,
+                            r.barrier_id, other.kind, other.width, other.height, other.array_layers, other.mip_levels, other.format, other.render_target
+                        );
+                    }
+                }
+            }
+            if crate::diag("arr") && desc.array_layers == 8 && desc.width >= 256 {
+                eprintln!(
+                    "DIAG arr new metal texture {id:?} at {:#x} {:?} {}x{} gen {} (entry had {:?})",
+                    rec.address.get(), desc.format, desc.width, desc.height, self.next_generation,
+                    self.entries.get(&id).map(|r| r.generation)
+                );
+            }
+            let tex = Texture::new(&self.ctx, desc)
+                .map_err(|e| crate::tex_skip(format_args!("new {id:?} {desc:?}: {e:?}")))?;
+            let generation = self.next_generation;
+            self.next_generation += 1;
+            let r = Res {
+                barrier_id: id,
+                tex,
+                desc,
+                generation,
+                scaled,
+                fresh: true,
+                widened,
+            };
+            self.aliases.insert(key, r.clone());
+            stats.textures_created += 1;
+            r
+        };
         if let Some(old) = self.entries.insert(id, r.clone()) {
             self.retired.push(old.tex);
         }
@@ -297,12 +360,13 @@ impl TextureStore {
     }
 
     /// Drops the views of replaced textures.
-    pub(crate) fn trim_views(&self) {
-        let live: HashMap<TexId, u64> = self.entries.iter().map(|(k, v)| (*k, v.generation)).collect();
+    pub(crate) fn trim_views(&mut self) {
+        let live: FastSet<u64> = self.entries.values().map(|v| v.generation).collect();
+        self.aliases.retain(|_, r| live.contains(&r.generation));
         self.views
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|(id, g, _), _| live.get(id) == Some(g));
+            .retain(|(generation, _), _| live.contains(generation));
     }
 
     /// True when the guest bytes have to go into the Metal texture before the frame uses it.
@@ -320,4 +384,102 @@ fn format_key(f: Format) -> u32 {
     let mut h = DefaultHasher::new();
     f.hash(&mut h);
     h.finish() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nxkit_nvn::{resource::ResourceTable, space::GpuAddr};
+
+    #[test]
+    fn attachment_views_write_distinct_mips_and_layers() {
+        use nxkit_metal::{ArgumentTable, ColorAttachment, FrameRing, LoadAction, RenderPassDesc, StoreAction};
+        use nxkit_nvn::frame::TargetView;
+        let Ok(ctx) = Context::system_default() else { return };
+        let desc = nxkit_nvn::layout::TextureDesc { target: Target::D2Array, format: 0x25,
+            flags: 0, samples: 0, width: 16, height: 16, depth: 2, levels: 2, stride: 0, packaged_block: None };
+        let mut table = ResourceTable::new();
+        let id = table.create(desc, GpuAddr::new(0x2000).unwrap()).unwrap();
+        let mut store = TextureStore::new(&ctx);
+        let res = store.ensure(table.get(id).unwrap(), 1.0, Use { attachment: true, ..Use::default() }, &mut EncodeStats::default()).unwrap();
+        let first = store.target_view(&res, TargetView::from_words([3, 0, 1, 0])).unwrap();
+        let second = store.target_view(&res, TargetView::from_words([0x00010003, 1 << 16, 1, 0])).unwrap();
+        assert_eq!((first.desc().width, second.desc().width), (16, 8));
+        let table = ArgumentTable::new(&ctx, 1, 1).unwrap();
+        let mut ring = FrameRing::new(&ctx).unwrap();
+        let mut frame = ring.begin().unwrap();
+        for (texture, clear) in [(&first, [1.,0.,0.,1.]), (&second, [0.,1.,0.,1.])] {
+            frame.commands().begin_render_pass(&RenderPassDesc { colors: vec![Some(ColorAttachment { depth_plane: 0,
+                texture: texture.clone(), load: LoadAction::Clear, store: StoreAction::Store,
+                clear, memoryless: false })], depth: None, stencil: None }, &table).unwrap().end();
+        }
+        frame.submit().unwrap().wait().unwrap();
+        assert_eq!(first.debug_read(&ctx, &[[0,0]]).unwrap()[0], [255,0,0,255]);
+        assert_eq!(second.debug_read(&ctx, &[[0,0]]).unwrap()[0], [0,255,0,255]);
+        assert_eq!(store.target_view(&res, TargetView::from_words([3,0,1,0])).unwrap().gpu_resource_id(), first.gpu_resource_id());
+    }
+
+    #[test]
+    fn repeated_objects_over_the_same_storage_share_one_backing() {
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: Target::D2,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 64,
+            height: 64,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
+        };
+        let mut table = ResourceTable::new();
+        let mut store = TextureStore::new(&ctx);
+        let mut stats = EncodeStats::default();
+        let mut first = None;
+        let mut ids = Vec::new();
+        for _ in 0..1000 {
+            let id = table.create(desc, GpuAddr::new(0x2000).unwrap()).unwrap();
+            let res = store
+                .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+                .unwrap();
+            let key = (res.tex.gpu_resource_id(), res.generation, res.barrier_id);
+            if let Some(want) = first {
+                assert_eq!(key, want);
+            } else {
+                first = Some(key);
+            }
+            ids.push(id);
+        }
+        assert_eq!(stats.textures_created, 1);
+        assert_eq!(store.aliases.len(), 1);
+        let different = table
+            .create(
+                nxkit_nvn::layout::TextureDesc {
+                    format: 0x27,
+                    ..desc
+                },
+                GpuAddr::new(0x2000).unwrap(),
+            )
+            .unwrap();
+        let r = store
+            .ensure(
+                table.get(different).unwrap(),
+                1.0,
+                Use::default(),
+                &mut stats,
+            )
+            .unwrap();
+        assert_ne!(r.tex.gpu_resource_id(), first.unwrap().0);
+        assert_eq!(stats.textures_created, 2);
+        for id in ids {
+            store.invalidate(id);
+        }
+        store.invalidate(different);
+        store.trim_views();
+        assert!(store.aliases.is_empty());
+    }
 }

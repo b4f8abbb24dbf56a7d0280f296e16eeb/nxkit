@@ -310,6 +310,12 @@ getter!(get_texture_address, "nvnTextureGetTextureAddress", u64, ADDRESS, u64, |
 pub(crate) fn storage_address(t: u64) -> AbiResult<u64> {
     field(t, |o| o.u64(ADDRESS))
 }
+
+/// The id of the texture at the guest address `t`. The game may copy texture objects, so the id comes from the
+/// object and not from the registry of initialised addresses.
+pub(crate) fn texture_id(t: u64) -> AbiResult<TexId> {
+    field(t, |o| o.u32(ID)).map(TexId)
+}
 getter!(get_storage_size, "nvnTextureGetStorageSize", i32, SIZE, u64, |v| v as i32);
 
 fn byte(t: u64, at: u64) -> AbiResult<i32> {

@@ -204,7 +204,8 @@ fn write_texels(name: &str, t: u64, view: u64, region: u64, src: u64, row: i64, 
         return Ok(());
     };
     let (lo, hi) = put(&t, &p, src)?;
-    gpu(name).with_front(|f| f.guest_wrote(t.host + lo, hi - lo).map(|_| ()))
+    gpu(name).invalidated(t.host + lo, hi - lo);
+    gpu(name).with_front(|f| f.texels_written(t.host + lo, hi - lo).map(|_| ()))
 }
 
 fn read_texels(name: &str, t: u64, view: u64, region: u64, dst: u64, row: i64, img: i64) -> AbiResult<()> {

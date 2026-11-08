@@ -40,6 +40,9 @@ pub struct TextureRecord {
     pub residency: Residency,
     /// True when the host knows that the contents are dead at the end of each frame.
     pub frame_local: bool,
+    /// Counts the CPU writes that hit this texture. A backend that encodes from a copy of the record compares it
+    /// before it applies what the GPU did ([`ResourceTable::gpu_wrote_at`]).
+    pub write_epoch: u32,
     alive: bool,
 }
 
@@ -70,10 +73,20 @@ impl ResourceTable {
     }
 
     /// Adds a texture at `address`. The storage must end below 2^40.
-    /// A new texture is `GuestNewer`, because the guest fills the memory before the GPU copy exists.
+    /// New storage is `GuestNewer`. An exact alias inherits the residency of the existing storage.
     pub fn create(&mut self, desc: TextureDesc, address: GpuAddr) -> Result<TexId> {
         let layout = desc.layout()?;
         address.offset(layout.size)?;
+        // Initializing another object over existing storage does not write that storage. Exact aliases inherit
+        // its current owner, so a new wrapper does not upload stale guest bytes over GPU-written contents.
+        let a = address.get();
+        let residency = self
+            .by_address
+            .range((a, 0)..=(a, u32::MAX))
+            .rev()
+            .filter_map(|(_, id)| self.get(*id).ok())
+            .find(|r| r.desc == desc)
+            .map_or(Residency::GuestNewer, |r| r.residency);
         let id = TexId(
             u32::try_from(self.records.len())
                 .map_err(|_| NvnError::BadPool("too many textures"))?,
@@ -83,8 +96,9 @@ impl ResourceTable {
             desc,
             layout,
             address,
-            residency: Residency::GuestNewer,
+            residency,
             frame_local: false,
+            write_epoch: 0,
             alive: true,
         });
         self.by_address.insert((address.get(), id.0), id);
@@ -125,8 +139,18 @@ impl ResourceTable {
     }
 
     /// Marks every texture that overlaps `[start, start + len)` as `GuestNewer` and pushes its id into `hit`.
-    /// This is the path for a CPU write into texture memory.
+    /// This is the path for a CPU write into texture memory. A texture that the GPU wrote last is left alone.
     pub fn guest_wrote(&mut self, start: GpuAddr, len: u64, hit: &mut Vec<TexId>) {
+        self.cpu_wrote(start, len, false, hit);
+    }
+
+    /// Like [`ResourceTable::guest_wrote`] for a write that is known to change texels (`nvnTextureWriteTexels`). It
+    /// marks a texture that the GPU wrote last too.
+    pub fn texels_written(&mut self, start: GpuAddr, len: u64, hit: &mut Vec<TexId>) {
+        self.cpu_wrote(start, len, true, hit);
+    }
+
+    fn cpu_wrote(&mut self, start: GpuAddr, len: u64, texels: bool, hit: &mut Vec<TexId>) {
         let (lo, hi) = (start.get(), start.get().saturating_add(len));
         let from = lo.saturating_sub(self.largest);
         let first = hit.len();
@@ -136,8 +160,13 @@ impl ResourceTable {
         let mut keep = first;
         for i in first..hit.len() {
             let r = &mut self.records[hit[i].0 as usize];
-            if r.end() > lo {
+            // A texture that the GPU wrote keeps its GPU content: games flush whole pools after writing other
+            // data into them, and taking the flush as new texels uploads guest bytes that never saw the GPU's
+            // writes over them (BotW's terrain height and material arrays, rendered on the GPU each frame,
+            // came out flat). nxnative treats flushes the same way, except for games whose profile asks.
+            if r.end() > lo && (texels || r.residency != Residency::GpuNewer) {
                 r.residency = Residency::GuestNewer;
+                r.write_epoch = r.write_epoch.wrapping_add(1);
                 hit[keep] = hit[i];
                 keep += 1;
             }
@@ -147,13 +176,40 @@ impl ResourceTable {
 
     /// Marks a texture as written by the GPU.
     pub fn gpu_wrote(&mut self, id: TexId) -> Result<()> {
-        self.get_mut(id)?.residency = Residency::GpuNewer;
-        Ok(())
+        self.set_alias_residency(id, Residency::GpuNewer, None)
+    }
+
+    /// Like [`ResourceTable::gpu_wrote`] for a frame that was encoded from a copy of the record. `epoch` is the
+    /// [`TextureRecord::write_epoch`] of that copy. A CPU write that came after the copy keeps the texture `GuestNewer`.
+    pub fn gpu_wrote_at(&mut self, id: TexId, epoch: u32) -> Result<()> {
+        self.set_alias_residency(id, Residency::GpuNewer, Some(epoch))
     }
 
     /// Marks a texture as synchronised after the backend copied one side to the other.
     pub fn synced(&mut self, id: TexId) -> Result<()> {
-        self.get_mut(id)?.residency = Residency::InSync;
+        self.set_alias_residency(id, Residency::InSync, None)
+    }
+
+    /// Like [`ResourceTable::synced`] for a frame that was encoded from a copy of the record. See
+    /// [`ResourceTable::gpu_wrote_at`].
+    pub fn synced_at(&mut self, id: TexId, epoch: u32) -> Result<()> {
+        self.set_alias_residency(id, Residency::InSync, Some(epoch))
+    }
+
+    /// Sets the residency of a texture and of its exact aliases. With `epoch` set, nothing changes when a CPU write hit
+    /// the texture since the record had that epoch.
+    fn set_alias_residency(&mut self, id: TexId, residency: Residency, epoch: Option<u32>) -> Result<()> {
+        let record = self.get(id)?;
+        if epoch.is_some_and(|e| e != record.write_epoch) {
+            return Ok(());
+        }
+        let (addr, desc) = (record.address.get(), record.desc);
+        for (_, alias) in self.by_address.range((addr, 0)..=(addr, u32::MAX)) {
+            let r = &mut self.records[alias.0 as usize];
+            if r.residency != residency && r.desc == desc {
+                r.residency = residency;
+            }
+        }
         Ok(())
     }
 
@@ -235,6 +291,95 @@ mod tests {
         t.gpu_wrote(a).unwrap();
         assert_eq!(t.get(a).unwrap().residency, Residency::GpuNewer);
         assert!(t.gpu_wrote(TexId(9)).is_err());
+    }
+
+    #[test]
+    fn exact_aliases_share_residency_and_new_objects_preserve_gpu_contents() {
+        let mut t = ResourceTable::new();
+        let a = t.create(rgba(8, 8), at(0x4000)).unwrap();
+        t.gpu_wrote(a).unwrap();
+        let b = t.create(rgba(8, 8), at(0x4000)).unwrap();
+        assert_eq!(t.get(b).unwrap().residency, Residency::GpuNewer);
+        let c = t.create(rgba(16, 8), at(0x4000)).unwrap();
+        assert_eq!(t.get(c).unwrap().residency, Residency::GuestNewer);
+        t.synced(b).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::InSync);
+        t.gpu_wrote(b).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::GpuNewer);
+        let mut hit = Vec::new();
+        t.guest_wrote(at(0x4000), 4, &mut hit);
+        assert_eq!(t.get(a).unwrap().residency, Residency::GpuNewer);
+        assert_eq!(t.get(b).unwrap().residency, Residency::GpuNewer);
+        assert!(!hit.contains(&a) && !hit.contains(&b));
+    }
+
+    #[test]
+    fn a_flush_marks_only_textures_the_gpu_did_not_write() {
+        let mut t = ResourceTable::new();
+        let gpu = t.create(rgba(8, 8), at(0x4000)).unwrap();
+        let cpu = t.create(rgba(8, 8), at(0x8000)).unwrap();
+        t.gpu_wrote(gpu).unwrap();
+        t.synced(cpu).unwrap();
+        let mut hit = Vec::new();
+        t.guest_wrote(at(0x4000), 0x8000, &mut hit);
+        assert_eq!(t.get(gpu).unwrap().residency, Residency::GpuNewer);
+        assert_eq!(t.get(cpu).unwrap().residency, Residency::GuestNewer);
+        assert_eq!(hit, vec![cpu]);
+    }
+
+    #[test]
+    fn a_cpu_write_after_the_copy_wins_over_the_report_of_the_gpu() {
+        let mut t = ResourceTable::new();
+        let a = t.create(rgba(64, 64), at(0x1000)).unwrap();
+        let seen = t.get(a).unwrap().write_epoch;
+        t.guest_wrote(at(0x1000), 4, &mut Vec::new());
+        t.gpu_wrote_at(a, seen).unwrap();
+        t.synced_at(a, seen).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::GuestNewer);
+        let now = t.get(a).unwrap().write_epoch;
+        t.gpu_wrote_at(a, now).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::GpuNewer);
+        t.synced_at(a, now).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::InSync);
+    }
+
+    #[test]
+    fn a_copy_back_leaves_the_texture_in_sync_until_the_cpu_writes_it() {
+        let mut t = ResourceTable::new();
+        let a = t.create(rgba(64, 64), at(0x1000)).unwrap();
+        let alias = t.create(rgba(64, 64), at(0x1000)).unwrap();
+        // The frame renders into the texture and copies it back: the report applies the write, then the sync.
+        let seen = t.get(a).unwrap().write_epoch;
+        t.gpu_wrote_at(a, seen).unwrap();
+        t.synced_at(a, seen).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::InSync);
+        assert_eq!(t.get(alias).unwrap().residency, Residency::InSync);
+        // A later flush or write of the memory is new data again, and the next use uploads it.
+        let mut hit = Vec::new();
+        t.guest_wrote(at(0x1000 + 0x100), 4, &mut hit);
+        assert_eq!(hit, [a, alias]);
+        assert_eq!(t.get(a).unwrap().residency, Residency::GuestNewer);
+        // The next frame renders it again without a copy-back: the GPU copy is newer, and a flush does not undo it.
+        let seen = t.get(a).unwrap().write_epoch;
+        t.gpu_wrote_at(a, seen).unwrap();
+        t.guest_wrote(at(0x1000), 4, &mut Vec::new());
+        assert_eq!(t.get(a).unwrap().residency, Residency::GpuNewer);
+        // `nvnTextureWriteTexels` always wins.
+        t.texels_written(at(0x1000), 4, &mut Vec::new());
+        assert_eq!(t.get(a).unwrap().residency, Residency::GuestNewer);
+    }
+
+    #[test]
+    fn a_cpu_write_between_the_encode_and_the_copy_back_report_wins() {
+        let mut t = ResourceTable::new();
+        let a = t.create(rgba(64, 64), at(0x1000)).unwrap();
+        t.synced(a).unwrap();
+        // The encoder works from a copy of the record. The CPU writes the texture before the report comes back.
+        let seen = t.get(a).unwrap().write_epoch;
+        t.guest_wrote(at(0x1000), 4, &mut Vec::new());
+        t.gpu_wrote_at(a, seen).unwrap();
+        t.synced_at(a, seen).unwrap();
+        assert_eq!(t.get(a).unwrap().residency, Residency::GuestNewer);
     }
 
     #[test]

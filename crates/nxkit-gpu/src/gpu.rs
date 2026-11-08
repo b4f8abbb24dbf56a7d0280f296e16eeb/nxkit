@@ -431,15 +431,82 @@ impl Gpu {
                     stats.uploads += 1;
                     stats.compute_passes += 1;
                     deswizzled.push(*id);
-                    self.barriers.seed(*id, Stages::DISPATCH | Stages::BLIT);
+                    self.barriers
+                        .seed(res.barrier_id, Stages::DISPATCH | Stages::BLIT);
                 }
                 Err(why) => stats.skip(why),
             }
         }
 
-        let barrier_plan = self.barriers.plan(frame, plan);
+        let aliases = textures
+            .iter()
+            .map(|(id, res)| (*id, res.barrier_id))
+            .collect();
+        if crate::diag("prov") && crate::lum::active() {
+            let keys: Vec<String> = std::fs::read_to_string("/tmp/fmap/terrain_keys.txt")
+                .map(|t| t.lines().map(str::to_owned).collect())
+                .unwrap_or_default();
+            let mut start: Vec<TexId> = Vec::new();
+            for d in &detail.draws {
+                if !keys.iter().any(|k| d.program.vertex.starts_with(k.as_str())) {
+                    continue;
+                }
+                for t in d.textures.iter().filter(|t| t.handle != 0 && t.stage == crate::detail::Stage::Vertex && t.slot == 0) {
+                    if let Ok((slot, _)) = view.resolve(t.handle) {
+                        if !start.contains(&slot.texture) {
+                            start.push(slot.texture);
+                        }
+                    }
+                }
+            }
+            let touches: Vec<_> = plan.passes.iter().map(|p| crate::barriers::touch(frame, plan, p)).collect();
+            let mut frontier = start.clone();
+            let mut seen: Vec<TexId> = Vec::new();
+            for depth in 0..4 {
+                let mut next = Vec::new();
+                for id in frontier.drain(..) {
+                    if seen.contains(&id) {
+                        continue;
+                    }
+                    seen.push(id);
+                    let desc = textures.get(&id).map(|r| (r.desc.kind, r.desc.width, r.desc.height, r.desc.array_layers, r.desc.format));
+                    let res = view.record(id).ok().map(|r| (r.residency, r.address.get()));
+                    let writers: Vec<usize> = touches.iter().enumerate().filter(|(_, t)| t.writes.contains(&id)).map(|(i, _)| i).collect();
+                    eprintln!("DIAG prov depth {depth} {id:?} {desc:?} {res:?} writers {writers:?}");
+                    for w in writers.iter().take(6) {
+                        let p = &plan.passes[*w];
+                        let reads: Vec<_> = touches[*w].sampled.iter().map(|r| (*r, textures.get(r).map(|x| (x.desc.width, x.desc.format)))).collect();
+                        eprintln!("DIAG prov   pass {w} {:?} cmds {:?} reads {reads:?}", p.kind, p.cmds);
+                        next.extend(touches[*w].sampled.iter().copied());
+                    }
+                }
+                frontier = next;
+            }
+        }
+        if crate::diag("hm") {
+            static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let is_hm = |id: &TexId| {
+                textures.get(id).is_some_and(|r| {
+                    r.desc.kind == nxkit_metal::TextureKind::D2Array && r.desc.array_layers == 8 && r.desc.width >= 256
+                })
+            };
+            for (i, p) in plan.passes.iter().enumerate() {
+                let t = crate::barriers::touch(frame, plan, p);
+                let hit: Vec<_> = t.writes.iter().filter(|id| is_hm(id)).collect();
+                if !hit.is_empty() && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 300 {
+                    let fmt: Vec<_> = hit.iter().map(|id| (**id, textures.get(id).map(|r| (r.desc.width, r.desc.format)))).collect();
+                    let atts: Vec<_> = plan.attachments_of(p).iter().map(|a| (a.tex, a.slot, a.view.level(), a.view.layer(), a.load, a.store)).collect();
+                    eprintln!("DIAG hm pass {i} {:?} cmds {:?} writes {fmt:?} atts {atts:?}", p.kind, p.cmds);
+                }
+            }
+        }
+        let t_barrier = Instant::now();
+        let barrier_plan = self.barriers.plan(frame, plan, &aliases);
+        stats.barrier_ns = nanos(t_barrier, Instant::now());
         let ords = ordinals(frame);
-        let run_at: HashMap<u32, RecordingRun> = detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
+        let run_at: FastMap<u32, RecordingRun> =
+            detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
+        let uploaded = Mutex::new(FastMap::default());
         let sh = Shared {
             ctx: &self.ctx,
             frame,

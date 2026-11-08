@@ -15,7 +15,7 @@ use crate::error::{MetalError, Result, create};
 use crate::format::Format;
 
 /// Where the pixels of a texture live.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Storage {
     /// Only the GPU reads and writes it. The default for render targets.
     Private,
@@ -26,7 +26,7 @@ pub enum Storage {
 }
 
 /// The shape of a texture.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureKind {
     /// One 2D image per level.
     D2,
@@ -53,7 +53,7 @@ impl TextureKind {
 }
 
 /// What a texture is for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextureDesc {
     /// The shape.
     pub kind: TextureKind,

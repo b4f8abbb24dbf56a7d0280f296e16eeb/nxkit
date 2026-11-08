@@ -255,8 +255,30 @@ pub struct Ctx<'a, M: GuestMem> {
     pub desc: &'a Descriptors,
 }
 
-/// The texture that starts at a GPU address. The newest one wins.
-pub fn texture_at(table: &ResourceTable, addr: u64) -> Option<TexId> {
+/// The bit where a record word keeps the texture id above the GPU address. Texture storage ends below 2^40.
+const TAG_SHIFT: u32 = 40;
+
+/// The record word of a texture: its GPU address, and above it the texture id plus one. Textures can share storage
+/// (BotW makes a 854x480 and a 1920x1080 texture at one address), so the address alone does not name one texture.
+/// An id that does not fit leaves the word untagged.
+pub fn tag_address(addr: u64, id: TexId) -> u64 {
+    match u64::from(id.0).checked_add(1) {
+        Some(tag) if tag < 1 << (64 - TAG_SHIFT) && addr < 1 << TAG_SHIFT => addr | tag << TAG_SHIFT,
+        _ => addr,
+    }
+}
+
+/// The texture of a record word. A tagged word names its texture while that texture lives at the address. Otherwise
+/// the newest texture at the address wins.
+pub fn texture_at(table: &ResourceTable, word: u64) -> Option<TexId> {
+    let addr = word & ((1 << TAG_SHIFT) - 1);
+    let tag = word >> TAG_SHIFT;
+    if tag != 0 {
+        let id = TexId((tag - 1) as u32);
+        if table.get(id).is_ok_and(|r| r.address.get() == addr) {
+            return Some(id);
+        }
+    }
     table.at_address(GpuAddr::new(addr).ok()?).last()
 }
 
@@ -327,6 +349,12 @@ impl Builder {
             return None;
         }
         let t = texture_at(cx.table, a);
+        if a & ((1 << TAG_SHIFT) - 1) == 0x15981c4e00 && std::env::var_os("NXKIT_WATCH_ADDR").is_some() {
+            static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 30 {
+                eprintln!("DIAG watch addr word {a:#x} -> {t:?}");
+            }
+        }
         self.refs.push(Ref::Addr(a, t));
         t
     }

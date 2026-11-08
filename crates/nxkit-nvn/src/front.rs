@@ -143,9 +143,9 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.space.gpu_address(host, len)
     }
 
-    /// The GPU address of a texture. A record in command memory names a texture by this address.
+    /// The record word of a texture: its GPU address tagged with its id (see [`crate::decode::tag_address`]).
     pub fn texture_address(&self, id: TexId) -> Result<u64> {
-        Ok(self.table.get(id)?.address.get())
+        Ok(crate::decode::tag_address(self.table.get(id)?.address.get(), id))
     }
 
     /// Creates a texture in guest memory. This is `nvnTextureInitialize`.
@@ -373,8 +373,19 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.frame.clear();
     }
 
-    /// Tells that the guest wrote host memory. The textures that overlap are marked `GuestNewer` and returned.
-    /// The recordings in that memory lose their summaries.
+    /// Tells that the guest wrote texels into host memory (`nvnTextureWriteTexels`). Every texture that overlaps is
+    /// marked `GuestNewer`, also one that the GPU wrote last, and returned. The recordings in that memory lose their
+    /// summaries.
+    pub fn texels_written(&mut self, host: u64, len: u64) -> Result<&[TexId]> {
+        let start = self.space.gpu_address(host, len)?;
+        self.cache.invalidate(host, host.saturating_add(len));
+        self.hit.clear();
+        self.table.texels_written(start, len, &mut self.hit);
+        Ok(&self.hit)
+    }
+
+    /// The game wrote `[host, host + len)` of guest memory (a flush of a mapped range). See
+    /// [`ResourceTable::guest_wrote`].
     pub fn guest_wrote(&mut self, host: u64, len: u64) -> Result<&[TexId]> {
         let start = self.space.gpu_address(host, len)?;
         self.cache.invalidate(host, host.saturating_add(len));

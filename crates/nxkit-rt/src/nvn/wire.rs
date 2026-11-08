@@ -19,7 +19,8 @@ impl Seam for Wired {
     }
 
     fn texture_address(&self, tex: u64) -> AbiResult<u64> {
-        texture::storage_address(tex)
+        let addr = texture::storage_address(tex)?;
+        Ok(nxkit_nvn::decode::tag_address(addr, texture::texture_id(tex)?))
     }
 }
 
