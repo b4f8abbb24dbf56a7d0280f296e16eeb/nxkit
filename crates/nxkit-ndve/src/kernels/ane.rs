@@ -89,7 +89,8 @@ mod tests {
             let at = src
                 .find(&format!("kernel void {}(", s.kernel))
                 .unwrap_or_else(|| panic!("no kernel {}", s.kernel));
-            let sig = &src[at..at + src[at..].find(')').unwrap_or(0)];
+            // The signature ends at the body's brace; an attribute such as `[[texture(0)]]` has its own parentheses.
+            let sig = &src[at..at + src[at..].find('{').unwrap_or(0)];
             for b in &s.buffers {
                 assert!(sig.contains(&format!("buffer({})", b.index)), "{sig}");
             }
