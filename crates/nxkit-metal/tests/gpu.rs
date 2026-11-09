@@ -209,8 +209,10 @@ fn single_channel_font_view_swizzles_to_white_with_red_as_alpha() {
     let mut bytes = [0; 16];
     output.read(0, &mut bytes).unwrap();
     let rgba: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect();
     assert_eq!(&rgba[..3], &[1.0; 3]);
     assert!((rgba[3] - 128.0 / 255.0).abs() < 0.0001);
@@ -811,8 +813,10 @@ fragment Outputs mrt() { return {float4(1,0,0,1), float4(0,1,0,1),
     for (slot, (texture, color)) in targets.iter().zip(expected).enumerate() {
         assert!(
             pixels(texture, 16, 16)
-                .chunks_exact(4)
-                .all(|pixel| pixel == color),
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == color),
             "output slot {slot}"
         );
     }
@@ -855,7 +859,6 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: None,
             collect: true,
-            ..Default::default()
         },
     )
     .unwrap();
@@ -869,7 +872,6 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: Some(archive.clone()),
             collect: false,
-            ..Default::default()
         },
     )
     .unwrap();
@@ -881,7 +883,6 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: Some(dir.join("none")),
             collect: false,
-            ..Default::default()
         },
     )
     .unwrap();
@@ -1239,8 +1240,10 @@ fn render_targets_select_distinct_depth_planes_of_a_volume() {
     for (texture, expected) in outputs.iter().zip([[255, 0, 0, 255], [0, 255, 0, 255]]) {
         assert!(
             pixels(texture, 16, 16)
-                .chunks_exact(4)
-                .all(|pixel| pixel == expected)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == expected)
         );
     }
 }

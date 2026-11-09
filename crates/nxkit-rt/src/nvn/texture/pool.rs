@@ -137,7 +137,7 @@ impl DescPools {
         if o.u32(OFF_MAGIC)? != self.magic {
             return Ok(None);
         }
-        let range = (o.u32(OFF_BASE)?, o.u32(OFF_N)? as u32);
+        let range = (o.u32(OFF_BASE)?, o.u32(OFF_N)?);
         o.set_u32(OFF_MAGIC, 0)?;
         Ok(Some(range))
     }

@@ -51,7 +51,7 @@ impl ExecutionRange {
 
 /// Checks that an execution range fits in its buffer.
 pub(crate) fn check_range_buffer(buffer: &DataBuffer, offset: u64) -> Result<()> {
-    if offset % 4 != 0 || offset + ExecutionRange::BYTES as u64 > buffer.len() {
+    if !offset.is_multiple_of(4) || offset + ExecutionRange::BYTES as u64 > buffer.len() {
         return Err(MetalError::Invalid(
             "the execution range is misaligned or outside its buffer",
         ));

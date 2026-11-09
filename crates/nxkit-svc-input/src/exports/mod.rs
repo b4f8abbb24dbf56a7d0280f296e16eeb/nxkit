@@ -18,7 +18,7 @@ macro_rules! stubs {
         )*
 
         pub(super) fn $list() -> Vec<Export> {
-            vec![$(Export::new($name, $f as usize)),*]
+            vec![$(Export::new($name, $f as *const () as usize)),*]
         }
     };
 }

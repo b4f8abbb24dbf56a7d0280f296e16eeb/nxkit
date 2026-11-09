@@ -146,7 +146,7 @@ impl Module {
     /// Checks the segments against each other and against the other fields.
     pub fn check(&self) -> Result<()> {
         let n = &self.name;
-        if self.base % PAGE != 0 || self.size == 0 {
+        if !self.base.is_multiple_of(PAGE) || self.size == 0 {
             return Err(bad(format!(
                 "module {n}: base {:#x} is not page aligned or size is 0",
                 self.base
@@ -204,7 +204,7 @@ impl Module {
                 "module {n}: data and bss are not in one writable segment"
             )));
         }
-        if self.key_page % PAGE != 0 || !self.writable(self.key_page, PAGE) {
+        if !self.key_page.is_multiple_of(PAGE) || !self.writable(self.key_page, PAGE) {
             return Err(bad(format!(
                 "module {n}: key page {:#x} is not aligned or not in a writable segment",
                 self.key_page
@@ -355,8 +355,8 @@ mod tests {
         let Some(m) = m else { return };
         assert_eq!(m.low, -131072);
         assert_eq!(m.end() - m.start(), 0x64000);
-        assert_eq!(m.start(), 0x1_0000_0400_00 - 0x2_0000);
-        assert_eq!(m.end(), 0x1_0000_0400_00 + 0x44000);
+        assert_eq!(m.start(), 0x0100_0004_0000 - 0x2_0000);
+        assert_eq!(m.end(), 0x0100_0004_0000 + 0x44000);
         assert!(m.check().is_ok(), "{:?}", m.check().err());
         assert!(m.writable(0x20000, 0x10));
         assert!(!m.writable(0x10, 0x10));
@@ -397,8 +397,8 @@ mod tests {
         let m = far().and_then(|m| m.moved(0x4000));
         assert!(
             m.as_ref()
-                .is_some_and(|m| m.base == 0x1_0000_0400_00 + 0x4000)
+                .is_some_and(|m| m.base == 0x0100_0004_0000 + 0x4000)
         );
-        assert!(m.is_some_and(|m| m.start() == 0x1_0000_0400_00 + 0x4000 - 0x2_0000));
+        assert!(m.is_some_and(|m| m.start() == 0x0100_0004_0000 + 0x4000 - 0x2_0000));
     }
 }

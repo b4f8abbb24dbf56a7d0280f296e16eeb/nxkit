@@ -30,7 +30,10 @@ fn grid(width: u32, height: u32) -> [u32; 2] {
     }
 }
 
-static TARGETS: Mutex<Vec<(u32, TexId, [u32; 2], Texture)>> = Mutex::new(Vec::new());
+/// A sampled target: its pass, texture id, probe grid and texture.
+type Target = (u32, TexId, [u32; 2], Texture);
+
+static TARGETS: Mutex<Vec<Target>> = Mutex::new(Vec::new());
 
 /// True when the current frame is sampled. The caller starts the frame with `crate::diag::begin_frame` first.
 pub(crate) fn begin() -> bool {

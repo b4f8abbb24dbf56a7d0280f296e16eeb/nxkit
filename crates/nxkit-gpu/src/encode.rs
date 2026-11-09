@@ -862,14 +862,15 @@ fn draw(
                 format!("{:?}", d.program.fragment),
                 format!("{unresolved:?}"),
             );
-            if let Ok(mut seen) = SEEN.lock() {
-                if !seen.contains(&key) && seen.len() < 400 {
-                    seen.push(key);
-                    eprintln!(
-                        "DIAG tex unresolved draw {n} pass {:?} vs {} fs {:?} {unresolved:?}",
-                        pc.size, d.program.vertex, d.program.fragment
-                    );
-                }
+            if let Ok(mut seen) = SEEN.lock()
+                && !seen.contains(&key)
+                && seen.len() < 400
+            {
+                seen.push(key);
+                eprintln!(
+                    "DIAG tex unresolved draw {n} pass {:?} vs {} fs {:?} {unresolved:?}",
+                    pc.size, d.program.vertex, d.program.fragment
+                );
             }
         }
     }
@@ -882,7 +883,10 @@ fn draw(
     );
     if crate::diag("pixel") && crate::diag::sampled() && FOCUS_PASS.with(std::cell::Cell::get) {
         static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 97 == 0 {
+        if SHOWN
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .is_multiple_of(97)
+        {
             eprintln!(
                 "DIAG pixel draw {:?} vs {} fs {:?} tex {:?} args {:?} vp {:?}",
                 p.as_ref().err(),
@@ -932,7 +936,9 @@ fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
         let mut bytes = vec![0u8; count * 4];
         match sh.guest_offset(addr, bytes.len() as u64) {
             Some(off) if sh.guest.read(off, &mut bytes).is_ok() => bytes
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect(),
             _ => Vec::new(),
@@ -941,7 +947,9 @@ fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
     for u in &d.ubos {
         let count = (u.size as usize / 4).min(16);
         let snap: Option<Vec<f32>> = u.snapshot.as_ref().map(|b| {
-            b.chunks_exact(4)
+            b.as_chunks::<4>()
+                .0
+                .iter()
                 .take(count)
                 .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect()
@@ -1056,10 +1064,10 @@ pub(crate) fn render_pass(
             if let Some(d) = sh.detail.draws.get(n as usize) {
                 for t in d.textures.iter().filter(|t| t.handle != 0) {
                     bound += 1;
-                    if let Some(id) = crate::barr::texture_of(t.handle) {
-                        if !known.contains(&id) {
-                            missing.insert(id);
-                        }
+                    if let Some(id) = crate::barr::texture_of(t.handle)
+                        && !known.contains(&id)
+                    {
+                        missing.insert(id);
                     }
                 }
             }
@@ -1126,10 +1134,10 @@ pub(crate) fn render_pass(
         });
         rp.set_label(&format!("r{index} {what} d{}", range.len()));
     }
-    if let Some(dep) = sh.barriers.before.get(index).copied().flatten() {
-        if rp.encode(&RenderCommand::Depend(dep)).is_err() {
-            stats.skipped[Skip::Encode as usize] += 1;
-        }
+    if let Some(dep) = sh.barriers.before.get(index).copied().flatten()
+        && rp.encode(&RenderCommand::Depend(dep)).is_err()
+    {
+        stats.skipped[Skip::Encode as usize] += 1;
     }
     // The barrier planner follows textures only, and it holds the vertex and fragment stages. An indirect draw reads
     // arguments that a dispatch or a copy wrote (culling), the pre-pass wrote the copies, and a task or mesh shader
@@ -1150,11 +1158,11 @@ pub(crate) fn render_pass(
     let mut memo = ArgsMemo::default();
     let mut n = range.start;
     while n < range.end {
-        if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end) {
-            if run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats) {
-                n += run.draws;
-                continue;
-            }
+        if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end)
+            && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
+        {
+            n += run.draws;
+            continue;
         }
         draw(
             sh,
@@ -1173,21 +1181,22 @@ pub(crate) fn render_pass(
     rp.end();
     if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
         for a in sh.plan.attachments_of(pass) {
-            if matches!(a.slot, Slot::Color(_)) && a.store == StoreAction::Store {
-                if let Slot::Color(slot) = a.slot {
-                    let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else {
-                        continue;
-                    };
-                    crate::lum::capture(
-                        sh.ctx,
-                        cb,
-                        &tables.vertex,
-                        pass.cmds.start,
-                        a.tex,
-                        &color.texture,
-                        color.depth_plane,
-                    );
-                }
+            if matches!(a.slot, Slot::Color(_))
+                && a.store == StoreAction::Store
+                && let Slot::Color(slot) = a.slot
+            {
+                let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else {
+                    continue;
+                };
+                crate::lum::capture(
+                    sh.ctx,
+                    cb,
+                    &tables.vertex,
+                    pass.cmds.start,
+                    a.tex,
+                    &color.texture,
+                    color.depth_plane,
+                );
             }
         }
     }
@@ -1259,9 +1268,9 @@ fragment Outputs fs() { return {float4(1,0,0,1), float4(0)}; }
             });
             2
         ];
-        for slot in 0..2 {
+        for (slot, color) in colors.iter_mut().enumerate() {
             if selected & (1 << slot) == 0 {
-                colors[slot] = None;
+                *color = None;
                 pipeline_desc.colors[slot] = None;
             }
         }
@@ -1294,6 +1303,12 @@ fragment Outputs fs() { return {float4(1,0,0,1), float4(0)}; }
         frame.submit().unwrap().wait().unwrap();
         let mut pixels = vec![0; 16 * 16 * 4];
         texture.read(16 * 4, &mut pixels).unwrap();
-        assert!(pixels.chunks_exact(4).all(|p| p == [255, 0, 0, 255]));
+        assert!(
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| *p == [255, 0, 0, 255])
+        );
     }
 }

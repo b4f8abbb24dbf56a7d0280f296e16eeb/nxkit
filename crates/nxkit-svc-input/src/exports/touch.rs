@@ -42,11 +42,11 @@ macro_rules! sized {
         $(
             $v.push(Export::new(
                 concat!("_ZN2nn3hid19GetTouchScreenStateILm", $n, "EEEvPNS0_16TouchScreenStateIXT_EEE"),
-                get_state::<$n> as usize,
+                get_state::<$n> as *const () as usize,
             ));
             $v.push(Export::new(
                 concat!("_ZN2nn3hid20GetTouchScreenStatesILm", $n, "EEEiPNS0_16TouchScreenStateIXT_EEEi"),
-                get_states::<$n> as usize,
+                get_states::<$n> as *const () as usize,
             ));
         )*
     };
@@ -56,7 +56,7 @@ macro_rules! sized {
 pub(super) fn list() -> Vec<Export> {
     let mut v = vec![Export::new(
         "_ZN2nn3hid16GetGestureStatesEPNS0_12GestureStateEi",
-        get_gesture_states as usize,
+        get_gesture_states as *const () as usize,
     )];
     sized!(v; 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16);
     v.extend(stub_list());

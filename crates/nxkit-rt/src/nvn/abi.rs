@@ -225,12 +225,8 @@ pub(crate) fn ret_bool(b: bool) -> u32 {
 pub(crate) struct Obj(pub(crate) u64);
 
 impl Obj {
-    /// The guest address.
-    pub(crate) fn addr(self) -> u64 {
-        self.0
-    }
-
     /// True for the null pointer.
+    #[cfg(test)]
     pub(crate) fn is_null(self) -> bool {
         self.0 == 0
     }
@@ -261,6 +257,7 @@ impl Obj {
     }
 
     /// Reads an `f32` at `off`.
+    #[cfg(test)]
     pub(crate) fn f32(self, off: u64) -> AbiResult<f32> {
         Ok(guest::read_f32(self.0.wrapping_add(off))?)
     }
@@ -357,6 +354,7 @@ impl<T> Registry<T> {
     }
 
     /// The number of entries. It locks every shard one after the other.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.shards
             .iter()

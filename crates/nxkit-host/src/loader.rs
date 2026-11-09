@@ -12,7 +12,7 @@
 //! lists it in `settings.optional_imports`. The slot of an import gets the address plus the addend. The relocation
 //! plan and the import list must cover the same slots: a count that differs stops the load. Then the thread-specific
 //! data is checked and the gates are installed. Last, the `sdk` module tells which console the game was built for
-//! ([`find_platform`]).
+//! (`find_platform`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -229,7 +229,7 @@ fn fill_imports(
                 weak_missing.push(&s.name);
                 0
             }
-            None if optional.iter().any(|o| *o == s.name) => 0,
+            None if optional.contains(&s.name) => 0,
             None => {
                 return Err(HostError::MissingImport {
                     module: m.name.clone(),

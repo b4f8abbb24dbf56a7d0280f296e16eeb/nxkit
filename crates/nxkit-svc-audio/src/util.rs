@@ -99,11 +99,6 @@ impl<T: Clone> ObjMap<T> {
         }
     }
 
-    /// A copy of the value under `k`.
-    pub(crate) fn get(&self, k: u64) -> Option<T> {
-        self.m.lock().ok().and_then(|m| m.get(&k).cloned())
-    }
-
     /// Removes and returns the value under `k`.
     pub(crate) fn del(&self, k: u64) -> Option<T> {
         self.m.lock().ok().and_then(|mut m| m.remove(&k))
@@ -113,7 +108,10 @@ impl<T: Clone> ObjMap<T> {
 /// Adds the export `name` for the `extern "C"` function `f` to the list `v`.
 macro_rules! ex {
     ($v:expr, $name:expr, $f:expr) => {
-        $v.push(nxkit_abi::export::Export::new($name, $f as usize))
+        $v.push(nxkit_abi::export::Export::new(
+            $name,
+            $f as *const () as usize,
+        ))
     };
 }
 pub(crate) use ex;

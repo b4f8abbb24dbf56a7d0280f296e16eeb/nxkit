@@ -78,27 +78,27 @@ pub(super) fn list() -> Vec<Export> {
     let mut v = vec![
         Export::new(
             "_ZN2nn3hid13GetMouseStateEPNS0_10MouseStateE",
-            get_mouse_state as usize,
+            get_mouse_state as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi",
-            get_mouse_states as usize,
+            get_mouse_states as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid16GetKeyboardStateEPNS0_13KeyboardStateE",
-            get_keyboard_state as usize,
+            get_keyboard_state as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid17GetKeyboardStatesEPNS0_13KeyboardStateEi",
-            get_keyboard_states as usize,
+            get_keyboard_states as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
-            get_debug_pad_state as usize,
+            get_debug_pad_state as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid17GetDebugPadStatesEPNS0_13DebugPadStateEi",
-            get_debug_pad_states as usize,
+            get_debug_pad_states as *const () as usize,
         ),
     ];
     v.extend(stub_list());

@@ -1450,10 +1450,12 @@ impl Walker {
                 break;
             }
         }
-        if found.is_none() && stale == 0 && crate::diag("walkmiss") {
-            if let Some(t) = e.list.last() {
-                walkmiss(t.key.why_not(st, self.track.prov), e.list.len());
-            }
+        if found.is_none()
+            && stale == 0
+            && crate::diag("walkmiss")
+            && let Some(t) = e.list.last()
+        {
+            walkmiss(t.key.why_not(st, self.track.prov), e.list.len());
         }
         if stale != 0 {
             let mut i = e.list.len();

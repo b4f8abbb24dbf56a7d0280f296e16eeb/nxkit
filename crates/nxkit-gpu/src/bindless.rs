@@ -391,12 +391,6 @@ impl Bindless {
     pub(crate) fn pool_buffers(&self) -> (Arc<DataBuffer>, Arc<DataBuffer>) {
         (self.tex_pool.clone(), self.samp_pool.clone())
     }
-
-    /// Forgets what the tables hold, so that the next frame writes every entry again.
-    pub(crate) fn forget(&mut self) {
-        self.tex_mirror.clear();
-        self.samp_mirror.clear();
-    }
 }
 
 /// What a stage of one draw or dispatch binds.
@@ -716,6 +710,7 @@ mod support_tests {
             reg,
             dim: None,
             rw: false,
+            bank: 0,
             rscale,
             img: None,
         }

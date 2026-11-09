@@ -197,7 +197,7 @@ impl Transfer {
             return Err(Skip::Transfer);
         }
         let r = if compressed {
-            self.upload_compressed(&mut pass, scratch, guest, base, &surf, rec, res)
+            self.upload_compressed(&mut pass, scratch, guest, base, &surf, (rec, res))
         } else {
             self.upload_plain(&mut pass, scratch, guest, base, &surf, res)
         };
@@ -331,8 +331,7 @@ impl Transfer {
         guest: &Arc<GuestMemory>,
         base: u64,
         surf: &SurfaceLayout,
-        rec: &TextureRecord,
-        res: &Res,
+        (rec, res): (&TextureRecord, &Res),
     ) -> Result<(), Skip> {
         let d = res.desc;
         let info = format_info(rec.desc.format).map_err(|_| Skip::Format)?;
@@ -832,8 +831,10 @@ mod tests {
             for level in 0..5 {
                 let at = (slice * 5 + level) * 16;
                 let rgba: Vec<f32> = bytes[at..at + 16]
-                    .chunks_exact(4)
-                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| f32::from_le_bytes(*b))
                     .collect();
                 let expected = if slice == 0 {
                     (31 - level) as f32 / 31.0

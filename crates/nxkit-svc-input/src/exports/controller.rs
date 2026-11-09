@@ -69,23 +69,23 @@ pub(super) fn list() -> Vec<Export> {
     let mut v = vec![
         Export::new(
             "_ZN2nn3hid19GetPlayerLedPatternERKj",
-            get_player_led_pattern as usize,
+            get_player_led_pattern as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid22GetNpadControllerColorEPNS0_19NpadControllerColorERKj",
-            get_controller_color as usize,
+            get_controller_color as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid22GetNpadControllerColorEPNS0_19NpadControllerColorES2_RKj",
-            get_controller_colors as usize,
+            get_controller_colors as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid21ShowControllerSupportEPNS0_27ControllerSupportResultInfoERKNS0_20ControllerSupportArgE",
-            show_controller_support_with_info as usize,
+            show_controller_support_with_info as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid21ShowControllerSupportERKNS0_20ControllerSupportArgE",
-            show_controller_support_arg as usize,
+            show_controller_support_arg as *const () as usize,
         ),
     ];
     v.extend(stub_list());

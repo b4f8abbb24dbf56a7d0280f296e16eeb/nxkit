@@ -391,16 +391,17 @@ pub fn native_image_blank_free(handle: u32) {
 /// image holds.
 pub fn native_image(handle: u32) -> Option<NativeImage> {
     let k = (handle & 0x7fff_ffff).wrapping_sub(1) as usize;
-    if handle >> 31 != 0 && k < MAX_BLANK {
-        if let Some(b) = &lock(&BLANKS)[k] {
-            return Some(NativeImage {
-                mem: b.block.ptr as u64,
-                size: b.size,
-                width: b.w,
-                height: b.h,
-                stride: blank_stride(b.w),
-            });
-        }
+    if handle >> 31 != 0
+        && k < MAX_BLANK
+        && let Some(b) = &lock(&BLANKS)[k]
+    {
+        return Some(NativeImage {
+            mem: b.block.ptr as u64,
+            size: b.size,
+            width: b.w,
+            height: b.h,
+            stride: blank_stride(b.w),
+        });
     }
     let (slot, i) = ((handle >> 8) as usize, handle & 0xff);
     let pool = lock(&NATIVE_POOLS).get(&slot).cloned()?;

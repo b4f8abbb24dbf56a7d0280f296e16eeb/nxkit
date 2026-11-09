@@ -8,7 +8,7 @@ const HOST: &str = "nxkit-host";
 
 /// The `nxkit-host` program: `NXB_NXKIT_HOST` or the file beside `exe` (`cargo build -p nxkit-host` puts it next to
 /// `nxb` in `target/<profile>/`).
-pub fn host(env: Option<&str>, exe: &Path) -> Result<PathBuf, String> {
+pub(crate) fn host(env: Option<&str>, exe: &Path) -> Result<PathBuf, String> {
     let path = match env.filter(|e| !e.is_empty()) {
         Some(e) => PathBuf::from(e),
         None => exe.parent().unwrap_or(Path::new(".")).join(HOST),
@@ -23,7 +23,7 @@ pub fn host(env: Option<&str>, exe: &Path) -> Result<PathBuf, String> {
 }
 
 /// A name that is safe as a file name: no `/` and no `:`, which Finder shows as one another.
-pub fn file_name(title: &str) -> String {
+pub(crate) fn file_name(title: &str) -> String {
     let n: String = title
         .chars()
         .filter(|c| !matches!(c, '/' | ':' | '\\' | '\0') && !c.is_control())
@@ -39,12 +39,12 @@ fn escape(s: &str) -> String {
 }
 
 /// The bundle identifier of a title when `--bundle-id` is not given.
-pub fn default_bundle_id(title_id: u64) -> String {
+pub(crate) fn default_bundle_id(title_id: u64) -> String {
     format!("org.nxkit.game.{title_id:016x}")
 }
 
 /// `Info.plist`.
-pub fn info_plist(name: &str, bundle_id: &str, version: &str) -> String {
+pub(crate) fn info_plist(name: &str, bundle_id: &str, version: &str) -> String {
     let rows = [
         ("CFBundleExecutable", HOST),
         ("CFBundleIdentifier", bundle_id),
@@ -71,7 +71,7 @@ pub fn info_plist(name: &str, bundle_id: &str, version: &str) -> String {
 }
 
 /// Signs `path` ad hoc (`codesign --force --sign -`). The Mac runs no unsigned arm64 code.
-pub fn sign(path: &Path) -> Result<(), String> {
+pub(crate) fn sign(path: &Path) -> Result<(), String> {
     let o = Command::new("codesign")
         .args(["--force", "--sign", "-"])
         .arg(path)
@@ -89,7 +89,7 @@ pub fn sign(path: &Path) -> Result<(), String> {
 
 /// Lays out `Info.plist` and `MacOS/nxkit-host` in the bundle `app` and signs the program. Returns the run folder,
 /// `Contents/Resources/nxkit`.
-pub fn skeleton(app: &Path, host: &Path, plist: &str) -> Result<PathBuf, String> {
+pub(crate) fn skeleton(app: &Path, host: &Path, plist: &str) -> Result<PathBuf, String> {
     let (contents, run) = (app.join("Contents"), app.join("Contents/Resources/nxkit"));
     let macos = contents.join("MacOS");
     for d in [&macos, &run] {

@@ -44,7 +44,7 @@ stubs! { stub_list;
 pub(super) fn list() -> Vec<Export> {
     let mut v = vec![Export::new(
         "_ZN2nn3hid24GetPalmaConnectionHandleEPNS0_21PalmaConnectionHandleERKj",
-        get_connection_handle as usize,
+        get_connection_handle as *const () as usize,
     )];
     v.extend(stub_list());
     v

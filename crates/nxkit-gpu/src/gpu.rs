@@ -554,14 +554,14 @@ impl Gpu {
             crate::tex_skip(what)
         })?;
         let id = slot.texture;
-        if !textures.contains_key(&id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = textures.entry(id) {
             let rec = view.record(id).map_err(|e| {
                 let what = format_args!("handle {handle:#x} tex {id:?}: {e:?}");
                 nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::HandleUnresolved, what);
                 crate::tex_skip(what)
             })?;
             let res = self.store.ensure(rec, scale, Use::default(), stats)?;
-            textures.insert(id, res);
+            e.insert(res);
         }
         let res = textures.get(&id).ok_or(Skip::Texture)?;
         let tex_view = self.store.view(id, res, &slot.header, stats)?;
@@ -570,57 +570,59 @@ impl Gpu {
         }
         if crate::diag("bc") && res.desc.format.is_compressed() {
             static SEEN_BC: std::sync::Mutex<Vec<TexId>> = std::sync::Mutex::new(Vec::new());
-            if let (Ok(rec), Ok(mut seen)) = (view.record(id), SEEN_BC.lock()) {
-                if !seen.contains(&id) && seen.len() < 200 {
-                    seen.push(id);
-                    let map = self.guest.address_map();
-                    let mut head = vec![0u8; 32.min(rec.layout.size as usize)];
-                    let read = rec
-                        .address
-                        .get()
-                        .checked_sub(map.gpu_base())
-                        .is_some_and(|off| self.guest.read(off, &mut head).is_ok());
-                    eprintln!(
-                        "DIAG bc {id:?} {}x{} {:?} residency {:?} size {} guest_read {read} head {head:02x?}",
-                        res.desc.width,
-                        res.desc.height,
-                        res.desc.format,
-                        rec.residency,
-                        rec.layout.size
-                    );
-                }
+            if let (Ok(rec), Ok(mut seen)) = (view.record(id), SEEN_BC.lock())
+                && !seen.contains(&id)
+                && seen.len() < 200
+            {
+                seen.push(id);
+                let map = self.guest.address_map();
+                let mut head = vec![0u8; 32.min(rec.layout.size as usize)];
+                let read = rec
+                    .address
+                    .get()
+                    .checked_sub(map.gpu_base())
+                    .is_some_and(|off| self.guest.read(off, &mut head).is_ok());
+                eprintln!(
+                    "DIAG bc {id:?} {}x{} {:?} residency {:?} size {} guest_read {read} head {head:02x?}",
+                    res.desc.width,
+                    res.desc.height,
+                    res.desc.format,
+                    rec.residency,
+                    rec.layout.size
+                );
             }
         }
         if crate::diag("hnd") {
             static SEEN: std::sync::Mutex<Vec<(u64, TexId, u64)>> =
                 std::sync::Mutex::new(Vec::new());
             let key = (handle, id, 0u64);
-            if let Ok(mut seen) = SEEN.lock() {
-                if !seen.contains(&key) && seen.len() < 2000 {
-                    seen.push(key);
-                    let v = tex_view.desc();
+            if let Ok(mut seen) = SEEN.lock()
+                && !seen.contains(&key)
+                && seen.len() < 2000
+            {
+                seen.push(key);
+                let v = tex_view.desc();
+                eprintln!(
+                    "DIAG hnd {handle} {id:?} backing {}x{} {:?} scaled {} view {}x{} {:?} kind {:?}",
+                    res.desc.width,
+                    res.desc.height,
+                    res.desc.format,
+                    res.scaled,
+                    v.width,
+                    v.height,
+                    v.format,
+                    v.kind
+                );
+                if matches!(v.kind, nxkit_metal::TextureKind::Cube) {
                     eprintln!(
-                        "DIAG hnd {handle} {id:?} backing {}x{} {:?} scaled {} view {}x{} {:?} kind {:?}",
-                        res.desc.width,
-                        res.desc.height,
-                        res.desc.format,
-                        res.scaled,
-                        v.width,
-                        v.height,
-                        v.format,
-                        v.kind
+                        "DIAG hnd cube {handle} {id:?} swizzle {:?} view {:?} levels {}+{} backing_levels {} identity_view {}",
+                        slot.header.view.swizzle,
+                        slot.header.view.format,
+                        slot.header.view.base_level,
+                        slot.header.view.levels,
+                        res.desc.mip_levels,
+                        tex_view.gpu_resource_id() == res.tex.gpu_resource_id()
                     );
-                    if matches!(v.kind, nxkit_metal::TextureKind::Cube) {
-                        eprintln!(
-                            "DIAG hnd cube {handle} {id:?} swizzle {:?} view {:?} levels {}+{} backing_levels {} identity_view {}",
-                            slot.header.view.swizzle,
-                            slot.header.view.format,
-                            slot.header.view.base_level,
-                            slot.header.view.levels,
-                            res.desc.mip_levels,
-                            tex_view.gpu_resource_id() == res.tex.gpu_resource_id()
-                        );
-                    }
                 }
             }
         }
@@ -1095,7 +1097,8 @@ impl Gpu {
         {
             static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             if crate::diag("barr")
-                && N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 120 == 0
+                && N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    .is_multiple_of(120)
             {
                 let d = barrier_plan.distance;
                 eprintln!(
@@ -1310,7 +1313,7 @@ fn pass_shape_diag(
         }
     }
     let mut v: Vec<_> = by_size.into_iter().collect();
-    v.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    v.sort_by_key(|e| std::cmp::Reverse(e.1.0));
     for (size, (n, draws)) in v.iter().take(20) {
         eprintln!("DIAG passes {n:4} with {draws:5} draws into {size}");
     }

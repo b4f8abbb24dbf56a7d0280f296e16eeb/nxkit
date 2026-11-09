@@ -16,7 +16,7 @@ fn io(p: &Path, e: std::io::Error) -> String {
 /// The profile folder `<work>/profile`: the `game.tsv` the shader split reads (what the title module says about the
 /// game's shaders) and the hand-written shader facts. The split's own tables join it after the extract
 /// ([`take_tables`]). Returns the folder and the `game.tsv` keys.
-pub fn profile(
+pub(crate) fn profile(
     work: &Path,
     st: &Standalone,
     title_id: u64,
@@ -59,7 +59,7 @@ pub fn profile(
 }
 
 /// The split's tables go into the profile folder, where the shader step reads them.
-pub fn take_tables(work: &Path, profile: &Path) -> Result<(), String> {
+pub(crate) fn take_tables(work: &Path, profile: &Path) -> Result<(), String> {
     for n in [
         "shader_map.tsv",
         "shader_facts.tsv",
@@ -75,16 +75,14 @@ pub fn take_tables(work: &Path, profile: &Path) -> Result<(), String> {
 }
 
 /// What the stage left in the run folder.
-pub struct Done {
+pub(crate) struct Done {
     /// The shader step's and the archive's summary.
     pub summary: String,
-    /// Whether `pipelines.mtl4archive` is in the run folder.
-    pub archive: bool,
 }
 
 /// Runs the shader step and the archive, then copies the Metal libraries, their `_b.json` reflection and the tables
 /// into `<run>/shaders` and the archive to `<run>/pipelines.mtl4archive`.
-pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
+pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
     let o = crate::pipeline::shaders_and_archive(a, b, p)?;
     let dst = run.join("shaders");
     let _ = std::fs::remove_dir_all(&dst);
@@ -128,7 +126,6 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
         .gpus
         .first()
         .map(|arch| b.work.join("pso/mac").join(format!("{arch}.mtl4a")));
-    let mut has = false;
     match (archive, &o.archive_error) {
         (Some(src), None) if src.is_file() => {
             let to = run.join("pipelines.mtl4archive");
@@ -137,7 +134,6 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
                 ..Default::default()
             });
             std::fs::copy(&src, &to).map_err(|e| io(&src, e))?;
-            has = true;
             if let Some(s) = &o.archive {
                 summary.push_str(&format!(", archive: {s}"));
             }
@@ -155,10 +151,7 @@ pub fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, S
         }
         (None, _) => summary.push_str(", no archive (--gpu none)"),
     }
-    Ok(Done {
-        summary,
-        archive: has,
-    })
+    Ok(Done { summary })
 }
 
 #[cfg(test)]

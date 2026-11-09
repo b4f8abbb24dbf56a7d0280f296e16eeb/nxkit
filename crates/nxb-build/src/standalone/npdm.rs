@@ -5,7 +5,7 @@
 
 /// What the NPDM says about the main thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MainThread {
+pub(crate) struct MainThread {
     /// The priority (0 to 63, lower runs first).
     pub priority: u8,
     /// The core the thread starts on.
@@ -15,7 +15,7 @@ pub struct MainThread {
 }
 
 /// Reads the main thread's settings from the raw NPDM.
-pub fn main_thread(npdm: &[u8]) -> Result<MainThread, String> {
+pub(crate) fn main_thread(npdm: &[u8]) -> Result<MainThread, String> {
     if npdm.len() < 0x20 || &npdm[..4] != b"META" {
         return Err("main.npdm: no META header".into());
     }
@@ -25,7 +25,7 @@ pub fn main_thread(npdm: &[u8]) -> Result<MainThread, String> {
         core: npdm[0xf],
         stack_size: u32::from_le_bytes(stack),
     };
-    if t.priority > 63 || t.core > 3 || t.stack_size == 0 || t.stack_size % 0x1000 != 0 {
+    if t.priority > 63 || t.core > 3 || t.stack_size == 0 || !t.stack_size.is_multiple_of(0x1000) {
         return Err(format!(
             "main.npdm: the main thread settings are not plausible (priority {}, core {}, stack {:#x}): the header offsets need a check",
             t.priority, t.core, t.stack_size

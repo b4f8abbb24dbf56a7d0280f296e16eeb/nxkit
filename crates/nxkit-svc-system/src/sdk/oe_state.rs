@@ -25,7 +25,7 @@ pub(super) fn applet_enter(name: &str) {
 /// The library applet closes.
 pub(super) fn applet_leave() {
     if OPEN_APPLETS
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
         .is_err()
     {
         super::fatal("applet_leave without applet_enter");

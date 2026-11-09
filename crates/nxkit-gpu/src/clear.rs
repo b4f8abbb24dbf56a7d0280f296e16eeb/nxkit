@@ -187,12 +187,12 @@ pub(crate) fn texel(
         Layout::Float16 { channels } => {
             (0..channels).for_each(|c| out.extend(half(f(c)).to_le_bytes()))
         }
-        Layout::Float32 { channels } => {
-            (0..channels).for_each(|c| out.extend(color[c].to_le_bytes()))
-        }
+        Layout::Float32 { channels } => color[..channels]
+            .iter()
+            .for_each(|c| out.extend(c.to_le_bytes())),
         Layout::Uint { channels, bytes } => {
-            for c in 0..channels {
-                let v = color[c].min(if bytes == 1 { 0xff } else { u32::MAX });
+            for c in &color[..channels] {
+                let v = (*c).min(if bytes == 1 { 0xff } else { u32::MAX });
                 out.extend(&v.to_le_bytes()[..bytes]);
             }
         }

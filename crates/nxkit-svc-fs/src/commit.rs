@@ -170,6 +170,8 @@ mod tests {
     use super::*;
     use crate::testutil::config;
 
+    // The lint does not see `cfg(all(test, ..))` as a test module.
+    #[allow(clippy::unwrap_used, reason = "a test helper")]
     fn saved(tag: &str) -> (Fs, Arc<Txn>) {
         let fs = Fs::new(config(tag));
         assert_eq!(fs.mount_save(b"save", &fs.save_dir()), OK);

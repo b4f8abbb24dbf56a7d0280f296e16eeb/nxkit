@@ -399,14 +399,14 @@ impl Decoder {
         };
         let data = self.shared.mem.read(i * IN_CAP + offset as usize, size);
         let key = parse_key_frame(&data);
-        if let Some(k) = &key {
-            if !st.fmt_sent {
-                if st.width == 0 || st.height == 0 {
-                    st.width = k.width;
-                    st.height = k.height;
-                }
-                st.colorspace = k.nv12_colorspace();
+        if let Some(k) = &key
+            && !st.fmt_sent
+        {
+            if st.width == 0 || st.height == 0 {
+                st.width = k.width;
+                st.height = k.height;
             }
+            st.colorspace = k.nv12_colorspace();
         }
         let first = !st.fmt_sent;
         if first {
@@ -483,10 +483,10 @@ impl Decoder {
                 }
             }
         }
-        if let Some(o) = st.out.get_mut(index) {
-            if o.cli {
-                o.rnd = true;
-            }
+        if let Some(o) = st.out.get_mut(index)
+            && o.cli
+        {
+            o.rnd = true;
         }
         if n > 0 {
             self.shared.cv.notify_all();

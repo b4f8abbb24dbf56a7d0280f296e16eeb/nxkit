@@ -291,24 +291,6 @@ pub(crate) fn watched(id: TexId) -> bool {
     .contains(&id.0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_knob_has_its_own_bit() {
-        assert!(KNOBS.len() <= 32);
-        for (i, k) in KNOBS.iter().enumerate() {
-            assert_eq!(knob_bit(k), 1 << i);
-        }
-        assert_eq!(knob_bit("unknown"), 0);
-        assert_eq!(
-            parse_knobs("nocull, noeq"),
-            knob_bit("nocull") | knob_bit("noeq")
-        );
-    }
-}
-
 /// `NXKIT_GPU_LABELS=1`: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
 pub(crate) fn gpu_labels() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -330,4 +312,22 @@ pub(crate) fn skipped_program(key: &str) -> bool {
             .unwrap_or_default()
     });
     !keys.is_empty() && keys.iter().any(|k| k == key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_knob_has_its_own_bit() {
+        assert!(KNOBS.len() <= 32);
+        for (i, k) in KNOBS.iter().enumerate() {
+            assert_eq!(knob_bit(k), 1 << i);
+        }
+        assert_eq!(knob_bit("unknown"), 0);
+        assert_eq!(
+            parse_knobs("nocull, noeq"),
+            knob_bit("nocull") | knob_bit("noeq")
+        );
+    }
 }

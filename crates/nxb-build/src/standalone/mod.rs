@@ -23,7 +23,7 @@ use crate::Args;
 use crate::events::{Progress, Update};
 use crate::graph::Build;
 use crate::inputs::{Inputs, Source};
-use nxtitle::{Standalone, Title as _};
+use nxtitle::Standalone;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -288,7 +288,7 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
 }
 
 /// Builds the app of a title that has a title module. `Ok(false)`: the game has no module, the engine path builds it.
-pub fn run(a: &Args, p: &Say) -> Result<bool, String> {
+pub(crate) fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let src = crate::inputs::discover(a)?;
     let program = u64::from(a.program.unwrap_or(0));
     let Some(t) = module(&src, program)? else {

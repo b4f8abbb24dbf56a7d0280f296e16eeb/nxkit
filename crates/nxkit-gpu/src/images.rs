@@ -278,12 +278,12 @@ fn one(
         crate::tex_skip(what)
     })?;
     let id = slot.texture;
-    if !textures.contains_key(&id) {
+    if let std::collections::hash_map::Entry::Vacant(e) = textures.entry(id) {
         let rec = view
             .record(id)
             .map_err(|e| crate::tex_skip(format_args!("image {id:?}: {e:?}")))?;
         let res = store.ensure(rec, scale, crate::textures::Use::default(), stats)?;
-        textures.insert(id, res);
+        e.insert(res);
     }
     let res = textures.get(&id).ok_or(Skip::Texture)?;
     if !res.desc.shader_write && d.img.writes() {
@@ -320,6 +320,7 @@ mod tests {
         let mut detail = FrameDetail::default();
         detail.dispatches.push(DispatchDetail {
             program: "cs".into(),
+            push: None,
             groups: [1; 3],
             ubos: vec![],
             sbufs: vec![],
@@ -328,6 +329,7 @@ mod tests {
         });
         detail.dispatches.push(DispatchDetail {
             program: "".into(),
+            push: None,
             groups: [1; 3],
             ubos: vec![],
             sbufs: vec![],

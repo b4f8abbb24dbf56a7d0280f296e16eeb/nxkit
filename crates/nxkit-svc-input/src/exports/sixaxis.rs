@@ -88,23 +88,23 @@ pub(super) fn list() -> Vec<Export> {
     let mut v = vec![
         Export::new(
             "_ZN2nn3hid23GetSixAxisSensorHandlesEPNS0_19SixAxisSensorHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE",
-            get_handles as usize,
+            get_handles as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19SixAxisSensorHandleE",
-            get_states as usize,
+            get_states as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid21GetSixAxisSensorStateEPNS0_18SixAxisSensorStateERKNS0_19SixAxisSensorHandleE",
-            get_state as usize,
+            get_state as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE",
-            is_at_rest as usize,
+            is_at_rest as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid32GetSixAxisSensorFusionParametersEPfS1_RKNS0_19SixAxisSensorHandleE",
-            get_fusion_parameters as usize,
+            get_fusion_parameters as *const () as usize,
         ),
     ];
     v.extend(stub_list());

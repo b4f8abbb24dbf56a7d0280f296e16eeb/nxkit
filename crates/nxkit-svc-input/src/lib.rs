@@ -6,7 +6,7 @@
 //! the HID shared memory for games that read it directly (R40). The host calls [`tick`] on each display tick, which
 //! renews the rumble pulses and writes the shared memory.
 //!
-//! Player 1 also gets the keyboard and the mouse in the PC layout of [`bind`] (R63). The keys are read at the call
+//! Player 1 also gets the keyboard and the mouse in the PC layout of `bind` (R63). The keys are read at the call
 //! like a controller. The mouse comes from the events of the host window through [`mouse_moved`], [`mouse_button`]
 //! and [`mouse_wheel`], because its motion cannot be read at a call. The keyboard and the mouse add to a controller,
 //! so they only change the state while a key or button is held or the mouse moves.

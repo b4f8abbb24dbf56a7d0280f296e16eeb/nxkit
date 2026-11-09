@@ -156,7 +156,7 @@ pub fn wrap(target: u64) -> Result<u64> {
                 .read_volatile()
         };
         if t == target {
-            return Ok(stubs as usize as u64 + 16 * i as u64);
+            return Ok(stubs as *const () as usize as u64 + 16 * i as u64);
         }
     }
     if k >= STUBS {
@@ -180,5 +180,5 @@ pub fn wrap(target: u64) -> Result<u64> {
             "two threads wrap big-stack exports at the same time".into(),
         ));
     }
-    Ok(stubs as usize as u64 + 16 * k as u64)
+    Ok(stubs as *const () as usize as u64 + 16 * k as u64)
 }

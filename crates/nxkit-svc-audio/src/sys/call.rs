@@ -34,7 +34,7 @@ pub fn call_pair(addr: usize, a: [u64; 8]) -> (u64, u64) {
 
 /// Reads 4 bytes of an AArch64 instruction at `addr`. Returns `None` for a zero or misaligned address.
 pub fn read_insn(addr: usize) -> Option<u32> {
-    if addr == 0 || addr % 4 != 0 {
+    if addr == 0 || !addr.is_multiple_of(4) {
         return None;
     }
     // SAFETY: `addr` is the entry of SDK code that the host mapped, which is readable and 4 byte aligned.
@@ -43,7 +43,7 @@ pub fn read_insn(addr: usize) -> Option<u32> {
 
 /// Reads the 8 byte pointer at `addr` (a GOT slot). Returns `None` for a zero or misaligned address.
 pub fn read_ptr(addr: usize) -> Option<usize> {
-    if addr == 0 || addr % 8 != 0 {
+    if addr == 0 || !addr.is_multiple_of(8) {
         return None;
     }
     // SAFETY: `addr` is a GOT slot of the game's module, which is mapped, readable and 8 byte aligned.

@@ -11,7 +11,7 @@ const HEADER_SIZE: usize = 32;
 const SEGMENT_CMD: usize = 72;
 
 /// One segment to write.
-pub struct Seg<'a> {
+pub(crate) struct Seg<'a> {
     /// The segment name, 16 bytes at most.
     pub name: &'a str,
     /// The preferred address (16K aligned).
@@ -58,7 +58,7 @@ fn padded(s: &[u8], to: usize) -> Vec<u8> {
 }
 
 /// Writes the dylib. `segs` must be in ascending address order without overlap. `uuid` is the image's identity.
-pub fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
+pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     let first = segs.first().ok_or("macho: no segments")?;
     let mut end = 0u64;
     for s in segs {

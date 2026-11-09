@@ -11,6 +11,12 @@ use objc2_metal::{MTLDevice, MTLPixelFormat, MTLTexture};
 
 use crate::frame::{Frame, Pixels};
 
+/// A Metal texture of one plane, with the `CVMetalTexture` that keeps it valid.
+type MetalPlane = (
+    Retained<ProtocolObject<dyn MTLTexture>>,
+    CFRetained<CVMetalTexture>,
+);
+
 /// The two textures of an NV12 picture.
 pub struct Planes {
     /// The luma plane, `R8Unorm`, the size of the picture.
@@ -75,13 +81,7 @@ impl TextureCache {
         width: usize,
         height: usize,
         index: usize,
-    ) -> Result<
-        (
-            Retained<ProtocolObject<dyn MTLTexture>>,
-            CFRetained<CVMetalTexture>,
-        ),
-        String,
-    > {
+    ) -> Result<MetalPlane, String> {
         let mut out = None;
         // SAFETY: `image` is a live pixel buffer with an IOSurface, and `out` is `None` as the function needs.
         unsafe {

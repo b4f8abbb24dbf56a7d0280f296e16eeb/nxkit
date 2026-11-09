@@ -238,7 +238,7 @@ pub fn set_slot_top(k: usize, top: u64) {
 
 /// The address of stub `k`, which a thread puts in its `KGATE` slot.
 pub fn stub_address(k: usize) -> u64 {
-    gate_stubs as usize as u64 + 16 * k as u64
+    gate_stubs as *const () as usize as u64 + 16 * k as u64
 }
 
 /// Runs guest code on the calling host thread and returns when the guest thread ends, through ExitThread or by

@@ -111,6 +111,6 @@ mod tests {
         p[0x10..0x14].copy_from_slice(&64u32.to_le_bytes());
         p[0x34..0x38].copy_from_slice(&0x3d56_4552u32.to_le_bytes());
         let n = service_work_size(&p);
-        assert!(n > 0 && n % WORK_PAGE == 0);
+        assert!(n > 0 && n.is_multiple_of(WORK_PAGE));
     }
 }

@@ -25,8 +25,11 @@
 
 use super::abi::{AbiResult, Obj, arg_bool, guard, log_once, ret_bool, table};
 
+#[cfg(test)]
 mod read;
 
+// The readers are for the command buffer group; only the tests use them until it does.
+#[cfg(test)]
 pub(crate) use read::*;
 
 /// A bit-field: the lowest bit and the width.

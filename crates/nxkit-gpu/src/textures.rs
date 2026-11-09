@@ -440,18 +440,18 @@ impl TextureStore {
 
     /// Forgets the Metal texture of `id` (the game created or finalized the texture again).
     pub(crate) fn invalidate(&mut self, id: TexId) {
-        if let Some(r) = self.entries.get(&id) {
-            if life_diag(
+        if let Some(r) = self.entries.get(&id)
+            && life_diag(
                 r.desc.format,
                 r.desc.width,
                 r.desc.height,
                 r.desc.array_layers,
-            ) {
-                eprintln!(
-                    "DIAG life invalidate {id:?} gen {} {:?} {}x{}",
-                    r.generation, r.desc.format, r.desc.width, r.desc.height
-                );
-            }
+            )
+        {
+            eprintln!(
+                "DIAG life invalidate {id:?} gen {} {:?} {}x{}",
+                r.generation, r.desc.format, r.desc.width, r.desc.height
+            );
         }
         if let Some(old) = self.entries.remove(&id) {
             self.retired.push(old.tex);
@@ -507,7 +507,7 @@ impl TextureStore {
         atomic: u8,
         stats: &mut EncodeStats,
     ) -> Result<Texture, Skip> {
-        let mut t = tic.clone();
+        let mut t = *tic;
         t.view.levels = 1;
         t.view.swizzle = [2, 3, 4, 5];
         self.view_impl(id, res, &t, Some(kind), atomic, stats)

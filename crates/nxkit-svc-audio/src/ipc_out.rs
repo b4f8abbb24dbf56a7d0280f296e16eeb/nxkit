@@ -18,10 +18,10 @@ pub(crate) struct AudioOutManager;
 
 impl AudioOutManager {
     fn list(req: &Request<'_>, rsp: &mut Response) {
-        if let Some(b) = req.buffer(BufferKind::Receive, 0) {
-            if b.size != 0 {
-                put_name(b.addr, "DeviceOut", (b.size as usize).min(NAME_MAX));
-            }
+        if let Some(b) = req.buffer(BufferKind::Receive, 0)
+            && b.size != 0
+        {
+            put_name(b.addr, "DeviceOut", (b.size as usize).min(NAME_MAX));
         }
         rsp.push_u32(1);
     }
@@ -48,10 +48,10 @@ impl AudioOutManager {
             rsp.result = RES_FAIL;
             return;
         };
-        if let Some(b) = req.buffer(BufferKind::Receive, 0) {
-            if b.size != 0 {
-                put_name(b.addr, "DeviceOut", (b.size as usize).min(NAME_MAX));
-            }
+        if let Some(b) = req.buffer(BufferKind::Receive, 0)
+            && b.size != 0
+        {
+            put_name(b.addr, "DeviceOut", (b.size as usize).min(NAME_MAX));
         }
         rsp.push_u32(RATE);
         rsp.push_u32(channels);
@@ -155,13 +155,14 @@ impl AudioOutIface {
             tags.extend_from_slice(&b.token.to_le_bytes());
             n += 1;
         }
-        if let Some(b) = req.buffer(BufferKind::Receive, 0) {
-            if !tags.is_empty() && guest::write(b.addr, &tags).is_err() {
-                eprintln!(
-                    "nxkit-audio: [RED] audout: the released buffer list at {:#x} is not writable",
-                    b.addr
-                );
-            }
+        if let Some(b) = req.buffer(BufferKind::Receive, 0)
+            && !tags.is_empty()
+            && guest::write(b.addr, &tags).is_err()
+        {
+            eprintln!(
+                "nxkit-audio: [RED] audout: the released buffer list at {:#x} is not writable",
+                b.addr
+            );
         }
         rsp.push_u32(n);
     }

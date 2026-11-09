@@ -141,16 +141,17 @@ fn orthonormalize(r: &mut [[f32; 3]; 3]) {
     for k in 0..3 {
         for p in 0..k {
             let d = c[k][0] * c[p][0] + c[k][1] * c[p][1] + c[k][2] * c[p][2];
-            for i in 0..3 {
-                c[k][i] -= d * c[p][i];
+            let cp = c[p];
+            for (v, w) in c[k].iter_mut().zip(cp) {
+                *v -= d * w;
             }
         }
         let mut n = (c[k][0] * c[k][0] + c[k][1] * c[k][1] + c[k][2] * c[k][2]).sqrt();
         if n < 1e-6 {
             n = 1.0;
         }
-        for i in 0..3 {
-            c[k][i] /= n;
+        for v in &mut c[k] {
+            *v /= n;
         }
     }
     for i in 0..3 {
@@ -190,11 +191,7 @@ impl MotionState {
                     *v /= yn;
                 }
                 let x = cross(y, z);
-                for j in 0..3 {
-                    self.r[0][j] = x[j];
-                    self.r[1][j] = y[j];
-                    self.r[2][j] = z[j];
-                }
+                self.r = [x, y, z];
             }
         }
         self.primed = true;
@@ -287,6 +284,7 @@ impl MotionState {
     }
 
     /// The sum of the absolute angular velocities, in revolutions per second.
+    #[cfg(test)]
     pub(crate) fn spin(&self) -> f32 {
         self.gyro.iter().map(|g| g.abs()).sum()
     }

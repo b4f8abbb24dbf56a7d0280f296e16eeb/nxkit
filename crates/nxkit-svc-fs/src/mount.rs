@@ -65,6 +65,7 @@ impl Fs {
     }
 
     /// Every mount, for the commit of a list of names and for the tests.
+    #[cfg(test)]
     pub(crate) fn all(&self) -> Arc<Vec<Arc<Mount>>> {
         self.snapshot()
     }

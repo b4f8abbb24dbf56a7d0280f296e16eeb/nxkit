@@ -233,14 +233,13 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         let slot = self
             .descriptors
             .register_texture(&self.table, id, texture, view)?;
-        if let Some(old) = old.filter(|&o| o != texture) {
-            if let Some(i) = self.orphans.iter().position(|&o| o == old) {
-                if !self.descriptors.has_slots(old) {
-                    self.orphans.swap_remove(i);
-                    self.drop_texture(old)?;
-                    self.dropped.push(old);
-                }
-            }
+        if let Some(old) = old.filter(|&o| o != texture)
+            && let Some(i) = self.orphans.iter().position(|&o| o == old)
+            && !self.descriptors.has_slots(old)
+        {
+            self.orphans.swap_remove(i);
+            self.drop_texture(old)?;
+            self.dropped.push(old);
         }
         Ok(slot)
     }
@@ -482,7 +481,7 @@ fn decode_diag(ns: u64, c: crate::cache::CacheStats, textures: (usize, usize)) {
     }
     let total = NS.fetch_add(ns, Ordering::Relaxed) + ns;
     let n = N.fetch_add(1, Ordering::Relaxed) + 1;
-    if n % 300 == 0 {
+    if n.is_multiple_of(300) {
         NS.store(0, Ordering::Relaxed);
         eprintln!(
             "nxkit-nvn: decode {:.2} ms per submit (mean of 300), texture records {} ({} live), cache {c:?}",

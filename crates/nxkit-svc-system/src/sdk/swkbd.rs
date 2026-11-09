@@ -42,8 +42,10 @@ static CHANGED_ARG: Block = Block::new();
 fn read_utf16(addr: u64, n: usize) -> String {
     let b = get_bytes(addr, n * 2);
     let units: Vec<u16> = b
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .take_while(|&u| u != 0)
         .collect();
     String::from_utf16_lossy(&units)

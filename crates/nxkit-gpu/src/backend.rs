@@ -197,10 +197,10 @@ impl GpuBackend {
             let t = ticks(if r.kind == 0x10 { start } else { end });
             let mut data = [0u8; 16];
             data[8..].copy_from_slice(&t.to_le_bytes());
-            if let Some(off) = r.addr.checked_sub(map.gpu_base()) {
-                if off + 16 <= map.len() {
-                    let _ = self.guest.write(off, &data);
-                }
+            if let Some(off) = r.addr.checked_sub(map.gpu_base())
+                && off + 16 <= map.len()
+            {
+                let _ = self.guest.write(off, &data);
             }
         }
     }
@@ -250,7 +250,7 @@ impl GpuBackend {
         if let Ok(r) = &result {
             self.copied_recent
                 .store(!r.copied_back.is_empty(), Ordering::Release);
-            if crate::diag("frame") && job.fence.0 % 60 == 0 {
+            if crate::diag("frame") && job.fence.0.is_multiple_of(60) {
                 eprintln!(
                     "DIAG frame copyback fence {} copied_back {}",
                     job.fence.0,
@@ -302,7 +302,7 @@ impl GpuBackend {
         // Only the state at the end of the frame is set: a texture that is synced in this frame is not first marked
         // as written. Nothing reads the state in between, and setting both every frame made every texture that is
         // copied back flip twice a frame, which defeated the alias cache of the table.
-        if crate::diag("frame") && fence.0 % 60 == 0 {
+        if crate::diag("frame") && fence.0.is_multiple_of(60) {
             eprintln!(
                 "DIAG frame copyback fence {} copied_back {} (sync)",
                 fence.0,
@@ -337,7 +337,7 @@ impl GpuBackend {
     /// Prints the diagnostics of a finished encode.
     fn note_report(&self, report: &EncodeReport) {
         let n = self.reports.fetch_add(1, Ordering::Relaxed);
-        if crate::diag("memory") && n % 120 == 0 {
+        if crate::diag("memory") && n.is_multiple_of(120) {
             eprintln!(
                 "DIAG memory frame {n}: Metal {} MiB, resident allocations {}",
                 self.ctx.allocated_bytes() / (1024 * 1024),
@@ -361,10 +361,10 @@ impl GpuBackend {
                 st.skipped
             );
         }
-        if (report.stats.skipped_total() > 0 && n < 16) || (diag && n % 30 == 0) {
+        if (report.stats.skipped_total() > 0 && n < 16) || (diag && n.is_multiple_of(30)) {
             eprintln!("nxkit-gpu: frame {n}: {:?}", report.stats);
         }
-        if diag && n % 30 == 0 {
+        if diag && n.is_multiple_of(30) {
             eprintln!("nxkit-gpu: {}", crate::coverage::describe());
         }
         // The mesh and indirect draws: every 30 frames under `stats` or `mesh`, and the first frame that has any.
@@ -372,7 +372,7 @@ impl GpuBackend {
         if !kinds.is_empty() {
             static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
             let first = FIRST.swap(false, Ordering::Relaxed);
-            if first || ((diag || crate::diag("mesh")) && n % 30 == 0) {
+            if first || ((diag || crate::diag("mesh")) && n.is_multiple_of(30)) {
                 eprintln!(
                     "nxkit-gpu: frame {n}: mesh and indirect draws: {}",
                     kinds.describe()
@@ -740,7 +740,7 @@ fn present_diag(i: usize) {
         return;
     }
     let n = PRESENT_DIAG[i].fetch_add(1, Ordering::Relaxed) + 1;
-    if i == 0 && n % 120 == 0 {
+    if i == 0 && n.is_multiple_of(120) {
         let v: Vec<u64> = PRESENT_DIAG
             .iter()
             .map(|c| c.load(Ordering::Relaxed))
@@ -835,10 +835,10 @@ impl TickSink for GpuBackend {
         if r.is_ok() {
             present_diag(3);
         }
-        if let Err(e) = r {
-            if !self.blit_failed.swap(true, Ordering::Relaxed) {
-                eprintln!("nxkit-gpu: the present failed: {e}");
-            }
+        if let Err(e) = r
+            && !self.blit_failed.swap(true, Ordering::Relaxed)
+        {
+            eprintln!("nxkit-gpu: the present failed: {e}");
         }
     }
 }
@@ -882,7 +882,7 @@ mod encpace {
 
     /// A tick shows frame `n`, with `pending` frames queued.
     pub(super) fn shown(n: u64, pending: usize) {
-        if on() && n % 60 == 0 {
+        if on() && n.is_multiple_of(60) {
             let t = now();
             let ask = AT_ASK[n as usize % N].load(Ordering::Relaxed);
             let ready = AT_READY[n as usize % N].load(Ordering::Relaxed);

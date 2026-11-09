@@ -180,11 +180,6 @@ impl State {
         message
     }
 
-    /// Whether a message waits. Lock free.
-    pub(crate) fn has_message(&self) -> bool {
-        self.queued.load(Ordering::Acquire) != 0
-    }
-
     /// The SDK event `GetNotificationMessageEvent` fills follows the queue as the IPC event does: it is signalled while
     /// a message waits and cleared when the queue is empty (nxnative `mq_ev_sync` in `dm/host/hle_oe.c`). The state is
     /// read and the event changed under the lock of the state, so a push that races a pop cannot leave the event

@@ -6,7 +6,7 @@
 //! the n-th `Cmd::Draw` of the frame uses `draws[n]`, the n-th `Cmd::Copy` uses `copies[n]`, and so on.
 //!
 //! Every number is the raw NVN value (`NVNblendFunc`, `NVNdepthFunc`, `NVNface` and others), so the recorder does no
-//! translation. [`crate::translate`] does it in one place.
+//! translation. `crate::translate` does it in one place.
 
 use std::sync::Arc;
 

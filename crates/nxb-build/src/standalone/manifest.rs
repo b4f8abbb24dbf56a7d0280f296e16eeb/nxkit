@@ -7,7 +7,7 @@ use super::npdm::MainThread;
 use nxb_pyjson::Value;
 
 /// One DLC folder.
-pub struct Aoc {
+pub(crate) struct Aoc {
     /// The index the game mounts (`dlc title id - app id - 0x1000`).
     pub index: u32,
     /// The DLC's title id.
@@ -19,7 +19,7 @@ pub struct Aoc {
 }
 
 /// What `game.json` is made from.
-pub struct Manifest<'a> {
+pub(crate) struct Manifest<'a> {
     /// The game's title id.
     pub title_id: u64,
     /// The game's name.
@@ -219,7 +219,7 @@ fn module(b: &Built, base: u64) -> Value {
 }
 
 /// The text of `game.json`.
-pub fn game_json(m: &Manifest) -> String {
+pub(crate) fn game_json(m: &Manifest) -> String {
     let mut f = vec![
         ("title_id", s(&format!("{:016X}", m.title_id))),
         ("name", s(m.name)),
@@ -283,7 +283,7 @@ fn list_json(list: Vec<Value>) -> String {
 }
 
 /// A list of `{ "name", "slot" }`: the form of the exports file.
-pub fn symbols_json(v: &[Sym]) -> String {
+pub(crate) fn symbols_json(v: &[Sym]) -> String {
     list_json(
         v.iter()
             .map(|x| obj(vec![("name", s(&x.name)), ("slot", n(x.slot))]))
@@ -292,7 +292,7 @@ pub fn symbols_json(v: &[Sym]) -> String {
 }
 
 /// A list of `{ "name", "slot", "addend", "weak" }`: the form of the imports file. One entry for each slot.
-pub fn imports_json(v: &[Import]) -> String {
+pub(crate) fn imports_json(v: &[Import]) -> String {
     list_json(
         v.iter()
             .map(|x| {
@@ -308,7 +308,7 @@ pub fn imports_json(v: &[Import]) -> String {
 }
 
 /// The names of the NVN list text (one a line).
-pub fn nvn_list(text: &str) -> Vec<String> {
+pub(crate) fn nvn_list(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))

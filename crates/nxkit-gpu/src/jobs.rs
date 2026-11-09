@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn the_pool_serves_many_calls_with_borrows() {
         for round in 0..200u32 {
-            let base = vec![round; 8];
+            let base = [round; 8];
             let out = run_all(6, (0..8usize).collect(), |i| base[i] + i as u32);
             assert_eq!(out, (0..8u32).map(|i| round + i).collect::<Vec<_>>());
         }

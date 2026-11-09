@@ -70,11 +70,9 @@ mod tests {
         let mut game = 0.0;
         let mut real = 0.0;
         let mut least = f32::MAX;
-        let mut i = 0;
         let _ = v.next(t, cap);
-        for _ in 0..2000 {
+        for i in 0..2000 {
             let d = intervals_ms[i % intervals_ms.len()];
-            i += 1;
             t += (d * 1e6) as u64;
             let s = v.next(t, cap);
             game += f64::from(s) / 30.0;

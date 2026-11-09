@@ -91,7 +91,7 @@ fn mgr_id(gm: u64) -> u64 {
     id
 }
 
-fn mgr_of<'a>(s: &'a mut State, gm: u64) -> (u64, &'a mut Mgr) {
+fn mgr_of(s: &mut State, gm: u64) -> (u64, &mut Mgr) {
     let id = mgr_id(gm);
     match s.mgrs.get_mut(&id) {
         Some(m) => (id, m),
@@ -101,7 +101,7 @@ fn mgr_of<'a>(s: &'a mut State, gm: u64) -> (u64, &'a mut Mgr) {
     }
 }
 
-fn dec_of<'a>(s: &'a mut State, gd: u64) -> &'a mut Dec {
+fn dec_of(s: &mut State, gd: u64) -> &mut Dec {
     match s.decs.get_mut(&gd) {
         Some(d) => d,
         None => fatal(&format!(

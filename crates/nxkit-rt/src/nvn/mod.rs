@@ -1,24 +1,24 @@
 //! The NVN C ABI of the host.
 //!
 //! A game gets every NVN function by name from `nvnBootstrapLoader` or `nvnDeviceGetProcAddress`. Both end in
-//! [`lookup`]. The functions are `extern "C"` and follow the signature of real NVN: an argument of fewer than 32 bits
+//! `lookup`. The functions are `extern "C"` and follow the signature of real NVN: an argument of fewer than 32 bits
 //! is a `u32`, a pointer is a `u64` (a guest address is a host address, R18), an enum is an `i32`, and a boolean result
 //! is a `u32`. No function is variadic.
 //!
 //! The groups:
-//! - [`device`], [`queue`], [`sync`], [`pool`], [`buffer`], [`window`], [`event`] and [`program`]: objects and
-//!   functions without a recording. A group keeps plain data in the guest object ([`abi::Obj`]) and host data in a
-//!   [`abi::Registry`].
-//! - [`texture`], [`sampler`], [`state`] and [`cmdbuf`]: texture and sampler objects with the descriptor pools, the
-//!   state setters and the command buffers. They record through the front end ([`ctx::Gpu`]).
+//! - `device`, `queue`, `sync`, `pool`, `buffer`, `window`, `event` and `program`: objects and
+//!   functions without a recording. A group keeps plain data in the guest object (`abi::Obj`) and host data in a
+//!   `abi::Registry`.
+//! - `texture`, `sampler`, `state` and `cmdbuf`: texture and sampler objects with the descriptor pools, the
+//!   state setters and the command buffers. They record through the front end (`ctx::Gpu`).
 //!
-//! Each group has `procs()`, its names and addresses. [`procs`] joins them. `FFI_GROUPS` in `nxkit-nvn` names what each
+//! Each group has `procs()`, its names and addresses. `procs` joins them. `FFI_GROUPS` in `nxkit-nvn` names what each
 //! group must export, and a test per group compares the two.
 //!
 //! A name that the game asks for and that no group exports:
-//! - If `nxnative` knows it, [`lookup`] gives a function that ends the game with the name when it is called (R24).
+//! - If `nxnative` knows it, `lookup` gives a function that ends the game with the name when it is called (R24).
 //!   A game that probes an optional function and never calls it keeps running.
-//! - If nobody knows it, [`lookup`] logs the name once and gives NULL.
+//! - If nobody knows it, `lookup` logs the name once and gives NULL.
 //!
 //! The host calls [`install`] once with the backend, before the game starts.
 

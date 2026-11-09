@@ -9,7 +9,7 @@
 
 /// One name with its slot (imports) or its value (exports), as an offset from the module's base.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sym {
+pub(crate) struct Sym {
     /// The symbol's name.
     pub name: String,
     /// The offset from the base: the slot the loader fills (import) or the symbol's address (export).
@@ -18,7 +18,7 @@ pub struct Sym {
 
 /// One slot that the loader fills with the address of an undefined symbol.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Import {
+pub(crate) struct Import {
     /// The symbol's name.
     pub name: String,
     /// The offset from the base of the slot.
@@ -31,7 +31,7 @@ pub struct Import {
 
 /// The dynamic symbols of one module.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Symbols {
+pub(crate) struct Symbols {
     /// Symbols the module needs, one entry for each slot, in slot order.
     pub imports: Vec<Import>,
     /// Symbols the module defines.
@@ -113,7 +113,7 @@ fn symbol_count(
 }
 
 /// Reads the imports and exports of the module whose flat image is `image`.
-pub fn symbols(image: &[u8]) -> Result<Symbols, String> {
+pub(crate) fn symbols(image: &[u8]) -> Result<Symbols, String> {
     let mod0 = u32at(image, 4)? as usize;
     if image.get(mod0..mod0 + 4) != Some(b"MOD0") {
         return Err("the module has no MOD0 header".into());

@@ -719,10 +719,10 @@ fn fragment_entry<'a>(fs: &'a StageProgram, targets: &Targets) -> &'a str {
             if let Some(entry) = &fs.entry_uint {
                 return entry;
             }
-        } else if let Some((entry, mask)) = &fs.entry_mixed {
-            if mask & present == integer {
-                return entry;
-            }
+        } else if let Some((entry, mask)) = &fs.entry_mixed
+            && mask & present == integer
+        {
+            return entry;
         }
     }
     &fs.entry
@@ -775,6 +775,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
                 task: None,
                 mesh: None,
             },
+            push: None,
             blend: Default::default(),
             write_masks: [15; 8],
             depth_stencil: Default::default(),

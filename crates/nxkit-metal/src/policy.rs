@@ -89,7 +89,7 @@ pub fn choose_present_plan(input: &PolicyInput) -> PresentPlan {
         );
     }
     let ticks = (display_hz / game_hz).max(1);
-    let divides = display_hz % game_hz == 0;
+    let divides = display_hz.is_multiple_of(game_hz);
     if !divides {
         return plan(
             FrameSource::Hold {

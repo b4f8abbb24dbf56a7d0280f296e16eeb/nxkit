@@ -89,39 +89,39 @@ pub(super) fn list() -> Vec<Export> {
     vec![
         Export::new(
             "_ZN2nn3hid20IsVibrationPermittedEv",
-            is_vibration_permitted as usize,
+            is_vibration_permitted as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid25GetVibrationDeviceHandlesEPNS0_21VibrationDeviceHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE",
-            get_device_handles as usize,
+            get_device_handles as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid25InitializeVibrationDeviceERKNS0_21VibrationDeviceHandleE",
-            initialize_device as usize,
+            initialize_device as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid18SendVibrationValueERKNS0_21VibrationDeviceHandleERKNS0_14VibrationValueE",
-            send_value as usize,
+            send_value as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid6detail19SendVibrationValuesEPKNS0_21VibrationDeviceHandleEPKNS0_14VibrationValueEi",
-            send_values as usize,
+            send_values as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid22GetVibrationDeviceInfoEPNS0_19VibrationDeviceInfoERKNS0_21VibrationDeviceHandleE",
-            get_device_info as usize,
+            get_device_info as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid24IsVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE",
-            is_device_mounted as usize,
+            is_device_mounted as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE",
-            is_device_mounted as usize,
+            is_device_mounted as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid23GetActualVibrationValueEPNS0_14VibrationValueERKNS0_21VibrationDeviceHandleE",
-            get_actual_value as usize,
+            get_actual_value as *const () as usize,
         ),
     ]
 }

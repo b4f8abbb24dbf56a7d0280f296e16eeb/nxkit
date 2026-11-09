@@ -110,7 +110,7 @@ extern "C" fn sleep_begin() {
 }
 
 extern "C" fn sleep_end() {
-    let _ = NO_SLEEP.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+    let _ = NO_SLEEP.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
     let open = NO_SLEEP.load(Ordering::SeqCst) > 0;
     state().with(|i| i.auto_sleep_disabled = open);
 }

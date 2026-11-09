@@ -4,7 +4,7 @@
 //! signals the event on its own timer drifts against the display. Two events can come in one tick of the display and
 //! none in the next, and the game stutters. So the event follows the ticks of the display link (R19).
 //!
-//! The host calls [`TickClock::tick`] on every tick of the display link. A worker thread per event counts the ticks and
+//! The host calls `TickClock::tick` on every tick of the display link. A worker thread per event counts the ticks and
 //! signals the event on every `ticks_per_vsync`th one. At a game rate of 60 on a display of 120 Hz that is every second
 //! tick, and the game steps at the speed of the Switch. When no tick arrives for a few periods (the window is hidden and
 //! the link is paused), the worker keeps the game running at the period of the game's vsync and counts that in

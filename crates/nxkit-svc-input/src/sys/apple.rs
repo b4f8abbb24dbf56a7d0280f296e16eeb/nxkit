@@ -117,11 +117,11 @@ impl Platform {
         let list = unsafe { GCController::controllers() }.to_vec();
         let live: Vec<usize> = list.iter().map(|c| Retained::as_ptr(c) as usize).collect();
         for p in 0..PLAYERS {
-            if let Some(owner) = slots.owner_of(p) {
-                if !live.contains(&owner) {
-                    slots.free(owner);
-                    self.pads[p] = None;
-                }
+            if let Some(owner) = slots.owner_of(p)
+                && !live.contains(&owner)
+            {
+                slots.free(owner);
+                self.pads[p] = None;
             }
         }
         for controller in list {

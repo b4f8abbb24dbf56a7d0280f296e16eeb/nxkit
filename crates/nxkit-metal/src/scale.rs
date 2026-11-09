@@ -60,7 +60,7 @@ impl RenderScale {
 fn scale_side(side: u32, factor: f32) -> u32 {
     let v = (f64::from(side) * f64::from(factor) - 1e-6).ceil().max(2.0) as u64;
     let even = v + (v & 1);
-    u32::try_from(even).unwrap_or(u32::MAX & !1)
+    u32::try_from(even).unwrap_or(u32::MAX - 1)
 }
 
 /// How the game's own upscaler is treated. It mirrors `nxtitle::Upscaler`, which this crate does not depend on.

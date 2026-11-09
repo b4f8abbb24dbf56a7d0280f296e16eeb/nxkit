@@ -21,6 +21,10 @@ use crate::format::Format;
 use crate::frame::{Frame, PendingPresent};
 use crate::texture::{Storage, Texture, TextureDesc};
 
+/// The block that Metal calls when a drawable was presented.
+type PresentedHandler =
+    RcBlock<'static, fn(NonNull<ProtocolObject<dyn MTLDrawable>>), dyn Send + Sync>;
+
 /// The pixel format of the layer.
 pub const PRESENT_FORMAT: Format = Format::Bgra8Unorm;
 
@@ -56,7 +60,7 @@ impl Drawable {
     /// Calls `f` with the time in seconds on the host clock at which the display showed the drawable, 0 when it did not
     /// show it. It must be called before the drawable is presented.
     pub fn on_presented(&self, f: impl Fn(f64) + Send + Sync + 'static) {
-        let block: RcBlock<'static, fn(NonNull<ProtocolObject<dyn MTLDrawable>>), dyn Send + Sync> =
+        let block: PresentedHandler =
             RcBlock::new(move |d: NonNull<ProtocolObject<dyn MTLDrawable>>| {
                 // SAFETY: Metal passes a valid drawable that lives for the call.
                 f(unsafe { d.as_ref() }.presentedTime());

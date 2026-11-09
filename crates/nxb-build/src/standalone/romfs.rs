@@ -28,7 +28,7 @@ fn target(dest: &Path, e: &RomEntry) -> Result<PathBuf, String> {
 }
 
 /// Writes every file of the image below `dest`. Returns the number of files and bytes.
-pub fn unpack(
+pub(crate) fn unpack(
     img: &Path,
     dest: &Path,
     mut each: impl FnMut(u64, u64),

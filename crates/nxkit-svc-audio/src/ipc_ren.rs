@@ -93,10 +93,10 @@ impl Drop for AudioDevice {
 }
 
 fn write_name(req: &Request<'_>) {
-    if let Some(b) = req.buffer(BufferKind::Receive, 0) {
-        if b.size != 0 {
-            put_name(b.addr, SPEAKER, (b.size as usize).min(DEVNAME));
-        }
+    if let Some(b) = req.buffer(BufferKind::Receive, 0)
+        && b.size != 0
+    {
+        put_name(b.addr, SPEAKER, (b.size as usize).min(DEVNAME));
     }
 }
 

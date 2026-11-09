@@ -412,8 +412,10 @@ impl Clicks {
         }
         let now = Instant::now();
         let inner = blk
-            .chunks_exact(2)
-            .zip(blk.chunks_exact(2).skip(1))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .zip(blk.as_chunks::<2>().0.iter().skip(1))
             .map(|(a, b)| {
                 (i32::from(b[0]) - i32::from(a[0]))
                     .abs()

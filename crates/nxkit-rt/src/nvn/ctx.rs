@@ -156,6 +156,7 @@ pub(crate) fn settings_if_installed() -> Option<&'static Settings> {
 }
 
 /// The command buffer numbers: a number for each live guest `NVNcommandBuffer`, with the numbers of released ones to reuse.
+#[cfg(test)]
 #[derive(Debug, Default)]
 struct CommandBufferIds {
     free: Vec<usize>,
@@ -178,7 +179,9 @@ pub(crate) struct Gpu {
     pub(crate) textures: Registry<TexId>,
     /// The guest address of an initialised `NVNprogram` to its stages. The program group maintains it.
     pub(crate) programs: Registry<ProgramRecord>,
+    #[cfg(test)]
     cb_ids: Registry<usize>,
+    #[cfg(test)]
     cb_alloc: Mutex<CommandBufferIds>,
 }
 
@@ -203,7 +206,9 @@ impl Gpu {
             writes_dirty: AtomicBool::new(false),
             textures: Registry::new(),
             programs: Registry::new(),
+            #[cfg(test)]
             cb_ids: Registry::new(),
+            #[cfg(test)]
             cb_alloc: Mutex::new(CommandBufferIds::default()),
         }
     }
@@ -400,6 +405,7 @@ impl Gpu {
 
     /// The number that the front end uses for the command buffer at the guest address `addr`. The same address gives the
     /// same number until [`Gpu::command_buffer_release`]. A new command buffer gets a number that is not in use.
+    #[cfg(test)]
     pub(crate) fn command_buffer_index(&self, addr: u64) -> usize {
         if let Some(i) = self.cb_ids.get(addr) {
             return i;
@@ -418,6 +424,7 @@ impl Gpu {
 
     /// Frees the number of the command buffer at `addr` and resets its state in the front end
     /// (`FrontEnd::release_command_buffer`). Nothing happens when `addr` has no number.
+    #[cfg(test)]
     pub(crate) fn command_buffer_release(&self, addr: u64) {
         let Some(i) = self.cb_ids.remove(addr) else {
             return;

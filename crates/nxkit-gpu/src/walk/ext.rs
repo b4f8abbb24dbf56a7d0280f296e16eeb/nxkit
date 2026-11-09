@@ -119,11 +119,12 @@ impl Walker {
                 static VIEWS: std::sync::Mutex<Vec<(u16, [u32; 4])>> =
                     std::sync::Mutex::new(Vec::new());
                 let value = (x.arg, [x.word(0), x.word(1), x.word(2), x.word(3)]);
-                if let Ok(mut views) = VIEWS.lock() {
-                    if views.len() < 80 && !views.contains(&value) {
-                        eprintln!("DIAG target view {value:x?}");
-                        views.push(value);
-                    }
+                if let Ok(mut views) = VIEWS.lock()
+                    && views.len() < 80
+                    && !views.contains(&value)
+                {
+                    eprintln!("DIAG target view {value:x?}");
+                    views.push(value);
                 }
             }
             ExtCode::VertexState => self.vertex_state(st, x),
@@ -1117,8 +1118,10 @@ mod tests {
 
     #[test]
     fn a_buffer_to_texture_copy_reads_the_buffer_view_and_region() {
-        let mut st = State::default();
-        st.copy_strides = [512, 4096];
+        let st = State {
+            copy_strides: [512, 4096],
+            ..State::default()
+        };
         // texture 0x2000, buffer 0x9_0000_1000, flags, view (levels, layers), region.
         let view = [1 | 2 | 3 << 16, 5 << 16, 0, 0];
         let region = [4u32, 8, 2, 120, 75, 3];

@@ -111,7 +111,7 @@ pub fn version(engine: &Path) -> Result<String, String> {
 const STANDALONE_REVISION: &str = "nxkit-chain-1";
 
 /// V for a build without nxnative (R49): the shader step is this workspace's code, so the version is a hash of
-/// [`STANDALONE_REVISION`], this crate's version and the translation options. The engine's `dm/gfx` files do not
+/// `STANDALONE_REVISION`, this crate's version and the translation options. The engine's `dm/gfx` files do not
 /// enter it, as the build does not run them. A changed translator that keeps the crate version needs a new revision.
 pub fn standalone_version() -> String {
     let mut h = nxb_model::Sha256::new();

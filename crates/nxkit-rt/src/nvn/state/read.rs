@@ -49,11 +49,6 @@ pub(crate) struct ColorState {
 }
 
 impl ColorState {
-    /// True when render target `i` blends.
-    pub(crate) fn blends(&self, i: u32) -> bool {
-        i < 8 && self.blend_enable >> i & 1 != 0
-    }
-
     /// True when any render target blends.
     pub(crate) fn any_blend(&self) -> bool {
         self.blend_enable != 0

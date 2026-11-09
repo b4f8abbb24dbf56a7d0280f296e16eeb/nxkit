@@ -114,11 +114,11 @@ impl PresentRule {
     /// of the profile says whether a frame follows the game's interval (`game`, as on the Switch) or the display
     /// (`display`).
     pub fn vsyncs(&self, game_interval: u32) -> u32 {
-        if self.cap != 0 {
+        if let Some(per_cap) = self.step_hz.checked_div(self.cap) {
             if self.hold != 0 && self.step_on {
                 self.hold
             } else {
-                self.step_hz / self.cap
+                per_cap
             }
         } else if self.display_mode {
             1

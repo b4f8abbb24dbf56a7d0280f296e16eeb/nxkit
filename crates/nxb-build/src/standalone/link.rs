@@ -8,7 +8,7 @@ use super::modules::Built;
 use std::path::Path;
 
 /// The image's identity: the first 16 bytes of a hash of the build IDs in load order.
-pub fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
+pub(crate) fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
     let mut h = nxb_model::Sha256::new();
     for (b, _) in mods {
         h.update(b.build_id.as_bytes());
@@ -21,7 +21,7 @@ pub fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
 }
 
 /// The text of `nxgame.dylib`: every segment of every module, by address.
-pub fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
+pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
     let mut segs: Vec<Seg> = Vec::new();
     for (b, base) in mods {
         for g in &b.shape.segments {
@@ -62,7 +62,7 @@ fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Writes `modules/<name>.{bin,imports.json,exports.json,fixups.tsv,gates.tsv}` into the run folder.
-pub fn module_files(
+pub(crate) fn module_files(
     run: &Path,
     mods: &[(Built, u64)],
     mut progress: impl FnMut(u64, u64),
@@ -88,7 +88,7 @@ pub fn module_files(
 }
 
 /// Writes and signs `nxgame.dylib`. Returns its size. `progress` gets the steps done (of 3) and what comes next.
-pub fn write_dylib(
+pub(crate) fn write_dylib(
     run: &Path,
     mods: &[(Built, u64)],
     mut progress: impl FnMut(u64, &str),

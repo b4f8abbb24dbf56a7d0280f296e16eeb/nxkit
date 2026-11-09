@@ -243,8 +243,8 @@ fn up_3_2(cap: &mut Cap, n: usize) -> usize {
 fn read_i32s(addr: u64, out: &mut [i32]) {
     let len = (out.len() * 4) as u64;
     mem::with_host(addr, len, |b| {
-        for (o, c) in out.iter_mut().zip(b.chunks_exact(4)) {
-            *o = i32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+        for (o, c) in out.iter_mut().zip(b.as_chunks::<4>().0) {
+            *o = i32::from_le_bytes(*c);
         }
     });
 }
@@ -444,7 +444,7 @@ fn sink_out(
     if loud {
         cap.nonsilent += 1;
     }
-    if cap.frames == 200 || cap.frames % 12000 == 0 {
+    if cap.frames == 200 || cap.frames.is_multiple_of(12000) {
         eprintln!(
             "nxkit-audio: audren: renderer {idx} rendered {} frames, {} of them not silent",
             cap.frames, cap.nonsilent
@@ -525,7 +525,7 @@ mod tests {
             }
             total += up_3_2(&mut cap, 160);
         }
-        assert!(total >= 4 * 240 - 2 && total <= 4 * 240 + 2);
+        assert!((4 * 240 - 2..=4 * 240 + 2).contains(&total));
     }
 
     #[test]

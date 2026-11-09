@@ -144,6 +144,9 @@ pub(crate) struct WalkCounters {
     pub(crate) verify_mismatches: u32,
 }
 
+/// A uniform buffer range: its GPU address and size.
+type SnapKey = (u64, u32);
+
 /// Reads recordings into the detail of the frame that is being built.
 pub(crate) struct Walker {
     counters: WalkCounters,
@@ -154,11 +157,11 @@ pub(crate) struct Walker {
     /// The GPU ranges that `UpdateUniformBuffer` wrote. A draw that binds an overlapping range gets a snapshot.
     updated: Vec<(u64, u64)>,
     /// The last snapshot of each uniform buffer range. An update that overlaps a range drops its snapshot.
-    snaps: std::cell::RefCell<FastMap<(u64, u32), Option<Arc<[u8]>>>>,
+    snaps: std::cell::RefCell<FastMap<SnapKey, Option<Arc<[u8]>>>>,
     /// The buffers of snapshots by size, oldest first, kept for reuse (`Walker::snap_buffer`).
     snap_pool: std::cell::RefCell<FastMap<u32, std::collections::VecDeque<Arc<[u8]>>>>,
     /// The newest snapshot of each range in the frame. A range with the same bytes again shares its buffer.
-    frame_snaps: std::cell::RefCell<FastMap<(u64, u32), Arc<[u8]>>>,
+    frame_snaps: std::cell::RefCell<FastMap<SnapKey, Arc<[u8]>>>,
     /// The bytes of a range that is compared with an earlier copy. It keeps its capacity.
     snap_tmp: std::cell::RefCell<Vec<u8>>,
     /// Whether every bound uniform buffer gets a copy (the overlap, not the `nosnap` knob). Read once per submit,

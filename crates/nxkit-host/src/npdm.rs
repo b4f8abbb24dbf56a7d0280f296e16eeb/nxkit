@@ -32,8 +32,8 @@ pub fn core_mask_of(npdm: &[u8]) -> Option<u64> {
     }
     let (kc_off, kc_size) = (u32_at(aci, 0x30)? as usize, u32_at(aci, 0x34)? as usize);
     let caps = aci.get(kc_off..kc_off.checked_add(kc_size)?)?;
-    caps.chunks_exact(4).find_map(|w| {
-        let cap = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
+    caps.as_chunks::<4>().0.iter().find_map(|w| {
+        let cap = u32::from_le_bytes(*w);
         (cap & 0xF == 0b0111).then(|| {
             let (lo, hi) = ((cap >> 16) & 0xFF, (cap >> 24) & 0xFF);
             (lo.min(63)..=hi.min(63)).fold(0u64, |m, c| m | 1 << c)
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn the_thread_info_capability_gives_the_cores() {
         // cores 0 to 5, priorities 24 to 59
-        let cap = 0b0111 | 59 << 4 | 24 << 10 | 0 << 16 | 5 << 24;
+        let cap = 0b0111 | 59 << 4 | 24 << 10 | 5 << 24;
         assert_eq!(core_mask_of(&npdm(cap)), Some(0b11_1111));
     }
 

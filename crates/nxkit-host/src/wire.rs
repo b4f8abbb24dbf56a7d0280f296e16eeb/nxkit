@@ -145,10 +145,10 @@ fn audio_join(id: u64) {
             .position(|(i, _, _)| *i == id)
             .map(|k| t.live.swap_remove(k).1)
     };
-    if let Some(thread) = thread {
-        if let Err(why) = thread.join() {
-            eprintln!("nxkit-host: joining an audio thread: {why}");
-        }
+    if let Some(thread) = thread
+        && let Err(why) = thread.join()
+    {
+        eprintln!("nxkit-host: joining an audio thread: {why}");
     }
 }
 

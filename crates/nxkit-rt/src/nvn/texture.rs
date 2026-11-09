@@ -167,10 +167,10 @@ impl Tex {
 /// Tells the front end and the backend that the texture at `addr` is gone, when `nvnTextureInitialize` made it there.
 fn release(name: &str, addr: u64) -> AbiResult<()> {
     let g = gpu(name);
-    if let Some(id) = g.textures.remove(addr) {
-        if g.with_front(|f| f.finalize_texture(id))? {
-            g.backend().texture_finalized(id);
-        }
+    if let Some(id) = g.textures.remove(addr)
+        && g.with_front(|f| f.finalize_texture(id))?
+    {
+        g.backend().texture_finalized(id);
     }
     Ok(())
 }
@@ -425,6 +425,7 @@ extern "C" fn get_view_offset(t: u64, v: u64) -> i64 {
 extern "C" fn set_debug_label(_t: u64, _label: u64) {}
 
 /// The id that the front end gave the texture at `addr`, for the command buffer.
+#[cfg(test)]
 pub(crate) fn id_of(addr: u64) -> AbiResult<u32> {
     field(addr, |o| o.u32(ID))
 }

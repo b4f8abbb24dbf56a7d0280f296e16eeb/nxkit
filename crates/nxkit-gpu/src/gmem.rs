@@ -299,8 +299,8 @@ impl GmemLogs {
             if self.buffer.read(at, &mut log).is_err() {
                 break;
             }
-            for (w, c) in seen.iter_mut().zip(log.chunks_exact(4)) {
-                *w |= u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+            for (w, c) in seen.iter_mut().zip(log.as_chunks::<4>().0) {
+                *w |= u32::from_le_bytes(*c);
             }
             let _ = self.buffer.write(at, &zero);
         }
@@ -337,6 +337,7 @@ pub(crate) struct GmemEnv<'a> {
 
 impl GmemEnv<'_> {
     /// An environment without a table, for tests.
+    #[cfg(test)]
     pub(crate) const NONE: GmemEnv<'static> = GmemEnv { map: 0, logs: None };
 
     /// The address of a log for one draw or dispatch, 0 when there are no logs.

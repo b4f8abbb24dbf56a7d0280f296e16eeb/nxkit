@@ -161,10 +161,10 @@ pub(crate) fn by_handle(h0: u64) -> Option<Arc<Ren>> {
 /// Frees the slot of `r`.
 pub(crate) fn free_slot(r: &Arc<Ren>) {
     let mut s = lk(&SLOTS);
-    if let Some(e) = s.get_mut(r.idx) {
-        if e.as_ref().is_some_and(|x| Arc::ptr_eq(x, r)) {
-            *e = None;
-        }
+    if let Some(e) = s.get_mut(r.idx)
+        && e.as_ref().is_some_and(|x| Arc::ptr_eq(x, r))
+    {
+        *e = None;
     }
 }
 

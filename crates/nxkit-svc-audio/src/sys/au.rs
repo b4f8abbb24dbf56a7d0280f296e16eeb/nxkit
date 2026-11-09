@@ -210,7 +210,7 @@ mod imp {
         }
         let buf = &list.mBuffers[0];
         let len = (buf.mDataByteSize / 4) as usize;
-        if buf.mData.is_null() || len == 0 || len % 2 != 0 {
+        if buf.mData.is_null() || len == 0 || !len.is_multiple_of(2) {
             return 0;
         }
         // SAFETY: `mData` points at `mDataByteSize` bytes of `f32` that this call owns until it returns.

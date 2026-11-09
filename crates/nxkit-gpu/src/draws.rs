@@ -317,11 +317,12 @@ pub(crate) fn fixed(
             "{ds:?} range {:?} depth {} stencil {}",
             d.dynamic.depth_range, pc.has_depth, pc.has_stencil
         );
-        if let Ok(mut s) = SEEN.lock() {
-            if s.len() < 40 && !s.contains(&key) {
-                eprintln!("DIAG depth draw {key}");
-                s.push(key);
-            }
+        if let Ok(mut s) = SEEN.lock()
+            && s.len() < 40
+            && !s.contains(&key)
+        {
+            eprintln!("DIAG depth draw {key}");
+            s.push(key);
         }
     }
     if crate::knob("nodepth") {

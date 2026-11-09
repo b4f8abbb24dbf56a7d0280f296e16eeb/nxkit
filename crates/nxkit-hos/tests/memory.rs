@@ -19,6 +19,7 @@ struct Rig {
     main: Arc<Thread>,
 }
 
+#[allow(clippy::expect_used, reason = "a test helper")]
 fn rig() -> Rig {
     let mem = Arc::new(FakeMemory::new(BASE, (SIZE / 4) as usize));
     let config = Config {

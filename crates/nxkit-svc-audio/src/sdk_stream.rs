@@ -227,8 +227,8 @@ extern "C" fn write_stream(g: u64, data: u64, frames: i32) -> i32 {
         pcm.resize(n * 2, 0);
         if i.fmt == FMT_FLOAT {
             let ok = guest::with_slice(data, n as u64 * 4, |src| {
-                for (k, c) in src.chunks_exact(4).enumerate() {
-                    let v = f32::from_le_bytes([c[0], c[1], c[2], c[3]]) * 32767.0;
+                for (k, c) in src.as_chunks::<4>().0.iter().enumerate() {
+                    let v = f32::from_le_bytes(*c) * 32767.0;
                     let q = v.clamp(-32768.0, 32767.0) as i16;
                     pcm[2 * k..2 * k + 2].copy_from_slice(&q.to_le_bytes());
                 }

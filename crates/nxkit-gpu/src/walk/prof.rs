@@ -149,7 +149,7 @@ impl Prof {
         }
         let n = self.reported.get();
         self.reported.set(n + 1);
-        let print = n < 200 || n % 20 == 0;
+        let print = n < 200 || n.is_multiple_of(20);
         let g = |c: &Cell<u64>| c.replace(0);
         let us = |ns: u64| ns as f64 / 1000.0;
         let (read, apply, detail, snap, alloc_snap, alloc_draw) = (

@@ -173,7 +173,7 @@ mod testing {
     impl Writer {
         fn put(&mut self, v: u32, bits: u32) {
             for i in (0..bits).rev() {
-                if self.n % 8 == 0 {
+                if self.n.is_multiple_of(8) {
                     self.bytes.push(0);
                 }
                 let b = ((v >> i) & 1) as u8;

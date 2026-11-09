@@ -64,7 +64,10 @@ pub(crate) fn buckets(n: u64) -> u64 {
         return n | 1;
     }
     let mut c = n;
-    while [2, 3, 5, 7, 11, 13, 17].iter().any(|p| c % p == 0) {
+    while [2, 3, 5, 7, 11, 13, 17]
+        .iter()
+        .any(|p| c.is_multiple_of(*p))
+    {
         c += 1;
     }
     c

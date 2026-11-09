@@ -200,8 +200,8 @@ fn box_layout(
     let row = u64::from(region.size[0].div_ceil(bw)) * block;
     let (bpr, bpi) = (u64::from(bytes_per_row), u64::from(bytes_per_image));
     let depth = u64::from(region.size[2]);
-    if region.origin[0] % bw != 0
-        || region.origin[1] % bh != 0
+    if !region.origin[0].is_multiple_of(bw)
+        || !region.origin[1].is_multiple_of(bh)
         || bpr < row
         || bpr % block != 0
         || offset % block != 0

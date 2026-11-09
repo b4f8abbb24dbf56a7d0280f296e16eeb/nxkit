@@ -83,8 +83,6 @@ fn svc_calls_reach_the_kernel_only_when_the_service_is_on() {
 
     // The main thread has no guest memory model here, so it has no thread-local region.
     // SAFETY: both pointers are NULL.
-    assert_eq!(
-        unsafe { nxkit_kernel_thread_tls(std::ptr::null_mut(), std::ptr::null_mut()) },
-        -1
-    );
+    let tls = unsafe { nxkit_kernel_thread_tls(std::ptr::null_mut(), std::ptr::null_mut()) };
+    assert_eq!(tls, -1);
 }

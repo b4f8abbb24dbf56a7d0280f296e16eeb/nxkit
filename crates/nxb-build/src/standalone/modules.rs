@@ -8,7 +8,7 @@ use nxtitle::Standalone;
 use std::path::Path;
 
 /// One rewritten module.
-pub struct Built {
+pub(crate) struct Built {
     /// The module's name (`main`, `subsdk0`, `sdk`).
     pub name: String,
     /// The first 16 bytes of the build ID as 32 hex digits.
@@ -37,7 +37,7 @@ fn err(name: &str, e: RewriteError) -> String {
 }
 
 /// Rewrites the modules of `st` from the ExeFS folder `exefs`. `rules` is the title's rule file text.
-pub fn rewrite_all(
+pub(crate) fn rewrite_all(
     exefs: &Path,
     st: &Standalone,
     profile: &str,

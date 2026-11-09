@@ -268,11 +268,11 @@ extern "C" fn h_open0(handle: u64, param: u64, work: u64, sz: u64) -> u32 {
 /// SDK's render, which uses the renderer that Close is about to free.
 extern "C" fn h_close(obj: u64, state: u64) {
     let a = by_handle(obj);
-    if let Some(a) = &a {
-        if a.tt.load(Ordering::Acquire) != 0 {
-            a.open.store(false, Ordering::Release);
-            host::join_thread(a.tt.swap(0, Ordering::AcqRel));
-        }
+    if let Some(a) = &a
+        && a.tt.load(Ordering::Acquire) != 0
+    {
+        a.open.store(false, Ordering::Release);
+        host::join_thread(a.tt.swap(0, Ordering::AcqRel));
     }
     let owned = OWNED.del(obj);
     let sev = rev_find(obj);

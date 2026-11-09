@@ -128,7 +128,8 @@ fn box_fits(d: &TextureDesc, region: &TextureRegion, count: u32) -> bool {
     let (bw, bh) = d.format.block_dim();
     let extent = d.level_extent(region.level);
     let ends = |i: usize, b: u32| {
-        region.origin[i].saturating_add(region.size[i]) == extent[i] || region.size[i] % b == 0
+        region.origin[i].saturating_add(region.size[i]) == extent[i]
+            || region.size[i].is_multiple_of(b)
     };
     !region.size.contains(&0)
         && count != 0
@@ -335,22 +336,23 @@ fn copy(
                 )
             })
         };
-        if let Cmd::Copy { src, dst } = cmd {
-            if (hit(src) || hit(dst)) && crate::diag::first(&TCOPY, 300) {
-                let f = |t: Option<TexId>| {
-                    t.and_then(|t| {
-                        sh.textures
-                            .get(&t)
-                            .map(|r| (t, r.desc.width, r.desc.format))
-                    })
-                };
-                eprintln!(
-                    "DIAG tcopy src {:?} dst {:?} detail {:?}",
-                    f(src),
-                    f(dst),
-                    entry
-                );
-            }
+        if let Cmd::Copy { src, dst } = cmd
+            && (hit(src) || hit(dst))
+            && crate::diag::first(&TCOPY, 300)
+        {
+            let f = |t: Option<TexId>| {
+                t.and_then(|t| {
+                    sh.textures
+                        .get(&t)
+                        .map(|r| (t, r.desc.width, r.desc.format))
+                })
+            };
+            eprintln!(
+                "DIAG tcopy src {:?} dst {:?} detail {:?}",
+                f(src),
+                f(dst),
+                entry
+            );
         }
     }
     if let Some(c) = entry.filter(|c| {
@@ -515,10 +517,10 @@ pub(crate) fn compute_pass(
     if crate::diag::gpu_labels() {
         cp.set_label(&format!("c{index} n{}", pass.cmds.len()));
     }
-    if let Some(dep) = sh.barriers.before.get(index).copied().flatten() {
-        if cp.encode(&ComputeCommand::Depend(dep)).is_err() {
-            stats.skip(Skip::Encode);
-        }
+    if let Some(dep) = sh.barriers.before.get(index).copied().flatten()
+        && cp.encode(&ComputeCommand::Depend(dep)).is_err()
+    {
+        stats.skip(Skip::Encode);
     }
     for i in pass.cmds.clone() {
         let Some(cmd) = sh.frame.cmds.get(i as usize).copied() else {
@@ -534,19 +536,19 @@ pub(crate) fn compute_pass(
             }
             _ => Ok(()),
         };
-        if crate::diag("comp") && crate::diag::sampled() {
-            if let (PassKind::Compute, Some(dd)) =
+        if crate::diag("comp")
+            && crate::diag::sampled()
+            && let (PassKind::Compute, Some(dd)) =
                 (pass.kind, sh.detail.dispatches.get(ord.dispatch as usize))
-            {
-                eprintln!(
-                    "DIAG comp pass {index} cmd {i} program {:?} groups {:?} textures {} sbufs {} result {:?}",
-                    dd.program,
-                    dd.groups,
-                    dd.textures.len(),
-                    dd.sbufs.len(),
-                    r
-                );
-            }
+        {
+            eprintln!(
+                "DIAG comp pass {index} cmd {i} program {:?} groups {:?} textures {} sbufs {} result {:?}",
+                dd.program,
+                dd.groups,
+                dd.textures.len(),
+                dd.sbufs.len(),
+                r
+            );
         }
         if let Err(why) = r {
             stats.skip(why);

@@ -51,8 +51,10 @@ extern "C" fn set_supported_ids(ids: u64, n: u64) {
         bytes.clear();
     }
     let ids: Vec<u32> = bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
     with(|i| i.set_ids(&ids));
 }
@@ -129,81 +131,87 @@ pub(super) fn list() -> Vec<Export> {
     let mut v = vec![
         Export::new(
             "_ZN2nn3hid22SetSupportedNpadIdTypeEPKjm",
-            set_supported_ids as usize,
+            set_supported_ids as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE",
-            set_supported_styles as usize,
+            set_supported_styles as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid24GetSupportedNpadStyleSetEv",
-            get_supported_styles as usize,
+            get_supported_styles as *const () as usize,
         ),
-        Export::new("_ZN2nn3hid15GetNpadStyleSetERKj", get_style_set as usize),
+        Export::new(
+            "_ZN2nn3hid15GetNpadStyleSetERKj",
+            get_style_set as *const () as usize,
+        ),
         Export::new(
             "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj",
-            states_full_key as usize,
+            states_full_key as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj",
-            states_handheld as usize,
+            states_handheld as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj",
-            states_joy_dual as usize,
+            states_joy_dual as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj",
-            states_joy_left as usize,
+            states_joy_left as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj",
-            states_joy_right as usize,
+            states_joy_right as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj",
-            state_full_key as usize,
+            state_full_key as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid12GetNpadStateEPNS0_17NpadHandheldStateERKj",
-            state_handheld as usize,
+            state_handheld as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyDualStateERKj",
-            state_joy_dual as usize,
+            state_joy_dual as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj",
-            state_joy_left as usize,
+            state_joy_left as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj",
-            state_joy_right as usize,
+            state_joy_right as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE",
-            set_hold_type as usize,
+            set_hold_type as *const () as usize,
         ),
-        Export::new("_ZN2nn3hid18GetNpadJoyHoldTypeEv", get_hold_type as usize),
+        Export::new(
+            "_ZN2nn3hid18GetNpadJoyHoldTypeEv",
+            get_hold_type as *const () as usize,
+        ),
         Export::new(
             "_ZN2nn3hid24SetNpadCommunicationModeENS0_21NpadCommunicationModeE",
-            set_communication_mode as usize,
+            set_communication_mode as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid24GetNpadCommunicationModeEv",
-            get_communication_mode as usize,
+            get_communication_mode as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid29SetNpadHandheldActivationModeENS0_26NpadHandheldActivationModeE",
-            set_handheld_activation_mode as usize,
+            set_handheld_activation_mode as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid29GetNpadHandheldActivationModeEv",
-            get_handheld_activation_mode as usize,
+            get_handheld_activation_mode as *const () as usize,
         ),
         Export::new(
             "_ZN2nn3hid27BindNpadStyleSetUpdateEventERKjPNS_2os15SystemEventTypeENS3_14EventClearModeE",
-            bind_style_set_update_event as usize,
+            bind_style_set_update_event as *const () as usize,
         ),
     ];
     v.extend(stub_list());

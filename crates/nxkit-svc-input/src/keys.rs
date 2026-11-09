@@ -97,7 +97,7 @@ impl KeySet {
     }
 
     /// The 0x30 bytes of a `KeyboardState`: sampling number, modifiers, then the key bitmap.
-    pub(crate) fn to_state_bytes(&self, sampling: u64) -> [u8; KEYBOARD_STATE_SIZE] {
+    pub(crate) fn to_state_bytes(self, sampling: u64) -> [u8; KEYBOARD_STATE_SIZE] {
         let mut b = [0u8; KEYBOARD_STATE_SIZE];
         b[0..8].copy_from_slice(&sampling.to_le_bytes());
         b[8..16].copy_from_slice(&self.modifiers().to_le_bytes());

@@ -189,13 +189,6 @@ pub(crate) struct StageProgram {
     pub(crate) mesh: Option<MeshInfo>,
 }
 
-impl StageProgram {
-    /// True when the stage has a binding of `kind`.
-    pub(crate) fn uses_pool(&self, kind: BindKind) -> bool {
-        self.binds.iter().any(|b| b.kind == kind)
-    }
-}
-
 type ProgramMap = crate::draws::FastMap<String, Result<Arc<StageProgram>, Skip>>;
 
 /// Reads and caches the programs of one shader directory.
@@ -264,16 +257,15 @@ impl Programs {
         let json = parse(&text).ok_or_else(|| why("json parse"))?;
         let lib = ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_b.metallib")))
             .map_err(|e| why(&format!("metallib {e:?}")))?;
-        if crate::diag("prog") {
-            if json
+        if crate::diag("prog")
+            && json
                 .get("raster")
                 .and_then(|r| r.get("primitive_id"))
                 .and_then(Json::as_i64)
                 .unwrap_or(0)
                 != 0
-            {
-                eprintln!("DIAG prog {key}: primitive_id");
-            }
+        {
+            eprintln!("DIAG prog {key}: primitive_id");
         }
         read_stage(&json, lib, vertex)
     }

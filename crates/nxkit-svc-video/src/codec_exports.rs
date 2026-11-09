@@ -64,7 +64,7 @@ fn read_sync(addr: u64) -> Option<SyncHandle> {
 fn write_sync(addr: u64, s: &SyncHandle) -> bool {
     let words = [s.magic, s.dec, s.idx, s.generation];
     let mut bytes = [0u8; 16];
-    for (chunk, w) in bytes.chunks_exact_mut(4).zip(words) {
+    for (chunk, w) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(words) {
         chunk.copy_from_slice(&w.to_le_bytes());
     }
     guest::write(addr, &bytes).is_ok()
@@ -592,106 +592,110 @@ fn family<const C: u8>(tag: &str, all: &mut Vec<Export>) {
     add(
         format!("Calculate{tag}DecoderWorkBuffer"),
         "EPmS1_mtt".into(),
-        work_buffer as usize,
+        work_buffer as *const () as usize,
     );
     add(
         format!("Initialize{tag}Decoder"),
         format!("E{s}Pvmmttj{INPUT}{OUTPUT}{csd}"),
-        init_full::<C> as usize,
+        init_full::<C> as *const () as usize,
     );
     add(
         format!("Initialize{tag}Decoder"),
         format!("E{s}mttj{INPUT}{OUTPUT}{csd}"),
-        init_remote::<C> as usize,
+        init_remote::<C> as *const () as usize,
     );
     add(
         format!("Finalize{tag}Decoder"),
         format!("E{s}"),
-        finalize as usize,
+        finalize as *const () as usize,
     );
     add(
         format!("Register{tag}DecoderBuffer"),
         format!("E{s}jPNS0_25VideoDecoderImagePoolTypeEj"),
-        register as usize,
+        register as *const () as usize,
     );
     add(
         format!("Unregister{tag}DecoderBuffer"),
         format!("E{s}j"),
-        unregister as usize,
+        unregister as *const () as usize,
     );
     add(
         format!("Start{tag}Decoder"),
         format!("E{s}"),
-        start as usize,
+        start as *const () as usize,
     );
-    add(format!("Stop{tag}Decoder"), format!("E{s}"), reset as usize);
+    add(
+        format!("Stop{tag}Decoder"),
+        format!("E{s}"),
+        reset as *const () as usize,
+    );
     add(
         format!("Flush{tag}Decoder"),
         format!("E{s}"),
-        reset as usize,
+        reset as *const () as usize,
     );
     add(
         format!("Get{tag}DecoderSubmissionReadyEvent"),
         format!("EPPNS_2os15SystemEventTypeE{s}"),
-        ready_event_out as usize,
+        ready_event_out as *const () as usize,
     );
     add(
         format!("Submit{tag}DecoderInputBuffer"),
         format!("EPm{s}PKvmNS_8TimeSpanEb"),
-        submit as usize,
+        submit as *const () as usize,
     );
     add(
         format!("SubmitEncrypted{tag}DecoderInputBuffer"),
         format!("EPm{s}PKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb"),
-        submit_encrypted as usize,
+        submit_encrypted as *const () as usize,
     );
     add(
         format!("Acquire{tag}DecoderOutputBuffer"),
         format!("EPjPNS_2gs16NativeSyncHandleE{s}"),
-        acquire as usize,
+        acquire as *const () as usize,
     );
     add(
         format!("Release{tag}DecoderOutputBuffer"),
         format!("E{s}jNS_2gs16NativeSyncHandleE"),
-        release as usize,
+        release as *const () as usize,
     );
     add(
         format!("Get{tag}DecoderOutputBufferProperties"),
         format!("EPtS1_S1_S1_PNS_8TimeSpanEPb{s}j"),
-        properties as usize,
+        properties as *const () as usize,
     );
     // The forms of SDK 22.
     add(
         format!("Initialize{tag}DecoderByTransferMemory"),
         format!("E{s}Pvmmttj{INPUT}{OUTPUT}{MODE}{csd}"),
-        init_transfer::<C> as usize,
+        init_transfer::<C> as *const () as usize,
     );
     add(
         format!("Initialize{tag}DecoderByRemoteMemory"),
         format!("E{s}mttj{INPUT}{OUTPUT}{MODE}{csd}"),
-        init_remote_mode::<C> as usize,
+        init_remote_mode::<C> as *const () as usize,
     );
     add(
         format!("Get{tag}DecoderSubmissionReadyEvent"),
         format!("E{s}"),
-        ready_event as usize,
+        ready_event as *const () as usize,
     );
     // The forms of SDK 19.
     add(
         format!("Initialize{tag}Decoder"),
         format!("E{s}mmttj{INPUT}{OUTPUT}{csd}"),
-        init_remote19::<C> as usize,
+        init_remote19::<C> as *const () as usize,
     );
     add(
         format!("Get{tag}DecoderOutputBufferProperties"),
         format!("EPtS1_S1_S1_PNS_5movie10ColorSpaceEPNS_8TimeSpanEPb{s}j"),
-        properties19 as usize,
+        properties19 as *const () as usize,
     );
     if C == H264 {
         add(
             format!("Initialize{tag}Decoder"),
             format!("E{s}Pvmmttj{INPUT}{OUTPUT}{MODE}{csd}"),
-            init_transfer::<C> as usize,
+            init_transfer::<C> as *const () as usize,
         );
     }
 }
@@ -705,67 +709,67 @@ pub(crate) fn table() -> Vec<Export> {
     add(
         "MakeDecodeImagePreference",
         "EttNS0_24VideoDecoderOutputFormatENS0_9CodecModeE".to_string(),
-        pref as usize,
+        pref as *const () as usize,
     );
     add(
         "MakeDecodeImagePreference",
         "EttNS0_24VideoDecoderOutputFormatENS0_15ImageTilingModeE".to_string(),
-        pref as usize,
+        pref as *const () as usize,
     );
     add(
         "CalculateDecoderImagePoolBuffer",
         format!("EPmS1_{pref_ref}j"),
-        pool_size as usize,
+        pool_size as *const () as usize,
     );
     add(
         "InitializeDecoderImagePool",
         format!("EP{pool_type}Pvm{pref_ref}jNS0_9CodecModeE"),
-        pool_with_mode as usize,
+        pool_with_mode as *const () as usize,
     );
     add(
         "InitializeDecoderImagePool",
         format!("EP{pool_type}Pvm{pref_ref}j"),
-        pool_no_mode as usize,
+        pool_no_mode as *const () as usize,
     );
     add(
         "FinalizeDecoderImagePool",
         format!("EP{pool_type}"),
-        pool_finalize as usize,
+        pool_finalize as *const () as usize,
     );
     add(
         "GetDecoderImagePoolNativeImageHandle",
         format!("EPK{pool_type}j"),
-        native_image_handle as usize,
+        native_image_handle as *const () as usize,
     );
     add(
         "ReadDecoderOutputImageRgbaHdr",
         format!("EPK{pool_type}jttttPvmm"),
-        read_rgba_hdr as usize,
+        read_rgba_hdr as *const () as usize,
     );
     add(
         "ReadDecoderOutputImageRgba",
         format!("EPK{pool_type}jttttPvmm"),
-        read_rgba as usize,
+        read_rgba as *const () as usize,
     );
     add(
         "ReadDecoderOutputImageNv12",
         format!("EPK{pool_type}jttttPvmmS4_mm"),
-        read_nv12 as usize,
+        read_nv12 as *const () as usize,
     );
     push(
         &mut all,
         "_ZN2nn5codec3sdk34MakeDecodeImagePreferenceForCompatEttNS0_24VideoDecoderOutputFormatENS0_9CodecModeE".to_string(),
-        pref as usize,
+        pref as *const () as usize,
     );
     push(
         &mut all,
         "_ZN2nn5codec5video10InitializeEv".to_string(),
-        service_init as usize,
+        service_init as *const () as usize,
     );
     push(
         &mut all,
         "_ZN2nn5codec5video8FinalizeEv".to_string(),
-        service_init as usize,
+        service_init as *const () as usize,
     );
     family::<VP8>("Vp8", &mut all);
     family::<VP9>("Vp9", &mut all);
@@ -774,31 +778,31 @@ pub(crate) fn table() -> Vec<Export> {
     let fixed: [(&str, usize); 7] = [
         (
             "_ZN2nn2gs17TryWaitNativeSyncERKNS0_16NativeSyncHandleE",
-            try_wait_native_sync as usize,
+            try_wait_native_sync as *const () as usize,
         ),
         (
             "_ZN2nn6syncpt3sdk20CreateSyncPointEventEPNS1_18SyncPointEventTypeE",
-            spt_create as usize,
+            spt_create as *const () as usize,
         ),
         (
             "_ZN2nn6syncpt3sdk25InitializeMultiWaitHolderEPNS_2os19MultiWaitHolderTypeEPNS1_18SyncPointEventTypeE",
-            spt_holder as usize,
+            spt_holder as *const () as usize,
         ),
         (
             "_ZN2nn6syncpt3sdk21RequestSyncPointEventEPNS1_18SyncPointEventTypeERKNS1_15SyncPointHandleE",
-            spt_request as usize,
+            spt_request as *const () as usize,
         ),
         (
             "_ZN2nn6syncpt3sdk20CancelSyncPointEventEPNS1_18SyncPointEventTypeE",
-            spt_cancel as usize,
+            spt_cancel as *const () as usize,
         ),
         (
             "_ZN2nn6syncpt3sdk21TryWaitSyncPointEventEPKNS1_18SyncPointEventTypeE",
-            spt_try_wait as usize,
+            spt_try_wait as *const () as usize,
         ),
         (
             "_ZN2nn6syncpt3sdk21DestroySyncPointEventEPNS1_18SyncPointEventTypeE",
-            spt_destroy as usize,
+            spt_destroy as *const () as usize,
         ),
     ];
     for (name, addr) in fixed {

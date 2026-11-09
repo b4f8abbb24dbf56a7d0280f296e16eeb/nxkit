@@ -54,8 +54,8 @@ pub(crate) fn nv12_to_rgba(
     };
     let (cw, ch) = (src_w.min(dst_w), src_h.min(dst_h));
     if cw < dst_w || ch < dst_h {
-        for px in dst.chunks_exact_mut(4) {
-            px.copy_from_slice(&[0, 0, 0, 255]);
+        for px in dst.as_chunks_mut::<4>().0 {
+            *px = [0, 0, 0, 255];
         }
     }
     let m = Matrix::new(colorspace);

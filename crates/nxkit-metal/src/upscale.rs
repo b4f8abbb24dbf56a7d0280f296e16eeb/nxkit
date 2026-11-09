@@ -45,6 +45,12 @@ struct Inner {
     raw: Retained<ProtocolObject<dyn MTL4FXSpatialScaler>>,
 }
 
+// SAFETY: the effect object is only used while its owner encodes, on one thread at a time, and the command buffer's
+// retained copy of the `Arc` keeps it alive and may drop it on a Metal thread, which Metal allows for its objects.
+unsafe impl Send for Inner {}
+// SAFETY: see `Send`.
+unsafe impl Sync for Inner {}
+
 /// A MetalFX spatial scaler.
 pub struct SpatialUpscaler {
     inner: Arc<Inner>,

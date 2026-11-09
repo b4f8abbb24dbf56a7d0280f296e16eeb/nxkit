@@ -222,8 +222,8 @@ impl Touches {
             f.x = t.x;
             f.y = t.y;
         }
-        for id in 0..FINGERS {
-            if seen[id] {
+        for (id, &was_seen) in seen.iter().enumerate() {
+            if was_seen {
                 continue;
             }
             self.watch[id].down = false;

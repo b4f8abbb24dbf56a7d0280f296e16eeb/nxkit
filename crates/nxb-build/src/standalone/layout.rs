@@ -16,18 +16,18 @@
 use std::collections::BTreeMap;
 
 /// The page size of the Mac (and the alignment of every segment).
-pub const PAGE: u64 = 0x4000;
+pub(crate) const PAGE: u64 = 0x4000;
 
 /// Where the first module's lowest segment starts. One constant, so the host and the build agree. The addresses are
 /// preferred ones: dyld slides the image when it loads it.
-pub const GUEST_BASE: u64 = 0x100_0000_0000;
+pub(crate) const GUEST_BASE: u64 = 0x100_0000_0000;
 
 /// The distance modules keep from each other.
 const MODULE_ALIGN: u64 = 0x1_0000;
 
 /// A module's segment.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Segment {
+pub(crate) struct Segment {
     /// The Mach-O segment name.
     pub name: String,
     /// The kind: `TEXT`, `DATA` or `PATCH`.
@@ -46,7 +46,7 @@ pub struct Segment {
 
 /// One module's parts, with offsets from its base.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Shape {
+pub(crate) struct Shape {
     /// The module's name.
     pub name: String,
     /// Its segments, lowest offset first.
@@ -58,11 +58,11 @@ pub struct Shape {
 }
 
 /// The header lines of a `.fixups.tsv`.
-pub struct Fixups(BTreeMap<String, String>);
+pub(crate) struct Fixups(BTreeMap<String, String>);
 
 impl Fixups {
     /// Reads the `# KEY<TAB>value` lines at the top of the file.
-    pub fn parse(text: &str) -> Fixups {
+    pub(crate) fn parse(text: &str) -> Fixups {
         let mut m = BTreeMap::new();
         for l in text.lines() {
             let Some(rest) = l.strip_prefix("# ") else {
@@ -77,7 +77,7 @@ impl Fixups {
     }
 
     /// A key's value as a signed number (`0x..` or `-0x..`).
-    pub fn num(&self, key: &str) -> Result<Option<i64>, String> {
+    pub(crate) fn num(&self, key: &str) -> Result<Option<i64>, String> {
         let Some(v) = self.0.get(key) else {
             return Ok(None);
         };
@@ -98,7 +98,7 @@ impl Fixups {
     }
 
     /// Whether the header has the key.
-    pub fn has(&self, key: &str) -> bool {
+    pub(crate) fn has(&self, key: &str) -> bool {
         self.0.contains_key(key)
     }
 }
@@ -120,7 +120,12 @@ fn tag(name: &str, index: usize) -> String {
 
 /// The segments of one module. `file_len` is the length of `<name>.patched.bin`, `index` the module's place in the
 /// load order.
-pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Shape, String> {
+pub(crate) fn shape(
+    name: &str,
+    index: usize,
+    file_len: usize,
+    f: &Fixups,
+) -> Result<Shape, String> {
     let bad = |m: String| format!("module {name}: {m}");
     if f.has("BACK_OFF") {
         return Err(format!(
@@ -245,7 +250,7 @@ pub fn shape(name: &str, index: usize, file_len: usize, f: &Fixups) -> Result<Sh
 
 impl Shape {
     /// The lowest and the highest offset the module maps: `(low <= 0, high > 0)`.
-    pub fn extent(&self) -> (i64, u64) {
+    pub(crate) fn extent(&self) -> (i64, u64) {
         let lo = self
             .segments
             .iter()
@@ -265,7 +270,7 @@ impl Shape {
 }
 
 /// The bases of the modules in load order, in a row from [`GUEST_BASE`] with a gap between them.
-pub fn bases(shapes: &[Shape]) -> Vec<u64> {
+pub(crate) fn bases(shapes: &[Shape]) -> Vec<u64> {
     let mut cursor = GUEST_BASE;
     let mut out = Vec::with_capacity(shapes.len());
     for s in shapes {

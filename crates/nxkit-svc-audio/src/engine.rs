@@ -181,6 +181,10 @@ pub(crate) fn mixer() -> &'static Arc<Mixer> {
 }
 
 /// Reads `ch` interleaved PCM16 channels per frame from `bytes` into stereo `dst`, times `gain`.
+#[allow(
+    clippy::approx_constant,
+    reason = "0.7071 is the default downmix coefficient of the SDK, not 1/sqrt(2) to full precision"
+)]
 fn convert(bytes: &[u8], ch: usize, gain: f32, dst: &mut [f32]) {
     let rd =
         |f: &[u8], j: usize| -> f32 { f32::from(i16::from_le_bytes([f[2 * j], f[2 * j + 1]])) };
@@ -564,22 +568,20 @@ impl Mixer {
                     "nxkit-audio: [RED] {f} buffers pointed outside guest memory or overflowed the released queue"
                 );
             }
-            if !join_logged {
-                if let Ok(out) = self.out.lock() {
-                    if let OutState::Device(o) = &*out {
-                        if let Some(st) = o.join_status() {
-                            join_logged = true;
-                            if st == 0 {
-                                eprintln!(
-                                    "nxkit-audio: the audio thread joined the os_workgroup of the device"
-                                );
-                            } else {
-                                eprintln!(
-                                    "nxkit-audio: [RED] os_workgroup_join returned {st}, the audio thread is outside the workgroup"
-                                );
-                            }
-                        }
-                    }
+            if !join_logged
+                && let Ok(out) = self.out.lock()
+                && let OutState::Device(o) = &*out
+                && let Some(st) = o.join_status()
+            {
+                join_logged = true;
+                if st == 0 {
+                    eprintln!(
+                        "nxkit-audio: the audio thread joined the os_workgroup of the device"
+                    );
+                } else {
+                    eprintln!(
+                        "nxkit-audio: [RED] os_workgroup_join returned {st}, the audio thread is outside the workgroup"
+                    );
                 }
             }
         }

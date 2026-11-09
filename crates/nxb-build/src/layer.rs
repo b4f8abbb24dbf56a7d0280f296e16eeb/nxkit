@@ -382,8 +382,7 @@ fn metallib(
     r: &Runner,
     msls: &[PathBuf],
     dir: &Path,
-    sdk: &str,
-    extra: &[&str],
+    (sdk, extra): (&str, &[&str]),
     lib: &Path,
     threads: usize,
     p: &Progress,
@@ -514,7 +513,15 @@ pub fn stage(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         ));
     }
     for (o, sdk, extra) in dirs {
-        metallib(&r, &msls, &work, sdk, extra, &o.join(&lib_name), threads, p)?;
+        metallib(
+            &r,
+            &msls,
+            &work,
+            (sdk, extra),
+            &o.join(&lib_name),
+            threads,
+            p,
+        )?;
         let f = o.join(&tsv_name);
         std::fs::write(&f, &tsv).map_err(|e| format!("{}: {e}", f.display()))?;
         let verts = if g == Gfx::Gl {

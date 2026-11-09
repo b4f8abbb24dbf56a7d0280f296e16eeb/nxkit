@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn a_language_code_is_the_tag_in_a_little_endian_integer() {
-        assert_eq!(language_code("en-US"), 0x5355_2d6e_65);
+        assert_eq!(language_code("en-US"), 0x0053_552d_6e65);
         assert_eq!(language_code("ja"), 0x616a);
     }
 
