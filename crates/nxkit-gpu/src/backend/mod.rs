@@ -71,6 +71,9 @@ pub struct GpuBackend {
     /// takes the snapshot of a frame from it.
     pools: GuestPoolSet,
     gpu: Mutex<Gpu>,
+    /// The texture ids that shaders read through the pool table, and the samplers the table holds. The encoder writes
+    /// it, `flush_frame` reads it without the lock of `gpu`.
+    pool_hint: Arc<crate::bindless::marks::PoolHint>,
     walker: Mutex<Walker>,
     /// The memory writes that the walker has not seen yet. It has a lock of its own, so a write never waits for a walk.
     invalidations: Arc<Invalidations>,
@@ -120,6 +123,7 @@ impl GpuBackend {
     ) -> nxkit_metal::Result<Arc<Self>> {
         let space = GuestSpace::over(&guest)?;
         let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
+        let pool_hint = gpu.pool_hint();
         let walker = Walker::new(settings.shader_dir.clone(), space.address_map());
         let invalidations = walker.invalidations();
         let pools = crate::guestpools::whole(&guest);
@@ -147,6 +151,7 @@ impl GpuBackend {
                 guest: space,
                 pools,
                 gpu: Mutex::new(gpu),
+                pool_hint,
                 walker: Mutex::new(walker),
                 invalidations,
                 overlap: crate::overlap::Overlap::default(),

@@ -179,7 +179,9 @@ impl Gpu {
         }
         mark(t0, "uses+ensure");
         let t_resolve = Instant::now();
-        let mut handles = self.resolve_handles(view, detail, scale, &mut textures, &mut stats);
+        let pool_ids = self.pool_prepare(view, detail, &mut stats);
+        let mut handles =
+            self.resolve_handles(view, detail, &pool_ids, scale, &mut textures, &mut stats);
         let t_fit = Instant::now();
         self.fit_handles(view, detail, &textures, &mut handles, &mut stats);
         crate::images::resolve(
@@ -199,6 +201,8 @@ impl Gpu {
         self.store.end_frame();
         drop(self.store.take_retired());
         self.store.trim_views();
+        // The store dropped or replaced Metal textures above: no element may keep the resource ID of one of them.
+        self.pool_release();
 
         mark(t0, "resolve+fit");
         self.imgdump_step(view, detail, &textures);
@@ -275,10 +279,10 @@ impl Gpu {
         pass_shape_diag(frame, plan, &textures);
         mark(t0, "pre-ring");
         let keep: Arc<Keep> = {
-            let (a, b) = self.bindless.pool_buffers();
+            let tables = self.bindless.pool_buffers();
             let mut all: Vec<Texture> = textures.values().map(|r| r.tex.clone()).collect();
             all.extend(handles.keep);
-            Arc::new((all, a, b, gmem_buf.clone(), pools.clone()))
+            Arc::new((all, tables, gmem_buf.clone(), pools.clone()))
         };
 
         let mut deswizzled = Vec::new();

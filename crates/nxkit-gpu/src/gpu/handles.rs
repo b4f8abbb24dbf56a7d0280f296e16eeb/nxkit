@@ -7,6 +7,7 @@ impl Gpu {
         &mut self,
         view: &dyn EncodeView,
         detail: &FrameDetail,
+        pool_ids: &[u32],
         scale: f32,
         textures: &mut FastMap<TexId, Res>,
         stats: &mut EncodeStats,
@@ -28,15 +29,186 @@ impl Gpu {
                 continue;
             }
             match self.resolve_one(view, handle, scale, textures, stats) {
-                Ok((r, view)) => {
-                    self.bindless.publish(handle, r);
+                Ok((r, owner, view)) => {
+                    self.bindless.publish(handle, r, owner);
                     out.map.insert(handle, r);
                     out.keep.push(view);
                 }
                 Err(why) => stats.skip(why),
             }
         }
+        self.resolve_pool(view, pool_ids, scale, textures, &mut out, stats);
         out
+    }
+
+    /// Reads the bitmap of the texture pool, writes the head of the tables and the samplers, and returns the texture
+    /// ids to fill for the frame: the ids that shaders marked, when a draw or dispatch of the frame has a `tex_pool`
+    /// binding, else none. A snapshot lists the ids that were wanted when the front end captured it.
+    pub(super) fn pool_prepare(
+        &mut self,
+        view: &dyn EncodeView,
+        detail: &FrameDetail,
+        stats: &mut EncodeStats,
+    ) -> Vec<u32> {
+        let limit = view.texture_limit();
+        if let Some(limit) = limit {
+            self.bindless.raise_texture_limit(limit);
+        }
+        let scanned = limit.map_or_else(Vec::new, |l| self.bindless.wanted(l));
+        self.pool_hint.set_ids(&scanned);
+        self.fill_samplers(view, stats);
+        // A texture of an element may be gone since the last frame (`nvnTextureFinalize`, eviction).
+        self.pool_release();
+        if scanned.is_empty() && view.pool_ids().is_none_or(<[u32]>::is_empty) {
+            return Vec::new();
+        }
+        if !self.frame_reads_pool(detail) {
+            return Vec::new();
+        }
+        let ids = view.pool_ids().map_or(scanned, <[u32]>::to_vec);
+        nxkit_nvn::diag::note_n(nxkit_nvn::diag::Reason::PoolWanted, ids.len() as u64);
+        ids
+    }
+
+    /// Sets to 0 the elements of the texture table whose Metal texture the store dropped or replaced.
+    pub(super) fn pool_release(&mut self) {
+        let store = &self.store;
+        let cleared = self
+            .bindless
+            .release_gone(|t, generation| store.get(t).map(|r| r.generation) != Some(generation));
+        nxkit_nvn::diag::note_n(nxkit_nvn::diag::Reason::PoolCleared, u64::from(cleared));
+    }
+
+    /// Writes the element of every registered sampler into the sampler table, when a sampler was registered since the
+    /// last time. A sampler read is not marked, so the host fills them all.
+    fn fill_samplers(&mut self, view: &dyn EncodeView, stats: &mut EncodeStats) {
+        let epoch = view.sampler_epoch();
+        if !self.pool_hint.needs_samplers(epoch) {
+            return;
+        }
+        let mut complete = true;
+        for (id, tsc) in view.samplers() {
+            match self.bindless.sampler(Some(&tsc)) {
+                Ok(resource) => self.bindless.publish_sampler(id, resource),
+                Err(why) => {
+                    complete = false;
+                    stats.skip(why);
+                }
+            }
+        }
+        if complete {
+            self.pool_hint.set_sampler_epoch(epoch);
+        }
+    }
+
+    /// True when a draw or dispatch of the frame runs a shader that has a `tex_pool` binding.
+    fn frame_reads_pool(&mut self, detail: &FrameDetail) -> bool {
+        let mut checked: FastSet<(&str, bool)> = FastSet::default();
+        let mut keys: Vec<(&str, bool)> = Vec::new();
+        for d in &detail.draws {
+            let p = &d.program;
+            keys.push((&p.vertex, true));
+            keys.extend(p.fragment.as_deref().map(|k| (k, false)));
+            keys.extend(p.task.as_deref().map(|k| (k, false)));
+            keys.extend(p.mesh.as_deref().map(|k| (k, false)));
+        }
+        keys.extend(
+            detail
+                .dispatches
+                .iter()
+                .map(|d| (d.program.as_str(), false)),
+        );
+        for (key, vertex) in keys {
+            if key.is_empty() || !checked.insert((key, vertex)) {
+                continue;
+            }
+            let map = &mut self.pool_decl[usize::from(vertex)];
+            let has = match map.get(key) {
+                Some(has) => *has,
+                None => {
+                    let has = self.programs.stage(key, vertex).is_ok_and(|p| {
+                        p.binds
+                            .iter()
+                            .any(|b| b.kind == crate::programs::BindKind::TexPool)
+                    });
+                    map.insert(key.to_owned(), has);
+                    has
+                }
+            };
+            if has {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Fills the element of each wanted texture id, after the bound handles. An id that names no live texture gets 0.
+    fn resolve_pool(
+        &mut self,
+        view: &dyn EncodeView,
+        ids: &[u32],
+        scale: f32,
+        textures: &mut FastMap<TexId, Res>,
+        out: &mut Handles,
+        stats: &mut EncodeStats,
+    ) {
+        use nxkit_nvn::diag::{Reason, note, note_n};
+        let (mut filled, mut unresolved) = (0u64, 0u64);
+        for &id in ids {
+            // Descriptor 0 is the unbound slot: its element stays the null texture.
+            if id == 0 {
+                continue;
+            }
+            match self.resolve_pool_one(view, id, scale, textures, stats) {
+                Ok(Some((tex, owner))) => {
+                    filled += u64::from(self.bindless.publish_texture(
+                        id,
+                        tex.gpu_resource_id(),
+                        owner,
+                    ));
+                    out.keep.push(tex);
+                }
+                Ok(None) => {
+                    self.bindless.clear_texture(id);
+                    if unresolved == 0 {
+                        note(Reason::PoolUnresolved, format_args!("texture id {id}"));
+                    }
+                    unresolved += 1;
+                }
+                Err(why) => {
+                    self.bindless.clear_texture(id);
+                    stats.skip(why);
+                }
+            }
+        }
+        note_n(Reason::PoolFilled, filled);
+        note_n(Reason::PoolUnresolved, unresolved.saturating_sub(1));
+    }
+
+    /// The view of descriptor `id` and the owner of its element, or `None` when the id has no live texture.
+    #[allow(clippy::type_complexity)]
+    fn resolve_pool_one(
+        &mut self,
+        view: &dyn EncodeView,
+        id: u32,
+        scale: f32,
+        textures: &mut FastMap<TexId, Res>,
+        stats: &mut EncodeStats,
+    ) -> std::result::Result<Option<(Texture, (TexId, u64))>, Skip> {
+        let Ok(slot) = view.texture_slot(id) else {
+            return Ok(None);
+        };
+        let tex = slot.texture;
+        if let std::collections::hash_map::Entry::Vacant(e) = textures.entry(tex) {
+            let Ok(rec) = view.record(tex) else {
+                return Ok(None);
+            };
+            let res = self.store.ensure(rec, scale, Use::default(), stats)?;
+            e.insert(res);
+        }
+        let res = textures.get(&tex).ok_or(Skip::Texture)?;
+        let tex_view = self.store.view(tex, res, &slot.header, stats)?;
+        Ok(Some((tex_view, (tex, res.generation))))
     }
 
     /// Makes the views that the shaders of the frame declare for their texture bindings when they differ from the
@@ -187,7 +359,7 @@ impl Gpu {
         scale: f32,
         textures: &mut FastMap<TexId, Res>,
         stats: &mut EncodeStats,
-    ) -> std::result::Result<(Resolved, Texture), Skip> {
+    ) -> std::result::Result<(Resolved, (TexId, u64), Texture), Skip> {
         let (slot, tsc) = view.resolve(handle).map_err(|e| {
             let what = format_args!("handle {handle:#x}: {e:?}");
             nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::HandleUnresolved, what);
@@ -273,6 +445,7 @@ impl Gpu {
                 sampler,
                 scaled: res.scaled,
             },
+            (id, res.generation),
             tex_view,
         ))
     }

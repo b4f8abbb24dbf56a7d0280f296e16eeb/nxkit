@@ -269,6 +269,11 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `program.failed` | encoder | A program that did not load. It counts once per key. |
 | `pipeline.archive-miss` | encoder | The archive of the build lacked a pipeline and Metal compiled it. The draw waited as `skip.pending`, so this is a hitch and not a loss. Without `NXKIT_DIAG=stats`, `health` or `pipe` it is only counted. With one on, the example says why (see "Archive coverage"). It counts the pipelines of a run without an archive too. |
 | `pipeline.failed` | encoder | A render, compute or depth-stencil state that Metal did not build. It counts every attempt. |
+| `bind.tex-pool` / `bind.samp-pool` | encoder | A texture or sampler pool table written into an argument buffer. A count, not a loss. |
+| `pool.wanted` | encoder | The texture IDs that shaders read through the pool table (marked in the bitmap in the last two sweeps), summed over the frames that have a pool binding. A count, not a loss. |
+| `pool.filled` | encoder | Elements of the texture table written because a shader marked their ID. A count, not a loss. |
+| `pool.unresolved` | encoder | A marked ID with no slot in the pool or with a dead texture. Its element is 0 and the shader reads the null texture. The example names an ID. |
+| `pool.cleared` | encoder | Elements set to 0 because the Metal texture behind them was dropped or replaced. A count, not a loss: the next frame fills a wanted ID again. |
 
 The native replacement of a chain of dispatches (`ndve`, see `NXKIT_NDVE`) prints its own block after the report, with the same cadence, and when a counter shows up that the last block did not have. It is not in the table above, because the reasons live in `nxkit-nvn`, which knows no network:
 

@@ -61,7 +61,7 @@ A translated shader has one argument buffer per stage at `[[buffer(0)]]`. Member
 
 - A `cbuf` binding gets the GPU address of the uniform buffer in guest memory (R3). A buffer that the guest rewrote in the same frame is copied into the per-batch `Scratch` first, because the frame is encoded after the guest wrote all versions. Every other buffer is bound by its guest address.
 - A `tex` binding gets the resource ID of the texture view that the handle names (`texture_id | sampler_id << 20`). A `samp` binding gets the resource ID of the sampler. A `samp_tex` binding gets both.
-- A `tex_pool` or `samp_pool` binding gets the address of a host table that maps descriptor ids to resource IDs. The encoder writes the entries of every handle that the frame uses.
+- A `tex_pool` or `samp_pool` binding gets the address of a host table that maps descriptor ids to resource IDs. The encoder writes the entries of every handle that the frame uses, the textures that shaders read through the table and every registered sampler (see "The pool tables" below).
 - A `drvcb` binding gets the driver constant block: the combined texture handles, the base instance and, for compute, the dispatch size and the uniform buffers.
 
 No bind call runs for each texture. Vertex streams are bound with `SetBuffer` at the stream slots, with the guest address and the offset. The vertex and fragment stages have separate argument tables.
@@ -175,6 +175,32 @@ The log is a bitmap of 8192 bits (1024 bytes): bit `i` of word `i / 32` is set b
 
 The bindings are counted as `bind.img`, `bind.gmem-map` and `bind.gmem-log` (not losses). `NXKIT_DIAG=gmem` prints the table size and each pool learned.
 
+### The pool tables
+
+A shader that indexes the whole ID range of the driver pool has a `tex_pool` or `samp_pool` binding. The member is a pointer to a table that the host keeps (`nxb-xlate`, `msl/pool.rs`: `strukt`, `element` and `MARK`). The layout is the contract:
+
+| bytes | field |
+|---|---|
+| 0 | `n` (u32): the highest ID that a read can name |
+| 8 | `seen` (u64): the GPU address of a bitmap |
+| 16 + 8 * id | the resource ID of the texture or sampler of the descriptor `id` |
+
+A read clamps its index to `n`. A texture read first calls `dm_pool_mark`: it sets bit `id & 31` of word `id >> 5` of the bitmap that `seen` names (with an atomic OR, and only when the bit is clear). There is no null check, so `seen` of both tables is always the address of a bitmap: 131072 bytes for the texture ids and 512 bytes for the sampler ids. Generated code never marks a sampler read; the second bitmap only makes the address valid. The host never sets a bit.
+
+`n` of the texture table is the highest ID of the texture pools that the game made. It is not the highest ID the host filled: a read above it would clamp to a lower ID and mark that one, and the host would never learn of the ID the shader wanted. The elements that the host has not filled hold 0, the null texture. `n` of the sampler table is the highest registered sampler ID. Neither shrinks.
+
+**The wanted set.** Once a frame, before the handles are resolved, the encoder reads the words of the texture bitmap up to the highest ID of the pools (`Bindless::wanted`, `bindless/marks.rs`). Two generations of bits are kept: `current`, the bits set since the last sweep, and `previous`, the bits that the last sweep took. An ID is wanted while it is in either. Every 60 frames the sweep copies `current` to `previous` and clears the bits it copied with an atomic AND (`DataBuffer::fetch_and_u32`). A bit that a shader sets at the same time is not lost: the AND clears only the bits that were read, and a bit that was cleared is set again by the next read, because the shader tests it first. An ID that no shader reads leaves after two sweeps.
+
+**The fill.** When a draw or dispatch of the frame has a program with a `tex_pool` binding, the encoder resolves every wanted ID after the bound handles: the slot of the descriptor, the record of its texture, `TextureStore::ensure` and `TextureStore::view`, the same steps as for a bound handle. It writes the resource ID of the view into the element and keeps the view in `Handles::keep`. The Metal texture is uploaded like any texture of the frame. The sampler table is not touched by a mark. An ID that has no slot or whose texture is dead gets the element 0 and counts `pool.unresolved`. ID 0 is the unbound slot and is skipped.
+
+A shader that reads an ID for the first time sets its bit in that frame and reads the old element (the null texture, or what the ID held before). The host sees the bit in the next frame, so the ID shows its texture one frame later. With the encoder thread the snapshot of a frame carries the slots of the IDs that were wanted when the front end captured it, so a new ID can take one frame more. The pool path makes the view of the descriptor and does not fit it to the type the shader declares (a cube read as 2D); Metal reads a texture of another type as one fixed value.
+
+**The samplers.** A sampler read is not marked, so the host fills every registered sampler. `Descriptors::sampler_epoch` changes when `register_sampler` sets a slot. When it is newer than the epoch the table holds, the encoder makes each sampler with `Bindless::sampler` (one Metal sampler for each distinct header) and writes its element. A texture registration does not change the counter.
+
+**The lifetime.** No element may hold the resource ID of a view or texture that is gone. The store drops and replaces Metal textures when it evicts, supersedes or remakes them (`end_frame`, `ensure`, `invalidate`), and a view lives as long as the generation of its Metal texture (`trim_views`). The table remembers, for each element that is not 0, the `TexId` and the store generation behind it. `Gpu::pool_release` writes 0 into every element whose texture has no entry in the store or has another generation, and forgets it. It runs at the start of the pool step and again after `trim_views`, so the command buffers of the frame never read a dropped texture. A wanted ID is filled again by the next frame. The rule covers the elements that a bound handle published too.
+
+The counters are `bind.tex-pool` and `bind.samp-pool` (a binding written into an argument buffer), `pool.wanted` (the wanted IDs of a frame with a pool binding), `pool.filled` (elements written because of a mark), `pool.unresolved` and `pool.cleared`. `tex_htab` and `samp_htab` (a table of guest handles) are still refused.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:
@@ -250,10 +276,11 @@ These are known gaps. Each shows up as a `Skip` count or is a limit of the first
 - Multisampled attachments are downgraded to one sample. The pass descriptions do not resolve.
 - The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool`, `drvcb`, `ubo_ptr`, `support`, `border`, `blendz`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`); the health report names the kind (`binding.refused`). `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bx` and `_bf` are not used. `_bp` is: a vertex shader with a `pull` field is loaded from `<key>_bp.metallib` (`programs.rs`), and each of its draws gets a `dm_vlayout` block at buffer 16 instead of its vertex streams and the default vertex (`pull/mod.rs`: per stream the address rounded down to 4 bytes, stride and divisor, per input location the NVN attribute word, 0 for an input without a bound stream). Its pipelines have no vertex layout, so the key and the thread memo leave the attributes and streams out. `NXKIT_PULL=0` keeps the `_b` library and the stage_in layout.
 - `blendz` is one 32-bit word per draw in the fragment argument buffer (`translate::blend_zero_word`): 3 bits per colour target, the kind of its source RGB factor (0 none, 1 `ZERO`, 2 `SRC_ALPHA`, 3 `ONE_MINUS_SRC_ALPHA`). The pixel shader writes RGB 0 to a float colour whose factor is 0 for the pixel, because the Apple blender gives NaN for `0 x NaN` and the console gives 0 (see [translator.md](translator.md)). The word is 0 for blending off, an integer format, a colour the shader does not write, the equation MIN or MAX and every other factor; the binding then points to the zero buffer. The memo of the argument buffers includes the word. A program without the binding ignores it, and the knob `nobz` sets every word to 0.
+- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool` (the host tables of the pool tables section), `drvcb`, `ubo_ptr`, `support`, `border`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`); the health report names the kind (`binding.refused`). `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bx` and `_bf` are not used. `_bp` is: a vertex shader with a `pull` field is loaded from `<key>_bp.metallib` (`programs.rs`), and each of its draws gets a `dm_vlayout` block at buffer 16 instead of its vertex streams and the default vertex (`pull/mod.rs`: per stream the address rounded down to 4 bytes, stride and divisor, per input location the NVN attribute word, 0 for an input without a bound stream). Its pipelines have no vertex layout, so the key and the thread memo leave the attributes and streams out. `NXKIT_PULL=0` keeps the `_b` library and the stage_in layout.
 - The texture view has no channel swizzle (counted as `swizzle_ignored`). A cube view ignores the layer range.
 - Texel fetches with integer coordinates and `textureSize` of a 2D texture see native units through the render scale of the support buffer. Other texture types still see the scaled size (refer to the render scale section).
 - The pool tables are written while earlier frames may still run. A frame in flight can read an entry that a later frame rewrote.
-- An unbound pool slot reads as zero.
+- An unbound pool slot reads as zero. A pool ID that a shader reads for the first time shows its texture one frame later.
 - The depth format is not part of the pipeline key.
 
 ## Unverified

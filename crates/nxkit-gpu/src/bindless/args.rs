@@ -338,8 +338,14 @@ fn build_args_in(
             BindKind::Samp | BindKind::SampTex => handle_of(b.reg)
                 .and_then(|h| env.handles.get(&h))
                 .map_or(env.default_sampler, |r| r.sampler),
-            BindKind::TexPool => env.pools.0,
-            BindKind::SampPool => env.pools.1,
+            BindKind::TexPool => {
+                note_n(Reason::BindTexPool, 1);
+                env.pools.0
+            }
+            BindKind::SampPool => {
+                note_n(Reason::BindSampPool, 1);
+                env.pools.1
+            }
             // Bank 24 is the push constant block; banks 0 and 2 are the driver block.
             BindKind::DrvCb if b.bank == PUSH_BANK => match inp.push {
                 Some(push) => sink.put(push)?,

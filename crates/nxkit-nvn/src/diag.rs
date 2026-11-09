@@ -161,6 +161,10 @@ reasons! {
     BindGmemMap => "bind.gmem-map",
     /// Bindings: a raw global memory write log (`gmem_log`) bound. A count, not a loss.
     BindGmemLog => "bind.gmem-log",
+    /// Bindings: a texture pool table (`tex_pool`) written into an argument buffer. A count, not a loss.
+    BindTexPool => "bind.tex-pool",
+    /// Bindings: a sampler pool table (`samp_pool`) written into an argument buffer. A count, not a loss.
+    BindSampPool => "bind.samp-pool",
     /// Raw global memory: memory pools that do not fit the 8191 entries of the table; addresses in them are not
     /// reached.
     GmemPoolsOver => "gmem.pools-over",
@@ -168,6 +172,17 @@ reasons! {
     GmemLogsShared => "gmem.logs-shared",
     /// Raw global memory: pools that shaders wrote through raw pointers, learned from the logs. Not a loss.
     GmemPoolWritten => "gmem.pool-written",
+    /// Texture pool: the IDs that shaders read through the pool table and that the host has to fill (the IDs marked in
+    /// the bitmap in the last two sweeps), counted for each frame that has a pool binding. A count, not a loss.
+    PoolWanted => "pool.wanted",
+    /// Texture pool: elements of the table written because a shader marked their ID. A count, not a loss.
+    PoolFilled => "pool.filled",
+    /// Texture pool: a marked ID with no live texture (no slot in the pool, or a texture that is gone). Its element is 0
+    /// and the shader reads the null texture. The example names an ID.
+    PoolUnresolved => "pool.unresolved",
+    /// Texture pool: elements set to 0 because the Metal texture behind them was dropped or replaced. A count, not a
+    /// loss: the next frame fills a wanted ID again.
+    PoolCleared => "pool.cleared",
 }
 
 impl Reason {
@@ -180,6 +195,11 @@ impl Reason {
             && self != Reason::BindImg
             && self != Reason::BindGmemMap
             && self != Reason::BindGmemLog
+            && self != Reason::BindTexPool
+            && self != Reason::BindSampPool
+            && self != Reason::PoolWanted
+            && self != Reason::PoolFilled
+            && self != Reason::PoolCleared
             && self != Reason::GmemPoolWritten
     }
 }

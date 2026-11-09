@@ -85,7 +85,15 @@ impl Backend for GpuBackend {
                 update.apply(cx.table);
             }
             if !enc.is_dead() {
-                let snapshot = Snapshot::capture(frame, plan, &detail, cx.table, cx.descriptors);
+                let snapshot = Snapshot::capture(
+                    frame,
+                    plan,
+                    &detail,
+                    cx.table,
+                    cx.descriptors,
+                    &self.pool_hint.ids(),
+                    self.pool_hint.sampler_epoch(),
+                );
                 let job = Box::new(Job {
                     frame: frame.clone(),
                     plan: plan.clone(),

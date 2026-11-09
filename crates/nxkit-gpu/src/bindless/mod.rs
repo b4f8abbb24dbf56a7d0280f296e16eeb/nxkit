@@ -7,6 +7,9 @@
 //! resource IDs by descriptor id and one of sampler resource IDs by sampler id.
 
 mod args;
+pub(crate) mod marks;
+#[cfg(test)]
+mod pool_tests;
 
 pub(crate) use self::args::{Env, StageInputs, fill_args, fill_args_scaled};
 
@@ -14,6 +17,7 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use nxkit_metal::{Context, DataBuffer, Sampler, Scratch, Texture};
+use nxkit_nvn::resource::TexId;
 use nxkit_nvn::tic::Tsc;
 
 use crate::detail::{Stage, TextureBind, UboDetail};
@@ -22,9 +26,12 @@ use crate::stats::Skip;
 use crate::translate;
 use nxkit_nvn::diag::{Reason, note_n};
 
-/// The bytes before the first element of a pool table. The layout of the tables is unverified against the shader
-/// step. The check is to compile a shader with a pool binding and read the index expression in its Metal source.
+/// The bytes before the first element of a pool table. The layout is the contract of `nxb-xlate` (`msl/pool.rs`:
+/// `strukt`, `element` and `MARK`): `n` (u32) at byte 0 is the highest ID that a read can name, `seen` (u64) at byte 8 is
+/// the GPU address of the bitmap of the IDs that shaders read, and the elements (8 byte resource IDs) start at byte 16.
 pub(crate) const POOL_HEAD: u64 = 16;
+/// The byte of `seen` in the head of a table.
+const POOL_SEEN: u64 = 8;
 /// The bytes of one pool element: a resource ID.
 pub(crate) const POOL_ELEMENT: u64 = 8;
 /// The size of the driver constant block.
@@ -289,8 +296,18 @@ pub(crate) struct Bindless {
     default_sampler: Sampler,
     tex_pool: Arc<DataBuffer>,
     samp_pool: Arc<DataBuffer>,
+    /// The bitmap of the texture IDs that shaders read (`seen` of the texture table), and of the sampler IDs, which no
+    /// generated code marks: it only makes `seen` of the sampler table an address that is valid.
+    tex_seen: Arc<DataBuffer>,
+    samp_seen: Arc<DataBuffer>,
     tex_mirror: crate::draws::FastMap<u32, u64>,
     samp_mirror: crate::draws::FastMap<u32, u64>,
+    /// The texture and Metal texture (store generation) behind each element of the texture table that is not 0.
+    tex_owner: crate::draws::FastMap<u32, (TexId, u64)>,
+    /// `n` of the two tables as written.
+    tex_n: u32,
+    samp_n: u32,
+    marks: marks::Marks,
     support: Arc<DataBuffer>,
     zero: Arc<DataBuffer>,
 }
@@ -341,6 +358,18 @@ impl Bindless {
             POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_TEXTURE_ID) + 1);
         let samp_bytes =
             POOL_HEAD + POOL_ELEMENT * (u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID) + 1);
+        let tex_seen = Arc::new(DataBuffer::new(
+            ctx,
+            (u64::from(nxkit_nvn::descriptors::MAX_TEXTURE_ID) + 1) / 8,
+        )?);
+        let samp_seen = Arc::new(DataBuffer::new(
+            ctx,
+            (u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID) + 1) / 8,
+        )?);
+        let tex_pool = Arc::new(DataBuffer::new(ctx, tex_bytes)?);
+        let samp_pool = Arc::new(DataBuffer::new(ctx, samp_bytes)?);
+        tex_pool.write(POOL_SEEN, &tex_seen.gpu_address().to_le_bytes())?;
+        samp_pool.write(POOL_SEEN, &samp_seen.gpu_address().to_le_bytes())?;
         let support = Arc::new(DataBuffer::new(ctx, STATIC_BYTES)?);
         for i in 0..SUPPORT_RENDER_SCALES {
             support.write(SUPPORT_RENDER_SCALE + 16 * i, &1.0f32.to_le_bytes())?;
@@ -352,10 +381,16 @@ impl Bindless {
             default_sampler,
             support,
             zero,
-            tex_pool: Arc::new(DataBuffer::new(ctx, tex_bytes)?),
-            samp_pool: Arc::new(DataBuffer::new(ctx, samp_bytes)?),
+            tex_pool,
+            samp_pool,
+            tex_seen,
+            samp_seen,
             tex_mirror: Default::default(),
             samp_mirror: Default::default(),
+            tex_owner: Default::default(),
+            tex_n: 0,
+            samp_n: 0,
+            marks: Default::default(),
         })
     }
 
@@ -379,22 +414,103 @@ impl Bindless {
         Ok(id)
     }
 
-    /// Writes the resource IDs of a handle into the pool tables, when they changed.
-    pub(crate) fn publish(&mut self, handle: u64, r: Resolved) {
+    /// Writes the resource IDs of a handle into the pool tables, when they changed. `owner` is the texture of the
+    /// handle and the generation of its Metal texture in the store: the element is cleared when either goes
+    /// ([`Bindless::release_gone`]).
+    pub(crate) fn publish(&mut self, handle: u64, r: Resolved, owner: (TexId, u64)) {
         let tex = (handle & u64::from(nxkit_nvn::descriptors::MAX_TEXTURE_ID)) as u32;
         let samp = ((handle >> 20) & u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID)) as u32;
-        if self.tex_mirror.get(&tex) != Some(&r.texture) {
-            let at = POOL_HEAD + POOL_ELEMENT * u64::from(tex);
-            if self.tex_pool.write(at, &r.texture.to_le_bytes()).is_ok() {
-                self.tex_mirror.insert(tex, r.texture);
+        self.publish_texture(tex, r.texture, owner);
+        self.publish_sampler(samp, r.sampler);
+    }
+
+    /// Writes the element of texture ID `id`, when it changed, and raises `n` to `id` when that is higher.
+    pub(crate) fn publish_texture(&mut self, id: u32, resource: u64, owner: (TexId, u64)) -> bool {
+        let at = POOL_HEAD + POOL_ELEMENT * u64::from(id);
+        let changed = self.tex_mirror.get(&id) != Some(&resource);
+        if changed && self.tex_pool.write(at, &resource.to_le_bytes()).is_ok() {
+            self.tex_mirror.insert(id, resource);
+        } else if changed {
+            return false;
+        }
+        self.tex_owner.insert(id, owner);
+        Self::raise(&self.tex_pool, &mut self.tex_n, id);
+        changed
+    }
+
+    /// Writes the element of sampler ID `id`, when it changed, and raises `n` to `id` when that is higher.
+    pub(crate) fn publish_sampler(&mut self, id: u32, resource: u64) {
+        if self.samp_mirror.get(&id) != Some(&resource) {
+            let at = POOL_HEAD + POOL_ELEMENT * u64::from(id);
+            if self.samp_pool.write(at, &resource.to_le_bytes()).is_ok() {
+                self.samp_mirror.insert(id, resource);
             }
         }
-        if self.samp_mirror.get(&samp) != Some(&r.sampler) {
-            let at = POOL_HEAD + POOL_ELEMENT * u64::from(samp);
-            if self.samp_pool.write(at, &r.sampler.to_le_bytes()).is_ok() {
-                self.samp_mirror.insert(samp, r.sampler);
-            }
+        Self::raise(&self.samp_pool, &mut self.samp_n, id);
+    }
+
+    /// Raises `n` of the texture table to the highest ID a read can name: the last slot of the texture pools. The
+    /// elements past the IDs that the host filled stay 0, so a read there gets the null texture, and its bit in the
+    /// bitmap tells the host to fill it. It never shrinks.
+    pub(crate) fn raise_texture_limit(&mut self, limit: u32) {
+        Self::raise(&self.tex_pool, &mut self.tex_n, limit);
+    }
+
+    fn raise(table: &DataBuffer, n: &mut u32, id: u32) {
+        if id > *n && table.write(0, &id.to_le_bytes()).is_ok() {
+            *n = id;
         }
+    }
+
+    /// Sets the element of texture ID `id` to 0 and forgets it. Returns true when it held a resource ID.
+    pub(crate) fn clear_texture(&mut self, id: u32) -> bool {
+        self.tex_owner.remove(&id);
+        let Some(held) = self.tex_mirror.get(&id).map(|r| *r != 0) else {
+            return false;
+        };
+        let at = POOL_HEAD + POOL_ELEMENT * u64::from(id);
+        if self.tex_pool.write(at, &0u64.to_le_bytes()).is_ok() {
+            self.tex_mirror.remove(&id);
+        }
+        held
+    }
+
+    /// Sets to 0 every element of the texture table whose texture `gone` names (by the texture and the generation of
+    /// its Metal texture), so that no element holds the resource ID of a texture or view that was dropped. Returns how
+    /// many elements it cleared.
+    pub(crate) fn release_gone(&mut self, mut gone: impl FnMut(TexId, u64) -> bool) -> u32 {
+        let stale: Vec<u32> = self
+            .tex_owner
+            .iter()
+            .filter(|(_, (t, g))| gone(*t, *g))
+            .map(|(id, _)| *id)
+            .collect();
+        let mut n = 0;
+        for id in stale {
+            n += u32::from(self.clear_texture(id));
+        }
+        n
+    }
+
+    /// The elements of the texture table that hold a resource ID, with their owner. For tests and diagnostics.
+    #[cfg(test)]
+    pub(crate) fn owners(&self) -> usize {
+        self.tex_owner.len()
+    }
+
+    /// Reads the bitmap of the texture IDs up to `limit`, sweeps it when it is time and returns the wanted IDs in
+    /// ascending order ([`marks::Marks`]).
+    pub(crate) fn wanted(&mut self, limit: u32) -> Vec<u32> {
+        let words = ((limit >> 5) as usize + 1).min(self.tex_seen.len() as usize / 4);
+        let bits = self.tex_seen.clone();
+        // A word that cannot be read counts as 0.
+        self.marks.step(
+            words,
+            |w| bits.load_u32(4 * w as u64).unwrap_or(0),
+            |w, b| {
+                let _ = bits.fetch_and_u32(4 * w as u64, !b);
+            },
+        )
     }
 
     /// The addresses of the two pool tables.
@@ -407,8 +523,20 @@ impl Bindless {
         (self.support.gpu_address(), self.zero.gpu_address())
     }
 
-    /// The pool tables, which the command buffers keep alive.
-    pub(crate) fn pool_buffers(&self) -> (Arc<DataBuffer>, Arc<DataBuffer>) {
-        (self.tex_pool.clone(), self.samp_pool.clone())
+    /// The pool tables and their bitmaps, which the command buffers keep alive. They join the residency set when they are
+    /// made, like every `DataBuffer`.
+    pub(crate) fn pool_buffers(&self) -> Vec<Arc<DataBuffer>> {
+        vec![
+            self.tex_pool.clone(),
+            self.samp_pool.clone(),
+            self.tex_seen.clone(),
+            self.samp_seen.clone(),
+        ]
+    }
+
+    /// The GPU addresses of the two bitmaps (`seen`).
+    #[cfg(test)]
+    pub(crate) fn seen(&self) -> (u64, u64) {
+        (self.tex_seen.gpu_address(), self.samp_seen.gpu_address())
     }
 }

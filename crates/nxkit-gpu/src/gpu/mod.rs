@@ -93,8 +93,7 @@ impl Default for GpuConfig {
 /// The objects that every command buffer of a frame keeps alive until the GPU is done with it.
 type Keep = (
     Vec<Texture>,
-    Arc<DataBuffer>,
-    Arc<DataBuffer>,
+    Vec<Arc<DataBuffer>>,
     Option<Arc<DataBuffer>>,
     Arc<GuestPools>,
 );
@@ -107,6 +106,11 @@ pub struct Gpu {
     /// The texture types that each shader declares for its texture bindings, by program key (fragment and compute
     /// first, vertex second), for [`Gpu::fit_handles`].
     fit_decl: [FastMap<String, Vec<(u32, nxkit_metal::TextureKind)>>; 2],
+    /// Whether the shader of a key has a pool binding (`tex_pool`), by key (fragment and compute first, vertex second),
+    /// for [`Gpu::frame_reads_pool`].
+    pool_decl: [FastMap<String, bool>; 2],
+    /// The wanted pool ids and the sampler epoch, which the front end reads to build the snapshot of a frame.
+    pool_hint: Arc<crate::bindless::marks::PoolHint>,
     /// The `img` members of the shaders by key, for [`crate::images`].
     img_decl: crate::images::Decls,
     /// The memory pools and the raw global memory table (`gmem.rs`).
@@ -159,6 +163,8 @@ impl Gpu {
             guest,
             programs: Programs::new(ctx, config.shader_dir),
             fit_decl: [FastMap::default(), FastMap::default()],
+            pool_decl: [FastMap::default(), FastMap::default()],
+            pool_hint: Arc::default(),
             img_decl: [FastMap::default(), FastMap::default()],
             gmem: crate::gmem::Gmem::new(ctx)?,
             imgdump: std::collections::VecDeque::new(),
@@ -178,6 +184,12 @@ impl Gpu {
             native: crate::native::Native::new(),
             vis_pool: Arc::default(),
         })
+    }
+
+    /// The texture ids that shaders read through the pool table and the sampler epoch of the table. The front end reads
+    /// it to copy the slots of those ids into a snapshot without the lock of the encoder.
+    pub(crate) fn pool_hint(&self) -> Arc<crate::bindless::marks::PoolHint> {
+        self.pool_hint.clone()
     }
 
     /// Tells the encoder about a texture or sampler pool that the game made. The pool memory is part of the guest

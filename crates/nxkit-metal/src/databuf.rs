@@ -113,6 +113,45 @@ impl DataBuffer {
         }
         Ok(())
     }
+
+    /// Loads the u32 at `offset` with a relaxed atomic load. The GPU may set bits of the word at the same time (a bitmap
+    /// that shaders fill with atomic ORs). `offset` must be a multiple of 4.
+    pub fn load_u32(&self, offset: u64) -> Result<u32> {
+        let word = self.word(offset)?;
+        Ok(word.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// ANDs `mask` into the u32 at `offset` with an atomic read-modify-write and returns the word before. A bit that the
+    /// GPU sets between a load and this call stays set when `mask` has a one there. `offset` must be a multiple of 4.
+    pub fn fetch_and_u32(&self, offset: u64, mask: u32) -> Result<u32> {
+        let word = self.word(offset)?;
+        Ok(word.fetch_and(mask, std::sync::atomic::Ordering::AcqRel))
+    }
+
+    fn word(&self, offset: u64) -> Result<&std::sync::atomic::AtomicU32> {
+        if !offset.is_multiple_of(4) {
+            return Err(MetalError::Invalid("an atomic word needs a 4 byte offset"));
+        }
+        offset
+            .checked_add(4)
+            .filter(|e| *e <= self.len)
+            .ok_or(MetalError::OutOfRange {
+                addr: offset,
+                len: 4,
+            })?;
+        // SAFETY: the word is inside the buffer (checked above) and 4 byte aligned (the contents of a buffer are page
+        // aligned and the offset is a multiple of 4). The buffer lives as long as `self`, and shared memory may be
+        // accessed atomically by the GPU and other threads.
+        Ok(unsafe {
+            std::sync::atomic::AtomicU32::from_ptr(
+                self.raw
+                    .contents()
+                    .cast::<u8>()
+                    .add(offset as usize)
+                    .cast::<u32>(),
+            )
+        })
+    }
 }
 
 impl Drop for DataBuffer {

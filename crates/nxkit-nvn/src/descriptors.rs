@@ -58,6 +58,8 @@ pub struct Descriptors {
     samplers: Vec<Option<Tsc>>,
     /// Counts the changes that can make a handle name another texture ([`Descriptors::epoch`]).
     epoch: u64,
+    /// Counts the sampler registrations ([`Descriptors::sampler_epoch`]).
+    sampler_epoch: u64,
 }
 
 fn add_pool(pools: &mut Vec<PoolRange>, new: PoolRange, max_id: u32) -> Result<()> {
@@ -91,6 +93,28 @@ impl Descriptors {
     /// texture, or loses it. Registering the texture a slot already holds, or a sampler, does not change it.
     pub fn epoch(&self) -> u64 {
         self.epoch
+    }
+
+    /// A counter that changes whenever a sampler slot is set ([`Descriptors::register_sampler`]). A texture registration
+    /// does not change it.
+    pub fn sampler_epoch(&self) -> u64 {
+        self.sampler_epoch
+    }
+
+    /// The highest id of the texture pools, or `None` when there is no pool.
+    pub fn texture_limit(&self) -> Option<u32> {
+        self.texture_pools
+            .iter()
+            .map(|p| p.base + p.count - 1)
+            .max()
+    }
+
+    /// The registered samplers with their ids, in id order.
+    pub fn samplers(&self) -> impl Iterator<Item = (u32, &Tsc)> {
+        self.samplers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.as_ref().map(|s| (i as u32, s)))
     }
 
     /// Adds a texture pool of `count` slots from id `base`, with its header memory at `memory`.
@@ -175,6 +199,7 @@ impl Descriptors {
             return Err(NvnError::UnknownDescriptor(id));
         }
         self.samplers[id as usize] = Some(sampler);
+        self.sampler_epoch += 1;
         Ok(())
     }
 
@@ -274,6 +299,27 @@ mod tests {
             d.resolve(Descriptors::handle(41, 3)).unwrap_err(),
             NvnError::UnknownDescriptor(41)
         );
+    }
+
+    #[test]
+    fn the_sampler_epoch_changes_with_a_sampler_and_not_with_a_texture() {
+        let (table, tex) = table_with_one();
+        let mut d = Descriptors::new();
+        d.add_texture_pool(0, 100, GpuAddr::new(0x10_0000).unwrap())
+            .unwrap();
+        d.add_sampler_pool(0, 10, GpuAddr::new(0x20_0000).unwrap())
+            .unwrap();
+        let start = d.sampler_epoch();
+        d.register_texture(&table, 5, tex, TextureView::identity())
+            .unwrap();
+        assert_eq!(d.sampler_epoch(), start);
+        d.register_sampler(3, sampler()).unwrap();
+        assert_ne!(d.sampler_epoch(), start);
+        let after = d.sampler_epoch();
+        d.register_sampler(3, sampler()).unwrap();
+        assert_ne!(d.sampler_epoch(), after);
+        assert_eq!(d.samplers().map(|(i, _)| i).collect::<Vec<_>>(), vec![3]);
+        assert_eq!(d.texture_limit(), Some(99));
     }
 
     #[test]
