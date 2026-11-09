@@ -261,7 +261,7 @@ fn run_on_gpu(gpu: &Gpu, net: &Net, blob: &[u8], pic: &Picture) -> Vec<u8> {
         pass.end();
     }
     frame.submit().unwrap().wait().unwrap();
-    let bpp = fmt.bytes_per_pixel() as u32;
+    let bpp = fmt.bytes_per_pixel();
     let mut bytes = vec![0u8; (out_size[0] * out_size[1] * bpp) as usize];
     out.read((out_size[0] * bpp) as usize, &mut bytes).unwrap();
     bytes
