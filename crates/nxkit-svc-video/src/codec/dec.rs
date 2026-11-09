@@ -193,14 +193,16 @@ impl Dec {
         fx: &mut Effects,
     ) -> Result<u64, u32> {
         trace(format_args!(
-            "dec {} submit {} bytes ts {ts} eos {eos} (held {}, pend {:?})",
+            "dec {} submit {} bytes ts {ts} eos {eos} (held {}, pend {:?}, load {})",
             self.id,
             data.len(),
             self.held.len(),
-            self.pend
+            self.pend,
+            self.load()
         ));
         self.diag_tick("submit");
         if self.load() >= HOLD {
+            trace(format_args!("dec {} submit refused, busy", self.id));
             self.refusals += 1;
             if self.refused < 4 {
                 self.refused += 1;
@@ -443,6 +445,15 @@ impl Dec {
 /// Carries out `fx` for the decoder behind `d` and releases its lock. The order lock is taken before the decoder lock
 /// is let go, so the effects of two calls happen in the order in which the calls decided them.
 pub(super) fn deliver(mut d: MutexGuard<'_, Dec>, fx: Effects) {
+    if let Some(up) = fx.event.filter(|&up| Some(up) != d.event_state) {
+        trace(format_args!(
+            "dec {} event {} (load {}, held {})",
+            d.id,
+            if up { "up" } else { "down" },
+            d.load(),
+            d.held.len()
+        ));
+    }
     d.event_state = fx.event.or(d.event_state);
     let (id, event, applier, order) = (d.id, d.event, Arc::clone(&d.applier), Arc::clone(&d.order));
     let turn = lock(&order);

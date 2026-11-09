@@ -76,6 +76,11 @@ pub(crate) trait Pipeline: Send {
     /// Blocks until the oldest packet in flight is decoded and gives its picture to `out`. Gives none when nothing is in
     /// flight, and returns at once then.
     fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String>;
+    /// Whether [`Pipeline::wait`] may be called in the middle of the stream. A pipeline that says no gives its pictures
+    /// from later pushes only, and waits only at the end of the stream ([`Pipeline::finish`]).
+    fn waits(&self) -> bool {
+        true
+    }
     /// The end of the stream: every picture that is still inside, in order.
     fn finish(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
         let mut n = out.len();
