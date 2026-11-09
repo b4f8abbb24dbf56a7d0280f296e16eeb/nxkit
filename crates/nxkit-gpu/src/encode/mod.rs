@@ -75,6 +75,21 @@ pub(super) fn draw_range(sh: &Shared<'_>, pass: &Pass) -> std::ops::Range<u32> {
     first..first + n as u32
 }
 
+/// Which draws of `range` (the draws of `pass`) a false render condition leaves out, by their place in the range.
+/// None when the frame has no such command.
+fn disabled_draws(sh: &Shared<'_>, pass: &Pass, range: &std::ops::Range<u32>) -> Option<Vec<bool>> {
+    if sh.frame.disabled.is_empty() {
+        return None;
+    }
+    let off: Vec<bool> = pass
+        .cmds
+        .clone()
+        .filter(|i| matches!(sh.frame.cmds.get(*i as usize), Some(Cmd::Draw { .. })))
+        .map(|i| sh.frame.skips(i))
+        .collect();
+    (off.len() == range.len() && off.contains(&true)).then_some(off)
+}
+
 /// Encodes one render pass into `cb`.
 pub(crate) fn render_pass(
     sh: &Shared<'_>,
@@ -226,9 +241,17 @@ pub(crate) fn render_pass(
     }
     let mut tr = Tracker::new(s.pc.size);
     let mut memo = ArgsMemo::default();
+    let off = disabled_draws(sh, pass, &range);
+    let is_off = |n: u32| off.as_ref().is_some_and(|o| o[(n - range.start) as usize]);
     let mut n = range.start;
     while n < range.end {
+        if is_off(n) {
+            stats.render_cond_draws += 1;
+            n += 1;
+            continue;
+        }
         if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end)
+            && (n..n + run.draws).all(|d| !is_off(d))
             && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
         {
             n += run.draws;

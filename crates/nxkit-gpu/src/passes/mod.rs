@@ -99,6 +99,10 @@ pub(crate) fn compute_pass(
             continue;
         };
         let ord = sh.ordinals.get(i as usize).copied().unwrap_or_default();
+        if sh.frame.skips(i) {
+            stats.render_cond_other += 1;
+            continue;
+        }
         if let (PassKind::Compute, Cmd::Dispatch { .. }, Some(p)) = (pass.kind, cmd, sh.native)
             && p.is_anchor(ord.dispatch)
         {

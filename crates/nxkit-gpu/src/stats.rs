@@ -265,6 +265,10 @@ pub struct EncodeStats {
     pub texture_create_ns: u64,
     /// Nanoseconds spent encoding uploads of guest data into textures.
     pub upload_ns: u64,
+    /// Draws that a false render condition left out (not a failure, so not in `skipped`).
+    pub render_cond_draws: u32,
+    /// Dispatches, copies and downsamples that a false render condition left out.
+    pub render_cond_other: u32,
 }
 
 impl EncodeStats {
@@ -319,6 +323,8 @@ impl EncodeStats {
         self.chunks_ns += o.chunks_ns;
         self.texture_create_ns += o.texture_create_ns;
         self.upload_ns += o.upload_ns;
+        self.render_cond_draws += o.render_cond_draws;
+        self.render_cond_other += o.render_cond_other;
     }
 }
 

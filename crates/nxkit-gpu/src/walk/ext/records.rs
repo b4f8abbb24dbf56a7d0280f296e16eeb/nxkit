@@ -9,6 +9,14 @@ impl Walker {
             ExtCode::ReportCounter if matches!(x.word(0), 0 | 0x10) => {
                 self.out.reports.push(crate::detail::CounterReport {
                     kind: x.word(0),
+                    value: 0,
+                    addr: x.word64(1),
+                });
+            }
+            ExtCode::ReportValue => {
+                self.out.reports.push(crate::detail::CounterReport {
+                    kind: crate::detail::REPORT_VALUE,
+                    value: x.word(0),
                     addr: x.word64(1),
                 });
             }

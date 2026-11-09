@@ -184,7 +184,8 @@ impl GpuBackend {
         }
     }
 
-    /// Writes the timestamp reports of the frames up to fence `upto`. A `TIMESTAMP_TOP` gets the GPU start of the
+    /// Writes the timestamp and value reports of the frames up to fence `upto`. A value report writes its value as the
+    /// counter (the render conditions of later frames read it, see `nxkit_nvn::rendercond`). A `TIMESTAMP_TOP` gets the GPU start of the
     /// last finished frame and a `TIMESTAMP` its end, in GPU ticks (19.2 MHz). The game takes its GPU time from the
     /// difference and picks its frame interval from it; without the reports it saw no GPU time and kept a 30 fps
     /// step on frames that took longer, which ran the game in slow motion.
@@ -203,6 +204,7 @@ impl GpuBackend {
         for (_, r) in due {
             let t = ticks(if r.kind == 0x10 { start } else { end });
             let mut data = [0u8; 16];
+            data[..8].copy_from_slice(&u64::from(r.value).to_le_bytes());
             data[8..].copy_from_slice(&t.to_le_bytes());
             if let Some(off) = r.addr.checked_sub(map.gpu_base())
                 && off + 16 <= map.len()

@@ -40,6 +40,7 @@ mod tests {
                 writes: Span::default(),
             }],
             lists: vec![TexId(2)],
+            disabled: Vec::new(),
         };
         let mut plan = PassPlan::default();
         let mut table = ResourceTable::new();
