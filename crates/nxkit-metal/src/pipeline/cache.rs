@@ -38,7 +38,7 @@ pub struct ArchiveConfig {
     /// The folder of the archive shards and their index (`nxkit_abi::shards`). A shard is opened when the first
     /// pipeline in it is asked for. A folder without an index counts as none, and `load` is used.
     pub shards: Option<PathBuf>,
-    /// How many shards stay open at once (the least recently used one closes). 0 is [`shards::DEFAULT_OPEN`].
+    /// How many shards stay open at once (the least recently used one closes). 0 is the default of 32.
     pub open_shards: usize,
     /// Collect every pipeline that the cache builds, so `save_archive` can write them.
     pub collect: bool,

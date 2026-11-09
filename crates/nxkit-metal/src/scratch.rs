@@ -83,7 +83,7 @@ impl Scratch {
     }
 
     /// Makes a scratch buffer that starts with `first` bytes. When it fills up, each new buffer is twice as large as
-    /// the one before, up to `max_chunk` (see [`next_chunk`]).
+    /// the one before, up to `max_chunk` (see `next_chunk`).
     pub fn growing(ctx: &Context, first: u64, max_chunk: u64) -> Result<Self> {
         let size = first;
         if size == 0 {

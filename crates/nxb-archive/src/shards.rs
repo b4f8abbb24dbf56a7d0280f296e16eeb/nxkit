@@ -111,7 +111,7 @@ pub fn index_bytes(shards: &[Shard]) -> Vec<u8> {
     ix.encode()
 }
 
-/// What [`write`] did.
+/// What [`write()`] did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Written {
     /// Shard files in the folder.
