@@ -219,6 +219,8 @@ pub struct PassStats {
     pub other_begins: BoundaryCounts,
     /// Copies without a texture on either side. They are no pass boundary and the encoder does not run them.
     pub buffer_copies_absorbed: u32,
+    /// Draws and clears while no render target was set. The GPU does nothing for them, and neither does the encoder.
+    pub no_target: u32,
     /// Render passes before the merge.
     pub render_passes_before_merge: u32,
     /// Render passes after the merge.
@@ -275,13 +277,14 @@ impl PassStats {
             )
         };
         format!(
-            "{}, {}, {}, render before merge {}, buffer copies absorbed {}, empty dropped {}, merged after targets {}, \
-             learned dead stores {} ({} bytes)",
+            "{}, {}, {}, render before merge {}, buffer copies absorbed {}, no target {}, empty dropped {}, \
+             merged after targets {}, learned dead stores {} ({} bytes)",
             group("render", &self.render_begins),
             group("compute", &self.compute_begins),
             group("other", &self.other_begins),
             self.render_passes_before_merge,
             self.buffer_copies_absorbed,
+            self.no_target,
             self.empty_dropped,
             self.merged_after_targets,
             self.stores_learned_dead,

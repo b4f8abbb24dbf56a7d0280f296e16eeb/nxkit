@@ -270,6 +270,12 @@ impl Scan<'_> {
     }
 
     fn clear(&mut self, i: u32, slot: Slot, full: bool) -> Result<()> {
+        if self.rt.is_empty() {
+            // Nothing to clear: the hardware does nothing either. Ocarina of Time clears once without targets after
+            // its opening movie, and the frame used to fail (and the present with it).
+            self.plan.stats.no_target += 1;
+            return Ok(());
+        }
         self.open_render(i)?;
         let missing = |s: Slot| {
             NvnError::NoTarget(if let Slot::Color(n) = s {
@@ -316,6 +322,11 @@ impl Scan<'_> {
 
     fn draw(&mut self, i: u32, st: DrawState, reads: Span) -> Result<()> {
         if self.last_draw == Some((st, reads)) {
+            return Ok(());
+        }
+        if self.rt.is_empty() {
+            // A draw with no render target writes nothing. It is left out, as a clear without targets is.
+            self.plan.stats.no_target += 1;
             return Ok(());
         }
         self.open_render(i)?;

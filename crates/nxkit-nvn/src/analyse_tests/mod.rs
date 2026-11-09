@@ -323,10 +323,12 @@ fn the_counters_add_up() {
 }
 
 #[test]
-fn drawing_without_a_target_is_an_error() {
+fn drawing_without_a_target_is_left_out() {
     let mut f = Fx::new();
     f.rec.draw(paint());
-    assert_eq!(f.run().unwrap_err(), NvnError::NoTarget(0));
+    assert!(f.run().is_ok());
+    assert_eq!(f.plan.passes.len(), 0);
+    assert_eq!(f.plan.stats.no_target, 1);
 }
 
 #[test]
