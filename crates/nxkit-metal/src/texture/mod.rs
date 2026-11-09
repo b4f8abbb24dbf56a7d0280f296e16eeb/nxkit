@@ -225,6 +225,11 @@ impl Texture {
         Some(raw.iter().map(|c| [c[0], c[1], c[2], c[3]]).collect())
     }
 
+    /// The bytes that the device took for the texture (`allocatedSize`).
+    pub fn allocated_bytes(&self) -> u64 {
+        self.inner.raw.allocatedSize() as u64
+    }
+
     /// The 64 bit resource ID that a shader reads from an argument buffer to sample or write this texture.
     /// The ID stays valid as long as the texture lives.
     pub fn gpu_resource_id(&self) -> u64 {

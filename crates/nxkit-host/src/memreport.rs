@@ -15,6 +15,8 @@
 //!   touched or not, which is what the Metal HUD shows), the textures and buffers of `nxkit-metal`, and the rest
 //!   (pipeline code, command allocators, ICBs, drawables).
 //! - `libs` and `pipelines`: live shader libraries and the pipeline states the caches hold.
+//! - `tex evicted`: the Metal textures the encoder dropped for being idle (`NXKIT_TEX_EVICT`) with their bytes, and
+//!   `reuploaded`: how many of them were made and uploaded again when the game used them later.
 
 use std::time::{Duration, Instant};
 
@@ -82,7 +84,7 @@ fn line(ctx: &Context, (g0, g1): (u64, u64), at: Duration) -> String {
     format!(
         "nxkit-mem t {}s (MiB): footprint {} peak {} = resident {} (anon {} file {}) compressed {} graphics {} (comp {}) | \
          guest mapped {} {} (by region: res {} dirty {}) | {} in use {} | {} | {} | {} | {} | {} | \
-         metal device {} = guest buffer {} + textures {} (n {}) + buffers {} (n {}) + rest {} | libs {} pipelines {} resident set {} | walk {walk_ms} ms",
+         metal device {} = guest buffer {} + textures {} (n {}) + buffers {} (n {}) + rest {} | libs {} pipelines {} resident set {} | tex evicted {} ({} MiB) reuploaded {} | walk {walk_ms} ms",
         at.as_secs(),
         mib(task.footprint),
         mib(task.footprint_peak),
@@ -113,6 +115,9 @@ fn line(ctx: &Context, (g0, g1): (u64, u64), at: Duration) -> String {
         m.libraries,
         m.pipelines,
         ctx.resident_count(),
+        m.evictions,
+        mib(m.evicted_bytes),
+        m.reuploads,
     )
 }
 
@@ -136,6 +141,7 @@ mod tests {
             "files res",
             "metal device",
             "pipelines",
+            "tex evicted",
         ] {
             assert!(l.contains(part), "{part} missing in {l}");
         }
