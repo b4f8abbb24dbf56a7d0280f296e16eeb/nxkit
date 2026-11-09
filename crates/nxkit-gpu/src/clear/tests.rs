@@ -60,8 +60,6 @@ fn integer_formats_take_the_uint_kind_and_clamp() {
         texel(Format::R32Uint, 2, c, 1).unwrap(),
         300u32.to_le_bytes()
     );
-    assert!(texel(Format::R32Uint, 0, c, 1).is_err());
-    assert!(texel(Format::Rgba8Unorm, 2, c, 0xf).is_err());
 }
 
 #[test]
@@ -86,7 +84,6 @@ fn a_partial_mask_or_an_unknown_format_is_refused() {
     );
     assert_eq!(w & 0x7ff, 15 << 6);
     assert_eq!(w >> 22, 16 << 5);
-    assert!(texel(Format::Rgba8Unorm, 1, c, 0xf).is_err());
 }
 
 #[test]
@@ -122,8 +119,29 @@ fn sixteen_bit_integers_clamp_to_their_range() {
         [1, 0, 2, 0, 3, 0, 4, 0]
     );
     assert_eq!(texel(Format::R16Uint, 2, [7, 0, 0, 0], 1).unwrap(), [7, 0]);
-    assert!(texel(Format::Rg16Uint, 0, [0; 4], 0x3).is_err());
-    assert!(texel(Format::Rg16Uint, 1, [0; 4], 0x3).is_err());
+}
+
+#[test]
+fn a_clear_of_another_value_type_is_converted() {
+    // Floats into an unsigned format: rounded, then clamped to the channel.
+    assert_eq!(
+        texel(Format::Rg16Uint, 0, f([1.0, 70000.0, 0.0, 0.0]), 0x3).unwrap(),
+        [1, 0, 0xff, 0xff]
+    );
+    assert_eq!(
+        texel(Format::Rg16Uint, 0, f([0.0; 4]), 0x3).unwrap(),
+        [0, 0, 0, 0]
+    );
+    // A negative signed value into an unsigned format is 0.
+    assert_eq!(
+        texel(Format::Rg16Uint, 1, [(-5i32) as u32, 3, 0, 0], 0x3).unwrap(),
+        [0, 0, 3, 0]
+    );
+    // An integer into a float format becomes the float.
+    assert_eq!(
+        texel(Format::R32Float, 2, [2, 0, 0, 0], 1).unwrap(),
+        2.0f32.to_le_bytes()
+    );
 }
 
 #[test]
@@ -141,7 +159,6 @@ fn signed_integers_take_the_int_kind_and_clamp() {
         texel(Format::R32Sint, 1, c, 1).unwrap(),
         (-1i32).to_le_bytes()
     );
-    assert!(texel(Format::R32Sint, 2, c, 1).is_err());
 }
 
 #[test]
