@@ -13,6 +13,8 @@ in_v = false
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nxkit-metal = { workspace = true }
+nxkit-native-plan = { workspace = true }
+nxkit-ndsr = { workspace = true }
 nxkit-ndve = { workspace = true }
 nxkit-nvn = { workspace = true }
 foldhash = "0.2"

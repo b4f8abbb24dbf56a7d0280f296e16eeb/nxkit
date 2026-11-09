@@ -108,17 +108,11 @@ pub(super) fn build(
         }
         let bad_buffer = s.buffers.iter().find(|b| match b.source {
             Source::Buffer(n) => n >= buffers.len(),
-            Source::Game(g) => !matches!(
-                g,
-                GameResource::ConversionPush | GameResource::ResamplerPush
-            ),
+            Source::Game(g) => !matches!(g, GameResource::Push(_)),
         });
         let bad_texture = s.textures.iter().find(|b| match b.source {
             Source::Buffer(_) => true,
-            Source::Game(g) => matches!(
-                g,
-                GameResource::ConversionPush | GameResource::ResamplerPush
-            ),
+            Source::Game(g) => matches!(g, GameResource::Push(_)),
         });
         if let Some(b) = bad_buffer.or(bad_texture) {
             return refuse(

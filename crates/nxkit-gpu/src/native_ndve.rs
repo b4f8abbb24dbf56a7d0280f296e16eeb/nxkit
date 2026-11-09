@@ -5,7 +5,7 @@
 //! first `NXKIT_DIAG=ndve` capture settles. A wrong guess makes the run fall back to the game's dispatches
 //! (`ndve.fallback`), never a wrong picture.
 
-use nxkit_ndve::plan::{GameResource, Plan};
+use nxkit_ndve::plan::{self, Plan};
 
 use crate::native::{BlobSpec, Place, Replacement, ResourceSpec, Run};
 
@@ -47,56 +47,56 @@ static BLOBS: [BlobSpec; 2] = [
 static RESOURCES: [ResourceSpec; 8] = [
     // Texture register 1 and 2 of the conversion (section 7).
     ResourceSpec {
-        resource: GameResource::LumaPlane,
+        resource: plan::LUMA_PLANE,
         place: Place::Texture {
             dispatch: CONVERSION,
             slot: 1,
         },
     },
     ResourceSpec {
-        resource: GameResource::ChromaPlane,
+        resource: plan::CHROMA_PLANE,
         place: Place::Texture {
             dispatch: CONVERSION,
             slot: 2,
         },
     },
     ResourceSpec {
-        resource: GameResource::ConversionPush,
+        resource: plan::CONVERSION_PUSH,
         place: Place::Push {
             dispatch: CONVERSION,
         },
     },
     // Image register 1 and texture register 3 of the resampler (section 8).
     ResourceSpec {
-        resource: GameResource::Output,
+        resource: plan::OUTPUT,
         place: Place::Image {
             dispatch: RESAMPLER,
             slot: 1,
         },
     },
     ResourceSpec {
-        resource: GameResource::Dither,
+        resource: plan::DITHER,
         place: Place::Texture {
             dispatch: RESAMPLER,
             slot: 3,
         },
     },
     ResourceSpec {
-        resource: GameResource::ResamplerPush,
+        resource: plan::RESAMPLER_PUSH,
         place: Place::Push {
             dispatch: RESAMPLER,
         },
     },
     // To confirm: the image slots of the two pictures the game's chain writes.
     ResourceSpec {
-        resource: GameResource::Intermediate { index: 0 },
+        resource: plan::PICTURE_RGBA8,
         place: Place::Image {
             dispatch: CONVERSION,
             slot: 0,
         },
     },
     ResourceSpec {
-        resource: GameResource::Intermediate { index: 1 },
+        resource: plan::PICTURE_RGB10A2,
         place: Place::Image {
             dispatch: LAYER_12,
             slot: 0,
