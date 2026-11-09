@@ -14,10 +14,12 @@
 //! | `d32b` | layer 9's output | 480x270x32 |
 //! | `e64a`, `e64b` | layers 5 to 7 | 240x135x64 |
 //! | `luma` | the luma of the 1920x1080 picture as f16, for the resampler | 1920x1080 |
+//! | `pic` | the converted picture, 3 bytes of each pixel in a `uint` | 1920x1080x4 bytes |
 //!
-//! The colour conversion is fused into layers 1 and 12 (nothing writes the RGBA8 picture; the planes are converted
-//! where they are read), and layer 12 writes the RGB10A2 picture ([`GameResource::Intermediate`] 1) which the luma pass
-//! and the resampler read.
+//! The colour conversion runs once (`ndve_convert`) into `pic`, the 3 bytes of each picture pixel (8 MB); layers 1 and
+//! 12 read the picture from there (nothing writes the RGBA8 image of the game). Layer 12 writes the RGB10A2 picture
+//! ([`GameResource::Intermediate`] 1) which the luma pass and the resampler read. Converting in both fused steps took
+//! 0.34 ms of texture work, the pass 0.05 ms.
 //!
 //! Layers 1 + 2 and 11 + 12 are one dispatch each (`ndve_l01_l02`, `ndve_l11_l12`): the first layer's output, with a
 //! one pixel halo, lives in threadgroup memory, so layer 1's output and layer 11's output are never buffers. The
@@ -32,6 +34,8 @@ const BLOB_BYTES: usize = 0x3c320;
 const RESAMPLER_BYTES: usize = 0x3000;
 /// Threads of a threadgroup of every convolution kernel (4 simdgroups).
 const THREADS: u32 = 128;
+/// Threads of the resampler (`RS_NSG` = 8 simdgroups).
+const RESAMPLE_THREADS: u32 = 256;
 
 /// How a layer is cut into threadgroups.
 #[derive(Clone, Copy, Debug)]
@@ -288,6 +292,7 @@ const B_E64A: usize = 17;
 const B_E64B: usize = 18;
 const B_LUMA: usize = 19;
 const B_RS_W: usize = 20;
+const B_PIC: usize = 21;
 
 /// Layers 2 and 11 run inside the step of layers 1 and 12.
 fn fused_second(n: usize) -> bool {
@@ -319,10 +324,11 @@ fn game(index: u32, resource: GameResource, writes: bool) -> Binding {
 
 /// The plan for the network of the weight blob `weights` (0x3c320 bytes) and the resampler's weights (0x3000 bytes).
 ///
-/// The steps, in order: layers 1 + 2 fused (`ndve_l01_l02`, takes the game's NV12 planes and conversion push block),
+/// The steps, in order: the colour conversion (`ndve_convert`, takes the game's NV12 planes and conversion push block),
+/// layers 1 + 2 fused (`ndve_l01_l02`),
 /// layers 3 to 10, layers 11 + 12 fused (`ndve_l11_l12`, writes the RGB10A2 picture), the luma pass, the resampler:
-/// 12 steps. The kernels and their binding indices are those of [`crate::msl::SOURCE`]: buffer 0 input, 1 output,
-/// 2 packed weights, 3 skip, 4 push block, 5 the packed weights of a fused pair's second layer; the resampler's are
+/// 13 steps. The kernels and their binding indices are those of [`crate::msl::SOURCE`]: buffer 0 input, 1 output,
+/// 2 packed weights, 3 skip (the picture in the fused pairs and the conversion), 4 push block, 5 the packed weights of a fused pair's second layer; the resampler's are
 /// listed with its step.
 ///
 /// # Errors
@@ -375,6 +381,7 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
         bytes: RESAMPLER_BYTES as u64,
         init: Some(resampler.to_vec()),
     });
+    buffers.push(scratch("ndve.pic", 1920, 1080, 2));
 
     // (input, output, skip) per layer, as buffer indices
     let routes: [(usize, usize, Option<usize>); 12] = [
@@ -391,7 +398,19 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
         (B_T1, B_S16, None),
         (B_S16, usize::MAX, None),
     ];
-    let mut steps = Vec::with_capacity(12);
+    let mut steps = Vec::with_capacity(13);
+    // the colour conversion, once, for both fused pairs: 1920 x 1080 threads in tiles of 16 x 8
+    steps.push(Step {
+        kernel: "ndve_convert",
+        groups: [120, 135, 1],
+        threads: [16, 8, 1],
+        threadgroup_bytes: 0,
+        buffers: vec![buf(3, B_PIC, true), game(4, plan::CONVERSION_PUSH, false)],
+        textures: vec![
+            game(0, plan::LUMA_PLANE, false),
+            game(1, plan::CHROMA_PLANE, false),
+        ],
+    });
     for (n, (l, &(input, output, skip))) in LAYERS.iter().zip(routes.iter()).enumerate() {
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
@@ -401,18 +420,14 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
                 buffers.push(buf(1, routes[n + 1].1, true));
                 buffers.push(buf(2, n, false));
                 buffers.push(buf(5, n + 1, false));
-                buffers.push(game(4, plan::CONVERSION_PUSH, false));
-                textures.push(game(0, plan::LUMA_PLANE, false));
-                textures.push(game(1, plan::CHROMA_PLANE, false));
+                buffers.push(buf(3, B_PIC, false));
             }
             Kind::Last => {
                 // fused with layer 11: the step reads that layer's input and has both weights
                 buffers.push(buf(0, routes[n - 1].0, false));
                 buffers.push(buf(2, n - 1, false));
                 buffers.push(buf(5, n, false));
-                buffers.push(game(4, plan::CONVERSION_PUSH, false));
-                textures.push(game(0, plan::LUMA_PLANE, false));
-                textures.push(game(1, plan::CHROMA_PLANE, false));
+                buffers.push(buf(3, B_PIC, false));
                 textures.push(game(2, GameResource::Intermediate { index: 1 }, true));
             }
             Kind::Conv3 | Kind::Down | Kind::Up => {
@@ -446,9 +461,9 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
     });
     steps.push(Step {
         kernel: "ndve_resample",
-        // 320 x 180 blocks of 8x8 pixels: a threadgroup of 4 simdgroups takes 4 rounds of 4 x 4 blocks of a row
-        groups: [5, 180, 1],
-        threads: [THREADS, 1, 1],
+        // 320 x 180 blocks of 8x8 pixels: a threadgroup of 8 simdgroups takes 2 rounds of 8 x 2 blocks of a row
+        groups: [10, 180, 1],
+        threads: [RESAMPLE_THREADS, 1, 1],
         threadgroup_bytes: 0,
         buffers: vec![
             buf(0, B_LUMA, false),

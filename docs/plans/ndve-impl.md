@@ -62,6 +62,30 @@ change to `plan.rs` needs the agreement of packages B and C.
 - Checks without a GPU: the MSL compiles with `xcrun -sdk macosx metal -c` (a test that skips when `xcrun` is missing);
   the plan's bindings reference existing buffers; buffer sizes match the layer table.
 
+GPU time of the kernels, `cargo test --release -p nxkit-gpu --test ndve_bench -- --ignored --nocapture` (synthetic
+weights and picture, 1920x1080 to 2560x1440, M2 Max, minimum of 80 runs, ms; every step alone in a command buffer; the
+picture and the output hash are the same before and after):
+
+| step | before | after |
+|---|---|---|
+| colour conversion (new pass) | - | 0.05 |
+| layers 1 + 2 | 1.35 | 0.88 |
+| layers 3 / 5 / 8 / 10 | 0.093 / 0.084 / 0.095 / 0.139 | 0.093 / 0.080 / 0.092 / 0.125 |
+| layers 4 / 6 / 7 / 9 | 0.337 / 0.338 / 0.338 / 0.337 | 0.320 / 0.316 / 0.315 / 0.320 |
+| layers 11 + 12 | 1.34 | 1.16 |
+| luma pass | 0.020 | 0.020 |
+| resampler | 1.27 | 1.15 |
+| whole plan, one command buffer, a barrier between steps | 5.78 | 4.92 |
+
+The floor of this design: a kernel that only runs the 8x8 products on registers takes 0.25 ms per 3x3 layer (4.9
+TMAC/s) and 0.28 ms with the f16 round of every K = 16 step (4.3 TMAC/s). The network is 15.7 GMAC, 3.7 ms at that
+rate, so the 3x3 layers (0.32 ms) and the resampler (1.15 ms for 5.1 GMAC) are within 15 % of it. What was left to win
+was the occupancy of the fused pairs (threadgroup memory: with a 16 halves pixel pitch three threadgroups fit a core
+instead of two), the picture conversion and the weight loads. Below about 4.5 ms only fewer MACs or fusing more steps
+(the drain at the end of each of the 13 dispatches is about 0.03 ms) would help. What does not work: an f16 accumulator
+(6 times slower), 8 simdgroups in the pairs with the output channels split (slower), a pair tile of 10 rows, 8 rows of
+a 3x3 tile per simdgroup.
+
 ### C. The hook in `nxkit-gpu` (new module `native.rs` and its call sites; `diag.rs` for the capture)
 
 - A general interface for a native replacement of a run of compute dispatches: find a run by program keys in the
