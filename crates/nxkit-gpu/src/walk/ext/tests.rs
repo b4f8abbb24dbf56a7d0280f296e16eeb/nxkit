@@ -301,6 +301,32 @@ fn a_buffer_to_texture_copy_reads_the_buffer_view_and_region() {
 }
 
 #[test]
+fn the_texture_addresses_of_a_copy_carry_no_id_tag() {
+    // The record word of a texture has its id plus one above bit 40 (0x693 is texture 1682).
+    let word = nxkit_nvn::decode::tag_address(0x0015_12c9_f000, nxkit_nvn::resource::TexId(1682));
+    assert_eq!(word, 0x0006_9315_12c9_f000);
+    let (lo, hi) = (word as u32, (word >> 32) as u32);
+    let st = State::default();
+    let words = [lo, hi, 0x1000, 0x15, 0, 0, 0, 0, 16, 16, 1];
+    let d = copy_detail(&st, &copy_ext(ExtCode::CopyBufferToTexture, 0, &words));
+    assert_eq!(
+        (d.src_addr, d.dst_addr),
+        (0x0015_0000_1000, 0x0015_12c9_f000)
+    );
+    let d = copy_detail(&st, &copy_ext(ExtCode::CopyTextureToBuffer, 0, &words));
+    assert_eq!(
+        (d.src_addr, d.dst_addr),
+        (0x0015_12c9_f000, 0x0015_0000_1000)
+    );
+    let words = [lo, hi, lo, hi, 0, 0, 0, 0, 16, 16, 1, 0, 0, 0, 16, 16, 1];
+    let d = copy_detail(&st, &copy_ext(ExtCode::CopyTextureToTexture, 0, &words));
+    assert_eq!(
+        (d.src_addr, d.dst_addr),
+        (0x0015_12c9_f000, 0x0015_12c9_f000)
+    );
+}
+
+#[test]
 fn a_texture_to_buffer_copy_keeps_the_texture_on_the_source_side() {
     let words = [0x2000, 0, 0x1000, 9, 0, 0, 0, 0, 16, 16, 1];
     let d = copy_detail(

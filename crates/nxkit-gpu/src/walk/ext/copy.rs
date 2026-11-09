@@ -1,5 +1,7 @@
 //! The detail of copies and clears.
 
+use nxkit_nvn::decode::untag_address;
+
 use super::*;
 
 /// Calls `set` with the group of each face that an `NVNface` value names, starting at `first`.
@@ -86,8 +88,8 @@ pub(super) fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
             dst_origin,
             size,
             dst_size,
-            src_addr: x.word64(0),
-            dst_addr: x.word64(2),
+            src_addr: untag_address(x.word64(0)),
+            dst_addr: untag_address(x.word64(2)),
             ..d
         };
     }
@@ -102,11 +104,11 @@ pub(super) fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
     d.dst_size = size;
     if x.code == ExtCode::CopyBufferToTexture {
         d.kind = CopyKind::BufferToTexture;
-        (d.src_addr, d.dst_addr) = (d.buffer, x.word64(0));
+        (d.src_addr, d.dst_addr) = (d.buffer, untag_address(x.word64(0)));
         (d.dst_level, d.dst_layer, d.dst_origin) = (level, layer, origin);
     } else {
         d.kind = CopyKind::TextureToBuffer;
-        (d.src_addr, d.dst_addr) = (x.word64(0), d.buffer);
+        (d.src_addr, d.dst_addr) = (untag_address(x.word64(0)), d.buffer);
         (d.src_level, d.src_layer, d.src_origin) = (level, layer, origin);
     }
     d

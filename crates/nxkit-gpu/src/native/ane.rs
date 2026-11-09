@@ -16,8 +16,8 @@ use super::iface::{ModelPackage, Offload};
 use nxkit_native_plan::GameResource;
 
 /// The sets of tensors. The decoder is three pictures ahead of the game, and two frames of the game are in flight, each
-/// reading one result.
-pub(super) const SLOTS: usize = 5;
+/// reading one result; one more keeps the next picture from taking the slot of a result the game has not read yet.
+pub(super) const SLOTS: usize = 6;
 
 /// `NXKIT_<NAME>_ANE_CACHE` names the cache directory; otherwise `~/Library/Caches/nxkit/<name>-ane`.
 pub(super) fn cache_root(name: &str, over: Option<&str>, home: Option<&str>) -> Option<PathBuf> {

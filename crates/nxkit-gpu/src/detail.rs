@@ -379,7 +379,8 @@ pub struct CopyDetail {
     /// it. Set for the copies between buffers and textures and for a buffer to buffer copy (which is
     /// [`CopyKind::Other`]).
     pub src_addr: u64,
-    /// The GPU address of what the copy writes, 0 when the walker did not read it.
+    /// The GPU address of what the copy writes, 0 when the walker did not read it. The address of a texture side is the
+    /// plain address, without the texture id the record word carries above it.
     pub dst_addr: u64,
 }
 

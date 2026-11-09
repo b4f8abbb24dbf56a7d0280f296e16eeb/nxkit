@@ -51,6 +51,8 @@ struct State {
     session: Option<(u64, Session)>,
     /// The last failure of the conversion or of the Neural Engine, for the health line.
     error: String,
+    /// The slots whose input tensor already holds the constant plane, one bit each.
+    ones: u32,
 }
 
 /// The picture feed of the process.
@@ -73,6 +75,7 @@ pub(super) fn feed() -> &'static Feed {
             epoch: 0,
             session: None,
             error: String::new(),
+            ones: 0,
         }),
         wake: Condvar::new(),
     })
@@ -180,6 +183,7 @@ impl Feed {
         st.session = Some((key, session.clone()));
         st.table = Table::new(SLOTS);
         st.queue.clear();
+        st.ones = 0;
     }
 
     /// The conversion constants the game's dispatch pushes. Gives their number, which changes with them.
@@ -324,8 +328,12 @@ impl Feed {
             st.table.skip(pic, Why::Size);
             return;
         }
-        let Some(slot) = self.lock().table.start(pic, epoch) else {
-            return;
+        let (slot, ones) = {
+            let mut st = self.lock();
+            let Some(slot) = st.table.start(pic, epoch) else {
+                return;
+            };
+            (slot, st.ones >> slot & 1 != 0)
         };
         let started = Instant::now();
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
@@ -333,7 +341,7 @@ impl Feed {
         let written = loaded.slots[slot]
             .input
             .write_bytes(|bytes, pitch| {
-                made = conv::convert(frame, &params, bytes, pitch, threads);
+                made = conv::convert(frame, &params, bytes, pitch, threads, ones);
             })
             .map_err(|e| e.to_string())
             .and(made);
@@ -341,6 +349,7 @@ impl Feed {
             self.finished(slot, pic, Some(e));
             return;
         }
+        self.lock().ones |= 1 << slot;
         let converted = started.elapsed();
         loaded.predict(slot, move |r| {
             log_timing(pic, converted, started.elapsed());

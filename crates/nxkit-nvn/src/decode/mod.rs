@@ -309,6 +309,11 @@ pub fn tag_address(addr: u64, id: TexId) -> u64 {
     }
 }
 
+/// The GPU address of a record word of a texture: the word without the id tag above it.
+pub fn untag_address(word: u64) -> u64 {
+    word & ((1 << TAG_SHIFT) - 1)
+}
+
 /// The texture of a record word. A tagged word names its texture while that texture lives at the address. Otherwise
 /// the newest texture at the address wins.
 pub fn texture_at(table: &ResourceTable, word: u64) -> Option<TexId> {
