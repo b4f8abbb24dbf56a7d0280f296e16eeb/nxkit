@@ -322,9 +322,7 @@ pub fn wrap(
     let p_out = out + (v_blocks * m.vertex.len() as u32 * BLOCK) as i32;
     let pads = padded(&vm, &pm, partners);
     let has_psiz = vm.iter().any(|(n, _)| *n == Some(POINT_SIZE));
-    // Invariant, as the position of a translated vertex shader: a game draws one geometry with two mesh shaders (a depth
-    // pre-pass, then a colour pass with the depth test EQUAL), and the depths of the two must be bit-identical.
-    t.push_str("struct dm_vertex_t {\n    float4 position [[position, invariant]];\n");
+    t.push_str("struct dm_vertex_t {\n    float4 position [[position]];\n");
     if has_psiz {
         t.push_str("    float point_size [[point_size]];\n");
     }

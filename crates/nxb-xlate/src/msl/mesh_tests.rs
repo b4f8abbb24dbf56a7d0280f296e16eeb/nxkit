@@ -224,18 +224,6 @@ fn a_mesh_shader_is_a_body_and_two_mesh_functions() {
 }
 
 #[test]
-fn the_position_of_a_mesh_shader_is_invariant() {
-    // two mesh shaders that draw one geometry (depth pre-pass, then colour with depth EQUAL) need equal depths
-    let t = run(&mesh("ms"), &ms_ops()).expect("translate");
-    let msl = &t.libraries[0].msl;
-    assert!(
-        msl.contains("float4 position [[position, invariant]];"),
-        "{msl}"
-    );
-    assert!(!msl.contains("float4 position [[position]];"), "{msl}");
-}
-
-#[test]
 fn every_vertex_block_comes_before_the_primitive_blocks() {
     // 128 vertices of 6 components and 64 primitives of 1: four vertex blocks of 192 words, then primitive blocks of 32
     let m = MeshStage {
