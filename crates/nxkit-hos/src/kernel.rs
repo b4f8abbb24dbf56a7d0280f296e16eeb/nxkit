@@ -393,7 +393,7 @@ impl Kernel {
     }
 
     /// Lends the QoS class of `cur` to the owner of a lock while `cur` waits, when the owner has a lower class. The
-    /// Horizon kernel lends the waiter's priority the same way. nxnative does it in `dm/host/hle_thread.c`, case
+    /// Horizon kernel lends the waiter's priority the same way. The engine does it in `dm/host/hle_thread.c`, case
     /// 0x1A (ArbitrateLock), with `pthread_override_qos_class_start_np`. The returned guard ends the override. An
     /// owner that exits meanwhile is safe, see `lend.rs`.
     pub(crate) fn boost_owner(&self, cur: &Arc<Thread>, owner: u32) -> Option<LendGuard> {

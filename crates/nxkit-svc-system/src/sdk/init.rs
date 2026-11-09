@@ -1,7 +1,7 @@
-//! The service initialisation that `nninitInitializeSdkModule` runs. Source: nxnative `dm/host/hle_sdkinit.c`.
+//! The service initialisation that `nninitInitializeSdkModule` runs.
 //!
 //! On a console each call opens a session to a system service. The host takes the call over and opens none.
-//! `nn::fs::InitializeForApplication` is in the list of nxnative too, and the file system crate serves it, so it is
+//! `nn::fs::InitializeForApplication` is in the list of the engine too, and the file system crate serves it, so it is
 //! left out here.
 
 use super::log_once;

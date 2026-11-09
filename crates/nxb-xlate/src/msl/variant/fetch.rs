@@ -7,7 +7,7 @@
 //! `fbK`. The result is one member per output and attachment, switched by `OM_j_k`.
 //!
 //! The entry is `main0_f`. The host asks the library for that name. The body stays `dm_body_main0`.
-//! The upstream tools cut `_bf` from the one compile of the shader. Here `_bf` is a source of its own.
+//! The engine's tools cut `_bf` from the one compile of the shader. Here `_bf` is a source of its own.
 
 use super::fetch_origin::{How, Tracer};
 use crate::msl::abi::Kind;

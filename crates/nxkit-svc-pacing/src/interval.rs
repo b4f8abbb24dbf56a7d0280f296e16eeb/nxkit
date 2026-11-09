@@ -1,8 +1,8 @@
 //! The target frame rate and how the game's frames are held on screen.
 //!
-//! These are the pure rules of nxnative that tie the profile keys `fps_target`, `fps_max` and `present_interval` to the
+//! These are the pure rules of the engine that tie the profile keys `fps_target`, `fps_max` and `present_interval` to the
 //! present path. They are ported from `dm/gfx/nvn/hle_nvn.c` (`fps_high`, `fps_present_cap`, `present_itv`,
-//! `rt_period_ns`) and `dm/host/hle_fpslock.c` of nxnative, read on 2026-11-07. The host reads the title's facts and calls
+//! `rt_period_ns`) and `dm/host/hle_fpslock.c`, read on 2026-11-07. The host reads the title's facts and calls
 //! them once at the start, and `present_vsyncs` on every present.
 
 use crate::notice::Notice;

@@ -1,6 +1,6 @@
 //! `audren:u` and `IAudioDevice` over IPC.
 //!
-//! nxnative has no DSP renderer on the host. The SDK renders in the guest (see `sdk_ren`). Over IPC the manager therefore
+//! The engine has no DSP renderer on the host. The SDK renders in the guest (see `sdk_ren`). Over IPC the manager therefore
 //! answers the work buffer size and the device service, and `OpenAudioRenderer` is not supported. The host says so
 //! loudly (R15) when a game asks.
 

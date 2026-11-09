@@ -127,7 +127,7 @@ An attachment is memoryless when it is not stored, not loaded, not sampled, and 
 
 ## NVN functions
 
-`entries` has the 743 NVN function names (`data/nvn_names.txt`), the 484 that are implemented (`data/nxnative_implemented.txt`), and the table `RECORDED` of the names that this crate handles. The table has the command memory functions and the CPU wait functions too. `FFI_GROUPS` has one row per group of `nxkit-rt` with the names that the group exports.
+`entries` has the 743 NVN function names (`data/nvn_names.txt`), the 484 that are implemented (`data/nvn_implemented.txt`), and the table `RECORDED` of the names that this crate handles. The table has the command memory functions and the CPU wait functions too. `FFI_GROUPS` has one row per group of `nxkit-rt` with the names that the group exports.
 `Coverage::of` takes the function names that one game imports and returns three lists: handled, not handled yet, and not implemented.
 
 ## The command buffer group

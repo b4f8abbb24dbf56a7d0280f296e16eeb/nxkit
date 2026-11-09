@@ -8,7 +8,7 @@
 //! signals the event on every `ticks_per_vsync`th one. At a game rate of 60 on a display of 120 Hz that is every second
 //! tick, and the game steps at the speed of the Switch. When no tick arrives for a few periods (the window is hidden and
 //! the link is paused), the worker keeps the game running at the period of the game's vsync and counts that in
-//! `self_clocked`, so the stall shows in the measurement. The behaviour is the one of the vsync thread of nxnative
+//! `self_clocked`, so the stall shows in the measurement. The behaviour is the one of the vsync thread of the engine
 //! (`dm/host/hle_sdk16.c`, `vsync_thread`), which also falls back to a timer.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};

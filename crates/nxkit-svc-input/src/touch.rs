@@ -1,7 +1,7 @@
 //! The touch screen and the gestures the SDK builds from it.
 //!
 //! The host pushes the touch points of its front end through [`crate::set_touches`]. A game reads them as
-//! `TouchScreenState<N>` and as `GestureState` entries. Both are ported from nxnative (`hle_touch.c`). The panel is
+//! `TouchScreenState<N>` and as `GestureState` entries. Both are ported from the engine (`hle_touch.c`). The panel is
 //! 1280 x 720 and the points of the host are normalized to 0..1 from the top left of the picture.
 //!
 //! A game looks only at the newest state, so a finger that goes down and up between two reads would be lost. Every

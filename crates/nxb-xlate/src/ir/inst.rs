@@ -182,7 +182,7 @@ impl IoVariable {
     pub const VertexIndex: IoVariable = IoVariable(40);
     pub const ViewportIndex: IoVariable = IoVariable(41);
     pub const ViewportMask: IoVariable = IoVariable(42);
-    /// nxnative: at the end, so the others keep their numbers.
+    /// The engine: at the end, so the others keep their numbers.
     pub const HelperInvocation: IoVariable = IoVariable(43);
 }
 

@@ -12,7 +12,7 @@
 //!
 //! Nothing here is a fixed address, so the search holds across the updates of a game.
 //!
-//! Source: `fb_find`, `fb_pair` and `fb_tick` in `dm/host/hle_fpslock.c` of nxnative, read on 2026-11-07 at `88c7e03f`.
+//! Source: `fb_find`, `fb_pair` and `fb_tick` in `dm/host/hle_fpslock.c`, read on 2026-11-07 at `88c7e03f`.
 
 use nxkit_abi::guest::{self, Fault};
 

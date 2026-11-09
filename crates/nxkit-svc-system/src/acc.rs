@@ -1,10 +1,10 @@
 //! The `acc:u0` and `acc:u1` services: `IAccountServiceForApplication`, `IProfile`, `IManagerForApplication` and the
 //! async context of the online calls.
 //!
-//! IDs and layouts are from libnx `acc.c` and switchbrew `Account services`. The values follow nxnative
+//! IDs and layouts are from libnx `acc.c` and switchbrew `Account services`. The values follow the engine
 //! `dm/host/hle_account.c`:
 //! - One local user with the uid [`UID`]. The nickname is `Config::nickname`.
-//! - The profile image is the plain 256x256 JPEG of nxnative (`k_profile_jpeg`, 670 bytes).
+//! - The profile image is the plain 256x256 JPEG of the engine (`k_profile_jpeg`, 670 bytes).
 //! - Every online call fails with `RES_FAIL` (the network service account is out of scope).
 //! - Save data thumbnails are accepted and dropped.
 //!
@@ -22,20 +22,20 @@
 //! `LoadNetworkServiceLicenseKindAsync` fail.
 //!
 //! The async context: 0 `GetSystemEvent` (signalled at once), 1 `Cancel`, 2 `HasDone` (true) and 3 `GetResult` (fails),
-//! as `AsyncContext` of nxnative.
+//! as `AsyncContext`.
 
 use crate::config;
 use crate::util::{Event, RES_FAIL, fail, padded, write_out};
 use nxkit_abi::ipc::{Handled, Request, Response, Service};
 use std::sync::Arc;
 
-/// The uid of the one user, `{0x78626c0000000001, 0x53574e4154495645}` in nxnative.
+/// The uid of the one user, `{0x78626c0000000001, 0x53574e4154495645}` in the engine.
 pub(crate) const UID: [u64; 2] = [0x7862_6c00_0000_0001, 0x5357_4e41_5449_5645];
 
 /// The slots of a uid list in the guest.
 const LIST_SLOTS: usize = 8;
 
-/// The profile image of nxnative: a baseline JPEG of 256x256 pixels.
+/// The profile image of the engine: a baseline JPEG of 256x256 pixels.
 const JPEG_HEAD: [u8; 285] = [
     0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
     0x00, 0x01, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08,
@@ -215,7 +215,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_profile_image_has_the_size_of_nxnative() {
+    fn the_profile_image_has_the_expected_size() {
         let image = profile_jpeg();
         assert_eq!(image.len(), 670);
         assert_eq!(&image[..2], &[0xff, 0xd8]);

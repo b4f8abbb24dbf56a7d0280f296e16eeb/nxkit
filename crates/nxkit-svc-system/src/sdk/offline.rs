@@ -1,10 +1,10 @@
-//! The entries of nxnative `dm/host/hle_offline.c` that need the host: local wireless and Bluetooth LE events, the
+//! The entries of the engine `dm/host/hle_offline.c` that need the host: local wireless and Bluetooth LE events, the
 //! error applet, the web page applets and the album calls that log.
 //!
 //! The events are made with the `event` module, which calls `CreateSystemEvent` of the game, so they live here and
 //! not in `nxkit-svc-offline`. A bound event never fires. The error applet opens a library applet for the length of the
 //! call with `AppletGuard` and logs what the game asks to show. No page and no picture is shown. The web page applets
-//! and the album calls log and fail. Every log line has the text of nxnative.
+//! and the album calls log and fail. Every log line has the text of the engine.
 
 use super::oe_state::AppletGuard;
 use super::{RES_FAIL, log};

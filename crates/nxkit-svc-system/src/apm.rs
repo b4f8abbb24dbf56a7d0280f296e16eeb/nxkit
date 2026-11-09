@@ -4,11 +4,11 @@
 //!
 //! `apm`, `apm:p`: 0 `OpenSession`, 1 `GetPerformanceMode`, 6 `IsCpuOverclockEnabled`.
 //!
-//! `ISession`: 0 `SetPerformanceConfiguration` (logged and ignored, as `SetPerformanceConfiguration` of nxnative
+//! `ISession`: 0 `SetPerformanceConfiguration` (logged and ignored, as `SetPerformanceConfiguration` of the engine
 //! `dm/host/hle_oe.c`), 1 `GetPerformanceConfiguration` (`0x00010001` for the boost mode and `0x00010000` for the normal
-//! mode, as nxnative) and 2 `SetCpuOverclockEnabled`.
+//! mode) and 2 `SetCpuOverclockEnabled`.
 //!
-//! `psm` has no counterpart in nxnative, which has no battery. The host reports a docked console with a full battery:
+//! `psm` has no counterpart in the engine, which has no battery. The host reports a docked console with a full battery:
 //! 0 `GetBatteryChargePercentage` gives 100, 1 `GetChargerType` gives `EnoughPower`, 2 to 6 and 8 to 11 are accepted,
 //! 4 `IsBatteryChargingEnabled` gives false, 12 `GetBatteryVoltageState` gives `Normal`, 13
 //! `GetRawBatteryChargePercentage` gives 100.0, 14 `IsEnoughPowerSupplied` gives true, 15 `GetBatteryAgePercentage`

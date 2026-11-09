@@ -1,7 +1,7 @@
 //! The `set` and `set:sys` services: `ISettingsServer` and `ISystemSettingsServer`.
 //!
 //! IDs and layouts are from libnx `set.c` and `setsys.c` and from switchbrew `Settings services`. The values follow
-//! nxnative `dm/host/hle_oe.c` (`GetDesiredLanguage`, the region of the language) and `dm/host/hle_sdk16.c`
+//! The engine `dm/host/hle_oe.c` (`GetDesiredLanguage`, the region of the language) and `dm/host/hle_sdk16.c`
 //! (`GetDeviceLocationName`).
 //!
 //! `set`: 0 `GetLanguageCode`, 1 and 5 `GetAvailableLanguageCodes`, 2 `MakeLanguageCode`, 3 and 6
@@ -14,7 +14,7 @@
 //! `IsUserSystemClockAutomaticCorrectionEnabled`, 62 `GetDebugModeFlag`, 69 `GetNfcEnableFlag` and 73
 //! `GetWirelessLanEnableFlag`.
 //!
-//! nxnative has no firmware version. The version and its layout come from libnx `setsys.h` and are chosen, see R38.
+//! The engine has no firmware version. The version and its layout come from libnx `setsys.h` and are chosen, see R38.
 
 use crate::config;
 use crate::time;
@@ -73,7 +73,7 @@ pub(crate) fn language_code(tag: &str) -> u64 {
     u64::from_le_bytes(b)
 }
 
-/// The region code of a language, as nxnative `hle_oe.c` maps it: 0 Japan, 1 USA, 2 Europe, 4 Korea or China.
+/// The region code of a language, as the engine `hle_oe.c` maps it: 0 Japan, 1 USA, 2 Europe, 4 Korea or China.
 pub(crate) fn region_code(tag: &str) -> i32 {
     if tag.starts_with("ja") {
         0
@@ -148,7 +148,7 @@ impl Settings {
             15 => rsp.push_bytes(&time::user_context()),
             23 => rsp.push_u32(0),
             35 => rsp.push_u32(1.0f32.to_bits()),
-            // nxnative has no settings database, so every item is missing.
+            // The engine has no settings database, so every item is missing.
             37 | 38 => return fail(rsp, RES_FAIL),
             53 => rsp.push_bytes(&tz::location_name()),
             58 => rsp.push_bytes(&time::network_context()),
@@ -200,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn the_regions_follow_nxnative() {
+    fn the_regions_follow_the_language_map() {
         assert_eq!(region_code("ja"), 0);
         assert_eq!(region_code("ko"), 4);
         assert_eq!(region_code("zh-TW"), 4);

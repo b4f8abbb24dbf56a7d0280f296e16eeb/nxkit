@@ -1,4 +1,4 @@
-//! The network interface service `nifm:u`. The host is offline, as nxnative (`dm/host/hle_net.c`, `SubmitNetworkRequest`
+//! The network interface service `nifm:u`. The host is offline, as the engine (`dm/host/hle_net.c`, `SubmitNetworkRequest`
 //! and `IsNetworkRequestOnHold`): no network is ever available, the first request query after `Submit` is on hold and every later query
 //! is not available.
 //!

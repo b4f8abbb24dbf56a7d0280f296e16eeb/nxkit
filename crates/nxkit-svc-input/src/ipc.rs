@@ -1,4 +1,4 @@
-//! The `hid` IPC service, for the code of the SDK that nxnative does not replace and for games that read the HID
+//! The `hid` IPC service, for the code of the SDK that the engine does not replace and for games that read the HID
 //! shared memory themselves.
 //!
 //! The command IDs and the data layouts are from memory of the switchbrew pages and unverified. A command that is not

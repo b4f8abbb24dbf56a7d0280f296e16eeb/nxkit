@@ -1,4 +1,4 @@
-//! `NvOsDrv*` take-overs. Source: nxnative `dm/host/hle_nvdrv.c`.
+//! `NvOsDrv*` take-overs.
 //!
 //! The host takes over NVN entirely and has no `nvdrv` service. Only the hardware decoder of the SDK movie library
 //! opens `/dev/nvhost-*` directly. Opening a device fails, and every ioctl, mapping and event query returns an error,

@@ -80,7 +80,7 @@ pub(crate) mod used {
     pub(crate) const SPARSE_TILE_LAYOUT: u64 = 0x10;
 }
 
-/// The sizes in bytes that the headers of one NVN version reserve for the objects (`nvn.h` of nxnative). They are
+/// The sizes in bytes that the headers of one NVN version reserve for the objects (`nvn.h`). They are
 /// for the allocations of tests only. The host never zeroes or writes by them, see [`used`].
 #[cfg(test)]
 #[allow(dead_code)]

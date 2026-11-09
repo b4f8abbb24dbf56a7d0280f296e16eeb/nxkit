@@ -1,4 +1,4 @@
-//! The work buffer size of the Horizon audio renderer service. It follows `ar_service_work_size` of nxnative.
+//! The work buffer size of the Horizon audio renderer service. It follows `ar_service_work_size`.
 //!
 //! A game sizes its work buffer for the DSP service. The SDK's own CPU renderer needs a different size, so the take-over
 //! of `GetAudioRendererWorkBufferSize` answers the service's number.

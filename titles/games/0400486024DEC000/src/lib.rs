@@ -4,17 +4,17 @@
 //! family. This module holds what is known to be true for this game. `render_cond`, `tex_flush_upload` and
 //! `tex_dirty_upload` come from agl code, but Breath of the Wild does not set them, so they are here.
 //!
-//! The game builds without nxnative ([`BuildHooks::standalone`]): update v131072, SDK 22.2.8, the modules `main`,
+//! The game builds without the engine ([`BuildHooks::standalone`]): update v131072, SDK 22.2.8, the modules `main`,
 //! `subsdk0` (the SDK's movie library) and `sdk`, read from a `.nup` container or from packages. The run settings are
-//! the values of nxnative's `game.tsv`. The NVN function list is not a hand list: the build reads the names from the
+//! the values of the engine's `game.tsv`. The NVN function list is not a hand list: the build reads the names from the
 //! modules' own strings (an empty list asks for that).
 //!
-//! The rewrite rules are data in `rules/0400486024DEC000.toml`: the frame ratio stub of nxnative's `patches.py`
+//! The rewrite rules are data in `rules/0400486024DEC000.toml`: the frame ratio stub of the engine's `patches.py`
 //! (`MATCH_FRAME_STEP`), for main build `e0f3ccfaf50065ae4ea01eb5aeb13b1a` only. The game steps its time by a frame
 //! ratio, so with the stub the host's frame step keeps game time equal to real time ([`Pacing::Display`]).
 //!
 //! The upscaler choice has no answer yet, so the core default applies. The seed list for the prepare step is
-//! `pso_manifest.tsv` in `seedds/nxnative` `dm/games/0400486024DEC000/`.
+//! `pso_manifest.tsv` in the engine tree `dm/games/0400486024DEC000/`.
 
 use nxtitle::{
     BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime,
@@ -31,22 +31,22 @@ pub struct Oot;
 pub static OOT: Oot = Oot;
 
 const README: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/0400486024DEC000/README.md at c8bfa161",
+    source: "engine tree dm/games/0400486024DEC000/README.md at c8bfa161",
     read: "2026-11-07",
 };
 
 const GAME_TSV: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/0400486024DEC000/game.tsv at 37f076a52168dadc86c679f483ae2e58519b3f7b",
+    source: "engine tree dm/games/0400486024DEC000/game.tsv at 37f076a52168dadc86c679f483ae2e58519b3f7b",
     read: "2026-11-08",
 };
 
 const PATCHES_PY: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/0400486024DEC000/patches.py at 37f076a52168dadc86c679f483ae2e58519b3f7b",
+    source: "engine tree dm/games/0400486024DEC000/patches.py at 37f076a52168dadc86c679f483ae2e58519b3f7b",
     read: "2026-11-08",
 };
 
 /// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The memory
-/// split is nxnative's starting split ("to be measured" in its comment): 256 MB in front, a 4 GB alias region, a
+/// split is the engine's starting split ("to be measured" in its comment): 256 MB in front, a 4 GB alias region, a
 /// 256 MB stack region and the heap region, with the Switch 2's 9 GB application pool. 48 MB of system resource, as
 /// the NPDM declares, so virtual address memory is on. The build row names no display version (`v131072` twice), so
 /// the app shows the number of the update.
@@ -78,7 +78,7 @@ const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(
     "",
     Evidence::Unverified {
         note: "the build lists the NVN function names in the read-only data of the modules: what the game can fetch \
-               through the NVN loader, a superset of what one play route calls. nxnative's usage.tsv of a route \
+               through the NVN loader, a superset of what one play route calls. The engine's usage.tsv of a route \
                checks it.",
     },
 );
@@ -166,7 +166,7 @@ impl BuildHooks for Oot {
                 ("sdk", "1643a838814f9c10c696f930ed681e7f"),
             ],
             nvn_functions: NVN_FUNCTIONS,
-            // the groups of nxnative's `game.tsv`: its split of the game found every file-sourced shader under them
+            // the groups of the engine's `game.tsv`: its split of the game found every file-sourced shader under them
             shader_groups: "/Shader/=shader /Effect/=effect /Lib/=lib /Layout2Shader/=layout /Movie/=movie",
             shader_groups_only: true,
             shader_note: "Ocarina of Time shaders",
@@ -185,11 +185,11 @@ impl BuildHooks for Oot {
     }
 }
 
-/// The game builds without nxnative, so nxkit runs every service.
+/// The game builds without the engine, so nxkit runs every service.
 const NXKIT: Fact<Runtime> = Fact::new(
     Runtime::Nxkit,
     Evidence::Unverified {
-        note: "the game has no nxnative path in a standalone build. A play of the title, the opening and Kokiri \
+        note: "the game has no engine path in a standalone build. A play of the title, the opening and Kokiri \
                Forest on the Mac checks each service.",
     },
 );
@@ -272,7 +272,7 @@ mod tests {
         assert!(text.contains("scope = \"0400486024DEC000\""));
         assert_eq!(text.matches("[[rule]]").count(), 1);
         assert_eq!(text.matches("kind = \"frame-step\"").count(), 1);
-        assert_eq!(text.matches("evidence = \"seedds/nxnative ").count(), 1);
+        assert_eq!(text.matches("evidence = \"engine tree ").count(), 1);
         assert!(text.contains("build = \"e0f3ccfaf50065ae4ea01eb5aeb13b1a\""));
     }
 

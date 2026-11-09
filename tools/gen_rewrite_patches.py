@@ -7,7 +7,7 @@ CUTS, OBS, CAPABILITIES, FRAME_STEP build IDs and MATCH_CUTS rules, the build ro
 SHA-256 of each source file (path relative to dm/tools).
 Games that have a title module (TITLE_MODULES) are left out: their rules are the title module's own data (R2).
 The snapshot is data/rewrite-rules/snapshot.tsv. Make the rule files from it with `nxb rewrite-rules data/rewrite-rules/snapshot.tsv data/rewrite-rules`.
-The patch data comes from the nxnative engine (MIT, see THIRD_PARTY.md and data/rewrite-rules/NOTICE)."""
+The patch data comes from engine (MIT, see THIRD_PARTY.md and data/rewrite-rules/NOTICE)."""
 import glob, hashlib, importlib.util, os, sys, types
 
 engine, out = sys.argv[1], sys.argv[2]

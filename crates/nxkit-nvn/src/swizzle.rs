@@ -1,7 +1,7 @@
 //! A CPU reference for block-linear storage: the address of a byte, and the copy between block-linear and linear rows.
 //!
 //! This is the slow, simple path. It is the reference for tests and the fallback when the GPU cannot read a layout.
-//! The GOB order is the one that `nvn_deswizzle.c` of nxnative uses (`THIRD_PARTY.md`).
+//! The GOB order is the one that `nvn_deswizzle.c` uses (`THIRD_PARTY.md`).
 
 use crate::error::{NvnError, Result};
 use crate::format::format_info;
@@ -311,9 +311,9 @@ mod tests {
         }
     }
 
-    // The hash comes from `nvn_swizzle` of nxnative (commit 90e1b34), run on the same input.
+    // The hash comes from `nvn_swizzle` (commit 90e1b34), run on the same input.
     #[test]
-    fn storage_is_byte_identical_to_nxnative() {
+    fn storage_is_byte_identical_to_reference() {
         let mut d = r8(70, 45);
         d.levels = 4;
         let mut storage = vec![0u8; d.layout().unwrap().size as usize];

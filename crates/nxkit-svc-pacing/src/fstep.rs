@@ -14,8 +14,8 @@
 //! one. The first frames of a probe may be late without failing it, because the clock of the processor needs time to rise
 //! for the shorter deadline.
 //!
-//! The logic is ported from `dm/gfx/nvn/nvn_fstep.h` of nxnative (`nvn_fstep_next`, `nvn_fstep_gpu_slowed`) at the head of
-//! pull request 76, read on 2026-11-07. The thresholds are nxnative's own and come from measurements on its devices
+//! The logic is ported from `dm/gfx/nvn/nvn_fstep.h` (`nvn_fstep_next`, `nvn_fstep_gpu_slowed`) at the head of
+//! pull request 76, read on 2026-11-07. The thresholds are own and come from measurements on its devices
 //! (iPhone and M5 Pro). They are not measured again on nxkit.
 
 /// The longest hold. The interval logic of Breath of the Wild and Tears of the Kingdom uses 1 to 3, so their integer
@@ -359,7 +359,7 @@ impl FrameStep {
 }
 
 /// The GPU time at the shortest hold and at the current hold. The GPU clock follows the hold: on a phone the GPU time of
-/// the same work grew from 14.4 to about 25 ms at hold 2 in nxnative's measurements, and the cost never fitted hold 1 again.
+/// the same work grew from 14.4 to about 25 ms at hold 2 in the engine's measurements, and the cost never fitted hold 1 again.
 #[derive(Clone, Debug, Default)]
 pub struct GpuSlow {
     /// The GPU time at `kmin`, a running mean.

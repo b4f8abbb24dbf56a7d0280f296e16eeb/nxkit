@@ -1,6 +1,6 @@
 //! The `appletOE` and `appletAE` services with `IApplicationProxy`, `ICommonStateGetter` and `ISelfController`.
 //!
-//! IDs and layouts are from libnx `applet.c` and switchbrew `Applet Manager services`. The values follow nxnative
+//! IDs and layouts are from libnx `applet.c` and switchbrew `Applet Manager services`. The values follow the engine
 //! `dm/host/hle_oe.c` (the messages, the focus handling modes, the display size, the performance configuration).
 //!
 //! `appletOE`: 0 `OpenApplicationProxy`. `appletAE`: 350 `OpenSystemApplicationProxy` and 1000 `GetDebugFunctions`.
@@ -181,7 +181,7 @@ impl Service for SelfController {
             9 => return self.launchable.reply(rsp, true),
             11 => s.with(|i| i.notify_operation = bool_at(req, 0)),
             12 => s.with(|i| i.notify_performance = bool_at(req, 0)),
-            // The first flag is the focus notification. nxnative maps the modes 1 and 2 to it.
+            // The first flag is the focus notification. The engine maps the modes 1 and 2 to it.
             13 => s.with(|i| i.notify_focus = bool_at(req, 0)),
             62 => s.with(|i| i.idle_extension = req.u32_at(0).unwrap_or(0)),
             63 => rsp.push_u32(s.with(|i| i.idle_extension)),

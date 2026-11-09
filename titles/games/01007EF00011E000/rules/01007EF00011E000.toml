@@ -13,7 +13,7 @@ offset = 17983244
 old = "6041201e"
 new = "4041201e"
 why = "lower bound of the candidate interval: fmov s0,s11 (2.0) → fmov s0,s10 (1.0)"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
@@ -23,7 +23,7 @@ offset = 17983248
 old = "7f0b0071"
 new = "7f070071"
 why = "lower bound of the candidate interval: cmp w27,#2 → cmp w27,#1"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
@@ -33,7 +33,7 @@ offset = 17983068
 old = "78008052"
 new = "58008052"
 why = "step-down target recorded when stepping up, max(candidate, w24) − 1: mov w24,#3 → mov w24,#2"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
@@ -43,7 +43,7 @@ offset = 17983304
 old = "1f0d0071"
 new = "1f090071"
 why = "step-down target recorded when stepping up: cmp w8,#3 → cmp w8,#2"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
@@ -53,7 +53,7 @@ offset = 17983380
 old = "3f0d0071"
 new = "3f090071"
 why = "stepping down stops at < 3 → at < 2: cmp w9,#3 → cmp w9,#2"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
@@ -63,7 +63,7 @@ offset = 17983772
 old = "c00000b4"
 new = "03000014"
 why = "interval controller always takes the GPU time path (CPU span timing): cbz x0,#0x1126934 → b #0x1126928"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
@@ -73,14 +73,14 @@ offset = 17983860
 old = "c00000b4"
 new = "03000014"
 why = "interval controller always takes the GPU time path (takes max(CPU span, GPU time)): cbz x0,#0x112698c → b #0x1126980"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule]]
 binding = "build"
 kind = "frame-step"
 build = "cd57b23fa4bbad65803d9788c01821ee"
 why = "frame step stub of the build"
-evidence = "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
+evidence = "engine tree dm/games/01007EF00011E000/patches.py at 0f2a772c13e2caed2959d1d1a93f8fe57f44c754, read 2026-11-07"
 
 [[rule.step]]
 op = "label"

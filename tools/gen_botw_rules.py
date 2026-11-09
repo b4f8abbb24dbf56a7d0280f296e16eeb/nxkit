@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Makes the rewrite rules of Breath of the Wild for the title module from nxnative's patches.py at pull request 76.
+"""Makes the rewrite rules of Breath of the Wild for the title module from the engine's patches.py at pull request 76.
 
-Usage: gen_botw_rules.py <nxnative dm/tools> <patches.py> <out.toml> <evidence text>
+Usage: gen_botw_rules.py <the engine dm/tools> <patches.py> <out.toml> <evidence text>
 
 The recorder is the one of nxkit tools/gen_rewrite_patches.py (symbolic addresses of the patch area, encoders that
 take an address replaced by recorders), with one more field in the context, `keys`, which the pull request's stubs fill

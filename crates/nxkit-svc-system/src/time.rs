@@ -1,6 +1,6 @@
 //! The `time:u`, `time:a` and `time:s` services: `IStaticService`, `ISystemClock` and `ISteadyClock`.
 //!
-//! Command IDs are from switchbrew `Time services` and libnx `time.c`. The values follow nxnative
+//! Command IDs are from switchbrew `Time services` and libnx `time.c`. The values follow the engine
 //! (`dm/host/hle_time.c`):
 //! - The user clock is the clock of the host. `Config::fixed_time` pins its start.
 //! - The steady clock is the monotonic clock of the host in seconds, with the source ID [`STEADY_ID`].
@@ -28,7 +28,7 @@ use nxkit_abi::ipc::{Handled, Request, Response, Service};
 use nxkit_abi::kernel::kernel;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// The source ID of the steady clock. It names the clock of the nxkit host, so it differs from the ID of nxnative.
+/// The source ID of the steady clock. It names the clock of the nxkit host, so it differs from the ID of the engine.
 pub(crate) const STEADY_ID: [u8; 16] = *b"nxkit-steady-001";
 
 const MEM_SIZE: u64 = 0x1000;

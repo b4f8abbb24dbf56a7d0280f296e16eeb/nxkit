@@ -2,7 +2,7 @@
 //!
 //! The host front end drives it with [`set_focus`], [`set_operation_mode`] and [`push_message`]. The applet services
 //! read it. The message queue and its event follow `ICommonStateGetter` of libnx (`applet.c`) and the messages of
-//! nxnative (`dm/host/hle_oe.c`): 15 for a focus change, 30 for an operation mode change and 31 for a performance
+//! Horizon (`dm/host/hle_oe.c`): 15 for a focus change, 30 for an operation mode change and 31 for a performance
 //! mode change.
 
 use crate::config;
@@ -74,7 +74,7 @@ pub(crate) fn state() -> &'static State {
             seen: Focus::InFocus,
             applets: 0,
             sdk_event: None,
-            // Without `SetFocusHandlingMode` the game gets focus messages, as in nxnative.
+            // Without `SetFocusHandlingMode` the game gets focus messages.
             notify_focus: true,
             notify_operation: false,
             notify_performance: false,
@@ -181,7 +181,7 @@ impl State {
     }
 
     /// The SDK event `GetNotificationMessageEvent` fills follows the queue as the IPC event does: it is signalled while
-    /// a message waits and cleared when the queue is empty (nxnative `mq_ev_sync` in `dm/host/hle_oe.c`). The state is
+    /// a message waits and cleared when the queue is empty. The state is
     /// read and the event changed under the lock of the state, so a push that races a pop cannot leave the event
     /// cleared over a queued message.
     fn sync_sdk_event(&self) {
@@ -205,7 +205,7 @@ impl State {
     }
 
     /// A library applet opens (`1`) or closes (`-1`), or the focus of the front end changed (`0`). One message 15
-    /// goes out for every change of the focus state that the game sees (`focus_sync` of nxnative `hle_oe.c`).
+    /// goes out for every change of the focus state that the game sees (`focus_sync` `hle_oe.c`).
     pub(crate) fn focus_sync(&self, applets: i32) {
         let notify = self.with(|i| {
             i.applets = i.applets.saturating_add_signed(applets);

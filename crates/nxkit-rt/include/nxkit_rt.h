@@ -28,7 +28,7 @@ void nxkit_init(uint64_t services);
  * NULL also means: the service of the name is not enabled, or nxkit_init was not called. */
 const void *nxkit_hle_find(const char *name);
 
-/* Like nxkit_hle_find, for the functions that need the big host stack (HLE_FORCE_BIG in nxnative).
+/* Like nxkit_hle_find, for the functions that need the big host stack (HLE_FORCE_BIG in the engine).
  * The host runs the function it gets on its big stack. nxkit_hle_find never returns such a function. */
 const void *nxkit_hle_find_big(const char *name);
 

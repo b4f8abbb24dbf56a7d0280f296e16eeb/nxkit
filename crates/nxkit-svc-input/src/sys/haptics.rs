@@ -1,4 +1,4 @@
-//! Core Haptics rumble of one controller, a port of nxnative `haptics_apple.m` (MIT).
+//! Core Haptics rumble of one controller, a port of the engine `haptics_apple.m` (MIT).
 //!
 //! A controller with a left and a right handle gets one engine for each, driven by motor 0 and motor 1. Any other
 //! controller gets one engine that plays both motors mixed. An engine plays a chain of half-second pulses. Their
@@ -179,7 +179,7 @@ impl Haptics {
             let Some(engine) = (unsafe { haptics.createEngineWithLocality(locality) }) else {
                 return false;
             };
-            // SAFETY: the engine is alive. Errors come back as `Err`.
+            // SAFETY: The engine is alive. Errors come back as `Err`.
             let started = unsafe {
                 engine.setPlaysHapticsOnly(true);
                 engine.setAutoShutdownEnabled(false);

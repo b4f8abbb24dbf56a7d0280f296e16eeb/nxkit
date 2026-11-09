@@ -1,4 +1,4 @@
-//! `nn::chat` take-overs (GameChat of the Switch 2 SDKs). Source: nxnative `dm/host/hle_misc.c`, the chat section.
+//! `nn::chat` take-overs (GameChat of the Switch 2 SDKs).
 //!
 //! The host has no GameChat. The library is ready and no chat runs, so nobody is chatting, there is no room, and the
 //! camera and sharing calls succeed and do nothing. The SDK versions go through a service object that `Initialize`

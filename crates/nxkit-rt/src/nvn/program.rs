@@ -2,7 +2,7 @@
 //!
 //! A game gives a program its shaders with `nvnProgramSetShaders`. Each stage is a code address and a control section.
 //! The host does not run the code. The shader step already translated every shader to a Metal function, and the
-//! `_b.json` of the step names it by a key. This group computes the key of each stage, as `nxnative` does:
+//! `_b.json` of the step names it by a key. This group computes the key of each stage, as the engine does:
 //! the first 8 bytes of `sha256(key bytes of the control section || code)`. `nxb-split` computes the same key
 //! (`shaders::skey` and `shaders::key_ctl`).
 //!

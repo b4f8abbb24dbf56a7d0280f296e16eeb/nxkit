@@ -1,4 +1,4 @@
-//! Native images of NVN. Source: nxnative `dm/gfx/nvn/hle_nvn.c`, the section "Native images".
+//! Native images of NVN.
 //!
 //! A decoded video picture is a texture: `nn::gs::NativeImageHandle`, then `nvnNativeImage`, then
 //! `nvnTextureInitializeFromNativeImage` (the movies of Fire Emblem Fortune's Weave, RGBA8). The functions are not in

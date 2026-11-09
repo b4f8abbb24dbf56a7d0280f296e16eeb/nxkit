@@ -1,6 +1,6 @@
-//! `nn::diag` take-overs: the game log and the aborts. Source: nxnative `dm/host/hle_sdk16.c`, section "diag".
+//! `nn::diag` take-overs: the game log and the aborts.
 //!
-//! An abort prints the Result and ends the process with a failure. The call site of nxnative comes from the guest
+//! An abort prints the Result and ends the process with a failure. The call site of the engine comes from the guest
 //! return address, which an export cannot read, so the message has no call site.
 
 use super::{fatal, get_bytes, get_cstr, get_u32, log, zero};

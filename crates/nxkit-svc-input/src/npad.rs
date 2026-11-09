@@ -1,6 +1,6 @@
 //! Npad ids, styles, the state layout and how a controller reading becomes an `NpadState`.
 //!
-//! The rules are those of nxnative `hle_hid.c` (MIT). Only the full key and the handheld style ever report a
+//! The rules are those of the engine `hle_hid.c` (MIT). Only the full key and the handheld style ever report a
 //! controller. The other styles answer with zeros and no attributes.
 
 /// The id of the handheld npad.

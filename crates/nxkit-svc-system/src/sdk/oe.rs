@@ -1,7 +1,7 @@
-//! `nn::oe` and `nn::applet` take-overs. Source: nxnative `dm/host/hle_oe.c`. The notification queue, the focus state
+//! `nn::oe` and `nn::applet` take-overs. The notification queue, the focus state
 //! and the library applet counter are in `oe_state.rs`.
 //!
-//! The functions that nxnative leaves empty because the host has no screenshot, recording or HOME button service are
+//! The functions that the engine leaves empty because the host has no screenshot, recording or HOME button service are
 //! empty here too. The rest answers from the shared state of the applet services and from the `Config`.
 
 use super::{get_bytes, log, log_once, log_once_with, nothing, put_bytes, put_i32, put_u64, zero};
@@ -47,7 +47,7 @@ extern "C" fn inactivity_extended() -> u32 {
     u32::from(state().with(|i| i.idle_extension) != 0)
 }
 
-/// `nn::applet::GetAppletResourceUserId`. The SDK 20 audio renderer aborts on 0 (nxnative `hle_oe.c`).
+/// `nn::applet::GetAppletResourceUserId`. The SDK 20 audio renderer aborts on 0.
 extern "C" fn aruid() -> u64 {
     0x80
 }

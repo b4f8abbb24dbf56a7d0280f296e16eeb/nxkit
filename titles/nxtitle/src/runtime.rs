@@ -1,17 +1,17 @@
-//! Which engine runs each part of a game. nxnative runs everything by default. A family or title moves one service
-//! at a time to nxkit, so the nxkit runtime replaces nxnative step by step.
+//! Which engine runs each part of a game. The engine runs everything by default. A family or title moves one service
+//! at a time to nxkit, so the nxkit runtime replaces the engine step by step.
 
 /// The engine that runs one service.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Runtime {
-    /// The nxnative host at the engine pin.
+    /// The the engine host at the engine pin.
     #[default]
-    Nxnative,
+    Engine,
     /// The nxkit runtime, linked into the host.
     Nxkit,
 }
 
-/// A part of the host that nxkit can take over. The host files are those of nxnative `dm/` at `f25fa956`.
+/// A part of the host that nxkit can take over. The host files are those of the engine `dm/` at `f25fa956`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Service {
     /// `nn::fs` and save sync (`host/hle_fs.c`, `host/save_sync.c`).

@@ -2,15 +2,15 @@
 //! flushes.
 //!
 //! The kernel ends the process through [`Config::process_exit`](crate::kernel::Config::process_exit). The host sets
-//! it to a function that flushes its logs and exits. `Break` follows nxnative (`dm/host/hle_svc.c`, case 0x26): a
+//! it to a function that flushes its logs and exits. `Break` follows the engine (`dm/host/hle_svc.c`, case 0x26): a
 //! reason with bit 31 set is a notification and the call returns. Any other reason ends the process with code 42.
-//! `ExitProcess` and `ReturnFromException` are not in nxnative. They follow Horizon, which ends the process.
+//! `ExitProcess` and `ReturnFromException` are not in the engine. They follow Horizon, which ends the process.
 
 use crate::kernel::Kernel;
 use crate::result::{KResult, KResultOr};
 use crate::sys;
 
-/// The exit code of a `Break` that is not a notification (the code of nxnative).
+/// The exit code of a `Break` that is not a notification (the code of the engine).
 const BREAK_EXIT_CODE: u32 = 42;
 /// The bit of a `Break` reason that says the guest goes on after the call.
 const NOTIFICATION_ONLY: u64 = 0x8000_0000;

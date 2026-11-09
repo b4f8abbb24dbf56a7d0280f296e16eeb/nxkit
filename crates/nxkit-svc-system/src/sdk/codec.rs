@@ -1,4 +1,4 @@
-//! `nn::codec::HardwareOpusDecoder` and `HardwareOpusMultiStreamDecoder` take-overs. Source: nxnative
+//! `nn::codec::HardwareOpusDecoder` and `HardwareOpusMultiStreamDecoder` take-overs. Source: The engine
 //! `dm/host/hle_codec.c`.
 //!
 //! The console decodes Opus in hardware through the `hwopus` service. The host has no such service, and the SDK bundles
@@ -8,7 +8,7 @@
 //!
 //! The C forms keep the software state in a block of the host. The first 8 bytes of the game's decoder object hold the
 //! address of the block, so a decode call finds its state with one load and no table. A finalized block goes to a
-//! free list of 64 slots and the next decoder takes it again. nxnative keeps the state in a map under a lock.
+//! free list of 64 slots and the next decoder takes it again. The engine keeps the state in a map under a lock.
 //! The size of the game's type does not matter, because the type is only an 8-byte handle here.
 //!
 //! A decoder of the SDK 21 asynchronous manager (`codec_mgr.rs`) has the address of its software state in its first 8

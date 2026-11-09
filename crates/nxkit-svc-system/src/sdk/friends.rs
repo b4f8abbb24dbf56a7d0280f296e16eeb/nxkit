@@ -1,4 +1,4 @@
-//! `nn::friends` take-overs. Source: nxnative `dm/host/hle_friends.c`.
+//! `nn::friends` take-overs.
 //!
 //! The friends service is not available. Every call that needs it fails, a `bool` call gives false, and the events are
 //! bound and never fire. The getters of `Friend`, `Profile` and `FriendPresence` and the constructors of the value

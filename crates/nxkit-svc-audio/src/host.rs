@@ -1,6 +1,6 @@
 //! The seams that the host sets, and the calls into it.
 //!
-//! The SDK take-overs of nxnative need things that only the host has: the address of an SDK function by its mangled name,
+//! The SDK take-overs of the engine need things that only the host has: the address of an SDK function by its mangled name,
 //! the binding of a guest `SystemEvent` to a kernel event, guest threads and a way to stop the game. The host fills a
 //! [`Host`] once and passes it to [`set_host`] before the game starts.
 
@@ -10,21 +10,21 @@ use std::sync::OnceLock;
 #[derive(Clone, Copy)]
 pub struct Host {
     /// The address of the SDK's own function with this mangled name (the original, not the take-over), or 0.
-    /// nxnative: `guest_sym`.
+    ///
     pub guest_sym: fn(&str) -> usize,
     /// Binds the guest `SystemEvent` at this address to a new kernel event. The second argument is true when the guest
-    /// object owns the handle. nxnative: `hle_bind_system_event`.
+    /// object owns the handle.
     pub bind_system_event: fn(u64, bool),
-    /// Signals the guest `SystemEvent` at this address. nxnative: `hle_signal_system_event`.
+    /// Signals the guest `SystemEvent` at this address.
     pub signal_system_event: fn(u64),
-    /// Copies the readable handle of a system event for the guest to own. nxnative: `hle_dup_readable_handle`.
+    /// Copies the readable handle of a system event for the guest to own.
     pub dup_readable_handle: fn(u32) -> u32,
     /// Starts a guest thread that runs `entry(arg)` with a priority and a stack size and returns its thread object.
-    /// nxnative: `dm_guest_thread_spawn`.
+    ///
     pub spawn_guest_thread: fn(extern "C" fn(u64), u64, i32, usize) -> u64,
-    /// Waits until the guest thread ends. nxnative: `dm_guest_thread_join`.
+    /// Waits until the guest thread ends.
     pub join_guest_thread: fn(u64),
-    /// Stops the game with this message. It does not return. nxnative: `die`.
+    /// Stops the game with this message. It does not return.
     pub fatal: fn(&str),
 }
 

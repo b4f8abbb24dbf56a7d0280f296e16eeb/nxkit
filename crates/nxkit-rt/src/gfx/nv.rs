@@ -1,4 +1,4 @@
-//! `nv::` take-overs. Source: nxnative `dm/gfx/hle_nv.c`.
+//! `nv::` take-overs.
 //!
 //! `nv::` is the driver glue beneath NVN. It makes the transfer memory and connects to the `nvdrv` service. NVN is
 //! replaced wholesale by [`crate::nvn`], so the layer has nothing to do. The host records what the game hands in:

@@ -1,5 +1,4 @@
-//! Ampere ALU results stored to shared memory so they are kept (upstream `b97f0dc6` and later, encodings
-//! checked there with nvdisasm 13.5 for sm_86).
+//! Ampere ALU results stored to shared memory so they are kept.
 #![cfg(test)]
 
 use super::tensor_tests::msl;

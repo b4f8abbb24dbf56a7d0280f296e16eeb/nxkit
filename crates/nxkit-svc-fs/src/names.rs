@@ -26,7 +26,7 @@ pub(crate) const MAX_NAME: usize = 0x300;
 const CASE_PREFIX: &[u8] = b".dm-case-";
 const INDEX_SHARDS: usize = 16;
 
-/// A path with `\` as `/`. Hosts before nxnative turned the backslash took it as part of a name, so a save written
+/// A path with `\` as `/`. Hosts before the engine turned the backslash took it as part of a name, so a save written
 /// by a game that uses `\` is found under the `/` form.
 pub(crate) fn fwd_slashes(p: &[u8]) -> Cow<'_, [u8]> {
     if p.contains(&b'\\') {

@@ -1,13 +1,13 @@
 //! The telemetry and logging services `prepo:u` and `lm`.
 //!
-//! `prepo:u` (`nn::prepo::detail::ipc::IPrepoService`): nxnative saves a play report and sends nothing
+//! `prepo:u` (`nn::prepo::detail::ipc::IPrepoService`): The engine saves a play report and sends nothing
 //! (`dm/host/hle_offline.c`, `PlayReport::Save`
 //! and `RequestImmediateTransmission`). IDs are from switchbrew `Play Report services`. The save
 //! commands 10100 to 10107 and 10500 and 10501 (`SendReport`), the immediate transmission 10200 and the system
 //! session ID 10400 are answered. 10300 `GetTransmissionStatus` gives 0. The report data is dropped.
 //!
 //! `lm` (`nn::lm::ILogService`): 0 `OpenLogger` returns `ILogger`. 0 `Log` writes the text of the log packet to the
-//! error output of the host. 1 `SetDestination` is accepted. IDs are from switchbrew `Log services`. nxnative has no
+//! error output of the host. 1 `SetDestination` is accepted. IDs are from switchbrew `Log services`. The engine has no
 //! counterpart.
 
 use crate::util::read_in;

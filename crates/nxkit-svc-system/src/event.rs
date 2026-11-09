@@ -5,7 +5,7 @@
 //! same in three steps. It calls the SDK function `CreateSystemEvent` of the game through the `guest_sym` seam, which
 //! makes the kernel event. It reads the write end with `GetWritableHandleOfSystemEvent`. It keeps the pair (guest
 //! address, write end), and signals through `nxkit_abi::kernel::kernel()`. This follows `hle_bind_system_event` and
-//! `hle_signal_system_event` in nxnative `dm/host/hle_thread.c`.
+//! `hle_signal_system_event` in the engine `dm/host/hle_thread.c`.
 
 use crate::seams::guest_sym;
 use crate::sys::call_guest;
@@ -97,7 +97,7 @@ pub(crate) fn guest_alloc(size: u64) -> u64 {
 }
 
 /// A block of guest memory that the game reads and writes and that never moves: the stand-in for the static buffers of
-/// nxnative (`static uint8_t g_ev[0x100]`). The first call of [`Block::addr`] allocates it.
+/// Horizon (`static uint8_t g_ev[0x100]`). The first call of [`Block::addr`] allocates it.
 pub(crate) struct Block(AtomicU64);
 
 impl Block {

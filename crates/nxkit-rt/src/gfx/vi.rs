@@ -1,5 +1,5 @@
 //! `nn::vi` take-overs: display, layer, native window, layer crop, frame history and the HDR and VRR calls.
-//! Source: nxnative `dm/gfx/hle_vi.c`.
+//!
 //!
 //! On a console the game opens the display with the `vi` service, creates a layer and gets the native window handle
 //! of the layer. It gives the handle to `nvnWindowBuilderSetNativeWindow`. The host has no `vi` service, so the
@@ -428,7 +428,7 @@ static MAX_RES_NOTE: AtomicBool = AtomicBool::new(false);
 /// output stays as the game set it. Fire Emblem Fortune's Weave sets 0 first, so the failed call told it 720p. It then
 /// chose its 1280x720 network and rendered at 640x360.
 ///
-/// The answer is 1, 1920x1080, as the screen of a Switch 2 in handheld mode. nxnative answers the largest of the four
+/// The answer is 1, 1920x1080, as the screen of a Switch 2 in handheld mode. The engine answers the largest of the four
 /// that the display holds when the console is docked. nxkit has no fact of the size of the display, so a docked console
 /// answers 1 too.
 extern "C" fn query_display_buffer_max_resolution(out: u64, _disp: u64) -> u32 {

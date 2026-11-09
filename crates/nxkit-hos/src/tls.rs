@@ -1,6 +1,6 @@
 //! The thread-local slot of a guest thread.
 //!
-//! nxnative gives every guest thread one block: an 8 KiB TLS block, a 0x200 byte thread-local region and a 0x400 byte
+//! The engine gives every guest thread one block: an 8 KiB TLS block, a 0x200 byte thread-local region and a 0x400 byte
 //! thread object (`dm/host/thread.c`). The register `tpidrro_el0` points to the region. Its first 0x100 bytes are the
 //! IPC buffer. The SDK reads the id of the thread at offset 0x110 and the address of the thread object at 0x1F8.
 //! Here one slot of 0x4000 bytes holds all three, so a slot is one 16 KiB host page. The slots come from the `tls`

@@ -1,5 +1,5 @@
 //! Rendering of the SDK's CPU renderer, the render thread, and the catch-up of `RequestUpdate`. It follows `hle_audren.c`
-//! of nxnative.
+//! of the engine.
 //!
 //! The SDK renders in the guest: it generates the command list, the CPU processes it, and the host reads the DeviceSink
 //! out of the list. The render thread calls the SDK once per frame and plays the result on the mixer.

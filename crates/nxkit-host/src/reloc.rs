@@ -1,7 +1,7 @@
 //! The relocations of an NSO image (R47a).
 //!
 //! The images of the build still hold module offsets in their pointers, and `base` is only a preferred address,
-//! because dyld slides the library. So the host adds the real base itself, the same as `relocate()` of nxnative does.
+//! because dyld slides the library. So the host adds the real base itself, the same as `relocate()` does.
 //! The plan is computed from the bytes of the image file and from the base, never from the memory of the module. So
 //! applying it twice gives the same result.
 //!

@@ -4,7 +4,7 @@
 //! an address wakes any one. The guest word is never waited on directly. The wait lists are per address in sharded
 //! tables. The lock order is condition variable shard, then lock shard. Nothing takes them the other way round.
 //!
-//! The behaviour follows nxnative's `hle_thread.c` (`ArbitrateLock` line 1029, `WaitProcessWideKeyAtomic` 1044,
+//! The behaviour follows the engine's `hle_thread.c` (`ArbitrateLock` line 1029, `WaitProcessWideKeyAtomic` 1044,
 //! `SignalProcessWideKey` 1070, `WaitForAddress` 1080, `SignalToAddress` 1093) and Horizon's kernel.
 
 use crate::kernel::Kernel;

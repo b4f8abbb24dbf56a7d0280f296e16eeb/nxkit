@@ -9,7 +9,7 @@
 //! - `<aoc>/<index>.img`: each DLC's RomFS (index = DLC title ID - base title ID - 0x1000).
 //!
 //! [`unpack_nup`] writes the RomFS as a folder of files instead (no image), with the shader split in the same pass:
-//! what a build without nxnative puts into the app.
+//! what a build without the engine puts into the app.
 //!
 //! The container is untrusted input: every offset, size and count is checked against the file before use, names
 //! never become host paths unchecked, and every file is checked against its size and SHA-256 when it is read.

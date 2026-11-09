@@ -1,8 +1,8 @@
 //! The list of NVN functions.
 //!
 //! The crate carries two lists as data.
-//! - [`NVN_NAMES`] is every NVN function name from nxnative (`dm/gfx/nvn/names.txt`).
-//! - [`NXNATIVE_IMPLEMENTED`] is the part that nxnative implements in `hle_nvn.c`.
+//! - [`NVN_NAMES`] is every NVN function name from the engine (`dm/gfx/nvn/names.txt`).
+//! - [`NVN_IMPLEMENTED`] is the part that the engine implements in `hle_nvn.c`.
 //!
 //! [`RECORDED`] is the part that this front end handles. Each entry names the [`Op`] that a call turns into.
 //! [`FFI_GROUPS`] is the part that the C ABI of `nxkit-rt` implements without the front end recording anything,
@@ -12,10 +12,10 @@
 
 use std::collections::HashSet;
 
-/// Every NVN function name that nxnative knows.
+/// Every NVN function name that the engine knows.
 pub const NVN_NAMES: &str = include_str!("../data/nvn_names.txt");
-/// The NVN functions that nxnative implements.
-pub const NXNATIVE_IMPLEMENTED: &str = include_str!("../data/nxnative_implemented.txt");
+/// The NVN functions that the engine implements.
+pub const NVN_IMPLEMENTED: &str = include_str!("../data/nvn_implemented.txt");
 
 /// What the front end does for a call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -700,9 +700,9 @@ pub const FFI_GROUPS: &[(&str, &[&str])] = &[
     ),
 ];
 
-/// The functions that nxnative answers with an empty body (`g_nops` in `hle_nvn.c`). They are not in
-/// [`NXNATIVE_IMPLEMENTED`]. A group of `nxkit-rt` may answer them and list them in [`FFI_GROUPS`].
-pub const NXNATIVE_EMPTY: &[&str] = &[
+/// The functions that the engine answers with an empty body (`g_nops` in `hle_nvn.c`). They are not in
+/// [`NVN_IMPLEMENTED`]. A group of `nxkit-rt` may answer them and list them in [`FFI_GROUPS`].
+pub const NVN_EMPTY: &[&str] = &[
     "nvnCommandBufferSetPatchSize",
     "nvnCommandBufferSetDepthBounds",
     "nvnCommandBufferWaitSync",
@@ -740,16 +740,16 @@ pub fn op_of(name: &str) -> Option<Op> {
 pub struct Coverage {
     /// Names that the front end records.
     pub handled: Vec<String>,
-    /// Names that nxnative implements and the front end does not handle yet.
+    /// Names that the engine implements and the front end does not handle yet.
     pub unhandled: Vec<String>,
-    /// Names that nxnative does not implement. A game that calls them has no reference to port from.
+    /// Names that the engine does not implement. A game that calls them has no reference to port from.
     pub unknown: Vec<String>,
 }
 
 impl Coverage {
     /// Splits the names of `list`.
     pub fn of<'a>(list: impl IntoIterator<Item = &'a str>) -> Self {
-        let known: HashSet<&str> = parse_names(NXNATIVE_IMPLEMENTED).collect();
+        let known: HashSet<&str> = parse_names(NVN_IMPLEMENTED).collect();
         let mut c = Self::default();
         let mut seen = HashSet::new();
         for name in list {
@@ -768,9 +768,9 @@ impl Coverage {
         c
     }
 
-    /// The coverage of everything that nxnative implements.
-    pub fn of_nxnative() -> Self {
-        Self::of(parse_names(NXNATIVE_IMPLEMENTED))
+    /// The coverage of everything that the engine implements.
+    pub fn of_implemented() -> Self {
+        Self::of(parse_names(NVN_IMPLEMENTED))
     }
 }
 
@@ -779,15 +779,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_lists_have_the_sizes_of_nxnative() {
+    fn the_lists_have_the_expected_sizes() {
         assert_eq!(parse_names(NVN_NAMES).count(), 743);
-        assert_eq!(parse_names(NXNATIVE_IMPLEMENTED).count(), 484);
+        assert_eq!(parse_names(NVN_IMPLEMENTED).count(), 484);
     }
 
     #[test]
     fn every_implemented_name_is_a_known_name() {
         let all: HashSet<&str> = parse_names(NVN_NAMES).collect();
-        assert!(parse_names(NXNATIVE_IMPLEMENTED).all(|n| all.contains(n)));
+        assert!(parse_names(NVN_IMPLEMENTED).all(|n| all.contains(n)));
     }
 
     #[test]
@@ -801,22 +801,22 @@ mod tests {
     }
 
     #[test]
-    fn every_recorded_name_is_implemented_by_nxnative() {
-        let known: HashSet<&str> = parse_names(NXNATIVE_IMPLEMENTED).collect();
+    fn every_recorded_name_is_implemented_by_reference() {
+        let known: HashSet<&str> = parse_names(NVN_IMPLEMENTED).collect();
         for (name, _) in RECORDED {
-            assert!(known.contains(name), "{name} has no nxnative reference");
+            assert!(known.contains(name), "{name} has no engine reference");
         }
     }
 
     #[test]
-    fn every_ffi_name_is_implemented_by_nxnative_and_listed_once() {
-        let known: HashSet<&str> = parse_names(NXNATIVE_IMPLEMENTED).collect();
+    fn every_ffi_name_is_implemented_by_reference_and_listed_once() {
+        let known: HashSet<&str> = parse_names(NVN_IMPLEMENTED).collect();
         let mut seen = HashSet::new();
         for (group, names) in FFI_GROUPS {
             for name in *names {
                 assert!(
-                    known.contains(name) || NXNATIVE_EMPTY.contains(name),
-                    "{group}: {name} has no nxnative reference"
+                    known.contains(name) || NVN_EMPTY.contains(name),
+                    "{group}: {name} has no engine reference"
                 );
                 assert!(seen.insert(*name), "{name} is in two groups or twice");
             }
@@ -840,9 +840,9 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_nxnative_list_splits_without_loss() {
-        let c = Coverage::of_nxnative();
-        let known: HashSet<&str> = parse_names(NXNATIVE_IMPLEMENTED).collect();
+    fn the_whole_reference_list_splits_without_loss() {
+        let c = Coverage::of_implemented();
+        let known: HashSet<&str> = parse_names(NVN_IMPLEMENTED).collect();
         let ffi_only = FFI_GROUPS
             .iter()
             .flat_map(|(_, names)| names.iter())

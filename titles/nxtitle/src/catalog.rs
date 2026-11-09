@@ -123,7 +123,7 @@ impl Resolved {
         t.into_iter().chain(f)
     }
 
-    /// The engine that runs a service: the title's choice, then the family's, then [`Runtime::Nxnative`].
+    /// The engine that runs a service: the title's choice, then the family's, then [`Runtime::Engine`].
     pub fn runtime(&self, service: Service) -> Runtime {
         self.runtime_hooks()
             .find_map(|h| h.runtime(service))
@@ -154,7 +154,7 @@ impl Resolved {
             .collect()
     }
 
-    /// The data of a build without nxnative: the title's, then the family's.
+    /// The data of a build without the engine: the title's, then the family's.
     pub fn standalone(&self) -> Option<Standalone> {
         self.build_hooks().find_map(|h| h.standalone())
     }

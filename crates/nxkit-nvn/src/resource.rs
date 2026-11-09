@@ -223,7 +223,7 @@ impl ResourceTable {
             // A texture that the GPU wrote keeps its GPU content: games flush whole pools after writing other
             // data into them, and taking the flush as new texels uploads guest bytes that never saw the GPU's
             // writes over them (BotW's terrain height and material arrays, rendered on the GPU each frame,
-            // came out flat). nxnative treats flushes the same way, except for games whose profile asks.
+            // came out flat). The engine treats flushes the same way, except for games whose profile asks.
             if r.end() > lo && (texels || r.residency != Residency::GpuNewer) {
                 self.group_residency.remove(&(r.address.get(), r.desc));
                 r.residency = Residency::GuestNewer;

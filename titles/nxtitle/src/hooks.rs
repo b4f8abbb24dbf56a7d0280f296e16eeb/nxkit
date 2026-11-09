@@ -89,7 +89,7 @@ pub enum Pacing {
     },
 }
 
-/// What a frame shows when the game sets no cap, as `present_interval` of nxnative's `game.tsv`.
+/// What a frame shows when the game sets no cap, as `present_interval` of the engine's `game.tsv`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PresentInterval {
     /// A frame stays on screen for the present interval the game set (`game`). A game that sets none gets one tick.
@@ -98,7 +98,7 @@ pub enum PresentInterval {
     Display,
 }
 
-/// The pacing profile of a game. It carries the keys of nxnative's `game.tsv` that steer the frame step and the
+/// The pacing profile of a game. It carries the keys of the engine's `game.tsv` that steer the frame step and the
 /// presents. Each key has a meaning in `nxkit-svc-pacing` (`LoadConfig`, `PresentSample` and `PresentRule`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaceProfile {
@@ -223,7 +223,7 @@ pub enum LimitRule {
     Reflected(ReflectedLimit),
 }
 
-/// The data `nxb build` needs to make a game without nxnative: no engine folder, no Python and no `dmhost`.
+/// The data `nxb build` needs to make a game without the engine: no engine folder, no Python and no `dmhost`.
 #[derive(Clone, Copy, Debug)]
 pub struct Standalone {
     /// The packed version the data was made for (`1114112` for v1114112). A build of another version is refused.
@@ -251,7 +251,7 @@ pub struct Standalone {
 
 /// Questions of the build: shaders, preparation and rewriter rules.
 pub trait BuildHooks: Sync {
-    /// What a build without nxnative needs. `None`: the title still builds through nxnative.
+    /// What a build without the engine needs. `None`: the title still builds through the engine.
     fn standalone(&self) -> Option<Standalone> {
         None
     }
@@ -299,7 +299,7 @@ pub trait RuntimeHooks: Sync {
         &[]
     }
     /// The engine that runs a service for this game. `None` leaves it to the next layer, and the core default is
-    /// [`Runtime::Nxnative`].
+    /// [`Runtime::Engine`].
     fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
         None
     }

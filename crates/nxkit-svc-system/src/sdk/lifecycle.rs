@@ -1,4 +1,4 @@
-//! The graceful exit of the host. Source: nxnative `dm/host/hle_lifecycle.c` (`dm_host_shutdown_then`).
+//! The graceful exit of the host.
 //!
 //! The host calls [`quit`] when the player closes the game or the process gets SIGTERM. `nn::oe::ExecuteProgram` of the
 //! game ends in it too, when the host has no other program to start.

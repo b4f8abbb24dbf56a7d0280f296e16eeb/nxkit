@@ -141,7 +141,7 @@ fn add_on_content_has_a_size_and_a_mount() {
 }
 
 #[test]
-fn the_queries_answer_as_nxnative() {
+fn the_queries_answer_as_expected() {
     let fs = global();
     let g = Guest::new(0x400);
     let (a, b) = (g.addr() + 0x100, g.addr() + 0x110);

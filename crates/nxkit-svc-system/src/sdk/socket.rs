@@ -1,4 +1,4 @@
-//! The descriptors that work without a network: event descriptors, `Poll`, `Select` and `Close`. Source: nxnative
+//! The descriptors that work without a network: event descriptors, `Poll`, `Select` and `Close`. Source: The engine
 //! `dm/host/hle_net.c`, the socket section (`efd_*`, `dm_sk_poll`, `dm_sk_select`).
 //!
 //! The host creates no socket, so every call that needs a peer fails with -1 and the errno `ENETDOWN` (50, the
@@ -7,9 +7,9 @@
 //! the flags of Horizon: bit 0 reads one at a time (semaphore), bits 1 and 2 never block.
 //!
 //! The counters are atomics. A read or write that does not block touches no lock. A call that has to wait sleeps on a
-//! condition variable that the writer wakes, and a writer takes the lock only when a waiter exists. nxnative takes
+//! condition variable that the writer wakes, and a writer takes the lock only when a waiter exists. The engine takes
 //! one global lock on every call and wakes sleepers in slices of 100 ms. A wait with no descriptor of the host is a
-//! plain sleep. nxnative uses the guest-aware sleep of its thread layer here.
+//! plain sleep. The engine uses the guest-aware sleep of its thread layer here.
 
 use super::{get_i32, get_u16, put_u16};
 use crate::util::lock;
@@ -30,7 +30,7 @@ const POLLOUT: u16 = 4;
 const POLLRDNORM: u16 = 0x40;
 const POLLWRNORM: u16 = 4;
 const POLLNVAL: u16 = 0x20;
-/// The longest wait of one `Poll` call. An endless wait returns after this, as in nxnative, so the thread comes back to
+/// The longest wait of one `Poll` call. An endless wait returns after this, so the thread comes back to
 /// the host.
 const IDLE_MS: i64 = 100;
 

@@ -6,7 +6,7 @@
 //! response there. No kernel lock is held while a session runs, because a service calls back into the kernel (it makes
 //! events, handles and shared memory while it handles a command).
 //!
-//! nxnative does not answer these svcs, its services are linked into the game. They are implemented as Horizon
+//! The engine does not answer these svcs, its services are linked into the game. They are implemented as Horizon
 //! defines them (switchbrew `svc` page, checked on 2026-11-07).
 
 use crate::handle::KObject;

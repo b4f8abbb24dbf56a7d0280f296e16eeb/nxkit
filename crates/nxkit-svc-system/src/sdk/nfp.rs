@@ -1,4 +1,4 @@
-//! `nn::nfc` and `nn::nfp` take-overs. Source: nxnative `dm/host/hle_sdk16.c`, sections "nfc" and "nfp".
+//! `nn::nfc` and `nn::nfp` take-overs.
 //!
 //! The host has no NFC reader. `nn::nfp` reports one device on the connected controller that never finds a tag, as a
 //! console does with no amiibo at hand. Every operation that needs a tag returns the result "tag not found". The

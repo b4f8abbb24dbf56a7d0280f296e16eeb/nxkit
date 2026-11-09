@@ -1,6 +1,6 @@
 //! The parental control services `pctl`, `pctl:a`, `pctl:s` and `pctl:r`.
 //!
-//! IDs and layouts are from libnx `pctl.c` and switchbrew `Parental Control services`. The values follow nxnative,
+//! IDs and layouts are from libnx `pctl.c` and switchbrew `Parental Control services`. The values follow the engine,
 //! which has one player and no parental controls: no restriction is enabled, the safety level is 0, free communication
 //! is never allowed and stereo vision is not permitted (`dm/host/hle_misc.c`, the `nn::pctl` functions
 //! `IsFreeCommunicationAvailable`, `GetStereoVisionRestriction` and `CheckAgcPermissionUnderMinimumAge`).
@@ -14,8 +14,8 @@
 //! `ResetConfirmedStereoVisionPermission` (accepted), 1065 `IsStereoVisionPermitted` (false), 1403 `IsPairingActive`
 //! (false), 1432, 1457 and 1473 the event getters (never signalled) and 1458 `IsPlayTimerAlarmDisabled` (true).
 //!
-//! The permitted flag of 1065 is false because nxnative never confirms stereo vision. A value of true would make a game
-//! that asks first behave differently from nxnative.
+//! The permitted flag of 1065 is false because the engine never confirms stereo vision. A value of true would make a game
+//! that asks first behave differently from the engine.
 
 use crate::util::Event;
 use nxkit_abi::ipc::{Handled, Request, Response, Service};

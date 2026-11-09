@@ -80,7 +80,7 @@ pub(crate) fn stage_app(
     let done = match previous {
         Some(prev) => {
             // the companion app comes from the previous app: keep a copy, the update rewrites it in place
-            let keep = w.join("tmp/nxnative");
+            let keep = w.join("tmp/companion");
             if companion.starts_with(&prev) {
                 std::fs::create_dir_all(w.join("tmp")).map_err(|e| e.to_string())?;
                 std::fs::copy(&companion, &keep).map_err(|e| e.to_string())?;

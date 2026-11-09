@@ -11,9 +11,9 @@
 //! the game's own present interval then ([`Limits::has_engine`]), because presenting at a cap that the game does not step
 //! by runs a fixed-step game fast or slow.
 //!
-//! Source of the mechanism: `lock_find`, `dm_fps_lock_engine` and `dm_fps_lock_tick` in `dm/host/hle_fpslock.c` of nxnative,
+//! Source of the mechanism: `lock_find`, `dm_fps_lock_engine` and `dm_fps_lock_tick` in `dm/host/hle_fpslock.c`,
 //! read on 2026-11-07 at `88c7e03f`. The places are not carried here. A module is `main`. The writes are plain stores that
-//! nxnative makes atomic, so they are not guaranteed to be whole for a thread that reads at the same time (unverified).
+//! The engine makes atomic, so they are not guaranteed to be whole for a thread that reads at the same time (unverified).
 
 pub mod reflect;
 pub mod rows;

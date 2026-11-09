@@ -3,9 +3,9 @@
 //! A fact goes here when every game of the family shows it. A fact that one game of the family does not share
 //! stays in the title modules. Ocarina of Time (`0400486024DEC000`) and Tears of the Kingdom (`0100F2C0115B6000`)
 //! set `render_cond`, `tex_flush_upload` and `tex_dirty_upload`. Breath of the Wild (`01007EF00011E000`) sets none
-//! of them (`seedds/nxnative` `dm/games/*/game.tsv` at `f25fa956`). So they are title facts.
+//! of them (the engine tree `dm/games/*/game.tsv` at `f25fa956`). So they are title facts.
 //!
-//! The frame step is a title fact too. Tears of the Kingdom has a `FRAME_STEP` stub of its own in `seedds/nxnative`
+//! The frame step is a title fact too. Tears of the Kingdom has a `FRAME_STEP` stub of its own in the engine tree
 //! (`dm/games/0100F2C0115B6000/patches.py` at `88c7e03f`, read 2026-11-07), and Ocarina of Time has none. The stubs
 //! patch addresses of one build of one game, so no stub is shared. What the games share is the state page the
 //! stubs read, and that protocol belongs to the loader, in `nxkit-svc-pacing`.
@@ -27,7 +27,7 @@ impl BuildHooks for Agl {
                     name: "agl_ndsr_vr",
                 },
                 Evidence::Unverified {
-                    note: "the upscaler networks are named agl_ndsr_vr in the nxnative OoT README. That their \
+                    note: "the upscaler networks are named agl_ndsr_vr in the engine OoT README. That their \
                            archive path carries this name is not checked.",
                 },
             )

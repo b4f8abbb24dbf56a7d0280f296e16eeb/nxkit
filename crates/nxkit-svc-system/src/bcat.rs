@@ -1,6 +1,6 @@
 //! The content services `bcat:u` and `aoc:u`.
 //!
-//! `bcat:u` (`nn::bcat::ipc::IServiceCreator`): nxnative initialises BCAT as a no-op and fails the delivery cache
+//! `bcat:u` (`nn::bcat::ipc::IServiceCreator`): The engine initialises BCAT as a no-op and fails the delivery cache
 //! mount (`dm/host/hle_offline.c`, `nn::bcat::Initialize` and
 //! `MountDeliveryCacheStorage`). IDs are from switchbrew `BCAT services`. The root
 //! commands 0 `CreateBcatService` returns `IBcatService` and 1 and 2 return `IDeliveryCacheStorageService`.
@@ -8,7 +8,7 @@
 //! (10100, 10101, 20100, 20101, 20300, 20301, 20400, 20401, 20410 and 20500) fail with `RES_FAIL`.
 //! `IDeliveryCacheStorageService` fails 0, 1 and 10, so the game sees an empty delivery cache that cannot be mounted.
 //!
-//! `aoc:u` (`nn::aoc::IAddOnContentManager`): nxnative counts add-on content in a directory of the host, and this
+//! `aoc:u` (`nn::aoc::IAddOnContentManager`): The engine counts add-on content in a directory of the host, and this
 //! service has none (`dm/host/hle_fs.c`, `MountAddOnContent`). IDs are from switchbrew `NS` (the `aoc:u` table).
 //! 2 `CountAddOnContent` and 3 `ListAddOnContent` give 0, 5 `GetAddOnContentBaseId` gives 0, 7 `PrepareAddOnContent` is
 //! accepted, 8 and 10 (the list changed event) give an event that is never signalled and 9

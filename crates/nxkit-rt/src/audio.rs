@@ -6,7 +6,7 @@ use std::ffi::{CString, c_char};
 use std::sync::OnceLock;
 
 /// The callbacks of the host that the audio take-overs need. Every field is required. The names are those of the host
-/// functions that nxnative has (`guest_sym`, `hle_bind_system_event`, `hle_signal_system_event`,
+/// functions that the engine has (`guest_sym`, `hle_bind_system_event`, `hle_signal_system_event`,
 /// `hle_dup_readable_handle`, `dm_guest_thread_spawn`, `dm_guest_thread_join` and `die`).
 #[repr(C)]
 #[derive(Clone, Copy)]

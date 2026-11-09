@@ -1,23 +1,23 @@
 //! The SDK-level take-overs of `dm/host/hle_os.c`: entropy, the environment and `StandardAllocator::Allocate`.
 //!
-//! nxnative lets the SDK's own `nn::os` run on a replaced kernel, so it takes over only four SDK or libc functions
+//! The engine lets the SDK's own `nn::os` run on a replaced kernel, so it takes over only four SDK or libc functions
 //! here. [`exports`] gives them as nxkit exports (R14). Every function is `extern "C"`, takes a pointer as a
 //! guest address and reads or writes guest memory through `nxkit_abi::guest`.
 //!
-//! | Name | nxnative entry | What it does |
+//! | Name | the engine entry | What it does |
 //! | --- | --- | --- |
 //! | `getentropy` | `HLE` | Fills the buffer from the entropy stream. Returns 0, or -1 for a bad buffer. |
 //! | `nn::crypto::GenerateCryptographicallyRandomBytes` | `HLE_FORCE` | The same stream. The csrng service is not opened. |
 //! | `getenv` | `HLE_FORCE` | The game's `game_env` answers its names. The SDK's own `getenv` answers the rest. |
 //! | `nn::mem::StandardAllocator::Allocate(size)` | `HLE_FORCE` | The SDK's own `Allocate`. With `alloc_big_align` a size of 64 KB or more is 64 KB aligned. |
 //!
-//! [`forced_names`] lists the entries that nxnative registers with `HLE_FORCE`: the host resolves every reference to
+//! [`forced_names`] lists the entries that the engine registers with `HLE_FORCE`: the host resolves every reference to
 //! such a name to the export, even where an SDK module defines it. `getentropy` is a plain `HLE`, so it fills only a
 //! reference that no module defines. `Export` has no flag for this, so the host takes it from `forced_names`.
 //!
 //! `getenv` and `Allocate` call the SDK's own function, found by [`crate::guest_sym`]. The lookup must answer with the
 //! SDK's definition and not with the export. When the lookup or the symbol is missing the process aborts with a
-//! message that names it, as nxnative does (R15).
+//! message that names it, as the engine does (R15).
 
 use crate::entropy;
 use crate::guestsym::require;
@@ -93,7 +93,7 @@ pub fn exports() -> Vec<Export> {
     ]
 }
 
-/// The exports that nxnative registers with `HLE_FORCE`: all references to the name go to the export.
+/// The exports that the engine registers with `HLE_FORCE`: all references to the name go to the export.
 pub fn forced_names() -> &'static [&'static str] {
     &[CSRNG, GETENV, ALLOCATE]
 }
@@ -181,7 +181,7 @@ fn allocators() -> &'static Allocators {
 
 /// `void *StandardAllocator::Allocate(size_t size)`. It goes straight to the SDK. With `alloc_big_align` a size of
 /// 64 KB or more goes to `Allocate(size, 0x10000)`, which puts the storage of a GPU memory pool on a 64 KB
-/// boundary (13 Sentinels and Unicorn Overlord, nxnative `hle_os.c`).
+/// boundary (13 Sentinels and Unicorn Overlord, the engine `hle_os.c`).
 extern "C" fn standard_allocate(this: u64, size: u64) -> u64 {
     let fns = allocators();
     let big = STATE.get().is_some_and(|s| s.big_align);

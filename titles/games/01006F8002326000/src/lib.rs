@@ -2,7 +2,7 @@
 //!
 //! The game runs on Nintendo EPD's engine (family `agl`) on NVN, update 3.0.3 (v2228224), SDK 20.5.4. This module
 //! holds the facts of the game that the system services need. The graphics needs of the game (`render_cond` and the
-//! memory layout) are in `seedds/nxnative` `dm/games/01006F8002326000/game.tsv` and are not in this module yet.
+//! memory layout) are in the engine tree `dm/games/01006F8002326000/game.tsv` and are not in this module yet.
 
 use nxtitle::{BuildHooks, Evidence, Fact, RuntimeHooks, Title, TitleId};
 
@@ -13,7 +13,7 @@ pub struct Acnh;
 pub static ACNH: Acnh = Acnh;
 
 const SF_SERVED: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/host/hle_sf.c (sf_served and its header comment) at f25fa956",
+    source: "engine tree dm/host/hle_sf.c (sf_served and its header comment) at f25fa956",
     read: "2026-11-07",
 };
 

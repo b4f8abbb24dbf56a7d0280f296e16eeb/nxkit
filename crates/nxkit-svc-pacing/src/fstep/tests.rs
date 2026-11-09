@@ -1,4 +1,4 @@
-//! Cases of `dm/gfx/tests/t_fstep.c` of nxnative, read on 2026-11-07. Frames are simulated in vsyncs. A frame whose work
+//! Cases of `dm/gfx/tests/t_fstep.c`, read on 2026-11-07. Frames are simulated in vsyncs. A frame whose work
 //! fits its hold stays on screen for the hold. A longer one takes its work, because the next frame starts at once.
 
 use super::*;

@@ -5,7 +5,7 @@
 //! stubs read them. The rewrite data of the title names the place of the page in the module, and the host gives the
 //! address to [`crate::Config::state_page`].
 //!
-//! The layout is the one of `dm/host/loader.c` and the patch tables of nxnative at the head of pull request 76,
+//! The layout is the one of `dm/host/loader.c` and the patch tables of the engine
 //! `0f2a772c13e2caed2959d1d1a93f8fe57f44c754`, read on 2026-11-07. It is listed in `THIRD_PARTY.md`. The offset `0x54`
 //! belongs to the game's stubs, which latch the variable step there. The host never writes it.
 

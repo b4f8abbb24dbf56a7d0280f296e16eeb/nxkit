@@ -1,6 +1,6 @@
 //! What the frame step learns about the device: the CPU parked on slow cores and the thermal cap.
 //!
-//! Ported from `fstep_cpu_slowed` and `thermal_capped` in `dm/gfx/nvn/hle_nvn.c` of nxnative, read on 2026-11-07. The
+//! Ported from `fstep_cpu_slowed` and `thermal_capped` in `dm/gfx/nvn/hle_nvn.c`, read on 2026-11-07. The
 //! host reads the counters and the thermal state of the system and gives them to the service. The service decides.
 
 /// The calm time after which a thermal cap ends (30 s).

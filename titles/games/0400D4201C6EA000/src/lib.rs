@@ -12,7 +12,7 @@ pub struct Mtf;
 pub static MTF: Mtf = Mtf;
 
 const HLE_NVN: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/gfx/nvn/hle_nvn.c at a9d06b6f, nvnCommandBufferBindVertexBuffers",
+    source: "engine tree dm/gfx/nvn/hle_nvn.c at a9d06b6f, nvnCommandBufferBindVertexBuffers",
     read: "2026-11-07",
 };
 

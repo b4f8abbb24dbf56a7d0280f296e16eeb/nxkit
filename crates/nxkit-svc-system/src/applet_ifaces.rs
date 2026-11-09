@@ -1,7 +1,7 @@
 //! The interfaces of `IApplicationProxy` that need no shared state: `IWindowController`, `IAudioController`,
 //! `IDisplayController`, `IDebugFunctions`, `ILibraryAppletCreator` and `IApplicationFunctions` with its storage.
 //!
-//! IDs and layouts are from libnx `applet.c` and switchbrew `Applet Manager services`. The values follow nxnative
+//! IDs and layouts are from libnx `applet.c` and switchbrew `Applet Manager services`. The values follow the engine
 //! `dm/host/hle_oe.c` (`hle_sdk16.c` for the display version).
 //!
 //! `IWindowController`: 1 `GetAppletResourceUserId` gives `0x80`, 10 to 12 and 20 to 21 are accepted.
@@ -10,7 +10,7 @@
 //! are accepted, 1 and 2 give a volume of 1.0.
 //!
 //! `IDisplayController`: 8 `TakeScreenShotOfOwnLayer`, 20 `ClearCaptureBuffer`, 21 `ClearAppletTransitionBuffer` and 28
-//! `TakeScreenShotOfOwnLayerEx` are accepted, as the screenshot calls of nxnative.
+//! `TakeScreenShotOfOwnLayerEx` are accepted, as the screenshot calls of the engine.
 //!
 //! `IDebugFunctions`: 0, 10, 20 and 100 are accepted.
 //!
@@ -33,10 +33,10 @@ use crate::util::{Event, RES_FAIL, fail, padded, result, write_out};
 use nxkit_abi::ipc::{Handled, Request, Response, Service};
 use std::sync::Arc;
 
-/// The ID of the applet resource user of the game, `0x80` in nxnative.
+/// The ID of the applet resource user of the game, `0x80` in the engine.
 const ARUID: u64 = 0x80;
 
-/// The 16 bytes of `GetPseudoDeviceId` of nxnative.
+/// The 16 bytes of `GetPseudoDeviceId`.
 const PSEUDO_DEVICE_ID: [u8; 16] = [
     0x78, 0x62, 0x6c, 0x00, 0x53, 0x57, 0x4e, 0x41, 0x54, 0x49, 0x56, 0x45, 0x31, 0x30, 0x30, 0x31,
 ];

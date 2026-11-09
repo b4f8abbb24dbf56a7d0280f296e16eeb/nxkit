@@ -50,7 +50,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// Whether the engine's framework project has the `DmShellGame` target: a patched engine links the host into each
-/// shell framework there and writes loader `FH`. Upstream's engine has `DmGame` only, loader `FR`.
+/// shell framework there and writes loader `FH`. The engine has `DmGame` only, loader `FR`.
 pub(crate) fn links_host(engine: &Path) -> bool {
     std::fs::read_to_string(engine.join("dm/ios/project-framework.yml"))
         .is_ok_and(|t| has_target(&t, "DmShellGame"))
@@ -90,7 +90,7 @@ fn done<T>(c: Result<T, String>, what: &str) -> Result<(), String> {
     c.map(|_| ()).map_err(|_| die(what))
 }
 
-/// `Gen/framework/dm`: a copy of the generated `dm/` without the fonts. Upstream's script drops `dm/env.txt` and
+/// `Gen/framework/dm`: a copy of the generated `dm/` without the fonts. The engine's script drops `dm/env.txt` and
 /// `dm/launcher.json` of a shell framework's game as well. A shell framework with its own host (`only` and the
 /// `DmShellGame` target) keeps `dm/env.txt`: the shell reads the player's build-time defaults from there, for example
 /// `DM_PROF_TEX_BC_CPU=1`. Returns the framework folder.
@@ -429,7 +429,7 @@ mod tests {
         assert!(fw.join("launcher.json").is_file());
         assert!(!fw.join("font").exists());
         let _ = std::fs::remove_dir_all(&d);
-        // upstream's engine: the file is removed
+        // the engine: the file is removed
         let d = staged("plain", plain, true);
         let fw = d.join("Gen/framework/dm");
         assert!(!fw.join("env.txt").exists());

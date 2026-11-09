@@ -1,4 +1,4 @@
-//! `nn::ro`: loading NRO modules at run time. Source: nxnative `dm/host/hle_ro.c`.
+//! `nn::ro`: loading NRO modules at run time.
 //!
 //! The console connects to the `ldr:ro` service. The host has none, and the SDK `Initialize` reads a null session.
 //! The symbol lookups search the loaded modules through the `guest_sym` seam. `LoadModule`, `UnloadModule` and the
@@ -8,7 +8,7 @@
 //!
 //! The `Module` object of the game holds the module token at +0, the state at +8 (1 when loaded), the image at +0x10
 //! and the buffer at +0x18. NRR files need no check, so registering one succeeds when it has the `NRR0` magic.
-//! The load needs no lock here. The host loader orders its own state, and nxnative's lock around the SDK is the lock
+//! The load needs no lock here. The host loader orders its own state, and the engine's lock around the SDK is the lock
 //! of the host loader in nxkit.
 
 use super::{get_cstr, get_u32, get_u64, log_once, nothing, put_u32, put_u64};

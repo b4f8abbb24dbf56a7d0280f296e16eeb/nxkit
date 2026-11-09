@@ -124,7 +124,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
     let step = match (target, page.is_some()) {
         (0, _) => StepMode::Own,
         // The load-driven step decides the hold from the cost of the frames and writes the step into the state
-        // page, so the game steps by the time each frame stays on screen (nxnative's frame step).
+        // page, so the game steps by the time each frame stays on screen (the engine's frame step).
         (30 | 60, true) => {
             let mut load =
                 LoadConfig::new(target).map_err(|e| HostError::Manifest(e.to_string()))?;

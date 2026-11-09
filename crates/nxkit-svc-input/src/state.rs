@@ -221,7 +221,7 @@ impl Input {
     }
 
     /// The bytes of `n` states of the npad `id`, newest first. Each read advances the sampling number. The
-    /// controller is read once and the entries repeat it, as nxnative does.
+    /// controller is read once and the entries repeat it.
     pub(crate) fn npad_states(&mut self, id: u32, style: u32, n: usize) -> Vec<[u8; STATE_SIZE]> {
         let state = self.npad_state(id, style);
         let newest = self.next_sampling();

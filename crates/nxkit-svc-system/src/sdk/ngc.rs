@@ -1,10 +1,10 @@
-//! `nn::ngc::ProfanityFilter` take-overs. Source: nxnative `dm/host/hle_misc.c`, the ngc section.
+//! `nn::ngc::ProfanityFilter` take-overs.
 //!
 //! The word list lives in a system data save that the host does not mount. Nothing is profanity and nothing is masked.
 //! The class is polymorphic and games call it through its vtable, so the constructor gives the object a host vtable.
 //! The host vtable copies the two header words of the vtable of the game (`_ZTVN2nn3ngc15ProfanityFilterE`). Each slot
 //! that points at a method that this module takes over gets the host function, and any other slot returns 0.
-//! The table ends at the first slot below 0x10000 or after 40 slots. nxnative also copies the slots that point into
+//! The table ends at the first slot below 0x10000 or after 40 slots. The engine also copies the slots that point into
 //! another guest module, and this module does not: a slot of a table in a foreign module has no owner to ask.
 
 use super::{get_u64, log, nothing, put_u64, zero};

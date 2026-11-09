@@ -1,4 +1,4 @@
-//! The SDK take-overs of the SDK 21 `OutputStream` and `InputStream`. They follow `hle_audio.c` of nxnative.
+//! The SDK take-overs of the SDK 21 `OutputStream` and `InputStream`. They follow `hle_audio.c`.
 //!
 //! A stream owns one mixer output. Each write becomes one 16-bit interleaved block that the host owns. The free count
 //! is the capacity less the frames still queued, and the release event of the stream is the one of the output.

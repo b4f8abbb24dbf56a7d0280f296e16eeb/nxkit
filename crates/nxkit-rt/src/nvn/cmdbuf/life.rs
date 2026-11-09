@@ -200,7 +200,7 @@ extern "C" fn get_copy_image_stride(c: u64) -> i64 {
 /// The functions that NVN defines for a hint that the host has no use for. Nothing is recorded.
 extern "C" fn hint(_c: u64) {}
 
-/// The names of the hint functions and the functions that nxnative answers with an empty body.
+/// The names of the hint functions and the functions that the engine answers with an empty body.
 const HINTS: &[&str] = &[
     "nvnCommandBufferSetPatchSize",
     "nvnCommandBufferSetDepthBounds",

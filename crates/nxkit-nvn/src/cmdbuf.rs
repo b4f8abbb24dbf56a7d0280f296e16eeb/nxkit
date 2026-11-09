@@ -60,7 +60,7 @@ impl CommandBuffer {
 
     /// `nvnCommandBufferAddCommandMemory`. The block is at a host address.
     /// Between recordings the block is where the next recording starts. During a recording it is the next block, which
-    /// a record that does not fit goes to. The counter of `used` starts again, as in NVN and in nxnative.
+    /// a record that does not fit goes to. The counter of `used` starts again, as in NVN and in the engine.
     pub fn add_command_memory(&mut self, start: u64, len: u64) -> Result<()> {
         if len < MIN_BLOCK_BYTES || !len.is_multiple_of(8) || !start.is_multiple_of(8) {
             return Err(NvnError::FieldRange("command memory block"));

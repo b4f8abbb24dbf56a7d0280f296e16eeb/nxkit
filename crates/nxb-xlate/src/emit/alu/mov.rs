@@ -137,7 +137,7 @@ pub(crate) fn emit_sreg(ctx: &mut Ctx, sreg: SReg) -> Result<Opd, String> {
 
 fn pixld(ctx: &mut Ctx) {
     let op = InstPixld(ctx.curr_op.raw);
-    // nxnative: PIXLD.MYINDEX reads the index of the sample the fragment runs for
+    // The engine: PIXLD.MYINDEX reads the index of the sample the fragment runs for
     if op.pix_mode() == PixMode::MyIndex
         && op.src_a() == 255
         && op.imm8() == 0

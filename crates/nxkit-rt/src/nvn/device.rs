@@ -17,8 +17,8 @@
 //! The host calls the debug callback of a game never. A game that installs one gets none of its messages.
 //!
 //! `nvnDeviceGetInteger` answers from a table of the values that the Switch driver reports for the NVN 55 API.
-//! The table is the one `nxnative` uses. Items 0 and 1 are the API version of the [`Settings`] and items 0x2E and
-//! 0x30 are the GPU code version of the settings. Item 0x5F (4096) is the one value that `nxnative` marks as unverified.
+//! The table is the one the engine uses. Items 0 and 1 are the API version of the [`Settings`] and items 0x2E and
+//! 0x30 are the GPU code version of the settings. Item 0x5F (4096) is the one value that the engine marks as unverified.
 //!
 //! A game of the Switch 2 gets the table of NVN2 (API 231) instead, up to item 0xA9. NVN2 is compiled into the game's
 //! own `sdk` module and answers most items from constants in one `switch`. The host finds that `switch` once at load
@@ -49,11 +49,11 @@ const TICK_NUM: u128 = 625;
 const TICK_DEN: u128 = 384;
 /// `NVN_DEVICE_INFO_*` items from this number on are not in the table.
 const INFO_TABLE_LEN: usize = 0x60;
-/// The one item above the table that nxnative answers.
+/// The one item above the table that the engine answers.
 const INFO_EXTRA: i32 = 0x67;
 
 /// The values of `NVNdeviceInfo` items 0 to 0x5F. Items 0 and 1 are replaced by the settings.
-/// Item 0x5F is the one value that nxnative does not mark as checked against a device.
+/// Item 0x5F is the one value that the engine does not mark as checked against a device.
 const INFO: [u32; INFO_TABLE_LEN] = [
     55, 15, 14, 65536, 256, 8, 16, 4, 16, 32, 16, 4, 4, 4, 16, 32, //
     32, 256, 256, 4, 8, 512, 256, 2, 256, 4096, 131072, 16, 1536, 1024, 64, 1536, //
@@ -72,7 +72,7 @@ pub const NVN2_API_MINOR: u32 = 39;
 /// The API major of NVN2.
 pub const NVN2_API_MAJOR: u32 = 231;
 
-/// The values of the NVN2 items 0 to 0xA9, from `nxnative` (`g_devinfo2`): the constants of the driver in the `sdk`
+/// The values of the NVN2 items 0 to 0xA9, from the engine (`g_devinfo2`): the constants of the driver in the `sdk`
 /// of SDK 21.4.4, read statically. Items 0 and 1 are the API version 231.39, items 0x2E to 0x31 the GPU code version
 /// 201.0 to 201.20 (0xC9 is the version of the control sections of its shaders). Item 6 is 32 on NVN2. The host keeps
 /// 16 vertex bindings, which all its tables hold. [`RT`] marks an item that the driver reads from the GPU.
@@ -294,7 +294,7 @@ enum Info {
     Value(u32),
     /// An NVN2 item that the driver reads from the GPU at run time. The host answers 0.
     Runtime,
-    /// An item that nxnative does not answer. The host answers 0.
+    /// An item that the engine does not answer. The host answers 0.
     Unknown,
 }
 
@@ -429,7 +429,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_has_the_values_of_nxnative_for_the_first_items() {
+    fn the_table_has_the_expected_values_for_the_first_items() {
         assert_eq!(INFO.len(), 0x60);
         assert_eq!(INFO[3], 65536);
         assert_eq!(INFO[0x1A], 131072);

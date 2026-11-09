@@ -10,7 +10,7 @@
 //! events that are bound to a host system event (`ldn::AttachStateChangeEvent`, `bluetooth::Acquire*Event`), the error
 //! and web applets and the album calls that log through the host, `poll`, `select` and the event descriptors, the
 //! variadic `Fcntl`, and the socket calls that set the `errno` of the thread (`sk_fail`, `GetLastError`, `GetHostEnt*`,
-//! `SetLastErrno`, `Close`). The naked assembly `PlayReport::Send` stays in nxnative.
+//! `SetLastErrno`, `Close`). The naked assembly `PlayReport::Send` stays in the engine.
 
 #![allow(unsafe_code)]
 

@@ -20,7 +20,7 @@
 //! table only. The command buffer group reads a state with [`blend`], [`color`], [`channel_mask`], [`depth_stencil`],
 //! [`multisample`], [`polygon`], [`vertex_attrib`] and [`vertex_stream`].
 //!
-//! Defaults and the bounds of the indexes were checked on 2026-11-07 against `dm/gfx/nvn/hle_nvn.c` of nxnative.
+//! Defaults and the bounds of the indexes were checked on 2026-11-07 against `dm/gfx/nvn/hle_nvn.c`.
 //! The NVN enum values are those of `dm/gfx/nvn/include/nvn.h`.
 
 use super::abi::{AbiResult, Obj, arg_bool, guard, log_once, ret_bool, table};

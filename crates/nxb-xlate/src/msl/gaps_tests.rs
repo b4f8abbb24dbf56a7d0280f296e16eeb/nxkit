@@ -243,7 +243,7 @@ fn the_hmma_helper_runs_on_simdgroup_matrices() {
 }
 
 /// A call outside every chain has no slot bits. It must not write slot 0, where a chain may hold its accumulator
-/// (upstream issue 1537, dotted rows in Ocarina of Time).
+/// (dotted rows in Ocarina of Time).
 #[test]
 fn the_hmma_helper_touches_a_slot_only_for_a_chain() {
     let m = msl(&hmma_sample());
@@ -353,7 +353,7 @@ fn a_shared_store_of_a_spilled_kernel_is_a_device_store() {
 }
 
 /// The helper accumulates in FP32 and rounds D to half once, as Ampere does. Apple's half `simdgroup_matrix` product
-/// rounds after each step and overflows to infinity on a partial sum (upstream issue 1568, speckles in Ocarina of
+/// rounds after each step and overflows to infinity on a partial sum (speckles in Ocarina of
 /// Time on M1 and M2).
 #[test]
 fn the_hmma_helper_accumulates_in_fp32() {

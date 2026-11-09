@@ -4,7 +4,7 @@
 //! the kernel and there is no global lock (R7). A number that this table does not answer returns false, and the
 //! host goes on with its own handler.
 //!
-//! Every svc number that nxnative answers (`dm/host/hle_svc.c` and `dm/host/hle_thread.c`, read on 2026-11-07), and
+//! Every svc number that the engine answers (`dm/host/hle_svc.c` and `dm/host/hle_thread.c`, read on 2026-11-07), and
 //! the numbers added here from Horizon:
 //!
 //! | svc | name | state |
@@ -15,28 +15,28 @@
 //! | 0x04 | MapMemory | done, `memsvc.rs` |
 //! | 0x05 | UnmapMemory | done, `memsvc.rs` |
 //! | 0x06 | QueryMemory | done, `memsvc.rs` |
-//! | 0x07 | ExitProcess | done per Horizon, not in nxnative |
+//! | 0x07 | ExitProcess | done per Horizon, not in the engine |
 //! | 0x08 to 0x12 | threads, sleep, priority, core mask, events | done |
-//! | 0x13 | MapSharedMemory | done per Horizon, not in nxnative |
-//! | 0x14 | UnmapSharedMemory | done per Horizon, not in nxnative |
-//! | 0x15 | CreateTransferMemory | done per Horizon, not in nxnative |
+//! | 0x13 | MapSharedMemory | done per Horizon, not in the engine |
+//! | 0x14 | UnmapSharedMemory | done per Horizon, not in the engine |
+//! | 0x15 | CreateTransferMemory | done per Horizon, not in the engine |
 //! | 0x16 to 0x1D | handles, waits, locks, condition variables | done |
 //! | 0x1E | GetSystemTick | done |
-//! | 0x1F | ConnectToNamedPort | done per Horizon, not in nxnative |
+//! | 0x1F | ConnectToNamedPort | done per Horizon, not in the engine |
 //! | 0x20 | SendSyncRequestLight | not answered, returns false |
-//! | 0x21 | SendSyncRequest | done per Horizon, not in nxnative |
-//! | 0x22 | SendSyncRequestWithUserBuffer | done per Horizon, not in nxnative |
-//! | 0x23 | SendAsyncRequestWithUserBuffer | done per Horizon, not in nxnative |
-//! | 0x24 | GetProcessId | done per Horizon, not in nxnative |
+//! | 0x21 | SendSyncRequest | done per Horizon, not in the engine |
+//! | 0x22 | SendSyncRequestWithUserBuffer | done per Horizon, not in the engine |
+//! | 0x23 | SendAsyncRequestWithUserBuffer | done per Horizon, not in the engine |
+//! | 0x24 | GetProcessId | done per Horizon, not in the engine |
 //! | 0x25 | GetThreadId | done |
 //! | 0x26 | Break | done |
 //! | 0x27 | OutputDebugString | done |
-//! | 0x28 | ReturnFromException | done per Horizon, not in nxnative |
+//! | 0x28 | ReturnFromException | done per Horizon, not in the engine |
 //! | 0x29 | GetInfo | done, `info.rs` |
-//! | 0x2A, 0x2B | FlushEntireDataCache, FlushDataCache | done per Horizon, not in nxnative |
+//! | 0x2A, 0x2B | FlushEntireDataCache, FlushDataCache | done per Horizon, not in the engine |
 //! | 0x2C | MapPhysicalMemory | done, `memsvc.rs` |
 //! | 0x2D | UnmapPhysicalMemory | done, `memsvc.rs` |
-//! | 0x30, 0x31, 0x37 | GetResourceLimit limit, current and peak value | done per Horizon, not in nxnative |
+//! | 0x30, 0x31, 0x37 | GetResourceLimit limit, current and peak value | done per Horizon, not in the engine |
 //! | 0x32 | SetThreadActivity | not answered, returns false. It needs a signal to pause a host thread |
 //! | 0x33 | GetThreadContext3 | not answered, returns false. It needs a paused thread |
 //! | 0x34, 0x35 | WaitForAddress, SignalToAddress | done |
@@ -180,7 +180,7 @@ impl Kernel {
                 set_value(regs, r);
             }
             0x1E => {
-                // The register that carries the tick is unverified. nxnative writes it to x1 with x0 = 0,
+                // The register that carries the tick is unverified. The engine writes it to x1 with x0 = 0,
                 // Horizon gives it in x0. Both are set.
                 let tick = self.system_tick();
                 (regs[0], regs[1]) = (tick, tick);

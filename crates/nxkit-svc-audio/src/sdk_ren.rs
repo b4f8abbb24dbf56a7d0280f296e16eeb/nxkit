@@ -1,4 +1,4 @@
-//! The SDK take-overs of the audio renderer: the work buffer size, open and close. They follow `hle_audren.c` of nxnative.
+//! The SDK take-overs of the audio renderer: the work buffer size, open and close. They follow `hle_audren.c`.
 //!
 //! A game asks for the DSP renderer of the console. The host opens the SDK's CPU renderer in manual mode instead, runs it
 //! on its own render thread and plays what the DeviceSink produces. The game still sees the work buffer size and the

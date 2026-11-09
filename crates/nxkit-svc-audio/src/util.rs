@@ -128,7 +128,7 @@ pub(crate) fn args(a: &[u64]) -> [u64; 8] {
     o
 }
 
-/// The result code of a generic failure. nxnative: `RES_FAIL`.
+/// The result code of a generic failure.
 pub(crate) const RES_FAIL: u32 = 0x2A2;
 
 /// Writes `s` and NUL padding so that `size` bytes at `addr` are set.

@@ -1,6 +1,6 @@
 //! The block-linear layout of a surface: the size and offset of each mip level and layer, and the kernel parameters.
 //!
-//! The layout follows deko3d (`dk_image.cpp`, devkitPro, ISC licence), through its port in `nvn_tex.c` of nxnative.
+//! The layout follows deko3d (`dk_image.cpp`, devkitPro, ISC licence), through its port in `nvn_tex.c`.
 //! `nxkit-nvn` has a second port in `layout.rs`, which this module does not depend on and is tested against.
 //! The rules are:
 //!

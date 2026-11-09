@@ -1,6 +1,6 @@
 //! NVN texture formats: bytes per block, block size and which aspects the format holds.
 //!
-//! The ranges follow `nvn_fmt_bpb` of nxnative (see `THIRD_PARTY.md`). The numbers are the values of `NVNformat`.
+//! The ranges follow `nvn_fmt_bpb` (see `THIRD_PARTY.md`). The numbers are the values of `NVNformat`.
 
 use crate::error::{NvnError, Result};
 

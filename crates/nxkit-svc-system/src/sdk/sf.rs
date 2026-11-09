@@ -1,5 +1,5 @@
 //! `nn::sf::hipc` and the camera context: host sessions for services that the game opens through the SDK. Source:
-//! nxnative `dm/host/hle_sf.c`.
+//! The engine `dm/host/hle_sf.c`.
 //!
 //! A game that links the HIPC client of the SDK connects to a service by name. `ConnectToHipcService` gives a host
 //! session for a name in [`Config::sf_services`](crate::Config::sf_services) and fails with the result of an

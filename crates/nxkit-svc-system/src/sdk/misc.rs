@@ -1,4 +1,4 @@
-//! The error applet, server name resolution and parental controls take-overs. Source: nxnative `dm/host/hle_misc.c`
+//! The error applet, server name resolution and parental controls take-overs. Source: The engine `dm/host/hle_misc.c`
 //! (the err, nsd and pctl sections).
 //!
 //! `err::ShowError` opens the error applet for the time of the call and logs the module and description numbers. A

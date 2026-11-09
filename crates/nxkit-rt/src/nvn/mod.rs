@@ -16,7 +16,7 @@
 //! group must export, and a test per group compares the two.
 //!
 //! A name that the game asks for and that no group exports:
-//! - If `nxnative` knows it, `lookup` gives a function that ends the game with the name when it is called (R24).
+//! - If the engine knows it, `lookup` gives a function that ends the game with the name when it is called (R24).
 //!   A game that probes an optional function and never calls it keeps running.
 //! - If nobody knows it, `lookup` logs the name once and gives NULL.
 //!
@@ -54,7 +54,7 @@ use abi::{fatal, guard};
 /// The longest function name that a game asks for.
 const NAME_MAX: usize = 256;
 
-/// The name under which the game imports the loader. It is a C name, not mangled (`HLE_FORCE("nvnBootstrapLoader")` in nxnative).
+/// The name under which the game imports the loader. It is a C name, not mangled (`HLE_FORCE("nvnBootstrapLoader")` in the engine).
 pub(crate) const BOOTSTRAP_LOADER_NAME: &str = "nvnBootstrapLoader";
 
 /// Every function that the groups export, in the order of the groups.
@@ -78,7 +78,7 @@ pub(crate) fn procs() -> &'static [(&'static str, usize)] {
     })
 }
 
-/// The names that `nxnative` knows, in the order of the stubs.
+/// The names that the engine knows, in the order of the stubs.
 fn known_names() -> &'static [&'static str] {
     static NAMES: OnceLock<Vec<&'static str>> = OnceLock::new();
     NAMES.get_or_init(|| parse_names(NVN_NAMES).collect())
@@ -194,7 +194,7 @@ fn stubs() -> &'static [[extern "C" fn() -> !; 10]; STUB_ROWS] {
 
 /// The address of the function for `name`, or 0.
 ///
-/// A function of a group is returned as it is. A name that `nxnative` knows and no group exports gets its stub.
+/// A function of a group is returned as it is. A name that the engine knows and no group exports gets its stub.
 /// An unknown name is logged once.
 pub(crate) fn lookup(name: &str) -> usize {
     static BY_NAME: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();

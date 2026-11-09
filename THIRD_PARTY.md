@@ -118,7 +118,7 @@ These parts of nxkit are ported or derived from nxnative:
   `crates/nxb-build/src/standalone/` follows the behaviour of `dm/host/hle_fs.c` and `dm/host/hle_misc.c`, not the code.
 - NVN front end. `nxkit-nvn` and the `nvn` modules of `nxkit-rt` port logic and data from `dm/gfx/nvn/nvn_tex.c`, `nvn_tex.h`,
   `dm/gfx/tex/nvn_deswizzle.c`, the format table of `dm/gfx/nvn/`, `names.txt` (`data/nvn_names.txt`), the list of implemented
-  names (`data/nxnative_implemented.txt`), `hle_nvn.c` and `nvn_obj.h`. The guest layouts and the recording path are written anew.
+  names (`data/nvn_implemented.txt`), `hle_nvn.c` and `nvn_obj.h`. The guest layouts and the recording path are written anew.
 - Frame encoder. `nxkit-gpu` takes enum values and tables from `dm/gfx/nvn/nvn_mtl.m` and `nvn.h` (`translate.rs`,
   `format_map.rs`). The code is written anew.
 - Host program. `nxkit-host` ports the approach and the assembly of the nxnative host: the svc gate, the thread entry and leave

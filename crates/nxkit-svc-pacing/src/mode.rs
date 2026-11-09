@@ -6,7 +6,7 @@
 //! so 1 at a target of 60 and 2 at a target of 30. A frame that takes longer than its hold slows the game, as it does on
 //! the Switch.
 //!
-//! The load-driven step ([`StepMode::Load`]) is the step of nxnative's `fstep_tick`. It takes a longer hold when 60 does
+//! The load-driven step ([`StepMode::Load`]) is the step of the engine's `fstep_tick`. It takes a longer hold when 60 does
 //! not hold and one more vsync while the game is behind real time (see [`crate::load`]). The host calls
 //! [`Stepper::present`] once for each presented frame, and that call writes the step.
 

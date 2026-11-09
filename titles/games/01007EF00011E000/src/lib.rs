@@ -5,15 +5,15 @@
 //! holds what is known to be true for this game.
 //!
 //! The game does not need `tex_flush_upload`, `render_cond` or `tex_dirty_upload`. The game's README in
-//! nxnative says so for `tex_flush_upload`, and its `game.tsv` sets none of the three.
+//! The engine says so for `tex_flush_upload`, and its `game.tsv` sets none of the three.
 //!
-//! The game builds without nxnative ([`BuildHooks::standalone`]): the module holds the NVN function list, the
+//! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the NVN function list, the
 //! shader split settings, the two hand-written shader facts and the rewriter rules (`rewrite_rules`). All nine
 //! services run on nxkit.
 //!
 //! The rewrite rules are data in `rules/01007EF00011E000.toml`: the seven interval controller cuts, the frame step
 //! stubs, the render scale, render pool and output size stubs. Each rule names its source file, commit and read
-//! date in its `evidence` key. The rules are the ones of `patches.py` at pull request 76 of `seedds/nxnative`.
+//! date in its `evidence` key. The rules are the ones of `patches.py`.
 //! They describe the build `cd57b23fa4bbad65803d9788c01821ee` of `main` and no other. The frame step protocol
 //! (the state page the stubs read) is in `nxkit-svc-pacing`.
 //!
@@ -33,7 +33,7 @@ pub struct Botw;
 pub static BOTW: Botw = Botw;
 
 const GAME_TSV: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/01007EF00011E000/game.tsv at f25fa956",
+    source: "engine tree dm/games/01007EF00011E000/game.tsv at f25fa956",
     read: "2026-11-07",
 };
 
@@ -41,9 +41,9 @@ const GAME_TSV: Evidence = Evidence::Recorded {
 /// `game_profile.h` (`python3 dm/games/game.py header 01007EF00011E000 <out.h>`, read 2026-11-07) shows each result.
 /// `render_base` (1600x900 docked, 1280x720 handheld) has no field: the host's resolution is its own business.
 ///
-/// These are nxnative's values, kept as the record of the game. nxkit's goals override some of them. R19 sets the
+/// These are the engine's values, kept as the record of the game. nxkit's goals override some of them. R19 sets the
 /// target to 120 fps through the frame step patch in the rewrite rules, so `fps_target 60` and `fps_max 60` do not cap
-/// nxkit. `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys describe nxnative's
+/// nxkit. `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys describe the engine's
 /// translator. R10 and R17 replace them (encoding on its own thread, a whole frame, barriers only where data flows).
 /// The host reader of `game.json` (`nxkit-host`) reads no `settings` object yet, checked on 2026-11-07.
 const SETTINGS: Fact<Settings> = Fact::new(
@@ -116,17 +116,17 @@ const NEEDS: &[Fact<Need>] = &[
 ];
 
 const USAGE: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/01007EF00011E000/usage.tsv at 88c7e03f (the nvn rows, route smoke.tsv quick, 70 s)",
+    source: "engine tree dm/games/01007EF00011E000/usage.tsv at 88c7e03f (the nvn rows, route smoke.tsv quick, 70 s)",
     read: "2026-11-07",
 };
 
 /// The NVN functions of one 70 s route are a lower bound. A function the route did not reach is missing. Two of the
-/// names (`nvnCommandBufferSetDepthBounds` and `nvnCommandBufferSetShaderScratchMemory`) are not in nxnative's
+/// names (`nvnCommandBufferSetDepthBounds` and `nvnCommandBufferSetShaderScratchMemory`) are not in the engine's
 /// implemented list.
 const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(include_str!("../nvn_functions.txt"), USAGE);
 
 const PATCHES_PY: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/01007EF00011E000/patches.py at pull request 76 head \
+    source: "engine tree dm/games/01007EF00011E000/patches.py at \
              0f2a772c13e2caed2959d1d1a93f8fe57f44c754",
     read: "2026-11-07",
 };
@@ -136,12 +136,12 @@ const PATCHES_PY: Evidence = Evidence::Recorded {
 const PACING: Fact<Pacing> = Fact::new(Pacing::Display, PATCHES_PY);
 
 const PROFILE: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/01007EF00011E000/game.tsv, dm/games/game.py (defaults) and \
+    source: "engine tree dm/games/01007EF00011E000/game.tsv, dm/games/game.py (defaults) and \
              dm/host/gen/01007EF00011E000/game_profile.h at 88c7e03f",
     read: "2026-11-07",
 };
 
-/// The keys of the game's profile in nxnative that steer the frame step and the presents. `game.tsv` sets `fps_target 60`
+/// The keys of the game's profile in the engine that steer the frame step and the presents. `game.tsv` sets `fps_target 60`
 /// and `present_snap on`. `fps_hold` (on) and `present_interval` (game) are the defaults of `game.py`, and
 /// `game_profile.h` has them as `DM_GAME_FPS_HOLD 1` and `DM_GAME_PRESENT_DISPLAY 0`.
 ///
@@ -184,7 +184,7 @@ impl BuildHooks for Botw {
 
 const THREAD_NOTE: &str = "the thread names and priorities are guesses from the engine's usual layout and are not \
                            read from the game. Checked on 2026-11-07 and nothing found: the game folder holds NSPs and no \
-                           extracted main NSO, and nxnative logs and notes name no BotW thread (only that the main thread \
+                           extracted main NSO, and the engine logs and notes name no BotW thread (only that the main thread \
                            and two workers on cores 1 and 2 poll one job queue). A thread dump of a run (nxkit-hos \
                            `dump_stats`) or the strings of the extracted main NSO checks them.";
 
@@ -213,18 +213,18 @@ pub fn role_table() -> RoleTable {
     RoleTable::new(&THREAD_ROLES.iter().map(|f| f.value).collect::<Vec<_>>())
 }
 
-/// The game builds without nxnative, so nxkit runs every service. The services' answers follow nxnative's
+/// The game builds without the engine, so nxkit runs every service. The services' answers follow the engine's
 /// (`dm/host/hle_*.c`). The nvn rows and the hle rows of `usage.tsv` list what the game calls.
 const NXKIT: Fact<Runtime> = Fact::new(
     Runtime::Nxkit,
     Evidence::Unverified {
-        note: "the game has no nxnative path in a standalone build. A play of the fixed route on the Mac checks \
+        note: "the game has no engine path in a standalone build. A play of the fixed route on the Mac checks \
               each service.",
     },
 );
 
 const SHARED_FONT: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/host/hle_sdk16.c (font_skip comment) at f25fa956",
+    source: "engine tree dm/host/hle_sdk16.c (font_skip comment) at f25fa956",
     read: "2026-11-07",
 };
 
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pace_profile_is_the_one_of_the_nxnative_profile() {
+    fn the_pace_profile_is_the_one_of_the_game_profile() {
         let Some(p) = BOTW.pace_profile() else {
             return;
         };
@@ -315,7 +315,7 @@ mod tests {
         let text = BOTW.rewrite_rules().unwrap_or_default();
         let rules = text.matches("[[rule]]").count();
         assert_eq!(rules, 8);
-        assert_eq!(text.matches("evidence = \"seedds/nxnative ").count(), rules);
+        assert_eq!(text.matches("evidence = \"engine tree ").count(), rules);
         assert!(text.contains("read 2026-11-07"));
     }
 

@@ -11,7 +11,7 @@
 //!
 //! [`backend::Backend`] is what the front end needs from the GPU backend.
 //!
-//! [`entries`] lists the NVN functions of nxnative and the ones that this crate handles.
+//! [`entries`] lists the NVN functions of the engine and the ones that this crate handles.
 //! Refer to `docs/nxkit-nvn.md` for the design and its limits.
 
 pub(crate) mod actions;

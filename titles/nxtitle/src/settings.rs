@@ -1,4 +1,4 @@
-//! The run settings of a game: what nxnative keeps in `dm/games/<id>/game.tsv` and generates into
+//! The run settings of a game: what the engine keeps in `dm/games/<id>/game.tsv` and generates into
 //! `dm/host/gen/<id>/game_profile.h` (`game.py` `header_one`). `nxb build` writes them into `game.json`.
 //! The defaults are those of `game.py`.
 

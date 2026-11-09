@@ -12,7 +12,7 @@ fn no(code: i32, what: &str, why: &str) -> Result<(), String> {
 
 /// Refuses the options of the engine path.
 pub(crate) fn refuse(a: &Args) -> Result<(), String> {
-    let engine = "belongs to the nxnative engine path. This title builds without nxnative";
+    let engine = "belongs to the engine path. This title builds without the engine";
     if a.engine.is_some() {
         return no(4, "--engine", &format!("({engine}): remove it"));
     }
@@ -20,7 +20,7 @@ pub(crate) fn refuse(a: &Args) -> Result<(), String> {
         return no(
             4,
             "--platform ios",
-            "(an iOS app of a title that builds without nxnative is not built yet): use --platform mac",
+            "(an iOS app of a title that builds without the engine is not built yet): use --platform mac",
         );
     }
     let flags: &[(bool, &str)] = &[

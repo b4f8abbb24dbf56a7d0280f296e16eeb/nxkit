@@ -4,8 +4,8 @@
 //! as data. The host writes the wanted value each frame that the current one differs, because the game may set it again.
 //! A value that is not in the range of a frame rate is left alone. It is not set yet.
 //!
-//! Source: the tick loop of `dm/host/hle_fpslock.c` of nxnative, read on 2026-11-07 at `88c7e03f`. The value kinds and the
-//! ranges are nxnative's. The rows are not, they are in the title modules.
+//! Source: the tick loop of `dm/host/hle_fpslock.c`, read on 2026-11-07 at `88c7e03f`. The value kinds and the
+//! ranges are the engine's. The rows are not, they are in the title modules.
 
 use nxkit_abi::guest::{self, Fault};
 

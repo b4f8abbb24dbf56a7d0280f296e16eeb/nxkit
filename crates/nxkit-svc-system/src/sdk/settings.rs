@@ -1,4 +1,4 @@
-//! `nn::settings` language take-overs. Source: nxnative `dm/host/hle_sdk16.c`, section "settings".
+//! `nn::settings` language take-overs.
 //!
 //! The table is the fixed list of `nn::settings::Language`. A Chinese code of either spelling matches both ids of its
 //! script, because the older games compare with `Chinese` (6) and `Taiwanese` (11) and the newer ones with

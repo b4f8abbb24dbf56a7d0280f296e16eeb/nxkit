@@ -1,7 +1,7 @@
 //! The boot of the SDK on the main guest thread (R57).
 //!
 //! On the console `rtld` and `nn::init::Start` start a game. The host has neither, so it runs their steps itself, in the
-//! order of `dm/host/main.c` of nxnative: `_init_libc0`, `nnosInitialize`, `_init_libc1`, `nninitInitializeSdkModule`,
+//! order of `dm/host/main.c` of the engine: `_init_libc0`, `nnosInitialize`, `_init_libc1`, `nninitInitializeSdkModule`,
 //! `SetHostArgc` and `SetHostArgv`, `nninitStartup`, `_init_libc2`, the `DT_INIT` function of each module, then `nnMain`.
 //! The `entry` of `game.json` is not used. The offset 0 of a module is its header and holds no code.
 //!
@@ -24,7 +24,7 @@ const INIT_STARTUP: &str = "nninitStartup";
 const INIT_LIBC2: &str = "_init_libc2";
 const NN_MAIN: &str = "nnMain";
 
-/// The one argument of the game, as nxnative passes it.
+/// The one argument of the game, as the engine passes it.
 const ARGV0: &str = "game";
 
 /// A guest function that the boot calls, with its address.

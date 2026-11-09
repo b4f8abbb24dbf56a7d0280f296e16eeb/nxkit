@@ -1,4 +1,4 @@
-//! The eight controller slots, a port of nxnative `pad_slots.h` (MIT).
+//! The eight controller slots, a port of the engine `pad_slots.h` (MIT).
 //!
 //! A slot keeps the name of its last controller after the controller left. A controller that comes back gets its old
 //! slot, so player numbers stay where they were.

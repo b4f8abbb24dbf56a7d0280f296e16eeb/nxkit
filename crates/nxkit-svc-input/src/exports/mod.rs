@@ -1,6 +1,6 @@
 //! The `nn::hid` functions that the game gets in place of the SDK's own (R14, R20).
 //!
-//! The list is that of nxnative `hle_hid.c` (MIT). Each function reads the controllers at the moment of the call
+//! The list is that of the engine `hle_hid.c` (MIT). Each function reads the controllers at the moment of the call
 //! and answers. A pointer argument is a guest address. A guest read or write that fails is ignored, because an
 //! export must not panic.
 

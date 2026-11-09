@@ -1,4 +1,4 @@
-//! The `nn::time` functions of the time service that the SDK asks for through its session. Source: nxnative
+//! The `nn::time` functions of the time service that the SDK asks for through its session. Source: The engine
 //! `dm/host/hle_time.c` (the periodic benefit claim and the two `detail::` questions).
 //!
 //! The claim of a periodic benefit (Tetris 99 2.5.0's daily reward) aborts in the SDK unless the time service session

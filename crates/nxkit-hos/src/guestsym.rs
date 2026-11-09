@@ -1,4 +1,4 @@
-//! The lookup of the SDK's own functions by mangled name (nxnative `guest_sym`).
+//! The lookup of the SDK's own functions by mangled name.
 //!
 //! Some take-overs call the function they replace, or call other SDK functions, because the SDK's `nn::os` runs
 //! unchanged on the kernel (`StandardAllocator::Allocate`, `getenv`, the host-made guest threads and the system

@@ -1,5 +1,5 @@
 //! The entropy of the process: one stream for `getentropy`, the csrng take-over and `GetInfo` `RandomEntropy`
-//! (nxnative `dm_entropy64`).
+//!.
 //!
 //! The stream is random by default. With [`set_deterministic`] it is a fixed-seed splitmix64 stream, so two runs
 //! of a replay get the same bytes.

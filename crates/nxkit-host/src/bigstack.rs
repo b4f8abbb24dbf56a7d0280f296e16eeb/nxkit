@@ -11,7 +11,7 @@
 //! arguments are carried over, so a function with more than eight integer or eight floating-point arguments, or a
 //! variadic one, cannot be listed.
 //!
-//! The assembly follows `dm/host/hle_bigstack.c` of nxnative (see THIRD_PARTY.md).
+//! The assembly follows `dm/host/hle_bigstack.c` (see THIRD_PARTY.md).
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};

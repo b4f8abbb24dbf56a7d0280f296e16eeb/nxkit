@@ -1,9 +1,9 @@
-//! `nxb build` for a title that has a title module: the run folder and the app without nxnative (H6, R21, R48 to R50).
+//! `nxb build` for a title that has a title module: the run folder and the app without the engine (H6, R21, R48 to R50).
 //!
 //! The stages, in order: unpack the packages (base, update, DLC) or the NUP container, put the RomFS into the run
 //! folder, rewrite the modules, write `game.json`, link and sign `nxgame.dylib`, make the shaders and the pipeline
 //! archive, and close the bundle. A NUP gives the RomFS as a folder in the extract's one pass (with the shader split),
-//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. A title without a module still builds through nxnative, and this path leaves it alone ([`run`] answers
+//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. A title without a module still builds through the engine, and this path leaves it alone ([`run`] answers
 //! `false`).
 
 mod bundle;
@@ -267,7 +267,7 @@ fn mib(n: u64) -> String {
 /// What a dry run prints.
 fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
     let mut s = format!(
-        "nxb build (no nxnative): {} [{:016X}] v{}\n",
+        "nxb build (no engine): {} [{:016X}] v{}\n",
         t.name, t.id, t.st.version
     );
     s.push_str(&format!("  base:      {}\n", b.base.display()));
@@ -298,11 +298,11 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<bool, String> {
     if src.source == Source::Dump {
         return Err(crate::exit::fail(
             4,
-            "unsupported: a build without nxnative reads packages (NSP or XCI) or a NUP container, not a dump folder",
+            "unsupported: a build without the engine reads packages (NSP or XCI) or a NUP container, not a dump folder",
         ));
     }
     if std::env::var_os("NXB_ENGINE").is_some() {
-        p.say("NXB_ENGINE is set and is not used: this title builds without nxnative");
+        p.say("NXB_ENGINE is set and is not used: this title builds without the engine");
     }
     let version = t.st.version;
     let updates: Vec<(u32, PathBuf)> = match version {

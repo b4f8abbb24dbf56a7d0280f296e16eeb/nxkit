@@ -281,7 +281,7 @@ pub(super) fn ldsm(ctx: &mut Ctx) -> R {
     };
     // The warp often stores the rows with no BAR before the LDSM. The Switch runs a warp's shared memory accesses in
     // order, Metal only through a barrier. A SIMD-group barrier before the reads lets the stores land, and one after keeps
-    // the next stores away until every lane has read (upstream PR 1376, dotted streaks in Ocarina of Time's movies).
+    // the next stores away until every lane has read (dotted streaks in Ocarina of Time's movies).
     ctx.add_op(I::SubgroupBarrier, StorageKind::None, None, &[]);
     // In a compute shader one MatrixLoad a matrix, which the tensor pass lowers to the same per-lane code once it knows
     // whether the HMMAs it feeds read their A where it reads. The barriers bracket that code too.

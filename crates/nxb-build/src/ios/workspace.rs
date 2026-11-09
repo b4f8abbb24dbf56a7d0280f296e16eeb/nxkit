@@ -247,7 +247,7 @@ mod tests {
         assert!(st.success());
     }
 
-    /// Oracle: the engine's `register_project` and this one, on a new workspace, on Xcode's file, a second game and a
+    /// Oracle: The engine's `register_project` and this one, on a new workspace, on Xcode's file, a second game and a
     /// rename: `contents.xcworkspacedata` and the workspace settings equal after every step.
     #[test]
     fn register_equals_the_reference_script() {

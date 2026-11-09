@@ -1,5 +1,5 @@
 # Hand-written translation facts, merged over the generated rows of the shader split: key <TAB> facts JSON
-# Source: seedds/nxnative dm/games/01007EF00011E000/shader_facts_manual.tsv at 88c7e03f
+# Source: engine tree dm/games/01007EF00011E000/shader_facts_manual.tsv at 88c7e03f
 # The game has no PC version, so the translator has no fragment output types and declares every output float. Metal refuses a pipeline whose float output meets an integer attachment.
 # 8e2cc2671cae6020 (agl_common BAHS@0x453f0 in Bootup_Graphics.pack, pixel): the BC4 block encoder. It writes 8-byte blocks through an RGBA16UI view into a 32x32 BC4 texture
 8e2cc2671cae6020	{"fout":{"0":"uint"}}

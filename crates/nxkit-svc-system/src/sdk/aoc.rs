@@ -1,11 +1,11 @@
-//! `nn::aoc` take-overs: the add-on content (DLC) list. Source: nxnative `dm/host/hle_misc.c` (the aoc section).
+//! `nn::aoc` take-overs: the add-on content (DLC) list.
 //!
 //! The owned indices are the numeric sub directories of `Config::aoc_dir` (each one is the RomFS of one DLC, the title
 //! id is the base id plus 0x1000 plus the index) or `NAME.img` files. They are fixed at the first query. Without
 //! `aoc_dir` no add-on content is owned. A directory and its `.img` replacement report the same DLC once. The list
 //! holds every index from 1 to 2000.
 //!
-//! nxnative registers `CountAddOnContent` and `ListAddOnContent` with `HLE_FORCE_BIG`, because the first query lists the
+//! The engine registers `CountAddOnContent` and `ListAddOnContent` with `HLE_FORCE_BIG`, because the first query lists the
 //! directory from a guest thread that can have little stack left. [`big_stack`] gives these two, and
 //! [`exports`] gives the others.
 
@@ -110,7 +110,7 @@ table! {
     "_ZN2nn3aoc25ShowAddOnContentLostErrorEPKii" => lost_error,
 }
 
-/// The two take-overs that nxnative registers with `HLE_FORCE_BIG`.
+/// The two take-overs that the engine registers with `HLE_FORCE_BIG`.
 pub(super) fn big_stack() -> Vec<Export> {
     vec![
         Export::new(
@@ -147,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn the_big_stack_exports_are_the_two_of_nxnative() {
+    fn the_big_stack_exports_are_the_two_take_overs() {
         let names: Vec<&str> = big_stack().iter().map(|e| e.name).collect();
         assert_eq!(
             names,

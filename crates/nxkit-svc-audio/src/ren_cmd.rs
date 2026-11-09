@@ -2,7 +2,7 @@
 //!
 //! The SDK renders in the guest. After it processed a frame, the host reads the DeviceSink command from the command list,
 //! mixes the sink's input buffers down to stereo and resamples 32 kHz to 48 kHz. The command layouts of the SDK versions
-//! differ, so the layout is worked out once from the first full command list. This follows `capture` of nxnative.
+//! differ, so the layout is worked out once from the first full command list. This follows `capture`.
 
 use crate::sys::mem;
 use std::f64::consts::PI;

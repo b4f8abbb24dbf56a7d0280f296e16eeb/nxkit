@@ -1,4 +1,4 @@
-//! `nn::oe`, `nn::time` and `nn::vi` take-overs of the SDK 16 file of nxnative. Source: nxnative
+//! `nn::oe`, `nn::time` and `nn::vi` take-overs of the SDK 16 file of the engine. Source: The engine
 //! `dm/host/hle_sdk16.c`, the `oe`, `time` and `vi` sections. The `pl` and `fontll` sections are in `font.rs`, `ec` in
 //! `shop.rs`, `nfc` and `nfp` in `nfp.rs`, `diag` in `diag.rs` and `settings` in `settings.rs`.
 //!

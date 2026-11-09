@@ -1,11 +1,11 @@
 //! The `fs` service of nxkit: `fsp-srv` over IPC and the `nn::fs` functions at SDK level.
 //!
 //! The game reaches the file system in two ways. The `nn::fs` functions of the SDK are replaced by the functions of
-//! [`exports()`] and [`big_stack_exports()`], as `dm/host/hle_fs.c` does in nxnative (R14). The IPC interfaces of
-//! [`services()`] answer the SDK code that nxnative does not replace (R35).
+//! [`exports()`] and [`big_stack_exports()`], as `dm/host/hle_fs.c` does in the engine (R14). The IPC interfaces of
+//! [`services()`] answer the SDK code that the engine does not replace (R35).
 //!
 //! The romfs is a folder that the build merged from the base, update and DLC layers. Its files are mapped and read
-//! without a copy. The saves have the layout of nxnative on disk (R13).
+//! without a copy. The saves have the layout of the engine on disk (R13).
 //!
 //! The host calls [`init`] once, before the guest runs, and hands [`exports()`], [`big_stack_exports()`] to the
 //! loader and [`services()`] to `nxkit_ipc::Ipc::new`.
@@ -100,7 +100,7 @@ pub fn exports() -> Vec<Export> {
     sdk::exports()
 }
 
-/// The `nn::fs` functions that nxnative registers with `HLE_FORCE_BIG`. A path buffer is sized by `PATH_MAX` and an
+/// The `nn::fs` functions that the engine registers with `HLE_FORCE_BIG`. A path buffer is sized by `PATH_MAX` and an
 /// open takes several KB of stack, while a game's save thread can have 8 KB, so the host runs these on a big stack.
 pub fn big_stack_exports() -> Vec<Export> {
     sdk::big_exports()

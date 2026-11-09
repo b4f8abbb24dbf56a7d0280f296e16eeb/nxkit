@@ -1,8 +1,8 @@
-//! `nn::jit`: code generation at run time. Source: nxnative `dm/host/hle_jit.c`.
+//! `nn::jit`: code generation at run time.
 //!
 //! On a console the jit service loads the JIT plugin of the game, an NRO, into a process of its own. It maps the code
 //! memory of the game read-write there and read and execute in the game, and calls the plugin entry points. Only Super
-//! Mario 3D All-Stars (Super Mario 64) uses it. nxnative takes over the whole API and runs the plugin on the calling
+//! Mario 3D All-Stars (Super Mario 64) uses it. The engine takes over the whole API and runs the plugin on the calling
 //! thread.
 //!
 //! The host of nxkit has no part of what that needs: it loads no NRO (the `nro_*` seams stop the game), it has no code

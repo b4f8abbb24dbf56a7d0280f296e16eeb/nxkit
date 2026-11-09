@@ -1,13 +1,13 @@
 //! `GetInfo` and the resource limit calls.
 //!
-//! The info types and their values follow nxnative (`dm/host/hle_svc.c`, case 0x29, the enum `I_*`) and the Horizon
-//! numbers in switchbrew's `svc` page (checked on 2026-11-07). The handle argument is not checked, as in nxnative.
+//! The info types and their values follow the engine (`dm/host/hle_svc.c`, case 0x29, the enum `I_*`) and the Horizon
+//! numbers in switchbrew's `svc` page (checked on 2026-11-07). The handle argument is not checked.
 //! Every type that the SDK asks for at start is answered from the memory model. Type 9 gives a resource limit handle,
-//! as Horizon does. Nxnative does not name types 10 and 19, and it answers every unknown number with zero and a log.
+//! as Horizon does. Engine does not name types 10 and 19, and it answers every unknown number with zero and a log.
 //! Here they return `InvalidEnumValue`, and the log names the number (R15).
 //!
 //! The resource limits are an approximation. `PhysicalMemory` has the application pool as its limit and `Threads` has
-//! 96, the limit that nxnative reads for an application from `pm` (Atmosphere `pm_spec.cpp`). The other resources
+//! 96, the limit that the engine reads for an application from `pm` (Atmosphere `pm_spec.cpp`). The other resources
 //! answer `NotSupported`. The peak value is the current value (unverified, nothing in the SDK reads it).
 
 use crate::handle::{CURRENT_PROCESS, KObject};

@@ -1,12 +1,12 @@
 //! The SDK-level take-overs of the system crate (R38a).
 //!
-//! nxnative replaces `nn::*` functions of the game SDK with host functions. This crate does the same for the system
+//! The engine replaces `nn::*` functions of the game SDK with host functions. This crate does the same for the system
 //! services, as `Export`s with `extern "C"` functions. An export wins over the SDK function, so the SDK code never
 //! runs and never opens the IPC session. The IPC services of this crate answer the SDK code that no export replaces.
-//! Every export of this crate is a forced take-over (`HLE_FORCE` of nxnative): it applies even when the module of the
+//! Every export of this crate is a forced take-over (`HLE_FORCE`): it applies even when the module of the
 //! game defines the symbol itself.
 //!
-//! One module follows each source file of nxnative `dm/host/`. The module docs name the file and the functions.
+//! One module follows each source file of the engine `dm/host/`. The module docs name the file and the functions.
 //! The calling convention is the one of `nxkit_abi::export`: narrow integers are `u32`, pointers are `u64` guest
 //! addresses, and the functions read and write guest memory through `nxkit_abi::guest`.
 
@@ -94,7 +94,7 @@ pub(crate) fn all() -> Vec<Export> {
     v
 }
 
-/// The take-overs that nxnative registers with `HLE_FORCE_BIG`: the host runs them on a bigger stack.
+/// The take-overs that the engine registers with `HLE_FORCE_BIG`: the host runs them on a bigger stack.
 pub(crate) fn big_stack() -> Vec<Export> {
     aoc::big_stack()
 }
@@ -106,7 +106,7 @@ pub(super) extern "C" fn ok() -> u32 {
     0
 }
 
-/// Returns the failure result of nxnative.
+/// Returns the failure result of the engine.
 pub(super) extern "C" fn fail() -> u32 {
     RES_FAIL
 }
@@ -167,7 +167,7 @@ fn check<T>(r: Result<T, guest::Fault>) -> T {
     }
 }
 
-/// Writes a `u8` to `addr`. A null address is skipped, as nxnative skips a null output pointer.
+/// Writes a `u8` to `addr`. A null address is skipped, as the engine skips a null output pointer.
 pub(super) fn put_u8(addr: u64, v: u8) {
     if addr != 0 {
         check(guest::write_u8(addr, v));

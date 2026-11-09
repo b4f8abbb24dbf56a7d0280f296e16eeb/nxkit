@@ -5,7 +5,7 @@ use nxkit_abi::ipc::{Buffer, BufferKind, Handled, Request, Response};
 use nxkit_abi::kernel::kernel;
 use std::sync::{Mutex, MutexGuard};
 
-/// The failure result of nxnative (`RES_FAIL` in `dm/host/hle.h`). It answers every call that needs a network or an
+/// The failure result of the engine (`RES_FAIL` in `dm/host/hle.h`). It answers every call that needs a network or an
 /// online account, and every request that the host cannot serve.
 pub(crate) const RES_FAIL: u32 = 0x2A2;
 

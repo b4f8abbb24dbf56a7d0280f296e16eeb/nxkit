@@ -23,7 +23,7 @@ const ENOENT: i32 = 2;
 const EEXIST: i32 = 17;
 const ENOTDIR: i32 = 20;
 
-/// The result code of a host error, as `err_res` of nxnative gives it: a missing entry or a part of the path that is
+/// The result code of a host error, as `err_res` gives it: a missing entry or a part of the path that is
 /// not a folder is "path not found", an existing entry is "path exists", all else is a failure.
 pub(crate) fn from_io(e: &io::Error) -> u32 {
     match e.raw_os_error() {
@@ -40,7 +40,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn host_errors_map_as_in_nxnative() {
+    fn host_errors_map_to_result_codes() {
         assert_eq!(
             from_io(&io::Error::from_raw_os_error(ENOENT)),
             PATH_NOT_FOUND

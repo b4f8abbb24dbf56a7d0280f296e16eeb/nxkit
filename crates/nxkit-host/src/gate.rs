@@ -11,7 +11,7 @@
 //! and returns to the caller of `enter`. The dispatcher runs on the gate stack, so no Rust frame of the host
 //! thread is skipped and the frames it skips on the gate stack hold no value with a destructor.
 //!
-//! The assembly follows `dm/host/entry.S` of nxnative (see THIRD_PARTY.md).
+//! The assembly follows `dm/host/entry.S` (see THIRD_PARTY.md).
 
 use std::cell::Cell;
 use std::sync::OnceLock;

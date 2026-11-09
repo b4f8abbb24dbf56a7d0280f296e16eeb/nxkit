@@ -4,7 +4,7 @@
 //! A request in a domain has a 16-byte domain header before that: the type (1 send, 2 close), the number of objects
 //! passed in, the size of the `SFCI` header plus the data, the object ID and a token. The IDs of the objects passed
 //! in follow the data. A reply in a domain has `{ number of objects, 3 words }` before the `SFCO` header and the IDs
-//! of the objects returned after the data. Checked on 2026-11-07 against `dm/host/hle_sf.c` of nxnative, which parses
+//! of the objects returned after the data. Checked on 2026-11-07 against `dm/host/hle_sf.c`, which parses
 //! the same headers.
 
 /// The `SFCI` magic as a little-endian word.

@@ -1,4 +1,4 @@
-//! The SDK take-overs of `nn::audio::AudioOut` and `AudioIn`. They follow `hle_audio.c` of nxnative.
+//! The SDK take-overs of `nn::audio::AudioOut` and `AudioIn`. They follow `hle_audio.c`.
 //!
 //! The game calls these functions in place of the SDK. The SDK would reach the `audout:u` service. Here the calls land on
 //! the mixer directly. A guest `AudioOut` object is mapped to a mixer slot by its address.

@@ -1,4 +1,4 @@
-//! The load-driven frame step: the port of `fstep_tick` of nxnative (R30a).
+//! The load-driven frame step: the port of `fstep_tick` (R30a).
 //!
 //! The host calls [`LoadStepper::present`] once for each presented frame, before the period of the frame is taken. The time
 //! since the last frame's start (`shown`) and the cost of the frame decide how long the frame stays on screen (the hold)
@@ -18,7 +18,7 @@
 //! - the reports that the CPU or the GPU runs slow for a reason other than heat.
 //!
 //! Source: `fstep_tick`, `fps_step_cap`, `high_cap_tick` and the present part of `nvnQueuePresentTexture` in
-//! `dm/gfx/nvn/hle_nvn.c` of nxnative, read on 2026-11-07 at `88c7e03f`. The thresholds are nxnative's own.
+//! `dm/gfx/nvn/hle_nvn.c`, read on 2026-11-07 at `88c7e03f`. The thresholds are own.
 
 use nxkit_abi::guest::Fault;
 

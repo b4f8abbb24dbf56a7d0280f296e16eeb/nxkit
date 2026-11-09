@@ -1,4 +1,4 @@
-//! Host-initiated guest threads (nxnative `dm/host/hle_guestthread.c`).
+//! Host-initiated guest threads.
 //!
 //! Host background work that calls the game's own allocator or locks (a movie player, an audio worker) needs a full
 //! SDK thread context. [`GuestThread::spawn`] calls the SDK's `nn::os::CreateThread` and `StartThread` with a host
@@ -6,9 +6,9 @@
 //! `nn::os` locks work in the closure as for any game thread.
 //!
 //! It must run on a guest thread, because the SDK creates the thread through the svc gate. It is not exposed to the
-//! game. The SDK functions come from [`crate::guest_sym`]. A missing one is an error that names it (nxnative dies).
+//! game. The SDK functions come from [`crate::guest_sym`]. A missing one is an error that names it (it ends the game).
 //!
-//! Not ported: `dm_thread_mark_host`. It marks the thread as not one of the game's, so that nxnative's start
+//! Not ported: `dm_thread_mark_host`. It marks the thread as not one of the game's, so that the engine's start
 //! handoff and core-peer waits skip it. The core rules here (`gate.rs`) keep no such wait.
 
 use crate::guestsym::require;

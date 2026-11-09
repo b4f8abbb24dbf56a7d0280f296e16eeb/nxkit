@@ -1,5 +1,5 @@
 //! The friend service `friend:u`. The console is offline, so the friend list is empty and no notification arrives
-//! (nxnative `dm/host/hle_offline.c`, `GetFriendList` and `CheckFriendListAvailability`, and `dm/host/hle_friends.c`).
+//!.
 //!
 //! IDs are from switchbrew `Friend services` and libnx `friends.c`.
 //!

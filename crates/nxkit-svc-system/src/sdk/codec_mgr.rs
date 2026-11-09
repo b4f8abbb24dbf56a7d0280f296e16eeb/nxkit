@@ -1,4 +1,4 @@
-//! The SDK 21 hardware Opus decoder manager. Source: nxnative `dm/host/hle_codec.c`, checked on 2026-11-08.
+//! The SDK 21 hardware Opus decoder manager.
 //!
 //! The asynchronous interface over `hwopus` has a manager that owns decoders and a pool of I/O buffers. The game
 //! enqueues one packet per call, then calls `ExecuteHardwareOpusDecoderDecoding` on each manager once per audio frame.

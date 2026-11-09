@@ -1,4 +1,4 @@
-//! `nn::account` take-overs. Source: nxnative `dm/host/hle_account.c`.
+//! `nn::account` take-overs.
 //!
 //! The host has one fixed local user. The online accounts fail, and the completion event of an asynchronous context
 //! fires at once. The nickname comes from the configuration.

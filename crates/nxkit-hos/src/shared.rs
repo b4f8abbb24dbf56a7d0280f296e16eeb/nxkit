@@ -8,7 +8,7 @@
 //!
 //! Transfer memory is memory of the game that a service may use. `CreateTransferMemory` locks the pages, so the game
 //! cannot unmap or reprotect them. The host keeps them accessible, because the service reads and writes them through
-//! the host address. Closing the handle unlocks them. Neither kind of memory is found in nxnative. Both follow the
+//! the host address. Closing the handle unlocks them. Neither kind of memory is found in the engine. Both follow the
 //! Horizon rules (switchbrew `svc` page, Atmosphere `svc_results.hpp`, checked on 2026-11-07).
 
 use crate::handle::{KObject, SharedMemory, TransferMemory};

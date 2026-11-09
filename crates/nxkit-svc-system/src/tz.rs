@@ -1,10 +1,10 @@
 //! `ITimeZoneService` of the `time:*` services, and the calendar conversion behind it.
 //!
-//! Commands (IDs of switchbrew `Time services`, behavior of nxnative `dm/host/hle_time.c`):
+//! Commands (IDs of switchbrew `Time services`, behavior of the engine `dm/host/hle_time.c`):
 //! - 0 `GetDeviceLocationName`, 2 `GetTotalLocationNameCount`, 3 `LoadLocationNameList`: the one location of the host.
-//! - 4 `LoadTimeZoneRule`: leaves the rule buffer untouched, as nxnative does. The conversion below never reads it.
+//! - 4 `LoadTimeZoneRule`: leaves the rule buffer untouched. The conversion below never reads it.
 //! - 100 `ToCalendarTime`, 101 `ToCalendarTimeWithMyRule`, 201 `ToPosixTime`, 202 `ToPosixTimeWithMyRule`: convert with
-//!   the local time of the host (`localtime_r`, `mktime`), as nxnative does.
+//!   the local time of the host (`localtime_r`, `mktime`).
 //!
 //! Command 1 `SetDeviceLocationName` is unknown: a game cannot set the zone of the host.
 
@@ -21,7 +21,7 @@ pub(crate) const CALENDAR_LEN: usize = 0x20;
 
 /// The name of the zone of the host, for example `Europe/Berlin`.
 ///
-/// The name comes from `TZ`, else from the target of the link `/etc/localtime`, else it is `UTC`. nxnative gives the
+/// The name comes from `TZ`, else from the target of the link `/etc/localtime`, else it is `UTC`. The engine gives the
 /// abbreviation `tzname[0]` here, which is not a location name.
 fn name_text() -> &'static str {
     static NAME: OnceLock<String> = OnceLock::new();

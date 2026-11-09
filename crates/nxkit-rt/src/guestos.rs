@@ -2,7 +2,7 @@
 //! game that the take-overs need, and the entropy mode.
 //!
 //! The functions themselves are `nxkit_hos::exports()`, and the host finds them with `nxkit_hle_find`. A name in
-//! `nxkit_hos::forced_names()` must win over the SDK's own definition, as `HLE_FORCE` does in nxnative.
+//! `nxkit_hos::forced_names()` must win over the SDK's own definition, as `HLE_FORCE` does in the engine.
 
 use nxkit_hos::{OsConfig, entropy, init_os, set_guest_sym};
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn nxkit_kernel_os_init(config: *const NxkitOsConfig) -> i
 }
 
 /// Switches the random bytes of `getentropy`, the csrng export and `GetInfo` type 11 to a fixed stream (non-zero)
-/// or back to random bytes (zero). This is the `DM_DETCLOCK` mode of nxnative. Call it before the game starts.
+/// or back to random bytes (zero). This is the `DM_DETCLOCK` mode of the engine. Call it before the game starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn nxkit_kernel_set_deterministic(on: u32) {
     entropy::set_deterministic(on != 0);

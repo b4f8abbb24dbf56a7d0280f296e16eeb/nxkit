@@ -1,4 +1,4 @@
-//! `nn::ec` take-overs: the shop applet pages, the purchased-item queue and the shop service accessor. Source: nxnative
+//! `nn::ec` take-overs: the shop applet pages, the purchased-item queue and the shop service accessor. Source: The engine
 //! `dm/host/hle_misc.c` (the ec section) and `dm/host/hle_sdk16.c` (`ShowShopApplicationInformationForUpgrade`).
 //!
 //! The host has no shop. A `ShowShop*` call opens the library applet for the time of the call, logs it and returns, as

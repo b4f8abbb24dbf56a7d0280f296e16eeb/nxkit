@@ -216,7 +216,7 @@ pub(crate) fn packages(
     Ok((s.images.len(), s.split_unsupported.clone()))
 }
 
-/// A NUP for a build without nxnative: `extract/v<version>/` with the ExeFS, the control data, the RomFS as a folder
+/// A NUP for a build without the engine: `extract/v<version>/` with the ExeFS, the control data, the RomFS as a folder
 /// (`romfs/`, no image) and each DLC's RomFS as `aoc/<index>/`, and the shader split in the same pass. Returns the
 /// summary and, when the split needs the game's own decoder, why.
 pub(crate) fn nup_loose(

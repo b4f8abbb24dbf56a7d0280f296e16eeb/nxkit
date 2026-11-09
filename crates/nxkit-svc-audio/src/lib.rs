@@ -1,6 +1,6 @@
 //! The audio service of the nxkit host.
 //!
-//! It serves a game the way nxnative does: at SDK level. [`exports`] replaces the `nn::audio` functions of AudioOut,
+//! It serves a game the way the engine does: at SDK level. [`exports`] replaces the `nn::audio` functions of AudioOut,
 //! AudioIn, the output stream, the audio device and the audio renderer. The IPC services [`services`] (`audout:u` and
 //! `audren:u`) answer SDK code that the take-overs do not replace.
 //!
@@ -71,7 +71,7 @@ pub fn exports() -> Vec<Export> {
     lists().0
 }
 
-/// The take-overs that nxnative registers as `HLE_FORCE_BIG`. The host runs them on a big stack.
+/// The take-overs that the engine registers as `HLE_FORCE_BIG`. The host runs them on a big stack.
 pub fn big_stack_exports() -> Vec<Export> {
     lists().1
 }

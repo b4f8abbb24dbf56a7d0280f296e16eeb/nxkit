@@ -7,15 +7,15 @@
 //!
 //! ## How the fields were checked (2026-11-07)
 //!
-//! nxnative has no hardware header code. Its texture pool is a table in the host (`dpool` in `hle_nvn.c`), and
+//! The engine has no hardware header code. Its texture pool is a table in the host (`dpool` in `hle_nvn.c`), and
 //! `nvn_texdesc` in `nvn_tex.h` plus `view_t` and `samp_par` in `nvn_obj.h` hold the same values as the fields here.
 //! No deko3d or Mesa header (`cl9097tex.h`, `clb197tex.h`) exists on the development machine. A search with Spotlight and
 //! in `~/repos/me` found none. So no bit position is checked against hardware.
 //! Every bit position is unverified against hardware, and nothing in nxkit needs it to be.
 //!
-//! Checked against `dm/gfx/nvn/include/nvn.h` and `nvn_tex.h` of nxnative:
+//! Checked against `dm/gfx/nvn/include/nvn.h` and `nvn_tex.h` of the engine:
 //!
-//! | Field | Bits | Largest value in nxnative | Result |
+//! | Field | Bits | Largest value in the engine | Result |
 //! |---|---|---|---|
 //! | format, view format | 8 | `NVNformat` 156 | fits |
 //! | target, view target | 4 | `NVN_TEXTURE_TARGET_BUFFER` 10 | fits, and the discriminants of [`Target`] equal the NVN values |

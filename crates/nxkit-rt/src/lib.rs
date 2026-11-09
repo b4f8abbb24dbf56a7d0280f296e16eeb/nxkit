@@ -120,7 +120,7 @@ pub struct Entry {
     pub service: Service,
     /// The address of the function.
     pub addr: usize,
-    /// True when the function needs the big host stack (`HLE_FORCE_BIG` in nxnative). The host finds it with
+    /// True when the function needs the big host stack (`HLE_FORCE_BIG` in the engine). The host finds it with
     /// [`nxkit_hle_find_big`] and runs it on that stack.
     pub big_stack: bool,
 }
@@ -359,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn the_fs_functions_of_nxnative_need_the_big_stack() {
+    fn the_fs_functions_need_the_big_stack() {
         let all = Service::all_bits();
         let name = b"_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci";
         assert_eq!(find_in(entries(), all, name), None);

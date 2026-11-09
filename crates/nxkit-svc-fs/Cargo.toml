@@ -1,6 +1,6 @@
 [package]
 name = "nxkit-svc-fs"
-description = "The fs service of nxkit: fsp-srv over IPC and the nn::fs functions at SDK level, with the romfs mapped and the saves in the nxnative layout"
+description = "The fs service of nxkit: fsp-srv over IPC and the nn::fs functions at SDK level, with the romfs mapped and the saves in the engine's layout"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

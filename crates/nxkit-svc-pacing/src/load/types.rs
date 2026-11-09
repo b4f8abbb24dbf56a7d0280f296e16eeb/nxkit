@@ -117,7 +117,7 @@ pub enum HoldWhy {
     Trial,
 }
 
-/// A change that nxnative writes to its log. The host logs it.
+/// A change that the engine writes to its log. The host logs it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// The cap changed.

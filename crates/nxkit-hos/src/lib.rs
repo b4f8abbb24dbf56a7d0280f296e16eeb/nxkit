@@ -11,7 +11,7 @@
 //!
 //! With [`Config::memory`] the kernel keeps its own model of the host's reservation (heap, stack and alias regions,
 //! shared and transfer memory, the thread-local regions) and answers the memory svcs, `GetInfo` and the IPC svcs.
-//! The SDK's own `nn::os` runs on this kernel. [`exports`] lists the few SDK and libc functions that nxnative
+//! The SDK's own `nn::os` runs on this kernel. [`exports`] lists the few SDK and libc functions that the engine
 //! replaces on top of it, and [`set_guest_sym`] is the seam through which they reach the SDK's own functions.
 //!
 //! `unsafe` is in the module `sys` only.

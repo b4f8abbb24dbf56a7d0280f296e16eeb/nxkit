@@ -1,9 +1,9 @@
-//! `nn::mii::Database`: the Mii database of the console. Source: nxnative `dm/host/hle_mii.c`.
+//! `nn::mii::Database`: the Mii database of the console.
 //!
 //! The host database holds no Mii of the player. It serves the six default Miis (three male, three female), reports
 //! itself empty, and cancels the Mii editor. `GetIndex` and `UpdateLatest` fail with "not found", and `Import` and
 //! `Export` fail because they need the test mode of the console. The `CharInfo` layout is 0x58 bytes. The offsets are
-//! from the `nn::mii::CharInfo` layout in nxnative (`mii_charinfo`). The default Mii has the face values of that
+//! from the `nn::mii::CharInfo` layout in the engine (`mii_charinfo`). The default Mii has the face values of that
 //! table, the nickname "no name", and the create ID of a UUID. A default Mii has a fixed ID per index and a random
 //! Mii has a new one each time.
 //!

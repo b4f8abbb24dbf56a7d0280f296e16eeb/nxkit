@@ -14,7 +14,7 @@ fn check_default_state(d: &Definitions) -> Result<(), String> {
 }
 
 /// The register of the depth output: four registers for each render target with any component enabled, then the
-/// sample mask register (upstream `473c9026`). Counting the enabled components agrees only when every enabled target
+/// sample mask register. Counting the enabled components agrees only when every enabled target
 /// has all four.
 pub fn depth_register(omap_targets: i32) -> i32 {
     let targets = (0..8)

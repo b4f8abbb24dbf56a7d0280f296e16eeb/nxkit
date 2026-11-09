@@ -14,7 +14,7 @@
 //! is a multiply, and A read by an LDSM is loaded from shared memory where the LDSM read it. That last one needs the
 //! one shared memory besides the scratch. With none or several, A goes through the block. C and D are in the call's
 //! own matrices, and a slot is read only for a chain's C and written only for its D. A call outside every chain has no
-//! slot bits and must not touch slot 0 (upstream issue 1537, dotted rows in Ocarina of Time).
+//! slot bits and must not touch slot 0 (dotted rows in Ocarina of Time).
 //!
 //! Every HMMA this helper stands for is `HMMA.16816.F16` (an F32 destination takes the shuffle emulation instead), and
 //! the hardware rounds D to half after each one, also between the steps of a chain. A slot therefore holds D already
@@ -25,7 +25,7 @@
 //! A and B are half matrices. C, D and the slots are float matrices: each product uses half A and B with an FP32
 //! accumulator, and D is rounded to half once, when the lanes read it from the B and C words of the block. Ampere also
 //! sums in FP32. Apple's half product rounds after each step and overflows to infinity on a partial sum, which gave
-//! speckles in Ocarina of Time on M1 and M2 (upstream issue 1568). On an M2 Max the FP32 accumulator costs about 1 %.
+//! speckles in Ocarina of Time on M1 and M2. On an M2 Max the FP32 accumulator costs about 1 %.
 
 use super::emit::{Em, R};
 use super::types::{msl_type, scalar};

@@ -187,7 +187,7 @@ impl Default for Bindings {
 
 impl Bindings {
     /// The PC layout (R63). W A S D walk, the mouse is the camera, E interacts, Space jumps, Shift runs, the left
-    /// mouse button attacks and the right one locks on. The nxnative keys that do not collide stay: J K U I are A B X Y,
+    /// mouse button attacks and the right one locks on. The the engine keys that do not collide stay: J K U I are A B X Y,
     /// G is the right stick click, Z is ZL, Return is Plus and the arrows are the D-pad.
     pub(crate) fn pc() -> Bindings {
         use Action::{Button, LeftStick, Walk};

@@ -1,4 +1,4 @@
-//! `nn::pl` shared font and `nn::fontll::ScalableFontEngine` take-overs. Source: nxnative `dm/host/hle_sdk16.c`, the
+//! `nn::pl` shared font and `nn::fontll::ScalableFontEngine` take-overs. Source: The engine `dm/host/hle_sdk16.c`, the
 //! `pl` and `fontll` sections.
 //!
 //! The console fonts are not in the game. The host loads a stand-in TrueType font into guest memory once, behind a

@@ -1,4 +1,4 @@
-//! Controller motion for the six-axis sensor, a port of nxnative `motion_fusion.h` (MIT).
+//! Controller motion for the six-axis sensor, a port of the engine `motion_fusion.h` (MIT).
 //!
 //! Input is what `GCMotion` reports in the controller's own frame: acceleration in G (gravity direction, so
 //! (0, 0, -1) lying face up) and rotation rate in rad/s. Output is the `SixAxisSensorState` data: acceleration in G,

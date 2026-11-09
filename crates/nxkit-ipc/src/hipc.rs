@@ -1,6 +1,6 @@
 //! HIPC, the message format of the kernel: the header, the special header, the descriptors and the raw data.
 //!
-//! The layout follows `dm/host/hle_sf.c` of nxnative (checked on 2026-11-07) and the public Horizon documentation.
+//! The layout follows `dm/host/hle_sf.c` (checked on 2026-11-07) and the public Horizon documentation.
 //! The descriptor bit fields are unverified against hardware.
 //!
 //! Message start, in words: word 0 has the type (bits 0 to 15) and the counts of X, A, B and W descriptors (4 bits

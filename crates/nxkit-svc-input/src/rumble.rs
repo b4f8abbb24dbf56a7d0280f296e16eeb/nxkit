@@ -1,4 +1,4 @@
-//! Switch vibration values and how they become one haptic level, a port of nxnative `hle_haptics.c` (MIT).
+//! Switch vibration values and how they become one haptic level, a port of the engine `hle_haptics.c` (MIT).
 //!
 //! A Switch rumble motor has a low and a high band, each with an amplitude and a frequency. A Mac controller has an
 //! intensity and a sharpness per engine. The mapping uses the power of both bands for the intensity and the

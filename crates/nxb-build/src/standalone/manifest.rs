@@ -94,7 +94,7 @@ fn memory(m: &nxtitle::Memory) -> Value {
     ])
 }
 
-/// The `settings` object: the other keys of nxnative's `game_profile.h`.
+/// The `settings` object: the other keys of the engine's `game_profile.h`.
 fn settings(m: &Manifest) -> Value {
     let t = &m.settings;
     let mut f = vec![

@@ -1,7 +1,7 @@
 //! The hooks that the host sets for the SDK-level exports (R38a).
 //!
 //! An export replaces a function of the game SDK, and some of them need what only the host or the game has: a symbol
-//! of the game (nxnative `guest_sym`), the connected controller, a keyboard front end. The host fills the fields that
+//! of the game, the connected controller, a keyboard front end. The host fills the fields that
 //! it can serve with [`set_seams`]. An export whose hook is missing answers as a console without the feature, for
 //! example with a cancelled keyboard.
 
@@ -27,11 +27,11 @@ pub struct TextRequest {
 /// The hooks of the host. Every field is optional.
 #[derive(Clone, Copy)]
 pub struct Seams {
-    /// The address of a symbol that the game defines, by its mangled name. nxnative `guest_sym`. It gives the function
+    /// The address of a symbol that the game defines, by its mangled name. The engine `guest_sym`. It gives the function
     /// of the game itself, never the export that replaces it, because `ScalableFontEngine::LoadFont` and the SDK
     /// software Opus decoder run through it. The exports that make a system event use it too.
     pub guest_sym: Option<fn(&str) -> Option<u64>>,
-    /// The number of the first connected controller, for `nn::nfp::GetNpadId`. nxnative `hle_hid_connected_npad`.
+    /// The number of the first connected controller, for `nn::nfp::GetNpadId`. The engine `hle_hid_connected_npad`.
     pub hid_connected_npad: Option<fn() -> u32>,
     /// The software keyboard: the text that the player types, or `None` for a cancel.
     pub text_input: Option<fn(&TextRequest) -> Option<String>>,

@@ -1,14 +1,14 @@
-//! `nn::swkbd` take-overs: the software keyboard and the inline keyboard. Source: nxnative `dm/host/hle_swkbd.c`.
+//! `nn::swkbd` take-overs: the software keyboard and the inline keyboard.
 //!
 //! `ShowKeyboard` reads the `ShowKeyboardArg` that `MakePreset` and `SetInitialTextUtf8` wrote in the SDK, asks the
 //! front end for the text and writes it back to the `String` as the applet does. The offsets are the ones of the SDK
-//! that nxnative was written against (`ShowKeyboard`, `SetInitialTextUtf8` and `ReadCloseResultAndString`). The text
+//! that the engine was written against (`ShowKeyboard`, `SetInitialTextUtf8` and `ReadCloseResultAndString`). The text
 //! comes from the `text_input` seam. Without it the keyboard is
 //! cancelled, which is what the SDK returns for a closed applet.
 //!
 //! The inline keyboard starts no applet. `Appear` arms one request and the next `Calc` asks for the text and calls the
 //! callbacks of the game on the guest thread that called `Calc`. The naming panel and the character name rule of
-//! nxnative (`hle_charname.c`) and the freeze of the guest clock while the box is open are not part of this crate.
+//! Horizon (`hle_charname.c`) and the freeze of the guest clock while the box is open are not part of this crate.
 
 use super::oe_state::AppletGuard;
 use super::{get_bytes, get_i32, get_u8, get_u64, log, nothing, put_bytes, put_zero, zero};

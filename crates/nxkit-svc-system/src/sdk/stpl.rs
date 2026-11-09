@@ -1,4 +1,4 @@
-//! `nn::streamplay` take-overs (GameShare and GameChat streaming of the Switch 2 SDKs). Source: nxnative
+//! `nn::streamplay` take-overs (GameShare and GameChat streaming of the Switch 2 SDKs). Source: The engine
 //! `dm/host/hle_misc.c`, the streamplay section.
 //!
 //! The host streams to nobody. The library is ready and no session is open, so every guest pad, sensor and vibration

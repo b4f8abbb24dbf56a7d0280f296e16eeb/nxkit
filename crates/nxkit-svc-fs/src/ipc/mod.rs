@@ -1,7 +1,7 @@
 //! The IPC interfaces of `fsp-srv` (R35).
 //!
 //! The command numbers, the layout of the raw data and the buffer kinds are those of the Horizon `fssrv` interfaces
-//! as the homebrew libraries describe them. They are not verified against hardware or against nxnative, which has no
+//! as the homebrew libraries describe them. They are not verified against hardware or against the engine, which has no
 //! `fsp-srv` server because it takes the `nn::fs` functions over at SDK level. A command that is not listed here
 //! gives `Handled::Unknown`, which stops the game with the interface and the command ID (R15).
 //!

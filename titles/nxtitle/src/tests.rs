@@ -118,7 +118,7 @@ impl RuntimeHooks for Game {
     }
     fn runtime(&self, s: Service) -> Option<Fact<Runtime>> {
         match (self.0, s) {
-            (1, Service::Fs) => Some(Fact::new(Runtime::Nxnative, REC)),
+            (1, Service::Fs) => Some(Fact::new(Runtime::Engine, REC)),
             (2, Service::Pacing) => Some(Fact::new(Runtime::Nxkit, REC)),
             _ => None,
         }
@@ -226,9 +226,9 @@ fn evidence_checked() {
 fn each_service_runs_where_the_title_then_the_family_says() {
     let c = catalog();
     let r = c.resolve(&TitleFacts::new(TitleId(1)));
-    assert_eq!(r.runtime(Service::Fs), Runtime::Nxnative);
+    assert_eq!(r.runtime(Service::Fs), Runtime::Engine);
     assert_eq!(r.runtime(Service::Audio), Runtime::Nxkit);
-    assert_eq!(r.runtime(Service::Gpu), Runtime::Nxnative);
+    assert_eq!(r.runtime(Service::Gpu), Runtime::Engine);
     assert_eq!(r.nxkit_services(), [Service::Audio]);
     let lone = c.resolve(&TitleFacts::new(TitleId(2)));
     assert_eq!(lone.nxkit_services(), [Service::Pacing]);

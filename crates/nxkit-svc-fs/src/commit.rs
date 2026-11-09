@@ -121,7 +121,7 @@ impl Txn {
 }
 
 impl Fs {
-    /// `Commit(name)`. A name that is not mounted or has no save behind it succeeds, as in nxnative.
+    /// `Commit(name)`. A name that is not mounted or has no save behind it succeeds.
     pub(crate) fn commit(&self, name: &[u8]) -> u32 {
         let Some(txn) = self.find(name).and_then(|m| m.txn.clone()) else {
             return OK;

@@ -1,4 +1,4 @@
-//! `nn::socket` and `nnsocket*` take-overs that fail offline. Source: nxnative `dm/host/hle_net.c`, the socket section,
+//! `nn::socket` and `nnsocket*` take-overs that fail offline. Source: The engine `dm/host/hle_net.c`, the socket section,
 //! and the socket overloads of `dm/host/hle_offline.c`.
 //!
 //! The host creates no socket. Every call that needs a peer returns -1 with the errno `ENETDOWN`, a name lookup gives a

@@ -5,8 +5,8 @@
 //! the render targets, and the title module tells the game through its own channel (for Breath of the Wild, the state
 //! page of `nxkit-svc-pacing`).
 //!
-//! The limits come from the loader of nxnative (`dm/host/loader.c`, pull request 76, read 2026-11-07). A scale above
-//! 1.0 needs memory for a larger render pool in the game, and nxnative caps the scale at 3.0.
+//! The limits come from the loader of the engine (`dm/host/loader.c`, read 2026-11-07). A scale above
+//! 1.0 needs memory for a larger render pool in the game, and the engine caps the scale at 3.0.
 
 use crate::error::{MetalError, Result};
 

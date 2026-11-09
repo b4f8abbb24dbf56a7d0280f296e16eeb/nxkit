@@ -13,8 +13,8 @@
 //! the catalog from the modules that are switched on by cargo features. The core uses this crate and the catalog
 //! only, never a family or title crate.
 //!
-//! nxnative runs every [`Service`] of a game by default. A family or title moves a service to nxkit through
-//! [`RuntimeHooks::runtime`], so nxkit replaces nxnative one service at a time.
+//! The engine runs every [`Service`] of a game by default. A family or title moves a service to nxkit through
+//! [`RuntimeHooks::runtime`], so nxkit replaces the engine one service at a time.
 //!
 //! A title module does not work around a core bug. A fix that helps more than one game belongs in the core.
 

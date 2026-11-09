@@ -1,4 +1,4 @@
-//! SystemEvents of the service layer (nxnative `dm/host/hle_thread.c`, `hle_bind_system_event` and its neighbours).
+//! SystemEvents of the service layer.
 //!
 //! A real service gives the client the read end of a kernel event, and the guest waits on it through the SDK's
 //! `nn::os::SystemEventType`. The host binds such an object to a kernel event: on a guest thread it calls the SDK's
@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 const CREATE: &str = "_ZN2nn2os17CreateSystemEventEPNS0_15SystemEventTypeENS0_14EventClearModeEb";
 const WRITABLE: &str = "_ZN2nn2os30GetWritableHandleOfSystemEventEPKNS0_15SystemEventTypeE";
 
-/// The most bindings at one time, as in nxnative.
+/// The most bindings at one time.
 const MAX_BINDINGS: usize = 512;
 
 struct Binding {

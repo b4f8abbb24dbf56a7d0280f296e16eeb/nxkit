@@ -6,7 +6,7 @@
 //! while it holds it. Memory svcs are one family with no wait list, so the lock is shared state and not a global
 //! lock (R7). Thread, lock and IPC paths never take it.
 //!
-//! The rules follow nxnative (`dm/host/hle_svc.c`, svc 0x01 to 0x06, 0x2C and 0x2D) and the result codes of Horizon
+//! The rules follow the engine (`dm/host/hle_svc.c`, svc 0x01 to 0x06, 0x2C and 0x2D) and the result codes of Horizon
 //! (Atmosphere `svc_results.hpp`, checked on 2026-11-07). Where the two differ the code says which one it follows.
 
 use crate::kernel::Kernel;
@@ -154,7 +154,7 @@ impl Kernel {
 
     /// `MapMemory`: `dst` in the stack region becomes a second view of `src`. The source is locked and has no access
     /// until `UnmapMemory`. The pages are shared when the host can share them (all three values are whole host pages).
-    /// Otherwise the data is copied, as in nxnative, and copied back by `UnmapMemory`.
+    /// Otherwise the data is copied, and copied back by `UnmapMemory`.
     pub(crate) fn map_memory(&self, dst: u64, src: u64, size: u64) -> KResultOr<()> {
         let vm = self.vm()?;
         let (d0, d1) = page_range(dst, size)?;
@@ -188,7 +188,7 @@ impl Kernel {
         Ok(())
     }
 
-    /// `UnmapMemory`: undoes one `MapMemory`. The three arguments must be those of the map, as in nxnative.
+    /// `UnmapMemory`: undoes one `MapMemory`. The three arguments must be those of the map.
     pub(crate) fn unmap_memory(&self, dst: u64, src: u64, size: u64) -> KResultOr<()> {
         let vm = self.vm()?;
         let (d0, d1) = page_range(dst, size)?;

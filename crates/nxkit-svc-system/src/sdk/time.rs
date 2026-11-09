@@ -1,4 +1,4 @@
-//! `nn::time` take-overs and the C library time functions. Source: nxnative `dm/host/hle_time.c`.
+//! `nn::time` take-overs and the C library time functions.
 //!
 //! The clocks come from the host. `Config::fixed_time` makes the user clock return one value. The
 //! calendar functions follow the time zone of the host. The libc `localtime`, `localtime_r` and `mktime` are forced

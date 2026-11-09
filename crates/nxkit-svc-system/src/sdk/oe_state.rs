@@ -1,4 +1,4 @@
-//! The notification queue, the focus state and the library applet counter of `nn::oe`. Source: nxnative
+//! The notification queue, the focus state and the library applet counter of `nn::oe`. Source: The engine
 //! `dm/host/hle_oe.c` (`mq_*`, `focus_sync`, `dm_applet_enter`, `dm_applet_leave`).
 //!
 //! The state is the one that the `appletOE` IPC services use, so a game sees the same queue through both paths.

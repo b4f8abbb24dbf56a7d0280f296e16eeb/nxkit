@@ -5,7 +5,7 @@
 //! memory is an array of words. Metal's threadgroup memory takes byte stores, and each byte is its own memory location.
 //! The emitter writes one store instead. Neighbouring bytes need no atomic. Two threads that store the same byte leave
 //! one of the two values, as on the console. In a mesh workgroup the 32 threads store neighbouring primitive index
-//! bytes, four to a word, and the loop retried about four times for each store (upstream `ffebfd59`).
+//! bytes, four to a word, and the loop retried about four times for each store.
 
 use super::emit::{Em, R};
 

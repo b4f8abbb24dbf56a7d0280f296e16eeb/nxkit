@@ -1,7 +1,7 @@
 //! The texture pool and the sampler pool.
 //!
 //! The game registers a texture in a slot of a texture pool and gets a handle: the texture id in the low 20 bits and
-//! the sampler id above them (`nvnDeviceGetTextureHandle`). The ids of all pools share one index space, as in nxnative.
+//! the sampler id above them (`nvnDeviceGetTextureHandle`). The ids of all pools share one index space.
 //! A draw names textures by handle, so the front end resolves a handle to a texture of the resource table.
 
 use crate::error::{NvnError, Result};

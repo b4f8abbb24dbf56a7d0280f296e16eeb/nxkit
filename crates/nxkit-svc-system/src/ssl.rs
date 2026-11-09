@@ -1,4 +1,4 @@
-//! The TLS service `ssl`. The host is offline, as nxnative (`dm/host/hle_net.c`, the `nn::ssl` block
+//! The TLS service `ssl`. The host is offline, as the engine (`dm/host/hle_net.c`, the `nn::ssl` block
 //! after the comment "ssl: offline"): a
 //! context can be created, but no connection can be created and no certificate can be imported.
 //!

@@ -7,12 +7,12 @@
 //!   second tick, so it steps its logic once per frame and runs at the speed of the Switch.
 //! - It writes the step of each frame into the state page of a game that has frame step data (see [`state`] and
 //!   [`mode`]). A game with such data runs at 120 fps and still steps right.
-//! - It decides how long each frame stays on screen when the load of the frames asks for it (the port of nxnative's
+//! - It decides how long each frame stays on screen when the load of the frames asks for it (the port of the engine's
 //!   `fstep_tick` in [`load`] and [`fstep`], R30a), and it writes the target frame rate into the frame limiter of an engine
 //!   that has no frame step ([`limits`], the port of `hle_fpslock.c`).
 //! - It counts what it did ([`snapshot`]), as part of the measurement of R16.
 //!
-//! `hle_fpslock.c` of nxnative exports no SDK function. It only writes the guest's memory, so [`exports`] has the vsync
+//! `hle_fpslock.c` exports no SDK function. It only writes the guest's memory, so [`exports`] has the vsync
 //! event alone.
 //!
 //! What the host does. It calls [`init`] before the game starts. It calls [`on_display_tick`] from the sink that it gave
@@ -26,7 +26,7 @@
 //! game's code. So the host gives [`Config::bind_system_event`], which makes the binding and returns the writable handle.
 //! The service signals that handle through the kernel of `nxkit-abi`. A signal that fails ends the worker of the event,
 //! because the game destroyed it. A handle number that the game reuses before the next tick would be signalled by
-//! mistake. nxnative closes that gap with a binding identity. This service does not and takes the gap as open.
+//! mistake. The engine closes that gap with a binding identity. This service does not and takes the gap as open.
 
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -64,7 +64,7 @@ use vsync::{Rates, TickClock, Wait, wait_vsync};
 pub const VSYNC_EVENT: &str =
     "_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE";
 
-/// The result that a failing call gives. It is the one failure of the host (`RES_FAIL` of nxnative).
+/// The result that a failing call gives. It is the one failure of the host (`RES_FAIL`).
 const RES_FAIL: u32 = 0x2A2;
 
 /// Binds the game's `SystemEventType` at the guest address to a kernel event and returns its writable handle. It runs
@@ -374,7 +374,7 @@ fn rule(s: &Shared) -> PresentRule {
     }
 }
 
-/// The vsyncs that a frame stays on screen (`present_itv` of nxnative). `game_interval` is the present interval that the
+/// The vsyncs that a frame stays on screen (`present_itv`). `game_interval` is the present interval that the
 /// game set, 0 when it set none. The unit is the one of [`hold`].
 pub fn present_vsyncs(game_interval: u32) -> Result<u32, Error> {
     Ok(rule(shared()?).vsyncs(game_interval))

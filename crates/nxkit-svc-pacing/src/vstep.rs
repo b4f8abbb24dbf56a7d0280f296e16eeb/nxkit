@@ -9,7 +9,7 @@
 //! on a display whose rate is not a multiple of the cap. A step over the ceiling is cut to it, so the game runs slower
 //! than real time when frames take longer than the ceiling, as it does on the Switch.
 //!
-//! The logic is ported from `dm/gfx/nvn/nvn_fstep.h` of nxnative (`nvn_vstep_next`) at the head of pull request 76,
+//! The logic is ported from `dm/gfx/nvn/nvn_fstep.h` (`nvn_vstep_next`)
 //! `0f2a772c13e2caed2959d1d1a93f8fe57f44c754`. It is listed in `THIRD_PARTY.md`.
 
 /// The smallest step in 1/30 s units, one 240th of a second.

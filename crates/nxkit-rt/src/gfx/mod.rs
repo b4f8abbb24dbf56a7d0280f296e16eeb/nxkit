@@ -1,11 +1,11 @@
 //! The SDK take-overs of the graphics service (R59).
 //!
-//! nxnative replaces the graphics glue of the SDK with host functions: the `nv::` driver layer beneath NVN, the
+//! The engine replaces the graphics glue of the SDK with host functions: the `nv::` driver layer beneath NVN, the
 //! `nn::vi` display and layer calls, and the native images of `nn::gs`. NVN itself is [`crate::nvn`], so the SDK
 //! code of these layers has nothing to do and never opens the `nvdrv` or `vi` service. The functions are exports of
-//! the `gpu` service (`Service::Gpu`) and are forced take-overs, as `HLE_FORCE` of nxnative.
+//! the `gpu` service (`Service::Gpu`) and are forced take-overs, as `HLE_FORCE`.
 //!
-//! One module follows each source file of nxnative `dm/gfx/`. The module docs name the file and the functions. The
+//! One module follows each source file of the engine `dm/gfx/`. The module docs name the file and the functions. The
 //! calling convention is the one of `nxkit_abi::export`: narrow integers are `u32`, pointers are `u64` guest
 //! addresses.
 

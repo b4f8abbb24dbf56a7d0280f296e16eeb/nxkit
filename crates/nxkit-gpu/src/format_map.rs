@@ -1,6 +1,6 @@
 //! The NVN to Metal format tables. Every format decision of the crate is in this file.
 //!
-//! The NVN values come from `nvn.h` of nxnative (see `THIRD_PARTY.md`). A row marked unverified has not been
+//! The NVN values come from `nvn.h` (see `THIRD_PARTY.md`). A row marked unverified has not been
 //! checked against a game texture yet.
 
 use nxkit_metal::{BcKind, Format, VertexFormat};
@@ -139,7 +139,7 @@ pub(crate) fn is_integer(f: Format) -> bool {
     )
 }
 
-/// The Metal vertex format of an NVN vertex attribute format (`vfmt` of nxnative).
+/// The Metal vertex format of an NVN vertex attribute format (`vfmt`).
 ///
 /// The one, two, three and four component groups start at 0x01, 0x0D, 0x19 and 0x25. The special formats are
 /// 0x3D UInt1010102Norm, 0x69 Int1010102Norm, 0x3F FloatRG11B10 and 0x9A UChar4Norm BGRA.

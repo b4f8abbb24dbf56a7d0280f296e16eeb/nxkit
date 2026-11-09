@@ -1,6 +1,6 @@
 //! The storage layout of an NVN texture: block-linear (Tegra X1), linear and buffer.
 //!
-//! This is a port of `nvn_tex.c` of nxnative, which ports the algorithm of deko3d (`dk_image.cpp`).
+//! This is a port of `nvn_tex.c`, which ports the algorithm of deko3d (`dk_image.cpp`).
 //! Both notices are in `THIRD_PARTY.md`. Sparse textures return [`NvnError::Unsupported`].
 
 use crate::error::{NvnError, Result};
@@ -443,9 +443,9 @@ mod tests {
         }
     }
 
-    // The expected values come from `nvn_tex_layout` of nxnative (commit 90e1b34), run on the same descriptions.
+    // The expected values come from `nvn_tex_layout` (commit 90e1b34), run on the same descriptions.
     #[test]
-    fn matches_the_nxnative_layouts() {
+    fn matches_the_reference_layouts() {
         let l = desc(64, 16, 0x25).layout().unwrap();
         assert_eq!((l.tile_h, l.size, l.align), (1, 4096, 512));
         let l = desc(256, 256, 0x25).layout().unwrap();
@@ -464,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_nxnative_layouts_of_other_targets() {
+    fn matches_the_reference_layouts_of_other_targets() {
         let mut d = desc(32, 32, 0x25);
         d.target = Target::D3;
         d.depth = 32;
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn minimal_layout_takes_one_gob_blocks_when_smaller() {
-        // 320x320 RGB5A1 (Tears of the Kingdom case of nxnative): 204800 bytes with 1-GOB blocks
+        // 320x320 RGB5A1 (Tears of the Kingdom case of the engine): 204800 bytes with 1-GOB blocks
         let mut d = desc(320, 320, 0x0D);
         d.flags = FLAG_MINIMAL_LAYOUT;
         assert_eq!(d.layout().unwrap().size, 204_800);

@@ -5,13 +5,13 @@
 //!
 //! The services are `nxkit_abi::ipc::Service` objects. The IPC server (`nxkit-ipc`) owns the sessions and the
 //! dispatch, and this crate answers the commands (R37). The command IDs and layouts are from libnx and switchbrew. The
-//! values follow nxnative, which answers the same questions at the SDK level (`dm/host/`). Every module names its
+//! values follow the engine, which answers the same questions at the SDK level (`dm/host/`). Every module names its
 //! sources. A command that no module lists is [`Handled::Unknown`](nxkit_abi::ipc::Handled::Unknown), and the server stops
 //! the game (R15).
 //!
 //! [`exports()`] lists the SDK functions that the host runs in place of the game's own (R38a). An export wins over the
 //! SDK function, so the SDK code never opens the IPC session. The IPC services answer the SDK code that no export
-//! replaces. [`big_stack_exports()`] lists the exports that nxnative runs with `HLE_FORCE_BIG`, for the host to wrap.
+//! replaces. [`big_stack_exports()`] lists the exports that the engine runs with `HLE_FORCE_BIG`, for the host to wrap.
 //! The exports need a few functions of the host, which the host passes in [`set_seams`].
 //!
 //! The host drives the applet state with [`set_focus`], [`set_operation_mode`] and [`push_message`].
@@ -120,12 +120,12 @@ pub(crate) fn config() -> &'static Config {
 /// The functions that this crate runs in place of SDK functions of the game (R38a).
 ///
 /// Every export is a forced take-over: it applies even when the module of the game defines the symbol. The
-/// exports that nxnative runs with `HLE_FORCE_BIG` are in [`big_stack_exports()`] and not here.
+/// exports that the engine runs with `HLE_FORCE_BIG` are in [`big_stack_exports()`] and not here.
 pub fn exports() -> Vec<Export> {
     sdk::all()
 }
 
-/// The exports that need a bigger guest stack than the game thread has. The host wraps them (nxnative
+/// The exports that need a bigger guest stack than the game thread has. The host wraps them (the engine
 /// `HLE_FORCE_BIG`). They are not in [`exports()`].
 pub fn big_stack_exports() -> Vec<Export> {
     sdk::big_stack()

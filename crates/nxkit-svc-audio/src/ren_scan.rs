@@ -1,8 +1,8 @@
 //! What the host reads off the SDK's own machine code: the update lock of the renderer system and the place of the system
-//! inside the renderer object. This follows `lock_in`, `update_lock` and `impl_sys_off` of nxnative.
+//! inside the renderer object. This follows `lock_in`, `update_lock` and `impl_sys_off`.
 //!
 //! The SDK versions differ in these offsets, and a wrong guess excludes nothing. The scan reads the first instructions of
-//! an SDK function, as nxnative does. It has not run on a game yet.
+//! an SDK function. It has not run on a game yet.
 
 use crate::host::sym_opt;
 use crate::sys::call::{read_insn, read_ptr};

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic CRA archives and NROs for the nxb-split tests (development tool, not part of a build).
 
-Usage: gen_cra_fixture.py <reference tools folder (nxnative/dm/gfx/tools)> <crates/nxb-split/tests/data>
+Usage: gen_cra_fixture.py <reference tools folder (the engine/dm/gfx/tools)> <crates/nxb-split/tests/data>
 Needs `sumo_nvnsh.bin` in the data folder. Writes three cases, each a folder `jb_<case>/` with the files of a tree
 and `jb_<case>.exp` with what the reference gives (`cra_jobs` and `cra_shaders` of shader_split.py, in the format of
 tests/jobs.rs):

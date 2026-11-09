@@ -1,7 +1,7 @@
 //! The service manager `sm:`.
 //!
 //! `Initialize` succeeds. `GetService` returns a session for a registered service. `RegisterService` and
-//! `UnregisterService` are refused, as in nxnative, because the game serves no port of its own. A name that no
+//! `UnregisterService` are refused, because the game serves no port of its own. A name that no
 //! service crate registered stops the game with the name (R15).
 
 use crate::{Registry, Stop, StopSlot};
@@ -9,7 +9,7 @@ use nxkit_abi::ipc::{Handled, Request, Response, Service};
 use std::sync::Arc;
 
 /// The result `NotAllowed` of the module `sm` (21): description 8. Unverified: taken from the public Horizon result
-/// list, not from nxnative, which does not serve `sm:` for fs.
+/// list, not from the engine, which does not serve `sm:` for fs.
 const RESULT_NOT_ALLOWED: u32 = 21 | 8 << 9;
 
 pub(crate) const INITIALIZE: u32 = 0;

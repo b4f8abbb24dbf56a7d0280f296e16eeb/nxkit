@@ -1,7 +1,7 @@
-//! `nn::web::OfflineWebSession` and `ShowOfflineHtmlPage`: the offline HTML page of a game. Source: nxnative
+//! `nn::web::OfflineWebSession` and `ShowOfflineHtmlPage`: the offline HTML page of a game. Source: The engine
 //! `dm/host/hle_web.c`.
 //!
-//! nxkit has no web view yet, so this is the stand-in of nxnative for a page that is not shown. A session start
+//! nxkit has no web view yet, so this is the stand-in of the engine for a page that is not shown. A session start
 //! queues the empty "ready" message that a game waits for before `Appear`. `Appear` ends the page at once with exit
 //! reason 0 and fires the exit event. `WaitForExit` returns the reason and an empty last URL. The synchronous
 //! `ShowOfflineHtmlPage` fails, because no page was shown. `TrySendContentMessage` accepts the message and drops it.
@@ -62,7 +62,7 @@ fn start() {
     s.ready_messages = 1;
 }
 
-/// Reads the page document path, as `web_tlv` of nxnative does, for the log. The argument is a TLV list: a count at +0
+/// Reads the page document path, as `web_tlv` does, for the log. The argument is a TLV list: a count at +0
 /// and entries of `{u16 type, u16 size, u32 pad, bytes}` from +8.
 fn document_path(arg: u64) -> String {
     let bytes = get_bytes(arg, ARG_SIZE);
