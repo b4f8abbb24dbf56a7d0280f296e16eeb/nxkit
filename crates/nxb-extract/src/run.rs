@@ -488,7 +488,6 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 tag: tags[k].trim_start_matches('/').to_string(),
                 main,
                 files,
-                dir: Some(out.clone()),
             });
         }
         let merged = t.post_images(&tags, &results, req.threads).and_then(|()| {

@@ -107,10 +107,7 @@ fn tools() -> Vec<Tool> {
         ),
         t("metal-tt", Find::Xcrun("macosx"), false, None),
         t("metal-pack", Find::Xcrun("macosx"), false, None),
-        t("metal (iphoneos)", Find::Xcrun("iphoneos"), false, None),
         t("codesign", Find::Path, false, None),
-        t("make", Find::Path, false, Some(&["--version"][..])),
-        t("xcodebuild", Find::Path, false, Some(&["-version"][..])),
     ]
 }
 

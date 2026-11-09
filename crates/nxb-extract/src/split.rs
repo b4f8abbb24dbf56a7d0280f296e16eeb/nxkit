@@ -47,10 +47,6 @@ pub struct SplitRequest {
     pub outputs: SplitOutputs,
     /// Workers.
     pub threads: usize,
-    /// The NROs the build captured (`DM_NRO_DIR`), `None`: the variable.
-    pub nro_dir: Option<PathBuf>,
-    /// The game's own decoder in the Mac host, for Oodle- and LZ5-compressed game files.
-    pub oodle: Option<crate::oodle_host::HostSpec>,
     /// Counts the scanned file bytes (`total` is set once the files are listed).
     pub progress: Option<std::sync::Arc<crate::run::Counter>>,
 }
@@ -79,8 +75,6 @@ pub struct VersionIn {
     pub main: Vec<u8>,
     /// (path relative to the RomFS root, SHA-256 of its bytes).
     pub files: Vec<(String, Digest)>,
-    /// The version directory: what the build's boots wrote beside the image (`glslc_capture`, `ue_shaders`).
-    pub dir: Option<PathBuf>,
 }
 
 type Template = Arc<OnceLock<std::result::Result<Option<FileResult>, ()>>>;
@@ -110,8 +104,6 @@ pub struct Templates {
     pub(crate) held: AtomicUsize,
     pub(crate) by_label: Mutex<HashMap<String, Outcome>>,
     pub(crate) jobs: Mutex<(Vec<Outcome>, HashSet<String>)>,
-    /// The NROs of `DM_NRO_DIR`.
-    pub(crate) nros: crate::split_out::Nros,
 }
 
 /// A held-back file: label, digest, bytes when the images are not kept.
@@ -164,7 +156,6 @@ impl Templates {
             held: AtomicUsize::new(0),
             by_label: Mutex::new(HashMap::new()),
             jobs: Mutex::new((Vec::new(), HashSet::new())),
-            nros: crate::split_out::read_nros(None)?,
         })
     }
 
@@ -282,7 +273,7 @@ impl Templates {
             }
         }
         let mut results = Vec::new();
-        for (n, v) in versions.iter().enumerate() {
+        for v in versions.iter() {
             let img = nxb_split::nso::image(&v.main).map_err(split_err)?;
             let label = if v.tag.is_empty() {
                 "main".to_string()
@@ -294,16 +285,6 @@ impl Templates {
             scan_blob(&img, &label, &mut found, &mut var, 0).map_err(split_err)?;
             let more = nxb_split::misc::main_extras(&img, &label, &found).map_err(split_err)?;
             found.extend(more);
-            // the NROs the game decodes at run time hold shaders no RomFS file has: scanned like main
-            if n == 0 {
-                for (name, nro) in &self.nros.files {
-                    scan_blob(nro, &format!("main/{name}"), &mut found, &mut var, 0)
-                        .map_err(split_err)?;
-                }
-            }
-            if let Some(d) = &v.dir {
-                found.extend(crate::split_out::host_made(d)?);
-            }
             let pairs = var_pairs(prof, &found, &var);
             results.push(FileResult {
                 keys: uniq(prof, found, true).map_err(split_err)?,
@@ -402,10 +383,6 @@ impl Templates {
 /// Runs the split on extracted version directories, returns the outputs and the `[RED]` lines of unreadable files.
 pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
     let mut t = Templates::new(&req.game_tsv)?;
-    if let Some(d) = &req.nro_dir {
-        t.nros = crate::split_out::read_nros(Some(d))?;
-    }
-    let _decoder = req.oodle.clone().map(crate::oodle_host::Installed::new);
     let mut versions = Vec::new();
     let mut jobs: Vec<(usize, String, u64, u64)> = Vec::new();
     let mut images = Vec::new();
@@ -553,7 +530,6 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
             tag,
             main,
             files: fl,
-            dir: Some(req.versions[vi].clone()),
         });
     }
     t.post(post, req.threads)?;

@@ -35,7 +35,7 @@ pub(crate) fn unpack(
 ) -> Result<(usize, u64), String> {
     const CHUNK: u64 = 8 << 20;
     let s = FileStorage::open(img).map_err(|e| e.to_string())?;
-    let files = crate::host::survey_extract::image_files(&s, img)?;
+    let files = super::image::image_files(&s, img)?;
     let total: u64 = files.iter().map(|e| e.size).sum();
     if dest.exists() {
         std::fs::remove_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;

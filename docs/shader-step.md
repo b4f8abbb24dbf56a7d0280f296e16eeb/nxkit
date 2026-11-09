@@ -144,9 +144,7 @@ A panic of the translator is caught and fails one key. For the other tools, a cr
 
 ## Raw container tier
 
-The raw tier (`own-raw`) is the first tier of the own front end in `build`. It makes the Mac libraries and the iOS libraries.
-The iOS libraries get only the raw tier. When it rejects a shader, Apple's compiler makes the iOS library.
-No GPU test covers the iOS libraries. Apple's `air-validate` accepted 997 iOS libraries of a sample of 1,000 shaders. The other 3 were rejects.
+The raw tier (`own-raw`) is the first tier of the own front end in `build`. It makes the Mac libraries.
 For a shader, the step calls `air_front::build_raw` in the same process. This call does the front end,
 the split of the entries, the optimizer, the bitcode writer and the library writer. It uses no Apple tool and starts no process.
 
@@ -164,8 +162,7 @@ The new default has a check in the process, but no GPU test for each shader.
   The old allow list (3,365 entries, about 14 % of the corpus) has the shaders that matched in the test. It is not in this repository.
 - **Switches.** `NXB_OWN_RAW=0` turns only the raw tier off. `NXB_OWN_RAW=list` uses only the shaders of the shipped allow list (old behavior).
   The tier is off when the file is missing. `NXB_OWN_RAW=<file>` uses another list. `NXB_OWN_FRONT=0` or `--own-front off` turns all own tiers off. The tier needs the own front end to be on.
-  `NXB_OWN_RAW_IOS=0` turns the raw tier off for the iOS libraries only.
-  The run note of the step tells which mode is on and how many libraries came from the raw tier, from the iOS raw tier and from Apple.
+  The run note of the step tells which mode is on and how many libraries came from the raw tier and from Apple.
 - **Cache key.** A raw library has the key field `own-raw@` and the front-end id, for each shader. A raw library is thus never given to a run with the tier off.
   Entries that an older version made in the list mode are not used.
 - **Output.** A raw library is not byte-identical to Apple's library, and it is larger (1.33 times on 40 samples, measured). This is by design.

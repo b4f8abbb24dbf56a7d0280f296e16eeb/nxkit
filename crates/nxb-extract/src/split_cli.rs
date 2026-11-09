@@ -51,8 +51,6 @@ pub fn main(args: &[String]) -> i32 {
         game_tsv,
         outputs,
         threads,
-        nro_dir: None,
-        oodle: None,
         progress: None,
     };
     let t = std::time::Instant::now();

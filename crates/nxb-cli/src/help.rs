@@ -33,13 +33,13 @@ pub const NXB: &[Cmd] = &[
     c(
         "build",
         "Whole build",
-        "the whole build (the reference script's command line, JSON progress events)",
-        "usage: nxb build <folder of packages | .nup file | dump folder> [-k prod.keys] [--platform mac|mac-app|ios] [-o OUT] [--work-dir D] --engine DIR [--progress json|bar]\n  inputs: NSP, NSZ, XCI, XCZ and merged packages in a folder (--title-id or --app picks a game), --nup FILE, --dump FOLDER, --aoc DLC_PACKAGE (repeatable)\n  options of the reference script: --app-name --bundle-id -l/--language --env-file --motion/--no-motion --seen-shaders --allow-damaged --allow-shader-regressions --allow-other-metal --mac-sign ID --gpu ARCH|none --romfs bundle|separate --keep-extracted --show-fps --program N (one program of a multi-program application)\n  a game with no profile in the engine is surveyed and gets a provisional profile (<work>/profile/<title ID>/, or --profile-out D): --provisional (also for a game with a profile) --survey-only (survey.md only) --no-heap-check (no heap and region check: they boot the game on the Mac, which nxb build does not do; without the option such a game stops with exit 4)\n  title resource patches: --resource-patch OPTION=VALUE|stock (repeatable; Ocarina of Time v131072: resolution-scale=S, 0 < S <= 1, pins the dynamic resolution; an archive of another version is left stock with a warning)\n  iOS: --team-id --framework --shell-framework FOLDER --prepare-xcode --xcode-workspace W\n  exit codes: 0 done, 1 error, 2 bad arguments, 3 damaged data, 4 not supported yet (a step that boots the game on the Mac), 6 missing key, 130 interrupted",
+        "the app of a game with a title module, for nxkit (JSON progress events)",
+        "usage: nxb build <folder of packages | .nup file> [-k prod.keys] [-o OUT.app] [--work-dir D] [--platform mac|mac-app] [--progress json|bar] [--dry-run]\n  inputs: NSP, NSZ, XCI, XCZ and merged packages in a folder (--title-id or --app picks a game), --nup FILE, --aoc DLC_PACKAGE (repeatable)\n  options: --app-name --bundle-id --gpu ARCH|none --threads N --load-limit PERCENT --own-front on|off|VERDICTS --shader-manifest FILE [--partial] --allow-damaged\n  title resource patches: --resource-patch OPTION=VALUE|stock (repeatable; Ocarina of Time v131072: resolution-scale=S, 0 < S <= 1, pins the dynamic resolution; an archive of another version is left stock with a warning)\n  only a game with a title module is built, into an app with nxkit-host as its program (NXB_NXKIT_HOST names another host file)\n  exit codes: 0 done, 1 error, 2 bad arguments, 3 damaged data, 4 not supported, 6 missing key, 130 interrupted",
     ),
     c(
         "extract",
         "Stages",
-        "extract a package (NSP, NSZ, XCI, NUP, merged, dump)",
+        "extract a package (NSP, NSZ, XCI, NUP, merged)",
         "usage: nxb extract --keys <prod.keys> --base <base.nsp> --out <dir> [--update <update.nsp> <dir>]... [--threads N] [--mem-mib N] [--cache-mib N] [--digests <tsv>] [--allow-damaged] [--manifest] [--program <title ID>] | --keys <prod.keys> --aoc <dlc.nsp> [<title ID>] --out <dir> | --nup <game.nup> [--work <dir>] [--version N] [--discard-images]",
     ),
     c(
@@ -49,46 +49,10 @@ pub const NXB: &[Cmd] = &[
         "usage: nxb split --game <game.tsv> --pkg <dir> --map <tsv> --facts <tsv> --pairs <tsv> --pso-pairs <tsv> [--threads N] <version dir>...",
     ),
     c(
-        "rewrite",
-        "Stages",
-        "the rewrite step of one NSO (patch_nso)",
-        "usage: nxb rewrite <NSO file> <output dir> <module name>",
-    ),
-    c(
-        "profile",
-        "Stages",
-        "the provisional profile of a game with no profile: guess, show, check, manifest",
-        "usage: nxb profile guess --engine <engine> (--extract <dir> | --exefs <dir> --romfs <manifest|folder>) [--app <hex>] [--name <text>] [--out <folder>] [--report <survey.md>] [--census <file>] [--no-heap-check] [--strict]\n       nxb profile show <game.tsv | profile folder> [--toml]\n       nxb profile check --engine <engine> <profile folder> (--extract <dir> | --exefs <dir> --romfs <manifest|folder>)\n       nxb profile manifest <RomFS.img> <out folder>",
-    ),
-    c(
-        "rewrite-rules",
-        "Stages",
-        "write the registered patches as private rule files",
-        "usage: nxb rewrite-rules <snapshot.tsv> <out dir>",
-    ),
-    c(
-        "nro",
-        "Stages",
-        "collect the NROs of a RomFS image (nro_collect)",
-        "usage: nxb nro <RomFS image> <out dir> [<nrr name>]",
-    ),
-    c(
         "shaders",
         "Stages",
         "the shader step: guards, own-verdicts, build",
         "usage: nxb shaders <guards|own-verdicts|build|prune|regressions|self-check> [args]\n  nxb shaders guards <b-dir> <out-dir> [jobs]\n  nxb shaders own-verdicts <validation.jsonl> [data-dir]\n  nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N] [key...]",
-    ),
-    c(
-        "app",
-        "Stages",
-        "the Mac app: stage the files and sign them",
-        "usage: nxb app <out.app> --host <dmhost> --companion-app <app> --patched <dir> --romfs <img> --msl <dir> --tables <dir> --font <dir> --title-id <id> --name <name> [--version v] [--category c] [--lang l] [--marker m] [--bundle-id id] [--html <dir>] [--pso <dir>] [--pso-pairs <tsv>] [--env-file f] [--settings <json>] [--icns <file>] [--fork-patches <file>] [--commit c] [--msl-name n] [--previous <old.app>] [--threads N] [--dest-digests <tsv>] [--program <row>]...",
-    ),
-    c(
-        "ipa",
-        "Stages",
-        "write the IPA zip",
-        "usage: nxb ipa <out.ipa> [--store .a:.b] [--skip <path>]... [--skip-suffix <s>]... <archive path>=<source>...",
     ),
     c(
         "pso",
@@ -107,12 +71,6 @@ pub const NXB: &[Cmd] = &[
         "Stages",
         "the ad-hoc signer: sign, appstage, digests, cdhash",
         "usage: nxb sign sign <bundle | mach-o file> [--entitlements <plist>] [--digests <tsv>] [--identifier <id>] [--no-sign-nested] [--runtime] [--threads N] [--verbose]\n  nxb sign appstage <out.app> --manifest <tsv> [--threads N] [--entitlements <f>] [--no-hash-while-staging] [--verbose]\n  nxb sign digests <path.app> [--threads N]\n  nxb sign cdhash <mach-o file>",
-    ),
-    c(
-        "ios",
-        "Stages",
-        "the iOS scripts: ipa and shell",
-        "usage: nxb ios ipa [<out.ipa> | --prepare-xcode] | nxb ios shell --prepare-xcode | --build\nThe environment is the one of build_ipa.sh and build_shell.sh. NXB_ENGINE names the folder holding dm/.",
     ),
     c(
         "airc",
@@ -157,7 +115,7 @@ pub const NXB: &[Cmd] = &[
 pub const SHADERBUILD: &[(&str, &str)] = &[
     (
         "build",
-        "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]",
+        "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]",
     ),
     (
         "guards",

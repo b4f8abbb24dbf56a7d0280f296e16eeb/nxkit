@@ -4,7 +4,7 @@
 use nxb_split::records::Outputs;
 
 use crate::error::{ExtractError, Result};
-use crate::split::{SplitOutputs, split_err, write};
+use crate::split::{SplitOutputs, write};
 
 /// `{n:,}` of the Python.
 fn thousands(n: usize) -> String {
@@ -133,95 +133,6 @@ fn stage_long(s: &str) -> &'static str {
         "ms" => "mesh",
         _ => "?",
     }
-}
-
-/// The files of `dir` ending in `ext`, sorted, AppleDouble files (`._*`) left out.
-fn named(dir: &std::path::Path, ext: &str) -> Vec<String> {
-    let mut v: Vec<String> = std::fs::read_dir(dir)
-        .map(|rd| {
-            rd.flatten()
-                .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| n.ends_with(ext) && !n.starts_with("._"))
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
-    v
-}
-
-/// What the build's boots wrote beside a version's image, scanned after main: the GLSLC outputs the game compiled at
-/// run time (`<dir>/glslc_capture` or `DM_GLSLC_CAPTURE`, labels `/glslc_capture/<name>`) and the Unreal shader code
-/// archives decoded with the game's Oodle (`<dir>/ue_shaders` or `DM_UE_SHADERS`, labels `/ue_shaders/<name>`).
-pub(crate) fn host_made(dir: &std::path::Path) -> Result<Vec<nxb_split::shaders::Found>> {
-    let env = |k: &str, d: &str| {
-        std::env::var_os(k)
-            .filter(|v| !v.is_empty())
-            .map_or_else(|| dir.join(d), std::path::PathBuf::from)
-    };
-    let read = |p: &std::path::Path| {
-        std::fs::read(p).map_err(|e| ExtractError::io(format!("read {}", p.display()), e))
-    };
-    let mut found = Vec::new();
-    let cap = env("DM_GLSLC_CAPTURE", "glslc_capture");
-    for n in named(&cap, ".glslc") {
-        let d = read(&cap.join(&n))?;
-        found.extend(
-            nxb_split::glslc::glslc_shaders(&d, &format!("/glslc_capture/{n}"), true, &[])
-                .map_err(split_err)?,
-        );
-    }
-    let ued = env("DM_UE_SHADERS", "ue_shaders");
-    for n in named(&ued, ".ushaderbytecode") {
-        let d = read(&ued.join(&n))?;
-        found.extend(
-            nxb_split::jobs::ue_shaders(&d, &format!("/ue_shaders/{n}")).map_err(split_err)?,
-        );
-    }
-    Ok(found)
-}
-
-/// The NROs of `DM_NRO_DIR` (`*.nro`, hidden files left out, sorted by name): the file table of a CRA archive is in
-/// one of them, and every NRO is scanned like main's image.
-#[derive(Default)]
-pub(crate) struct Nros {
-    /// The variable's text, `None` when it is unset (the reference names it in a message).
-    pub dir: String,
-    /// File name and bytes.
-    pub files: Vec<(String, std::sync::Arc<Vec<u8>>)>,
-}
-
-pub(crate) fn read_nros(given: Option<&std::path::Path>) -> Result<Nros> {
-    let Some(dir) = given
-        .map(|d| d.as_os_str().to_os_string())
-        .or_else(|| std::env::var_os("DM_NRO_DIR"))
-    else {
-        return Ok(Nros {
-            dir: "None".into(),
-            files: Vec::new(),
-        });
-    };
-    let path = std::path::Path::new(&dir);
-    let mut names: Vec<String> = std::fs::read_dir(path)
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| e.path().is_file())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| n.ends_with(".nro") && !n.starts_with('.'))
-                .collect()
-        })
-        .unwrap_or_default();
-    names.sort();
-    let mut files = Vec::new();
-    for n in names {
-        let p = path.join(&n);
-        let d =
-            std::fs::read(&p).map_err(|e| ExtractError::io(format!("read {}", p.display()), e))?;
-        files.push((n, std::sync::Arc::new(d)));
-    }
-    Ok(Nros {
-        dir: dir.to_string_lossy().into_owned(),
-        files,
-    })
 }
 
 /// The end of a fused split: its bad-file lines and timing, or the reason when it stopped on a file only the game's

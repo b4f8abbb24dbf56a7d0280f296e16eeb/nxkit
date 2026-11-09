@@ -1,6 +1,6 @@
 [package]
 name = "nxb-pack"
-description = "Pack and sign: the Mac app stage (staging with clones, incremental reuse, ad-hoc signing byte-identical to codesign)"
+description = "Ad-hoc code signing of Mac bundles and Mach-O files (byte-identical to codesign) and the staging of a file set into a bundle"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
