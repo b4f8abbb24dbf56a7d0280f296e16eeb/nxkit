@@ -1,6 +1,0 @@
-# nxb rewrite rules (generated from the engine's patch files). Private data: instruction words of game code.
-
-scope = "010063301BD50000"
-
-[[build]]
-row = ["build", "v720896", "1.4.1", "main=0f4138f9b3c475d890aec26313d567dc", "subsdk0=6b29d0c7a23a7c0bf7fb98699cc8bcb7", "sdk=6075151627016eef437c1312f2e3ed56"]

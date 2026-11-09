@@ -1,50 +1,18 @@
-//! `nxb build`: the NSP build script (`scripts/build_ipa_from_nsp.py`) as one stage graph. Same command line (the
-//! options it does not implement yet are refused by name, exit code 1 with a `[RED]` line), same console events
-//! (`--progress json`: the front ends' NDJSON, [`events`]), same exit codes (0 done, 1 error, 2 bad arguments, 130
-//! interrupted).
-//!
-//! The graph (`--platform mac-app`): extract + split (fused, one pass for all versions) -> shaders -> pipeline archive
-//! (when `--gpu` names an architecture.`nxb-archive`, not run on a full game from here yet) -> app (stage + sign, an in-place update of the previous app).
-//! Stages overlap where the graph allows ([`order`]): the Mac host from the start, the app's companion app, icon and
-//! settings beside the shader step, the first archive's batches as their libraries appear (widening to every core when
-//! the shader step ends), the console events stay those of a run one after another. Not overlapped yet: the shader
-//! step with the extract (it reads the split's packages when they are all written) and the staging of the app's
-//! non-shader files with the shader step. `--dry-run` prints the graph and the keys.
-//!
-//! `--platform mac` has the same nodes without the app and ends with the command that runs the game (`mac_run`).
-//! `--program N` builds one program of a multi-program application as a game of its own. For `mac-app` and `mac`, the
-//! profile's other programs are built that way first (`programs`).
-//!
-//! The rewrite (`patch_nso.py`) is made by [`rewrite`] when the work folder has no `patched_<package>`, with the engine's own
-//! files (a case outside the port's contract stops the build at the rewrite with the message of `nxb rewrite`, which exits with code 4: there is no fallback to a later stage without the patched modules). Not ported yet,
-//! taken from the work folder (the Python build's outputs) and named in the plan: the survey and profile steps. The
-//! shader step is an existing library folder (`--shaders`, or the work folder's `shader/cache/b-<chain>`), running the
-//! lead's `shaderbuild build` as a process from here is not wired yet.
+//! `nxb build`: the app of a game that has a title module, made for nxkit. One run: extract (packages or NUP, with the
+//! shader split) -> romfs -> rewrite -> manifest -> link -> shaders and pipeline archive -> bundle, with
+//! `nxkit-host` as the program of the app (`standalone`). Console events as `--progress json` NDJSON ([`events`]),
+//! exit codes 0 done, 1 error, 2 bad arguments, 3 damaged data, 4 not supported, 6 missing key, 130 interrupted.
+//! `--dry-run` prints the plan and writes nothing. A game without a title module is refused.
 
-mod app_stage;
 mod args;
-mod boot;
 pub mod events;
 mod extract_stage;
 pub mod graph;
 pub mod host;
 pub mod inputs;
-pub mod ios;
-pub mod ios_cli;
-mod iosbuild;
-pub mod layer;
-mod mac_run;
-mod nxkit;
-mod options;
-pub mod order;
 pub mod pipeline;
-mod programs;
-mod provisional;
 mod resource_patch;
-pub mod rewrite;
-mod stages;
 mod standalone;
-mod versions;
 
 /// The exit code a failing stage asks for (the first one wins). Stage closures return `Result<String, String>`, so the
 /// class of an error (damaged data 3, not supported yet 4, bad arguments 2, missing key 6) travels beside the text.
@@ -83,7 +51,7 @@ fn watch_interrupts(prog: std::sync::Arc<events::Progress>) {
                 let n = nxb_tool::kill_everything();
                 prog.end("interrupted", false);
                 prog.say(&format!(
-                    "[RED] interrupted (signal {sig}), {n} child process groups stopped"
+                    "nxb: error: interrupted (signal {sig}), {n} child process groups stopped"
                 ));
                 prog.finish();
                 std::process::exit(130);
@@ -115,9 +83,9 @@ pub fn main(argv: &[String]) -> i32 {
         Ok(a) => a,
         Err((code, msg)) => {
             if json {
-                events::Progress::new(events::Mode::Json, sink).say(&format!("[RED] {msg}"));
+                events::Progress::new(events::Mode::Json, sink).say(&format!("nxb: error: {msg}"));
             } else {
-                println!("[RED] {msg}");
+                println!("nxb: error: {msg}");
             }
             return code;
         }
@@ -131,13 +99,13 @@ pub fn main(argv: &[String]) -> i32 {
     };
     let prog = std::sync::Arc::new(events::Progress::new(mode, sink));
     watch_interrupts(prog.clone());
-    let result = graph::run(&a, &prog);
+    let result = standalone::run(&a, &prog);
     let code = match result {
         Ok(()) => 0,
         Err(e) => {
             prog.end("", false);
-            prog.say(&format!("[RED] {e}"));
-            // 3 damaged data, 4 not supported yet (the text starts with "unsupported" or the stage said so), 6 missing key
+            prog.say(&format!("nxb: error: {e}"));
+            // 3 damaged data, 4 not supported (the text starts with "unsupported" or the stage said so), 6 missing key
             match exit::get() {
                 0 if e.starts_with("unsupported") => 4,
                 0 => 1,

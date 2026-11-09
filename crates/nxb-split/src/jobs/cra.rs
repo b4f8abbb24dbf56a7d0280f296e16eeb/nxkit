@@ -40,12 +40,7 @@ fn entries(rel: &str, nros: &NroSet) -> R<Vec<Entry>> {
         }
     }
     Err(SplitError::Red(format!(
-        "/{rel}: a CRA archive, and no NRO in DM_NRO_DIR ({}) holds its file table",
-        if nros.dir.is_empty() {
-            "None"
-        } else {
-            &nros.dir
-        }
+        "/{rel}: a CRA archive, and no NRO holds its file table"
     )))
 }
 

@@ -509,7 +509,6 @@ pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
                     tag: String::new(),
                     main,
                     files,
-                    dir: Some(r.out.clone()),
                 }],
                 outputs,
             )

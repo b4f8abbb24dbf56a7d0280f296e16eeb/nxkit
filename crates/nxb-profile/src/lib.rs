@@ -8,12 +8,8 @@
 //! (dotted path) and [`Profile::problems`] (the rules of 2.11). Std only. The TOML reader handles the subset a profile
 //! needs (see [`toml`]).
 
-mod game;
 mod profile;
 pub mod toml;
-pub mod tsv;
-
-pub use game::parse_int;
 
 pub use profile::{
     CAPABILITY_KEYS, Computed, Cut, Declared, FrameLimit, PROVEN_KEYS, Present, Profile,

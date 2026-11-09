@@ -1,6 +1,5 @@
-//! What a build reads the game from, as the NSP script's `scan_nsps`, `scan_nup` and `scan_dump` find it: a folder of
-//! packages (NSP, NSZ, XCI, XCZ, merged packages that hold the base game, the update and DLC in one file), a NUP
-//! container (the `.nup` file, or the only one in the folder), or a dump folder (the game's files already extracted).
+//! What a build reads the game from: a folder of packages (NSP, NSZ, XCI, XCZ, merged packages that hold the base
+//! game, the update and DLC in one file) or a NUP container (the `.nup` file, or the only one in the folder).
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -15,8 +14,6 @@ pub enum Source {
     Packages,
     /// A NUP container (no keys).
     Nup,
-    /// A dump folder (no keys).
-    Dump,
 }
 
 /// The game found in the input.
@@ -24,18 +21,18 @@ pub enum Source {
 pub struct Inputs {
     /// The kind.
     pub source: Source,
-    /// The title ID of the game (the base game's). With `--program N`: the program's, the application's + N.
+    /// The title ID of the game (the base game's).
     pub app: u64,
-    /// The base game's package, the NUP file or the dump folder.
+    /// The base game's package or the NUP file.
     pub base: PathBuf,
     /// The updates by version (the package, the NUP file or `updates/<version>`).
     pub updates: Vec<(u32, PathBuf)>,
     /// DLC packages: (title ID, version, path).
     pub dlc: Vec<(u64, u32, PathBuf)>,
     /// The application to read from the packages (`nx_extract --app`): set for merged packages, cartridge images, a
-    /// game picked with `--title-id` and a program of a multi-program application.
+    /// game picked with `--title-id`.
     pub app_flag: Option<u64>,
-    /// Whether the NUP or the dump holds the base game's own files (version 0).
+    /// Whether the NUP holds the base game's own files (version 0).
     pub has_base: bool,
     /// Notes for the console (skipped files, merged packages).
     pub notes: Vec<String>,
@@ -283,7 +280,7 @@ fn scan_packages(
                 continue;
             }
             notes.push(format!(
-                "[RED] {name}: its content metas could not be read, it counts as the one title its ticket or name gives"
+                "nxb: warning: {name}: its content metas could not be read, it counts as the one title its ticket or name gives"
             ));
         }
         let ticket = names.iter().find_map(|n| {
@@ -403,29 +400,6 @@ fn scan_nup(path: &Path, want: Option<u64>) -> Result<Inputs, String> {
     })
 }
 
-fn scan_dump(dir: &Path, want: Option<u64>) -> Result<Inputs, String> {
-    let s = nxb_extract::dump::scan(dir).map_err(|e| e.to_string())?;
-    if let Some(w) = want
-        && w != s.app
-    {
-        return Err(format!(
-            "no game {w:016X} (--title-id) in {}, which holds {:016X}",
-            dir.display(),
-            s.app
-        ));
-    }
-    Ok(Inputs {
-        source: Source::Dump,
-        app: s.app,
-        base: dir.to_path_buf(),
-        updates: s.updates.into_iter().collect(),
-        dlc: s.dlc.keys().map(|t| (*t, 0, dir.join("dlc"))).collect(),
-        app_flag: None,
-        has_base: dir.join("base/romfs").is_dir(),
-        notes: Vec::new(),
-    })
-}
-
 fn parse_title(s: &str) -> Result<u64, String> {
     hex16(s.trim()).ok_or_else(|| {
         crate::exit::fail(
@@ -435,22 +409,16 @@ fn parse_title(s: &str) -> Result<u64, String> {
     })
 }
 
-/// Finds the game in the input the command line names: `--nup`, `--dump`, a `.nup` file, or a folder (packages, else
-/// the one NUP in it, else a dump).
+/// Finds the game in the input the command line names: `--nup`, a `.nup` file, or a folder (packages, else
+/// the one NUP in it).
 pub fn discover(a: &Args) -> Result<Inputs, String> {
     let want = a.title_id.as_deref().map(parse_title).transpose()?;
     let keys = a.keys.as_deref();
     if let Some(n) = &a.nup {
-        one_program(a, "A NUP")?;
         return nup_checked(n).and_then(|n| scan_nup(&n, want));
-    }
-    if let Some(d) = &a.dump {
-        one_program(a, "A dump folder")?;
-        return scan_dump(d, want);
     }
     let p = &a.nsp_dir;
     if p.is_file() {
-        one_program(a, "A NUP")?;
         return nup_checked(p).and_then(|n| scan_nup(&n, want));
     }
     if !p.is_dir() {
@@ -463,7 +431,6 @@ pub fn discover(a: &Args) -> Result<Inputs, String> {
             .collect();
         match nups.as_slice() {
             [one] => {
-                one_program(a, "A NUP")?;
                 return scan_nup(one, want);
             }
             [] => {}
@@ -478,26 +445,8 @@ pub fn discover(a: &Args) -> Result<Inputs, String> {
                 ));
             }
         }
-        if nxb_extract::dump::is_dump(p) {
-            one_program(a, "A dump folder")?;
-            return scan_dump(p, want);
-        }
     }
     scan_packages(p, keys, want, &a.aoc)
-}
-
-/// `--program N` picks a program from the packages of a multi-program application. A NUP and a dump hold one
-/// program's files.
-fn one_program(a: &Args, what: &str) -> Result<(), String> {
-    if a.program.is_some_and(|n| n != 0) {
-        return Err(crate::exit::fail(
-            2,
-            format!(
-                "--program / PROGRAM_INDEX picks a program from a multi-program application's NSPs. {what} is read as one program's files"
-            ),
-        ));
-    }
-    Ok(())
 }
 
 fn nup_checked(p: &Path) -> Result<PathBuf, String> {
@@ -511,27 +460,6 @@ fn nup_checked(p: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_program_needs_packages() {
-        let mut a = Args {
-            nup: Some("g.nup".into()),
-            program: Some(1),
-            ..Args::default()
-        };
-        let e = discover(&a).unwrap_err();
-        assert!(
-            e.starts_with("--program / PROGRAM_INDEX picks a program"),
-            "{e}"
-        );
-        assert!(e.contains("A NUP is read as one program's files"), "{e}");
-        a.nup = None;
-        a.dump = Some("d".into());
-        assert!(discover(&a).unwrap_err().contains("A dump folder is read"));
-        // program 0 is the application's own: the input is read as it is
-        a.program = Some(0);
-        assert!(!discover(&a).unwrap_err().contains("PROGRAM_INDEX"));
-    }
 
     #[test]
     fn tags_in_file_names() {

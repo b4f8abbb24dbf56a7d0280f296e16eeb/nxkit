@@ -14,9 +14,6 @@ use std::path::{Path, PathBuf};
 /// The raw tier's switch: `0` off, `list` the shipped allow list, a file name another allow list, else every shader.
 pub const RAW_SWITCH: &str = "NXB_OWN_RAW";
 
-/// `0` turns the raw tier of the iOS libraries off. The Mac libraries keep [`RAW_SWITCH`].
-pub const RAW_IOS_SWITCH: &str = "NXB_OWN_RAW_IOS";
-
 /// File name of the raw allow list in `<DATA_DIR>/<air-front id>/`.
 pub const RAW_LIST: &str = "raw-verified.txt";
 
@@ -67,11 +64,8 @@ pub struct RawTier {
 
 #[cfg(feature = "air-front")]
 impl RawTier {
-    /// The tier of this run ([`mode`]) for macOS or iOS, `None` when it is off. A damaged list is an error.
-    pub fn open(ios: bool) -> Result<Option<RawTier>, String> {
-        if ios && std::env::var_os(RAW_IOS_SWITCH).is_some_and(|v| v == "0") {
-            return Ok(None);
-        }
+    /// The tier of this run ([`mode`]), `None` when it is off. A damaged list is an error.
+    pub fn open() -> Result<Option<RawTier>, String> {
         let list = match mode().0 {
             None => return Ok(None),
             Some(Mode::All) => None,
@@ -82,7 +76,7 @@ impl RawTier {
             }
         };
         Ok(Some(RawTier {
-            fe: nxb_tool::airfront::RawFrontEnd::new(ios),
+            fe: nxb_tool::airfront::RawFrontEnd::new(false),
             list,
             id: nxb_tool::airfront::raw_id(),
             libs: Default::default(),
@@ -138,37 +132,6 @@ impl RawTier {
     }
 }
 
-impl crate::own_front::OwnFront {
-    /// The cache-key field of an iOS library: `own-raw@<air-front id>` when the iOS raw tier takes the shader, else
-    /// `None` (the key stays as without the tier).
-    pub fn ios_key_field(&self, msl: &[u8]) -> Option<&str> {
-        #[cfg(feature = "air-front")]
-        if let Some(r) = &self.raw_ios
-            && r.takes(msl)
-        {
-            return Some(r.id());
-        }
-        let _ = msl;
-        None
-    }
-
-    /// The iOS library from the raw tier, `None` when Apple must make it.
-    pub fn try_compile_ios(&self, msl: &[u8]) -> Option<Vec<u8>> {
-        #[cfg(feature = "air-front")]
-        {
-            self.raw_ios
-                .as_ref()
-                .and_then(|r| r.compile(msl))
-                .map(|(lib, _)| lib)
-        }
-        #[cfg(not(feature = "air-front"))]
-        {
-            let _ = msl;
-            None
-        }
-    }
-}
-
 #[cfg(all(test, feature = "air-front"))]
 mod tests {
     use super::*;
@@ -187,26 +150,6 @@ mod tests {
         let text = format!("{}\n", nxb_model::sha256(msl).to_hex());
         t.list = Some(nxb_tool::airfront::RawAllowList::parse(&text).expect("list"));
         assert!(t.takes(msl) && !t.takes(b"other") && t.listed() == Some(1));
-    }
-
-    #[test]
-    fn ios_tier_builds_a_valid_library_unlike_the_mac_one() {
-        let msl = b"#include <metal_stdlib>\nusing namespace metal;\nkernel void k(device float* o [[buffer(0)]], uint i [[thread_position_in_grid]]) { o[i] = 1.0; }\n";
-        let tier = |ios| RawTier {
-            fe: nxb_tool::airfront::RawFrontEnd::new(ios),
-            list: None,
-            id: nxb_tool::airfront::raw_id(),
-            libs: Default::default(),
-            fallback: Default::default(),
-        };
-        let (mac, ios) = (tier(false), tier(true));
-        let (m, _) = mac.compile(msl).expect("mac library");
-        let (i, _) = ios.compile(msl).expect("ios library");
-        nxb_tool::airfront::validate_library(&i).expect("valid ios library");
-        assert_ne!(m, i);
-        assert_eq!(ios.libs.load(std::sync::atomic::Ordering::Relaxed), 1);
-        assert!(ios.compile(b"this is not metal {").is_none());
-        assert_eq!(ios.fallback.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
     #[test]

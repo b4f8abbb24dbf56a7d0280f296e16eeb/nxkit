@@ -157,18 +157,4 @@ mod tests {
         r.multi = true;
         assert!(validate(&r).is_err());
     }
-
-    #[test]
-    fn the_shipped_rules_are_well_formed() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../data/rewrite-rules/snapshot.tsv");
-        let text = std::fs::read_to_string(path).expect("snapshot");
-        let table = crate::patches::PatchTable::parse(&text).expect("parse");
-        let mut n = 0;
-        for rule in table.rules.values().flat_map(|m| m.values()).flatten() {
-            assert_eq!(validate(rule), Ok(()), "{}", rule.name);
-            n += 1;
-        }
-        assert!(n > 0);
-    }
 }

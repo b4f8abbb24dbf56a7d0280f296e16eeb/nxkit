@@ -1,6 +1,6 @@
 # Build Breath of the Wild with nxkit
 
-This page shows how to make the app of The Legend of Zelda: Breath of the Wild from your own game files. The build uses nxkit only. It needs no Python and no `--engine`.
+This page shows how to make the app of The Legend of Zelda: Breath of the Wild from your own game files. The build uses nxkit only. `nxb` builds only nxkit apps: a game needs a title module, and the app has `nxkit-host` as its program. There is no `--engine`.
 
 You need a Mac with Apple silicon, Xcode command line tools and Rust 1.99 or newer. You also need the game files and your `prod.keys` file. nxkit does not contain either of them.
 
@@ -80,7 +80,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 
 1. Extract. The packages become `RomFS.img`, `ExeFS` and the shader split. The update layers on top of the base game.
 2. Romfs. The files of `RomFS.img` go to `romfs/`. The build checks that `romfs/Pack/Bootup_Graphics.pack` exists. Each DLC goes to its own folder `aoc/<index>/`. The Master Trials is `aoc/1` and The Champions' Ballad is `aoc/2`. The DLC is not merged into `romfs/`. Refer to R50 in [decisions.md](decisions.md).
-3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports, and applies the patch rules of the title module (`rewrite_rules()` of `nxgame-botw`, one file `rules/01007EF00011E000.toml`). `data/rewrite-rules` has no file for this game.
+3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports, and applies the patch rules of the title module (`rewrite_rules()` of `nxgame-botw`, one file `rules/01007EF00011E000.toml`).
 4. Manifest. `game.json` gets the modules, the NVN function list, the services, the main thread from `main.npdm`, the memory layout and the run settings.
 5. Link. `nxgame.dylib` holds the modules at their fixed addresses. `codesign` signs it ad hoc. Refer to R48.
 6. Shaders. The build compiles the shaders into `shaders/` and makes `pipelines.mtl4archive` for the GPU of this Mac. `--gpu none` skips the archive.
@@ -89,7 +89,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 ## What does not work yet
 
 - The build was written without a run on the game files. The first real build can stop at a stage with a named error.
-- `--platform ios` is not supported for this game. The build stops with exit code 4. Options of the old path (for example `--shaders`, `--companion-app` and `--dump`) stop the build with exit code 4 and name the option.
+- `--platform ios` is not supported: nxkit has no iOS host yet. The options of the former engine path (for example `--engine`, `--shaders`, `--companion-app` and `--dump`) do not exist any more and give exit code 2.
 - A missing pipeline archive is a `[RED]` warning. The game then compiles its pipelines while it runs.
 - The bundle is not sealed. Whether macOS starts it without a seal is not tested.
 - The rules of the title module are the 168 frame-step steps. The screen shape, layout and FOV stubs are not in them. Without them the game keeps its own aspect and field of view.

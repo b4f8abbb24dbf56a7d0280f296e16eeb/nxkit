@@ -1,22 +1,17 @@
 //! The command line of the `nxb` binary (layer L3).
 //!
-//! `nxb` is the one binary: the whole build and every stage as a subcommand (design-pipeline-rest 11). There are no
-//! other program names and no dispatch by `argv[0]`. Each subcommand calls a library main with the command line and
-//! exit codes of the reference scripts:
+//! `nxb` is the one binary: the build of an nxkit app and the stages that work without more than their arguments, as
+//! subcommands. There are no other program names and no dispatch by `argv[0]`. Each subcommand calls a library main:
 //!
 //! | `nxb` command | calls |
 //! |---|---|
 //! | `build` | `nxb_build::main` |
 //! | `extract` | `nxb_extract::cli::main` |
 //! | `split` | `nxb_extract::split_cli::main` |
-//! | `rewrite`, `nro`, `rewrite-rules` | `nxb_build::rewrite` |
 //! | `shaders guards|own-verdicts|build` | this crate (the shader-step command line) |
-//! | `app` | `nxb_pack::cli::macapp::main` |
-//! | `ipa` | `nxb_pack::cli::ipa::main` |
 //! | `sign` | `nxb_pack::cli::sign::main` |
 //! | `pso` | `nxb_archive::cli::pso::main` |
 //! | `archive` | `nxb_archive::cli::archive::main` |
-//! | `ios` | `nxb_build::ios_cli::main` |
 //! | `airc` | `airc::main` (the own front end compiler) |
 //! | `cache`, `prune` | `cache` (store export, import, prune, list) |
 //! | `regressions` | `regressions` (`shader_regressions.py`) |
@@ -131,23 +126,11 @@ pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Writ
         // the extract stage: NSP and NUP packages (ADR W19)
         "extract" if bin == Binary::Nxb => return nxb_extract::cli::main(rest),
         "split" if bin == Binary::Nxb => return nxb_extract::split_cli::main(rest),
-        // the rewrite step (`patch_nso.py`'s command line, exit code 4 = unsupported, run the script)
-        "rewrite" if bin == Binary::Nxb => return nxb_build::rewrite::main(rest),
-        // the NRO collection (`nro_collect.py`'s command line, exit code 4 = unsupported)
-        "nro" if bin == Binary::Nxb => return nxb_build::rewrite::nro_main(rest),
-        // the registered patches as private rule files
-        "rewrite-rules" if bin == Binary::Nxb => return nxb_build::rewrite::rules_main(rest),
-        // the provisional profile of a game with no profile (guess, show, check, manifest)
-        "profile" if bin == Binary::Nxb => return nxb_build::host::profile_cli::main(rest),
         // pack and sign stages
-        "app" if bin == Binary::Nxb => return nxb_pack::cli::macapp::main(rest),
-        "ipa" if bin == Binary::Nxb => return nxb_pack::cli::ipa::main(rest),
         "sign" if bin == Binary::Nxb => return nxb_pack::cli::sign::main(rest),
         // pipeline archive stages
         "pso" if bin == Binary::Nxb => return nxb_archive::cli::pso::main(rest),
         "archive" if bin == Binary::Nxb => return nxb_archive::cli::archive::main(rest),
-        // the iOS scripts
-        "ios" if bin == Binary::Nxb => return nxb_build::ios_cli::main(rest),
         // the own front end compiler
         "airc" if bin == Binary::Nxb => return airc_main(rest),
         c => writeln!(err, "{}: unknown command {c:?} (try help)", bin.name()).map(|_| 2),

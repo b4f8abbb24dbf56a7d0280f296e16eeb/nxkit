@@ -15,9 +15,6 @@ fn usage() -> i32 {
 /// [`crate::nup`]; everything else is the NSP extract.
 pub fn main(args: &[String]) -> i32 {
     let a: Vec<String> = args.to_vec();
-    if let Some(code) = dump_main(&a) {
-        return code;
-    }
     if let Some(code) = nup_main(&a) {
         return code;
     }
@@ -291,72 +288,6 @@ fn nup_main(a: &[String]) -> Option<i32> {
         i += 2;
     }
     Some(match crate::nup::extract_nup(&r) {
-        Ok(_) => 0,
-        Err(e) => {
-            println!("[RED] {e}");
-            e.exit_code()
-        }
-    })
-}
-
-/// The dump-folder form: `--dump <folder> [--work <dir>] [--version N] [--threads N] [--mem-mib N] [--digests <tsv>]
-/// [--discard-images]`, or the folder as the only argument when it has the dump layout.
-fn dump_main(a: &[String]) -> Option<i32> {
-    let named = a
-        .iter()
-        .position(|x| x == "--dump")
-        .and_then(|i| a.get(i + 1))
-        .cloned();
-    let only = (a.len() == 1
-        && !a[0].starts_with('-')
-        && crate::dump::is_dump(std::path::Path::new(&a[0])))
-    .then(|| a[0].clone());
-    let path = PathBuf::from(named.or(only)?);
-    let mut r = crate::dump::DumpRequest {
-        dump: path,
-        version: None,
-        work: PathBuf::new(),
-        threads: std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4),
-        mem_limit: 1 << 30,
-        discard_images: false,
-        digests: None,
-        progress: None,
-    };
-    let mut i = 0;
-    while i < a.len() {
-        let v = a.get(i + 1).cloned().unwrap_or_default();
-        match a[i].as_str() {
-            "--dump" => {}
-            "--work" => r.work = PathBuf::from(&v),
-            "--version" => match v.parse() {
-                Ok(n) => r.version = Some(n),
-                Err(_) => {
-                    println!("[RED] --version needs a number");
-                    return Some(2);
-                }
-            },
-            "--threads" => r.threads = v.parse().unwrap_or(r.threads),
-            "--mem-mib" => r.mem_limit = v.parse::<u64>().map(|m| m << 20).unwrap_or(r.mem_limit),
-            "--digests" => r.digests = Some(PathBuf::from(&v)),
-            "--discard-images" => {
-                r.discard_images = true;
-                i += 1;
-                continue;
-            }
-            s if !s.starts_with('-') => {
-                i += 1;
-                continue;
-            }
-            other => {
-                println!("[RED] unknown option for a dump folder: {other}");
-                return Some(2);
-            }
-        }
-        i += 2;
-    }
-    Some(match crate::dump::extract_dump(&r) {
         Ok(_) => 0,
         Err(e) => {
             println!("[RED] {e}");

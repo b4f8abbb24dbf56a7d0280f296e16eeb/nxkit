@@ -72,11 +72,9 @@ nxb-extract = { path = "crates/nxb-extract" }
 nxb-pack = { path = "crates/nxb-pack" }
 nxb-archive = { path = "crates/nxb-archive" }
 nxb-build = { path = "crates/nxb-build" }
-nxb-nro = { path = "crates/nxb-nro" }
 nxb-profile = { path = "crates/nxb-profile" }
 nxb-xlatedev = { path = "crates/nxb-xlatedev" }
 nxb-xlate = { path = "crates/nxb-xlate" }
-nxb-layer = { path = "crates/nxb-layer" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
 objc2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-audio-toolbox = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
