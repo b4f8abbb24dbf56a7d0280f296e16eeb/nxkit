@@ -3,6 +3,7 @@
 //! The rest of the host sees safe types. A [`Reservation`] checks every address against its own range before it
 //! touches memory.
 
+pub mod allocspy;
 pub mod appkit;
 mod dylib;
 mod kernel;
