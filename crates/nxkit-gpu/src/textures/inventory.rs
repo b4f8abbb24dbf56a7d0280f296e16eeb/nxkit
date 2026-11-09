@@ -160,7 +160,8 @@ pub struct Dup {
     pub bytes: u64,
 }
 
-/// The idle buckets of the `sampled` class: used in the last 60 frames, in the last 600, older.
+/// The idle buckets of the `sampled` class and of the attachment entries: used in the last 60 frames, in the last
+/// 600, older.
 pub const IDLE_EDGES: [u64; 2] = [60, 600];
 
 /// The totals of one scan.
@@ -188,6 +189,15 @@ pub struct Inventory {
     pub same_range: Dup,
     /// The entries whose guest range overlaps the range of another live entry.
     pub overlap: Dup,
+    /// The part of `overlap` that are attachment entries (the id was an attachment).
+    pub overlap_attachment: Dup,
+    /// The part of `overlap` that are all other entries.
+    pub overlap_other: Dup,
+    /// The attachment entries (ids that were an attachment) by idle frames of their Metal texture, in the buckets of
+    /// `idle`. The count is entries; the bytes are of the distinct Metal textures behind them.
+    pub attachment_idle: [Total; 3],
+    /// The distinct (format, width, height) among the attachment entries.
+    pub attachment_shapes: u64,
     /// The largest Metal textures, largest first (at most [`LARGEST`]).
     pub largest: Vec<Largest>,
 }
@@ -212,6 +222,10 @@ pub(super) struct Span {
     pub(super) desc: TextureDesc,
     pub(super) generation: u64,
     pub(super) bytes: u64,
+    /// The id is in the attachment set of the store.
+    pub(super) attachment: bool,
+    /// Frames since a frame used the Metal texture of the entry last.
+    pub(super) idle: u64,
 }
 
 fn sum_up(ids: &[usize], spans: &[Span]) -> Dup {
@@ -245,6 +259,38 @@ fn same_range(spans: &[Span]) -> Dup {
 
 /// The entries whose range `[address, address + size)` overlaps the range of another entry. Empty ranges are left out.
 fn overlap(spans: &[Span]) -> Dup {
+    sum_up(&overlapping(spans), spans)
+}
+
+/// The overlapping entries split into attachment entries and the others.
+fn overlap_split(spans: &[Span]) -> (Dup, Dup) {
+    let (a, o): (Vec<usize>, Vec<usize>) = overlapping(spans)
+        .into_iter()
+        .partition(|&i| spans[i].attachment);
+    (sum_up(&a, spans), sum_up(&o, spans))
+}
+
+/// The attachment entries by idle bucket, and the number of distinct shapes among them.
+fn attachments(spans: &[Span]) -> ([Total; 3], u64) {
+    let mut idle = [Total::default(); 3];
+    let mut seen: HashSet<u64> = HashSet::new();
+    let mut shapes: HashSet<(nxkit_metal::Format, u32, u32)> = HashSet::new();
+    for s in spans.iter().filter(|s| s.attachment) {
+        let b = IDLE_EDGES
+            .iter()
+            .position(|&e| s.idle <= e)
+            .unwrap_or(IDLE_EDGES.len());
+        idle[b].count += 1;
+        if seen.insert(s.generation) {
+            idle[b].bytes += s.bytes;
+        }
+        shapes.insert((s.desc.format, s.desc.width, s.desc.height));
+    }
+    (idle, shapes.len() as u64)
+}
+
+/// The indices of the entries that overlap another entry.
+fn overlapping(spans: &[Span]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..spans.len()).filter(|&i| spans[i].size > 0).collect();
     order.sort_by_key(|&i| spans[i].address);
     let end = |i: usize| spans[i].address.saturating_add(spans[i].size);
@@ -264,12 +310,11 @@ fn overlap(spans: &[Span]) -> Dup {
         }
         max_end = max_end.max(end(i));
     }
-    let ids: Vec<usize> = order
+    order
         .iter()
         .zip(&hit)
         .filter_map(|(&i, &h)| h.then_some(i))
-        .collect();
-    sum_up(&ids, spans)
+        .collect()
 }
 
 /// The totals for these textures and entries.
@@ -335,6 +380,8 @@ pub(super) fn build(
         .collect();
     inv.same_range = same_range(spans);
     inv.overlap = overlap(spans);
+    (inv.overlap_attachment, inv.overlap_other) = overlap_split(spans);
+    (inv.attachment_idle, inv.attachment_shapes) = attachments(spans);
     inv
 }
 
@@ -401,13 +448,19 @@ impl TextureStore {
             .collect();
         let spans: Vec<Span> = self
             .entries
-            .values()
-            .map(|r| Span {
+            .iter()
+            .map(|(id, r)| Span {
                 address: r.guest_address,
                 size: r.guest_size,
                 desc: r.desc,
                 generation: r.generation,
                 bytes: bytes.get(&r.generation).copied().unwrap_or(0),
+                attachment: self.attachments.contains(id),
+                idle: self.frame.saturating_sub(
+                    self.usage
+                        .get(&r.generation)
+                        .map_or(self.frame, |u| u.last_frame),
+                ),
             })
             .collect();
         let total = |it: &mut dyn Iterator<Item = u64>| {

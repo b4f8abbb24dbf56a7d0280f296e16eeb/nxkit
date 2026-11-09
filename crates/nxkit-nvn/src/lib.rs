@@ -42,6 +42,7 @@ pub mod resource;
 pub mod screen;
 pub mod space;
 pub mod swizzle;
+pub mod texlife;
 pub mod tic;
 
 #[cfg(test)]
@@ -52,3 +53,5 @@ mod front_state_tests;
 mod front_tests;
 #[cfg(test)]
 mod testkit;
+#[cfg(test)]
+mod texlife_tests;

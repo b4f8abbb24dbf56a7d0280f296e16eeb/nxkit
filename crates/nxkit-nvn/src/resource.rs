@@ -165,6 +165,13 @@ impl ResourceTable {
         (self.records.len(), self.by_address.len())
     }
 
+    /// The records of the live textures, by address.
+    pub fn live(&self) -> impl Iterator<Item = &TextureRecord> + '_ {
+        self.by_address
+            .values()
+            .filter_map(|id| self.records.get(id.0 as usize))
+    }
+
     /// Removes a texture. Its id is not used again.
     pub fn finalize(&mut self, id: TexId) -> Result<()> {
         let r = self.get_mut(id)?;

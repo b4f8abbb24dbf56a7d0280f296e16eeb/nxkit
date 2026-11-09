@@ -39,6 +39,16 @@ fn span(address: u64, size: u64, generation: u64, w: u32) -> Span {
         desc: desc(Format::Rgba8Unorm, w, w),
         generation,
         bytes: 100,
+        attachment: false,
+        idle: 0,
+    }
+}
+
+fn att(address: u64, size: u64, generation: u64, w: u32, idle: u64) -> Span {
+    Span {
+        attachment: true,
+        idle,
+        ..span(address, size, generation, w)
     }
 }
 
@@ -211,4 +221,76 @@ fn overlapping_ranges_are_found_at_both_ends() {
             bytes: 300
         }
     );
+}
+
+#[test]
+fn the_overlap_is_split_into_attachment_entries_and_the_others() {
+    let spans = [
+        att(0x1000, 0x1000, 1, 16, 0), // overlaps the next two
+        span(0x1800, 0x100, 2, 16),    // inside the first
+        att(0x1c00, 0x1000, 1, 16, 0), // overlaps the first, shares its Metal texture
+        att(0x9000, 0x100, 4, 16, 0),  // alone
+    ];
+    let (a, o) = overlap_split(&spans);
+    assert_eq!(
+        a,
+        Dup {
+            entries: 2,
+            textures: 1,
+            bytes: 100
+        }
+    );
+    assert_eq!(
+        o,
+        Dup {
+            entries: 1,
+            textures: 1,
+            bytes: 100
+        }
+    );
+    // the two parts add up to the whole
+    let all = overlap(&spans);
+    assert_eq!((all.entries, all.bytes), (3, 200));
+}
+
+#[test]
+fn attachment_entries_are_counted_by_idle_age() {
+    let spans = [
+        att(0x1000, 0x100, 1, 16, 0),
+        att(0x2000, 0x100, 1, 16, 0), // same Metal texture: counted as an entry, its bytes once
+        att(0x3000, 0x100, 2, 16, 60),
+        att(0x4000, 0x100, 3, 16, 61),
+        att(0x5000, 0x100, 4, 16, 600),
+        att(0x6000, 0x100, 5, 16, 601),
+        span(0x7000, 0x100, 6, 16), // not an attachment
+    ];
+    let (idle, _) = attachments(&spans);
+    let t = |count, bytes| Total { count, bytes };
+    assert_eq!(idle, [t(3, 200), t(2, 200), t(1, 100)]);
+}
+
+#[test]
+fn the_shapes_of_the_attachments_are_distinct_by_format_width_and_height() {
+    let mut other_format = att(0x3000, 0x100, 3, 16, 0);
+    other_format.desc.format = Format::Bgra8Unorm;
+    let spans = [
+        att(0x1000, 0x100, 1, 16, 0),
+        att(0x2000, 0x100, 2, 16, 0), // same shape as the first
+        other_format,
+        att(0x4000, 0x100, 4, 32, 0),
+        span(0x5000, 0x100, 5, 64), // a sampled entry adds no shape
+    ];
+    assert_eq!(attachments(&spans).1, 3);
+    assert_eq!(attachments(&[]).1, 0);
+}
+
+#[test]
+fn build_fills_the_attachment_fields() {
+    let spans = [att(0x1000, 0x200, 1, 16, 5), att(0x1100, 0x200, 2, 16, 700)];
+    let inv = build(10, &[], &spans, 0, Total::default(), Total::default());
+    assert_eq!(inv.attachment_idle[0].count, 1);
+    assert_eq!(inv.attachment_idle[2].count, 1);
+    assert_eq!(inv.attachment_shapes, 1);
+    assert_eq!(inv.overlap_attachment.entries, 2);
+    assert_eq!(inv.overlap_other.entries, 0);
 }

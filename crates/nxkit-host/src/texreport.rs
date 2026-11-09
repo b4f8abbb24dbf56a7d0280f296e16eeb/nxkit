@@ -16,9 +16,20 @@
 //! - `nxkit-mem tex scale`: the scaled textures and what they would take at scale 1 (bytes divided by scale squared).
 //! - `nxkit-mem tex dup`: entries that have the same guest start and description as another live entry, and entries
 //!   whose guest range overlaps another live entry's range, each with the Metal textures behind them and their bytes.
+//! - `nxkit-mem tex attach`: the attachment entries (ids that were a render target; the store never evicts them) by
+//!   frames since the last use, in the buckets of `idle` (the MiB are of the distinct textures behind them), the
+//!   number of distinct (format, width, height) among them, and the overlap line of `dup` split into attachment
+//!   entries and all others.
 //! - `nxkit-mem tex largest`: the largest Metal textures, one `format WxHxD/layers mips scale class MiB idle`.
+//! - `nxkit-mem texlife`: the life of the texture records of the NVN front end (`nxkit_nvn::texlife`): the calls of
+//!   `nvnTextureInitialize` and how many of them shared a record or took an orphan back, the finalizes that dropped the
+//!   record or left an orphan, the orphans released later, the orphans and records now, and the ones in no live memory
+//!   pool. Each total that only grows has the change since the previous report in `(+n)`.
+
+use std::sync::Mutex;
 
 use nxkit_gpu::inventory::{Class, Dup, Inventory, Total};
+use nxkit_nvn::texlife::{Held, Snapshot};
 
 const MIB: f64 = 1024.0 * 1024.0;
 
@@ -128,6 +139,19 @@ fn dup_line(i: &Inventory) -> String {
     )
 }
 
+fn attach_line(i: &Inventory) -> String {
+    let d = &i.attachment_idle;
+    format!(
+        "nxkit-mem tex attach (entries/MiB): <=60 {} <=600 {} older {} | shapes {} | overlap attachment {} | overlap other {}",
+        total(&d[0]),
+        total(&d[1]),
+        total(&d[2]),
+        i.attachment_shapes,
+        dup(&i.overlap_attachment),
+        dup(&i.overlap_other)
+    )
+}
+
 fn largest_line(i: &Inventory) -> String {
     let mut s = String::from("nxkit-mem tex largest (MiB):");
     for (k, l) in i.largest.iter().enumerate() {
@@ -157,14 +181,59 @@ pub fn tex_lines(i: &Inventory, process_bytes: u64) -> Vec<String> {
         idle_line(i),
         scale_line(i),
         dup_line(i),
+        attach_line(i),
         largest_line(i),
     ]
+}
+
+fn held(h: &Held) -> String {
+    format!("{}/{}", h.count, mib(h.bytes))
+}
+
+/// `now` and its change since `before`, as `now (+change)`.
+fn grew(now: u64, before: u64) -> String {
+    format!("{now} (+{})", now.saturating_sub(before))
+}
+
+/// The line of the texture life. `prev` is the snapshot of the previous report; without one the change is from zero.
+fn texlife_line(s: &Snapshot, prev: &Snapshot) -> String {
+    let (c, p) = (&s.counts, &prev.counts);
+    format!(
+        "nxkit-mem texlife (count, change since the last report): init {} shared {} reshared-orphan {} | finalize dropped {} orphaned {} released {} | orphans {}/{} MiB | records made {} live {} | outside-pools records {} orphans {}",
+        grew(c.inits, p.inits),
+        grew(c.shared, p.shared),
+        grew(c.reshared, p.reshared),
+        grew(c.dropped_now, p.dropped_now),
+        grew(c.orphaned, p.orphaned),
+        grew(c.released, p.released),
+        c.orphans,
+        mib(c.orphan_bytes),
+        grew(s.made, prev.made),
+        s.live,
+        held(&s.outside.records),
+        held(&s.outside.orphans)
+    )
+}
+
+static PREV_LIFE: Mutex<Option<Snapshot>> = Mutex::new(None);
+
+/// The line of the texture life now, with the change since the previous call (since zero for the first).
+fn life_now() -> String {
+    let now = nxkit_nvn::texlife::snapshot();
+    let mut prev = PREV_LIFE.lock().unwrap_or_else(|e| e.into_inner());
+    let line = texlife_line(&now, &prev.unwrap_or_default());
+    *prev = Some(now);
+    line
 }
 
 /// The lines of the last scan, or none when there was no scan (the report is off, or fewer than 60 frames ran).
 pub fn lines() -> Vec<String> {
     match nxkit_gpu::inventory::latest() {
-        Some(i) => tex_lines(&i, nxkit_metal::mem_stats().texture_bytes),
+        Some(i) => {
+            let mut v = tex_lines(&i, nxkit_metal::mem_stats().texture_bytes);
+            v.push(life_now());
+            v
+        }
         None => Vec::new(),
     }
 }
@@ -323,10 +392,72 @@ mod tests {
     }
 
     #[test]
+    fn the_attach_line_has_the_buckets_the_shapes_and_the_overlap_split() {
+        let mut i = sample();
+        i.attachment_idle = [t(5, 30), t(15, 90), t(20, 180)];
+        i.attachment_shapes = 4;
+        i.overlap_attachment = Dup {
+            entries: 5,
+            textures: 4,
+            bytes: 40 * M,
+        };
+        i.overlap_other = Dup {
+            entries: 4,
+            textures: 3,
+            bytes: 10 * M,
+        };
+        let l = attach_line(&i);
+        assert!(
+            l.ends_with(
+                "<=60 5/30.0 <=600 15/90.0 older 20/180.0 | shapes 4 | overlap attachment 5 entries 4 textures 40.0 MiB | overlap other 4 entries 3 textures 10.0 MiB"
+            ),
+            "{l}"
+        );
+    }
+
+    #[test]
+    fn the_texlife_line_shows_totals_and_the_change() {
+        let mut s = Snapshot::default();
+        s.counts.inits = 120;
+        s.counts.shared = 100;
+        s.counts.reshared = 2;
+        s.counts.dropped_now = 10;
+        s.counts.orphaned = 30;
+        s.counts.released = 28;
+        s.counts.orphans = 2;
+        s.counts.orphan_bytes = 2 * M;
+        s.made = 5000;
+        s.live = 90;
+        s.outside.records = Held {
+            count: 3,
+            bytes: 6 * M,
+        };
+        s.outside.orphans = Held { count: 1, bytes: M };
+        let mut prev = Snapshot::default();
+        prev.counts.inits = 100;
+        prev.made = 4990;
+        let l = texlife_line(&s, &prev);
+        for part in [
+            "init 120 (+20)",
+            "shared 100 (+100)",
+            "reshared-orphan 2 (+2)",
+            "dropped 10 (+10)",
+            "orphaned 30 (+30)",
+            "released 28 (+28)",
+            "orphans 2/2.0 MiB",
+            "made 5000 (+10) live 90",
+            "outside-pools records 3/6.0 orphans 1/1.0",
+        ] {
+            assert!(l.contains(part), "{part} missing in {l}");
+        }
+        assert!(l.starts_with("nxkit-mem texlife "));
+    }
+
+    #[test]
     fn every_line_starts_with_the_prefix() {
         let lines = tex_lines(&sample(), 0);
-        assert_eq!(lines.len(), 7);
+        assert_eq!(lines.len(), 8);
         assert!(lines.iter().all(|l| l.starts_with("nxkit-mem tex ")));
-        assert!(tex_lines(&Inventory::default(), 0).len() == 7);
+        assert!(tex_lines(&Inventory::default(), 0).len() == 8);
     }
 }

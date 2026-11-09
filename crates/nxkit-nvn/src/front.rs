@@ -14,7 +14,7 @@ use crate::analyse::Analyser;
 use crate::cache::{CacheStats, RecCache};
 use crate::cmdbuf::{CommandBuffer, CommandHandle};
 use crate::decode::{Ctx, State, summary};
-use crate::descriptors::{Descriptors, TextureSlot};
+use crate::descriptors::Descriptors;
 use crate::error::{NvnError, Result};
 use crate::frame::{Cmd, Frame};
 use crate::layout::TextureDesc;
@@ -25,7 +25,8 @@ use crate::record::Record;
 use crate::rendercond::RenderConds;
 use crate::resource::{ResourceTable, TexId};
 use crate::space::{GpuAddr, GpuSpace};
-use crate::tic::{TextureView, Tsc};
+use crate::texlife::{Life, SCAN_EVERY};
+use crate::tic::Tsc;
 
 /// Why a frame ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,13 +66,13 @@ struct Callback {
 /// The NVN front end.
 #[derive(Debug)]
 pub struct FrontEnd<S: GpuSpace, M: GuestMem> {
-    space: S,
+    pub(crate) space: S,
     mem: M,
-    table: ResourceTable,
-    descriptors: Descriptors,
+    pub(crate) table: ResourceTable,
+    pub(crate) descriptors: Descriptors,
     buffers: Vec<CommandBuffer>,
     callbacks: HashMap<usize, Callback>,
-    queues: HashMap<usize, State>,
+    pub(crate) queues: HashMap<usize, State>,
     /// The render condition of each queue and the reports it reads.
     render: RenderConds,
     cache: RecCache,
@@ -80,9 +81,9 @@ pub struct FrontEnd<S: GpuSpace, M: GuestMem> {
     analyser: Analyser,
     flushes: FlushStats,
     hit: Vec<TexId>,
-    /// Textures the game finalized while a pool slot still holds them.
-    orphans: Vec<TexId>,
-    dropped: Vec<TexId>,
+    /// The textures the game finalized while a pool slot still holds them, and their counts (`texlife.rs`).
+    pub(crate) life: Life,
+    pub(crate) dropped: Vec<TexId>,
 }
 
 impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
@@ -101,7 +102,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             frame: Frame::new(),
             plan: PassPlan::new(),
             analyser: Analyser::new(),
-            orphans: Vec::new(),
+            life: Life::default(),
             dropped: Vec::new(),
             flushes: FlushStats::default(),
             hit: Vec::new(),
@@ -166,52 +167,6 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         Ok(self.create_texture_shared(desc, host_address)?.0)
     }
 
-    /// Like [`FrontEnd::create_texture`]. A live texture with the same address and description is shared and comes back
-    /// with `true` (see [`ResourceTable::create_shared`]); the backend already knows it.
-    pub fn create_texture_shared(
-        &mut self,
-        desc: TextureDesc,
-        host_address: u64,
-    ) -> Result<(TexId, bool)> {
-        let size = desc.layout()?.size;
-        let address = self.space.gpu_address(host_address, size)?;
-        self.table.create_shared(desc, address)
-    }
-
-    /// Destroys a texture. This is `nvnTextureFinalize`.
-    ///
-    /// On the hardware a texture pool slot is a copy of the texture header in memory, so it stays usable after the
-    /// texture object is finalized: games keep sampling such slots. The record therefore lives on while a slot holds
-    /// it and goes when the last slot is registered with another texture.
-    /// The result is false while the record lives on; [`FrontEnd::take_dropped`] gives it when it goes.
-    pub fn finalize_texture(&mut self, id: TexId) -> Result<bool> {
-        // Another texture object still names the record.
-        if !self.table.release_ref(id)? {
-            return Ok(false);
-        }
-        if self.descriptors.has_slots(id) {
-            self.table.get(id)?;
-            if !self.orphans.contains(&id) {
-                self.orphans.push(id);
-            }
-            return Ok(false);
-        }
-        self.drop_texture(id)?;
-        Ok(true)
-    }
-
-    /// The finalized textures whose last slot went since the previous call.
-    pub fn take_dropped(&mut self) -> Vec<TexId> {
-        std::mem::take(&mut self.dropped)
-    }
-
-    fn drop_texture(&mut self, id: TexId) -> Result<()> {
-        self.table.finalize(id)?;
-        self.descriptors.drop_texture(id);
-        self.queues.values_mut().for_each(|q| q.forget(id));
-        Ok(())
-    }
-
     /// Creates a texture pool. This is `nvnTexturePoolInitialize`.
     pub fn add_texture_pool(&mut self, base: u32, count: u32, host_memory: u64) -> Result<()> {
         let bytes = u64::from(count) * crate::tic::HEADER_BYTES as u64;
@@ -224,29 +179,6 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         let bytes = u64::from(count) * crate::tic::HEADER_BYTES as u64;
         let memory = self.space.gpu_address(host_memory, bytes)?;
         self.descriptors.add_sampler_pool(base, count, memory)
-    }
-
-    /// Registers a texture. This is `nvnTexturePoolRegisterTexture`.
-    /// A recording that bound the old texture of this id is decoded again at its next submit.
-    pub fn register_texture(
-        &mut self,
-        id: u32,
-        texture: TexId,
-        view: TextureView,
-    ) -> Result<TextureSlot> {
-        let old = self.descriptors.texture(id).ok().map(|s| s.texture);
-        let slot = self
-            .descriptors
-            .register_texture(&self.table, id, texture, view)?;
-        if let Some(old) = old.filter(|&o| o != texture)
-            && let Some(i) = self.orphans.iter().position(|&o| o == old)
-            && !self.descriptors.has_slots(old)
-        {
-            self.orphans.swap_remove(i);
-            self.drop_texture(old)?;
-            self.dropped.push(old);
-        }
-        Ok(slot)
     }
 
     /// Registers a sampler. This is `nvnSamplerPoolRegisterSampler`.
@@ -480,6 +412,9 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             .analyse(&self.frame, &self.table, &mut self.plan)?;
         crate::rendercond::frame_diag(&mut self.render, &self.frame);
         self.render.flushed();
+        if (self.flushes.present + self.flushes.cpu_wait).is_multiple_of(SCAN_EVERY) {
+            self.scan_outside_pools();
+        }
         Ok(&self.plan)
     }
 
