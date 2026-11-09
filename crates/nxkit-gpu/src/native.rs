@@ -19,11 +19,13 @@
 //! 3. The pass loop skips the dispatches of the run and calls [`encode`] at the last one. [`encode`] makes one compute
 //!    pass with the plan's steps and a barrier between steps that depend on each other.
 //!
-//! `NXKIT_NDVE=0` turns the module off. `NXKIT_DIAG=ndve` prints the capture list once per distinct run.
-//! `NXKIT_NDVE_COMPARE=1` with it runs the game's chain and the plan on a sampled frame and prints the difference.
+//! `NXKIT_<NAME>=0` turns a network off (`NXKIT_NDVE`, `NXKIT_NDSR`). `NXKIT_DIAG=<name>` prints the capture list once per
+//! distinct run. `NXKIT_<NAME>_COMPARE=1` runs the game's chain and the plan on a sampled frame and prints the difference.
 
 mod book;
 mod build;
+mod capture;
+mod iface;
 mod prof;
 mod run;
 mod util;
@@ -33,14 +35,16 @@ use book::intermediates_read_later;
 #[cfg(test)]
 use build::{barrier_flags, written_resources};
 use build::{build, used_resources, uses_resource};
-use run::{Compare, PendingCompare, capture, count_fallback, count_native, make_compare};
+use capture::capture;
+pub(crate) use iface::{BlobSpec, Bound, Place, Replacement, ResourceSpec, Run, RunInfo, Shape};
+use run::{Compare, PendingCompare, count_fallback, count_native, make_compare};
 pub(crate) use run::{encode, health_lines};
 use util::{bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
     ArgumentTable, CommandBuffer, ComputeCommand, ComputePipeline, Context, DataBuffer, Dependency,
@@ -56,90 +60,6 @@ use crate::pipelines::Pipelines;
 use crate::snapshot::EncodeView;
 use crate::stats::{EncodeStats, Skip};
 use crate::textures::Res;
-
-// ---------------------------------------------------------------------------------------------------------------------
-// The interface
-// ---------------------------------------------------------------------------------------------------------------------
-
-/// The run of dispatches that a replacement found: `len` dispatches from the dispatch at index `start`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Run {
-    /// The index of the first dispatch of the run in the frame's dispatch list.
-    pub(crate) start: usize,
-    /// The number of dispatches.
-    pub(crate) len: usize,
-}
-
-/// A byte range of the weights, found through a storage buffer binding of the run. The `dispatch` counts from the
-/// start of the run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct BlobSpec {
-    /// The dispatch of the run whose binding names the bytes.
-    pub(crate) dispatch: usize,
-    /// The slot of the storage buffer in that dispatch.
-    pub(crate) slot: u32,
-    /// Where the bound address lies in the blob. The blob starts at the address minus this.
-    pub(crate) offset: u64,
-    /// The length of the blob in bytes.
-    pub(crate) len: u64,
-}
-
-/// Where a game resource is bound in the run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Place {
-    /// A sampled texture of a dispatch.
-    Texture {
-        /// The dispatch of the run.
-        dispatch: usize,
-        /// The texture slot.
-        slot: u32,
-    },
-    /// A storage image of a dispatch.
-    Image {
-        /// The dispatch of the run.
-        dispatch: usize,
-        /// The image slot.
-        slot: u32,
-    },
-    /// The compute push constants of a dispatch.
-    Push {
-        /// The dispatch of the run.
-        dispatch: usize,
-    },
-}
-
-/// One game resource and where the run binds it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ResourceSpec {
-    /// The resource the plan names.
-    pub(crate) resource: GameResource,
-    /// Where it is bound.
-    pub(crate) place: Place,
-}
-
-/// A network that can replace a run of dispatches.
-pub(crate) trait Replacement: Send + Sync {
-    /// A short name for the diagnostics and the health report.
-    fn name(&self) -> &'static str;
-
-    /// Finds the run in the program keys of the frame's dispatches.
-    fn find(&self, keys: &[&str]) -> Option<Run>;
-
-    /// The weight ranges to read. `accepts` and `plan` get their bytes in this order.
-    fn blobs(&self) -> &'static [BlobSpec];
-
-    /// True when the bytes are the weights of the network that this replacement implements.
-    fn accepts(&self, blobs: &[&[u8]]) -> bool;
-
-    /// Builds the plan from the weights. It is called once for each distinct set of bytes.
-    fn plan(&self, blobs: &[&[u8]]) -> Result<Plan, String>;
-
-    /// The Metal source of the kernels that the plan's steps name.
-    fn source(&self) -> &'static str;
-
-    /// Where the run binds the game resources that the plan names.
-    fn resources(&self) -> &'static [ResourceSpec];
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The cache
@@ -163,8 +83,12 @@ enum Verdict {
     Refused(&'static str, String),
 }
 
-/// The addresses where the blobs start and a hash of all their bytes.
-type Key = (Vec<u64>, u64);
+/// The addresses where the blobs start, a hash of all their bytes and the shape's tag (the picture sizes of a network
+/// whose plan follows them).
+type Key = (Vec<u64>, u64, Vec<u32>);
+
+/// The plans a network may keep. Dynamic resolution makes a new size now and then; a full cache starts again.
+const CACHE_MAX: usize = 64;
 
 /// Why a frame keeps the game's dispatches: a counted reason and a sentence for the diagnostics.
 struct Refusal(&'static str, String);
@@ -176,8 +100,11 @@ fn refuse<T>(reason: &'static str, what: impl Into<String>) -> Result<T, Refusal
 /// The state of the native path, owned by the encoder.
 pub(crate) struct Native {
     nets: Vec<Box<dyn Replacement>>,
+    /// For each net: whether it is on (`NXKIT_<NAME>`) and whether it compares (`NXKIT_<NAME>_COMPARE`).
+    switches: Vec<(bool, bool)>,
     cache: HashMap<(usize, Key), Verdict>,
-    captured: HashSet<(usize, Key)>,
+    /// The runs the capture has printed: net, weight hash, tag.
+    captured: HashSet<(usize, u64, Vec<u32>)>,
     blobs: Vec<Vec<u8>>,
     /// The frames the plan ran in, for the sample of the compare.
     ready_frames: u64,
@@ -187,11 +114,18 @@ pub(crate) struct Native {
 
 impl Native {
     pub(crate) fn new() -> Self {
-        Self::with(vec![Box::new(crate::native_ndve::Ndve)])
+        Self::with(vec![
+            Box::new(crate::native_ndve::Ndve),
+            Box::new(crate::native_ndsr::Ndsr),
+        ])
     }
 
     fn with(nets: Vec<Box<dyn Replacement>>) -> Self {
         Self {
+            switches: nets
+                .iter()
+                .map(|n| (enabled(n.name()), compare_on(n.name())))
+                .collect(),
             nets,
             cache: HashMap::new(),
             captured: HashSet::new(),
@@ -227,7 +161,7 @@ impl Native {
         cx: &PrepareCx<'_>,
         stats: &mut EncodeStats,
     ) -> Option<Prepared> {
-        if !enabled() || cx.detail.dispatches.len() < 2 {
+        if cx.detail.dispatches.len() < 2 {
             return None;
         }
         let keys: Vec<&str> = cx
@@ -240,6 +174,7 @@ impl Native {
             .nets
             .iter()
             .enumerate()
+            .filter(|(i, _)| self.switches[*i].0)
             .find_map(|(i, n)| n.find(&keys).map(|r| (i, r)))?;
         match self.attempt(net, run, cx, stats) {
             Ok(p) => {
@@ -282,10 +217,14 @@ impl Native {
                 format!("{name}: other commands lie between the dispatches of {run:?}"),
             )
         })?;
-        let spans = self.nets[net].blobs();
-        let mut starts = Vec::with_capacity(spans.len());
-        self.blobs.resize_with(spans.len(), Vec::new);
-        for (spec, bytes) in spans.iter().zip(&mut self.blobs) {
+        let info = RunInfo::new(&*self.nets[net], run, cx);
+        let shape = self.nets[net].shape(&info);
+        let mut starts = Vec::with_capacity(shape.blobs.len());
+        self.blobs.clear();
+        if shape.refusal.is_none() {
+            self.blobs.resize_with(shape.blobs.len(), Vec::new);
+        }
+        for (spec, bytes) in shape.blobs.iter().zip(&mut self.blobs) {
             let dd = dispatches
                 .get(run.start + spec.dispatch)
                 .filter(|_| spec.dispatch < run.len)
@@ -329,26 +268,36 @@ impl Native {
             starts.push(start);
         }
         let hash = hash_blobs(&self.blobs);
-        let key: (usize, Key) = (net, (starts, hash));
+        let first_time = crate::diag(name) && self.captured.insert((net, hash, shape.tag.clone()));
+        if let Some(why) = shape.refusal.clone() {
+            if first_time {
+                capture(&*self.nets[net], &shape, run, cx, hash, anchor_cmd);
+                eprintln!("DIAG {name} {name}: refused (shape): {why}");
+            }
+            return refuse("shape", why);
+        }
+        let key: (usize, Key) = (net, (starts, hash, shape.tag.clone()));
         if !self.cache.contains_key(&key) {
+            if self.cache.len() >= CACHE_MAX {
+                self.cache.clear();
+            }
             let blobs: Vec<&[u8]> = self.blobs.iter().map(Vec::as_slice).collect();
-            let verdict = match build(&*self.nets[net], &blobs, cx) {
+            let verdict = match build(&*self.nets[net], &blobs, &shape, &info, cx) {
                 Ok(e) => Verdict::Ready(Arc::new(e)),
                 Err(Refusal(reason, what)) => Verdict::Refused(reason, what),
             };
             self.cache.insert(key.clone(), verdict);
         }
-        let first_time = crate::diag("ndve") && self.captured.insert(key.clone());
         if first_time {
-            capture(&*self.nets[net], run, cx, key.1.1);
+            capture(&*self.nets[net], &shape, run, cx, hash, anchor_cmd);
             match &self.cache[&key] {
                 Verdict::Ready(e) => eprintln!(
-                    "DIAG ndve {name}: plan ready, {} steps, {} buffers",
+                    "DIAG {name} {name}: plan ready, {} steps, {} buffers",
                     e.plan.steps.len(),
                     e.buffers.len()
                 ),
                 Verdict::Refused(reason, what) => {
-                    eprintln!("DIAG ndve {name}: refused ({reason}): {what}")
+                    eprintln!("DIAG {name} {name}: refused ({reason}): {what}")
                 }
             }
         }
@@ -359,17 +308,16 @@ impl Native {
         let mut prepared = self.bind(net, &entry, run, cx, anchor_cmd, stats)?;
         if first_time {
             eprintln!(
-                "DIAG ndve {name}: intermediates the frame reads later {:?}",
+                "DIAG {name} {name}: intermediates the frame reads later {:?}",
                 prepared.reads_later
             );
         }
         self.ready_frames += 1;
-        if compare_on()
-            && crate::diag("ndve")
+        if self.switches[net].1
             && self.ready_frames % COMPARE_EVERY == COMPARE_FIRST
             && let Some(c) = make_compare(&entry, &prepared, cx)
         {
-            self.pending.push(c.pending(self.frames));
+            self.pending.push(c.pending(self.frames, name));
             prepared.compare = Some(c);
         }
         Ok(prepared)
