@@ -2,14 +2,19 @@
 
 use super::*;
 
-pub(super) fn enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_NDVE").map_or(true, |v| v != "0"))
+/// The name of the environment variable that belongs to a network: `NXKIT_NDVE` for `ndve`, with `suffix` appended.
+pub(super) fn env_name(net: &str, suffix: &str) -> String {
+    format!("NXKIT_{}{suffix}", net.to_ascii_uppercase())
 }
 
-pub(super) fn compare_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_NDVE_COMPARE").is_ok_and(|v| v == "1"))
+/// `NXKIT_<NAME>=0` turns a network off.
+pub(super) fn enabled(net: &str) -> bool {
+    std::env::var(env_name(net, "")).map_or(true, |v| v != "0")
+}
+
+/// `NXKIT_<NAME>_COMPARE=1` runs the game's chain next to the plan on a sampled frame.
+pub(super) fn compare_on(net: &str) -> bool {
+    std::env::var(env_name(net, "_COMPARE")).is_ok_and(|v| v == "1")
 }
 
 /// The storage buffer binding of a compute dispatch at `slot`.

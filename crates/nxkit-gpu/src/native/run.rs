@@ -156,13 +156,14 @@ pub(super) struct Compare {
 }
 
 impl Compare {
-    pub(super) fn pending(&self, frame: u64) -> PendingCompare {
+    pub(super) fn pending(&self, frame: u64, name: &'static str) -> PendingCompare {
         let native = self
             .twins
             .iter()
             .find(|(g, _)| *g == GameResource::Output)
             .map(|(_, t)| t.clone());
         PendingCompare {
+            name,
             frame,
             native,
             game: Some(self.snapshot.clone()),
@@ -173,6 +174,7 @@ impl Compare {
 /// A compare whose pictures are read some frames after the frame that made them.
 #[derive(Default)]
 pub(super) struct PendingCompare {
+    name: &'static str,
     pub(super) frame: u64,
     native: Option<Texture>,
     game: Option<Texture>,
@@ -189,28 +191,42 @@ impl PendingCompare {
         let mut b = a.clone();
         if n.read(bytes, &mut a).is_err() || g.read(bytes, &mut b).is_err() {
             eprintln!(
-                "DIAG ndve compare frame {}: the pictures could not be read",
-                self.frame
+                "DIAG {} compare frame {}: the pictures could not be read",
+                self.name, self.frame
             );
             return;
         }
-        let diff = picture_diff(&a, &b);
+        let diff = picture_diff(&a, &b, d.format);
         eprintln!(
-            "DIAG ndve compare frame {} {}x{} {:?}: max difference per channel (r,g,b,a) {:?}, differing pixels {} of {}",
-            self.frame, d.width, d.height, d.format, diff.max, diff.pixels, diff.total
+            "DIAG {} compare frame {} {}x{} {:?}: max difference per channel (r,g,b,a) {:?}, differing pixels {} of {}",
+            self.name, self.frame, d.width, d.height, d.format, diff.max, diff.pixels, diff.total
         );
     }
 }
 
-/// The difference of two pictures of 4 bytes per pixel.
+/// The difference of two pictures of 4 bytes per pixel. The unit is a step of the stored code of a channel: a byte for
+/// the 8-bit formats, a step of the 10-bit channels of `Rgb10A2`, the raw 11/11/10-bit float code of `Rg11B10Float`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Diff {
-    max: [u8; 4],
+    max: [u32; 4],
     pixels: u64,
     total: u64,
 }
 
-fn picture_diff(a: &[u8], b: &[u8]) -> Diff {
+/// The four channels (r, g, b, a) of a pixel as stored codes.
+fn channels(format: nxkit_metal::Format, px: [u8; 4]) -> [u32; 4] {
+    use nxkit_metal::Format;
+    let v = u32::from_le_bytes(px);
+    match format {
+        Format::Rgb10A2Unorm | Format::Rgb10A2Uint => {
+            [v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0x3ff, v >> 30]
+        }
+        Format::Rg11B10Float => [v & 0x7ff, (v >> 11) & 0x7ff, v >> 22, 0],
+        _ => px.map(u32::from),
+    }
+}
+
+fn picture_diff(a: &[u8], b: &[u8], format: nxkit_metal::Format) -> Diff {
     let mut d = Diff {
         max: [0; 4],
         pixels: 0,
@@ -219,6 +235,7 @@ fn picture_diff(a: &[u8], b: &[u8]) -> Diff {
     let (pa, _) = a.as_chunks::<4>();
     let (pb, _) = b.as_chunks::<4>();
     for (x, y) in pa.iter().zip(pb) {
+        let (x, y) = (channels(format, *x), channels(format, *y));
         let mut any = false;
         for c in 0..4 {
             let v = x[c].abs_diff(y[c]);
@@ -256,108 +273,6 @@ pub(super) fn make_compare(entry: &Entry, p: &Prepared, cx: &PrepareCx<'_>) -> O
         snapshot,
         size: [out_desc.width, out_desc.height, 1],
     })
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// The capture
-// ---------------------------------------------------------------------------------------------------------------------
-
-/// `NXKIT_DIAG=ndve`: the list of ndve-native.md section 10 for the run: the keys, and for each dispatch the groups, the
-/// storage and uniform buffers (with the offset from the blob start), the push constants, the textures and images with
-/// their formats and sizes, and the samplers.
-pub(super) fn capture(net: &dyn Replacement, run: Run, cx: &PrepareCx<'_>, hash: u64) {
-    let name = net.name();
-    eprintln!(
-        "DIAG ndve {name}: run of {} dispatches from {}, weight hash {hash:#018x}",
-        run.len, run.start
-    );
-    let base: Vec<Option<u64>> = net
-        .blobs()
-        .iter()
-        .map(|s| {
-            cx.detail
-                .dispatches
-                .get(run.start + s.dispatch)
-                .and_then(|d| sbuf_of(d, s.slot))
-                .and_then(|b| blob_start(b.address, s.offset))
-        })
-        .collect();
-    for (i, d) in cx
-        .detail
-        .dispatches
-        .iter()
-        .enumerate()
-        .skip(run.start)
-        .take(run.len)
-    {
-        let n = i - run.start;
-        eprintln!(
-            "DIAG ndve {name} dispatch {n} key {} groups {:?}",
-            d.program, d.groups
-        );
-        for s in &d.sbufs {
-            let rel = base
-                .iter()
-                .flatten()
-                .find_map(|b| s.address.checked_sub(*b).filter(|o| *o < 0x400000));
-            eprintln!(
-                "DIAG ndve {name}   sbuf slot {} addr {:#x} size {:#x} from blob start {:?}",
-                s.slot,
-                s.address,
-                s.size,
-                rel.map(|o| format!("{o:#x}"))
-            );
-        }
-        for u in &d.ubos {
-            eprintln!(
-                "DIAG ndve {name}   ubo slot {} addr {:#x} size {:#x}",
-                u.slot, u.address, u.size
-            );
-        }
-        if let Some(push) = &d.push {
-            let words: Vec<String> = push
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|w| format!("{:08x}", u32::from_le_bytes(*w)))
-                .collect();
-            let floats: Vec<f32> = push
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|w| f32::from_le_bytes(*w))
-                .collect();
-            eprintln!(
-                "DIAG ndve {name}   push {} bytes words {} floats {floats:?}",
-                push.len(),
-                words.join(" ")
-            );
-        }
-        for (kind, list) in [("tex", &d.textures), ("img", &d.images)] {
-            for t in list {
-                let found = cx.view.resolve(t.handle).ok().map(|(slot, tsc)| {
-                    let r = cx.textures.get(&slot.texture);
-                    (
-                        slot.texture,
-                        r.map(|r| (r.desc.format, r.desc.width, r.desc.height, r.scaled)),
-                        tsc.map(|s| format!("{s:?}")),
-                    )
-                });
-                match found {
-                    Some((id, desc, sampler)) => eprintln!(
-                        "DIAG ndve {name}   {kind} slot {} handle {:#x} {id:?} {desc:?} sampler {}",
-                        t.slot,
-                        t.handle,
-                        sampler.unwrap_or_else(|| "none".into())
-                    ),
-                    None => eprintln!(
-                        "DIAG ndve {name}   {kind} slot {} handle {:#x} unresolved",
-                        t.slot, t.handle
-                    ),
-                }
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -402,8 +317,8 @@ pub(super) fn count_fallback(name: &'static str, reason: &'static str, what: &st
     {
         Some((_, _, n, _)) => *n += 1,
         None => {
-            if crate::diag("ndve") && nxkit_nvn::diag::first(&SHOWN, 50) {
-                eprintln!("DIAG ndve {name}: fallback ({reason}): {what}");
+            if crate::diag(name) && nxkit_nvn::diag::first(&SHOWN, 50) {
+                eprintln!("DIAG {name} {name}: fallback ({reason}): {what}");
             }
             c.fallback
                 .push((name, reason, 1, what.chars().take(160).collect()));
@@ -445,7 +360,8 @@ mod tests {
     fn the_picture_diff_counts_pixels_and_the_largest_step() {
         let a = [10u8, 20, 30, 255, 0, 0, 0, 255];
         let b = [10u8, 25, 30, 255, 1, 0, 0, 255];
-        let d = picture_diff(&a, &b);
+        let f = nxkit_metal::Format::Rgba8Unorm;
+        let d = picture_diff(&a, &b, f);
         assert_eq!(
             d,
             Diff {
@@ -454,7 +370,19 @@ mod tests {
                 total: 2
             }
         );
-        assert_eq!(picture_diff(&a, &a).pixels, 0);
+        assert_eq!(picture_diff(&a, &a, f).pixels, 0);
+    }
+
+    #[test]
+    fn the_packed_formats_compare_by_channel_code() {
+        use nxkit_metal::Format;
+        // r = 1, g = 2, b = 3, a = 1 against r = 4, g = 2, b = 0, a = 2.
+        let px = |r: u32, g: u32, b: u32, a: u32| (r | g << 10 | b << 20 | a << 30).to_le_bytes();
+        let d = picture_diff(&px(1, 2, 3, 1), &px(4, 2, 0, 2), Format::Rgb10A2Unorm);
+        assert_eq!(d.max, [3, 0, 3, 1]);
+        let f = |r: u32, g: u32, b: u32| (r | g << 11 | b << 22).to_le_bytes();
+        let d = picture_diff(&f(5, 6, 7), &f(5, 8, 7), Format::Rg11B10Float);
+        assert_eq!(d.max, [0, 2, 0, 0]);
     }
 
     #[test]
