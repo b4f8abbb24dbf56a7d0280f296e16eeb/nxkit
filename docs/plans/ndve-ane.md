@@ -67,3 +67,12 @@ A picture is known by its `Frame::id`, which the table keeps with its state (`Qu
 `ndve.ane` counts pictures made from the Neural Engine. `ndve.ane_fallback(reason)` counts those the Metal plan made: `warmup` (the model was still loading, or the picture was decoded before the model and the constants were known), `late` (the result was not ready when the frame was encoded, or no slot was free for it), `unknown_picture` (no picture was read into the plane the dispatch binds or into what it was copied from, and no fingerprint matches, or the picture is not 1920x1080; the text names the last addresses the game read into), `no_match` (the stream was given up after 30 such dispatches, until the next stream), `error` (loading was refused, or the conversion or the Neural Engine failed; the text says why), `params` (the conversion constants changed). With `NXKIT_NDVE_COMPARE=1` the sampled frame compares the epilogue's output with the game's chain. The first three pictures log `nxkit: ndve.ane: picture N: input written in .. ms, result after .. ms`.
 
 Expected in the game: after `ndve.ane: ready`, `ndve.ane` rises with the pictures and the fallbacks stay at the few `warmup` pictures of the first seconds. A large `unknown_picture` means the game's NDVE input does not come from `ReadDecoderOutputImageNv12` into the addresses reported, a large `late` that the feeder or the Neural Engine is slower than the pictures.
+
+## Idea, not built: the colour conversion inside the model
+
+Today the CPU turns each decoded NV12 picture into the model's f16 RGB input (about 2-3 ms per picture, `conv.rs`). The
+conversion could move into the Core ML program: two inputs (the luma plane and the half-size chroma plane, 8-bit), the
+chroma upsample and the colour matrix as small convolutions on the Neural Engine, so the CPU only copies the planes into
+the shared tensors, or rav1d writes them there directly and the CPU does nothing. The cost is exactness: the game rounds
+the converted colour to 8 bits before the network, and a rounding op on the Neural Engine gave wrong results once (see
+above), so the input would differ by up to about 1/255. Worth doing only when the CPU time per picture matters.
