@@ -7,8 +7,8 @@
 //!
 //! | buffer | holds | size |
 //! |---|---|---|
-//! | `t1` | layer 1's output, later layer 10's | 960x540x16 |
-//! | `s16` | layer 2's output (the skip of layer 10), later layer 11's | 960x540x16 |
+//! | `t1` | layer 10's output (layer 11 reads it) | 960x540x16 |
+//! | `s16` | layer 2's output (read by layer 3 and, as the skip, by layer 10) | 960x540x16 |
 //! | `d32a` | layers 3's output, later layer 8's | 480x270x32 |
 //! | `s32` | layer 4's output (the skip of layer 8) | 480x270x32 |
 //! | `d32b` | layer 9's output | 480x270x32 |
@@ -18,6 +18,10 @@
 //! The colour conversion is fused into layers 1 and 12 (nothing writes the RGBA8 picture; the planes are converted
 //! where they are read), and layer 12 writes the RGB10A2 picture ([`GameResource::Intermediate`] 1) which the luma pass
 //! and the resampler read.
+//!
+//! Layers 1 + 2 and 11 + 12 are one dispatch each (`ndve_l01_l02`, `ndve_l11_l12`): the first layer's output, with a
+//! one pixel halo, lives in threadgroup memory, so layer 1's output and layer 11's output are never buffers. The
+//! 12 layers still own their packed weights (buffers 0 to 11); the fused steps bind two of them.
 
 use crate::pack::pack_layer;
 use crate::plan::{Binding, Buffer, GameResource, Plan, Source, Step};
@@ -34,6 +38,8 @@ const THREADS: u32 = 128;
 enum Geometry {
     /// 3x3: tiles of `tw` x `th` output pixels, one threadgroup a tile.
     Tiles { tw: usize, th: usize },
+    /// Two fused 3x3 layers (`Pair` in `conv.metal`): tiles of `tw` x `th` pixels of the second layer's output.
+    Pair { tw: usize, th: usize },
     /// 2x2: tasks of `mt` m-tiles (8 pixels each) in one row, one simdgroup a task, four a threadgroup.
     Tasks { mt: usize },
 }
@@ -71,6 +77,16 @@ struct Layer {
 }
 
 const T32X4: Geometry = Geometry::Tiles { tw: 32, th: 4 };
+/// The tile of the fused pairs (`Pair::TW`, `Pair::TH` in `conv.metal`).
+const PAIR: Geometry = Geometry::Pair {
+    tw: PAIR_TW,
+    th: PAIR_TH,
+};
+const PAIR_TW: usize = 30;
+const PAIR_TH: usize = 12;
+/// Simdgroups of the fused pairs' threadgroups (`THREADS / 32`); only the tests read it.
+#[cfg(test)]
+const PAIR_SIMDGROUPS: usize = 4;
 const T16X4: Geometry = Geometry::Tiles { tw: 16, th: 4 };
 
 const LAYERS: [Layer; 12] = [
@@ -84,7 +100,7 @@ const LAYERS: [Layer; 12] = [
         out_wh: (960, 540),
         w_off: 0x0,
         b_off: 0x1200,
-        geo: T32X4,
+        geo: PAIR,
     },
     Layer {
         kernel: "ndve_l02",
@@ -96,7 +112,7 @@ const LAYERS: [Layer; 12] = [
         out_wh: (960, 540),
         w_off: 0x1300,
         b_off: 0x2500,
-        geo: T32X4,
+        geo: PAIR,
     },
     Layer {
         kernel: "ndve_l03",
@@ -204,7 +220,7 @@ const LAYERS: [Layer; 12] = [
         out_wh: (960, 540),
         w_off: 0x39e00,
         b_off: 0x3b000,
-        geo: T32X4,
+        geo: PAIR,
     },
     Layer {
         kernel: "ndve_l12",
@@ -216,7 +232,7 @@ const LAYERS: [Layer; 12] = [
         out_wh: (960, 540),
         w_off: 0x3b100,
         b_off: 0x3c300,
-        geo: T32X4,
+        geo: PAIR,
     },
 ];
 
@@ -246,7 +262,9 @@ impl Layer {
     fn groups(&self) -> [u32; 3] {
         let ceil = |a: usize, b: usize| u32::try_from(a.div_ceil(b)).unwrap_or(u32::MAX);
         match self.geo {
-            Geometry::Tiles { tw, th } => [ceil(self.out_wh.0, tw), ceil(self.out_wh.1, th), 1],
+            Geometry::Tiles { tw, th } | Geometry::Pair { tw, th } => {
+                [ceil(self.out_wh.0, tw), ceil(self.out_wh.1, th), 1]
+            }
             Geometry::Tasks { mt } => {
                 // tasks are over the output (down) or the input (up) pixels
                 let (w, h) = if self.kind == Kind::Up {
@@ -271,6 +289,19 @@ const B_E64B: usize = 18;
 const B_LUMA: usize = 19;
 const B_RS_W: usize = 20;
 
+/// Layers 2 and 11 run inside the step of layers 1 and 12.
+fn fused_second(n: usize) -> bool {
+    n == 1 || n == 10
+}
+/// The kernel of the step that starts at layer `n`.
+fn step_kernel(n: usize, l: &Layer) -> &'static str {
+    match n {
+        0 => "ndve_l01_l02",
+        11 => "ndve_l11_l12",
+        _ => l.kernel,
+    }
+}
+
 fn buf(index: u32, source: usize, writes: bool) -> Binding {
     Binding {
         index,
@@ -288,9 +319,10 @@ fn game(index: u32, resource: GameResource, writes: bool) -> Binding {
 
 /// The plan for the network of the weight blob `weights` (0x3c320 bytes) and the resampler's weights (0x3000 bytes).
 ///
-/// The steps, in order: the 12 layers (1 and 12 take the game's NV12 planes and conversion push block, 12 writes the
-/// RGB10A2 picture), the luma pass, the resampler. The kernels and their binding indices are those of
-/// [`crate::msl::SOURCE`]: buffer 0 input, 1 output, 2 packed weights, 3 skip, 4 push block; the resampler's are
+/// The steps, in order: layers 1 + 2 fused (`ndve_l01_l02`, takes the game's NV12 planes and conversion push block),
+/// layers 3 to 10, layers 11 + 12 fused (`ndve_l11_l12`, writes the RGB10A2 picture), the luma pass, the resampler:
+/// 12 steps. The kernels and their binding indices are those of [`crate::msl::SOURCE`]: buffer 0 input, 1 output,
+/// 2 packed weights, 3 skip, 4 push block, 5 the packed weights of a fused pair's second layer; the resampler's are
 /// listed with its step.
 ///
 /// # Errors
@@ -359,27 +391,34 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
         (B_T1, B_S16, None),
         (B_S16, usize::MAX, None),
     ];
-    let mut steps = Vec::with_capacity(14);
+    let mut steps = Vec::with_capacity(12);
     for (n, (l, &(input, output, skip))) in LAYERS.iter().zip(routes.iter()).enumerate() {
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
         match l.kind {
             Kind::First => {
-                buffers.push(buf(1, output, true));
+                // fused with layer 2: that layer's output is the step's
+                buffers.push(buf(1, routes[n + 1].1, true));
                 buffers.push(buf(2, n, false));
+                buffers.push(buf(5, n + 1, false));
                 buffers.push(game(4, GameResource::ConversionPush, false));
                 textures.push(game(0, GameResource::LumaPlane, false));
                 textures.push(game(1, GameResource::ChromaPlane, false));
             }
             Kind::Last => {
-                buffers.push(buf(0, input, false));
-                buffers.push(buf(2, n, false));
+                // fused with layer 11: the step reads that layer's input and has both weights
+                buffers.push(buf(0, routes[n - 1].0, false));
+                buffers.push(buf(2, n - 1, false));
+                buffers.push(buf(5, n, false));
                 buffers.push(game(4, GameResource::ConversionPush, false));
                 textures.push(game(0, GameResource::LumaPlane, false));
                 textures.push(game(1, GameResource::ChromaPlane, false));
                 textures.push(game(2, GameResource::Intermediate { index: 1 }, true));
             }
             Kind::Conv3 | Kind::Down | Kind::Up => {
+                if fused_second(n) {
+                    continue; // the step of the layer before covers it
+                }
                 buffers.push(buf(0, input, false));
                 buffers.push(buf(1, output, true));
                 buffers.push(buf(2, n, false));
@@ -389,7 +428,7 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
             }
         }
         steps.push(Step {
-            kernel: l.kernel,
+            kernel: step_kernel(n, l),
             groups: l.groups(),
             threads: [THREADS, 1, 1],
             threadgroup_bytes: 0,
@@ -407,8 +446,8 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
     });
     steps.push(Step {
         kernel: "ndve_resample",
-        // 320 x 180 blocks of 8x8 pixels: a threadgroup of 4 simdgroups takes 5 rounds of 4 x 2 blocks of a row
-        groups: [8, 180, 1],
+        // 320 x 180 blocks of 8x8 pixels: a threadgroup of 4 simdgroups takes 4 rounds of 4 x 4 blocks of a row
+        groups: [5, 180, 1],
         threads: [THREADS, 1, 1],
         threadgroup_bytes: 0,
         buffers: vec![
