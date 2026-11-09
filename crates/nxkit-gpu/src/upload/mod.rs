@@ -5,6 +5,7 @@
 //! read of it, or at the end of a frame that wrote it when its storage lies in a pool the CPU can access (`copyback`).
 
 mod dirty;
+mod staging;
 #[cfg(test)]
 mod tests;
 
@@ -32,6 +33,8 @@ pub(crate) struct Transfer {
     swizzler: Swizzler,
     order: GobOrder,
     gate: Mutex<()>,
+    /// The staging buffers of compressed uploads.
+    staging: Mutex<staging::Pool<DataBuffer>>,
     /// The staging pool and the queued scalings of uploads into scaled textures.
     scaled: Mutex<ScaledUploads>,
 }
@@ -101,6 +104,7 @@ impl Transfer {
             swizzler: Swizzler::new(ctx, cache)?,
             order,
             gate: Mutex::new(()),
+            staging: Mutex::new(staging::Pool::new()),
             scaled: Mutex::new(ScaledUploads::new(ctx, cache)?),
         })
     }
@@ -346,21 +350,42 @@ impl Transfer {
         }
         // Compressed mip chains keep 1x1 blocks after reaching the block size. A mipmapped staging texture in
         // block units cannot represent those tail levels, and rounding before shifting also loses NPOT blocks.
-        // Each level therefore gets a buffer with the exact block extent of that level.
+        // Each level therefore gets a range of the staging buffer with the exact block extent of that level.
+        let sizes: Vec<[u32; 3]> = (0..d.mip_levels)
+            .map(|level| {
+                let [w, h, _] = d.level_extent(level);
+                [
+                    w.div_ceil(u32::from(info.block_w)),
+                    h.div_ceil(u32::from(info.block_h)),
+                    1,
+                ]
+            })
+            .collect();
+        let bytes: Vec<u64> = sizes
+            .iter()
+            .map(|s| u64::from(s[0]) * u64::from(s[1]) * u64::from(surf.bytes_per_block))
+            .collect();
+        let (offsets, total) = staging::level_offsets(&bytes);
+        if total == 0 {
+            return Ok(());
+        }
+        // Every byte of a level range is written by the deswizzle before the copy reads it, so a reused buffer needs
+        // no clearing and a new one is not zero filled by the CPU.
+        let staging = self
+            .staging
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .acquire(total, |len| {
+                DataBuffer::new_unfilled(&self.ctx, len).ok().map(Arc::new)
+            })
+            .ok_or(Skip::Transfer)?;
+        // The command buffer holds the buffer from here on, also when an error cuts the encoding short, so the pool
+        // never hands it out while commands that name it can still run.
+        pass.retain(staging.clone());
         for level in 0..d.mip_levels {
             let [w, h, _] = d.level_extent(level);
-            let size = [
-                w.div_ceil(u32::from(info.block_w)),
-                h.div_ceil(u32::from(info.block_h)),
-                1,
-            ];
-            let staging = Arc::new(
-                DataBuffer::new(
-                    &self.ctx,
-                    u64::from(size[0]) * u64::from(size[1]) * u64::from(surf.bytes_per_block),
-                )
-                .map_err(|_| Skip::Transfer)?,
-            );
+            let size = sizes[level as usize];
+            let at = offsets[level as usize];
             let (tile_h, _) = rec.desc.level_tiles(level).map_err(|_| Skip::Transfer)?;
             let params = DeswizzleParams {
                 bytes_per_block: surf.bytes_per_block,
@@ -385,7 +410,7 @@ impl Transfer {
                         scratch,
                         guest,
                         base + u64::from(slice) * rec.layout.layer_size + offset,
-                        &staging,
+                        (&staging, at),
                         &params,
                     )
                     .map_err(|_| Skip::Transfer)?;
@@ -396,14 +421,13 @@ impl Transfer {
                 .map_err(|_| Skip::Transfer)?;
                 pass.encode(&ComputeCommand::CopyBufferToTexture {
                     buffer: staging.clone(),
-                    offset: 0,
+                    offset: at,
                     bytes_per_row: size[0] * surf.bytes_per_block,
                     texture: res.tex.clone(),
                     region: TextureRegion::whole(level, slice, [w, h, 1]),
                 })
                 .map_err(|_| Skip::Transfer)?;
             }
-            pass.retain(staging);
         }
         Ok(())
     }
