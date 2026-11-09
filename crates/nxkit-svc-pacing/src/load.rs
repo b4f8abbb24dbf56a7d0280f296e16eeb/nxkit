@@ -67,6 +67,7 @@ impl LoadStepper {
             fs: {
                 let mut fs = FrameStep::default();
                 fs.work = cfg.work;
+                fs.drop_debt = cfg.steady;
                 fs
             },
             gpu: GpuSlow::default(),
