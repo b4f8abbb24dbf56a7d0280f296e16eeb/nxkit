@@ -5,9 +5,13 @@
 //! alpha-to-coverage flag. Two draws with the same translated state share one pipeline, however different their NVN
 //! state was. The depth and stencil state is a separate object that Metal binds per draw and not per pipeline.
 
+mod builds;
 mod render;
+mod stats;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use stats::frame_done;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -25,6 +29,8 @@ use crate::detail::{AttributeDetail, BlendDetail, DrawDetail, ProgramRef};
 use crate::programs::StageProgram;
 use crate::stats::Skip;
 use crate::translate;
+
+use builds::{Builds, Job, JobKind, MeshJob, RenderJob, async_on};
 
 /// Counts a pipeline that Metal did not build for the health report and prints it under the `pipe` category (at most
 /// 300 lines). Gives back `Skip::Pipeline`.
@@ -120,81 +126,16 @@ pub(crate) struct Pipelines {
     builds: Arc<Builds>,
 }
 
-/// The state of the background compiles (`NXKIT_PIPELINE_ASYNC`, on by default).
-#[derive(Default)]
-struct Builds {
-    pending: Mutex<FastSet<u64>>,
-    failed: Mutex<FastSet<u64>>,
-    queue: Mutex<Option<std::sync::mpsc::Sender<Job>>>,
-}
-
-/// A pipeline to compile in the background, with an owned copy of its description.
-struct Job {
-    key: u64,
-    what: String,
-    kind: JobKind,
-}
-
-enum JobKind {
-    Render(RenderJob),
-    Mesh(MeshJob),
-}
-
-/// A render pipeline of vertex and fragment stages.
-struct RenderJob {
-    vertex: (ShaderLibrary, String),
-    fragment: Option<(ShaderLibrary, String)>,
-    colors: Vec<Option<nxkit_metal::ColorTarget>>,
-    vertex_layout: nxkit_metal::VertexDescriptor,
-    topology: TopologyClass,
-    sample_count: u32,
-    alpha_to_coverage: bool,
-}
-
-/// A mesh pipeline: object, mesh and fragment stages.
-struct MeshJob {
-    object: Option<(ShaderLibrary, String)>,
-    mesh: (ShaderLibrary, String),
-    fragment: Option<(ShaderLibrary, String)>,
-    colors: Vec<Option<nxkit_metal::ColorTarget>>,
-    sample_count: u32,
-    alpha_to_coverage: bool,
-    object_threads: u32,
-    mesh_threads: u32,
-    payload_bytes: u32,
-}
-
-impl MeshJob {
-    fn desc(&self) -> MeshPipelineDesc<'_> {
-        fn fun((l, e): &(ShaderLibrary, String)) -> (&ShaderLibrary, &str) {
-            (l, e.as_str())
-        }
-        MeshPipelineDesc {
-            object: self.object.as_ref().map(fun),
-            mesh: fun(&self.mesh),
-            fragment: self.fragment.as_ref().map(fun),
-            colors: self.colors.clone(),
-            sample_count: self.sample_count,
-            alpha_to_coverage: self.alpha_to_coverage,
-            object_threads: self.object_threads,
-            mesh_threads: self.mesh_threads,
-            payload_bytes: self.payload_bytes,
-        }
+impl Drop for Pipelines {
+    fn drop(&mut self) {
+        self.builds.close();
     }
 }
 
-/// The threads that compile render pipelines in the background.
-const COMPILE_THREADS: usize = 2;
-
-/// Whether a render pipeline that the cache lacks compiles in the background (`NXKIT_PIPELINE_ASYNC=0` turns it off).
-/// The draw is left out until it is ready, a frame or two, instead of stalling the encode for the 5 to 30 ms of the
-/// compile.
-fn async_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    // The unit tests build synchronously, so a call returns its pipeline.
-    *ON.get_or_init(|| {
-        !cfg!(test) && std::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0")
-    })
+/// Whether the pipeline cache compiles the unspecialized pipeline of a pair of functions that the archive lacks and
+/// specializes it per colour state (`ArchiveConfig::compile_bases`): on unless `NXKIT_PIPELINE_BASES=0`.
+pub(crate) fn bases_on() -> bool {
+    std::env::var("NXKIT_PIPELINE_BASES").map_or(true, |v| v != "0")
 }
 
 /// The point size fallback of [`build_render`] has this key.
@@ -232,96 +173,17 @@ fn build_render(
     })
 }
 
-impl Builds {
-    /// Queues `job` once per key. The threads start with the first job.
-    fn start(
-        self: &Arc<Self>,
-        cache: &Arc<PipelineCache>,
-        fallbacks: &Arc<Mutex<FastSet<u64>>>,
-        job: Job,
-    ) {
-        if !self
-            .pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(job.key)
-        {
-            return;
-        }
-        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
-        if queue.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel::<Job>();
-            let rx = Arc::new(Mutex::new(rx));
-            for i in 0..COMPILE_THREADS {
-                let (rx, me, cache, fallbacks) =
-                    (rx.clone(), self.clone(), cache.clone(), fallbacks.clone());
-                let _ = std::thread::Builder::new()
-                    .name(format!("nxkit-pipeline-{i}"))
-                    .spawn(move || {
-                        nxkit_metal::thread::set_utility();
-                        loop {
-                            let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
-                            let Ok(job) = next else { return };
-                            me.run(&cache, &fallbacks, &job);
-                        }
-                    });
-            }
-            *queue = Some(tx);
-        }
-        if let Some(tx) = queue.as_ref()
-            && let Err(e) = tx.send(job)
-        {
-            self.pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .remove(&e.0.key);
-        }
-    }
-
-    fn run(&self, cache: &PipelineCache, fallbacks: &Mutex<FastSet<u64>>, job: &Job) {
-        let built = match &job.kind {
-            JobKind::Render(r) => {
-                let mut desc = RenderPipelineDesc::new(
-                    (&r.vertex.0, r.vertex.1.as_str()),
-                    r.fragment.as_ref().map(|(l, e)| (l, e.as_str())),
-                    &[],
-                );
-                desc.colors = r.colors.clone();
-                desc.vertex_layout = r.vertex_layout.clone();
-                desc.topology = r.topology;
-                desc.sample_count = r.sample_count;
-                desc.alpha_to_coverage = r.alpha_to_coverage;
-                build_render(cache, fallbacks, job.key, &mut desc).map(|(_, source)| {
-                    crate::coverage::record(cache, source, Some(&desc), &job.what);
-                })
-            }
-            JobKind::Mesh(m) => cache.mesh_traced(job.key, &m.desc()).map(|(_, source)| {
-                crate::coverage::record(cache, source, None, &job.what);
-            }),
-        };
-        if let Err(e) = built {
-            pipe_failed(format_args!("{}: {e}", job.what));
-            self.failed
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(job.key);
-        }
-        self.pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&job.key);
-    }
-}
-
 impl Pipelines {
     pub(crate) fn new(
         ctx: &Context,
         archive: &ArchiveConfig,
     ) -> Result<Self, nxkit_metal::MetalError> {
+        let cache = Arc::new(PipelineCache::new(ctx, archive)?);
+        stats::watch(&cache);
         Ok(Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             ctx: ctx.clone(),
-            cache: Arc::new(PipelineCache::new(ctx, archive)?),
+            cache,
             depth: Mutex::new(FastMap::default()),
             flat: Mutex::new(None),
             paint: Mutex::new(None),
