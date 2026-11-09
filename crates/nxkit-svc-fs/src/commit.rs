@@ -79,7 +79,7 @@ impl Txn {
         if self.is_poisoned() {
             self.reset_work();
             eprintln!(
-                "[RED] nxkit-svc-fs: a write to {} failed, so the commit is refused and the work folder is reset",
+                "nxkit-svc-fs: warning: a write to {} failed, so the commit is refused and the work folder is reset",
                 self.commit.display()
             );
             return FAIL;

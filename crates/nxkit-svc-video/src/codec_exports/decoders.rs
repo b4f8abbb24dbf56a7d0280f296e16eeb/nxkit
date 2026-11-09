@@ -94,7 +94,7 @@ pub(super) extern "C" fn finalize(t: u64) -> u32 {
 
 pub(super) extern "C" fn register(t: u64, i: u32, pool: u64, pidx: u32) -> u32 {
     dec_call(t, |d, _| d.register(i, pool_of(pool), pidx)).unwrap_or_else(|| {
-        red(&format!("nn::codec::Register…DecoderBuffer index {i}"));
+        warn(&format!("nn::codec::Register…DecoderBuffer index {i}"));
         BAD
     })
 }
@@ -134,12 +134,12 @@ pub(super) extern "C" fn submit(out: u64, t: u64, data: u64, size: u64, ts: u64,
         return BAD;
     }
     if size > MAX_PACKET {
-        red(&format!("nn::codec: a packet of {size} bytes is refused"));
+        warn(&format!("nn::codec: a packet of {size} bytes is refused"));
         return BAD;
     }
     let mut packet = vec![0u8; size as usize];
     if size > 0 && guest::read(data, &mut packet).is_err() {
-        red(&format!(
+        warn(&format!(
             "nn::codec: a packet at {data:#x} is outside guest memory"
         ));
         return BAD;
@@ -173,7 +173,7 @@ pub(super) extern "C" fn acquire(idx: u64, sync: u64, t: u64) -> u32 {
 
 pub(super) extern "C" fn release(t: u64, i: u32, _sync_a: u64, _sync_b: u64) {
     if dec_call(t, |d, fx| d.release(i, fx)).is_none() {
-        red(&format!("nn::codec::Release…DecoderOutputBuffer index {i}"));
+        warn(&format!("nn::codec::Release…DecoderOutputBuffer index {i}"));
     }
 }
 

@@ -226,7 +226,7 @@ pub(crate) fn lookup(name: &str) -> usize {
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(name.to_owned());
             if first {
-                eprintln!("[RED] NVN address lookup of an unknown name: {name}");
+                eprintln!("nxkit-rt: warning: NVN address lookup of an unknown name: {name}");
             }
             0
         }

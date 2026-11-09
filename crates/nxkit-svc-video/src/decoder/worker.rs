@@ -111,7 +111,7 @@ pub(super) fn worker(sh: &Arc<Shared>) {
             Err(e) => {
                 if st.logged & 2 == 0 {
                     st.logged |= 2;
-                    eprintln!("[RED] video: a packet was not decoded: {e}");
+                    eprintln!("nxkit-video: warning: a packet was not decoded: {e}");
                 }
                 None
             }

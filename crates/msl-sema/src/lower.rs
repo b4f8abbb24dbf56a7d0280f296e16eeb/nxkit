@@ -18,7 +18,7 @@ mod pool;
 type R<T> = Result<T, Error>;
 
 /// A dm_bs instantiation: argument types, sampling option per extra argument, function.
-type DmBsInstance = (Vec<Type>, Vec<Option<&'static str>>, usize);
+type BsInstance = (Vec<Type>, Vec<Option<&'static str>>, usize);
 
 /// Analyses an accepted module.
 pub fn analyze(m: &ast::Module) -> R<Module> {
@@ -47,9 +47,9 @@ struct Cx {
     ref_locals: HashMap<LocalId, (Space, Type)>,
     ret: Type,
     /// dm_bs instantiations: argument types -> function.
-    dm_bs_inst: Vec<DmBsInstance>,
+    bs_inst: Vec<BsInstance>,
     /// dm_pool_mark instantiations: pool pointer type -> function.
-    dm_pool_inst: Vec<(Type, usize)>,
+    pool_inst: Vec<(Type, usize)>,
 }
 
 fn parse_int(text: &str) -> R<i128> {
@@ -941,8 +941,8 @@ impl Cx {
                 let v = self.expr(&args[0])?;
                 Ok(Expr::new(ExprKind::TexCast(Box::new(v)), ty))
             }
-            Callee::Prelude("dm_bs") => self.dm_bs(args, ty),
-            Callee::Prelude("dm_pool_mark") => self.dm_pool_mark(args),
+            Callee::Prelude("dm_bs") => self.bs_call(args, ty),
+            Callee::Prelude("dm_pool_mark") => self.pool_mark(args),
             Callee::Prelude(p) => Err(Error::unsupported(format!("prelude-call:{p}"))),
             Callee::Builtin(name) => {
                 let mut vals = Vec::with_capacity(args.len());
@@ -956,7 +956,7 @@ impl Cx {
     }
 
     /// `dm_bs(r, b, i, t, w, a...)`: `if (b->mask >> i & 1u) r = dm_bmix(r, t.sample(w, a...), b->k[i]); return r;`
-    fn dm_bs(&mut self, args: &[ast::Expr], ty: Type) -> R<Expr> {
+    fn bs_call(&mut self, args: &[ast::Expr], ty: Type) -> R<Expr> {
         if args.len() < 6 {
             return Err(Error::invalid("dm_bs arity"));
         }
@@ -991,14 +991,14 @@ impl Cx {
         };
         let tys: Vec<Type> = vals.iter().map(|v| v.ty.clone()).collect();
         let fid = match self
-            .dm_bs_inst
+            .bs_inst
             .iter()
             .find(|(t, o, _)| *t == tys && *o == opts)
         {
             Some((_, _, f)) => *f,
             None => {
-                let f = self.dm_bs_instantiate(&tys, &opts, tx, &ty)?;
-                self.dm_bs_inst.push((tys, opts, f));
+                let f = self.bs_instantiate(&tys, &opts, tx, &ty)?;
+                self.bs_inst.push((tys, opts, f));
                 f
             }
         };
@@ -1008,7 +1008,7 @@ impl Cx {
 
     /// Builds `V dm_bs(V r, constant dm_border_t* b, uint i, T t, sampler w, A... a)`:
     /// `if (b->mask >> i & 1u) r = dm_bmix(r, t.sample(w, a...), b->k[i]); return r;`
-    fn dm_bs_instantiate(
+    fn bs_instantiate(
         &mut self,
         tys: &[Type],
         opts: &[Option<&'static str>],

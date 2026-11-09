@@ -184,7 +184,7 @@ impl Fs {
                         } else {
                             "the clone of the save folder failed"
                         };
-                        eprintln!("[RED] nxkit-svc-fs: {why}: {e}. {} is mounted read-only, so no save is written", dir.display());
+                        eprintln!("nxkit-svc-fs: warning: {why}: {e}. {} is mounted read-only, so no save is written", dir.display());
                         return Ok(Self::plain(name, dir.to_path_buf(), true));
                     }
                 },

@@ -58,7 +58,7 @@ fn a_build_without_an_entry_is_told() {
     let row = fixed(OTHER, 0x40, Kind::FpsI32);
     let (l, notices) = Limits::new(&config(module(0x10000, 0), 60, vec![row]));
     assert!(!l.has_engine());
-    assert!(notices.iter().any(|n| n.red && n.text.contains(BUILD)));
+    assert!(notices.iter().any(|n| n.warn && n.text.contains(BUILD)));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn a_name_that_the_rewriter_did_not_find_is_told() {
     assert!(
         notices
             .iter()
-            .any(|n| n.red && n.text.contains("console.var"))
+            .any(|n| n.warn && n.text.contains("console.var"))
     );
 }
 
@@ -86,7 +86,7 @@ fn a_target_of_120_is_refused_for_an_engine_limit() {
     let (l, notices) = Limits::new(&config(module(0x10000, 0), 120, vec![row]));
     assert!(l.has_engine());
     assert_eq!(l.target(), 0);
-    assert!(notices.iter().any(|n| n.red));
+    assert!(notices.iter().any(|n| n.warn));
 }
 
 #[test]

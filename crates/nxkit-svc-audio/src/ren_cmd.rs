@@ -340,7 +340,7 @@ fn histogram(lay: &mut Layout, cl: &[u8], ncmd: u32) {
         lay.sink4 = true;
     } else if !have {
         eprintln!(
-            "nxkit-audio: [RED] audren: no DeviceSink (ID {:#x}) in the command list, {ncand} commands of {sink_sz:#x} bytes: the game will have no sound",
+            "nxkit-audio: warning: audren: no DeviceSink (ID {:#x}) in the command list, {ncand} commands of {sink_sz:#x} bytes: the game will have no sound",
             lay.sink_id
         );
     }
@@ -394,7 +394,7 @@ fn sink_out(
         if !lay.rate_logged {
             lay.rate_logged = true;
             eprintln!(
-                "nxkit-audio: [RED] audren: renderer sample rate {} (the SDK takes 32000 or 48000): no sound",
+                "nxkit-audio: warning: audren: renderer sample rate {} (the SDK takes 32000 or 48000): no sound",
                 h.rate
             );
         }
@@ -488,7 +488,7 @@ pub(crate) fn capture(
             if !lay.malformed_logged || n.is_power_of_two() {
                 lay.malformed_logged = true;
                 eprintln!(
-                    "nxkit-audio: [RED] audren: command {i} of the command list is malformed (offset {pos:#x}, list {:#x} bytes), the frame is silent ({n} so far)",
+                    "nxkit-audio: warning: audren: command {i} of the command list is malformed (offset {pos:#x}, list {:#x} bytes), the frame is silent ({n} so far)",
                     cl.len()
                 );
             }

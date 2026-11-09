@@ -167,7 +167,7 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
         let guest_need = if service != 0 { service } else { need };
         if (sz as usize) < guest_need {
             eprintln!(
-                "nxkit-audio: [RED] audren: work buffer {sz:#x} is smaller than the service requirement {guest_need:#x}"
+                "nxkit-audio: warning: audren: work buffer {sz:#x} is smaller than the service requirement {guest_need:#x}"
             );
             return RES_FAIL;
         }
@@ -189,7 +189,7 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
     };
     if ev != 0 && device == 0 && sev.is_none() {
         eprintln!(
-            "nxkit-audio: [RED] audren: all renderer events are in use: the SDK keeps the game's event, which must outlive the renderer"
+            "nxkit-audio: warning: audren: all renderer events are in use: the SDK keeps the game's event, which must outlive the renderer"
         );
     }
     T_IN_OPEN.with(|t| t.set(true));
@@ -207,7 +207,7 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
         if let Some(s) = sev {
             rev_set(s, 0);
         }
-        eprintln!("nxkit-audio: [RED] audren: the SDK's OpenAudioRenderer failed with {r:#x}");
+        eprintln!("nxkit-audio: warning: audren: the SDK's OpenAudioRenderer failed with {r:#x}");
         return r;
     }
     let h0 = guest::read_u64(handle).unwrap_or(0);
@@ -246,7 +246,7 @@ fn ar_open(handle: u64, ev: u64, param: u64, work: u64, sz: u64) -> u32 {
     };
     let Some(ren) = ren else {
         eprintln!(
-            "nxkit-audio: [RED] audren: more than {} renderers: this one is not rendered",
+            "nxkit-audio: warning: audren: more than {} renderers: this one is not rendered",
             crate::ren_state::AR_MAX
         );
         return r;

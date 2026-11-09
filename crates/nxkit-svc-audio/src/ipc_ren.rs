@@ -31,7 +31,7 @@ impl AudioRendererManager {
         let n = service_work_size(&p);
         if n == 0 {
             eprintln!(
-                "nxkit-audio: [RED] audren: GetWorkBufferSize for an unknown revision or an invalid parameter"
+                "nxkit-audio: warning: audren: GetWorkBufferSize for an unknown revision or an invalid parameter"
             );
             rsp.result = NOT_SUPPORTED;
             return;
@@ -41,12 +41,12 @@ impl AudioRendererManager {
 
     fn device_service(rsp: &mut Response) {
         let Some(k) = kernel::kernel() else {
-            eprintln!("nxkit-audio: [RED] audren: no kernel, cannot make IAudioDevice");
+            eprintln!("nxkit-audio: warning: audren: no kernel, cannot make IAudioDevice");
             rsp.result = RES_FAIL;
             return;
         };
         let Ok((writable, readable)) = k.create_event() else {
-            eprintln!("nxkit-audio: [RED] audren: the device event could not be created");
+            eprintln!("nxkit-audio: warning: audren: the device event could not be created");
             rsp.result = RES_FAIL;
             return;
         };
@@ -64,7 +64,7 @@ impl Service for AudioRendererManager {
         match req.command {
             0 | 3 => {
                 eprintln!(
-                    "nxkit-audio: [RED] audren: command {} opens a renderer over IPC, which the host does not provide. The SDK's renderer runs in the guest",
+                    "nxkit-audio: warning: audren: command {} opens a renderer over IPC, which the host does not provide. The SDK's renderer runs in the guest",
                     req.command
                 );
                 rsp.result = NOT_SUPPORTED;

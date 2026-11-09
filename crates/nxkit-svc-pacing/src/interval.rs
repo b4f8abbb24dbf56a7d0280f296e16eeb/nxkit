@@ -28,7 +28,7 @@ pub fn resolve_target(fps_target: u32, fps_max: u32) -> Target {
     if !TARGETS.contains(&fps_target) {
         return Target {
             fps: 0,
-            notice: Some(Notice::red(format!(
+            notice: Some(Notice::warn(format!(
                 "the target frame rate {fps_target} must be 0, 30, 60 or 120, so the game's frame limit stays"
             ))),
         };
@@ -36,7 +36,7 @@ pub fn resolve_target(fps_target: u32, fps_max: u32) -> Target {
     if fps_target == HIGH_TARGET && fps_max < HIGH_TARGET {
         return Target {
             fps: 60,
-            notice: Some(Notice::red(
+            notice: Some(Notice::warn(
                 "the target frame rate 120 is not checked for this game's speed (fps_max below 120), so it runs at 60",
             )),
         };
@@ -61,7 +61,7 @@ pub fn runs_at_120(
     }
     let high = !has_state_page && has_engine_limiter;
     let why = (!high).then(|| {
-        Notice::red(format!(
+        Notice::warn(format!(
             "120 fps: this main has {}, so it runs at 60",
             if has_state_page {
                 "a frame step in whole vsyncs"
@@ -83,7 +83,7 @@ pub fn engine_present_cap(fps_target: u32, has_engine_limiter: bool) -> (u32, Op
         _ => 0,
     };
     if cap != 0 && !has_engine_limiter {
-        let n = Notice::red(format!(
+        let n = Notice::warn(format!(
             "present cap {cap} fps not applied: this main has neither a frame step nor an engine frame limit the host writes, so the game's own present interval stays"
         ));
         return (0, Some(n));
@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(resolve_target(120, 60).fps, 60);
         assert_eq!(resolve_target(120, 120).fps, 120);
         let bad = resolve_target(45, 120);
-        assert!(bad.fps == 0 && bad.notice.is_some_and(|n| n.red));
+        assert!(bad.fps == 0 && bad.notice.is_some_and(|n| n.warn));
     }
 
     #[test]
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(engine_present_cap(120, true), (60, None));
         assert_eq!(engine_present_cap(0, false), (0, None));
         let (cap, why) = engine_present_cap(60, false);
-        assert!(cap == 0 && why.is_some_and(|n| n.red));
+        assert!(cap == 0 && why.is_some_and(|n| n.warn));
     }
 
     fn rule(cap: u32, hold: u32, step_on: bool, display_mode: bool) -> PresentRule {

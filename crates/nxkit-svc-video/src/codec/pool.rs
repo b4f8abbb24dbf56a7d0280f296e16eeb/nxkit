@@ -185,7 +185,7 @@ pub(crate) fn native_handle(pool: &PoolRef, i: u32) -> u32 {
     if p.slot == 0 {
         let mut native = lock(&NATIVE_POOLS);
         let Some(slot) = (1..=MAX_POOLS).find(|s| !native.contains_key(s)) else {
-            red(&format!(
+            warn(&format!(
                 "nn::codec: more than {MAX_POOLS} pools with native images"
             ));
             return 0;
@@ -266,7 +266,7 @@ pub fn native_image_blank(w: u32, h: u32) -> u32 {
     };
     let mut blanks = lock(&BLANKS);
     let Some(k) = blanks.iter().position(Option::is_none) else {
-        red(&format!(
+        warn(&format!(
             "native images: more than {MAX_BLANK} blank images"
         ));
         return 0;

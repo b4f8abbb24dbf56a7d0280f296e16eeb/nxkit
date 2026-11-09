@@ -83,7 +83,7 @@ pub(crate) fn fs() -> Option<&'static Fs> {
         static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !NOTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             eprintln!(
-                "[RED] nxkit-svc-fs: the game used the file system before init was called, so every call fails"
+                "nxkit-svc-fs: warning: the game used the file system before init was called, so every call fails"
             );
         }
     }

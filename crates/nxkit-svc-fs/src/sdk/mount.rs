@@ -32,7 +32,7 @@ pub(super) extern "C" fn mount_rom_plain(name: u64) -> u32 {
 pub(super) extern "C" fn mount_rom_index(name: u64, index: i32, _cache: u64, _size: u64) -> u32 {
     if index != 0 {
         eprintln!(
-            "[RED] nxkit-svc-fs: MountRom with program index {index}: the host has the romfs of this program only"
+            "nxkit-svc-fs: warning: MountRom with program index {index}: the host has the romfs of this program only"
         );
     }
     run_text(name, |fs, n| fs.mount_rom(n))
@@ -65,7 +65,7 @@ pub(super) extern "C" fn query_system_data_cache(out: u64, _id: u64) -> u32 {
 }
 
 pub(super) extern "C" fn mount_system_data(_name: u64, id: u64, _cache: u64, _size: u64) -> u32 {
-    eprintln!("[RED] nxkit-svc-fs: MountSystemData {id:016x}: the host has no system data");
+    eprintln!("nxkit-svc-fs: warning: MountSystemData {id:016x}: the host has no system data");
     TARGET_NOT_FOUND
 }
 
@@ -164,7 +164,7 @@ pub(super) extern "C" fn is_save_existing(_uid: u64) -> u32 {
 
 pub(super) extern "C" fn mount_save_read_only(_name: u64, app: u64, _uid: u64) -> u32 {
     eprintln!(
-        "[RED] nxkit-svc-fs: read-only mount of the save data of program {app:016x}: the host has none"
+        "nxkit-svc-fs: warning: read-only mount of the save data of program {app:016x}: the host has none"
     );
     TARGET_NOT_FOUND
 }

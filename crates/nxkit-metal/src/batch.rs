@@ -298,7 +298,7 @@ impl Batch {
                     static SHOWN: AtomicUsize = AtomicUsize::new(0);
                     if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
                         eprintln!(
-                            "nxkit-metal: [RED] batch {number} command buffer failed: {} {:?}",
+                            "nxkit-metal: warning: batch {number} command buffer failed: {} {:?}",
                             e.localizedDescription(),
                             e.userInfo()
                         );

@@ -125,7 +125,7 @@ pub(crate) extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
                 })?;
         } else if mem == 0 && !virt {
             eprintln!(
-                "[RED] NVN nvnMemoryPoolInitialize: a pool that is not virtual has no storage (flags {flags:#x}, size {len:#x})"
+                "nxkit-rt: warning: NVN nvnMemoryPoolInitialize: a pool that is not virtual has no storage (flags {flags:#x}, size {len:#x})"
             );
         }
         Ok(1)
@@ -252,7 +252,7 @@ extern "C" fn pool_map_virtual(p: u64, n: i32, requests: u64) -> u32 {
             let phys = view(r.phys)?;
             if phys.mem == 0 {
                 eprintln!(
-                    "[RED] NVN nvnMemoryPoolMapVirtual: the physical pool {:#x} has no storage",
+                    "nxkit-rt: warning: NVN nvnMemoryPoolMapVirtual: the physical pool {:#x} has no storage",
                     r.phys
                 );
                 return Ok(ret_bool(false));
@@ -260,7 +260,7 @@ extern "C" fn pool_map_virtual(p: u64, n: i32, requests: u64) -> u32 {
             match classify(&r, pool_size, phys, o.u64(OFF_MEM)?) {
                 Mapping::OutOfRange => {
                     eprintln!(
-                        "[RED] NVN nvnMemoryPoolMapVirtual: request out of range (virtual {:#x}+{:#x} of {pool_size:#x}, physical {:#x} of {:#x})",
+                        "nxkit-rt: warning: NVN nvnMemoryPoolMapVirtual: request out of range (virtual {:#x}+{:#x} of {pool_size:#x}, physical {:#x} of {:#x})",
                         r.voff, r.size, r.poff, phys.size
                     );
                     return Ok(ret_bool(false));

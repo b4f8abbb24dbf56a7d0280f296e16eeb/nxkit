@@ -58,7 +58,7 @@ extern "C" fn event_initialize(e: u64, b: u64) -> u32 {
             pool::view(pool_addr)?.mem
         };
         if mem == 0 {
-            eprintln!("[RED] NVN nvnEventInitialize: the event has no storage");
+            eprintln!("nxkit-rt: warning: NVN nvnEventInitialize: the event has no storage");
             return Ok(0);
         }
         let o = Obj(e);

@@ -8,7 +8,7 @@
 //! The host of nxkit has no part of what that needs: it loads no NRO (the `nro_*` seams stop the game), it has no code
 //! memory with write protection that the guest can run, and it has no loader that relocates a module alone against
 //! itself. So `Initialize` and `Finalize` are ported as they are, and `CreateJitEnvironment` stops the game with a
-//! `[RED]` note instead of letting the SDK read the missing service session (R15, R61). The game gets no handle, so
+//! `warning:` note instead of letting the SDK read the missing service session (R15, R61). The game gets no handle, so
 //! `DestroyJitEnvironment`, `GetJitEnvironmentInfo`, `Control` and `GenerateCode` cannot be reached and are not
 //! taken over.
 
@@ -27,7 +27,7 @@ extern "C" fn initialize() {
 /// yet.
 extern "C" fn create_jit_environment() -> u32 {
     fatal(
-        "[RED] jit::CreateJitEnvironment: the host cannot run a JIT plugin (it loads no NRO and has no code memory that \
+        "nxkit-svc-system: warning: jit::CreateJitEnvironment: the host cannot run a JIT plugin (it loads no NRO and has no code memory that \
          the plugin can write and the game can run), so Super Mario 64 of Super Mario 3D All-Stars cannot go on",
     )
 }

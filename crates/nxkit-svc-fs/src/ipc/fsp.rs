@@ -36,7 +36,7 @@ impl FspSrv {
                 Ok(i) => Some(Arc::new(i)),
                 Err(e) => {
                     eprintln!(
-                        "[RED] nxkit-svc-fs: the romfs image of {} cannot be built: {e}",
+                        "nxkit-svc-fs: warning: the romfs image of {} cannot be built: {e}",
                         fs.cfg.romfs.display()
                     );
                     None
@@ -82,7 +82,7 @@ impl FspSrv {
             }
             other => {
                 eprintln!(
-                    "[RED] nxkit-svc-fs: OpenSaveDataFileSystem of save type {other}: the host serves account, device and cache saves only"
+                    "nxkit-svc-fs: warning: OpenSaveDataFileSystem of save type {other}: the host serves account, device and cache saves only"
                 );
                 return answer(rsp, TARGET_NOT_FOUND);
             }
@@ -122,7 +122,7 @@ impl Service for FspSrv {
             51 => Self::open_save(req, rsp),
             53 => {
                 eprintln!(
-                    "[RED] nxkit-svc-fs: read-only open of save data: the host has none for another program"
+                    "nxkit-svc-fs: warning: read-only open of save data: the host has none for another program"
                 );
                 answer(rsp, TARGET_NOT_FOUND)
             }

@@ -184,14 +184,14 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
             release(name, t)?;
         }
         if built.pool == 0 {
-            eprintln!("[RED] NVN {name}: the builder has no memory pool");
+            eprintln!("nxkit-rt: warning: NVN {name}: the builder has no memory pool");
             return Ok(0);
         }
         let p = memory_pool::view(built.pool)?;
         let layout = built.desc.layout()?;
         if p.mem == 0 {
             eprintln!(
-                "[RED] NVN {name}: the memory pool has no storage (pool {:#x}, flags {:#x})",
+                "nxkit-rt: warning: NVN {name}: the memory pool has no storage (pool {:#x}, flags {:#x})",
                 built.pool, p.flags
             );
             return Ok(0);
@@ -202,7 +202,7 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
                 .is_none_or(|end| end > p.size)
         {
             eprintln!(
-                "[RED] NVN {name}: a texture of {:#x} bytes at offset {:#x} does not fit the memory pool of {:#x} bytes",
+                "nxkit-rt: warning: NVN {name}: a texture of {:#x} bytes at offset {:#x} does not fit the memory pool of {:#x} bytes",
                 layout.size, built.off, p.size
             );
             return Ok(0);

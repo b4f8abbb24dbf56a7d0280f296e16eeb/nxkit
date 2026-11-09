@@ -335,7 +335,7 @@ impl Frame {
                     static SHOWN: std::sync::atomic::AtomicU32 =
                         std::sync::atomic::AtomicU32::new(0);
                     if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 4 {
-                        eprintln!("nxkit-metal: [RED] present threw {e:?}");
+                        eprintln!("nxkit-metal: warning: present threw {e:?}");
                     }
                 }
             }
