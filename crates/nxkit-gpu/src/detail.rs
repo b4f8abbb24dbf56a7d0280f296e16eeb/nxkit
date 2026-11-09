@@ -375,6 +375,12 @@ pub struct CopyDetail {
     pub row_stride: u64,
     /// The bytes between two layers or depth slices of the buffer (`SetCopyImageStride`). 0 means tightly packed.
     pub image_stride: u64,
+    /// The GPU address of what the copy reads (a buffer, or the storage of a texture), 0 when the walker did not read
+    /// it. Set for the copies between buffers and textures and for a buffer to buffer copy (which is
+    /// [`CopyKind::Other`]).
+    pub src_addr: u64,
+    /// The GPU address of what the copy writes, 0 when the walker did not read it.
+    pub dst_addr: u64,
 }
 
 /// A `Cmd::Dispatch`.

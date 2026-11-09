@@ -86,6 +86,8 @@ pub(super) fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
             dst_origin,
             size,
             dst_size,
+            src_addr: x.word64(0),
+            dst_addr: x.word64(2),
             ..d
         };
     }
@@ -100,9 +102,11 @@ pub(super) fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
     d.dst_size = size;
     if x.code == ExtCode::CopyBufferToTexture {
         d.kind = CopyKind::BufferToTexture;
+        (d.src_addr, d.dst_addr) = (d.buffer, x.word64(0));
         (d.dst_level, d.dst_layer, d.dst_origin) = (level, layer, origin);
     } else {
         d.kind = CopyKind::TextureToBuffer;
+        (d.src_addr, d.dst_addr) = (x.word64(0), d.buffer);
         (d.src_level, d.src_layer, d.src_origin) = (level, layer, origin);
     }
     d
@@ -111,4 +115,17 @@ pub(super) fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
 /// The value of a stride setting. A negative stride is no stride.
 pub(super) fn stride(x: &Ext) -> u64 {
     u64::try_from(x.word64(0) as i64).unwrap_or(0)
+}
+
+/// The detail of a `CopyBufferToBuffer` record (words: source (2), destination (2), size (2), flags). It has no box, only
+/// the two addresses; a record that is too short keeps the default entry.
+pub(super) fn buffer_copy_detail(x: &Ext) -> CopyDetail {
+    if x.words().len() < 4 {
+        return CopyDetail::default();
+    }
+    CopyDetail {
+        src_addr: x.word64(0),
+        dst_addr: x.word64(2),
+        ..CopyDetail::default()
+    }
 }

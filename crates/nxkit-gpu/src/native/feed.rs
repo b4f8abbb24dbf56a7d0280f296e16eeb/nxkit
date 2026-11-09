@@ -8,6 +8,11 @@
 //! (the Core ML completion has run), hands out a [`Hold`] on the slot. Nothing on the GPU waits for the Neural Engine.
 //! A picture whose result is not ready is made by the Metal plan.
 //!
+//! The game copies the picture into textures of its own before the dispatch, so the dispatch's planes are not the ones
+//! the video service wrote: the offload follows the game's copies back to them, and, when that finds nothing, looks for
+//! the picture's fingerprint ([`super::print`]) in the planes. A stream whose dispatches match no picture for a while is
+//! given up ([`super::matching`]): no picture of it is converted until the next stream starts.
+//!
 //! The conversion's constants (the game's colour matrix and offsets) are not known before the first NDVE dispatch; they
 //! are taken from its push block, and pictures decoded before that are made by the plan.
 
@@ -20,16 +25,24 @@ use nxkit_svc_video::{Frame, PictureSink};
 
 use super::ane::{SLOTS, Session};
 use super::conv::{self, Params};
+use super::matching::{How, Matcher};
+use super::print::{self, Print};
 use super::slots::{Binds, Miss, Pic, Table, Why};
 
 /// Decoded pictures that wait for the feeder. The decoder is three ahead of the game, so a longer queue means the
 /// feeder cannot keep up; the oldest pictures are dropped (the plan makes them).
 const QUEUE: usize = 8;
 
+/// The fingerprints of decoded pictures the feed remembers.
+const PRINTS: usize = 16;
+
 /// The feeder's state, shared by the video service's threads, the feeder thread and the encoder.
 struct State {
     table: Table,
     binds: Binds,
+    /// The fingerprints of the luma of the latest decoded pictures, oldest first.
+    prints: VecDeque<(Print, Pic)>,
+    matcher: Matcher,
     queue: VecDeque<Arc<Frame>>,
     /// The conversion constants of the game and their number: it changes when they do.
     params: Option<Params>,
@@ -53,6 +66,8 @@ pub(super) fn feed() -> &'static Feed {
         state: Mutex::new(State {
             table: Table::new(SLOTS),
             binds: Binds::default(),
+            prints: VecDeque::new(),
+            matcher: Matcher::default(),
             queue: VecDeque::new(),
             params: None,
             epoch: 0,
@@ -83,6 +98,10 @@ struct Sink;
 impl PictureSink for Sink {
     fn decoded(&self, frame: &Arc<Frame>) {
         feed().queue(frame);
+    }
+
+    fn stream_started(&self) {
+        feed().stream_started();
     }
 
     fn read_nv12(&self, frame: u64, luma: u64, chroma: u64, _width: u32, _height: u32) {
@@ -119,9 +138,22 @@ impl Feed {
 
     /// A picture was decoded: queued for the model, or, when there is no model to run yet, made by the plan.
     fn queue(&self, frame: &Arc<Frame>) {
-        let mut st = self.lock();
         let pic = frame.id();
+        let off = self.lock().matcher.off();
+        // A given up stream costs nothing: no fingerprint, no conversion.
+        let print = if off { None } else { print::of_frame(frame) };
+        let mut st = self.lock();
         st.table.queued(pic);
+        if off {
+            st.table.skip(pic, Why::Warmup);
+            return;
+        }
+        if let Some(p) = print {
+            st.prints.push_back((p, pic));
+            while st.prints.len() > PRINTS {
+                st.prints.pop_front();
+            }
+        }
         if st.session.is_none() {
             st.table.skip(pic, Why::Warmup);
             return;
@@ -157,19 +189,62 @@ impl Feed {
         st.epoch
     }
 
-    /// The result for the picture in the planes at the host addresses `luma` and `chroma`, made with the constants
-    /// `epoch`, if it is ready. Otherwise the reason it is not.
-    pub(super) fn pick(&self, epoch: u32, luma: u64, chroma: u64) -> Result<Hold, Reason> {
-        let mut st = self.lock();
-        let Some(pic) = st.binds.find(luma, chroma) else {
-            return Err((
-                "unknown_picture",
-                format!(
-                    "no picture was read into the planes {luma:#x} and {chroma:#x}; {}",
-                    st.binds.recent()
-                ),
-            ));
+    /// True when the stream is given up: the dispatches match no picture, so nothing is converted.
+    pub(super) fn given_up(&self) -> bool {
+        self.lock().matcher.off()
+    }
+
+    /// A video stream starts: the matching is tried again, and the line of the stream before is printed.
+    fn stream_started(&self) {
+        let line = self.lock().matcher.restart();
+        if let Some(l) = line {
+            eprintln!("{l}");
+        }
+    }
+
+    /// The result for the picture of a dispatch, made with the constants `epoch`, if it is ready. Otherwise the reason
+    /// it is not. `lumas` are the host addresses the picture's luma may have been read into: the dispatch's own luma
+    /// plane first, then the memory the game's copies took it from. `prints` gives the fingerprints of the planes in
+    /// guest memory, and is only called when no address names a picture.
+    pub(super) fn pick(
+        &self,
+        epoch: u32,
+        lumas: &[u64],
+        prints: impl FnOnce() -> Vec<Print>,
+    ) -> Result<Hold, Reason> {
+        let by_address = {
+            let st = self.lock();
+            lumas.iter().enumerate().find_map(|(i, l)| {
+                let how = if i == 0 { How::Address } else { How::Copy };
+                st.binds.find_luma(*l).map(|pic| (pic, how))
+            })
         };
+        let found = by_address.or_else(|| {
+            let prints = prints();
+            let st = self.lock();
+            prints.iter().find_map(|p| {
+                let (_, pic) = st.prints.iter().rev().find(|(q, _)| q == p)?;
+                Some((*pic, How::Print))
+            })
+        });
+        let mut st = self.lock();
+        let Some((pic, how)) = found else {
+            let line = st.matcher.miss();
+            let what = format!(
+                "no picture was read into the plane {:#x} or what it was copied from ({} candidates), and no fingerprint of a decoded picture is in it; {}",
+                lumas.first().copied().unwrap_or(0),
+                lumas.len().saturating_sub(1),
+                st.binds.recent()
+            );
+            drop(st);
+            if let Some(l) = line {
+                eprintln!("{l}");
+            }
+            return Err(("unknown_picture", what));
+        };
+        if let Some(l) = st.matcher.hit(how) {
+            eprintln!("{l}");
+        }
         match st.table.take(pic, epoch) {
             Ok(slot) => Ok(Hold { slot, pic }),
             Err(Miss::Unknown) => Err((

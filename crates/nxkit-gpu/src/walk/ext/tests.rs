@@ -288,6 +288,8 @@ fn a_buffer_to_texture_copy_reads_the_buffer_view_and_region() {
         ([4, 8, 2], [120, 75, 3], [120, 75, 3])
     );
     assert_eq!((d.row_stride, d.image_stride), (512, 4096));
+    // The addresses of both sides: the buffer is read, the texture (address 0x2000) is written.
+    assert_eq!((d.src_addr, d.dst_addr), (0x9_0000_1000, 0x2000));
 
     // Without a view the region starts 4 words earlier and the copy uses level 0, layer 0.
     let words = [0x2000, 0, 0x1000, 9, 0, 0, 0, 0, 320, 180, 0];
