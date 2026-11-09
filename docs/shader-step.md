@@ -68,6 +68,7 @@ A key that the translator does not do is a `ShaderError` of that key. The build 
 The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
 The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.19`) and `NXB_TEST_XLATE_SALT`.
 No Rust source goes into V. A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
+A feature revision (`nxb_xlate::msl::revision`) translates again only the shaders whose code uses that feature.
 
 The output is not byte-identical to the output of the former C# translator and `spirv-cross`. No game ran with it yet (D20). Unit tests and Metal compile tests on built samples cover it.
 
@@ -82,7 +83,8 @@ The output is not byte-identical to the output of the former C# translator and `
 The rules for these identities:
 
 1. V comes from the host's shader chain files, not from the binary. No Rust source goes into V.
-2. `TRANSLATOR_ID` in `nxb-xlate` is a string. Increase it by hand for each change of the translator output.
+2. `TRANSLATOR_ID` in `nxb-xlate` is a string. Increase it by hand for each change of the translator output. For a change that alters only the shaders of one feature (`HMMA`), increase that feature's revision in `nxb_xlate::msl::revision` instead.
+   The crate version is in no key. V of a build without the engine and the front-end id `air-front@0.10.0+f<FORMAT>` keep a fixed base, so a release keeps the store.
 3. The runtime crates are not in V, and TOOL_FP does not contain BIN_ID. A new binary from the same sources keeps V and all cache keys.
 4. The design compares BIN_ID with a lock file at start, and a mismatch is a `[RED]` build error. The code does not have this check at this time. The command `nxb self-check` only finds the external tools and shows their versions.
 5. The reuse key of the build contains BIN_ID. After a runtime fix, the shader step runs one more time, with cache hits only.

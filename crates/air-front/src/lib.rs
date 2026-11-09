@@ -29,11 +29,18 @@ pub const BACK_HALF_TEXT: &[&[&str]] = &[
     &["--discard-value-names", "-", "-o", "-"],
 ];
 
-/// The front end's identity for cache keys and TOOL_FP: crate version plus the emitter's
+/// The front end's identity for cache keys and TOOL_FP: [`ID_BASE`] plus the emitter's
 /// output-format generation. Bump [`FORMAT`] whenever emitted IR changes for any input.
+///
+/// The crate version is not part of it: a release changes no emitted IR, and with the version in the id every library
+/// of every game compiled again after a release (`docs/early-cutoff.md`).
 pub fn id() -> String {
-    format!("air-front@{}+f{FORMAT}", env!("CARGO_PKG_VERSION"))
+    format!("air-front@{ID_BASE}+f{FORMAT}")
 }
+
+/// The crate version at which [`id`] stopped following the crate version. It is fixed, so the libraries in the stores
+/// and the verdict folders named by the id stay valid.
+pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
 pub const FORMAT: u32 = 8;
@@ -291,5 +298,11 @@ mod tests {
     #[test]
     fn id_names_format() {
         assert!(id().ends_with(&format!("+f{FORMAT}")));
+    }
+
+    #[test]
+    fn id_does_not_follow_the_crate_version() {
+        // the id of the 0.10.0 stores: a release keeps every library's key
+        assert_eq!(id(), format!("air-front@0.10.0+f{FORMAT}"));
     }
 }
