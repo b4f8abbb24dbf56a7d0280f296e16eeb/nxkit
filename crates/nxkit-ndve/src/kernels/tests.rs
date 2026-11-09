@@ -36,7 +36,7 @@ fn wrong_lengths_are_errors() {
 #[test]
 fn buffers_match_the_layer_table() {
     let p = make();
-    assert_eq!(p.buffers.len(), 21);
+    assert_eq!(p.buffers.len(), 22);
     for (i, l) in LAYERS.iter().enumerate() {
         let b = &p.buffers[i];
         assert_eq!(
@@ -61,21 +61,23 @@ fn buffers_match_the_layer_table() {
     }
 }
 
-/// The step that runs layer `n` (0-based) and the layers it covers: 1 + 2 and 11 + 12 are fused.
+/// The step that runs layer `n` (0-based) and the layers it covers: 1 + 2 and 11 + 12 are fused. Step 0 is the colour
+/// conversion.
 fn step_of(n: usize) -> usize {
     match n {
-        0 | 1 => 0,
-        2..=9 => n - 1,
-        _ => 9,
+        0 | 1 => 1,
+        2..=9 => n,
+        _ => 10,
     }
 }
 
 #[test]
 fn every_binding_names_a_buffer_of_the_right_size() {
     let p = make();
-    assert_eq!(p.steps.len(), 12);
-    assert_eq!(p.steps[0].kernel, "ndve_l01_l02");
-    assert_eq!(p.steps[9].kernel, "ndve_l11_l12");
+    assert_eq!(p.steps.len(), 13);
+    assert_eq!(p.steps[0].kernel, "ndve_convert");
+    assert_eq!(p.steps[1].kernel, "ndve_l01_l02");
+    assert_eq!(p.steps[10].kernel, "ndve_l11_l12");
     for (n, l) in LAYERS.iter().enumerate() {
         let s = &p.steps[step_of(n)];
         if !fused_second(n) && !matches!(l.kind, Kind::First | Kind::Last) {
@@ -138,28 +140,28 @@ fn fused_steps_route_the_tensors() {
             .map(|b| b.source)
             .collect()
     };
-    assert_eq!(writes(&p.steps[0]), vec![Source::Buffer(B_S16)]);
+    assert_eq!(writes(&p.steps[1]), vec![Source::Buffer(B_S16)]);
     assert!(
-        p.steps[1]
+        p.steps[2]
             .buffers
             .iter()
             .any(|b| b.index == 0 && b.source == Source::Buffer(B_S16))
     );
-    // layer 10 (step 8) reads s16 as the skip and writes t1, which the last fused step reads
-    assert!(
-        p.steps[8]
-            .buffers
-            .iter()
-            .any(|b| b.index == 3 && b.source == Source::Buffer(B_S16))
-    );
-    assert_eq!(writes(&p.steps[8]), vec![Source::Buffer(B_T1)]);
+    // layer 10 (step 9) reads s16 as the skip and writes t1, which the last fused step reads
     assert!(
         p.steps[9]
             .buffers
             .iter()
+            .any(|b| b.index == 3 && b.source == Source::Buffer(B_S16))
+    );
+    assert_eq!(writes(&p.steps[9]), vec![Source::Buffer(B_T1)]);
+    assert!(
+        p.steps[10]
+            .buffers
+            .iter()
             .any(|b| b.index == 0 && b.source == Source::Buffer(B_T1))
     );
-    assert!(writes(&p.steps[9]).is_empty());
+    assert!(writes(&p.steps[10]).is_empty());
 }
 
 #[test]
@@ -188,11 +190,12 @@ fn the_grids_cover_the_images() {
         }
     }
     let p = make();
-    let rs = &p.steps[11];
-    // 5 threadgroups x 4 rounds x 4 simdgroups x 4 blocks = 320 blocks of 8 pixels = 2560; 180 rows of blocks = 1440
-    assert_eq!(rs.groups[0] * 4 * 4 * 4 * 8, 2560);
+    let rs = &p.steps[12];
+    // 10 threadgroups x 2 rounds x 8 simdgroups x 2 blocks = 320 blocks of 8 pixels = 2560; 180 rows of blocks = 1440
+    assert_eq!(rs.groups[0] * 2 * 8 * 2 * 8, 2560);
+    assert_eq!(rs.threads[0], 8 * 32);
     assert_eq!(rs.groups[1] * 8, 1440);
-    let luma = &p.steps[10];
+    let luma = &p.steps[11];
     assert_eq!(
         (
             luma.groups[0] * luma.threads[0],

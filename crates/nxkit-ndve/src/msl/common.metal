@@ -56,9 +56,9 @@ static inline hmat bias_relu(fmat a, hmat bias) {
 // The colour conversion 49dff010 (NV12 to RGBA8) of one picture pixel, as the 8-bit unorm value the game's image holds
 // (the write rounds to nearest even, the read gives c / 255). Push words: matrix rows at 0-2, 4-6, 8-10, offsets at
 // 12-14. The chroma plane is sampled bilinearly at the pixel centre (the sampler of the game is not known to us:
-// linear, clamp to edge).
-static inline float3 convert_px(texture2d<float, access::read> luma, texture2d<float, access::sample> chroma,
-                                constant float *cp, uint2 p) {
+// linear, clamp to edge). The result is the integer 0 .. 255 of each component as a float.
+static inline float3 convert_bytes(texture2d<float, access::read> luma, texture2d<float, access::sample> chroma,
+                                   constant float *cp, uint2 p) {
     // BEST GUESS: the hook cannot bind the game's sampler; linear, clamp to edge, normalized as section 7 implies.
     constexpr sampler smp(coord::normalized, address::clamp_to_edge, filter::linear);
     const float2 size = float2(luma.get_width(), luma.get_height());
@@ -68,5 +68,12 @@ static inline float3 convert_px(texture2d<float, access::read> luma, texture2d<f
     const float r = fma(vv, cp[2], fma(yv, cp[0], uv * cp[1]));
     const float g = fma(vv, cp[6], fma(yv, cp[4], uv * cp[5]));
     const float b = fma(vv, cp[10], fma(yv, cp[8], uv * cp[9]));
-    return rint(clamp(float3(r, g, b), 0.0f, 1.0f) * 255.0f) / 255.0f;
+    return rint(clamp(float3(r, g, b), 0.0f, 1.0f) * 255.0f);
+}
+
+// The converted picture is made once by ndve_convert (3 bytes of a pixel as r | g << 8 | b << 16) and read by the two
+// fused pairs, instead of sampling the planes again in each (the picture pixels of a halo are needed by two tiles).
+static inline float3 picture_px(device const uint *pic, uint2 p) {
+    const uint v = pic[p.y * 1920 + p.x];
+    return float3(float(v & 255u), float((v >> 8) & 255u), float((v >> 16) & 255u)) / 255.0f;
 }
