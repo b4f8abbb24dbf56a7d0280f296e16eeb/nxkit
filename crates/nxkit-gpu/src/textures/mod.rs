@@ -13,6 +13,7 @@
 mod blocks;
 mod evict;
 pub mod inventory;
+mod supersede;
 #[cfg(test)]
 mod tests;
 mod views;
@@ -125,6 +126,8 @@ pub(crate) struct TextureStore {
     evicted_ids: FastSet<TexId>,
     /// The memory report is on, so every scan publishes the inventory.
     inventory: bool,
+    /// The textures dropped because another texture overwrote their memory (`supersede.rs`).
+    sup: supersede::State,
 }
 
 fn kind_of(t: Target) -> Option<TextureKind> {
@@ -245,6 +248,7 @@ impl TextureStore {
             usage: FastMap::default(),
             evicted_ids: FastSet::default(),
             inventory: inventory::wanted(),
+            sup: supersede::State::from_env(),
         }
     }
 
@@ -418,6 +422,7 @@ impl TextureStore {
         }
         self.used(r.generation, rec.residency == Residency::GpuNewer);
         self.made_again(id);
+        self.remade_after_supersede(id);
         Ok(r)
     }
 
@@ -445,6 +450,7 @@ impl TextureStore {
         self.native.remove(&id);
         self.heat.remove(&id);
         self.evicted_ids.remove(&id);
+        self.sup.forget(id);
     }
 
     /// The textures that were replaced. The caller drops them when the GPU is done with them.

@@ -198,6 +198,10 @@ pub struct Inventory {
     pub attachment_idle: [Total; 3],
     /// The distinct (format, width, height) among the attachment entries.
     pub attachment_shapes: u64,
+    /// The Metal textures the supersede rule dropped so far and their bytes.
+    pub superseded: Total,
+    /// The ids that got a Metal texture again after their texture was superseded.
+    pub remade: u64,
     /// The largest Metal textures, largest first (at most [`LARGEST`]).
     pub largest: Vec<Largest>,
 }
@@ -482,7 +486,8 @@ impl TextureStore {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .len() as u64;
-        let inv = build(self.frame, &texs, &spans, views, shadows, retired);
+        let mut inv = build(self.frame, &texs, &spans, views, shadows, retired);
+        (inv.superseded, inv.remade) = (self.sup.dropped, self.sup.remade);
         *LATEST.lock().unwrap_or_else(PoisonError::into_inner) = Some(inv);
     }
 }

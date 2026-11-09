@@ -44,6 +44,10 @@ pub(super) struct Usage {
     pub(super) last_frame: u64,
     /// A frame wrote it (the table said `GpuNewer` or a pass wrote it) since it was made.
     pub(super) gpu_written: bool,
+    /// The last frame in which a pass of a frame wrote it (`mark_written`), `None` when none did. It is an event, not
+    /// the state "the GPU copy is newer" that `used` sees: a texture that was rendered once and is sampled every
+    /// frame has no new write. `supersede` compares it with the `last_frame` of the textures over the same memory.
+    pub(super) written_frame: Option<u64>,
 }
 
 /// What [`evictable`] decides on, for one Metal texture.
@@ -76,10 +80,14 @@ impl TextureStore {
         u.gpu_written |= written;
     }
 
-    /// Notes that a frame wrote the texture `id`.
+    /// Notes that a frame wrote the texture `id`. The encoder calls it after `end_frame` of the same frame, which has
+    /// counted the frame already, so the write belongs to the frame before the counter. This way a use and a write of
+    /// one frame have the same number, as in [`TextureStore::used`].
     pub(crate) fn mark_written(&mut self, id: TexId) {
         if let Some(r) = self.entries.get(&id) {
-            self.usage.entry(r.generation).or_default().gpu_written = true;
+            let u = self.usage.entry(r.generation).or_default();
+            u.gpu_written = true;
+            u.written_frame = Some(self.frame.saturating_sub(1));
         }
     }
 
@@ -87,7 +95,11 @@ impl TextureStore {
     /// many Metal textures it dropped. The textures are in `retired`; the caller drops them with `take_retired`.
     pub(crate) fn end_frame(&mut self) -> usize {
         self.frame += 1;
-        let dropped = self.evict_scan();
+        let mut dropped = self.evict_scan();
+        dropped += self.supersede_scan();
+        if self.frame.is_multiple_of(SCAN_EVERY) {
+            self.prune_usage();
+        }
         // The memory report wants the inventory after the scan, also when eviction is off.
         if self.inventory && self.frame.is_multiple_of(SCAN_EVERY) {
             self.publish_inventory();
@@ -112,7 +124,7 @@ impl TextureStore {
             let f = idle.entry(r.generation).or_insert(Facts {
                 usage: self.usage.get(&r.generation).copied().unwrap_or(Usage {
                     last_frame: now,
-                    gpu_written: false,
+                    ..Usage::default()
                 }),
                 render_target_like: false,
                 memoryless: r.desc.storage == Storage::Memoryless,
@@ -127,28 +139,52 @@ impl TextureStore {
             }
         }
         let mut dropped: FastSet<u64> = FastSet::default();
-        let mut ids = Vec::new();
-        for (id, r) in &self.entries {
-            if !keep.contains(&r.generation) {
-                ids.push(*id);
-            }
-        }
-        for id in ids {
-            let Some(r) = self.entries.remove(&id) else {
-                continue;
-            };
-            if dropped.insert(r.generation) {
-                nxkit_metal::texture_evicted(r.tex.allocated_bytes());
+        let gone: FastSet<u64> = self
+            .entries
+            .values()
+            .map(|r| r.generation)
+            .filter(|g| !keep.contains(g))
+            .collect();
+        for (id, generation, bytes) in self.drop_generations(&gone) {
+            if dropped.insert(generation) {
+                nxkit_metal::texture_evicted(bytes);
             }
             self.evicted_ids.insert(id);
-            self.retired.push(r.tex);
         }
-        self.usage.retain(|g, _| !dropped.contains(g));
-        if !dropped.is_empty() {
+        dropped.len()
+    }
+
+    /// Removes every entry of the Metal textures `gens`, retires the textures, forgets their usage and lets
+    /// `trim_views` drop their aliases, views and shadows. It keeps `attachments`, `atomic`, `native` and `heat`: an id
+    /// that is used again gets a new texture in the same shape. Returns the id, the generation and the
+    /// `allocatedSize` of each removed entry.
+    pub(super) fn drop_generations(&mut self, gens: &FastSet<u64>) -> Vec<(TexId, u64, u64)> {
+        let ids: Vec<TexId> = self
+            .entries
+            .iter()
+            .filter(|(_, r)| gens.contains(&r.generation))
+            .map(|(id, _)| *id)
+            .collect();
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(r) = self.entries.remove(&id) {
+                out.push((id, r.generation, r.tex.allocated_bytes()));
+                self.retired.push(r.tex);
+            }
+        }
+        self.usage.retain(|g, _| !gens.contains(g));
+        if !out.is_empty() {
             // The alias map and the views hold the texture too.
             self.trim_views();
         }
-        dropped.len()
+        out
+    }
+
+    /// Forgets the usage of every Metal texture that no entry holds any more (`ensure` replaced the entry of an id or
+    /// `invalidate` removed it). Without this the map grows for the whole run.
+    pub(super) fn prune_usage(&mut self) {
+        let live: FastSet<u64> = self.entries.values().map(|r| r.generation).collect();
+        self.usage.retain(|g, _| live.contains(g));
     }
 
     /// Counts the re-upload of a texture that went, when `id` gets a Metal texture again.
@@ -167,7 +203,7 @@ mod tests {
         Facts {
             usage: Usage {
                 last_frame,
-                gpu_written: false,
+                ..Usage::default()
             },
             render_target_like: false,
             memoryless: false,

@@ -244,3 +244,107 @@ fn compressed_textures_are_never_render_targets() {
     assert!(!d.render_target);
     assert_eq!(d.kind, TextureKind::D3);
 }
+
+#[test]
+fn a_texture_that_another_one_overwrote_is_superseded() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let small = nxkit_nvn::layout::TextureDesc {
+        target: Target::D2,
+        format: 0x25,
+        flags: 0,
+        samples: 0,
+        width: 64,
+        height: 64,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let big = nxkit_nvn::layout::TextureDesc {
+        width: 128,
+        height: 128,
+        ..small
+    };
+    let mut table = ResourceTable::new();
+    let mut store = TextureStore::new(&ctx);
+    let mut stats = EncodeStats::default();
+    let addr = GpuAddr::new(0x2000).unwrap();
+    let first = table.create(small, addr).unwrap();
+    let second = table.create(big, addr).unwrap();
+    let old = store
+        .ensure(table.get(first).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
+    store.end_frame();
+    // The second texture covers the range of the first and a frame writes it after the last use of the first.
+    store
+        .ensure(table.get(second).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
+    store.end_frame();
+    store.mark_written(second);
+    let mut dropped = 0;
+    while store.frame < evict::SCAN_EVERY {
+        dropped += store.end_frame();
+    }
+    assert_eq!(dropped, 1);
+    assert!(store.get(first).is_none());
+    assert!(store.get(second).is_some());
+    assert_eq!(store.take_retired().len(), 1);
+    assert_eq!(store.sup.dropped.count, 1);
+    // No usage of a generation that no entry holds.
+    let live: FastSet<u64> = store.entries.values().map(|r| r.generation).collect();
+    assert!(store.usage.keys().all(|g| live.contains(g)));
+    assert!(!store.usage.contains_key(&old.generation));
+    // The first id gets a new texture when it is used again, and the store counts it.
+    let again = store
+        .ensure(table.get(first).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
+    assert_ne!(again.generation, old.generation);
+    assert_eq!(store.sup.remade, 1);
+}
+
+#[test]
+fn a_texture_that_is_only_used_as_gpu_newer_supersedes_nothing() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let small = nxkit_nvn::layout::TextureDesc {
+        target: Target::D2,
+        format: 0x25,
+        flags: 0,
+        samples: 0,
+        width: 64,
+        height: 64,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let big = nxkit_nvn::layout::TextureDesc {
+        width: 128,
+        height: 128,
+        ..small
+    };
+    let mut table = ResourceTable::new();
+    let mut store = TextureStore::new(&ctx);
+    let mut stats = EncodeStats::default();
+    let addr = GpuAddr::new(0x2000).unwrap();
+    let first = table.create(small, addr).unwrap();
+    let second = table.create(big, addr).unwrap();
+    store
+        .ensure(table.get(first).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
+    table.gpu_wrote(second).unwrap();
+    // The state "the GPU copy is newer" is no write event: `mark_written` is never called.
+    let mut dropped = 0;
+    while store.frame < evict::SCAN_EVERY {
+        store
+            .ensure(table.get(second).unwrap(), 1.0, Use::default(), &mut stats)
+            .unwrap();
+        dropped += store.end_frame();
+    }
+    assert_eq!(dropped, 0);
+    assert!(store.get(first).is_some() && store.get(second).is_some());
+    assert_eq!(store.sup.dropped.count, 0);
+}

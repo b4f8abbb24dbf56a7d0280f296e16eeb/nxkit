@@ -19,7 +19,8 @@
 //! - `nxkit-mem tex attach`: the attachment entries (ids that were a render target; the store never evicts them) by
 //!   frames since the last use, in the buckets of `idle` (the MiB are of the distinct textures behind them), the
 //!   number of distinct (format, width, height) among them, and the overlap line of `dup` split into attachment
-//!   entries and all others.
+//!   entries and all others, then `superseded` (Metal textures dropped because another texture overwrote their guest
+//!   memory, count/MiB, in total) and `remade` (ids that got a Metal texture again after that).
 //! - `nxkit-mem tex largest`: the largest Metal textures, one `format WxHxD/layers mips scale class MiB idle`.
 //! - `nxkit-mem texlife`: the life of the texture records of the NVN front end (`nxkit_nvn::texlife`): the calls of
 //!   `nvnTextureInitialize` and how many of them shared a record or took an orphan back, the finalizes that dropped the
@@ -142,13 +143,15 @@ fn dup_line(i: &Inventory) -> String {
 fn attach_line(i: &Inventory) -> String {
     let d = &i.attachment_idle;
     format!(
-        "nxkit-mem tex attach (entries/MiB): <=60 {} <=600 {} older {} | shapes {} | overlap attachment {} | overlap other {}",
+        "nxkit-mem tex attach (entries/MiB): <=60 {} <=600 {} older {} | shapes {} | overlap attachment {} | overlap other {} | superseded {} remade {}",
         total(&d[0]),
         total(&d[1]),
         total(&d[2]),
         i.attachment_shapes,
         dup(&i.overlap_attachment),
-        dup(&i.overlap_other)
+        dup(&i.overlap_other),
+        total(&i.superseded),
+        i.remade
     )
 }
 
@@ -396,6 +399,8 @@ mod tests {
         let mut i = sample();
         i.attachment_idle = [t(5, 30), t(15, 90), t(20, 180)];
         i.attachment_shapes = 4;
+        i.superseded = t(12, 340);
+        i.remade = 3;
         i.overlap_attachment = Dup {
             entries: 5,
             textures: 4,
@@ -409,7 +414,7 @@ mod tests {
         let l = attach_line(&i);
         assert!(
             l.ends_with(
-                "<=60 5/30.0 <=600 15/90.0 older 20/180.0 | shapes 4 | overlap attachment 5 entries 4 textures 40.0 MiB | overlap other 4 entries 3 textures 10.0 MiB"
+                "<=60 5/30.0 <=600 15/90.0 older 20/180.0 | shapes 4 | overlap attachment 5 entries 4 textures 40.0 MiB | overlap other 4 entries 3 textures 10.0 MiB | superseded 12/340.0 remade 3"
             ),
             "{l}"
         );
