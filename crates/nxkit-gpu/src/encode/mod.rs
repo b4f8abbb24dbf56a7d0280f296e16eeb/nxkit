@@ -90,6 +90,29 @@ fn disabled_draws(sh: &Shared<'_>, pass: &Pass, range: &std::ops::Range<u32>) ->
     (off.len() == range.len() && off.contains(&true)).then_some(off)
 }
 
+/// Sets the visibility offset that the next draws count into (None: they do not count). False when the encoder
+/// refused it: the draws after it are not counted.
+fn set_counting(
+    rp: &mut RenderPass<'_>,
+    counting: &mut Option<u64>,
+    want: Option<u64>,
+    stats: &mut EncodeStats,
+) -> bool {
+    if *counting == want {
+        return true;
+    }
+    let cmd = RenderCommand::SetVisibility {
+        counting: want.is_some(),
+        offset: want.unwrap_or(0),
+    };
+    if rp.encode(&cmd).is_err() {
+        stats.skipped[Skip::Encode as usize] += 1;
+        return false;
+    }
+    *counting = want;
+    true
+}
+
 /// Encodes one render pass into `cb`.
 pub(crate) fn render_pass(
     sh: &Shared<'_>,
@@ -190,7 +213,12 @@ pub(crate) fn render_pass(
     }
     // The GPU driven draws of the pass get their copied arguments before the pass starts.
     let pre = crate::indirect::prepass(sh, cb, &tables.vertex, scratch, range.clone(), stats);
-    let Ok(mut rp) = cb.begin_render_pass_split(&s.desc, &tables.vertex, &tables.fragment) else {
+    // The draws of a slot of the GPU counters count their samples (`queries`).
+    let vis = sh.queries.and_then(|q| Some((q, q.pass(index)?)));
+    let visibility = vis.as_ref().map(|(_, v)| v.buffer);
+    let Ok(mut rp) =
+        cb.begin_render_pass_counted(&s.desc, &tables.vertex, &tables.fragment, visibility)
+    else {
         return lost(stats, Skip::Encode);
     };
     stats.render_passes += 1;
@@ -243,6 +271,9 @@ pub(crate) fn render_pass(
     let mut memo = ArgsMemo::default();
     let off = disabled_draws(sh, pass, &range);
     let is_off = |n: u32| off.as_ref().is_some_and(|o| o[(n - range.start) as usize]);
+    let counts = |n: u32| vis.as_ref().and_then(|(q, v)| v.offset(q.draw_slot(n)?));
+    // The visibility offset that counts now, None while nothing counts.
+    let mut counting: Option<u64> = None;
     let mut n = range.start;
     while n < range.end {
         if is_off(n) {
@@ -251,12 +282,16 @@ pub(crate) fn render_pass(
             continue;
         }
         if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end)
-            && (n..n + run.draws).all(|d| !is_off(d))
+            && (n..n + run.draws).all(|d| !is_off(d) && counts(d).is_none())
+            && set_counting(&mut rp, &mut counting, None, stats)
             && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
         {
             n += run.draws;
             continue;
         }
+        let want = counts(n);
+        let counted = vis.is_some() && set_counting(&mut rp, &mut counting, want, stats);
+        let before = stats.draws;
         draw(
             sh,
             &s.pc,
@@ -269,6 +304,13 @@ pub(crate) fn render_pass(
             n,
             stats,
         );
+        if counted
+            && want.is_some()
+            && stats.draws > before
+            && let Some(((q, _), slot)) = vis.as_ref().zip(sh.queries.and_then(|q| q.draw_slot(n)))
+        {
+            q.encoded(slot);
+        }
         n += 1;
     }
     rp.end();

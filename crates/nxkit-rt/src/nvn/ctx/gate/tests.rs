@@ -126,3 +126,49 @@ fn the_work_that_ran_counts_its_waits_signals_and_passes_the_held_ops() {
     assert_eq!((g.stats.signals, g.stats.fences, g.stats.waits), (1, 1, 1));
     assert_eq!(g.held[0].passed, 1);
 }
+
+#[test]
+fn a_flush_forces_first_the_wait_that_no_held_work_can_satisfy() {
+    const F: u64 = 0x2000;
+    let mem = Mem::default().event(E, 0).event(F, 0);
+    let mut g = Gate::new(true);
+    // QA waits for the GPU signal of QB; QB waits for a CPU signal of F that comes after the present.
+    let on_f = MarkOp::WaitEvent {
+        event: F,
+        mode: EVENT_WAIT_EQUAL,
+        value: 1,
+    };
+    g.push(QA, submit());
+    g.push(QB, submit());
+    g.held[0].marks = Some(vec![wait(1)]);
+    g.held[1].marks = Some(vec![on_f, signal(1)]);
+    let blockers: Vec<_> = g
+        .heads()
+        .into_iter()
+        .map(|i| {
+            (
+                i,
+                g.blocker(g.held[i].queue, g.held[i].marks.as_ref().unwrap(), &mem),
+            )
+        })
+        .collect();
+    assert_eq!(blockers, [(0, Some(wait(1))), (1, Some(on_f))]);
+    assert!(g.signalled_by_held(E + 0x100, QA, &mem));
+    assert_eq!(g.force_pick(&blockers, &mem), 1);
+    // Once QB ran, QA may run.
+    let qb = g.held.remove(1).unwrap();
+    g.ran(qb.marks.as_ref().unwrap(), &mem);
+    assert_eq!(g.blocker(QA, &[wait(1)], &mem), None);
+}
+
+#[test]
+fn a_flush_forces_the_oldest_when_every_wait_waits_for_held_work() {
+    let mem = Mem::default().event(E, 0);
+    let mut g = Gate::new(true);
+    g.push(QA, submit());
+    g.push(QB, submit());
+    g.held[0].marks = Some(vec![wait(1), signal(2)]);
+    g.held[1].marks = Some(vec![wait(2), signal(1)]);
+    let blockers = vec![(0, Some(wait(1))), (1, Some(wait(2)))];
+    assert_eq!(g.force_pick(&blockers, &mem), 0);
+}

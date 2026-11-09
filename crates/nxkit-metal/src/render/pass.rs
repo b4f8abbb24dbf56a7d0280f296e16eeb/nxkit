@@ -6,12 +6,13 @@ use objc2_foundation::NSRange;
 use objc2_metal::{
     MTL4CommandBuffer, MTL4CommandEncoder, MTL4RenderCommandEncoder, MTL4RenderPassDescriptor,
     MTL4VisibilityOptions, MTLClearColor, MTLCullMode, MTLRenderStages, MTLScissorRect, MTLSize,
-    MTLStages, MTLViewport,
+    MTLStages, MTLViewport, MTLVisibilityResultMode, MTLVisibilityResultType,
 };
 
 use super::{CullMode, RenderCommand, RenderPassDesc, check_attachment};
 use crate::barrier::Stages;
 use crate::compute_icb::check_range_buffer;
+use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::table::ArgumentTable;
@@ -24,7 +25,7 @@ impl CommandBuffer {
         desc: &RenderPassDesc,
         table: &ArgumentTable,
     ) -> Result<RenderPass<'_>> {
-        self.begin_render_pass_with(desc, table, None)
+        self.begin_render_pass_with(desc, table, None, None)
     }
 
     /// Starts a render pass with one argument table per stage. A translated shader reads its argument buffer at
@@ -35,7 +36,21 @@ impl CommandBuffer {
         vertex_table: &ArgumentTable,
         fragment_table: &ArgumentTable,
     ) -> Result<RenderPass<'_>> {
-        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table))
+        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table), None)
+    }
+
+    /// [`CommandBuffer::begin_render_pass_split`] with an optional visibility result buffer: the draws after a
+    /// [`RenderCommand::SetVisibility`] count their samples into it. The pass adds to what the buffer holds
+    /// (`MTLVisibilityResultTypeAccumulate`), so the caller zeroes it and gives each pass offsets of its own. The caller
+    /// keeps the buffer alive until the GPU finished the command buffer.
+    pub fn begin_render_pass_counted(
+        &mut self,
+        desc: &RenderPassDesc,
+        vertex_table: &ArgumentTable,
+        fragment_table: &ArgumentTable,
+        visibility: Option<&DataBuffer>,
+    ) -> Result<RenderPass<'_>> {
+        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table), visibility)
     }
 
     fn begin_render_pass_with(
@@ -43,6 +58,7 @@ impl CommandBuffer {
         desc: &RenderPassDesc,
         table: &ArgumentTable,
         fragment_table: Option<&ArgumentTable>,
+        visibility: Option<&DataBuffer>,
     ) -> Result<RenderPass<'_>> {
         let first = desc
             .colors
@@ -54,6 +70,17 @@ impl CommandBuffer {
             .ok_or(MetalError::Invalid("a render pass needs an attachment"))?;
         let mut pd = self.pass_desc.take().unwrap_or_else(PassDescriptor::new);
         let result = self.fill_pass(&mut pd, desc, first);
+        // SAFETY: the buffer is a live shared buffer in the residency set. The GPU writes it while the pass runs; the
+        // caller keeps it alive and reads it only after the command buffer finished.
+        unsafe {
+            pd.raw
+                .setVisibilityResultBuffer(visibility.map(|v| &*v.raw))
+        };
+        pd.raw.setVisibilityResultType(if visibility.is_some() {
+            MTLVisibilityResultType::Accumulate
+        } else {
+            MTLVisibilityResultType::Reset
+        });
         let rp = pd.raw.clone();
         self.pass_desc = Some(pd);
         result?;
@@ -89,6 +116,7 @@ impl CommandBuffer {
             table: table.clone(),
             fragment_table: fragment_table.cloned(),
             object_table: None,
+            visibility_len: visibility.map_or(0, DataBuffer::len),
             has_pipeline: false,
             ended: false,
         })
@@ -212,6 +240,8 @@ pub struct RenderPass<'a> {
     table: ArgumentTable,
     fragment_table: Option<ArgumentTable>,
     object_table: Option<ArgumentTable>,
+    /// The length of the visibility result buffer, 0 without one.
+    visibility_len: u64,
     has_pipeline: bool,
     ended: bool,
 }
@@ -329,6 +359,26 @@ impl RenderPass<'_> {
                 &*self.enc,
                 Stages::VERTEX | Stages::FRAGMENT | Stages::OBJECT | Stages::MESH,
             )?,
+            RenderCommand::SetVisibility { counting, offset } => {
+                let mode = if *counting {
+                    if !offset.is_multiple_of(8)
+                        || offset
+                            .checked_add(8)
+                            .is_none_or(|e| e > self.visibility_len)
+                    {
+                        return Err(MetalError::Invalid(
+                            "the visibility offset is outside the visibility result buffer",
+                        ));
+                    }
+                    MTLVisibilityResultMode::Counting
+                } else {
+                    MTLVisibilityResultMode::Disabled
+                };
+                let offset = if *counting { *offset as usize } else { 0 };
+                // SAFETY: a counting offset is 8 byte aligned and its 8 bytes lie in the buffer of the pass (checked
+                // above); a disabled test writes nothing.
+                unsafe { self.enc.setVisibilityResultMode_offset(mode, offset) };
+            }
             RenderCommand::WaitForEarlierPasses => self
                 .enc
                 .barrierAfterQueueStages_beforeStages_visibilityOptions(

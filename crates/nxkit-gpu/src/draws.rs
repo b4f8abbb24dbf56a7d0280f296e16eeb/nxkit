@@ -95,6 +95,8 @@ pub(crate) struct Shared<'a> {
     pub(crate) preloaded: &'a FastMap<usize, u64>,
     /// The run of dispatches that a native plan replaces in this frame, when there is one.
     pub(crate) native: Option<&'a crate::native::Prepared>,
+    /// The visibility offsets and counted draws of the GPU counters of the frame (`queries`).
+    pub(crate) queries: Option<&'a crate::queries::FrameQueries>,
 }
 
 impl Shared<'_> {

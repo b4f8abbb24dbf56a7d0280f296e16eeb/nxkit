@@ -348,4 +348,6 @@ pub struct EncodeReport {
     pub mirrored: Vec<TexId>,
     /// The counters.
     pub stats: EncodeStats,
+    /// The GPU counters of the frame, which the backend writes when the GPU finished it.
+    pub(crate) queries: Option<std::sync::Arc<crate::queries::FrameQueries>>,
 }

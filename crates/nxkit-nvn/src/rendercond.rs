@@ -12,17 +12,21 @@
 //!
 //! - `ReportValue` writes a value that the recording names, so the table knows it.
 //! - The timestamp counters (`TIMESTAMP`, `TIMESTAMP_TOP`) write a counter of 0.
-//! - The other counters (samples passed, primitives) are counted by the GPU. The host does not know them, so a
-//!   condition that reads one is unknown, and an unknown condition renders, as the host did before.
+//! - The counters that the GPU counts (samples passed, vertices, primitives) are emulated (`crate::counters`): the
+//!   backend writes them when the GPU finished the frame, and they land in [`Landed`]. A condition reads a counter
+//!   once landed: the value of the report it names when that report landed, else the last value that landed at the
+//!   address (a report of an earlier frame: one frame of latency, `NXKIT_RENDERCOND_STALE=0` turns that off), else
+//!   it is unknown.
+//! - The other counters are unknown. An unknown condition renders, as the host did before.
 //!
 //! The known values stay in the table for [`KEEP_FLUSHES`] flushes; by then the backend wrote them to guest memory.
-//! The unknown ones stay until a known value replaces them. A CPU read back of the condition (GPU predication) is not
-//! needed, because every value the host can know is known when the stream is appended.
+//! The GPU counters stay until a known value replaces them.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::counters::{Counters, Landed, Source};
 use crate::frame::{Cmd, Frame};
 use crate::marks::{Mark, MarkOp, RENDER_IF_EQUAL, RENDER_IF_NOT_EQUAL};
 use crate::mem::GuestMem;
@@ -32,16 +36,43 @@ use crate::space::{GpuAddr, GpuSpace};
 pub const KEEP_FLUSHES: u64 = 8;
 /// The most entries of the report table. A full table drops its known values.
 const MAX_REPORTS: usize = 4096;
-/// `NVN_COUNTER_TYPE_TIMESTAMP` and `NVN_COUNTER_TYPE_TIMESTAMP_TOP`: their counter word is 0.
-const TIMESTAMPS: [u32; 2] = [0, 0x10];
-
 /// What the table knows of the counter of a report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Report {
     /// A counter that a recording wrote, with the flush of its frame.
     Known { value: u64, flush: u64 },
+    /// A counter that the host emulates: report `seq` writes it when the GPU finished its frame.
+    Gpu { seq: u64 },
     /// A counter that only the GPU knows.
     Unknown,
+}
+
+/// What a condition reads of one counter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Read {
+    /// A value of a recording or of guest memory.
+    Known(u64),
+    /// The emulated counter of the report that the table names, landed.
+    Landed(u64),
+    /// The last emulated counter that landed at the address, of an earlier report.
+    Stale(u64),
+    /// Nothing that the host knows.
+    Unknown,
+}
+
+impl Read {
+    fn value(self) -> Option<u64> {
+        match self {
+            Self::Known(v) | Self::Landed(v) | Self::Stale(v) => Some(v),
+            Self::Unknown => None,
+        }
+    }
+}
+
+/// `NXKIT_RENDERCOND_STALE=0`: a condition does not read the counter of an earlier report.
+fn stale_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NXKIT_RENDERCOND_STALE").map_or(true, |v| v != "0"))
 }
 
 /// The counters of the render conditions since the last [`RenderConds::take_stats`].
@@ -57,10 +88,18 @@ pub struct CondStats {
     pub false_: u32,
     /// Conditions that read a counter only the GPU knows, or had an unknown mode. They render.
     pub unknown: u32,
+    /// Conditions that read emulated counters of the reports they name, landed.
+    pub landed: u32,
+    /// Conditions that read the counter of an earlier report at an address (one frame of latency).
+    pub stale: u32,
     /// `ReportValue` writes that the table took.
     pub values: u32,
+    /// Counter reports that the host emulates (`crate::counters`).
+    pub emulated: u32,
     /// Counter reports that only the GPU knows.
     pub counters: u32,
+    /// The GPU counter reports by `NVNcounterType` (16 and above in the last), emulated or not.
+    pub kinds: [u32; 17],
 }
 
 impl CondStats {
@@ -81,6 +120,8 @@ pub struct RenderConds {
     reports: HashMap<u64, Report>,
     flush: u64,
     stats: CondStats,
+    /// The slots and reports of the GPU counters.
+    counters: Counters,
     /// The first evaluations, for `NXKIT_DIAG=rendercond`.
     pub evaluations: Vec<Evaluation>,
 }
@@ -102,7 +143,9 @@ impl RenderConds {
         read: impl Fn(u64) -> Option<u64>,
     ) {
         let mut on = !self.off.get(&queue).copied().unwrap_or(false);
+        self.counters.begin(queue, base);
         if marks.is_empty() && on {
+            self.counters.end(queue, frame.cmds.len() as u32, frame);
             return;
         }
         let mut from = base;
@@ -117,12 +160,17 @@ impl RenderConds {
                 MarkOp::RenderIf { mode, addr } => self.evaluate(mode, addr, &read),
                 MarkOp::ReportValue { addr, value } => {
                     self.stats.values += 1;
-                    self.report(addr, Some(u64::from(value)));
+                    let value = u64::from(value);
+                    let flush = self.flush;
+                    self.report(addr, Report::Known { value, flush });
                     continue;
                 }
                 MarkOp::ReportCounter { addr, kind } => {
-                    self.stats.counters += u32::from(!TIMESTAMPS.contains(&kind));
-                    self.report(addr, TIMESTAMPS.contains(&kind).then_some(0));
+                    self.counter_report(queue, base, at, kind, addr, frame);
+                    continue;
+                }
+                MarkOp::ResetCounter { kind } => {
+                    self.counters.reset(queue, base, at, kind, frame);
                     continue;
                 }
                 _ => continue,
@@ -136,12 +184,51 @@ impl RenderConds {
             frame.disable(from..frame.cmds.len() as u32);
         }
         self.off.insert(queue, !on);
+        self.counters.end(queue, frame.cmds.len() as u32, frame);
+    }
+
+    /// `ReportCounter` of `kind` at `addr` before command `at`.
+    fn counter_report(
+        &mut self,
+        queue: usize,
+        base: u32,
+        at: u32,
+        kind: u32,
+        addr: u64,
+        frame: &mut Frame,
+    ) {
+        let source = crate::counters::source(kind);
+        if source == Source::Timestamp {
+            self.report(
+                addr,
+                Report::Known {
+                    value: 0,
+                    flush: self.flush,
+                },
+            );
+            return;
+        }
+        self.stats.kinds[kind.min(16) as usize] += 1;
+        let r = match self.counters.report(queue, base, at, kind, addr, frame) {
+            Some(seq) => {
+                self.stats.emulated += 1;
+                Report::Gpu { seq }
+            }
+            None => {
+                self.stats.counters += 1;
+                Report::Unknown
+            }
+        };
+        self.report(addr, r);
     }
 
     /// Whether the condition renders. An unknown counter or mode renders.
     fn evaluate(&mut self, mode: u32, addr: u64, read: &impl Fn(u64) -> Option<u64>) -> bool {
-        let a = self.counter(addr, read);
-        let b = self.counter(addr.wrapping_add(16), read);
+        let (ra, rb) = (
+            self.counter(addr, read),
+            self.counter(addr.wrapping_add(16), read),
+        );
+        let (a, b) = (ra.value(), rb.value());
         let r = match (mode, a, b) {
             (RENDER_IF_EQUAL, Some(a), Some(b)) => Some(a == b),
             (RENDER_IF_NOT_EQUAL, Some(a), Some(b)) => Some(a != b),
@@ -152,41 +239,57 @@ impl RenderConds {
             Some(false) => self.stats.false_ += 1,
             None => self.stats.unknown += 1,
         }
+        if r.is_some() {
+            if matches!(ra, Read::Stale(_)) || matches!(rb, Read::Stale(_)) {
+                self.stats.stale += 1;
+            } else if matches!(ra, Read::Landed(_)) || matches!(rb, Read::Landed(_)) {
+                self.stats.landed += 1;
+            }
+        }
         if self.evaluations.len() < 64 {
             self.evaluations.push((mode, addr, a, b, r));
         }
         r.unwrap_or(true)
     }
 
-    fn counter(&self, addr: u64, read: &impl Fn(u64) -> Option<u64>) -> Option<u64> {
+    fn counter(&self, addr: u64, read: &impl Fn(u64) -> Option<u64>) -> Read {
         match self.reports.get(&addr) {
             Some(Report::Known { value, flush }) if self.flush - flush < KEEP_FLUSHES => {
-                Some(*value)
+                Read::Known(*value)
             }
-            Some(Report::Unknown) => None,
-            _ => read(addr),
+            Some(Report::Gpu { seq }) => match self.counters.landed().get(addr) {
+                Some((v, s)) if s == *seq => Read::Landed(v),
+                Some((v, _)) if stale_on() => Read::Stale(v),
+                _ => Read::Unknown,
+            },
+            Some(Report::Unknown) => Read::Unknown,
+            _ => read(addr).map_or(Read::Unknown, Read::Known),
         }
     }
 
-    fn report(&mut self, addr: u64, value: Option<u64>) {
+    fn report(&mut self, addr: u64, r: Report) {
         if self.reports.len() >= MAX_REPORTS {
-            self.reports.retain(|_, r| *r == Report::Unknown);
+            self.reports
+                .retain(|_, r| !matches!(r, Report::Known { .. }));
         }
-        let r = value.map_or(Report::Unknown, |value| Report::Known {
-            value,
-            flush: self.flush,
-        });
         self.reports.insert(addr, r);
+    }
+
+    /// The counters that landed, for the backend and the tests.
+    pub fn landed(&self) -> &std::sync::Arc<Landed> {
+        self.counters.landed()
     }
 
     /// The frame was flushed. Known values age by one flush.
     pub fn flushed(&mut self) {
         self.flush += 1;
+        self.counters.flushed();
     }
 
-    /// Forgets the condition of a queue (`nvnQueueFinalize`).
+    /// Forgets the condition and the counter slots of a queue (`nvnQueueFinalize`).
     pub fn drop_queue(&mut self, queue: usize) {
         self.off.remove(&queue);
+        self.counters.drop_queue(queue);
     }
 
     /// The counters since the last call.
@@ -224,7 +327,8 @@ pub(crate) fn read_gpu_u64<S: GpuSpace, M: GuestMem>(space: &S, mem: &M, addr: u
 }
 
 /// `NXKIT_DIAG=rendercond`: one line for a frame that set a condition or left something out (the first 300 such
-/// frames, then every 60th), and the first evaluations with the counters they read.
+/// frames, then every 60th), and the first evaluations with the counters they read. The backend adds a line for the
+/// emulated counters it wrote (`nxkit-gpu`, `queries`).
 pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
     static ON: OnceLock<bool> = OnceLock::new();
     if !*ON.get_or_init(|| crate::diag::on("rendercond")) {
@@ -261,15 +365,27 @@ pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
     let shown = SHOWN.fetch_add(1, Ordering::Relaxed);
     if shown < 300 || shown.is_multiple_of(60) {
         let [d, c, x, k] = disabled_counts(frame);
+        let kinds: Vec<String> = s
+            .kinds
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| **n > 0)
+            .map(|(k, n)| format!("{k:#x}:{n}"))
+            .collect();
         eprintln!(
-            "DIAG rendercond frame {n}: enable {} (off {}), conditions true {} false {} unknown {}, reports value {} gpu-only {} | left out: draws {d} clears {c} dispatches {x} copies {k} in {} ranges of {} commands",
+            "DIAG rendercond frame {n}: enable {} (off {}), conditions true {} false {} unknown {} (read landed {} stale {}), reports value {} emulated {} gpu-only {} by type [{}] in {} slots | left out: draws {d} clears {c} dispatches {x} copies {k} in {} ranges of {} commands",
             s.enables,
             s.disables,
             s.true_,
             s.false_,
             s.unknown,
+            s.landed,
+            s.stale,
             s.values,
+            s.emulated,
             s.counters,
+            kinds.join(" "),
+            frame.counters.slots,
             frame.disabled.len(),
             frame.cmds.len()
         );

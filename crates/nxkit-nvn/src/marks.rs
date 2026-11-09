@@ -38,7 +38,13 @@ pub enum MarkOp {
         /// The value.
         value: u32,
     },
-    /// `ReportCounter` of the `NVNcounterType` `kind`.
+    /// `ResetCounter` of the `NVNcounterType` `kind`: the counter of the queue starts again at 0.
+    ResetCounter {
+        /// The counter type.
+        kind: u32,
+    },
+    /// `ReportCounter` of the `NVNcounterType` `kind`: the GPU writes the counter and its time into the 16-byte
+    /// `NVNcounterData` at `addr`.
     ReportCounter {
         /// The GPU address of the report.
         addr: u64,

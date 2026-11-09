@@ -125,6 +125,8 @@ pub struct Gpu {
     pools: Vec<(u64, u64)>,
     copyback: CopyBack,
     native: crate::native::Native,
+    /// The visibility result buffers of the GPU counters (`queries`).
+    vis_pool: Arc<crate::queries::VisPool>,
 }
 
 impl Gpu {
@@ -170,6 +172,7 @@ impl Gpu {
             pools: Vec::new(),
             copyback: CopyBack::default(),
             native: crate::native::Native::new(),
+            vis_pool: Arc::default(),
         })
     }
 

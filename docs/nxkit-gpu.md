@@ -82,6 +82,19 @@ The walker details every draw kind but transform feedback and `DrawTexture`. `Dr
 
 `EncodeStats::kinds` counts these draws by class, encoded and skipped by reason, with the Metal draws they became, the pre-passes and their records, and what was clamped (`NXKIT_DIAG=mesh`).
 
+## GPU counters and render conditions (`queries`)
+
+NVN has no query objects. A game resets a counter of a queue (`nvnCommandBufferResetCounter`), draws, and has the GPU write the counter into a 16-byte `NVNcounterData` (`nvnCommandBufferReportCounter`: the 64-bit counter, then the 64-bit GPU time). An occlusion test reports samples passed before and after its boxes, at `addr` and `addr + 16`, and `SetRenderEnableConditional` compares the two counters later (`nxkit_nvn::rendercond`).
+
+- The front end (`nxkit_nvn::counters`) cuts the commands of each queue that uses a counter into slots, which end at every reset and report of the queue. `Frame::counters` holds the command ranges of the slots and, for each report, the slots it sums: the slots of its queue since the last reset of its counter in the frame, or since the start of the frame. A report across frames thus starts again at 0 in each frame; the begin and end reports of a test are in one frame.
+- `queries::prepare` gives every render pass with draws of a slot that counts samples one offset per slot in a zeroed visibility result buffer (a small pool of shared buffers). No two passes share an offset, so the passes of the parallel command buffers never add to the same 8 bytes. The pass gets the buffer with `MTLVisibilityResultTypeAccumulate` (`CommandBuffer::begin_render_pass_counted`) and each draw sets the offset of its slot (`RenderCommand::SetVisibility`, `MTLVisibilityResultModeCounting`); a draw of no slot turns counting off. A recording run with a counted draw is drawn one by one, not as an ICB.
+- The encoder counts the draws it encoded per slot. A slot with a draw that was not encoded (a pipeline still compiling, a lost pass) is not counted, so its reports do not land and a condition does not hide an object because its boxes were not drawn.
+- Vertices (`INPUT_VERTICES`, `VERTEX_SHADER_INVOCATIONS`) and primitives (`INPUT_PRIMITIVES`, `CLIPPER_INPUT_PRIMITIVES`, `PRIMITIVES_GENERATED`) are added up on the CPU from the arguments and topology of the draws of the slots (vertex shader invocations without the post-transform cache). An indirect or mesh draw makes the slot unknown. The other counter types (the invocations of the other stages, tessellation and geometry primitives, transform feedback, zcull) are unknown.
+- When the GPU finished the frame (`GpuBackend::write_counters`, at the wait for its fence), every report whose slots were all counted gets its `NVNcounterData` in guest memory (counter and GPU end time) and lands in `nxkit_nvn::counters::Landed` with the sequence number of the report. All 16 bytes must lie in guest memory (`queries::write_report`), the same check that the timestamp and `ReportValue` writes get. `ReportValue` writes its 32-bit value zero-extended as the counter, as the GPU writes the payload of a four-word report.
+- A render condition reads a counter once landed: the value of the report the table names when it landed, else the last value that landed at the address (the report of an earlier frame: one frame of latency), else the condition is unknown and renders. `NXKIT_RENDERCOND_STALE=0` drops the fallback, `NXKIT_COUNTERS=0` turns the emulation off (every GPU counter unknown again, as before). `NXKIT_DIAG=rendercond` counts the conditions that read landed and stale counters, the reports by counter type, and what the backend wrote.
+
+The counter type numbers (`SAMPLES_PASSED` 1, the statistics 2 to 0xf, `TIMESTAMP_TOP` 0x10) follow the order of `NVNcounterType`; the per-type counts of `NXKIT_DIAG=rendercond` show which ones a game reports.
+
 ## Barriers only where data flows (R19)
 
 `barriers.rs` tracks, for each texture, the stages that wrote it and the stages that read it. Before a pass it emits one `Dependency` only when the pass reads something that an earlier pass wrote, or writes something that an earlier pass wrote or read. The `after` stages are the stages of the earlier writers and the `before` stage is the first stage that needs the data (fragment for a render pass that samples in the fragment stage). A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.
@@ -255,6 +268,8 @@ Each item names the check.
 | The channel order of the 4 bit formats and the block copy of compressed formats into uint textures | upload a known texture of each format and read it back |
 | The state after `ExecuteIcb` is undefined as assumed | compare a pass that runs an ICB and then draws without setting state |
 | The types that the encoding threads share are `Sync` | the first build |
+| Visibility counting adds per offset across passes with `Accumulate` | `crates/nxkit-metal/tests/visibility.rs` |
+| An occlusion condition hides the right objects (samples on the scaled targets, depth of the pass) | a scene with occlusion culling, `NXKIT_DIAG=rendercond` false ratio, and `NXKIT_COUNTERS=0` to compare |
 
 The code has not been compiled or run. The first build and the first frame of Breath of the Wild will show the remaining errors.
 

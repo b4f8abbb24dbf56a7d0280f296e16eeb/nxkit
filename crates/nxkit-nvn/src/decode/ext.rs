@@ -95,7 +95,10 @@ impl Builder {
                     kind: x.word(0),
                 });
             }
-            ExtCode::ResetCounter => self.blockers |= super::BLOCK_SYNC,
+            ExtCode::ResetCounter => {
+                self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::ResetCounter { kind: x.word(0) });
+            }
             // A recording under a render condition is never an indirect command buffer: some of its draws may not run.
             ExtCode::Setting if x.arg == Setting::RenderEnable as u16 => {
                 self.blockers |= super::BLOCK_SYNC;
