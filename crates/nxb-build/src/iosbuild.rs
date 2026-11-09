@@ -261,7 +261,13 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<(), String> 
                     if crate::layer::gfx(b)? != Gfx::Nvn {
                         return crate::layer::stage(a2, b, p);
                     }
-                    crate::pipeline::shaders_and_archive(a2, b, p).map(|o| o.shaders)
+                    crate::pipeline::shaders_and_archive(
+                        a2,
+                        b,
+                        p,
+                        crate::archive_layout::Layout::Merged,
+                    )
+                    .map(|o| o.shaders)
                 }))
             }
             (_, _, "JIT capture") => Work::Turn(Box::new(move || crate::boot::jit::stage(b, p))),

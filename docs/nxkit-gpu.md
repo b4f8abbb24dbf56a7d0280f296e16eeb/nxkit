@@ -44,7 +44,7 @@ let stats = gpu.wait()?;                     // GPU time of the last frame
 
 ### Archive coverage
 
-`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts.
+`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts. The archive is not read whole: `GpuSettings::archive_shards` names the folder of the batch archives and the index, and the cache opens a shard for the first pipeline in it (`NXKIT_SHARD_LRU` open at most). See docs/shader-step.md, "The pipeline archive as shards".
 
 ## Bindless textures and buffers
 

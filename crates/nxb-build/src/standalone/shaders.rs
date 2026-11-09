@@ -81,9 +81,11 @@ pub(crate) struct Done {
 }
 
 /// Runs the shader step and the archive, then copies the Metal libraries, their `_b.json` reflection and the tables
-/// into `<run>/shaders` and the archive to `<run>/pipelines.mtl4archive`.
+/// into `<run>/shaders` and the archive to `<run>/pipelines/` (the shards and their index) or `<run>/pipelines.mtl4archive`
+/// (`NXB_ARCHIVE_LAYOUT`, see `crate::archive_layout`).
 pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
-    let o = crate::pipeline::shaders_and_archive(a, b, p)?;
+    let layout = crate::archive_layout::Layout::from_env();
+    let o = crate::pipeline::shaders_and_archive(a, b, p, layout)?;
     let dst = run.join("shaders");
     let _ = std::fs::remove_dir_all(&dst);
     std::fs::create_dir_all(&dst).map_err(|e| io(&dst, e))?;
@@ -122,31 +124,34 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
         ));
     }
     let mut summary = format!("{n} shader files ({})", o.shaders);
-    let archive = b
-        .gpus
-        .first()
-        .map(|arch| b.work.join("pso/mac").join(format!("{arch}.mtl4a")));
-    match (archive, &o.archive_error) {
-        (Some(src), None) if src.is_file() => {
-            let to = run.join("pipelines.mtl4archive");
+    match (b.gpus.first(), &o.archive_error) {
+        (Some(arch), None) => {
             p.set(Update {
                 note: Some("copying the pipeline archive"),
                 ..Default::default()
             });
-            std::fs::copy(&src, &to).map_err(|e| io(&src, e))?;
+            if layout.merges() {
+                let src = b.work.join("pso/mac").join(format!("{arch}.mtl4a"));
+                if !src.is_file() {
+                    return Err(format!(
+                        "the archive step reported no error and left no file at {}",
+                        src.display()
+                    ));
+                }
+                std::fs::copy(&src, run.join("pipelines.mtl4archive")).map_err(|e| io(&src, e))?;
+            }
+            if layout.shards() {
+                let n =
+                    crate::archive_layout::copy_to_run(&crate::archive_layout::shard_dir(b), run)?;
+                summary.push_str(&format!(", {n} archive shards"));
+            }
             if let Some(s) = &o.archive {
                 summary.push_str(&format!(", archive: {s}"));
             }
         }
         (Some(_), Some(why)) => {
             p.say(&format!(
-                "[RED] no pipeline archive: {why}. The app is built without pipelines.mtl4archive and compiles its pipelines while the game runs."
-            ));
-        }
-        (Some(src), None) => {
-            return Err(format!(
-                "the archive step reported no error and left no file at {}",
-                src.display()
+                "[RED] no pipeline archive: {why}. The app is built without one and compiles its pipelines while the game runs."
             ));
         }
         (None, _) => summary.push_str(", no archive (--gpu none)"),

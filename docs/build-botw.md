@@ -83,7 +83,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports, and applies the patch rules of the title module (`rewrite_rules()` of `nxgame-botw`, one file `rules/01007EF00011E000.toml`). `data/rewrite-rules` has no file for this game.
 4. Manifest. `game.json` gets the modules, the NVN function list, the services, the main thread from `main.npdm`, the memory layout and the run settings.
 5. Link. `nxgame.dylib` holds the modules at their fixed addresses. `codesign` signs it ad hoc. Refer to R48.
-6. Shaders. The build compiles the shaders into `shaders/` and makes `pipelines.mtl4archive` for the GPU of this Mac. `--gpu none` skips the archive.
+6. Shaders. The build compiles the shaders into `shaders/` and makes the pipeline archive for the GPU of this Mac: `pipelines/` with one archive file for each batch and an index (`NXB_ARCHIVE_LAYOUT=merged` makes the single `pipelines.mtl4archive` instead). `--gpu none` skips the archive.
 7. Bundle. The build adds `Info.plist`, signs `nxkit-host` ad hoc and moves the app to its final path.
 
 ## What does not work yet

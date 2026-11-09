@@ -84,7 +84,7 @@ fn line(ctx: &Context, (g0, g1): (u64, u64), at: Duration) -> String {
     format!(
         "nxkit-mem t {}s (MiB): footprint {} peak {} = resident {} (anon {} file {}) compressed {} graphics {} (comp {}) | \
          guest mapped {} {} (by region: res {} dirty {}) | {} in use {} | {} | {} | {} | {} | {} | \
-         metal device {} = guest buffer {} + textures {} (n {}) + buffers {} (n {}) + rest {} | libs {} pipelines {} resident set {} | tex evicted {} ({} MiB) reuploaded {} | walk {walk_ms} ms",
+         metal device {} = guest buffer {} + textures {} (n {}) + buffers {} (n {}) + rest {} | libs {} pipelines {} resident set {} | archive shards {} ({} MiB, opened {}) | tex evicted {} ({} MiB) reuploaded {} | walk {walk_ms} ms",
         at.as_secs(),
         mib(task.footprint),
         mib(task.footprint_peak),
@@ -115,6 +115,9 @@ fn line(ctx: &Context, (g0, g1): (u64, u64), at: Duration) -> String {
         m.libraries,
         m.pipelines,
         ctx.resident_count(),
+        m.archive_shards,
+        mib(m.archive_shard_bytes),
+        m.archive_opens,
         m.evictions,
         mib(m.evicted_bytes),
         m.reuploads,
@@ -141,6 +144,7 @@ mod tests {
             "files res",
             "metal device",
             "pipelines",
+            "archive shards",
             "tex evicted",
         ] {
             assert!(l.contains(part), "{part} missing in {l}");

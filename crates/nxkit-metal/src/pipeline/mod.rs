@@ -22,6 +22,8 @@ use crate::state::{ColorTarget, TopologyClass, VertexDescriptor};
 #[derive(Clone)]
 pub struct ShaderLibrary {
     raw: Retained<ProtocolObject<dyn MTLLibrary>>,
+    /// What the shard index names the library by: the file stem of a `.metallib` (`<key>_b`), or the name of the source.
+    stem: Option<std::sync::Arc<str>>,
     /// The library in the memory counters, shared by the clones.
     _tracked: std::sync::Arc<crate::memstats::Tracked>,
 }
@@ -35,6 +37,7 @@ impl ShaderLibrary {
     pub(crate) fn tracked(raw: Retained<ProtocolObject<dyn MTLLibrary>>) -> Self {
         Self {
             raw,
+            stem: None,
             _tracked: std::sync::Arc::new(crate::memstats::Tracked::new(
                 crate::memstats::Kind::Library,
                 0,
@@ -52,7 +55,17 @@ impl ShaderLibrary {
             .device()
             .newLibraryWithURL_error(&url)
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
-        Ok(Self::tracked(raw))
+        let mut lib = Self::tracked(raw);
+        lib.stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(std::sync::Arc::from);
+        Ok(lib)
+    }
+
+    /// What the shard index names the library by.
+    pub(crate) fn stem(&self) -> Option<&str> {
+        self.stem.as_deref()
     }
 
     /// Compiles Metal Shading Language source with `MTL4Compiler`.
@@ -64,7 +77,9 @@ impl ShaderLibrary {
             .compiler()
             .newLibraryWithDescriptor_error(&d)
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
-        Ok(Self::tracked(raw))
+        let mut lib = Self::tracked(raw);
+        lib.stem = Some(std::sync::Arc::from(name));
+        Ok(lib)
     }
 
     /// The names of the functions in the library.
@@ -194,3 +209,5 @@ pub struct MeshPipelineDesc<'a> {
 pub use cache::{ArchiveConfig, MissWhy, PipelineCache, Source};
 
 mod cache;
+mod lru;
+mod shards;

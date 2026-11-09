@@ -22,6 +22,7 @@ use crate::device::{Context, RawCompiler, ns};
 use crate::error::{MetalError, Result, create};
 use crate::state::{TopologyClass, check_sample_count};
 
+use super::shards::{self, ShardSet};
 use super::{ComputePipeline, MeshPipelineDesc, RenderPipeline, RenderPipelineDesc, ShaderLibrary};
 
 /// The empty fragment function of a depth-only mesh pipeline.
@@ -31,8 +32,14 @@ const NOP_FRAGMENT_NAME: &str = "nxkit_mesh_nop";
 /// Where a pipeline cache reads and writes its archive.
 #[derive(Clone, Debug, Default)]
 pub struct ArchiveConfig {
-    /// An archive to look pipelines up in before compiling. A missing file is not an error.
+    /// An archive to look pipelines up in before compiling. A missing file is not an error. Metal reads the whole file
+    /// into memory, so a large archive belongs in `shards`. Not used when `shards` has an index.
     pub load: Option<PathBuf>,
+    /// The folder of the archive shards and their index (`nxkit_abi::shards`). A shard is opened when the first
+    /// pipeline in it is asked for. A folder without an index counts as none, and `load` is used.
+    pub shards: Option<PathBuf>,
+    /// How many shards stay open at once (the least recently used one closes). 0 is [`shards::DEFAULT_OPEN`].
+    pub open_shards: usize,
     /// Collect every pipeline that the cache builds, so `save_archive` can write them.
     pub collect: bool,
 }
@@ -74,6 +81,10 @@ pub struct PipelineCache {
     loaded_archive: bool,
     /// The archive of `load`, asked first for a render pipeline.
     archive: Option<Retained<ProtocolObject<dyn MTL4Archive>>>,
+    /// The file of `archive` in the memory counters.
+    _archive_bytes: Option<std::sync::Arc<crate::memstats::Tracked>>,
+    /// The shards of `shards`: asked in place of `archive`.
+    shards: Option<ShardSet<shards::Open>>,
     /// A read-write lock: every encode thread looks pipelines up at once, and they are built rarely.
     entries: RwLock<HashMap<u64, Entry>>,
     hits: AtomicU64,
@@ -104,18 +115,21 @@ impl PipelineCache {
         let options = MTL4CompilerTaskOptions::new();
         let mut loaded_archive = false;
         let mut archive_obj = None;
-        if let Some(path) = archive.load.as_deref().filter(|p| p.exists()) {
-            let p = path
-                .to_str()
-                .ok_or(MetalError::Invalid("the archive path is not UTF-8"))?;
-            let a = ctx
-                .device()
-                .newArchiveWithURL_error(&NSURL::fileURLWithPath(&ns(p)))
-                .map_err(|e| create("pipeline archive", e.localizedDescription()))?;
+        let mut archive_bytes = None;
+        let shard_set = archive
+            .shards
+            .as_deref()
+            .and_then(|d| ShardSet::open(ctx, d, archive.open_shards));
+        if shard_set.is_some() {
+            loaded_archive = true;
+        } else if let Some(path) = archive.load.as_deref().filter(|p| p.exists()) {
+            let open =
+                shards::open_archive(ctx, path).map_err(|e| create("pipeline archive", e))?;
             options.setLookupArchives(Some(&NSArray::from_retained_slice(std::slice::from_ref(
-                &a,
+                &open.archive,
             ))));
-            archive_obj = Some(a);
+            archive_obj = Some(open.archive.clone());
+            archive_bytes = Some(open.tracked());
             loaded_archive = true;
         }
         Ok(Self {
@@ -124,6 +138,8 @@ impl PipelineCache {
             options,
             loaded_archive,
             archive: archive_obj,
+            _archive_bytes: archive_bytes,
+            shards: shard_set,
             entries: RwLock::new(HashMap::new()),
             hits: AtomicU64::new(0),
             builds: AtomicU64::new(0),
@@ -167,11 +183,16 @@ impl PipelineCache {
         if support_icb {
             d.setSupportIndirectCommandBuffers(MTL4IndirectCommandBufferSupportState::Enabled);
         }
+        // a shard has its compute pipelines: the compiler finds them in the shard's archive
+        let options = self
+            .shards
+            .as_ref()
+            .and_then(|s| s.compute_options(lib, function));
         let raw = self
             .compiler
             .newComputePipelineStateWithDescriptor_compilerTaskOptions_error(
                 &d,
-                Some(&self.options),
+                Some(options.as_deref().unwrap_or(&self.options)),
             )
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
         let p = ComputePipeline { raw };
@@ -195,7 +216,7 @@ impl PipelineCache {
             return Ok((p, Source::Cached));
         }
         let d = self.render_descriptor(desc)?;
-        if let Some(a) = &self.archive
+        if let Some(a) = self.render_archive(desc)
             && let Ok(raw) = a.newRenderPipelineStateWithDescriptor_error(&d)
         {
             let p = RenderPipeline { raw };
@@ -217,7 +238,7 @@ impl PipelineCache {
     /// group of the pipeline's state set at a time. Costs up to nine archive lookups, so call it for a diagnostic.
     pub fn explain_miss(&self, desc: &RenderPipelineDesc<'_>) -> Result<MissWhy> {
         let mut why = MissWhy::default();
-        let Some(a) = &self.archive else {
+        let Some(a) = self.render_archive(desc) else {
             return Ok(why);
         };
         let ask = |group: Option<&str>| -> Result<bool> {
@@ -246,6 +267,17 @@ impl PipelineCache {
             }
         }
         Ok(why)
+    }
+
+    /// The archive to ask for a render pipeline: its shard when the cache has shards, else the single archive.
+    fn render_archive(
+        &self,
+        desc: &RenderPipelineDesc<'_>,
+    ) -> Option<Retained<ProtocolObject<dyn MTL4Archive>>> {
+        match &self.shards {
+            Some(s) => s.render_archive(desc),
+            None => self.archive.clone(),
+        }
     }
 
     /// The Metal descriptor of a render pipeline.
@@ -447,9 +479,17 @@ impl PipelineCache {
         self.builds.load(Ordering::Relaxed)
     }
 
-    /// True when an archive was found and attached.
+    /// True when an archive was found and attached: the single archive or the index of the shards.
     pub fn has_archive(&self) -> bool {
         self.loaded_archive
+    }
+
+    /// The shards of the archive: (files in the index, pipelines in it, open now, opened since the start). None when
+    /// the cache has no shards.
+    pub fn shard_stats(&self) -> Option<(usize, usize, usize, u64)> {
+        self.shards
+            .as_ref()
+            .map(|s| (s.shards(), s.pipelines(), s.open_now(), s.opens()))
     }
 }
 
