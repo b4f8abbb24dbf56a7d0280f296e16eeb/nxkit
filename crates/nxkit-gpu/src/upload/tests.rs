@@ -1,7 +1,9 @@
 //! Tests for the upload and copy-back paths.
 
 use super::*;
-use nxkit_metal::{ArchiveConfig, ArgumentTable, DataBuffer, FrameRing, ShaderLibrary};
+use nxkit_metal::{
+    ArchiveConfig, ArgumentTable, DataBuffer, Dependency, FrameRing, ShaderLibrary, Use,
+};
 use nxkit_nvn::{resource::ResourceTable, space::GpuAddr};
 
 /// Uploads `desc` from a pattern in guest memory, clears the memory, copies `dirty` back and returns the
@@ -260,4 +262,33 @@ fn compressed_upload_preserves_every_mip_and_array_layer() {
             assert_eq!(rgba[3], 1.0);
         }
     }
+}
+
+#[test]
+fn textures_the_kernel_cannot_write_go_through_a_buffer() {
+    use nxkit_metal::BcKind;
+    assert!(buffered::via_buffer(Format::Depth16Unorm));
+    assert!(buffered::via_buffer(Format::Depth32Float));
+    assert!(buffered::via_buffer(Format::Stencil8));
+    assert!(buffered::via_buffer(Format::Bc(BcKind::Bc4Unorm)));
+    assert!(!buffered::via_buffer(Format::Depth32FloatStencil8));
+    assert!(!buffered::via_buffer(Format::R16Uint));
+    assert!(!buffered::via_buffer(Format::Rgba8Unorm));
+}
+
+#[test]
+fn buffered_levels_round_each_level_to_whole_blocks_and_keep_the_depth() {
+    // A 64x64x64 BC4 3D texture is 16x16 blocks deep 64; a 2D chain keeps 1x1 blocks for its tail levels.
+    assert_eq!(
+        buffered::level_blocks(&[[64, 64, 64]], (4, 4)),
+        vec![[16, 16, 64]]
+    );
+    assert_eq!(
+        buffered::level_blocks(&[[10, 6, 1], [5, 3, 1], [2, 1, 1], [1, 1, 0]], (4, 4)),
+        vec![[3, 2, 1], [2, 1, 1], [1, 1, 1], [1, 1, 1]]
+    );
+    assert_eq!(
+        buffered::level_blocks(&[[4096, 4096, 1]], (1, 1)),
+        vec![[4096, 4096, 1]]
+    );
 }

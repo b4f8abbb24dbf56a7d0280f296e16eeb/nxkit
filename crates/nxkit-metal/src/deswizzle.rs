@@ -104,11 +104,11 @@ kernel void deswizzle3d(constant Params& p [[buffer(0)]],
 }
 
 kernel void deswizzle_buffer(constant Params& p [[buffer(0)]], device uchar* dst [[buffer(1)]],
-                            uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= p.ew || gid.y >= p.eh) { return; }
-    uint3 b = uint3(gid.x, gid.y, 0);
-    store_block(dst + (ulong(gid.y) * p.ew + gid.x) * p.bytes_per_block,
-                p.bytes_per_block, load_block(block_ptr(p, b), p.bytes_per_block));
+                            uint3 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.ew || gid.y >= p.eh || gid.z >= p.ed) { return; }
+    ulong at = (ulong(gid.z) * p.eh + gid.y) * p.ew + gid.x;
+    store_block(dst + at * p.bytes_per_block, p.bytes_per_block,
+                load_block(block_ptr(p, gid), p.bytes_per_block));
 }
 
 kernel void swizzle2d(constant Params& p [[buffer(0)]],
@@ -347,8 +347,9 @@ impl Deswizzler {
         &self.k.table
     }
 
-    /// Deswizzles a whole 2D level into a tightly packed range of a buffer that starts at `dst_offset`. Compressed blocks use this path before a
-    /// buffer-to-texture copy, because Metal cannot copy an integer texture directly into a compressed texture.
+    /// Deswizzles a whole 2D level into a tightly packed range of a buffer that starts at `dst_offset`. Textures that
+    /// the kernel cannot write (compressed, depth and stencil formats) use this path before a buffer-to-texture copy:
+    /// Metal cannot copy an integer texture into a compressed texture, and has no integer view of a depth texture.
     #[allow(clippy::too_many_arguments)]
     pub fn encode_to_buffer(
         &self,
@@ -356,26 +357,80 @@ impl Deswizzler {
         scratch: &Scratch,
         guest: &Arc<GuestMemory>,
         guest_offset: u64,
-        (dst, dst_offset): (&Arc<DataBuffer>, u64),
+        dst: (&Arc<DataBuffer>, u64),
         params: &DeswizzleParams,
     ) -> Result<()> {
         let level = params.level()?;
-        let size =
-            u64::from(params.width) * u64::from(params.height) * u64::from(params.bytes_per_block);
+        let base = guest.gpu_address_of_offset(guest_offset, params.storage_bytes())?;
+        self.level_to_buffer(
+            pass,
+            scratch,
+            guest,
+            (base, level),
+            params.bytes_per_block,
+            params.order,
+            dst,
+        )
+    }
+
+    /// Deswizzles the whole level `level` of slice 0 of `surface` (all its depth, for a 3D surface) into a tightly
+    /// packed range of a buffer that starts at `dst_offset`: rows of blocks, then depth slices. `guest_offset` is the
+    /// offset of the surface from the start of the guest memory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_level_to_buffer(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        guest_offset: u64,
+        surface: &SurfaceLayout,
+        level: u32,
+        dst: (&Arc<DataBuffer>, u64),
+    ) -> Result<()> {
+        let l = surface.level(level)?;
+        let at = guest_offset
+            .checked_add(l.offset)
+            .ok_or(MetalError::Invalid("the level offset overflows"))?;
+        let base = guest.gpu_address_of_offset(at, l.bytes)?;
+        self.level_to_buffer(
+            pass,
+            scratch,
+            guest,
+            (base, l),
+            surface.bytes_per_block,
+            surface.order,
+            dst,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn level_to_buffer(
+        &self,
+        pass: &mut ComputePass<'_>,
+        scratch: &Scratch,
+        guest: &Arc<GuestMemory>,
+        (base, level): (u64, LevelLayout),
+        bytes_per_block: u32,
+        order: GobOrder,
+        (dst, dst_offset): (&Arc<DataBuffer>, u64),
+    ) -> Result<()> {
+        let size = u64::from(level.width)
+            * u64::from(level.height)
+            * u64::from(level.depth.max(1))
+            * u64::from(bytes_per_block);
         if dst_offset
             .checked_add(size)
             .is_none_or(|end| end > dst.len())
         {
             return Err(MetalError::Invalid("the deswizzle buffer is too small"));
         }
-        let base = guest.gpu_address_of_offset(guest_offset, params.storage_bytes())?;
         let job = KernelParams {
             base,
             level,
-            order: params.order,
-            bytes_per_block: params.bytes_per_block,
+            order,
+            bytes_per_block,
             origin: [0; 3],
-            extent: [params.width, params.height, 1],
+            extent: [level.width, level.height, level.depth.max(1)],
         };
         let args = scratch.push(&job.to_bytes())?;
         let pipeline = self
