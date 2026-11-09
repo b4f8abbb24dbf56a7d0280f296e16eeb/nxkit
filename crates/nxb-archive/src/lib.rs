@@ -16,6 +16,8 @@
 pub mod cli;
 pub mod compute;
 pub mod cut;
+#[cfg(test)]
+mod key_tests;
 pub mod plan;
 pub mod script;
 pub mod stream;

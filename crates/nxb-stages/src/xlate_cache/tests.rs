@@ -297,3 +297,61 @@ fn a_passthrough_geometry_job_keeps_its_lean_kernels() {
     assert_eq!(again, t);
     assert_eq!(x.hits.load(Ordering::Relaxed), 1);
 }
+
+/// An Ampere compute job whose code holds `HMMA.16816.F16` after the header, or no instruction.
+fn ampere_job(hmma: bool) -> Job {
+    let mut code = vec![0u8; 0x90];
+    if hmma {
+        code.extend_from_slice(&0x0000_0004_242e_723c_u64.to_le_bytes());
+        code.extend_from_slice(&0x041f_f000_0000_08ff_u64.to_le_bytes());
+    }
+    let mut j = job(&code);
+    j.json.set("arch", Value::str("sm86"));
+    j.json.set("stage", Value::str("cs"));
+    j
+}
+
+static HMMA_2: [Feature; 1] = [Feature {
+    name: "hmma",
+    revision: 2,
+    uses: revision::FEATURES[0].uses,
+}];
+
+#[test]
+fn a_feature_bump_translates_only_the_shaders_that_use_it() {
+    let d = dir();
+    let runs = Arc::new(AtomicU32::new(0));
+    let a = Xlate::with(Store::open(&d).unwrap(), "t1".into(), counting(&runs));
+    a.translate(&ampere_job(true), &ctx(&[])).unwrap();
+    a.translate(&ampere_job(false), &ctx(&[])).unwrap();
+    assert_eq!(runs.load(Ordering::Relaxed), 2);
+    let b =
+        Xlate::with(Store::open(&d).unwrap(), "t1".into(), counting(&runs)).with_features(&HMMA_2);
+    b.translate(&ampere_job(true), &ctx(&[])).unwrap();
+    b.translate(&ampere_job(false), &ctx(&[])).unwrap();
+    assert_eq!(
+        runs.load(Ordering::Relaxed),
+        3,
+        "only the HMMA shader again"
+    );
+    assert_eq!(b.hits.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn a_shader_without_features_keeps_the_key_it_had_before_features() {
+    let d = dir();
+    let runs = Arc::new(AtomicU32::new(0));
+    let none =
+        Xlate::with(Store::open(&d).unwrap(), "t1".into(), counting(&runs)).with_features(&[]);
+    none.translate(&ampere_job(false), &ctx(&[])).unwrap();
+    none.translate(&ampere_job(true), &ctx(&[])).unwrap();
+    let x = Xlate::with(Store::open(&d).unwrap(), "t1".into(), counting(&runs));
+    x.translate(&ampere_job(false), &ctx(&[])).unwrap();
+    x.translate(&ampere_job(true), &ctx(&[])).unwrap();
+    assert_eq!(
+        runs.load(Ordering::Relaxed),
+        3,
+        "a new feature translates its users once"
+    );
+    assert_eq!(x.hits.load(Ordering::Relaxed), 1);
+}
