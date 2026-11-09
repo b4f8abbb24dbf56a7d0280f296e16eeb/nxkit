@@ -14,9 +14,9 @@ mod apple {
     use std::sync::Arc;
 
     use crate::av1::{Sequence, find_sequence, nv12_colorspace};
-    use crate::decoder::{Backend, Decoded};
+    use crate::decoder::Backend;
     use crate::frame::Frame;
-    use crate::sys::dav1d::{Dav1d, Picture};
+    use crate::sys::dav1d::Dav1d;
     use crate::sys::vt::{self, Session};
     use crate::vp9::KeyFrame;
 
@@ -39,20 +39,16 @@ mod apple {
     }
 
     impl Backend for VideoToolbox {
-        fn decode(&mut self, packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String> {
+        fn decode(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
             let picture = self.session.decode(packet)?;
-            Ok(picture
-                .map(|b| Decoded {
-                    frame: Arc::new(Frame::from_buffer(
-                        self.width,
-                        self.height,
-                        self.colorspace,
-                        b,
-                    )),
-                    ts,
-                })
-                .into_iter()
-                .collect())
+            Ok(picture.map(|b| {
+                Arc::new(Frame::from_buffer(
+                    self.width,
+                    self.height,
+                    self.colorspace,
+                    b,
+                ))
+            }))
         }
     }
 
@@ -62,9 +58,7 @@ mod apple {
     }
 
     /// The AV1 decoder of one stream. A temporal unit goes in whole, its OBUs in the low-overhead format that WebM and
-    /// the demuxer of the SDK keep them in. A unit shows at most one picture. VideoToolbox gives it at once; rav1d decodes
-    /// several units at the same time (frame threads) and gives the picture of a unit with a later one, in display order
-    /// and with the timestamp of its own unit.
+    /// the demuxer of the SDK keep them in. A unit shows at most one picture, in order, so no queue is needed.
     ///
     /// The hardware decoder of VideoToolbox is used when the Mac has one and the stream is 8-bit 4:2:0. Anything else
     /// goes to rav1d, from the unit that VideoToolbox refused on.
@@ -136,92 +130,56 @@ mod apple {
             self.seq = Some(seq);
         }
 
-        fn decode_software(&mut self, packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String> {
+        fn decode_software(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
             if self.software.is_none() {
                 self.software = Some(Dav1d::open()?);
             }
             let Some(dav1d) = self.software.as_mut() else {
-                return Ok(Vec::new());
+                return Ok(None);
             };
-            dav1d.decode(packet, ts)?.into_iter().map(convert).collect()
-        }
-    }
-
-    /// A picture of rav1d as a frame in NV12.
-    fn convert(pic: Picture) -> Result<Decoded, String> {
-        let (matrix, full_range) = pic.matrix_and_range();
-        let nv12 = pic.with_planar(|p| (p.width, p.height, p.to_nv12()));
-        let Some((w, h, nv12)) = nv12 else {
-            return Err("rav1d gave a picture in a layout that has no NV12 form".to_string());
-        };
-        let (w, h) = (w as u32, h as u32);
-        Ok(Decoded {
-            frame: Arc::new(Frame::from_nv12(
+            let Some(pic) = dav1d.decode(packet)? else {
+                return Ok(None);
+            };
+            let (matrix, full_range) = pic.matrix_and_range();
+            let nv12 = pic.with_planar(|p| (p.width, p.height, p.to_nv12()));
+            let Some((w, h, nv12)) = nv12 else {
+                return Err("rav1d gave a picture in a layout that has no NV12 form".to_string());
+            };
+            let (w, h) = (w as u32, h as u32);
+            Ok(Some(Arc::new(Frame::from_nv12(
                 w,
                 h,
                 nv12_colorspace(matrix, full_range, h),
                 nv12,
-            )),
-            ts: pic.timestamp(),
-        })
+            ))))
+        }
     }
 
     impl Backend for Av1 {
-        fn decode(&mut self, packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String> {
+        fn decode(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
             if let Some(seq) = find_sequence(packet).filter(|s| self.seq.as_ref() != Some(s)) {
-                // A changed sequence header: the pictures of the old stream come out first.
-                let rest = match self.software.as_mut() {
-                    Some(d) if self.seq.is_some() => d.drain()?.into_iter().map(convert).collect(),
-                    _ => Ok(Vec::new()),
-                };
                 self.start(seq);
-                let mut out: Vec<Decoded> = rest?;
-                out.extend(self.decode_unit(packet, ts)?);
-                return Ok(out);
             }
-            self.decode_unit(packet, ts)
-        }
-
-        fn drain(&mut self) -> Result<Vec<Decoded>, String> {
-            match self.software.as_mut() {
-                Some(d) => d.drain()?.into_iter().map(convert).collect(),
-                None => Ok(Vec::new()),
-            }
-        }
-
-        fn flush(&mut self) {
-            if let Some(d) = self.software.as_mut() {
-                d.flush();
-            }
-            self.hardware = None;
-            self.seq = None;
-        }
-
-        fn in_flight(&self) -> usize {
-            self.software.as_ref().map_or(0, Dav1d::in_flight)
-        }
-    }
-
-    impl Av1 {
-        fn decode_unit(&mut self, packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String> {
             if self.soft {
                 // A stream cannot start in the middle: until the first sequence header, rav1d is not asked.
                 if self.seq.is_none() {
-                    return Ok(Vec::new());
+                    return Ok(None);
                 }
-                return self.decode_software(packet, ts);
+                return self.decode_software(packet);
             }
             let (Some(session), Some(seq)) = (self.hardware.as_mut(), self.seq.as_ref()) else {
-                return Ok(Vec::new());
+                return Ok(None);
             };
             let Some(buffer) = session.decode(packet)? else {
-                return Ok(Vec::new());
+                return Ok(None);
             };
             let (w, h) = buffer.size();
-            Ok(vec![Decoded {
-                frame: Arc::new(Frame::from_buffer(w, h, seq.nv12_colorspace(h), buffer)),
-                ts,
-            }])
+            Ok(Some(Arc::new(Frame::from_buffer(
+                w,
+                h,
+                seq.nv12_colorspace(h),
+                buffer,
+            ))))
         }
     }
 }
@@ -253,7 +211,7 @@ pub(crate) fn open_av1() -> Result<Box<dyn Backend>, String> {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::apple::Av1;
-    use crate::decoder::{Backend, Decoded};
+    use crate::decoder::Backend;
     use crate::frame::Frame;
 
     /// Two AV1 streams of four frames at 64x48 that show one flat colour, written with `aomenc` from a synthetic picture
@@ -312,27 +270,6 @@ mod tests {
         Av1::software()
     }
 
-    /// The timestamp of unit `i` in these tests.
-    fn ts(i: usize) -> i64 {
-        1_000 + 16_667 * i as i64
-    }
-
-    /// Sends the units, each with its timestamp, and gives the pictures that came out while sending, then the ones that
-    /// the end of the stream gave.
-    fn feed(d: &mut Av1, units: &[&[u8]]) -> (Vec<Decoded>, Vec<Decoded>) {
-        let mut during = Vec::new();
-        for (i, unit) in units.iter().enumerate() {
-            during.extend(
-                d.decode(unit, ts(i))
-                    .unwrap_or_else(|e| unreachable!("decode failed: {e}")),
-            );
-        }
-        let after = d
-            .drain()
-            .unwrap_or_else(|e| unreachable!("drain failed: {e}"));
-        (during, after)
-    }
-
     /// The Y, Cb and Cr of the first pixel.
     fn first_pixel(f: &Frame) -> (u8, u8, u8) {
         let n = f.to_nv12().unwrap_or_else(|_| unreachable!());
@@ -341,10 +278,6 @@ mod tests {
 
     fn near(a: u8, b: u8) -> bool {
         a.abs_diff(b) <= 3
-    }
-
-    fn frame_threads() -> bool {
-        std::thread::available_parallelism().is_ok_and(|n| n.get() > 1)
     }
 
     #[test]
@@ -356,14 +289,19 @@ mod tests {
     #[test]
     fn rav1d_decodes_a_flat_8_bit_stream() {
         let mut d = software();
-        let (during, after) = feed(&mut d, &units(&FLAT_8_BIT));
-        assert_eq!(during.len() + after.len(), 4);
-        for p in during.iter().chain(&after) {
-            let f = &p.frame;
+        let mut shown = 0;
+        for unit in units(&FLAT_8_BIT) {
+            let Some(f) = d
+                .decode(unit)
+                .unwrap_or_else(|e| panic!("decode failed: {e}"))
+            else {
+                continue;
+            };
+            shown += 1;
             assert_eq!((f.width(), f.height()), (64, 48));
             // BT.709 limited range.
             assert_eq!(f.colorspace(), 3);
-            let (y, u, v) = first_pixel(f);
+            let (y, u, v) = first_pixel(&f);
             assert!(
                 near(y, 100) && near(u, 150) && near(v, 90),
                 "pixel {y} {u} {v}"
@@ -372,75 +310,28 @@ mod tests {
             let n = f.to_nv12().unwrap_or_else(|_| unreachable!());
             assert!(near(n.y[64 * 48 - 1], 100));
         }
+        assert_eq!(shown, 4);
     }
 
     #[test]
     fn rav1d_gives_a_10_bit_stream_as_8_bit_nv12() {
         let mut d = software();
-        let (during, after) = feed(&mut d, &units(&FLAT_10_BIT));
-        assert_eq!(during.len() + after.len(), 4);
-        for p in during.iter().chain(&after) {
-            let (y, u, v) = first_pixel(&p.frame);
+        let mut shown = 0;
+        for unit in units(&FLAT_10_BIT) {
+            let Some(f) = d
+                .decode(unit)
+                .unwrap_or_else(|e| panic!("decode failed: {e}"))
+            else {
+                continue;
+            };
+            shown += 1;
+            let (y, u, v) = first_pixel(&f);
             assert!(
                 near(y, 100) && near(u, 150) && near(v, 90),
                 "pixel {y} {u} {v}"
             );
         }
-    }
-
-    #[test]
-    fn pictures_come_in_order_with_their_own_timestamps_and_later_than_their_packets() {
-        let mut d = software();
-        let (during, after) = feed(&mut d, &units(&FLAT_8_BIT));
-        let all: Vec<i64> = during.iter().chain(&after).map(|p| p.ts).collect();
-        assert_eq!(all, (0..4).map(ts).collect::<Vec<_>>());
-        if frame_threads() {
-            // The picture of a unit comes out with a later unit, so some are still inside when the data ends.
-            assert!(during.len() < 4, "{} pictures before the end", during.len());
-            assert!(!after.is_empty());
-            // The first picture to come out is not the one of the unit that was just sent.
-            if let Some(first) = during.first() {
-                assert_eq!(first.ts, ts(0));
-            }
-        }
-    }
-
-    #[test]
-    fn the_end_of_the_stream_gives_the_rest_and_then_nothing() {
-        let mut d = software();
-        let all = units(&FLAT_8_BIT);
-        let mut got = 0;
-        for (i, unit) in all.iter().enumerate() {
-            got += d.decode(unit, ts(i)).map_or(0, |v| v.len());
-            assert!(d.in_flight() <= 8);
-        }
-        let rest = d.drain().unwrap_or_else(|_| unreachable!());
-        assert_eq!(got + rest.len(), 4);
-        assert_eq!(d.in_flight(), 0);
-        assert!(d.drain().is_ok_and(|v| v.is_empty()));
-    }
-
-    #[test]
-    fn a_flush_drops_the_pictures_inside() {
-        let mut d = software();
-        let all = units(&FLAT_8_BIT);
-        let mut got = 0;
-        for (i, unit) in all.iter().enumerate() {
-            got += d.decode(unit, ts(i)).map_or(0, |v| v.len());
-        }
-        d.flush();
-        assert_eq!(d.in_flight(), 0);
-        assert!(d.drain().is_ok_and(|v| v.is_empty()));
-        if frame_threads() {
-            assert!(got < 4);
-        }
-        // The stream starts over with a key frame.
-        let (during, after) = feed(&mut d, &all);
-        assert_eq!(during.len() + after.len(), 4);
-        assert_eq!(
-            during.iter().chain(&after).next().map(|p| p.ts),
-            Some(ts(0))
-        );
+        assert_eq!(shown, 4);
     }
 
     #[test]
@@ -448,11 +339,9 @@ mod tests {
         let mut d = software();
         let first = units(&FLAT_8_BIT);
         let second = units(&FLAT_10_BIT);
-        let mut n = d.decode(first[0], 0).map_or(0, |v| v.len());
-        n += d.decode(second[0], 1).map_or(0, |v| v.len());
-        n += d.decode(second[1], 2).map_or(0, |v| v.len());
-        n += d.drain().map_or(0, |v| v.len());
-        assert_eq!(n, 3);
+        assert!(d.decode(first[0]).is_ok_and(|f| f.is_some()));
+        assert!(d.decode(second[0]).is_ok_and(|f| f.is_some()));
+        assert!(d.decode(second[1]).is_ok_and(|f| f.is_some()));
     }
 
     #[test]
@@ -460,15 +349,15 @@ mod tests {
         let mut d = software();
         let all = units(&FLAT_8_BIT);
         // The second unit is an inter frame without a sequence header.
-        assert!(d.decode(all[1], 0).is_ok_and(|v| v.is_empty()));
-        assert!(d.decode(&[], 0).is_ok_and(|v| v.is_empty()));
+        assert!(matches!(d.decode(all[1]), Ok(None)));
+        assert!(matches!(d.decode(&[]), Ok(None)));
     }
 
     #[test]
     fn a_corrupt_unit_is_an_error_or_nothing_and_the_stream_goes_on() {
         let mut d = software();
         let all = units(&FLAT_8_BIT);
-        assert!(d.decode(all[0], 0).is_ok());
+        assert!(d.decode(all[0]).is_ok_and(|f| f.is_some()));
         // Garbage with a plausible OBU header, a truncated unit and a unit with flipped bytes.
         let mut cut = all[1].to_vec();
         cut.truncate(cut.len() / 2);
@@ -482,11 +371,9 @@ mod tests {
             &cut[..],
             &flipped[..],
         ] {
-            let _ = d.decode(bad, 1);
+            let _ = d.decode(bad);
         }
         // A key frame still decodes after them.
-        d.flush();
-        let (during, after) = feed(&mut d, &all[..1]);
-        assert_eq!(during.len() + after.len(), 1);
+        assert!(d.decode(all[0]).is_ok_and(|f| f.is_some()));
     }
 }

@@ -49,31 +49,10 @@ const DEFAULT_HEIGHT: u32 = 1080;
 /// `nv12-colorspace` before a stream says otherwise: BT.709 limited range.
 const DEFAULT_COLORSPACE: u32 = 3;
 
-/// A decoded picture with the timestamp of the packet that it belongs to.
-pub(crate) struct Decoded {
-    pub(crate) frame: Arc<Frame>,
-    pub(crate) ts: i64,
-}
-
-/// A video decoder of one stream type. It turns packets into pictures. A decoder with frame threads gives the picture of
-/// a packet some packets later, so the pictures carry their own timestamps.
+/// A video decoder of one stream type. It turns a packet into a picture.
 pub(crate) trait Backend: Send {
-    /// Takes one packet with timestamp `ts` and returns the pictures that are ready now, in display order. Empty when
-    /// none is ready. It does not wait for a picture that is still being decoded.
-    fn decode(&mut self, packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String>;
-
-    /// The end of the stream: every picture still inside the decoder, in display order.
-    fn drain(&mut self) -> Result<Vec<Decoded>, String> {
-        Ok(Vec::new())
-    }
-
-    /// Stop, Flush and seek: the pictures inside the decoder are dropped.
-    fn flush(&mut self) {}
-
-    /// The packets taken whose pictures are not out yet. The host counts them with the pictures it holds.
-    fn in_flight(&self) -> usize {
-        0
-    }
+    /// Decodes one packet. `Ok(None)` when it shows no picture.
+    fn decode(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String>;
 }
 
 /// Opens a decoder for a stream that starts with this key frame.
@@ -598,10 +577,9 @@ pub(crate) fn decode_packet(
     backend: &mut Option<(Box<dyn Backend>, u32, u32)>,
     open: Opener,
     data: &[u8],
-    ts: i64,
-) -> Result<Vec<Decoded>, String> {
+) -> Result<Option<Arc<Frame>>, String> {
     if data.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     if let Some(k) = parse_key_frame(data) {
         let same = matches!(backend, Some((_, w, h)) if *w == k.width && *h == k.height);
@@ -611,9 +589,9 @@ pub(crate) fn decode_packet(
         }
     }
     match backend {
-        Some((b, _, _)) => b.decode(data, ts),
+        Some((b, _, _)) => b.decode(data),
         // A stream cannot start in the middle: packets before the first key frame show nothing.
-        None => Ok(Vec::new()),
+        None => Ok(None),
     }
 }
 
@@ -622,17 +600,16 @@ pub(crate) fn decode_av1(
     backend: &mut Option<(Box<dyn Backend>, u32, u32)>,
     open: fn() -> Result<Box<dyn Backend>, String>,
     data: &[u8],
-    ts: i64,
-) -> Result<Vec<Decoded>, String> {
+) -> Result<Option<Arc<Frame>>, String> {
     if data.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     if backend.is_none() {
         *backend = Some((open()?, 0, 0));
     }
     match backend {
-        Some((b, _, _)) => b.decode(data, ts),
-        None => Ok(Vec::new()),
+        Some((b, _, _)) => b.decode(data),
+        None => Ok(None),
     }
 }
 
@@ -661,7 +638,7 @@ fn worker(sh: &Arc<Shared>) {
             backend = None;
             seen_close = close;
         }
-        let result = decode_packet(&mut backend, sh.open, &packet.data, packet.pts);
+        let result = decode_packet(&mut backend, sh.open, &packet.data);
 
         st = lock(&sh.state);
         if st.shutdown {
@@ -673,8 +650,7 @@ fn worker(sh: &Arc<Shared>) {
         }
         st.inputs[packet.index] = InSlot::Free;
         let pic = match result {
-            // One output slot for each packet: the first picture of the packet.
-            Ok(p) => p.into_iter().next().map(|d| d.frame),
+            Ok(p) => p,
             Err(e) => {
                 if st.logged & 2 == 0 {
                     st.logged |= 2;
@@ -754,17 +730,14 @@ mod tests {
     struct MockBackend;
 
     impl Backend for MockBackend {
-        fn decode(&mut self, _packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String> {
+        fn decode(&mut self, _packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
             let planes = Nv12 {
                 y: vec![0; 16 * 16],
                 y_stride: 16,
                 uv: vec![128; 16 * 8],
                 uv_stride: 16,
             };
-            Ok(vec![Decoded {
-                frame: Arc::new(Frame::from_nv12(16, 16, 3, planes)),
-                ts,
-            }])
+            Ok(Some(Arc::new(Frame::from_nv12(16, 16, 3, planes))))
         }
     }
 
