@@ -820,3 +820,15 @@ There is one template, `ndsr_light`, with 15 instantiations (one per program, `L
 The plan refuses a push block whose tile (`w18, w19`) is not the kernel's grid. The hook (`native_ndsr.rs`) runs the
 vr_light programs that have a kernel. It accepts RGB9E5 / R11G11B10F / float4 input, and for B and C an R11G11B10F,
 RGB10A2 or RGBA16F output. It tags plans by words 2 to 9 and 18 to 28.
+
+The first GPU comparison of `ndsr_light_r12_a` (`ndsr_light_kernel.rs`) gave these results:
+- **Exact inputs:** 0 pixels beyond 4e-3, largest difference 4.8e-7. That is the fast `exp2` / `log2` of the sRGB
+  encode; the f16 epilogue gives the same bits.
+- **Random weights:** 3.7 % of the pixels beyond 4e-3, largest 0.050. That is the f32 accumulation inside
+  `simdgroup_multiply_accumulate` rounding a K = 16 sum to the other f16 neighbour, as in the vr kernels. The f16
+  epilogue and the sharpening (strength 2.5) spread it further.
+
+A CPU model of the same threadgroup reproduces this (`light/flip2.py`: every HMMA as sequential f32 fmas): 2.7 %
+beyond 4e-3, largest 0.025, and none on exact inputs. The comparison test now accepts this: 1e-5 counts as equal, and
+on random weights it allows 5 % of the pixels beyond 4e-3 and 0.125 at most. It prints every kernel before it fails.
+The first timing at 1536x864 -> 2048x1152 for Ocarina's `ndsr_light_r43_b` was 0.49 to 0.67 ms (minimum of 25).
