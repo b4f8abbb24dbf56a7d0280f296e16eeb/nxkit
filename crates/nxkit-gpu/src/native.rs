@@ -46,7 +46,7 @@ use nxkit_metal::{
     ArgumentTable, CommandBuffer, ComputeCommand, ComputePipeline, Context, DataBuffer, Dependency,
     GuestMemory, Scratch, Storage, Texture, TextureDesc,
 };
-use nxkit_ndve::plan::{Binding, GameResource, Plan, Source, Step};
+use nxkit_native_plan::{Binding, GameResource, Plan, Source, Step};
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::resource::TexId;
 

@@ -24,7 +24,7 @@
 //! 12 layers still own their packed weights (buffers 0 to 11); the fused steps bind two of them.
 
 use crate::pack::pack_layer;
-use crate::plan::{Binding, Buffer, GameResource, Plan, Source, Step};
+use crate::plan::{self, Binding, Buffer, GameResource, Plan, Source, Step};
 
 /// The weight blob of the network: layers 1 to 12 with their biases (`docs/plans/ndve-native.md` section 2).
 const BLOB_BYTES: usize = 0x3c320;
@@ -401,18 +401,18 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
                 buffers.push(buf(1, routes[n + 1].1, true));
                 buffers.push(buf(2, n, false));
                 buffers.push(buf(5, n + 1, false));
-                buffers.push(game(4, GameResource::ConversionPush, false));
-                textures.push(game(0, GameResource::LumaPlane, false));
-                textures.push(game(1, GameResource::ChromaPlane, false));
+                buffers.push(game(4, plan::CONVERSION_PUSH, false));
+                textures.push(game(0, plan::LUMA_PLANE, false));
+                textures.push(game(1, plan::CHROMA_PLANE, false));
             }
             Kind::Last => {
                 // fused with layer 11: the step reads that layer's input and has both weights
                 buffers.push(buf(0, routes[n - 1].0, false));
                 buffers.push(buf(2, n - 1, false));
                 buffers.push(buf(5, n, false));
-                buffers.push(game(4, GameResource::ConversionPush, false));
-                textures.push(game(0, GameResource::LumaPlane, false));
-                textures.push(game(1, GameResource::ChromaPlane, false));
+                buffers.push(game(4, plan::CONVERSION_PUSH, false));
+                textures.push(game(0, plan::LUMA_PLANE, false));
+                textures.push(game(1, plan::CHROMA_PLANE, false));
                 textures.push(game(2, GameResource::Intermediate { index: 1 }, true));
             }
             Kind::Conv3 | Kind::Down | Kind::Up => {
@@ -453,12 +453,12 @@ pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
         buffers: vec![
             buf(0, B_LUMA, false),
             buf(1, B_RS_W, false),
-            game(2, GameResource::ResamplerPush, false),
+            game(2, plan::RESAMPLER_PUSH, false),
         ],
         textures: vec![
             game(0, GameResource::Intermediate { index: 1 }, false),
-            game(1, GameResource::Dither, false),
-            game(2, GameResource::Output, true),
+            game(1, plan::DITHER, false),
+            game(2, plan::OUTPUT, true),
         ],
     });
     Ok(Plan { buffers, steps })
