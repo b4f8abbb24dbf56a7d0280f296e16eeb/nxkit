@@ -15,7 +15,7 @@ use crate::compute_icb::check_range_buffer;
 use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
-use crate::table::ArgumentTable;
+use crate::table::{ArgumentTable, check_real};
 use crate::texture::Texture;
 
 impl CommandBuffer {
@@ -455,6 +455,7 @@ impl RenderPass<'_> {
                         "the index range is longer than the index buffer",
                     ));
                 }
+                check_real(*index_addr)?;
                 // SAFETY: a pipeline is bound (`need_pipeline`) and the index range is inside the length given
                 // to Metal (checked above).
                 unsafe {
@@ -476,6 +477,7 @@ impl RenderPass<'_> {
             } => {
                 self.need_pipeline()?;
                 check_indirect(*indirect_addr)?;
+                check_real(*indirect_addr)?;
                 // The GPU reads the arguments when the draw runs. A wrong address makes the GPU fault, which is not a
                 // memory safety matter for the host; the alignment is checked above.
                 self.enc
@@ -490,6 +492,8 @@ impl RenderPass<'_> {
             } => {
                 self.need_pipeline()?;
                 check_indirect(*indirect_addr)?;
+                check_real(*indirect_addr)?;
+                check_real(*index_addr)?;
                 if !index_addr.is_multiple_of(index_type.bytes()) {
                     return Err(MetalError::Invalid(
                         "the index buffer is not aligned to its index width",
@@ -533,6 +537,7 @@ impl RenderPass<'_> {
             } => {
                 self.need_pipeline()?;
                 check_indirect(*indirect_addr)?;
+                check_real(*indirect_addr)?;
                 self.enc.drawMeshThreadgroupsWithIndirectBuffer_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
                     *indirect_addr,
                     threads(*object_threads),

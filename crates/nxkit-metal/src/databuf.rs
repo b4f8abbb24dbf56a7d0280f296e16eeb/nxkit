@@ -8,6 +8,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLBuffer, MTLDevice, MTLResource, MTLResourceOptions};
 
+use crate::address::check_outside_window;
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 
@@ -49,6 +50,7 @@ impl DataBuffer {
             // SAFETY: `contents` points to `len` bytes of shared memory that nobody else uses yet.
             unsafe { std::ptr::write_bytes(raw.contents().cast::<u8>(), 0, len as usize) };
         }
+        check_outside_window("data buffer", raw.gpuAddress(), raw.length() as u64)?;
         ctx.add_allocation(ProtocolObject::from_ref(&*raw));
         let tracked = crate::memstats::Tracked::new(
             crate::memstats::Kind::Buffer,

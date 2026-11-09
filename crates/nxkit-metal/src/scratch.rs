@@ -10,6 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLBuffer, MTLDevice, MTLResource, MTLResourceOptions};
 
+use crate::address::check_outside_window;
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 
@@ -95,6 +96,7 @@ impl Scratch {
             .device()
             .newBufferWithLength_options(size as usize, MTLResourceOptions::StorageModeShared)
             .ok_or_else(|| create("scratch buffer", "newBufferWithLength returned nil"))?;
+        check_outside_window("scratch buffer", buffer.gpuAddress(), size)?;
         ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
         Ok(Self {
             ctx: ctx.clone(),
@@ -189,6 +191,7 @@ impl Scratch {
                         MTLResourceOptions::StorageModeShared,
                     )
                     .ok_or_else(|| create("scratch buffer", "newBufferWithLength returned nil"))?;
+                check_outside_window("scratch buffer", buffer.gpuAddress(), size)?;
                 self.ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
                 st.tracked.push(track(&buffer));
                 st.buffers.push(buffer);

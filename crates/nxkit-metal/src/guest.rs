@@ -10,7 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
 
-use crate::address::AddressMap;
+use crate::address::{AddressMap, check_outside_window};
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 
@@ -28,11 +28,20 @@ impl Drop for OwnedRegion {
 }
 
 /// The guest memory of the host as seen by the GPU.
+///
+/// A buffer joins the residency set when it is made, but the GPU may use it only after the next
+/// [`Context::commit_residency`]. [`GuestMemory::allocate`] and [`GuestMemory::from_raw`] commit when they make a
+/// buffer and when they drop one. A buffer from [`GuestMemory::from_raw_uncommitted`] commits neither: whoever makes
+/// or drops such buffers must call `commit_residency` once per batch, before the GPU work that uses a new buffer is
+/// submitted, and after a drop to let the set release the pages.
 pub struct GuestMemory {
     buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
     map: AddressMap,
     base: NonNull<u8>,
     ctx: Context,
+    /// True when the buffer commits the residency set on drop. Buffers made by `from_raw_uncommitted` leave that to
+    /// the caller.
+    commits: bool,
     _tracked: crate::memstats::Tracked,
     // Last field: it drops after `buffer`, so Metal never sees a dangling range.
     #[allow(dead_code)] // owns the memory behind the buffer
@@ -61,7 +70,7 @@ impl GuestMemory {
         let base = NonNull::new(raw).ok_or_else(|| create("guest memory", "out of memory"))?;
         let owned = OwnedRegion(base, layout);
         // SAFETY: `base` is valid for `len` bytes until `owned` drops, which happens after the buffer is released.
-        unsafe { Self::wrap(ctx, base, len, Some(owned)) }
+        unsafe { Self::wrap(ctx, base, len, Some(owned), true) }
     }
 
     /// Wraps memory that the caller owns, for example the mapping of the guest address space.
@@ -72,17 +81,34 @@ impl GuestMemory {
     /// The memory must not be unmapped or moved. `base` and `len` must be multiples of [`PAGE_SIZE`].
     pub unsafe fn from_raw(ctx: &Context, base: NonNull<u8>, len: u64) -> Result<Self> {
         // SAFETY: the contract of this function is the contract of `wrap`.
-        unsafe { Self::wrap(ctx, base, len, None) }
+        unsafe { Self::wrap(ctx, base, len, None, true) }
+    }
+
+    /// Like [`GuestMemory::from_raw`], but the residency set is not committed, neither here nor when the value drops.
+    /// The buffer is in the set, and the GPU may use it only after the caller's next [`Context::commit_residency`].
+    /// Many buffers made together need one commit. After the last drop of a batch, commit too, so the pages leave the
+    /// set.
+    ///
+    /// # Safety
+    ///
+    /// The same as for [`GuestMemory::from_raw`]: `base` must be valid for reads and writes of `len` bytes for as long
+    /// as the returned value lives, the memory must not be unmapped or moved, and `base` and `len` must be multiples
+    /// of [`PAGE_SIZE`].
+    pub unsafe fn from_raw_uncommitted(ctx: &Context, base: NonNull<u8>, len: u64) -> Result<Self> {
+        // SAFETY: the contract of this function is the contract of `wrap`.
+        unsafe { Self::wrap(ctx, base, len, None, false) }
     }
 
     /// # Safety
     ///
-    /// `base` is valid for `len` bytes for the life of the result.
+    /// `base` is valid for `len` bytes for the life of the result. `commit` says whether this call and the drop of the
+    /// result commit the residency set.
     unsafe fn wrap(
         ctx: &Context,
         base: NonNull<u8>,
         len: u64,
         owned: Option<OwnedRegion>,
+        commit: bool,
     ) -> Result<Self> {
         let addr = base.as_ptr() as u64;
         for v in [addr, len] {
@@ -112,14 +138,18 @@ impl GuestMemory {
                 )
         }
         .ok_or_else(|| create("guest buffer", "newBufferWithBytesNoCopy returned nil"))?;
+        check_outside_window("guest buffer", buffer.gpuAddress(), len)?;
         let map = AddressMap::new(addr, buffer.gpuAddress(), len)?;
         ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
-        ctx.commit_residency();
+        if commit {
+            ctx.commit_residency();
+        }
         Ok(Self {
             buffer,
             map,
             base,
             ctx: ctx.clone(),
+            commits: commit,
             _tracked: crate::memstats::Tracked::new(crate::memstats::Kind::Guest, len),
             owned,
         })
@@ -195,6 +225,8 @@ impl Drop for GuestMemory {
     fn drop(&mut self) {
         self.ctx
             .remove_allocation(ProtocolObject::from_ref(&*self.buffer));
-        self.ctx.commit_residency();
+        if self.commits {
+            self.ctx.commit_residency();
+        }
     }
 }

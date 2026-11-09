@@ -5,6 +5,42 @@
 
 use crate::error::{MetalError, Result};
 
+/// The first address of the window that the guest GPU addresses will use.
+///
+/// The runtime gives the game virtual GPU addresses in `[GUEST_VA_BASE, GUEST_VA_MAX)`, and each memory pool keeps a
+/// no-copy buffer at a real address that Metal chose. The real addresses seen so far are near `0x15_0000_0000`, so
+/// the window lies above them. Nothing in Metal may be handed an address inside the window: see [`is_guest_va`].
+///
+/// The window lies below `1 << 40`. The game's GPU address space is 40 bits wide, and the address hint of the game
+/// memory only works for addresses below that. The window is 256 GiB long, which holds the 12.6 GiB guest range with
+/// room to spare.
+pub const GUEST_VA_BASE: u64 = 0xC0_0000_0000;
+
+/// The end of the window, exclusive. It is `1 << 40`.
+pub const GUEST_VA_MAX: u64 = 0x100_0000_0000;
+
+/// True when `addr` is inside the window `[GUEST_VA_BASE, GUEST_VA_MAX)` of virtual guest addresses.
+///
+/// Such an address is not a GPU address that Metal knows. Metal and the shaders must get real addresses only.
+pub const fn is_guest_va(addr: u64) -> bool {
+    addr >= GUEST_VA_BASE && addr < GUEST_VA_MAX
+}
+
+/// Checks that the range `[addr, addr + len)` of a new Metal allocation does not touch the window. Every allocation
+/// that hands out a `gpuAddress` calls it once, when it is made.
+pub(crate) fn check_outside_window(what: &'static str, addr: u64, len: u64) -> Result<()> {
+    let end = addr.saturating_add(len);
+    if addr < GUEST_VA_MAX && end > GUEST_VA_BASE {
+        return Err(MetalError::Create {
+            what,
+            reason: format!(
+                "Metal gave the GPU address range {addr:#x}..{end:#x}, which touches the window of the virtual guest addresses {GUEST_VA_BASE:#x}..{GUEST_VA_MAX:#x}; the window must move"
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// The map of one guest memory region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AddressMap {
@@ -129,5 +165,27 @@ mod tests {
     fn rejects_empty_and_wrapping() {
         assert!(AddressMap::new(0, 0, 0).is_err());
         assert!(AddressMap::new(u64::MAX, 0, 2).is_err());
+    }
+
+    #[test]
+    fn the_window_has_two_edges() {
+        assert!(is_guest_va(GUEST_VA_BASE));
+        assert!(is_guest_va(GUEST_VA_MAX - 1));
+        assert!(!is_guest_va(GUEST_VA_BASE - 1));
+        assert!(!is_guest_va(GUEST_VA_MAX));
+        assert!(!is_guest_va(0));
+        assert!(!is_guest_va(u64::MAX));
+        assert_eq!(GUEST_VA_MAX, 1 << 40);
+    }
+
+    #[test]
+    fn an_allocation_may_not_touch_the_window() {
+        assert!(check_outside_window("t", 0x15_0000_0000, 1 << 30).is_ok());
+        assert!(check_outside_window("t", GUEST_VA_BASE - 16, 16).is_ok());
+        assert!(check_outside_window("t", GUEST_VA_MAX, 16).is_ok());
+        assert!(check_outside_window("t", GUEST_VA_BASE - 16, 17).is_err());
+        assert!(check_outside_window("t", GUEST_VA_BASE, 1).is_err());
+        assert!(check_outside_window("t", GUEST_VA_MAX - 1, 1).is_err());
+        assert!(check_outside_window("t", 0x10_0000_0000, 1 << 40).is_err());
     }
 }

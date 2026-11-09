@@ -70,7 +70,7 @@ mod timestamp;
 mod upscale;
 mod vmregion;
 
-pub use address::AddressMap;
+pub use address::{AddressMap, GUEST_VA_BASE, GUEST_VA_MAX, is_guest_va};
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
 pub use batch::{
     BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
