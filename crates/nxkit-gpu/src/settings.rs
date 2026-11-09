@@ -64,6 +64,7 @@ impl GpuSettings {
                 shards: self.archive_shards.clone(),
                 open_shards: self.open_shards,
                 collect: self.collect_archive,
+                compile_bases: crate::pipelines::bases_on(),
             },
             gob_order: self.gob_order,
         }

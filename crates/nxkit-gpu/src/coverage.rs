@@ -32,8 +32,9 @@ pub(crate) fn record(
     desc: Option<&RenderPipelineDesc<'_>>,
     what: &str,
 ) {
+    // A specialization of an unspecialized pipeline counts as a hit: the functions were not compiled for the draw.
     let Source::Compiled(took) = source else {
-        if source == Source::Archive {
+        if matches!(source, Source::Archive(_) | Source::Specialized(_)) {
             ARCHIVE_HITS.fetch_add(1, Ordering::Relaxed);
         }
         return;
