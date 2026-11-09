@@ -13,24 +13,109 @@
 //! A built buffer is valid for a signature. The signature hashes everything that went into the slots: the draw
 //! details, the resolved texture and sampler ids and the attachment formats of the pass. Another signature builds
 //! the buffer again. `Gpu::recording_dropped` forgets a buffer when the cache dropped its summary.
+//!
+//! The guest buffers of a slot come from the pool snapshot of the frame. An entry keeps the buffer and the id of every
+//! pool it named, so the buffers live as long as the ICB. It is built again when one of those pools is gone from the
+//! snapshot of a later frame, or was registered again under another id or range.
 
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use crate::draws::{FastMap, FastSet};
 
-use nxkit_metal::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
+use nxkit_metal::{GuestMemory, IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 
 use crate::bindless::Arena;
 use crate::detail::{DrawDetail, RecordingRun};
 use crate::draws::{Geom, PassCtx, Shared, prepare};
+use crate::guestpools::GuestPools;
+use crate::pools::{Backing, Loc, PoolBuffer, PoolSnapshot};
 use crate::stats::Skip;
+
+#[cfg(test)]
+mod tests;
 
 const DRAW_ARENA_BYTES: u64 =
     2 * (crate::bindless::DRV_SIZE as u64 + 2048) + crate::pull::BYTES as u64 + 16;
 
+/// The pools that one ICB named: for each the id, the range and the buffer. The buffers stay alive with the ICB. Needs
+/// no Metal object, so the checks on it run in tests.
+pub(crate) struct PoolRefs<B: Backing> {
+    /// The generation of the snapshot in which every pool was last seen to be current.
+    generation: u64,
+    pools: Vec<Named<B>>,
+}
+
+struct Named<B: Backing> {
+    id: u64,
+    start: u64,
+    end: u64,
+    /// Held only to keep the buffer alive.
+    _buf: Arc<PoolBuffer<B>>,
+}
+
+impl<B: Backing + Clone> PoolRefs<B> {
+    /// No pools yet, taken at the generation of `snap`.
+    pub(crate) fn new(snap: &PoolSnapshot<B>) -> Self {
+        Self {
+            generation: snap.generation(),
+            pools: Vec::new(),
+        }
+    }
+
+    /// Notes the pool of `loc` (once per pool) and gives its backing, or `None` when the pool has none.
+    pub(crate) fn take(&mut self, snap: &PoolSnapshot<B>, loc: Loc) -> Option<B> {
+        let e = snap.entries().get(loc.pool as usize)?;
+        let mem = e.buf.mem()?.clone();
+        if !self.pools.iter().any(|n| n.id == e.id) {
+            self.pools.push(Named {
+                id: e.id,
+                start: e.start,
+                end: e.end,
+                _buf: Arc::clone(&e.buf),
+            });
+        }
+        Some(mem)
+    }
+
+    /// True when every pool is in `snap` under the same id at the same range. The snapshot only changes its
+    /// generation when a pool is registered or unregistered, so the same generation as at the last check means
+    /// nothing changed and no id is looked up. Otherwise each id is looked up by its start; the generation is kept
+    /// when all pools are still there, so the lookups run once per change and not once per frame.
+    pub(crate) fn current(&mut self, snap: &PoolSnapshot<B>) -> bool {
+        if self.generation == snap.generation() {
+            return true;
+        }
+        let es = snap.entries();
+        let same = self.pools.iter().all(|n| {
+            let i = es.partition_point(|e| e.start < n.start);
+            es.get(i)
+                .is_some_and(|e| e.start == n.start && e.end == n.end && e.id == n.id)
+        });
+        if same {
+            self.generation = snap.generation();
+        }
+        same
+    }
+
+    /// True when the ICB names one of the pools `ids`.
+    pub(crate) fn names_any(&self, ids: &[u64]) -> bool {
+        self.pools.iter().any(|n| ids.contains(&n.id))
+    }
+}
+
+/// Drops the entries of `map` whose pools include one of `ids`.
+fn forget<V, B: Backing + Clone>(
+    map: &mut FastMap<u64, V>,
+    ids: &[u64],
+    refs: impl Fn(&V) -> &PoolRefs<B>,
+) {
+    map.retain(|_, v| !refs(v).names_any(ids));
+}
+
 struct Entry {
     icb: IndirectCommandBuffer,
+    pools: PoolRefs<Arc<GuestMemory>>,
     signature: u64,
     slots: u32,
     skipped: Vec<Skip>,
@@ -125,6 +210,14 @@ impl Icbs {
         self.entries.clear();
     }
 
+    /// Forgets the ICBs that name one of the pools `ids`. A pool that went away also fails the check in `get`; this
+    /// frees the ICB and its buffers at once.
+    // The per-pool mode calls it when a new snapshot generation unregistered pools (package P7).
+    #[allow(dead_code)]
+    pub(crate) fn forget_pools(&mut self, ids: &[u64]) {
+        forget(&mut self.entries, ids, |e| &e.pools);
+    }
+
     /// The number of ICBs held.
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
@@ -143,13 +236,17 @@ impl Icbs {
             return None;
         }
         let sig = signature(sh, pc, draws);
-        if let Some(e) = self.entries.get(&run.handle).filter(|e| e.signature == sig) {
-            return Some(Built {
-                icb: e.icb.clone(),
-                slots: e.slots,
-                skipped: e.skipped.clone(),
-                rebuilt: false,
-            });
+        if let Some(e) = self.entries.get_mut(&run.handle) {
+            if e.signature == sig && e.pools.current(sh.pools) {
+                return Some(Built {
+                    icb: e.icb.clone(),
+                    slots: e.slots,
+                    skipped: e.skipped.clone(),
+                    rebuilt: false,
+                });
+            }
+            // Another signature, or a pool it named is gone: the old buffer is of no use.
+            self.entries.remove(&run.handle);
         }
         let e = build(sh, pc, draws, sig)?;
         let b = Built {
@@ -172,8 +269,9 @@ fn build(
     let mut arena = Arena::new(sh.ctx, DRAW_ARENA_BYTES * draws.len() as u64).ok()?;
     let mut cmds: Vec<Vec<IcbCommand>> = Vec::with_capacity(draws.len());
     let mut skipped = Vec::new();
+    let mut pools = PoolRefs::new(sh.pools);
     for d in draws {
-        match slot_commands(sh, pc, d, &mut arena) {
+        match slot_commands(sh, pc, d, &mut arena, &mut pools) {
             Ok(c) => cmds.push(c),
             Err(why) => skipped.push(why),
         }
@@ -196,9 +294,25 @@ fn build(
     }
     Some(Entry {
         icb,
+        pools,
         signature,
         slots: cmds.len() as u32,
         skipped,
+    })
+}
+
+/// The buffer of the pool that holds a guest address and the offset in it. `None` (an address outside guest memory) or
+/// a pool without a buffer is `Skip::Buffer`.
+fn icb_buffer(
+    snap: &GuestPools,
+    pools: &mut PoolRefs<Arc<GuestMemory>>,
+    loc: Option<Loc>,
+) -> Result<IcbBuffer, Skip> {
+    let loc = loc.ok_or(Skip::Buffer)?;
+    let guest = pools.take(snap, loc).ok_or(Skip::Buffer)?;
+    Ok(IcbBuffer {
+        guest,
+        offset: loc.offset,
     })
 }
 
@@ -207,14 +321,9 @@ fn slot_commands(
     pc: &PassCtx,
     d: &DrawDetail,
     arena: &mut Arena,
+    pools: &mut PoolRefs<Arc<GuestMemory>>,
 ) -> Result<Vec<IcbCommand>, Skip> {
     let p = prepare(sh, pc, d, arena, true)?;
-    let buffer = |addr: u64| -> Result<IcbBuffer, Skip> {
-        Ok(IcbBuffer {
-            guest: sh.guest.clone(),
-            offset: sh.guest_offset(addr, 1).ok_or(Skip::Buffer)?,
-        })
-    };
     let data = |addr: u64| (arena.buffer.clone(), arena.offset_of(addr));
     let mut c = vec![IcbCommand::SetPipeline(p.pipeline.clone())];
     let (b, offset) = data(p.vertex_args);
@@ -231,7 +340,7 @@ fn slot_commands(
             offset,
         });
     }
-    for (index, addr) in &p.streams {
+    for ((index, addr), loc) in p.streams.iter().zip(&p.stream_locs) {
         // The default vertex and the layout block of a pulled draw are in the arena; the streams in guest memory.
         if *index == crate::translate::DEFAULT_VERTEX_SLOT
             || p.pulled && *index == crate::pull::SLOT
@@ -245,7 +354,7 @@ fn slot_commands(
         } else {
             c.push(IcbCommand::SetVertexBuffer {
                 index: *index,
-                buffer: buffer(*addr)?,
+                buffer: icb_buffer(sh.pools, pools, *loc)?,
             });
         }
     }
@@ -271,7 +380,8 @@ fn slot_commands(
         Geom::Indexed {
             primitive,
             index_type,
-            address,
+            address: _,
+            loc,
             count,
             instances,
             base_vertex,
@@ -279,7 +389,7 @@ fn slot_commands(
         } => IcbCommand::DrawIndexed {
             primitive,
             index_type,
-            indices: buffer(address)?,
+            indices: icb_buffer(sh.pools, pools, loc)?,
             index_count: count,
             instance_count: instances,
             base_vertex,

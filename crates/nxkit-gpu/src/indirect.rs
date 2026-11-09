@@ -23,7 +23,9 @@ use nxkit_metal::{ArgumentTable, CommandBuffer, ComputeCommand, Scratch};
 
 use crate::detail::DrawArgs;
 use crate::draws::{FastMap, Shared};
+use crate::geometry::word_loc;
 use crate::mesh::{INDIRECT_SPLITS, MAX_GRID};
+use crate::pools::{Backing, PoolSnapshot};
 use crate::stats::{EncodeStats, Skip};
 
 /// The bytes from one copied record to the next. A record has at most five words and the first workgroup of a mesh
@@ -59,7 +61,7 @@ kernel void nxkit_indirect(device const job *j [[buffer(0)]], uint t [[thread_po
 }
 "#;
 
-/// One job of the kernel.
+/// One job of the kernel. `rec` and `cnt` are real addresses.
 struct Job {
     rec: u64,
     cnt: u64,
@@ -78,15 +80,15 @@ pub(crate) struct Prepass {
     pub(crate) gpu_driven: bool,
 }
 
-/// The jobs of draw `d`, or why it gets none. `None` for a draw that needs no copy.
-fn jobs_of(
-    sh: &Shared<'_>,
+/// The jobs of draw `d`, or why it gets none. `None` for a draw that needs no copy. The jobs hold real addresses: the
+/// kernel loads through them.
+fn jobs_of<B: Backing>(
+    pools: &PoolSnapshot<B>,
     args: &DrawArgs,
     task: bool,
     out: &mut Vec<Job>,
 ) -> Option<Result<(), Skip>> {
-    let ok =
-        |addr: u64, bytes: u64| addr.is_multiple_of(4) && sh.guest_offset(addr, bytes).is_some();
+    let at = |addr: u64, bytes: u64| word_loc(pools, addr, bytes).ok().map(|l| l.real);
     match *args {
         DrawArgs::MultiIndirectCount {
             index,
@@ -97,23 +99,23 @@ fn jobs_of(
         } => {
             let words = if index.is_some() { 5 } else { 4 };
             let n = max.min(MAX_MULTI);
-            if !ok(count, 4) || !stride.is_multiple_of(4) {
+            let Some(cnt) = at(count, 4).filter(|_| stride.is_multiple_of(4)) else {
                 return Some(Err(crate::buf_skip(format_args!(
                     "multi-draw count {count:#x} stride {stride}"
                 ))));
-            }
+            };
             let first = out.len();
             for i in 0..n {
                 let rec = indirect.wrapping_add(u64::from(i).wrapping_mul(stride));
-                if !ok(rec, 4 * u64::from(words)) {
+                let Some(real) = at(rec, 4 * u64::from(words)) else {
                     out.truncate(first);
                     return Some(Err(crate::buf_skip(format_args!(
                         "multi-draw record {i} at {rec:#x}"
                     ))));
-                }
+                };
                 out.push(Job {
-                    rec,
-                    cnt: count,
+                    rec: real,
+                    cnt,
                     i,
                     words,
                     base: 0,
@@ -123,11 +125,11 @@ fn jobs_of(
             Some(Ok(()))
         }
         DrawArgs::MeshTasksIndirect { indirect } => {
-            if !ok(indirect, 8) {
+            let Some(real) = at(indirect, 8) else {
                 return Some(Err(crate::buf_skip(format_args!(
                     "mesh draw arguments at {indirect:#x}"
                 ))));
-            }
+            };
             let (splits, limit) = if task {
                 (1, u32::MAX)
             } else {
@@ -135,8 +137,8 @@ fn jobs_of(
             };
             for k in 0..splits {
                 out.push(Job {
-                    rec: indirect,
-                    cnt: indirect,
+                    rec: real,
+                    cnt: real,
                     i: 0,
                     words: 0,
                     base: k * MAX_GRID,
@@ -169,7 +171,7 @@ pub(crate) fn prepass(
         // A task or mesh shader reads what the culling of the frame wrote, through its storage buffers.
         out.gpu_driven |= d.args.is_indirect() || d.args.is_mesh();
         let at = jobs.len();
-        match jobs_of(sh, &d.args, d.program.task.is_some(), &mut jobs) {
+        match jobs_of(sh.pools, &d.args, d.program.task.is_some(), &mut jobs) {
             Some(Ok(())) => firsts.push((n, at)),
             Some(Err(why)) => {
                 out.copies.insert(n, Err(why));
@@ -260,3 +262,6 @@ fn run(
     cp.end();
     Ok(outputs)
 }
+
+#[cfg(test)]
+mod tests;

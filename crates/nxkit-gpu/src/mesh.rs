@@ -39,7 +39,8 @@ const C0_ROW: usize = 0x10;
 const C0_SSBO_SLOTS: u32 = 16;
 
 /// Writes the storage buffer table of a task or mesh stage into its driver block `b`. The shaders read the address of
-/// a storage buffer from there. Other stages are left as they are.
+/// a storage buffer from there, and take offsets against it (the guest address, not the real one: the storage buffer
+/// itself reaches the shader through its argument word). Other stages are left as they are.
 pub(crate) fn storage_table(b: &mut [u8], inp: &StageInputs<'_>) {
     let base = match inp.stage {
         Stage::Task => C0_SSBO_TS,
@@ -132,7 +133,7 @@ pub(crate) fn prepare(
             }
         }
         DrawArgs::MeshTasksIndirect { indirect } => {
-            crate::draws::indirect_args(sh, indirect, 8)?;
+            crate::geometry::indirect_args(sh.pools, indirect, 8)?;
             Geom::MeshIndirect {
                 splits: if task { 1 } else { INDIRECT_SPLITS },
                 object_threads,
@@ -181,6 +182,7 @@ pub(crate) fn prepare(
         fragment_args,
         object_args,
         streams: Vec::new(),
+        stream_locs: Vec::new(),
         pulled: false,
         cull: f.cull,
         winding: f.winding,

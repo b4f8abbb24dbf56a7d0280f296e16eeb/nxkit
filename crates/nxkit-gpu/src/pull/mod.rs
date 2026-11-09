@@ -62,12 +62,16 @@ pub(crate) fn attribute_word(format: u32, offset: u32, stream: u32) -> u32 {
 
 /// The `dm_vlayout` block of a draw.
 ///
-/// Per stream: the GPU address of its buffer rounded down to 4 bytes, the stride (0: every vertex reads element 0)
+/// Per stream: the real GPU address of its buffer rounded down to 4 bytes, the stride (0: every vertex reads element 0)
 /// and the divisor (0: per vertex). The low bits of the address move into the offsets of the stream's attributes, as
 /// `dm_fetch` expects. Per input location: the attribute word, or 0 when the location has no attribute or its stream
 /// has no buffer. The base vertex and base instance are not in the block: the vertex function gets them through
 /// `[[vertex_id]]`, `[[instance_id]]` and `[[base_instance]]`, also for indirect draws.
-pub(crate) fn layout(d: &DrawDetail) -> Block {
+///
+/// `real` gives the real address of a guest GPU address, or `None` when it lies in no pool. The block holds real
+/// addresses because `dm_fetch` dereferences them. The low bits that move into the offsets are those of the real
+/// address, which the GPU sees. A stream with no real address is left out, so its attributes read the default.
+pub(crate) fn layout(d: &DrawDetail, real: impl Fn(u64) -> Option<u64>) -> Block {
     let mut b = [0u8; BYTES];
     let mut low = [None::<u32>; STREAMS];
     for s in &d.streams {
@@ -75,11 +79,14 @@ pub(crate) fn layout(d: &DrawDetail) -> Block {
         if i >= STREAMS {
             continue;
         }
+        let Some(address) = real(s.address) else {
+            continue;
+        };
         let at = i * STREAM_BYTES;
-        b[at..at + 8].copy_from_slice(&(s.address & !3).to_le_bytes());
+        b[at..at + 8].copy_from_slice(&(address & !3).to_le_bytes());
         b[at + 8..at + 12].copy_from_slice(&s.stride.to_le_bytes());
         b[at + 12..at + 16].copy_from_slice(&s.divisor.to_le_bytes());
-        low[i] = Some((s.address & 3) as u32);
+        low[i] = Some((address & 3) as u32);
     }
     for a in &d.attributes {
         let l = a.location as usize;
@@ -121,13 +128,10 @@ static STRAYS: AtomicU64 = AtomicU64::new(0);
 
 /// `NXKIT_DIAG=pull`: checks that every element a pulled draw reads lies in guest memory, for the draws whose vertex
 /// range the host knows (arrays, and indexed draws with readable indices), and prints the first reads that do not. A
-/// read outside makes the GPU fault; the command buffer then fails (`nxkit-metal: warning: frame ... failed`).
-pub(crate) fn diag_draw(
-    sh: &crate::draws::Shared<'_>,
-    d: &DrawDetail,
-    inputs: &[u32],
-    block: &Block,
-) {
+/// read outside makes the GPU fault; the command buffer then fails (`nxkit-metal: warning: frame ... failed`). The
+/// check works on guest addresses, so it builds its own block with the guest bases of the streams.
+pub(crate) fn diag_draw(sh: &crate::draws::Shared<'_>, d: &DrawDetail, inputs: &[u32]) {
+    let block = &layout(d, Some);
     let indices = |index_type: u32, address: u64, count: u32| {
         let size = 1u64 << index_type.min(2);
         let off = sh.guest_offset(address, u64::from(count) * size)?;

@@ -301,7 +301,7 @@ impl Gpu {
                 let t_up = Instant::now();
                 let r = self
                     .transfer
-                    .upload_scaled(first, &scratch, &self.guest, rec, res, wait);
+                    .upload_scaled(first, &scratch, pools, rec, res, wait);
                 stats.upload_ns += nanos(t_up, Instant::now());
                 match r {
                     Ok(()) => scaled_queued.push((*id, res.barrier_id)),
@@ -327,9 +327,7 @@ impl Gpu {
             }
             let wait = self.copyback.upload_waits(rec);
             let t_up = Instant::now();
-            let r = self
-                .transfer
-                .upload(first, &scratch, &self.guest, rec, res, wait);
+            let r = self.transfer.upload(first, &scratch, pools, rec, res, wait);
             stats.upload_ns += nanos(t_up, Instant::now());
             static UPLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             if crate::diag("upload")
@@ -506,7 +504,7 @@ impl Gpu {
                     &textures,
                     &dirty,
                     &copied_back,
-                    &mut stats,
+                    (pools.as_ref(), &mut stats),
                 );
                 PHASES.with(|p| p.borrow_mut()[1] = nanos(t_cb, Instant::now()));
                 r

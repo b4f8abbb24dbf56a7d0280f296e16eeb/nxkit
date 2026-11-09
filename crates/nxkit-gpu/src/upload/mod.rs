@@ -23,6 +23,8 @@ use nxkit_nvn::format::format_info;
 use nxkit_nvn::layout::Target;
 use nxkit_nvn::resource::TextureRecord;
 
+use crate::guestpools::GuestPools;
+use crate::pools::{Backing, PoolSnapshot};
 use crate::scaled::ScaledUploads;
 use crate::stats::Skip;
 use crate::textures::Res;
@@ -82,11 +84,27 @@ fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLay
     })
 }
 
-fn guest_offset(rec: &TextureRecord, guest: &GuestMemory) -> Result<u64, Skip> {
-    rec.address
-        .get()
-        .checked_sub(guest.address_map().gpu_base())
-        .ok_or(Skip::Buffer)
+/// The backing of the pool that holds `[address, address + len)` and the offset of the range in it. A range that lies
+/// in no pool, in a pool without a buffer or across the end of its pool is a miss: `Skip::Buffer`, never a partial use.
+pub(crate) fn locate<B: Backing>(
+    pools: &PoolSnapshot<B>,
+    address: u64,
+    len: u64,
+) -> Result<(&B, u64), Skip> {
+    let loc = pools.resolve(address, len).map_err(|_| Skip::Buffer)?;
+    let mem = pools.entries()[loc.pool as usize]
+        .buf
+        .mem()
+        .ok_or(Skip::Buffer)?;
+    Ok((mem, loc.offset))
+}
+
+/// The pool buffer that holds all bytes of the texture of `rec` and the offset of its first byte in it.
+fn guest_offset<'p, B: Backing>(
+    rec: &TextureRecord,
+    pools: &'p PoolSnapshot<B>,
+) -> Result<(&'p B, u64), Skip> {
+    locate(pools, rec.address.get(), rec.layout.size)
 }
 
 fn extent(d: &TextureDesc, level: u32) -> [u32; 3] {
@@ -124,7 +142,7 @@ impl Transfer {
         &self,
         cb: &mut CommandBuffer,
         scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
         wait: bool,
@@ -144,7 +162,7 @@ impl Transfer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .staging(rec, res)?;
-        self.upload(cb, scratch, guest, rec, &staging, wait)?;
+        self.upload(cb, scratch, pools, rec, &staging, wait)?;
         cb.retain(staging.tex.clone());
         self.scaled
             .lock()
@@ -167,16 +185,16 @@ impl Transfer {
         &self,
         cb: &mut CommandBuffer,
         scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
         wait: bool,
     ) -> Result<(), Skip> {
         let _gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
         if rec.layout.linear {
-            return self.upload_linear(cb, guest, rec, res, wait);
+            return self.upload_linear(cb, pools, rec, res, wait);
         }
-        let r = self.upload_block_linear(cb, scratch, guest, rec, res, wait);
+        let r = self.upload_block_linear(cb, scratch, pools, rec, res, wait);
         if let Err(why) = r {
             let d = res.desc;
             upload_failed(format_args!(
@@ -191,13 +209,13 @@ impl Transfer {
         &self,
         cb: &mut CommandBuffer,
         scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
         wait: bool,
     ) -> Result<(), Skip> {
         let surf = surface(rec, res, self.order)?;
-        let base = guest_offset(rec, guest)?;
+        let (guest, base) = guest_offset(rec, pools)?;
         let d = res.desc;
         let buffered = buffered::via_buffer(d.format);
         let mut pass = cb
@@ -257,7 +275,7 @@ impl Transfer {
     fn upload_linear(
         &self,
         cb: &mut CommandBuffer,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
         wait: bool,
@@ -292,7 +310,7 @@ impl Transfer {
                 d.format, d.width, d.height, rec.desc.stride
             );
         }
-        let r = self.copy_linear(cb, guest, rec, res, wait);
+        let r = self.copy_linear(cb, pools, rec, res, wait);
         if let Err(why) = r {
             upload_failed(format_args!(
                 "linear {:?} {}x{} stride {}: {why:?}",
@@ -305,13 +323,13 @@ impl Transfer {
     fn copy_linear(
         &self,
         cb: &mut CommandBuffer,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
         wait: bool,
     ) -> Result<(), Skip> {
         let d = res.desc;
-        let base = guest_offset(rec, guest)?;
+        let (guest, base) = guest_offset(rec, pools)?;
         let mut pass = cb
             .begin_compute_pass(self.deswizzler.table())
             .map_err(|_| Skip::Transfer)?;
@@ -338,7 +356,7 @@ impl Transfer {
         &self,
         cb: &mut CommandBuffer,
         scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
     ) -> Result<(), Skip> {
@@ -348,7 +366,7 @@ impl Transfer {
         }
         let _gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
         let surf = surface(rec, res, self.order)?;
-        let base = guest_offset(rec, guest)?;
+        let (guest, base) = guest_offset(rec, pools)?;
         let mut pass = cb
             .begin_compute_pass(self.swizzler.table())
             .map_err(|_| Skip::Transfer)?;
@@ -385,7 +403,7 @@ impl Transfer {
         &self,
         cb: &mut CommandBuffer,
         scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         items: &[(&TextureRecord, &Res, &Dirty)],
     ) -> Vec<Result<u64, Skip>> {
         if items.is_empty() {
@@ -401,7 +419,7 @@ impl Transfer {
         }
         let out = items
             .iter()
-            .map(|(rec, res, dirty)| self.copy_back_one(&mut pass, scratch, guest, rec, res, dirty))
+            .map(|(rec, res, dirty)| self.copy_back_one(&mut pass, scratch, pools, rec, res, dirty))
             .collect();
         pass.end();
         out
@@ -411,7 +429,7 @@ impl Transfer {
         &self,
         pass: &mut ComputePass<'_>,
         scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
+        pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
         dirty: &Dirty,
@@ -425,7 +443,7 @@ impl Transfer {
         {
             return Err(Skip::Transfer);
         }
-        let base = guest_offset(rec, guest)?;
+        let (guest, base) = guest_offset(rec, pools)?;
         let bpp = u64::from(d.format.block_bytes());
         let bytes = |level: u32| {
             let [w, h, z] = extent(&d, level);

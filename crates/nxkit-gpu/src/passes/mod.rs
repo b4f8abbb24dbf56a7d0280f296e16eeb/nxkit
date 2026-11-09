@@ -163,7 +163,7 @@ pub(crate) fn cpu_read(
         if !(rec.residency == Residency::GpuNewer || written_here) || done.contains(&id) {
             continue;
         }
-        match sh.transfer.copy_back(cb, scratch, sh.guest, rec, res) {
+        match sh.transfer.copy_back(cb, scratch, sh.pools, rec, res) {
             Ok(()) => {
                 stats.copybacks += 1;
                 stats.compute_passes += 1;

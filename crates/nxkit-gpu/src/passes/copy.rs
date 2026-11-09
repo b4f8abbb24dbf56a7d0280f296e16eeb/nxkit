@@ -219,9 +219,10 @@ fn copy_buffer(
     let images = u64::from(count.max(region.size[2]));
     let len = u64::from(bytes_per_image) * (images - 1)
         + u64::from(bytes_per_row) * image.div_ceil(row.max(1));
-    let Some(offset) = sh.guest_offset(c.buffer, len) else {
+    // The buffer of the pool that holds the whole range, and the offset in it.
+    let Ok((guest, offset)) = crate::upload::locate(sh.pools, c.buffer, len) else {
         return Err(copy_skip(format_args!(
-            "buffer address {:#x} + {len} is outside guest memory",
+            "buffer address {:#x} + {len} is not in one pool",
             c.buffer
         )));
     };
@@ -233,7 +234,7 @@ fn copy_buffer(
         let offset = offset + u64::from(bytes_per_image) * u64::from(i);
         let command = if to_texture {
             ComputeCommand::CopyGuestToTexture {
-                guest: sh.guest.clone(),
+                guest: guest.clone(),
                 offset,
                 bytes_per_row,
                 bytes_per_image,
@@ -244,7 +245,7 @@ fn copy_buffer(
             ComputeCommand::CopyTextureRegionToGuest {
                 texture: res.tex.clone(),
                 region,
-                guest: sh.guest.clone(),
+                guest: guest.clone(),
                 offset,
                 bytes_per_row,
                 bytes_per_image,

@@ -150,3 +150,143 @@ fn a_scaled_image_gets_its_entry() {
         &|_| None
     ));
 }
+
+/// A backing whose real address lies a fixed distance from the guest address, so a word and a c0 value differ.
+struct Shifted(u64);
+
+impl Backing for Shifted {
+    fn real_base(&self) -> u64 {
+        self.0
+    }
+}
+
+const GUEST: u64 = 0x1000;
+const REAL: u64 = 0x9000_0000;
+const LEN: u64 = 0x1000;
+
+/// One pool at `GUEST` of `LEN` bytes, whose buffer starts at `REAL`.
+fn shifted() -> PoolSnapshot<Shifted> {
+    PoolSnapshot::whole(GUEST, LEN, Shifted(REAL))
+}
+
+fn ubo(slot: u32, address: u64, size: u32, snapshot: Option<Arc<[u8]>>) -> UboDetail {
+    UboDetail {
+        stage: Stage::Compute,
+        slot,
+        address,
+        size,
+        snapshot,
+    }
+}
+
+fn no_put(_: &Arc<[u8]>) -> Result<u64, Skip> {
+    panic!("no snapshot expected");
+}
+
+#[test]
+fn a_uniform_word_is_real_and_c0_stays_virtual() {
+    let pools = shifted();
+    let ubos = [ubo(2, GUEST + 0x40, 0x100, None)];
+    let mut out = Vec::new();
+    ubo_words(&mut out, &pools, Stage::Compute, &ubos, 0x77, &mut no_put).unwrap();
+    assert_eq!(
+        out,
+        [UboWord {
+            slot: 2,
+            word: REAL + 0x40,
+            guest: GUEST + 0x40,
+            size: 0x100
+        }]
+    );
+    let inp = StageInputs {
+        stage: Stage::Compute,
+        ubos: &ubos,
+        sbufs: &[],
+        textures: &[],
+        images: &[],
+        base_instance: 0,
+        groups: Some([1, 1, 1]),
+        push: None,
+    };
+    let mut b = Vec::new();
+    drv_block(&mut b, &inp, &out);
+    let at = DRV_CS_UBO + 0x20;
+    assert_eq!(&b[at..at + 8], &(GUEST + 0x40).to_le_bytes());
+    assert_eq!(&b[at + 8..at + 12], &0x100u32.to_le_bytes());
+}
+
+#[test]
+fn a_snapshot_keeps_its_scratch_address_and_its_guest_address() {
+    let pools = shifted();
+    let bytes: Arc<[u8]> = Arc::from(vec![1u8, 2, 3, 4]);
+    let ubos = [ubo(0, GUEST + 8, 4, Some(bytes))];
+    let mut out = Vec::new();
+    let mut put = |b: &Arc<[u8]>| -> Result<u64, Skip> {
+        assert_eq!(&**b, &[1, 2, 3, 4]);
+        Ok(0x5555)
+    };
+    ubo_words(&mut out, &pools, Stage::Compute, &ubos, 0x77, &mut put).unwrap();
+    assert_eq!((out[0].word, out[0].guest), (0x5555, GUEST + 8));
+}
+
+#[test]
+fn a_uniform_outside_every_pool_reads_the_zero_buffer_and_is_counted() {
+    let pools = shifted();
+    let before = nxkit_nvn::diag::total(Reason::SkipBuffer);
+    let ubos = [
+        ubo(1, GUEST + LEN + 0x10, 0x40, None),
+        ubo(3, 0, 0x40, None),
+    ];
+    let mut out = Vec::new();
+    ubo_words(&mut out, &pools, Stage::Compute, &ubos, 0x77, &mut no_put).unwrap();
+    for (w, slot) in out.iter().zip([1, 3]) {
+        assert_eq!(
+            *w,
+            UboWord {
+                slot,
+                word: 0x77,
+                guest: 0,
+                size: 0
+            }
+        );
+    }
+    assert!(nxkit_nvn::diag::total(Reason::SkipBuffer) >= before + 2);
+}
+
+#[test]
+fn a_uniform_longer_than_its_pool_is_clamped() {
+    let pools = shifted();
+    let ubos = [ubo(0, GUEST + LEN - 0x30, 0x100, None)];
+    let mut out = Vec::new();
+    ubo_words(&mut out, &pools, Stage::Compute, &ubos, 0x77, &mut no_put).unwrap();
+    assert_eq!(out[0].word, REAL + LEN - 0x30);
+    assert_eq!(out[0].size, 0x30);
+}
+
+#[test]
+fn a_storage_buffer_word_is_real_or_zero() {
+    let pools = shifted();
+    let inside = ubo(0, GUEST + 0x20, 0x10, None);
+    let outside = ubo(1, GUEST + 2 * LEN, 0x10, None);
+    let word = |s: Option<&UboDetail>| sbuf_word(&pools, s, true, 0x77, &mut no_put).unwrap();
+    assert_eq!(word(Some(&inside)), REAL + 0x20);
+    assert_eq!(word(Some(&outside)), 0x77);
+    assert_eq!(word(None), 0x77);
+    // a read-only buffer with a copy takes the copy, a writable one keeps the buffer
+    let copy = ubo(0, GUEST + 0x20, 4, Some(Arc::from(vec![9u8; 4])));
+    let mut put = |_: &Arc<[u8]>| -> Result<u64, Skip> { Ok(0x5555) };
+    assert_eq!(
+        sbuf_word(&pools, Some(&copy), false, 0x77, &mut put).unwrap(),
+        0x5555
+    );
+    assert_eq!(
+        sbuf_word(&pools, Some(&copy), true, 0x77, &mut no_put).unwrap(),
+        REAL + 0x20
+    );
+}
+
+#[test]
+fn the_identity_backing_gives_the_address_back() {
+    let pools = PoolSnapshot::whole(GUEST, LEN, Shifted(GUEST));
+    assert_eq!(locate(&pools, GUEST + 0x123, 8), Some((GUEST + 0x123, 8)));
+}

@@ -1,6 +1,7 @@
 //! The argument buffers of a stage: the driver block, the support block and the texture and uniform buffer tables.
 
 use super::*;
+use crate::pools::{Backing, PoolSnapshot};
 
 #[cfg(test)]
 mod tests;
@@ -32,7 +33,6 @@ pub(crate) struct Env<'a> {
     pub(crate) gmem: crate::gmem::GmemEnv<'a>,
     pub(crate) pools: (u64, u64),
     /// The memory pools at the flush of the frame.
-    #[allow(dead_code)] // the argument buffer package (P4b) resolves through it
     pub(crate) guest_pools: &'a crate::guestpools::GuestPools,
     pub(crate) default_sampler: u64,
     /// The support buffer and the zero buffer, from [`Bindless::statics`].
@@ -55,7 +55,7 @@ fn put_u32(buf: &mut [u8], at: usize, v: u32) {
 
 /// The driver constant block of a stage. Its layout follows the constants of `nxb-xlate`. The fill is partial:
 /// the combined texture handles, the base instance and, for compute, the dispatch size and the uniform buffers.
-fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubo_addr: &[(u32, u64, u32)]) {
+fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubos: &[UboWord]) {
     b.clear();
     b.resize(DRV_SIZE, 0);
     for t in inp.textures.iter().filter(|t| t.stage == inp.stage) {
@@ -69,11 +69,12 @@ fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubo_addr: &[(u32, u64, u32)
         for (i, v) in g.iter().enumerate() {
             put_u32(b, DRV_DISPATCH + 4 * i, *v);
         }
-        for (slot, addr, size) in ubo_addr {
-            if (*slot as usize) < DRV_CS_UBO_SLOTS {
-                let at = DRV_CS_UBO + 0x10 * *slot as usize;
-                put_u64(b, at, *addr);
-                put_u32(b, at + 8, *size);
+        // The table stays virtual: it holds the guest address, not the word the shader dereferences.
+        for u in ubos {
+            if (u.slot as usize) < DRV_CS_UBO_SLOTS {
+                let at = DRV_CS_UBO + 0x10 * u.slot as usize;
+                put_u64(b, at, u.guest);
+                put_u32(b, at + 8, u.size);
             }
         }
     }
@@ -129,13 +130,101 @@ fn put_f32(buf: &mut [u8], at: usize, v: f32) {
     put_u32(buf, at, v.to_bits());
 }
 
+/// A uniform buffer of a stage as the argument buffer and the driver block see it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UboWord {
+    slot: u32,
+    /// The address a shader dereferences: a real address, or the scratch copy of a snapshot.
+    word: u64,
+    /// The guest address for the c0 table of a compute stage (0 when the buffer is outside every pool).
+    guest: u64,
+    /// The size for the c0 table, cut to the end of its pool.
+    size: u32,
+}
+
+/// The real address of a guest range and its size cut to the room of its pool. A range in no pool is counted and
+/// gives `None`, so the caller binds the zero buffer as for an unbound slot.
+fn locate<B: Backing>(pools: &PoolSnapshot<B>, guest: u64, size: u32) -> Option<(u64, u32)> {
+    match pools.resolve_start(guest) {
+        Ok(loc) => Some((
+            loc.real,
+            size.min(u32::try_from(loc.room).unwrap_or(u32::MAX)),
+        )),
+        Err(_) => {
+            note_n(Reason::SkipBuffer, 1);
+            None
+        }
+    }
+}
+
+/// Puts a snapshot into the scratch buffer and gives its address.
+type PutShared<'a> = &'a mut dyn FnMut(&Arc<[u8]>) -> Result<u64, Skip>;
+
+/// The uniform buffers of `stage`. A buffer with a snapshot reads its scratch copy and keeps its guest address for
+/// c0; the others read through their real address. A buffer in no pool reads the zero buffer.
+fn ubo_words<B: Backing>(
+    out: &mut Vec<UboWord>,
+    pools: &PoolSnapshot<B>,
+    stage: Stage,
+    ubos: &[UboDetail],
+    zero: u64,
+    put: PutShared<'_>,
+) -> Result<(), Skip> {
+    out.clear();
+    for u in ubos.iter().filter(|u| u.stage == stage) {
+        let w = match &u.snapshot {
+            Some(bytes) => UboWord {
+                slot: u.slot,
+                word: put(bytes)?,
+                guest: u.address,
+                size: u.size,
+            },
+            None => match locate(pools, u.address, u.size) {
+                Some((real, size)) => UboWord {
+                    slot: u.slot,
+                    word: real,
+                    guest: u.address,
+                    size,
+                },
+                None => UboWord {
+                    slot: u.slot,
+                    word: zero,
+                    guest: 0,
+                    size: 0,
+                },
+            },
+        };
+        out.push(w);
+    }
+    Ok(())
+}
+
+/// The word of a storage buffer. One that is not bound reads zeros, and its writes land in the zero buffer. A buffer
+/// that the shader only reads takes the walk's copy when there is one (the overlap: the CPU may already write the
+/// next frame's data); one that it may write keeps the buffer itself, so the writes stay.
+fn sbuf_word<B: Backing>(
+    pools: &PoolSnapshot<B>,
+    bound: Option<&UboDetail>,
+    rw: bool,
+    zero: u64,
+    put: PutShared<'_>,
+) -> Result<u64, Skip> {
+    let Some(s) = bound else {
+        return Ok(zero);
+    };
+    match &s.snapshot {
+        Some(bytes) if !rw => put(bytes),
+        _ => Ok(locate(pools, s.address, s.size).map_or(zero, |(real, _)| real)),
+    }
+}
+
 /// The buffers that [`build_args`] reuses from draw to draw.
 #[derive(Default)]
 struct ArgsScratch {
     args: Vec<u8>,
     drv: Vec<u8>,
     support: Vec<u8>,
-    ubos: Vec<(u32, u64, u32)>,
+    ubos: Vec<UboWord>,
 }
 
 thread_local! {
@@ -202,14 +291,14 @@ fn build_args_in(
     } = scratch;
     args.clear();
     args.resize((p.arg_bytes as usize).max(8), 0);
-    ubos.clear();
-    for u in inp.ubos.iter().filter(|u| u.stage == inp.stage) {
-        let addr = match &u.snapshot {
-            Some(bytes) => sink.put_shared(bytes)?,
-            None => u.address,
-        };
-        ubos.push((u.slot, addr, u.size));
-    }
+    ubo_words(
+        ubos,
+        env.guest_pools,
+        inp.stage,
+        inp.ubos,
+        env.statics.1,
+        &mut |bytes| sink.put_shared(bytes),
+    )?;
     let handle_of = |slot: u32| {
         inp.textures
             .iter()
@@ -227,8 +316,8 @@ fn build_args_in(
         let v = match b.kind {
             BindKind::Cbuf => ubos
                 .iter()
-                .find(|(s, _, _)| *s == b.reg)
-                .map_or(env.statics.1, |(_, a, _)| *a),
+                .find(|u| u.slot == b.reg)
+                .map_or(env.statics.1, |u| u.word),
             BindKind::Tex => handle_of(b.reg).map_or(0, |h| {
                 b.dim
                     .and_then(|k| env.fits.get(&(h, k)).copied())
@@ -251,8 +340,8 @@ fn build_args_in(
             }
             BindKind::UboPtr => ubos
                 .iter()
-                .find(|(s, _, _)| *s == b.reg)
-                .map_or(env.statics.1, |(_, a, _)| *a),
+                .find(|u| u.slot == b.reg)
+                .map_or(env.statics.1, |u| u.word),
             BindKind::Support => {
                 if support_block(support, &p.binds, env, pass_scale, &handle_of, &image_of) {
                     sink.put(support)?
@@ -262,20 +351,15 @@ fn build_args_in(
             }
             // A zero border block has no sampler bit set, so no sample is corrected.
             BindKind::Border => env.statics.1,
-            // A storage buffer that is not bound reads zeros, and its writes land in the zero buffer. A buffer that the
-            // shader only reads takes the walk's copy when there is one (the overlap: the CPU may already write the next
-            // frame's data); one that it may write keeps the buffer itself, so the writes stay.
-            BindKind::Sbuf => match inp
-                .sbufs
-                .iter()
-                .find(|s| s.stage == inp.stage && s.slot == b.reg)
-            {
-                Some(s) => match &s.snapshot {
-                    Some(bytes) if !b.rw => sink.put_shared(bytes)?,
-                    _ => s.address,
-                },
-                None => env.statics.1,
-            },
+            BindKind::Sbuf => sbuf_word(
+                env.guest_pools,
+                inp.sbufs
+                    .iter()
+                    .find(|s| s.stage == inp.stage && s.slot == b.reg),
+                b.rw,
+                env.statics.1,
+                &mut |bytes| sink.put_shared(bytes),
+            )?,
             BindKind::Img => {
                 note_n(Reason::BindImg, 1);
                 let found = b.dim.zip(b.img).and_then(|(dim, decl)| {

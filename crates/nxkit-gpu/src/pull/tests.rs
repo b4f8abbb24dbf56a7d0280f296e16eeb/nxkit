@@ -208,7 +208,7 @@ fn the_block_holds_the_streams_and_attributes_of_the_draw() {
             stream(2, 0x1_0000_8000, 4, 0),
         ],
     );
-    let b = layout(&d);
+    let b = layout(&d, Some);
     assert_eq!(u64_at(&b, 0), 0x1_0000_1000);
     assert_eq!(u32_at(&b, 8), 16);
     assert_eq!(u32_at(&b, 12), 0);
@@ -231,10 +231,38 @@ fn an_unaligned_base_moves_its_low_bits_into_the_offsets() {
         vec![attr(0, 0x25, 0, 1), attr(1, 0x0A, 6, 1)],
         vec![stream(1, 0x2000_0003, 10, 0)],
     );
-    let b = layout(&d);
+    let b = layout(&d, Some);
     assert_eq!(u64_at(&b, STREAM_BYTES), 0x2000_0000);
     assert_eq!(u32_at(&b, ATTR_OFFSET), 0x25 | 3 << 8 | 1 << 27);
     assert_eq!(u32_at(&b, ATTR_OFFSET + 4), 0x0A | 9 << 8 | 1 << 27);
+}
+
+/// The block holds the real base, and the low bits that move into the offsets are those of the real address.
+#[test]
+fn a_resolver_that_adds_a_delta_changes_the_base_and_keeps_the_low_bits() {
+    const DELTA: u64 = 0x1_0000_0000;
+    let d = draw(
+        vec![attr(0, 0x25, 0, 1), attr(1, 0x0A, 6, 1)],
+        vec![stream(1, 0x2000_0003, 10, 0)],
+    );
+    let b = layout(&d, |a| Some(a + DELTA));
+    assert_eq!(u64_at(&b, STREAM_BYTES), 0x2000_0000 + DELTA);
+    assert_eq!(u32_at(&b, ATTR_OFFSET), 0x25 | 3 << 8 | 1 << 27);
+    assert_eq!(u32_at(&b, ATTR_OFFSET + 4), 0x0A | 9 << 8 | 1 << 27);
+    // a delta with low bits changes them in the offsets: the GPU sees the real address
+    let b = layout(&d, |a| Some(a + DELTA + 1));
+    assert_eq!(u64_at(&b, STREAM_BYTES), 0x2000_0004 + DELTA);
+    assert_eq!(u32_at(&b, ATTR_OFFSET), 0x25 | 1 << 27);
+}
+
+#[test]
+fn a_stream_with_no_real_address_is_left_out() {
+    let d = draw(
+        vec![attr(0, 0x25, 0, 1)],
+        vec![stream(1, 0x2000_0000, 10, 0)],
+    );
+    let b = layout(&d, |_| None);
+    assert!(b.iter().all(|v| *v == 0));
 }
 
 #[test]
@@ -251,7 +279,7 @@ fn instanced_and_constant_streams_keep_their_divisor_and_stride() {
             stream(2, 0x3000, 0, 0),
         ],
     );
-    let b = layout(&d);
+    let b = layout(&d, Some);
     // per vertex, per instance with divisor 3 (dm_fetch adds the base instance), constant
     assert_eq!((u32_at(&b, 8), u32_at(&b, 12)), (16, 0));
     assert_eq!(
@@ -278,7 +306,7 @@ fn an_input_without_a_bound_stream_reads_the_default() {
         ],
         vec![stream(0, 0x1000, 16, 0), stream(20, 0x5000, 16, 0)],
     );
-    let b = layout(&d);
+    let b = layout(&d, Some);
     assert_eq!(u32_at(&b, ATTR_OFFSET), 0);
     assert_eq!(u32_at(&b, ATTR_OFFSET + 4), 0);
     // only stream 0 is in the block
@@ -393,7 +421,7 @@ fn a_pulled_element_has_the_address_of_the_stage_in_fetch() {
         attr(9, 0x2E, 0, 2),
     ];
     let d = draw(attributes.clone(), streams.clone());
-    let b = layout(&d);
+    let b = layout(&d, Some);
     for (vid, iid, bi) in [(0, 0, 0), (2, 0, 0), (1000, 7, 2), (65_535, 9, 9)] {
         for a in &attributes {
             let s = streams.iter().find(|s| s.index == a.stream).unwrap();
@@ -416,7 +444,7 @@ fn an_input_without_an_attribute_loads_nothing() {
         vec![attr(0, 0x2E, 0, 0), attr(1, 0x01, 0, 3)],
         vec![stream(0, GUEST_BASE, 16, 0)],
     );
-    let b = layout(&d);
+    let b = layout(&d, Some);
     assert!(model::element(&b, 1, 0, 0, 0).is_none());
     assert!(model::element(&b, 2, 0, 0, 0).is_none());
     assert!(model::element(&b, 16, 0, 0, 0).is_none());
@@ -466,7 +494,7 @@ fn the_check_finds_reads_outside_guest_memory() {
         vec![attr(0, 0x2E, 0, 0)],
         vec![stream(0, end - 3 * 16, 16, 0)],
     );
-    let b = layout(&d);
+    let b = layout(&d, Some);
     let ranges = model::ranges(&d, |_, _, _| None).unwrap();
     assert_eq!(ranges, ((0, 2), (0, 0)));
     assert!(model::check(&b, &[0], ranges, inside).is_none());

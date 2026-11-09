@@ -288,7 +288,7 @@ impl Gpu {
         textures: &FastMap<TexId, Res>,
         dirty: &FastMap<TexId, (Dirty, usize)>,
         copied_back: &[TexId],
-        stats: &mut EncodeStats,
+        (pools, stats): (&GuestPools, &mut EncodeStats),
     ) -> (Vec<TexId>, Vec<(u64, u64)>) {
         // The last writer first: of two textures over the same storage, the one written last is copied back.
         let mut order: Vec<(usize, TexId)> = dirty
@@ -337,9 +337,7 @@ impl Gpu {
             .iter()
             .map(|(_, rec, res, d, _)| (*rec, *res, *d))
             .collect();
-        let results = self
-            .transfer
-            .copy_back_many(cb, scratch, &self.guest, &args);
+        let results = self.transfer.copy_back_many(cb, scratch, pools, &args);
         let (mut done, mut done_ranges) = (Vec::new(), Vec::new());
         let (mut bytes, mut refused) = (0u64, 0u32);
         for ((id, rec, res, d, flags), r) in items.iter().zip(results) {

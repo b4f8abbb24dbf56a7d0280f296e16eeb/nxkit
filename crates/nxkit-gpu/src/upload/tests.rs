@@ -6,6 +6,11 @@ use nxkit_metal::{
 };
 use nxkit_nvn::{resource::ResourceTable, space::GpuAddr};
 
+/// The snapshot of the whole mode over `guest`: one pool at the real address of the buffer.
+fn whole(guest: &Arc<GuestMemory>) -> GuestPools {
+    GuestPools::whole(guest.address_map().gpu_base(), guest.len(), guest.clone())
+}
+
 /// Uploads `desc` from a pattern in guest memory, clears the memory, copies `dirty` back and returns the
 /// pattern, the guest bytes after the copy-back and the record.
 fn round_trip(
@@ -20,6 +25,7 @@ fn round_trip(
         }
     };
     let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
+    let pools = whole(&guest);
     let mut resources = ResourceTable::new();
     let id = resources
         .create(
@@ -46,7 +52,7 @@ fn round_trip(
     let mut frame = ring.begin().unwrap();
     let scratch = frame.scratch();
     transfer
-        .upload(frame.commands(), &scratch, &guest, &rec, &res, false)
+        .upload(frame.commands(), &scratch, &pools, &rec, &res, false)
         .unwrap();
     ctx.commit_residency();
     frame.submit().unwrap().wait().unwrap();
@@ -54,7 +60,7 @@ fn round_trip(
     let mut frame = ring.begin().unwrap();
     let scratch = frame.scratch();
     let results =
-        transfer.copy_back_many(frame.commands(), &scratch, &guest, &[(&rec, &res, dirty)]);
+        transfer.copy_back_many(frame.commands(), &scratch, &pools, &[(&rec, &res, dirty)]);
     assert!(results[0].is_ok(), "{results:?}");
     ctx.commit_residency();
     frame.submit().unwrap().wait().unwrap();
@@ -147,6 +153,7 @@ fn compressed_upload_preserves_every_mip_and_array_layer() {
         }
     };
     let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
+    let pools = whole(&guest);
     let desc = nxkit_nvn::layout::TextureDesc {
         target: Target::D2Array,
         format: 0x41,
@@ -208,7 +215,7 @@ fn compressed_upload_preserves_every_mip_and_array_layer() {
     let mut frame = ring.begin().unwrap();
     let scratch = frame.scratch();
     transfer
-        .upload(frame.commands(), &scratch, &guest, rec, &res, false)
+        .upload(frame.commands(), &scratch, &pools, rec, &res, false)
         .unwrap();
     {
         let mut cp = frame.commands().begin_compute_pass(&table).unwrap();
@@ -291,4 +298,106 @@ fn buffered_levels_round_each_level_to_whole_blocks_and_keep_the_depth() {
         buffered::level_blocks(&[[4096, 4096, 1]], (1, 1)),
         vec![[4096, 4096, 1]]
     );
+}
+
+/// A backing with a real address of its own, so a pool is told apart from the next one.
+struct Fake(u64);
+
+impl Backing for Fake {
+    fn real_base(&self) -> u64 {
+        self.0
+    }
+}
+
+struct NoPins;
+
+impl crate::pools::PagePins for NoPins {
+    fn pin(&self, _start: u64, _end: u64) {}
+
+    fn unpin(&self, _start: u64, _end: u64) {}
+}
+
+/// Two pools of 0x4000 bytes at 0x4000 and 0x10_0000, each with a buffer at a real address of its own.
+fn two_pools() -> crate::pools::PoolSet<Fake> {
+    let set = crate::pools::PoolSet::new(
+        0,
+        0,
+        |host: u64, _len: u64| Ok(Fake(host + 0x1_0000_0000)),
+        Arc::new(NoPins),
+    );
+    set.register(0x4000, 0x4000, 0).unwrap();
+    set.register(0x10_0000, 0x4000, 0).unwrap();
+    set
+}
+
+#[test]
+fn locate_gives_the_buffer_of_the_pool_and_the_offset_in_it() {
+    let snap = two_pools().current();
+    let (mem, offset) = locate(&snap, 0x10_1000, 0x2000).unwrap();
+    assert_eq!(mem.0, 0x1_0010_0000);
+    assert_eq!(offset, 0x1000);
+    let (mem, offset) = locate(&snap, 0x4000, 0x4000).unwrap();
+    assert_eq!(mem.0, 0x1_0000_4000);
+    assert_eq!(offset, 0);
+}
+
+#[test]
+fn locate_skips_a_range_that_is_not_whole_in_one_pool() {
+    let snap = two_pools().current();
+    // across the end of the pool
+    assert_eq!(locate(&snap, 0x7000, 0x2000).err(), Some(Skip::Buffer));
+    // in the gap between the pools, and below the first one
+    assert_eq!(locate(&snap, 0x8000, 1).err(), Some(Skip::Buffer));
+    assert_eq!(locate(&snap, 0x100, 1).err(), Some(Skip::Buffer));
+    // one byte past the last byte of the last pool
+    assert_eq!(locate(&snap, 0x10_4000, 1).err(), Some(Skip::Buffer));
+}
+
+#[test]
+fn a_texture_across_the_end_of_its_pool_is_not_uploaded() {
+    let Ok(ctx) = Context::system_default() else {
+        eprintln!("skipped: no usable Metal 4 device");
+        return;
+    };
+    let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
+    let base = guest.address_map().gpu_base();
+    // The pool ends 0x1000 bytes into the texture, which needs more.
+    let pools = GuestPools::whole(base, 0x1000 + 0x1000, guest.clone());
+    let desc = nxkit_nvn::layout::TextureDesc {
+        target: Target::D2,
+        format: 0x06,
+        flags: 0,
+        samples: 0,
+        width: 64,
+        height: 64,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let mut resources = ResourceTable::new();
+    let id = resources
+        .create(desc, GpuAddr::new(base + 0x1000).unwrap())
+        .unwrap();
+    let rec = *resources.get(id).unwrap();
+    assert!(rec.layout.size > 0x1000);
+    let mut store = crate::textures::TextureStore::new(&ctx);
+    let res = store
+        .ensure(
+            &rec,
+            1.0,
+            crate::textures::Use::default(),
+            &mut Default::default(),
+        )
+        .unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let transfer = Transfer::new(&ctx, &cache, GobOrder::Tegra).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let scratch = frame.scratch();
+    let r = transfer.upload(frame.commands(), &scratch, &pools, &rec, &res, false);
+    assert_eq!(r, Err(Skip::Buffer));
+    let items = [(&rec, &res, &Dirty::default())];
+    let back = transfer.copy_back_many(frame.commands(), &scratch, &pools, &items);
+    assert_eq!(back, vec![Err(Skip::Buffer)]);
 }

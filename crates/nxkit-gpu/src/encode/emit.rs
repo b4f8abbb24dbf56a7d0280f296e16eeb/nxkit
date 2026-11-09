@@ -227,6 +227,7 @@ pub(super) fn emit(
             instances,
             base_vertex,
             base_instance,
+            ..
         } => RenderCommand::DrawIndexed {
             primitive,
             index_type,
