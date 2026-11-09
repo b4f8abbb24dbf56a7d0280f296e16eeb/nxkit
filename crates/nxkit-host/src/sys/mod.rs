@@ -354,6 +354,42 @@ pub fn reserve_where(hints: &[u64], len: u64, accept: impl Fn(u64) -> bool) -> R
     )))
 }
 
+/// Reserves `len` bytes of address space at an address `a` with `a % align == phase % align` that ends at or below `end`,
+/// near `hint`. It maps `len + align` bytes, keeps the aligned part and gives the rest back, so an address the system
+/// picks at random still serves. A hint alone gave an unaligned address about one start in three (Ocarina of Time).
+pub fn reserve_aligned(
+    hint: u64,
+    len: u64,
+    align: u64,
+    phase: u64,
+    end: u64,
+) -> Result<Reservation> {
+    let align = align.max(1);
+    let total = len
+        .checked_add(align)
+        .ok_or_else(|| HostError::Memory(format!("{len:#x} bytes of guest memory are too many")))?;
+    let got = map_hint(hint, total, PROT_RW)?;
+    let base = got + (phase % align + align - got % align) % align;
+    if base.checked_add(len).is_none_or(|e| e > end) {
+        // SAFETY: `got` was just mapped here with `total` bytes.
+        unsafe { munmap(got as usize as *mut c_void, total as usize) };
+        return Err(HostError::Memory(format!(
+            "the system gave {got:#x} for {total:#x} bytes, the aligned range ends above {end:#x}"
+        )));
+    }
+    // SAFETY: both pieces lie inside the mapping made above and outside the kept range.
+    unsafe {
+        if base > got {
+            munmap(got as usize as *mut c_void, (base - got) as usize);
+        }
+        let tail = got + total - (base + len);
+        if tail > 0 {
+            munmap((base + len) as usize as *mut c_void, tail as usize);
+        }
+    }
+    Ok(Reservation { base, len })
+}
+
 /// Maps anonymous memory with `addr` as a hint and returns the address that the system chose.
 pub fn map_hint(addr: u64, len: u64, prot: i32) -> Result<u64> {
     let flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
@@ -465,4 +501,27 @@ pub fn map_stack(len: u64, guard: u64) -> Result<u64> {
         return Err(mem_err("mprotect", errno()));
     }
     Ok(base)
+}
+
+#[cfg(test)]
+mod aligned_tests {
+    use super::*;
+
+    #[test]
+    fn an_aligned_reservation_keeps_the_phase_and_the_limit() {
+        let (len, align, end) = (0x400_0000, 0x20_0000, 1u64 << 39);
+        for phase in [0, 0x1000, 0x1f_f000] {
+            let r = reserve_aligned(0x70_0000_0000, len, align, phase, end).unwrap();
+            assert_eq!(r.base() % align, phase % align);
+            assert_eq!(r.len(), len);
+            assert!(r.base() + len <= end);
+            // SAFETY: the range was reserved above and nothing else uses it.
+            unsafe { munmap(r.base() as usize as *mut c_void, len as usize) };
+        }
+    }
+
+    #[test]
+    fn an_aligned_reservation_refuses_a_range_above_the_limit() {
+        assert!(reserve_aligned(0x70_0000_0000, 0x400_0000, 0x20_0000, 0, 0x1000).is_err());
+    }
 }

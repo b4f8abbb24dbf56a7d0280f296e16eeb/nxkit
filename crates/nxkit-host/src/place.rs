@@ -207,12 +207,24 @@ pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
         got.checked_add(len).is_some_and(|e| e <= layout::SPACE_END)
             && got.wrapping_sub(start) % layout::REGION_ALIGN == 0
     };
-    let res = sys::reserve_where(&hints, len, accept).map_err(|e| {
-        HostError::Memory(format!(
-            "the guest range {start:#x} + {len:#x} has no home below {:#x}: {e}",
-            layout::SPACE_END
-        ))
-    })?;
+    // The hints first; when the system gives unaligned addresses, a range with room for the alignment.
+    let res = sys::reserve_where(&hints, len, accept)
+        .or_else(|first| {
+            sys::reserve_aligned(
+                layout::FALLBACK_BASE,
+                len,
+                layout::REGION_ALIGN,
+                start,
+                layout::SPACE_END,
+            )
+            .map_err(|e| HostError::Memory(format!("{first}; aligned: {e}")))
+        })
+        .map_err(|e| {
+            HostError::Memory(format!(
+                "the guest range {start:#x} + {len:#x} has no home below {:#x}: {e}",
+                layout::SPACE_END
+            ))
+        })?;
     let slide = res.base().wrapping_sub(start) as i64;
     if slide == 0 {
         return Ok((res, game.clone(), wanted));
