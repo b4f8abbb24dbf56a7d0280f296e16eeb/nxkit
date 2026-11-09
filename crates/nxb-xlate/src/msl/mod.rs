@@ -9,6 +9,8 @@
 ///
 /// Bump the number whenever a change alters the MSL text or the reflection for an unchanged input: a new emitter
 /// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
+/// A change that alters the output only of the shaders that use one feature of [`revision::FEATURES`] bumps that
+/// feature's revision instead, so the other shaders keep their translations (`docs/early-cutoff.md`).
 pub const TRANSLATOR_ID: &str = "msl-2.19";
 
 pub mod abi;
@@ -65,6 +67,7 @@ pub mod prelude;
 #[cfg(test)]
 mod raw_last_tests;
 pub mod refl;
+pub mod revision;
 pub mod shared_store;
 pub mod spill;
 #[cfg(test)]
