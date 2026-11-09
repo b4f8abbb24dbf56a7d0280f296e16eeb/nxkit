@@ -785,6 +785,7 @@ dependencies = [
  "nxkit-ndsr",
  "nxkit-ndve",
  "nxkit-nvn",
+ "nxkit-svc-video",
 ]
 
 [[package]]

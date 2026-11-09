@@ -18,6 +18,7 @@ nxkit-native-plan = { workspace = true }
 nxkit-ndsr = { workspace = true }
 nxkit-ndve = { workspace = true }
 nxkit-nvn = { workspace = true }
+nxkit-svc-video = { workspace = true }
 foldhash = "0.2"
 
 [lints]

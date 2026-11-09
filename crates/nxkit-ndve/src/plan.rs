@@ -19,9 +19,7 @@ pub const PICTURE_RGBA8: GameResource = GameResource::Intermediate { index: 0 };
 /// The RGB10A2 picture of layer 12.
 pub const PICTURE_RGB10A2: GameResource = GameResource::Intermediate { index: 1 };
 
-/// The Neural Engine's input tensor `x` (R16Float, 1920 x 4320), written by the GPU. Bound from the slot of the ring.
-pub const ANE_X: GameResource = GameResource::Image(0);
-/// The Neural Engine's output `final` (R16Float, 1920 x 3240).
+/// The Neural Engine's output `final` (R16Float, 1920 x 3240). Bound from the slot that holds the picture's result.
 pub const ANE_FINAL: GameResource = GameResource::Image(1);
 /// The Neural Engine's output `delta` (R16Float, 2560 x 1440).
 pub const ANE_DELTA: GameResource = GameResource::Image(2);

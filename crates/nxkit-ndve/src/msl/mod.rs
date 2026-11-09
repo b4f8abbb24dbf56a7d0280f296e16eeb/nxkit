@@ -6,7 +6,7 @@
 //! - `common.metal`: the shared pieces: the K = 16 step with its f16 rounding, the epilogues and the colour conversion.
 //! - `conv.metal`: the twelve convolution layers (3x3 with a staged input tile, 2x2 down, 2x2 up with the skip).
 //! - `resample.metal`: the luma pass and the resampler.
-//! - `ane.metal`: the GPU's share of the Neural Engine path (input tensor, quantise, epilogue).
+//! - `ane.metal`: the GPU's share of the Neural Engine path (quantise, epilogue).
 
 /// The MSL of every kernel of [`crate::plan::Plan::steps`].
 pub const SOURCE: &str = concat!(

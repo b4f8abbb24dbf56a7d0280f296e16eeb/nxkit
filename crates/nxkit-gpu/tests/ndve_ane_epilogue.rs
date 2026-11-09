@@ -17,7 +17,7 @@ use nxkit_metal::{
 };
 use nxkit_ndve::ane::epilogue::{self, Epilogue};
 use nxkit_ndve::half;
-use nxkit_ndve::kernels::ane_plans;
+use nxkit_ndve::kernels::ane_epilogue;
 use nxkit_ndve::msl;
 use nxkit_ndve::plan::{self, GameResource, Source};
 
@@ -103,12 +103,12 @@ fn the_epilogue_matches_the_cpu_reference() {
     upload(&t_delta, &bytes(&delta), 2560, 2);
     upload(&t_dither, &dith, 512, 4);
 
-    let plans = ane_plans();
+    let plan = ane_epilogue();
     let mut frame = ring.begin().unwrap();
     let push_addr = frame.scratch().push(&push()).unwrap();
     {
         let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
-        for (n, step) in plans.epilogue.steps.iter().enumerate() {
+        for (n, step) in plan.steps.iter().enumerate() {
             if n > 0 {
                 pass.encode(&ComputeCommand::Barrier).unwrap();
             }
