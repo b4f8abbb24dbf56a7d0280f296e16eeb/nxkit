@@ -13,7 +13,7 @@ pub(super) extern "C" fn va_set_format(s: u64, format: i32, offset: i64) {
     guard("nvnVertexAttribStateSetFormat", || {
         if !(0..ATTRIB_OFFSET_LIMIT).contains(&offset) {
             eprintln!(
-                "[RED] NVN nvnVertexAttribStateSetFormat: the vertex attribute offset {offset} exceeds the packed range"
+                "nxkit-rt: warning: NVN nvnVertexAttribStateSetFormat: the vertex attribute offset {offset} exceeds the packed range"
             );
         }
         let w = pack(

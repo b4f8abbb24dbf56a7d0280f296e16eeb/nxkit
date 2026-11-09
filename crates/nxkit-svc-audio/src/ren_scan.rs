@@ -89,7 +89,7 @@ pub(crate) fn update_lock(guess: usize) -> Option<(usize, bool)> {
     let found = lock_in(UPDATE).or_else(|| lock_in(UPDATE_IMPL));
     if found.is_none() {
         eprintln!(
-            "nxkit-audio: [RED] audren: no update lock read off AudioRenderSystem::Update or UpdateImpl, keeping +{guess:#x}, where command generation may race the game's RequestUpdate"
+            "nxkit-audio: warning: audren: no update lock read off AudioRenderSystem::Update or UpdateImpl, keeping +{guess:#x}, where command generation may race the game's RequestUpdate"
         );
     }
     found

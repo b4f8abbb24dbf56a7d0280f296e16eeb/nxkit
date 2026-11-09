@@ -171,7 +171,7 @@ pub fn scan_sdk_driver(text: (u64, u64), ro: (u64, u64)) {
         let found = guest::with_slice(text.0, text.1, |b| find_driver_switch(b, text.0, ro)).ok().flatten();
         if found.is_none() {
             eprintln!(
-                "[RED] NVN sdk: NVN2's nvnDeviceGetInteger switch not found; the device answers the newest versions known"
+                "nxkit-rt: warning: NVN sdk: NVN2's nvnDeviceGetInteger switch not found; the device answers the newest versions known"
             );
         }
         found
@@ -328,13 +328,13 @@ extern "C" fn device_get_integer(_d: u64, item: i32, out: u64) {
             Info::Value(v) => Obj(out).set_u32(0, v),
             Info::Runtime => {
                 eprintln!(
-                    "[RED] NVN nvnDeviceGetInteger: item {item:#x}: NVN2 reads it from the GPU at run time, not known here; the host answers 0"
+                    "nxkit-rt: warning: NVN nvnDeviceGetInteger: item {item:#x}: NVN2 reads it from the GPU at run time, not known here; the host answers 0"
                 );
                 Obj(out).set_u32(0, 0)
             }
             Info::Unknown => {
                 eprintln!(
-                    "[RED] NVN nvnDeviceGetInteger: item {item:#x} is not known, the host answers 0"
+                    "nxkit-rt: warning: NVN nvnDeviceGetInteger: item {item:#x} is not known, the host answers 0"
                 );
                 Obj(out).set_u32(0, 0)
             }

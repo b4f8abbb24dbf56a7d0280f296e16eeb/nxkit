@@ -184,7 +184,7 @@ pub(crate) fn other(why: impl Into<String>) -> AbiError {
 
 /// Ends the game and says which NVN function did it. The process aborts, so a debugger or a crash report shows the stop.
 pub(crate) fn fatal(name: &str, why: impl fmt::Display) -> ! {
-    eprintln!("[RED] NVN {name}: {why}");
+    eprintln!("nxkit-rt: warning: NVN {name}: {why}");
     std::process::abort()
 }
 

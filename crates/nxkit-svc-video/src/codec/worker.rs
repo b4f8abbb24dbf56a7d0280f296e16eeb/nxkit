@@ -39,7 +39,7 @@ pub(super) fn absorb(
         && d.errors < 4
     {
         d.errors += 1;
-        red(&format!("nn::codec {}: {e}", d.codec.name()));
+        warn(&format!("nn::codec {}: {e}", d.codec.name()));
     }
     d.inflight = d.inflight.saturating_sub(out.len());
     if matches!(call, Call::Wait) && res.is_ok() && out.is_empty() {

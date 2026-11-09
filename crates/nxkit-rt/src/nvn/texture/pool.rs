@@ -84,7 +84,7 @@ impl DescPools {
         let (mem_pool, off) = memory;
         if n <= 0 || off < 0 || mem_pool == 0 {
             eprintln!(
-                "[RED] NVN {name}: bad arguments (pool {mem_pool:#x}, offset {off:#x}, {n} descriptors)"
+                "nxkit-rt: warning: NVN {name}: bad arguments (pool {mem_pool:#x}, offset {off:#x}, {n} descriptors)"
             );
             return Ok(0);
         }
@@ -93,7 +93,7 @@ impl DescPools {
         let p = memory_pool::view(mem_pool)?;
         if p.mem == 0 {
             eprintln!(
-                "[RED] NVN {name}: the memory pool has no storage (pool {mem_pool:#x}, flags {:#x})",
+                "nxkit-rt: warning: NVN {name}: the memory pool has no storage (pool {mem_pool:#x}, flags {:#x})",
                 p.flags
             );
             return Ok(0);
@@ -103,7 +103,7 @@ impl DescPools {
             .is_none_or(|end| end > p.size)
         {
             eprintln!(
-                "[RED] NVN {name}: {count} descriptors at offset {off:#x} do not fit the memory pool of {:#x} bytes",
+                "nxkit-rt: warning: NVN {name}: {count} descriptors at offset {off:#x} do not fit the memory pool of {:#x} bytes",
                 p.size
             );
             return Ok(0);

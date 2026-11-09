@@ -126,7 +126,7 @@ extern "C" fn texture_initialize_from_native_image(t: u64, i: u64) -> u32 {
     let format = checked(NAME, guest::read_u32(i + OFF_FORMAT));
     let Some(picture) = native_image(handle) else {
         log(format_args!(
-            "[RED] {NAME}: handle {handle:#x} names no picture"
+            "nxkit-rt: warning: {NAME}: handle {handle:#x} names no picture"
         ));
         return 0;
     };

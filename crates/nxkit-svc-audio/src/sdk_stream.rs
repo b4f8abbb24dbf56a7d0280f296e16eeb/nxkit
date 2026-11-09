@@ -79,13 +79,13 @@ fn open_at(g: u64, ev: u64, fmt: u64, frames: i32) -> u32 {
     let rate = guest::read_i32(fmt + 8).unwrap_or(0);
     if f != FMT_FLOAT && f != FMT_PCM16 {
         eprintln!(
-            "nxkit-audio: [RED] OutputStream sample format {f} is not supported, the open fails"
+            "nxkit-audio: warning: OutputStream sample format {f} is not supported, the open fails"
         );
         return RES_FAIL;
     }
     if rate != 0 && rate != engine::RATE as i32 {
         eprintln!(
-            "nxkit-audio: [RED] OutputStream sample rate {rate} is not supported (48000 only), the open fails"
+            "nxkit-audio: warning: OutputStream sample rate {rate} is not supported (48000 only), the open fails"
         );
         return RES_FAIL;
     }

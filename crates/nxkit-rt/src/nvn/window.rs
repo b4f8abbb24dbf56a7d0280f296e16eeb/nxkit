@@ -132,7 +132,9 @@ extern "C" fn builder_set_textures(b: u64, n: i32, textures: u64) {
         let n = if (0..=MAX_TEXTURES).contains(&n) {
             n
         } else {
-            eprintln!("[RED] NVN nvnWindowBuilderSetTextures: the count {n} is not in 0..=4");
+            eprintln!(
+                "nxkit-rt: warning: NVN nvnWindowBuilderSetTextures: the count {n} is not in 0..=4"
+            );
             n.clamp(0, MAX_TEXTURES)
         };
         let o = Obj(b);

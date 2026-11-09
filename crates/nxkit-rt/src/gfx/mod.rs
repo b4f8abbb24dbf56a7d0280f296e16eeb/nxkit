@@ -53,7 +53,7 @@ pub(crate) fn log_once_with(flag: &AtomicBool, msg: impl FnOnce() -> String) {
 
 /// Ends the game and says which function did it. The process aborts, as an NVN failure does (R15).
 pub(crate) fn fatal(name: &str, why: impl fmt::Display) -> ! {
-    eprintln!("[RED] {name}: {why}");
+    eprintln!("nxkit-rt: warning: {name}: {why}");
     std::process::abort()
 }
 
