@@ -1,6 +1,6 @@
 //! Reads a recording from command memory and gives its summary.
 //!
-//! A [`Summary`] is the effect stream of one recording: the [`Cmd`] values that the pass analysis reads.
+//! A [`Summary`] is the effect stream of one recording: the [`Cmd`](crate::frame::Cmd) values that the pass analysis reads.
 //! It also says which state the recording takes from its caller ([`Needs`]), which state it leaves behind ([`Delta`]),
 //! and which addresses and handles it resolved ([`Ref`]). The cache in [`crate::cache`] keeps summaries per handle.
 //!
@@ -12,12 +12,15 @@ use std::ops::Range;
 use crate::cache::RecCache;
 use crate::descriptors::Descriptors;
 use crate::error::{NvnError, Result};
-use crate::frame::{Cmd, CmdStream, DrawState, RtSet, Span};
+use crate::frame::{CmdStream, DrawState, RtSet};
 use crate::mem::GuestMem;
-use crate::record::{NO_HANDLE, Record, deferred_handle};
+use crate::record::Record;
 use crate::resource::{ResourceTable, TexId};
 use crate::space::GpuAddr;
 
+use build::{Builder, delta_slots};
+
+mod build;
 mod ext;
 
 /// The number of texture and image slots.
@@ -292,7 +295,7 @@ fn watch_addr() -> Option<u64> {
 }
 
 /// The bit where a record word keeps the texture id above the GPU address. Texture storage ends below 2^40.
-const TAG_SHIFT: u32 = 40;
+pub(super) const TAG_SHIFT: u32 = 40;
 
 /// The record word of a texture: its GPU address, and above it the texture id plus one. Textures can share storage
 /// (BotW makes a 854x480 and a 1920x1080 texture at one address), so the address alone does not name one texture.
@@ -335,303 +338,6 @@ impl Ref {
                 let mut b = [0u8; 8];
                 mem.read(at, &mut b).is_ok() && u64::from_le_bytes(b) == raw
             }
-        }
-    }
-}
-
-struct Builder {
-    st: State,
-    needs: Needs,
-    sets: Sets,
-    stream: CmdStream,
-    refs: Vec<Ref>,
-    children: Vec<u64>,
-    blockers: u8,
-    draws: u32,
-    unresolved: u32,
-    tex_list: Option<Span>,
-    img_list: Option<Span>,
-    scratch: Vec<TexId>,
-    /// The bit of each sampling slot of `st.tex` that holds a texture.
-    tex_live: u128,
-    /// The bit of each image slot of `st.img` that holds a texture.
-    img_live: u128,
-    /// True when the recording itself resolved something, so that `refs` has entries of its own.
-    own_refs: bool,
-    /// Time of the records and of the splices, for `NXKIT_DIAG=decodeprof`.
-    ns_apply: u64,
-    ns_splice: u64,
-    records: u64,
-}
-
-/// The distinct textures of the slots that `live` marks, in slot order.
-fn collect(live: u128, slots: &[Option<TexId>; MAX_BINDINGS], out: &mut Vec<TexId>) {
-    out.clear();
-    for (_, t) in bound(live, slots) {
-        if !out.contains(&t) {
-            out.push(t);
-        }
-    }
-}
-
-/// Sets or clears the bit of `slot` in `live` after the slot got `value`.
-fn mark(live: &mut u128, slot: usize, value: Option<TexId>) {
-    let bit = 1u128 << slot;
-    *live = if value.is_some() {
-        *live | bit
-    } else {
-        *live & !bit
-    };
-}
-
-fn delta_slots(mask: u128, slots: &[Option<TexId>; MAX_BINDINGS]) -> Slots {
-    let mut out = Vec::with_capacity(mask.count_ones() as usize);
-    let mut rest = mask;
-    while rest != 0 {
-        let i = rest.trailing_zeros() as usize;
-        rest &= rest - 1;
-        out.push((i as u8, slots.get(i).copied().flatten()));
-    }
-    out
-}
-
-impl Builder {
-    fn addr<M: GuestMem>(&mut self, cx: &Ctx<M>, a: u64) -> Option<TexId> {
-        if a == 0 {
-            return None;
-        }
-        let t = texture_at(cx.table, a);
-        if watch_addr().is_some_and(|w| w == a & ((1 << TAG_SHIFT) - 1)) {
-            static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            if crate::diag::first(&SHOWN, 30) {
-                eprintln!("DIAG watch addr word {a:#x} -> {t:?}");
-            }
-        }
-        self.refs.push(Ref::Addr(a, t));
-        self.own_refs = true;
-        t
-    }
-
-    fn handle<M: GuestMem>(&mut self, cx: &Ctx<M>, h: u64) -> Option<TexId> {
-        if h == NO_HANDLE {
-            return None;
-        }
-        let t = texture_of(cx.desc, h);
-        if t.is_none() {
-            self.unresolved += 1;
-        }
-        self.refs.push(Ref::Handle(h, t));
-        self.own_refs = true;
-        t
-    }
-
-    fn need_draw_state(&mut self) {
-        self.needs.draw |= !self.sets.draw;
-        self.needs.targets |= !self.sets.targets;
-        self.needs.tex |= !self.sets.tex;
-    }
-
-    fn reads(&mut self) -> Span {
-        if let Some(s) = self.tex_list {
-            return s;
-        }
-        collect(self.tex_live, &self.st.tex, &mut self.scratch);
-        let s = self.stream.push_list(&self.scratch);
-        self.tex_list = Some(s);
-        s
-    }
-
-    fn writes(&mut self) -> Span {
-        if let Some(s) = self.img_list {
-            return s;
-        }
-        collect(self.img_live, &self.st.img, &mut self.scratch);
-        let s = self.stream.push_list(&self.scratch);
-        self.img_list = Some(s);
-        s
-    }
-
-    fn apply<M: GuestMem>(&mut self, cx: &Ctx<M>, rec: Record) {
-        match rec {
-            Record::SetTargets { color, depth } => {
-                let mut set = RtSet::default();
-                for (slot, a) in set.color.iter_mut().zip(color) {
-                    *slot = self.addr(cx, a);
-                }
-                set.depth = self.addr(cx, depth);
-                self.st.targets = set;
-                self.sets.targets = true;
-                self.blockers |= BLOCK_TARGETS;
-                self.stream.cmds.push(Cmd::SetRenderTargets(set));
-            }
-            Record::SetScissor { full } => {
-                self.st.scissor_full = full;
-                self.sets.scissor = true;
-            }
-            Record::ClearColor { slot } => {
-                self.needs.scissor |= !self.sets.scissor;
-                self.needs.targets |= !self.sets.targets;
-                self.blockers |= BLOCK_CLEAR;
-                let full = self.st.scissor_full;
-                self.stream.cmds.push(Cmd::ClearColor { slot, full });
-            }
-            Record::ClearDepthStencil => {
-                self.needs.scissor |= !self.sets.scissor;
-                self.needs.targets |= !self.sets.targets;
-                self.blockers |= BLOCK_CLEAR;
-                let full = self.st.scissor_full;
-                self.stream.cmds.push(Cmd::ClearDepthStencil { full });
-            }
-            Record::Discard { color, depth } => {
-                self.needs.targets |= !self.sets.targets;
-                self.blockers |= BLOCK_CLEAR;
-                self.stream.cmds.push(Cmd::Discard { color, depth });
-            }
-            Record::BindState(s) => {
-                self.st.draw = s;
-                self.sets.draw = true;
-            }
-            Record::BindTexture { slot, handle } => {
-                let t = self.handle(cx, handle);
-                self.st.tex[slot as usize] = t;
-                mark(&mut self.tex_live, usize::from(slot), t);
-                self.sets.tex |= 1 << slot;
-                self.tex_list = None;
-            }
-            Record::BindTexturesDeferred {
-                first,
-                count,
-                src,
-                tex_base,
-                samp_base,
-            } => {
-                for k in 0..count {
-                    let slot = usize::from(first) + usize::from(k);
-                    let Some(at) = self.st.tex.get(slot).map(|_| src + 8 * u64::from(k)) else {
-                        break;
-                    };
-                    let (raw, handle) = match deferred_handle(cx.mem, src, k, tex_base, samp_base) {
-                        Ok((_, raw, h)) => (raw, h),
-                        Err(_) => (0, 0),
-                    };
-                    self.refs.push(Ref::Deferred(at, raw));
-                    self.own_refs = true;
-                    let t = self.handle(cx, handle);
-                    self.st.tex[slot] = t;
-                    mark(&mut self.tex_live, slot, t);
-                    self.sets.tex |= 1 << slot;
-                }
-                self.tex_list = None;
-            }
-            Record::BindImage { slot, handle } => {
-                let t = self.handle(cx, handle);
-                self.st.img[slot as usize] = t;
-                mark(&mut self.img_live, usize::from(slot), t);
-                self.sets.img |= 1 << slot;
-                self.img_list = None;
-            }
-            Record::Draw => {
-                self.need_draw_state();
-                let reads = self.reads();
-                self.draws += 1;
-                self.stream.cmds.push(Cmd::Draw {
-                    state: self.st.draw,
-                    reads,
-                });
-            }
-            Record::Dispatch => {
-                self.needs.tex |= !self.sets.tex;
-                self.needs.img |= !self.sets.img;
-                self.blockers |= BLOCK_COMPUTE;
-                let (reads, writes) = (self.reads(), self.writes());
-                self.stream.cmds.push(Cmd::Dispatch { reads, writes });
-            }
-            Record::Copy { src, dst } => {
-                let (src, dst) = (self.addr(cx, src), self.addr(cx, dst));
-                self.blockers |= BLOCK_COPY;
-                self.stream.cmds.push(Cmd::Copy { src, dst });
-            }
-            Record::Downsample { src, dst } => {
-                self.blockers |= BLOCK_COPY;
-                match (self.addr(cx, src), self.addr(cx, dst)) {
-                    (Some(src), Some(dst)) => self.stream.cmds.push(Cmd::Downsample { src, dst }),
-                    // The walker of the encoder gives one detail entry for every downsample record. A copy
-                    // without textures keeps the count of copy commands equal to that of the entries.
-                    _ => {
-                        self.unresolved += 1;
-                        self.stream.cmds.push(Cmd::Copy {
-                            src: None,
-                            dst: None,
-                        });
-                    }
-                }
-            }
-            Record::Barrier(bits) => {
-                self.blockers |= BLOCK_SYNC;
-                self.stream.cmds.push(Cmd::Barrier(bits));
-            }
-            Record::Sync => {
-                self.blockers |= BLOCK_SYNC;
-                self.stream.cmds.push(Cmd::Sync);
-            }
-            Record::Present(a) | Record::CpuRead(a) => {
-                self.blockers |= BLOCK_SYNC;
-                match self.addr(cx, a) {
-                    Some(t) if matches!(rec, Record::Present(_)) => {
-                        self.stream.cmds.push(Cmd::Present(t))
-                    }
-                    Some(t) => self.stream.cmds.push(Cmd::CpuRead(t)),
-                    None => self.unresolved += 1,
-                }
-            }
-            Record::Ext(x) => self.apply_ext(cx, x),
-            Record::End | Record::Jump(_) | Record::Call(_) => {}
-        }
-    }
-
-    fn splice(&mut self, handle: u64, c: &Summary) {
-        let clock = crate::prof::Clock::start();
-        self.splice_in(handle, c);
-        self.ns_splice += clock.ns();
-    }
-
-    fn splice_in(&mut self, handle: u64, c: &Summary) {
-        let (n, s) = (&c.needs, &self.sets);
-        self.needs.targets |= n.targets && !s.targets;
-        self.needs.scissor |= n.scissor && !s.scissor;
-        self.needs.draw |= n.draw && !s.draw;
-        self.needs.tex |= n.tex & !s.tex;
-        self.needs.img |= n.img & !s.img;
-        self.stream.splice(&c.stream);
-        self.refs.extend_from_slice(&c.refs);
-        self.children.push(handle);
-        self.blockers |= c.blockers;
-        self.draws += c.draws;
-        self.unresolved += c.unresolved;
-        let d = &c.delta;
-        if let Some(t) = d.targets {
-            self.st.targets = t;
-            self.sets.targets = true;
-        }
-        if let Some(f) = d.scissor {
-            self.st.scissor_full = f;
-            self.sets.scissor = true;
-        }
-        if let Some(s) = d.draw {
-            self.st.draw = s;
-            self.sets.draw = true;
-        }
-        for (i, t) in &d.tex {
-            self.st.tex[*i as usize] = *t;
-            mark(&mut self.tex_live, usize::from(*i), *t);
-            self.sets.tex |= 1 << i;
-            self.tex_list = None;
-        }
-        for (i, t) in &d.img {
-            self.st.img[*i as usize] = *t;
-            mark(&mut self.img_live, usize::from(*i), *t);
-            self.sets.img |= 1 << i;
-            self.img_list = None;
         }
     }
 }
