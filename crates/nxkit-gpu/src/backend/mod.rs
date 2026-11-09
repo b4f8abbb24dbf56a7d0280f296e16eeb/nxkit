@@ -37,6 +37,7 @@ use crate::blit::Blit;
 use crate::detail::FrameDetail;
 use crate::encthread::{Encoder, Job, Msg, Reply, TableUpdate};
 use crate::guest::GuestView;
+use crate::guestpools::{GuestPoolSet, GuestPools};
 use crate::settings::GpuSettings;
 use crate::snapshot::{EncodeView, Live, Snapshot};
 use crate::stats::EncodeReport;
@@ -62,6 +63,9 @@ struct Pending {
 pub struct GpuBackend {
     ctx: Context,
     guest: Arc<GuestMemory>,
+    /// The NVN memory pools. It has a lock of its own, so a registration never waits for an encode. `flush_frame`
+    /// takes the snapshot of a frame from it.
+    pools: GuestPoolSet,
     gpu: Mutex<Gpu>,
     walker: Mutex<Walker>,
     /// The memory writes that the walker has not seen yet. It has a lock of its own, so a write never waits for a walk.
@@ -113,6 +117,7 @@ impl GpuBackend {
         let gpu = Gpu::with_config(ctx, guest.clone(), settings.config())?;
         let walker = Walker::new(settings.shader_dir.clone(), guest.address_map());
         let invalidations = walker.invalidations();
+        let pools = crate::guestpools::whole(&guest);
         if settings.overlap {
             crate::overlap::set_on();
         }
@@ -135,6 +140,7 @@ impl GpuBackend {
             Self {
                 ctx: ctx.clone(),
                 guest,
+                pools,
                 gpu: Mutex::new(gpu),
                 walker: Mutex::new(walker),
                 invalidations,
@@ -266,12 +272,14 @@ impl GpuBackend {
     /// Encodes a job and waits for the copy-back that its report asks for. The result tells the front end what to change
     /// in its table.
     fn encode_job(&self, job: &Job) -> Result<TableUpdate, String> {
+        self.pools.drain_graveyard();
         let (result, submitted) = {
             let mut gpu = locked(&self.gpu);
             let r = gpu.encode_frame(
                 &job.frame,
                 &job.plan,
                 &job.snapshot,
+                &job.pools,
                 &job.detail,
                 self.scale,
             );
@@ -326,6 +334,7 @@ impl GpuBackend {
         &self,
         frame: &Frame,
         plan: &PassPlan,
+        pools: &Arc<GuestPools>,
         fence: Fence,
         detail: &FrameDetail,
         cx: FlushCx<'_>,
@@ -334,7 +343,8 @@ impl GpuBackend {
             table: &*cx.table,
             descriptors: cx.descriptors,
         };
-        let result = locked(&self.gpu).encode_frame(frame, plan, &view, detail, self.scale);
+        self.pools.drain_graveyard();
+        let result = locked(&self.gpu).encode_frame(frame, plan, &view, pools, detail, self.scale);
         self.hold_counters(fence, detail, &result);
         self.encoded.fetch_max(fence.0, Ordering::AcqRel);
         let report = result.map_err(fail)?;

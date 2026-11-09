@@ -32,6 +32,7 @@ mod format_map;
 mod gmem;
 mod gpu;
 mod guest;
+mod guestpools;
 mod health;
 mod icbs;
 mod images;
@@ -47,7 +48,6 @@ mod native_ndve;
 mod overlap;
 mod passes;
 mod pipelines;
-#[allow(dead_code)] // no user until the plumbing package
 mod pools;
 mod programs;
 mod pull;
@@ -63,6 +63,7 @@ mod walk;
 
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
+pub use guestpools::GuestPools;
 pub use pipelines::flush_runtime_cache;
 pub use pools::{
     Backing, BadRange, Drained, Loc, MakeBacking, MetalPoolSet, Miss, PAGE, PagePins, PoolBuffer,

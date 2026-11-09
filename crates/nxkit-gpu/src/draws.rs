@@ -80,6 +80,9 @@ pub(crate) struct Shared<'a> {
     pub(crate) pipelines: &'a Pipelines,
     pub(crate) env: Env<'a>,
     pub(crate) guest: &'a Arc<GuestMemory>,
+    /// The pools at the flush of the frame. The batch keeps them alive.
+    #[allow(dead_code)] // the draw packages (P4a to P4d) resolve through it
+    pub(crate) pools: &'a crate::guestpools::GuestPools,
     pub(crate) icbs: &'a Mutex<Icbs>,
     pub(crate) ordinals: &'a [Ordinal],
     /// The recording runs by the ordinal of their first draw.

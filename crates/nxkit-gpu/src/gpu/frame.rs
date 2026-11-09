@@ -46,7 +46,8 @@ impl Gpu {
     /// Encodes a held frame and submits it.
     ///
     /// `frame` and `plan` come from `nxkit-nvn` (`Frame` and `analyse`). `detail` carries what the commands of the
-    /// frame bound, `view` gives the texture records and resolves texture handles. `scale` is the factor for textures that are rendered
+    /// frame bound, `view` gives the texture records and resolves texture handles. `pools` is the pool snapshot of
+    /// the flush; the batch keeps it until the GPU is done. `scale` is the factor for textures that are rendered
     /// into (2.0 for 1080p to 4K, 1.0 for none). The call returns when the command buffers are committed. The GPU
     /// runs on. Call [`Gpu::wait`] before the CPU reads a texture that the report lists in `copied_back`.
     pub fn encode_frame(
@@ -54,10 +55,13 @@ impl Gpu {
         frame: &Frame,
         plan: &PassPlan,
         view: &dyn EncodeView,
+        pools: &Arc<GuestPools>,
         detail: &FrameDetail,
         scale: f32,
     ) -> Result<EncodeReport> {
-        nxkit_metal::autorelease_pool(|| self.encode_frame_inner(frame, plan, view, detail, scale))
+        nxkit_metal::autorelease_pool(|| {
+            self.encode_frame_inner(frame, plan, view, pools, detail, scale)
+        })
     }
 
     fn encode_frame_inner(
@@ -65,6 +69,7 @@ impl Gpu {
         frame: &Frame,
         plan: &PassPlan,
         view: &dyn EncodeView,
+        pools: &Arc<GuestPools>,
         detail: &FrameDetail,
         scale: f32,
     ) -> Result<EncodeReport> {
@@ -100,41 +105,11 @@ impl Gpu {
         // The ring waited for the batch that used this slot before, so its write logs are final.
         let region = ((batch.number() - 1) % nxkit_metal::BATCHES_IN_FLIGHT as u64) as usize;
         self.gmem.learn(region);
-        let map = self.guest.address_map();
-        let gmem_buf = self.gmem.refresh(&self.ctx, |start, len| {
-            let host = map.host_address(start, len).ok()?;
-            Some(map.gpu_address(host, len).ok()?.wrapping_sub(start))
-        });
+        let gmem_buf = self.gmem.refresh(&self.ctx, pools);
         self.gmem.logs().begin(region, self.gmem.ranges());
         let gmem_logs = self.gmem.logs().clone();
         let scratch = batch.scratch();
-        let preload = {
-            let snaps: Vec<Arc<[u8]>> = detail
-                .draws
-                .iter()
-                .flat_map(|d| d.ubos.iter().chain(d.sbufs.iter()))
-                .chain(detail.dispatches.iter().flat_map(|d| d.ubos.iter()))
-                .filter_map(|u| u.snapshot.clone())
-                .collect();
-            let scratch = scratch.clone();
-            std::thread::Builder::new()
-                .name("nxkit-preload".into())
-                .spawn(move || {
-                    // Every uniform snapshot of the frame goes to the scratch memory once. The chunks then only look the
-                    // addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
-                    // every draw by all chunk threads.
-                    let mut preloaded: FastMap<usize, u64> = FastMap::default();
-                    for bytes in &snaps {
-                        let key = bytes.as_ptr() as usize;
-                        if !preloaded.contains_key(&key)
-                            && let Ok(a) = scratch.push(bytes)
-                        {
-                            preloaded.insert(key, a);
-                        }
-                    }
-                    preloaded
-                })
-        };
+        let preload = preload::start(detail, &scratch);
         mark(t0, "ring");
         let mut uses = collect_uses(frame, plan);
         // The textures the fragment shaders of draws bind as images are not in the frame's lists. They are used (not
@@ -302,7 +277,7 @@ impl Gpu {
             let (a, b) = self.bindless.pool_buffers();
             let mut all: Vec<Texture> = textures.values().map(|r| r.tex.clone()).collect();
             all.extend(handles.keep);
-            Arc::new((all, a, b, gmem_buf.clone()))
+            Arc::new((all, a, b, gmem_buf.clone(), pools.clone()))
         };
 
         let mut deswizzled = Vec::new();
@@ -447,10 +422,7 @@ impl Gpu {
         mark(t0, "barriers");
         let run_at: FastMap<u32, RecordingRun> =
             detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
-        let preloaded: FastMap<usize, u64> = match preload {
-            Ok(h) => h.join().unwrap_or_default(),
-            Err(_) => FastMap::default(),
-        };
+        let preloaded = preload::finish(preload);
         mark(t0, "preload");
         let uploaded = Mutex::new(FastMap::default());
         let sh = Shared {
@@ -472,11 +444,13 @@ impl Gpu {
                     logs: Some((&*gmem_logs, region)),
                 },
                 pools: self.bindless.pools(),
+                guest_pools: pools,
                 default_sampler: self.bindless.default_sampler_id(),
                 statics: self.bindless.statics(),
                 scale,
             },
             guest: &self.guest,
+            pools,
             icbs: &self.icbs,
             ordinals: &ords,
             run_at: &run_at,

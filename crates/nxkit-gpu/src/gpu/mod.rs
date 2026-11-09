@@ -30,6 +30,7 @@ use crate::copyback::CopyBack;
 use crate::detail::{DrawArgs, FrameDetail, RecordingRun};
 use crate::draws::{Shared, ordinals};
 use crate::encode::{Tables, render_pass};
+use crate::guestpools::GuestPools;
 use crate::icbs::Icbs;
 use crate::jobs;
 use crate::passes::{compute_pass, cpu_read};
@@ -43,6 +44,7 @@ use crate::upload::{Dirty, Transfer};
 mod diag;
 mod frame;
 mod handles;
+mod preload;
 mod timing;
 mod uses;
 
@@ -93,6 +95,7 @@ type Keep = (
     Arc<DataBuffer>,
     Arc<DataBuffer>,
     Option<Arc<DataBuffer>>,
+    Arc<GuestPools>,
 );
 
 /// The frame encoder.

@@ -31,6 +31,9 @@ pub(crate) struct Env<'a> {
     /// The raw global memory table and logs.
     pub(crate) gmem: crate::gmem::GmemEnv<'a>,
     pub(crate) pools: (u64, u64),
+    /// The memory pools at the flush of the frame.
+    #[allow(dead_code)] // the argument buffer package (P4b) resolves through it
+    pub(crate) guest_pools: &'a crate::guestpools::GuestPools,
     pub(crate) default_sampler: u64,
     /// The support buffer and the zero buffer, from [`Bindless::statics`].
     pub(crate) statics: (u64, u64),

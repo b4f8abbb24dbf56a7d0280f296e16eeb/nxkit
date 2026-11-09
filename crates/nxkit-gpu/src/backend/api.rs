@@ -13,13 +13,23 @@ impl Backend for GpuBackend {
 
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()> {
         let gpu_addr = self.guest.gpu_address(pool.host, pool.len).map_err(fail)?;
-        locked(&self.gpu)
+        // A pool of no bytes holds no address. The encoder still hears of it, as before.
+        let id = (pool.len > 0)
+            .then(|| self.pools.register(gpu_addr, pool.len, pool.flags))
+            .transpose()
+            .map_err(|e| fail(format_args!("bad pool range {:#x}+{:#x}", e.start, e.len)))?;
+        let r = locked(&self.gpu)
             .register_memory_pool(gpu_addr, pool.len, pool.flags)
-            .map_err(fail)
+            .map_err(fail);
+        if let (Err(_), Some(id)) = (&r, id) {
+            self.pools.unregister_id(id);
+        }
+        r
     }
 
     fn unregister_pool(&self, host: u64) {
         if let Ok(gpu_addr) = self.guest.gpu_address(host, 1) {
+            self.pools.unregister(gpu_addr);
             locked(&self.gpu).unregister_memory_pool(gpu_addr);
         }
     }
@@ -63,6 +73,8 @@ impl Backend for GpuBackend {
             );
             detail = FrameDetail::default();
         }
+        // The snapshot of the flush: a pool the game finalizes after this point still serves the frame.
+        let pools = self.pools.current();
         if let Some(enc) = &self.enc {
             let settled = enc.settle();
             if let Some(update) = &settled.update {
@@ -75,6 +87,7 @@ impl Backend for GpuBackend {
                     plan: plan.clone(),
                     detail,
                     snapshot,
+                    pools,
                     fence,
                 });
                 if !enc.submit(job) {
@@ -83,7 +96,7 @@ impl Backend for GpuBackend {
                 return settled.error.map_or(Ok(()), |e| Err(BackendError(e)));
             }
         }
-        let r = self.flush_sync(frame, plan, fence, &detail, cx);
+        let r = self.flush_sync(frame, plan, &pools, fence, &detail, cx);
         drop_later(detail);
         r
     }

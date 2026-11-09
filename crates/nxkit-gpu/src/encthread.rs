@@ -24,6 +24,7 @@ use nxkit_nvn::passes::PassPlan;
 use nxkit_nvn::resource::{ResourceTable, TexId};
 
 use crate::detail::FrameDetail;
+use crate::guestpools::GuestPools;
 use crate::snapshot::Snapshot;
 
 /// One frame for the encoder thread.
@@ -36,6 +37,9 @@ pub(crate) struct Job {
     pub(crate) detail: FrameDetail,
     /// The texture records and handles that the frame names, as they were at the flush.
     pub(crate) snapshot: Snapshot,
+    /// The memory pools at the flush. The frame resolves guest addresses against them, even if the game finalizes a
+    /// pool before the thread runs the job.
+    pub(crate) pools: Arc<GuestPools>,
     /// The fence of the flush.
     pub(crate) fence: Fence,
 }
@@ -267,6 +271,7 @@ mod tests {
             plan: PassPlan::default(),
             detail: FrameDetail::default(),
             snapshot: Snapshot::default(),
+            pools: Arc::new(GuestPools::empty()),
             fence: Fence(fence),
         })
     }

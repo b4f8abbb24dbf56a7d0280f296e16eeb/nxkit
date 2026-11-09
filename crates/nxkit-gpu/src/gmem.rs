@@ -40,6 +40,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use nxkit_metal::{BATCHES_IN_FLIGHT, Context, DataBuffer};
 use nxkit_nvn::diag::{Reason, note, note_n};
 
+use crate::pools::{Backing, PoolSnapshot};
+
 /// Entries of the table (`GlobalToStorage.GmemMapLog2` = 13).
 pub(crate) const ENTRIES: usize = 8192;
 /// Bytes of one entry.
@@ -116,9 +118,11 @@ pub(crate) fn build_table(pools: impl IntoIterator<Item = (u64, u64, u64)>) -> T
 pub(crate) struct Gmem {
     /// `start -> end` of each pool, in guest GPU addresses. Pools do not overlap.
     pools: BTreeMap<u64, u64>,
-    /// Counts the changes of `pools`. The table is built again when it differs from `built`.
+    /// Counts the changes of `pools`.
     generation: u64,
-    built: u64,
+    /// The generation of `pools` and the generation of the pool snapshot that the table was built from. The table is
+    /// built again when either differs.
+    built: Option<(u64, u64)>,
     buffer: Option<Arc<DataBuffer>>,
     ranges: Arc<Vec<(u64, u64)>>,
     logs: Arc<GmemLogs>,
@@ -131,7 +135,7 @@ impl Gmem {
         Ok(Self {
             pools: BTreeMap::new(),
             generation: 1,
-            built: 0,
+            built: None,
             buffer: None,
             ranges: Arc::new(Vec::new()),
             logs: Arc::new(GmemLogs::new(ctx)?),
@@ -165,19 +169,20 @@ impl Gmem {
         }
     }
 
-    /// Builds the table again when the pools changed. `delta` gives the delta of a pool range, or `None` when the GPU
-    /// cannot reach it (the pool is then left out). Returns the table's buffer, which the batch must keep alive.
-    pub(crate) fn refresh(
+    /// Builds the table again when the pools or the snapshot changed. The delta of a pool is the snapshot's real
+    /// address of its start minus the start; a pool that the snapshot does not resolve is left out. Returns the
+    /// table's buffer, which the batch must keep alive.
+    pub(crate) fn refresh<B: Backing>(
         &mut self,
         ctx: &Context,
-        delta: impl Fn(u64, u64) -> Option<u64>,
+        snapshot: &PoolSnapshot<B>,
     ) -> Option<Arc<DataBuffer>> {
-        if self.built != self.generation {
-            let t = build_table(
-                self.pools
-                    .iter()
-                    .filter_map(|(s, e)| delta(*s, *e - *s).map(|d| (*s, *e, d))),
-            );
+        let stamp = (self.generation, snapshot.generation());
+        if self.built != Some(stamp) {
+            let t = build_table(self.pools.iter().filter_map(|(s, e)| {
+                let at = snapshot.resolve(*s, *e - *s).ok()?;
+                Some((*s, *e, at.real.wrapping_sub(*s)))
+            }));
             if t.over != 0 {
                 note_n(Reason::GmemPoolsOver, u64::from(t.over));
             }
@@ -199,7 +204,7 @@ impl Gmem {
                     self.buffer = None;
                 }
             }
-            self.built = self.generation;
+            self.built = Some(stamp);
         }
         self.buffer.clone()
     }
@@ -442,6 +447,84 @@ mod tests {
         assert_eq!(g.pools.len(), 1);
         g.remove_pool(0x1800);
         assert!(g.pools.is_empty());
+    }
+
+    /// A backing whose real address is a fixed distance from the host address, so a table delta is visible.
+    struct Shifted(u64);
+
+    impl Backing for Shifted {
+        fn real_base(&self) -> u64 {
+            self.0
+        }
+    }
+
+    struct NoPins;
+
+    impl crate::pools::PagePins for NoPins {
+        fn pin(&self, _start: u64, _end: u64) {}
+        fn unpin(&self, _start: u64, _end: u64) {}
+    }
+
+    const SHIFT: u64 = 0x1_0000_0000;
+
+    fn shifted_set() -> crate::pools::PoolSet<Shifted> {
+        crate::pools::PoolSet::new(
+            0,
+            0,
+            |host: u64, _len: u64| Ok(Shifted(host + SHIFT)),
+            Arc::new(NoPins),
+        )
+    }
+
+    fn delta_of_entry(buf: &DataBuffer, entry: usize) -> u64 {
+        let mut b = [0u8; 8];
+        buf.read((entry * ENTRY_BYTES + 16) as u64, &mut b).unwrap();
+        u64::from_le_bytes(b)
+    }
+
+    #[test]
+    fn the_table_takes_the_delta_of_a_pool_from_the_snapshot() {
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let set = shifted_set();
+        set.register(0x4000, 0x4000, 0).unwrap();
+        let mut g = Gmem::new(&ctx).unwrap();
+        g.add_pool(0x4000, 0x4000);
+        // a pool that the snapshot does not hold is left out
+        g.add_pool(0x10_0000, 0x1000);
+        let buf = g.refresh(&ctx, &*set.current()).unwrap();
+        assert_eq!(g.ranges(), Arc::new(vec![(0, 0), (0x4000, 0x8000)]));
+        assert_eq!(delta_of_entry(&buf, 1), SHIFT);
+    }
+
+    #[test]
+    fn the_table_is_built_again_only_when_a_generation_changed() {
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let set = shifted_set();
+        set.register(0x4000, 0x4000, 0).unwrap();
+        let mut g = Gmem::new(&ctx).unwrap();
+        g.add_pool(0x4000, 0x4000);
+        let snap = set.current();
+        let first = g.refresh(&ctx, &*snap).unwrap();
+        // the same pools and the same generation: the same buffer
+        let again = g.refresh(&ctx, &*snap).unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        let same = g.refresh(&ctx, &*set.current()).unwrap();
+        assert!(Arc::ptr_eq(&first, &same));
+        // a new snapshot generation builds it again
+        set.register(0x10_0000, 0x4000, 0).unwrap();
+        let newer = g.refresh(&ctx, &*set.current()).unwrap();
+        assert!(!Arc::ptr_eq(&first, &newer));
+        let held = g.refresh(&ctx, &*set.current()).unwrap();
+        assert!(Arc::ptr_eq(&newer, &held));
+        // so does a change of the pools of the table
+        g.add_pool(0x10_0000, 0x4000);
+        let last = g.refresh(&ctx, &*set.current()).unwrap();
+        assert!(!Arc::ptr_eq(&newer, &last));
+        assert_eq!(g.ranges().len(), 3);
     }
 
     #[test]

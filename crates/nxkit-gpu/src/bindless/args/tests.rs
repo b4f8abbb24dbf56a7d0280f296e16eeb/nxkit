@@ -21,12 +21,15 @@ fn env<'a>(
     fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
     images: &'a crate::draws::FastMap<ImageKey, ImageRes>,
 ) -> Env<'a> {
+    static NO_POOLS: std::sync::OnceLock<crate::guestpools::GuestPools> =
+        std::sync::OnceLock::new();
     Env {
         handles,
         fits,
         images,
         gmem: crate::gmem::GmemEnv::NONE,
         pools: (0, 0),
+        guest_pools: NO_POOLS.get_or_init(crate::guestpools::GuestPools::empty),
         default_sampler: 0,
         statics: (0, 0),
         scale: 2.0,
