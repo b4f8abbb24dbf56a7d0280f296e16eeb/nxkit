@@ -75,7 +75,8 @@ State of the pull path:
   with the base instance, and unaligned bases (low bits move into the attribute offset). `vin_tests.rs` covers it.
 - Build: `_bp.metallib` exists for all 10 950 shaders. The 17:50 archive already compiled `_bp` bases for all 33 365
   non-mesh pairs, so the archive cost is known (see the table).
-- Host: built behind `NXKIT_PULL` (on by default; `NXKIT_PULL=0` draws with stage_in). `programs.rs` loads
+- Host: built behind `NXKIT_PULL` (off by default since it stalled the GPU in the title of OoT; `NXKIT_PULL=1`
+  turns it on). `programs.rs` loads
   `<key>_bp.metallib` and the `pull` field's entry for a vertex shader with a `pull` field at slot 16
   (`StageProgram::pull`); a `_bp` that does not load keeps `_b`. `pull/mod.rs` writes the 320-byte block per draw from
   `DrawDetail::streams` / `attributes` (the stream address is already the host GPU address of the guest buffer),
@@ -104,7 +105,8 @@ Host work:
 - `plan.rs`: archive `(<vk>_bp, entry)` when the vertex shader has a pull field, `(<vk>_b, entry)` otherwise; drop the
   `left[2]` case. The host must ask for exactly what the plan archives (the bug of 17:50).
 
-Switch: `NXKIT_PULL=0` draws with stage_in as today (the `_b` library stays), default on once the pixel tests pass.
+Switch: `NXKIT_PULL=1` draws through `_bp`; without it the host draws with stage_in (the `_b` library stays).
+Default on once the pixel test (`nxkit-metal` `tests/pull.rs`) passes and the title of OoT runs steady with it.
 
 Effort: host ≈ 300 lines + a pixel test (pull vs stage_in for each format class, divisor, stride 0, unaligned base),
 `plan.rs` ≈ 20 lines + `mesh_pairs.rs` test update. 2 to 3 days.
