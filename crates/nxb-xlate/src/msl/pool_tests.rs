@@ -148,7 +148,8 @@ fn argument_ids_count_a_pointer_once() {
     let t = translate(&b);
     let r = t.libraries[0].reflection.clone().expect("reflection");
     let ids: Vec<u32> = r.bindings.iter().map(|x| x.arg_id).collect();
-    assert_eq!(ids, vec![0, 1]);
+    // The texture pool, the sampler pool and the blend word of the pixel shader.
+    assert_eq!(ids, vec![0, 1, 2]);
 }
 
 #[test]

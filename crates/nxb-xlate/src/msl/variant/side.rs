@@ -34,6 +34,18 @@ static inline bool dm_alpha_pass(float a, constant dm_alpha_state& s)
 }
 ";
 
+/// The blend word helper: true when the source RGB factor of a target is exactly 0 for this pixel.
+///
+/// `k` is the kind of the target in the blend word (`blendz`): 1 `ZERO`, 2 `SRC_ALPHA`, 3 `ONE_MINUS_SRC_ALPHA`,
+/// 4 `SRC1_ALPHA`, 5 `ONE_MINUS_SRC1_ALPHA`. The tests are on integer bits, so fast math cannot fold them away.
+pub const BLENDZ_HELPER: &str = "
+static inline __attribute__((always_inline)) bool dm_bz_zero(uint k, float a, float a1)
+{
+    uint b = k < 4u ? as_type<uint>(a) : as_type<uint>(a1);
+    return k == 1u || ((k == 2u || k == 4u) && (b & 0x7fffffffu) == 0u) || ((k == 3u || k == 5u) && b == 0x3f800000u);
+}
+";
+
 /// The logic operation helper.
 pub const LOGIC_HELPER: &str = "
 struct dm_logic_state { uint op; uint pad0, pad1, pad2; uint4 mask[8]; };   // NVN_LOGIC_OP_* and each colour target's channel masks (dmsh_logic.py)

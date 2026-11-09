@@ -306,3 +306,160 @@ fn metal_builds_the_derived_entries() {
         assert!(at(n.as_bytes()), "{n}");
     }
 }
+
+/// The text of the function that starts with `head`, up to its closing brace at the start of a line.
+fn function_of<'a>(msl: &'a str, head: &str) -> &'a str {
+    let at = msl
+        .find(head)
+        .unwrap_or_else(|| panic!("missing {head}\n{msl}"));
+    let end = msl[at..].find("\n}\n").expect("end of function");
+    &msl[at..at + end]
+}
+
+/// `colors(n)` that stores a float to each of the colours 0 to n - 1.
+fn float_colors(n: usize) -> B {
+    let mut b = colors(n);
+    let f = float_in(&mut b);
+    for l in 0..n {
+        b.store_io(IoVariable::FragmentOutputColor, Some(l as i32), 0, f);
+    }
+    b
+}
+
+#[test]
+fn the_blend_rule_wraps_main0() {
+    let (_, t) = side_sample();
+    let msl = &t.libraries[0].msl;
+    assert!(msl.contains("constant uint* dm_bz [[id("), "{msl}");
+    let r = t.libraries[0].reflection.as_ref().expect("reflection");
+    let bz = r
+        .bindings
+        .iter()
+        .find(|b| b.msl_name == "dm_bz")
+        .expect("the blend word binding");
+    assert_eq!(bz.kind, crate::msl::abi::Kind::BlendZ);
+    assert_eq!(bz.kind.as_str(), "blendz");
+    assert!(msl.contains("static main0_out dm_body_main0("));
+    assert!(msl.contains("static inline __attribute__((always_inline)) bool dm_bz_zero("));
+    let head = "static inline __attribute__((always_inline)) bool dm_bz_zero(";
+    let at = msl.find(head).expect("helper");
+    assert!(msl[..at].ends_with('\n'), "the helper is not a template");
+    assert!(
+        !msl[..at]
+            .trim_end()
+            .lines()
+            .last()
+            .unwrap_or("")
+            .starts_with("template"),
+        "the helper is not a template"
+    );
+    let main0 = function_of(msl, "fragment main0_out main0(");
+    let rule = main0
+        .find("if (dm_bz_zero((dm_bz >> 3u) & 7u, dm_r.c1.w, 0.0f))")
+        .expect("the rule line of colour 1");
+    let call = main0.find("main0_out dm_r = dm_body_main0(").expect("call");
+    let ret = main0.find("return dm_r;").expect("return");
+    assert!(call < rule && rule < ret, "{main0}");
+    assert!(main0.contains("uint dm_bz = *spvDescriptorSet0.dm_bz;"));
+    assert!(main0.contains("dm_r.c1.x = 0.0f; dm_r.c1.y = 0.0f; dm_r.c1.z = 0.0f;"));
+    assert!(!main0.contains("dm_r.c1.w = 0.0f"));
+}
+
+#[test]
+fn the_blend_rule_takes_the_body_form() {
+    let mut b = colors(1);
+    let f = float_in(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, f);
+    let msl = b.msl();
+    assert!(msl.contains("static main0_out dm_body_main0("), "{msl}");
+    let main0 = function_of(&msl, "fragment main0_out main0(");
+    assert!(main0.contains("main0_out dm_r = dm_body_main0("));
+    assert!(main0.contains("if (dm_bz_zero((dm_bz >> 0u) & 7u, dm_r.c0.w, 0.0f))"));
+}
+
+#[test]
+fn each_target_has_its_own_kind() {
+    let msl = float_colors(3).msl();
+    let main0 = function_of(&msl, "fragment main0_out main0(");
+    for (n, shift) in [(0, 0), (1, 3), (2, 6)] {
+        let want = format!("if (dm_bz_zero((dm_bz >> {shift}u) & 7u, dm_r.c{n}.w, 0.0f))");
+        assert!(main0.contains(&want), "missing {want}\n{main0}");
+        assert!(main0.contains(&format!("dm_r.c{n}.z = 0.0f;")));
+    }
+}
+
+#[test]
+fn pads_and_integer_entries_get_no_rule() {
+    // The pad of colour 0 gets no line, the float colour 1 does.
+    let (_, t) = side_sample();
+    let msl = &t.libraries[0].msl;
+    assert!(!msl.contains("dm_r.c0_pad.x = 0.0f"), "{msl}");
+    assert!(!msl.contains("dm_r.c0_pad.w, "));
+    // An integer colour has an entry without a rule.
+    let mut b = colors(1);
+    let v = int_value(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, v);
+    let msl = b.msl();
+    let u = function_of(&msl, "static main0_out_u dm_body_main0_u(");
+    assert!(!u.contains("dm_bz"), "{u}");
+    // A mixed shader: only the float member of `main0_m` has a line.
+    let mut b = colors(2);
+    let f = float_in(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, f);
+    let v = int_value(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(1), 0, v);
+    let msl = b.msl();
+    let m = function_of(&msl, "static main0_out_m dm_body_main0_m(");
+    assert!(
+        m.contains("if (dm_bz_zero((dm_bz >> 0u) & 7u, dm_r.c0.w, 0.0f))"),
+        "{m}"
+    );
+    assert!(!m.contains("dm_r.c1.x = 0.0f"), "{m}");
+    assert!(!m.contains(">> 3u"), "{m}");
+}
+
+#[test]
+fn the_second_source_feeds_the_first_target() {
+    let b = float_colors(2);
+    let opt = super::Options {
+        dual_source: true,
+        ..super::Options::default()
+    };
+    let t = super::library::build(&b.s, &super::Context::default(), &opt).expect("build");
+    let msl = &t.libraries[0].msl;
+    let d = function_of(msl, "static main0_out_d dm_body_main0_d(");
+    assert!(
+        d.contains("if (dm_bz_zero((dm_bz >> 0u) & 7u, dm_r.c0.w, dm_r.c1.w))"),
+        "{d}"
+    );
+    assert!(!d.contains("dm_r.c1.x = 0.0f"), "{d}");
+    assert!(!d.contains(">> 3u"), "{d}");
+    // The entry for the guest's own colours keeps a line per colour.
+    let main0 = function_of(msl, "fragment main0_out main0(");
+    assert!(main0.contains("dm_r.c0.w, 0.0f))") && main0.contains("dm_r.c1.w, 0.0f))"));
+}
+
+#[test]
+fn a_shader_without_colours_reads_no_word() {
+    let mut b = B::new(crate::attr::Stage::Fragment, "ps");
+    b.s.props.definitions.imap_types = vec![[2, 2, 2, 2]];
+    let msl = b.msl();
+    assert!(msl.contains("constant uint* dm_bz [[id("), "{msl}");
+    assert!(!msl.contains("dm_bz_zero"));
+    assert!(!msl.contains("*spvDescriptorSet0.dm_bz"));
+}
+
+#[test]
+#[ignore]
+fn metal_builds_the_blend_rule() {
+    let (_, t) = side_sample();
+    metal_library("blendz_ps", &t);
+    let mut b = float_colors(2);
+    b.s.props.definitions.early_z_force = true;
+    let opt = super::Options {
+        dual_source: true,
+        ..super::Options::default()
+    };
+    let t = super::library::build(&b.s, &super::Context::default(), &opt).expect("build");
+    metal_library("blendz_dual_ps", &t);
+}

@@ -32,6 +32,8 @@ pub struct Feature {
 /// `hmma` 1: an F16 HMMA chain rounds its accumulator to half after every step (`msl/hmma.rs`).
 ///
 /// `meshpos` 1: the position of a mesh shader is `invariant` (`msl/mesh.rs`), so two mesh shaders give equal depths.
+///
+/// `blendz` 1: a pixel shader writes RGB 0 to a float colour whose blend factor is 0 (`msl/variant/pixel.rs`).
 pub const FEATURES: &[Feature] = &[
     Feature {
         name: "hmma",
@@ -42,6 +44,11 @@ pub const FEATURES: &[Feature] = &[
         name: "meshpos",
         revision: 1,
         uses: uses_mesh_position,
+    },
+    Feature {
+        name: "blendz",
+        revision: 1,
+        uses: uses_blend_word,
     },
 ];
 
@@ -63,6 +70,11 @@ fn uses_hmma(job: &Job, code: &[u8]) -> bool {
 /// A mesh shader (`ms`): the only stage whose wrapper declares the position the feature changes.
 fn uses_mesh_position(job: &Job, _code: &[u8]) -> bool {
     job.mesh_stage.as_ref().is_some_and(|m| m.kind == "ms")
+}
+
+/// A pixel shader: every one reads the blend word, whether it writes a float colour or not.
+fn uses_blend_word(job: &Job, _code: &[u8]) -> bool {
+    job.stage == "ps" && job.mesh_stage.is_none()
 }
 
 /// The feature field of a shader's key over `features`: `name=revision` of each feature it uses, `;`-joined, empty
@@ -129,6 +141,30 @@ mod tests {
         assert_eq!(tags(&mesh("ms"), &code(&[HMMA])), "hmma=1;meshpos=1");
         assert_eq!(tags(&mesh("ts"), &code(&[])), "");
         assert_eq!(tags(&job(true), &code(&[])), "");
+    }
+
+    #[test]
+    fn blendz_is_in_the_key_of_pixel_shaders_only() {
+        let stage = |name: &str| {
+            let mut j = job(true);
+            j.stage = name.into();
+            j
+        };
+        assert_eq!(tags(&stage("ps"), &code(&[])), "blendz=1");
+        assert_eq!(tags(&stage("ps"), &code(&[HMMA])), "hmma=1;blendz=1");
+        for other in ["vs", "cs", "gs"] {
+            assert_eq!(tags(&stage(other), &code(&[])), "", "{other}");
+        }
+        let mut mesh = stage("cs");
+        mesh.mesh_stage = Some(crate::job::MeshStage {
+            kind: "ms".into(),
+            ..Default::default()
+        });
+        assert_eq!(tags(&mesh, &code(&[])), "meshpos=1");
+        // A mesh job is not a pixel shader, whatever its stage name.
+        let mut odd = stage("ps");
+        odd.mesh_stage = mesh.mesh_stage.clone();
+        assert_eq!(tags(&odd, &code(&[])), "meshpos=1");
     }
 
     #[test]

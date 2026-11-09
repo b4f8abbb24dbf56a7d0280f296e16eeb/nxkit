@@ -152,6 +152,10 @@ pub(crate) fn prepare(
         base_instance: 0,
         groups: None,
         push: d.push.as_deref(),
+        blendz: match (&fs, stage) {
+            (Some(f), Stage::Fragment) => crate::translate::blend_zero_word(d, f, &pc.targets),
+            _ => 0,
+        },
     };
     let mesh_args = crate::bindless::fill_args(&ms, &inputs(Stage::Mesh), &sh.env, sink)?;
     let object_args = match &ts {
@@ -234,6 +238,7 @@ mod tests {
             base_instance: 0,
             groups: None,
             push: None,
+            blendz: 0,
         };
         let mut b = vec![0u8; 0xA00];
         storage_table(&mut b, &inp);

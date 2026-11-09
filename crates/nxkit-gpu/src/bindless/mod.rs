@@ -135,6 +135,7 @@ impl ArgsMemo {
         m.next.push(p as *const StageProgram as u64);
         m.next.push(u64::from(inp.base_instance));
         m.next.push(u64::from(pass_scale.to_bits()));
+        m.next.push(u64::from(inp.blendz));
         // The push constants are shared until the game pushes again, so their address names their content.
         m.next.push(inp.push.map_or(0, |b| b.as_ptr() as u64));
         let mark = m.next.len();

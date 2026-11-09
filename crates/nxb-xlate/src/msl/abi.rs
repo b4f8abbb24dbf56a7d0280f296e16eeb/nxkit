@@ -54,6 +54,8 @@ pub enum Kind {
     SampHtab,
     /// `border`: the border colour block.
     Border,
+    /// `blendz`: the word that tells, per colour target, which source factor is zero for a pixel (`BLENDZ_MEMBER`).
+    BlendZ,
     /// `gmem_map`: the memory pool table for untraced global memory.
     GmemMap,
     /// `gmem_log`: the write log of untraced global memory.
@@ -89,6 +91,7 @@ impl Kind {
             Kind::TexHtab => "tex_htab",
             Kind::SampHtab => "samp_htab",
             Kind::Border => "border",
+            Kind::BlendZ => "blendz",
             Kind::GmemMap => "gmem_map",
             Kind::GmemLog => "gmem_log",
         }
@@ -182,6 +185,8 @@ pub const SUPPORT_RENDER_SCALES: u32 = 73;
 pub const SUPPORT_SIZE: u32 = 1392;
 /// The name of the border block's member in the argument buffer.
 pub const BORDER_MEMBER: &str = "dm_border";
+/// The name of the blend word's member in the argument buffer of a pixel shader.
+pub const BLENDZ_MEMBER: &str = "dm_bz";
 /// The fragment argument table's binding of the logic op block.
 pub const LOGIC_BUFFER: u32 = 29;
 /// The function constant index of the logic op.

@@ -97,6 +97,9 @@ const KNOBS: &[&str] = &[
     // The supersede rule of the texture store is off, the same as `NXKIT_TEX_SUPERSEDE=0`, switched while the game
     // runs, to compare both at one place.
     "nosupersede",
+    // The blend word of every pixel shader is 0: a source colour with the blend factor 0 is not set to 0 in the shader,
+    // and the Apple blender gives NaN for `0 x NaN`. It shows the blots that the rule removes.
+    "nobz",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

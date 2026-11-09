@@ -281,6 +281,10 @@ pub(crate) fn prepare(
         base_instance,
         groups: None,
         push: d.push.as_deref(),
+        blendz: match (&fs, stage) {
+            (Some(f), Stage::Fragment) => translate::blend_zero_word(d, f, &pc.targets),
+            _ => 0,
+        },
     };
     let vertex_args = crate::bindless::fill_args(&vs, &inputs(Stage::Vertex), &sh.env, sink)?;
     let fragment_args = match &fs {

@@ -103,6 +103,27 @@ A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images
 
 Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true. That is the case when the shader forces the early depth test, or when its texture pool marks IDs and the shader has no discard, depth write or memory write (`pool::early`). The rule lives in `entry::early_tests`, and the base entries, the side entries and the fetch entry use it.
 
+## Blend factor 0
+
+On the console a blend term whose factor is exactly 0 contributes 0, also when the colour is NaN or Inf. The Apple GPU blender computes `0 x NaN = NaN`. A game that writes `Inf * 0 = NaN` with alpha 0 under `SRC_ALPHA` blending into a float target puts the NaN into the target, and a later pass spreads it as very bright blots.
+
+Every pixel shader has the argument buffer member `constant uint* dm_bz` (binding kind `blendz`). It points to one 32-bit word that the host fills for each draw: 3 bits per colour target `i` at bit `3 i`, the kind of the source RGB factor of that target.
+
+| kind | source RGB factor | the factor is 0 when |
+|---|---|---|
+| 0 | blending off, an integer format, a colour the shader does not write, the equation MIN or MAX, any other factor | never |
+| 1 | `ZERO` | always |
+| 2 | `SRC_ALPHA` | the alpha of the output is +0 or -0 |
+| 3 | `ONE_MINUS_SRC_ALPHA` | the alpha of the output is exactly 1 |
+| 4 | `SRC1_ALPHA` | the alpha of the second source is +0 or -0 |
+| 5 | `ONE_MINUS_SRC1_ALPHA` | the alpha of the second source is exactly 1 |
+
+When the word is not 0, `main0` calls `dm_body_main0` and then, for every float colour output, writes RGB 0 if `dm_bz_zero` says the factor is 0. The tests are on integer bits (`as_type<uint>`), so fast math cannot fold them away. Alpha is never changed, because it is also a factor and feeds alpha to coverage. Integer outputs, pads, the second source (`index(1)`) and the side entries (`main0_a`, `main0_l`, `_bf`) get no rule. `main0_m` and `main0_d` have the rule for their float members; `main0_d` passes the alpha of its second source as the second factor of kinds 4 and 5. The host sets the kinds 4 and 5 never, because it uses no dual source entry.
+
+The rule does not cover a destination term with factor 0 (the shader does not see the destination), the factors `DST_*`, `SRC_ALPHA_SATURATE` and the constant colour factors, and the colour of `SRC1_COLOR` per channel. These stay at kind 0. With a stale NaN in the destination, `NaN x 0` can still differ from the console.
+
+The feature revision `blendz` (now 1) is in the key of every pixel shader that is not a mesh stage job, so these shaders translate again. `TRANSLATOR_ID` does not change. A translation without the binding (an old store) works: the host does not fill what the program does not have, and the rule is off.
+
 ## Ampere global memory
 
 `ATOMG.CAS` (opcode 0x3a9) is a compare and swap. Rb holds the expected value and Rc (bits 64 to 71) the new value. Rd gets the old value.
@@ -191,7 +212,7 @@ the answer-table flag, the dual-source and fetch-outputs-only flags and the vary
 The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.19`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
-A change that alters the MSL only of shaders that use one feature of `nxb_xlate::msl::revision::FEATURES` (now `hmma` and `meshpos`) increases that feature's revision instead of `TRANSLATOR_ID`. The key of a shader whose code uses the feature has the field `features` (`hmma=1`, `meshpos=1`), so only these shaders translate again. A shader that uses no feature has no such field.
+A change that alters the MSL only of shaders that use one feature of `nxb_xlate::msl::revision::FEATURES` (now `hmma`, `meshpos` and `blendz`) increases that feature's revision instead of `TRANSLATOR_ID`. The key of a shader whose code uses the feature has the field `features` (`hmma=1`, `meshpos=1`, `blendz=1`), so only these shaders translate again. A shader that uses no feature has no such field.
 
 ## 64 bit floats
 

@@ -20,6 +20,8 @@ pub(crate) struct StageInputs<'a> {
     pub(crate) groups: Option<[u32; 3]>,
     /// The push constants of the draw or dispatch (bank 24), when it has any.
     pub(crate) push: Option<&'a [u8]>,
+    /// The blend word of a fragment stage (`translate::blend_zero_word`), 0 for every other stage.
+    pub(crate) blendz: u32,
 }
 
 /// What the argument buffers need besides the bindings.
@@ -275,6 +277,15 @@ fn build_args(
     r
 }
 
+/// The blend word: the zero buffer when the word is 0 (blending off), else a copy of the 4 bytes.
+fn blend_word(word: u32, zero: u64, sink: &mut dyn Sink) -> Result<u64, Skip> {
+    if word == 0 {
+        Ok(zero)
+    } else {
+        sink.put(&word.to_le_bytes())
+    }
+}
+
 fn build_args_in(
     p: &StageProgram,
     inp: &StageInputs<'_>,
@@ -351,6 +362,7 @@ fn build_args_in(
             }
             // A zero border block has no sampler bit set, so no sample is corrected.
             BindKind::Border => env.statics.1,
+            BindKind::BlendZ => blend_word(inp.blendz, env.statics.1, sink)?,
             BindKind::Sbuf => sbuf_word(
                 env.guest_pools,
                 inp.sbufs

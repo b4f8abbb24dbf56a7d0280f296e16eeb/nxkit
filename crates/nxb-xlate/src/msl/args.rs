@@ -66,6 +66,8 @@ pub struct Res {
     pub text: String,
     /// The program has border emulation.
     pub border: bool,
+    /// The program is a pixel shader and has the blend word.
+    pub blendz: bool,
     /// The argument buffer has members.
     pub has_args: bool,
     /// A fragment shader tests depth early because its pool marks only (see `pool::early`).
@@ -535,6 +537,10 @@ pub fn build(
         }
     }
     b.border(props)?;
+    if stage == "ps" {
+        b.member("constant uint*", abi::BLENDZ_MEMBER, 1, Kind::BlendZ);
+        b.res.blendz = true;
+    }
     let mut res = b.res;
     res.has_args = !b.members.is_empty();
     res.early = pool::early(&res, usage);

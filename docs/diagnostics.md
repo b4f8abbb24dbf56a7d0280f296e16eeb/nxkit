@@ -201,6 +201,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `rc3d` | The same as `NXKIT_RENDERCOND=3d`, switched while the game runs: a false condition leaves out draws and clears only. The front end marks the commands under a false condition when it appends a stream; the choice of the commands is made when they are encoded, so the switch acts on the next frame. |
 | `freshzero` | A Metal texture that the store made new for the frame and that gets no upload (a record that the GPU wrote last, a scaled or a widened texture) is cleared to zero before the frame uses it: colour 0,0,0,0, depth 0, stencil 0, every level, layer and depth plane, one render pass each in the first command buffer. Compressed, memoryless and stencil-only textures, and textures without render target usage, are skipped. A scaled texture whose guest copy is newer gets the scaled upload and is not cleared. |
 | `nosupersede` | The supersede rule of the texture store is off, the same as `NXKIT_TEX_SUPERSEDE=0`, switched while the game runs. It compares both at one place. |
+| `nobz` | The blend word of every pixel shader is 0, so a source colour whose blend factor is 0 is not set to 0 in the shader and the Apple blender gives NaN for `0 x NaN`. It shows the blots that the rule removes. |
 
 ## The render health report
 

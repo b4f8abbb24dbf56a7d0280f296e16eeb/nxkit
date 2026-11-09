@@ -207,6 +207,7 @@ fn a_uniform_word_is_real_and_c0_stays_virtual() {
         base_instance: 0,
         groups: Some([1, 1, 1]),
         push: None,
+        blendz: 0,
     };
     let mut b = Vec::new();
     drv_block(&mut b, &inp, &out);
@@ -289,4 +290,30 @@ fn a_storage_buffer_word_is_real_or_zero() {
 fn the_identity_backing_gives_the_address_back() {
     let pools = PoolSnapshot::whole(GUEST, LEN, Shifted(GUEST));
     assert_eq!(locate(&pools, GUEST + 0x123, 8), Some((GUEST + 0x123, 8)));
+}
+
+/// A sink that keeps what it gets.
+struct Puts(Vec<Vec<u8>>);
+
+impl Sink for Puts {
+    fn put(&mut self, data: &[u8]) -> Result<u64, Skip> {
+        self.0.push(data.to_vec());
+        Ok(0x1000 + 0x10 * self.0.len() as u64)
+    }
+}
+
+#[test]
+fn the_blend_word_zero_binds_the_zero_buffer() {
+    let mut sink = Puts(Vec::new());
+    assert_eq!(blend_word(0, 0x77, &mut sink).unwrap(), 0x77);
+    assert!(sink.0.is_empty());
+}
+
+#[test]
+fn a_blend_word_puts_four_bytes() {
+    let mut sink = Puts(Vec::new());
+    let word = (2u32 << 3) | 1;
+    let at = blend_word(word, 0x77, &mut sink).unwrap();
+    assert_eq!(at, 0x1010);
+    assert_eq!(sink.0, [word.to_le_bytes().to_vec()]);
 }

@@ -38,6 +38,8 @@ pub(crate) enum BindKind {
     Support,
     /// `border`: the border colour block.
     Border,
+    /// `blendz`: the blend word of the draw (`translate::blend_zero_word`), 4 bytes.
+    BlendZ,
     /// `sbuf`: the GPU address of storage buffer `reg`.
     Sbuf,
     /// `c1`: the shader's own constant segment, whose bytes the json carries.
@@ -352,6 +354,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             "ubo_ptr" => BindKind::UboPtr,
             "support" => BindKind::Support,
             "border" => BindKind::Border,
+            "blendz" => BindKind::BlendZ,
             "sbuf" => BindKind::Sbuf,
             "c1" => BindKind::C1,
             "img" => BindKind::Img,

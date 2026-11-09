@@ -45,6 +45,7 @@ fn dispatch(
         base_instance: 0,
         groups: Some(dd.groups),
         push: dd.push.as_deref(),
+        blendz: 0,
     };
     let args = fill_args(
         &p,

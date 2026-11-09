@@ -120,3 +120,42 @@ fn signed_arithmetic_wraps_without_nsw() {
     }
     assert!(!ir.contains("nsw") && !ir.contains("nuw"), "{ir}");
 }
+
+#[test]
+fn the_blend_rule_of_a_pixel_shader_emits() {
+    let ir = emit(
+        "struct spvDescriptorSetBuffer0 { constant uint* dm_bz [[id(0)]]; };\n\
+         struct main0_in { float4 u [[user(locn0)]]; };\n\
+         struct main0_out { float4 c0 [[color(0)]]; float4 c1 [[color(1)]]; };\n\
+         static inline __attribute__((always_inline)) bool dm_bz_zero(uint k, float a, float a1)\n\
+         {\n\
+             uint b = k < 4u ? as_type<uint>(a) : as_type<uint>(a1);\n\
+             return k == 1u || ((k == 2u || k == 4u) && (b & 0x7fffffffu) == 0u) || ((k == 3u || k == 5u) && b == 0x3f800000u);\n\
+         }\n\
+         static main0_out dm_body_main0(main0_in in, constant spvDescriptorSetBuffer0& spvDescriptorSet0)\n\
+         {\n\
+             main0_out out = {};\n\
+             out.c0 = in.u;\n\
+             out.c1 = in.u * in.u;\n\
+             return out;\n\
+         }\n\
+         fragment main0_out main0(main0_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])\n\
+         {\n\
+             main0_out dm_r = dm_body_main0(in, spvDescriptorSet0);\n\
+             uint dm_bz = *spvDescriptorSet0.dm_bz;\n\
+             if (dm_bz != 0u)\n\
+             {\n\
+                 if (dm_bz_zero((dm_bz >> 0u) & 7u, dm_r.c0.w, 0.0f)) { dm_r.c0.x = 0.0f; dm_r.c0.y = 0.0f; dm_r.c0.z = 0.0f; }\n\
+                 if (dm_bz_zero((dm_bz >> 3u) & 7u, dm_r.c1.w, dm_r.c0.w)) { dm_r.c1.x = 0.0f; dm_r.c1.y = 0.0f; dm_r.c1.z = 0.0f; }\n\
+             }\n\
+             return dm_r;\n\
+         }\n",
+    );
+    assert!(
+        ir.contains("define <{ <4 x float>, <4 x float> }> @main0("),
+        "{ir}"
+    );
+    // The tests are on integer bits, so fast math cannot fold them away.
+    assert!(ir.contains("and i32"), "{ir}");
+    assert!(ir.contains("1065353216"), "{ir}");
+}
