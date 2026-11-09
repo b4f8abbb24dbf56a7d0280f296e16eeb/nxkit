@@ -13,9 +13,11 @@
 // pointer offsets into the staged input.
 //
 // Costs, on an M2 Max (30 cores, 128 FMA lanes each, 1.4 GHz: 5.4 TMAC/s peak). A 3x3 layer is 1.19 GMAC at every
-// level, 2.3 M simdgroup products. The estimates below assume 40 % of peak (about 2.2 TMAC/s), the rate of the
-// 8x8 simdgroup_matrix kernels with an f16 round after every second product, so about 0.55 ms for each 3x3 layer and
-// 0.12 ms for each 2x2 layer (0.27 GMAC). Memory is not the limit: the biggest activation tensor is 16.6 MB.
+// level, 2.3 M simdgroup products, a 2x2 layer 0.27 GMAC. Measured with a kernel that only runs the products on
+// registers: 0.25 ms per 3x3 layer without the f16 round (4.9 TMAC/s) and 0.28 ms with it (4.3 TMAC/s), so that is the
+// floor of the layers; the 3x3 kernels below take 0.32 ms (the 2x2 ones 0.08 to 0.12). A product with an f16
+// accumulator is 6 times slower, and unrolling the 16-channel blocks of a tap is worth 5 %. The time of the whole
+// network is therefore the MACs: 15.7 GMAC are 3.7 ms at 4.3 TMAC/s.
 // ---------------------------------------------------------------------------------------------------------------------
 
 // A 3x3 stride-1 layer with zero padding. A threadgroup computes a TW x TH tile of output pixels for all COUT channels.
@@ -65,6 +67,7 @@ struct Conv3 {
         }
         for (int t = 0; t < 9; t++) {
             const int dy = t / 3, dx = t % 3;
+            _Pragma("clang loop unroll(full)")
             for (int kb = 0; kb < CIN / 16; kb++) {
                 hmat b0[NT], b1[NT];
                 device const half *bp = w + ((t * (CIN / 8) + kb * 2) * (COUT / 8) + int(ng) * NT) * 64;
@@ -121,7 +124,7 @@ static inline void conv3_buf(device const half *in, device half *out, device con
 
 // Layers 4 and 9: 32 -> 32 at 480x270. Tile 32 x 4, 4 simdgroups of one tile row (MT = 4, NT = 4): 16 products per
 // 16 loads, 32 accumulator registers. 15 x 68 threadgroups (the last row of tiles is half empty), staged tile 16 KB.
-// 0.5 ms each.
+// 0.32 ms each.
 kernel void ndve_l04(device const half *in [[buffer(0)]], device half *out [[buffer(1)]],
                      device const half *wb [[buffer(2)]], uint2 tg [[threadgroup_position_in_grid]],
                      uint sg [[simdgroup_index_in_threadgroup]], uint tid [[thread_index_in_threadgroup]]) {
@@ -140,7 +143,7 @@ kernel void ndve_l09(device const half *in [[buffer(0)]], device half *out [[buf
 
 // Layers 6 and 7: 64 -> 64 at 240x135. Tile 16 x 4 = 64 pixels; the 4 simdgroups are 2 (rows of 2 tile rows) x 2 (halves
 // of the 64 output channels), each MT = 4, NT = 4. The two halves load the same A tiles. 15 x 34 = 510 threadgroups of
-// 15.5 KB. 0.5 ms each.
+// 15.5 KB. 0.32 ms each.
 kernel void ndve_l06(device const half *in [[buffer(0)]], device half *out [[buffer(1)]],
                      device const half *wb [[buffer(2)]], uint2 tg [[threadgroup_position_in_grid]],
                      uint sg [[simdgroup_index_in_threadgroup]], uint tid [[thread_index_in_threadgroup]]) {
@@ -174,6 +177,7 @@ static inline void down_body(device const half *in, device half *out, device con
     }
     for (int t = 0; t < 4; t++) {
         const int dy = t >> 1, dx = t & 1;
+        _Pragma("clang loop unroll(full)")
         for (int kb = 0; kb < CIN / 16; kb++) {
             hmat b0[NT], b1[NT];
             device const half *bp = wb + ((t * (CIN / 8) + kb * 2) * NT) * 64;
@@ -205,14 +209,14 @@ static inline void down_body(device const half *in, device half *out, device con
     }
 }
 
-// Layer 3: 16 -> 32, 960x540 -> 480x270. Tasks of 16 pixels (MT = 2, NT = 4), 8100 tasks, 4 a threadgroup. 0.12 ms.
+// Layer 3: 16 -> 32, 960x540 -> 480x270. Tasks of 16 pixels (MT = 2, NT = 4), 8100 tasks, 4 a threadgroup. 0.09 ms.
 kernel void ndve_l03(device const half *in [[buffer(0)]], device half *out [[buffer(1)]],
                      device const half *wb [[buffer(2)]], uint tg [[threadgroup_position_in_grid]],
                      uint sg [[simdgroup_index_in_threadgroup]]) {
     down_body<16, 32, 2, 480, 270>(in, out, wb, tg * 4 + sg);
 }
 
-// Layer 5: 32 -> 64, 480x270 -> 240x135. Tasks of 16 pixels (MT = 2, NT = 8: 16 accumulators), 2025 tasks. 0.12 ms.
+// Layer 5: 32 -> 64, 480x270 -> 240x135. Tasks of 16 pixels (MT = 2, NT = 8: 16 accumulators), 2025 tasks. 0.08 ms.
 kernel void ndve_l05(device const half *in [[buffer(0)]], device half *out [[buffer(1)]],
                      device const half *wb [[buffer(2)]], uint tg [[threadgroup_position_in_grid]],
                      uint sg [[simdgroup_index_in_threadgroup]]) {
@@ -247,6 +251,7 @@ static inline void up_body(device const half *in, device const half *skip, devic
                 set_elems(acc[i][j], elems(sk));
             }
         }
+        _Pragma("clang loop unroll(full)")
         for (int kb = 0; kb < CIN / 16; kb++) {
             hmat b0[NT], b1[NT];
             device const half *bp = wb + ((t * (CIN / 8) + kb * 2) * NT) * 64;
@@ -277,7 +282,7 @@ static inline void up_body(device const half *in, device const half *skip, devic
 }
 
 // Layer 8: 64 -> 32, 240x135 -> 480x270, skip = layer 4's output. Tasks of 16 input pixels (MT = 2, NT = 4), 2025 tasks.
-// 0.15 ms.
+// 0.09 ms.
 kernel void ndve_l08(device const half *in [[buffer(0)]], device half *out [[buffer(1)]],
                      device const half *wb [[buffer(2)]], device const half *skip [[buffer(3)]],
                      uint tg [[threadgroup_position_in_grid]], uint sg [[simdgroup_index_in_threadgroup]]) {
@@ -285,7 +290,7 @@ kernel void ndve_l08(device const half *in [[buffer(0)]], device half *out [[buf
 }
 
 // Layer 10: 32 -> 16, 480x270 -> 960x540, skip = layer 2's output. Tasks of 32 input pixels (MT = 4, NT = 2), 4050
-// tasks. 0.12 ms.
+// tasks. 0.12 ms (the skip and the output are 16.6 MB each: this one is bound by memory).
 kernel void ndve_l10(device const half *in [[buffer(0)]], device half *out [[buffer(1)]],
                      device const half *wb [[buffer(2)]], device const half *skip [[buffer(3)]],
                      uint tg [[threadgroup_position_in_grid]], uint sg [[simdgroup_index_in_threadgroup]]) {
@@ -313,13 +318,17 @@ kernel void ndve_l10(device const half *in [[buffer(0)]], device half *out [[buf
 //
 // Rounding is that of the separate layers: f16 after every K = 16 step, relu(f16(D + bias)) as the mid value.
 // Work split: 4 simdgroups, simdgroup s takes rows s, s + 4, ... of the first layer's 14 rows and of the second's 12,
-// one row (4 m-tiles x 2 n-tiles = 8 accumulators) at a time, so B tiles serve 4 products and A tiles 2.
-// Expected, for the pair at the measured clock: the MAC time of the two layers (2 x 0.57 ms) times 1.12 plus the colour
-// conversion (about 0.27 ms) and the last layer's per-pixel epilogue: about 1.45 ms for layers 1 + 2 (was 1.48) and
-// 1.45 ms for 11 + 12 (was 1.50). The gain is the avoided traffic and the 4 m-tile rows sharing their B loads, not
-// fewer MACs, so it is small.
+// one row (4 m-tiles x 2 n-tiles = 8 accumulators) at a time. The 9 x 4 weight tiles of a layer are loaded into
+// registers once (36 registers) instead of 4 per tap and row. The A tiles are 8 pixels of 16 channels.
+// Pixel pitch PX. 24 halves (16 + 8) put the 8 rows of an A load in other banks, but the staged tile is then 26 KB and
+// only two threadgroups fit a core. With 16 the tile is 17 KB and three fit: layers 1 + 2 went from 1.09 to 0.88 ms in
+// spite of the bank conflicts. Layers 11 + 12 also have the 4 KB of D rows and did not gain from 16, they keep 24.
+// Measured on an M2 Max (ms of GPU time): 1.36 and 1.34 before, 0.88 and 1.15 now. The MAC time of the two layers is
+// 0.7 ms at the rate of the register-only products with rounding; the rest is the staging, the barriers and the
+// last layer's epilogue (the picture read 0.09, the texture write 0.03, the staging 0.08).
 // ---------------------------------------------------------------------------------------------------------------------
-struct Pair {
+template <int PX>
+struct PairT {
     static constant constexpr int TW = 30;
     static constant constexpr int TH = 12;
     static constant constexpr int W = 960;
@@ -328,7 +337,7 @@ struct Pair {
     static constant constexpr int IH = TH + 4;
     static constant constexpr int MW = TW + 2;
     static constant constexpr int MH = TH + 2;
-    static constant constexpr int PPX = 24;   // pixel pitch, halves (16 channels + 8: the 8 rows of an A load use other banks)
+    static constant constexpr int PPX = PX;   // pixel pitch, halves: 16 channels, or 16 + 8 so that the 8 rows of an A load use other banks
     static constant constexpr int STAGED = (IW * IH > MW * MH ? IW * IH : MW * MH) * PPX;   // halves
     static constant constexpr int THREADS = 128;
     static constant constexpr int WEIGHTS = 9 * 16 * 16;   // halves; the bias tiles follow
@@ -345,41 +354,50 @@ struct Pair {
         }
     }
 
-    // The same from the NV12 planes: the colour conversion and the 2x2 space-to-depth in one. Packed pixel (X, Y)
+    // The same from the converted picture (ndve_convert): the 2x2 space-to-depth. Packed pixel (X, Y)
     // channel 4 * (2 sy + sx) + c is picture pixel (2 X + sx, 2 Y + sy) component c, with alpha 1.
-    static inline void stage_pic(threadgroup half *st, texture2d<float, access::read> luma,
-                                 texture2d<float, access::sample> chroma, constant float *cp, uint tid, int tx0, int ty0) {
-        for (int i = int(tid); i < IW * IH * 4; i += THREADS) {
-            const int s = i & 3, p = i >> 2;
+    static inline void stage_pic(threadgroup half *st, device const uint *pic, uint tid, int tx0, int ty0) {
+        for (int p = int(tid); p < IW * IH; p += THREADS) {
             const int gx = tx0 - 2 + p % IW, gy = ty0 - 2 + p / IW;
-            half4 v = half4(0.0h);
+            half4 v[4];
+            _Pragma("clang loop unroll(full)")
+            for (int s = 0; s < 4; s++) v[s] = half4(0.0h);
             if (gx >= 0 && gx < W && gy >= 0 && gy < H) {
-                const float3 c = convert_px(luma, chroma, cp, uint2(2 * gx + (s & 1), 2 * gy + (s >> 1)));
-                v = half4(half3(c), 1.0h);
+                const uint2 top = *((device const uint2 *)(pic + (2 * gy) * 1920 + 2 * gx));
+                const uint2 bot = *((device const uint2 *)(pic + (2 * gy + 1) * 1920 + 2 * gx));
+                const uint q[4] = {top.x, top.y, bot.x, bot.y};
+                _Pragma("clang loop unroll(full)")
+                for (int s = 0; s < 4; s++) {
+                    v[s] = half4(half3(float3(float(q[s] & 255u), float((q[s] >> 8) & 255u), float((q[s] >> 16) & 255u)) /
+                                       255.0f), 1.0h);
+                }
             }
-            *((threadgroup half4 *)(st + p * PPX + 4 * s)) = v;
+            threadgroup half4 *d = (threadgroup half4 *)(st + p * PPX);
+            _Pragma("clang loop unroll(full)")
+            for (int s = 0; s < 4; s++) d[s] = v[s];
         }
     }
 
     // One row of output of a 3x3 layer: 4 m-tiles of 8 pixels at x = min(8 i, xmax) of row r, from `src` whose rows are
     // `rowpx` pixels apart (the output pixel (x, r) reads the source pixels (x + dx, r + dy)). Taps in order, one
     // K = 16 step each, from C = 0.
-    static inline void gemm_row(threadgroup const half *src, device const half *w, int r, int rowpx, int xmax,
+    static inline void load_w(device const half *w, thread hmat (&wr)[9][4]) {
+        _Pragma("clang loop unroll(full)")
+        for (int t = 0; t < 9; t++) {
+            _Pragma("clang loop unroll(full)")
+            for (int q = 0; q < 4; q++) simdgroup_load(wr[t][q], w + t * 256 + q * 64, 8);
+        }
+    }
+    static inline void gemm_row(threadgroup const half *src, thread const hmat (&wr)[9][4], int r, int rowpx, int xmax,
                                 thread fmat (&acc)[4][2]) {
         _Pragma("clang loop unroll(full)")
         for (int i = 0; i < 4; i++) {
             acc[i][0] = zero_acc();
             acc[i][1] = zero_acc();
         }
+        _Pragma("clang loop unroll(full)")
         for (int t = 0; t < 9; t++) {
             const int dy = t / 3, dx = t % 3;
-            hmat b0[2], b1[2];
-            device const half *bp = w + t * 256;
-            _Pragma("clang loop unroll(full)")
-            for (int j = 0; j < 2; j++) {
-                simdgroup_load(b0[j], bp + j * 64, 8);
-                simdgroup_load(b1[j], bp + (2 + j) * 64, 8);
-            }
             _Pragma("clang loop unroll(full)")
             for (int i = 0; i < 4; i++) {
                 const int x = min(8 * i, xmax);
@@ -387,8 +405,8 @@ struct Pair {
                 hmat a0, a1;
                 simdgroup_load(a0, ap, PPX);
                 simdgroup_load(a1, ap + 8, PPX);
-                hstep(acc[i][0], a0, a1, b0[0], b1[0]);
-                hstep(acc[i][1], a0, a1, b0[1], b1[1]);
+                hstep(acc[i][0], a0, a1, wr[t][0], wr[t][2]);
+                hstep(acc[i][1], a0, a1, wr[t][1], wr[t][3]);
             }
         }
     }
@@ -398,12 +416,14 @@ struct Pair {
         hmat bm[2];
         simdgroup_load(bm[0], w + WEIGHTS, 8);
         simdgroup_load(bm[1], w + WEIGHTS + 64, 8);
+        hmat wr[9][4];
+        load_w(w, wr);
         _Pragma("clang loop unroll(full)")
         for (int b = 0; b < 4; b++) {
             const int r = int(sg) + 4 * b;
             if (r < MH) {   // uniform per simdgroup
                 fmat acc[4][2];
-                gemm_row(st, w, r, IW, 24, acc);
+                gemm_row(st, wr, r, IW, 24, acc);
                 _Pragma("clang loop unroll(full)")
                 for (int i = 0; i < 4; i++) {
                     keep[b][i][0] = bias_relu(acc[i][0], bm[0]);
@@ -445,17 +465,16 @@ struct Pair {
 };
 
 // Layers 1 + 2. Buffer 1 is layer 2's output (the skip of layer 10 and the input of layer 3), 2 the packed weights of
-// layer 1, 5 those of layer 2, 4 the conversion's push block, the planes are the textures 0 and 1.
+// layer 1, 5 those of layer 2, 3 the converted picture.
 kernel void ndve_l01_l02(device half *out [[buffer(1)]], device const half *w1 [[buffer(2)]],
-                         constant float *cp [[buffer(4)]], device const half *w2 [[buffer(5)]],
-                         texture2d<float, access::read> luma [[texture(0)]],
-                         texture2d<float, access::sample> chroma [[texture(1)]], uint2 tg [[threadgroup_position_in_grid]],
+                         device const uint *pic [[buffer(3)]], device const half *w2 [[buffer(5)]],
+                         uint2 tg [[threadgroup_position_in_grid]],
                          uint sg [[simdgroup_index_in_threadgroup]], uint tid [[thread_index_in_threadgroup]]) {
-    typedef Pair P;
+    typedef PairT<16> P;
     threadgroup uint4 stq[P::STAGED / 8];
     threadgroup half *st = (threadgroup half *)stq;
     const int tx0 = int(tg.x) * P::TW, ty0 = int(tg.y) * P::TH;
-    P::stage_pic(st, luma, chroma, cp, tid, tx0, ty0);
+    P::stage_pic(st, pic, tid, tx0, ty0);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     hmat keep[4][4][2];
     P::mid_compute(st, w1, sg, keep);
@@ -464,9 +483,11 @@ kernel void ndve_l01_l02(device half *out [[buffer(1)]], device const half *w1 [
     hmat bm[2];
     simdgroup_load(bm[0], w2 + P::WEIGHTS, 8);
     simdgroup_load(bm[1], w2 + P::WEIGHTS + 64, 8);
+    hmat wr[9][4];
+    P::load_w(w2, wr);
     for (int r = int(sg); r < P::TH; r += 4) {
         fmat acc[4][2];
-        P::gemm_row(st, w2, r, P::MW, P::LAST_X, acc);
+        P::gemm_row(st, wr, r, P::MW, P::LAST_X, acc);
         _Pragma("clang loop unroll(full)")
         for (int i = 0; i < 4; i++) {
             device half *o = out + (long(ty0 + r) * P::W + tx0 + min(8 * i, P::LAST_X)) * 16;
@@ -476,20 +497,18 @@ kernel void ndve_l01_l02(device half *out [[buffer(1)]], device const half *w1 [
     }
 }
 
-// Layers 11 + 12. Buffer 0 is layer 10's output, 2 and 5 the packed weights of layers 11 and 12, 4 the push block of the
-// conversion; layer 12 has no ReLU, then depth-to-space and the sum with the picture. D of an output row goes to
+// Layers 11 + 12. Buffer 0 is layer 10's output, 2 and 5 the packed weights of layers 11 and 12, 3 the converted picture;
+// layer 12 has no ReLU, then depth-to-space and the sum with the picture. D of an output row goes to
 // threadgroup memory as f16 (the rounded D of the last step); a lane then takes one output pixel of the 1920x1080
-// picture, converts the picture pixel again (the picture is not stored), and computes per component, in f16 as the game
+// picture, reads the picture pixel (the sub-pixel of a lane, and so its biases, are the same in every round), and computes per component, in f16 as the game
 // does, ((f16(picture) + D[n]) + bias[n]) + -0.0 with n = 2s, 2s + 1, 8 + 2s, 9 + 2s for sub-pixel s = 2 sy + sx.
 // The RGB10A2 image is written with the float of that sum.
 kernel void ndve_l11_l12(device const half *in [[buffer(0)]], device const half *w1 [[buffer(2)]],
-                         constant float *cp [[buffer(4)]], device const half *w2 [[buffer(5)]],
-                         texture2d<float, access::read> luma [[texture(0)]],
-                         texture2d<float, access::sample> chroma [[texture(1)]],
+                         device const uint *pic [[buffer(3)]], device const half *w2 [[buffer(5)]],
                          texture2d<float, access::write> dst [[texture(2)]], uint2 tg [[threadgroup_position_in_grid]],
                          uint sg [[simdgroup_index_in_threadgroup]], uint lane [[thread_index_in_simdgroup]],
                          uint tid [[thread_index_in_threadgroup]]) {
-    typedef Pair P;
+    typedef PairT<24> P;
     threadgroup uint4 stq[P::STAGED / 8];
     threadgroup half dd[4][32 * 16];   // a simdgroup's D of one row: [pixel][channel]
     threadgroup half *st = (threadgroup half *)stq;
@@ -501,9 +520,15 @@ kernel void ndve_l11_l12(device const half *in [[buffer(0)]], device const half 
     threadgroup_barrier(mem_flags::mem_threadgroup);
     P::mid_store(st, keep, sg, tid, tg);
     device const half *bias = w2 + P::WEIGHTS;
+    // the sub-pixel of a lane is the same in every round (idx = 32 k + lane): its four biases are loaded once
+    const int sub = int(lane) & 3, n0 = 2 * sub, n1 = 8 + 2 * sub;
+    const half bs0 = bias[(n0 >> 3) * 64 + (n0 & 7)], bs1 = bias[((n0 + 1) >> 3) * 64 + ((n0 + 1) & 7)];
+    const half bs2 = bias[(n1 >> 3) * 64 + (n1 & 7)], bs3 = bias[((n1 + 1) >> 3) * 64 + ((n1 + 1) & 7)];
+    hmat wr[9][4];
+    P::load_w(w2, wr);
     for (int r = int(sg); r < P::TH; r += 4) {
         fmat acc[4][2];
-        P::gemm_row(st, w2, r, P::MW, P::LAST_X, acc);
+        P::gemm_row(st, wr, r, P::MW, P::LAST_X, acc);
         _Pragma("clang loop unroll(full)")
         for (int i = 0; i < 4; i++) {
             const int x = min(8 * i, P::LAST_X);
@@ -512,19 +537,29 @@ kernel void ndve_l11_l12(device const half *in [[buffer(0)]], device const half 
         }
         simdgroup_barrier(mem_flags::mem_threadgroup);
         const int py = ty0 + r;
+        _Pragma("clang loop unroll(full)")
         for (int k = 0; k < 4; k++) {
-            const int idx = k * 32 + int(lane), sub = idx & 3, px = idx >> 2;
+            const int px = k * 8 + (int(lane) >> 2);
             if (px >= P::TW) break;
             const uint2 p = uint2(2 * (tx0 + px) + (sub & 1), 2 * py + (sub >> 1));
-            const float3 pic = convert_px(luma, chroma, cp, p);
-            const int n0 = 2 * sub, n1 = 8 + 2 * sub;
+            const float3 pc = picture_px(pic, p);
             threadgroup const half *d = &dd[sg][px * 16];
-            const half v0 = (half(pic.x) + d[n0]) + bias[(n0 >> 3) * 64 + (n0 & 7)];
-            const half v1 = (half(pic.y) + d[n0 + 1]) + bias[((n0 + 1) >> 3) * 64 + ((n0 + 1) & 7)];
-            const half v2 = (half(pic.z) + d[n1]) + bias[(n1 >> 3) * 64 + (n1 & 7)];
-            const half v3 = (1.0h + d[n1 + 1]) + bias[((n1 + 1) >> 3) * 64 + ((n1 + 1) & 7)];
+            const half v0 = (half(pc.x) + d[n0]) + bs0;
+            const half v1 = (half(pc.y) + d[n0 + 1]) + bs1;
+            const half v2 = (half(pc.z) + d[n1]) + bs2;
+            const half v3 = (1.0h + d[n1 + 1]) + bs3;
             dst.write(float4(float(v0 + (-0.0h)), float(v1 + (-0.0h)), float(v2 + (-0.0h)), float(v3 + (-0.0h))), p);
         }
         simdgroup_barrier(mem_flags::mem_threadgroup);
     }
+}
+
+// The colour conversion of the whole picture, once: the NV12 planes to 3 bytes of each pixel of the 1920x1080 picture.
+// Buffer 3 is the picture, 4 the conversion's push block, the planes are the textures 0 and 1.
+kernel void ndve_convert(device uint *pic [[buffer(3)]], constant float *cp [[buffer(4)]],
+                         texture2d<float, access::read> luma [[texture(0)]],
+                         texture2d<float, access::sample> chroma [[texture(1)]], uint2 g [[thread_position_in_grid]]) {
+    if (g.x >= 1920 || g.y >= 1080) return;
+    const float3 c = convert_bytes(luma, chroma, cp, g);
+    pic[g.y * 1920 + g.x] = uint(c.x) | (uint(c.y) << 8) | (uint(c.z) << 16);
 }

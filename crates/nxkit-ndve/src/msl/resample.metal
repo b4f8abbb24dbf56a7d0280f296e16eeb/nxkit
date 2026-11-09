@@ -22,18 +22,18 @@ kernel void ndve_luma(device half *luma [[buffer(0)]], texture2d<float, access::
 // to f16 (a K = 16 step; the second step of the chain starts from the rounded first). Cost of a block: 172 products
 // of 8x8x8 = 88 k MAC; the picture has 57600 blocks: 5.1 GMAC, the same as 4.3 of the 3x3 layers.
 //
-// Tiling. A threadgroup of RS_NSG simdgroups stages the 12 KB of weights in threadgroup memory once and loops RS_ITER
-// times over RS_NSG * RS_NB blocks of a row; a simdgroup takes RS_NB blocks side by side, so every weight tile it loads
-// serves RS_NB blocks. Per round and block: 172 products (86 K = 16 steps) against 16 / RS_NB tile loads per 32
-// products. Going from RS_NB = 2 to 4 halves the tile loads per product (8 to 4 per 32) and the loop overhead; the
-// accumulators and the stage-1 results stay in registers (about 60 of them), nothing goes to device memory between
-// the stages, and the luma window and the delta share one threadgroup array (window 8 KB + weights 12 KB = 20 KB).
-// The arithmetic is unchanged, so the work is 5.1 GMAC at the rate of the 32- and 64-channel convolutions (about
-// 2.1 to 2.5 TMAC/s at the measured clock): the multiply-accumulates are the limit, the tile loads and the staging
-// were roughly a fifth of the 2.03 ms. Expected 1.7 to 1.8 ms; below that only fewer MACs would help.
-constant constexpr int RS_NB = 4;
-constant constexpr int RS_NSG = 4;
-constant constexpr int RS_ITER = 4;   // 5 threadgroups * 4 * 4 * 4 = 320 blocks a row
+// Tiling. A threadgroup of RS_NSG = 8 simdgroups stages the 12 KB of weights in threadgroup memory once and loops
+// RS_ITER = 2 times over RS_NSG * RS_NB blocks of a row; a simdgroup takes RS_NB = 2 blocks side by side, so every
+// weight tile it loads serves 2 blocks. Per round and block: 172 products (86 K = 16 steps). The accumulators and the
+// stage-1 results stay in registers, nothing goes to device memory between the stages, and the luma window and the
+// delta share one threadgroup array (windows 8 KB + weights 12 KB = 20 KB). The arithmetic is the network's: 5.1 GMAC.
+// Measured on an M2 Max, in ms of GPU time: 1.27 with 4 simdgroups of 4 blocks, 1.15 with 8 of 2 (more simdgroups hide
+// the latency of the window loads and of the barrier; 16 of 2 is 1.13). The window loads, the sampler and the stores
+// cost nothing measurable: with each of them removed the time stays 1.14 to 1.15, so the products are the limit (the
+// same kernel without the f16 rounding is not faster). Only fewer MACs would help.
+constant constexpr int RS_NB = 2;
+constant constexpr int RS_NSG = 8;
+constant constexpr int RS_ITER = 2;   // 10 threadgroups * 2 * 8 * 2 = 320 blocks a row
 
 // One block of the network on the patches X[b][k tile (rows)][n tile (columns)], in place.
 static inline void rs_block(thread hmat (&X)[RS_NB][2][2], threadgroup const half *wb) {
