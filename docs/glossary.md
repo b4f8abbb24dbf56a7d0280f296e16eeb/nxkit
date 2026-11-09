@@ -20,8 +20,8 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | event code | The stable code (`NXB` and four digits) of an event in the NDJSON stream. Each event also has a severity. |
 | early cutoff | A stage does not run when the keys of its inputs did not change. The term comes from build systems. Refer to [early-cutoff.md](early-cutoff.md). |
 | fallback | The use of the Apple tool for a shader or a file that the own code does not cover. |
-| game package | An input file or folder with game content: NSP, XCI, NSZ, XCZ, NUP or a dump folder. |
-| host | The runtime program that loads the game files and the shader libraries on the target Mac or iOS device. |
+| game package | An input file or folder with game content: NSP, XCI, NSZ, XCZ, NUP. |
+| host | The runtime program that loads the game files and the shader libraries on the target Mac. |
 | library | A Metal library file (`.metallib`). |
 | manifest | The list of files of one store entry, with size and digest of each file. The store writes it last. |
 | partial build | A build with `--partial`. It builds only the shaders of the shader manifest and writes `_b_partial.json`. |
@@ -35,7 +35,7 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | reference title | The one game that gave all measured numbers in these documents. |
 | overlap | Two stages of `nxb build` run at the same time. The events stay the same as in a run in series. |
 | Rust translator | The translator in the crates `nxb-xlate` and `nxb-maxwell`. It writes MSL directly and runs in the process of the shader step. |
-| rewrite rules | The registered patches for code modules (cuts, observation gates, frame step stubs and others), kept as data in `data/rewrite-rules`. |
+| rewrite rules | The registered patches for code modules (cuts, observation gates, frame step stubs and others), kept as data in the title module (`rules/<title ID>.toml`). |
 | reuse key | A digest of all inputs of a stage. If the key does not change, the stage uses its previous output. |
 | shader step | The stage that translates and compiles the shaders of a game into libraries. The command is `nxb shaders`. |
 | survey | The examination of the files of a game that has no profile. It writes `survey.md` and the values of the provisional profile. Use `--survey-only` to stop after it. |

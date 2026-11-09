@@ -46,7 +46,7 @@ Use packages from your own dumps only.
 
 - The Mach-O reader checks every load command size and every read against the file length.
 - Staging paths are checked. A destination path must be relative and must not contain empty, `.` or `..` parts.
-- There are two ZIP readers. `nxb-split/src/jobs/zip.rs` reads ZIP archives in game data. `nxb-pack/src/ipa_reuse.rs` reads the central directory of the previous IPA.
+- `nxb-split/src/jobs/zip.rs` reads ZIP archives in game data.
 
 ### Child processes
 

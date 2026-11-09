@@ -151,7 +151,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
         }
         (Some(_), Some(why)) => {
             p.say(&format!(
-                "[RED] no pipeline archive: {why}. The app is built without one and compiles its pipelines while the game runs."
+                "nxb: warning: no pipeline archive: {why}. The app is built without pipelines.mtl4archive and compiles its pipelines while the game runs."
             ));
         }
         (None, _) => summary.push_str(", no archive (--gpu none)"),

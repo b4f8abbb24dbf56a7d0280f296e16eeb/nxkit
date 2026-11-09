@@ -97,87 +97,6 @@ fn choose(
     Ok((out.into_iter().map(|(p, x)| (*p, x)).collect(), warnings))
 }
 
-/// The package folder the app takes its RomFS and game files from: `ex` (`extract/<package>`) when no patch applies,
-/// otherwise `<work>/resources/<package>` with the patched RomFS. Warnings go to `say`, they never fail the build.
-pub(crate) fn package_dir(
-    a: &Args,
-    b: &Build,
-    say: &dyn Fn(&str),
-    ex: &Path,
-) -> Result<PathBuf, String> {
-    let (chosen, warnings) = choices(&b.title, &a.resource_patches)?;
-    for w in &warnings {
-        say(w);
-    }
-    // `<work>/resources/<package>` beside `<work>/extract/<package>`
-    let work = ex.parent().and_then(Path::parent).unwrap_or(&b.work);
-    let res = work.join("resources");
-    let out = res.join(&b.package);
-    let unpatched = || -> Result<PathBuf, String> {
-        // a folder of an earlier build with patches is not used any more
-        if out.exists() {
-            std::fs::remove_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-        }
-        Ok(ex.to_path_buf())
-    };
-    if chosen.is_empty() {
-        return unpatched();
-    }
-    let (img, dir) = (ex.join("RomFS.img"), ex.join("RomFS"));
-    let romfs = if img.is_file() {
-        Romfs::image(&img)?
-    } else if dir.is_dir() {
-        Romfs::Dir(dir)
-    } else {
-        say(&format!(
-            "resource patches: no RomFS in {}, the game keeps its stock resources",
-            ex.display()
-        ));
-        return unpatched();
-    };
-    let stamp = stamp_of(&romfs, &chosen)?;
-    if std::fs::read_to_string(out.join(STAMP)).is_ok_and(|s| s == stamp) {
-        return Ok(out);
-    }
-    let (files, warnings) = edited(&|path| romfs.read(path), &chosen);
-    for w in &warnings {
-        say(w);
-    }
-    if files.is_empty() {
-        return unpatched();
-    }
-    let tmp = res.join(format!(".{}.tmp", b.package));
-    let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
-    if tmp.exists() {
-        std::fs::remove_dir_all(&tmp).map_err(|e| io(&tmp, e))?;
-    }
-    std::fs::create_dir_all(&res).map_err(|e| io(&res, e))?;
-    nxb_sys::clone::clone_or_copy(ex, &tmp).map_err(|e| io(ex, e))?;
-    match romfs {
-        Romfs::Image { .. } => write_image(&tmp.join("RomFS.img"), &files)?,
-        Romfs::Dir(_) => {
-            for (path, data) in &files {
-                let f = tmp.join("RomFS").join(path);
-                // a new file, not a write through the clone or a hard link
-                std::fs::remove_file(&f).map_err(|e| io(&f, e))?;
-                std::fs::write(&f, data).map_err(|e| io(&f, e))?;
-            }
-        }
-    }
-    std::fs::write(tmp.join(STAMP), &stamp).map_err(|e| io(&tmp, e))?;
-    if out.exists() {
-        std::fs::remove_dir_all(&out).map_err(|e| io(&out, e))?;
-    }
-    std::fs::rename(&tmp, &out).map_err(|e| io(&out, e))?;
-    let names: Vec<&str> = files.iter().map(|f| f.0.as_str()).collect();
-    say(&format!(
-        "resource patches: {} rewritten in {}",
-        names.join(", "),
-        out.display()
-    ));
-    Ok(out)
-}
-
 /// The folder of patched RomFS files for the standalone build, or `None` when no patch applies. `ex` is the extract
 /// folder (`extract/<package>`); the RomFS is its `RomFS.img`, or the loose folder `loose` (a NUP's). The folder is
 /// `<work>/resources/<name of ex>.overlay` and holds only the new files, at their RomFS paths: nothing in `extract/`
@@ -449,42 +368,6 @@ fn edit_member(sarc: &mut [u8], p: &ResourcePatch, x: f32) -> Result<(), String>
         member[o..o + 4].copy_from_slice(&x.to_le_bytes());
     }
     Ok(())
-}
-
-/// Puts new bytes for files of a `DMROMFS1` image (a clone): each new file after the file data, then the index with
-/// their new places, then the header. The old bytes of those files stay unused in the image.
-fn write_image(img: &Path, files: &[(String, Vec<u8>)]) -> Result<(), String> {
-    let at = |e: String| format!("{}: {e}", img.display());
-    let f = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(img)
-        .map_err(|e| at(e.to_string()))?;
-    let Romfs::Image { mut index, .. } = Romfs::image(img)? else {
-        return Err(at("not an image".into()));
-    };
-    let mut h = [0u8; 32];
-    f.read_exact_at(&mut h, 0).map_err(|e| at(e.to_string()))?;
-    let mut header = Header::parse(&h).map_err(|e| at(e.0))?;
-    let mut end = header.index_offset;
-    for (path, data) in files {
-        let r = index
-            .find(path)
-            .ok_or_else(|| at(format!("no file {path}")))?;
-        f.write_all_at(data, end).map_err(|e| at(e.to_string()))?;
-        index
-            .set_file(r.entry, end, data.len() as u64)
-            .map_err(|e| at(e.0))?;
-        end += data.len() as u64;
-    }
-    f.write_all_at(index.bytes(), end)
-        .map_err(|e| at(e.to_string()))?;
-    f.set_len(end + index.bytes().len() as u64)
-        .map_err(|e| at(e.to_string()))?;
-    header.index_offset = end;
-    f.write_all_at(&header.bytes(), 0)
-        .map_err(|e| at(e.to_string()))?;
-    f.sync_all().map_err(|e| at(e.to_string()))
 }
 
 #[cfg(test)]

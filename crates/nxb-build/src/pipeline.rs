@@ -16,18 +16,8 @@ use std::sync::atomic::Ordering;
 /// The shader step's configuration from the build's plan: the chain version
 /// and the profile's inputs digest computed as `dmsh_chain.py` does, outputs in `<work>/shader/cache/b-<V>`.
 pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
-    // a build without an engine folder (the standalone one, R49) has its own chain version
-    let (chain, inputs) = if b.engine.as_os_str().is_empty() {
-        (
-            nxb_shader::chain::standalone_version(),
-            nxb_shader::chain::inputs(&b.profile.0)?,
-        )
-    } else {
-        (
-            nxb_shader::chain::version(&b.engine)?,
-            nxb_shader::chain::inputs_of(&b.engine, &b.profile.0)?,
-        )
-    };
+    let chain = nxb_shader::chain::standalone_version();
+    let inputs = nxb_shader::chain::inputs(&b.profile.0)?;
     let sh = b.work.join("shader");
     let manifest = match &a.manifest {
         Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),
@@ -59,16 +49,7 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
         order: Vec::new(),
         manifest,
         partial: a.partial,
-        ios_out: a.also_ios.then(|| sh.join("ios")),
     })
-}
-
-/// Where this build's shader step writes `c1_full.tsv` and `cb_extent.tsv` (`nxb_stages::guard_tables`). None with
-/// `--shaders`, which names a library folder the step did not build: the tables then come from the profile.
-pub(crate) fn guard_tables(a: &Args, b: &Build) -> Option<PathBuf> {
-    a.shaders
-        .is_none()
-        .then(|| b.work.join("shader/work/tables"))
 }
 
 /// The compute shaders that get compute pipelines in the archive: the profile's prewarm list (`pso_manifest.tsv`, `C`
@@ -386,79 +367,6 @@ pub(crate) fn write_archive_stamps(
         pipes.len(),
     );
     std::fs::write(out.join("archive.tsv"), tsv).map_err(|e| e.to_string())
-}
-
-/// One architecture's pipeline archive: the plan of `pso_offline.py` (profile pairs, then the split's pso_pairs.tsv)
-/// and `nxb_archive::build` (content-cut batches in the store). Output in `<work>/pso/mac`, as the NSP script's.
-pub(crate) fn stage_pso(b: &Build, arch: &str, p: &Progress) -> Result<String, String> {
-    use nxb_archive::plan;
-    let pairs = [
-        b.profile.0.join("shader_pairs.tsv"),
-        b.work.join("shader/pso_pairs.tsv"),
-    ];
-    let text = plan::pair_text(&pairs);
-    let chain = b
-        .shaders
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_prefix("b-"))
-        .ok_or("library folder is not b-<chain>")?;
-    let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero");
-    let plan = plan::plan(&b.shaders, chain, &plan::read_pairs(&text), zero);
-    let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
-    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    let (pipes, _) = nxb_archive::compute::plan_compute(&b.shaders, chain, &compute_shaders(b));
-    let js = work.join("bases.mtl4-json");
-    std::fs::write(&js, plan::script_text_with(&b.shaders, &plan.bases, &pipes))
-        .map_err(|e| e.to_string())?;
-    let osmin = osmin()?;
-    let batches = Arc::new(nxb_archive::Batches::default());
-    let c = nxb_archive::Config {
-        progress: Some(batches.clone()),
-        ..nxb_archive::Config::for_tools(
-            "macos",
-            arch,
-            &osmin,
-            &js,
-            &out.join(format!("{arch}.mtl4a")),
-            &work,
-        )?
-    };
-    let r = p.tracked(
-        None,
-        "batches",
-        || {
-            (
-                batches.done.load(Ordering::Relaxed),
-                batches.total.load(Ordering::Relaxed),
-            )
-        },
-        || nxb_archive::build(&c),
-    )?;
-    std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, &text))
-        .map_err(|e| e.to_string())?;
-    std::fs::write(
-        out.join("archive.tsv"),
-        plan::archive_tsv(
-            &[arch.to_string()],
-            "macos",
-            &osmin,
-            &c.toolchain,
-            plan.bases.len(),
-            plan.rest.len(),
-            pipes.len(),
-        ),
-    )
-    .map_err(|e| e.to_string())?;
-    let tail =
-        nxb_sched::Partial::read(&b.shaders).map_or(String::new(), |st| format!("; {}", st.note()));
-    Ok(format!(
-        "{} pipelines, {} MB, {} batches{tail}",
-        plan.bases.len() + pipes.len(),
-        r.size >> 20,
-        r.batches.len()
-    ))
 }
 
 #[cfg(test)]
