@@ -6,7 +6,7 @@ use common::*;
 use nxkit_hos::{Config, KResult, NameMatch, Qos, RoleRule, RoleTable, ThreadRole, Timeout, sys};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SHORT: Timeout = Timeout::After(Duration::from_millis(30));
 
@@ -84,6 +84,46 @@ fn cancel_synchronization_ends_the_wait_with_cancelled() {
     assert_eq!(w.kernel.cancel_synchronization(h), Ok(()));
     w.join(&[h]);
     assert_eq!(result.load(Ordering::SeqCst), KResult::CANCELLED.raw());
+}
+
+/// The SDK's `MultiWait` cancels the wait of its thread right after that thread let go of the list lock, so the cancel
+/// often comes while the thread enters `WaitSynchronization`. A cancel in that moment must still end the wait.
+#[test]
+fn a_cancel_while_the_wait_starts_is_not_lost() {
+    const ROUNDS: u32 = 3000;
+    let w = world();
+    let (_, r) = w.kernel.create_event().expect("event");
+    let k = w.kernel.clone();
+    let armed = Arc::new(AtomicU32::new(0));
+    let done = Arc::new(AtomicU32::new(0));
+    let lost = Arc::new(AtomicU32::new(0));
+    let (a, d, l) = (armed.clone(), done.clone(), lost.clone());
+    let h = w.spawn("waiter", 30, 0, move |t| {
+        for round in 1..=ROUNDS {
+            a.store(round, Ordering::SeqCst);
+            let t0 = Instant::now();
+            let res = k.wait_synchronization(t, &[r], Timeout::After(Duration::from_secs(1)));
+            if res != Err(KResult::CANCELLED) || t0.elapsed() >= Duration::from_secs(1) {
+                l.fetch_add(1, Ordering::SeqCst);
+            }
+            d.store(round, Ordering::SeqCst);
+        }
+    });
+    for round in 1..=ROUNDS {
+        while armed.load(Ordering::SeqCst) < round {
+            std::hint::spin_loop();
+        }
+        assert_eq!(w.kernel.cancel_synchronization(h), Ok(()));
+        while done.load(Ordering::SeqCst) < round {
+            std::hint::spin_loop();
+        }
+    }
+    w.join(&[h]);
+    assert_eq!(
+        lost.load(Ordering::SeqCst),
+        0,
+        "cancels that did not end the wait"
+    );
 }
 
 #[test]

@@ -109,6 +109,9 @@ impl Kernel {
             cur.parker.prepare();
             *lock(&cur.wait_kind) = WaitKind::Sync;
             let hit = objects.iter().position(|o| o.sync().check_or_register(cur));
+            // A cancel that came after the check above and before the wait kind was `Sync` found no wait to wake.
+            // Its flag is set, so look at it again now: a later cancel sees `Sync` and wakes the parker.
+            let cancelled = hit.is_none() && cur.take_cancel();
             let left = match (timeout, deadline) {
                 (Timeout::Immediate, _) => Timeout::Immediate,
                 (Timeout::After(_), Some(dl)) => match dl.checked_duration_since(Instant::now()) {
@@ -118,7 +121,7 @@ impl Kernel {
                 _ => Timeout::Infinite,
             };
             let mut timed_out = false;
-            if hit.is_none() {
+            if hit.is_none() && !cancelled {
                 if left == Timeout::Immediate {
                     timed_out = true;
                 } else {
@@ -131,6 +134,9 @@ impl Kernel {
             *lock(&cur.wait_kind) = WaitKind::None;
             if let Some(i) = hit {
                 return Ok(i);
+            }
+            if cancelled {
+                return Err(KResult::CANCELLED);
             }
             if timed_out {
                 return Err(if cur.take_cancel() {
