@@ -35,6 +35,7 @@ mod barrier;
 mod batch;
 mod blocklinear;
 mod compute;
+mod compute_copy;
 mod compute_icb;
 mod databuf;
 mod deswizzle;

@@ -106,3 +106,12 @@ fragment Outputs fs() { return {float4(1,0,0,1), float4(0)}; }
             .all(|p| *p == [255, 0, 0, 255])
     );
 }
+
+#[test]
+fn block_copies_put_each_shadow_at_an_aligned_offset() {
+    assert_eq!(
+        blocks::offsets(&[2048, 100, 256]),
+        (vec![0, 2048, 2304], 2560)
+    );
+    assert_eq!(blocks::offsets(&[]), (vec![], 0));
+}

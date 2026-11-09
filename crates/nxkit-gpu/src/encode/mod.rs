@@ -27,8 +27,10 @@ use crate::draws::{Geom, PassCtx, Prep, Shared, prepare};
 use crate::indirect::Prepass;
 use crate::pipelines::Targets;
 use crate::stats::{EncodeStats, Skip};
+use crate::textures::BlockTarget;
 use crate::translate;
 
+mod blocks;
 mod diag;
 mod emit;
 mod setup;
@@ -166,6 +168,11 @@ pub(crate) fn render_pass(
         Ok(s) => s,
         Err(why) => return lost(stats, why),
     };
+    // The block shadows that the pass loads get the blocks of their compressed texture first.
+    let loads: Vec<&BlockTarget> = s.blocks.iter().filter(|b| b.1).map(|b| &b.0).collect();
+    if !blocks::copy(sh.ctx, cb, &tables.vertex, &loads, blocks::Way::Load) {
+        return lost(stats, Skip::Copy);
+    }
     // The GPU driven draws of the pass get their copied arguments before the pass starts.
     let pre = crate::indirect::prepass(sh, cb, &tables.vertex, scratch, range.clone(), stats);
     let Ok(mut rp) = cb.begin_render_pass_split(&s.desc, &tables.vertex, &tables.fragment) else {
@@ -190,6 +197,17 @@ pub(crate) fn render_pass(
         && rp.encode(&RenderCommand::Depend(dep)).is_err()
     {
         stats.skipped[Skip::Encode as usize] += 1;
+    }
+    if !loads.is_empty() {
+        let dep = Dependency {
+            scope: Scope::FromEarlierPasses,
+            after: Stages::BLIT,
+            before: Stages::FRAGMENT,
+            visibility: Visibility::Device,
+        };
+        if rp.encode(&RenderCommand::Depend(dep)).is_err() {
+            stats.skipped[Skip::Encode as usize] += 1;
+        }
     }
     // The barrier planner follows textures only, and it holds the vertex and fragment stages. An indirect draw reads
     // arguments that a dispatch or a copy wrote (culling), the pre-pass wrote the copies, and a task or mesh shader
@@ -231,6 +249,11 @@ pub(crate) fn render_pass(
         n += 1;
     }
     rp.end();
+    // The barrier plan counts the blit stage as a writer of a compressed attachment (`BarrierState::plan`).
+    let stores: Vec<&BlockTarget> = s.blocks.iter().filter(|b| b.2).map(|b| &b.0).collect();
+    if !blocks::copy(sh.ctx, cb, &tables.vertex, &stores, blocks::Way::Store) {
+        stats.skipped[Skip::Copy as usize] += stores.len() as u32;
+    }
     if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
         for a in sh.plan.attachments_of(pass) {
             if matches!(a.slot, Slot::Color(_))

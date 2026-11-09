@@ -409,10 +409,21 @@ impl Gpu {
         kpass_diag(frame, plan, detail, &ords, &textures);
         mark(t0, "ords+kpass");
         let t_barrier = Instant::now();
+        // Render passes write compressed attachments through block shadows and a blit (`textures::blocks`).
+        let blit_written = textures
+            .values()
+            .filter(|r| r.desc.format.is_compressed())
+            .map(|r| r.barrier_id)
+            .collect();
         let vertex_samples = vertex_sampling_passes(frame, plan, detail, &ords);
-        let barrier_plan = self
-            .barriers
-            .plan(frame, plan, &aliases, &vertex_samples, &pass_images);
+        let barrier_plan = self.barriers.plan(
+            frame,
+            plan,
+            &aliases,
+            &vertex_samples,
+            &pass_images,
+            &blit_written,
+        );
         stats.barrier_ns = nanos(t_barrier, Instant::now());
         {
             static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

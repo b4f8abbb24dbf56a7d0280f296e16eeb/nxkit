@@ -10,6 +10,13 @@ impl TextureStore {
         view: nxkit_nvn::frame::TargetView,
     ) -> Result<Texture, Skip> {
         let d = res.desc;
+        // Metal aborts on a view between compressed and uncompressed formats, and cannot render into a compressed one:
+        // the encoder renders such an attachment into a block shadow (`TextureStore::block_target`).
+        if d.format.is_compressed() {
+            let what = format_args!("attachment view {view:?} of compressed {d:?}");
+            nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::ViewCreate, what);
+            return Err(crate::tex_skip(what));
+        }
         let format = match view.format().and_then(texture_format) {
             Some(Mapped::Exact(format)) if !res.widened => format,
             _ => d.format,
@@ -248,5 +255,9 @@ impl TextureStore {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|(generation, _), _| live.contains(generation));
+        self.shadows
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(generation, ..), _| live.contains(generation));
     }
 }

@@ -10,6 +10,7 @@
 //! stays at its size for good, because the guest memory has the unscaled bytes. So does a texture that the CPU writes
 //! often and the GPU renders rarely (`Heat`): every write would need a staging upload and a scale.
 
+mod blocks;
 mod evict;
 #[cfg(test)]
 mod tests;
@@ -18,7 +19,11 @@ mod views;
 use crate::draws::{FastMap, FastSet};
 use std::sync::{Mutex, PoisonError};
 
-use nxkit_metal::{Context, Format, Storage, Texture, TextureDesc, TextureKind, ViewDesc};
+use nxkit_metal::{
+    Context, Format, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc,
+};
+
+pub(crate) use self::blocks::BlockTarget;
 use nxkit_nvn::format::{Aspects, format_info};
 use nxkit_nvn::layout::Target;
 use nxkit_nvn::resource::{Residency, TexId, TextureRecord};
@@ -97,6 +102,8 @@ pub(crate) struct TextureStore {
     heat: FastMap<TexId, Heat>,
     next_generation: u64,
     views: Mutex<FastMap<ViewKey, Texture>>,
+    /// The block shadows of compressed attachments by generation, level, layer and view format (`blocks`).
+    shadows: Mutex<FastMap<(u64, u32, u32, u32), Texture>>,
     retired: Vec<Texture>,
     /// The storage ranges of the textures made so far, for the `contain` diagnostic.
     spans: Mutex<Vec<(u64, u64, TexId, TextureDesc)>>,
@@ -181,7 +188,8 @@ pub(crate) fn describe(
     // makes texture objects for the same memory again, and the store shares a Metal texture between records only
     // when their descriptions match. So every texture that Metal can render into gets the usage, and a record that
     // is sampled first sees what a later render target of the same memory wrote.
-    let render_target = u.attachment || (!compressed && format != Format::Rgb9E5Float);
+    // Metal cannot render into a compressed format: an attachment of one renders into a block shadow (`blocks`).
+    let render_target = !compressed && (u.attachment || format != Format::Rgb9E5Float);
     let memoryless = u.memoryless && u.attachment && !u.cpu_read;
     let exact = matches!(mapped, Mapped::Exact(_));
     let desc = TextureDesc {
@@ -219,6 +227,7 @@ impl TextureStore {
             heat: FastMap::default(),
             next_generation: 1,
             views: Mutex::new(FastMap::default()),
+            shadows: Mutex::new(FastMap::default()),
             retired: Vec::new(),
             spans: Mutex::new(Vec::new()),
             frame: 0,
@@ -274,7 +283,10 @@ impl TextureStore {
         }
         u.attachment |= self.attachments.contains(&id);
         u.atomic |= self.atomic.contains(&id);
-        let scaled = self.is_scaled(id, scale);
+        // A compressed texture keeps its size: its attachments render blocks, which a scale would not keep.
+        let compressed =
+            texture_format(rec.desc.format).is_some_and(|m| m.format().is_compressed());
+        let scaled = !compressed && self.is_scaled(id, scale);
         let (desc, widened) = describe(rec, if scaled { scale } else { 1.0 }, u)?;
         if let Some(r) = self.entries.get_mut(&id) {
             if r.desc == desc {
