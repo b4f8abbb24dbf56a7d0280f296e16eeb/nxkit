@@ -9,6 +9,7 @@
 //! The crate is pure Rust and uses only `std`. It does no I/O and has no Metal code: `nxkit-gpu` reads the game's
 //! file, asks [`file::Network::parse`] and [`fingerprint`], and encodes the [`plan::Plan`] with the MSL of [`msl`].
 //!
+//! - [`ane`]: the network as a Core ML ML Program for the Neural Engine (the files of an `.mlpackage`).
 //! - [`mod@file`]: the `.dat` container, its networks and the weight blobs.
 //! - [`fingerprint`]: the checks that a file and a dispatch sequence are the network this crate implements.
 //! - [`net`]: the layer table of the network (shapes, offsets, kinds).
@@ -18,6 +19,7 @@
 //! - [`mod@reference`]: a CPU implementation with the rounding of the hardware, for tests and diagnostics.
 //! - [`half`]: software f16 with round to nearest even, for the reference.
 
+pub mod ane;
 pub mod file;
 pub mod fingerprint;
 pub mod half;

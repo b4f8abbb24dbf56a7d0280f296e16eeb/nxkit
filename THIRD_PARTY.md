@@ -24,6 +24,7 @@ taken from other implementations.
 | AArch64 decoding and patching | `nxb-a64`, `nxb-rewrite` | the Arm Architecture Reference Manual |
 | Property lists (XML and binary) | `nxb-plist`, `nxb-pack` | public Apple documentation and observed output |
 | Block-linear texture layout (mip block height, layer stride) | `nxkit-metal` | the layout rules of deko3d (`dk_image.cpp`). The code is written anew and no source is copied |
+| Core ML model package (`Model.proto` / `MIL.proto` messages, `weight.bin` layout) | `nxkit-ndve::ane` | the field numbers and enum values of the coremltools `.proto` files (BSD-3-Clause, Copyright (c) 2020, Apple Inc.) read from the published format, and the output of coremltools on a test model. The `.proto` files are not vendored; the encoder is written by hand |
 
 ## Shader translator ported from Ryujinx
 
