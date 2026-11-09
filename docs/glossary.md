@@ -7,6 +7,16 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 
 | term | definition |
 |---|---|
+| ANE, Neural Engine | The Apple block for neural networks. `nxkit-coreml` runs a Core ML model on it. NDVE can use it (`NXKIT_NDVE_ANE`). |
+| base pipeline | The unspecialized render pipeline that the archive holds for one shader pair, with no colour state. A pipeline of a draw is made from it by specialization. |
+| block shadow | A plain colour texture that a render pass writes when the attachment is a compressed texture. After the pass its content is copied into the blocks of the compressed texture. |
+| DVFS | Dynamic voltage and frequency scaling: the GPU changes its clock with its load. Assumed to be why the GPU time in ms of the same work rises when a paced frame is lighter (not measured here). |
+| NDSR | The neural super resolution library of the Nintendo SDK, used by the agl family as the in-game upscaler. `nxkit-ndsr` runs its networks (packs `vr`, `vr_light`) with own kernels. |
+| NDVE | The movie upscaler of the Nintendo SDK (`nn::ndve`): a U-Net and a resampler on the picture of a movie. `nxkit-ndve` runs it with own kernels or on the Neural Engine. |
+| prewarm | The work at the start of the host that makes the pipelines of the runtime list before the first frame. |
+| shard | One batch of the pipeline archive as a file of its own under `pipelines/`, found through the index `index.nxpi`. The host keeps at most 32 open. |
+| specialization | Making a render pipeline for a colour state (formats, blend, write mask) from an unspecialized base with Metal 4, with no shader compile. |
+| vertex pulling | A vertex shader that reads its vertex streams itself from a layout block (`dm_vlayout`, buffer 16) through its `_bp` library, so its pipelines have no vertex layout. |
 | cache export | One file with the cache entries of a title, made by `nxb cache export`. It has a checksum at the end. |
 | allow list | The list of shader digests with the verdict `own-identical`. When the raw path does not take a shader, the own front end compiles it only if it is on this list. Other shaders go to the Apple front end. |
 | Apple front end | Apple's `metal -c` compiler, used from MSL source to AIR. |
