@@ -114,11 +114,9 @@ const fn spec(
     in_px: u32,
     variant: Variant,
     step: [u32; 2],
-    ratio_bits: u32,
-    cell: [u32; 4],
+    (ratio_bits, cell): (u32, [u32; 4]),
     ty_odd: bool,
-    simdgroups: u32,
-    patch_group: u32,
+    shape: [u32; 2],
 ) -> KernelSpec {
     KernelSpec {
         name,
@@ -128,8 +126,8 @@ const fn spec(
         ratio_bits,
         cell,
         ty_odd,
-        simdgroups,
-        patch_group,
+        simdgroups: shape[0],
+        patch_group: shape[1],
     }
 }
 
@@ -148,21 +146,21 @@ use Variant::{A, B, C};
 
 /// The 15 network programs of the vr pack (ndsr-native.md section 4; the tile is the config bytes `b0 b1`).
 pub const KERNELS: [KernelSpec; 15] = [
-    spec("ndsr_in10_a", 10, A, [39, 29], R10, C10, false, 12, 1),
-    spec("ndsr_in10_b", 10, B, [39, 29], R10, C10, false, 12, 1),
-    spec("ndsr_in10_c", 10, C, [39, 39], R10, C10, false, 16, 1),
-    spec("ndsr_in8_a", 8, A, [31, 31], R8, C8, true, 16, 1),
-    spec("ndsr_in8_b", 8, B, [31, 31], R8, C8, true, 16, 1),
-    spec("ndsr_in8_c", 8, C, [31, 31], R8, C8, true, 16, 1),
-    spec("ndsr_in7_a", 7, A, [27, 27], R7, C7, true, 16, 1),
-    spec("ndsr_in7_b", 7, B, [55, 41], R7, C7, true, 8, 1),
-    spec("ndsr_in7_c", 7, C, [55, 20], R7, C7, true, 12, 2),
-    spec("ndsr_in6_a", 6, A, [23, 23], R6, C6, true, 16, 1),
-    spec("ndsr_in6_b", 6, B, [47, 23], R6, C6, true, 12, 1),
-    spec("ndsr_in6_c", 6, C, [47, 23], R6, C6, true, 12, 1),
-    spec("ndsr_in4_a", 4, A, [31, 23], R4, C4, true, 8, 3),
-    spec("ndsr_in4_b", 4, B, [31, 23], R4, C4, true, 8, 3),
-    spec("ndsr_in4_c", 4, C, [31, 23], R4, C4, true, 8, 3),
+    spec("ndsr_in10_a", 10, A, [39, 29], (R10, C10), false, [12, 1]),
+    spec("ndsr_in10_b", 10, B, [39, 29], (R10, C10), false, [12, 1]),
+    spec("ndsr_in10_c", 10, C, [39, 39], (R10, C10), false, [16, 1]),
+    spec("ndsr_in8_a", 8, A, [31, 31], (R8, C8), true, [16, 1]),
+    spec("ndsr_in8_b", 8, B, [31, 31], (R8, C8), true, [16, 1]),
+    spec("ndsr_in8_c", 8, C, [31, 31], (R8, C8), true, [16, 1]),
+    spec("ndsr_in7_a", 7, A, [27, 27], (R7, C7), true, [16, 1]),
+    spec("ndsr_in7_b", 7, B, [55, 41], (R7, C7), true, [8, 1]),
+    spec("ndsr_in7_c", 7, C, [55, 20], (R7, C7), true, [12, 2]),
+    spec("ndsr_in6_a", 6, A, [23, 23], (R6, C6), true, [16, 1]),
+    spec("ndsr_in6_b", 6, B, [47, 23], (R6, C6), true, [12, 1]),
+    spec("ndsr_in6_c", 6, C, [47, 23], (R6, C6), true, [12, 1]),
+    spec("ndsr_in4_a", 4, A, [31, 23], (R4, C4), true, [8, 3]),
+    spec("ndsr_in4_b", 4, B, [31, 23], (R4, C4), true, [8, 3]),
+    spec("ndsr_in4_c", 4, C, [31, 23], (R4, C4), true, [8, 3]),
 ];
 
 /// The kernel of an input scale (`in` = 10, 8, 7, 6, 4) and a variant.
