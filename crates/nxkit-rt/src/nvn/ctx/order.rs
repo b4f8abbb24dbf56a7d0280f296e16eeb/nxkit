@@ -123,24 +123,51 @@ impl Gpu {
         self.release_all(&mut front, &mut gate)
     }
 
-    /// Runs every held op in the order it came (a flush, a present, a finalised queue).
+    /// Runs every held op (a flush, a present, a finalised queue): the one whose wait no held work satisfies first
+    /// ([`Gate::force_pick`]), then what it releases, until nothing is held.
     pub(super) fn release_all(&self, front: &mut Front, gate: &mut Gate) -> AbiResult<()> {
         let mut first = Ok(());
-        while let Some(h) = gate.held.pop_front() {
+        while !gate.held.is_empty() {
+            for j in 0..gate.held.len() {
+                self.marks_of(front, &mut gate.held[j]);
+            }
+            let blockers: Vec<(usize, Option<MarkOp>)> = gate
+                .heads()
+                .into_iter()
+                .map(|i| {
+                    let h = &gate.held[i];
+                    let b = h
+                        .marks
+                        .as_ref()
+                        .and_then(|m| gate.blocker(h.queue, m, &Guest));
+                    (i, b)
+                })
+                .collect();
+            let i = gate.force_pick(&blockers, &Guest);
+            let blocker = blockers.iter().find(|(j, _)| *j == i).and_then(|(_, b)| *b);
+            let Some(h) = gate.held.remove(i) else {
+                break;
+            };
             gate.stats.forced += 1;
             if diag() {
                 static SHOWN: AtomicU32 = AtomicU32::new(0);
                 if nxkit_nvn::diag::first(&SHOWN, 100) {
+                    let cur = match blocker {
+                        Some(MarkOp::WaitEvent { event, .. }) => gate.event_value(event, &Guest),
+                        _ => None,
+                    };
                     eprintln!(
-                        "DIAG queues forced q {:#x} {} at the flush, {} ops of other queues after it",
+                        "DIAG queues forced q {:#x} {} at the flush on {blocker:x?} (counter now {cur:x?}), {} ops of other queues after it",
                         h.queue,
                         op_name(&h.op),
                         h.passed
                     );
                 }
             }
-            let r = self.run_held(front, gate, h);
-            first = first.and(r);
+            first = first.and(self.run_held(front, gate, h));
+            if gate.on {
+                first = first.and(self.pump(front, gate));
+            }
         }
         first
     }

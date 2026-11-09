@@ -15,6 +15,11 @@
 //!   was submitted already is in the frame before the wait. A fence that is not submitted yet is not waited for: NVN
 //!   binds the wait to the fence the sync has when the wait is made.
 //!
+//! What a flush runs first ([`Gate::force_pick`]): the oldest held op whose wait no held work can satisfy (a wait for
+//! a CPU signal that has not come yet, the game signals it after the present), then what that releases. Running the
+//! held work strictly oldest first ran a queue that waits for the GPU signal of another held queue before that queue,
+//! against the order the console keeps.
+//!
 //! `NXKIT_QUEUE_ORDER=0` holds nothing; the waits that would have held are still counted.
 
 use std::collections::{HashMap, VecDeque};
@@ -214,6 +219,43 @@ impl Gate {
     pub(crate) fn cpu_signalled(&mut self, word: u64) {
         self.stats.cpu_signals += 1;
         self.events.remove(&word);
+    }
+
+    /// True when held work of a queue other than `queue` signals the event whose counter is at `word`. Only held ops
+    /// whose marks were read count.
+    pub(crate) fn signalled_by_held(&self, word: u64, queue: u64, mem: &impl Words) -> bool {
+        self.held.iter().any(|h| {
+            h.queue != queue
+                && h.marks.as_ref().is_some_and(|m| {
+                    m.iter().any(|op| match *op {
+                        MarkOp::SignalEvent { event, .. } => {
+                            self.counter(event, mem).is_some_and(|(w, _)| w == word)
+                        }
+                        _ => false,
+                    })
+                })
+        })
+    }
+
+    /// The held op that a flush runs next, when nothing can run: the oldest head of a queue whose blocking wait no held
+    /// work can satisfy, else the oldest. `blockers` has the blocking wait of each head (None when it may run).
+    pub(crate) fn force_pick(
+        &self,
+        blockers: &[(usize, Option<MarkOp>)],
+        mem: &impl Words,
+    ) -> usize {
+        let free = blockers.iter().find(|(i, b)| {
+            let queue = self.held[*i].queue;
+            match *b {
+                None => true,
+                Some(MarkOp::WaitEvent { event, .. }) => self
+                    .counter(event, mem)
+                    .is_none_or(|(word, _)| !self.signalled_by_held(word, queue, mem)),
+                Some(MarkOp::WaitSync { sync }) => !self.fenced_by_held(sync, queue),
+                Some(_) => true,
+            }
+        });
+        free.or(blockers.first()).map_or(0, |(i, _)| *i)
     }
 
     /// The counter of an event as the gate sees it, for the diagnostic.
