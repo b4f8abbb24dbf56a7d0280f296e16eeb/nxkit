@@ -7,6 +7,7 @@
 
 use std::ops::Range;
 
+use crate::counters::FrameCounters;
 use crate::marks::Mark;
 use crate::resource::TexId;
 
@@ -227,6 +228,8 @@ pub struct Frame {
     /// The ranges of commands that run while a render condition is false, in order and apart. Only the commands that
     /// [`conditional`] names are left out; the others in a range run.
     pub disabled: Vec<Range<u32>>,
+    /// The slots of the GPU counters and the reports that the backend writes (see [`crate::counters`]).
+    pub counters: FrameCounters,
 }
 
 /// True for a command that a false render condition leaves out: draws, clears, and unless `NXKIT_RENDERCOND=3d`,
@@ -256,6 +259,7 @@ impl Frame {
         self.cmds.clear();
         self.lists.clear();
         self.disabled.clear();
+        self.counters.clear();
     }
 
     /// Marks the commands of `r` as run under a false render condition. The ranges come in command order; one that

@@ -422,7 +422,7 @@ fn empty_key() -> Arc<str> {
 }
 
 /// The detail of a draw that cannot run. It keeps the ordinals of the draws after it.
-fn empty_draw() -> DrawDetail {
+pub(crate) fn empty_draw() -> DrawDetail {
     DrawDetail {
         push: None,
         program: ProgramRef {

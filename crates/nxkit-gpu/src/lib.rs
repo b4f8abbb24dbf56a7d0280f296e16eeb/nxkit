@@ -49,6 +49,7 @@ mod passes;
 mod pipelines;
 mod programs;
 mod pull;
+mod queries;
 mod scaled;
 mod settings;
 pub mod snapshot;

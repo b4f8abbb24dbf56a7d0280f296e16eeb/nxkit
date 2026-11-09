@@ -207,6 +207,14 @@ pub enum RenderCommand {
         /// The upper bound.
         max: f32,
     },
+    /// Counts the samples of the draws after it that pass the depth and stencil tests into the 8 bytes at `offset` of
+    /// the visibility result buffer of the pass (`CommandBuffer::begin_render_pass_counted`), or stops counting.
+    SetVisibility {
+        /// True to count, false to stop.
+        counting: bool,
+        /// The byte offset, a multiple of 8. Ignored when `counting` is false.
+        offset: u64,
+    },
     /// Orders this pass after the work of earlier passes of the command buffer.
     WaitForEarlierPasses,
     /// A barrier with explicit stages. The stages must be `VERTEX` or `FRAGMENT` on the side of this pass.

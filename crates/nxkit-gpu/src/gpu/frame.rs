@@ -311,6 +311,11 @@ impl Gpu {
             .split_first_mut()
             .ok_or(MetalError::Invalid("the batch has no buffers"))?;
         first.retain(keep.clone());
+        let queries =
+            crate::queries::prepare(&self.ctx, &self.vis_pool, frame, plan, detail, &ords);
+        if let Some(b) = queries.as_ref().and_then(|q| q.buffer()) {
+            first.retain(b.clone());
+        }
         self.transfer.begin_frame();
         let mut scaled_queued = Vec::new();
         for (id, res) in &textures {
@@ -482,6 +487,7 @@ impl Gpu {
             uploaded: &uploaded,
             preloaded: &preloaded,
             native: native.as_ref(),
+            queries: queries.as_deref(),
         };
         let mut start = 0;
         let ranges: Vec<Range<usize>> = ends
@@ -568,6 +574,7 @@ impl Gpu {
             copied_back,
             mirrored,
             stats,
+            queries,
         })
     }
 }

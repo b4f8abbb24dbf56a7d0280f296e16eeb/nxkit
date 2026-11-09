@@ -19,6 +19,7 @@ pub mod analyse;
 pub mod backend;
 pub mod cache;
 pub mod cmdbuf;
+pub mod counters;
 pub mod decode;
 pub mod descriptors;
 pub mod diag;

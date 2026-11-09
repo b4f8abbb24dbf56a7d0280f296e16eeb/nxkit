@@ -41,6 +41,7 @@ mod tests {
             }],
             lists: vec![TexId(2)],
             disabled: Vec::new(),
+            counters: Default::default(),
         };
         let mut plan = PassPlan::default();
         let mut table = ResourceTable::new();

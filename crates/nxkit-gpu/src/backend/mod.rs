@@ -82,6 +82,9 @@ pub struct GpuBackend {
     /// The timestamp reports of encoded frames that the GPU has not been seen to finish, with the fence of their
     /// frame. [`GpuBackend::drain`] writes them.
     counters: Mutex<Vec<(u64, crate::detail::CounterReport)>>,
+    /// The GPU counters of encoded frames (`queries`) that the GPU has not been seen to finish, with the fence of their
+    /// frame.
+    queries: Mutex<Vec<(u64, Arc<crate::queries::FrameQueries>)>>,
     /// The GPU start and end of the last finished frame, in seconds of the host clock.
     last_gpu: Mutex<Option<(f64, f64)>>,
     blit_failed: AtomicBool,
@@ -146,6 +149,7 @@ impl GpuBackend {
                 pacer: OnceLock::new(),
                 reports: AtomicU64::new(0),
                 counters: Mutex::new(Vec::new()),
+                queries: Mutex::new(Vec::new()),
                 last_gpu: Mutex::new(None),
                 blit_failed: AtomicBool::new(false),
                 enc,
@@ -177,42 +181,68 @@ impl GpuBackend {
         result.is_ok()
     }
 
-    /// Keeps the timestamp reports of a frame until the GPU is seen to finish it.
-    fn hold_counters(&self, fence: Fence, detail: &FrameDetail) {
+    /// Keeps the timestamp reports and the GPU counters of a frame until the GPU is seen to finish it.
+    fn hold_counters<E>(
+        &self,
+        fence: Fence,
+        detail: &FrameDetail,
+        result: &Result<EncodeReport, E>,
+    ) {
         if !detail.reports.is_empty() {
             locked(&self.counters).extend(detail.reports.iter().map(|r| (fence.0, *r)));
         }
-    }
-
-    /// Writes the timestamp and value reports of the frames up to fence `upto`. A value report writes its value as the
-    /// counter (the render conditions of later frames read it, see `nxkit_nvn::rendercond`). A `TIMESTAMP_TOP` gets the GPU start of the
-    /// last finished frame and a `TIMESTAMP` its end, in GPU ticks (19.2 MHz). The game takes its GPU time from the
-    /// difference and picks its frame interval from it; without the reports it saw no GPU time and kept a 30 fps
-    /// step on frames that took longer, which ran the game in slow motion.
-    fn write_counters(&self, upto: u64) {
-        let Some((start, end)) = *locked(&self.last_gpu) else {
-            return;
-        };
-        let due: Vec<_> = {
-            let mut c = locked(&self.counters);
-            let (due, keep): (Vec<_>, Vec<_>) = c.drain(..).partition(|(f, _)| *f <= upto);
-            *c = keep;
-            due
-        };
-        let ticks = |s: f64| (s.max(0.0) * 1e9 * 384.0 / 625.0) as u64;
-        let map = self.guest.address_map();
-        for (_, r) in due {
-            let t = ticks(if r.kind == 0x10 { start } else { end });
-            let mut data = [0u8; 16];
-            data[..8].copy_from_slice(&u64::from(r.value).to_le_bytes());
-            data[8..].copy_from_slice(&t.to_le_bytes());
-            if let Some(off) = r.addr.checked_sub(map.gpu_base())
-                && off + 16 <= map.len()
-            {
-                let _ = self.guest.write(off, &data);
-            }
+        if let Some(q) = result.as_ref().ok().and_then(|r| r.queries.clone()) {
+            locked(&self.queries).push((fence.0, q));
         }
     }
+
+    /// Writes the reports of the frames up to fence `upto` into guest memory, each a 16-byte `NVNcounterData` (the 64-bit
+    /// counter, then the 64-bit time in GPU ticks of 19.2 MHz), only where all 16 bytes lie in guest memory
+    /// (`queries::write_report`).
+    ///
+    /// - A `TIMESTAMP_TOP` gets the GPU start of the last finished frame and a `TIMESTAMP` its end, with a counter of 0.
+    ///   The game takes its GPU time from the difference and picks its frame interval from it; without the reports it
+    ///   saw no GPU time and kept a 30 fps step on frames that took longer, which ran the game in slow motion.
+    /// - A `ReportValue` writes its 32-bit value as the counter (zero-extended, as the GPU writes the payload of a
+    ///   four-word report) and the end time. The render conditions of later frames read it (`nxkit_nvn::rendercond`).
+    /// - The GPU counters (samples passed, vertices, primitives) are written and landed by `queries`.
+    fn write_counters(&self, upto: u64) {
+        let gpu_time = *locked(&self.last_gpu);
+        let ticks = |s: f64| (s.max(0.0) * 1e9 * 384.0 / 625.0) as u64;
+        let map = self.guest.address_map();
+        if let Some((start, end)) = gpu_time {
+            for (_, r) in take_due(&self.counters, upto) {
+                let t = ticks(if r.kind == 0x10 { start } else { end });
+                if crate::queries::write_report(&self.guest, &map, r.addr, u64::from(r.value), t)
+                    .is_none()
+                {
+                    report_refused(r.addr);
+                }
+            }
+        }
+        let end = gpu_time.map_or(0, |(_, end)| ticks(end));
+        for (_, q) in take_due(&self.queries, upto) {
+            crate::queries::write_diag(&q.write(&self.guest, end));
+        }
+    }
+}
+
+/// Takes the entries of the frames up to fence `upto` out of `held`.
+fn take_due<T>(held: &Mutex<Vec<(u64, T)>>, upto: u64) -> Vec<(u64, T)> {
+    let mut c = locked(held);
+    let (due, keep): (Vec<_>, Vec<_>) = c.drain(..).partition(|(f, _)| *f <= upto);
+    *c = keep;
+    due
+}
+
+/// A report whose 16 bytes are not in guest memory is not written. Said once.
+fn report_refused(addr: u64) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "nxkit-gpu: a counter report at {addr:#x} is not in guest memory, it is not written"
+        );
+    });
 }
 
 impl GpuBackend {
@@ -267,7 +297,7 @@ impl GpuBackend {
                 );
             }
         }
-        self.hold_counters(job.fence, &job.detail);
+        self.hold_counters(job.fence, &job.detail, &result);
         self.encoded.fetch_max(job.fence.0, Ordering::AcqRel);
         let report = result.map_err(|e| e.to_string())?;
         let epoch = |id: &TexId| job.snapshot.record(*id).ok().map(|r| (*id, r.write_epoch));
@@ -305,7 +335,7 @@ impl GpuBackend {
             descriptors: cx.descriptors,
         };
         let result = locked(&self.gpu).encode_frame(frame, plan, &view, detail, self.scale);
-        self.hold_counters(fence, detail);
+        self.hold_counters(fence, detail, &result);
         self.encoded.fetch_max(fence.0, Ordering::AcqRel);
         let report = result.map_err(fail)?;
         // Only the state at the end of the frame is set: a texture that is synced in this frame is not first marked
