@@ -50,11 +50,20 @@ fn track(buffer: &ProtocolObject<dyn MTLBuffer>) -> crate::memstats::Tracked {
     crate::memstats::Tracked::new(crate::memstats::Kind::Buffer, buffer.allocatedSize() as u64)
 }
 
+/// The size of the buffer that follows one of `last` bytes when `need` bytes do not fit: twice `last`, at most
+/// `max_chunk` (never below `last`), and at least `need` rounded to the alignment.
+pub(crate) fn next_chunk(last: u64, need: u64, max_chunk: u64) -> u64 {
+    last.saturating_mul(2)
+        .min(max_chunk.max(last))
+        .max(need.next_multiple_of(SCRATCH_ALIGN))
+}
+
 /// A bump allocator over shared buffers. It grows without moving live allocations, and reuses its buffers after
 /// `reset`. The caller commits residency after encoding and before submitting work that uses new buffers.
 pub struct Scratch {
     ctx: Context,
-    chunk_bytes: u64,
+    /// The cap of the size of a new buffer, and the size of the first one that follows the first buffer's doubling.
+    max_chunk: u64,
     id: u64,
     /// Counts the resets. A block from an earlier epoch is stale.
     epoch: AtomicU64,
@@ -67,8 +76,16 @@ unsafe impl Send for Scratch {}
 unsafe impl Sync for Scratch {}
 
 impl Scratch {
-    /// Makes a scratch buffer of `size` bytes. It joins the residency set.
+    /// Makes a scratch buffer of `size` bytes. It joins the residency set. When it fills up, it adds buffers of the
+    /// same size.
     pub fn new(ctx: &Context, size: u64) -> Result<Self> {
+        Self::growing(ctx, size, size)
+    }
+
+    /// Makes a scratch buffer that starts with `first` bytes. When it fills up, each new buffer is twice as large as
+    /// the one before, up to `max_chunk` (see [`next_chunk`]).
+    pub fn growing(ctx: &Context, first: u64, max_chunk: u64) -> Result<Self> {
+        let size = first;
         if size == 0 {
             return Err(MetalError::Invalid(
                 "a scratch buffer needs at least one byte",
@@ -81,7 +98,7 @@ impl Scratch {
         ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
         Ok(Self {
             ctx: ctx.clone(),
-            chunk_bytes: size,
+            max_chunk: max_chunk.max(size),
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             epoch: AtomicU64::new(0),
             state: Mutex::new(State {
@@ -163,7 +180,7 @@ impl Scratch {
         while start + len > st.buffers[st.index].length() as u64 {
             let next = st.index + 1;
             if next == st.buffers.len() {
-                let size = self.chunk_bytes.max(len.next_multiple_of(SCRATCH_ALIGN));
+                let size = next_chunk(st.buffers[st.index].length() as u64, len, self.max_chunk);
                 let buffer = self
                     .ctx
                     .device()
@@ -224,5 +241,33 @@ impl Drop for Scratch {
             self.ctx
                 .remove_allocation(ProtocolObject::from_ref(&**buffer));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIB: u64 = 1 << 20;
+
+    #[test]
+    fn chunks_double_up_to_the_cap() {
+        assert_eq!(next_chunk(8 * MIB, 1, 64 * MIB), 16 * MIB);
+        assert_eq!(next_chunk(16 * MIB, 1, 64 * MIB), 32 * MIB);
+        assert_eq!(next_chunk(32 * MIB, 1, 64 * MIB), 64 * MIB);
+        assert_eq!(next_chunk(64 * MIB, 1, 64 * MIB), 64 * MIB);
+    }
+
+    #[test]
+    fn a_large_request_gets_its_own_chunk() {
+        assert_eq!(
+            next_chunk(8 * MIB, 100 * MIB + 1, 64 * MIB),
+            100 * MIB + SCRATCH_ALIGN
+        );
+    }
+
+    #[test]
+    fn a_fixed_scratch_keeps_its_size() {
+        assert_eq!(next_chunk(4 * MIB, 1, 4 * MIB), 4 * MIB);
     }
 }

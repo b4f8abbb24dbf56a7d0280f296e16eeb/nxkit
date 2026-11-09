@@ -46,6 +46,7 @@ use run::{Compare, PendingCompare, count_fallback, count_native, make_compare};
 pub(crate) use run::{encode, health_lines};
 use util::{ane_on, bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
 
+use crate::lru::Lru;
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::AtomicU32;
@@ -102,8 +103,15 @@ enum Verdict {
 /// whose plan follows them).
 type Key = (Vec<u64>, u64, Vec<u32>);
 
-/// The plans a network may keep. Dynamic resolution makes a new size now and then; a full cache starts again.
-const CACHE_MAX: usize = 64;
+/// The plans the cache keeps. A plan of a network holds tens of MB of scratch, and the game uses one or two at a time
+/// (dynamic resolution makes a new size now and then), so the cache is small and drops the least recently used.
+/// `NXKIT_NATIVE_CACHE=<n>` changes it.
+fn cache_max() -> usize {
+    std::env::var("NXKIT_NATIVE_CACHE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4)
+}
 
 /// Why a frame keeps the game's dispatches: a counted reason and a sentence for the diagnostics.
 struct Refusal(&'static str, String);
@@ -121,7 +129,7 @@ pub(crate) struct Native {
     ane_switch: Vec<bool>,
     /// The models of the Neural Engine path by net and weight hash.
     ane: HashMap<(usize, u64), offload::AneNet>,
-    cache: HashMap<(usize, Key), Verdict>,
+    cache: Lru<(usize, Key), Verdict>,
     /// The runs the capture has printed: net, weight hash, tag.
     captured: HashSet<(usize, u64, Vec<u32>)>,
     blobs: Vec<Vec<u8>>,
@@ -148,7 +156,7 @@ impl Native {
             ane_switch: nets.iter().map(|n| ane_on(n.name())).collect(),
             ane: HashMap::new(),
             nets,
-            cache: HashMap::new(),
+            cache: Lru::new(cache_max()),
             captured: HashSet::new(),
             blobs: Vec::new(),
             ready_frames: 0,
@@ -298,27 +306,28 @@ impl Native {
             return refuse("shape", why);
         }
         let key: (usize, Key) = (net, (starts, hash, shape.tag.clone()));
-        if !self.cache.contains_key(&key) {
-            if self.cache.len() >= CACHE_MAX {
-                self.cache.clear();
+        let verdict = match self.cache.get(&key).cloned() {
+            Some(v) => v,
+            None => {
+                let blobs: Vec<&[u8]> = self.blobs.iter().map(Vec::as_slice).collect();
+                let built = match build(
+                    &*self.nets[net],
+                    &blobs,
+                    &shape,
+                    &info,
+                    cx,
+                    self.ane_switch[net],
+                ) {
+                    Ok(e) => Verdict::Ready(Arc::new(e)),
+                    Err(Refusal(reason, what)) => Verdict::Refused(reason, what),
+                };
+                self.cache.insert(key, built.clone());
+                built
             }
-            let blobs: Vec<&[u8]> = self.blobs.iter().map(Vec::as_slice).collect();
-            let verdict = match build(
-                &*self.nets[net],
-                &blobs,
-                &shape,
-                &info,
-                cx,
-                self.ane_switch[net],
-            ) {
-                Ok(e) => Verdict::Ready(Arc::new(e)),
-                Err(Refusal(reason, what)) => Verdict::Refused(reason, what),
-            };
-            self.cache.insert(key.clone(), verdict);
-        }
+        };
         if first_time {
             capture(&*self.nets[net], &shape, run, cx, hash, anchor_cmd);
-            match &self.cache[&key] {
+            match &verdict {
                 Verdict::Ready(e) => eprintln!(
                     "DIAG {name} {name}: plan ready, {} steps, {} buffers",
                     e.plan.steps.len(),
@@ -329,9 +338,9 @@ impl Native {
                 }
             }
         }
-        let entry = match &self.cache[&key] {
-            Verdict::Ready(e) => e.clone(),
-            Verdict::Refused(reason, what) => return refuse(reason, what.clone()),
+        let entry = match verdict {
+            Verdict::Ready(e) => e,
+            Verdict::Refused(reason, what) => return refuse(reason, what),
         };
         let mut prepared = self.bind(net, &entry, run, cx, anchor_cmd, stats)?;
         if self.ane_switch[net] {

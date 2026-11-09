@@ -123,6 +123,13 @@ unsafe extern "C" {
         info: *mut c_int,
         count: *mut u32,
     ) -> c_int;
+    fn mach_vm_page_range_query(
+        task: u32,
+        address: u64,
+        size: u64,
+        dispositions: u64,
+        count: *mut u64,
+    ) -> c_int;
     fn malloc_zone_statistics(zone: *mut c_void, stats: *mut MallocStats);
 }
 
@@ -280,4 +287,90 @@ pub fn malloc_in_use() -> u64 {
     // SAFETY: a null zone asks for the sum of all zones; `s` is a writable `malloc_statistics_t`.
     unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut s) };
     s.size_in_use as u64
+}
+
+/// `VM_PAGE_QUERY_PAGE_PRESENT`.
+const PAGE_PRESENT: i32 = 0x1;
+/// `VM_PAGE_QUERY_PAGE_DIRTY`.
+const PAGE_DIRTY: i32 = 0x4;
+/// `VM_PAGE_QUERY_PAGE_PAGED_OUT`.
+const PAGE_PAGED_OUT: i32 = 0x8;
+
+/// Counts the pages of one query by their disposition bits.
+fn count_pages(dispositions: &[i32], page: u64) -> Pages {
+    let mut p = Pages::default();
+    for &d in dispositions {
+        if d & PAGE_PRESENT != 0 {
+            p.resident += page;
+        }
+        if d & PAGE_DIRTY != 0 {
+            p.dirty += page;
+        }
+        if d & PAGE_PAGED_OUT != 0 {
+            p.swapped += page;
+        }
+    }
+    p
+}
+
+/// The pages of `[start, end)` that the kernel has resident, dirty or paged out, from a query of each page. The region
+/// walk of [`regions`] counts by VM object, and for the guest range (one anonymous mapping under a no-copy Metal buffer)
+/// it reported 12.6 GiB resident next to a footprint of 113 MiB. The per-page query is the ground truth. None when the
+/// kernel refuses the query. `mapped` is the length of the range.
+pub fn page_query(start: u64, end: u64, page: u64) -> Option<Pages> {
+    const CHUNK: u64 = 1 << 30;
+    let mut out = Pages {
+        mapped: end.saturating_sub(start),
+        ..Pages::default()
+    };
+    let mut buf: Vec<i32> = vec![0; (CHUNK / page.max(1)) as usize];
+    let mut at = start;
+    while at < end {
+        let len = (end - at).min(CHUNK);
+        let mut count = len / page;
+        if count == 0 {
+            break;
+        }
+        // SAFETY: `buf` holds `CHUNK / page` ints and `count` is at most that. The kernel writes one int per page of
+        // `[at, at + len)` and updates `count`. The call only reads the map of this task.
+        let kr = unsafe {
+            mach_vm_page_range_query(
+                mach_task_self_,
+                at,
+                len,
+                buf.as_mut_ptr() as u64,
+                &mut count,
+            )
+        };
+        if kr != KERN_SUCCESS {
+            return None;
+        }
+        let n = (count as usize).min(buf.len());
+        let c = count_pages(&buf[..n], page);
+        out.resident += c.resident;
+        out.dirty += c.dirty;
+        out.swapped += c.swapped;
+        at += len;
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pages_are_counted_by_bit() {
+        let d = [
+            0,
+            PAGE_PRESENT,
+            PAGE_PRESENT | PAGE_DIRTY,
+            PAGE_PAGED_OUT,
+            PAGE_PRESENT | PAGE_DIRTY | PAGE_PAGED_OUT,
+        ];
+        let p = count_pages(&d, 16384);
+        assert_eq!(p.resident, 3 * 16384);
+        assert_eq!(p.dirty, 2 * 16384);
+        assert_eq!(p.swapped, 2 * 16384);
+    }
 }

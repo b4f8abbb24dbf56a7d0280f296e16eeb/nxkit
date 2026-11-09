@@ -33,8 +33,13 @@ use crate::table::Keep;
 /// The number of batches the CPU can run ahead of the GPU.
 pub const BATCHES_IN_FLIGHT: usize = 3;
 
-/// The size of the scratch buffer of each slot.
-pub const BATCH_SCRATCH_BYTES: u64 = 64 * 1024 * 1024;
+/// The size of the first scratch buffer of each slot. A slot that needs more adds buffers that double in size up to
+/// [`BATCH_SCRATCH_MAX_BYTES`]. A slot that never needs more (the game's constants are a few MB a frame) keeps 8 MiB,
+/// and with the three slots of the ring that is 24 MiB, not 192 MiB.
+pub const BATCH_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The largest buffer that a slot adds to its scratch.
+pub const BATCH_SCRATCH_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Default)]
 struct DoneState {
@@ -128,7 +133,11 @@ impl BatchRing {
                     state: Mutex::new(DoneState::default()),
                     cv: Condvar::new(),
                 }),
-                scratch: Arc::new(Scratch::new(ctx, BATCH_SCRATCH_BYTES)?),
+                scratch: Arc::new(Scratch::growing(
+                    ctx,
+                    BATCH_SCRATCH_BYTES,
+                    BATCH_SCRATCH_MAX_BYTES,
+                )?),
             });
         }
         ctx.commit_residency();

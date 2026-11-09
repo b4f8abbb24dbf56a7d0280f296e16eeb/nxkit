@@ -70,7 +70,10 @@ mod upscale;
 
 pub use address::AddressMap;
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
-pub use batch::{BATCH_SCRATCH_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing, SubmittedBatch};
+pub use batch::{
+    BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
+    SubmittedBatch,
+};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use compute_icb::{
@@ -88,7 +91,7 @@ pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
-pub use memstats::{MemStats, mem_stats};
+pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{
