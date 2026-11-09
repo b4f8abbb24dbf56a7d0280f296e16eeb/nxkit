@@ -91,7 +91,7 @@ pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
-pub use memstats::{MemStats, mem_stats};
+pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{

@@ -25,6 +25,9 @@ const KINDS: usize = 4;
 static COUNT: [AtomicU64; KINDS] = [const { AtomicU64::new(0) }; KINDS];
 static BYTES: [AtomicU64; KINDS] = [const { AtomicU64::new(0) }; KINDS];
 static PIPELINES: AtomicU64 = AtomicU64::new(0);
+static EVICTIONS: AtomicU64 = AtomicU64::new(0);
+static EVICTED_BYTES: AtomicU64 = AtomicU64::new(0);
+static REUPLOADS: AtomicU64 = AtomicU64::new(0);
 
 /// One live allocation in the counters. Dropping it takes it out again.
 #[derive(Debug)]
@@ -53,6 +56,17 @@ pub(crate) fn pipeline_kept() {
     PIPELINES.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Counts a texture that the encoder dropped because it was not used for a while and its guest copy is current.
+pub fn texture_evicted(bytes: u64) {
+    EVICTIONS.fetch_add(1, Ordering::Relaxed);
+    EVICTED_BYTES.fetch_add(bytes, Ordering::Relaxed);
+}
+
+/// Counts a texture that was made again, and uploaded again, after an eviction.
+pub fn texture_reuploaded() {
+    REUPLOADS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// The live Metal objects of this crate, by kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MemStats {
@@ -72,6 +86,12 @@ pub struct MemStats {
     pub libraries: u64,
     /// Pipeline states that the pipeline caches hold.
     pub pipelines: u64,
+    /// Textures dropped for not being used (since the start).
+    pub evictions: u64,
+    /// Their `allocatedSize` in bytes.
+    pub evicted_bytes: u64,
+    /// Evicted textures that were made again.
+    pub reuploads: u64,
 }
 
 /// The counters now.
@@ -87,6 +107,9 @@ pub fn mem_stats() -> MemStats {
         guest_bytes: b(Kind::Guest),
         libraries: c(Kind::Library),
         pipelines: PIPELINES.load(Ordering::Relaxed),
+        evictions: EVICTIONS.load(Ordering::Relaxed),
+        evicted_bytes: EVICTED_BYTES.load(Ordering::Relaxed),
+        reuploads: REUPLOADS.load(Ordering::Relaxed),
     }
 }
 
@@ -105,5 +128,16 @@ mod tests {
         assert!(mem_stats().buffer_bytes >= 1 << 40);
         drop(t);
         assert!(mem_stats().buffer_bytes < 1 << 40);
+    }
+
+    #[test]
+    fn evictions_and_reuploads_add_up() {
+        let before = mem_stats();
+        texture_evicted(1000);
+        texture_reuploaded();
+        let after = mem_stats();
+        assert!(after.evictions > before.evictions);
+        assert!(after.evicted_bytes >= before.evicted_bytes + 1000);
+        assert!(after.reuploads > before.reuploads);
     }
 }

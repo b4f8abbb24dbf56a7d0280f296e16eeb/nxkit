@@ -10,6 +10,7 @@
 //! stays at its size for good, because the guest memory has the unscaled bytes. So does a texture that the CPU writes
 //! often and the GPU renders rarely (`Heat`): every write would need a staging upload and a scale.
 
+mod evict;
 #[cfg(test)]
 mod tests;
 mod views;
@@ -99,6 +100,14 @@ pub(crate) struct TextureStore {
     retired: Vec<Texture>,
     /// The storage ranges of the textures made so far, for the `contain` diagnostic.
     spans: Mutex<Vec<(u64, u64, TexId, TextureDesc)>>,
+    /// The frames the store has seen end.
+    frame: u64,
+    /// The idle frames after which a texture goes, `None` when eviction is off (`NXKIT_TEX_EVICT`).
+    evict_after: Option<u64>,
+    /// The use of each Metal texture by generation.
+    usage: FastMap<u64, evict::Usage>,
+    /// The ids whose Metal texture was evicted and not made again yet.
+    evicted_ids: FastSet<TexId>,
 }
 
 fn kind_of(t: Target) -> Option<TextureKind> {
@@ -212,6 +221,10 @@ impl TextureStore {
             views: Mutex::new(FastMap::default()),
             retired: Vec::new(),
             spans: Mutex::new(Vec::new()),
+            frame: 0,
+            evict_after: evict::frames_from_env(),
+            usage: FastMap::default(),
+            evicted_ids: FastSet::default(),
         }
     }
 
@@ -266,7 +279,9 @@ impl TextureStore {
         if let Some(r) = self.entries.get_mut(&id) {
             if r.desc == desc {
                 r.fresh = false;
-                return Ok(r.clone());
+                let r = r.clone();
+                self.used(r.generation, rec.residency == Residency::GpuNewer);
+                return Ok(r);
             }
             if r.scaled != scaled {
                 stats.textures_rescaled += 1;
@@ -375,6 +390,8 @@ impl TextureStore {
         if let Some(old) = self.entries.insert(id, r.clone()) {
             self.retired.push(old.tex);
         }
+        self.used(r.generation, rec.residency == Residency::GpuNewer);
+        self.made_again(id);
         Ok(r)
     }
 
@@ -401,6 +418,7 @@ impl TextureStore {
         self.atomic.remove(&id);
         self.native.remove(&id);
         self.heat.remove(&id);
+        self.evicted_ids.remove(&id);
     }
 
     /// The textures that were replaced. The caller drops them when the GPU is done with them.
