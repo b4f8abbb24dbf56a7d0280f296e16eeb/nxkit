@@ -3,7 +3,7 @@
 //! The path looks for the picture the video service wrote (`ReadDecoderOutputImageNv12`, tight NV12 at a guest address)
 //! in the planes the game's NDVE dispatch binds. If the game puts the picture into those planes by a way the feeder
 //! does not follow, nothing matches. At the first dispatch of the run that reaches the Neural Engine path
-//! (`NXKIT_NDVE_ANE=1`), and again 60 dispatches later, the report prints:
+//! (on unless `NXKIT_NDVE_ANE=0`), and again 60 dispatches later, the report prints:
 //!
 //! 1. the descriptors of the luma and chroma textures as the game set them, the memory pool they lie in, and where the
 //!    decoder wrote its latest picture: the same pool or not, the same VM object at the same offset (two views of the
