@@ -44,6 +44,7 @@ mod json;
 mod lru;
 mod lum;
 mod mesh;
+mod nanscan;
 mod native;
 mod native_ndsr;
 mod native_ndve;

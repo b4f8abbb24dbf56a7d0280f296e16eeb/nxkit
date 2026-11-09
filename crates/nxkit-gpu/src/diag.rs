@@ -204,6 +204,22 @@ pub(crate) fn paint_programs() -> &'static [String] {
     })
 }
 
+/// The fragment program keys of `NXKIT_DIAG_FS` (comma separated). With keys, the `draw` line prints every draw of
+/// these programs and `nanscan` looks at the passes that hold one. Empty without the variable.
+pub(crate) fn fs_programs() -> &'static [String] {
+    static KEYS: OnceLock<Vec<String>> = OnceLock::new();
+    KEYS.get_or_init(|| {
+        std::env::var("NXKIT_DIAG_FS")
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
 /// The texture filter of `NXKIT_DIAG_TEX`: a format name (as `Debug` prints it), a size `WxH` or `WxHxL` (layers),
 /// or both, separated by `/` (`R16Unorm/256x256`). Every part that is given has to match.
 #[derive(Debug, Default)]

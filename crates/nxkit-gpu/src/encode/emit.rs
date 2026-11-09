@@ -241,6 +241,56 @@ pub(super) fn emit(
     })
 }
 
+/// The most `draw` lines that `NXKIT_DIAG_FS` prints for one fragment program in a run.
+const FS_DRAW_LINES: u32 = 200;
+
+/// True while `NXKIT_DIAG_FS` lists the fragment program of the draw and its lines are within the limit.
+fn listed_draw(d: &crate::detail::DrawDetail) -> bool {
+    static SHOWN: std::sync::Mutex<Vec<(String, u32)>> = std::sync::Mutex::new(Vec::new());
+    let Some(key) = d.program.fragment.as_deref() else {
+        return false;
+    };
+    if !crate::diag::fs_programs().iter().any(|k| k == key) {
+        return false;
+    }
+    let Ok(mut shown) = SHOWN.lock() else {
+        return false;
+    };
+    match shown.iter_mut().find(|(k, _)| k == key) {
+        Some((_, count)) if *count >= FS_DRAW_LINES => false,
+        Some((_, count)) => {
+            *count += 1;
+            true
+        }
+        None => {
+            shown.push((key.to_owned(), 1));
+            true
+        }
+    }
+}
+
+/// The colour targets of a draw for the `draw` line: for each slot its format, and the blend state as the NVN
+/// numbers (`off`, or `on src/dst op` of RGB).
+fn target_state(pc: &PassCtx, d: &crate::detail::DrawDetail) -> String {
+    let slots: Vec<String> = pc
+        .targets
+        .colors
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let f = (*f)?;
+            let b = d.blend.get(i)?;
+            let blend = if b.enable {
+                format!("on {}/{} op {}", b.src_rgb, b.dst_rgb, b.op_rgb)
+            } else {
+                "off".to_owned()
+            };
+            Some(format!("{i}:{f:?} blend {blend}"))
+        })
+        .collect();
+    format!("[{}]", slots.join(", "))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     sh: &Shared<'_>,
@@ -258,9 +308,16 @@ pub(super) fn draw(
         return stats.skip(Skip::Detail);
     };
     static DRAW_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if draw_diag("draw", &DRAW_SHOWN) {
+    // With NXKIT_DIAG_FS, every draw of a listed fragment program prints, on every frame.
+    let listed = crate::diag("draw") && listed_draw(d);
+    if listed || draw_diag("draw", &DRAW_SHOWN) {
+        let targets = if crate::diag::fs_programs().is_empty() {
+            String::new()
+        } else {
+            format!(" targets {}", target_state(pc, d))
+        };
         eprintln!(
-            "DIAG draw {n} vs {} fs {:?} args {:?} depth {:?} raster {:?} masks {:?} blend {:?} inputs {:?} streams {:?} ubos {:?} textures {:?}",
+            "DIAG draw {n} vs {} fs {:?} args {:?} depth {:?} raster {:?} masks {:?} blend {:?} inputs {:?} streams {:?} ubos {:?} textures {:?}{targets}",
             d.program.vertex,
             d.program.fragment,
             d.args,

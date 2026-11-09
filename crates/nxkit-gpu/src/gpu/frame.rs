@@ -77,6 +77,7 @@ impl Gpu {
         self.native.begin_frame();
         let diag_frame = crate::diag::begin_frame();
         let lum = crate::lum::begin();
+        let scan = crate::nanscan::begin(&self.ctx);
         let t0 = Instant::now();
         MARKS.with(|m| m.borrow_mut().clear());
         let scale = if scale.is_finite() && scale > 0.0 {
@@ -542,9 +543,14 @@ impl Gpu {
         let number = submitted.number();
         self.older = self.last.replace(submitted);
         self.copyback.submitted(number, &mirrored_ranges);
-        if lum {
+        if lum || scan {
             let _ = self.wait();
+        }
+        if lum {
             crate::lum::dump(&self.ctx);
+        }
+        if scan {
+            crate::nanscan::dump();
         }
         crate::health::frame(diag_frame, &stats);
         Ok(EncodeReport {

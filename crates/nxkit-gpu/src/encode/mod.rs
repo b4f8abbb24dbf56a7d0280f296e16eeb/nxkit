@@ -319,6 +319,24 @@ pub(crate) fn render_pass(
     if !blocks::copy(sh.ctx, cb, &tables.vertex, &stores, blocks::Way::Store) {
         stats.skipped[Skip::Copy as usize] += stores.len() as u32;
     }
+    if crate::nanscan::active() {
+        let stored: Vec<(TexId, &nxkit_metal::Texture)> = sh
+            .plan
+            .attachments_of(pass)
+            .iter()
+            .filter_map(|a| {
+                let Slot::Color(slot) = a.slot else {
+                    return None;
+                };
+                if a.store != StoreAction::Store {
+                    return None;
+                }
+                let color = s.desc.colors.get(usize::from(slot))?.as_ref()?;
+                Some((a.tex, &color.texture))
+            })
+            .collect();
+        crate::nanscan::pass(sh, cb, index, range.clone(), &stored);
+    }
     if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
         for a in sh.plan.attachments_of(pass) {
             if matches!(a.slot, Slot::Color(_))
