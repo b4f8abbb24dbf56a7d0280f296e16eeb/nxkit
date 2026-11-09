@@ -10,7 +10,7 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | ANE, Neural Engine | The Apple block for neural networks. `nxkit-coreml` runs a Core ML model on it. NDVE can use it (`NXKIT_NDVE_ANE`). |
 | base pipeline | The unspecialized render pipeline that the archive holds for one shader pair, with no colour state. A pipeline of a draw is made from it by specialization. |
 | block shadow | A plain colour texture that a render pass writes when the attachment is a compressed texture. After the pass its content is copied into the blocks of the compressed texture. |
-| DVFS | Dynamic voltage and frequency scaling: the GPU changes its clock with its load. Assumed to be why the GPU time in ms of the same work rises when a paced frame is lighter (not measured here). |
+| DVFS | Dynamic voltage and frequency scaling: the GPU changes its clock with its load. It is why the GPU time in ms of the same work rises when a paced frame is lighter: measured on an M2 Max, about 4 ms at the start became 11 to 14 ms at about 750 MHz instead of 1398 MHz (see `pacing.md`). |
 | NDSR | The neural super resolution library of the Nintendo SDK, used by the agl family as the in-game upscaler. `nxkit-ndsr` runs its networks (packs `vr`, `vr_light`) with own kernels. |
 | NDVE | The movie upscaler of the Nintendo SDK (`nn::ndve`): a U-Net and a resampler on the picture of a movie. `nxkit-ndve` runs it with own kernels or on the Neural Engine. |
 | prewarm | The work at the start of the host that makes the pipelines of the runtime list before the first frame. |

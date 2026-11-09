@@ -193,7 +193,7 @@ Status: specialization, background builds, the runtime cache and the pull path a
 
 Details: [pacing.md](pacing.md). The frame step is load-driven: it holds a frame for a number of vsyncs of 1/60 s from the cost of the frames. The profile (`pace_profile` in `game.json`) says how: `hold` (a late frame may stay longer, thermal cap on), `work` (a frame is judged by its work only) and `steady` (the step never leaves the cap's frame rate; a long frame shows late once and the game pays the time back). The variable step, which follows the measured time between shown frames, runs only under variable refresh (VRR) on an adaptive screen. A fixed screen keeps the load-driven step at 60 and a grid of ticks. VRR has not run on a screen yet (tests only).
 
-Assumed, not measured here: the GPU lowers its clock when a paced frame leaves it idle (DVFS), so the GPU time in ms of the same work rises when the load per frame falls. Compare GPU times only at equal pacing, and do not read a rise in `NXKIT_PACE_DIAG` GPU ms after a speed-up as a loss.
+Measured (`pacing.md`): the GPU lowers its clock when a paced frame leaves it idle (DVFS), so the GPU time in ms of the same work rises when the load per frame falls. Compare GPU times only at equal pacing, and do not read a rise in `NXKIT_PACE_DIAG` GPU ms after a speed-up as a loss.
 
 ## Store format and API stability
 

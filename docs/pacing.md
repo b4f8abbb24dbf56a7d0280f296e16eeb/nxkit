@@ -72,7 +72,7 @@ The variable step (`StepMode::Variable`: the time between the last two shown fra
 
 ## GPU time and the clock of the GPU (DVFS)
 
-The GPU time per frame in `NXKIT_PACE_DIAG` is not a constant of the work. Assumed, not measured here: an Apple GPU lowers its clock when its load is low, so a lighter frame or a capped frame rate can show a higher GPU time in ms for the same work. A speed-up of a kernel can thus raise the GPU ms of a paced frame. Compare GPU times at equal pacing (the same cap, the same screen mode), or use `NXKIT_DIAG=nativeprof`, which times the steps of a native plan inside one pass.
+The GPU time per frame in `NXKIT_PACE_DIAG` (and the Metal HUD) is not a constant of the work. An Apple GPU lowers its clock when it idles part of each frame, until it is busy most of the time, so a capped frame rate shows a higher GPU time in ms for the same work. Measured with `powermetrics --samplers gpu_power` (M2 Max, Ocarina of Time at 60 fps): a frame of about 4 ms at the start settles at 11 to 14 ms with the GPU at about 750 MHz instead of its 1398 MHz and 94 to 97 % active residency; a heavy 3D scene ran at the full clock with about 15 ms. The governor is in the GPU firmware; macOS has no public way to fix the clock. A speed-up of a kernel can thus raise the GPU ms of a paced frame. Compare GPU times at equal pacing (the same cap, the same screen mode), or use `NXKIT_DIAG=nativeprof`, which times the steps of a native plan inside one pass.
 
 ## Open points
 
