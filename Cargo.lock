@@ -751,7 +751,9 @@ dependencies = [
 name = "nxgame-oot"
 version = "0.10.0"
 dependencies = [
+ "nxb-a64",
  "nxb-profile",
+ "nxb-rewrite",
  "nxtitle",
 ]
 

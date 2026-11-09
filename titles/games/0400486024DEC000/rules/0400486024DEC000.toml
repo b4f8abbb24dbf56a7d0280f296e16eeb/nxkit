@@ -2,9 +2,16 @@
 #
 # The frame ratio stub of `MATCH_FRAME_STEP` in patches.py, as steps for main build e0f3ccfaf50065ae4ea01eb5aeb13b1a
 # (v131072). The function is at main+0x6e6be0, the division `fdiv s8,s1,s0` at +0xe4 (main+0x6e6cc4). The stub
-# gives the ratio the host's step × base rate / 60 and counts the vsyncs stepped (state page +0x30). Until the host
-# has decided a step (state page +0x20 is 0), and at fps_target 0 (state page +0x0), the game's own division runs.
-# Offsets in the comments are from label 0, the start of the stub.
+# gives the ratio the host's step × base rate / 60, where the step is in vsyncs of 1/60 s. Which field carries the
+# step depends on the host's mode:
+#  - At fps_target 30 and 60 the host writes the whole step in vsyncs (state page +0x20, 60 Hz units) and leaves the
+#    variable step (+0x50) at 0. The stub counts the vsyncs stepped (state page +0x30).
+#  - At fps_target 120 the host steps by time: +0x50 is the time since the previous frame in units of 1/30 s (0.25 at
+#    120 fps, floor 0.125, ceiling 1.5) and +0x20 is 1. A variable step that is not 0 wins, and as vsyncs it is
+#    twice its value, so the ratio is half per 120 Hz tick. The stepped count is not kept (it is a whole count and
+#    only the load-driven step at 60 reads it).
+# Until the host has decided a step (+0x50 and +0x20 are both 0), and at fps_target 0 (+0x0), the game's own division
+# runs. Offsets in the comments are from label 0, the start of the stub.
 #
 # The dynamic resolution stub of the same patches.py is not here: the resolution rules are a separate change.
 
@@ -42,89 +49,114 @@ target = "S+0"
 op = "word"
 word = 3107979793
 
-# +8: cbz w17, +60 (the game's division)
+# +8: cbz w17, +80 (the game's division)
 [[rule.step]]
 op = "word"
-word = 872415665
+word = 872415825
 
-# +12: ldr w17,[x16,#0x20] (step in vsyncs)
+# +12: ldr s8,[x16,#0x50] (variable step, units of 1/30 s; s8 is free, s0 is still the game's)
+[[rule.step]]
+op = "word"
+word = 3175109128
+
+# +16: fcmp s8,#0.0
+[[rule.step]]
+op = "word"
+word = 505422088
+
+# +20: b.ne +56 (a variable step is set)
+[[rule.step]]
+op = "word"
+word = 1409286433
+
+# +24: ldr w17,[x16,#0x20] (step in vsyncs)
 [[rule.step]]
 op = "word"
 word = 3107987985
 
-# +16: cbz w17, +60 (not decided yet)
+# +28: cbz w17, +80 (not decided yet)
 [[rule.step]]
 op = "word"
-word = 872415601
+word = 872415665
 
-# +20: ucvtf s0,w17
+# +32: ucvtf s0,w17
 [[rule.step]]
 op = "word"
 word = 505610784
 
-# +24: ldr x16,[x16,#0x30]
+# +36: ldr x16,[x16,#0x30]
 [[rule.step]]
 op = "word"
 word = 4181727760
 
-# +28: add x16,x16,x17
+# +40: add x16,x16,x17
 [[rule.step]]
 op = "word"
 word = 2333147664
 
-# +32: adrp x17, state page
+# +44: adrp x17, state page
 [[rule.step]]
 op = "adrp"
 reg = 17
-pc = "L0+32"
+pc = "L0+44"
 target = "S+0"
 
-# +36: str x16,[x17,#0x30] (vsyncs stepped)
+# +48: str x16,[x17,#0x30] (vsyncs stepped)
 [[rule.step]]
 op = "word"
 word = 4177533488
 
-# +40: fmul s8,s0,s1 (step × base rate)
+# +52: b +60 (to the ratio)
+[[rule.step]]
+op = "word"
+word = 335544322
+
+# +56: fadd s0,s8,s8 (variable step as vsyncs of 1/60 s: x2)
+[[rule.step]]
+op = "word"
+word = 505948416
+
+# +60: fmul s8,s0,s1 (step in vsyncs x base rate)
 [[rule.step]]
 op = "word"
 word = 505481224
 
-# +44: mov w16,#0x42700000 (60.0)
+# +64: mov w16,#0x42700000 (60.0)
 [[rule.step]]
 op = "word"
 word = 1386761744
 
-# +48: fmov s0,w16
+# +68: fmov s0,w16
 [[rule.step]]
 op = "word"
 word = 505872896
 
-# +52: fdiv s8,s8,s0 (/ 60)
+# +72: fdiv s8,s8,s0 (/ 60)
 [[rule.step]]
 op = "word"
 word = 505420040
 
-# +56: back after the site
+# +76: back after the site
 [[rule.step]]
 op = "b"
-from = "L0+56"
+from = "L0+76"
 to = "7236808"
 mask = 0
 
-# +60: fdiv s8,s1,s0 (the game's division)
+# +80: fdiv s8,s1,s0 (the game's division)
 [[rule.step]]
 op = "word"
 word = 505419816
 
-# +64: back after the site
+# +84: back after the site
 [[rule.step]]
 op = "b"
-from = "L0+64"
+from = "L0+84"
 to = "7236808"
 mask = 0
 
 [[rule.step]]
 op = "put"
 at = 7236804
-why = "frame ratio: the host's step × base rate / 60 instead of base rate / the game's frame rate (state page target fps; 0 = the game's ratio)"
+why = "frame ratio: the host's step in vsyncs of 1/60 s (whole step, or the variable step x 2 at 120 fps) x base rate / 60 instead of base rate / the game's frame rate (state page target fps; 0 = the game's ratio)"
 items = ["b:7236804:L0+0:0"]
