@@ -1,7 +1,7 @@
 //! The checks that a game runs exactly the network of this crate.
 //!
 //! Two checks, as in section 11 of `docs/plans/ndve-native.md`: the sequence of shader keys of a frame's dispatches
-//! ([`matches`]) and the weight bytes bound to them ([`weights_ok`]). The picture sizes are checked by the caller, which
+//! ([`matches()`]) and the weight bytes bound to them ([`weights_ok`]). The picture sizes are checked by the caller, which
 //! sees the textures.
 
 use nxb_model::{sha256, to_hex};

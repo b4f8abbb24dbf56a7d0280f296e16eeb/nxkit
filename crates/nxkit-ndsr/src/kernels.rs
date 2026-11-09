@@ -14,6 +14,7 @@
 //! Only the vr input is implemented (`Y'` in the green channel of tex0, as the vr programs read it). The vr_light input
 //! (f16 luma of sqrt RGB) and the agl one (f32 luma) are open, see the end of `docs/plans/ndsr-native.md` section 13.
 
+use crate::net::{Net, Pack};
 use crate::pack;
 use crate::plan::{Binding, Buffer, GameResource, Plan, Source, Step};
 
@@ -24,16 +25,7 @@ pub const PUSH: GameResource = GameResource::Push(0);
 /// The image the network writes (the game's img1): the result of the run.
 pub const OUT: GameResource = GameResource::Output;
 
-/// The output encoding of a network program (ndsr-native.md section 7.7).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Variant {
-    /// sRGB encoded, 8-bit UNORM image, dither 1/255.
-    A,
-    /// Linear, 10-bit UNORM image, dither 1/1023.
-    B,
-    /// Linear, R11G11B10F image, dither of one unit of the last place.
-    C,
-}
+pub use crate::net::Variant;
 
 /// One network program of the vr pack: the parameters of its instantiation in `ndsr.metal`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,13 +142,48 @@ pub fn find(in_px: u32, variant: Variant) -> Option<&'static KernelSpec> {
         .find(|k| k.in_px == in_px && k.variant == variant)
 }
 
+/// The plan of a network of the table ([`crate::fingerprint::find`]) for an input of `in_size` pixels and an output of
+/// `out_size`. The kernel is the one of the network's input scale and variant ([`find`]); `blob` is the game's weight
+/// blob (ssbo 2 of the dispatch) and `push` the dispatch's push block, which the kernel reads from the game's bank at
+/// run time, so it only has to be there.
+///
+/// # Errors
+///
+/// When the network is not of the vr pack (the vr_light and agl inputs are open), the push block is missing, or
+/// [`plan_kernel`] refuses.
+pub fn plan(
+    net: &Net,
+    blob: &[u8],
+    in_size: [u32; 2],
+    out_size: [u32; 2],
+    push: &[u8],
+) -> Result<Plan, String> {
+    if net.pack != Pack::Vr {
+        return Err(format!(
+            "{}: the {} pack is not run natively yet (vr pack only)",
+            net.key,
+            net.pack.name()
+        ));
+    }
+    if push.is_empty() {
+        return Err(format!("{}: no push block", net.key));
+    }
+    let kernel = find(u32::from(net.in_px), net.variant).ok_or_else(|| {
+        format!(
+            "{}: no kernel for in {} {:?}",
+            net.key, net.in_px, net.variant
+        )
+    })?;
+    plan_kernel(kernel, blob, in_size, out_size)
+}
+
 /// The plan of one network program for an input of `in_size` pixels and an output of `out_size`: the packed weights as
 /// the only buffer and one dispatch. `blob` is the game's weight blob (ssbo 2 of the network dispatch): the vr pack's, 0x3000 bytes.
 ///
 /// # Errors
 ///
 /// When a size is zero, or `blob` is not the six layers of the vr pack.
-pub fn plan(
+pub fn plan_kernel(
     kernel: &KernelSpec,
     blob: &[u8],
     in_size: [u32; 2],
@@ -200,6 +227,7 @@ pub fn plan(
 mod tests {
     use super::*;
     use crate::msl::SOURCE;
+    use crate::net::NETS;
 
     fn blob() -> Vec<u8> {
         (0..pack::BLOB_BYTES / 2)
@@ -283,7 +311,7 @@ mod tests {
     #[test]
     fn plan_shape() {
         let k = find(10, Variant::A).expect("kernel");
-        let p = plan(k, &blob(), [1536, 864], [1920, 1080]).expect("plan");
+        let p = plan_kernel(k, &blob(), [1536, 864], [1920, 1080]).expect("plan");
         assert_eq!(p.buffers.len(), 1);
         assert_eq!(p.buffers[0].bytes, 0x3000);
         assert_eq!(p.buffers[0].init.as_ref().map(Vec::len), Some(0x3000));
@@ -302,15 +330,39 @@ mod tests {
         assert!(s.textures[1].writes && !s.textures[0].writes);
     }
 
+    /// Every vr network of the table has a kernel of its scale and variant; the other packs refuse with a reason.
+    #[test]
+    fn plan_of_a_net() {
+        let push = [0u8; 80];
+        for n in &NETS {
+            let r = plan(n, &blob(), [64, 64], [128, 128], &push);
+            if n.pack == Pack::Vr {
+                let p = r.expect(n.key);
+                let k = find(u32::from(n.in_px), n.variant).expect("kernel");
+                assert_eq!(p.steps[0].kernel, k.name);
+                assert_eq!(
+                    k.step,
+                    [u32::from(n.step_x), u32::from(n.step_y)],
+                    "{}",
+                    n.key
+                );
+            } else {
+                assert!(r.is_err_and(|e| e.contains("vr pack only")), "{}", n.key);
+            }
+        }
+        let n = NETS.iter().find(|n| n.pack == Pack::Vr).expect("vr");
+        assert!(plan(n, &blob(), [64, 64], [128, 128], &[]).is_err());
+    }
+
     #[test]
     fn plan_errors() {
         let k = find(8, Variant::B).expect("kernel");
-        assert!(plan(k, &blob()[..100], [64, 64], [128, 128]).is_err());
-        assert!(plan(k, &blob(), [0, 64], [128, 128]).is_err());
+        assert!(plan_kernel(k, &blob()[..100], [64, 64], [128, 128]).is_err());
+        assert!(plan_kernel(k, &blob(), [0, 64], [128, 128]).is_err());
         let short = &blob()[..pack::SHORT_BLOB_BYTES];
-        assert!(plan(k, short, [64, 64], [128, 128]).is_err());
+        assert!(plan_kernel(k, short, [64, 64], [128, 128]).is_err());
         // the vr repack differs from the identity
-        let v = plan(k, &blob(), [64, 64], [128, 128]).expect("plan");
+        let v = plan_kernel(k, &blob(), [64, 64], [128, 128]).expect("plan");
         assert_ne!(v.buffers[0].init.as_deref(), Some(&blob()[..]));
     }
 }

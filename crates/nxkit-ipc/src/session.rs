@@ -116,6 +116,19 @@ impl IpcSession {
         STOP_RESULT
     }
 
+    /// The Horizon service a new object belongs to. Objects returned by `sm:` are the roots of the services they were
+    /// asked for, so they carry that service's name, not the port's; every other object inherits its parent's.
+    fn service_of(&self, iface: &Arc<dyn Service>) -> &'static str {
+        if self.link.service != crate::SM_PORT {
+            return self.link.service;
+        }
+        self.inner
+            .registry
+            .iter()
+            .find(|(_, root)| Arc::ptr_eq(root, iface))
+            .map_or(self.link.service, |(name, _)| *name)
+    }
+
     /// A handle for a new session of `iface`, which the response moves to the game.
     fn handle_for(&self, iface: Arc<dyn Service>, command: u32) -> Result<u32, ResultCode> {
         let Some(k) = kernel() else {
@@ -125,7 +138,7 @@ impl IpcSession {
                 "the kernel is not registered".to_string(),
             ));
         };
-        let session = new_session(&self.inner, self.link.service, iface);
+        let session = new_session(&self.inner, self.service_of(&iface), iface);
         k.add_session(session)
     }
 

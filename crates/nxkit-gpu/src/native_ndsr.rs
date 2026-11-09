@@ -251,7 +251,9 @@ fn shape_of(info: &RunInfo<'_>) -> Shape {
     tag.extend([size_in[0], size_in[1], size_out[0], size_out[1]]);
     tag.extend(halves(push_tag(push)));
     let variant = api::variant(net);
-    let refusal = if !INPUT_FORMATS.contains(&input.format) {
+    let refusal = if let Some(why) = api::unsupported(net) {
+        Some(why)
+    } else if !INPUT_FORMATS.contains(&input.format) {
         Some(format!("tex0 has format {:?}, not a float4", input.format))
     } else if !variant.output_formats().contains(&output.format) {
         Some(format!(
@@ -271,28 +273,18 @@ fn shape_of(info: &RunInfo<'_>) -> Shape {
 }
 
 /// The surface of `nxkit-ndsr` this file codes against. A rename there changes this module and nothing else.
-///
-/// Until packages A and B are merged the crate has no table and no kernels, so the module below stands in for them: it
-/// knows no network (the hook never finds a run) and the tests give it two. On the merge, delete the `lib` module, point
-/// `api` at `nxkit_ndsr::{fingerprint, kernels, msl, net}` and drop the `#[cfg(test)]` table. The signatures assumed:
-///
-/// - `fingerprint::find(keys: &[&str]) -> Option<(usize, &'static Net)>`: the index in `keys` of the first dispatch
-///   whose key is a network of the table, and the network.
-/// - `fingerprint::weights_ok(net: &Net, blob: &[u8]) -> bool`.
-/// - `kernels::plan(net: &Net, blob: &[u8], in_size: [u32; 2], out_size: [u32; 2], push: &[u8]) -> Result<Plan, String>`.
-/// - `msl::SOURCE: &str`.
-/// - `net::Net` with `key: &'static str`, `blob_len: usize` and `variant: net::Variant { A, B, C }`.
 mod api {
     use super::Variant;
-    use super::lib::{self, Net};
+    use nxkit_ndsr::net::{Net, Pack};
     use nxkit_ndsr::plan::Plan;
+    use nxkit_ndsr::{fingerprint, kernels, msl, net};
 
     pub(super) fn find(keys: &[&str]) -> Option<(usize, &'static Net)> {
-        lib::fingerprint::find(keys)
+        fingerprint::find(keys)
     }
 
     pub(super) fn weights_ok(net: &Net, blob: &[u8]) -> bool {
-        lib::fingerprint::weights_ok(net, blob)
+        fingerprint::weights_ok(net, blob)
     }
 
     pub(super) fn plan(
@@ -302,11 +294,11 @@ mod api {
         size_out: [u32; 2],
         push: &[u8],
     ) -> Result<Plan, String> {
-        lib::kernels::plan(net, blob, size_in, size_out, push)
+        kernels::plan(net, blob, size_in, size_out, push)
     }
 
     pub(super) fn source() -> &'static str {
-        lib::msl::SOURCE
+        msl::SOURCE
     }
 
     pub(super) fn key(net: &Net) -> &'static str {
@@ -314,103 +306,37 @@ mod api {
     }
 
     pub(super) fn blob_len(net: &Net) -> usize {
-        net.blob_len
+        net.blob().len as usize
+    }
+
+    /// Why the network is not run natively, if it is not: only the vr pack has kernels.
+    pub(super) fn unsupported(net: &Net) -> Option<String> {
+        (net.pack != Pack::Vr).then(|| {
+            format!(
+                "{}: the {} pack is not run natively yet (vr pack only)",
+                net.key,
+                net.pack.name()
+            )
+        })
     }
 
     pub(super) fn variant(net: &Net) -> Variant {
         match net.variant {
-            lib::Variant::A => Variant::A,
-            lib::Variant::B => Variant::B,
-            lib::Variant::C => Variant::C,
+            net::Variant::A => Variant::A,
+            net::Variant::B => Variant::B,
+            net::Variant::C => Variant::C,
         }
-    }
-}
-
-/// Stand-in for the parts of `nxkit-ndsr` that packages A and B write. See [`api`].
-#[allow(dead_code)]
-mod lib {
-    use nxkit_ndsr::plan::Plan;
-
-    pub(super) enum Variant {
-        A,
-        B,
-        C,
-    }
-
-    pub(super) struct Net {
-        pub(super) key: &'static str,
-        pub(super) blob_len: usize,
-        pub(super) variant: Variant,
-    }
-
-    #[cfg(test)]
-    static NETS: [Net; 2] = [
-        Net {
-            key: "aaaa",
-            blob_len: 0x3000,
-            variant: Variant::A,
-        },
-        Net {
-            key: "bbbb",
-            blob_len: 0x1800,
-            variant: Variant::C,
-        },
-    ];
-    #[cfg(not(test))]
-    static NETS: [Net; 0] = [];
-
-    pub(super) mod fingerprint {
-        use super::{NETS, Net};
-
-        pub(in super::super) fn find(keys: &[&str]) -> Option<(usize, &'static Net)> {
-            keys.iter()
-                .enumerate()
-                .find_map(|(i, k)| NETS.iter().find(|n| n.key == *k).map(|n| (i, n)))
-        }
-
-        pub(in super::super) fn weights_ok(net: &Net, blob: &[u8]) -> bool {
-            blob.len() == net.blob_len
-        }
-    }
-
-    pub(super) mod kernels {
-        use super::{Net, Plan};
-
-        /// The test plan carries the sizes it was made for in its one buffer.
-        pub(in super::super) fn plan(
-            _net: &Net,
-            _blob: &[u8],
-            size_in: [u32; 2],
-            size_out: [u32; 2],
-            _push: &[u8],
-        ) -> Result<Plan, String> {
-            if cfg!(not(test)) {
-                return Err("nxkit-ndsr has no kernels yet".into());
-            }
-            let init = [size_in, size_out]
-                .concat()
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect();
-            Ok(Plan {
-                buffers: vec![nxkit_ndsr::plan::Buffer {
-                    name: "sizes",
-                    bytes: 16,
-                    init: Some(init),
-                }],
-                steps: vec![],
-            })
-        }
-    }
-
-    pub(super) mod msl {
-        pub(in super::super) const SOURCE: &str = "";
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A vr network of the 10-pixel scale (variant A) and a vr_light one (3-layer weights).
+    const VR_A: &str = "14c10aa70b81f04e";
+    const VR_B: &str = "f407ab4429b8eae6";
+    const LIGHT: &str = "927ceaf3cf1be240";
 
     fn bound(resource: GameResource, w: u32, h: u32, format: Format) -> Bound {
         Bound {
@@ -449,7 +375,7 @@ mod tests {
     #[test]
     fn the_run_is_the_network_dispatch_among_the_smaa_ones() {
         let n = Ndsr;
-        let keys = ["f8965bff", "d17eefaf", "92918e9b", "aaaa", "x"];
+        let keys = ["f8965bff", "d17eefaf", "92918e9b", VR_A, "x"];
         assert_eq!(n.find(&keys), Some(Run { start: 3, len: 1 }));
         assert_eq!(n.find(&["f8965bff", "92918e9b"]), None);
         assert_eq!(n.name(), "ndsr");
@@ -474,12 +400,13 @@ mod tests {
     #[test]
     fn the_blob_length_follows_the_network() {
         let p = push(1536, 864, 1920, 1080);
-        let s = shape_of(&info("aaaa", &p, Format::Rgba8Unorm, [1920, 1080]));
+        let s = shape_of(&info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]));
         assert_eq!(s.blobs[0].len, 0x3000);
         assert_eq!(s.refusal, None);
-        let s = shape_of(&info("bbbb", &p, Format::Rg11B10Float, [1920, 1080]));
+        // The vr_light pack has no kernels yet: refused with a reason, its blob is still told.
+        let s = shape_of(&info(LIGHT, &p, Format::Rgba8Unorm, [1920, 1080]));
         assert_eq!(s.blobs[0].len, 0x1800);
-        assert_eq!(s.refusal, None);
+        assert!(s.refusal.is_some_and(|r| r.contains("vr pack only")));
     }
 
     #[test]
@@ -487,29 +414,29 @@ mod tests {
         let p1 = push(1536, 864, 1920, 1080);
         let p2 = push(1280, 720, 1920, 1080);
         let tag = |key, p: &[u8], out| shape_of(&info(key, p, out, [1920, 1080])).tag;
-        let a = tag("aaaa", &p1, Format::Rgba8Unorm);
-        assert_eq!(a, tag("aaaa", &p1, Format::Rgba8Unorm), "stable");
-        assert_ne!(a, tag("aaaa", &p2, Format::Rgba8Unorm), "input size");
-        assert_ne!(a, tag("bbbb", &p1, Format::Rg11B10Float), "network");
+        let a = tag(VR_A, &p1, Format::Rgba8Unorm);
+        assert_eq!(a, tag(VR_A, &p1, Format::Rgba8Unorm), "stable");
+        assert_ne!(a, tag(VR_A, &p2, Format::Rgba8Unorm), "input size");
+        assert_ne!(a, tag(VR_B, &p1, Format::Rgb10A2Unorm), "network");
         assert_eq!(&a[2..6], &[1536, 864, 1920, 1080]);
         // The words the kernel does not read do not make a new plan; the strength does.
         let mut q = p1.clone();
         q[0] ^= 0xff;
         q[12 * 4] ^= 0xff;
-        assert_eq!(a, tag("aaaa", &q, Format::Rgba8Unorm));
+        assert_eq!(a, tag(VR_A, &q, Format::Rgba8Unorm));
         q[18 * 4] ^= 0x01;
-        assert_ne!(a, tag("aaaa", &q, Format::Rgba8Unorm));
+        assert_ne!(a, tag(VR_A, &q, Format::Rgba8Unorm));
     }
 
     #[test]
     fn the_formats_must_be_the_variants() {
         let p = push(1536, 864, 1920, 1080);
         // Variant A writes 8 bit; a 10 bit image is variant B's.
-        let s = shape_of(&info("aaaa", &p, Format::Rgb10A2Unorm, [1920, 1080]));
+        let s = shape_of(&info(VR_A, &p, Format::Rgb10A2Unorm, [1920, 1080]));
         assert!(s.refusal.is_some_and(|r| r.contains("img1")));
         // The capture still gets the tag.
         assert_eq!(s.tag.len(), 8);
-        let mut i = info("aaaa", &p, Format::Rgba8Unorm, [1920, 1080]);
+        let mut i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
         i.bound[0].format = Format::Rgba8Unorm;
         assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("tex0")));
     }
@@ -517,10 +444,10 @@ mod tests {
     #[test]
     fn a_run_without_pictures_or_push_is_refused() {
         let p = push(1536, 864, 1920, 1080);
-        let mut i = info("aaaa", &p, Format::Rgba8Unorm, [1920, 1080]);
+        let mut i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
         i.bound.pop();
         assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("img1")));
-        let mut i = info("aaaa", &p, Format::Rgba8Unorm, [1920, 1080]);
+        let mut i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
         i.pushes = vec![None];
         assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("push")));
         let i = info("zzzz", &p, Format::Rgba8Unorm, [1920, 1080]);
@@ -540,27 +467,28 @@ mod tests {
     }
 
     #[test]
-    fn the_weights_and_the_plan_follow_the_network_and_the_sizes() {
+    fn the_weights_and_the_plan_follow_the_network_and_the_sizes() -> Result<(), String> {
         let n = Ndsr;
         let p = push(1280, 720, 1920, 1080);
-        let i = info("aaaa", &p, Format::Rgba8Unorm, [1920, 1080]);
+        let i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
         let s = n.shape(&i);
-        assert!(n.accepts_in(&[&[0; 0x3000]], &s, &i));
+        // Zero bytes are not the game's weights.
+        assert!(!n.accepts_in(&[&[0; 0x3000]], &s, &i));
         assert!(!n.accepts_in(&[&[0; 0x1800]], &s, &i));
         assert!(!n.accepts_in(&[], &s, &i));
-        let plan = n
-            .plan_in(&[&[0; 0x3000]], &s, &i)
-            .map_err(|e| e.to_string());
-        let init = plan.ok().and_then(|p| p.buffers[0].init.clone());
-        let sizes: Vec<u32> = init
-            .iter()
-            .flat_map(|b| b.chunks(4))
-            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-            .collect();
-        assert_eq!(sizes, [1280, 720, 1920, 1080]);
+        let plan = n.plan_in(&[&[0; 0x3000]], &s, &i)?;
+        assert_eq!(plan.steps[0].kernel, "ndsr_in10_a");
+        assert_eq!(
+            plan.steps[0].groups,
+            [1280u32.div_ceil(39), 720u32.div_ceil(29), 1]
+        );
+        // vr_light is refused by the plan too.
+        let i = info(LIGHT, &p, Format::Rgba8Unorm, [1920, 1080]);
+        assert!(n.plan_in(&[&[0; 0x1800]], &s, &i).is_err());
         assert!(n.plan_in(&[], &s, &i).is_err());
         // The static interface is not usable: the plan needs the sizes.
         assert!(!n.accepts(&[&[0; 0x3000]]));
         assert!(n.plan(&[&[0; 0x3000]]).is_err());
+        Ok(())
     }
 }
