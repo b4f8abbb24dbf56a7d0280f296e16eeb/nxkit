@@ -70,8 +70,9 @@ pub(crate) type Pic = (Arc<Frame>, i64);
 pub(crate) trait Pipeline: Send {
     /// How many packets the decoder works on at once. It bounds the pictures that are still inside.
     fn lag(&self) -> usize;
-    /// Sends one packet. The pictures that come out because of it go to `out`.
-    fn push(&mut self, packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<(), String>;
+    /// Sends one packet. The pictures that come out because of it go to `out`. Gives whether the decoder took the packet
+    /// in: a packet it dropped (before the first sequence header, empty) is not in flight and no picture follows.
+    fn push(&mut self, packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<bool, String>;
     /// Blocks until the oldest packet in flight is decoded and gives its picture to `out`. Gives none when nothing is in
     /// flight, and returns at once then.
     fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String>;
