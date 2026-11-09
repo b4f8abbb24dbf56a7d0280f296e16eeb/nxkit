@@ -4,12 +4,16 @@
 //! [`crate::plan::Plan::steps`] is a `kernel void` of this source; `kernels.rs` names them and sets their grids.
 //!
 //! - `common.metal`: the K = 16 step with its f16 rounding (copied from `nxkit-ndve`).
-//! - `ndsr.metal`: the network program as one kernel template and its 15 instantiations, one per input scale and variant.
+//! - `ndsr.metal`: the vr network program as one kernel template and its 15 instantiations, one per input scale and
+//!   variant.
+//! - `ndsr_light.metal`: the vr_light network program, a second template (it uses `ndsr.metal`'s layers) and its 15
+//!   instantiations, one per program.
 
 /// The MSL of every kernel of [`crate::plan::Plan::steps`].
 pub const SOURCE: &str = concat!(
     include_str!("msl/common.metal"),
     include_str!("msl/ndsr.metal"),
+    include_str!("msl/ndsr_light.metal"),
 );
 
 #[cfg(test)]

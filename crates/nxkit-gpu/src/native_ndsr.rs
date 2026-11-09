@@ -82,9 +82,15 @@ enum Variant {
 }
 
 impl Variant {
-    /// The formats of `img1` that this variant writes. The backing may be the sRGB twin of the plain format.
-    fn output_formats(self) -> &'static [Format] {
+    /// The formats of `img1` that this variant writes. The backing may be the sRGB twin of the plain format. The
+    /// vr_light programs B and C write linear values without a dither (section 15.4), so any float or 10-bit image.
+    fn output_formats(self, light: bool) -> &'static [Format] {
         match self {
+            Self::B | Self::C if light => &[
+                Format::Rg11B10Float,
+                Format::Rgb10A2Unorm,
+                Format::Rgba16Float,
+            ],
             Self::A => &[
                 Format::Rgba8Unorm,
                 Format::Rgba8UnormSrgb,
@@ -99,6 +105,14 @@ impl Variant {
 
 /// The formats of `tex0`: the float4 that neighbourhood blending `92918e9b` writes.
 const INPUT_FORMATS: [Format; 2] = [Format::Rgba16Float, Format::Rgba32Float];
+/// The formats of `tex0` for the vr_light networks: the sqrt RGB of `a335c1db` (RGB9E5, as Ocarina of Time binds it) or
+/// of `1fdc8517` (a float4).
+const LIGHT_INPUT_FORMATS: [Format; 4] = [
+    Format::Rgb9E5Float,
+    Format::Rg11B10Float,
+    Format::Rgba16Float,
+    Format::Rgba32Float,
+];
 
 impl Replacement for Ndsr {
     fn name(&self) -> &'static str {
@@ -191,11 +205,11 @@ fn plan_sizes(push: &[u8], input: &Bound, output: &Bound) -> ([u32; 2], [u32; 2]
 }
 
 /// The push words that change the kernel's result: the sizes, offsets and reciprocals (2 to 9), the unsharp strength
-/// and the dither switch (18, 19). The others are not read (section 7.9); a word that moves every frame would make a
-/// plan every frame.
-fn push_tag(push: &[u8]) -> u64 {
+/// and the dither switch (18, 19); for vr_light the tile, its mapping, the output size and the strength (18 to 28,
+/// section 15.4). The others are not read (section 7.9); a word that moves every frame would make a plan every frame.
+fn push_tag(push: &[u8], light: bool) -> u64 {
     let mut h = foldhash::fast::FixedState::with_seed(0).build_hasher();
-    for i in (2..10).chain(18..20) {
+    for i in (2..10).chain(18..if light { 29 } else { 20 }) {
         h.write_u32(word(push, i).unwrap_or(u32::MAX));
     }
     h.finish()
@@ -249,18 +263,27 @@ fn shape_of(info: &RunInfo<'_>) -> Shape {
     };
     let (size_in, size_out) = plan_sizes(push, input, output);
     tag.extend([size_in[0], size_in[1], size_out[0], size_out[1]]);
-    tag.extend(halves(push_tag(push)));
+    let light = api::is_light(net);
+    tag.extend(halves(push_tag(push, light)));
     let variant = api::variant(net);
+    let inputs: &[Format] = if light {
+        &LIGHT_INPUT_FORMATS
+    } else {
+        &INPUT_FORMATS
+    };
     let refusal = if let Some(why) = api::unsupported(net) {
         Some(why)
-    } else if !INPUT_FORMATS.contains(&input.format) {
-        Some(format!("tex0 has format {:?}, not a float4", input.format))
-    } else if !variant.output_formats().contains(&output.format) {
+    } else if !inputs.contains(&input.format) {
+        Some(format!(
+            "tex0 has format {:?}, not one of {inputs:?}",
+            input.format
+        ))
+    } else if !variant.output_formats(light).contains(&output.format) {
         Some(format!(
             "{}: img1 has format {:?}, variant {variant:?} writes {:?}",
             api::key(net),
             output.format,
-            variant.output_formats()
+            variant.output_formats(light)
         ))
     } else {
         None
@@ -309,15 +332,26 @@ mod api {
         net.blob().len as usize
     }
 
-    /// Why the network is not run natively, if it is not: only the vr pack has kernels.
+    /// Why the network is not run natively, if it is not: the vr programs and the vr_light programs that have a
+    /// kernel run, agl_ndsr does not.
     pub(super) fn unsupported(net: &Net) -> Option<String> {
-        (net.pack != Pack::Vr).then(|| {
+        let runs = match net.pack {
+            Pack::Vr => true,
+            Pack::VrLight => kernels::light::find(net).is_some(),
+            Pack::Agl => false,
+        };
+        (!runs).then(|| {
             format!(
-                "{}: the {} pack is not run natively yet (vr pack only)",
+                "{}: the {} pack is not run natively yet",
                 net.key,
                 net.pack.name()
             )
         })
+    }
+
+    /// The program is of the vr_light pack.
+    pub(super) fn is_light(net: &Net) -> bool {
+        net.pack == Pack::VrLight
     }
 
     pub(super) fn variant(net: &Net) -> Variant {
@@ -330,165 +364,4 @@ mod api {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A vr network of the 10-pixel scale (variant A) and a vr_light one (3-layer weights).
-    const VR_A: &str = "14c10aa70b81f04e";
-    const VR_B: &str = "f407ab4429b8eae6";
-    const LIGHT: &str = "927ceaf3cf1be240";
-
-    fn bound(resource: GameResource, w: u32, h: u32, format: Format) -> Bound {
-        Bound {
-            resource,
-            width: w,
-            height: h,
-            format,
-        }
-    }
-
-    /// A push block of 20 words with the vr layout of section 7.9.
-    fn push(w_in: u32, h_in: u32, w_out: u32, h_out: u32) -> Vec<u8> {
-        let mut words = [0u32; 20];
-        words[2] = w_in - 1;
-        words[3] = h_in - 1;
-        words[6] = w_out - 1;
-        words[7] = h_out - 1;
-        words[8] = (1.0f32 / w_in as f32).to_bits();
-        words[9] = (1.0f32 / h_in as f32).to_bits();
-        words[18] = 1.5f32.to_bits();
-        words[19] = 1;
-        words.iter().flat_map(|w| w.to_le_bytes()).collect()
-    }
-
-    fn info<'a>(key: &'a str, push: &'a [u8], out: Format, size_out: [u32; 2]) -> RunInfo<'a> {
-        RunInfo {
-            keys: vec![key],
-            pushes: vec![Some(push)],
-            bound: vec![
-                bound(INPUT, 1536, 864, Format::Rgba16Float),
-                bound(OUTPUT, size_out[0], size_out[1], out),
-            ],
-        }
-    }
-
-    #[test]
-    fn the_run_is_the_network_dispatch_among_the_smaa_ones() {
-        let n = Ndsr;
-        let keys = ["f8965bff", "d17eefaf", "92918e9b", VR_A, "x"];
-        assert_eq!(n.find(&keys), Some(Run { start: 3, len: 1 }));
-        assert_eq!(n.find(&["f8965bff", "92918e9b"]), None);
-        assert_eq!(n.name(), "ndsr");
-        assert_eq!(n.lead(), 3);
-    }
-
-    #[test]
-    fn the_resources_stay_inside_the_one_dispatch_run() {
-        for r in Ndsr.resources() {
-            let d = match r.place {
-                Place::Texture { dispatch, .. }
-                | Place::Image { dispatch, .. }
-                | Place::Push { dispatch } => dispatch,
-            };
-            assert_eq!(d, 0, "{r:?}");
-        }
-        for b in Ndsr.blobs() {
-            assert_eq!(b.dispatch, 0);
-        }
-    }
-
-    #[test]
-    fn the_blob_length_follows_the_network() {
-        let p = push(1536, 864, 1920, 1080);
-        let s = shape_of(&info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]));
-        assert_eq!(s.blobs[0].len, 0x3000);
-        assert_eq!(s.refusal, None);
-        // The vr_light pack has no kernels yet: refused with a reason, its blob is still told.
-        let s = shape_of(&info(LIGHT, &p, Format::Rgba8Unorm, [1920, 1080]));
-        assert_eq!(s.blobs[0].len, 0x1800);
-        assert!(s.refusal.is_some_and(|r| r.contains("vr pack only")));
-    }
-
-    #[test]
-    fn each_size_and_network_gets_its_own_tag() {
-        let p1 = push(1536, 864, 1920, 1080);
-        let p2 = push(1280, 720, 1920, 1080);
-        let tag = |key, p: &[u8], out| shape_of(&info(key, p, out, [1920, 1080])).tag;
-        let a = tag(VR_A, &p1, Format::Rgba8Unorm);
-        assert_eq!(a, tag(VR_A, &p1, Format::Rgba8Unorm), "stable");
-        assert_ne!(a, tag(VR_A, &p2, Format::Rgba8Unorm), "input size");
-        assert_ne!(a, tag(VR_B, &p1, Format::Rgb10A2Unorm), "network");
-        assert_eq!(&a[2..6], &[1536, 864, 1920, 1080]);
-        // The words the kernel does not read do not make a new plan; the strength does.
-        let mut q = p1.clone();
-        q[0] ^= 0xff;
-        q[12 * 4] ^= 0xff;
-        assert_eq!(a, tag(VR_A, &q, Format::Rgba8Unorm));
-        q[18 * 4] ^= 0x01;
-        assert_ne!(a, tag(VR_A, &q, Format::Rgba8Unorm));
-    }
-
-    #[test]
-    fn the_formats_must_be_the_variants() {
-        let p = push(1536, 864, 1920, 1080);
-        // Variant A writes 8 bit; a 10 bit image is variant B's.
-        let s = shape_of(&info(VR_A, &p, Format::Rgb10A2Unorm, [1920, 1080]));
-        assert!(s.refusal.is_some_and(|r| r.contains("img1")));
-        // The capture still gets the tag.
-        assert_eq!(s.tag.len(), 8);
-        let mut i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
-        i.bound[0].format = Format::Rgba8Unorm;
-        assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("tex0")));
-    }
-
-    #[test]
-    fn a_run_without_pictures_or_push_is_refused() {
-        let p = push(1536, 864, 1920, 1080);
-        let mut i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
-        i.bound.pop();
-        assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("img1")));
-        let mut i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
-        i.pushes = vec![None];
-        assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("push")));
-        let i = info("zzzz", &p, Format::Rgba8Unorm, [1920, 1080]);
-        assert!(shape_of(&i).refusal.is_some_and(|r| r.contains("zzzz")));
-    }
-
-    #[test]
-    fn the_sizes_come_from_the_push_words_when_they_fit() {
-        let i = bound(INPUT, 1536, 864, Format::Rgba16Float);
-        let o = bound(OUTPUT, 1920, 1080, Format::Rgba8Unorm);
-        let p = push(1280, 720, 1920, 1080);
-        assert_eq!(plan_sizes(&p, &i, &o), ([1280, 720], [1920, 1080]));
-        // Larger than the picture, or no words: the pictures' sizes.
-        let big = push(2000, 720, 1920, 1080);
-        assert_eq!(plan_sizes(&big, &i, &o).0, [1536, 864]);
-        assert_eq!(plan_sizes(&[], &i, &o), ([1536, 864], [1920, 1080]));
-    }
-
-    #[test]
-    fn the_weights_and_the_plan_follow_the_network_and_the_sizes() -> Result<(), String> {
-        let n = Ndsr;
-        let p = push(1280, 720, 1920, 1080);
-        let i = info(VR_A, &p, Format::Rgba8Unorm, [1920, 1080]);
-        let s = n.shape(&i);
-        // Zero bytes are not the game's weights.
-        assert!(!n.accepts_in(&[&[0; 0x3000]], &s, &i));
-        assert!(!n.accepts_in(&[&[0; 0x1800]], &s, &i));
-        assert!(!n.accepts_in(&[], &s, &i));
-        let plan = n.plan_in(&[&[0; 0x3000]], &s, &i)?;
-        assert_eq!(plan.steps[0].kernel, "ndsr_in10_a");
-        assert_eq!(
-            plan.steps[0].groups,
-            [1280u32.div_ceil(39), 720u32.div_ceil(29), 1]
-        );
-        // vr_light is refused by the plan too.
-        let i = info(LIGHT, &p, Format::Rgba8Unorm, [1920, 1080]);
-        assert!(n.plan_in(&[&[0; 0x1800]], &s, &i).is_err());
-        assert!(n.plan_in(&[], &s, &i).is_err());
-        // The static interface is not usable: the plan needs the sizes.
-        assert!(!n.accepts(&[&[0; 0x3000]]));
-        assert!(n.plan(&[&[0; 0x3000]]).is_err());
-        Ok(())
-    }
-}
+mod tests;
