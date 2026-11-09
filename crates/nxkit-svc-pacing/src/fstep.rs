@@ -33,6 +33,12 @@ pub const FSTEP_DEBT_MAX: f64 = 15.0;
 pub const FSTEP_HOLD0: f64 = 60.0;
 /// The longest wait before a trial (8 s).
 pub const FSTEP_HOLD_MAX: f64 = 480.0;
+/// The longest wait before a trial when only the work judges a frame ([`FrameStep::work`], 2 s): after a few failed
+/// trials the frame rate stayed down for seconds although the frames fitted again, and the GPU clock fell further.
+pub const FSTEP_HOLD_MAX_WORK: f64 = 120.0;
+/// With [`FrameStep::work`]: a frame whose work took this many vsyncs more than `k` is a hitch (a load, a stall), not a
+/// sign that the work does not fit. Its time is paid back as debt, and it does not count toward a step up.
+pub const FSTEP_HITCH: f64 = 3.0;
 /// The first frames of a probe, whose lateness neither fails it nor counts toward a step up.
 pub const FSTEP_GRACE: i32 = 30;
 /// The cost at the longer hold against the cost that held the shorter one. At most this much is the same scene.
@@ -116,6 +122,9 @@ pub struct FrameStep {
     pub shown_slack: f64,
     /// The screen's verdict for the next call. The call clears it.
     pub screen: Screen,
+    /// Only the work judges a frame (`game.json` key `pace_work`): a frame is late when its cost does not fit the
+    /// hold, not when it was shown longer; a hitch does not count; a trial waits at most [`FSTEP_HOLD_MAX_WORK`].
+    pub work: bool,
     /// Vsyncs at `kmin` in a row.
     pub run: f64,
     /// The running mean of the cost of the frames on time at `kmin`.
@@ -170,7 +179,12 @@ impl FrameStep {
     /// Runs once a frame and returns the step for the next frame. `self.k` is how long that frame stays on screen.
     pub fn next(&mut self, input: &FrameInput) -> i32 {
         let pv = f64::from(self.per_vsync.max(1));
-        let (hold0, hold_max) = (FSTEP_HOLD0 * pv, FSTEP_HOLD_MAX * pv);
+        let hold_max = if self.work {
+            FSTEP_HOLD_MAX_WORK
+        } else {
+            FSTEP_HOLD_MAX
+        };
+        let (hold0, hold_max) = (FSTEP_HOLD0 * pv, hold_max * pv);
         let kmin = input.kmin.max(1);
         let kmax = input.kmax.min(FSTEP_MAX).max(kmin);
         if self.hold == 0.0 {
@@ -218,12 +232,26 @@ impl FrameStep {
         self.kmin = kmin;
         let screen = std::mem::take(&mut self.screen);
         let hk = f64::from(held);
-        let late = match screen {
-            Screen::Unjudged => {
-                input.shown > hk + FSTEP_LATE + self.shown_slack || input.cost > hk + FSTEP_LATE
+        // With `work`, a frame is late when its work did not fit the hold: the game's time without the pacing wait, or
+        // the GPU time (`cost`). How long it was shown also holds what the game waits for by itself and the jitter of an
+        // adaptive screen, and a longer hold makes neither shorter (Ocarina of Time stepped from 30 to 20 fps at a cost
+        // of 0.71 vsyncs on a ProMotion screen). A hitch is paid back and not counted.
+        let late = if self.work {
+            let hitch = input.cost > hk + FSTEP_HITCH;
+            !hitch
+                && match screen {
+                    Screen::Unjudged => input.cost > hk + FSTEP_LATE,
+                    Screen::Late => true,
+                    Screen::OnTime => false,
+                }
+        } else {
+            match screen {
+                Screen::Unjudged => {
+                    input.shown > hk + FSTEP_LATE + self.shown_slack || input.cost > hk + FSTEP_LATE
+                }
+                Screen::Late => true,
+                Screen::OnTime => false,
             }
-            Screen::Late => true,
-            Screen::OnTime => false,
         };
         let grace = self.grace > 0;
         if grace && !cap_probe {

@@ -27,6 +27,7 @@ const TYPED: &[&str] = &[
     "pso_mtl4",
     "enc_thread",
     "overlap",
+    "pace_profile",
     "screen_aspect",
     "pad_layout",
     "op_mode",
@@ -85,6 +86,8 @@ pub struct Settings {
     pub enc_thread: bool,
     /// Whether the CPU runs one frame ahead of the GPU. Absent in an older `game.json`: off.
     pub overlap: bool,
+    /// The frame step's profile (`pace_profile`): `hold` (the default) or `work`. See `nxkit_svc_pacing::fstep`.
+    pub pace_profile: String,
     /// Whether the screen keeps the aspect ratio of the game.
     pub screen_aspect: bool,
     /// The pad layout of the game, for example `nintendo`.
@@ -227,6 +230,13 @@ impl Settings {
             pso_mtl4: flag(v, "pso_mtl4")?,
             enc_thread: flag(v, "enc_thread")?,
             overlap: v.get("overlap").and_then(Value::as_bool).unwrap_or(false),
+            pace_profile: match v.get("pace_profile").and_then(Value::as_str) {
+                None | Some("hold") => "hold".to_string(),
+                Some("work") => "work".to_string(),
+                Some(other) => {
+                    return Err(bad(format!("pace_profile {other:?} is not hold or work")));
+                }
+            },
             screen_aspect: flag(v, "screen_aspect")?,
             pad_layout: text(v, "pad_layout", "settings")?,
             op_mode: text(v, "op_mode", "settings")?,

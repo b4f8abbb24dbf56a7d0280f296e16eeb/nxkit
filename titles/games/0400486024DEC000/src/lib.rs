@@ -75,6 +75,9 @@ const SETTINGS: Fact<Settings> = Fact::new(
         // Measured on nxkit: without it the main thread waited about three quarters of a frame for the GPU in
         // nvnSyncWait and the opening movie fell to 18-30 fps; with it the opening holds 60.
         overlap: true,
+        // Measured on nxkit: judged by how long frames were shown, the step went to 20 fps at a cost of 0.71 vsyncs
+        // (the movie player and an adaptive screen), and after a load hitch it stayed down for seconds.
+        pace_profile: "work",
         ..Settings::DEFAULT
     },
     GAME_TSV,

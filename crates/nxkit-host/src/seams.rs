@@ -129,12 +129,14 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
             let mut load =
                 LoadConfig::new(target).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
+            load.work = s.pace_profile == "work";
             StepMode::Load(load)
         }
         (t, true) if t > 60 => StepMode::Variable(t),
         (t, _) => {
             let mut load = LoadConfig::new(t).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
+            load.work = s.pace_profile == "work";
             StepMode::Load(load)
         }
     };

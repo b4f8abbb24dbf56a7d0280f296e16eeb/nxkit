@@ -64,7 +64,11 @@ impl LoadStepper {
     pub fn new(cfg: LoadConfig) -> Self {
         Self {
             cfg,
-            fs: FrameStep::default(),
+            fs: {
+                let mut fs = FrameStep::default();
+                fs.work = cfg.work;
+                fs
+            },
             gpu: GpuSlow::default(),
             cpu: CpuWatch::new(cfg.perf_levels),
             thermal: ThermalCap::new(cfg.thermal_cap),

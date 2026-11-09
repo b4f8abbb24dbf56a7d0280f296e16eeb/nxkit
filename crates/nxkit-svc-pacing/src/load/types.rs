@@ -19,6 +19,8 @@ pub struct LoadConfig {
     pub probe_ramp: bool,
     /// The core types of the system (`hw.nperflevels`). One never reports a slow CPU.
     pub perf_levels: u32,
+    /// Only the work of a frame judges it ([`crate::fstep::FrameStep::work`], `game.json` key `pace_work`).
+    pub work: bool,
 }
 
 impl LoadConfig {
@@ -31,6 +33,7 @@ impl LoadConfig {
                 thermal_cap: true,
                 probe_ramp: true,
                 perf_levels: 1,
+                work: false,
             }),
             other => Err(BadTarget(other)),
         }

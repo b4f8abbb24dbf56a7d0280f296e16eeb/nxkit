@@ -29,6 +29,7 @@ fn config(target: u32) -> LoadConfig {
         thermal_cap: true,
         probe_ramp: true,
         perf_levels: 1,
+        work: false,
     }
 }
 
@@ -40,21 +41,27 @@ fn run(
     ms: f64,
     mut tweak: impl FnMut(&mut PresentSample),
 ) -> Outcome {
-    let mut out = None;
+    // The outcome of the last frame, with the events of every frame of the run.
+    let mut out: Option<Outcome> = None;
+    let mut events = Vec::new();
     for i in 0..n {
         let now = ((from + i) as f64 * ms * 1e6) as u64 + MS;
         let mut p = sample(from + i, now);
         tweak(&mut p);
         s.frame_started(now, 0);
         out = s.present(&p, None).ok();
+        if let Some(o) = &out {
+            events.extend(o.events.iter().cloned());
+        }
     }
-    out.unwrap_or_else(|| Outcome {
-        cap: 0,
-        hold: 0,
-        step: 0,
-        kmin: 0,
-        events: Vec::new(),
-    })
+    out.map(|o| Outcome { events, ..o })
+        .unwrap_or_else(|| Outcome {
+            cap: 0,
+            hold: 0,
+            step: 0,
+            kmin: 0,
+            events: Vec::new(),
+        })
 }
 
 #[test]
@@ -69,7 +76,12 @@ fn steady_60_fps_frames_are_held_for_one_vsync() {
     let mut s = stepper(60);
     let out = run(&mut s, 1, 120, 1000.0 / 60.0, |_| {});
     assert_eq!((out.cap, out.hold, out.step, out.kmin), (60, 1, 1, 1));
-    assert!(out.events.is_empty());
+    // Only the first present reports the cap; nothing changes after it.
+    assert!(
+        out.events
+            .iter()
+            .all(|e| matches!(e, Event::CapChanged { .. }))
+    );
 }
 
 #[test]

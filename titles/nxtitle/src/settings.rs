@@ -64,6 +64,10 @@ pub struct Settings {
     /// `overlap`: the CPU runs one frame ahead of the GPU; `nvnSyncWait` for the newest frame waits for the one
     /// before it (`docs/plans/fence-overlap.md`).
     pub overlap: bool,
+    /// `pace_profile`: how the frame step decides the hold. `hold` (the default): a frame shown longer than its hold
+    /// counts as late. `work`: only a frame's work judges it, hitches do not count and a trial waits at most 2 s, for a
+    /// game whose frames wait for things a longer hold does not shorten (movies, its own loops).
+    pub pace_profile: &'static str,
     /// `screen_aspect`: stubs that follow a screen taller than 16:9.
     pub screen_aspect: bool,
     /// `shared_font`: `bfttf` (8-byte header and TTF) or `ttf`. `None`: the host decides by the SDK version.
@@ -125,6 +129,7 @@ impl Settings {
         pso_mtl4: false,
         enc_thread: false,
         overlap: false,
+        pace_profile: "hold",
         screen_aspect: false,
         shared_font: None,
         pad_layout: "simple",

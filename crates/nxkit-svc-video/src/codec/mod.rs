@@ -101,20 +101,34 @@ fn diag_codec() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "codec" || c == "all"))
+        std::env::var("NXKIT_DIAG").is_ok_and(|v| {
+            v.split(',')
+                .any(|c| c == "codec" || c == "codecall" || c == "all")
+        })
     })
 }
 
 pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU32, Ordering};
-    static ON: OnceLock<bool> = OnceLock::new();
+    static ON: OnceLock<(bool, u32)> = OnceLock::new();
     static N: AtomicU32 = AtomicU32::new(0);
-    let on = *ON.get_or_init(|| {
-        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "codec" || c == "all"))
+    // `codec`: the first 600 calls. `codecall`: every call, with the time in ms, to see where a stream sticks late.
+    let (on, cap) = *ON.get_or_init(|| {
+        let v = std::env::var("NXKIT_DIAG").unwrap_or_default();
+        let all = v.split(',').any(|c| c == "codecall");
+        (
+            all || v.split(',').any(|c| c == "codec" || c == "all"),
+            if all { u32::MAX } else { 600 },
+        )
     });
-    if on && N.fetch_add(1, Ordering::Relaxed) < 600 {
-        eprintln!("DIAG codec {what}");
+    if on && N.fetch_add(1, Ordering::Relaxed) < cap {
+        static T0: OnceLock<std::time::Instant> = OnceLock::new();
+        let ms = T0
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_millis();
+        eprintln!("DIAG codec {ms} {what}");
     }
 }
 
