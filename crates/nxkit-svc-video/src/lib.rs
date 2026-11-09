@@ -17,6 +17,7 @@ mod exports;
 mod frame;
 mod guest_api;
 mod pacing;
+mod planar;
 mod vp9;
 mod yuv;
 
