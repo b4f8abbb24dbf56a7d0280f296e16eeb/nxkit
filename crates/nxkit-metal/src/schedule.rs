@@ -87,6 +87,23 @@ impl TickScheduler {
         self.ready.len()
     }
 
+    /// Takes the newest ready frame and drops the older ones, for the variable refresh path that shows a frame as soon as
+    /// it is ready. Returns the frame and how many older frames were dropped. `None` when no frame is ready.
+    pub fn take_latest(&mut self) -> Option<(u64, u64)> {
+        let frame = self.ready.pop_back()?;
+        let dropped = self.ready.len() as u64;
+        self.ready.clear();
+        self.last_game = Some(frame);
+        Some((frame, dropped))
+    }
+
+    /// Keeps only the newest ready frame, so at most one frame waits. Returns how many older frames were dropped.
+    pub fn keep_newest(&mut self) -> u64 {
+        let dropped = self.ready.len().saturating_sub(1);
+        self.ready.drain(..dropped);
+        dropped as u64
+    }
+
     /// Decides what this tick shows.
     pub fn on_tick(&mut self) -> TickAction {
         match self.source {
@@ -156,6 +173,23 @@ mod tests {
         s.frame_ready(2);
         assert_eq!(s.on_tick(), game(1));
         assert_eq!(s.on_tick(), game(2));
+        assert_eq!(s.on_tick(), TickAction::Missed);
+    }
+
+    #[test]
+    fn the_newest_frame_wins_when_frames_come_faster_than_ticks() {
+        let mut s = TickScheduler::new(FrameSource::PerTick);
+        assert_eq!(s.take_latest(), None);
+        s.frame_ready(1);
+        s.frame_ready(2);
+        s.frame_ready(3);
+        assert_eq!(s.keep_newest(), 2);
+        assert_eq!(s.queued(), 1);
+        assert_eq!(s.keep_newest(), 0);
+        s.frame_ready(4);
+        assert_eq!(s.take_latest(), Some((4, 1)));
+        assert_eq!(s.queued(), 0);
+        // A tick after a frame was taken is a miss, as after any shown frame.
         assert_eq!(s.on_tick(), TickAction::Missed);
     }
 

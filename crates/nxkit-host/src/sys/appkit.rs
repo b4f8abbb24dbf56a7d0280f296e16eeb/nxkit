@@ -9,7 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use nxkit_metal::{Context, DisplayLink, DisplayTick, FrameHooks, FrameInterval, Presenter};
+use nxkit_metal::{
+    Context, DisplayLink, DisplayTick, FrameHooks, FrameInterval, LinkRate, Presenter,
+};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
@@ -142,14 +144,22 @@ fn screen_facts(s: &NSScreen) -> ScreenFacts {
 /// The display link rate for the screen that shows the window. Before the window is on a screen it is the screen
 /// that `NXKIT_SCREEN` names, else the main one. The link rate is the refresh rate of the current mode of that screen
 /// (`refresh.rs`), not its highest one: the game's own pacing picks the frames it renders, and the link ticks at a rate
-/// that holds each frame an exact number of ticks.
-fn screen_interval(mtm: MainThreadMarker, window: Option<&NSWindow>) -> FrameInterval {
+/// that holds each frame an exact number of ticks. On an adaptive screen with a variable frame step it is a range
+/// (variable refresh, `refresh::choose_presentation`).
+fn screen_interval(mtm: MainThreadMarker, window: Option<&NSWindow>) -> LinkRate {
     match window
         .and_then(|w| w.screen())
         .or_else(|| target_screen(mtm))
     {
-        Some(s) => FrameInterval::from_hz(refresh::apply(&screen_facts(&s)).link_hz),
-        None => FrameInterval::Hz60,
+        Some(s) => {
+            let plan = refresh::apply(&screen_facts(&s));
+            // On an adaptive screen with a variable frame step the link gets a range, not one rate.
+            match refresh::vrr_range() {
+                Some(range) => LinkRate::Variable(range),
+                None => LinkRate::Fixed(FrameInterval::from_hz(plan.link_hz)),
+            }
+        }
+        None => LinkRate::Fixed(FrameInterval::Hz60),
     }
 }
 
@@ -362,9 +372,9 @@ impl AppDelegate {
         let (Some(window), Some(link)) = (self.window().get(), self.link().get()) else {
             return;
         };
-        let interval = screen_interval(MainThreadMarker::from(self), Some(window));
-        if (link.target_hz() - interval.hz()).abs() > f32::EPSILON {
-            link.set_interval(interval);
+        let rate = screen_interval(MainThreadMarker::from(self), Some(window));
+        if link.rate_range() != rate.range() {
+            link.set_rate(rate);
         }
     }
 }

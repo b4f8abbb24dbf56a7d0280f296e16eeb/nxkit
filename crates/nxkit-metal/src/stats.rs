@@ -28,6 +28,7 @@ pub struct PacingStats {
     game_frames: AtomicU64,
     interpolated_frames: AtomicU64,
     held: AtomicU64,
+    parked: AtomicU64,
     missed: AtomicU64,
     handler_total_ns: AtomicU64,
     handler_max_ns: AtomicU64,
@@ -51,6 +52,8 @@ pub struct PacingSnapshot {
     pub interpolated_frames: u64,
     /// The ticks where nothing was due.
     pub held: u64,
+    /// The ticks whose drawable waited for a frame (variable refresh path). A frame that arrives later shows on it.
+    pub parked: u64,
     /// The ticks where a frame was due and none was ready.
     pub missed: u64,
     /// The sum of the time the host spent in the tick handler, in nanoseconds.
@@ -112,6 +115,19 @@ impl PacingStats {
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Counts a tick of the variable refresh path that found no frame and kept its drawable for the next one.
+    pub fn record_parked(&self) {
+        self.ticks.fetch_add(1, Ordering::Relaxed);
+        self.parked.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Counts the action of a parked tick that a frame came for. The tick itself was counted by [`Self::record_parked`].
+    pub fn record_action_only(&self, action: &TickAction) {
+        if let TickAction::Present(Shown::Game { .. }) = action {
+            self.game_frames.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     /// Adds the time the host spent in the tick handler.
     pub fn record_handler(&self, ns: u64) {
         self.handler_total_ns.fetch_add(ns, Ordering::Relaxed);
@@ -154,6 +170,7 @@ impl PacingStats {
             game_frames: self.game_frames.load(Ordering::Relaxed),
             interpolated_frames: self.interpolated_frames.load(Ordering::Relaxed),
             held: self.held.load(Ordering::Relaxed),
+            parked: self.parked.load(Ordering::Relaxed),
             missed: self.missed.load(Ordering::Relaxed),
             handler_total_ns: self.handler_total_ns.load(Ordering::Relaxed),
             handler_max_ns: self.handler_max_ns.load(Ordering::Relaxed),
@@ -199,6 +216,15 @@ mod tests {
             ),
             (4, 1, 1, 1, 1)
         );
+    }
+
+    #[test]
+    fn a_parked_tick_counts_once_and_its_frame_counts_later() {
+        let s = PacingStats::default();
+        s.record_parked();
+        s.record_action_only(&TickAction::Present(Shown::Game { frame: 7 }));
+        let n = s.snapshot();
+        assert_eq!((n.ticks, n.parked, n.game_frames, n.held), (1, 1, 1, 0));
     }
 
     #[test]

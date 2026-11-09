@@ -50,6 +50,16 @@ pub fn timed_present() -> Option<f64> {
     }
 }
 
+/// The time in seconds on the clock of `Drawable::on_presented` and `DisplayTick` (`CACurrentMediaTime`).
+pub fn media_time() -> f64 {
+    // SAFETY: `CACurrentMediaTime` has no preconditions. QuartzCore is linked through `objc2-quartz-core`.
+    unsafe { CACurrentMediaTime() }
+}
+
+unsafe extern "C" {
+    fn CACurrentMediaTime() -> f64;
+}
+
 /// A drawable of the layer. Render into [`Drawable::texture`], then call [`Frame::present`].
 pub struct Drawable {
     texture: Texture,

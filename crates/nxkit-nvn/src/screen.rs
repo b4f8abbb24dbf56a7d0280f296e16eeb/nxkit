@@ -35,6 +35,94 @@ pub fn shown(present: u64, secs: f64) {
     SHOWN[i].store(v.to_bits(), Ordering::Relaxed);
     TAG[i].store(present, Ordering::Release);
     judder_note(v);
+    pace_note(v);
+    if v > 0.0
+        && let Some(hook) = SHOWN_HOOK.get()
+    {
+        hook(present, v);
+    }
+}
+
+/// The function that [`shown`] calls for every present the display showed, with the present number and the time.
+static SHOWN_HOOK: std::sync::OnceLock<fn(u64, f64)> = std::sync::OnceLock::new();
+
+/// Sets the function that learns of every shown present, once. The host uses it to feed the time of the display to the
+/// variable frame step. The function runs on a Metal thread and must be short.
+pub fn set_shown_hook(hook: fn(u64, f64)) -> bool {
+    SHOWN_HOOK.set(hook).is_ok()
+}
+
+/// The presents per `NXKIT_PACE_DIAG` line of the interval between shown presents.
+const PACE_EVERY: u32 = 120;
+
+/// The spread of the intervals between shown presents, for `NXKIT_PACE_DIAG=1`.
+#[derive(Debug)]
+struct PaceSpread {
+    last: f64,
+    n: u32,
+    sum: f64,
+    sum_sq: f64,
+    min: f64,
+    max: f64,
+}
+
+impl PaceSpread {
+    const fn new() -> Self {
+        Self {
+            last: 0.0,
+            n: 0,
+            sum: 0.0,
+            sum_sq: 0.0,
+            min: f64::MAX,
+            max: 0.0,
+        }
+    }
+
+    /// A present was shown at `secs`. Returns the line for the last [`PACE_EVERY`] intervals when they are complete.
+    fn note(&mut self, secs: f64) -> Option<String> {
+        let prev = std::mem::replace(&mut self.last, secs);
+        if prev <= 0.0 || secs <= prev {
+            return None;
+        }
+        let ms = (secs - prev) * 1e3;
+        self.n += 1;
+        self.sum += ms;
+        self.sum_sq += ms * ms;
+        self.min = self.min.min(ms);
+        self.max = self.max.max(ms);
+        if self.n < PACE_EVERY {
+            return None;
+        }
+        let n = f64::from(self.n);
+        let mean = self.sum / n;
+        let sd = (self.sum_sq / n - mean * mean).max(0.0).sqrt();
+        let line = format!(
+            "nxkit-pacing: diag present interval {mean:.2} ms (sd {sd:.2}, min {:.2}, max {:.2}) over {} presents",
+            self.min, self.max, self.n
+        );
+        *self = Self {
+            last: secs,
+            ..Self::new()
+        };
+        Some(line)
+    }
+}
+
+static PACE: std::sync::Mutex<PaceSpread> = std::sync::Mutex::new(PaceSpread::new());
+
+fn pace_note(secs: f64) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if secs <= 0.0 || !*ON.get_or_init(|| std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1"))
+    {
+        return;
+    }
+    let line = PACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .note(secs);
+    if let Some(line) = line {
+        eprintln!("{line}");
+    }
 }
 
 /// When present `present` went on screen: negative when it was dropped, 0 when not known (yet).
@@ -158,6 +246,28 @@ pub fn judder_line(hz: f64, bins: &[u64], mean: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_spread_shows_a_13_ms_frame_as_13_ms() {
+        let mut p = PaceSpread::new();
+        let mut t = 100.0;
+        let mut line = None;
+        for i in 0..=PACE_EVERY {
+            // 13 ms with a swing of 1 ms either way.
+            let swing = if i % 2 == 0 { 0.001 } else { -0.001 };
+            t += 0.013 + swing;
+            line = line.or(p.note(t));
+        }
+        assert!(line.is_some(), "a line after a full window");
+        let line = line.unwrap_or_default();
+        assert!(line.contains("interval 13.00 ms"), "{line}");
+        assert!(line.contains("sd 1.00"), "{line}");
+        assert!(line.contains("min 12.00, max 14.00"), "{line}");
+        // The next window starts empty, and a dropped or repeated time makes no interval.
+        assert_eq!(p.n, 0);
+        assert_eq!(p.note(t), None);
+        assert_eq!(p.n, 0);
+    }
 
     #[test]
     fn a_present_is_known_until_the_ring_comes_round() {

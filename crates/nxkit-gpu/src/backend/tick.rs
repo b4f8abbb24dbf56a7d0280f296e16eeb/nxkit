@@ -101,7 +101,8 @@ impl TickSink for GpuBackend {
             &texture,
             crop,
             tick.drawable,
-            tick.target_presentation_timestamp,
+            // A tick of the immediate mode has no target: the frame shows as soon as it is drawn.
+            (!tick.immediate).then_some(tick.target_presentation_timestamp),
         );
         if r.is_ok() {
             present_diag(3);

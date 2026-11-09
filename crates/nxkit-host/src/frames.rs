@@ -102,6 +102,10 @@ struct Ticks {
 
 impl FrameHooks for Ticks {
     fn display_tick(&self, tick: DisplayTick) {
+        // Variable refresh (`refresh.rs`): the pacer shows a frame as soon as it is ready, on the drawable of the newest
+        // tick, and ignores the hold below.
+        self.pacer
+            .set_immediate(crate::refresh::vrr_range().is_some());
         nxkit_svc_input::tick();
         // `Err` means the pacing service is not initialised. The pacer then keeps the source of the plan.
         let _ = nxkit_svc_pacing::on_display_tick();
@@ -140,6 +144,13 @@ impl FrameHooks for Ticks {
     }
 }
 
+/// A present was shown at `secs` (`CACurrentMediaTime`). The variable frame step takes the time of the display from it,
+/// on the clock of the starts of frames. It does nothing unless variable refresh turned it on.
+fn shown_to_step(_present: u64, secs: f64) {
+    let ago_ns = ((nxkit_metal::media_time() - secs).max(0.0) * 1e9) as u64;
+    nxkit_svc_pacing::frame_shown(nxkit_rt::nvn::clock_ns().saturating_sub(ago_ns));
+}
+
 /// Makes the backend, installs it in the NVN front end and returns the hooks for the display link.
 pub fn install(
     ctx: &Context,
@@ -169,6 +180,8 @@ pub fn install(
         "nxkit-host: present plan {:?} ({})",
         plan.source, plan.reason
     );
+    // Set once; a second install in the same process keeps the first hook, which is the same function.
+    let _ = nxkit_nvn::screen::set_shown_hook(shown_to_step);
     let pacer = Pacer::new(plan, backend.clone());
     backend.set_pacer(pacer.clone());
     Ok(Arc::new(Ticks {

@@ -68,13 +68,14 @@ impl Blit {
         })
     }
 
-    /// Draws `src` into `drawable` and presents it at `at` (seconds on the `CACurrentMediaTime` clock).
+    /// Draws `src` into `drawable` and presents it at `at` (seconds on the `CACurrentMediaTime` clock), or as soon as the
+    /// GPU is done when `at` is `None`.
     pub(crate) fn present(
         &mut self,
         src: &Texture,
         crop: nxkit_nvn::backend::Rect,
         drawable: Drawable,
-        at: f64,
+        at: Option<f64>,
     ) -> Result<()> {
         let mut frame = self.ring.begin()?;
         let words: Vec<u8> = [crop.x, crop.y, crop.width, crop.height]
@@ -123,7 +124,10 @@ impl Blit {
             })?;
             pass.end();
         }
-        frame.present_at(drawable, at);
+        match at {
+            Some(at) => frame.present_at(drawable, at),
+            None => frame.present(drawable),
+        }
         frame.submit()?;
         Ok(())
     }

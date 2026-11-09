@@ -44,7 +44,21 @@ The display link of a ProMotion screen can run at any rate between its limits, a
 
 Metal may refuse `presentAfterMinimumDuration:` on a drawable of `CAMetalDisplayLink` (it does so for `presentAtTime:`). The call is wrapped in an exception catch. On the first refusal the host prints one line, turns timed presents off for the run and presents plainly. `NXKIT_TIMED_PRESENT=0` or `1` overrides the default (on for adaptive screens only).
 
+## Variable refresh (VRR)
+
+On a screen that adapts its refresh rate (ProMotion, or an external Adaptive-Sync display that macOS reports with a longest refresh interval above the shortest) and a game that steps by the measured frame time (`StepMode::Variable`, a target above 60 with a state page), the host does not hold a frame for a tick of a fixed grid. On the grid a frame of 13 ms showed after 16.7 ms. The choice is `refresh::choose_presentation`; the Load (hold-based) step, a screen that does not adapt and `NXKIT_VRR=0` keep the grid, unchanged.
+
+- **The link has a range.** `preferredFrameRateRange` is minimum = the floor the game needs (60, `NXKIT_VRR_MIN` changes it), maximum = the highest rate of the screen (`maximumFramesPerSecond`, 120 or 144) and preferred = the target of the step, cut to the maximum. `RateRange::plan` makes it. The screen line says `VRR on` with the range.
+- **A frame shows when it is ready.** The `Pacer` is in its immediate mode (`Pacer::set_immediate`). A tick that finds no frame keeps its drawable (parked) instead of letting it go. The frame that the game presents next is drawn into the parked drawable the moment it is queued, on the encoder thread, and the drawable is presented at once (`Frame::present`, no target time). A frame that is ready before a tick takes the drawable of that tick. The hold of the frame step is not used.
+- **At most one frame is queued.** A newer frame replaces one that waited for a tick (`Pacer::superseded` counts them), so latency stays one frame. The game thread is still held back by the backend when three presents are on their way (`MAX_PENDING`).
+- **The step is measured at the presentation.** The display's `presentedTime` of each frame goes to the pacing service (`frame_shown`, through `nxkit_nvn::screen::set_shown_hook`), converted to the clock of the frame starts. The step of the next frame is the time between the last two shown frames (`VariableStep::note_shown`), with the same floor and carry. Game time follows what the screen shows. Before the first shown frame, and on the grid, the step is the time between frame starts as before.
+- **Timed presents are off** under VRR, and the measured tick rate is not compared with the plan (`note_measured`): the tick rate follows the frames.
+
+`NXKIT_PACE_DIAG=1` prints the mean and the spread of the interval between shown frames every 120 presents, see `docs/diagnostics.md`.
+
 ## Open points
+
+- Variable refresh has not run on a screen. The tests cover the choice, the range, the scheduler, the step and the interval statistics. Check on the ProMotion screen: the screen line says `VRR on`, the `present interval` line of `NXKIT_PACE_DIAG=1` follows the frame time (13 ms frames show at about 13 ms) and the panel rate follows. Whether macOS keeps the link at its maximum and the panel follows the presents, whether a parked drawable some milliseconds old presents without complaint, and how the game's vsync event behaves while the tick rate moves are open.
 
 - None of this has been run on a screen. The tests cover the plan, the tracker, the mode choice and the histogram. Check the screen line and the `judder` line on the 120 Hz monitor, on the 144 Hz setting and on the built-in display.
 - If the window is in full screen (`--fullscreen`), macOS can give it another mode or display than the window had. The notification replans, but this was not tried.

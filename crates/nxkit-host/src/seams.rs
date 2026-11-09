@@ -140,6 +140,11 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
             StepMode::Load(load)
         }
     };
+    // Variable refresh needs to know that the game steps by the measured frame time.
+    crate::refresh::set_variable_step(match step {
+        StepMode::Variable(t) => Some(t),
+        _ => None,
+    });
     Ok(nxkit_svc_pacing::Config {
         bind_system_event: wire::pacing_bind,
         state_page: page,

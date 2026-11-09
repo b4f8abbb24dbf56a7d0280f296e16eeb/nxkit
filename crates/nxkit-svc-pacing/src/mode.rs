@@ -79,6 +79,8 @@ pub struct Stepper {
     mode: StepMode,
     variable: VariableStep,
     load: Option<LoadStepper>,
+    /// Whether the variable step takes its time from the shown frames (`frame_shown`) and not from the starts of frames.
+    by_shown: bool,
 }
 
 fn load_of(mode: StepMode) -> Option<LoadStepper> {
@@ -100,6 +102,7 @@ impl Stepper {
             mode,
             variable: VariableStep::new(),
             load: load_of(mode),
+            by_shown: false,
         })
     }
 
@@ -112,6 +115,7 @@ impl Stepper {
             mode,
             variable: VariableStep::new(),
             load: load_of(mode),
+            by_shown: false,
         }
     }
 
@@ -146,6 +150,23 @@ impl Stepper {
         self.load = load_of(mode);
         self.mode = mode;
         Ok(())
+    }
+
+    /// Makes the variable step take its time from the frames the display shows ([`Stepper::frame_shown`]), or from the
+    /// starts of frames again. The variable step starts again.
+    pub fn set_by_shown(&mut self, on: bool) {
+        if self.by_shown != on {
+            self.by_shown = on;
+            self.variable.reset();
+        }
+    }
+
+    /// The display showed a frame at `shown_ns`, on the clock of the starts of frames. Only the variable step with
+    /// [`Stepper::set_by_shown`] on uses it.
+    pub fn frame_shown(&mut self, shown_ns: u64) {
+        if let (true, StepMode::Variable(cap)) = (self.by_shown, self.mode) {
+            self.variable.note_shown(shown_ns, cap);
+        }
     }
 
     /// A game frame starts at `start_ns`, a monotonic time in nanoseconds. Writes its step.

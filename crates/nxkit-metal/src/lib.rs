@@ -88,13 +88,15 @@ pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
-pub use pacing::{DisplayLink, DisplayTick, FrameInterval, Pacer, TickSink};
+pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{
     ArchiveConfig, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache, RenderPipeline,
     RenderPipelineDesc, ShaderLibrary, Source,
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
-pub use present::{Drawable, PRESENT_FORMAT, Presenter, set_timed_present, timed_present};
+pub use present::{
+    Drawable, PRESENT_FORMAT, Presenter, media_time, set_timed_present, timed_present,
+};
 pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
     StencilAttachment, Viewport,

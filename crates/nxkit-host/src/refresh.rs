@@ -8,13 +8,17 @@
 
 use std::sync::Mutex;
 
-use nxkit_metal::display;
+use nxkit_metal::{RateRange, display};
 use nxkit_svc_pacing::refresh::{self, TickPlan};
 
 use crate::settings::Settings;
 
 /// The vsync of the game's frame step. A Switch game steps in vsyncs of 1/60 s.
 const VSYNC_HZ: f32 = 60.0;
+
+/// The lowest rate under variable refresh when `NXKIT_VRR_MIN` does not say: the game steps by the measured time, but its
+/// physics and its audio want at least the rate of the Switch.
+const DEFAULT_VRR_FLOOR: u32 = 60;
 
 /// What the user and the game ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +31,37 @@ pub struct Request {
     pub set_refresh: Option<u32>,
     /// Timed presents: `Some(true)` forces them, `Some(false)` forbids them, `None` uses them on a screen that adapts its rate.
     pub timed: Option<bool>,
+    /// Variable refresh: `false` when `NXKIT_VRR=0` turns it off.
+    pub vrr: bool,
+    /// The lowest rate the game needs under variable refresh. `NXKIT_VRR_MIN`, 60 by default.
+    pub vrr_floor: u32,
+}
+
+/// How frames reach the screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Presentation {
+    /// The display link ticks at a fixed rate, and a frame shows on a tick of that grid.
+    Grid,
+    /// The display link has a range of rates, a frame shows as soon as it is ready and the screen follows.
+    Vrr(RateRange),
+}
+
+/// Variable refresh when the screen adapts its rate and the game steps by the measured frame time (`StepMode::Variable`,
+/// `variable_target` is its target); the fixed grid otherwise. `max_fps` is the highest rate of the screen. A screen
+/// that cannot go above the floor has nothing to follow, so it keeps the grid.
+pub fn choose_presentation(
+    request: &Request,
+    adaptive: bool,
+    variable_target: Option<u32>,
+    max_fps: u32,
+) -> Presentation {
+    let Some(target) = variable_target else {
+        return Presentation::Grid;
+    };
+    if !request.vrr || !adaptive || max_fps <= request.vrr_floor {
+        return Presentation::Grid;
+    }
+    Presentation::Vrr(RateRange::plan(request.vrr_floor, max_fps, target))
 }
 
 impl Request {
@@ -45,6 +80,12 @@ impl Request {
                 "0" => Some(false),
                 _ => None,
             });
+        let vrr = std::env::var("NXKIT_VRR").map_or(true, |v| v.trim() != "0");
+        let vrr_floor = std::env::var("NXKIT_VRR_MIN")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .filter(|hz| *hz > 0)
+            .unwrap_or(DEFAULT_VRR_FLOOR);
         Self {
             target_fps: if settings.fps_target == 0 {
                 60
@@ -54,6 +95,8 @@ impl Request {
             free_rate: settings.fps_free,
             set_refresh,
             timed,
+            vrr,
+            vrr_floor,
         }
     }
 }
@@ -73,6 +116,9 @@ pub struct ScreenFacts {
 
 struct State {
     request: Request,
+    /// The target of the variable frame step, when the game steps that way.
+    variable_target: Option<u32>,
+    presentation: Presentation,
     plan: Option<TickPlan>,
     announced: String,
     /// The display ids that a switch was tried for with this rate, so that a failed switch does not repeat.
@@ -87,7 +133,11 @@ static STATE: Mutex<State> = Mutex::new(State {
         free_rate: false,
         set_refresh: None,
         timed: None,
+        vrr: true,
+        vrr_floor: DEFAULT_VRR_FLOOR,
     },
+    variable_target: None,
+    presentation: Presentation::Grid,
     plan: None,
     announced: String::new(),
     tried: Vec::new(),
@@ -111,6 +161,25 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 /// Sets what is asked for. The host calls it once before the window opens.
 pub fn configure(request: Request) {
     state().request = request;
+}
+
+/// Tells the module that the game steps by the measured frame time (`StepMode::Variable`) with this target, or does not.
+/// The pacing seam calls it before the window opens.
+pub fn set_variable_step(target: Option<u32>) {
+    state().variable_target = target;
+}
+
+/// How frames reach the screen, from the latest [`apply`].
+pub fn presentation() -> Presentation {
+    state().presentation
+}
+
+/// The rate range of the display link under variable refresh, `None` for the fixed grid.
+pub fn vrr_range() -> Option<RateRange> {
+    match presentation() {
+        Presentation::Vrr(r) => Some(r),
+        Presentation::Grid => None,
+    }
 }
 
 /// The plan of the latest [`apply`].
@@ -158,10 +227,17 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
     }
     let (hz, source) = refresh_of(facts);
     let plan = refresh::plan_ticks(hz, req.target_fps, req.free_rate, facts.adaptive);
+    let presentation = choose_presentation(&req, facts.adaptive, st.variable_target, facts.max_fps);
+    let vrr = match presentation {
+        Presentation::Vrr(r) => Some(r),
+        Presentation::Grid => None,
+    };
     let fps = plan.fps as f32;
     // The service takes the link rate and the vsync rate of the game, so that a frame step of N vsyncs holds N * ticks.
+    // Under variable refresh the link runs between the floor and the highest rate; the preferred rate stands for it.
+    let link_hz = vrr.map_or(plan.link_hz as f32, |r| r.preferred);
     let _ = nxkit_svc_pacing::set_rates(
-        plan.link_hz as f32,
+        link_hz,
         if plan.fps == req.target_fps {
             VSYNC_HZ
         } else {
@@ -169,15 +245,20 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
         },
     );
     nxkit_svc_pacing::set_screen_hz(hz.round() as u32);
-    nxkit_nvn::screen::set_refresh_hz(if facts.adaptive {
+    nxkit_nvn::screen::set_refresh_hz(if let Some(r) = vrr {
+        f64::from(r.preferred)
+    } else if facts.adaptive {
         f64::from(plan.link_hz)
     } else {
         hz
     });
+    // The game's time follows the frames the display shows, not the starts of frames.
+    nxkit_svc_pacing::set_step_by_shown(vrr.is_some());
     // Off unless asked for (NXKIT_TIMED_PRESENT=1): on a ProMotion screen a minimum duration per present let macOS
     // lower the panel's rate, and a frame of 0.8 vsyncs of work waited about 3.8 vsyncs for the screen (Ocarina of
     // Time, 2026-11-09). Without it each frame shows on the next tick of the link.
-    let timed = req.timed.unwrap_or(false);
+    // Under variable refresh a frame shows as soon as it is ready, so a minimum duration would only hold it back.
+    let timed = req.timed.unwrap_or(false) && vrr.is_none();
     nxkit_metal::set_timed_present(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
     let mut hint = String::new();
     if !plan.exact {
@@ -196,15 +277,16 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
         }
     }
     let line = format!(
-        "nxkit-host: screen \"{}\" refresh {hz:.2} Hz ({source}{}), link {} Hz, {} tick{} per {} fps frame{}{}{}{note}{hint}",
+        "nxkit-host: screen \"{}\" refresh {hz:.2} Hz ({source}{}), link {} Hz, {} tick{} per {} fps frame{}{}{}{}{note}{hint}",
         facts.name,
         if facts.adaptive { ", adaptive" } else { "" },
-        plan.link_hz,
+        link_text(vrr, plan.link_hz),
         plan.ticks_per_frame,
         if plan.ticks_per_frame == 1 { "" } else { "s" },
         plan.fps,
         if plan.exact { "" } else { " (uneven)" },
         if timed { ", timed presents" } else { "" },
+        vrr_text(vrr),
         if req.free_rate && plan.fps != req.target_fps {
             ", free frame rate"
         } else {
@@ -216,9 +298,25 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
         st.announced = line;
     }
     st.plan = Some(plan);
+    st.presentation = presentation;
     st.reported = 0;
     GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     plan
+}
+
+/// The link rate of the screen line: one rate on the grid, the range under variable refresh.
+fn link_text(vrr: Option<RateRange>, link_hz: u32) -> String {
+    vrr.map_or_else(|| link_hz.to_string(), |r| format!("{}-{}", r.min, r.max))
+}
+
+/// The part of the screen line that says variable refresh is on, with the range of the link.
+fn vrr_text(vrr: Option<RateRange>) -> String {
+    vrr.map_or_else(String::new, |r| {
+        format!(
+            ", VRR on (frames show when ready, link {}-{} Hz, prefers {})",
+            r.min, r.max, r.preferred
+        )
+    })
 }
 
 /// The link ticked at `measured_hz` over the last second while the plan asked for `plan.link_hz`. When they differ by
@@ -227,6 +325,10 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
 pub fn note_measured(measured_hz: f64) -> Option<f64> {
     let mut st = state();
     let plan = st.plan?;
+    // Under variable refresh the tick rate follows the frames and is no fixed rate to check the plan against.
+    if matches!(st.presentation, Presentation::Vrr(_)) {
+        return None;
+    }
     let rounded = measured_hz.round() as u32;
     if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz))
         || rounded == st.reported
@@ -253,6 +355,64 @@ pub fn note_measured(measured_hz: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn request() -> Request {
+        Request {
+            target_fps: 60,
+            free_rate: false,
+            set_refresh: None,
+            timed: None,
+            vrr: true,
+            vrr_floor: 60,
+        }
+    }
+
+    #[test]
+    fn an_adaptive_screen_with_a_variable_step_gets_a_range() {
+        let p = choose_presentation(&request(), true, Some(120), 120);
+        let Presentation::Vrr(r) = p else {
+            panic!("{p:?}");
+        };
+        assert_eq!((r.min, r.max, r.preferred), (60.0, 120.0, 120.0));
+        // An external Adaptive-Sync screen of 144 Hz and a game that aims at 240.
+        let Presentation::Vrr(r) = choose_presentation(&request(), true, Some(240), 144) else {
+            panic!("no range");
+        };
+        assert_eq!((r.min, r.max, r.preferred), (60.0, 144.0, 144.0));
+        assert_eq!(vrr_text(None), "");
+        assert!(vrr_text(Some(r)).contains("VRR on"));
+        assert_eq!(link_text(Some(r), 60), "60-144");
+        assert_eq!(link_text(None, 120), "120");
+    }
+
+    #[test]
+    fn everything_else_keeps_the_grid() {
+        let r = request();
+        // The hold-based step (no variable target) and a screen that does not adapt.
+        assert_eq!(choose_presentation(&r, true, None, 120), Presentation::Grid);
+        assert_eq!(
+            choose_presentation(&r, false, Some(120), 120),
+            Presentation::Grid
+        );
+        // A screen that cannot go above the floor has nothing to follow.
+        assert_eq!(
+            choose_presentation(&r, true, Some(120), 60),
+            Presentation::Grid
+        );
+        // NXKIT_VRR=0.
+        let off = Request { vrr: false, ..r };
+        assert_eq!(
+            choose_presentation(&off, true, Some(120), 120),
+            Presentation::Grid
+        );
+        // A higher floor from NXKIT_VRR_MIN.
+        let Presentation::Vrr(v) =
+            choose_presentation(&Request { vrr_floor: 80, ..r }, true, Some(120), 120)
+        else {
+            panic!("no range");
+        };
+        assert_eq!(v.min, 80.0);
+    }
 
     #[test]
     fn the_request_takes_the_target_from_the_settings() {

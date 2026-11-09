@@ -283,6 +283,43 @@ pub fn frame_started(start_ns: u64) -> Result<(), Error> {
     }
 }
 
+/// Whether the variable step takes its time from the shown frames. Read without a lock by [`frame_shown`].
+static BY_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes the variable step (`StepMode::Variable`) measure its time at the presentation: the step of a frame is the time
+/// between the last two frames the display showed ([`frame_shown`]), not the time between two frame starts. The host
+/// turns it on when frames are shown as soon as they are ready (variable refresh). The variable step starts again on a
+/// change. Does nothing without a state page.
+pub fn set_step_by_shown(on: bool) {
+    BY_SHOWN.store(on, Ordering::Relaxed);
+    if let Ok(s) = shared()
+        && let Some(st) = s
+            .stepper
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+    {
+        st.set_by_shown(on);
+    }
+}
+
+/// The display showed a frame at `shown_ns`, a monotonic time in nanoseconds on the clock of [`frame_started`]. A cheap
+/// no-op while [`set_step_by_shown`] is off.
+pub fn frame_shown(shown_ns: u64) {
+    if !BY_SHOWN.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Ok(s) = shared()
+        && let Some(st) = s
+            .stepper
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+    {
+        st.frame_shown(shown_ns);
+    }
+}
+
 /// The game starts a frame at `start_ns`. The first acquire of the frame waited `wait_ns` for the pacing, and the
 /// load-driven step takes that wait off the cost of the frame.
 pub fn frame_started_waited(start_ns: u64, wait_ns: u64) -> Result<(), Error> {

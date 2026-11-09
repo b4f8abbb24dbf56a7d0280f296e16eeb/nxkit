@@ -41,7 +41,13 @@ mod wire;
 
 pub use cmdbuf::{CommandSettings, set_command_settings};
 pub use ctx::{InstallError, Settings, install};
+
 pub use device::{NVN2_API_MAJOR, NVN2_API_MINOR, scan_sdk_driver, sdk_item};
+
+/// The guest clock in nanoseconds, the one the frame step takes the start of a frame from. 0 before [`install`].
+pub fn clock_ns() -> u64 {
+    ctx::settings_if_installed().map_or(0, |s| (s.clock_ns)())
+}
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock, PoisonError};
