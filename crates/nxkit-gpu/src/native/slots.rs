@@ -220,12 +220,9 @@ impl Binds {
         }
     }
 
-    /// The picture in the planes at `luma` and `chroma`.
-    pub(super) fn find(&self, luma: u64, chroma: u64) -> Option<Pic> {
-        self.list
-            .iter()
-            .find(|b| b.0 == luma && b.1 == chroma)
-            .map(|b| b.2)
+    /// The picture whose luma was read into `luma`, whatever the chroma address.
+    pub(super) fn find_luma(&self, luma: u64) -> Option<Pic> {
+        self.list.iter().find(|b| b.0 == luma).map(|b| b.2)
     }
 
     /// The addresses of the last reads, for a diagnostic.
@@ -394,12 +391,11 @@ mod tests {
         let mut b = Binds::default();
         b.bind(0x1000, 0x9000, 1);
         b.bind(0x2000, 0xa000, 2);
-        assert_eq!(b.find(0x1000, 0x9000), Some(1));
+        assert_eq!(b.find_luma(0x1000), Some(1));
         b.bind(0x1000, 0x9000, 3);
-        assert_eq!(b.find(0x1000, 0x9000), Some(3));
-        // The luma address alone is not the picture: the chroma plane must be where it was read to.
-        assert_eq!(b.find(0x1000, 0xa000), None);
-        assert_eq!(b.find(0x3000, 0x9000), None);
+        assert_eq!(b.find_luma(0x1000), Some(3));
+        assert_eq!(b.find_luma(0x2000), Some(2));
+        assert_eq!(b.find_luma(0x3000), None);
     }
 
     #[test]
@@ -409,8 +405,8 @@ mod tests {
         for i in 0..40u64 {
             b.bind(0x1000 + i * 0x100, 0x9000, i);
         }
-        assert_eq!(b.find(0x1000, 0x9000), None);
-        assert_eq!(b.find(0x1000 + 39 * 0x100, 0x9000), Some(39));
+        assert_eq!(b.find_luma(0x1000), None);
+        assert_eq!(b.find_luma(0x1000 + 39 * 0x100), Some(39));
         assert!(b.recent().contains("0x3700/0x9000"), "{}", b.recent());
     }
 }
