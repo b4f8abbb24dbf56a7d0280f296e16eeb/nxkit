@@ -19,6 +19,7 @@ use crate::macho;
 use crate::manifest::Game;
 use crate::memory;
 use crate::place;
+use crate::probe_pools;
 use crate::sys::{self, Dylib, PROT_NONE};
 
 const COPY_RUNS: usize = 5;
@@ -283,5 +284,7 @@ pub fn run(root: &Path) -> Result<()> {
     fixed_calls(&ranges, &free);
     copy_cost(&game)?;
     dyld_placement(&game);
+    // Before 5 and 6, which keep the guest range until the process ends and so wire memory that this step must not see.
+    probe_pools::run()?;
     buffer_and_residency(&game)
 }

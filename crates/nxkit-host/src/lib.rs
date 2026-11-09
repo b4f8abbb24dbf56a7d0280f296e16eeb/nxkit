@@ -43,6 +43,8 @@ pub mod poolreport;
 #[cfg(target_os = "macos")]
 pub mod probe;
 #[cfg(target_os = "macos")]
+pub mod probe_pools;
+#[cfg(target_os = "macos")]
 pub mod refresh;
 #[cfg(target_os = "macos")]
 pub mod run;
