@@ -20,8 +20,8 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-rt (unsafe code, the C ABI of the host)"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-ndve, nxkit-ndsr, nxkit-rt (unsafe code, the C ABI of the host)"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-coreml, nxkit-native-plan, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
@@ -95,6 +95,10 @@ The rules:
 | nxkit-svc-input | L0 | no | impl | the `input` service: controllers, GameController and Core Haptics through `objc2`. `unsafe` only in `sys` |
 | nxkit-svc-audio | L0 | no | impl | the audio service of the nxkit host: SDK take-overs, `audout:u`, `audren:u`, `IAudioDevice`, and a mixer in the AUHAL callback (R41, R42). It is not compiled or tested yet |
 | nxkit-svc-pacing | L0 | no | impl | the `pacing` service: the `Pacer` for present intervals and the frame pace profile |
+| nxkit-native-plan | L0 | no | impl | the native passes as data (`Plan`, `Step`, `GameResource`, `Binding`), shared by the networks that `nxkit-gpu` runs natively. No Metal code |
+| nxkit-ndve | L1 | no | impl | the movie network of `nn::ndve` run natively: file reader, weight packing, the plan and Metal kernels, and the `ane` module that writes the Core ML model for the Neural Engine. Refer to [plans/ndve-native.md](plans/ndve-native.md) |
+| nxkit-ndsr | L1 | no | impl | the agl upscaler NDSR run natively: network table and fingerprint of the packs `vr` and `vr_light`, pack reader, CPU reference, kernels and plan. Refer to [plans/ndsr-native.md](plans/ndsr-native.md) |
+| nxkit-coreml | L0 | no | impl | Core ML on the Neural Engine over IOSurface tensors (`objc2-core-ml`). It knows nothing about the network. Refer to [plans/ndve-ane.md](plans/ndve-ane.md) |
 | nxkit-host | L2 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
 | nxkit-svc-system | L0 | no | impl | the system services as `Service` objects: `set`, `set:sys`, `apm`, `time:*`, `acc:*`, `appletOE`, `appletAE`, `pctl*`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u` (R37), and the SDK exports of the take-overs (R38a). The module `sys` holds the clock, time zone and guest call functions |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
@@ -138,6 +142,58 @@ flowchart LR
   PLAN --> SEAL["seal and sign from known digests"]
   SEAL --> APP["Mac app"]
 ```
+
+## The host at run time: the parts that are not a straight translation
+
+Most of the run time path is a direct image of the Switch: `nxkit-hos` threads, `nxkit-ipc` services, `nxkit-rt` NVN calls, `nxkit-nvn` frames, `nxkit-gpu` Metal 4 work (refer to [nxkit-gpu.md](nxkit-gpu.md)). Six parts do more than that. Each has a detailed plan, and this section gives the shape and the status. A number is marked **measured** (a run on the reference machine, an M2 Max unless said), **derived** or **assumed** (nobody checked it).
+
+### Native replacements of tensor networks
+
+Some games run a neural network as a chain of compute dispatches. `nxkit-gpu` (`native`) can replace such a chain by kernels of its own. The layer knows no network. A `Replacement` says how to find the chain (the program keys of the frame's dispatches), which bound weight buffers prove that it is the known network, and how to build a `Plan` (buffers, kernels, grids, bindings; the types are in `nxkit-native-plan`, with no Metal code). `Native::prepare` reads the weight bytes through the bindings and hashes them once per frame, looks the verdict up in a small LRU cache of plans (`NXKIT_NATIVE_CACHE`, 4), and the pass loop skips the game's dispatches and encodes the plan at the last one. Anything that does not match keeps the game's own dispatches, so the failure mode is the original picture and never a wrong one. `NXKIT_<NAME>=0` turns a network off, `NXKIT_<NAME>_COMPARE=1` runs both on a sampled frame.
+
+- **NDVE** (`nxkit-ndve`): the movie upscaler of `nn::ndve`, a U-Net and a resampler on the 1080p picture. Plan: [ndve-native.md](plans/ndve-native.md), [ndve-impl.md](plans/ndve-impl.md). The GPU kernels take 5.8 ms for the full picture before, 4.9 ms after the fused layers (measured).
+- **NDSR** (`nxkit-ndsr`): the in-game upscaler of the agl family. The packs `vr` and `vr_light` hold 15 network programs. Each has a CPU reference that matches the emulated SASS of the game bit for bit, and one Metal kernel. Each input and output size gets its own plan, because the dynamic resolution changes the size every few frames. The kernels are 1.7 to 2.2 times faster than the first version on the full picture (measured). Plan: [ndsr-native.md](plans/ndsr-native.md), [ndsr-impl.md](plans/ndsr-impl.md). The NDVE resampler is an NDSR network.
+
+### The Neural Engine offload of NDVE
+
+The Neural Engine runs the movie network faster than the GPU kernels leave room for. It is on by default; `NXKIT_NDVE_ANE=0` keeps NDVE on the GPU. Plan: [ndve-ane.md](plans/ndve-ane.md).
+
+- `nxkit-coreml` loads a Core ML ML Program with `cpuAndNeuralEngine` and runs it over IOSurface tensors. It knows nothing about the network. `nxkit-metal` wraps an IOSurface as a texture. A model that is not all on the Neural Engine (`compute_plan`) is refused.
+- The `ane` module of `nxkit-ndve` writes the `.mlpackage` from the weight blob in Rust (no Python at run time). The model leaves the quantise, the bilinear sample and the dither to a GPU epilogue (`ndve_ane_quant`, `ndve_ane_epilogue`). The package and the compiled model are cached by the weights and the macOS build.
+- The picture is fed at decode time. `nxkit-svc-video` reports every decoded picture and the guest memory the game reads it into; a feeder converts it to the f16 input on the CPU (2 to 3 ms, measured in the study) and starts the prediction, three pictures ahead of the game. The first wiring, where the game's frame wrote the input and the result came one picture later, never had a result in time (1095 of 1101 pictures late, measured) and is gone.
+- The game's dispatch finds its picture in three ways: the address of the read, the chain of the game's copies back to that address, and a luma fingerprint. A stream with 30 dispatches in a row that match nothing is given up. A dispatch without a ready result runs the Metal plan (`ndve.ane_fallback(reason)`).
+- Status: the wiring has unit tests without Metal or Core ML. The study measured about 9 ms for the model on the Neural Engine; whether every picture is early enough in a game is read from the health counters and the `ndvetrace` report, not assumed.
+
+### The movie path
+
+AV1 movies decode on the CPU with rav1d on a worker thread of the stream (all cores up to 16, two frames in flight), or in hardware with VideoToolbox on M3 and newer. `Submit` only queues the packet. The worker is at most three pictures ahead of the game and never drains the decoder before the end of the stream, because a drain in the middle of a stream waited for ever with more than one frame in flight. An 8-bit 4:2:0 picture becomes NV12 by rows. Each picture has its own timestamp and an id for the Neural Engine feeder.
+
+### The pipeline path, end to end
+
+Details: [shader-step.md](shader-step.md), [plans/pipelines-at-build-time.md](plans/pipelines-at-build-time.md), [plans/pipeline-prewarm.md](plans/pipeline-prewarm.md).
+
+1. **Build.** `nxb-xlate` translates the shader to MSL, the own front end or Apple's tools make the Metal library, and `nxb-archive` plans the pipeline archive: one unspecialized base for each shader pair. A vertex shader with stage inputs has a second library, `_bp`, that reads its streams itself (vertex pulling). The plan archives the `_bp` function, so its base has no vertex layout.
+2. **Keys.** Batches are content keys. A translator change that touches only the shaders of one feature (now `hmma`) raises that feature's revision and not `TRANSLATOR_ID`; the crate version is in no key. A rebuild redoes only what changed.
+3. **Shards.** Each batch is one `.mtl4archive` file under `pipelines/` with an index (`index.nxpi`). `MTL4Archive` read one merged file whole into memory (4.8 GB for one title, measured), so the host opens a shard when its first pipeline is asked for and keeps at most 32 open.
+4. **Host.** For a draw `Pipelines` looks the pipeline up in the shards and the runtime archives. A miss takes the base of the pair and specializes it for the colour state with Metal 4 (`cache/specialize.rs`), on background threads (half the cores, 2 to 8, user-initiated QoS, the jobs of the latest frame first). The draw is left out until its pipeline is ready (`skip.pending`).
+5. **Runtime cache.** Every pipeline the host makes is captured into `rt-*.mtl4archive` files with a list (`pipelines.seen`) beside the title. At the next start the host makes the pipelines of the list before the first frame (budget 20 s). The user does not rebuild after playing.
+6. **Vertex pulling.** With `_bp` the draw binds a `dm_vlayout` block at buffer 16 and the pipeline has no vertex layout, so one base serves every layout. `NXKIT_PULL=0` keeps `stage_in`.
+
+Status: specialization, background builds, the runtime cache and the pull path are built. The archive served 21 % of the shader pairs of one title before the pull path (derived from the plan counts); the plan expects 96 % with it, **assumed until measured in a game**. Building every pipeline at build time (recorded states, a fetch-blend fallback) is a plan.
+
+### Memory
+
+- **The guest range** is one reservation of address space that is also one no-copy `MTLBuffer`. Its whole length counts in the Metal device total (and in the Metal HUD), touched or not. The pages that count for the process are the touched ones: `NXKIT_MEM_REPORT` counts the mapped, resident, dirty and compressed pages per page.
+- **Textures** have a Metal copy and the guest copy. The Metal copy of a texture that no frame used for 600 frames (`NXKIT_TEX_EVICT`) is dropped when the guest copy is current, and made again when the game uses it. A render target, a texture a frame wrote, one the CPU reads back and a memoryless, widened or scaled texture stay.
+- **Pipeline archives** are heap while open: the shards, at most 32 (`NXKIT_SHARD_LRU`). Shader libraries stay loaded (`docs/nxkit-gpu.md`, "Memory").
+- **Caches are bounded:** native plans (4), batch scratch (8 MiB per slot, doubling up to 64 MiB), pooled staging buffers for compressed uploads.
+- `NXKIT_MEM_ALLOC=<MiB>` names who makes a large heap allocation.
+
+### Pacing
+
+Details: [pacing.md](pacing.md). The frame step is load-driven: it holds a frame for a number of vsyncs of 1/60 s from the cost of the frames. The profile (`pace_profile` in `game.json`) says how: `hold` (a late frame may stay longer, thermal cap on), `work` (a frame is judged by its work only) and `steady` (the step never leaves the cap's frame rate; a long frame shows late once and the game pays the time back). The variable step, which follows the measured time between shown frames, runs only under variable refresh (VRR) on an adaptive screen. A fixed screen keeps the load-driven step at 60 and a grid of ticks. VRR has not run on a screen yet (tests only).
+
+Assumed, not measured here: the GPU lowers its clock when a paced frame leaves it idle (DVFS), so the GPU time in ms of the same work rises when the load per frame falls. Compare GPU times only at equal pacing, and do not read a rise in `NXKIT_PACE_DIAG` GPU ms after a speed-up as a loss.
 
 ## Store format and API stability
 

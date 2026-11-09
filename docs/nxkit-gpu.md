@@ -46,6 +46,15 @@ let stats = gpu.wait()?;                     // GPU time of the last frame
 
 `Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts. The archive is not read whole: `GpuSettings::archive_shards` names the folder of the batch archives and the index, and the cache opens a shard for the first pipeline in it (`NXKIT_SHARD_LRU` open at most). See docs/shader-step.md, "The pipeline archive as shards".
 
+### Specialization, background builds and the runtime cache
+
+Plans: [plans/pipelines-at-build-time.md](plans/pipelines-at-build-time.md), [plans/pipeline-prewarm.md](plans/pipeline-prewarm.md).
+
+- **Specialization.** The archive holds one unspecialized base for each shader pair. Metal 4 turns a base into a pipeline for a colour state (formats, blend, write mask) without a compile (`cache/specialize.rs`). A base of a point-size vertex function is made without a primitive class. `NXKIT_PIPELINE_SPECIALIZE=0` never specializes. A base that the archive lacks is compiled only with `NXKIT_PIPELINE_BASES=1` (off: one base per vertex layout was as rare as its pipelines, measured on one title, and its compile took 0.1 to 10 s where the full compile took 1 to 6 ms).
+- **Background builds.** A missing pipeline builds on threads (half the cores, 2 to 8, `NXKIT_PIPELINE_THREADS`) at user-initiated QoS (`NXKIT_PIPELINE_QOS`). A draw of the latest frame takes the job first. The draw is left out until the pipeline is ready (`skip.pending`). `NXKIT_PIPELINE_ASYNC=0` builds in the encode. `NXKIT_DIAG=pipe` shows the backlog.
+- **Runtime cache and prewarm.** `pipelines/record.rs` captures every pipeline into `rt-*.mtl4archive` files and writes the descriptions into `pipelines.seen`. `prewarm.rs` makes the list before the first frame (budget 20 s, `NXKIT_PIPELINE_PREWARM_WAIT`). Details: [shader-step.md](shader-step.md) "The runtime pipeline cache". Assumption not yet checked: that the serializer writes only the new pipelines on each flush.
+- **Vertex pulling.** A vertex shader with a `pull` field in its `_b.json` draws through its `_bp` library. The encoder fills a `dm_vlayout` block (for 16 streams the GPU address, stride and divisor, and 16 attribute words) and binds it at buffer 16; the pipelines have no vertex layout, so one archived base per pair serves every layout. `NXKIT_PULL=0` keeps `stage_in`. `NXKIT_DIAG=pipe` counts pulled and `stage_in` draws. Built and tested; not yet measured in a game.
+
 ## Bindless textures and buffers
 
 A translated shader has one argument buffer per stage at `[[buffer(0)]]`. Member `arg_id` is at byte `8 * arg_id` and holds a GPU address or a resource ID. The encoder writes into it:
@@ -161,7 +170,29 @@ The bindings are counted as `bind.img`, `bind.gmem-map` and `bind.gmem-log` (not
 - Compressed, depth and stencil uploads share pooled staging buffers (see "Textures").
 - Textures that no frame used for 600 frames (`NXKIT_TEX_EVICT`) lose their Metal copy when the guest copy is current (`textures/evict.rs`). The store notes the frame of each Metal texture's last use every time `ensure` hands it out, and `end_frame` scans every 60 frames. A texture that was ever an attachment, an atomic target or a CPU-read texture, that a frame wrote, or that is memoryless, widened or scaled stays. The dropped texture goes through `retired`, and the command buffers of frames in flight keep their own references through `Keep`, so it lives until the GPU is done. The next use makes it again with `fresh` set, and the normal upload path (`needs_upload`) fills it from guest memory. The orphans of the front end (finalized textures that a pool slot still names) lose their Metal copy the same way when they go idle.
 
+- The guest range is one no-copy `MTLBuffer`. Its whole length counts in the Metal device total and in the Metal HUD, touched or not. `NXKIT_MEM_REPORT` shows the touched pages apart.
+- The pipeline archive is read into memory per file. With shards (one per batch) the host opens a shard on its first pipeline and keeps 32 open (`NXKIT_SHARD_LRU`); the single archive of an older build is read whole (4.8 GB for one title, measured).
+- `NXKIT_MEM_ALLOC=<MiB>` prints who makes a large heap allocation.
+
 Shader libraries stay loaded on purpose. `Programs` keeps each `StageProgram` with its `ShaderLibrary` for the life of the shader directory, and the library cannot be dropped once the pipelines of a program exist: a program makes a new pipeline for every combination of render targets, blend state, vertex layout and topology, so a later draw can need the library again. The code does not know when the last such pipeline was made. `pipelines/render.rs` builds the pipeline description with `&vs.lib` before it looks the cache up, the background compile jobs (`RenderJob`, `MeshJob`) hold clones of the libraries, and the mesh path clones them as well. To release a library, the description would have to be built only on a miss, and `StageProgram.lib` would become a handle that loads the metallib again on demand. That changes the hot path of every draw for an unmeasured gain: the library counter (`libs` in the report) counts objects, not bytes, and Metal does not report what a library costs. Measure `libs` and the `files` regions in a long run before doing it.
+
+## Native replacements (`native`)
+
+A game can run a neural network as a chain of compute dispatches. `native` replaces such a chain by a `Plan` of own kernels (`nxkit-native-plan`, built by `nxkit-ndve` or `nxkit-ndsr`). The module knows no network: a `Replacement` gives the program keys that find the run, the weight buffers that prove the network, and the plan. Each frame `Native::prepare` reads and hashes the weights through the storage bindings, looks the verdict up in the plan cache (4 plans, least recently used out, `NXKIT_NATIVE_CACHE`) and resolves the game's textures, so nothing fails later. The pass loop then skips the run's dispatches and `encode` writes one compute pass with the plan's steps and a barrier between dependent steps. Any mismatch leaves the game's own dispatches: the result is the original picture and never a wrong one, and the health report counts the reason (`ndve.*`, `ndsr.*`).
+
+- NDVE (`native_ndve`): the movie network, key and bindings of `nn::ndve`. NDSR (`native_ndsr`): the agl upscaler; each input and output size has its own plan.
+- `NXKIT_NDVE=0` and `NXKIT_NDSR=0` turn a network off. `NXKIT_<NAME>_COMPARE=1` runs the game's chain and the plan on a sampled frame and prints the largest difference per channel. `NXKIT_DIAG=ndve`, `ndsr` print the capture list once per run. `NXKIT_DIAG=nativeprof` times each step with GPU timestamps (the steps then run one after the other, so the sum is above the plan's time). `NXKIT_SKIP_PROGRAMS` and `NXKIT_SKIP_FILE` leave out steps by kernel name.
+- Status: measured kernel times are in the plans ([ndve-impl.md](plans/ndve-impl.md), [ndsr-native.md](plans/ndsr-native.md)). A plan holds tens of MB of scratch.
+
+## Neural Engine offload (`native/ane`)
+
+For NDVE the model can run on the Neural Engine instead (`NXKIT_NDVE_ANE=0` turns it off). Plan: [plans/ndve-ane.md](plans/ndve-ane.md). Files: `ane.rs` (session, load and refuse), `feed.rs` (the feeder thread), `conv.rs` (the CPU colour conversion), `slots.rs` (the result table), `offload.rs` (the dispatch side), `matching.rs`, `trace.rs` and `print.rs` (finding the picture), `ane_trace.rs` (`NXKIT_DIAG=ndvetrace`).
+
+- A background thread writes the Core ML package (`nxkit-ndve::ane`), compiles and loads it with `nxkit-coreml`, and refuses it unless every operation is on the Neural Engine. The package is cached by the weights and the macOS build.
+- The model runs at decode time. `nxkit-svc-video` reports each decoded `Frame` and each read of a picture into guest memory (`PictureSink`). The feeder converts the picture to the f16 input on the CPU and starts `predict_async`. The completion makes the slot `Ready`. A picture shown twice finds its slot again.
+- The dispatch finds its picture by the address of a read, by the chain of the walk's copy records (each carries the plain GPU address of both sides; up to four hops), or by a luma fingerprint of 256 scattered bytes. The game copies the decoder's planes, so the first way alone fails.
+- A ready result lets the frame run `ndve_ane_quant` and `ndve_ane_epilogue` in place of the plan, with the slot's outputs bound as textures. Without a result the plan runs. Counters: `ndve.ane` and `ndve.ane_fallback(warmup|late|unknown_picture|params|error|no_match)`.
+- Not measured here: the share of pictures that are early enough in a game. Read it from the counters.
 
 ## Diagnostics
 

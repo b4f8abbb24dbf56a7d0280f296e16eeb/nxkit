@@ -56,6 +56,24 @@ On a screen that adapts its refresh rate (ProMotion, or an external Adaptive-Syn
 
 `NXKIT_PACE_DIAG=1` prints the mean and the spread of the interval between shown frames every 120 presents, see `docs/diagnostics.md`.
 
+## Profiles of the frame step
+
+The load-driven step holds a frame for a number of vsyncs of 1/60 s from the cost of the frames. The key `pace_profile` of `game.json` (the hook `RuntimeHooks::pace_profile` of the title) picks how:
+
+| profile | rule |
+|---|---|
+| `hold` (default) | A late frame may stay longer than the cap's vsyncs (`fps_hold`). The thermal cap and the CPU watch work. A frame is late when it was shown longer than planned. |
+| `work` | A frame is late when its cost does not fit the hold, not when it was shown longer; the verdict of the screen is ignored too. A frame over three vsyncs past the hold is a hitch that is paid back and not counted. On a ProMotion screen the `hold` profile stepped one title from 30 to 20 fps at 0.71 vsyncs per frame (measured). |
+| `steady` | The step never leaves the cap's frame rate: no hold above the cap and no thermal cap (a movie still caps it). A frame that runs long shows late once and the game pays the time back. Lost time is dropped and not paid back: with no longer hold the debt never cleared and frames showed two vsyncs. One title fell to 30 fps for short hitches under `hold`, but under `steady` its presents fell behind and the game waited up to 400 ms for a window texture, so that title uses `work` (measured). |
+
+## The variable step only under VRR
+
+The variable step (`StepMode::Variable`: the time between the last two shown frames) runs only when the screen is adaptive and the link has a range (see "Variable refresh (VRR)"). On a fixed screen the game keeps the load-driven step at 60. One title ran at about 10 fps on a fixed 120 Hz screen with the variable step (measured). `NXKIT_VRR=0` keeps the fixed grid on an adaptive screen.
+
+## GPU time and the clock of the GPU (DVFS)
+
+The GPU time per frame in `NXKIT_PACE_DIAG` is not a constant of the work. Assumed, not measured here: an Apple GPU lowers its clock when its load is low, so a lighter frame or a capped frame rate can show a higher GPU time in ms for the same work. A speed-up of a kernel can thus raise the GPU ms of a paced frame. Compare GPU times at equal pacing (the same cap, the same screen mode), or use `NXKIT_DIAG=nativeprof`, which times the steps of a native plan inside one pass.
+
 ## Open points
 
 - Variable refresh has not run on a screen. The tests cover the choice, the range, the scheduler, the step and the interval statistics. Check on the ProMotion screen: the screen line says `VRR on`, the `present interval` line of `NXKIT_PACE_DIAG=1` follows the frame time (13 ms frames show at about 13 ms) and the panel rate follows. Whether macOS keeps the link at its maximum and the panel follows the presents, whether a parked drawable some milliseconds old presents without complaint, and how the game's vsync event behaves while the tick rate moves are open.
