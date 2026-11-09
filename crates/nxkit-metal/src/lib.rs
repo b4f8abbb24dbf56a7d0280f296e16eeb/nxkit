@@ -70,7 +70,10 @@ mod upscale;
 
 pub use address::AddressMap;
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
-pub use batch::{BATCH_SCRATCH_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing, SubmittedBatch};
+pub use batch::{
+    BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
+    SubmittedBatch,
+};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use compute_icb::{
