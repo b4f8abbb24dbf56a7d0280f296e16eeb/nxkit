@@ -1,0 +1,255 @@
+//! Render pass encoding.
+//!
+//! A render pass of the plan becomes one Metal render pass. The attachments, load actions, store actions and the
+//! memoryless choice come from the analysis. The draws go in one by one, or a replayed recording goes in as one
+//! indirect command buffer execution. A [`Tracker`] remembers the encoder state, so that a draw only sets what
+//! changed.
+//!
+//! The viewport and the scissor rectangle of NVN are in the size of the game. When the attachments are scaled (R19)
+//! the pass multiplies them by the scale of the frame. The NVN y origin of the viewport is passed on unchanged.
+//! Whether it needs a flip is unverified. The check is a frame with a viewport that does not cover the target.
+
+use std::sync::PoisonError;
+
+use nxkit_metal::{
+    ArgumentTable, ColorAttachment, CommandBuffer, Context, CullMode, Dependency, DepthAttachment,
+    DepthBias, DepthClip, DepthStencilDesc, FillMode, LoadAction as MLoad, MetalError,
+    RenderCommand, RenderPass, RenderPassDesc, Scissor, Scope, Scratch, Stages, StencilAttachment,
+    Storage, StoreAction as MStore, Viewport, Visibility, Winding,
+};
+use nxkit_nvn::frame::Cmd;
+use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
+use nxkit_nvn::resource::TexId;
+
+use crate::bindless::{ArgsMemo, ScratchSink};
+use crate::detail::{ClearDetail, DrawArgs, DynamicDetail, RecordingRun};
+use crate::draws::{Geom, PassCtx, Prep, Shared, prepare};
+use crate::indirect::Prepass;
+use crate::pipelines::Targets;
+use crate::stats::{EncodeStats, Skip};
+use crate::translate;
+
+mod diag;
+mod emit;
+mod setup;
+#[cfg(test)]
+mod tests;
+mod tracker;
+
+use diag::*;
+use emit::*;
+use setup::*;
+use tracker::*;
+
+/// The argument tables of one encoding task. A vertex and a fragment stage need their own table. The mesh stage of a
+/// mesh draw shares the vertex table and the object stage (a task shader) has the third.
+pub(crate) struct Tables {
+    pub(crate) vertex: ArgumentTable,
+    pub(crate) fragment: ArgumentTable,
+    pub(crate) object: ArgumentTable,
+}
+
+impl Tables {
+    /// Makes the tables. A translated shader binds at most 31 buffers and no textures, since textures are bindless.
+    pub(crate) fn new(ctx: &Context) -> Result<Self, MetalError> {
+        Ok(Self {
+            vertex: ArgumentTable::new(ctx, 31, 0)?,
+            fragment: ArgumentTable::new(ctx, 31, 0)?,
+            object: ArgumentTable::new(ctx, 31, 0)?,
+        })
+    }
+}
+
+pub(super) fn draw_range(sh: &Shared<'_>, pass: &Pass) -> std::ops::Range<u32> {
+    let first = sh
+        .ordinals
+        .get(pass.cmds.start as usize)
+        .map_or(0, |o| o.draw);
+    let n = pass
+        .cmds
+        .clone()
+        .filter(|i| matches!(sh.frame.cmds.get(*i as usize), Some(Cmd::Draw { .. })))
+        .count();
+    first..first + n as u32
+}
+
+/// Encodes one render pass into `cb`.
+pub(crate) fn render_pass(
+    sh: &Shared<'_>,
+    cb: &mut CommandBuffer,
+    tables: &Tables,
+    scratch: &Scratch,
+    index: usize,
+    pass: &Pass,
+    stats: &mut EncodeStats,
+) {
+    let range = draw_range(sh, pass);
+    if crate::diag::tex_filtered() {
+        let focus = sh.plan.attachments_of(pass).iter().any(|a| {
+            sh.textures.get(&a.tex).is_some_and(|r| {
+                crate::diag::tex_match(
+                    r.desc.format,
+                    r.desc.width,
+                    r.desc.height,
+                    r.desc.array_layers,
+                )
+            })
+        });
+        FOCUS_PASS.with(|c| c.set(focus));
+    }
+    let lost = |stats: &mut EncodeStats, why: Skip| {
+        for n in range.clone() {
+            stats.skip_draw(sh.detail.draws.get(n as usize).map(|d| &d.args), why);
+        }
+    };
+    if crate::diag("barr") && crate::diag::sampled() {
+        let known: std::collections::HashSet<TexId> = sh
+            .plan
+            .reads_of(pass)
+            .iter()
+            .copied()
+            .chain(sh.plan.attachments_of(pass).iter().map(|a| a.tex))
+            .collect();
+        let mut missing: std::collections::BTreeSet<TexId> = std::collections::BTreeSet::new();
+        let mut bound = 0usize;
+        for n in range.clone() {
+            if let Some(d) = sh.detail.draws.get(n as usize) {
+                for t in d.textures.iter().filter(|t| t.handle != 0) {
+                    bound += 1;
+                    if let Some(id) = crate::barr::texture_of(t.handle)
+                        && !known.contains(&id)
+                    {
+                        missing.insert(id);
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "DIAG barr pass {index} cmds {:?} draws {} bound {bound} planner_reads {} missing {missing:?}",
+            pass.cmds,
+            range.len(),
+            sh.plan.reads_of(pass).len()
+        );
+    }
+    let s = setup(sh, pass);
+    if sh
+        .plan
+        .attachments_of(pass)
+        .iter()
+        .any(|a| crate::watched(a.tex))
+    {
+        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 {
+            let atts: Vec<_> = sh
+                .plan
+                .attachments_of(pass)
+                .iter()
+                .map(|a| {
+                    (
+                        a.tex,
+                        a.slot,
+                        sh.textures
+                            .get(&a.tex)
+                            .map(|r| (r.desc.width, r.desc.height, r.desc.format)),
+                    )
+                })
+                .collect();
+            eprintln!(
+                "DIAG watch pass {index} cmds {:?} draws {} setup {:?} atts {atts:?}",
+                pass.cmds,
+                range.len(),
+                s.as_ref().err()
+            );
+        }
+    }
+    let s = match s {
+        Ok(s) => s,
+        Err(why) => return lost(stats, why),
+    };
+    // The GPU driven draws of the pass get their copied arguments before the pass starts.
+    let pre = crate::indirect::prepass(sh, cb, &tables.vertex, scratch, range.clone(), stats);
+    let Ok(mut rp) = cb.begin_render_pass_split(&s.desc, &tables.vertex, &tables.fragment) else {
+        return lost(stats, Skip::Encode);
+    };
+    stats.render_passes += 1;
+    if crate::diag::gpu_labels() {
+        let first = s
+            .desc
+            .colors
+            .iter()
+            .flatten()
+            .map(|c| c.texture.desc())
+            .next()
+            .or_else(|| s.desc.depth.as_ref().map(|d| d.texture.desc()));
+        let what = first.map_or_else(String::new, |d| {
+            format!("{}x{} {:?}", d.width, d.height, d.format)
+        });
+        rp.set_label(&format!("r{index} {what} d{}", range.len()));
+    }
+    if let Some(dep) = sh.barriers.before.get(index).copied().flatten()
+        && rp.encode(&RenderCommand::Depend(dep)).is_err()
+    {
+        stats.skipped[Skip::Encode as usize] += 1;
+    }
+    // The barrier planner follows textures only, and it holds the vertex and fragment stages. An indirect draw reads
+    // arguments that a dispatch or a copy wrote (culling), the pre-pass wrote the copies, and a task or mesh shader
+    // reads storage buffers and textures in stages that the planner does not hold. Such a pass waits for them.
+    if pre.gpu_driven {
+        let dep = Dependency {
+            scope: Scope::FromEarlierPasses,
+            after: Stages::DISPATCH | Stages::BLIT | Stages::FRAGMENT,
+            before: Stages::VERTEX | Stages::OBJECT | Stages::MESH,
+            visibility: Visibility::Device,
+        };
+        match rp.encode(&RenderCommand::Depend(dep)) {
+            Ok(()) => stats.barriers_emitted += 1,
+            Err(_) => stats.skipped[Skip::Encode as usize] += 1,
+        }
+    }
+    let mut tr = Tracker::new(s.pc.size);
+    let mut memo = ArgsMemo::default();
+    let mut n = range.start;
+    while n < range.end {
+        if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end)
+            && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
+        {
+            n += run.draws;
+            continue;
+        }
+        draw(
+            sh,
+            &s.pc,
+            &mut rp,
+            &mut tr,
+            scratch,
+            &mut memo,
+            &pre,
+            &tables.object,
+            n,
+            stats,
+        );
+        n += 1;
+    }
+    rp.end();
+    if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
+        for a in sh.plan.attachments_of(pass) {
+            if matches!(a.slot, Slot::Color(_))
+                && a.store == StoreAction::Store
+                && let Slot::Color(slot) = a.slot
+            {
+                let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else {
+                    continue;
+                };
+                crate::lum::capture(
+                    sh.ctx,
+                    cb,
+                    &tables.vertex,
+                    pass.cmds.start,
+                    a.tex,
+                    &color.texture,
+                    color.depth_plane,
+                );
+            }
+        }
+    }
+}
