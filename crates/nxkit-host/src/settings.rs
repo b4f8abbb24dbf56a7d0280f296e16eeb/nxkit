@@ -26,6 +26,7 @@ const TYPED: &[&str] = &[
     "present_snap",
     "pso_mtl4",
     "enc_thread",
+    "overlap",
     "screen_aspect",
     "pad_layout",
     "op_mode",
@@ -82,6 +83,8 @@ pub struct Settings {
     pub pso_mtl4: bool,
     /// Whether the encoder runs on its own thread.
     pub enc_thread: bool,
+    /// Whether the CPU runs one frame ahead of the GPU. Absent in an older `game.json`: off.
+    pub overlap: bool,
     /// Whether the screen keeps the aspect ratio of the game.
     pub screen_aspect: bool,
     /// The pad layout of the game, for example `nintendo`.
@@ -223,6 +226,7 @@ impl Settings {
             present_snap: flag(v, "present_snap")?,
             pso_mtl4: flag(v, "pso_mtl4")?,
             enc_thread: flag(v, "enc_thread")?,
+            overlap: v.get("overlap").and_then(Value::as_bool).unwrap_or(false),
             screen_aspect: flag(v, "screen_aspect")?,
             pad_layout: text(v, "pad_layout", "settings")?,
             op_mode: text(v, "op_mode", "settings")?,

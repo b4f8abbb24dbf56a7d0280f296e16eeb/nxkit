@@ -110,6 +110,9 @@ impl GpuBackend {
         let gpu = Gpu::with_config(ctx, guest.clone(), settings.config())?;
         let walker = Walker::new(settings.shader_dir.clone(), guest.address_map());
         let invalidations = walker.invalidations();
+        if settings.overlap {
+            crate::overlap::set_on();
+        }
         let threaded =
             settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {

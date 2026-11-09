@@ -68,6 +68,9 @@ const SETTINGS: Fact<Settings> = Fact::new(
         draw_barriers_game: true,
         tex_flush_upload: true,
         tex_dirty_upload: true,
+        // Measured on nxkit: without it the main thread waited about three quarters of a frame for the GPU in
+        // nvnSyncWait and the opening movie fell to 18-30 fps; with it the opening holds 60.
+        overlap: true,
         ..Settings::DEFAULT
     },
     GAME_TSV,

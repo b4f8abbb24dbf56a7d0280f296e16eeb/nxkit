@@ -61,6 +61,9 @@ pub struct Settings {
     pub pso_mtl4: bool,
     /// `enc_thread`: Metal encoding on its own thread.
     pub enc_thread: bool,
+    /// `overlap`: the CPU runs one frame ahead of the GPU; `nvnSyncWait` for the newest frame waits for the one
+    /// before it (`docs/plans/fence-overlap.md`).
+    pub overlap: bool,
     /// `screen_aspect`: stubs that follow a screen taller than 16:9.
     pub screen_aspect: bool,
     /// `shared_font`: `bfttf` (8-byte header and TTF) or `ttf`. `None`: the host decides by the SDK version.
@@ -121,6 +124,7 @@ impl Settings {
         present_snap: false,
         pso_mtl4: false,
         enc_thread: false,
+        overlap: false,
         screen_aspect: false,
         shared_font: None,
         pad_layout: "simple",

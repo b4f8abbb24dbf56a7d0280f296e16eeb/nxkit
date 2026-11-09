@@ -21,6 +21,8 @@ pub struct GpuSettings {
     /// Encode the frames on a thread of their own (`game.json` key `enc_thread`). The environment variable
     /// `NXKIT_ENC_THREAD=1` turns it on too.
     pub enc_thread: bool,
+    /// The CPU runs one frame ahead of the GPU (`game.json` key `overlap`). `NXKIT_OVERLAP=1` turns it on too.
+    pub overlap: bool,
     /// The order inside a GOB of the guest textures: [`GobOrder::Switch2`] for a game of the Switch 2.
     pub gob_order: GobOrder,
 }
@@ -34,6 +36,7 @@ impl Default for GpuSettings {
             threads: 0,
             scale: 2.0,
             enc_thread: false,
+            overlap: false,
             gob_order: GobOrder::Tegra,
         }
     }

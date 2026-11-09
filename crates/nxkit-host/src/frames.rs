@@ -56,6 +56,7 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1.0),
         enc_thread: settings.enc_thread,
+        overlap: settings.overlap,
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
             Platform::Ounce => GobOrder::Switch2,
