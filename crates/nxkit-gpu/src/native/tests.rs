@@ -108,7 +108,7 @@ fn independent_steps_share_a_wave() {
         step(vec![bind(0, Source::Buffer(0), true)], vec![]),
         step(
             vec![bind(0, Source::Buffer(1), true)],
-            vec![bind(0, Source::Game(GameResource::LumaPlane), false)],
+            vec![bind(0, Source::Game(GameResource::Texture(0)), false)],
         ),
     ];
     assert_eq!(barrier_flags(&steps), vec![false, false]);
@@ -146,17 +146,17 @@ fn used_resources_lists_each_game_resource_once() {
         buffers: vec![],
         steps: vec![
             step(
-                vec![g(GameResource::ConversionPush)],
-                vec![g(GameResource::LumaPlane)],
+                vec![g(GameResource::Push(0))],
+                vec![g(GameResource::Texture(0))],
             ),
-            step(vec![], vec![g(GameResource::LumaPlane)]),
+            step(vec![], vec![g(GameResource::Texture(0))]),
         ],
     };
     assert_eq!(
         used_resources(&plan),
-        vec![GameResource::ConversionPush, GameResource::LumaPlane]
+        vec![GameResource::Push(0), GameResource::Texture(0)]
     );
-    assert!(uses_resource(&plan, GameResource::LumaPlane));
+    assert!(uses_resource(&plan, GameResource::Texture(0)));
     assert!(!uses_resource(&plan, GameResource::Output));
 }
 
@@ -232,7 +232,7 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
         anchor: 2,
         textures: vec![
             (GameResource::Output, tex.clone(), desc, TexId(7)),
-            (GameResource::LumaPlane, tex, desc, TexId(8)),
+            (GameResource::Texture(0), tex, desc, TexId(8)),
         ],
         pushes: vec![],
         reads_later: vec![],
