@@ -97,6 +97,10 @@ impl Analyser {
             before_open: (Boundary::Start, None, None),
         };
         for (i, cmd) in frame.cmds.iter().enumerate() {
+            // A command under a false render condition does nothing: a clear does not clear, a draw touches nothing.
+            if frame.skips(i as u32) {
+                continue;
+            }
             s.step(i as u32, *cmd)?;
         }
         s.close_render(frame.cmds.len() as u32);

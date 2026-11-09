@@ -105,9 +105,11 @@ pub enum ExtCode {
     TransformFeedback,
     /// `SetViewportSwizzles`, one viewport. The argument is the index. Words: the swizzles of x, y, z and w.
     ViewportSwizzle,
+    /// `WaitEvent`. Words: event address (2), wait mode, value.
+    WaitEvent,
 }
 
-const CODES: [ExtCode; 36] = [
+const CODES: [ExtCode; 37] = [
     ExtCode::Setting,
     ExtCode::Program,
     ExtCode::VertexBuffer,
@@ -144,6 +146,7 @@ const CODES: [ExtCode; 36] = [
     ExtCode::TransformFeedbackBuffer,
     ExtCode::TransformFeedback,
     ExtCode::ViewportSwizzle,
+    ExtCode::WaitEvent,
 ];
 
 impl ExtCode {

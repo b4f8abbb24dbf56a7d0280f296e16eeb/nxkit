@@ -5,8 +5,9 @@
 //! patches the draw state, and a scissor tells whether it covers the whole target.
 
 use super::{Builder, Ctx};
-use crate::ext::{Ext, ExtCode, StateKind};
+use crate::ext::{Ext, ExtCode, Setting, StateKind};
 use crate::frame::{Cmd, MAX_COLOR, TargetView};
+use crate::marks::{Mark, MarkOp};
 use crate::mem::GuestMem;
 use crate::record::Record;
 
@@ -55,16 +56,68 @@ impl Builder {
                 let (src, dst) = (x.word64(0), x.word64(2));
                 self.apply(cx, Record::Downsample { src, dst });
             }
-            ExtCode::FenceSync | ExtCode::SignalEvent | ExtCode::WaitSync => {
+            ExtCode::FenceSync => {
+                self.mark(MarkOp::FenceSync { sync: x.word64(0) });
                 self.apply(cx, Record::Sync);
             }
-            ExtCode::ReportValue | ExtCode::ResetCounter | ExtCode::ReportCounter => {
+            ExtCode::SignalEvent => {
+                self.mark(MarkOp::SignalEvent {
+                    event: x.word64(0),
+                    mode: x.word(2),
+                    value: x.word(5),
+                });
+                self.apply(cx, Record::Sync);
+            }
+            // A wait adds no command: it orders queues (the host holds the submit), and a command would cut the pass.
+            ExtCode::WaitSync => {
                 self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::WaitSync { sync: x.word64(0) });
+            }
+            ExtCode::WaitEvent => {
+                self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::WaitEvent {
+                    event: x.word64(0),
+                    mode: x.word(2),
+                    value: x.word(3),
+                });
+            }
+            ExtCode::ReportValue => {
+                self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::ReportValue {
+                    addr: x.word64(1),
+                    value: x.word(0),
+                });
+            }
+            ExtCode::ReportCounter => {
+                self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::ReportCounter {
+                    addr: x.word64(1),
+                    kind: x.word(0),
+                });
+            }
+            ExtCode::ResetCounter => self.blockers |= super::BLOCK_SYNC,
+            // A recording under a render condition is never an indirect command buffer: some of its draws may not run.
+            ExtCode::Setting if x.arg == Setting::RenderEnable as u16 => {
+                self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::RenderEnable(x.word(0) != 0));
+            }
+            ExtCode::Setting if x.arg == Setting::RenderEnableConditional as u16 => {
+                self.blockers |= super::BLOCK_SYNC;
+                self.mark(MarkOp::RenderIf {
+                    mode: x.word(0),
+                    addr: x.word64(1),
+                });
             }
             ExtCode::State => self.patch_state(x),
             ExtCode::Scissor if x.arg == FIRST_SCISSOR => self.scissor(cx, x),
             _ => {}
         }
+    }
+
+    /// Puts a mark before the next command.
+    fn mark(&mut self, op: MarkOp) {
+        let at = self.stream.cmds.len() as u32;
+        self.stream.marks.push(Mark { at, op });
     }
 
     /// A clear that does not cover the whole target is a partial clear, whatever the scissor says.

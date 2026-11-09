@@ -18,9 +18,11 @@ use crate::descriptors::{Descriptors, TextureSlot};
 use crate::error::{NvnError, Result};
 use crate::frame::{Cmd, Frame};
 use crate::layout::TextureDesc;
+use crate::marks::MarkOp;
 use crate::mem::GuestMem;
 use crate::passes::PassPlan;
 use crate::record::Record;
+use crate::rendercond::RenderConds;
 use crate::resource::{ResourceTable, TexId};
 use crate::space::{GpuAddr, GpuSpace};
 use crate::tic::{TextureView, Tsc};
@@ -70,6 +72,8 @@ pub struct FrontEnd<S: GpuSpace, M: GuestMem> {
     buffers: Vec<CommandBuffer>,
     callbacks: HashMap<usize, Callback>,
     queues: HashMap<usize, State>,
+    /// The render condition of each queue and the reports it reads.
+    render: RenderConds,
     cache: RecCache,
     frame: Frame,
     plan: PassPlan,
@@ -92,6 +96,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             buffers: Vec::new(),
             callbacks: HashMap::new(),
             queues: HashMap::new(),
+            render: RenderConds::new(),
             cache: RecCache::new(),
             frame: Frame::new(),
             plan: PassPlan::new(),
@@ -382,7 +387,13 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         }
         let clock = crate::prof::Clock::start();
         inherited.apply(&s.delta);
+        let base = self.frame.cmds.len() as u32;
         self.frame.append(&s.stream);
+        let (space, mem) = (&self.space, &self.mem);
+        self.render
+            .apply(queue, base, &s.stream.marks, &mut self.frame, |addr| {
+                crate::rendercond::read_gpu_u64(space, mem, addr)
+            });
         if crate::prof::on() {
             let n = s.stream.cmds.len() as u64;
             let p = &mut self.cache.prof;
@@ -397,6 +408,46 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         Ok(())
     }
 
+    /// Adds the waits and signals between queues of `handles`, submitted in order on `queue`, to `out`, without
+    /// submitting them: the host decides with them whether the submit waits for another queue. The summaries go into
+    /// the cache, so the submit that follows finds them.
+    pub fn queue_marks(
+        &mut self,
+        queue: usize,
+        handles: &[CommandHandle],
+        out: &mut Vec<MarkOp>,
+    ) -> Result<()> {
+        let cx = Ctx {
+            mem: &self.mem,
+            table: &self.table,
+            desc: &self.descriptors,
+        };
+        let mut st = self.queues.get(&queue).cloned().unwrap_or_default();
+        for h in handles {
+            let i = summary(&mut self.cache, &cx, h.0, &st, 0)?;
+            let s = self
+                .cache
+                .entry(h.0, i)
+                .ok_or(NvnError::BadRecord("summary is missing"))?;
+            out.extend(
+                s.stream
+                    .marks
+                    .iter()
+                    .map(|m| m.op)
+                    .filter(MarkOp::orders_queues),
+            );
+            if handles.len() > 1 {
+                st.apply(&s.delta);
+            }
+        }
+        Ok(())
+    }
+
+    /// The counters and first evaluations of the render conditions.
+    pub fn render_conds(&mut self) -> &mut RenderConds {
+        &mut self.render
+    }
+
     /// The state that the last submit of a queue left.
     pub fn queue_state(&self, queue: usize) -> Option<&State> {
         self.queues.get(&queue)
@@ -405,6 +456,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     /// Forgets the state of a queue, for `nvnQueueFinalize`. The queue starts again with the default state.
     pub fn drop_queue(&mut self, queue: usize) {
         self.queues.remove(&queue);
+        self.render.drop_queue(queue);
     }
 
     /// The game presents a texture with `nvnQueuePresentTexture`. This puts the present into the frame,
@@ -426,6 +478,8 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         }
         self.analyser
             .analyse(&self.frame, &self.table, &mut self.plan)?;
+        crate::rendercond::frame_diag(&mut self.render, &self.frame);
+        self.render.flushed();
         Ok(&self.plan)
     }
 

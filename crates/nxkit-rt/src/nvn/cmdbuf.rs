@@ -31,6 +31,12 @@ use std::sync::OnceLock;
 
 pub(crate) use seam::{Seam, set_seam};
 
+/// Whether a recording waited for a sync or an event, or signalled an event: the submits then go through the gate of
+/// the queues (`ctx::gate`).
+pub(crate) fn waits_recorded() -> bool {
+    xfer::WAITS_RECORDED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// What a title needs the command buffer group to do differently. The host fills it from the needs of the title
 /// (`game.json`). The default is the strict behaviour of the SDK.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

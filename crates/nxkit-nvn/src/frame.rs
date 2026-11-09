@@ -5,6 +5,9 @@
 //! A [`CmdStream`] is the record of one NVN command buffer. A queue submit appends it to the frame.
 //! All vectors keep their capacity from frame to frame, so recording does not allocate once the game is warm.
 
+use std::ops::Range;
+
+use crate::marks::Mark;
 use crate::resource::TexId;
 
 /// The number of colour attachments that NVN has.
@@ -156,6 +159,8 @@ pub struct CmdStream {
     pub cmds: Vec<Cmd>,
     /// The shared texture lists.
     pub lists: Vec<TexId>,
+    /// The render conditions, reports, waits and signals between the commands, in order (see [`crate::marks`]).
+    pub marks: Vec<Mark>,
     /// The indices of the commands that hold a [`Span`], valid when `sealed` equals `cmds.len()` ([`CmdStream::seal`]).
     span_at: Vec<u32>,
     /// The number of commands that `span_at` covers.
@@ -172,6 +177,7 @@ impl CmdStream {
     pub fn clear(&mut self) {
         self.cmds.clear();
         self.lists.clear();
+        self.marks.clear();
         self.span_at.clear();
         self.sealed = 0;
     }
@@ -192,6 +198,11 @@ impl CmdStream {
 
     /// Appends another stream. Its spans move behind the lists of this stream.
     pub fn splice(&mut self, other: &CmdStream) {
+        let base = self.cmds.len() as u32;
+        self.marks.extend(other.marks.iter().map(|m| Mark {
+            at: m.at + base,
+            op: m.op,
+        }));
         append(&mut self.cmds, &mut self.lists, other);
     }
 
@@ -213,6 +224,25 @@ pub struct Frame {
     pub cmds: Vec<Cmd>,
     /// The shared texture lists.
     pub lists: Vec<TexId>,
+    /// The ranges of commands that run while a render condition is false, in order and apart. Only the commands that
+    /// [`conditional`] names are left out; the others in a range run.
+    pub disabled: Vec<Range<u32>>,
+}
+
+/// True for a command that a false render condition leaves out: draws, clears, and unless `NXKIT_RENDERCOND=3d`,
+/// dispatches, copies and downsamples.
+pub fn conditional(c: &Cmd) -> bool {
+    match c {
+        Cmd::Draw { .. } | Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => true,
+        Cmd::Dispatch { .. } | Cmd::Copy { .. } | Cmd::Downsample { .. } => !only_3d(),
+        _ => false,
+    }
+}
+
+/// `NXKIT_RENDERCOND=3d`: a render condition leaves out draws and clears only.
+fn only_3d() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NXKIT_RENDERCOND").is_ok_and(|v| v == "3d"))
 }
 
 impl Frame {
@@ -225,6 +255,29 @@ impl Frame {
     pub fn clear(&mut self) {
         self.cmds.clear();
         self.lists.clear();
+        self.disabled.clear();
+    }
+
+    /// Marks the commands of `r` as run under a false render condition. The ranges come in command order; one that
+    /// touches the last range joins it.
+    pub fn disable(&mut self, r: Range<u32>) {
+        if r.is_empty() {
+            return;
+        }
+        match self.disabled.last_mut() {
+            Some(last) if last.end >= r.start => last.end = last.end.max(r.end),
+            _ => self.disabled.push(r),
+        }
+    }
+
+    /// True when command `i` is left out: it is in a disabled range and [`conditional`].
+    pub fn skips(&self, i: u32) -> bool {
+        if self.disabled.is_empty() {
+            return false;
+        }
+        let at = self.disabled.partition_point(|r| r.end <= i);
+        self.disabled.get(at).is_some_and(|r| r.start <= i)
+            && self.cmds.get(i as usize).is_some_and(conditional)
     }
 
     /// Appends a command buffer. Its spans move to the shared list. The stream stays valid, so the game can submit it again.

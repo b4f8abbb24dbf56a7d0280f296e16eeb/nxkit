@@ -85,9 +85,15 @@ fn signalled(mode: i32, old: u32, value: u32) -> u32 {
 }
 
 fn signal(e: u64, mode: i32, value: u32) -> AbiResult<()> {
-    let word = Obj(Obj(e).u64(OFF_VAL)?);
+    let addr = Obj(e).u64(OFF_VAL)?;
+    let word = Obj(addr);
     let old = word.u32(0)?;
-    word.set_u32(0, signalled(mode, old, value))
+    word.set_u32(0, signalled(mode, old, value))?;
+    // A queue that waits for this counter may run now.
+    match super::ctx::installed() {
+        Some(g) => g.event_signalled(addr),
+        None => Ok(()),
+    }
 }
 
 extern "C" fn event_signal(e: u64, mode: i32, value: u32) {

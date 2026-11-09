@@ -363,7 +363,36 @@ extern "C" fn fence_sync(c: u64, sync: u64, cond: i32, flags: i32) {
     );
 }
 
+/// Set once a recording waited for a sync or an event: the submits are then checked for waits on other queues
+/// (`crate::nvn::gate`).
+pub(crate) static WAITS_RECORDED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn wait_sync(c: u64, sync: u64) {
+    WAITS_RECORDED.store(true, std::sync::atomic::Ordering::Relaxed);
+    emit(
+        "nvnCommandBufferWaitSync",
+        c,
+        ExtCode::WaitSync,
+        0,
+        &[lo(sync), hi(sync)],
+    );
+}
+
+extern "C" fn wait_event(c: u64, event: u64, mode: i32, value: u32) {
+    WAITS_RECORDED.store(true, std::sync::atomic::Ordering::Relaxed);
+    emit(
+        "nvnCommandBufferWaitEvent",
+        c,
+        ExtCode::WaitEvent,
+        0,
+        &[lo(event), hi(event), mode as u32, value],
+    );
+}
+
 extern "C" fn signal_event(c: u64, event: u64, mode: i32, location: i32, flags: i32, value: u32) {
+    // The gate follows the signals from the first one on, so a later wait sees the counter they left.
+    WAITS_RECORDED.store(true, std::sync::atomic::Ordering::Relaxed);
     emit(
         "nvnCommandBufferSignalEvent",
         c,
@@ -512,6 +541,8 @@ pub(super) fn procs() -> Vec<(&'static str, usize)> {
         "nvnCommandBufferBarrier" => barrier as extern "C" fn(u64, i32),
         "nvnCommandBufferFenceSync" => fence_sync as extern "C" fn(u64, u64, i32, i32),
         "nvnCommandBufferSignalEvent" => signal_event as extern "C" fn(u64, u64, i32, i32, i32, u32),
+        "nvnCommandBufferWaitSync" => wait_sync as extern "C" fn(u64, u64),
+        "nvnCommandBufferWaitEvent" => wait_event as extern "C" fn(u64, u64, i32, u32),
         "nvnCommandBufferReportValue" => report_value as extern "C" fn(u64, u32, u64),
         "nvnCommandBufferReportCounter" => report_counter as extern "C" fn(u64, i32, u64),
         "nvnCommandBufferResetCounter" => reset_counter as extern "C" fn(u64, i32),
