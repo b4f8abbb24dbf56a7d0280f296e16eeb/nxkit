@@ -140,7 +140,9 @@ extern "C" fn queue_initialize(q: u64, b: u64) -> u32 {
 extern "C" fn queue_finalize(q: u64) {
     guard("nvnQueueFinalize", || {
         Obj(q).set_u32(0, 0)?;
-        gpu("nvnQueueFinalize").lock().drop_queue(q as usize);
+        let g = gpu("nvnQueueFinalize");
+        g.release_held()?;
+        g.lock().drop_queue(q as usize);
         Ok(())
     });
 }
@@ -292,15 +294,15 @@ extern "C" fn queue_acquire_texture(_q: u64, w: u64, idx: u64) -> u32 {
     })
 }
 
-extern "C" fn queue_fence_sync(_q: u64, s: u64, _condition: i32, _flags: i32) {
+extern "C" fn queue_fence_sync(q: u64, s: u64, _condition: i32, _flags: i32) {
     guard("nvnQueueFenceSync", || {
-        let fence = gpu("nvnQueueFenceSync").fence_now();
-        sync::set_queue_fence(Obj(s), fence)
+        gpu("nvnQueueFenceSync").queue_fence(q, s)
     });
 }
 
-/// `nvnQueueWaitSync`: the host replays in submission order, so the GPU never waits for an earlier fence.
-extern "C" fn queue_wait_sync(_q: u64, s: u64) -> u32 {
+/// `nvnQueueWaitSync`: the host replays in submission order, so a fence that was submitted before is in the frame
+/// before the wait. Only a fence that a held queue has not submitted yet makes this queue wait (see `ctx::gate`).
+extern "C" fn queue_wait_sync(q: u64, s: u64) -> u32 {
     guard("nvnQueueWaitSync", || {
         if !sync::is_fenced(Obj(s))? {
             log_once(
@@ -308,6 +310,7 @@ extern "C" fn queue_wait_sync(_q: u64, s: u64) -> u32 {
                 "QueueWaitSync: the sync object has no fence yet, the host does not wait",
             );
         }
+        gpu("nvnQueueWaitSync").queue_wait(q, s)?;
         Ok(1)
     })
 }

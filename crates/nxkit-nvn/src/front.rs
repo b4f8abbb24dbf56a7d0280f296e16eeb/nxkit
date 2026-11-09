@@ -18,6 +18,7 @@ use crate::descriptors::{Descriptors, TextureSlot};
 use crate::error::{NvnError, Result};
 use crate::frame::{Cmd, Frame};
 use crate::layout::TextureDesc;
+use crate::marks::MarkOp;
 use crate::mem::GuestMem;
 use crate::passes::PassPlan;
 use crate::record::Record;
@@ -402,6 +403,41 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             if p.submits >= crate::prof::REPORT_EVERY {
                 eprintln!("nxkit-nvn: {}", p.describe());
                 *p = Default::default();
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds the waits and signals between queues of `handles`, submitted in order on `queue`, to `out`, without
+    /// submitting them: the host decides with them whether the submit waits for another queue. The summaries go into
+    /// the cache, so the submit that follows finds them.
+    pub fn queue_marks(
+        &mut self,
+        queue: usize,
+        handles: &[CommandHandle],
+        out: &mut Vec<MarkOp>,
+    ) -> Result<()> {
+        let cx = Ctx {
+            mem: &self.mem,
+            table: &self.table,
+            desc: &self.descriptors,
+        };
+        let mut st = self.queues.get(&queue).cloned().unwrap_or_default();
+        for h in handles {
+            let i = summary(&mut self.cache, &cx, h.0, &st, 0)?;
+            let s = self
+                .cache
+                .entry(h.0, i)
+                .ok_or(NvnError::BadRecord("summary is missing"))?;
+            out.extend(
+                s.stream
+                    .marks
+                    .iter()
+                    .map(|m| m.op)
+                    .filter(MarkOp::orders_queues),
+            );
+            if handles.len() > 1 {
+                st.apply(&s.delta);
             }
         }
         Ok(())

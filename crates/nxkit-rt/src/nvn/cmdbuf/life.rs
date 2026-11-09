@@ -204,7 +204,6 @@ extern "C" fn hint(_c: u64) {}
 const HINTS: &[&str] = &[
     "nvnCommandBufferSetPatchSize",
     "nvnCommandBufferSetDepthBounds",
-    "nvnCommandBufferWaitSync",
     "nvnCommandBufferSetShaderScratchMemory",
     "nvnCommandBufferPushDebugGroupDynamic",
     "nvnCommandBufferPopDebugGroup",
@@ -214,7 +213,6 @@ const HINTS: &[&str] = &[
     "nvnCommandBufferPushDebugGroupStatic",
     "nvnCommandBufferPopDebugGroupId",
     "nvnCommandBufferInsertDebugMarkerStatic",
-    "nvnCommandBufferWaitEvent",
     "nvnCommandBufferSetStencilCullCriteria",
     "nvnCommandBufferSaveZCullData",
     "nvnCommandBufferRestoreZCullData",

@@ -22,6 +22,11 @@
 //! when the fence is the one of the open frame, so a CPU wait never waits for a flush that nobody will make. A wait with
 //! a timeout of zero flushes too, so a game that polls does not wait for ever.
 //!
+//! Queues. Every queue's submits go into the one open frame in the order of the calls. A submit that waits for an event
+//! or a sync that another queue has not signalled yet is held, with what its queue does after it, until the signal is
+//! in the frame (`gate` decides, `order` runs). A flush runs what is still held first. A game that never records a
+//! wait or an event signal skips the gate.
+//!
 //! A backend may encode a flushed frame on a thread of its own. [`Backend::wait_fence`] and [`Backend::wait_idle`] then
 //! wait for that thread, and [`Backend::settle`] brings the texture table up to date before the front end reads the
 //! residency of a texture (`nvnTextureReadTexels`). [`Backend::flush_frame`] settles the frame before it.
@@ -42,6 +47,9 @@ use nxkit_nvn::space::{GpuSpace, LinearSpace};
 
 use super::abi::{AbiResult, Registry, fatal, log_once};
 use super::program::ProgramRecord;
+
+mod gate;
+mod order;
 
 /// Guest memory for the front end: the range that the host named with `nxkit_abi::guest::set_range`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -149,6 +157,11 @@ pub(crate) fn gpu(name: &str) -> &'static Gpu {
         .unwrap_or_else(|| fatal(name, "no GPU backend is installed"))
 }
 
+/// The installed context, None before [`install`].
+pub(crate) fn installed() -> Option<&'static Gpu> {
+    GPU.get()
+}
+
 /// The settings of the installed context. None before [`install`]. The SDK take-overs of `gfx` read the API version
 /// with it and must not end the game when no context exists.
 pub(crate) fn settings_if_installed() -> Option<&'static Settings> {
@@ -171,6 +184,8 @@ pub(crate) struct Gpu {
     backend: Arc<dyn Backend>,
     settings: Settings,
     flushed: AtomicU64,
+    /// The work that waits for a signal of another queue (`gate`). Taken after the front lock, never before it.
+    gate: Mutex<gate::Gate>,
     /// The ranges of `nvnMemoryPoolFlushMappedRange` that [`Gpu::lock`] has not yet told the front end.
     pending_writes: Mutex<Vec<(u64, u64)>>,
     /// True when `pending_writes` may hold a range. Keeps the common case of [`Gpu::lock`] to one atomic load.
@@ -202,6 +217,7 @@ impl Gpu {
             backend,
             settings,
             flushed: AtomicU64::new(0),
+            gate: Mutex::new(gate::Gate::new(order::ordering_on())),
             pending_writes: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),
             textures: Registry::new(),
@@ -302,6 +318,18 @@ impl Gpu {
     /// Ends the open frame and hands it to the backend, with the lock held by the caller. An empty frame ends nothing.
     /// The result is the fence of the work that was flushed, which is the last fence when the frame was empty.
     pub(crate) fn flush_locked(&self, front: &mut Front, reason: FlushReason) -> AbiResult<Fence> {
+        let held = {
+            let mut gate = self.gate();
+            let held = self.release_all(front, &mut gate);
+            self.gate_report(&mut gate, self.flushed() + 1);
+            held
+        };
+        if let Err(e) = held {
+            log_once(
+                "flush-held",
+                format_args!("a held submit failed at the flush: {e}"),
+            );
+        }
         if front.frame_is_empty() {
             return Ok(Fence(self.flushed()));
         }
@@ -327,7 +355,7 @@ impl Gpu {
     pub(crate) fn fence_now(&self) -> Fence {
         let front = self.lock();
         let last = self.flushed();
-        Fence(if front.frame_is_empty() {
+        Fence(if front.frame_is_empty() && self.gate().is_empty() {
             last
         } else {
             last + 1
@@ -353,16 +381,16 @@ impl Gpu {
         Ok(())
     }
 
-    /// `nvnQueueSubmitCommands`: submits `handles` in order on the queue at the guest address `queue`. The queue keeps
-    /// the state that the recordings leave. The backend sees the handles after the front end accepted all of them. The
-    /// backend claims its order under the lock and its deferred work (the walk) runs after the lock is released.
-    pub(crate) fn submit(
+    /// Puts `handles` into the frame, in order on the queue at the guest address `queue` (`nvnQueueSubmitCommands`
+    /// once the gate lets them run, see `order`). The queue keeps the state that the recordings leave. The backend
+    /// sees the handles after the front end accepted all of them.
+    fn run_submit(
         &self,
+        front: &mut Front,
         queue: u64,
         handles: &[CommandHandle],
         origin_lower_left: bool,
     ) -> AbiResult<()> {
-        let mut front = self.lock();
         // The backend's walk and the front end's decode read the same recordings and do not depend on each other, so the
         // walk runs on a helper thread while this one decodes. The walk ends before the front lock goes, so the next
         // flush finds it done, as when both ran here one after the other.
@@ -389,7 +417,6 @@ impl Gpu {
             }
             failed
         });
-        drop(front);
         failed.map_or(Ok(()), |e| Err(e.into()))
     }
 
@@ -397,6 +424,13 @@ impl Gpu {
     pub(crate) fn present(&self, present: Present) -> AbiResult<()> {
         {
             let mut front = self.lock();
+            let held = self.release_all(&mut front, &mut self.gate());
+            if let Err(e) = held {
+                log_once(
+                    "present-held",
+                    format_args!("a held submit failed at the present: {e}"),
+                );
+            }
             front.present(present.texture);
             super::frametime::sub(0, || self.flush_locked(&mut front, FlushReason::Present))?;
         }
