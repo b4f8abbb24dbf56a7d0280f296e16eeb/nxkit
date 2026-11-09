@@ -61,7 +61,15 @@ fn nxkit_mask(g: &Game) -> Result<i128, String> {
     Ok(mask)
 }
 
-/// `game.upscaler_keys`: the compute shaders of `agl_ndsr.pck` in the shader map, sorted 16-digit keys.
+/// The place strings of the NDSR packs in the shader map.
+const NDSR_PACKS: [&str; 3] = [
+    "/agl_ndsr.pck#",
+    "/agl_ndsr_vr.pck#",
+    "/agl_ndsr_vr_light.pck#",
+];
+
+/// `game.upscaler_keys`: the compute shaders of the three NDSR packs (`agl_ndsr.pck`, `agl_ndsr_vr.pck`,
+/// `agl_ndsr_vr_light.pck`) in the shader map, sorted 16-digit keys.
 pub fn upscaler_keys(g: &Game) -> Result<Vec<String>, String> {
     let p = g.table("shader_map.tsv");
     if !p.exists() {
@@ -73,7 +81,7 @@ pub fn upscaler_keys(g: &Game) -> Result<Vec<String>, String> {
         let c: Vec<&str> = line.split('\t').collect();
         if c.len() >= 5
             && c[2] == "compute"
-            && c[4].contains("/agl_ndsr.pck#")
+            && NDSR_PACKS.iter().any(|p| c[4].contains(p))
             && c[3].len() == 16
             && c[3]
                 .bytes()

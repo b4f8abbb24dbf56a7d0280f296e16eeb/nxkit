@@ -21,19 +21,28 @@ pub static AGL: Agl = Agl;
 
 impl BuildHooks for Agl {
     fn shader_role(&self, shader: &ShaderView<'_>) -> Option<Fact<ShaderRole>> {
-        shader.archive.filter(|a| a.contains("agl_ndsr")).map(|_| {
-            Fact::new(
-                ShaderRole::Upscaler {
-                    name: "agl_ndsr_vr",
-                },
-                Evidence::Unverified {
-                    note: "the upscaler networks are named agl_ndsr_vr in the engine OoT README. That their \
-                           archive path carries this name is not checked.",
-                },
-            )
-        })
+        // The place strings of the shader map end in `<pack>.pck#NDSR@<offset>`. `agl_ndsr_vr_light.pck` and
+        // `agl_ndsr_vr.pck` do not contain each other, and neither contains `agl_ndsr.pck`.
+        let name = NDSR_PACKS
+            .iter()
+            .find(|(pack, _)| shader.archive.is_some_and(|a| a.contains(pack)))
+            .map(|(_, name)| *name)?;
+        Some(Fact::new(
+            ShaderRole::Upscaler { name },
+            Evidence::Recorded {
+                source: "docs/plans/ndsr-native.md section 2 at 118ada8",
+                read: "2026-11-09",
+            },
+        ))
     }
 }
+
+/// The three NDSR archives in `Lib/agl/agl_resource.Nin_Ounce_NVN2.release.sarc.zs` and the upscaler each is.
+const NDSR_PACKS: [(&str, &str); 3] = [
+    ("agl_ndsr_vr_light.pck", "agl_ndsr_vr_light"),
+    ("agl_ndsr_vr.pck", "agl_ndsr_vr"),
+    ("agl_ndsr.pck", "agl_ndsr"),
+];
 
 impl RuntimeHooks for Agl {}
 
@@ -76,18 +85,30 @@ mod tests {
     }
 
     #[test]
-    fn ndsr_is_an_upscaler_and_unverified() {
-        let s = ShaderView {
+    fn ndsr_packs_are_upscalers() {
+        for (archive, want) in [
+            (
+                "Lib/agl/agl_resource.sarc/agl_ndsr.pck#NDSR@0x10",
+                "agl_ndsr",
+            ),
+            ("agl_ndsr_vr.pck", "agl_ndsr_vr"),
+            ("agl_ndsr_vr_light.pck", "agl_ndsr_vr_light"),
+        ] {
+            let s = ShaderView {
+                key: "0000000000000000",
+                stage: ShaderStage::Compute,
+                archive: Some(archive),
+            };
+            let r = AGL.shader_role(&s).expect(archive);
+            assert_eq!(r.value, ShaderRole::Upscaler { name: want });
+            assert!(r.evidence.is_checked());
+        }
+        let other = ShaderView {
             key: "0000000000000000",
             stage: ShaderStage::Compute,
             archive: Some("Shader/agl_ndsr_vr.bnsh"),
         };
-        let r = AGL.shader_role(&s);
-        assert!(matches!(
-            r.map(|f| f.value),
-            Some(ShaderRole::Upscaler { .. })
-        ));
-        assert!(r.is_some_and(|f| !f.evidence.is_checked()));
+        assert!(AGL.shader_role(&other).is_none());
         assert!(AGL.needs().is_empty());
     }
 }

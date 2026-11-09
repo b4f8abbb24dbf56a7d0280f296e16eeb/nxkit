@@ -3,8 +3,8 @@
 //! `game.py header` and `settings.py`, rows `header|settings <gid> <platform> <gfxapi> <DM_LANG> <patched> <control>
 //! <expected file or ->`).
 
-use super::header::header_one;
-use super::profile::Profiles;
+use super::header::{header_one, upscaler_keys};
+use super::profile::{Game, Profiles};
 use super::settings::{languages, render};
 use std::path::{Path, PathBuf};
 
@@ -144,4 +144,27 @@ fn language_choice_as_the_nsp_script() {
     );
     assert_eq!(game_language("en-US", false, &["ja"]).unwrap(), "ja");
     assert!(game_language("fr", true, &["ja"]).is_err());
+}
+
+#[test]
+fn upscaler_keys_cover_the_three_ndsr_packs() {
+    let e = engine();
+    let g = Game::open(&e.join("dm/games/0100000000001000")).unwrap();
+    assert!(upscaler_keys(&g).unwrap().is_empty());
+    let row = |key: &str, stage: &str, pack: &str| {
+        format!("x\tx\t{stage}\t{key}\tL/agl_resource.sarc/{pack}#NDSR@0x10\n")
+    };
+    let map = [
+        row("00000000000000c3", "compute", "agl_ndsr_vr_light.pck"),
+        row("00000000000000b2", "compute", "agl_ndsr_vr.pck"),
+        row("00000000000000a1", "compute", "agl_ndsr.pck"),
+        row("00000000000000a0", "pixel", "agl_ndsr.pck"),
+        row("00000000000000d4", "compute", "other.pck"),
+    ]
+    .concat();
+    std::fs::write(g.table("shader_map.tsv"), map).unwrap();
+    assert_eq!(
+        upscaler_keys(&g).unwrap(),
+        ["00000000000000a1", "00000000000000b2", "00000000000000c3"]
+    );
 }
