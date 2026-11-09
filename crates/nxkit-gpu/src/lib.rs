@@ -47,6 +47,8 @@ mod native_ndve;
 mod overlap;
 mod passes;
 mod pipelines;
+#[allow(dead_code)] // no user until the plumbing package
+mod pools;
 mod programs;
 mod pull;
 mod queries;
@@ -62,6 +64,10 @@ mod walk;
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use pipelines::flush_runtime_cache;
+pub use pools::{
+    Backing, BadRange, Drained, Loc, MakeBacking, MetalPoolSet, Miss, PAGE, PagePins, PoolBuffer,
+    PoolEntry, PoolSet, PoolSnapshot, PoolStats,
+};
 pub use settings::GpuSettings;
 pub use snapshot::{EncodeView, Live, Snapshot};
 pub use stats::{DrawClass, EncodeReport, EncodeStats, KindStats, Skip};
