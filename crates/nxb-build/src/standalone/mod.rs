@@ -1,15 +1,14 @@
-//! `nxb build` for a title that has a title module: the run folder and the app without the engine (H6, R21, R48 to R50).
+//! `nxb build`: the app of a title that has a title module, with `nxkit-host` as its program (H6, R21, R48 to R50).
 //!
 //! The stages, in order: unpack the packages (base, update, DLC) or the NUP container, put the RomFS into the run
 //! folder, rewrite the modules, write `game.json`, link and sign `nxgame.dylib`, make the shaders and the pipeline
 //! archive, and close the bundle. A NUP gives the RomFS as a folder in the extract's one pass (with the shader split),
-//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. A title without a module still builds through the engine, and this path leaves it alone ([`run`] answers
-//! `false`).
+//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. A title without a module is refused.
 
 mod bundle;
-mod checks;
 mod elf;
 mod files;
+mod image;
 mod layout;
 mod link;
 mod macho;
@@ -77,8 +76,8 @@ struct Game {
 }
 
 /// The title module of the input's game, `None` when the game has no module or has no data for this build.
-fn module(src: &Inputs, program: u64) -> Result<Option<Game>, String> {
-    let id = src.app + program;
+fn module(src: &Inputs) -> Result<Option<Game>, String> {
+    let id = src.app;
     let catalog = nxtitles::catalog()?;
     let r = catalog.resolve(&nxtitle::TitleFacts::new(nxtitle::TitleId(id)));
     let (Some(st), Some(t)) = (r.standalone(), r.title) else {
@@ -146,10 +145,7 @@ fn mib(n: u64) -> String {
 
 /// What a dry run prints.
 fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
-    let mut s = format!(
-        "nxb build (no engine): {} [{:016X}] v{}\n",
-        t.name, t.id, t.st.version
-    );
+    let mut s = format!("nxb build: {} [{:016X}] v{}\n", t.name, t.id, t.st.version);
     s.push_str(&format!("  base:      {}\n", b.base.display()));
     for (v, path) in &b.updates {
         s.push_str(&format!("  update:    v{v} {}\n", path.display()));
@@ -167,23 +163,18 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
     s
 }
 
-/// Builds the app of a title that has a title module. `Ok(false)`: the game has no module, the engine path builds it.
-pub(crate) fn run(a: &Args, p: &Say) -> Result<bool, String> {
+/// Builds the app of a title that has a title module.
+pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let src = crate::inputs::discover(a)?;
-    let program = u64::from(a.program.unwrap_or(0));
-    let Some(t) = module(&src, program)? else {
-        return Ok(false);
-    };
-    checks::refuse(a)?;
-    if src.source == Source::Dump {
+    let Some(t) = module(&src)? else {
         return Err(crate::exit::fail(
             4,
-            "unsupported: a build without the engine reads packages (NSP or XCI) or a NUP container, not a dump folder",
+            format!(
+                "unsupported: the game {:016X} has no title module. nxb builds only games that have one, for nxkit",
+                src.app
+            ),
         ));
-    }
-    if std::env::var_os("NXB_ENGINE").is_some() {
-        p.say("NXB_ENGINE is set and is not used: this title builds without the engine");
-    }
+    };
     let version = t.st.version;
     let updates: Vec<(u32, PathBuf)> = match version {
         0 => Vec::new(),
@@ -224,28 +215,20 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<bool, String> {
     let package = format!("v{version}");
     let mut b = Build {
         title: format!("{:016X}", t.id),
-        program,
-        mac_run: false,
         base: src.base.clone(),
         updates,
         package: package.clone(),
-        split_versions: vec![package],
         work: work.clone(),
         profile: (PathBuf::new(), Default::default()),
         shaders: work
             .join("shader/cache")
             .join(format!("b-{}", nxb_shader::chain::standalone_version())),
-        out: out.clone(),
         gpus: Vec::new(),
-        engine: PathBuf::new(),
-        nodes: Vec::new(),
         src,
-        prov: false,
-        gfx: std::sync::OnceLock::new(),
     };
     if a.dry_run {
         print!("{}", describe(&t, &b, &host, &out));
-        return Ok(true);
+        return Ok(());
     }
     replaceable(&out)?;
     b.profile = shaders::profile(&work, &t.st, t.id, t.name)?;
@@ -468,7 +451,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<bool, String> {
         Ok(((), out.display().to_string()))
     })?;
     p.say(&format!("app: {}", out.display()));
-    Ok(true)
+    Ok(())
 }
 
 fn plist(a: &Args, t: &Game) -> String {

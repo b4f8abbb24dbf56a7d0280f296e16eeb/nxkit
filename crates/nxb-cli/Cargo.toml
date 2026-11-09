@@ -1,6 +1,6 @@
 [package]
 name = "nxb-cli"
-description = "The nxb binary (multicall: the old program names are links to it)"
+description = "The nxb binary: the nxkit app build and the stage commands"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

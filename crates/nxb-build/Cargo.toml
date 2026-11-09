@@ -1,6 +1,6 @@
 [package]
 name = "nxb-build"
-description = "nxb build: the NSP build script's command line as one stage graph (extract, split, shaders, pipeline archive, app) with the front ends' NDJSON events"
+description = "nxb build: the app of a game with a title module for nxkit (extract, rewrite, link, shaders, pipeline archive, bundle) with the front ends' NDJSON events"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -26,9 +26,6 @@ nxkit-abi.workspace = true
 nxb-stages.workspace = true
 nxb-shader.workspace = true
 nxb-rewrite.workspace = true
-nxb-nro.workspace = true
-nxb-profile.workspace = true
-nxb-layer.workspace = true
 nxb-romfs.workspace = true
 nxb-split.workspace = true
 nxtitle.workspace = true

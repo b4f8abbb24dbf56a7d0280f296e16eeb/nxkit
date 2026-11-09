@@ -54,8 +54,6 @@ pub struct BuildConfig {
     pub on_done: Option<OnDone>,
     /// The key list, once known.
     pub on_start: Option<OnStart>,
-    /// Also build the iOS libraries (same sources, `ios_metal.py` convention) into `<ios_out>/b-<chain>/`.
-    pub ios_out: Option<PathBuf>,
     /// Keys to translate first, in this order (empty: pixel and compute shaders, then paired vertex shaders).
     pub order: Vec<String>,
     /// Keys a title used: translated first, in this order (empty: no change).
@@ -106,10 +104,6 @@ pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
 pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
-    let ios_out = cfg
-        .ios_out
-        .as_ref()
-        .map(|d| d.join(format!("b-{}", cfg.chain)));
     let tmp = cfg.scratch.join("tmp");
     for d in [&out, &tmp, &cfg.work.join("pch")] {
         fs::create_dir_all(d).map_err(|e| fatal("create folder", e))?;
@@ -137,10 +131,11 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         }
         k.into_iter().collect()
     };
-    // Clear both targets before writing any shader. An interrupted build must not certify old iOS libraries.
-    for dir in std::iter::once(&out).chain(ios_out.iter()) {
+    // Clear the target before writing any shader. An interrupted build must not certify old libraries.
+    {
+        let dir = &out;
         fs::create_dir_all(dir).map_err(|e| fatal("output folder", e))?;
-        if cfg.keys.is_empty() || ios_out.as_ref() == Some(dir) {
+        if cfg.keys.is_empty() {
             match fs::remove_file(dir.join("inputs.tsv")) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                     return Err(fatal("inputs.tsv", e));
@@ -202,12 +197,6 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
             &cfg.work.join("pch"),
         )
         .map_err(|e| fatal("header", e))?;
-    let ios = match &ios_out {
-        Some(d) => Some(crate::build_shared::ios_side(
-            &cfg, d, &resolver, &registry, &home, &tmp,
-        )?),
-        None => None,
-    };
     let mut store = Store::open(&cfg.store).map_err(|e| fatal("store", e))?;
     store.set_durability(Durability::Relaxed);
     let xlate = crate::xlate_cache::Xlate::open(&cfg.store, &cfg.chain)
@@ -227,7 +216,6 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         inputs,
         pairs,
         flights: SingleFlight::new(),
-        ios,
         gates: Mutex::new(BTreeMap::new()),
         dependents: Mutex::new(BTreeMap::new()),
         results: Mutex::new(BTreeMap::new()),
@@ -336,9 +324,6 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         fs::write(out.join("_b_cas.txt"), text).map_err(|e| fatal("_b_cas.txt", e))?;
         crate::guard_tables::write(&out, &cfg.work.join("tables"), cfg.jobs)
             .map_err(|e| fatal("guard tables", e))?;
-        if let Some(dir) = ios_out {
-            fs::write(dir.join("inputs.tsv"), stamp).map_err(|e| fatal("iOS inputs.tsv", e))?;
-        }
     }
     crate::build_partial::mark(&cfg, &out, &results, total)?;
     let _ = fs::remove_dir_all(cfg.scratch.join("tmp"));

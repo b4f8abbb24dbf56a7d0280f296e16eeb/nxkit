@@ -1,38 +1,7 @@
-//! The Mac stages around the app that the NSP script runs as tools: the app icon (`sips`, `iconutil`), the companion
-//! app (`clang`, `swiftc`), the app settings (`dm/games/settings.py`, ported) and the Mac host (`make`, `clang`).
-//! Every child runs through [`nxb_tool::Tool`] (own process group, exact environment, timeout).
+//! The tools the build starts (`xcrun clang` for the GPU probe): every child runs through [`nxb_tool::Tool`] (own
+//! process group, exact environment, timeout).
 
-pub mod app;
-pub mod build_sources;
-pub mod companion;
-pub mod fingerprint;
 pub mod gpu;
-pub mod guess;
-pub mod guess_check;
-pub mod guess_dump;
-pub mod guess_facts;
-pub mod guess_src;
-#[cfg(test)]
-mod guess_tests;
-pub mod header;
-pub mod header_multi;
-pub mod icon;
-pub mod machost;
-pub mod nsofacts;
-pub mod profile;
-pub mod profile_cli;
-pub mod profile_tsv;
-pub mod pyfmt;
-pub mod rom;
-pub mod settings;
-#[cfg(test)]
-mod settings_tests;
-pub mod survey;
-pub mod survey_extract;
-pub mod survey_profile;
-#[cfg(test)]
-mod survey_tests;
-pub mod ue_paks;
 
 use nxb_tool::{Completed, EnvPolicy, Invocation, ProcessRegistry, ProcessTool, Tool, ToolId};
 use std::ffi::OsString;
@@ -41,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-/// The folders the NSP script puts in front of `PATH` (`TOOL_PATHS`: GUI apps do not get the shell's `PATH`).
+/// The folders put in front of `PATH` (`TOOL_PATHS`: GUI apps do not get the shell's `PATH`).
 pub const TOOL_PATHS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 
 /// Runs the stages' tools: one registry (cancellation) and one environment for all of them.
@@ -50,20 +19,6 @@ pub struct Runner {
     reg: Arc<ProcessRegistry>,
     env: EnvPolicy,
     path: String,
-}
-
-static GAMES: std::sync::OnceLock<(PathBuf, bool)> = std::sync::OnceLock::new();
-
-/// The folder holding a provisional profile and whether it goes before the engine's own: every [`Runner::from_parent`]
-/// after this passes them on as `DM_GAMES_DIR` and `DM_GAMES_FIRST` (the process environment is left alone: the
-/// rewrite refuses an environment that names profiles outside the engine).
-pub fn set_games(dir: PathBuf, first: bool) {
-    let _ = GAMES.set((dir, first));
-}
-
-/// What [`set_games`] set.
-pub(crate) fn games() -> Option<&'static (PathBuf, bool)> {
-    GAMES.get()
 }
 
 impl Runner {
@@ -80,9 +35,8 @@ impl Runner {
         }
     }
 
-    /// The NSP script's environment for its tools: `PATH` = [`TOOL_PATHS`] + the caller's `PATH` (else
-    /// `/usr/bin:/bin:/usr/sbin:/sbin`), and the caller's `HOME`, `TMPDIR`, `USER`, `LANG`, `DM_GAMES_DIR`,
-    /// `DM_GAMES_FIRST` when set. The deny list of [`EnvPolicy`] still applies (`DEVELOPER_DIR` never reaches a child).
+    /// The environment for the tools: `PATH` = [`TOOL_PATHS`] + the caller's `PATH` (else
+    /// `/usr/bin:/bin:/usr/sbin:/sbin`), and the caller's `HOME`, `TMPDIR`, `USER`, `LANG` when set. The deny list of [`EnvPolicy`] still applies (`DEVELOPER_DIR` never reaches a child).
     pub fn from_parent() -> Result<Self, String> {
         let home = std::env::var("HOME").unwrap_or_default();
         let mut dirs: Vec<String> = TOOL_PATHS
@@ -96,22 +50,9 @@ impl Runner {
         let mut env = EnvPolicy::empty()
             .set("PATH", dirs.join(":"))
             .map_err(|e| e.to_string())?;
-        for name in [
-            "HOME",
-            "TMPDIR",
-            "USER",
-            "LANG",
-            "DM_GAMES_DIR",
-            "DM_GAMES_FIRST",
-        ] {
+        for name in ["HOME", "TMPDIR", "USER", "LANG"] {
             if let Some(v) = std::env::var_os(name) {
                 env = env.set(name, v).map_err(|e| e.to_string())?;
-            }
-        }
-        if let Some((dir, first)) = GAMES.get() {
-            env = env.set("DM_GAMES_DIR", dir).map_err(|e| e.to_string())?;
-            if *first {
-                env = env.set("DM_GAMES_FIRST", "1").map_err(|e| e.to_string())?;
             }
         }
         Ok(Runner::new(env))

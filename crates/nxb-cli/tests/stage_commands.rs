@@ -9,11 +9,7 @@ fn nxb() -> PathBuf {
 }
 
 fn run(exe: &Path, args: &[&str]) -> (Option<i32>, String, String) {
-    let o = Command::new(exe)
-        .args(args)
-        .env_remove("NXB_ENGINE")
-        .output()
-        .expect("run");
+    let o = Command::new(exe).args(args).output().expect("run");
     (
         o.status.code(),
         String::from_utf8_lossy(&o.stdout).into_owned(),
@@ -60,28 +56,12 @@ fn usage_and_failures_match() {
         ],
     );
     assert_ne!(r.0, Some(0));
-    assert_eq!(stage("ios", &[]).0, Some(2));
     assert_eq!(stage("archive", &[]).0, Some(2));
     assert_eq!(stage("pso", &[]).0, Some(1));
-    assert_eq!(stage("ipa", &[]).0, Some(2));
-    assert_eq!(stage("app", &[]).0, Some(2));
     assert_ne!(stage("sign", &[]).0, Some(0));
     assert_ne!(stage("sign", &["cdhash", &nope]).0, Some(0));
     assert_eq!(stage("extract", &[]).0, Some(2));
     let _ = std::fs::remove_dir_all(t);
-}
-
-#[test]
-fn ipa_writes_a_zip() {
-    let t = tmp("ipa");
-    std::fs::write(t.join("a.txt"), b"hello zip").unwrap();
-    let src = format!("Payload/a.txt={}", t.join("a.txt").display());
-    let o1 = t.join("1.ipa");
-    let a = run(&nxb(), &["ipa", o1.to_str().unwrap(), &src]);
-    assert_eq!((a.0, a.1.as_str()), (Some(0), "packed: 2 entries\n"));
-    let bytes = std::fs::read(&o1).unwrap();
-    assert_eq!(&bytes[..4], b"PK\x03\x04");
-    let _ = std::fs::remove_dir_all(&t);
 }
 
 #[test]
@@ -104,20 +84,18 @@ fn airc_is_a_command() {
     let _ = std::fs::remove_dir_all(&t);
 }
 
-/// The real Mac/iOS shader stage, with a synthetic Maxwell compute shader that only exits.
+/// The real Mac shader stage, with a synthetic Maxwell compute shader that only exits.
 #[cfg(target_os = "macos")]
 #[test]
-fn full_shader_build_stamps_both_targets_and_retires_old_ios_outputs() {
+fn full_shader_build_stamps_the_library() {
     if !Command::new("/usr/bin/xcrun")
-        .args(["--sdk", "iphoneos", "metal", "--version"])
+        .args(["--sdk", "macosx", "metal", "--version"])
         .output()
         .is_ok_and(|o| o.status.success())
     {
         return;
     }
-    let d = tmp("ios-library-stamp");
-    let ios = d.join("ios/b-test");
-    std::fs::create_dir_all(&ios).unwrap();
+    let d = tmp("library-stamp");
     let key = "0123456789abcdef";
     let mut record = vec![0; 0x38];
     record[..8].copy_from_slice(b"BTCDBTCD");
@@ -137,8 +115,6 @@ fn full_shader_build_stamps_both_targets_and_retires_old_ios_outputs() {
         format!("{key}\t{{\"local\":[1,1,1]}}\n"),
     )
     .unwrap();
-    let obsolete = ios.join("fedcba9876543210_b.metallib");
-    std::fs::write(&obsolete, "old library").unwrap();
     let run = |keys: &[&str]| {
         let result = Command::new(nxb())
             .current_dir(&d)
@@ -152,7 +128,7 @@ fn full_shader_build_stamps_both_targets_and_retires_old_ios_outputs() {
                 "test-inputs",
             ])
             .args(["--store", "store", "--work", "work", "--scratch", "scratch"])
-            .args(["--ios", "ios", "--own-front", "off", "--jobs", "1"])
+            .args(["--own-front", "off", "--jobs", "1"])
             .args(keys)
             .output()
             .unwrap();
@@ -163,20 +139,10 @@ fn full_shader_build_stamps_both_targets_and_retires_old_ios_outputs() {
         );
     };
     run(&[]);
-    for lib in [&ios, &d.join("cache/b-test")] {
-        let binary = std::fs::read(lib.join(format!("{key}_b.metallib"))).unwrap();
-        assert!(binary.starts_with(b"MTLB"));
-    }
-    let stamp = std::fs::read(d.join("cache/b-test/inputs.tsv")).unwrap();
-    assert_eq!(std::fs::read(ios.join("inputs.tsv")).unwrap(), stamp);
-    assert!(
-        !obsolete.exists(),
-        "a stamp must never certify stale iOS libraries"
-    );
+    let binary = std::fs::read(d.join(format!("cache/b-test/{key}_b.metallib"))).unwrap();
+    assert!(binary.starts_with(b"MTLB"));
+    assert!(d.join("cache/b-test/inputs.tsv").is_file());
     run(&[key]);
-    assert!(
-        !ios.join("inputs.tsv").exists(),
-        "a subset cannot certify a full iOS library"
-    );
+    assert!(d.join(format!("cache/b-test/{key}_b.metallib")).is_file());
     let _ = std::fs::remove_dir_all(d);
 }

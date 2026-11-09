@@ -105,8 +105,8 @@ impl Templates {
             })
             .collect();
         let nros = jobs::NroSet {
-            dir: self.nros.dir.clone(),
-            files: self.nros.files.iter().map(|(_, d)| d.clone()).collect(),
+            dir: "None".into(),
+            files: Vec::new(),
         };
         let plan = jobs::plan_with(&jfiles, &nros).map_err(split_err)?;
         self.add_notes(plan.notes.iter().cloned());
