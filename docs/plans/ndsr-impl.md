@@ -41,45 +41,47 @@ Cut so that no two touch the same files. Package 0 is small and goes first (one 
 
 ### A0. Finish the recovery (scratch tools, then `docs/plans/ndsr-native.md` sections 7, 8, 13)
 
-This is the critical path; nothing bit-faithful can be written before it. It needs no repo code.
+**Status: done for the vr pack, structure only for vr_light and agl_ndsr.** All 15 vr network programs are recovered
+bit for bit (ndsr-native.md section 7: a Python model, `scratchpad/ndsr/refvr.py`, equals the lane-exact emulation of
+the SASS on every output pixel of 12 threadgroups per program at four input sizes). The agl -> vr weight permutation is
+known (section 8.3), so one canonical layout (agl's, which is also NDVE's) serves all packs.
 
-- Extend the NDVE emulator (scratch `ndve/emu.py`, copy to `ndsr/`): `TLD4` 0xb63 (four tokens, one component, the
-  gather order), `MUFU` (symbolic `rcp/rsq/lg2/ex2/sqrt/sin/cos` by sub-op), any other missing ops the vr programs hit.
-- Emulate one threadgroup of `14c10aa70b81f04e` (vr 1.2 A) and `e4b49569547e3d47` (vr 3.0 A), then one variant B, one
-  vr_light and one agl_ndsr program (`abef20ad0d9a9b12`). Read from it, per network: the input block (`in x in` G
-  texels -> K lanes, padding/clamp at the window edge), the HMMA chains (A row bases, B tile offsets in the blob, C
-  start), ReLU and bias positions, the grid the network writes to threadgroup memory, and the epilogue expression tree
-  (bilinear, sqrt, chroma difference, signed square, sRGB, dither hash bit by bit).
-- Derive the weight permutation agl -> vr from the emulated B addresses (the multisets already match, section 5) so
-  one canonical layout serves all three packs.
-- Output: a per-network spec table (config, block shape, layer list, weight offsets) and the epilogue formula, marked V.
-  Can be split between two people: vr/vr_light programs and agl_ndsr programs.
+Left (A0b, can run in parallel with A/B/C; same tools):
+
+- vr_light (15 programs): input element (f16 luma of sqrt RGB) and epilogue (29 push words), compare with the model as
+  `batchvr.py` does; the 256-thread 4/3 program and the 3-layer 0x1800 blobs.
+- agl_ndsr (22 programs): only if the capture of section 10 shows the agl pack in gameplay.
+- Nothing here blocks the vr path.
 
 ### A. Table, fingerprint, reference (`nxkit-ndsr`: `net.rs`, `fingerprint.rs`, `pack_file.rs`, `reference.rs`)
 
 - `net.rs`: the 52 network programs of ndsr-native.md section 4 as a table: key, pack, ratio (in, out), step
-  `(b0, b1)`, variant (sRGB A / B / C, sRGB decode for agl B), blob length, blob SHA-256. Fill the layer shapes from A0.
+  `(b0, b1)`, variant (vr: A sRGB 8-bit / B linear 10-bit / C linear R11G11B10F; agl: B adds an sRGB decode), blob
+  length, blob SHA-256, and per vr program the immediates the bit-exact path needs (section 7.4 and the section 4
+  table): the ratio bits `R`, the cell-offset triple `(s, h, h1x, h1y)` and whether `ty` uses the odd-row form. The
+  layer shape is the same for all (6 layers x 2 terms of 16x16, section 7.3; 3 layers for the 0x1800 blobs, I).
 - `fingerprint.rs`: `fn find(keys: &[&str]) -> Option<(usize, &Net)>`; `fn weights_ok(net, blob) -> bool`.
 - `pack_file.rs`: parses an NDSR pack (header, 8-byte entries, types of section 3). Tests and tools only: with
   `NXKIT_NDSR_PACK=<path>` a test checks the three packs' entry tables and blob hashes against `net.rs`.
   `nxb-split::engines::ndsr_shaders` stays the build-side parser; this one only reads, it shares no code with it.
 - `half.rs`: reuse `nxkit-ndve`'s (re-export or move to a shared place in package 0).
-- `reference.rs`: the network on the CPU from an RGBA input image and the push words to the output image, with the
-  arithmetic of A0 (f16 per HMMA step of K = 16, rounding to f16 after every HMMA, bilinear and epilogue in f32 in the
-  shader's fma order, the integer dither hash). Exposes the network grid before the resample so kernels can be checked
-  in two halves. Tests: f16 edge cases, a hand case of one block, determinism on a 64x48 crop, the real blobs pass the
-  fingerprint with `NXKIT_NDSR_PACK`.
+- `reference.rs`: a port of `scratchpad/ndsr/refvr.py` (ndsr-native.md section 7, step for step): window, patches, the
+  6-layer network (f16 after every HMMA), grid with the f16 base sample and signed square, unsharp, tile rule,
+  resample, chroma, encode A/B/C, hash dither; the sampler as a parameter (bilinear, clamp to edge by default). Exposes
+  the grid before and after the unsharp pass so kernels can be checked in three parts. Tests: f16 edge cases, golden
+  values for a few threadgroups produced by `refvr.py` (checked in as small fixtures, no game data), the tile rule at
+  the first and last tiles, determinism on a 64x48 crop, the real blobs pass the fingerprint with `NXKIT_NDSR_PACK`.
 
 ### B. Kernels and packing (`nxkit-ndsr`: `pack.rs`, `msl/*.metal`, `kernels.rs`)
 
-- `pack.rs`: one canonical weight layout for `simdgroup_half8x8` tiles from any of the three blob layouts (the
-  permutation of A0), biases as f16 vectors.
-- `msl/ndsr.metal`: one kernel, specialised by function constants (in block, out block, block count 3 or 6, variant):
-  load the input window of G (or f16 luma for light, f32 luma for agl), run the block MLP on `simdgroup_matrix` with an
-  f16 rounding after every K = 16 step (as NDVE's kernels do), write the ratio grid to threadgroup memory, resample
-  bilinear to the output pixels, apply the epilogue of A0, write the image. Reuse NDVE's resampler kernel structure
-  (`nxkit-ndve/src/msl/resample.metal`), which is already this network family at 4/3; the difference is the ratio and
-  the arbitrary-size resample.
+- `pack.rs`: the canonical layout is agl_ndsr's (= NDVE's: per layer `[W1_0, W1_1, W2_0, W2_1]`, 8x8 row-major tiles,
+  ready for `simdgroup_load`); vr blobs map to it by ndsr-native.md section 8.3 (fragment order, and the even layers'
+  transposes). No biases exist.
+- `msl/ndsr.metal`: one kernel, specialised by function constants (in, npx, npy, variant): load the window of Y' (or
+  f16 luma for light, f32 luma for agl), run 5 layers of NDVE's `rs_block` plus one without ReLU (ndsr-native.md
+  section 14: `common.metal`'s `hstep` and `rs_block` are reusable as is), keep `Y[0..11][0..11]`, build the f16 grid
+  with the base sample, the unsharp pass, then the per-pixel resample, chroma, encode and dither of section 7.6-7.8.
+  The epilogue is new code; NDVE's has nothing of it.
 - `kernels.rs`: `fn plan(net, blob, in_size, out_size, push) -> Plan`: the packed weight buffer (`init`), one step with
   grid `ceil(W / b0) x ceil(H / b1)` or the kernel's own tiling, bindings to the game's tex0, sampler and img1.
 - Checks without a GPU: MSL compiles with `xcrun -sdk macosx metal -c` (skip without `xcrun`); bindings reference
@@ -92,10 +94,13 @@ This is the critical path; nothing bit-faithful can be written before it. It nee
   sampler, img1, push bank 24 of that dispatch.
 - The cache key includes the input and output sizes (dynamic resolution changes them every few frames); keep the last
   few plans (one per ratio) so a resolution change costs no rebuild.
-- `NXKIT_DIAG=ndsr`: once per distinct (key, sizes), print the capture list of ndsr-native.md section 10 for the
-  network dispatch and the four SMAA dispatches before it (keys, grids, push words, texture/image formats and sizes,
-  samplers, ssbo addresses). `NXKIT_NDSR_COMPARE=1`: run both on a sampled frame and print the largest difference per
-  channel. Health lines `ndsr.native`, `ndsr.fallback` with the reason.
+- `NXKIT_DIAG=ndsr`: once per distinct (key, sizes), print step 2 of ndsr-native.md section 10 for the network
+  dispatch and the three AA dispatches before it (keys, grids, push words, texture/image formats and sizes, samplers,
+  ssbo addresses, whether tex0 is the neighbourhood-blending img2, the readers of img2 and img1).
+  `NXKIT_NDSR_COMPARE=1`: run both on a sampled frame and print the largest difference per channel. Health lines
+  `ndsr.native`, `ndsr.fallback` with the reason.
+- `accepts` also checks the bound tex0 has the format the variant expects (the `92918e9b` output) and img1 one of the
+  variant's formats; anything else falls back.
 - Depends on package 0 only for types; can stub `nxkit-ndsr` as `native_ndve.rs` does in its tests.
 
 ### D. Family layer and build facts (`titles/families/agl/src/lib.rs`, `crates/nxb-build/src/host/header.rs`)
@@ -108,17 +113,21 @@ This is the critical path; nothing bit-faithful can be written before it. It nee
 
 ### E. Translator (`nxb-xlate`: tensor pass, only if A0 finds gaps)
 
-- The agl_ndsr networks use MOVM and LDSM like the NDVE resampler, already handled. The vr/vr_light networks use
-  `LDS` fragments and `TLD4`; if A0 finds a lane-dependent pattern the translated MSL gets wrong (as the dotted rows
-  were), fix it here so the fallback path is right too. Package D of ndve-impl.md (round after every HMMA) already
-  covers these shaders.
+- The agl_ndsr networks use MOVM and LDSM like the NDVE resampler, already handled. The vr/vr_light networks have two
+  patterns A0 found that the translated MSL must get right (check against `refvr.py` with `NXKIT_NDSR_COMPARE=1`
+  once package C exists, or by reading the MSL of 14c10aa7): (1) the **D registers of one HMMA used directly as the B
+  operand** of the next (a matrix transpose by fragment layout, no MOVM; section 7.3), and (2) weights loaded by
+  `LDG.128` straight into A/B fragment registers (the blob is in fragment order). Also `TLD4.PTP` with per-texel
+  offsets (Metal has no gather with four offsets; the translation must fetch four texels) and `S2UR` ctaid reads on the
+  uniform path in 12 of the 15 programs. Package D of ndve-impl.md (round after every HMMA) already covers the
+  rounding.
 
 ## 3. Order
 
-0 first (small). Then A0, C, D, E in parallel; A and B start on the table, packing infrastructure and kernel skeleton at
-once and fill in the layer semantics when A0 delivers. The first in-game run needs 0, A0, A, B, C; the first capture
-(`NXKIT_DIAG=ndsr`, package C) can run before the kernels exist and should, because it decides which pack and variant
-matter.
+0 first (small). A0 is done for vr, so A, B, C, D, E can all start; A0b (vr_light, agl) runs alongside. The first
+in-game run needs 0, A, B, C. Before any of that, one gameplay run with today's `NXKIT_DIAG=comp` answers which pack,
+variant and ratios run (ndsr-native.md section 10 step 1, no code needed); if it shows the light or agl pack, A0b moves
+onto the critical path.
 
 ## 4. How we test it in the game
 
@@ -130,6 +139,8 @@ matter.
 ## 5. What "right" means
 
 As for NDVE: the CPU reference first (bit for bit where the f32 order matches, else within 1 f16 ulp in the network
-grid and 1 unit of the 8-bit output), the translated chain second (compare the largest difference; the translated
-network can be noisy), the eye third. The HMMA internal rounding remains unknown without a console picture. The dither
-is an integer hash of the pixel position and must match exactly.
+grid and 1 unit of the output format), the translated chain second (compare the largest difference; the translated
+network can be noisy), the eye third. The reference itself is checked against the emulated SASS (bit for bit, A0). The
+HMMA internal rounding, the MUFU error and the sampler's sub-texel precision remain unknown without a console picture;
+`hstep` (two f32 8x8x8 products, then f16) differs from the reference's single exact rounding only in rare
+double-rounding cases. The dither is an integer hash of the pixel position and must match exactly.
