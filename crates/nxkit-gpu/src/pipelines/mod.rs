@@ -132,28 +132,49 @@ impl Drop for Pipelines {
     }
 }
 
-/// Whether the pipeline cache compiles the unspecialized pipeline of a pair of functions that the archive lacks and
-/// specializes it per colour state (`ArchiveConfig::compile_bases`): on unless `NXKIT_PIPELINE_BASES=0`.
+/// Whether the pipeline cache compiles the unspecialized pipeline of a base that the archive lacks and specializes it
+/// per colour state (`ArchiveConfig::compile_bases`): off unless `NXKIT_PIPELINE_BASES=1`. In Ocarina of Time every
+/// base was as rare as its pipelines (the vertex layout is part of it), an unspecialized compile took 0.1 to 10 s
+/// where the full compile took 1 to 6 ms, and text of the title screen went missing.
 pub(crate) fn bases_on() -> bool {
-    std::env::var("NXKIT_PIPELINE_BASES").map_or(true, |v| v != "0")
+    std::env::var("NXKIT_PIPELINE_BASES").is_ok_and(|v| v == "1")
+}
+
+/// Whether the pipeline cache specializes the unspecialized pipelines of the archive (`ArchiveConfig::exact_only`
+/// off): on unless `NXKIT_PIPELINE_SPECIALIZE=0`, which looks up and compiles exact pipelines only.
+pub(crate) fn specialize_on() -> bool {
+    std::env::var("NXKIT_PIPELINE_SPECIALIZE").map_or(true, |v| v != "0")
 }
 
 /// The point size fallback of [`build_render`] has this key.
 const FALLBACK_KEY: u64 = 0x9e37_79b9_7f4a_7c15;
 
+/// The key under which `fallbacks` remembers that the vertex function `entry` of the program `vertex` writes the
+/// point size, so every later state of it skips the class at once.
+fn point_size_key(vertex: &str, entry: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    ("point-size", vertex, entry).hash(&mut h);
+    h.finish()
+}
+
+/// Whether the pipeline `key` of the vertex function `vertex` (its [`point_size_key`]) is built without a class.
+fn falls_back(fallbacks: &Mutex<FastSet<u64>>, key: u64, vertex: u64) -> bool {
+    let set = fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
+    set.contains(&key) || set.contains(&vertex)
+}
+
 /// Builds a render pipeline. NVN writes the point size of every draw; Metal refuses a point size write for a line or
-/// triangle class, so such a pipeline is built again without a class, and the key is remembered in `fallbacks`.
+/// triangle class, so such a pipeline is built again without a class. The key and the vertex function (`vertex`, its
+/// [`point_size_key`]) are remembered in `fallbacks`: each refused compile costs as much as a good one, and a vertex
+/// function used with many states paid one per state before.
 fn build_render(
     cache: &PipelineCache,
     fallbacks: &Mutex<FastSet<u64>>,
     key: u64,
+    vertex: u64,
     desc: &mut RenderPipelineDesc<'_>,
 ) -> Result<(RenderPipeline, Source), nxkit_metal::MetalError> {
-    if fallbacks
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .contains(&key)
-    {
+    if desc.topology != TopologyClass::Point && falls_back(fallbacks, key, vertex) {
         desc.topology = TopologyClass::Unspecified;
         return cache.render_traced(key ^ FALLBACK_KEY, desc);
     }
@@ -165,10 +186,9 @@ fn build_render(
         let pipeline = cache.render_traced(key ^ FALLBACK_KEY, desc)?;
         // Remember the successful variant. Retrying the rejected descriptor for every draw invokes the Metal compiler
         // thousands of times per frame even though the fallback itself is cached.
-        fallbacks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(key);
+        let mut set = fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
+        set.insert(key);
+        set.insert(vertex);
         Ok(pipeline)
     })
 }

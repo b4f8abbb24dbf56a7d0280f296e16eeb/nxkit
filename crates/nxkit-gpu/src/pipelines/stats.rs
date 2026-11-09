@@ -131,8 +131,8 @@ fn line() -> String {
     if let Some(c) = cache {
         let b = c.base_stats();
         out.push_str(&format!(
-            " | bases from archive {} compiled {} missing {}, specialized {} refused {}",
-            b.found, b.compiled, b.missing, b.specialized, b.failed
+            " | bases from archive {} (archive named the pair but missed {}) compiled {} missing {}, specialized {} refused {}",
+            b.found, b.rejected, b.compiled, b.missing, b.specialized, b.failed
         ));
         if let Some(e) = b.first_error {
             out.push_str(&format!(" (first: {e})"));

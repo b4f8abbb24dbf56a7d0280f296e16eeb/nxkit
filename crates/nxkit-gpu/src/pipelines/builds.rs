@@ -26,6 +26,8 @@ pub(super) enum JobKind {
 
 /// A render pipeline of vertex and fragment stages.
 pub(super) struct RenderJob {
+    /// The [`point_size_key`] of the vertex function.
+    pub(super) vertex_key: u64,
     pub(super) vertex: (ShaderLibrary, String),
     pub(super) fragment: Option<(ShaderLibrary, String)>,
     pub(super) colors: Vec<Option<nxkit_metal::ColorTarget>>,
@@ -266,10 +268,12 @@ impl Builds {
                 desc.topology = r.topology;
                 desc.sample_count = r.sample_count;
                 desc.alpha_to_coverage = r.alpha_to_coverage;
-                build_render(cache, fallbacks, job.key, &mut desc).map(|(_, source)| {
-                    crate::coverage::record(cache, source, Some(&desc), &job.what);
-                    source
-                })
+                build_render(cache, fallbacks, job.key, r.vertex_key, &mut desc).map(
+                    |(_, source)| {
+                        crate::coverage::record(cache, source, Some(&desc), &job.what);
+                        source
+                    },
+                )
             }
             JobKind::Mesh(m) => cache.mesh_traced(job.key, &m.desc()).map(|(_, source)| {
                 crate::coverage::record(cache, source, None, &job.what);

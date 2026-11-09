@@ -149,12 +149,10 @@ impl Pipelines {
         paint.hash(&mut h);
         paint_dir.hash(&mut h);
         let key = h.finish();
+        let vertex = point_size_key(&d.program.vertex, desc.vertex.1);
         if async_on() && !icb {
-            let fallback = self
-                .topology_fallbacks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .contains(&key);
+            let fallback =
+                class != TopologyClass::Point && falls_back(&self.topology_fallbacks, key, vertex);
             if let Some(p) =
                 self.cache
                     .cached_render(if fallback { key ^ FALLBACK_KEY } else { key })
@@ -178,6 +176,7 @@ impl Pipelines {
                 key,
                 what: format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str())),
                 kind: JobKind::Render(RenderJob {
+                    vertex_key: vertex,
                     vertex: (desc.vertex.0.clone(), desc.vertex.1.to_string()),
                     fragment: desc.fragment.map(|(l, e)| (l.clone(), e.to_string())),
                     colors: desc.colors.clone(),
@@ -192,8 +191,14 @@ impl Pipelines {
             return Err(Skip::Pending);
         }
         let what = || format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str()));
-        let (p, source) = build_render(&self.cache, &self.topology_fallbacks, key, &mut desc)
-            .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
+        let (p, source) = build_render(
+            &self.cache,
+            &self.topology_fallbacks,
+            key,
+            vertex,
+            &mut desc,
+        )
+        .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
         crate::coverage::record(&self.cache, source, Some(&desc), &what());
         Ok((p, key))
     }

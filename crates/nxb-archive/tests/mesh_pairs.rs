@@ -32,3 +32,20 @@ fn a_mesh_pair_is_counted_and_not_planned() {
     assert_eq!(p.left[3], 1);
     assert!(p.bases.is_empty());
 }
+
+/// The host draws a vertex shader with stage inputs from its `_b` library with the vertex layout of the draw, so the
+/// `_bp` library that pulls its own vertices is not archived in its place: the pair is left out.
+#[test]
+fn a_vertex_shader_with_inputs_is_left_out_even_when_it_can_pull() {
+    let d = dir().join("pull");
+    fs::create_dir_all(&d).unwrap();
+    reflection(
+        &d,
+        "vs",
+        ", \"vertex_inputs\": [0], \"pull\": {\"slot\": 16}",
+    );
+    reflection(&d, "ps", "");
+    let p = plan(&d, "abc", &[("vs".to_string(), "ps".to_string())], false);
+    assert_eq!(p.left[2], 1);
+    assert!(p.bases.is_empty());
+}

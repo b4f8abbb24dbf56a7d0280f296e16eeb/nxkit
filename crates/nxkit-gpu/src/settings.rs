@@ -65,6 +65,7 @@ impl GpuSettings {
                 open_shards: self.open_shards,
                 collect: self.collect_archive,
                 compile_bases: crate::pipelines::bases_on(),
+                exact_only: !crate::pipelines::specialize_on(),
             },
             gob_order: self.gob_order,
         }

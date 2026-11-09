@@ -50,6 +50,8 @@ pub struct ArchiveConfig {
     /// pipeline of the pair whose state allows it by specializing that one (`cache::specialize`). Off: such a pair
     /// compiles each of its states from the functions.
     pub compile_bases: bool,
+    /// Never specialize: look up the exact pipeline in the archive, else compile it from the functions.
+    pub exact_only: bool,
 }
 
 /// Where a pipeline of [`PipelineCache::render_traced`] came from, and what making it cost. A time is the whole call:
@@ -104,6 +106,8 @@ pub struct PipelineCache {
     loaded_archive: bool,
     /// [`ArchiveConfig::compile_bases`].
     compile_bases: bool,
+    /// [`ArchiveConfig::exact_only`].
+    exact_only: bool,
     /// The archive of `load`, asked first for a render pipeline.
     archive: Option<Retained<ProtocolObject<dyn MTL4Archive>>>,
     /// The file of `archive` in the memory counters.
@@ -165,6 +169,7 @@ impl PipelineCache {
             options,
             loaded_archive,
             compile_bases: archive.compile_bases,
+            exact_only: archive.exact_only,
             archive: archive_obj,
             _archive_bytes: archive_bytes,
             shards: shard_set,
