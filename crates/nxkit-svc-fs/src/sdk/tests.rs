@@ -126,7 +126,10 @@ fn add_on_content_has_a_size_and_a_mount() {
     let g = Guest::new(0x400);
     let out = g.addr() + 0x100;
     assert_eq!(mount::query_aoc_cache(out, 1), OK);
-    assert!(g.u64_at(0x100) >= 0x200);
+    // The work buffer of the folder is the size of its tables, which the scan counts exactly: the hash tables and the
+    // entries of the root directory (0x18) and of the one file `x.bin` (0x20 plus its name padded to 4), with 3
+    // buckets each.
+    assert_eq!(g.u64_at(0x100), 4 * 3 + 0x18 + 4 * 3 + 0x20 + 8);
     assert_eq!(mount::query_aoc_cache(out, 9), OK);
     assert_eq!(g.u64_at(0x100), 0x1000);
     assert_eq!(mount::mount_aoc(g.cstr(0, "sdkaoc"), 1, 0, 0), OK);
