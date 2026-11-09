@@ -18,19 +18,19 @@ pub(crate) fn encode(
     stats: &mut EncodeStats,
 ) {
     let before = sh.barriers.before.get(pass_index).copied().flatten();
-    // The ticket of the Neural Engine path is settled when the GPU has finished this command buffer. If the pass
-    // fails, the ticket is dropped, and the slot it holds is freed without a prediction.
-    let ticket = p
+    // The claim on the Neural Engine's result ends when the GPU has finished this command buffer. If the pass fails,
+    // the claim is dropped here.
+    let hold = p
         .ane
         .as_ref()
-        .and_then(|a| a.ticket.lock().ok().and_then(|mut t| t.take()));
+        .and_then(|a| a.hold.lock().ok().and_then(|mut t| t.take()));
     if let Err(why) = encode_pass(sh, cb, scratch, before, p) {
         count_fallback(p.name, "encode", &format!("pass {pass_index}: {why}"));
         stats.skip(Skip::Encode);
     } else {
         stats.compute_passes += 1;
-        if let Some(t) = ticket {
-            cb.after_gpu(move |ok| t.settle(ok));
+        if let Some(h) = hold {
+            cb.after_gpu(move |_| drop(h));
         }
     }
 }
@@ -83,68 +83,55 @@ fn encode_pass(
             .find(|(g, _, _, _)| *g == r)
             .map(|(_, t, _, _)| t.clone())
     };
-    // The Neural Engine path writes the model's input for every picture, and its epilogue replaces the plan when the
-    // previous picture's result is ready.
-    let mut segments: Vec<&Entry> = Vec::with_capacity(2);
-    match &p.ane {
-        None => segments.push(&p.entry),
-        Some(a) => {
-            if a.write {
-                segments.push(&a.entries.input);
-            }
-            segments.push(if a.epilogue {
-                &a.entries.epilogue
-            } else {
-                &p.entry
-            });
+    // The Neural Engine's epilogue replaces the plan when the picture's result is ready.
+    let entry: &Entry = match &p.ane {
+        Some(a) => &a.entry,
+        None => &p.entry,
+    };
+    for (i, step) in entry.plan.steps.iter().enumerate() {
+        // `NXKIT_SKIP_PROGRAMS` / `NXKIT_SKIP_FILE` name a step by its kernel, to measure what it costs.
+        if crate::diag::skipped_program(step.kernel) {
+            continue;
         }
-    }
-    for entry in segments {
-        for (i, step) in entry.plan.steps.iter().enumerate() {
-            // `NXKIT_SKIP_PROGRAMS` / `NXKIT_SKIP_FILE` name a step by its kernel, to measure what it costs.
-            if crate::diag::skipped_program(step.kernel) {
-                continue;
-            }
-            if entry.barrier_before[i] {
-                cp.encode(&ComputeCommand::Barrier)
-                    .map_err(ctx("barrier"))?;
-            }
-            cp.encode(&ComputeCommand::SetPipeline(entry.pipelines[i].clone()))
-                .map_err(ctx("pipeline"))?;
-            for b in &step.buffers {
-                let addr = match b.source {
-                    Source::Buffer(n) => entry.buffers[n].gpu_address(),
-                    Source::Game(g) => push_addr
-                        .iter()
-                        .find(|(r, _)| *r == g)
-                        .map(|(_, a)| *a)
-                        .ok_or_else(|| format!("{g:?} has no bytes"))?,
-                };
-                cp.encode(&ComputeCommand::SetBuffer {
-                    index: b.index,
-                    gpu_addr: addr,
-                })
-                .map_err(ctx("set buffer"))?;
-            }
-            for b in &step.textures {
-                let Source::Game(g) = b.source else {
-                    return Err(format!("step {i} binds a plan buffer as a texture"));
-                };
-                let texture = tex_of(g).ok_or_else(|| format!("{g:?} has no texture"))?;
-                cp.encode(&ComputeCommand::SetTexture {
-                    index: b.index,
-                    texture,
-                })
-                .map_err(ctx("set texture"))?;
-            }
-            cp.encode(&ComputeCommand::DispatchThreadgroups {
-                groups: step.groups,
-                threads: step.threads,
+        if entry.barrier_before[i] {
+            cp.encode(&ComputeCommand::Barrier)
+                .map_err(ctx("barrier"))?;
+        }
+        cp.encode(&ComputeCommand::SetPipeline(entry.pipelines[i].clone()))
+            .map_err(ctx("pipeline"))?;
+        for b in &step.buffers {
+            let addr = match b.source {
+                Source::Buffer(n) => entry.buffers[n].gpu_address(),
+                Source::Game(g) => push_addr
+                    .iter()
+                    .find(|(r, _)| *r == g)
+                    .map(|(_, a)| *a)
+                    .ok_or_else(|| format!("{g:?} has no bytes"))?,
+            };
+            cp.encode(&ComputeCommand::SetBuffer {
+                index: b.index,
+                gpu_addr: addr,
             })
-            .map_err(ctx("dispatch"))?;
-            if let Some(f) = prof.as_mut() {
-                super::prof::step(f, &mut cp, step.kernel);
-            }
+            .map_err(ctx("set buffer"))?;
+        }
+        for b in &step.textures {
+            let Source::Game(g) = b.source else {
+                return Err(format!("step {i} binds a plan buffer as a texture"));
+            };
+            let texture = tex_of(g).ok_or_else(|| format!("{g:?} has no texture"))?;
+            cp.encode(&ComputeCommand::SetTexture {
+                index: b.index,
+                texture,
+            })
+            .map_err(ctx("set texture"))?;
+        }
+        cp.encode(&ComputeCommand::DispatchThreadgroups {
+            groups: step.groups,
+            threads: step.threads,
+        })
+        .map_err(ctx("dispatch"))?;
+        if let Some(f) = prof.as_mut() {
+            super::prof::step(f, &mut cp, step.kernel);
         }
     }
     if let Some(f) = prof.take() {
@@ -167,7 +154,7 @@ fn encode_pass(
     }
     cp.retain(p.entry.clone());
     if let Some(a) = &p.ane {
-        cp.retain(a.entries.clone());
+        cp.retain(a.entry.clone());
     }
     if let Some(c) = &p.compare {
         cp.retain(c.clone());

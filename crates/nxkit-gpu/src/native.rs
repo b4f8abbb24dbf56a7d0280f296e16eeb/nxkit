@@ -26,11 +26,13 @@ mod ane;
 mod book;
 mod build;
 mod capture;
+mod conv;
+mod feed;
 mod iface;
 mod offload;
 mod prof;
-mod ring;
 mod run;
+mod slots;
 mod util;
 
 pub(crate) use book::book_writes;
@@ -40,7 +42,8 @@ use build::{barrier_flags, written_resources};
 use build::{build, used_resources, uses_resource};
 use capture::capture;
 pub(crate) use iface::{
-    BlobSpec, Bound, ModelPackage, Offload, Place, Replacement, ResourceSpec, Run, RunInfo, Shape,
+    BlobSpec, Bound, ModelPackage, Offload, PictureSpec, Place, Replacement, ResourceSpec, Run,
+    RunInfo, Shape,
 };
 use run::{Compare, PendingCompare, count_fallback, count_native, make_compare};
 pub(crate) use run::{encode, health_lines};
@@ -80,16 +83,8 @@ struct Entry {
     barrier_before: Vec<bool>,
     /// The game resources that the plan writes, in the order of the plan.
     written: Vec<GameResource>,
-    /// The plans of the Neural Engine path, when it is on and the network has one.
-    ane: Option<Arc<AneEntries>>,
-}
-
-/// The two plans of the Neural Engine path, made ready.
-struct AneEntries {
-    /// Writes the model's input.
-    input: Entry,
-    /// Makes the output from the model's outputs.
-    epilogue: Entry,
+    /// The epilogue of the Neural Engine path, when it is on and the network has one.
+    epilogue: Option<Arc<Entry>>,
 }
 
 /// What the cache knows about a set of weights.
@@ -148,6 +143,9 @@ impl Native {
     }
 
     fn with(nets: Vec<Box<dyn Replacement>>) -> Self {
+        if nets.iter().any(|n| ane_on(n.name())) {
+            feed::install();
+        }
         Self {
             switches: nets
                 .iter()
@@ -376,6 +374,7 @@ impl Native {
         let name = self.nets[net].name();
         let mut textures = Vec::new();
         let mut pushes = Vec::new();
+        let mut addrs = Vec::new();
         for spec in self.nets[net].resources() {
             if !uses_resource(&entry.plan, spec.resource) {
                 continue;
@@ -467,6 +466,7 @@ impl Native {
                         )
                     })?;
                     let desc = view.desc();
+                    addrs.push((spec.resource, header.address.get()));
                     textures.push((spec.resource, view, desc, id));
                 }
             }
@@ -494,6 +494,7 @@ impl Native {
             reads_later,
             compare: None,
             ane: None,
+            addrs,
         })
     }
 }
@@ -553,8 +554,10 @@ pub(crate) struct Prepared {
     /// For each [`GameResource::Intermediate`] the plan writes: whether a later command of the frame reads it.
     reads_later: Vec<(GameResource, bool)>,
     compare: Option<Compare>,
-    /// The Neural Engine path of this picture, when it is on and the model is loaded.
+    /// The Neural Engine path of this picture, when it is on and the picture's result is ready.
     ane: Option<offload::AnePrepared>,
+    /// The GPU address of the storage of each texture and image of the run, by resource.
+    addrs: Vec<(GameResource, u64)>,
 }
 
 impl Prepared {

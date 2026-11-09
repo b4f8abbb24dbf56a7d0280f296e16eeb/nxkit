@@ -1,25 +1,11 @@
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The Neural Engine path (docs/plans/ndve-ane.md). The model takes the picture as planar f16 and gives `final` and
-// `delta`; these three kernels are the GPU's share. The tensors are R16Float textures over IOSurfaces: a tensor
-// [1, C, H, W] is W wide and C * H rows high, plane c at rows c * H .. c * H + H - 1.
+// The Neural Engine path (docs/plans/ndve-ane.md). The model takes the picture as planar f16, which the host writes from
+// the decoded picture, and gives `final` and `delta`; these two kernels are the GPU's share. The tensors are R16Float
+// textures over IOSurfaces: a tensor [1, C, H, W] is W wide and C * H rows high, plane c at rows c * H .. c * H + H - 1.
 // ---------------------------------------------------------------------------------------------------------------------
 
-// Step 1: the colour conversion of the game (`convert_bytes`) written as the model's input x [1, 4, 1080, 1920]:
-// R, G, B as k / 255 in f16, plane 3 = 1.0. Buffer 0 is the conversion's push block, the planes are the textures 0 and
-// 1, the tensor is the texture 2.
-kernel void ndve_ane_input(constant float *cp [[buffer(0)]], texture2d<float, access::read> luma [[texture(0)]],
-                           texture2d<float, access::sample> chroma [[texture(1)]],
-                           texture2d<half, access::write> x [[texture(2)]], uint2 g [[thread_position_in_grid]]) {
-    if (g.x >= 1920 || g.y >= 1080) return;
-    const float3 c = convert_bytes(luma, chroma, cp, g) / 255.0f;
-    x.write(half4(half(c.x)), g);
-    x.write(half4(half(c.y)), uint2(g.x, g.y + 1080));
-    x.write(half4(half(c.z)), uint2(g.x, g.y + 2160));
-    x.write(half4(1.0h), uint2(g.x, g.y + 3240));
-}
-
-// Step 2: `final` [1, 3, 1080, 1920] (texture 0) to the RGB10A2 picture the game's layer 12 writes (texture 1). The
+// Step 1: `final` [1, 3, 1080, 1920] (texture 0) to the RGB10A2 picture the game's layer 12 writes (texture 1). The
 // image write quantises to 10 bits, which is the model's missing round(final * 1023) / 1023.
 kernel void ndve_ane_quant(texture2d<half, access::read> fin [[texture(0)]],
                            texture2d<float, access::write> pic [[texture(1)]], uint2 g [[thread_position_in_grid]]) {
@@ -29,7 +15,7 @@ kernel void ndve_ane_quant(texture2d<half, access::read> fin [[texture(0)]],
     pic.write(float4(clamp(v, 0.0f, 1.0f), 1.0f), g);
 }
 
-// Steps 3 to 5: the linear sample of the picture (bilinear 4/3, f16), the add of `delta` [1, 1, 1440, 2560] (texture 3),
+// Steps 2 to 4: the linear sample of the picture (bilinear 4/3, f16), the add of `delta` [1, 1, 1440, 2560] (texture 3),
 // the game's dither and the flip, as ndve_resample's epilogue. Buffer 0 is the resampler's push block (84 bytes):
 // 10, 11 floats: the output pixel size in uv; 18, 19: the row to flip about and the flip on; 20: quantise and dither on.
 kernel void ndve_ane_epilogue(constant uint *pu [[buffer(0)]], texture2d<half, access::sample> pic [[texture(0)]],

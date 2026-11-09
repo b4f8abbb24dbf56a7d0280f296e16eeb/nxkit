@@ -17,6 +17,7 @@ mod exports;
 mod frame;
 mod guest_api;
 mod pacing;
+mod picture;
 mod planar;
 mod vp9;
 mod yuv;
@@ -35,6 +36,7 @@ use nxkit_abi::ipc::Named;
 pub use codec::{NativeImage, native_image, native_image_blank, native_image_blank_free};
 pub use frame::{Frame, Nv12};
 pub use pacing::playing as movie_playing;
+pub use picture::{PictureSink, set_picture_sink};
 
 /// What the host gives the service.
 pub trait Host: Send + Sync {

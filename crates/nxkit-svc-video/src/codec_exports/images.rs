@@ -188,6 +188,7 @@ pub(super) extern "C" fn read_nv12(
             // The game samples these planes with its own shader: the GPU must see that the host wrote them.
             crate::guest_wrote(ydst, yp.len() as u64);
             crate::guest_wrote(uvdst, uvp.len() as u64);
+            crate::picture::read_nv12(frame.id(), ydst, uvdst, w as u32, h as u32);
         }
         Err(e) => warn(&format!("nn::codec::ReadDecoderOutputImageNv12: {e}")),
     }
