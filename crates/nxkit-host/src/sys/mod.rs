@@ -5,6 +5,7 @@
 
 pub mod allocspy;
 pub mod appkit;
+pub mod crashsig;
 mod dylib;
 pub mod exitflush;
 mod kernel;

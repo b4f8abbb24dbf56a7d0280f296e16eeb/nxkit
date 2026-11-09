@@ -150,6 +150,7 @@ impl ThreadEnv {
 }
 
 fn run(entry: u64, arg: u64, arg1: u64, sp: u64) -> Result<()> {
+    crate::sys::crashsig::thread_stack();
     let env = ThreadEnv::new()?;
     gate::enter(entry, arg, arg1, sp);
     env.release();
@@ -170,6 +171,7 @@ pub fn start_main(boot: Boot, stack_top: u64) -> Result<()> {
     std::thread::Builder::new()
         .name("guest-main".into())
         .spawn(move || {
+            crate::sys::crashsig::thread_stack();
             let handle = match seams::attach_main_thread() {
                 Ok(h) => h,
                 Err(e) => stop::fatal(&format!("cannot attach the main guest thread: {e}")),

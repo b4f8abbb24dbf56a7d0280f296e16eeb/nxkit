@@ -65,6 +65,7 @@ fn check_kernel_service(mask: u64) -> Result<()> {
 
 /// Runs the game. It returns when the window or the game has stopped.
 pub fn run(opts: &Options) -> Result<()> {
+    sys::crashsig::install();
     let game = Game::read(&opts.root)?;
     let mask = loader::service_mask(&game.services)?;
     check_kernel_service(mask)?;
@@ -90,6 +91,17 @@ pub fn run(opts: &Options) -> Result<()> {
         loaded.game.modules.len(),
         loaded.placement,
         loaded.exports.len()
+    );
+    sys::crashsig::set_modules(
+        loaded
+            .game
+            .modules
+            .iter()
+            .map(|m| {
+                let start = m.base.wrapping_add_signed(m.low);
+                (m.name.clone(), start, start + m.span)
+            })
+            .collect(),
     );
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;

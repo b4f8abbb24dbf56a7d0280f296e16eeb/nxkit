@@ -16,6 +16,7 @@ The code is in `nxkit_nvn::diag` (the shared `NXKIT_DIAG` parser and the health 
 | `NXKIT_PAINT_FS` | Comma separated fragment program keys that the `paint` and `paintdir` knobs paint. When it is empty, they paint every draw into one colour target. |
 | `NXKIT_WATCH_TEX` | Comma separated texture ids. The encoder prints the passes that render into them and the copies that touch them (at most 40 each). |
 | `NXKIT_WATCH_ADDR` | A GPU address in hex. The decoder prints the texture that each record word at this address resolves to (at most 30). There is no default address. |
+| `NXKIT_CRASH_REPORT=0` | Turns off the crash report. By default a fatal `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE` or `SIGTRAP` prints to stderr the address, the thread, the registers, the frame pointer chain (guest frames as `main+0x...`, host frames with their symbol) and the guest module ranges, then ends the process as before (status 139 for a `SIGSEGV`). |
 | `<NXKIT_DIAG_DIR>/nobar` | A file with `lo hi`. The passes in `[lo, hi)` get a full barrier from all earlier work. Use it to bisect a missing barrier. It is read every frame. |
 
 The variables `NXKIT_ANE_DUMP`, `NXKIT_ANE_STUDY`, `NXKIT_COREML_PACKAGE`, `NXKIT_NDSR_PACK` and `NXKIT_NDVE_DAT` belong to ignored tests and are not read by the host.
