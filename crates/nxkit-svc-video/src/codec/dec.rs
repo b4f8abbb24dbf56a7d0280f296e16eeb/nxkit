@@ -175,6 +175,7 @@ impl Dec {
             }
             return false;
         }
+        crate::picture::decoded(&frame);
         self.held.push_back(Held {
             frame,
             ts,

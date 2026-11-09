@@ -1,11 +1,10 @@
 //! The Neural Engine path of a network (`NXKIT_<NAME>_ANE=1`): the Core ML model, its loading on a background thread,
-//! the shared tensors of the ring and the tickets that tie a picture's frame to them.
+//! and the shared tensors of the slots.
 //!
 //! The model is written from the weight blobs into a cache directory, compiled and loaded off the render thread, and
 //! used only when Core ML puts every operation on the Neural Engine. Until then, and whenever anything fails, the plan
-//! of [`super`] runs. A loaded model owns a ring of slots (see [`super::ring`]); a picture's frame writes the model's
-//! input into one, and when that frame has finished on the GPU the Neural Engine runs on it. The next picture's frame
-//! makes its output from that result if it is ready.
+//! of [`super`] runs. A loaded model owns the sets of tensors that [`super::slots`] hands out; [`super::feed`] writes
+//! a decoded picture's input into one and runs the model on it, ahead of the game's frame that uses the result.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -14,11 +13,11 @@ use std::time::Instant;
 use nxkit_coreml::{Model, SharedTensor};
 
 use super::iface::{ModelPackage, Offload};
-use super::ring::{Ring, Turn};
 use nxkit_native_plan::GameResource;
 
-/// The sets of tensors of the ring. Three: the picture being written, the one running and the one being read.
-pub(super) const SLOTS: usize = 3;
+/// The sets of tensors. The decoder is three pictures ahead of the game, and two frames of the game are in flight, each
+/// reading one result.
+pub(super) const SLOTS: usize = 5;
 
 /// `NXKIT_<NAME>_ANE_CACHE` names the cache directory; otherwise `~/Library/Caches/nxkit/<name>-ane`.
 pub(super) fn cache_root(name: &str, over: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
@@ -76,27 +75,21 @@ pub(super) struct SlotTensors {
     pub(super) outputs: Vec<SharedTensor>,
 }
 
-/// A model that is loaded, with the tensors of the ring.
+/// A model that is loaded, with the tensors of the slots.
 pub(super) struct Loaded {
     model: Model,
     names: (String, Vec<String>),
     pub(super) slots: Vec<SlotTensors>,
-    ring: Mutex<Ring>,
-    label: &'static str,
 }
 
 impl Loaded {
-    fn ring(&self) -> std::sync::MutexGuard<'_, Ring> {
-        self.ring.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Starts the next picture.
-    pub(super) fn begin(&self) -> Turn {
-        self.ring().begin()
-    }
-
-    /// Runs the Neural Engine on the slot (its input is written) and, when it is done, makes the outputs ready.
-    fn kick(self: &Arc<Self>, slot: usize, pic: u64) {
+    /// Runs the model on the input of `slot` (written) into its outputs, and calls `done` on a Core ML thread when they
+    /// are written or the run failed. The slot's tensors must not be touched meanwhile.
+    pub(super) fn predict(
+        &self,
+        slot: usize,
+        done: impl FnOnce(Result<(), String>) + Send + 'static,
+    ) {
         let t = &self.slots[slot];
         let outs: Vec<(&str, &SharedTensor)> = self
             .names
@@ -105,62 +98,10 @@ impl Loaded {
             .map(String::as_str)
             .zip(t.outputs.iter())
             .collect();
-        let me = self.clone();
         self.model
             .predict_async(&[(self.names.0.as_str(), &t.input)], &outs, move |r| {
-                let ok = r.is_ok();
-                if let Err(e) = r {
-                    super::run::count_ane_fallback(me.label, "predict", &e.to_string());
-                }
-                me.ring().finished(slot, pic, ok);
+                done(r.map_err(|e| e.to_string()))
             });
-    }
-}
-
-/// What a picture's frame holds of the ring: the slot it writes and the slot it reads. It is settled when the frame has
-/// finished on the GPU ([`Ticket::settle`]); a ticket that is dropped instead (the frame never ran) frees its slots.
-pub(super) struct Ticket {
-    loaded: Arc<Loaded>,
-    turn: Turn,
-    settled: bool,
-}
-
-impl Ticket {
-    pub(super) fn new(loaded: Arc<Loaded>, turn: Turn) -> Self {
-        Self {
-            loaded,
-            turn,
-            settled: false,
-        }
-    }
-
-    /// The frame has finished on the GPU with `ok`: the read slot is free, and the written one goes to the Neural Engine.
-    pub(super) fn settle(mut self, ok: bool) {
-        self.done(ok);
-    }
-
-    fn done(&mut self, ok: bool) {
-        if std::mem::replace(&mut self.settled, true) {
-            return;
-        }
-        let kick = {
-            let mut ring = self.loaded.ring();
-            if let Ok(slot) = self.turn.read {
-                ring.released(slot, self.turn.pic - 1);
-            }
-            self.turn
-                .write
-                .filter(|&slot| ring.filled(slot, self.turn.pic, ok))
-        };
-        if let Some(slot) = kick {
-            self.loaded.kick(slot, self.turn.pic);
-        }
-    }
-}
-
-impl Drop for Ticket {
-    fn drop(&mut self) {
-        self.done(false);
     }
 }
 
@@ -171,7 +112,8 @@ pub(super) enum Phase {
     Failed(String),
 }
 
-/// A model that loads in the background.
+/// A model that loads in the background. Clones see the same model.
+#[derive(Clone)]
 pub(super) struct Session {
     phase: Arc<Mutex<Phase>>,
 }
@@ -189,7 +131,7 @@ impl Session {
         let slot = phase.clone();
         let job = move || {
             let started = Instant::now();
-            let r = load(label, &offload, &blobs, root.as_deref(), &key);
+            let r = load(&offload, &blobs, root.as_deref(), &key);
             let mut p = slot.lock().unwrap_or_else(PoisonError::into_inner);
             *p = match r {
                 Ok(l) => {
@@ -226,7 +168,6 @@ impl Session {
 }
 
 fn load(
-    label: &'static str,
     offload: &Offload,
     blobs: &[Vec<u8>],
     root: Option<&Path>,
@@ -266,10 +207,10 @@ fn load(
                 .ok_or_else(|| format!("the model has no output {name}"))?,
         );
     }
-    if pkg.input.0 != offload.input_tensor.0 {
+    if pkg.input.0 != offload.input_tensor {
         return Err(format!(
             "the model's input is {}, not {}",
-            pkg.input.0, offload.input_tensor.0
+            pkg.input.0, offload.input_tensor
         ));
     }
     let mut slots = Vec::with_capacity(SLOTS);
@@ -294,30 +235,27 @@ fn load(
                 .collect(),
         ),
         slots,
-        ring: Mutex::new(Ring::new(SLOTS)),
-        label,
     })
 }
 
-/// The tensors of a slot as the textures the plan's steps bind, made once per loaded model.
+/// The outputs of a slot as the textures the epilogue binds, made once per loaded model.
 pub(super) struct SlotTextures {
-    pub(super) input: nxkit_metal::Texture,
     pub(super) outputs: Vec<nxkit_metal::Texture>,
 }
 
-/// Wraps the tensors of every slot as textures.
+/// Wraps the outputs of every slot as textures. The input is the host's: nothing on the GPU touches it.
 pub(super) fn textures(
     ctx: &nxkit_metal::Context,
     l: &Loaded,
 ) -> Result<Vec<SlotTextures>, String> {
-    let wrap = |t: &SharedTensor, writable: bool| {
+    let wrap = |t: &SharedTensor| {
         nxkit_metal::Texture::from_io_surface(
             ctx,
             t.io_surface(),
             t.width() as u32,
             t.height() as u32,
             nxkit_metal::Format::R16Float,
-            writable,
+            false,
         )
         .map_err(|e| format!("texture of a tensor: {e}"))
     };
@@ -325,12 +263,7 @@ pub(super) fn textures(
         .iter()
         .map(|s| {
             Ok(SlotTextures {
-                input: wrap(&s.input, true)?,
-                outputs: s
-                    .outputs
-                    .iter()
-                    .map(|t| wrap(t, false))
-                    .collect::<Result<_, String>>()?,
+                outputs: s.outputs.iter().map(wrap).collect::<Result<_, String>>()?,
             })
         })
         .collect()

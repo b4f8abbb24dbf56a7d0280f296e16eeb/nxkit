@@ -90,10 +90,7 @@ pub(super) fn build(
         .map_err(|e| Refusal("build", format!("{name}: {e}")))?;
     let mut entry = ready(name, net.source(), plan, cx)?;
     if with_offload && let Some(o) = net.offload() {
-        entry.ane = Some(Arc::new(AneEntries {
-            input: ready(name, net.source(), o.input, cx)?,
-            epilogue: ready(name, net.source(), o.epilogue, cx)?,
-        }));
+        entry.epilogue = Some(Arc::new(ready(name, net.source(), o.epilogue, cx)?));
     }
     Ok(entry)
 }
@@ -162,6 +159,6 @@ fn ready(
         pipelines,
         barrier_before,
         written,
-        ane: None,
+        epilogue: None,
     })
 }
