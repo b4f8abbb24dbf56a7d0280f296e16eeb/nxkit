@@ -26,7 +26,8 @@ use crate::detail::{DrawDetail, RecordingRun};
 use crate::draws::{Geom, PassCtx, Shared, prepare};
 use crate::stats::Skip;
 
-const DRAW_ARENA_BYTES: u64 = 2 * (crate::bindless::DRV_SIZE as u64 + 2048);
+const DRAW_ARENA_BYTES: u64 =
+    2 * (crate::bindless::DRV_SIZE as u64 + 2048) + crate::pull::BYTES as u64 + 16;
 
 struct Entry {
     icb: IndirectCommandBuffer,
@@ -231,7 +232,10 @@ fn slot_commands(
         });
     }
     for (index, addr) in &p.streams {
-        if *index == crate::translate::DEFAULT_VERTEX_SLOT {
+        // The default vertex and the layout block of a pulled draw are in the arena; the streams in guest memory.
+        if *index == crate::translate::DEFAULT_VERTEX_SLOT
+            || p.pulled && *index == crate::pull::SLOT
+        {
             let (buffer, offset) = data(*addr);
             c.push(IcbCommand::SetVertexData {
                 index: *index,

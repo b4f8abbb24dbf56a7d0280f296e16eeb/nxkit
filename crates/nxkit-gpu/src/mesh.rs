@@ -181,6 +181,7 @@ pub(crate) fn prepare(
         fragment_args,
         object_args,
         streams: Vec::new(),
+        pulled: false,
         cull: f.cull,
         winding: f.winding,
         fill: f.fill,

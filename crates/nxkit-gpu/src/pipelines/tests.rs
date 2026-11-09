@@ -31,6 +31,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
+        pull: false,
         colors: Some(vec![0]),
         threadgroup: [1; 3],
         c1: vec![],
