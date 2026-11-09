@@ -300,6 +300,22 @@ fn channel(chan: Chan, word: u32, srgb: bool) -> Vec<u8> {
     }
 }
 
+/// The words of `color`, given as `from`, as values of `to`: floats are rounded to the nearest integer and clamped
+/// to the 32-bit range, integers become floats, and a signed value given to an unsigned format (or back) is clamped
+/// at zero or `i32::MAX`. The channel packing clamps further to the channel's own range.
+fn convert(color: [u32; 4], from: Kind, to: Kind) -> [u32; 4] {
+    color.map(|w| match (from, to) {
+        (a, b) if a == b => w,
+        (Kind::Float, Kind::Int) => (f32::from_bits(w).round() as i32) as u32,
+        (Kind::Float, Kind::Uint) => f32::from_bits(w).round() as u32,
+        (Kind::Int, Kind::Float) => (w as i32 as f32).to_bits(),
+        (Kind::Uint, Kind::Float) => (w as f32).to_bits(),
+        (Kind::Int, Kind::Uint) => (w as i32).max(0) as u32,
+        (Kind::Uint, Kind::Int) => w.min(i32::MAX as u32),
+        _ => w,
+    })
+}
+
 /// One texel of `format` that holds `color`, for a clear of `kind` (0 for `f32` bits, 1 for `i32` values, 2 for `u32`
 /// values) with the NVN channel `mask`. Integer values outside the range of a channel are clamped to it. The error
 /// says why the clear cannot be done as a fill: the format has no packing, the kind does not suit the format, or the
@@ -315,9 +331,10 @@ pub(crate) fn texel(
     if mask & needed != needed {
         return Err("the channel mask leaves a channel of the format unwritten");
     }
-    if Kind::of(kind) != Some(l.kind()) {
-        return Err("the clear value type does not suit the format");
-    }
+    let given = Kind::of(kind).ok_or("the clear value type is unknown")?;
+    // A clear whose value type differs from the format's is converted to it, as the hardware does: Ocarina of Time
+    // clears an Rg16Uint target with `ClearTexture` (floats) every frame.
+    let color = convert(color, given, l.kind());
     let f = |i: usize| f32::from_bits(color[i]);
     Ok(match l {
         Layout::Array {
