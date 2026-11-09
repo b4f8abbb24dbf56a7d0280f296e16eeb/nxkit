@@ -189,6 +189,10 @@ fn put<K: std::hash::Hash + Eq>(
     if m.len() >= MAX_LANDED {
         let keep = newest.saturating_sub(MAX_LANDED as u64 / 2);
         m.retain(|_, (_, s)| *s >= keep);
+        // A map that is still more than half full starts again, so the scan never runs for every report.
+        if m.len() >= MAX_LANDED / 2 {
+            m.clear();
+        }
     }
     let e = m.entry(key).or_insert((value, seq));
     if seq >= e.1 {

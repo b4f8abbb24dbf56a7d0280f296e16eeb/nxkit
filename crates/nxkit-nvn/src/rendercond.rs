@@ -305,17 +305,20 @@ impl RenderConds {
 
     fn report(&mut self, addr: u64, r: Report) {
         if self.reports.len() >= MAX_REPORTS {
-            // The known values and the older half of the emulated counters go; the unknown ones stay.
-            let newest = self.reports.values().fold(0, |m, r| match r {
-                Report::Gpu { seq, .. } => m.max(*seq),
-                _ => m,
-            });
-            let keep = newest.saturating_sub(MAX_REPORTS as u64 / 2);
+            // The known values and the older half of the emulated counters go; the unknown ones stay. A table that is
+            // still more than half full starts again, so the scan never runs for every report.
+            let keep = self
+                .counters
+                .newest_seq()
+                .saturating_sub(MAX_REPORTS as u64 / 2);
             self.reports.retain(|_, r| match r {
                 Report::Known { .. } => false,
                 Report::Gpu { seq, .. } => *seq >= keep,
                 Report::Unknown => true,
             });
+            if self.reports.len() >= MAX_REPORTS / 2 {
+                self.reports.clear();
+            }
         }
         self.reports.insert(addr, r);
     }
