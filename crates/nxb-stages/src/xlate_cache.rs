@@ -1,7 +1,8 @@
 //! The in-process translator of the shader step (`nxb_xlate::msl::translate`) in front of the store (docs/early-cutoff.md).
 //! A translation is kept under the translator identity, the job, the code bytes and what the stage step adds (chain,
-//! source, paired shader, the inputs of the pixel partners). Every stage after it keys on content again (the compile by
-//! the MSL), so equal outputs stop a change there.
+//! source, paired shader, the inputs of the pixel partners) and the revisions of the translator features the shader's
+//! code uses (`nxb_xlate::msl::revision`): a feature bump translates only the shaders that use the feature. Every stage
+//! after it keys on content again (the compile by the MSL), so equal outputs stop a change there.
 //!
 //! A panic of the translator is caught and counted. A failure keeps the reason string of `nxb_xlate::msl::Failure`.
 
@@ -10,6 +11,7 @@ use nxb_pyjson::{Value, dumps, parse};
 use nxb_shader::job::Job;
 use nxb_store::Store;
 use nxb_xlate::job::Job as XJob;
+use nxb_xlate::msl::revision::{self, Feature};
 use nxb_xlate::msl::{Context, Failure, Side, StageInputs, Translated, Varying, translate};
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -149,6 +151,7 @@ pub(crate) struct Xlate {
     store: Store,
     id: String,
     run: Box<Run>,
+    features: &'static [Feature],
     /// Jobs answered from the store.
     pub(crate) hits: AtomicU64,
     /// Jobs translated.
@@ -158,7 +161,8 @@ pub(crate) struct Xlate {
 
 /// The translator identity: the label, the chain version V (the engine files of `dmsh_chain.py` `FILES` and the options,
 /// no Rust source), the version of the MSL back end (`nxb_xlate::msl::TRANSLATOR_ID`) and the `NXB_TEST_XLATE_SALT` test
-/// hook. A change of `nxb-xlate` translates again only when someone increases `TRANSLATOR_ID` by hand. A new chain
+/// hook. A change of `nxb-xlate` translates again only when someone increases `TRANSLATOR_ID` (every shader) or a feature
+/// revision of `nxb_xlate::msl::revision` (the shaders that use the feature) by hand. A new chain
 /// translates again, and the compile cache stops the change where the MSL stays equal.
 pub(crate) fn translator_id(chain: &str) -> String {
     let mut h = nxb_model::Sha256::new();
@@ -192,10 +196,18 @@ impl Xlate {
             store,
             id,
             run,
+            features: revision::FEATURES,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             refused: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// The translator with other feature revisions (a feature bump in a test).
+    #[cfg(test)]
+    pub(crate) fn with_features(mut self, features: &'static [Feature]) -> Xlate {
+        self.features = features;
+        self
     }
 
     /// Keys the translator refused, by reason (`error` for a job it cannot read, `panic` for a caught panic).
@@ -209,7 +221,8 @@ impl Xlate {
         *m.entry(why.to_string()).or_default() += 1;
     }
 
-    fn key(&self, job: &Job, ctx: &Context<'_>) -> ContentKey {
+    /// The store key. `j` is the job as the translator reads it (`None`: it cannot read the job, so no feature).
+    fn key(&self, job: &Job, j: Option<&XJob>, ctx: &Context<'_>) -> ContentKey {
         let partners: String = ctx
             .partners
             .iter()
@@ -221,7 +234,7 @@ impl Xlate {
                 )
             })
             .collect();
-        ContentKey::builder("nxb.xlate.v2")
+        let k = ContentKey::builder("nxb.xlate.v2")
             .field_str("translator", &self.id)
             .field_str("job", &dumps(&job.json))
             .field("code", &job.code)
@@ -234,13 +247,22 @@ impl Xlate {
                 "fetch_outputs_only",
                 if ctx.fetch_outputs_only { "1" } else { "0" },
             )
-            .field_str("partners", &partners)
-            .finish()
+            .field_str("partners", &partners);
+        // no field for a shader that uses no feature: its key stays the key it had before features existed
+        let tags = j.map_or_else(String::new, |j| {
+            revision::tags_of(self.features, j, &job.code)
+        });
+        if tags.is_empty() {
+            k.finish()
+        } else {
+            k.field_str("features", &tags).finish()
+        }
     }
 
     /// Translate one shader, from the store when its key is there.
     pub(crate) fn translate(&self, job: &Job, ctx: &Context<'_>) -> Result<Translation, Failure> {
-        let key = self.key(job, ctx);
+        let parsed = XJob::from_value(&job.json);
+        let key = self.key(job, parsed.as_ref().ok(), ctx);
         let hit = self
             .store
             .lookup(&key)
@@ -256,7 +278,7 @@ impl Xlate {
             return Ok(t);
         }
         self.misses.fetch_add(1, Ordering::Relaxed);
-        let j = XJob::from_value(&job.json).map_err(|e| {
+        let j = parsed.map_err(|e| {
             self.refuse("error");
             Failure::new("translation failed", e)
         })?;
