@@ -117,66 +117,6 @@ fn ftab() -> Vec<u8> {
     t
 }
 
-/// (components, size code, kind) of `dm_ftab` for a Metal vertex format.
-fn expected(f: VertexFormat) -> (u8, u8, u8) {
-    use VertexFormat as V;
-    // kinds: 1 unorm, 2 snorm, 3 uint, 4 sint, 5 float, 8 unorm 10:10:10:2, 9 snorm 10:10:10:2, 10 R11G11B10F, 11 BGRA8
-    match f {
-        V::UCharNorm => (1, 0, 1),
-        V::UChar2Norm => (2, 0, 1),
-        V::UChar3Norm => (3, 0, 1),
-        V::UChar4Norm => (4, 0, 1),
-        V::CharNorm => (1, 0, 2),
-        V::Char2Norm => (2, 0, 2),
-        V::Char3Norm => (3, 0, 2),
-        V::Char4Norm => (4, 0, 2),
-        V::UChar => (1, 0, 3),
-        V::UChar2 => (2, 0, 3),
-        V::UChar3 => (3, 0, 3),
-        V::UChar4 => (4, 0, 3),
-        V::Char => (1, 0, 4),
-        V::Char2 => (2, 0, 4),
-        V::Char3 => (3, 0, 4),
-        V::Char4 => (4, 0, 4),
-        V::Half => (1, 1, 5),
-        V::Half2 => (2, 1, 5),
-        V::Half3 => (3, 1, 5),
-        V::Half4 => (4, 1, 5),
-        V::UShortNorm => (1, 1, 1),
-        V::UShort2Norm => (2, 1, 1),
-        V::UShort3Norm => (3, 1, 1),
-        V::UShort4Norm => (4, 1, 1),
-        V::ShortNorm => (1, 1, 2),
-        V::Short2Norm => (2, 1, 2),
-        V::Short3Norm => (3, 1, 2),
-        V::Short4Norm => (4, 1, 2),
-        V::UShort => (1, 1, 3),
-        V::UShort2 => (2, 1, 3),
-        V::UShort3 => (3, 1, 3),
-        V::UShort4 => (4, 1, 3),
-        V::Short => (1, 1, 4),
-        V::Short2 => (2, 1, 4),
-        V::Short3 => (3, 1, 4),
-        V::Short4 => (4, 1, 4),
-        V::Float => (1, 2, 5),
-        V::Float2 => (2, 2, 5),
-        V::Float3 => (3, 2, 5),
-        V::Float4 => (4, 2, 5),
-        V::UInt => (1, 2, 3),
-        V::UInt2 => (2, 2, 3),
-        V::UInt3 => (3, 2, 3),
-        V::UInt4 => (4, 2, 3),
-        V::Int => (1, 2, 4),
-        V::Int2 => (2, 2, 4),
-        V::Int3 => (3, 2, 4),
-        V::Int4 => (4, 2, 4),
-        V::UInt1010102Norm => (4, 2, 8),
-        V::Int1010102Norm => (4, 2, 9),
-        V::FloatRg11B10 => (3, 2, 10),
-        V::UChar4NormBgra => (4, 0, 11),
-    }
-}
-
 /// Every NVN format that the stage_in path draws decodes to the same components, size and kind through `dm_fetch`, so
 /// switching to pulling loses no attribute and changes no value.
 #[test]
@@ -187,7 +127,7 @@ fn every_format_of_the_stage_in_path_has_its_decode_in_the_table() {
         let Some(f) = vertex_format(nvn) else {
             continue;
         };
-        let e = expected(f);
+        let e = super::model::shape(f);
         let b = t[nvn as usize];
         let got = ((b & 3) + 1, (b >> 2) & 3, b >> 4);
         assert_eq!(got, e, "format {nvn:#x} {f:?}");
@@ -418,4 +358,166 @@ fragment float4 fs() { return float4(1); }
     });
     assert_eq!(kc, ka);
     assert_eq!(pipelines.counts(), (1, 1));
+}
+
+/// The GPU address of guest offset 0 in Ocarina of Time's run, and the guest buffer's length: a stream near the end
+/// lies more than 12 GiB above the base, so no address may be cut to 32 bits.
+const GUEST_BASE: u64 = 0x14_F9C8_8000;
+const GUEST_LEN: u64 = 12_626 << 20;
+
+/// The address the stage_in fetch reads for `vid` and `iid`: stream address + offset + element * stride, in 64 bits.
+fn stage_in_address(s: &StreamDetail, a: &AttributeDetail, vid: u32, iid: u32, bi: u32) -> u64 {
+    let element = if s.stride == 0 {
+        0
+    } else {
+        (iid - bi).checked_div(s.divisor).map_or(vid, |i| i + bi)
+    };
+    s.address + u64::from(a.offset) + u64::from(element) * u64::from(s.stride)
+}
+
+/// `dm_fetch` reads the element that the stage_in fetch reads, at the same GPU address, for per-vertex, per-instance
+/// and constant streams at aligned and unaligned bases high in the guest buffer.
+#[test]
+fn a_pulled_element_has_the_address_of_the_stage_in_fetch() {
+    let high = GUEST_BASE + GUEST_LEN - 0x10_0000;
+    let streams = vec![
+        stream(0, high, 20, 0),
+        stream(1, high + 0x8_0002, 12, 3),
+        stream(2, GUEST_BASE + 0x40, 0, 0),
+    ];
+    let attributes = vec![
+        attr(0, 0x2E, 0, 0),
+        attr(3, 0x25, 16, 0),
+        attr(5, 0x2D, 0, 1),
+        attr(7, 0x22, 6, 1),
+        attr(9, 0x2E, 0, 2),
+    ];
+    let d = draw(attributes.clone(), streams.clone());
+    let b = layout(&d);
+    for (vid, iid, bi) in [(0, 0, 0), (2, 0, 0), (1000, 7, 2), (65_535, 9, 9)] {
+        for a in &attributes {
+            let s = streams.iter().find(|s| s.index == a.stream).unwrap();
+            let e = model::element(&b, a.location, vid, iid, bi).unwrap();
+            assert_eq!(
+                e.address,
+                stage_in_address(s, a, vid, iid, bi),
+                "location {} vid {vid} iid {iid}",
+                a.location
+            );
+        }
+    }
+    // the block keeps the full 64-bit base
+    assert_eq!(u64_at(&b, 0), high);
+}
+
+#[test]
+fn an_input_without_an_attribute_loads_nothing() {
+    let d = draw(
+        vec![attr(0, 0x2E, 0, 0), attr(1, 0x01, 0, 3)],
+        vec![stream(0, GUEST_BASE, 16, 0)],
+    );
+    let b = layout(&d);
+    assert!(model::element(&b, 1, 0, 0, 0).is_none());
+    assert!(model::element(&b, 2, 0, 0, 0).is_none());
+    assert!(model::element(&b, 16, 0, 0, 0).is_none());
+    assert!(model::element(&b, 0, 0, 0, 0).is_some());
+}
+
+/// The bytes of each load of `dm_decode`: whole words for aligned 8- and 16-bit elements, exact sizes otherwise.
+#[test]
+fn the_load_widths_are_those_of_dm_decode() {
+    use model::{read_bytes, shape};
+    use nxkit_metal::VertexFormat as V;
+    for (f, aligned, bytes) in [
+        (V::Float4, true, 16),
+        (V::Float3, false, 12),
+        (V::Float, true, 4),
+        (V::UChar4Norm, true, 4),
+        (V::UChar4Norm, false, 4),
+        (V::UChar, true, 4),
+        (V::UChar, false, 1),
+        (V::Half3, true, 8),
+        (V::Half3, false, 6),
+        (V::Half2, true, 4),
+        (V::UInt1010102Norm, false, 4),
+        (V::FloatRg11B10, true, 4),
+        (V::UChar4NormBgra, true, 4),
+    ] {
+        assert_eq!(
+            read_bytes(shape(f), aligned),
+            bytes,
+            "{f:?} aligned {aligned}"
+        );
+    }
+    assert!(
+        FETCH.contains("if (sz == 1u && n > 2u) w.xy = uint2(*(device const packed_uint2 *)p);")
+    );
+}
+
+fn inside(a: u64, n: u64) -> bool {
+    a >= GUEST_BASE && a + n <= GUEST_BASE + GUEST_LEN
+}
+
+/// `NXKIT_DIAG=pull` finds a read that leaves guest memory at the last vertex, and none for a draw that stays inside.
+#[test]
+fn the_check_finds_reads_outside_guest_memory() {
+    let end = GUEST_BASE + GUEST_LEN;
+    let d = draw(
+        vec![attr(0, 0x2E, 0, 0)],
+        vec![stream(0, end - 3 * 16, 16, 0)],
+    );
+    let b = layout(&d);
+    let ranges = model::ranges(&d, |_, _, _| None).unwrap();
+    assert_eq!(ranges, ((0, 2), (0, 0)));
+    assert!(model::check(&b, &[0], ranges, inside).is_none());
+    let more = ((0, 3), (0, 0));
+    let s = model::check(&b, &[0], more, inside).unwrap();
+    assert_eq!(
+        (s.location, s.element.address, s.element.bytes),
+        (0, end, 16)
+    );
+}
+
+#[test]
+fn indexed_draws_check_the_indices_plus_the_base_vertex() {
+    let mut d = draw(
+        vec![attr(0, 0x2E, 0, 0)],
+        vec![stream(0, GUEST_BASE, 16, 0)],
+    );
+    d.args = DrawArgs::Indexed {
+        index_type: 1,
+        address: GUEST_BASE,
+        count: 6,
+        instances: 2,
+        base_vertex: -4,
+        base_instance: 1,
+    };
+    let r = model::ranges(&d, |t, _, n| {
+        assert_eq!((t, n), (1, 6));
+        Some((4, 9))
+    });
+    assert_eq!(r, Some(((0, 5), (1, 2))));
+    assert_eq!(model::ranges(&d, |_, _, _| None), None);
+}
+
+#[test]
+fn the_index_range_skips_restart_indices_but_not_widened_bytes() {
+    assert_eq!(index_range(0, &[3, 0xff, 1]), Some((1, 0xff)));
+    assert_eq!(index_range(1, &[2, 0, 0xff, 0xff, 7, 0]), Some((2, 7)));
+    let mut b = Vec::new();
+    for i in [u32::MAX, 5, 9] {
+        b.extend(i.to_le_bytes());
+    }
+    assert_eq!(index_range(2, &b), Some((5, 9)));
+    assert_eq!(index_range(1, &[0xff, 0xff]), None);
+    assert_eq!(index_range(0, &[]), None);
+}
+
+/// Pulling stays off unless `NXKIT_PULL=1`.
+#[test]
+fn pulling_is_off_unless_asked_for() {
+    assert!(!enabled(None));
+    assert!(!enabled(Some("0")));
+    assert!(!enabled(Some("")));
+    assert!(enabled(Some("1")));
 }

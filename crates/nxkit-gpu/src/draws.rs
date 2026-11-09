@@ -256,10 +256,12 @@ pub(crate) fn prepare(
         }
     }
     if vs.pull {
-        streams.push((
-            crate::pull::SLOT,
-            put_layout(sink, &crate::pull::layout(d))?,
-        ));
+        let block = crate::pull::layout(d);
+        if crate::diag("pull") {
+            let inputs: Vec<u32> = vs.inputs.iter().map(|(l, _)| *l).collect();
+            crate::pull::diag_draw(sh, d, &inputs, &block);
+        }
+        streams.push((crate::pull::SLOT, put_layout(sink, &block)?));
     } else if translate::needs_default_vertex(d, &vs.inputs) {
         streams.push((translate::DEFAULT_VERTEX_SLOT, sink.put(&[0; 16])?));
     }

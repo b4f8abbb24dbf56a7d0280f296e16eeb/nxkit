@@ -7,12 +7,16 @@
 //! layout, so one unspecialized base per shader pair serves every layout the game draws with, and the build's archive
 //! holds it.
 //!
-//! `NXKIT_PULL=0` draws with `_b` and the stage_in vertex layout as before.
+//! Pulling is off by default until it is verified in a game (Ocarina of Time's title stalled the GPU for up to 2 s with
+//! it, see docs/diagnostics.md): `NXKIT_PULL=1` turns it on, otherwise every vertex shader draws with `_b` and the
+//! stage_in vertex layout. `NXKIT_DIAG=pull` checks the reads of pulled draws against guest memory ([`model`]).
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::detail::DrawDetail;
+
+pub(crate) mod model;
 
 /// The buffer slot of the layout block (`pull::SLOT` of the translator, `[[buffer(16)]]` of the `_bp` entry).
 pub(crate) const SLOT: u32 = 16;
@@ -35,10 +39,15 @@ pub(crate) const BYTES: usize = ATTR_OFFSET + ATTRIBUTES * 4;
 /// One layout block, as `dm_fetch` reads it.
 pub(crate) type Block = [u8; BYTES];
 
-/// Whether the host draws vertex shaders through their `_bp` library: on unless `NXKIT_PULL=0`. Read once.
+/// Whether the host draws vertex shaders through their `_bp` library: only with `NXKIT_PULL=1`. Read once.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_PULL").map_or(true, |v| v != "0"))
+    *ON.get_or_init(|| enabled(std::env::var("NXKIT_PULL").ok().as_deref()))
+}
+
+/// The value of `NXKIT_PULL` that turns pulling on: `1`. Unset, `0` or anything else keeps stage_in.
+pub(crate) fn enabled(v: Option<&str>) -> bool {
+    v == Some("1")
 }
 
 /// The attribute word of `dm_fetch`: the NVN attribute state word, format in bits 0 to 7, offset in 8 to 26, stream
@@ -105,6 +114,80 @@ pub(crate) fn take() -> (u64, u64) {
         PULLED.swap(0, Ordering::Relaxed),
         STAGE_IN.swap(0, Ordering::Relaxed),
     )
+}
+
+/// Pulled reads outside guest memory that `NXKIT_DIAG=pull` found, in total.
+static STRAYS: AtomicU64 = AtomicU64::new(0);
+
+/// `NXKIT_DIAG=pull`: checks that every element a pulled draw reads lies in guest memory, for the draws whose vertex
+/// range the host knows (arrays, and indexed draws with readable indices), and prints the first reads that do not. A
+/// read outside makes the GPU fault; the command buffer then fails (`nxkit-metal: warning: frame ... failed`).
+pub(crate) fn diag_draw(
+    sh: &crate::draws::Shared<'_>,
+    d: &DrawDetail,
+    inputs: &[u32],
+    block: &Block,
+) {
+    let indices = |index_type: u32, address: u64, count: u32| {
+        let size = 1u64 << index_type.min(2);
+        let off = sh.guest_offset(address, u64::from(count) * size)?;
+        let mut bytes = vec![0u8; (u64::from(count) * size) as usize];
+        sh.guest.read(off, &mut bytes).ok()?;
+        index_range(index_type, &bytes)
+    };
+    let Some(ranges) = model::ranges(d, indices) else {
+        return;
+    };
+    let inside = |a: u64, n: u64| sh.guest_offset(a, n).is_some();
+    if let Some(s) = model::check(block, inputs, ranges, inside) {
+        let n = STRAYS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n <= 32 {
+            let m = sh.guest.address_map();
+            eprintln!(
+                "DIAG pull stray read {n}: vs {} location {} reads {} bytes at {:#x}, guest {:#x}+{:#x}, vertices {:?} \
+                 instances {:?} args {:?} streams {:?} attributes {:?}",
+                d.program.vertex,
+                s.location,
+                s.element.bytes,
+                s.element.address,
+                m.gpu_base(),
+                m.len(),
+                ranges.0,
+                ranges.1,
+                d.args,
+                d.streams,
+                d.attributes
+            );
+        }
+    }
+}
+
+/// The lowest and highest index the GPU shades: 8-bit indices are widened to 16 bits, so 0xff is a vertex; 0xffff of
+/// 16-bit and 0xffffffff of 32-bit indices restart the strip and shade nothing. `None` without a vertex.
+pub(crate) fn index_range(index_type: u32, bytes: &[u8]) -> Option<(u32, u32)> {
+    let it: Box<dyn Iterator<Item = u32>> = match index_type {
+        0 => Box::new(bytes.iter().map(|&b| u32::from(b))),
+        1 => Box::new(
+            bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u32::from(u16::from_le_bytes(*c)))
+                .filter(|&i| i != 0xffff),
+        ),
+        _ => Box::new(
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_le_bytes(*c))
+                .filter(|&i| i != u32::MAX),
+        ),
+    };
+    it.fold(None, |r, i| match r {
+        None => Some((i, i)),
+        Some((lo, hi)) => Some((lo.min(i), hi.max(i))),
+    })
 }
 
 #[cfg(test)]
