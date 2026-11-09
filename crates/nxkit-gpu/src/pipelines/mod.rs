@@ -6,11 +6,16 @@
 //! state was. The depth and stencil state is a separate object that Metal binds per draw and not per pipeline.
 
 mod builds;
+mod prewarm;
+mod record;
 mod render;
+mod runtime;
 mod stats;
 #[cfg(test)]
 mod tests;
 
+pub use runtime::flush_runtime_cache;
+pub(crate) use runtime::plan as runtime_plan;
 pub(crate) use stats::frame_done;
 
 use std::cell::RefCell;
@@ -174,6 +179,23 @@ fn build_render(
     vertex: u64,
     desc: &mut RenderPipelineDesc<'_>,
 ) -> Result<(RenderPipeline, Source), nxkit_metal::MetalError> {
+    let built = build_render_uncounted(cache, fallbacks, key, vertex, desc);
+    if let Ok((_, source)) = &built
+        && record::armed()
+    {
+        let fb = desc.topology != TopologyClass::Point && falls_back(fallbacks, key, vertex);
+        record::render(key, vertex, fb, desc, *source);
+    }
+    built
+}
+
+fn build_render_uncounted(
+    cache: &PipelineCache,
+    fallbacks: &Mutex<FastSet<u64>>,
+    key: u64,
+    vertex: u64,
+    desc: &mut RenderPipelineDesc<'_>,
+) -> Result<(RenderPipeline, Source), nxkit_metal::MetalError> {
     if desc.topology != TopologyClass::Point && falls_back(fallbacks, key, vertex) {
         desc.topology = TopologyClass::Unspecified;
         return cache.render_traced(key ^ FALLBACK_KEY, desc);
@@ -253,9 +275,12 @@ impl Pipelines {
     pub(crate) fn compute(&self, key: &str, p: &StageProgram) -> Result<ComputePipeline, Skip> {
         let mut h = DefaultHasher::new();
         ("compute", key).hash(&mut h);
-        self.cache
-            .compute(h.finish(), &p.lib, &p.entry)
-            .map_err(|e| pipe_failed(format_args!("compute {}: {e}", p.entry)))
+        let key = h.finish();
+        let made = self.cache.compute(key, &p.lib, &p.entry);
+        if made.is_ok() {
+            record::compute(key, &p.lib, &p.entry);
+        }
+        made.map_err(|e| pipe_failed(format_args!("compute {}: {e}", p.entry)))
     }
 
     /// The depth and stencil state object of a description, made once.

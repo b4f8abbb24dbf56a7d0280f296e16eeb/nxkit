@@ -63,8 +63,8 @@ impl ShaderLibrary {
         Ok(lib)
     }
 
-    /// What the shard index names the library by.
-    pub(crate) fn stem(&self) -> Option<&str> {
+    /// What the shard index names the library by: the file stem of a `.metallib`, or the name of a source library.
+    pub fn stem(&self) -> Option<&str> {
         self.stem.as_deref()
     }
 

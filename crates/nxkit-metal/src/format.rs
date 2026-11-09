@@ -45,6 +45,9 @@ macro_rules! formats {
         }
 
         impl Format {
+            /// Every format that is not block compressed, in declaration order (for a text form that is read back).
+            pub const SIMPLE: &'static [Self] = &[$(Self::$name),+];
+
             pub(crate) fn to_mtl(self) -> MTLPixelFormat {
                 match self {
                     $(Self::$name => MTLPixelFormat::$mtl,)+

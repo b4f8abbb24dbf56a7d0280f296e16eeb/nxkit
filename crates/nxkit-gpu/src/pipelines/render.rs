@@ -281,6 +281,7 @@ impl Pipelines {
             .cache
             .mesh_traced(key, &job.desc())
             .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
+        record::mesh(key, &job.desc(), source);
         crate::coverage::record(&self.cache, source, None, &what());
         Ok((p, key))
     }

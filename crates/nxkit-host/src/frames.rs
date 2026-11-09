@@ -72,6 +72,9 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
             .unwrap_or(1.0),
         enc_thread: settings.enc_thread,
         overlap: settings.overlap,
+        // The runtime pipeline cache: what this run compiles is kept for the next start (`crate::pipecache`).
+        runtime_cache: crate::pipecache::folder(root),
+        build_id: crate::pipecache::build_id(root),
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
             Platform::Ounce => GobOrder::Switch2,
@@ -173,6 +176,7 @@ pub fn install(
     root: &Path,
     settings: &Settings,
 ) -> Result<Arc<dyn FrameHooks>> {
+    crate::sys::exitflush::install();
     let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings))
         .map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
     nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))

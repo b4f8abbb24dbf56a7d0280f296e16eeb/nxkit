@@ -52,6 +52,9 @@ pub struct ArchiveConfig {
     pub compile_bases: bool,
     /// Never specialize: look up the exact pipeline in the archive, else compile it from the functions.
     pub exact_only: bool,
+    /// Archives that the host wrote in earlier runs (the runtime cache): extra lookup archives for every compile of the
+    /// cache, beside the build's archive or shards. One that cannot be opened is reported and left out.
+    pub runtime: Vec<PathBuf>,
 }
 
 /// Where a pipeline of [`PipelineCache::render_traced`] came from, and what making it cost. A time is the whole call:
@@ -112,6 +115,8 @@ pub struct PipelineCache {
     archive: Option<Retained<ProtocolObject<dyn MTL4Archive>>>,
     /// The file of `archive` in the memory counters.
     _archive_bytes: Option<std::sync::Arc<crate::memstats::Tracked>>,
+    /// The archives of `ArchiveConfig::runtime`, which are lookup archives of every compile.
+    _runtime: Vec<shards::Open>,
     /// The shards of `shards`: asked in place of `archive`.
     shards: Option<ShardSet<shards::Open>>,
     /// A read-write lock: every encode thread looks pipelines up at once, and they are built rarely.
@@ -163,6 +168,12 @@ impl PipelineCache {
             archive_bytes = Some(open.tracked());
             loaded_archive = true;
         }
+        let runtime = shards::open_runtime(ctx, &archive.runtime);
+        if !runtime.is_empty() {
+            let mut all: Vec<_> = archive_obj.iter().cloned().collect();
+            all.extend(runtime.iter().map(|o| o.archive.clone()));
+            options.setLookupArchives(Some(&NSArray::from_retained_slice(&all)));
+        }
         Ok(Self {
             compiler,
             serializer,
@@ -172,6 +183,7 @@ impl PipelineCache {
             exact_only: archive.exact_only,
             archive: archive_obj,
             _archive_bytes: archive_bytes,
+            _runtime: runtime,
             shards: shard_set,
             entries: RwLock::new(HashMap::new()),
             hits: AtomicU64::new(0),

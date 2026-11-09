@@ -58,6 +58,20 @@ pub(crate) fn open_archive(ctx: &Context, path: &Path) -> Result<Open, String> {
     })
 }
 
+/// Opens the archives that earlier runs of the host wrote. One that fails is reported and left out.
+pub(crate) fn open_runtime(ctx: &Context, paths: &[PathBuf]) -> Vec<Open> {
+    paths
+        .iter()
+        .filter_map(|p| match open_archive(ctx, p) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                eprintln!("nxkit-metal: runtime archive {}: {e}", p.display());
+                None
+            }
+        })
+        .collect()
+}
+
 /// Opens the shard file at a path.
 type Opener<A> = Box<dyn Fn(&Path) -> Result<A, String> + Send + Sync>;
 

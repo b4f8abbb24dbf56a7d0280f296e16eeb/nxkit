@@ -59,6 +59,7 @@ mod walk;
 
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
+pub use pipelines::flush_runtime_cache;
 pub use settings::GpuSettings;
 pub use snapshot::{EncodeView, Live, Snapshot};
 pub use stats::{DrawClass, EncodeReport, EncodeStats, KindStats, Skip};
