@@ -145,10 +145,12 @@ pub struct Plan {
     pub left: [usize; 7],
 }
 
-/// `plan`: the bases of the archive, one per pair, as the host asks for them. The host draws every vertex shader with
-/// its `_b` library and its `entry` (it neither pulls vertices through `_bp` nor uses `entry_z`) and looks a base up by
-/// exactly those functions (`nxkit-metal` `cache::specialize`), so a base of `_bp` or `main0_z` was never found. A vertex
-/// shader with stage inputs needs the vertex layout of the draw, which a base cannot have, and is left out (`left[2]`).
+/// `plan`: the bases of the archive, one per pair, as the host asks for them, and the host looks a base up by exactly
+/// those functions (`nxkit-metal` `cache::specialize`). A vertex shader whose reflection has a `pull` field at slot 16
+/// is drawn through its `_bp` library and the field's `entry` (`main0` without one): it reads its inputs itself, so its
+/// pipelines have no vertex layout (`nxkit-gpu` `pull`, on unless `NXKIT_PULL=0`). Every other vertex shader is drawn
+/// with its `_b` library and its `entry`. A vertex shader with stage inputs and no `pull` field needs the vertex layout
+/// of the draw, which a base cannot have, and is left out (`left[2]`). `entry_z` is not used.
 /// `_zero` (depth mode `zero`) stays for the callers; the stamp records it.
 pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool) -> Plan {
     let mut js: HashMap<String, Option<Value>> = HashMap::new();
@@ -195,7 +197,8 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool
             Some(Value::Bool(b)) => *b,
             _ => false,
         };
-        if has_inputs {
+        let pull = pull_entry(&vj);
+        if has_inputs && pull.is_none() {
             out.left[2] += 1;
             continue;
         }
@@ -212,7 +215,10 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool
             out.left[5] += 1;
             continue;
         }
-        let vl = format!("{vk}_b");
+        let (vl, ventry) = match pull {
+            Some(e) => (format!("{vk}_bp"), Some(e)),
+            None => (format!("{vk}_b"), ventry),
+        };
         let fl = format!("{fk}_b");
         let vf = fns
             .entry(vl.clone())
@@ -251,6 +257,26 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool
         }
     }
     out
+}
+
+/// The entry of the `_bp` library that the host draws a vertex shader with: the `entry` of its `pull` field, `main0`
+/// when the field has none, `None` without a field or for a field at another slot than 16 (`nxkit-gpu`
+/// `programs::pull_entry`).
+pub fn pull_entry(vj: &Value) -> Option<String> {
+    let p = match vj.get("pull") {
+        Some(p @ Value::Object(_)) => p,
+        _ => return None,
+    };
+    if !matches!(p.get("slot"), Some(Value::Int(16))) {
+        return None;
+    }
+    Some(
+        p.get("entry")
+            .and_then(Value::as_str)
+            .filter(|e| !e.is_empty())
+            .unwrap_or("main0")
+            .to_string(),
+    )
 }
 
 /// `script`: the Metal 4 pipelines script of the bases, written as `json.dump(indent=1)` does.

@@ -2,7 +2,9 @@
 //!
 //! The shader step of the build writes `<key>_b.metallib` and `<key>_b.json` for every shader (R1, D20). The metallib
 //! holds the entry function. The JSON holds the bindings of the host contract. This module reads both, keeps them by
-//! key and rejects the programs that the encoder cannot drive. Each stage has one argument buffer at `[[buffer(0)]]`.
+//! key and rejects the programs that the encoder cannot drive. A vertex shader whose JSON has a `pull` field is loaded
+//! from its `<key>_bp.metallib` instead while pulling is on (`crate::pull`): the same bindings, an entry that reads its
+//! inputs from the layout block at buffer 16. Each stage has one argument buffer at `[[buffer(0)]]`.
 //! Member `arg_id` sits at byte `8 * arg_id` and holds a resource ID or a GPU address.
 
 use std::path::PathBuf;
@@ -179,6 +181,9 @@ pub(crate) struct StageProgram {
     pub(crate) arg_bytes: u32,
     /// The locations of the vertex inputs.
     pub(crate) inputs: Vec<(u32, VertexFormat)>,
+    /// The library is the `_bp` library of a vertex shader: it reads its inputs through the `dm_vlayout` block at
+    /// `crate::pull::SLOT` and its pipelines have no vertex layout.
+    pub(crate) pull: bool,
     /// The colour outputs that a fragment shader writes. `None` means that the reflection does not say.
     pub(crate) colors: Option<Vec<u8>>,
     /// The threadgroup size of a compute shader.
@@ -257,6 +262,11 @@ impl Programs {
         let json = parse(&text).ok_or_else(|| why("json parse"))?;
         let lib = ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_b.metallib")))
             .map_err(|e| why(&format!("metallib {e:?}")))?;
+        let pull = if vertex && crate::pull::on() {
+            self.pull_library(key, &json)
+        } else {
+            None
+        };
         if crate::diag("prog")
             && json
                 .get("raster")
@@ -267,13 +277,49 @@ impl Programs {
         {
             eprintln!("DIAG prog {key}: primitive_id");
         }
-        read_stage(&json, lib, vertex)
+        let mut p = read_stage(&json, lib, vertex)?;
+        if let Some((lib, entry)) = pull {
+            p.lib = lib;
+            p.entry = entry;
+            p.pull = true;
+        }
+        Ok(p)
+    }
+
+    /// The `_bp` library of a vertex shader and its entry, when the JSON has a `pull` field (the step removes the
+    /// field when `_bp` did not compile). A library that does not load leaves the shader on `_b` and stage_in.
+    fn pull_library(&self, key: &str, json: &Json) -> Option<(ShaderLibrary, String)> {
+        let entry = pull_entry(json)?;
+        match ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_bp.metallib"))) {
+            Ok(lib) => Some((lib, entry)),
+            Err(e) => {
+                if crate::diag("prog") {
+                    eprintln!("DIAG prog {key}: _bp metallib {e:?}, drawn with stage_in");
+                }
+                None
+            }
+        }
     }
 }
 
+/// The entry of the `_bp` library that a `pull` field names (`main0` when the field has none), or `None` without a
+/// field or for a field at another slot than the host binds the layout block to. `nxb-archive` `plan` archives exactly
+/// this function.
+pub(crate) fn pull_entry(json: &Json) -> Option<String> {
+    let p = json.get("pull")?;
+    if p.get("slot").and_then(Json::as_i64) != Some(i64::from(crate::pull::SLOT)) {
+        return None;
+    }
+    Some(
+        p.get("entry")
+            .and_then(Json::as_str)
+            .filter(|e| !e.is_empty())
+            .unwrap_or("main0")
+            .to_owned(),
+    )
+}
+
 fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProgram, Skip> {
-    // A `pull` field names the extra `_bp` library that pulls its own vertices. The `_b` library keeps the stage_in
-    // contract, so the field changes nothing here.
     let raster = json.get("raster");
     if raster
         .and_then(|r| r.get("primitive_id"))
@@ -451,6 +497,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         binds,
         arg_bytes,
         inputs,
+        pull: false,
         colors,
         threadgroup,
         c1,

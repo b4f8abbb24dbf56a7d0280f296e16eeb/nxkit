@@ -34,12 +34,21 @@ impl Pipelines {
                 targets: targets.clone(),
                 blend: d.blend,
                 write_masks: d.write_masks,
-                attributes: d.attributes.clone(),
-                streams: d
-                    .streams
-                    .iter()
-                    .map(|s| (s.index, s.stride, s.divisor))
-                    .collect(),
+                pull: vs.pull,
+                // A pulling pipeline has no vertex layout: the memo does not keep it.
+                attributes: if vs.pull {
+                    Vec::new()
+                } else {
+                    d.attributes.clone()
+                },
+                streams: if vs.pull {
+                    Vec::new()
+                } else {
+                    d.streams
+                        .iter()
+                        .map(|s| (s.index, s.stride, s.divisor))
+                        .collect()
+                },
                 pipeline: pipeline.clone(),
                 key,
             });
@@ -122,13 +131,19 @@ impl Pipelines {
             &[],
         );
         desc.colors = color_targets(d, fs, targets);
-        desc.vertex_layout = translate::vertex_descriptor(d, &vs.inputs).map_err(|e| {
-            nxkit_nvn::diag::example(
-                nxkit_nvn::diag::Reason::SkipFormat,
-                format_args!("vertex {e:?} vs {:?}", d.program.vertex),
-            );
-            Skip::Format
-        })?;
+        // A vertex function that pulls reads the streams itself (`crate::pull`): the pipeline has no vertex layout, so
+        // one base per pair serves every layout and the archive can hold it.
+        desc.vertex_layout = if vs.pull {
+            nxkit_metal::VertexDescriptor::default()
+        } else {
+            translate::vertex_descriptor(d, &vs.inputs).map_err(|e| {
+                nxkit_nvn::diag::example(
+                    nxkit_nvn::diag::Reason::SkipFormat,
+                    format_args!("vertex {e:?} vs {:?}", d.program.vertex),
+                );
+                Skip::Format
+            })?
+        };
         desc.topology = class;
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;
@@ -143,6 +158,9 @@ impl Pipelines {
             .hash(&mut h);
         desc.colors.hash(&mut h);
         desc.vertex_layout.hash(&mut h);
+        if vs.pull {
+            "pull".hash(&mut h);
+        }
         class.hash(&mut h);
         d.raster.alpha_to_coverage.hash(&mut h);
         flat.hash(&mut h);

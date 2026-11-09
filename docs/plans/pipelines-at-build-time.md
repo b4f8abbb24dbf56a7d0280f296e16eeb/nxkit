@@ -1,6 +1,7 @@
 # Pipelines at build time: every render pipeline the game uses comes from the archive
 
-Status: plan, 2026-11-09. Nothing of it is built. Measured on Ocarina of Time (OoT) with the build and logs of
+Status: plan, 2026-11-09. Phase 1 (vertex pulling) is built in the host and the plan, not yet measured in a game (see
+"State of the pull path"); the other phases are not built. Measured on Ocarina of Time (OoT) with the build and logs of
 2026-11-09 (chain `71c2f44e5744`, archive of 17:50, host before and after `d54f925`).
 
 ## Recommendation
@@ -74,8 +75,18 @@ State of the pull path:
   with the base instance, and unaligned bases (low bits move into the attribute offset). `vin_tests.rs` covers it.
 - Build: `_bp.metallib` exists for all 10 950 shaders. The 17:50 archive already compiled `_bp` bases for all 33 365
   non-mesh pairs, so the archive cost is known (see the table).
-- Host: does not use it. `programs.rs` loads `_b` only ("the field changes nothing here"); `plan.rs` (since `d54f925`)
-  archives `_b` and leaves pairs with stage inputs out.
+- Host: built behind `NXKIT_PULL` (on by default; `NXKIT_PULL=0` draws with stage_in). `programs.rs` loads
+  `<key>_bp.metallib` and the `pull` field's entry for a vertex shader with a `pull` field at slot 16
+  (`StageProgram::pull`); a `_bp` that does not load keeps `_b`. `pull/mod.rs` writes the 320-byte block per draw from
+  `DrawDetail::streams` / `attributes` (the stream address is already the host GPU address of the guest buffer),
+  `draws.rs` puts it into the sink (shared through the pass's `ArgsMemo` while unchanged) and binds it at 16 in place
+  of the streams and the default vertex; ICB draws take it from their arena (`icbs.rs`). The pipeline key and
+  `LAST_PIPELINE` leave the layout out for pulling vertex functions; the descriptor has an empty layout. The `pipe`
+  line counts `draws pulled` and `stage_in`. Mesh draws are unchanged; the host has no transform feedback path.
+- Plan: `plan.rs` archives `(<vk>_bp, pull.entry)` for a vertex shader with a `pull` field at slot 16, `(<vk>_b,
+  entry)` otherwise; `left[2]` now counts only shaders with inputs that cannot pull.
+- Open: the pixel test (pull vs stage_in per format class, divisor, stride 0, unaligned base) and the GPU cost
+  measurement; the tests of this phase check the block against `dm_fetch.metal`'s struct and table, not pixels.
 
 Host work:
 

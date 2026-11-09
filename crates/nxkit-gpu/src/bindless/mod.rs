@@ -109,6 +109,8 @@ pub(crate) trait Sink {
 #[derive(Default)]
 pub(crate) struct ArgsMemo {
     stages: [StageMemo; 2],
+    /// The layout block of the last pulled draw and its address (`crate::pull`).
+    layout: Option<(crate::pull::Block, u64)>,
 }
 
 /// The last argument buffer of one stage, with the words that describe what it was built from.
@@ -162,6 +164,19 @@ impl ArgsMemo {
         std::mem::swap(&mut m.last, &mut m.next);
         m.valid = false;
         None
+    }
+
+    /// The address of `block` when the last pulled draw put the same block.
+    pub(crate) fn layout(&self, block: &crate::pull::Block) -> Option<u64> {
+        self.layout
+            .as_ref()
+            .filter(|(b, _)| b == block)
+            .map(|(_, a)| *a)
+    }
+
+    /// Records the address of the layout block that a pulled draw put.
+    pub(crate) fn store_layout(&mut self, block: &crate::pull::Block, addr: u64) {
+        self.layout = Some((*block, addr));
     }
 
     /// Records the buffer that was built after a miss of [`ArgsMemo::lookup`].

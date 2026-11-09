@@ -187,8 +187,11 @@ pub(crate) struct Prep {
     pub(crate) fragment_args: Option<u64>,
     /// The argument buffer of the task shader of a mesh draw.
     pub(crate) object_args: Option<u64>,
-    /// The buffer slot and guest GPU address of each vertex stream.
+    /// The buffer slot and guest GPU address of each vertex stream. For a pulled draw only the layout block at
+    /// `pull::SLOT`, an address in the sink like the default vertex at `translate::DEFAULT_VERTEX_SLOT`.
     pub(crate) streams: Vec<(u32, u64)>,
+    /// The vertex function pulls its inputs (`crate::pull`).
+    pub(crate) pulled: bool,
     pub(crate) cull: CullMode,
     pub(crate) winding: Winding,
     pub(crate) fill: FillMode,
@@ -248,11 +251,19 @@ pub(crate) fn prepare(
                 m.len()
             )));
         }
-        streams.push((translate::stream_slot(s.index), s.address));
+        if !vs.pull {
+            streams.push((translate::stream_slot(s.index), s.address));
+        }
     }
-    if translate::needs_default_vertex(d, &vs.inputs) {
+    if vs.pull {
+        streams.push((
+            crate::pull::SLOT,
+            put_layout(sink, &crate::pull::layout(d))?,
+        ));
+    } else if translate::needs_default_vertex(d, &vs.inputs) {
         streams.push((translate::DEFAULT_VERTEX_SLOT, sink.put(&[0; 16])?));
     }
+    crate::pull::count(vs.pull);
     let inputs = |stage| StageInputs {
         stage,
         ubos: &d.ubos,
@@ -283,6 +294,7 @@ pub(crate) fn prepare(
         fragment_args,
         object_args: None,
         streams,
+        pulled: vs.pull,
         cull: f.cull,
         winding: f.winding,
         fill: f.fill,
@@ -290,6 +302,19 @@ pub(crate) fn prepare(
         clip: f.clip,
         geom,
     })
+}
+
+/// The address of the layout block of a pulled draw. The draws of a pass that keep their vertex state share one copy
+/// through the sink's memo.
+fn put_layout(sink: &mut dyn Sink, block: &crate::pull::Block) -> Result<u64, Skip> {
+    if let Some(a) = sink.memo().and_then(|m| m.layout(block)) {
+        return Ok(a);
+    }
+    let a = sink.put(block)?;
+    if let Some(m) = sink.memo() {
+        m.store_layout(block, a);
+    }
+    Ok(a)
 }
 
 /// The cull mode of a draw. NVN culls both faces with `FRONT_AND_BACK`, which Metal cannot.

@@ -2,7 +2,8 @@
 //!
 //! The line tells where a backlog of `skip.pending` comes from: how many draws waited, how many jobs were queued, how
 //! many wait and compile now, and what each kind of pipeline creation cost (an exact archive hit, a specialization of
-//! an unspecialized pipeline, a compile from the functions) with its mean and longest time in the window.
+//! an unspecialized pipeline, a compile from the functions) with its mean and longest time in the window, then how
+//! many vertex draws were prepared with pulled vertices and with the stage_in layout in the window (`crate::pull`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -123,6 +124,8 @@ fn line() -> String {
             out.push_str(&format!(" {kind} 0"));
         }
     }
+    let (pulled, stage_in) = crate::pull::take();
+    out.push_str(&format!(" | draws pulled {pulled} stage_in {stage_in}"));
     let cache = CACHE
         .lock()
         .unwrap_or_else(PoisonError::into_inner)

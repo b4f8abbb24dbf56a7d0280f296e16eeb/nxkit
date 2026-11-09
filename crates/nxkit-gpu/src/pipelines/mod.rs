@@ -1,9 +1,10 @@
 //! Pipelines keyed by their translated state (R1, R17).
 //!
 //! The key is a hash of everything that goes into the Metal pipeline descriptor: the two shader keys, the colour
-//! targets with their blend state and write mask, the vertex layout, the topology class, the sample count and the
-//! alpha-to-coverage flag. Two draws with the same translated state share one pipeline, however different their NVN
-//! state was. The depth and stencil state is a separate object that Metal binds per draw and not per pipeline.
+//! targets with their blend state and write mask, the vertex layout (none when the vertex function pulls its inputs,
+//! `crate::pull`), the topology class, the sample count and the alpha-to-coverage flag. Two draws with the same
+//! translated state share one pipeline, however different their NVN state was. The depth and stencil state is a
+//! separate object that Metal binds per draw and not per pipeline.
 
 mod builds;
 mod prewarm;
@@ -76,6 +77,8 @@ struct Last {
     targets: Targets,
     blend: [BlendDetail; 8],
     write_masks: [u8; 8],
+    /// The vertex function pulls: the attributes and streams are not part of the pipeline and stay empty.
+    pull: bool,
     attributes: Vec<AttributeDetail>,
     /// The index, stride and divisor of each stream. The address does not matter for the pipeline.
     streams: Vec<(u32, u32, u32)>,
@@ -93,13 +96,14 @@ impl Last {
             && self.blend == d.blend
             && self.program == d.program
             && self.targets == *targets
-            && self.attributes == d.attributes
-            && self.streams.len() == d.streams.len()
-            && self
-                .streams
-                .iter()
-                .zip(&d.streams)
-                .all(|(m, s)| *m == (s.index, s.stride, s.divisor))
+            && (self.pull
+                || self.attributes == d.attributes
+                    && self.streams.len() == d.streams.len()
+                    && self
+                        .streams
+                        .iter()
+                        .zip(&d.streams)
+                        .all(|(m, s)| *m == (s.index, s.stride, s.divisor)))
     }
 }
 
