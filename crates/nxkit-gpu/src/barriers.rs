@@ -9,7 +9,7 @@
 //! A barrier after queue stages also covers the passes of earlier command buffers on the same queue. This is assumed
 //! from the Metal 4 documentation and is not verified on hardware.
 
-use crate::draws::FastMap;
+use crate::draws::{FastMap, FastSet};
 
 use nxkit_metal::{Dependency, Scope, Stages, Visibility};
 use nxkit_nvn::frame::{Cmd, Frame};
@@ -67,7 +67,7 @@ mod tests {
         let mut state = BarrierState::default();
         state.seed(TexId(1), Stages::FRAGMENT);
         let aliases: FastMap<TexId, TexId> = [(TexId(2), TexId(1))].into_iter().collect();
-        let barriers = state.plan(&frame, &plan, &aliases, &[], &[]);
+        let barriers = state.plan(&frame, &plan, &aliases, &[], &[], &FastSet::default());
         assert_eq!(barriers.emitted, 1);
         let dep = barriers.before[0].unwrap();
         assert_eq!(dep.after, Stages::FRAGMENT);
@@ -127,7 +127,14 @@ mod tests {
             state.seed(TexId(0), Stages::FRAGMENT);
             let mut vs = vec![false; plan.passes.len()];
             vs[render] = vertex;
-            let barriers = state.plan(&frame, &plan, &FastMap::default(), &vs, &[]);
+            let barriers = state.plan(
+                &frame,
+                &plan,
+                &FastMap::default(),
+                &vs,
+                &[],
+                &FastSet::default(),
+            );
             assert_eq!(barriers.before[render].unwrap().before, want);
         }
     }
@@ -229,6 +236,7 @@ impl BarrierState {
         aliases: &FastMap<TexId, TexId>,
         vertex_samples: &[bool],
         images: &[crate::images::PassImages],
+        blit_written: &FastSet<TexId>,
     ) -> BarrierPlan {
         let mut out = BarrierPlan::default();
         let mut first = true;
@@ -342,14 +350,15 @@ impl BarrierState {
                 let id = aliases.get(id).unwrap_or(id);
                 let h = self.pending.entry(*id).or_default();
                 h.last = Some(index);
-                h.write = join(
-                    h.write,
-                    if p.kind == PassKind::Render {
-                        Stages::FRAGMENT
-                    } else {
-                        mine
-                    },
-                );
+                // A render pass writes a compressed attachment through a block shadow and a blit after the pass.
+                let stages = match p.kind {
+                    PassKind::Render if blit_written.contains(id) => {
+                        Stages::FRAGMENT | Stages::BLIT
+                    }
+                    PassKind::Render => Stages::FRAGMENT,
+                    _ => mine,
+                };
+                h.write = join(h.write, stages);
             }
             for id in &t.reads {
                 let id = aliases.get(id).unwrap_or(id);
