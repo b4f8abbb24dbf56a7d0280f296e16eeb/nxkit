@@ -237,13 +237,10 @@ impl FrameStep {
         // adaptive screen, and a longer hold makes neither shorter (Ocarina of Time stepped from 30 to 20 fps at a cost
         // of 0.71 vsyncs on a ProMotion screen). A hitch is paid back and not counted.
         let late = if self.work {
-            let hitch = input.cost > hk + FSTEP_HITCH;
-            !hitch
-                && match screen {
-                    Screen::Unjudged => input.cost > hk + FSTEP_LATE,
-                    Screen::Late => true,
-                    Screen::OnTime => false,
-                }
+            // Only the work: the screen's verdict (a present shown later than planned) is not the frame's cost either,
+            // and on a ProMotion screen it said late for frames of 0.17 vsyncs.
+            let _ = screen;
+            input.cost > hk + FSTEP_LATE && input.cost <= hk + FSTEP_HITCH
         } else {
             match screen {
                 Screen::Unjudged => {
