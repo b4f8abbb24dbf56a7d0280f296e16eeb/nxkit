@@ -298,20 +298,46 @@ pub(crate) fn gpu_labels() -> bool {
 }
 
 /// `NXKIT_SKIP_PROGRAMS=<key>,<key>`: dispatches whose compute shader has one of these keys are not run. A debugging aid
-/// to find which pass of a chain turns a picture black.
+/// to find which pass of a chain turns a picture black, or which pass costs the GPU time.
+///
+/// `NXKIT_SKIP_FILE=<path>` does the same with the keys in a file (comma or line separated), read again twice a
+/// second, so one run can measure one program after the other while the game stays in the same scene.
 pub(crate) fn skipped_program(key: &str) -> bool {
-    static KEYS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    use std::time::{Duration, Instant};
+    fn parse(v: &str) -> Vec<String> {
+        v.split([',', '\n'])
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .collect()
+    }
+    static KEYS: OnceLock<Vec<String>> = OnceLock::new();
     let keys = KEYS.get_or_init(|| {
         std::env::var("NXKIT_SKIP_PROGRAMS")
-            .map(|v| {
-                v.split(',')
-                    .map(|k| k.trim().to_string())
-                    .filter(|k| !k.is_empty())
-                    .collect()
-            })
+            .map(|v| parse(&v))
             .unwrap_or_default()
     });
-    !keys.is_empty() && keys.iter().any(|k| k == key)
+    if keys.iter().any(|k| k == key) {
+        return true;
+    }
+    static FILE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    let Some(path) = FILE.get_or_init(|| std::env::var_os("NXKIT_SKIP_FILE").map(Into::into))
+    else {
+        return false;
+    };
+    static READ: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+    let mut read = READ.lock().unwrap_or_else(PoisonError::into_inner);
+    let stale = read
+        .as_ref()
+        .is_none_or(|(at, _)| at.elapsed() > Duration::from_millis(500));
+    if stale {
+        let keys = std::fs::read_to_string(path)
+            .map(|v| parse(&v))
+            .unwrap_or_default();
+        *read = Some((Instant::now(), keys));
+    }
+    read.as_ref()
+        .is_some_and(|(_, keys)| keys.iter().any(|k| k == key))
 }
 
 #[cfg(test)]
