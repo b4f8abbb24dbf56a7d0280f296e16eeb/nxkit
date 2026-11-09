@@ -422,7 +422,11 @@ impl TextureStore {
         }
         self.used(r.generation, rec.residency == Residency::GpuNewer);
         self.made_again(id);
-        self.remade_after_supersede(id);
+        self.remade_after_supersede(
+            id,
+            (r.desc.format, r.desc.width, r.desc.height),
+            rec.residency == Residency::GpuNewer,
+        );
         Ok(r)
     }
 

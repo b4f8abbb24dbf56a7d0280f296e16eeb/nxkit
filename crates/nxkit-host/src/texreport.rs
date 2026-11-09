@@ -20,7 +20,9 @@
 //!   frames since the last use, in the buckets of `idle` (the MiB are of the distinct textures behind them), the
 //!   number of distinct (format, width, height) among them, and the overlap line of `dup` split into attachment
 //!   entries and all others, then `superseded` (Metal textures dropped because another texture overwrote their guest
-//!   memory, count/MiB, in total) and `remade` (ids that got a Metal texture again after that).
+//!   memory, count/MiB, in total) and `remade` (ids that got a Metal texture again after that). A further line, `tex remade`, follows when
+//!   any id was remade: the total and the shapes (format, size) with the most remakes, each as `count/gpu-newer`
+//!   (`gpu-newer`: the newest content was only on the GPU, so the new texture got no upload).
 //! - `nxkit-mem tex largest`: the largest Metal textures, one `format WxHxD/layers mips scale class MiB idle`.
 //! - `nxkit-mem texlife`: the life of the texture records of the NVN front end (`nxkit_nvn::texlife`): the calls of
 //!   `nvnTextureInitialize` and how many of them shared a record or took an orphan back, the finalizes that dropped the
@@ -155,6 +157,24 @@ fn attach_line(i: &Inventory) -> String {
     )
 }
 
+/// The line of the remade textures by shape, or `None` when no texture was remade.
+fn remade_line(i: &Inventory) -> Option<String> {
+    if i.remade == 0 {
+        return None;
+    }
+    let mut s = format!(
+        "nxkit-mem tex remade (count, of them gpu-newer): total {}/{}",
+        i.remade, i.remade_gpu_newer
+    );
+    for r in &i.remade_shapes {
+        s += &format!(
+            " | {} {}x{} {}/{}",
+            r.format, r.width, r.height, r.count, r.gpu_newer
+        );
+    }
+    Some(s)
+}
+
 fn largest_line(i: &Inventory) -> String {
     let mut s = String::from("nxkit-mem tex largest (MiB):");
     for (k, l) in i.largest.iter().enumerate() {
@@ -177,7 +197,7 @@ fn largest_line(i: &Inventory) -> String {
 
 /// The texture lines for an inventory. `process_bytes` is `texture_bytes` of the process.
 pub fn tex_lines(i: &Inventory, process_bytes: u64) -> Vec<String> {
-    vec![
+    let mut v = vec![
         store_line(i, process_bytes),
         guest_line(i),
         formats_line(i),
@@ -185,8 +205,10 @@ pub fn tex_lines(i: &Inventory, process_bytes: u64) -> Vec<String> {
         scale_line(i),
         dup_line(i),
         attach_line(i),
-        largest_line(i),
-    ]
+    ];
+    v.extend(remade_line(i));
+    v.push(largest_line(i));
+    v
 }
 
 fn held(h: &Held) -> String {
@@ -417,6 +439,38 @@ mod tests {
                 "<=60 5/30.0 <=600 15/90.0 older 20/180.0 | shapes 4 | overlap attachment 5 entries 4 textures 40.0 MiB | overlap other 4 entries 3 textures 10.0 MiB | superseded 12/340.0 remade 3"
             ),
             "{l}"
+        );
+    }
+
+    #[test]
+    fn the_remade_line_lists_the_shapes_and_is_absent_without_remakes() {
+        use nxkit_gpu::inventory::RemadeShape;
+        let mut i = sample();
+        i.remade = 0;
+        assert_eq!(remade_line(&i), None);
+        i.remade = 17;
+        i.remade_gpu_newer = 12;
+        i.remade_shapes = vec![
+            RemadeShape {
+                format: "Rg11B10Float".into(),
+                width: 1536,
+                height: 864,
+                count: 12,
+                gpu_newer: 12,
+            },
+            RemadeShape {
+                format: "R8Unorm".into(),
+                width: 768,
+                height: 432,
+                count: 5,
+                gpu_newer: 0,
+            },
+        ];
+        assert_eq!(
+            remade_line(&i).as_deref(),
+            Some(
+                "nxkit-mem tex remade (count, of them gpu-newer): total 17/12 | Rg11B10Float 1536x864 12/12 | R8Unorm 768x432 5/0"
+            )
         );
     }
 

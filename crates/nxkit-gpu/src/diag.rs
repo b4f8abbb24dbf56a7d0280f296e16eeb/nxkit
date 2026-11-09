@@ -94,6 +94,9 @@ const KNOBS: &[&str] = &[
     "rc3d",
     // A Metal texture that the frame made new and that gets no upload is cleared to zero before the frame uses it.
     "freshzero",
+    // The supersede rule of the texture store is off, the same as `NXKIT_TEX_SUPERSEDE=0`, switched while the game
+    // runs, to compare both at one place.
+    "nosupersede",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

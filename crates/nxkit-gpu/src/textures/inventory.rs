@@ -126,6 +126,21 @@ pub struct ClassTotal {
     pub guest_bytes: u64,
 }
 
+/// The ids that got a Metal texture again after their texture was superseded, for one shape of the new texture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemadeShape {
+    /// The Metal format as `Debug` prints it.
+    pub format: String,
+    /// The width of level 0 in pixels.
+    pub width: u32,
+    /// The height of level 0 in pixels.
+    pub height: u32,
+    /// The remade ids.
+    pub count: u64,
+    /// The remade ids whose newest content was only on the GPU (the new texture got no upload).
+    pub gpu_newer: u64,
+}
+
 /// One of the largest Metal textures.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Largest {
@@ -202,12 +217,19 @@ pub struct Inventory {
     pub superseded: Total,
     /// The ids that got a Metal texture again after their texture was superseded.
     pub remade: u64,
+    /// The shapes of the remade textures, the most remade first (at most [`REMADE_SHAPES`]). Cumulative like `remade`.
+    pub remade_shapes: Vec<RemadeShape>,
+    /// The remakes with the newest content only on the GPU, all shapes. Cumulative.
+    pub remade_gpu_newer: u64,
     /// The largest Metal textures, largest first (at most [`LARGEST`]).
     pub largest: Vec<Largest>,
 }
 
 /// How many of the largest textures are kept.
 pub const LARGEST: usize = 8;
+
+/// How many shapes of remade textures the inventory lists.
+pub const REMADE_SHAPES: usize = 8;
 
 /// One Metal texture, for [`build`].
 pub(super) struct Tex {
@@ -488,6 +510,7 @@ impl TextureStore {
             .len() as u64;
         let mut inv = build(self.frame, &texs, &spans, views, shadows, retired);
         (inv.superseded, inv.remade) = (self.sup.dropped, self.sup.remade);
+        (inv.remade_shapes, inv.remade_gpu_newer) = self.sup.remade_shapes(REMADE_SHAPES);
         *LATEST.lock().unwrap_or_else(PoisonError::into_inner) = Some(inv);
     }
 }

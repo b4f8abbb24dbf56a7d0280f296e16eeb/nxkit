@@ -17,7 +17,8 @@
 //! 5. No id of Y is read back by the CPU. Memoryless textures hold no memory and are left alone.
 //!
 //! A texture that a frame used again after the write has a `last_frame` that is not older than the write and stays:
-//! the game treats both as alive. `NXKIT_TEX_SUPERSEDE=0` turns the rule off.
+//! the game treats both as alive. `NXKIT_TEX_SUPERSEDE=0` turns the rule off, and so does the knob `nosupersede`
+//! (switched while the game runs).
 //!
 //! The decision is [`superseded`], a pure function over one [`Span`] per Metal texture. The store runs it in the scan
 //! of `end_frame`, every [`SCAN_EVERY`] frames, as a batch.
@@ -128,6 +129,17 @@ pub(super) struct State {
     ids: FastSet<TexId>,
     /// The ids that got a Metal texture again after that.
     pub(super) remade: u64,
+    /// The remade ids by shape (format, width, height).
+    shapes: FastMap<(nxkit_metal::Format, u32, u32), ShapeCount>,
+}
+
+/// The remade ids of one shape.
+#[derive(Clone, Copy, Default)]
+struct ShapeCount {
+    /// All of them.
+    remade: u64,
+    /// The ones whose newest content was only on the GPU: the new Metal texture got no upload.
+    gpu_newer: u64,
 }
 
 impl State {
@@ -140,6 +152,39 @@ impl State {
         }
     }
 
+    /// Counts the id in `shape` when it was superseded and not made again yet.
+    fn count_remade(&mut self, id: TexId, shape: (nxkit_metal::Format, u32, u32), gpu_newer: bool) {
+        if self.ids.remove(&id) {
+            self.remade += 1;
+            let c = self.shapes.entry(shape).or_default();
+            c.remade += 1;
+            c.gpu_newer += u64::from(gpu_newer);
+        }
+    }
+
+    /// The remade shapes, the most remade first (at most `max`), and the total of remakes with `gpu_newer`.
+    pub(super) fn remade_shapes(&self, max: usize) -> (Vec<inventory::RemadeShape>, u64) {
+        let mut v: Vec<inventory::RemadeShape> = self
+            .shapes
+            .iter()
+            .map(|(&(format, width, height), c)| inventory::RemadeShape {
+                format: format!("{format:?}"),
+                width,
+                height,
+                count: c.remade,
+                gpu_newer: c.gpu_newer,
+            })
+            .collect();
+        v.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| a.format.cmp(&b.format))
+                .then_with(|| (a.width, a.height).cmp(&(b.width, b.height)))
+        });
+        v.truncate(max);
+        (v, self.shapes.values().map(|c| c.gpu_newer).sum())
+    }
+
     /// Forgets the id: the game made the texture again, so it is not "superseded and waiting" any more.
     pub(super) fn forget(&mut self, id: TexId) {
         self.ids.remove(&id);
@@ -150,7 +195,8 @@ impl TextureStore {
     /// Drops the Metal textures that another texture overwrote (see the module). Runs every [`SCAN_EVERY`] frames.
     /// Returns how many Metal textures it dropped; they are in `retired`.
     pub(super) fn supersede_scan(&mut self) -> usize {
-        if !self.sup.enabled || !self.frame.is_multiple_of(SCAN_EVERY) {
+        if !self.sup.enabled || !self.frame.is_multiple_of(SCAN_EVERY) || crate::knob("nosupersede")
+        {
             return 0;
         }
         let mut spans: FastMap<u64, Span> = FastMap::default();
@@ -220,11 +266,15 @@ impl TextureStore {
         counted.len()
     }
 
-    /// Counts the id when it gets a Metal texture again after its texture was superseded.
-    pub(super) fn remade_after_supersede(&mut self, id: TexId) {
-        if self.sup.ids.remove(&id) {
-            self.sup.remade += 1;
-        }
+    /// Counts the id when it gets a Metal texture again after its texture was superseded, and counts it in the shape
+    /// of the new texture. `gpu_newer`: the newest content was only on the GPU, so the new texture got no upload.
+    pub(super) fn remade_after_supersede(
+        &mut self,
+        id: TexId,
+        shape: (nxkit_metal::Format, u32, u32),
+        gpu_newer: bool,
+    ) {
+        self.sup.count_remade(id, shape, gpu_newer);
     }
 }
 
@@ -415,6 +465,36 @@ mod tests {
         // The latest write wins the credit.
         assert!(v.iter().any(|v| v.victim == 1 && v.by == 3));
         assert!(v.iter().any(|v| v.victim == 2 && v.by == 3));
+    }
+
+    #[test]
+    fn a_remade_id_counts_in_its_shape() {
+        use nxkit_metal::Format;
+        let mut s = State::default();
+        let a = (Format::R8Unorm, 768, 432);
+        let b = (Format::Rg11B10Float, 1536, 864);
+        for id in [1, 2, 3] {
+            s.ids.insert(TexId(id));
+        }
+        s.count_remade(TexId(1), a, false);
+        s.count_remade(TexId(2), a, true);
+        s.count_remade(TexId(3), b, true);
+        // Not superseded: not counted. Remade once: not counted twice.
+        s.count_remade(TexId(9), a, true);
+        s.count_remade(TexId(1), a, true);
+        assert_eq!(s.remade, 3);
+        let (v, g) = s.remade_shapes(8);
+        assert_eq!(g, 2);
+        assert_eq!(v.len(), 2);
+        assert_eq!(
+            (v[0].format.as_str(), v[0].count, v[0].gpu_newer),
+            ("R8Unorm", 2, 1)
+        );
+        assert_eq!(
+            (v[1].format.as_str(), v[1].count, v[1].gpu_newer),
+            ("Rg11B10Float", 1, 1)
+        );
+        assert_eq!(s.remade_shapes(1).0.len(), 1);
     }
 
     #[test]
