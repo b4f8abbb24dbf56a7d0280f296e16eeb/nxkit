@@ -17,7 +17,7 @@ use rav1d::src::lib::{
     dav1d_get_picture, dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
 
-use crate::av1::{Layout, Planar};
+use crate::planar::{Layout, Planar};
 
 /// How often one temporal unit is offered to the decoder. A unit is taken at once, so this only stops a loop that
 /// never ends.
