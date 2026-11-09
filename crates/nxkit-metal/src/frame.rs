@@ -6,6 +6,7 @@
 
 use std::any::Any;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
@@ -265,6 +266,18 @@ impl Frame {
                     gpu_end_s: end,
                     failed: fb.error().is_some(),
                 };
+                // The batches print their failures (`batch.rs`); a frame (the present blit) did not, so a GPU fault
+                // there left no line in the log.
+                if let Some(e) = fb.error() {
+                    static SHOWN: AtomicUsize = AtomicUsize::new(0);
+                    if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
+                        eprintln!(
+                            "nxkit-metal: warning: frame {number} command buffer failed: {} {:?}",
+                            e.localizedDescription(),
+                            e.userInfo()
+                        );
+                    }
+                }
                 if let Ok(mut k) = keep.lock() {
                     k.take();
                 }

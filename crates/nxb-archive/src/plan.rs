@@ -148,7 +148,7 @@ pub struct Plan {
 /// `plan`: the bases of the archive, one per pair, as the host asks for them, and the host looks a base up by exactly
 /// those functions (`nxkit-metal` `cache::specialize`). A vertex shader whose reflection has a `pull` field at slot 16
 /// is drawn through its `_bp` library and the field's `entry` (`main0` without one): it reads its inputs itself, so its
-/// pipelines have no vertex layout (`nxkit-gpu` `pull`, on unless `NXKIT_PULL=0`). Every other vertex shader is drawn
+/// pipelines have no vertex layout (`nxkit-gpu` `pull`, on with `NXKIT_PULL=1`). Every other vertex shader is drawn
 /// with its `_b` library and its `entry`. A vertex shader with stage inputs and no `pull` field needs the vertex layout
 /// of the draw, which a base cannot have, and is left out (`left[2]`). `entry_z` is not used.
 /// `_zero` (depth mode `zero`) stays for the callers; the stamp records it.
