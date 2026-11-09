@@ -13,8 +13,8 @@ use rav1d::include::dav1d::headers::{
 };
 use rav1d::include::dav1d::picture::Dav1dPicture;
 use rav1d::src::lib::{
-    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture,
-    dav1d_open, dav1d_picture_unref, dav1d_send_data,
+    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_flush,
+    dav1d_get_picture, dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
 
 use crate::av1::{Layout, Planar};
@@ -22,6 +22,23 @@ use crate::av1::{Layout, Planar};
 /// How often one temporal unit is offered to the decoder. A unit is taken at once, so this only stops a loop that
 /// never ends.
 const MAX_SENDS: usize = 64;
+
+/// The most threads a streaming decoder gets.
+const MAX_THREADS: usize = 16;
+
+/// The worker threads of a streaming decoder: all cores, up to 16.
+fn stream_threads() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| n.get().min(MAX_THREADS))
+}
+
+/// The frames that rav1d decodes at once for `threads` worker threads: `ceil(sqrt(threads))`, at most 8.
+fn frame_delay(threads: usize) -> usize {
+    let mut n = 1;
+    while n * n < threads {
+        n += 1;
+    }
+    n.clamp(1, 8)
+}
 
 /// A rav1d decoder.
 pub(crate) struct Dav1d {
@@ -35,15 +52,32 @@ unsafe impl Send for Dav1d {}
 impl Dav1d {
     /// Opens a decoder that gives one picture for each temporal unit before `decode` returns.
     pub(crate) fn open() -> Result<Dav1d, String> {
+        Dav1d::open_with(
+            std::thread::available_parallelism().map_or(2, |n| n.get().min(8)),
+            1,
+        )
+    }
+
+    /// The frames in flight of a decoder from [`Dav1d::open_streaming`].
+    pub(crate) fn streaming_delay() -> usize {
+        frame_delay(stream_threads())
+    }
+
+    /// Opens a decoder for a worker thread: all cores up to 16 and frame threading. A picture comes out of
+    /// [`Dav1d::send`] only when the ring of frames wraps, and otherwise from [`Dav1d::wait`].
+    pub(crate) fn open_streaming() -> Result<Dav1d, String> {
+        Dav1d::open_with(stream_threads(), Dav1d::streaming_delay())
+    }
+
+    fn open_with(threads: usize, delay: usize) -> Result<Dav1d, String> {
         let mut settings = std::mem::MaybeUninit::<Dav1dSettings>::uninit();
         // SAFETY: the pointer is valid for a write of one `Dav1dSettings`, which the call fills.
         unsafe { dav1d_default_settings(NonNull::from(&mut settings).cast()) };
         // SAFETY: `dav1d_default_settings` wrote every field.
         let mut settings = unsafe { settings.assume_init() };
-        let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(8));
         settings.n_threads = threads as c_int;
-        // One frame at a time: the picture of a unit is out before the send returns.
-        settings.max_frame_delay = 1;
+        // With one frame the picture of a unit is out before the send returns.
+        settings.max_frame_delay = delay as c_int;
         // Only the highest spatial layer.
         settings.all_layers = 0;
 
@@ -110,6 +144,89 @@ impl Dav1d {
         }
         Ok(shown)
     }
+
+    /// Sends one temporal unit with the timestamp `ts`. The pictures that come out because of it go to `out`, each
+    /// with its own timestamp. With frame threads that is usually the picture of an earlier unit, and none at all
+    /// for the first units. It never waits for a frame in flight, except that rav1d waits for a free frame slot.
+    ///
+    /// One `dav1d_get_picture` follows each send: a second call without a send in between would drain and block.
+    pub(crate) fn send(
+        &mut self,
+        unit: &[u8],
+        ts: i64,
+        out: &mut Vec<Picture>,
+    ) -> Result<(), String> {
+        let Some(ctx) = self.ctx else {
+            return Err("the decoder is closed".to_string());
+        };
+        if unit.is_empty() {
+            return Ok(());
+        }
+        let mut data = Dav1dData::default();
+        // SAFETY: `data` is valid for a write. The call allocates `unit.len()` bytes for it.
+        let buf = unsafe { dav1d_data_create(Some(NonNull::from(&mut data)), unit.len()) };
+        let Some(buf) = NonNull::new(buf) else {
+            return Err("dav1d has no memory for a packet".to_string());
+        };
+        // SAFETY: `buf` points at `unit.len()` writable bytes that nothing else uses.
+        unsafe { std::ptr::copy_nonoverlapping(unit.as_ptr(), buf.as_ptr(), unit.len()) };
+        data.m.timestamp = ts;
+        let mut sends = 0;
+        while data.sz > 0 {
+            sends += 1;
+            if sends > MAX_SENDS {
+                // SAFETY: `data` holds the unit that the decoder did not take.
+                unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) };
+                return Err("dav1d took no more data".to_string());
+            }
+            // SAFETY: `ctx` is open, `data` is a unit that `dav1d_data_create` made.
+            let r = unsafe { dav1d_send_data(Some(ctx), Some(NonNull::from(&mut data))) };
+            if r.0 != 0 && !would_block(r.0) {
+                // SAFETY: as above. The decoder keeps the data when it refuses it.
+                unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) };
+                return Err(format!("dav1d refused a packet (code {})", r.0));
+            }
+            if let Some(pic) = self.get()? {
+                out.push(pic);
+            }
+        }
+        Ok(())
+    }
+
+    /// One `dav1d_get_picture`. `Ok(None)` for `EAGAIN`.
+    fn get(&self) -> Result<Option<Picture>, String> {
+        let Some(ctx) = self.ctx else {
+            return Err("the decoder is closed".to_string());
+        };
+        let mut pic = Dav1dPicture::default();
+        // SAFETY: `ctx` is open and `pic` is valid for a write.
+        let r = unsafe { dav1d_get_picture(Some(ctx), Some(NonNull::from(&mut pic))) };
+        match r.0 {
+            0 => Ok(Some(Picture { pic })),
+            code if would_block(code) => Ok(None),
+            code => Err(format!("dav1d could not decode a picture (code {code})")),
+        }
+    }
+
+    /// Waits for the oldest frame in flight and gives its picture. rav1d drains when `dav1d_get_picture` is called
+    /// again with no data sent in between: the first call after a send only arms the drain (`EAGAIN`), the next one
+    /// blocks until a frame is done. `Ok(None)` when no frame is in flight.
+    pub(crate) fn wait(&mut self) -> Result<Option<Picture>, String> {
+        for _ in 0..2 {
+            if let Some(pic) = self.get()? {
+                return Ok(Some(pic));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Drops every picture inside the decoder and the state of the stream, for Stop, Flush and a seek.
+    pub(crate) fn flush(&mut self) {
+        if let Some(ctx) = self.ctx {
+            // SAFETY: `ctx` is open.
+            unsafe { dav1d_flush(ctx) };
+        }
+    }
 }
 
 /// Whether a negative result of dav1d is `EAGAIN`: the decoder wants the next call, nothing failed.
@@ -134,6 +251,11 @@ pub(crate) struct Picture {
 unsafe impl Send for Picture {}
 
 impl Picture {
+    /// The timestamp that the unit of this picture was sent with.
+    pub(crate) fn timestamp(&self) -> i64 {
+        self.pic.m.timestamp
+    }
+
     /// The `matrix_coefficients` of the sequence header (as in `av1::Sequence::matrix`), and whether the range is full.
     pub(crate) fn matrix_and_range(&self) -> (u8, bool) {
         match self.pic.seq_hdr {

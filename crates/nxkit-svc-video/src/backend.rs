@@ -14,9 +14,9 @@ mod apple {
     use std::sync::Arc;
 
     use crate::av1::{Sequence, find_sequence, nv12_colorspace};
-    use crate::decoder::Backend;
+    use crate::decoder::{Backend, Pic, Pipeline};
     use crate::frame::Frame;
-    use crate::sys::dav1d::Dav1d;
+    use crate::sys::dav1d::{Dav1d, Picture};
     use crate::sys::vt::{self, Session};
     use crate::vp9::KeyFrame;
 
@@ -140,26 +140,108 @@ mod apple {
             let Some(pic) = dav1d.decode(packet)? else {
                 return Ok(None);
             };
-            let (matrix, full_range) = pic.matrix_and_range();
-            let nv12 = pic.with_planar(|p| (p.width, p.height, p.to_nv12()));
-            let Some((w, h, nv12)) = nv12 else {
-                return Err("rav1d gave a picture in a layout that has no NV12 form".to_string());
+            to_frame(&pic).map(Some)
+        }
+
+        /// Follows the sequence header of a packet: a changed one opens the decoder for it.
+        fn follow(&mut self, packet: &[u8]) {
+            if let Some(seq) = find_sequence(packet).filter(|s| self.seq.as_ref() != Some(s)) {
+                self.start(seq);
+            }
+        }
+    }
+
+    /// A rav1d picture as a frame of NV12.
+    fn to_frame(pic: &Picture) -> Result<Arc<Frame>, String> {
+        let (matrix, full_range) = pic.matrix_and_range();
+        let nv12 = pic.with_planar(|p| (p.width, p.height, p.to_nv12()));
+        let Some((w, h, nv12)) = nv12 else {
+            return Err("rav1d gave a picture in a layout that has no NV12 form".to_string());
+        };
+        let (w, h) = (w as u32, h as u32);
+        Ok(Arc::new(Frame::from_nv12(
+            w,
+            h,
+            nv12_colorspace(matrix, full_range, h),
+            nv12,
+        )))
+    }
+
+    /// rav1d on a worker thread, with frame threading. It opens at the first packet that the worker sends, on the
+    /// worker. A stream starts at a sequence header: packets before one are dropped.
+    struct Dav1dPipeline {
+        dav1d: Option<Dav1d>,
+        started: bool,
+        lag: usize,
+    }
+
+    impl Dav1dPipeline {
+        fn collect(pics: Vec<Picture>, out: &mut Vec<Pic>) -> Result<(), String> {
+            for pic in pics {
+                out.push((to_frame(&pic)?, pic.timestamp()));
+            }
+            Ok(())
+        }
+    }
+
+    impl Pipeline for Dav1dPipeline {
+        fn lag(&self) -> usize {
+            self.lag
+        }
+
+        fn push(&mut self, packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<(), String> {
+            if !self.started {
+                if find_sequence(packet).is_none() {
+                    return Ok(());
+                }
+                self.started = true;
+            }
+            if self.dav1d.is_none() {
+                self.dav1d = Some(Dav1d::open_streaming()?);
+            }
+            let Some(d) = self.dav1d.as_mut() else {
+                return Ok(());
             };
-            let (w, h) = (w as u32, h as u32);
-            Ok(Some(Arc::new(Frame::from_nv12(
-                w,
-                h,
-                nv12_colorspace(matrix, full_range, h),
-                nv12,
-            ))))
+            let mut pics = Vec::new();
+            let sent = d.send(packet, ts, &mut pics);
+            Dav1dPipeline::collect(pics, out)?;
+            sent
+        }
+
+        fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
+            let Some(d) = self.dav1d.as_mut() else {
+                return Ok(());
+            };
+            let pic = d.wait()?;
+            Dav1dPipeline::collect(pic.into_iter().collect(), out)
+        }
+
+        fn flush(&mut self) {
+            if let Some(d) = self.dav1d.as_mut() {
+                d.flush();
+            }
+            // The next packet must carry a sequence header again.
+            self.started = false;
         }
     }
 
     impl Backend for Av1 {
-        fn decode(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
-            if let Some(seq) = find_sequence(packet).filter(|s| self.seq.as_ref() != Some(s)) {
-                self.start(seq);
+        fn pipeline(&mut self, packet: &[u8]) -> Option<Box<dyn Pipeline>> {
+            self.follow(packet);
+            // Hardware decoding, or no sequence header yet: the calling thread decodes.
+            if !self.soft || self.seq.is_none() {
+                return None;
             }
+            self.software = None;
+            Some(Box::new(Dav1dPipeline {
+                dav1d: None,
+                started: false,
+                lag: Dav1d::streaming_delay(),
+            }))
+        }
+
+        fn decode(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
+            self.follow(packet);
             if self.soft {
                 // A stream cannot start in the middle: until the first sequence header, rav1d is not asked.
                 if self.seq.is_none() {
@@ -351,6 +433,38 @@ mod tests {
         // The second unit is an inter frame without a sequence header.
         assert!(matches!(d.decode(all[1]), Ok(None)));
         assert!(matches!(d.decode(&[]), Ok(None)));
+    }
+
+    #[test]
+    fn the_pipeline_of_rav1d_gives_every_picture_with_its_timestamp() {
+        let mut d = software();
+        let all = units(&FLAT_8_BIT);
+        // No sequence header yet: the calling thread decodes.
+        assert!(d.pipeline(all[1]).is_none());
+        let Some(mut pipe) = d.pipeline(all[0]) else {
+            panic!("no pipeline for a software stream");
+        };
+        let mut out = Vec::new();
+        for (k, unit) in all.iter().enumerate() {
+            pipe.push(unit, 700 + k as i64, &mut out)
+                .unwrap_or_else(|e| panic!("push failed: {e}"));
+        }
+        pipe.finish(&mut out)
+            .unwrap_or_else(|e| panic!("finish failed: {e}"));
+        let ts: Vec<i64> = out.iter().map(|p| p.1).collect();
+        assert_eq!(ts, vec![700, 701, 702, 703]);
+        assert!(out.iter().all(|p| near(first_pixel(&p.0).0, 100)));
+        // A flush drops the state: the stream starts again at a sequence header.
+        pipe.flush();
+        let mut again = Vec::new();
+        pipe.push(all[1], 1, &mut again)
+            .unwrap_or_else(|e| panic!("{e}"));
+        pipe.finish(&mut again).unwrap_or_else(|e| panic!("{e}"));
+        assert!(again.is_empty());
+        pipe.push(all[0], 9, &mut again)
+            .unwrap_or_else(|e| panic!("{e}"));
+        pipe.finish(&mut again).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(again.len(), 1);
     }
 
     #[test]

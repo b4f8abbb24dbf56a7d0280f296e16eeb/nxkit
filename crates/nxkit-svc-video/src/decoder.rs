@@ -53,6 +53,41 @@ const DEFAULT_COLORSPACE: u32 = 3;
 pub(crate) trait Backend: Send {
     /// Decodes one packet. `Ok(None)` when it shows no picture.
     fn decode(&mut self, packet: &[u8]) -> Result<Option<Arc<Frame>>, String>;
+
+    /// Called with each packet while the stream decodes in the call that submits it. A backend that decodes on the
+    /// CPU, where one packet takes long and pictures come out late, answers with a [`Pipeline`] that a worker thread
+    /// runs from then on (and `packet` goes to it). The default decodes in the calling thread.
+    fn pipeline(&mut self, _packet: &[u8]) -> Option<Box<dyn Pipeline>> {
+        None
+    }
+}
+
+/// A decoded picture and the timestamp of the packet that it belongs to.
+pub(crate) type Pic = (Arc<Frame>, i64);
+
+/// A decoder that lags behind its input: a packet goes in, and its picture comes out later, after more packets or when
+/// the caller waits for it. One worker thread owns it and calls it, never two at once.
+pub(crate) trait Pipeline: Send {
+    /// How many packets the decoder works on at once. It bounds the pictures that are still inside.
+    fn lag(&self) -> usize;
+    /// Sends one packet. The pictures that come out because of it go to `out`.
+    fn push(&mut self, packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<(), String>;
+    /// Blocks until the oldest packet in flight is decoded and gives its picture to `out`. Gives none when nothing is in
+    /// flight, and returns at once then.
+    fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String>;
+    /// The end of the stream: every picture that is still inside, in order.
+    fn finish(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
+        let mut n = out.len();
+        loop {
+            self.wait(out)?;
+            if out.len() == n {
+                return Ok(());
+            }
+            n = out.len();
+        }
+    }
+    /// Drops the pictures inside and the state of the stream.
+    fn flush(&mut self);
 }
 
 /// Opens a decoder for a stream that starts with this key frame.
@@ -591,24 +626,6 @@ pub(crate) fn decode_packet(
     match backend {
         Some((b, _, _)) => b.decode(data),
         // A stream cannot start in the middle: packets before the first key frame show nothing.
-        None => Ok(None),
-    }
-}
-
-/// Decodes one packet of an AV1 stream. The decoder opens at the first packet and finds the sequence header itself.
-pub(crate) fn decode_av1(
-    backend: &mut Option<(Box<dyn Backend>, u32, u32)>,
-    open: fn() -> Result<Box<dyn Backend>, String>,
-    data: &[u8],
-) -> Result<Option<Arc<Frame>>, String> {
-    if data.is_empty() {
-        return Ok(None);
-    }
-    if backend.is_none() {
-        *backend = Some((open()?, 0, 0));
-    }
-    match backend {
-        Some((b, _, _)) => b.decode(data),
         None => Ok(None),
     }
 }
