@@ -67,7 +67,7 @@ fn time_every_kernel() {
         .unwrap_or_default();
     let blob: Vec<u8> = (0..pack::BLOB_BYTES / 2)
         .flat_map(|i| {
-            let v = ((i * 2_654_435_761usize >> 7) % 1000) as f64 / 1000.0 - 0.5;
+            let v = (((i * 2_654_435_761usize) >> 7) % 1000) as f64 / 1000.0 - 0.5;
             nxkit_ndsr::half::from_f64(v * 0.3).to_le_bytes()
         })
         .collect();
