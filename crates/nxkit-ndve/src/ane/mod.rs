@@ -49,10 +49,12 @@
 //! - [`mod@graph`]: the network as operations.
 //! - `resampler`: the resampler weights as convolution weights.
 //! - [`mod@blob`]: the file `weights/weight.bin`.
+//! - [`mod@epilogue`]: the GPU's epilogue on the CPU (reference) and the reader of the game's push block.
 //! - [`mod@package`]: `Manifest.json` and `Model.proto`.
 //! - [`mod@proto`]: the protobuf writer.
 
 pub mod blob;
+pub mod epilogue;
 pub mod graph;
 pub mod mil;
 pub mod package;
@@ -85,3 +87,14 @@ pub fn build_package(blob: &[u8], res: &[u8], variant: Variant) -> Result<Packag
 
 #[cfg(test)]
 mod tests;
+
+/// The key of the compiled model in a cache: the SHA-256 of the weight blob and the build of the OS (Core ML compiles
+/// for the OS it runs on).
+#[must_use]
+pub fn cache_key(blob: &[u8], os_build: &str) -> String {
+    format!(
+        "{}-{}",
+        nxb_model::to_hex(&nxb_model::sha256(blob).0),
+        os_build
+    )
+}

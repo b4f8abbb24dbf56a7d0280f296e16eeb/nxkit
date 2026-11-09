@@ -779,6 +779,7 @@ name = "nxkit-gpu"
 version = "0.10.0"
 dependencies = [
  "foldhash 0.2.0",
+ "nxkit-coreml",
  "nxkit-metal",
  "nxkit-native-plan",
  "nxkit-ndsr",

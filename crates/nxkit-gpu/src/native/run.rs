@@ -18,11 +18,20 @@ pub(crate) fn encode(
     stats: &mut EncodeStats,
 ) {
     let before = sh.barriers.before.get(pass_index).copied().flatten();
+    // The ticket of the Neural Engine path is settled when the GPU has finished this command buffer. If the pass
+    // fails, the ticket is dropped, and the slot it holds is freed without a prediction.
+    let ticket = p
+        .ane
+        .as_ref()
+        .and_then(|a| a.ticket.lock().ok().and_then(|mut t| t.take()));
     if let Err(why) = encode_pass(sh, cb, scratch, before, p) {
         count_fallback(p.name, "encode", &format!("pass {pass_index}: {why}"));
         stats.skip(Skip::Encode);
     } else {
         stats.compute_passes += 1;
+        if let Some(t) = ticket {
+            cb.after_gpu(move |ok| t.settle(ok));
+        }
     }
 }
 
@@ -64,56 +73,78 @@ fn encode_pass(
         {
             return Some(t.clone());
         }
+        if let Some(a) = &p.ane
+            && let Some((_, t)) = a.textures.iter().find(|(g, _)| *g == r)
+        {
+            return Some(t.clone());
+        }
         p.textures
             .iter()
             .find(|(g, _, _, _)| *g == r)
             .map(|(_, t, _, _)| t.clone())
     };
-    let entry = &p.entry;
-    for (i, step) in entry.plan.steps.iter().enumerate() {
-        // `NXKIT_SKIP_PROGRAMS` / `NXKIT_SKIP_FILE` name a step by its kernel, to measure what it costs.
-        if crate::diag::skipped_program(step.kernel) {
-            continue;
+    // The Neural Engine path writes the model's input for every picture, and its epilogue replaces the plan when the
+    // previous picture's result is ready.
+    let mut segments: Vec<&Entry> = Vec::with_capacity(2);
+    match &p.ane {
+        None => segments.push(&p.entry),
+        Some(a) => {
+            if a.write {
+                segments.push(&a.entries.input);
+            }
+            segments.push(if a.epilogue {
+                &a.entries.epilogue
+            } else {
+                &p.entry
+            });
         }
-        if entry.barrier_before[i] {
-            cp.encode(&ComputeCommand::Barrier)
-                .map_err(ctx("barrier"))?;
-        }
-        cp.encode(&ComputeCommand::SetPipeline(entry.pipelines[i].clone()))
-            .map_err(ctx("pipeline"))?;
-        for b in &step.buffers {
-            let addr = match b.source {
-                Source::Buffer(n) => entry.buffers[n].gpu_address(),
-                Source::Game(g) => push_addr
-                    .iter()
-                    .find(|(r, _)| *r == g)
-                    .map(|(_, a)| *a)
-                    .ok_or_else(|| format!("{g:?} has no bytes"))?,
-            };
-            cp.encode(&ComputeCommand::SetBuffer {
-                index: b.index,
-                gpu_addr: addr,
+    }
+    for entry in segments {
+        for (i, step) in entry.plan.steps.iter().enumerate() {
+            // `NXKIT_SKIP_PROGRAMS` / `NXKIT_SKIP_FILE` name a step by its kernel, to measure what it costs.
+            if crate::diag::skipped_program(step.kernel) {
+                continue;
+            }
+            if entry.barrier_before[i] {
+                cp.encode(&ComputeCommand::Barrier)
+                    .map_err(ctx("barrier"))?;
+            }
+            cp.encode(&ComputeCommand::SetPipeline(entry.pipelines[i].clone()))
+                .map_err(ctx("pipeline"))?;
+            for b in &step.buffers {
+                let addr = match b.source {
+                    Source::Buffer(n) => entry.buffers[n].gpu_address(),
+                    Source::Game(g) => push_addr
+                        .iter()
+                        .find(|(r, _)| *r == g)
+                        .map(|(_, a)| *a)
+                        .ok_or_else(|| format!("{g:?} has no bytes"))?,
+                };
+                cp.encode(&ComputeCommand::SetBuffer {
+                    index: b.index,
+                    gpu_addr: addr,
+                })
+                .map_err(ctx("set buffer"))?;
+            }
+            for b in &step.textures {
+                let Source::Game(g) = b.source else {
+                    return Err(format!("step {i} binds a plan buffer as a texture"));
+                };
+                let texture = tex_of(g).ok_or_else(|| format!("{g:?} has no texture"))?;
+                cp.encode(&ComputeCommand::SetTexture {
+                    index: b.index,
+                    texture,
+                })
+                .map_err(ctx("set texture"))?;
+            }
+            cp.encode(&ComputeCommand::DispatchThreadgroups {
+                groups: step.groups,
+                threads: step.threads,
             })
-            .map_err(ctx("set buffer"))?;
-        }
-        for b in &step.textures {
-            let Source::Game(g) = b.source else {
-                return Err(format!("step {i} binds a plan buffer as a texture"));
-            };
-            let texture = tex_of(g).ok_or_else(|| format!("{g:?} has no texture"))?;
-            cp.encode(&ComputeCommand::SetTexture {
-                index: b.index,
-                texture,
-            })
-            .map_err(ctx("set texture"))?;
-        }
-        cp.encode(&ComputeCommand::DispatchThreadgroups {
-            groups: step.groups,
-            threads: step.threads,
-        })
-        .map_err(ctx("dispatch"))?;
-        if let Some(f) = prof.as_mut() {
-            super::prof::step(f, &mut cp, step.kernel);
+            .map_err(ctx("dispatch"))?;
+            if let Some(f) = prof.as_mut() {
+                super::prof::step(f, &mut cp, step.kernel);
+            }
         }
     }
     if let Some(f) = prof.take() {
@@ -134,7 +165,10 @@ fn encode_pass(
         })
         .map_err(ctx("compare copy"))?;
     }
-    cp.retain(entry.clone());
+    cp.retain(p.entry.clone());
+    if let Some(a) = &p.ane {
+        cp.retain(a.entries.clone());
+    }
     if let Some(c) = &p.compare {
         cp.retain(c.clone());
     }
@@ -285,6 +319,10 @@ struct Counts {
     native: Vec<(&'static str, u64)>,
     /// Frames a found run kept the game's dispatches, by network name and reason, with the first example.
     fallback: Vec<(&'static str, &'static str, u64, String)>,
+    /// Pictures the Neural Engine's result made the output of, by network name.
+    ane: Vec<(&'static str, u64)>,
+    /// Pictures of the Neural Engine path that the plan made, by network name and reason, with the first example.
+    ane_fallback: Vec<(&'static str, &'static str, u64, String)>,
     /// The counts at the last report.
     reported: Vec<u64>,
 }
@@ -292,6 +330,8 @@ struct Counts {
 static COUNTS: Mutex<Counts> = Mutex::new(Counts {
     native: Vec::new(),
     fallback: Vec::new(),
+    ane: Vec::new(),
+    ane_fallback: Vec::new(),
     reported: Vec::new(),
 });
 
@@ -304,6 +344,30 @@ pub(super) fn count_native(name: &'static str) {
     match c.native.iter_mut().find(|(n, _)| *n == name) {
         Some((_, n)) => *n += 1,
         None => c.native.push((name, 1)),
+    }
+}
+
+/// A picture whose output the Neural Engine made, by network name.
+pub(super) fn count_ane(name: &'static str) {
+    let mut c = counts();
+    match c.ane.iter_mut().find(|(n, _)| *n == name) {
+        Some((_, n)) => *n += 1,
+        None => c.ane.push((name, 1)),
+    }
+}
+
+/// A picture that the Metal plan made although the Neural Engine path is on, by network name and reason.
+pub(super) fn count_ane_fallback(name: &'static str, reason: &'static str, what: &str) {
+    let mut c = counts();
+    match c
+        .ane_fallback
+        .iter_mut()
+        .find(|(n, r, _, _)| *n == name && *r == reason)
+    {
+        Some((_, _, n, _)) => *n += 1,
+        None => c
+            .ane_fallback
+            .push((name, reason, 1, what.chars().take(160).collect())),
     }
 }
 
@@ -344,6 +408,19 @@ pub(crate) fn health_lines() -> (String, bool) {
             out,
             "health:   {:<24} {:>10}  e.g. {example}",
             format!("{name}.fallback({reason})"),
+            n
+        );
+    }
+    for (name, n) in &c.ane {
+        now.push(*n);
+        let _ = writeln!(out, "health:   {:<24} {:>10}", format!("{name}.ane"), n);
+    }
+    for (name, reason, n, example) in &c.ane_fallback {
+        now.push(*n);
+        let _ = writeln!(
+            out,
+            "health:   {:<24} {:>10}  e.g. {example}",
+            format!("{name}.ane_fallback({reason})"),
             n
         );
     }
@@ -388,6 +465,8 @@ mod tests {
     #[test]
     fn the_health_lines_name_native_frames_and_fallback_reasons() {
         count_native("testnet");
+        count_ane("testnet");
+        count_ane_fallback("testnet", "late", "the previous result is not ready");
         count_fallback(
             "testnet",
             "weights",
@@ -397,6 +476,8 @@ mod tests {
         assert!(fresh);
         assert!(text.contains("testnet.native"), "{text}");
         assert!(text.contains("testnet.fallback(weights)"), "{text}");
+        assert!(text.contains("testnet.ane "), "{text}");
+        assert!(text.contains("testnet.ane_fallback(late)"), "{text}");
         let (_, fresh) = health_lines();
         assert!(!fresh);
     }
