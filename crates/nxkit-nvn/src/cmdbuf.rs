@@ -14,8 +14,37 @@ use crate::error::{NvnError, Result};
 use crate::mem::GuestMem;
 use crate::record::{JUMP_BYTES, Record};
 
-/// The smallest block of command memory.
+/// The smallest block that a game may ask for. The rule is on the request of the game, not on the block that the host
+/// uses: a block that the end of its pool cut short can be smaller (see [`clip_block`]).
 pub const MIN_BLOCK_BYTES: u64 = 64;
+
+/// The rules of `nvnCommandBufferAddCommandMemory` on what the game asked for: the host address of the start and the
+/// requested length. The refusal names the rule and carries both values.
+pub fn check_request(start: u64, requested: u64) -> Result<()> {
+    let bad = |rule| NvnError::BadCommandMemory {
+        start,
+        len: requested,
+        rule,
+    };
+    if requested < MIN_BLOCK_BYTES {
+        return Err(bad("the request is smaller than the minimum block"));
+    }
+    if !requested.is_multiple_of(8) {
+        return Err(bad("the requested length is not a multiple of 8"));
+    }
+    if !start.is_multiple_of(8) {
+        return Err(bad("the start is not a multiple of 8"));
+    }
+    Ok(())
+}
+
+/// The bytes of a requested block that the host uses when only `available` bytes are left in the pool. Games ask for
+/// more than is left near the pool end and the recorder writes only inside the block, so the block is cut to the pool
+/// end and rounded down to a multiple of 8. The result can be below [`MIN_BLOCK_BYTES`], also 0. Such a block holds
+/// what fits, and a record that does not fit goes the way it goes when a block is full.
+pub fn clip_block(requested: u64, available: u64) -> u64 {
+    requested.min(available) & !7
+}
 
 /// The handle of a finished recording. It is the host address of its first record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -62,12 +91,16 @@ impl CommandBuffer {
     /// Between recordings the block is where the next recording starts. During a recording it is the next block, which
     /// a record that does not fit goes to. The counter of `used` starts again, as in NVN and in the engine.
     pub fn add_command_memory(&mut self, start: u64, len: u64) -> Result<()> {
-        if len < MIN_BLOCK_BYTES || !len.is_multiple_of(8) || !start.is_multiple_of(8) {
-            return Err(NvnError::FieldRange("command memory block"));
+        let bad = |rule| NvnError::BadCommandMemory { start, len, rule };
+        if !start.is_multiple_of(8) {
+            return Err(bad("the start is not a multiple of 8"));
+        }
+        if !len.is_multiple_of(8) {
+            return Err(bad("the length is not a multiple of 8"));
         }
         let end = start
             .checked_add(len)
-            .ok_or(NvnError::FieldRange("command memory block"))?;
+            .ok_or_else(|| bad("the block ends past the address space"))?;
         if self.recording {
             self.blocks.push(start..end);
         } else {
@@ -143,35 +176,44 @@ impl CommandBuffer {
         }
         let need = bytes.len() as u64 + if is_end { 0 } else { u64::from(JUMP_BYTES) };
         if !self.fits(need) {
-            let next = self
-                .blocks
-                .get(self.current + 1)
-                .filter(|b| b.end - b.start >= need)
-                .cloned();
-            let Some(next) =
-                next.filter(|_| self.pos + u64::from(JUMP_BYTES) <= self.blocks[self.current].end)
-            else {
+            let cur_end = self.blocks.get(self.current).map(|b| b.end);
+            // The first block after the current one that holds the record and a jump. A block before it is too small for
+            // the record, was never jumped to and is left unused.
+            let next = (self.current + 1..self.blocks.len())
+                .find(|&i| self.blocks[i].end - self.blocks[i].start >= need);
+            let (Some(cur_end), Some(next)) = (cur_end, next) else {
                 return Err(NvnError::OutOfCommandMemory { need: need as u32 });
             };
-            let jump = Record::Jump(next.start).encode()?;
-            self.put(mem, jump.as_bytes())?;
-            if let Some(from) = self.open_from.take() {
-                self.spans.push(from..self.pos);
+            let start = self.blocks[next].start;
+            if self.pos + u64::from(JUMP_BYTES) <= cur_end {
+                let jump = Record::Jump(start).encode()?;
+                self.put(mem, jump.as_bytes())?;
+                if let Some(from) = self.open_from.take() {
+                    self.spans.push(from..self.pos);
+                }
+            } else if self.begin.is_some() {
+                // A record is only written with room for a jump behind it, so this does not happen. A block that
+                // cannot take a jump cannot be left.
+                return Err(NvnError::OutOfCommandMemory { need: need as u32 });
             }
-            self.current += 1;
-            self.pos = next.start;
+            // Else nothing of this recording is in the current block, so no record leads into it. A block with less
+            // than the room of a jump (the end of a short block, or a block of 0 bytes) is dropped without a jump and
+            // the recording starts in the next block.
+            self.current = next;
+            self.pos = start;
         }
         self.put(mem, bytes)
     }
 
     /// Where a writer that bypasses [`CommandBuffer::write`] puts its next record. `limit` is the end of the room for a
-    /// record that is not the end record: the block end less the room of a jump. A command buffer without a block
-    /// gives `limit == pos`, so no record fits.
+    /// record that is not the end record: the block end less the room of a jump, and never below `pos`. A command
+    /// buffer without a block, and a block with less room than a jump, give `limit == pos`, so no record fits.
     pub fn cursor(&self) -> Cursor {
         let limit = self
             .blocks
             .get(self.current)
-            .map_or(self.pos, |b| b.end.saturating_sub(u64::from(JUMP_BYTES)));
+            .map_or(self.pos, |b| b.end.saturating_sub(u64::from(JUMP_BYTES)))
+            .max(self.pos);
         Cursor {
             pos: self.pos,
             limit,
@@ -293,8 +335,11 @@ mod tests {
     #[test]
     fn wrong_calls_are_errors() {
         let (mut cb, mut mem) = setup();
-        assert!(cb.add_command_memory(BASE, 32).is_err());
+        assert!(check_request(BASE, 32).is_err());
+        assert!(check_request(BASE + 4, 64).is_err());
+        assert!(check_request(BASE, 100).is_err());
         assert!(cb.add_command_memory(BASE + 4, 64).is_err());
+        assert!(cb.add_command_memory(BASE, 60).is_err());
         assert!(cb.begin_recording().is_ok());
         assert!(cb.begin_recording().is_err());
         assert_eq!(
@@ -347,5 +392,199 @@ mod tests {
         let e = Record::Dispatch.encode().unwrap();
         cb.write_encoded(&mut mem, e.as_bytes(), false).unwrap();
         assert_eq!(Record::read(&mem, BASE).unwrap().0, Record::Dispatch);
+    }
+
+    #[test]
+    fn the_refusal_names_the_rule_and_the_values() {
+        let e = check_request(BASE + 4, 512).unwrap_err();
+        assert_eq!(
+            e,
+            NvnError::BadCommandMemory {
+                start: BASE + 4,
+                len: 512,
+                rule: "the start is not a multiple of 8"
+            }
+        );
+        assert!(e.to_string().contains("0x70000004"));
+        assert!(e.to_string().contains("512 bytes"));
+        assert!(check_request(BASE, 64).is_ok());
+        assert!(check_request(BASE, 512).is_ok());
+    }
+
+    #[test]
+    fn the_clip_cuts_to_the_pool_end_and_rounds_down_to_8() {
+        assert_eq!(clip_block(512, 4096), 512);
+        assert_eq!(clip_block(512, 200), 200);
+        assert_eq!(clip_block(512, 60), 56);
+        assert_eq!(clip_block(512, 63), 56);
+        assert_eq!(clip_block(512, 7), 0);
+        assert_eq!(clip_block(512, 0), 0);
+        assert_eq!(clip_block(64, 64), 64);
+    }
+
+    #[test]
+    fn a_block_below_the_minimum_holds_what_fits() {
+        let (mut cb, mut mem) = setup();
+        // 24 bytes: one record and the room of a jump, or the end record
+        cb.add_command_memory(BASE, 24).unwrap();
+        cb.begin_recording().unwrap();
+        cb.write(&mut mem, Record::Draw).unwrap();
+        assert_eq!(cb.cursor().limit, BASE + 8);
+        assert_eq!(
+            cb.write(&mut mem, Record::Draw),
+            Err(NvnError::OutOfCommandMemory { need: 24 })
+        );
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.spans, vec![BASE..BASE + 16]);
+        assert_eq!(Record::read(&mem, BASE + 8).unwrap().0, Record::End);
+    }
+
+    #[test]
+    fn a_block_of_8_bytes_holds_only_the_end_record() {
+        let (mut cb, mut mem) = setup();
+        cb.add_command_memory(BASE, 8).unwrap();
+        cb.begin_recording().unwrap();
+        assert_eq!(
+            cb.write(&mut mem, Record::Draw),
+            Err(NvnError::OutOfCommandMemory { need: 24 })
+        );
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE));
+        assert_eq!(r.spans, vec![BASE..BASE + 8]);
+    }
+
+    #[test]
+    fn a_block_of_0_bytes_acts_as_a_full_block() {
+        let (mut cb, mut mem) = setup();
+        cb.add_command_memory(BASE + 0x100, 0).unwrap();
+        assert_eq!(cb.free(), 0);
+        assert_eq!(cb.cursor().pos, cb.cursor().limit);
+        cb.begin_recording().unwrap();
+        assert_eq!(
+            cb.write(&mut mem, Record::Draw),
+            Err(NvnError::OutOfCommandMemory { need: 24 })
+        );
+        assert_eq!(cb.used(), 0);
+        // the game adds memory, the record goes to it and no jump is written in the empty block
+        cb.add_command_memory(BASE + 0x200, 128).unwrap();
+        cb.write(&mut mem, Record::Draw).unwrap();
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE + 0x200));
+        assert_eq!(r.spans, vec![BASE + 0x200..BASE + 0x200 + 16]);
+        assert_eq!(Record::read(&mem, BASE + 0x200).unwrap().0, Record::Draw);
+    }
+
+    #[test]
+    fn the_end_record_of_a_block_of_0_bytes_goes_to_the_next_block() {
+        let (mut cb, mut mem) = setup();
+        cb.add_command_memory(BASE, 0).unwrap();
+        cb.begin_recording().unwrap();
+        assert_eq!(
+            cb.end_recording(&mut mem),
+            Err(NvnError::OutOfCommandMemory { need: 8 })
+        );
+        cb.add_command_memory(BASE + 0x40, 64).unwrap();
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE + 0x40));
+    }
+
+    #[test]
+    fn a_recording_that_starts_in_a_block_tail_without_room_for_a_jump_starts_in_the_next_block() {
+        let (mut cb, mut mem) = setup();
+        cb.add_command_memory(BASE, 64).unwrap();
+        cb.begin_recording().unwrap();
+        for _ in 0..6 {
+            cb.write(&mut mem, Record::Draw).unwrap();
+        }
+        cb.end_recording(&mut mem).unwrap();
+        // 8 bytes are left, the next recording has no room for a jump
+        assert_eq!(cb.free(), 8);
+        cb.begin_recording().unwrap();
+        cb.add_command_memory(BASE + 0x100, 64).unwrap();
+        cb.write(&mut mem, Record::Dispatch).unwrap();
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE + 0x100));
+    }
+
+    #[test]
+    fn a_recording_overflows_out_of_a_short_block_into_the_next_and_decodes_back() {
+        let (mut cb, mut mem) = setup();
+        // 56 bytes, as a clip of 512 at 56 bytes before the pool end gives
+        let n = clip_block(512, 59);
+        assert_eq!(n, 56);
+        cb.add_command_memory(BASE, n).unwrap();
+        cb.begin_recording().unwrap();
+        // 5 records and a jump fill a block of 56 bytes, so 11 records leave two blocks and end in the third
+        let recs: Vec<Record> = (0..11)
+            .map(|i| {
+                if i % 2 == 0 {
+                    Record::Draw
+                } else {
+                    Record::Dispatch
+                }
+            })
+            .collect();
+        let mut sent = 0;
+        let mut blocks = 0;
+        while sent < recs.len() {
+            match cb.write(&mut mem, recs[sent]) {
+                Ok(()) => sent += 1,
+                Err(NvnError::OutOfCommandMemory { .. }) => {
+                    blocks += 1;
+                    cb.add_command_memory(BASE + 0x100 * blocks, 56).unwrap();
+                }
+                Err(e) => panic!("{e}"),
+            }
+        }
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE));
+        assert_eq!(r.spans.len(), 3);
+        assert_eq!(r.spans[0], BASE..BASE + 56);
+        assert_eq!(r.spans[1], BASE + 0x100..BASE + 0x100 + 56);
+        assert_eq!(r.spans[2], BASE + 0x200..BASE + 0x200 + 16);
+        // follow the jumps from the handle and read the records back
+        let (mut at, mut got) = (r.handle.0, Vec::new());
+        loop {
+            match Record::read(&mem, at).unwrap().0 {
+                Record::Jump(to) => at = to,
+                Record::End => break,
+                rec => {
+                    got.push(rec);
+                    at += 8;
+                }
+            }
+        }
+        assert_eq!(got, recs);
+    }
+
+    #[test]
+    fn a_too_small_block_added_during_a_recording_is_passed_over() {
+        let (mut cb, mut mem) = setup();
+        cb.add_command_memory(BASE, 64).unwrap();
+        cb.begin_recording().unwrap();
+        for _ in 0..6 {
+            cb.write(&mut mem, Record::Draw).unwrap();
+        }
+        assert!(cb.write(&mut mem, Record::Draw).is_err());
+        cb.add_command_memory(BASE + 0x80, 16).unwrap();
+        assert!(cb.write(&mut mem, Record::Draw).is_err());
+        cb.add_command_memory(BASE + 0x100, 64).unwrap();
+        cb.write(&mut mem, Record::Draw).unwrap();
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.spans[1].start, BASE + 0x100);
+    }
+
+    #[test]
+    fn the_limit_of_a_short_block_is_never_below_the_position() {
+        let mut cb = CommandBuffer::new();
+        for len in [0, 8] {
+            cb.add_command_memory(BASE, len).unwrap();
+            let c = cb.cursor();
+            assert_eq!((c.pos, c.limit), (BASE, BASE));
+        }
+        cb.add_command_memory(BASE, 16).unwrap();
+        assert_eq!(cb.cursor().limit, BASE);
+        cb.add_command_memory(BASE, 24).unwrap();
+        assert_eq!(cb.cursor().limit, BASE + 8);
     }
 }

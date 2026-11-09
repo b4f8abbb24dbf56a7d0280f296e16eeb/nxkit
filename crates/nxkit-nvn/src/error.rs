@@ -42,6 +42,15 @@ pub enum NvnError {
         /// The bytes that the record needs, including the room for a jump.
         need: u32,
     },
+    /// A block of command memory that a command buffer refuses. The rule says which check failed.
+    BadCommandMemory {
+        /// The host address of the block.
+        start: u64,
+        /// The length of the block in bytes.
+        len: u64,
+        /// The rule that the block breaks.
+        rule: &'static str,
+    },
     /// A command record in guest memory is not valid. The text says why.
     BadRecord(&'static str),
 }
@@ -69,6 +78,12 @@ impl fmt::Display for NvnError {
             Self::NoTarget(slot) => write!(f, "render target slot {slot} is not set"),
             Self::OutOfCommandMemory { need } => {
                 write!(f, "command memory is full, {need} more bytes are needed")
+            }
+            Self::BadCommandMemory { start, len, rule } => {
+                write!(
+                    f,
+                    "command memory block at {start:#x} of {len} bytes: {rule}"
+                )
             }
             Self::BadRecord(why) => write!(f, "invalid command record: {why}"),
         }

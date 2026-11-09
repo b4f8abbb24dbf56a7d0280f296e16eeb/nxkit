@@ -1,5 +1,6 @@
 //! The life of a command buffer: initialise, memory, callback, recording, call and copy, and the getters.
 
+use nxkit_nvn::cmdbuf::{check_request, clip_block};
 use nxkit_nvn::record::Record;
 
 use super::rec::{
@@ -32,13 +33,29 @@ extern "C" fn finalize(c: u64) {
 extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
     guard("nvnCommandBufferAddCommandMemory", || {
         let v = pool::view(memory_pool)?;
-        let off = u64::try_from(off).map_err(|_| other("the command memory offset is negative"))?;
+        let off_raw = off;
+        let off = u64::try_from(off).unwrap_or(u64::MAX);
+        // The request is `n` bytes at `off`. The text of a refusal carries all of it, because this is the last line before the
+        // game ends.
+        let ctx = |why: &dyn std::fmt::Display| {
+            other(format!(
+                "{why} (cb {c:#x}, requested {n} bytes at pool offset {off_raw:#x}, pool size {:#x}, pool flags {:#x}, pool memory {:#x})",
+                v.size, v.flags, v.mem
+            ))
+        };
+        if off_raw < 0 {
+            return Err(ctx(&"the command memory offset is negative"));
+        }
         if v.mem == 0 || v.cpu_no_access() {
-            return Err(other("the pool of the command memory has no CPU mapping"));
+            return Err(ctx(&"the pool of the command memory has no CPU mapping"));
         }
-        if off >= v.size {
-            return Err(other("the command memory starts outside its pool"));
+        // `off == size` is a block of 0 bytes: the game asked for memory at the very end of the pool.
+        if off > v.size {
+            return Err(ctx(&"the command memory starts outside its pool"));
         }
+        let host = v.mem + off;
+        // The rules of NVN are on what the game asked for.
+        check_request(host, n).map_err(|e| ctx(&e))?;
         if n > v.size - off {
             crate::diag!(
                 "DIAG cmdmem clipped cb {c:#x} requested {n} available {} poolsize {} off {off}",
@@ -47,19 +64,21 @@ extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
             );
         }
         // Games pass max(measured size, 512) for prerecorded slots near the pool end, and real NVN does not check the range. The
-        // recorder writes only inside the given bytes, so the part past the pool is cut off and recording overflows as usual.
-        let n = n.min(v.size - off);
-        let host = v.mem + off;
+        // recorder writes only inside the given bytes, so the part past the pool is cut off. A block that is cut short holds
+        // what fits and a record that does not fit goes the way it does when a block is full.
+        let n = clip_block(n, v.size - off);
         crate::diag!(
             "DIAG add cmdmem cb {c:#x} pool {memory_pool:#x} off {off:#x} host {host:#x} n {n:#x} poolmem {:#x} size {:#x} flags {:#x}",
             v.mem,
             v.size,
             v.flags
         );
-        super::seam::validate_region(host, n)?;
+        if n > 0 {
+            super::seam::validate_region(host, n)?;
+        }
         with_recorder(c, |r| {
             sync_in(c, r)?;
-            r.buf.add_command_memory(host, n)?;
+            r.buf.add_command_memory(host, n).map_err(|e| ctx(&e))?;
             sync_out(c, r)
         })
     });
