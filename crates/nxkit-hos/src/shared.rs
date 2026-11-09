@@ -79,9 +79,9 @@ impl Kernel {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         if !host.can_remap(start, host_len) {
-            // the GPU buffer keeps the pages that were here: the GPU does not see the view (see `crate::pinned`)
+            // a GPU buffer keeps the pages that were here: the GPU does not see the view (see `crate::pinned`)
             (self.config.log)(&format!(
-                "MapSharedMemory at {start:#x}: the view lies in the GPU buffer, the GPU does not see it"
+                "MapSharedMemory at {start:#x}: the view lies in a pinned range under a GPU buffer, the GPU does not see it"
             ));
         }
         if !host.remap(start, obj.base, host_len, new) {

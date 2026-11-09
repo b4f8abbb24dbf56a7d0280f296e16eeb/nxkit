@@ -14,6 +14,7 @@ use crate::memory::{HostSpace, PAGE_SIZE};
 use crate::result::{KResult, KResultOr};
 use crate::space::{Block, attr, perm, state};
 use crate::thread::lock;
+use crate::vm::View;
 
 /// `SetHeapSize` takes multiples of 2 MiB.
 const HEAP_ALIGN: u64 = 0x20_0000;
@@ -35,8 +36,8 @@ pub(crate) fn page_range(addr: u64, size: u64) -> KResultOr<(u64, u64)> {
 }
 
 /// Whether `MapMemory` shares the pages: all three values are whole host pages, and the host may put other pages
-/// under both ranges. `UnmapMemory` asks the same and gets the same answer, because the pinned range never changes
-/// while the game runs.
+/// under both ranges. Only `MapMemory` asks. The pinned set changes while the game runs (`crate::pinned`), so a later
+/// answer can differ; `UnmapMemory` reads the choice that `MapMemory` recorded (`Space::views`).
 fn shares(host: &dyn HostSpace, d0: u64, s0: u64, size: u64) -> bool {
     let page = host.page_size();
     [d0, s0, size].iter().all(|v| v.is_multiple_of(page))
@@ -60,7 +61,8 @@ impl Kernel {
 
     /// `SetHeapSize`: the heap grows or shrinks to `size`. Returns the address of the heap. A shrink gives the pages
     /// back, and they read as zero if the heap grows over them again. A shrink over a page that is locked (the source
-    /// of `MapMemory`, or transfer memory) is refused.
+    /// of `MapMemory`, or transfer memory) is refused. Pages that a pin reaches (`crate::pinned`) stay where they are,
+    /// zeroed and without access. The size counters are those of the guest's view and drop by the whole shrink.
     pub(crate) fn set_heap_size(&self, size: u64) -> KResultOr<u64> {
         let vm = self.vm()?;
         if !size.is_multiple_of(HEAP_ALIGN) {
@@ -165,7 +167,8 @@ impl Kernel {
 
     /// `MapMemory`: `dst` in the stack region becomes a second view of `src`. The source is locked and has no access
     /// until `UnmapMemory`. The pages are shared when the host can share them (all three values are whole host pages).
-    /// Otherwise the data is copied, and copied back by `UnmapMemory`.
+    /// Otherwise the data is copied, and copied back by `UnmapMemory`. The choice is recorded with the mapping
+    /// (`Space::views`), and `UnmapMemory` follows the record.
     pub(crate) fn map_memory(&self, dst: u64, src: u64, size: u64) -> KResultOr<()> {
         let vm = self.vm()?;
         let (d0, d1) = page_range(dst, size)?;
@@ -181,7 +184,8 @@ impl Kernel {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
-        let ok = if shares(host.as_ref(), d0, s0, size) {
+        let shared = shares(host.as_ref(), d0, s0, size);
+        let ok = if shared {
             host.remap(d0, s0, size, perm::RW) && host.protect(s0, size, perm::NONE)
         } else {
             host.protect(d0, size, perm::RW) && host.copy(d0, s0, size)
@@ -189,6 +193,14 @@ impl Kernel {
         if !ok {
             return Err(self.host_failed("MapMemory"));
         }
+        sp.views.insert(
+            d0,
+            View {
+                src: s0,
+                size,
+                shared,
+            },
+        );
         sp.map.rewrite(s0, s1, |b| Block {
             perm: perm::NONE,
             attr: b.attr | attr::LOCKED,
@@ -216,14 +228,31 @@ impl Kernel {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
-        let ok = if shares(host.as_ref(), d0, s0, size) {
-            host.protect(s0, size, perm::RW) && host.release(d0, size)
+        // the choice of `MapMemory`, not a new one: shared pages are only unmapped at `dst` (`release` could zero them
+        // in place, and that would zero the source), and copied pages are copied back
+        let shared = match sp.views.get(&d0) {
+            Some(v) if v.src == s0 && v.size == size => v.shared,
+            _ => {
+                (self.config.log)(&format!(
+                    "UnmapMemory at {d0:#x}: no record of how MapMemory made it, the data is copied back"
+                ));
+                // copying is safe for pages that were shared too: the source gets access, and the bytes are copied
+                // onto themselves
+                if !host.protect(s0, size, perm::RW) {
+                    return Err(self.host_failed("UnmapMemory"));
+                }
+                false
+            }
+        };
+        let ok = if shared {
+            host.protect(s0, size, perm::RW) && host.drop_view(d0, size)
         } else {
             host.copy(s0, d0, size) && host.release(d0, size)
         };
         if !ok {
             return Err(self.host_failed("UnmapMemory"));
         }
+        sp.views.remove(&d0);
         sp.map.set(d0, d1, state::FREE, perm::NONE, 0, 0);
         sp.map.rewrite(s0, s1, |b| Block {
             perm: perm::RW,
@@ -305,7 +334,9 @@ impl Kernel {
     }
 
     /// `UnmapPhysicalMemory`: the mapped pages of the range in the alias region are given back. A locked page
-    /// refuses the call.
+    /// refuses the call. Pages that a pin reaches (`crate::pinned`) stay where they are, zeroed and without access;
+    /// the kernel counts them as given back, and a later `MapPhysicalMemory` gives them access again and they read
+    /// as zero.
     pub(crate) fn unmap_physical_memory(&self, addr: u64, size: u64) -> KResultOr<()> {
         let vm = self.vm()?;
         let (start, end) = self.alias_range(addr, size)?;

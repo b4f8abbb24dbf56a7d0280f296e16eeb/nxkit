@@ -1,9 +1,11 @@
 //! The memory model, thread-local slots, `GetInfo` and the main thread, over fake memory.
 
+use nxkit_hos::pinned;
 use nxkit_hos::{
-    Config, FakeMemory, GuestMemory, KResult, Kernel, MainThread, MemoryConfig, Thread, ThreadState,
+    Config, FakeMemory, GuestMemory, HostSpace, KResult, Kernel, MainThread, MemoryConfig, Thread,
+    ThreadState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 const BASE: u64 = 0x10_0000;
 const SIZE: u64 = 0x80_0000;
@@ -19,12 +21,16 @@ struct Rig {
     main: Arc<Thread>,
 }
 
-#[allow(clippy::expect_used, reason = "a test helper")]
 fn rig() -> Rig {
     let mem = Arc::new(FakeMemory::new(BASE, (SIZE / 4) as usize));
+    build(mem.clone(), mem.clone(), mem)
+}
+
+#[allow(clippy::expect_used, reason = "a test helper")]
+fn build(host: Arc<dyn HostSpace>, guest: Arc<dyn GuestMemory>, mem: Arc<FakeMemory>) -> Rig {
     let config = Config {
         memory: Some(MemoryConfig {
-            host: mem.clone(),
+            host,
             base: BASE,
             size: SIZE,
             front_size: 0x10_0000,
@@ -48,7 +54,7 @@ fn rig() -> Rig {
         log: |_| {},
         ..Config::default()
     };
-    let kernel = Kernel::try_new(config, mem.clone()).expect("the layout fits");
+    let kernel = Kernel::try_new(config, guest).expect("the layout fits");
     let main = kernel.attach_main_thread("main").expect("attach");
     Rig { kernel, mem, main }
 }
@@ -346,4 +352,248 @@ fn a_system_event_is_not_bound_without_the_sdk_lookup() {
     assert_eq!(r.kernel.system_event_binding(0x1000), 0);
     assert!(!r.kernel.signal_bound_system_event(0x1000));
     assert_eq!(r.kernel.clear_system_event(0x1000), Ok(()));
+}
+
+/// One call of the kernel on the host's pages, as the recording host saw it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Call {
+    /// `remap(dst, src, len)`: the pages are shared.
+    Remap(u64, u64, u64),
+    /// `copy(dst, src, len)`.
+    Copy(u64, u64, u64),
+    /// `drop_view(addr, len)`.
+    Drop(u64, u64),
+    /// A run of `release` that was given back.
+    Give(u64, u64),
+    /// A run of `release` that a pin keeps: zeroed in place.
+    Keep(u64, u64),
+}
+
+/// Fake memory that records the calls that move pages. It asks the pinned set like the host memory does, and cuts a
+/// `release` at the pinned pages like the host memory does (`pinned::split`). Pages are 4 KiB.
+struct Rec {
+    mem: Arc<FakeMemory>,
+    calls: Mutex<Vec<Call>>,
+}
+
+impl Rec {
+    fn note(&self, c: Call) {
+        self.calls.lock().unwrap_or_else(|e| e.into_inner()).push(c);
+    }
+
+    fn calls(&self) -> Vec<Call> {
+        self.calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn forget(&self) {
+        self.calls.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+}
+
+impl GuestMemory for Rec {
+    fn load32(&self, addr: u64) -> Option<u32> {
+        self.mem.load32(addr)
+    }
+    fn load64(&self, addr: u64) -> Option<u64> {
+        self.mem.load64(addr)
+    }
+    fn store32(&self, addr: u64, value: u32) -> bool {
+        self.mem.store32(addr, value)
+    }
+    fn cas32(&self, addr: u64, current: u32, new: u32) -> Option<Result<u32, u32>> {
+        self.mem.cas32(addr, current, new)
+    }
+}
+
+impl HostSpace for Rec {
+    fn page_size(&self) -> u64 {
+        0x1000
+    }
+    fn protect(&self, addr: u64, len: u64, perm: u32) -> bool {
+        self.mem.protect(addr, len, perm)
+    }
+    fn release(&self, addr: u64, len: u64) -> bool {
+        pinned::split(addr, addr + len, 0x1000)
+            .into_iter()
+            .all(|(s, e, pinned)| {
+                self.note(if pinned {
+                    Call::Keep(s, e)
+                } else {
+                    Call::Give(s, e)
+                });
+                self.mem.zero(s, e - s)
+            })
+    }
+    fn zero(&self, addr: u64, len: u64) -> bool {
+        self.mem.zero(addr, len)
+    }
+    fn remap(&self, dst: u64, src: u64, len: u64, perm: u32) -> bool {
+        self.note(Call::Remap(dst, src, len));
+        self.mem.remap(dst, src, len, perm)
+    }
+    fn copy(&self, dst: u64, src: u64, len: u64) -> bool {
+        self.note(Call::Copy(dst, src, len));
+        self.mem.copy(dst, src, len)
+    }
+    fn can_remap(&self, addr: u64, len: u64) -> bool {
+        !pinned::overlaps(addr, len)
+    }
+    fn drop_view(&self, addr: u64, len: u64) -> bool {
+        // like the host memory: the pages of the view go, the pages they showed stay. The fake has no second view.
+        self.note(Call::Drop(addr, len));
+        self.mem.zero(addr, len)
+    }
+}
+
+/// The pinned set is a static of the process and the tests run in parallel: a test that pins takes this lock, and
+/// the set is empty when it starts and when it ends.
+static PINS: Mutex<()> = Mutex::new(());
+
+struct Exclusive {
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl Drop for Exclusive {
+    fn drop(&mut self) {
+        pinned::clear();
+    }
+}
+
+fn exclusive_pins() -> Exclusive {
+    let g = PINS.lock().unwrap_or_else(|e| e.into_inner());
+    pinned::clear();
+    Exclusive { _lock: g }
+}
+
+fn rig_rec() -> (Rig, Arc<Rec>) {
+    let mem = Arc::new(FakeMemory::new(BASE, (SIZE / 4) as usize));
+    let rec = Arc::new(Rec {
+        mem: mem.clone(),
+        calls: Mutex::new(Vec::new()),
+    });
+    (build(rec.clone(), rec.clone(), mem), rec)
+}
+
+#[test]
+fn a_mapping_that_shared_its_pages_is_unmapped_by_sharing_although_a_pin_appeared() {
+    let _p = exclusive_pins();
+    let (r, rec) = rig_rec();
+    r.svc(0x01, &[0, MIB2]);
+    let (src, dst) = (HEAP + 0x1000, STACK);
+    assert!(r.mem.store32(src, 0xABCD));
+    assert_eq!(r.svc(0x04, &[dst, src, 0x2000])[0], 0);
+    assert_eq!(rec.calls(), vec![Call::Remap(dst, src, 0x2000)]);
+    // a buffer over the source appears while the stack view lives
+    pinned::pin(src, src + 0x2000);
+    rec.forget();
+    assert_eq!(r.svc(0x05, &[dst, src, 0x2000])[0], 0);
+    // only the view goes: nothing is copied and nothing is zeroed in the source
+    assert_eq!(rec.calls(), vec![Call::Drop(dst, 0x2000)]);
+    assert_eq!(r.mem.load32(src), Some(0xABCD));
+}
+
+#[test]
+fn a_mapping_that_copied_its_pages_is_unmapped_by_copying_although_the_pin_went_away() {
+    let _p = exclusive_pins();
+    let (r, rec) = rig_rec();
+    r.svc(0x01, &[0, MIB2]);
+    let (src, dst) = (HEAP + 0x1000, STACK);
+    pinned::pin(src, src + 0x2000);
+    assert!(r.mem.store32(src, 1));
+    assert_eq!(r.svc(0x04, &[dst, src, 0x2000])[0], 0);
+    assert_eq!(rec.calls(), vec![Call::Copy(dst, src, 0x2000)]);
+    // the buffer is gone, and the stack view got a write
+    assert!(pinned::unpin(src, src + 0x2000));
+    assert!(r.mem.store32(dst, 0x77));
+    rec.forget();
+    assert_eq!(r.svc(0x05, &[dst, src, 0x2000])[0], 0);
+    assert_eq!(
+        rec.calls(),
+        vec![Call::Copy(src, dst, 0x2000), Call::Give(dst, dst + 0x2000)]
+    );
+    assert_eq!(r.mem.load32(src), Some(0x77));
+}
+
+#[test]
+fn map_memory_copies_when_the_source_lies_in_the_set_range_and_shares_when_it_goes() {
+    let _p = exclusive_pins();
+    let (r, rec) = rig_rec();
+    r.svc(0x01, &[0, MIB2]);
+    let (src, dst) = (HEAP + 0x1000, STACK);
+    pinned::set(HEAP, HEAP + MIB2);
+    assert_eq!(r.svc(0x04, &[dst, src, 0x1000])[0], 0);
+    pinned::set(0, 0);
+    assert_eq!(r.svc(0x05, &[dst, src, 0x1000])[0], 0);
+    assert_eq!(r.svc(0x04, &[dst, src, 0x1000])[0], 0);
+    assert_eq!(r.svc(0x05, &[dst, src, 0x1000])[0], 0);
+    assert_eq!(
+        rec.calls(),
+        vec![
+            Call::Copy(dst, src, 0x1000),
+            Call::Copy(src, dst, 0x1000),
+            Call::Give(dst, dst + 0x1000),
+            Call::Remap(dst, src, 0x1000),
+            Call::Drop(dst, 0x1000),
+        ]
+    );
+}
+
+#[test]
+fn a_heap_shrink_gives_back_all_but_the_pinned_page() {
+    let _p = exclusive_pins();
+    let (r, rec) = rig_rec();
+    r.svc(0x01, &[0, MIB2]);
+    let kept = HEAP + 0x3000;
+    pinned::pin(kept, kept + 0x1000);
+    assert!(r.mem.store32(kept, 5));
+    assert!(r.mem.store32(HEAP, 6));
+    rec.forget();
+    assert_eq!(r.svc(0x01, &[0, 0])[0], 0);
+    assert_eq!(
+        rec.calls(),
+        vec![
+            Call::Give(HEAP, kept),
+            Call::Keep(kept, kept + 0x1000),
+            Call::Give(kept + 0x1000, HEAP + MIB2),
+        ]
+    );
+    // all of it reads as zero, the kept page included, and the model says the heap is free
+    assert_eq!(r.mem.load32(kept), Some(0));
+    assert_eq!(r.mem.load32(HEAP), Some(0));
+    assert_eq!(r.query(HEAP).2, 0);
+    assert_eq!(r.svc(0x01, &[0, MIB2])[0], 0);
+    assert_eq!(r.query(HEAP), (HEAP, MIB2, 5, 0, 3));
+}
+
+#[test]
+fn a_heap_shrink_over_the_set_range_keeps_every_page() {
+    let _p = exclusive_pins();
+    let (r, rec) = rig_rec();
+    r.svc(0x01, &[0, MIB2]);
+    pinned::set(HEAP, HEAP + MIB2);
+    rec.forget();
+    assert_eq!(r.svc(0x01, &[0, 0])[0], 0);
+    assert_eq!(rec.calls(), vec![Call::Keep(HEAP, HEAP + MIB2)]);
+}
+
+#[test]
+fn unmap_physical_memory_gives_back_all_but_the_pinned_page() {
+    let _p = exclusive_pins();
+    let (r, rec) = rig_rec();
+    assert_eq!(r.svc(0x2C, &[ALIAS, 0x4000])[0], 0);
+    pinned::pin(ALIAS + 0x1000, ALIAS + 0x2000);
+    assert!(r.mem.store32(ALIAS + 0x1000, 9));
+    rec.forget();
+    assert_eq!(r.svc(0x2D, &[ALIAS, 0x4000])[0], 0);
+    assert_eq!(
+        rec.calls(),
+        vec![
+            Call::Give(ALIAS, ALIAS + 0x1000),
+            Call::Keep(ALIAS + 0x1000, ALIAS + 0x2000),
+            Call::Give(ALIAS + 0x2000, ALIAS + 0x4000),
+        ]
+    );
+    assert_eq!(r.query(ALIAS).2, 0);
+    assert_eq!(r.svc(0x2C, &[ALIAS, 0x4000])[0], 0);
+    assert_eq!(r.mem.load32(ALIAS + 0x1000), Some(0));
 }

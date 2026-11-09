@@ -53,7 +53,8 @@ pub trait HostSpace: Send + Sync {
     fn protect(&self, addr: u64, len: u64, perm: u32) -> bool;
 
     /// Gives the pages back: they read as zero when they are made accessible again, and they are not accessible now.
-    /// Pages that share a host page with memory that stays are zeroed instead.
+    /// Pages that share a host page with memory that stays are zeroed instead, and so are the host pages that a pin
+    /// reaches (`crate::pinned`); those lose their access too.
     fn release(&self, addr: u64, len: u64) -> bool;
 
     /// Writes zeros. The pages stay as accessible as they are.
@@ -66,8 +67,10 @@ pub trait HostSpace: Send + Sync {
     /// Copies `len` bytes. The ranges do not overlap.
     fn copy(&self, dst: u64, src: u64, len: u64) -> bool;
 
-    /// True when `remap` and `release` may put other pages under `addr..addr + len`. False where the pages must stay
-    /// (`crate::pinned`): there `MapMemory` copies, and `release` zeroes the pages in place.
+    /// True when `remap` and `release` may put other pages under `addr..addr + len`. False where a pin reaches the
+    /// range (`crate::pinned`: the memory under a live GPU buffer, a set that changes while the game runs): there
+    /// `MapMemory` copies. `release` cuts its range at the pinned host pages, zeroes those in place and gives back the
+    /// rest. `MapMemory` asks once and `UnmapMemory` follows the recorded answer, so the answer may change between them.
     fn can_remap(&self, _addr: u64, _len: u64) -> bool {
         true
     }

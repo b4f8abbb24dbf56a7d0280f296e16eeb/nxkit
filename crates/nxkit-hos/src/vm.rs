@@ -97,6 +97,17 @@ pub(crate) struct Space {
     pub map: MemoryMap,
     pub heap_size: u64,
     pub physical_used: u64,
+    /// How each live `MapMemory` was made, by destination address. `UnmapMemory` reads it, because the pinned set
+    /// changes while the game runs and a new answer can differ from the one `MapMemory` acted on.
+    pub views: std::collections::BTreeMap<u64, View>,
+}
+
+/// One `MapMemory`: the source, the size, and whether the host shared the pages (true) or copied them (false).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct View {
+    pub src: u64,
+    pub size: u64,
+    pub shared: bool,
 }
 
 /// The kernel's memory.
@@ -230,6 +241,7 @@ impl Vm {
                 map,
                 heap_size: 0,
                 physical_used: 0,
+                views: std::collections::BTreeMap::new(),
             }),
             tls_free: Mutex::new(slots),
             shared_next: AtomicU64::new(0),

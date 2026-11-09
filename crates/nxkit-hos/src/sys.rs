@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 mod call;
+mod release;
 
 pub use call::{GuestFn, random_fill};
 pub(crate) use call::{drop_spawn_arg, run_spawned, spawn_arg};
@@ -476,8 +477,9 @@ mod posix {
 ///
 /// `protect` rounds outward when it grants access and inward when it removes it, so a host page that still has a
 /// Horizon page with access stays accessible. Two Horizon pages with different access on one host page get the
-/// access of the last call. `release` leaves a host page that it only partly releases readable and writable. Inside the
-/// pinned range (`crate::pinned`) `release` zeroes the pages and takes their access instead of replacing them.
+/// access of the last call. `release` leaves a host page that it only partly releases readable and writable. The host
+/// pages that a pin reaches (`crate::pinned`) are zeroed and lose their access instead of being replaced; the rest of the
+/// range is given back (`release.rs`).
 impl HostSpace for HostMemory {
     fn page_size(&self) -> u64 {
         posix::page_size().max(PAGE_SIZE)
@@ -494,17 +496,7 @@ impl HostSpace for HostMemory {
     }
 
     fn release(&self, addr: u64, len: u64) -> bool {
-        let ps = self.page_size();
-        let first = addr.div_ceil(ps) * ps;
-        let last = (addr + len) & !(ps - 1);
-        if last <= first {
-            return self.scrub(addr, len);
-        }
-        if !self.can_remap(addr, len) {
-            // the GPU keeps the pages under the range: zero them in place instead of replacing them
-            return self.scrub(addr, len) && posix::protect(first, last - first, 0);
-        }
-        self.drop_view(first, last - first) && self.release_edges(addr, len, first, last)
+        self.release_range(addr, len)
     }
 
     fn zero(&self, addr: u64, len: u64) -> bool {
@@ -525,22 +517,6 @@ impl HostSpace for HostMemory {
 
     fn drop_view(&self, addr: u64, len: u64) -> bool {
         posix::drop_pages(addr, len)
-    }
-}
-
-impl HostMemory {
-    /// Zeros the parts of a released range that share a host page with memory that stays.
-    fn release_edges(&self, addr: u64, len: u64, first: u64, last: u64) -> bool {
-        (first == addr || self.scrub(addr, first - addr))
-            && (last == addr + len || self.scrub(last, addr + len - last))
-    }
-
-    /// Zeros a range that shares a host page with memory that stays. The host page is made readable and writable.
-    fn scrub(&self, addr: u64, len: u64) -> bool {
-        let ps = self.page_size();
-        let start = addr & !(ps - 1);
-        let end = (addr + len).div_ceil(ps) * ps;
-        posix::protect(start, end - start, 3) && posix::fill_zero(addr, len)
     }
 }
 
