@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use nxkit_abi::guest;
 
 use crate::config;
-use crate::decoder::{Backend, decode_av1, decode_packet};
+use crate::decoder::{Backend, Decoded, decode_av1, decode_packet};
 use crate::frame::Frame;
 
 /// Marks a handle that this crate wrote into an SDK object, in the upper 32 bits.
@@ -38,6 +38,12 @@ const FIFO: usize = 8;
 pub(crate) const READY: usize = 4;
 /// Decoded pictures that wait for a released buffer, at which packets are refused. A player that sends one packet per
 /// signal and ignores the result needs room for a signal that is in flight when the event goes down.
+///
+/// The pictures that are still inside the decoder (rav1d decodes up to 8 units at once and gives each picture with a
+/// later unit) count against this too: a packet is refused when `held + in flight >= HOLD`. So every picture that a
+/// packet can still produce has a place, and a drain at the end of the stream cannot overrun [`HOLD`]. The in-flight
+/// number is at most 8, below [`HOLD`] - [`READY`], so the submission ready event (which goes down at [`READY`] held
+/// pictures) is always down before the refusal can start.
 pub(crate) const HOLD: usize = 12;
 /// The decoders that exist at once. The sync handle names one by a number from 1 to this.
 const MAX_DECODERS: u32 = 16;
@@ -474,20 +480,30 @@ pub(crate) struct Dec {
     refused: u32,
 }
 
-/// Decodes one packet on a thread with a big stack, because the caller can be a guest thread with 8 KB.
-fn decode_big(
-    codec: Codec,
-    stream: &mut Stream,
-    data: &[u8],
-) -> Result<Option<Arc<Frame>>, String> {
+/// What the decoder thread does.
+enum Job<'a> {
+    /// Decode a packet with this timestamp.
+    Packet(&'a [u8], i64),
+    /// Give every picture that is still inside the decoder.
+    Drain,
+}
+
+/// Runs `job` on a thread with a big stack, because the caller can be a guest thread with 8 KB.
+fn decode_big(codec: Codec, stream: &mut Stream, job: Job<'_>) -> Result<Vec<Decoded>, String> {
     std::thread::scope(|s| {
-        let job = std::thread::Builder::new()
+        let run = std::thread::Builder::new()
             .stack_size(DECODE_STACK)
-            .spawn_scoped(s, || match codec {
-                Codec::Av1 => decode_av1(stream, crate::backend::open_av1, data),
-                _ => decode_packet(stream, crate::backend::open, data),
+            .spawn_scoped(s, || match job {
+                Job::Packet(data, ts) => match codec {
+                    Codec::Av1 => decode_av1(stream, crate::backend::open_av1, data, ts),
+                    _ => decode_packet(stream, crate::backend::open, data, ts),
+                },
+                Job::Drain => match stream {
+                    Some((b, _, _)) => b.drain(),
+                    None => Ok(Vec::new()),
+                },
             });
-        match job {
+        match run {
             Ok(h) => h
                 .join()
                 .unwrap_or_else(|_| Err("the decoder thread panicked".to_string())),
@@ -571,6 +587,10 @@ impl Dec {
     pub(crate) fn reset(&mut self, fx: &mut Effects) {
         self.held.clear();
         self.eos_pending = false;
+        // The pictures inside the decoder are stale too.
+        if let Some((b, _, _)) = self.stream.as_mut() {
+            b.flush();
+        }
         self.stream = None;
         if self.event != 0 {
             fx.event = Some(true);
@@ -583,6 +603,11 @@ impl Dec {
         if self.event != 0 && self.held.len() < READY {
             fx.event = Some(true);
         }
+    }
+
+    /// The packets that the decoder took and whose pictures are not out yet.
+    fn in_flight(&self) -> usize {
+        self.stream.as_ref().map_or(0, |(b, _, _)| b.in_flight())
     }
 
     fn hold(&mut self, frame: Arc<Frame>, ts: i64) -> bool {
@@ -604,7 +629,26 @@ impl Dec {
         true
     }
 
-    /// One packet: decoded at once. Its pictures wait for released buffers. The end of stream marks the last picture,
+    /// Holds the pictures of a decode or drain, each with its own timestamp. Whether one was held.
+    fn hold_all(&mut self, r: Result<Vec<Decoded>, String>) -> bool {
+        let mut got = false;
+        match r {
+            Ok(pictures) => {
+                for d in pictures {
+                    got |= self.hold(d.frame, d.ts);
+                }
+            }
+            Err(e) => {
+                if self.errors < 4 {
+                    self.errors += 1;
+                    red(&format!("nn::codec {}: {e}", self.codec.name()));
+                }
+            }
+        }
+        got
+    }
+
+    /// One packet: sent to the decoder at once. The pictures that are ready (a decoder with frame threads gives them some packets late) wait for released buffers, each with the timestamp of its own packet. The end of stream marks the last picture,
     /// or comes as a buffer of its own. Gives the number of this submission.
     pub(crate) fn submit(
         &mut self,
@@ -620,13 +664,14 @@ impl Dec {
             self.held.len(),
             self.pend
         ));
-        if self.held.len() >= HOLD {
+        if self.held.len() + self.in_flight() >= HOLD {
             if self.refused < 4 {
                 self.refused += 1;
                 red(&format!(
-                    "nn::codec {}: a packet is refused with {} pictures waiting for a released buffer",
+                    "nn::codec {}: a packet is refused with {} pictures waiting for a released buffer and {} in the decoder",
                     self.codec.name(),
-                    self.held.len()
+                    self.held.len(),
+                    self.in_flight()
                 ));
             }
             if self.event != 0 {
@@ -636,18 +681,13 @@ impl Dec {
         }
         let mut got = false;
         if !data.is_empty() {
-            match decode_big(self.codec, &mut self.stream, data) {
-                Ok(Some(frame)) => got = self.hold(frame, ts),
-                Ok(None) => {}
-                Err(e) => {
-                    if self.errors < 4 {
-                        self.errors += 1;
-                        red(&format!("nn::codec {}: {e}", self.codec.name()));
-                    }
-                }
-            }
+            let r = decode_big(self.codec, &mut self.stream, Job::Packet(data, ts));
+            got = self.hold_all(r);
         }
         if eos {
+            // No more data comes: the pictures inside the decoder come out now.
+            let r = decode_big(self.codec, &mut self.stream, Job::Drain);
+            got |= self.hold_all(r);
             match self.held.back_mut() {
                 Some(last) if got => last.eos = true,
                 _ => self.eos_pending = true,
@@ -998,6 +1038,127 @@ mod tests {
 
     fn dec() -> Dec {
         Dec::new(1, Codec::Vp9, 0)
+    }
+
+    /// A decoder with frame threads: every packet is answered with the picture of the packet `LAG` before it, and the
+    /// end of the stream gives the last `LAG`.
+    struct Lagging {
+        sent: Vec<i64>,
+        out: usize,
+        flushed: bool,
+    }
+
+    const LAG: usize = 3;
+
+    impl Backend for Lagging {
+        fn decode(&mut self, _packet: &[u8], ts: i64) -> Result<Vec<Decoded>, String> {
+            self.sent.push(ts);
+            let mut v = Vec::new();
+            while self.sent.len() - self.out > LAG {
+                v.push(Decoded {
+                    frame: Arc::new(grey()),
+                    ts: self.sent[self.out],
+                });
+                self.out += 1;
+            }
+            Ok(v)
+        }
+        fn drain(&mut self) -> Result<Vec<Decoded>, String> {
+            let v = self.sent[self.out..]
+                .iter()
+                .map(|&ts| Decoded {
+                    frame: Arc::new(grey()),
+                    ts,
+                })
+                .collect();
+            self.out = self.sent.len();
+            Ok(v)
+        }
+        fn flush(&mut self) {
+            self.flushed = true;
+        }
+        fn in_flight(&self) -> usize {
+            (self.sent.len() - self.out).min(LAG)
+        }
+    }
+
+    fn lagging() -> Dec {
+        let mut d = Dec::new(1, Codec::Av1, 0);
+        d.stream = Some((
+            Box::new(Lagging {
+                sent: Vec::new(),
+                out: 0,
+                flushed: false,
+            }),
+            0,
+            0,
+        ));
+        d
+    }
+
+    #[test]
+    fn a_late_picture_keeps_the_timestamp_of_its_packet() {
+        let mut d = lagging();
+        let mut fx = Effects::default();
+        for i in 0..6 {
+            assert!(d.submit(&[1], 100 + i, false, &mut fx).is_ok());
+        }
+        let ts: Vec<i64> = d.held.iter().map(|h| h.ts).collect();
+        assert_eq!(ts, vec![100, 101, 102]);
+    }
+
+    #[test]
+    fn the_end_of_stream_drains_the_decoder_and_marks_the_last_picture() {
+        let mut d = lagging();
+        let mut fx = Effects::default();
+        for i in 0..5 {
+            assert!(d.submit(&[1], i, false, &mut fx).is_ok());
+        }
+        assert!(d.submit(&[1], 5, true, &mut fx).is_ok());
+        let ts: Vec<i64> = d.held.iter().map(|h| h.ts).collect();
+        assert_eq!(ts, vec![0, 1, 2, 3, 4, 5]);
+        assert!(d.held.back().is_some_and(|h| h.eos));
+        assert!(d.held.iter().rev().skip(1).all(|h| !h.eos));
+        assert!(!d.eos_pending);
+        assert_eq!(d.in_flight(), 0);
+    }
+
+    #[test]
+    fn pictures_inside_the_decoder_count_against_hold() {
+        let mut d = lagging();
+        for _ in 0..HOLD - LAG {
+            d.held.push_back(Held {
+                frame: Arc::new(grey()),
+                ts: 0,
+                eos: false,
+            });
+        }
+        let mut fx = Effects::default();
+        // The packets are taken while held and in flight together stay below HOLD, then refused.
+        let mut taken = 0;
+        while d.submit(&[1], taken, false, &mut fx).is_ok() {
+            taken += 1;
+            assert!(d.held.len() + d.in_flight() <= HOLD);
+        }
+        assert_eq!(taken, LAG as i64);
+        assert_eq!(d.held.len() + d.in_flight(), HOLD);
+        // The end of the stream still fits: nothing is dropped.
+        let before = d.held.len() + d.in_flight();
+        d.held.pop_front();
+        assert!(d.submit(&[], 3, true, &mut fx).is_ok());
+        assert_eq!(d.held.len(), before - 1);
+    }
+
+    #[test]
+    fn a_reset_flushes_the_decoder_and_drops_the_held_pictures() {
+        let mut d = lagging();
+        let mut fx = Effects::default();
+        for i in 0..6 {
+            assert!(d.submit(&[1], i, false, &mut fx).is_ok());
+        }
+        d.reset(&mut fx);
+        assert!(d.held.is_empty());
+        assert!(d.stream.is_none());
     }
 
     #[test]
