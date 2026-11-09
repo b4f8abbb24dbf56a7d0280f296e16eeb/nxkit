@@ -706,6 +706,7 @@ mod support_tests {
     fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
         Bind {
             arg_id: 0,
+            bank: 0,
             kind,
             reg,
             dim: None,

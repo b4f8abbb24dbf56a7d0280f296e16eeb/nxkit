@@ -1,0 +1,639 @@
+//! The plan of the movie network: the packed weights, the activation buffers and the dispatches of the kernels in
+//! [`crate::msl::SOURCE`], for the passes 3 to 16 of `docs/plans/ndve-native.md` (section 4).
+//!
+//! The layer table below is private on purpose (it repeats section 4 of that document and will be replaced by `net.rs`).
+//!
+//! Activations are NHWC f16 buffers. Eight are enough because a tensor dies when its last reader has run:
+//!
+//! | buffer | holds | size |
+//! |---|---|---|
+//! | `t1` | layer 1's output, later layer 10's | 960x540x16 |
+//! | `s16` | layer 2's output (the skip of layer 10), later layer 11's | 960x540x16 |
+//! | `d32a` | layers 3's output, later layer 8's | 480x270x32 |
+//! | `s32` | layer 4's output (the skip of layer 8) | 480x270x32 |
+//! | `d32b` | layer 9's output | 480x270x32 |
+//! | `e64a`, `e64b` | layers 5 to 7 | 240x135x64 |
+//! | `luma` | the luma of the 1920x1080 picture as f16, for the resampler | 1920x1080 |
+//!
+//! The colour conversion is fused into layers 1 and 12 (nothing writes the RGBA8 picture; the planes are converted
+//! where they are read), and layer 12 writes the RGB10A2 picture ([`GameResource::Intermediate`] 1) which the luma pass
+//! and the resampler read.
+
+use crate::pack::pack_layer;
+use crate::plan::{Binding, Buffer, GameResource, Plan, Source, Step};
+
+/// The weight blob of the network: layers 1 to 12 with their biases (`docs/plans/ndve-native.md` section 2).
+const BLOB_BYTES: usize = 0x3c320;
+/// The weights of the resampler's six blocks.
+const RESAMPLER_BYTES: usize = 0x3000;
+/// Threads of a threadgroup of every convolution kernel (4 simdgroups).
+const THREADS: u32 = 128;
+
+/// How a layer is cut into threadgroups.
+#[derive(Clone, Copy, Debug)]
+enum Geometry {
+    /// 3x3: tiles of `tw` x `th` output pixels, one threadgroup a tile.
+    Tiles { tw: usize, th: usize },
+    /// 2x2: tasks of `mt` m-tiles (8 pixels each) in one row, one simdgroup a task, four a threadgroup.
+    Tasks { mt: usize },
+}
+
+/// The convolution a layer is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// Layer 1: 3x3 from the NV12 planes.
+    First,
+    /// 3x3, buffer in, buffer out.
+    Conv3,
+    /// 2x2 stride 2.
+    Down,
+    /// 2x2 stride 2 transposed with a skip.
+    Up,
+    /// Layer 12: 3x3 to the RGB10A2 picture.
+    Last,
+}
+
+/// One row of section 4 of `ndve-native.md`.
+#[derive(Clone, Copy, Debug)]
+struct Layer {
+    kernel: &'static str,
+    label: &'static str,
+    kind: Kind,
+    cin: usize,
+    cout: usize,
+    /// The size in pixels of the tensor the layer reads (for `First`: the packed picture).
+    in_wh: (usize, usize),
+    /// The size in pixels of the tensor the layer writes.
+    out_wh: (usize, usize),
+    w_off: usize,
+    b_off: usize,
+    geo: Geometry,
+}
+
+const T32X4: Geometry = Geometry::Tiles { tw: 32, th: 4 };
+const T16X4: Geometry = Geometry::Tiles { tw: 16, th: 4 };
+
+const LAYERS: [Layer; 12] = [
+    Layer {
+        kernel: "ndve_l01",
+        label: "ndve.w01",
+        kind: Kind::First,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x0,
+        b_off: 0x1200,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l02",
+        label: "ndve.w02",
+        kind: Kind::Conv3,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x1300,
+        b_off: 0x2500,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l03",
+        label: "ndve.w03",
+        kind: Kind::Down,
+        cin: 16,
+        cout: 32,
+        in_wh: (960, 540),
+        out_wh: (480, 270),
+        w_off: 0x2600,
+        b_off: 0x3600,
+        geo: Geometry::Tasks { mt: 2 },
+    },
+    Layer {
+        kernel: "ndve_l04",
+        label: "ndve.w04",
+        kind: Kind::Conv3,
+        cin: 32,
+        cout: 32,
+        in_wh: (480, 270),
+        out_wh: (480, 270),
+        w_off: 0x3700,
+        b_off: 0x7f00,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l05",
+        label: "ndve.w05",
+        kind: Kind::Down,
+        cin: 32,
+        cout: 64,
+        in_wh: (480, 270),
+        out_wh: (240, 135),
+        w_off: 0x8000,
+        b_off: 0xc000,
+        geo: Geometry::Tasks { mt: 2 },
+    },
+    Layer {
+        kernel: "ndve_l06",
+        label: "ndve.w06",
+        kind: Kind::Conv3,
+        cin: 64,
+        cout: 64,
+        in_wh: (240, 135),
+        out_wh: (240, 135),
+        w_off: 0xc100,
+        b_off: 0x1e100,
+        geo: T16X4,
+    },
+    Layer {
+        kernel: "ndve_l07",
+        label: "ndve.w07",
+        kind: Kind::Conv3,
+        cin: 64,
+        cout: 64,
+        in_wh: (240, 135),
+        out_wh: (240, 135),
+        w_off: 0x1e200,
+        b_off: 0x30200,
+        geo: T16X4,
+    },
+    Layer {
+        kernel: "ndve_l08",
+        label: "ndve.w08",
+        kind: Kind::Up,
+        cin: 64,
+        cout: 32,
+        in_wh: (240, 135),
+        out_wh: (480, 270),
+        w_off: 0x30300,
+        b_off: 0x34300,
+        geo: Geometry::Tasks { mt: 2 },
+    },
+    Layer {
+        kernel: "ndve_l09",
+        label: "ndve.w09",
+        kind: Kind::Conv3,
+        cin: 32,
+        cout: 32,
+        in_wh: (480, 270),
+        out_wh: (480, 270),
+        w_off: 0x34400,
+        b_off: 0x38c00,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l10",
+        label: "ndve.w10",
+        kind: Kind::Up,
+        cin: 32,
+        cout: 16,
+        in_wh: (480, 270),
+        out_wh: (960, 540),
+        w_off: 0x38d00,
+        b_off: 0x39d00,
+        geo: Geometry::Tasks { mt: 4 },
+    },
+    Layer {
+        kernel: "ndve_l11",
+        label: "ndve.w11",
+        kind: Kind::Conv3,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x39e00,
+        b_off: 0x3b000,
+        geo: T32X4,
+    },
+    Layer {
+        kernel: "ndve_l12",
+        label: "ndve.w12",
+        kind: Kind::Last,
+        cin: 16,
+        cout: 16,
+        in_wh: (960, 540),
+        out_wh: (960, 540),
+        w_off: 0x3b100,
+        b_off: 0x3c300,
+        geo: T32X4,
+    },
+];
+
+impl Layer {
+    /// Taps of the convolution: 9 for 3x3, 4 for 2x2.
+    fn taps(&self) -> usize {
+        match self.kind {
+            Kind::First | Kind::Conv3 | Kind::Last => 9,
+            Kind::Down | Kind::Up => 4,
+        }
+    }
+    /// Bytes of the weights in the game's blob.
+    fn weight_bytes(&self) -> usize {
+        self.taps() * self.cin * self.cout * 2
+    }
+    /// Bytes of the input tensor.
+    #[cfg(test)]
+    fn in_bytes(&self) -> u64 {
+        (self.in_wh.0 * self.in_wh.1 * self.cin * 2) as u64
+    }
+    /// Bytes of the output tensor.
+    #[cfg(test)]
+    fn out_bytes(&self) -> u64 {
+        (self.out_wh.0 * self.out_wh.1 * self.cout * 2) as u64
+    }
+    /// The threadgroups of the layer's dispatch.
+    fn groups(&self) -> [u32; 3] {
+        let ceil = |a: usize, b: usize| u32::try_from(a.div_ceil(b)).unwrap_or(u32::MAX);
+        match self.geo {
+            Geometry::Tiles { tw, th } => [ceil(self.out_wh.0, tw), ceil(self.out_wh.1, th), 1],
+            Geometry::Tasks { mt } => {
+                // tasks are over the output (down) or the input (up) pixels
+                let (w, h) = if self.kind == Kind::Up {
+                    self.in_wh
+                } else {
+                    self.out_wh
+                };
+                [ceil(w / (8 * mt) * h, 4), 1, 1]
+            }
+        }
+    }
+}
+
+// Buffer indices in `Plan::buffers`: the 12 packed layers first, then these.
+const B_T1: usize = 12;
+const B_S16: usize = 13;
+const B_D32A: usize = 14;
+const B_S32: usize = 15;
+const B_D32B: usize = 16;
+const B_E64A: usize = 17;
+const B_E64B: usize = 18;
+const B_LUMA: usize = 19;
+const B_RS_W: usize = 20;
+
+fn buf(index: u32, source: usize, writes: bool) -> Binding {
+    Binding {
+        index,
+        source: Source::Buffer(source),
+        writes,
+    }
+}
+fn game(index: u32, resource: GameResource, writes: bool) -> Binding {
+    Binding {
+        index,
+        source: Source::Game(resource),
+        writes,
+    }
+}
+
+/// The plan for the network of the weight blob `weights` (0x3c320 bytes) and the resampler's weights (0x3000 bytes).
+///
+/// The steps, in order: the 12 layers (1 and 12 take the game's NV12 planes and conversion push block, 12 writes the
+/// RGB10A2 picture), the luma pass, the resampler. The kernels and their binding indices are those of
+/// [`crate::msl::SOURCE`]: buffer 0 input, 1 output, 2 packed weights, 3 skip, 4 push block; the resampler's are
+/// listed with its step.
+///
+/// # Errors
+///
+/// When a slice has the wrong length or a layer's weights cannot be packed.
+pub fn plan(weights: &[u8], resampler: &[u8]) -> Result<Plan, String> {
+    if weights.len() != BLOB_BYTES {
+        return Err(format!(
+            "the weight blob has {} bytes, expected {BLOB_BYTES}",
+            weights.len()
+        ));
+    }
+    if resampler.len() != RESAMPLER_BYTES {
+        return Err(format!(
+            "the resampler weights have {} bytes, expected {RESAMPLER_BYTES}",
+            resampler.len()
+        ));
+    }
+    let mut buffers = Vec::with_capacity(21);
+    for l in &LAYERS {
+        let w = weights
+            .get(l.w_off..l.w_off + l.weight_bytes())
+            .ok_or_else(|| format!("{}: weights outside the blob", l.label))?;
+        let b = weights
+            .get(l.b_off..)
+            .ok_or_else(|| format!("{}: bias outside the blob", l.label))?;
+        let packed =
+            pack_layer(w, b, l.taps(), l.cin, l.cout).map_err(|e| format!("{}: {e}", l.label))?;
+        buffers.push(Buffer {
+            name: l.label,
+            bytes: packed.len() as u64,
+            init: Some(packed),
+        });
+    }
+    let scratch = |name: &'static str, w: usize, h: usize, c: usize| Buffer {
+        name,
+        bytes: (w * h * c * 2) as u64,
+        init: None,
+    };
+    buffers.push(scratch("ndve.t1", 960, 540, 16));
+    buffers.push(scratch("ndve.s16", 960, 540, 16));
+    buffers.push(scratch("ndve.d32a", 480, 270, 32));
+    buffers.push(scratch("ndve.s32", 480, 270, 32));
+    buffers.push(scratch("ndve.d32b", 480, 270, 32));
+    buffers.push(scratch("ndve.e64a", 240, 135, 64));
+    buffers.push(scratch("ndve.e64b", 240, 135, 64));
+    buffers.push(scratch("ndve.luma", 1920, 1080, 1));
+    buffers.push(Buffer {
+        name: "ndve.rs_w",
+        bytes: RESAMPLER_BYTES as u64,
+        init: Some(resampler.to_vec()),
+    });
+
+    // (input, output, skip) per layer, as buffer indices
+    let routes: [(usize, usize, Option<usize>); 12] = [
+        (usize::MAX, B_T1, None),
+        (B_T1, B_S16, None),
+        (B_S16, B_D32A, None),
+        (B_D32A, B_S32, None),
+        (B_S32, B_E64A, None),
+        (B_E64A, B_E64B, None),
+        (B_E64B, B_E64A, None),
+        (B_E64A, B_D32A, Some(B_S32)),
+        (B_D32A, B_D32B, None),
+        (B_D32B, B_T1, Some(B_S16)),
+        (B_T1, B_S16, None),
+        (B_S16, usize::MAX, None),
+    ];
+    let mut steps = Vec::with_capacity(14);
+    for (n, (l, &(input, output, skip))) in LAYERS.iter().zip(routes.iter()).enumerate() {
+        let mut buffers = Vec::new();
+        let mut textures = Vec::new();
+        match l.kind {
+            Kind::First => {
+                buffers.push(buf(1, output, true));
+                buffers.push(buf(2, n, false));
+                buffers.push(game(4, GameResource::ConversionPush, false));
+                textures.push(game(0, GameResource::LumaPlane, false));
+                textures.push(game(1, GameResource::ChromaPlane, false));
+            }
+            Kind::Last => {
+                buffers.push(buf(0, input, false));
+                buffers.push(buf(2, n, false));
+                buffers.push(game(4, GameResource::ConversionPush, false));
+                textures.push(game(0, GameResource::LumaPlane, false));
+                textures.push(game(1, GameResource::ChromaPlane, false));
+                textures.push(game(2, GameResource::Intermediate { index: 1 }, true));
+            }
+            Kind::Conv3 | Kind::Down | Kind::Up => {
+                buffers.push(buf(0, input, false));
+                buffers.push(buf(1, output, true));
+                buffers.push(buf(2, n, false));
+                if let Some(s) = skip {
+                    buffers.push(buf(3, s, false));
+                }
+            }
+        }
+        steps.push(Step {
+            kernel: l.kernel,
+            groups: l.groups(),
+            threads: [THREADS, 1, 1],
+            threadgroup_bytes: 0,
+            buffers,
+            textures,
+        });
+    }
+    steps.push(Step {
+        kernel: "ndve_luma",
+        groups: [120, 135, 1],
+        threads: [16, 8, 1],
+        threadgroup_bytes: 0,
+        buffers: vec![buf(0, B_LUMA, true)],
+        textures: vec![game(0, GameResource::Intermediate { index: 1 }, false)],
+    });
+    steps.push(Step {
+        kernel: "ndve_resample",
+        // 320 x 180 blocks of 8x8 pixels: a threadgroup of 4 simdgroups takes 5 rounds of 4 x 2 blocks of a row
+        groups: [8, 180, 1],
+        threads: [THREADS, 1, 1],
+        threadgroup_bytes: 0,
+        buffers: vec![
+            buf(0, B_LUMA, false),
+            buf(1, B_RS_W, false),
+            game(2, GameResource::ResamplerPush, false),
+        ],
+        textures: vec![
+            game(0, GameResource::Intermediate { index: 1 }, false),
+            game(1, GameResource::Dither, false),
+            game(2, GameResource::Output, true),
+        ],
+    });
+    Ok(Plan { buffers, steps })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pack::packed_len;
+    use std::collections::BTreeSet;
+
+    /// A blob of the right length whose halves are small finite numbers.
+    fn blob() -> Vec<u8> {
+        (0..BLOB_BYTES / 2)
+            .flat_map(|i| (0x3000 + (i % 0x400) as u16).to_le_bytes())
+            .collect()
+    }
+    fn make() -> Plan {
+        plan(&blob(), &vec![0u8; RESAMPLER_BYTES]).expect("the plan builds")
+    }
+
+    #[test]
+    fn layer_offsets_follow_each_other() {
+        // weights then bias, each layer padded to 0x100 bytes, the last bias 0x20 bytes: the blob ends at 0x3c320
+        let mut end = 0usize;
+        for (i, l) in LAYERS.iter().enumerate() {
+            assert_eq!(l.w_off, end, "layer {}", i + 1);
+            assert_eq!(l.b_off, l.w_off + l.weight_bytes(), "layer {}", i + 1);
+            end = (l.b_off + l.cout * 2).next_multiple_of(0x100);
+        }
+        // the last bias is padded to 0x20 bytes only
+        assert_eq!(LAYERS[11].b_off + 0x20, BLOB_BYTES);
+    }
+
+    #[test]
+    fn wrong_lengths_are_errors() {
+        assert!(plan(&blob()[..100], &vec![0; RESAMPLER_BYTES]).is_err());
+        assert!(plan(&blob(), &[0; 10]).is_err());
+    }
+
+    #[test]
+    fn buffers_match_the_layer_table() {
+        let p = make();
+        assert_eq!(p.buffers.len(), 21);
+        for (i, l) in LAYERS.iter().enumerate() {
+            let b = &p.buffers[i];
+            assert_eq!(
+                b.bytes as usize,
+                packed_len(l.taps(), l.cin, l.cout),
+                "{}",
+                l.label
+            );
+            assert_eq!(b.init.as_ref().map(Vec::len), Some(b.bytes as usize));
+        }
+        for (i, b) in p.buffers.iter().enumerate().skip(12) {
+            assert_eq!(
+                b.init.as_ref().map(Vec::len).is_some(),
+                i == B_RS_W,
+                "{}",
+                b.name
+            );
+        }
+        let mut names = BTreeSet::new();
+        for b in &p.buffers {
+            assert!(names.insert(b.name), "duplicate name {}", b.name);
+        }
+    }
+
+    #[test]
+    fn every_binding_names_a_buffer_of_the_right_size() {
+        let p = make();
+        assert_eq!(p.steps.len(), 14);
+        for (n, (l, s)) in LAYERS.iter().zip(&p.steps).enumerate() {
+            assert_eq!(s.kernel, l.kernel);
+            for b in s.buffers.iter().chain(&s.textures) {
+                if let Source::Buffer(i) = b.source {
+                    assert!(i < p.buffers.len(), "layer {} binds buffer {i}", n + 1);
+                }
+            }
+            let size_of = |index: u32| -> Option<u64> {
+                s.buffers
+                    .iter()
+                    .find(|b| b.index == index)
+                    .and_then(|b| match b.source {
+                        Source::Buffer(i) => Some(p.buffers[i].bytes),
+                        Source::Game(_) => None,
+                    })
+            };
+            match l.kind {
+                Kind::First => assert_eq!(size_of(1), Some(l.out_bytes())),
+                Kind::Last => assert_eq!(size_of(0), Some(l.in_bytes())),
+                Kind::Conv3 | Kind::Down | Kind::Up => {
+                    assert_eq!(size_of(0), Some(l.in_bytes()), "layer {} input", n + 1);
+                    assert_eq!(size_of(1), Some(l.out_bytes()), "layer {} output", n + 1);
+                    if l.kind == Kind::Up {
+                        // the skip has the output's size
+                        assert_eq!(size_of(3), Some(l.out_bytes()), "layer {} skip", n + 1);
+                    } else {
+                        assert_eq!(size_of(3), None);
+                    }
+                }
+            }
+            assert_eq!(size_of(2), Some(packed_len(l.taps(), l.cin, l.cout) as u64));
+        }
+    }
+
+    #[test]
+    fn the_grids_cover_the_images() {
+        for l in &LAYERS {
+            let g = l.groups();
+            match l.geo {
+                Geometry::Tiles { tw, th } => {
+                    assert!(
+                        g[0] as usize * tw >= l.out_wh.0 && g[1] as usize * th >= l.out_wh.1,
+                        "{}",
+                        l.kernel
+                    );
+                    // the kernels read their tile geometry from template arguments; the widths divide the images
+                    assert_eq!(l.out_wh.0 % tw, 0, "{}", l.kernel);
+                }
+                Geometry::Tasks { mt } => {
+                    let (w, h) = if l.kind == Kind::Up {
+                        l.in_wh
+                    } else {
+                        l.out_wh
+                    };
+                    assert_eq!(w % (8 * mt), 0, "{}", l.kernel);
+                    assert!(g[0] as usize * 4 >= w / (8 * mt) * h, "{}", l.kernel);
+                }
+            }
+        }
+        let p = make();
+        let rs = &p.steps[13];
+        // 8 threadgroups x 5 rounds x 4 simdgroups x 2 blocks = 320 blocks of 8 pixels = 2560; 180 rows of blocks = 1440
+        assert_eq!(rs.groups[0] * 5 * 4 * 2 * 8, 2560);
+        assert_eq!(rs.groups[1] * 8, 1440);
+        let luma = &p.steps[12];
+        assert_eq!(
+            (
+                luma.groups[0] * luma.threads[0],
+                luma.groups[1] * luma.threads[1]
+            ),
+            (1920, 1080)
+        );
+    }
+
+    /// The text of the kernel's parameter list in the MSL.
+    fn signature(name: &str) -> String {
+        let src = crate::msl::SOURCE;
+        let head = format!("kernel void {name}(");
+        let start = src
+            .find(&head)
+            .unwrap_or_else(|| panic!("no kernel {name}"))
+            + head.len();
+        let end = src[start..].find(") {").map_or(src.len(), |e| start + e);
+        src[start..end].to_string()
+    }
+    fn indices(sig: &str, attr: &str) -> BTreeSet<u32> {
+        let key = format!("[[{attr}(");
+        sig.match_indices(&key)
+            .filter_map(|(i, _)| {
+                let rest = &sig[i + key.len()..];
+                rest[..rest.find(')')?].parse().ok()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bindings_are_the_kernels_arguments() {
+        let p = make();
+        for s in &p.steps {
+            let sig = signature(s.kernel);
+            let b: BTreeSet<u32> = s.buffers.iter().map(|b| b.index).collect();
+            let t: BTreeSet<u32> = s.textures.iter().map(|b| b.index).collect();
+            assert_eq!(indices(&sig, "buffer"), b, "{} buffers", s.kernel);
+            assert_eq!(indices(&sig, "texture"), t, "{} textures", s.kernel);
+            assert_eq!(
+                b.len(),
+                s.buffers.len(),
+                "{}: a buffer index twice",
+                s.kernel
+            );
+            assert_eq!(
+                t.len(),
+                s.textures.len(),
+                "{}: a texture index twice",
+                s.kernel
+            );
+            let threads = s.threads[0] * s.threads[1] * s.threads[2];
+            assert!(
+                threads <= 1024 && s.groups.iter().all(|&g| g > 0),
+                "{}",
+                s.kernel
+            );
+        }
+    }
+
+    #[test]
+    fn no_step_reads_and_writes_one_buffer() {
+        let p = make();
+        for s in &p.steps {
+            let reads: Vec<Source> = s
+                .buffers
+                .iter()
+                .filter(|b| !b.writes)
+                .map(|b| b.source)
+                .collect();
+            for w in s.buffers.iter().filter(|b| b.writes) {
+                assert!(
+                    !reads.contains(&w.source),
+                    "{} reads and writes one buffer",
+                    s.kernel
+                );
+            }
+        }
+    }
+}

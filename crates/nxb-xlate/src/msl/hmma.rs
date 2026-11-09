@@ -16,6 +16,12 @@
 //! own matrices, and a slot is read only for a chain's C and written only for its D. A call outside every chain has no
 //! slot bits and must not touch slot 0 (upstream issue 1537, dotted rows in Ocarina of Time).
 //!
+//! Every HMMA this helper stands for is `HMMA.16816.F16` (an F32 destination takes the shuffle emulation instead), and
+//! the hardware rounds D to half after each one, also between the steps of a chain. A slot therefore holds D already
+//! rounded: before it is written, the lane's two elements of each matrix go through `half2` in the registers (no
+//! scratch round trip, no barrier). The two K = 8 products are summed in FP32 first, as the hardware sums 16 products
+//! before it rounds.
+//!
 //! A and B are half matrices. C, D and the slots are float matrices: each product uses half A and B with an FP32
 //! accumulator, and D is rounded to half once, when the lanes read it from the B and C words of the block. Ampere also
 //! sums in FP32. Apple's half product rounds after each step and overflows to infinity on a partial sum, which gave
@@ -192,7 +198,7 @@ pub(super) fn body(em: &Em<'_>, i: usize) -> R<Option<String>> {
     put("}".into());
     put("simdgroup_multiply_accumulate(c0, am[1], b1, c0); simdgroup_multiply_accumulate(c1, am[3], b1, c1);".into());
     put(format!(
-        "if (dslot) {{ acc[k] = c0; acc[k + 1] = c1; simdgroup_barrier({flags}); a17 = 0; return 0; }}"
+        "if (dslot) {{ c0.thread_elements()[0] = float(half(c0.thread_elements()[0])); c0.thread_elements()[1] = float(half(c0.thread_elements()[1])); c1.thread_elements()[0] = float(half(c1.thread_elements()[0])); c1.thread_elements()[1] = float(half(c1.thread_elements()[1])); acc[k] = c0; acc[k + 1] = c1; simdgroup_barrier({flags}); a17 = 0; return 0; }}"
     ));
     put(format!("{space} float* w = ({space} float*)(s + 128);"));
     put("simdgroup_store(c0, w, 8, ulong2(0, 0)); simdgroup_store(c1, w, 8, ulong2(0, 8));".into());

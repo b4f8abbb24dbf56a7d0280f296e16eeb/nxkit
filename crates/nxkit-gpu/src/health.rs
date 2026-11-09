@@ -35,7 +35,21 @@ pub(crate) fn frame(n: u64, stats: &EncodeStats) {
         u64::from(stats.scaled_upload_lost),
     );
     note_n(Reason::UploadScaled, u64::from(stats.scaled_uploads));
+    native_report(n);
     frame_end(n);
+}
+
+/// Prints the native path's counters (`ndve.native`, `ndve.fallback`) with the report: every `REPORT_EVERY` frames and
+/// at once when a counter shows up that the last report did not have. They are not in `Reason` (that list is in
+/// `nxkit-nvn`, which knows no network), so they print as a block of their own.
+fn native_report(n: u64) {
+    if !nxkit_nvn::diag::health_on() {
+        return;
+    }
+    let (lines, fresh) = crate::native::health_lines();
+    if !lines.is_empty() && (fresh || n.is_multiple_of(nxkit_nvn::diag::REPORT_EVERY)) {
+        eprint!("health: native paths (frame {n})\n{lines}");
+    }
 }
 
 #[cfg(test)]

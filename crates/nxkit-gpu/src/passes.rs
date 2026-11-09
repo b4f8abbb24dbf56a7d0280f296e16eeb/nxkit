@@ -24,6 +24,10 @@ fn dispatch(
     scratch: &Scratch,
     n: u32,
 ) -> Result<(), Skip> {
+    // A dispatch of a run that a native plan replaces: the plan is encoded after the pass of the last one.
+    if sh.native.is_some_and(|p| p.skips(n)) {
+        return Ok(());
+    }
     let dd = sh.detail.dispatches.get(n as usize).ok_or(Skip::Detail)?;
     if crate::diag::skipped_program(&dd.program) {
         return Err(Skip::Encode);
@@ -522,11 +526,17 @@ pub(crate) fn compute_pass(
     {
         stats.skip(Skip::Encode);
     }
+    let mut native_here = None;
     for i in pass.cmds.clone() {
         let Some(cmd) = sh.frame.cmds.get(i as usize).copied() else {
             continue;
         };
         let ord = sh.ordinals.get(i as usize).copied().unwrap_or_default();
+        if let (PassKind::Compute, Cmd::Dispatch { .. }, Some(p)) = (pass.kind, cmd, sh.native)
+            && p.is_anchor(ord.dispatch)
+        {
+            native_here = Some(p);
+        }
         let r = match (pass.kind, cmd) {
             (PassKind::Compute, Cmd::Dispatch { .. }) => {
                 dispatch(sh, &mut cp, scratch, ord.dispatch)
@@ -555,6 +565,9 @@ pub(crate) fn compute_pass(
         }
     }
     cp.end();
+    if let Some(p) = native_here {
+        crate::native::encode(sh, cb, scratch, index, p, stats);
+    }
 }
 
 /// Encodes the copy-back of the textures that a CPU read pass names. A texture is copied when the table says the GPU
