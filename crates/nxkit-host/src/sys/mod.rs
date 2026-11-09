@@ -7,6 +7,7 @@ pub mod appkit;
 mod dylib;
 mod kernel;
 mod mouse;
+pub mod vm;
 
 pub use dylib::{Dylib, Image};
 pub use kernel::*;

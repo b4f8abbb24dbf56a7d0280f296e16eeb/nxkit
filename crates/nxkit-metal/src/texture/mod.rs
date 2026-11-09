@@ -6,13 +6,14 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSRange;
 use objc2_metal::{
-    MTLDevice, MTLOrigin, MTLRegion, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
-    MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureUsage,
+    MTLDevice, MTLOrigin, MTLRegion, MTLResource, MTLSize, MTLStorageMode, MTLTexture,
+    MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureUsage,
 };
 
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 use crate::format::Format;
+use crate::memstats::{Kind, Tracked};
 
 pub use desc::{Storage, TextureDesc, TextureKind, TextureRegion, ViewDesc};
 
@@ -28,6 +29,8 @@ struct Inner {
     resident: bool,
     /// For an atomic alias: the `R32Uint` texture under `raw`.
     atomic_raw: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    /// The bytes of a texture with its own storage in the memory counters. None for views and drawables.
+    _tracked: Option<Tracked>,
 }
 
 // SAFETY: `MTLTexture` objects are thread safe reference counted objects and `Inner` never changes them.
@@ -106,13 +109,22 @@ impl Texture {
         if resident {
             ctx.add_allocation(ProtocolObject::from_ref(&*raw));
         }
+        let tracked = Some(Tracked::new(Kind::Texture, raw.allocatedSize() as u64));
         if alias {
             let seen = raw
                 .newTextureViewWithPixelFormat(desc.format.to_mtl())
                 .ok_or_else(|| create("texture view", "the alias view returned nil"))?;
-            return Ok(Self::wrap(ctx, seen, desc, resident, None, Some(raw)));
+            return Ok(Self::wrap(
+                ctx,
+                seen,
+                desc,
+                resident,
+                None,
+                Some(raw),
+                tracked,
+            ));
         }
-        Ok(Self::wrap(ctx, raw, desc, resident, None, None))
+        Ok(Self::wrap(ctx, raw, desc, resident, None, None, tracked))
     }
 
     /// Wraps a texture that Metal made, for example the texture of a drawable. It does not join the residency set.
@@ -121,7 +133,7 @@ impl Texture {
         raw: Retained<ProtocolObject<dyn MTLTexture>>,
         desc: TextureDesc,
     ) -> Self {
-        Self::wrap(ctx, raw, desc, false, None, None)
+        Self::wrap(ctx, raw, desc, false, None, None, None)
     }
 
     fn wrap(
@@ -131,6 +143,7 @@ impl Texture {
         resident: bool,
         parent: Option<Texture>,
         atomic_raw: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+        tracked: Option<Tracked>,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -140,6 +153,7 @@ impl Texture {
                 ctx: ctx.clone(),
                 resident,
                 atomic_raw,
+                _tracked: tracked,
             }),
         }
     }
@@ -342,6 +356,7 @@ impl Texture {
             desc,
             false,
             Some(self.clone()),
+            None,
             None,
         ))
     }

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
+use objc2_metal::{MTLBuffer, MTLDevice, MTLResource, MTLResourceOptions};
 
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
@@ -40,8 +40,14 @@ thread_local! {
 
 struct State {
     buffers: Vec<Retained<ProtocolObject<dyn MTLBuffer>>>,
+    /// The bytes of `buffers` in the memory counters, one entry per buffer.
+    tracked: Vec<crate::memstats::Tracked>,
     index: usize,
     cursor: u64,
+}
+
+fn track(buffer: &ProtocolObject<dyn MTLBuffer>) -> crate::memstats::Tracked {
+    crate::memstats::Tracked::new(crate::memstats::Kind::Buffer, buffer.allocatedSize() as u64)
 }
 
 /// A bump allocator over shared buffers. It grows without moving live allocations, and reuses its buffers after
@@ -79,6 +85,7 @@ impl Scratch {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             epoch: AtomicU64::new(0),
             state: Mutex::new(State {
+                tracked: vec![track(&buffer)],
                 buffers: vec![buffer],
                 index: 0,
                 cursor: 0,
@@ -166,6 +173,7 @@ impl Scratch {
                     )
                     .ok_or_else(|| create("scratch buffer", "newBufferWithLength returned nil"))?;
                 self.ctx.add_allocation(ProtocolObject::from_ref(&*buffer));
+                st.tracked.push(track(&buffer));
                 st.buffers.push(buffer);
             }
             st.index = next;
