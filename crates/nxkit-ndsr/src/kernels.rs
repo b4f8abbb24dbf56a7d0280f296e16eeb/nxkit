@@ -44,6 +44,12 @@ pub struct KernelSpec {
     pub cell: [u32; 4],
     /// Whether the rows use the odd-row form of `ty` (all but the 1.2 programs).
     pub ty_odd: bool,
+    /// Simdgroups of a threadgroup (`NSG` of the instantiation); the threadgroup has 32 times as many threads. Tuned
+    /// per kernel on the full-size picture: more simdgroups hide the latency of the window, the cell samples and the
+    /// barriers, until the registers per thread suffer.
+    pub simdgroups: u32,
+    /// Patches a simdgroup takes at once (`NB`): a weight tile loaded serves that many patches.
+    pub patch_group: u32,
 }
 
 impl KernelSpec {
@@ -56,19 +62,40 @@ impl KernelSpec {
         ]
     }
 
-    /// The threadgroup memory the kernel declares, in bytes: the grid, the input window, the per-simdgroup result
-    /// scratch and, when the 32 KB budget allows, the staged weights (a mirror of `ndsr_main`).
+    /// The layers of the network (of 6) staged in threadgroup memory: as many as fit in the 32 KB budget next to the
+    /// grid, the input window and the per-simdgroup result scratch (a mirror of `NST` in `ndsr_main`).
     #[must_use]
-    pub const fn threadgroup_bytes(&self) -> u32 {
+    pub const fn staged_layers(&self) -> u32 {
+        let base = self.threadgroup_base();
+        if base + 2048 > 32768 - 256 {
+            0
+        } else {
+            let n = (32768 - 256 - base) / 2048;
+            if n > 6 { 6 } else { n }
+        }
+    }
+
+    /// The threads of a threadgroup.
+    #[must_use]
+    pub const fn threads(&self) -> u32 {
+        32 * self.simdgroups
+    }
+
+    /// The threadgroup memory without the staged weights: grid, window, result scratch.
+    const fn threadgroup_base(&self) -> u32 {
         let [npx, npy] = self.patches();
         let grid = 144 * npx * npy;
         let win = (self.in_px * (npx - 1) + 16) * (self.in_px * (npy - 1) + 16);
-        let base = (grid + win + 4 * 256) * 2;
-        if base + 12288 <= 32768 - 256 {
-            base + 12288
-        } else {
-            base
-        }
+        (grid + win + self.simdgroups * 256) * 2
+    }
+
+    /// The threadgroup memory the kernel declares, in bytes: the grid, the input window, the per-simdgroup result
+    /// scratch and the staged weights (a mirror of `ndsr_main`).
+    #[must_use]
+    pub const fn threadgroup_bytes(&self) -> u32 {
+        let staged = self.staged_layers();
+        // with nothing staged the kernel still declares 8 halves
+        self.threadgroup_base() + if staged == 0 { 16 } else { 2048 * staged }
     }
 
     /// The threadgroups for an input of `in_size` pixels: the tile rule of section 7.6 needs exactly these.
@@ -90,6 +117,8 @@ const fn spec(
     ratio_bits: u32,
     cell: [u32; 4],
     ty_odd: bool,
+    simdgroups: u32,
+    patch_group: u32,
 ) -> KernelSpec {
     KernelSpec {
         name,
@@ -99,6 +128,8 @@ const fn spec(
         ratio_bits,
         cell,
         ty_odd,
+        simdgroups,
+        patch_group,
     }
 }
 
@@ -117,21 +148,21 @@ use Variant::{A, B, C};
 
 /// The 15 network programs of the vr pack (ndsr-native.md section 4; the tile is the config bytes `b0 b1`).
 pub const KERNELS: [KernelSpec; 15] = [
-    spec("ndsr_in10_a", 10, A, [39, 29], R10, C10, false),
-    spec("ndsr_in10_b", 10, B, [39, 29], R10, C10, false),
-    spec("ndsr_in10_c", 10, C, [39, 39], R10, C10, false),
-    spec("ndsr_in8_a", 8, A, [31, 31], R8, C8, true),
-    spec("ndsr_in8_b", 8, B, [31, 31], R8, C8, true),
-    spec("ndsr_in8_c", 8, C, [31, 31], R8, C8, true),
-    spec("ndsr_in7_a", 7, A, [27, 27], R7, C7, true),
-    spec("ndsr_in7_b", 7, B, [55, 41], R7, C7, true),
-    spec("ndsr_in7_c", 7, C, [55, 20], R7, C7, true),
-    spec("ndsr_in6_a", 6, A, [23, 23], R6, C6, true),
-    spec("ndsr_in6_b", 6, B, [47, 23], R6, C6, true),
-    spec("ndsr_in6_c", 6, C, [47, 23], R6, C6, true),
-    spec("ndsr_in4_a", 4, A, [31, 23], R4, C4, true),
-    spec("ndsr_in4_b", 4, B, [31, 23], R4, C4, true),
-    spec("ndsr_in4_c", 4, C, [31, 23], R4, C4, true),
+    spec("ndsr_in10_a", 10, A, [39, 29], R10, C10, false, 12, 1),
+    spec("ndsr_in10_b", 10, B, [39, 29], R10, C10, false, 12, 1),
+    spec("ndsr_in10_c", 10, C, [39, 39], R10, C10, false, 16, 1),
+    spec("ndsr_in8_a", 8, A, [31, 31], R8, C8, true, 16, 1),
+    spec("ndsr_in8_b", 8, B, [31, 31], R8, C8, true, 16, 1),
+    spec("ndsr_in8_c", 8, C, [31, 31], R8, C8, true, 16, 1),
+    spec("ndsr_in7_a", 7, A, [27, 27], R7, C7, true, 16, 1),
+    spec("ndsr_in7_b", 7, B, [55, 41], R7, C7, true, 8, 1),
+    spec("ndsr_in7_c", 7, C, [55, 20], R7, C7, true, 12, 2),
+    spec("ndsr_in6_a", 6, A, [23, 23], R6, C6, true, 16, 1),
+    spec("ndsr_in6_b", 6, B, [47, 23], R6, C6, true, 12, 1),
+    spec("ndsr_in6_c", 6, C, [47, 23], R6, C6, true, 12, 1),
+    spec("ndsr_in4_a", 4, A, [31, 23], R4, C4, true, 8, 3),
+    spec("ndsr_in4_b", 4, B, [31, 23], R4, C4, true, 8, 3),
+    spec("ndsr_in4_c", 4, C, [31, 23], R4, C4, true, 8, 3),
 ];
 
 /// The kernel of an input scale (`in` = 10, 8, 7, 6, 4) and a variant.
@@ -209,7 +240,7 @@ pub fn plan_kernel(
         steps: vec![Step {
             kernel: kernel.name,
             groups: kernel.groups(in_size),
-            threads: [128, 1, 1],
+            threads: [kernel.threads(), 1, 1],
             threadgroup_bytes: 0,
             buffers: vec![
                 bind(0, Source::Buffer(0), false),
@@ -284,6 +315,8 @@ mod tests {
                 u64::from(k.cell[2]),
                 u64::from(k.cell[3]),
                 u64::from(k.ty_odd),
+                u64::from(k.simdgroups),
+                u64::from(k.patch_group),
             ];
             assert_eq!(n, &want, "{name}");
         }
@@ -302,8 +335,14 @@ mod tests {
             // the network maps in to 12 cells: ratio 12 / in
             let ratio = f32::from_bits(k.ratio_bits);
             assert!((ratio - 12.0 / k.in_px as f32).abs() < 1e-6, "{}", k.name);
-            assert!(12 * npx <= 128, "the unsharp pass is a column a thread");
+            assert_eq!(
+                12 * npx % 6,
+                0,
+                "the unsharp pass takes blocks of 6 columns"
+            );
             assert!(k.threadgroup_bytes() <= 32768, "{}", k.name);
+            assert!((1..=16).contains(&k.simdgroups), "{}", k.name);
+            assert!((1..=4).contains(&k.patch_group), "{}", k.name);
         }
         assert_eq!(find(9, Variant::A), None);
     }
@@ -320,7 +359,7 @@ mod tests {
         };
         assert_eq!(s.kernel, "ndsr_in10_a");
         assert_eq!(s.groups, [1536u32.div_ceil(39), 864u32.div_ceil(29), 1]);
-        assert_eq!(s.threads, [128, 1, 1]);
+        assert_eq!(s.threads, [k.threads(), 1, 1]);
         for b in s.buffers.iter().chain(&s.textures) {
             if let Source::Buffer(i) = b.source {
                 assert!(i < p.buffers.len());
