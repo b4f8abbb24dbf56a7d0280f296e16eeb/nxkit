@@ -4,6 +4,7 @@
 //! frame. A render target stays in Metal. It goes back to guest memory with the swizzle kernel when the frame has a CPU
 //! read of it, or at the end of a frame that wrote it when its storage lies in a pool the CPU can access (`copyback`).
 
+mod buffered;
 mod dirty;
 mod staging;
 #[cfg(test)]
@@ -14,9 +15,9 @@ pub(crate) use self::dirty::Dirty;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
-    CommandBuffer, ComputeCommand, ComputePass, Context, DataBuffer, Dependency, DeswizzleParams,
-    Deswizzler, Format, GobOrder, GuestMemory, PipelineCache, Scratch, SurfaceLayout, Swizzler,
-    TextureDesc, TextureKind, TextureRegion, Use,
+    CommandBuffer, ComputeCommand, ComputePass, Context, DataBuffer, Deswizzler, Format, GobOrder,
+    GuestMemory, PipelineCache, Scratch, SurfaceLayout, Swizzler, TextureDesc, TextureKind,
+    TextureRegion,
 };
 use nxkit_nvn::format::format_info;
 use nxkit_nvn::layout::Target;
@@ -33,7 +34,7 @@ pub(crate) struct Transfer {
     swizzler: Swizzler,
     order: GobOrder,
     gate: Mutex<()>,
-    /// The staging buffers of compressed uploads.
+    /// The staging buffers of the uploads through a buffer (compressed, depth and stencil textures).
     staging: Mutex<staging::Pool<DataBuffer>>,
     /// The staging pool and the queued scalings of uploads into scaled textures.
     scaled: Mutex<ScaledUploads>,
@@ -198,7 +199,7 @@ impl Transfer {
         let surf = surface(rec, res, self.order)?;
         let base = guest_offset(rec, guest)?;
         let d = res.desc;
-        let compressed = matches!(d.format, Format::Bc(_) | Format::Astc { .. });
+        let buffered = buffered::via_buffer(d.format);
         let mut pass = cb
             .begin_compute_pass(self.deswizzler.table())
             .map_err(|_| Skip::Transfer)?;
@@ -206,8 +207,8 @@ impl Transfer {
             pass.end();
             return Err(Skip::Transfer);
         }
-        let r = if compressed {
-            self.upload_compressed(&mut pass, scratch, guest, base, &surf, (rec, res))
+        let r = if buffered {
+            self.upload_buffered(&mut pass, scratch, guest, base, &surf, (rec, res))
         } else {
             self.upload_plain(&mut pass, scratch, guest, base, &surf, res)
         };
@@ -330,106 +331,6 @@ impl Transfer {
             .map_err(|_| Skip::Transfer);
         pass.end();
         r
-    }
-
-    /// Compressed blocks are deswizzled into a buffer and copied into the texture. Metal does not support a direct
-    /// integer-texture to compressed-texture copy. Each mip uses its exact block extent, including the tail levels.
-    fn upload_compressed(
-        &self,
-        pass: &mut ComputePass<'_>,
-        scratch: &Scratch,
-        guest: &Arc<GuestMemory>,
-        base: u64,
-        surf: &SurfaceLayout,
-        (rec, res): (&TextureRecord, &Res),
-    ) -> Result<(), Skip> {
-        let d = res.desc;
-        let info = format_info(rec.desc.format).map_err(|_| Skip::Format)?;
-        if d.kind == TextureKind::D3 {
-            return Err(Skip::Transfer);
-        }
-        // Compressed mip chains keep 1x1 blocks after reaching the block size. A mipmapped staging texture in
-        // block units cannot represent those tail levels, and rounding before shifting also loses NPOT blocks.
-        // Each level therefore gets a range of the staging buffer with the exact block extent of that level.
-        let sizes: Vec<[u32; 3]> = (0..d.mip_levels)
-            .map(|level| {
-                let [w, h, _] = d.level_extent(level);
-                [
-                    w.div_ceil(u32::from(info.block_w)),
-                    h.div_ceil(u32::from(info.block_h)),
-                    1,
-                ]
-            })
-            .collect();
-        let bytes: Vec<u64> = sizes
-            .iter()
-            .map(|s| u64::from(s[0]) * u64::from(s[1]) * u64::from(surf.bytes_per_block))
-            .collect();
-        let (offsets, total) = staging::level_offsets(&bytes);
-        if total == 0 {
-            return Ok(());
-        }
-        // Every byte of a level range is written by the deswizzle before the copy reads it, so a reused buffer needs
-        // no clearing and a new one is not zero filled by the CPU.
-        let staging = self
-            .staging
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .acquire(total, |len| {
-                DataBuffer::new_unfilled(&self.ctx, len).ok().map(Arc::new)
-            })
-            .ok_or(Skip::Transfer)?;
-        // The command buffer holds the buffer from here on, also when an error cuts the encoding short, so the pool
-        // never hands it out while commands that name it can still run.
-        pass.retain(staging.clone());
-        for level in 0..d.mip_levels {
-            let [w, h, _] = d.level_extent(level);
-            let size = sizes[level as usize];
-            let at = offsets[level as usize];
-            let (tile_h, _) = rec.desc.level_tiles(level).map_err(|_| Skip::Transfer)?;
-            let params = DeswizzleParams {
-                bytes_per_block: surf.bytes_per_block,
-                width: size[0],
-                height: size[1],
-                block_height: 1 << tile_h,
-                pitch: 0,
-                order: surf.order,
-            };
-            let offset = rec.desc.level_offset(level).map_err(|_| Skip::Transfer)?;
-            for slice in 0..d.slice_count() {
-                if slice != 0 {
-                    pass.encode(&ComputeCommand::Depend(Dependency::within_pass(
-                        Use::CopyRead,
-                        Use::ComputeWrite,
-                    )))
-                    .map_err(|_| Skip::Transfer)?;
-                }
-                self.deswizzler
-                    .encode_to_buffer(
-                        pass,
-                        scratch,
-                        guest,
-                        base + u64::from(slice) * rec.layout.layer_size + offset,
-                        (&staging, at),
-                        &params,
-                    )
-                    .map_err(|_| Skip::Transfer)?;
-                pass.encode(&ComputeCommand::Depend(Dependency::within_pass(
-                    Use::ComputeWrite,
-                    Use::CopyRead,
-                )))
-                .map_err(|_| Skip::Transfer)?;
-                pass.encode(&ComputeCommand::CopyBufferToTexture {
-                    buffer: staging.clone(),
-                    offset: at,
-                    bytes_per_row: size[0] * surf.bytes_per_block,
-                    texture: res.tex.clone(),
-                    region: TextureRegion::whole(level, slice, [w, h, 1]),
-                })
-                .map_err(|_| Skip::Transfer)?;
-            }
-        }
-        Ok(())
     }
 
     /// Encodes the copy of the whole texture back into guest memory, in its block-linear layout.

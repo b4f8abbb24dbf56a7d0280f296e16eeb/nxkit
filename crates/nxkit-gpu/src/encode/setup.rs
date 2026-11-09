@@ -5,6 +5,9 @@ use super::*;
 pub(super) struct Setup {
     pub(super) desc: RenderPassDesc,
     pub(super) pc: PassCtx,
+    /// The colour attachments that render the blocks of a compressed texture into a shadow, and whether the pass loads
+    /// (true) the old blocks and stores (second) the new ones.
+    pub(super) blocks: Vec<(BlockTarget, bool, bool)>,
 }
 
 pub(super) fn load(a: LoadAction, memoryless: bool) -> MLoad {
@@ -185,12 +188,22 @@ pub(super) fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
     let mut size: Option<[u32; 2]> = None;
     let mut scale = 1.0;
     let mut has_stencil = false;
+    let mut blocks = Vec::new();
     for a in sh.plan.attachments_of(pass) {
         if matches!(a.slot, Slot::Color(n) if selected & (1 << n) == 0) {
             continue;
         }
         let res = sh.textures.get(&a.tex).ok_or(Skip::Texture)?;
-        let texture = sh.texture_store.target_view(res, a.view)?;
+        // A colour attachment of a compressed texture renders its blocks into a shadow (`textures::blocks`).
+        let block = if matches!(a.slot, Slot::Color(_)) && res.desc.format.is_compressed() {
+            Some(sh.texture_store.block_target(res, a.view)?)
+        } else {
+            None
+        };
+        let texture = match &block {
+            Some(b) => b.shadow.clone(),
+            None => sh.texture_store.target_view(res, a.view)?,
+        };
         let d = texture.desc();
         if crate::diag("draw")
             && crate::diag::sampled()
@@ -256,6 +269,9 @@ pub(super) fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         }
         let s = store(a.store, mem);
         let clear = clear_of(sh, pass, a.slot);
+        if let Some(b) = block {
+            blocks.push((b, l == MLoad::Load, s == MStore::Store));
+        }
         match a.slot {
             Slot::Color(n) => colors.push((
                 n,
@@ -340,7 +356,7 @@ pub(super) fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         has_depth: desc.depth.is_some(),
         has_stencil,
     };
-    Ok(Setup { desc, pc })
+    Ok(Setup { desc, pc, blocks })
 }
 
 /// NVN may bind a texture to several slots and select the writer with channel masks. Metal gives each attachment
