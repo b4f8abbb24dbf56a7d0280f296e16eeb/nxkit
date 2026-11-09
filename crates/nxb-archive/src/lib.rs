@@ -19,8 +19,12 @@ pub mod cut;
 #[cfg(test)]
 mod key_tests;
 pub mod plan;
+mod progress;
 pub mod script;
+pub mod shards;
 pub mod stream;
+
+pub use progress::Batches;
 
 use std::collections::HashMap;
 use std::fs;
@@ -35,43 +39,6 @@ use nxb_tool::{EnvPolicy, Invocation, ProcessRegistry, run_process};
 
 use crate::cut::{Base, cut_for_slots};
 use crate::script::Script;
-
-/// Batches compiled so far and in all, for a caller's progress display: one atomic add for each batch.
-#[derive(Debug, Default)]
-pub struct Batches {
-    /// Batches done (compiled, or taken from the store).
-    pub done: std::sync::atomic::AtomicU64,
-    /// Batches in all. A streamed archive counts one batch for each group when it starts and corrects the count of a
-    /// group when the group is planned (a group is one batch unless it is cut further or holds no pipeline).
-    pub total: std::sync::atomic::AtomicU64,
-}
-
-impl Batches {
-    pub(crate) fn planned(c: &Config, n: usize) {
-        if let Some(b) = &c.progress {
-            b.total
-                .fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-
-    /// A group planned `n` batches where [`Batches::planned`] had counted `estimate` for it at the start.
-    pub(crate) fn replanned(c: &Config, estimate: usize, n: usize) {
-        if let Some(b) = &c.progress {
-            use std::sync::atomic::Ordering::Relaxed;
-            if n >= estimate {
-                b.total.fetch_add((n - estimate) as u64, Relaxed);
-            } else {
-                b.total.fetch_sub((estimate - n) as u64, Relaxed);
-            }
-        }
-    }
-
-    pub(crate) fn finished(c: &Config) {
-        if let Some(b) = &c.progress {
-            b.done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-}
 
 /// What to build.
 #[derive(Clone, Debug)]
@@ -116,6 +83,9 @@ pub struct Config {
     pub nice: i32,
     /// Counts the batches for a progress display (`None`: not counted).
     pub progress: Option<Arc<Batches>>,
+    /// Merge the pieces into `out`. A streamed archive ([`stream::Stream::run`]) that sets it false leaves the pieces
+    /// as they are, in [`Report::shards`], and writes no `out` (see [`mod@shards`]). [`build`] always merges.
+    pub merge: bool,
 }
 
 /// The tools `metal-tt` drives, called directly (`-j 1` costs half the CPU of `metal-tt`'s threads).
@@ -200,6 +170,8 @@ pub struct Report {
     pub size: u64,
     /// The merged archive came from the store (key: the batches' keys in merge order).
     pub merged_from_store: bool,
+    /// The pieces of a streamed archive with the pipelines in each, in merge order.
+    pub shards: Vec<shards::Shard>,
 }
 
 fn hash_libraries(
@@ -570,6 +542,7 @@ impl Config {
             direct: None,
             nice: 0,
             progress: None,
+            merge: true,
         })
         .map(|mut c: Config| {
             // applegpu-nt -j 1 + air-pack, one run per core: half the CPU of metal-tt's own threads.

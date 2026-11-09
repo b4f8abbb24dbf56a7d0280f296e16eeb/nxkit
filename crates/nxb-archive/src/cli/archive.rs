@@ -75,6 +75,7 @@ pub fn main(args: &[String]) -> i32 {
         direct: None,
         nice: 0,
         progress: None,
+        merge: true,
     };
     let mut c = c;
     if let Some(j) = g("nt-jobs").and_then(|v| v.parse().ok()) {

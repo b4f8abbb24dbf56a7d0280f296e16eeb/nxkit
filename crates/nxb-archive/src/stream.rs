@@ -26,7 +26,11 @@ use nxb_tool::ProcessRegistry;
 use crate::cut::cut;
 use crate::plan::{self, PlannedBase};
 use crate::script::Script;
+use crate::shards::Shard;
 use crate::{BatchReport, Config, Report};
+
+/// A compiled batch: its key, its archive, its report and the pipelines in it.
+type Piece = (ContentKey, PathBuf, BatchReport, Vec<crate::shards::Ident>);
 
 /// The pairs (or the compute libraries) of one group and how many of its shaders are still running.
 struct Group {
@@ -266,7 +270,7 @@ impl Stream {
         let store = Store::open(&c.store).map_err(|e| e.to_string())?;
         let reg = ProcessRegistry::new();
         let seen: Mutex<HashSet<PlannedBase>> = Mutex::new(HashSet::new());
-        let pieces: Mutex<Vec<(ContentKey, PathBuf, BatchReport)>> = Mutex::new(Vec::new());
+        let pieces: Mutex<Vec<Piece>> = Mutex::new(Vec::new());
         let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let groups = &self.groups;
         let headroom = Headroom::new(inp.limits);
@@ -297,6 +301,14 @@ impl Stream {
         }
         let mut pieces = pieces.into_inner().unwrap_or_else(PoisonError::into_inner);
         pieces.sort_by_key(|a| a.0.to_hex());
+        let shards = pieces
+            .iter()
+            .map(|p| Shard {
+                key: p.0.to_hex(),
+                path: p.1.clone(),
+                idents: p.3.clone(),
+            })
+            .collect();
         let t1 = Instant::now();
         let mut report = Report {
             peak_runs: headroom.peak(),
@@ -305,7 +317,15 @@ impl Stream {
         let keys: Vec<ContentKey> = pieces.iter().map(|p| p.0).collect();
         let paths: Vec<PathBuf> = pieces.iter().map(|p| p.1.clone()).collect();
         report.batches = pieces.into_iter().map(|p| p.2).collect();
-        crate::merge(c, &store, &reg, &keys, &paths, &mut report)?;
+        report.shards = shards;
+        if c.merge {
+            crate::merge(c, &store, &reg, &keys, &paths, &mut report)?;
+        } else {
+            report.size = paths
+                .iter()
+                .map(|p| fs::metadata(p).map_or(0, |m| m.len()))
+                .sum();
+        }
         report.seconds = (0.0, (t1 - t0).as_secs_f64(), t1.elapsed().as_secs_f64());
         let n = seen
             .into_inner()
@@ -324,7 +344,7 @@ fn group(
     store: &Store,
     reg: &ProcessRegistry,
     headroom: &Headroom,
-) -> Result<Vec<(ContentKey, PathBuf, BatchReport)>, String> {
+) -> Result<Vec<Piece>, String> {
     let p = plan::plan(&inp.lib_dir, &inp.chain, pairs, inp.zero);
     let (pipes, _) = crate::compute::plan_compute(&inp.lib_dir, &inp.chain, computes);
     let (bases, pipes): (Vec<PlannedBase>, Vec<crate::compute::ComputePipe>) = {
@@ -359,7 +379,7 @@ fn group(
         let key = crate::batch_key(c, &batch);
         let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg, Some(headroom))?;
         crate::Batches::finished(c);
-        out.push((key, piece, rep));
+        out.push((key, piece, rep, crate::shards::idents(&script, &batch)?));
     }
     Ok(out)
 }

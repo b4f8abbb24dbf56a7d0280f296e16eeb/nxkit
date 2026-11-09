@@ -18,6 +18,8 @@ nxb-pyjson.workspace = true
 nxb-tool.workspace = true
 nxb-store.workspace = true
 nxb-sched.workspace = true
+# The index format of the shards (`nxkit_abi::shards`), which the host reads.
+nxkit-abi.workspace = true
 
 [lints]
 workspace = true

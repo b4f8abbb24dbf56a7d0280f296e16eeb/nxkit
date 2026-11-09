@@ -84,7 +84,7 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 
 ### Other files
 
-`romfs/`, `shaders/` and `pipelines.mtl4archive` are read by the services and the GPU backend, not by the loader.
+`romfs/`, `shaders/` and `pipelines/` (the pipeline archive shards and `index.nxpi`, or the single `pipelines.mtl4archive` of an older build) are read by the services and the GPU backend, not by the loader.
 
 ### input.json
 
@@ -233,7 +233,7 @@ The content view takes the key events, so AppKit plays no alert sound, and passe
 
 `frames.rs` builds the frame path. `seams::frame_hooks` calls it with the run folder.
 
-1. It makes the `GpuBackend` of `nxkit-gpu` over the guest memory. The shader folder is `<run folder>/shaders`. It holds `<key>_b.metallib`, `<key>_b.json` and `.tsv` files, one set per shader, with the 16 hex digit shader key as the name. The pipeline archive is `<run folder>/pipelines.mtl4archive` and is loaded when `pso_mtl4` is true. `enc_thread` false encodes on one thread, true picks the thread count from the cores. The render scale is 2.0.
+1. It makes the `GpuBackend` of `nxkit-gpu` over the guest memory. The shader folder is `<run folder>/shaders`. It holds `<key>_b.metallib`, `<key>_b.json` and `.tsv` files, one set per shader, with the 16 hex digit shader key as the name. The pipeline archive is `<run folder>/pipelines/` (one archive file for each build batch and `index.nxpi`, opened when the first pipeline in it is asked for, 32 open at most) or, in an app of an older build, `<run folder>/pipelines.mtl4archive` (read whole into memory), and is loaded when it exists or `pso_mtl4` is true. Refer to docs/shader-step.md, "The pipeline archive as shards". `enc_thread` false encodes on one thread, true picks the thread count from the cores. The render scale is 2.0.
 2. It installs the backend with `nxkit_rt::nvn::install`. The settings are `nvn_api` and `shader_key_skip`. It calls `nxkit_rt::nvn::set_command_settings` with `vertex_stream_null_bind`.
 3. It asks `choose_present_plan` for the plan of a 60 Hz game on a 120 Hz display and makes the `Pacer` of `nxkit-metal` with the backend as its tick sink.
 4. The returned hooks run on each display tick. They call `nxkit_svc_pacing::on_display_tick`, which signals the vsync event of the game. They read `nxkit_svc_pacing::hold`. A hold above zero sets the source of the `Pacer` to `Hold { ticks_per_frame: hold * ticks_per_vsync }`. Then they pass the tick to the `Pacer`.

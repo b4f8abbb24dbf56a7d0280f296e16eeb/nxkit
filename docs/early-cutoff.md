@@ -32,6 +32,7 @@ The effect of a chain change:
 - A change that alters only the shaders of one feature increases the feature's revision (`nxb_xlate::msl::revision::FEATURES`). Only the shaders whose code uses the feature translate again. The feature test reads the code bytes (an Ampere word with the HMMA opcode), not the output, so the key is known before the translation.
 - A release (a new workspace version) changes no key. The crate version is not in V of a build without the engine and not in the front-end id. Before 0.10.0 it was in both: a release translated and compiled every shader again.
 - A change of the translator compiles again only the shaders with a changed MSL, and their archive batches.
+- The archive ships the batch archives as shards (`pipelines/<batch key>.mtl4archive` and `index.nxpi`, see docs/shader-step.md "The pipeline archive as shards"). The batch key is the file name, so an unchanged batch comes from the store and keeps its file in the app, and a rebuild of an app made with the merged archive reuses the batches that it stored then, without a compile. The merged archive has no store entry in this layout: its key (`nxb-archive merged 1`) is used only by `NXB_ARCHIVE_LAYOUT=merged` or `both`.
 - A new translator version with the same output translates again, but does not compile a shader.
 - A V change translates all shaders again. It compiles only the shaders with a changed MSL.
 - A new Xcode compiles all shaders again, because the compiler identity is part of each compile key.

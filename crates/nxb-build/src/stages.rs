@@ -72,7 +72,12 @@ pub(crate) fn run_nodes(
                 }
                 crate::provisional::take_tables(b)?;
                 // the shader step and the first architecture's archive together (crate::pipeline)
-                let o = crate::pipeline::shaders_and_archive(a, b, p)?;
+                let o = crate::pipeline::shaders_and_archive(
+                    a,
+                    b,
+                    p,
+                    crate::archive_layout::Layout::Merged,
+                )?;
                 *streamed.lock().map_err(|_| "lock")? = o.archive;
                 *archive_error.lock().map_err(|_| "lock")? = o.archive_error;
                 Ok(o.shaders)

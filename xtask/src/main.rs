@@ -61,6 +61,8 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxkit-svc-video", "nxkit-abi"),
     ("nxkit-rt", "nxkit-nvn"),
     // The GPU backend (`nxkit-gpu`) implements the `Backend` of the NVN front end. The host installs it.
+    // the shard index of the pipeline archive, written by the build and read by the Metal backend
+    ("nxkit-metal", "nxkit-abi"),
     ("nxkit-gpu", "nxkit-nvn"),
     ("nxkit-host", "nxkit-gpu"),
     ("nxkit-host", "nxkit-nvn"),

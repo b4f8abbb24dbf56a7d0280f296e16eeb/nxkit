@@ -422,6 +422,7 @@ dependencies = [
  "nxb-store",
  "nxb-sys",
  "nxb-tool",
+ "nxkit-abi",
 ]
 
 [[package]]
@@ -445,6 +446,7 @@ dependencies = [
  "nxb-stages",
  "nxb-sys",
  "nxb-tool",
+ "nxkit-abi",
  "nxtitle",
  "nxtitles",
 ]
@@ -831,6 +833,7 @@ name = "nxkit-metal"
 version = "0.10.0"
 dependencies = [
  "block2",
+ "nxkit-abi",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",

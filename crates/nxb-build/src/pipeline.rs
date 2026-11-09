@@ -4,6 +4,7 @@
 //! step translates the archive's shaders first so the groups complete one after another.
 
 use crate::Args;
+use crate::archive_layout::Layout;
 use crate::events::{Progress, Update};
 use crate::graph::Build;
 use nxb_pyjson::Value;
@@ -139,7 +140,12 @@ pub struct Outcome {
 }
 
 /// Run the shader step and, for the first `--gpu` architecture, the streamed archive beside it.
-pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Outcome, String> {
+pub fn shaders_and_archive(
+    a: &Args,
+    b: &Build,
+    p: &Arc<Progress>,
+    layout: Layout,
+) -> Result<Outcome, String> {
     let mut cfg = shader_config(a, b)?;
     let lib = cfg.out.join(format!("b-{}", cfg.chain));
     let arch = b.gpus.first().cloned();
@@ -154,6 +160,7 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
         Some(arch) => Some(nxb_archive::Config {
             nice: ARCHIVE_NICE,
             progress: Some(batches.clone()),
+            merge: layout.merges(),
             ..archive_config(b, &lib, arch)?
         }),
         None => None,
@@ -269,13 +276,18 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                         .and_then(|((rep, bases), c)| {
                             let arch = arch.clone().unwrap_or_default();
                             write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
-                            Ok((rep, bases))
+                            let shards = layout
+                                .shards()
+                                .then(|| crate::archive_layout::publish(b, &rep))
+                                .transpose()?;
+                            Ok((rep, bases, shards))
                         });
                     match done {
-                        Ok((rep, bases)) => {
+                        Ok((rep, bases, shards)) => {
                             let tail = partial
                                 .filter(|_| a.partial)
                                 .map_or(String::new(), |st| format!("; {}", st.note()));
+                            let tail = shards.map_or(tail.clone(), |s| format!("; {s}{tail}"));
                             Some(Ok(format!(
                                 "{bases} pipelines, {} MB, {} batches ({} reused, up to {} compiler runs at once), streamed beside the shader step{tail}",
                                 rep.size >> 20,
@@ -506,6 +518,7 @@ mod tests {
             direct: None,
             nice: 0,
             progress: None,
+            merge: true,
         }
     }
 

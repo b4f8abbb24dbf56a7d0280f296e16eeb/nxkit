@@ -9,6 +9,7 @@
 //! - [`export`]: one function that a service gives the game in place of an SDK function (R14).
 //! - [`ipc`]: the trait of a service that answers Horizon IPC requests, and the request and response types (R14, R15).
 //! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
+//! - [`shards`]: the index of the pipeline archive shards that the build writes and the host reads.
 //! - [`platform`]: the console the game was built for, the Switch or the Switch 2, set once by the host at load.
 
 pub mod export;
@@ -16,3 +17,4 @@ pub mod guest;
 pub mod ipc;
 pub mod kernel;
 pub mod platform;
+pub mod shards;

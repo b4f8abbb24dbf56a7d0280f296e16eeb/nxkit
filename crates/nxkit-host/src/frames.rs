@@ -30,6 +30,9 @@ const GAME_HZ: u32 = 60;
 /// The file of the Metal 4 pipeline archive in the run folder.
 const ARCHIVE: &str = "pipelines.mtl4archive";
 
+/// The folder of the pipeline archive shards in the run folder. `nxkit_abi::shards::SHARD_DIR` names it.
+const SHARDS: &str = nxkit_abi::shards::SHARD_DIR;
+
 /// The folder of the translated shaders in the run folder.
 const SHADERS: &str = "shaders";
 
@@ -45,6 +48,18 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
             let path = root.join(ARCHIVE);
             (settings.pso_mtl4 || path.is_file()).then_some(path)
         },
+        // The shards of a build that made them (an index in the folder): the archive is not read whole, a shard is opened
+        // for the first pipeline in it. `NXKIT_ARCHIVE_SHARDS=0` ignores them and loads the single archive, if any.
+        archive_shards: {
+            let dir = root.join(SHARDS);
+            let on = std::env::var("NXKIT_ARCHIVE_SHARDS").is_ok_and(|v| v == "0" || v == "off");
+            (!on && dir.join(nxkit_abi::shards::INDEX_FILE).is_file()).then_some(dir)
+        },
+        // `NXKIT_SHARD_LRU` sets how many shards stay open. Zero is 32.
+        open_shards: std::env::var("NXKIT_SHARD_LRU")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
         threads: std::env::var("NXKIT_ENCODE_THREADS")
             .ok()

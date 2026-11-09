@@ -12,6 +12,11 @@ pub struct GpuSettings {
     pub shader_dir: PathBuf,
     /// The Metal 4 pipeline archive to load, when the title uses one.
     pub archive: Option<PathBuf>,
+    /// The folder of the archive shards (`<run>/pipelines`). Its index wins over `archive`, which Metal reads whole
+    /// into memory.
+    pub archive_shards: Option<PathBuf>,
+    /// How many shards stay open at once. Zero picks the default of the Metal backend (32).
+    pub open_shards: usize,
     /// Collect the pipelines that get built, so an archive can be written.
     pub collect_archive: bool,
     /// The threads that encode passes. Zero picks a number from the cores.
@@ -32,6 +37,8 @@ impl Default for GpuSettings {
         Self {
             shader_dir: PathBuf::from("shaders"),
             archive: None,
+            archive_shards: None,
+            open_shards: 0,
             collect_archive: false,
             threads: 0,
             scale: 2.0,
@@ -54,6 +61,8 @@ impl GpuSettings {
             },
             archive: ArchiveConfig {
                 load: self.archive.clone(),
+                shards: self.archive_shards.clone(),
+                open_shards: self.open_shards,
                 collect: self.collect_archive,
             },
             gob_order: self.gob_order,

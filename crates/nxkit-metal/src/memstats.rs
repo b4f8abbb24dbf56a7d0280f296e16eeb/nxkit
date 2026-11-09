@@ -18,9 +18,12 @@ pub(crate) enum Kind {
     Guest,
     /// A shader library (a `.metallib` that was loaded or MSL that was compiled). Its bytes are unknown, so 0.
     Library,
+    /// A pipeline archive file that is open (the single archive or a shard). Its bytes are the file size: the archive
+    /// reads its file into memory.
+    Shard,
 }
 
-const KINDS: usize = 4;
+const KINDS: usize = 5;
 
 static COUNT: [AtomicU64; KINDS] = [const { AtomicU64::new(0) }; KINDS];
 static BYTES: [AtomicU64; KINDS] = [const { AtomicU64::new(0) }; KINDS];
@@ -28,6 +31,7 @@ static PIPELINES: AtomicU64 = AtomicU64::new(0);
 static EVICTIONS: AtomicU64 = AtomicU64::new(0);
 static EVICTED_BYTES: AtomicU64 = AtomicU64::new(0);
 static REUPLOADS: AtomicU64 = AtomicU64::new(0);
+static SHARD_OPENS: AtomicU64 = AtomicU64::new(0);
 
 /// One live allocation in the counters. Dropping it takes it out again.
 #[derive(Debug)]
@@ -54,6 +58,11 @@ impl Drop for Tracked {
 /// Counts a pipeline state that a [`crate::PipelineCache`] keeps. The caches never drop one.
 pub(crate) fn pipeline_kept() {
     PIPELINES.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts the opening of a pipeline archive file. A shard that was closed and is asked again counts again.
+pub(crate) fn shard_opened() {
+    SHARD_OPENS.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Counts a texture that the encoder dropped because it was not used for a while and its guest copy is current.
@@ -92,6 +101,12 @@ pub struct MemStats {
     pub evicted_bytes: u64,
     /// Evicted textures that were made again.
     pub reuploads: u64,
+    /// Pipeline archive files that are open: the single archive or the shards that the cache keeps.
+    pub archive_shards: u64,
+    /// Their file sizes in bytes.
+    pub archive_shard_bytes: u64,
+    /// Archive files opened since the start (a closed shard that was asked again counts again).
+    pub archive_opens: u64,
 }
 
 /// The counters now.
@@ -110,6 +125,9 @@ pub fn mem_stats() -> MemStats {
         evictions: EVICTIONS.load(Ordering::Relaxed),
         evicted_bytes: EVICTED_BYTES.load(Ordering::Relaxed),
         reuploads: REUPLOADS.load(Ordering::Relaxed),
+        archive_shards: c(Kind::Shard),
+        archive_shard_bytes: b(Kind::Shard),
+        archive_opens: SHARD_OPENS.load(Ordering::Relaxed),
     }
 }
 
@@ -128,6 +146,19 @@ mod tests {
         assert!(mem_stats().buffer_bytes >= 1 << 40);
         drop(t);
         assert!(mem_stats().buffer_bytes < 1 << 40);
+    }
+
+    #[test]
+    fn an_open_shard_counts_its_file_size_while_it_lives() {
+        let before = mem_stats();
+        let t = Tracked::new(Kind::Shard, 1 << 41);
+        let now = mem_stats();
+        assert!(now.archive_shards > before.archive_shards);
+        assert!(now.archive_shard_bytes >= 1 << 41);
+        drop(t);
+        assert!(mem_stats().archive_shard_bytes < 1 << 41);
+        shard_opened();
+        assert!(mem_stats().archive_opens > before.archive_opens);
     }
 
     #[test]

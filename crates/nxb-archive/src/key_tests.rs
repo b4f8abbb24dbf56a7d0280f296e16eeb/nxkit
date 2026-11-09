@@ -34,6 +34,7 @@ fn config(toolchain: &str) -> Config {
         direct: None,
         nice: 0,
         progress: None,
+        merge: true,
     }
 }
 

@@ -859,6 +859,7 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: None,
             collect: true,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -872,6 +873,7 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: Some(archive.clone()),
             collect: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -883,6 +885,7 @@ fn pipeline_cache_counts_hits_and_archive_round_trips() {
         &ArchiveConfig {
             load: Some(dir.join("none")),
             collect: false,
+            ..Default::default()
         },
     )
     .unwrap();

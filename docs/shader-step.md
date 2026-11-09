@@ -218,3 +218,24 @@ The JSON writer and the guard tables were checked on the reference title and the
 
 The libraries and `_b.json` come from the Rust translator. They are not compared byte for byte with earlier output. No game ran with them yet (D20).
 The side library cut and the compile conventions are fixed. The raw tier is not byte-identical to Apple's libraries.
+
+## The pipeline archive as shards
+
+`MTL4Archive` (`newArchiveWithURL`) reads an archive file whole into memory. The merged archive of a big title is 4.8 GB (Ocarina of Time: `heap` of the running host showed one `NSConcreteData` of 4.67 GB), and on a 32 GB Mac that put the system into swap. So the standalone build (`nxkit-host`) does not ship the merged file. The archive stage compiles the pipelines in batches (`nxb-archive`, about 2,000 bases each, 387 batches for Ocarina of Time), and the build ships each batch archive as a file of its own with an index:
+
+```
+Contents/Resources/nxkit/pipelines/<batch key>.mtl4archive    one for each batch, named by the content key of the batch
+Contents/Resources/nxkit/pipelines/index.nxpi                 pipeline to shard
+```
+
+The index (`nxkit_abi::shards`, format in the module doc) maps a pipeline to its shard file by what the host has when it asks: the file stem of the library of each stage (`<key>_b`, the name of `<key>_b.metallib`) and the entry name, for a render pipeline of the vertex and the fragment function, for a compute pipeline of its function. The colour state is not in the identity: the build archives each pair with unspecialized state (`plan::script_text_with`), and Metal matches the specialized descriptor of the host to it inside the shard. The build takes the identities from the batch's script (`nxb_archive::shards::idents`), so they are the libraries and entries that `metal-tt` compiled.
+
+The build, `nxb_archive::stream::Stream::run` with `Config::merge` false: the batches compile as before, in the store under their batch key, but `metal-pack` does not run and the merged archive is not stored. `nxb_archive::shards::write` links each batch archive from the store into `<work>/pso/mac/pipelines` (a copy when that is another volume), keeps a file of the same name and size, removes the files of batches that are gone and writes `index.nxpi` last, through a temporary file. `standalone/shaders.rs` copies the folder into the run folder. A rebuild reuses every batch whose key did not change, with its file (see docs/early-cutoff.md).
+
+`NXB_ARCHIVE_LAYOUT` picks the files of the standalone build: `shards` (the default), `merged` (the single `pipelines.mtl4archive`, for a host without shard support) or `both`. The Mac app of the Darwin-Metal host (`stages.rs`, `pso/mac/*.mtl4a`) always gets the merged file.
+
+The host (`PipelineCache` in `nxkit-metal`, `pipeline/shards.rs`). `ArchiveConfig::shards` names the folder, and `nxkit-host` sets it when `pipelines/index.nxpi` is a file. The index is read at start and nothing else is opened. A lookup for a render pipeline (`render_traced`, `explain_miss`) or a compute pipeline (`compute_with`) asks the index with the stems of the libraries and the function names (`ShaderLibrary` keeps the stem of the file it was loaded from, or the name of its source). A pipeline that is not in the index is compiled as before and opens nothing. Else the shard is opened with `newArchiveWithURL` on the first lookup, and the pair is asked from it; a miss there compiles as before. At most `NXKIT_SHARD_LRU` shards (32 by default) stay open, the least recently used one closes, and a closed one is opened again when it is asked for. A lookup in flight keeps its shard alive, so a close never pulls an archive out from under a thread. A shard that cannot be opened is reported once and not tried again. A compute pipeline gets the shard as the lookup archive of its compiler call (the single archive is set on the compiler's options for the whole run). Mesh pipelines are not archived, as before.
+
+An app without `pipelines/index.nxpi` (an older build) loads `pipelines.mtl4archive` whole, as before. When both exist the shards win. `NXKIT_ARCHIVE_SHARDS=0` makes the host ignore the shards and load the single file. The memory counters count each open archive file with its size (`MemStats::archive_shards`, `archive_shard_bytes`, `archive_opens`), the single archive as one; `NXKIT_MEM_REPORT` prints them as `archive shards N (M MiB, opened K)`.
+
+Cost: a shard has the libraries of its batches again. The merged archive holds a library once, the shards hold it in each batch that uses it, so the sum of the shards is larger than the merged file. A group of pairs of one vertex shader stays in one batch, the fragment libraries are shared between batches.
