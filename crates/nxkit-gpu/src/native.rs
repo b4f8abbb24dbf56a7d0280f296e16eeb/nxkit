@@ -22,13 +22,18 @@
 //! `NXKIT_NDVE=0` turns the module off. `NXKIT_DIAG=ndve` prints the capture list once per distinct run.
 //! `NXKIT_NDVE_COMPARE=1` with it runs the game's chain and the plan on a sampled frame and prints the difference.
 
+mod book;
 mod build;
 mod run;
+mod util;
 
 #[cfg(test)]
 use build::{barrier_flags, written_resources};
 use build::{build, used_resources, uses_resource};
+use util::{bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
 use run::{Compare, PendingCompare, capture, count_fallback, count_native, make_compare};
+pub(crate) use book::book_writes;
+use book::intermediates_read_later;
 pub(crate) use run::{encode, health_lines};
 
 use std::collections::{HashMap, HashSet};
@@ -216,7 +221,7 @@ impl Native {
 
     /// Looks for a run in the frame and prepares it. `None` means that the game's dispatches run: either no run was
     /// found, or it was refused (counted with the reason).
-    pub(crate) fn prepare(&mut self, cx: &PrepareCx<'_>) -> Option<Prepared> {
+    pub(crate) fn prepare(&mut self, cx: &PrepareCx<'_>, stats: &mut EncodeStats) -> Option<Prepared> {
         if !enabled() || cx.detail.dispatches.len() < 2 {
             return None;
         }
@@ -231,7 +236,7 @@ impl Native {
             .iter()
             .enumerate()
             .find_map(|(i, n)| n.find(&keys).map(|r| (i, r)))?;
-        match self.attempt(net, run, cx) {
+        match self.attempt(net, run, cx, stats) {
             Ok(p) => {
                 count_native(self.nets[net].name());
                 Some(p)
@@ -243,7 +248,13 @@ impl Native {
         }
     }
 
-    fn attempt(&mut self, net: usize, run: Run, cx: &PrepareCx<'_>) -> Result<Prepared, Refusal> {
+    fn attempt(
+        &mut self,
+        net: usize,
+        run: Run,
+        cx: &PrepareCx<'_>,
+        stats: &mut EncodeStats,
+    ) -> Result<Prepared, Refusal> {
         let name = self.nets[net].name();
         let dispatches = &cx.detail.dispatches;
         if run.len == 0
@@ -340,7 +351,7 @@ impl Native {
             Verdict::Ready(e) => e.clone(),
             Verdict::Refused(reason, what) => return refuse(reason, what.clone()),
         };
-        let mut prepared = self.bind(net, &entry, run, cx, anchor_cmd)?;
+        let mut prepared = self.bind(net, &entry, run, cx, anchor_cmd, stats)?;
         if first_time {
             eprintln!(
                 "DIAG ndve {name}: intermediates the frame reads later {:?}",
@@ -367,6 +378,7 @@ impl Native {
         run: Run,
         cx: &PrepareCx<'_>,
         anchor_cmd: usize,
+        stats: &mut EncodeStats,
     ) -> Result<Prepared, Refusal> {
         let name = self.nets[net].name();
         let mut textures = Vec::new();
@@ -420,7 +432,7 @@ impl Native {
                             ),
                         )
                     })?;
-                    let res = cx.resolve(bind.handle).ok_or_else(|| {
+                    let (id, res, header) = cx.resolve(bind.handle).ok_or_else(|| {
                         Refusal(
                             "resource",
                             format!(
@@ -444,12 +456,27 @@ impl Native {
                             ),
                         );
                     }
-                    textures.push((spec.resource, res.tex.clone(), res.desc));
+                    // The same view the game's own dispatch binds: its format may differ from the backing's (an
+                    // sRGB texture written as plain 8-bit), and a kernel write to the backing would encode.
+                    let view = if matches!(spec.place, Place::Image { .. }) {
+                        cx.store
+                            .image_view(id, res, header, nxkit_metal::TextureKind::D2, 0, stats)
+                    } else {
+                        cx.store.view(id, res, header, stats)
+                    }
+                    .map_err(|_| {
+                        Refusal(
+                            "resource",
+                            format!("{name}: no view of {:?} ({:?})", spec.resource, res.desc.format),
+                        )
+                    })?;
+                    let desc = view.desc();
+                    textures.push((spec.resource, view, desc, id));
                 }
             }
         }
         for used in used_resources(&entry.plan) {
-            let have = textures.iter().any(|(r, _, _)| *r == used)
+            let have = textures.iter().any(|(r, _, _, _)| *r == used)
                 || pushes.iter().any(|(r, _)| *r == used);
             if !have {
                 return refuse(
@@ -480,69 +507,6 @@ const COMPARE_FIRST: u64 = 10;
 /// The frames after which the compare reads its pictures. The GPU is done with them by then.
 const COMPARE_DELAY: u64 = 4;
 
-fn enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_NDVE").map_or(true, |v| v != "0"))
-}
-
-fn compare_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_NDVE_COMPARE").is_ok_and(|v| v == "1"))
-}
-
-/// The storage buffer binding of a compute dispatch at `slot`.
-fn sbuf_of(dd: &DispatchDetail, slot: u32) -> Option<&UboDetail> {
-    dd.sbufs
-        .iter()
-        .find(|s| s.stage == Stage::Compute && s.slot == slot)
-}
-
-fn bind_of(list: &[TextureBind], slot: u32) -> Option<&TextureBind> {
-    list.iter()
-        .find(|t| t.stage == Stage::Compute && t.slot == slot)
-}
-
-/// The address where a blob starts, when a binding at `offset` into it has the address `address`.
-fn blob_start(address: u64, offset: u64) -> Option<u64> {
-    address.checked_sub(offset)
-}
-
-fn hash_blobs(blobs: &[Vec<u8>]) -> u64 {
-    let mut h = foldhash::fast::FixedState::with_seed(0).build_hasher();
-    for b in blobs {
-        h.write_usize(b.len());
-        h.write(b);
-    }
-    h.finish()
-}
-
-/// The command indices of the first and the last dispatch of the run, when only dispatches, barriers and fences lie
-/// between them. A copy or a draw inside the run would mean that the game does more than the chain.
-fn run_commands(cmds: &[Cmd], run: Run) -> Option<(usize, usize)> {
-    let mut seen = 0usize;
-    let mut inside = 0usize;
-    let (mut first, mut last) = (None, None);
-    for (i, c) in cmds.iter().enumerate() {
-        match c {
-            Cmd::Dispatch { .. } => {
-                if seen >= run.start && seen < run.start + run.len {
-                    first.get_or_insert(i);
-                    last = Some(i);
-                    inside += 1;
-                }
-                seen += 1;
-            }
-            Cmd::Barrier(_) | Cmd::Sync => {}
-            _ if first.is_some() && seen < run.start + run.len => return None,
-            _ => {}
-        }
-    }
-    if inside != run.len {
-        return None;
-    }
-    first.zip(last)
-}
-
 // ---------------------------------------------------------------------------------------------------------------------
 // What the frame needs
 // ---------------------------------------------------------------------------------------------------------------------
@@ -556,6 +520,7 @@ pub(crate) struct PrepareCx<'a> {
     pub(crate) detail: &'a FrameDetail,
     pub(crate) view: &'a dyn EncodeView,
     pub(crate) textures: &'a FastMap<TexId, Res>,
+    pub(crate) store: &'a crate::textures::TextureStore,
 }
 
 impl PrepareCx<'_> {
@@ -567,9 +532,9 @@ impl PrepareCx<'_> {
     }
 
     /// The texture of a handle (a texture handle or the texture id of an image descriptor).
-    fn resolve(&self, handle: u64) -> Option<&Res> {
+    fn resolve(&self, handle: u64) -> Option<(TexId, &Res, &nxkit_nvn::tic::Tic)> {
         let (slot, _) = self.view.resolve(handle).ok()?;
-        self.textures.get(&slot.texture)
+        Some((slot.texture, self.textures.get(&slot.texture)?, &slot.header))
     }
 }
 
@@ -582,7 +547,7 @@ pub(crate) struct Prepared {
     /// The index of the last dispatch of the run. The plan is encoded in its place.
     anchor: u32,
     /// The game textures and images of the plan, with the description they were made with.
-    textures: Vec<(GameResource, Texture, TextureDesc)>,
+    textures: Vec<(GameResource, Texture, TextureDesc, TexId)>,
     pushes: Vec<(GameResource, Arc<[u8]>)>,
     /// For each [`GameResource::Intermediate`] the plan writes: whether a later command of the frame reads it.
     reads_later: Vec<(GameResource, bool)>,
@@ -596,42 +561,22 @@ impl Prepared {
         self.compare.is_none() && (self.first..=self.anchor).contains(&dispatch)
     }
 
+    /// The textures of the game that the plan writes. The frame books them as written by the GPU in the pass of the
+    /// anchor dispatch, as it books the images of the dispatches the plan replaces.
+    pub(crate) fn writes(&self) -> Vec<TexId> {
+        let mut out: Vec<TexId> = Vec::new();
+        for (r, _, _, id) in &self.textures {
+            if self.entry.written.contains(r) && !out.contains(id) {
+                out.push(*id);
+            }
+        }
+        out
+    }
+
     /// True for the dispatch where the plan is encoded.
     pub(crate) fn is_anchor(&self, dispatch: u32) -> bool {
         dispatch == self.anchor
     }
-}
-
-/// Whether a command after `anchor_cmd` reads each intermediate picture the plan writes.
-fn intermediates_read_later(
-    frame: &Frame,
-    anchor_cmd: usize,
-    cx: &PrepareCx<'_>,
-    textures: &[(GameResource, Texture, TextureDesc)],
-) -> Vec<(GameResource, bool)> {
-    let mut out = Vec::new();
-    for (r, tex, _) in textures {
-        if !matches!(r, GameResource::Intermediate { .. }) {
-            continue;
-        }
-        let id = tex.gpu_resource_id();
-        let same = |t: &TexId| {
-            cx.textures
-                .get(t)
-                .is_some_and(|res| res.tex.gpu_resource_id() == id)
-        };
-        let read = frame.cmds.iter().skip(anchor_cmd + 1).any(|c| match *c {
-            Cmd::Draw { reads, .. } | Cmd::Dispatch { reads, .. } => {
-                frame.list(reads).iter().any(same)
-            }
-            Cmd::Copy { src, .. } => src.iter().any(same),
-            Cmd::Downsample { src, .. } => same(&src),
-            Cmd::Present(t) | Cmd::CpuRead(t) => same(&t),
-            _ => false,
-        });
-        out.push((*r, read));
-    }
-    out
 }
 
 #[cfg(test)]

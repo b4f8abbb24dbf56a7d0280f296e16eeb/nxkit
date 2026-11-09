@@ -184,3 +184,66 @@ fn a_prepared_run_skips_its_dispatches_and_anchors_the_last() {
     assert!(!p.skips(2) && p.skips(3) && p.skips(5) && !p.skips(6));
     assert!(p.is_anchor(5) && !p.is_anchor(4));
 }
+
+#[test]
+fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
+    use nxkit_nvn::analyse::Analyser;
+    use nxkit_nvn::passes::{PassKind, PassPlan};
+    use nxkit_nvn::resource::ResourceTable;
+
+    let ctx = match nxkit_metal::Context::system_default() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut frame = Frame::new();
+    for i in 0..3 {
+        if i > 0 {
+            frame.cmds.push(Cmd::Barrier(1));
+        }
+        frame.cmds.push(dispatch());
+    }
+    let mut plan = PassPlan::default();
+    Analyser::new()
+        .analyse(&frame, &ResourceTable::new(), &mut plan)
+        .unwrap();
+    let computes: Vec<_> = plan
+        .passes
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.kind == PassKind::Compute)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(computes.len(), 3);
+    let desc = TextureDesc::compute_2d(4, 4, nxkit_metal::Format::Rgba8Unorm);
+    let tex = Texture::new(&ctx, desc).unwrap();
+    let p = Prepared {
+        entry: Arc::new(Entry {
+            plan: Plan {
+                buffers: vec![],
+                steps: vec![],
+            },
+            buffers: vec![],
+            pipelines: vec![],
+            barrier_before: vec![],
+            written: vec![GameResource::Output],
+        }),
+        name: "t",
+        first: 0,
+        anchor: 2,
+        textures: vec![
+            (GameResource::Output, tex.clone(), desc, TexId(7)),
+            (GameResource::LumaPlane, tex, desc, TexId(8)),
+        ],
+        pushes: vec![],
+        reads_later: vec![],
+        compare: None,
+    };
+    assert_eq!(p.writes(), vec![TexId(7)]);
+    let ords = crate::draws::ordinals(&frame);
+    let mut images = vec![crate::images::PassImages::default(); plan.passes.len()];
+    book_writes(&p, &frame, &plan, &ords, &mut images);
+    for (i, x) in images.iter().enumerate() {
+        let want: Vec<TexId> = if i == computes[2] { vec![TexId(7)] } else { vec![] };
+        assert_eq!(x.writes, want, "pass {i}");
+    }
+}
