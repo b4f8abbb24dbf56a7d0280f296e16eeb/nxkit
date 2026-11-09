@@ -121,6 +121,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
     let s = &game.settings;
     let page = state_page(game);
     let target = s.fps_target;
+    let mut variable = None;
     let step = match (target, page.is_some()) {
         (0, _) => StepMode::Own,
         // The load-driven step decides the hold from the cost of the frames and writes the step into the state
@@ -132,7 +133,15 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
             load.work = s.pace_profile == "work";
             StepMode::Load(load)
         }
-        (t, true) if t > 60 => StepMode::Variable(t),
+        // A target above 60 asks for the variable step, which only works under variable refresh. The game starts on the
+        // load-driven step at 60 and the refresh module switches when the screen allows (`refresh::set_variable_step`).
+        (t, true) if t > 60 => {
+            let mut load = LoadConfig::new(60).map_err(|e| HostError::Manifest(e.to_string()))?;
+            load.hold = s.fps_hold;
+            load.work = s.pace_profile == "work";
+            variable = Some(t);
+            StepMode::Load(load)
+        }
         (t, _) => {
             let mut load = LoadConfig::new(t).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
@@ -141,10 +150,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
         }
     };
     // Variable refresh needs to know that the game steps by the measured frame time.
-    crate::refresh::set_variable_step(match step {
-        StepMode::Variable(t) => Some(t),
-        _ => None,
-    });
+    crate::refresh::set_variable_step(variable, step);
     Ok(nxkit_svc_pacing::Config {
         bind_system_event: wire::pacing_bind,
         state_page: page,

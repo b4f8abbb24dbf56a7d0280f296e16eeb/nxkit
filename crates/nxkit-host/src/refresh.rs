@@ -6,6 +6,7 @@
 //! and prints one line when anything changed. [`note_measured`] checks the plan against the real tick rate.
 //! The design is in `docs/pacing.md`.
 
+use nxkit_svc_pacing::StepMode;
 use std::sync::Mutex;
 
 use nxkit_metal::{RateRange, display};
@@ -116,8 +117,12 @@ pub struct ScreenFacts {
 
 struct State {
     request: Request,
-    /// The target of the variable frame step, when the game steps that way.
+    /// The target of the variable frame step, when the game asks to step that way.
     variable_target: Option<u32>,
+    /// The step the game takes on the fixed grid instead of the variable step.
+    grid_step: Option<StepMode>,
+    /// Whether the pacing service steps by the variable step now, once [`apply`] decided it.
+    stepping_variable: Option<bool>,
     presentation: Presentation,
     plan: Option<TickPlan>,
     announced: String,
@@ -137,6 +142,8 @@ static STATE: Mutex<State> = Mutex::new(State {
         vrr_floor: DEFAULT_VRR_FLOOR,
     },
     variable_target: None,
+    grid_step: None,
+    stepping_variable: None,
     presentation: Presentation::Grid,
     plan: None,
     announced: String::new(),
@@ -163,10 +170,16 @@ pub fn configure(request: Request) {
     state().request = request;
 }
 
-/// Tells the module that the game steps by the measured frame time (`StepMode::Variable`) with this target, or does not.
-/// The pacing seam calls it before the window opens.
-pub fn set_variable_step(target: Option<u32>) {
-    state().variable_target = target;
+/// Tells the module that the game asks to step by the measured frame time (`StepMode::Variable`) with this target, or
+/// does not. `grid_step` is the step it takes when the frames go on the fixed grid. The variable step only works when
+/// each frame shows as soon as it is ready: on the grid it left the load-driven pacer out, and Ocarina of Time ran at
+/// about 10 fps on a fixed 120 Hz screen (2026-11-09). So [`apply`] switches the pacing service to the variable step
+/// under variable refresh and to `grid_step` otherwise. The pacing seam calls it before the window opens.
+pub fn set_variable_step(target: Option<u32>, grid_step: StepMode) {
+    let mut st = state();
+    st.variable_target = target;
+    st.grid_step = Some(grid_step);
+    st.stepping_variable = None;
 }
 
 /// How frames reach the screen, from the latest [`apply`].
@@ -254,6 +267,19 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
     });
     // The game's time follows the frames the display shows, not the starts of frames.
     nxkit_svc_pacing::set_step_by_shown(vrr.is_some());
+    if let (Some(target), Some(grid)) = (st.variable_target, st.grid_step)
+        && st.stepping_variable != Some(vrr.is_some())
+    {
+        let mode = if vrr.is_some() {
+            StepMode::Variable(target)
+        } else {
+            grid
+        };
+        match nxkit_svc_pacing::set_step_mode(mode) {
+            Ok(()) => st.stepping_variable = Some(vrr.is_some()),
+            Err(e) => eprintln!("nxkit-host: the frame step stays: {e:?}"),
+        }
+    }
     // Off unless asked for (NXKIT_TIMED_PRESENT=1): on a ProMotion screen a minimum duration per present let macOS
     // lower the panel's rate, and a frame of 0.8 vsyncs of work waited about 3.8 vsyncs for the screen (Ocarina of
     // Time, 2026-11-09). Without it each frame shows on the next tick of the link.
