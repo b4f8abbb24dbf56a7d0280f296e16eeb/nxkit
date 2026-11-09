@@ -31,15 +31,6 @@ fn stream_threads() -> usize {
     std::thread::available_parallelism().map_or(2, |n| n.get().min(MAX_THREADS))
 }
 
-/// The frames that rav1d decodes at once for `threads` worker threads: `ceil(sqrt(threads))`, at most 8.
-fn frame_delay(threads: usize) -> usize {
-    let mut n = 1;
-    while n * n < threads {
-        n += 1;
-    }
-    n.clamp(1, 8)
-}
-
 /// A rav1d decoder.
 pub(crate) struct Dav1d {
     ctx: Option<Dav1dContext>,
@@ -58,13 +49,19 @@ impl Dav1d {
         )
     }
 
-    /// The frames in flight of a decoder from [`Dav1d::open_streaming`].
+    /// The frames in flight of a decoder from [`Dav1d::open_streaming`]: one.
+    ///
+    /// With more than one frame context, rav1d gives a picture out only on a later send or in a drain, and a drain
+    /// in the middle of a stream (`dav1d_get_picture` twice without a send) can wait for ever: Ocarina of Time's title
+    /// movie, whose stream holds units of 3 and 19 bytes that show no picture, stopped after about 30 pictures with
+    /// the worker in `dav1d_get_picture` and every rav1d thread idle. With one frame context a unit's picture is out
+    /// when its send returns, and a drain never blocks: it gives the picture or `EAGAIN`. The parallel work comes
+    /// from the tile and row threads and the NEON code, and the worker thread keeps the decode off the game's threads.
     pub(crate) fn streaming_delay() -> usize {
-        frame_delay(stream_threads())
+        1
     }
 
-    /// Opens a decoder for a worker thread: all cores up to 16 and frame threading. A picture comes out of
-    /// [`Dav1d::send`] only when the ring of frames wraps, and otherwise from [`Dav1d::wait`].
+    /// Opens a decoder for a worker thread: all cores up to 16, one frame at a time (see [`Dav1d::streaming_delay`]).
     pub(crate) fn open_streaming() -> Result<Dav1d, String> {
         Dav1d::open_with(stream_threads(), Dav1d::streaming_delay())
     }
