@@ -17,7 +17,7 @@ use rav1d::src::lib::{
     dav1d_get_picture, dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
 
-use crate::av1::{Layout, Planar};
+use crate::planar::{Layout, Planar};
 
 /// How often one temporal unit is offered to the decoder. A unit is taken at once, so this only stops a loop that
 /// never ends.
@@ -25,6 +25,9 @@ const MAX_SENDS: usize = 64;
 
 /// The most threads a streaming decoder gets.
 const MAX_THREADS: usize = 16;
+
+/// The frames that a streaming decoder works on at once (see [`Dav1d::streaming_delay`]).
+const STREAM_FRAMES: usize = 2;
 
 /// The worker threads of a streaming decoder: all cores, up to 16.
 fn stream_threads() -> usize {
@@ -49,19 +52,26 @@ impl Dav1d {
         )
     }
 
-    /// The frames in flight of a decoder from [`Dav1d::open_streaming`]: one.
+    /// The frames in flight of a decoder from [`Dav1d::open_streaming`]: [`STREAM_FRAMES`], or `NXKIT_AV1_FRAMES`
+    /// (1 to 8).
     ///
-    /// With more than one frame context, rav1d gives a picture out only on a later send or in a drain, and a drain
-    /// in the middle of a stream (`dav1d_get_picture` twice without a send) can wait for ever: Ocarina of Time's title
-    /// movie, whose stream holds units of 3 and 19 bytes that show no picture, stopped after about 30 pictures with
-    /// the worker in `dav1d_get_picture` and every rav1d thread idle. With one frame context a unit's picture is out
-    /// when its send returns, and a drain never blocks: it gives the picture or `EAGAIN`. The parallel work comes
-    /// from the tile and row threads and the NEON code, and the worker thread keeps the decode off the game's threads.
+    /// One frame at a time is not fast enough: rav1d reads the symbols of each tile on one thread, and the second half
+    /// of Ocarina of Time's 1080p title movie (4 MB/s) decoded at 48 pictures a second on an M2 Max, so the game
+    /// waited on pictures that were not there. With two frames the next frame is read
+    /// while the last one is filtered, and the worker converts a picture while rav1d decodes.
+    ///
+    /// With more than one frame a picture comes out on a later send, and a drain in the middle of a stream
+    /// (`dav1d_get_picture` twice without a send) waited for ever in rav1d (Ocarina of Time's title movie stopped
+    /// after about 30 pictures, every rav1d thread idle). So the worker of such a stream never drains before the end
+    /// of the stream ([`crate::decoder::Pipeline::waits`]): it sends, and takes the one picture that each send gives.
     pub(crate) fn streaming_delay() -> usize {
-        1
+        std::env::var("NXKIT_AV1_FRAMES")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .map_or(STREAM_FRAMES, |n| n.clamp(1, 8))
     }
 
-    /// Opens a decoder for a worker thread: all cores up to 16, one frame at a time (see [`Dav1d::streaming_delay`]).
+    /// Opens a decoder for a worker thread: all cores up to 16, [`Dav1d::streaming_delay`] frames at once.
     pub(crate) fn open_streaming() -> Result<Dav1d, String> {
         Dav1d::open_with(stream_threads(), Dav1d::streaming_delay())
     }
@@ -73,7 +83,7 @@ impl Dav1d {
         // SAFETY: `dav1d_default_settings` wrote every field.
         let mut settings = unsafe { settings.assume_init() };
         settings.n_threads = threads as c_int;
-        // With one frame the picture of a unit is out before the send returns.
+        // With one frame the picture of a unit is out before the send returns, with more it comes on a later send.
         settings.max_frame_delay = delay as c_int;
         // Only the highest spatial layer.
         settings.all_layers = 0;

@@ -167,7 +167,7 @@ mod apple {
         )))
     }
 
-    /// rav1d on a worker thread, with frame threading. It opens at the first packet that the worker sends, on the
+    /// rav1d on a worker thread, [`Dav1d::streaming_delay`] frames at once. It opens at the first packet that the worker sends, on the
     /// worker. A stream starts at a sequence header: packets before one are dropped.
     struct Dav1dPipeline {
         dav1d: Option<Dav1d>,
@@ -210,13 +210,22 @@ mod apple {
             let first = out.len();
             Dav1dPipeline::collect(pics, out)?;
             // One frame at a time: a picture that comes out of this send is the one this packet shows, so it carries
-            // the packet's time, as on the console. rav1d's own timestamp is the one of the packet that decoded the
-            // frame, and a `show_existing_frame` unit (Ocarina of Time's 3-byte units) shows a frame decoded earlier:
-            // its picture came out with an old time, and the movie player waited on it.
-            for pic in out.iter_mut().skip(first) {
-                pic.1 = ts;
+            // the packet's time, as on the console. A `show_existing_frame` unit (Ocarina of Time's 3-byte units)
+            // shows a frame decoded earlier, and its picture came out with an old time that the movie player waited
+            // on. With more frames the picture of a send is the one of an earlier packet: rav1d gives each picture,
+            // a shown existing frame too, the time of the packet that showed it.
+            if self.lag == 1 {
+                for pic in out.iter_mut().skip(first) {
+                    pic.1 = ts;
+                }
             }
             sent.map(|()| true)
+        }
+
+        /// With more than one frame a wait drains rav1d, which can hang in the middle of a stream (see
+        /// [`Dav1d::streaming_delay`]).
+        fn waits(&self) -> bool {
+            self.lag == 1
         }
 
         fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
@@ -481,7 +490,7 @@ mod tests {
     #[test]
     fn a_looping_stream_gives_every_picture_back() {
         // The title movie loops: key frame, three inter frames, again. Every picture must come out, with the waits that
-        // the worker makes whenever it is idle.
+        // the worker makes whenever it is idle, or, with more than one frame at once, from the next pushes alone.
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut d = software();
@@ -500,7 +509,7 @@ mod tests {
                     }
                     ts += 1;
                 }
-                if round % 3 == 2 {
+                if round % 3 == 2 && pipe.waits() {
                     // Idle: wait until nothing comes any more.
                     loop {
                         let n = out.len();
