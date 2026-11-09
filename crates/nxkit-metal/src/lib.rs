@@ -47,6 +47,7 @@ mod frame;
 mod guest;
 mod icb;
 mod interpolate;
+mod memstats;
 mod metrics;
 mod pacing;
 mod pipeline;
@@ -87,6 +88,7 @@ pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
+pub use memstats::{MemStats, mem_stats};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{

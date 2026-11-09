@@ -76,6 +76,7 @@ pub fn run(opts: &Options) -> Result<()> {
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
     mem.seal()?;
+    crate::memreport::start(&ctx, (layout.all.start, layout.all.end()));
 
     nxkit_rt::nxkit_init(mask);
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;

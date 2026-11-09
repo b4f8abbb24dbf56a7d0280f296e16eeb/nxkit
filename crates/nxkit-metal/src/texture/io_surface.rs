@@ -53,6 +53,10 @@ impl Texture {
         let mut desc = TextureDesc::compute_2d(width, height, format);
         desc.shader_write = writable;
         ctx.add_allocation(ProtocolObject::from_ref(&*raw));
-        Ok(Self::wrap(ctx, raw, desc, true, None, None))
+        let tracked = Some(crate::memstats::Tracked::new(
+            crate::memstats::Kind::Texture,
+            objc2_metal::MTLResource::allocatedSize(&*raw) as u64,
+        ));
+        Ok(Self::wrap(ctx, raw, desc, true, None, None, tracked))
     }
 }
