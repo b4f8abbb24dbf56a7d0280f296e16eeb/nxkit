@@ -1,6 +1,6 @@
 # nn::ndve on the Neural Engine: the model and its interface
 
-Status: the model writer is done (`crates/nxkit-ndve/src/ane/`); loading and running it is `nxkit-coreml`'s job. Numbers are from the feasibility study (scratch prototype built with coremltools): the "fullnb" model, 50 operations, all on the ANE, 9.1 ms per 1080p frame, output within 1/255 of the reference after the GPU pass below; the U-Net alone is 33 operations, 4.8 ms, 2 of 1023 on the RGB10 picture.
+Status: the model writer is done (`crates/nxkit-ndve/src/ane/`); loading and running it is `nxkit-coreml`'s job; the wiring into the game's frame is described in the last section (`NXKIT_NDVE_ANE=1`, off by default, untested in the game). Numbers are from the feasibility study (scratch prototype built with coremltools): the "fullnb" model, 50 operations, all on the ANE, 9.1 ms per 1080p frame, output within 1/255 of the reference after the GPU pass below; the U-Net alone is 33 operations, 4.8 ms, 2 of 1023 on the RGB10 picture.
 
 ## What the crate gives
 
@@ -26,3 +26,11 @@ U-Net: `pixel_unshuffle(2)`; layers 1 to 11 as `conv`/`conv_transpose` + bias + 
 ## Tests
 
 Structure (50 and 33 operations, names, shapes), the weight file's offsets (equal to the prototype's, total 862528 bytes) and alignment, the layer-1 permutation, the dense folding, determinism. An ignored test loads the package with coremltools on the CPU and compares it with the prototype's model on synthetic weights.
+
+## Wiring in the frame (`crates/nxkit-gpu/src/native/{ane,offload,ring}.rs`)
+
+`NXKIT_NDVE_ANE=1` turns it on; `NXKIT_NDVE_ANE_CACHE=<dir>` moves the cache (default `~/Library/Caches/nxkit/ndve-ane`: `<blob sha>-<os build>.mlpackage` and the compiled model next to it). When the NDVE run is found, a background thread writes the package (`Variant::Full`), compiles and loads it, and refuses it unless `compute_plan().all_on_neural_engine()` (the off-ANE operations go to the log). Three sets of tensors (input `x`, outputs `final` and `delta`, IOSurface f16, wrapped as R16Float textures) form the ring (`ring.rs`: Free, Filling, Running, Ready, Reading).
+
+Per picture the frame always runs `ndve_ane_input` (colour conversion written as `x`; the game's conversion push block). When the previous picture's result is ready, the frame runs `ndve_ane_quant` (`final` to the RGB10A2 picture of layer 12, which the image write quantises) and `ndve_ane_epilogue` (linear sample, `+ delta`, dither, flip, RGBA8; the game's resampler push block) instead of the Metal plan. Otherwise the Metal plan runs. A command buffer's `after_gpu` callback releases the slot it read and, for the slot it wrote, starts `predict_async`; its completion makes the slot Ready. The result is used by the next picture only (one picture of latency); an older result is dropped.
+
+Health lines: `ndve.ane` (pictures made from the Neural Engine) and `ndve.ane_fallback(reason)` with the reasons `warmup` (still loading), `error` (loading refused; the text says why), `first`, `late` (previous result not ready), `ring` (no free slot, the picture is not sent), `predict` (the Neural Engine failed), `textures`. With `NXKIT_NDVE_COMPARE=1` the sampled frame compares the epilogue's output with the game's chain.

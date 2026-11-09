@@ -353,3 +353,12 @@ fn dump_the_synthetic_package() {
         std::fs::write(at, bytes).expect("write");
     }
 }
+
+#[test]
+fn the_cache_key_names_the_weights_and_the_os() {
+    let a = cache_key(&[1, 2, 3], "Version 26.0 (Build 25A1)");
+    assert_eq!(a, cache_key(&[1, 2, 3], "Version 26.0 (Build 25A1)"));
+    assert_ne!(a, cache_key(&[1, 2, 4], "Version 26.0 (Build 25A1)"));
+    assert_ne!(a, cache_key(&[1, 2, 3], "Version 26.1 (Build 25B5)"));
+    assert!(a.ends_with("-Version 26.0 (Build 25A1)"));
+}

@@ -22,11 +22,14 @@
 //! `NXKIT_<NAME>=0` turns a network off (`NXKIT_NDVE`, `NXKIT_NDSR`). `NXKIT_DIAG=<name>` prints the capture list once per
 //! distinct run. `NXKIT_<NAME>_COMPARE=1` runs the game's chain and the plan on a sampled frame and prints the difference.
 
+mod ane;
 mod book;
 mod build;
 mod capture;
 mod iface;
+mod offload;
 mod prof;
+mod ring;
 mod run;
 mod util;
 
@@ -36,10 +39,12 @@ use book::intermediates_read_later;
 use build::{barrier_flags, written_resources};
 use build::{build, used_resources, uses_resource};
 use capture::capture;
-pub(crate) use iface::{BlobSpec, Bound, Place, Replacement, ResourceSpec, Run, RunInfo, Shape};
+pub(crate) use iface::{
+    BlobSpec, Bound, ModelPackage, Offload, Place, Replacement, ResourceSpec, Run, RunInfo, Shape,
+};
 use run::{Compare, PendingCompare, count_fallback, count_native, make_compare};
 pub(crate) use run::{encode, health_lines};
-use util::{bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
+use util::{ane_on, bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -74,6 +79,16 @@ struct Entry {
     barrier_before: Vec<bool>,
     /// The game resources that the plan writes, in the order of the plan.
     written: Vec<GameResource>,
+    /// The plans of the Neural Engine path, when it is on and the network has one.
+    ane: Option<Arc<AneEntries>>,
+}
+
+/// The two plans of the Neural Engine path, made ready.
+struct AneEntries {
+    /// Writes the model's input.
+    input: Entry,
+    /// Makes the output from the model's outputs.
+    epilogue: Entry,
 }
 
 /// What the cache knows about a set of weights.
@@ -102,6 +117,10 @@ pub(crate) struct Native {
     nets: Vec<Box<dyn Replacement>>,
     /// For each net: whether it is on (`NXKIT_<NAME>`) and whether it compares (`NXKIT_<NAME>_COMPARE`).
     switches: Vec<(bool, bool)>,
+    /// For each net: whether the Neural Engine path is on (`NXKIT_<NAME>_ANE=1`).
+    ane_switch: Vec<bool>,
+    /// The models of the Neural Engine path by net and weight hash.
+    ane: HashMap<(usize, u64), offload::AneNet>,
     cache: HashMap<(usize, Key), Verdict>,
     /// The runs the capture has printed: net, weight hash, tag.
     captured: HashSet<(usize, u64, Vec<u32>)>,
@@ -126,6 +145,8 @@ impl Native {
                 .iter()
                 .map(|n| (enabled(n.name()), compare_on(n.name())))
                 .collect(),
+            ane_switch: nets.iter().map(|n| ane_on(n.name())).collect(),
+            ane: HashMap::new(),
             nets,
             cache: HashMap::new(),
             captured: HashSet::new(),
@@ -282,7 +303,14 @@ impl Native {
                 self.cache.clear();
             }
             let blobs: Vec<&[u8]> = self.blobs.iter().map(Vec::as_slice).collect();
-            let verdict = match build(&*self.nets[net], &blobs, &shape, &info, cx) {
+            let verdict = match build(
+                &*self.nets[net],
+                &blobs,
+                &shape,
+                &info,
+                cx,
+                self.ane_switch[net],
+            ) {
                 Ok(e) => Verdict::Ready(Arc::new(e)),
                 Err(Refusal(reason, what)) => Verdict::Refused(reason, what),
             };
@@ -306,6 +334,9 @@ impl Native {
             Verdict::Refused(reason, what) => return refuse(reason, what.clone()),
         };
         let mut prepared = self.bind(net, &entry, run, cx, anchor_cmd, stats)?;
+        if self.ane_switch[net] {
+            self.attach_ane(net, hash, &entry, &mut prepared, cx);
+        }
         if first_time {
             eprintln!(
                 "DIAG {name} {name}: intermediates the frame reads later {:?}",
@@ -453,6 +484,7 @@ impl Native {
             pushes,
             reads_later,
             compare: None,
+            ane: None,
         })
     }
 }
@@ -512,6 +544,8 @@ pub(crate) struct Prepared {
     /// For each [`GameResource::Intermediate`] the plan writes: whether a later command of the frame reads it.
     reads_later: Vec<(GameResource, bool)>,
     compare: Option<Compare>,
+    /// The Neural Engine path of this picture, when it is on and the model is loaded.
+    ane: Option<offload::AnePrepared>,
 }
 
 impl Prepared {

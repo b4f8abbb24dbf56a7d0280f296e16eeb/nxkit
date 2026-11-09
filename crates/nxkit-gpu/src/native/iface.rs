@@ -58,6 +58,31 @@ pub(crate) struct ResourceSpec {
     pub(crate) place: Place,
 }
 
+/// A Core ML model of the network and the GPU's share of running it (a network that can run on the Neural Engine). The
+/// tensors are `R16Float` textures over IOSurfaces; a tensor `[1, C, H, W]` is `W` wide and `C * H` high.
+pub(crate) struct Offload {
+    /// Writes the model's input from the game's resources. It runs for every picture.
+    pub(crate) input: Plan,
+    /// Makes the game's output from the model's outputs. It runs in place of the plan.
+    pub(crate) epilogue: Plan,
+    /// The files of the `.mlpackage` and the shapes of its tensors, from the weight blobs (in the order of
+    /// [`Replacement::blobs`]). It runs on a background thread.
+    pub(crate) package: fn(&[&[u8]]) -> Result<ModelPackage, String>,
+    /// The key of the compiled model in the cache, from the weight blobs and the build of the OS.
+    pub(crate) cache_key: fn(&[&[u8]], &str) -> String,
+    /// The name and the resource of the model's input.
+    pub(crate) input_tensor: (&'static str, GameResource),
+    /// The names and the resources of the model's outputs.
+    pub(crate) output_tensors: &'static [(&'static str, GameResource)],
+}
+
+/// The files of an `.mlpackage` as paths relative to its directory, and the model's tensors with their shapes.
+pub(crate) struct ModelPackage {
+    pub(crate) files: Vec<(String, Vec<u8>)>,
+    pub(crate) input: (String, Vec<usize>),
+    pub(crate) outputs: Vec<(String, Vec<usize>)>,
+}
+
 /// A network that can replace a run of dispatches.
 pub(crate) trait Replacement: Send + Sync {
     /// A short name for the diagnostics and the health report.
@@ -80,6 +105,11 @@ pub(crate) trait Replacement: Send + Sync {
 
     /// Where the run binds the game resources that the plan names.
     fn resources(&self) -> &'static [ResourceSpec];
+
+    /// The model that runs the network on the Neural Engine, if there is one. `None` is the default.
+    fn offload(&self) -> Option<Offload> {
+        None
+    }
 
     /// How many dispatches before the run the capture lists as well (a network that follows fixed passes lists them).
     fn lead(&self) -> usize {

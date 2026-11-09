@@ -12,6 +12,7 @@ layer = "L2"
 in_v = false
 
 [target.'cfg(target_os = "macos")'.dependencies]
+nxkit-coreml = { workspace = true }
 nxkit-metal = { workspace = true }
 nxkit-native-plan = { workspace = true }
 nxkit-ndsr = { workspace = true }

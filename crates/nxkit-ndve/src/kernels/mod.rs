@@ -25,6 +25,10 @@
 //! one pixel halo, lives in threadgroup memory, so layer 1's output and layer 11's output are never buffers. The
 //! 12 layers still own their packed weights (buffers 0 to 11); the fused steps bind two of them.
 
+mod ane;
+
+pub use ane::{AnePlans, TENSORS as ANE_TENSORS, ane_plans};
+
 use crate::pack::pack_layer;
 use crate::plan::{self, Binding, Buffer, GameResource, Plan, Source, Step};
 
