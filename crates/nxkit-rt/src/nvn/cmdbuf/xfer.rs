@@ -173,6 +173,16 @@ extern "C" fn clear_texture_f(c: u64, tex: u64, view: u64, region: u64, rgba: u6
     );
 }
 
+extern "C" fn clear_texture_i(c: u64, tex: u64, view: u64, region: u64, rgba: u64, mask: i32) {
+    clear_texture(
+        "nvnCommandBufferClearTexturei",
+        c,
+        [tex, view, region, rgba],
+        mask,
+        1,
+    );
+}
+
 extern "C" fn clear_texture_ui(c: u64, tex: u64, view: u64, region: u64, rgba: u64, mask: i32) {
     clear_texture(
         "nvnCommandBufferClearTextureui",
@@ -489,6 +499,7 @@ pub(super) fn procs() -> Vec<(&'static str, usize)> {
         "nvnCommandBufferClearDepthStencil" => clear_depth_stencil as extern "C" fn(u64, f32, u32, i32, i32),
         "nvnCommandBufferClearBuffer" => clear_buffer as extern "C" fn(u64, u64, u64, u32),
         "nvnCommandBufferClearTexture" => clear_texture_f as extern "C" fn(u64, u64, u64, u64, u64, i32),
+        "nvnCommandBufferClearTexturei" => clear_texture_i as extern "C" fn(u64, u64, u64, u64, u64, i32),
         "nvnCommandBufferClearTextureui" => clear_texture_ui as extern "C" fn(u64, u64, u64, u64, u64, i32),
         "nvnCommandBufferCopyBufferToBuffer" => copy_buffer_to_buffer as extern "C" fn(u64, u64, u64, u64, i32),
         "nvnCommandBufferCopyBufferToTexture" => copy_buffer_to_texture as extern "C" fn(u64, u64, u64, u64, u64, i32),
