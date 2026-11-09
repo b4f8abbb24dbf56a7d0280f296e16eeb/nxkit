@@ -180,6 +180,22 @@ fn thread_priority_and_core_mask_are_validated() {
 }
 
 #[test]
+fn the_processor_number_is_the_pinned_core_on_all_six_cores() {
+    let w = world_with(Config {
+        core_mask: 0b11_1111,
+        ..Config::default()
+    });
+    let k = &w.kernel;
+    let me = w.main.handle();
+    for core in 0..6 {
+        assert_eq!(k.set_thread_core_mask(&w.main, me, -1, 1 << core), Ok(()));
+        assert_eq!(k.current_processor_number(&w.main), core);
+    }
+    assert_eq!(k.set_thread_core_mask(&w.main, me, 5, 0b11_0000), Ok(()));
+    assert_eq!(k.current_processor_number(&w.main), 5);
+}
+
+#[test]
 fn sleep_waits_and_yield_returns() {
     let w = world();
     let t0 = std::time::Instant::now();

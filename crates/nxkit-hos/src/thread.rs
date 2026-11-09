@@ -284,7 +284,11 @@ impl Thread {
         self.state.store(s as u8, Ordering::Release);
     }
 
-    /// The core the thread belongs to for the core rules: the ideal core, else the lowest core of the mask.
+    /// The core the thread belongs to: the ideal core, else the lowest core of the mask. It is also what
+    /// `GetCurrentProcessorNumber` answers, so it is not capped at the four cores of the Switch: a Switch 2 game pins
+    /// its workers to cores 0 to 5 and keeps data per core. Capped at 3, the workers of cores 3, 4 and 5 shared one
+    /// core's data at the same time (Ocarina of Time crashed in its render lists when the title movie ended). The core
+    /// gates cap the core themselves.
     pub(crate) fn core(&self) -> usize {
         let ideal = self.ideal_core.load(Ordering::Relaxed);
         if ideal >= 0 {
@@ -293,7 +297,7 @@ impl Thread {
         self.core_mask
             .load(Ordering::Relaxed)
             .trailing_zeros()
-            .min(3) as usize
+            .min(63) as usize
     }
 
     pub(crate) fn applied_qos(&self) -> Option<Qos> {
