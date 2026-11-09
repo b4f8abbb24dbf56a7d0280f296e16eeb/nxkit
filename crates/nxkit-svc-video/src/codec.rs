@@ -23,11 +23,9 @@
 //! - VP9 and the AV1 of VideoToolbox decode in the calling thread of `submit`, on a scoped thread with a big stack.
 //! - AV1 on the CPU (rav1d) has a worker thread for each stream. The first packet that the backend answers with a
 //!   [`Pipeline`] switches the decoder to it. From then on `submit` only copies the packet and its time into the bounded
-//!   input queue (`Dec::queued`) and returns. The worker owns the rav1d context, sends the packets, and waits for
-//!   pictures with a blocking drain whenever the queue is empty and frames are in flight, so a picture reaches the game
-//!   when it is decoded, not when the next packet is sent. rav1d decodes several frames at once and only releases a
-//!   picture when its frame ring wraps or when it is drained, so a worker that only fetched pictures after a send would
-//!   wait for the game, which waits for the picture.
+//!   input queue (`Dec::queued`) and returns. The worker owns the rav1d context and sends the packets. rav1d runs one
+//!   frame at a time with tile and row threads (`Dav1d::streaming_delay`), so a unit's picture is out when its send
+//!   returns and a drain never blocks. The game's threads never wait for the decode.
 //! - The worker puts pictures into `Dec::held` under the lock and runs the same `drain` as the guest, which moves them
 //!   into released buffers and decides the event. The effects (`Effects`) are carried out after the lock is released,
 //!   on the worker thread: the host signals a system event of the kernel from any thread (the event is bound when the
@@ -858,7 +856,7 @@ impl Dec {
             Ok(h) => {
                 self.worker = Some(h);
                 eprintln!(
-                    "[codec] {} decoder {}: a worker thread decodes on the CPU, {} frames at once",
+                    "[codec] {} decoder {}: a worker thread decodes on the CPU, {} frame at a time",
                     self.codec.name(),
                     self.id,
                     self.lag
