@@ -17,9 +17,10 @@ pub(super) fn compare_on(net: &str) -> bool {
     std::env::var(env_name(net, "_COMPARE")).is_ok_and(|v| v == "1")
 }
 
-/// `NXKIT_<NAME>_ANE=1` runs the network on the Neural Engine, with the plan as the fallback.
+/// Whether a network that can run on the Neural Engine does, with the plan as the fallback. On unless
+/// `NXKIT_<NAME>_ANE=0`; only networks with an offload (NDVE) use it.
 pub(super) fn ane_on(net: &str) -> bool {
-    std::env::var(env_name(net, "_ANE")).is_ok_and(|v| v == "1")
+    std::env::var(env_name(net, "_ANE")).map_or(true, |v| v != "0")
 }
 
 /// The storage buffer binding of a compute dispatch at `slot`.

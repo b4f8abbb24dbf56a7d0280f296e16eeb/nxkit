@@ -1,6 +1,6 @@
 # nn::ndve on the Neural Engine: the model and its interface
 
-Status: the model writer is done (`crates/nxkit-ndve/src/ane/`); loading and running it is `nxkit-coreml`'s job; the wiring into the game's frame is described in the last section (`NXKIT_NDVE_ANE=1`, off by default). The first wiring (the game's frame writes the input, the model runs after that frame, the next picture reads the result) never had a result in time in the game: 1095 of 1101 movie pictures were `late`, and the extra input pass raised the GPU time. The wiring below runs the model at decode time, ahead of the game. Numbers are from the feasibility study (scratch prototype built with coremltools): the "fullnb" model, 50 operations, all on the ANE, 9.1 ms per 1080p frame, output within 1/255 of the reference after the GPU pass below; the U-Net alone is 33 operations, 4.8 ms, 2 of 1023 on the RGB10 picture.
+Status: the model writer is done (`crates/nxkit-ndve/src/ane/`); loading and running it is `nxkit-coreml`'s job; the wiring into the game's frame is described in the last section (on by default, `NXKIT_NDVE_ANE=0` turns it off, off by default). The first wiring (the game's frame writes the input, the model runs after that frame, the next picture reads the result) never had a result in time in the game: 1095 of 1101 movie pictures were `late`, and the extra input pass raised the GPU time. The wiring below runs the model at decode time, ahead of the game. Numbers are from the feasibility study (scratch prototype built with coremltools): the "fullnb" model, 50 operations, all on the ANE, 9.1 ms per 1080p frame, output within 1/255 of the reference after the GPU pass below; the U-Net alone is 33 operations, 4.8 ms, 2 of 1023 on the RGB10 picture.
 
 ## What the crate gives
 
@@ -28,7 +28,7 @@ Structure (50 and 33 operations, names, shapes), the weight file's offsets (equa
 
 ## Wiring: the model runs at decode time (`crates/nxkit-gpu/src/native/{ane,feed,conv,slots,offload}.rs`)
 
-`NXKIT_NDVE_ANE=1` turns it on; `NXKIT_NDVE_ANE_CACHE=<dir>` moves the cache (default `~/Library/Caches/nxkit/ndve-ane`: `<blob sha>-<os build>.mlpackage` and the compiled model next to it). When the NDVE run is found, a background thread writes the package (`Variant::Full`), compiles and loads it, and refuses it unless `compute_plan().all_on_neural_engine()` (the off-ANE operations go to the log). Five sets of tensors (input `x`, outputs `final` and `delta`, IOSurface f16) are made with it. The outputs are wrapped as R16Float textures; the input is only ever touched by the CPU and the Neural Engine.
+The Neural Engine path is on by default, `NXKIT_NDVE_ANE=0` turns it off; `NXKIT_NDVE_ANE_CACHE=<dir>` moves the cache (default `~/Library/Caches/nxkit/ndve-ane`: `<blob sha>-<os build>.mlpackage` and the compiled model next to it). When the NDVE run is found, a background thread writes the package (`Variant::Full`), compiles and loads it, and refuses it unless `compute_plan().all_on_neural_engine()` (the off-ANE operations go to the log). Five sets of tensors (input `x`, outputs `final` and `delta`, IOSurface f16) are made with it. The outputs are wrapped as R16Float textures; the input is only ever touched by the CPU and the Neural Engine.
 
 ### Why ahead
 
