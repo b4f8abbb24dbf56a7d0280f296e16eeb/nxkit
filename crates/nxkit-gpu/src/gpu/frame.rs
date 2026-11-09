@@ -237,6 +237,7 @@ impl Gpu {
                 view,
                 textures: &textures,
                 store: &self.store,
+                pools: (&self.copyback, self.gmem.learned()),
             },
             &mut stats,
         );

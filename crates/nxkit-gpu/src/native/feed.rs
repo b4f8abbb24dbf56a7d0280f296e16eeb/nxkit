@@ -128,6 +128,9 @@ impl Drop for Hold {
     }
 }
 
+/// A read of a picture by the game: the host addresses of its luma and chroma and the picture.
+pub(super) type ReadOf = (u64, u64, Pic);
+
 /// Why a picture has no result: the reason of the health line and a sentence.
 pub(super) type Reason = (&'static str, String);
 
@@ -187,6 +190,12 @@ impl Feed {
             st.epoch += 1;
         }
         st.epoch
+    }
+
+    /// The reads of the game and the fingerprints of the latest decoded pictures, for `NXKIT_DIAG=ndvetrace`.
+    pub(super) fn trace_view(&self) -> (Vec<ReadOf>, Vec<(Print, Pic)>) {
+        let st = self.lock();
+        (st.binds.all(), st.prints.iter().copied().collect())
     }
 
     /// True when the stream is given up: the dispatches match no picture, so nothing is converted.
