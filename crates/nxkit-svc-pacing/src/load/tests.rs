@@ -30,6 +30,7 @@ fn config(target: u32) -> LoadConfig {
         probe_ramp: true,
         perf_levels: 1,
         work: false,
+        steady: false,
     }
 }
 
@@ -191,4 +192,24 @@ fn the_step_and_the_game_step_go_through_the_state_page() {
     s.frame_started(p.now_ns, 0);
     let out = s.present(&p, Some(&page));
     assert!(out.is_ok_and(|o| o.events.contains(&Event::GameStep { vsyncs: 2 })));
+}
+
+#[test]
+fn a_steady_step_keeps_60_fps_through_long_frames_and_heat() {
+    let mut c = config(60);
+    c.work = true;
+    c.steady = true;
+    let mut s = LoadStepper::new(c);
+    // Frames of 1.6 vsyncs of work, then a serious thermal state: the hold stays one vsync. The step pays the time
+    // back, so it may be longer.
+    let out = run(&mut s, 1, 600, 1000.0 / 60.0 * 1.6, |_| {});
+    assert_eq!((out.cap, out.hold, out.kmin), (60, 1, 1));
+    let out = run(&mut s, 601, 600, 1000.0 / 60.0, |p| p.thermal = 2);
+    assert_eq!((out.cap, out.hold, out.step), (60, 1, 1));
+    // The same long frames without steady raise the hold.
+    let mut c = config(60);
+    c.work = true;
+    let mut s = LoadStepper::new(c);
+    let out = run(&mut s, 1, 600, 1000.0 / 60.0 * 1.6, |_| {});
+    assert!(out.hold >= 2, "{}", out.hold);
 }

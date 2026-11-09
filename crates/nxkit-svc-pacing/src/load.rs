@@ -122,7 +122,8 @@ impl LoadStepper {
     }
 
     fn cap(&mut self, s: &PresentSample) -> (u32, CapWhy) {
-        let thermal = self.thermal.capped(s.now_ns, s.thermal);
+        // A steady step keeps the target in any thermal state. A movie still caps it: the game asks for that.
+        let thermal = self.thermal.capped(s.now_ns, s.thermal) && !self.cfg.steady;
         if self.cfg.at_120() {
             let screen_ok = s.screen_hz == 0 || s.screen_hz >= 120;
             return match (screen_ok, s.movie, thermal) {
@@ -214,7 +215,9 @@ impl LoadStepper {
             kmax_diag(&self.cfg, hz, cap),
         );
         let kmin = hz / cap as i32;
-        let kmax = if self.cfg.at_120() {
+        let kmax = if self.cfg.steady {
+            kmin
+        } else if self.cfg.at_120() {
             2
         } else if !self.cfg.hold {
             kmin

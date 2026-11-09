@@ -86,7 +86,7 @@ pub struct Settings {
     pub enc_thread: bool,
     /// Whether the CPU runs one frame ahead of the GPU. Absent in an older `game.json`: off.
     pub overlap: bool,
-    /// The frame step's profile (`pace_profile`): `hold` (the default) or `work`. See `nxkit_svc_pacing::fstep`.
+    /// The frame step's profile (`pace_profile`): `hold` (the default), `work` or `steady`. See `nxkit_svc_pacing::fstep`.
     pub pace_profile: String,
     /// Whether the screen keeps the aspect ratio of the game.
     pub screen_aspect: bool,
@@ -233,8 +233,11 @@ impl Settings {
             pace_profile: match v.get("pace_profile").and_then(Value::as_str) {
                 None | Some("hold") => "hold".to_string(),
                 Some("work") => "work".to_string(),
+                Some("steady") => "steady".to_string(),
                 Some(other) => {
-                    return Err(bad(format!("pace_profile {other:?} is not hold or work")));
+                    return Err(bad(format!(
+                        "pace_profile {other:?} is not hold, work or steady"
+                    )));
                 }
             },
             screen_aspect: flag(v, "screen_aspect")?,

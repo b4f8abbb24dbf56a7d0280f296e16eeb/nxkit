@@ -77,7 +77,7 @@ const SETTINGS: Fact<Settings> = Fact::new(
         overlap: true,
         // Measured on nxkit: judged by how long frames were shown, the step went to 20 fps at a cost of 0.71 vsyncs
         // (the movie player and an adaptive screen), and after a load hitch it stayed down for seconds.
-        pace_profile: "work",
+        pace_profile: "steady",
         ..Settings::DEFAULT
     },
     GAME_TSV,

@@ -66,7 +66,8 @@ pub struct Settings {
     pub overlap: bool,
     /// `pace_profile`: how the frame step decides the hold. `hold` (the default): a frame shown longer than its hold
     /// counts as late. `work`: only a frame's work judges it, hitches do not count and a trial waits at most 2 s, for a
-    /// game whose frames wait for things a longer hold does not shorten (movies, its own loops).
+    /// game whose frames wait for things a longer hold does not shorten (movies, its own loops). `steady`: `work`, and the
+    /// step never leaves the target (no longer hold, no thermal or slow cap); a long frame shows late once.
     pub pace_profile: &'static str,
     /// `screen_aspect`: stubs that follow a screen taller than 16:9.
     pub screen_aspect: bool,
