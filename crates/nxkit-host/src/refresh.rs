@@ -174,7 +174,10 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
     } else {
         hz
     });
-    let timed = req.timed.unwrap_or(facts.adaptive);
+    // Off unless asked for (NXKIT_TIMED_PRESENT=1): on a ProMotion screen a minimum duration per present let macOS
+    // lower the panel's rate, and a frame of 0.8 vsyncs of work waited about 3.8 vsyncs for the screen (Ocarina of
+    // Time, 2026-11-09). Without it each frame shows on the next tick of the link.
+    let timed = req.timed.unwrap_or(false);
     nxkit_metal::set_timed_present(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
     let mut hint = String::new();
     if !plan.exact {
