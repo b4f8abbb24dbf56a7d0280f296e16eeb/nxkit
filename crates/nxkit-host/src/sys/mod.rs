@@ -6,6 +6,7 @@
 pub mod allocspy;
 pub mod appkit;
 mod dylib;
+pub mod exitflush;
 mod kernel;
 mod mouse;
 pub mod vm;

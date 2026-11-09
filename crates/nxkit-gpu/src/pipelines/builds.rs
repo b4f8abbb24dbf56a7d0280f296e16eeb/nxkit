@@ -276,6 +276,7 @@ impl Builds {
                 )
             }
             JobKind::Mesh(m) => cache.mesh_traced(job.key, &m.desc()).map(|(_, source)| {
+                record::mesh(job.key, &m.desc(), source);
                 crate::coverage::record(cache, source, None, &job.what);
                 source
             }),

@@ -30,6 +30,10 @@ pub struct GpuSettings {
     pub overlap: bool,
     /// The order inside a GOB of the guest textures: [`GobOrder::Switch2`] for a game of the Switch 2.
     pub gob_order: GobOrder,
+    /// A writable folder of the title for the runtime pipeline cache (see `pipelines/runtime.rs`), or none.
+    pub runtime_cache: Option<PathBuf>,
+    /// A number that changes with the app build: a runtime cache of another one is dropped.
+    pub build_id: u64,
 }
 
 impl Default for GpuSettings {
@@ -45,6 +49,8 @@ impl Default for GpuSettings {
             enc_thread: false,
             overlap: false,
             gob_order: GobOrder::Tegra,
+            runtime_cache: None,
+            build_id: 0,
         }
     }
 }
@@ -66,8 +72,11 @@ impl GpuSettings {
                 collect: self.collect_archive,
                 compile_bases: crate::pipelines::bases_on(),
                 exact_only: !crate::pipelines::specialize_on(),
+                runtime: Vec::new(),
             },
             gob_order: self.gob_order,
+            runtime_cache: self.runtime_cache.clone(),
+            build_id: self.build_id,
         }
     }
 }

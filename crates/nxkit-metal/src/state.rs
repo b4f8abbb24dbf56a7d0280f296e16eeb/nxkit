@@ -21,6 +21,9 @@ macro_rules! mtl_enum {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum $name { $($(#[$vm])* $v),+ }
         impl $name {
+            /// Every value, in declaration order (for a text form that is read back).
+            pub const ALL: &'static [Self] = &[$(Self::$v),+];
+
             pub(crate) fn to_mtl(self) -> $mtl {
                 match self { $(Self::$v => <$mtl>::$mv),+ }
             }

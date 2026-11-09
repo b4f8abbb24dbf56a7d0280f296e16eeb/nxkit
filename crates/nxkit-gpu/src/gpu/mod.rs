@@ -66,6 +66,10 @@ pub struct GpuConfig {
     pub archive: ArchiveConfig,
     /// The order of the 16 byte pieces in a GOB of the guest textures.
     pub gob_order: GobOrder,
+    /// A writable folder of the title for the runtime pipeline cache, or none for no cache.
+    pub runtime_cache: Option<PathBuf>,
+    /// A number that changes with the app build, so a cache of another build is dropped.
+    pub build_id: u64,
 }
 
 impl Default for GpuConfig {
@@ -77,6 +81,8 @@ impl Default for GpuConfig {
                 .min(6),
             archive: ArchiveConfig::default(),
             gob_order: GobOrder::default(),
+            runtime_cache: None,
+            build_id: 0,
         }
     }
 }
@@ -130,7 +136,17 @@ impl Gpu {
     /// Makes the encoder.
     pub fn with_config(ctx: &Context, guest: Arc<GuestMemory>, config: GpuConfig) -> Result<Self> {
         let threads = config.threads.max(1);
-        let pipelines = Pipelines::new(ctx, &config.archive)?;
+        let mut archive = config.archive.clone();
+        let cache_plan = crate::pipelines::runtime_plan(
+            ctx,
+            config.runtime_cache.as_deref(),
+            config.build_id,
+            &mut archive,
+        );
+        let pipelines = Pipelines::new(ctx, &archive)?;
+        if let Some(plan) = cache_plan {
+            pipelines.runtime_start(plan, &config.shader_dir);
+        }
         let transfer = Transfer::new(ctx, pipelines.cache(), config.gob_order)?;
         Ok(Self {
             ctx: ctx.clone(),
