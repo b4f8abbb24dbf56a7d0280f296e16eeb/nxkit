@@ -17,6 +17,7 @@ use crate::format::Format;
 pub use desc::{Storage, TextureDesc, TextureKind, TextureRegion, ViewDesc};
 
 mod desc;
+mod io_surface;
 
 struct Inner {
     /// The texture a view was made from. It stays alive as long as the view.
