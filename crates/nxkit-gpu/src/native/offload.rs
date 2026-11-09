@@ -7,6 +7,7 @@
 //! Neural Engine path. Either way no pass is added.
 
 use super::ane::{Session, SlotTextures, bound, cache_root, textures};
+use super::ane_trace;
 use super::conv::Params;
 use super::feed::{Hold, feed};
 use super::iface::PictureSpec;
@@ -65,6 +66,9 @@ impl Native {
         cx: &PrepareCx<'_>,
     ) {
         let name = self.nets[net].name();
+        if let Some(off) = self.nets[net].offload() {
+            ane_trace::dispatch(self.nets[net].resources(), off.picture, prepared, cx);
+        }
         let Some(epilogue) = entry.epilogue.clone() else {
             return;
         };

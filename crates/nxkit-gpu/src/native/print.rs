@@ -30,7 +30,7 @@ pub(super) enum Layout {
 
 impl Layout {
     /// The byte offset of texel `x`, `y` of a plane `width` by `height`.
-    fn offset(self, (x, y): (u32, u32), (width, height): (u32, u32)) -> u64 {
+    pub(super) fn offset(self, (x, y): (u32, u32), (width, height): (u32, u32)) -> u64 {
         match self {
             Self::Pitch(p) => u64::from(y) * p + u64::from(x),
             Self::Block(tile_h) => {
