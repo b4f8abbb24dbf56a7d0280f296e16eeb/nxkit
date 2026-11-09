@@ -225,6 +225,11 @@ impl Binds {
         self.list.iter().find(|b| b.0 == luma).map(|b| b.2)
     }
 
+    /// The reads, oldest first: luma and chroma host addresses and the picture.
+    pub(super) fn all(&self) -> Vec<(u64, u64, Pic)> {
+        self.list.iter().copied().collect()
+    }
+
     /// The addresses of the last reads, for a diagnostic.
     pub(super) fn recent(&self) -> String {
         let tail: Vec<String> = self

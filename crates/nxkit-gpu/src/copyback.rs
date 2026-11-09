@@ -85,6 +85,12 @@ impl CopyBack {
         }
     }
 
+    /// The memory pool that holds `addr`: its GPU start and end and its flags.
+    pub(crate) fn pool_of(&self, addr: u64) -> Option<(u64, u64, u32)> {
+        let (s, (e, f)) = self.pools.range(..=addr).next_back()?;
+        (addr < *e).then_some((*s, *e, *f))
+    }
+
     /// The game finalised the pool at GPU address `start`.
     pub(crate) fn remove_pool(&mut self, start: u64) {
         self.pools.remove(&start);
