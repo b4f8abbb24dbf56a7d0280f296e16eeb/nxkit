@@ -11,8 +11,12 @@ pub(crate) fn book_writes(
     ords: &[crate::draws::Ordinal],
     images: &mut [crate::images::PassImages],
 ) {
-    let Some(index) = anchor_pass(p, frame, plan, ords) else { return };
-    let Some(slot) = images.get_mut(index) else { return };
+    let Some(index) = anchor_pass(p, frame, plan, ords) else {
+        return;
+    };
+    let Some(slot) = images.get_mut(index) else {
+        return;
+    };
     for id in p.writes() {
         if !slot.writes.contains(&id) {
             slot.writes.push(id);
@@ -31,7 +35,9 @@ fn anchor_pass(
         pass.kind == nxkit_nvn::passes::PassKind::Compute
             && pass.cmds.clone().any(|i| {
                 matches!(frame.cmds.get(i as usize), Some(Cmd::Dispatch { .. }))
-                    && ords.get(i as usize).is_some_and(|o| p.is_anchor(o.dispatch))
+                    && ords
+                        .get(i as usize)
+                        .is_some_and(|o| p.is_anchor(o.dispatch))
             })
     })
 }

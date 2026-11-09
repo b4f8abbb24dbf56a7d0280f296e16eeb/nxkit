@@ -243,7 +243,11 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
     let mut images = vec![crate::images::PassImages::default(); plan.passes.len()];
     book_writes(&p, &frame, &plan, &ords, &mut images);
     for (i, x) in images.iter().enumerate() {
-        let want: Vec<TexId> = if i == computes[2] { vec![TexId(7)] } else { vec![] };
+        let want: Vec<TexId> = if i == computes[2] {
+            vec![TexId(7)]
+        } else {
+            vec![]
+        };
         assert_eq!(x.writes, want, "pass {i}");
     }
 }

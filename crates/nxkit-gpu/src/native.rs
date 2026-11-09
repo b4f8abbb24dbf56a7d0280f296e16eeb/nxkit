@@ -27,14 +27,14 @@ mod build;
 mod run;
 mod util;
 
+pub(crate) use book::book_writes;
+use book::intermediates_read_later;
 #[cfg(test)]
 use build::{barrier_flags, written_resources};
 use build::{build, used_resources, uses_resource};
-use util::{bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
 use run::{Compare, PendingCompare, capture, count_fallback, count_native, make_compare};
-pub(crate) use book::book_writes;
-use book::intermediates_read_later;
 pub(crate) use run::{encode, health_lines};
+use util::{bind_of, blob_start, compare_on, enabled, hash_blobs, run_commands, sbuf_of};
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -221,7 +221,11 @@ impl Native {
 
     /// Looks for a run in the frame and prepares it. `None` means that the game's dispatches run: either no run was
     /// found, or it was refused (counted with the reason).
-    pub(crate) fn prepare(&mut self, cx: &PrepareCx<'_>, stats: &mut EncodeStats) -> Option<Prepared> {
+    pub(crate) fn prepare(
+        &mut self,
+        cx: &PrepareCx<'_>,
+        stats: &mut EncodeStats,
+    ) -> Option<Prepared> {
         if !enabled() || cx.detail.dispatches.len() < 2 {
             return None;
         }
@@ -467,7 +471,10 @@ impl Native {
                     .map_err(|_| {
                         Refusal(
                             "resource",
-                            format!("{name}: no view of {:?} ({:?})", spec.resource, res.desc.format),
+                            format!(
+                                "{name}: no view of {:?} ({:?})",
+                                spec.resource, res.desc.format
+                            ),
                         )
                     })?;
                     let desc = view.desc();
@@ -534,7 +541,11 @@ impl PrepareCx<'_> {
     /// The texture of a handle (a texture handle or the texture id of an image descriptor).
     fn resolve(&self, handle: u64) -> Option<(TexId, &Res, &nxkit_nvn::tic::Tic)> {
         let (slot, _) = self.view.resolve(handle).ok()?;
-        Some((slot.texture, self.textures.get(&slot.texture)?, &slot.header))
+        Some((
+            slot.texture,
+            self.textures.get(&slot.texture)?,
+            &slot.header,
+        ))
     }
 }
 
