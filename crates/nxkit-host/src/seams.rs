@@ -130,7 +130,8 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
             let mut load =
                 LoadConfig::new(target).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
-            load.work = s.pace_profile == "work";
+            load.work = matches!(s.pace_profile.as_str(), "work" | "steady");
+            load.steady = s.pace_profile == "steady";
             StepMode::Load(load)
         }
         // A target above 60 asks for the variable step, which only works under variable refresh. The game starts on the
@@ -138,14 +139,16 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
         (t, true) if t > 60 => {
             let mut load = LoadConfig::new(60).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
-            load.work = s.pace_profile == "work";
+            load.work = matches!(s.pace_profile.as_str(), "work" | "steady");
+            load.steady = s.pace_profile == "steady";
             variable = Some(t);
             StepMode::Load(load)
         }
         (t, _) => {
             let mut load = LoadConfig::new(t).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
-            load.work = s.pace_profile == "work";
+            load.work = matches!(s.pace_profile.as_str(), "work" | "steady");
+            load.steady = s.pace_profile == "steady";
             StepMode::Load(load)
         }
     };
