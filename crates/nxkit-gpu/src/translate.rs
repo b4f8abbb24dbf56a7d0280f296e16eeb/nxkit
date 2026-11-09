@@ -276,9 +276,24 @@ pub(crate) fn vertex_descriptor(
         } else {
             (StepFunction::PerVertex, 1)
         };
+        // Metal refuses a layout with stride 0, also for a constant step that never moves (an assertion in the archive,
+        // "references a buffer ... that has no stride"; Ocarina of Time after its opening). The stride of a constant
+        // step is not read, so any value that covers the attributes does: their furthest end, at least 16, in 4s.
+        let stride = if s.stride == 0 {
+            let end = d
+                .attributes
+                .iter()
+                .filter(|a| a.stream == s.index)
+                .map(|a| a.offset + 16)
+                .max()
+                .unwrap_or(16);
+            end.max(16).next_multiple_of(4)
+        } else {
+            s.stride
+        };
         out.layouts.push(VertexLayout {
             buffer: stream_slot(s.index),
-            stride: s.stride,
+            stride,
             step,
             step_rate,
         });
