@@ -1,5 +1,5 @@
 //! Lowering of `mulhi`, the simd builtins, `front_facing` and `calculate_*_lod` on synthetic MSL.
-//! The expected lines are what `metal -c -O1 -fpreserve-invariance` emits for the same source.
+//! The expected lines are what `metal -c -O1 -fpreserve-invariance -fwrapv` emits for the same source.
 
 use air_emit::{compile_source, Target};
 

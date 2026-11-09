@@ -552,6 +552,7 @@ fn metal_compiles_the_task_and_mesh_functions() {
                 "-c",
                 "-O1",
                 "-fpreserve-invariance",
+                "-fwrapv",
                 "-std=metal3.0",
             ])
             .arg(&src)

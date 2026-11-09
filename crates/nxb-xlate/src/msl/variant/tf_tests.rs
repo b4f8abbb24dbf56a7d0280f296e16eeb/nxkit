@@ -217,6 +217,7 @@ fn metal_compiles_the_capture_entry() {
             "-c",
             "-O1",
             "-fpreserve-invariance",
+            "-fwrapv",
             "-std=metal3.0",
         ])
         .arg(&src)

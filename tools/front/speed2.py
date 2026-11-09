@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """F4 speed variants on one input list, N workers, alternating rounds (load average printed per run).
-apple: metal -c -O1 -fpreserve-invariance -include-pch PCH (stdin) | metallib
+apple: metal -c -O1 -fpreserve-invariance -fwrapv -include-pch PCH (stdin) | metallib
 A: airc emit -> files -> air-opt -O1 -> air-opt --discard-value-names -> metallib (4 processes, temp files)
 B: the same chain through pipes (no temp files)
 C: airc emit | air-as | metallib (no optimiser)
@@ -28,7 +28,7 @@ def q(s): return "'" + s.replace("'", "'\\''") + "'"
 
 def apple(i):
     o = os.path.join(tmp, 'a%d' % i)
-    sh('%s -c -O1 -fpreserve-invariance -include-pch %s -x metal - -o - < %s | %s - -o %s.lib' % (METAL, PCH, q(srcs[i]), LIB, o))
+    sh('%s -c -O1 -fpreserve-invariance -fwrapv -include-pch %s -x metal - -o - < %s | %s - -o %s.lib' % (METAL, PCH, q(srcs[i]), LIB, o))
 
 def va(i):
     o = os.path.join(tmp, 'A%d' % i)

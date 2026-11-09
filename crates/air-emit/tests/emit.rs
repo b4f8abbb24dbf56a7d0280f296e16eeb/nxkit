@@ -108,3 +108,15 @@ fn user_call_sites_and_derivatives_have_separate_attribute_groups() {
     assert!(ir.contains("declare float @air.dfdx.f32(float) #12"));
     assert!(ir.contains("attributes #12 = { convergent nounwind willreturn }"));
 }
+
+#[test]
+fn signed_arithmetic_wraps_without_nsw() {
+    let ir = emit(
+        "kernel void k(device int* p [[buffer(0)]], uint i [[thread_position_in_grid]])\n\
+         { int a = p[0]; int b = p[1]; p[2] = a + b; p[3] = a - b; p[4] = a * b; p[5] = -a; }\n",
+    );
+    for op in ["add i32", "sub i32", "mul i32"] {
+        assert!(ir.contains(op), "{op}\n{ir}");
+    }
+    assert!(!ir.contains("nsw") && !ir.contains("nuw"), "{ir}");
+}

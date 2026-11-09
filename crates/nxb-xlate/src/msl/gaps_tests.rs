@@ -470,6 +470,7 @@ fn gaps_metal_compiles_the_samples() {
                 "-c",
                 "-O1",
                 "-fpreserve-invariance",
+                "-fwrapv",
                 "-std=metal3.1",
             ])
             .arg(&src)

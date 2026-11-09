@@ -18,7 +18,7 @@ use crate::ModCx;
 type R<T> = Result<T, Error>;
 
 /// Fast-math flags clang sets on float operations for the engine's flags
-/// (`-O1 -fpreserve-invariance`, no `contract`/`reassoc`).
+/// (`-O1 -fpreserve-invariance -fwrapv`, no `contract`/`reassoc`).
 pub const FM: &str = "nnan ninf nsz arcp afn";
 
 /// A value: its LLVM spelling and its type (value form).
@@ -1448,8 +1448,7 @@ impl<'a> FnGen<'a> {
                 match op {
                     UnOp::Neg if is_float(s) => self.emit(format!("{r} = fneg {FM} {t} {}", v.r)),
                     UnOp::Neg => self.emit(format!(
-                        "{r} = sub {}{t} {}, {}",
-                        if is_signed(s) { "nsw " } else { "" },
+                        "{r} = sub {t} {}, {}",
                         zero_text(&self.cx.types, &ty, false),
                         v.r
                     )),
@@ -2065,13 +2064,8 @@ impl<'a> FnGen<'a> {
                 }
             }
         }
-        // clang: signed add/sub/mul are `nsw` (overflow is undefined in C++)
-        let nsw = if sg && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) {
-            "nsw "
-        } else {
-            ""
-        };
-        self.emit(format!("{r} = {o} {nsw}{t} {}, {yv}", x.r));
+        // Signed arithmetic wraps (`-fwrapv`), so the compiler writes no `nsw` on signed add, sub, mul and negation.
+        self.emit(format!("{r} = {o} {t} {}, {yv}", x.r));
         Ok(V { r, ty: ty.clone() })
     }
 

@@ -174,6 +174,7 @@ pub(super) fn compile_metal(name: &str, msl: &str) {
             "-c",
             "-O1",
             "-fpreserve-invariance",
+            "-fwrapv",
             "-std=metal3.0",
         ])
         .arg(&src)

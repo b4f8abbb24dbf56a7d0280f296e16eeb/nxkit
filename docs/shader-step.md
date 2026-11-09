@@ -121,8 +121,9 @@ The step does not pass `DEVELOPER_DIR`, `TOOLCHAINS`, `MTL_*`, `METAL_*`, `CLANG
 
 Compile conventions:
 
-- Mac: `-c -O1 -fpreserve-invariance -fbracket-depth=1024`.
-- iOS: `-c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance -fbracket-depth=1024`.
+- Mac: `-c -O1 -fpreserve-invariance -fwrapv -fbracket-depth=1024`.
+- iOS: `-c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv -fbracket-depth=1024`.
+- `-fwrapv` makes signed integer overflow wrap, as it does in the guest shaders. Without it the compiler writes `nsw` on signed arithmetic and may assume that it never overflows.
 - `-fbracket-depth=1024` allows more nested brackets than the default of 256. A source within 256 compiles to the same bytes with it. The record string (`chain_metal`) does not name it.
 - The source goes to stdin. There is one PCH for each convention and target.
 

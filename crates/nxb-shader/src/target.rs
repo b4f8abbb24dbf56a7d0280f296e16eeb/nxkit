@@ -17,10 +17,16 @@ pub struct TargetConv {
 /// `ios_metal.py`). A source within the default limit compiles to the same bytes with it, so the record does not name it.
 pub const BRACKET_DEPTH: &str = "-fbracket-depth=1024";
 
-/// The Mac convention: `metal -c -O1 -fpreserve-invariance`, then `metallib` (RM 3.3).
+/// The Mac convention: `metal -c -O1 -fpreserve-invariance -fwrapv`, then `metallib` (RM 3.3).
 pub const MAC: TargetConv = TargetConv {
     target: Target::Mac,
-    compile_flags: &["-c", "-O1", "-fpreserve-invariance", BRACKET_DEPTH],
+    compile_flags: &[
+        "-c",
+        "-O1",
+        "-fpreserve-invariance",
+        "-fwrapv",
+        BRACKET_DEPTH,
+    ],
 };
 
 /// The iOS convention (`dm/ios/tools/ios_metal.py`): iOS 18, relaxed math (NaN and Inf kept), invariance, `-O1`.
@@ -32,6 +38,7 @@ pub const IOS: TargetConv = TargetConv {
         "-mios-version-min=18.0",
         "-fmetal-math-mode=relaxed",
         "-fpreserve-invariance",
+        "-fwrapv",
         BRACKET_DEPTH,
     ],
 };
@@ -71,15 +78,29 @@ mod tests {
     fn mac_record_matches_python() {
         assert_eq!(
             MAC.record(),
-            "xcrun -sdk macosx metal -c -O1 -fpreserve-invariance; xcrun -sdk macosx metallib"
+            "xcrun -sdk macosx metal -c -O1 -fpreserve-invariance -fwrapv; xcrun -sdk macosx metallib"
         );
         assert_eq!(
             MAC.pch_flags(),
-            ["-O1", "-fpreserve-invariance", "-fbracket-depth=1024"]
+            [
+                "-O1",
+                "-fpreserve-invariance",
+                "-fwrapv",
+                "-fbracket-depth=1024"
+            ]
         );
         assert_eq!(
             IOS.record(),
-            "xcrun -sdk iphoneos metal -c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance; xcrun -sdk iphoneos metallib"
+            "xcrun -sdk iphoneos metal -c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv; xcrun -sdk iphoneos metallib"
         );
+    }
+
+    #[test]
+    fn both_targets_wrap_signed_overflow() {
+        for conv in [&MAC, &IOS] {
+            assert!(conv.compile_flags.contains(&"-fwrapv"));
+            assert!(conv.pch_flags().contains(&"-fwrapv"));
+            assert!(conv.record().split([' ', ';']).any(|f| f == "-fwrapv"));
+        }
     }
 }

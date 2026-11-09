@@ -495,6 +495,7 @@ fn metal_compiles_the_samples() {
                 "-c",
                 "-O1",
                 "-fpreserve-invariance",
+                "-fwrapv",
                 "-std=metal3.0",
             ])
             .arg(&src)

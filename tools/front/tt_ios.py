@@ -9,7 +9,7 @@ x = lambda t: subprocess.run(['xcrun', '-sdk', 'iphoneos', '-find', t], capture_
 SDK = subprocess.run(['xcrun', '-sdk', 'iphoneos', '--show-sdk-path'], capture_output=True, text=True).stdout.strip()
 OPT = x('air-opt'); AIRC = (os.environ.get('NXB_AIRC', 'target/release/airc'))
 ENV = {'SDKROOT': SDK, 'PATH': '/usr/bin:/bin'}
-IOS = ['xcrun', '-sdk', 'iphoneos', 'metal', '-c', '-O1', '-mios-version-min=18.0', '-fmetal-math-mode=relaxed', '-fpreserve-invariance', '-x', 'metal', '-']
+IOS = ['xcrun', '-sdk', 'iphoneos', 'metal', '-c', '-O1', '-mios-version-min=18.0', '-fmetal-math-mode=relaxed', '-fpreserve-invariance', '-fwrapv', '-x', 'metal', '-']
 N, ARCH = int(sys.argv[1]), sys.argv[2]; rnd = random.Random(int(sys.argv[3]) if len(sys.argv) > 3 else 1)
 L = open(((os.environ.get('NXB_CORPUS') or sys.exit('set NXB_CORPUS')))).read().split()
 vs = [p for p in L if p.endswith('_bp.metal')]; fs = [p for p in L if p.endswith('_bu.metal')]
