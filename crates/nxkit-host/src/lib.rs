@@ -35,6 +35,8 @@ pub mod loader;
 #[cfg(target_os = "macos")]
 pub mod memory;
 #[cfg(target_os = "macos")]
+pub mod memreport;
+#[cfg(target_os = "macos")]
 pub mod place;
 #[cfg(target_os = "macos")]
 pub mod probe;

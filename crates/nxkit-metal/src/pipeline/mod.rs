@@ -22,6 +22,8 @@ use crate::state::{ColorTarget, TopologyClass, VertexDescriptor};
 #[derive(Clone)]
 pub struct ShaderLibrary {
     raw: Retained<ProtocolObject<dyn MTLLibrary>>,
+    /// The library in the memory counters, shared by the clones.
+    _tracked: std::sync::Arc<crate::memstats::Tracked>,
 }
 
 // SAFETY: a library is an immutable, thread safe Metal object.
@@ -30,6 +32,16 @@ unsafe impl Send for ShaderLibrary {}
 unsafe impl Sync for ShaderLibrary {}
 
 impl ShaderLibrary {
+    pub(crate) fn tracked(raw: Retained<ProtocolObject<dyn MTLLibrary>>) -> Self {
+        Self {
+            raw,
+            _tracked: std::sync::Arc::new(crate::memstats::Tracked::new(
+                crate::memstats::Kind::Library,
+                0,
+            )),
+        }
+    }
+
     /// Loads a `.metallib` file.
     pub fn from_path(ctx: &Context, path: &Path) -> Result<Self> {
         let p = path
@@ -40,7 +52,7 @@ impl ShaderLibrary {
             .device()
             .newLibraryWithURL_error(&url)
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
-        Ok(Self { raw })
+        Ok(Self::tracked(raw))
     }
 
     /// Compiles Metal Shading Language source with `MTL4Compiler`.
@@ -52,7 +64,7 @@ impl ShaderLibrary {
             .compiler()
             .newLibraryWithDescriptor_error(&d)
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
-        Ok(Self { raw })
+        Ok(Self::tracked(raw))
     }
 
     /// The names of the functions in the library.

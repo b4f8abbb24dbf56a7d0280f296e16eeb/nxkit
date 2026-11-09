@@ -33,6 +33,7 @@ pub struct GuestMemory {
     map: AddressMap,
     base: NonNull<u8>,
     ctx: Context,
+    _tracked: crate::memstats::Tracked,
     // Last field: it drops after `buffer`, so Metal never sees a dangling range.
     #[allow(dead_code)] // owns the memory behind the buffer
     owned: Option<OwnedRegion>,
@@ -119,6 +120,7 @@ impl GuestMemory {
             map,
             base,
             ctx: ctx.clone(),
+            _tracked: crate::memstats::Tracked::new(crate::memstats::Kind::Guest, len),
             owned,
         })
     }

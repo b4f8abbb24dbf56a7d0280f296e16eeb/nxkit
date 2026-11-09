@@ -381,7 +381,7 @@ impl PipelineCache {
             d.setName(Some(&ns("nxkit-mesh-nop")));
             self.compiler
                 .newLibraryWithDescriptor_error(&d)
-                .map(|raw| ShaderLibrary { raw })
+                .map(ShaderLibrary::tracked)
                 .map_err(|e| e.localizedDescription().to_string())
         });
         r.clone().map_err(MetalError::Compile)
@@ -412,10 +412,15 @@ impl PipelineCache {
 
     fn insert(&self, key: u64, e: Entry) -> Result<()> {
         self.builds.fetch_add(1, Ordering::Relaxed);
-        self.entries
+        let fresh = self
+            .entries
             .write()
             .map_err(|_| MetalError::Invalid("pipeline cache lock poisoned"))?
-            .insert(key, e);
+            .insert(key, e)
+            .is_none();
+        if fresh {
+            crate::memstats::pipeline_kept();
+        }
         Ok(())
     }
 
