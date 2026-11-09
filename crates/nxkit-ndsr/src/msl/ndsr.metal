@@ -129,11 +129,11 @@ static inline void ndsr_layer_rev(thread hmat (&X)[NB][2][2], P wb) {
     }
 }
 
-// Layer L: the even ones in the vr order, five with ReLU, the last without; staged in threadgroup memory (wt) when
+// Layer L of NL: the even ones in the vr order, all but the last with ReLU; staged in threadgroup memory (wt) when
 // L < NST, else read from the device buffer (wd).
-template <uint L, uint NST, uint NB>
+template <uint L, uint NST, uint NB, uint NL = 6>
 static inline void ndsr_step(thread hmat (&X)[NB][2][2], threadgroup const half *wt, device const half *wd) {
-    constexpr bool REV = (L % 2) == 0, RELU = L < 5;
+    constexpr bool REV = (L % 2) == 0, RELU = L + 1 < NL;
     if (L < NST) {
         if (REV) ndsr_layer_rev<RELU>(X, wt + 1024 * L);
         else ndsr_layer<RELU>(X, wt + 1024 * L);
