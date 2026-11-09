@@ -65,7 +65,19 @@ pub(super) fn delta_slots(mask: u128, slots: &[Option<TexId>; MAX_BINDINGS]) -> 
     out
 }
 
+/// True for a handle of texture id 0. NVN reserves the first texture descriptors for itself, so a game never registers
+/// a texture there, and binding such a handle binds no texture: it is an unbind, not a handle that failed to resolve.
+pub(super) fn null_handle(h: u64) -> bool {
+    h & u64::from(crate::descriptors::MAX_TEXTURE_ID) == 0
+}
+
 impl Builder {
+    /// Counts a reference that names no texture, and keeps it as an example of `decode.unresolved`.
+    fn unresolved(&mut self, what: std::fmt::Arguments<'_>) {
+        self.unresolved += 1;
+        crate::diag::example(crate::diag::Reason::DecodeUnresolved, what);
+    }
+
     fn addr<M: GuestMem>(&mut self, cx: &Ctx<M>, a: u64) -> Option<TexId> {
         if a == 0 {
             return None;
@@ -87,8 +99,8 @@ impl Builder {
             return None;
         }
         let t = texture_of(cx.desc, h);
-        if t.is_none() {
-            self.unresolved += 1;
+        if t.is_none() && !null_handle(h) {
+            self.unresolved(format_args!("texture handle {h:#x}"));
         }
         self.refs.push(Ref::Handle(h, t));
         self.own_refs = true;
@@ -182,7 +194,12 @@ impl Builder {
                     };
                     let (raw, handle) = match deferred_handle(cx.mem, src, k, tex_base, samp_base) {
                         Ok((_, raw, h)) => (raw, h),
-                        Err(_) => (0, 0),
+                        Err(_) => {
+                            self.unresolved(format_args!(
+                                "deferred handle at {at:#x} is unreadable"
+                            ));
+                            (0, NO_HANDLE)
+                        }
                     };
                     self.refs.push(Ref::Deferred(at, raw));
                     self.own_refs = true;
@@ -228,7 +245,7 @@ impl Builder {
                     // The walker of the encoder gives one detail entry for every downsample record. A copy
                     // without textures keeps the count of copy commands equal to that of the entries.
                     _ => {
-                        self.unresolved += 1;
+                        self.unresolved(format_args!("downsample {src:#x} -> {dst:#x}"));
                         self.stream.cmds.push(Cmd::Copy {
                             src: None,
                             dst: None,
@@ -251,7 +268,7 @@ impl Builder {
                         self.stream.cmds.push(Cmd::Present(t))
                     }
                     Some(t) => self.stream.cmds.push(Cmd::CpuRead(t)),
-                    None => self.unresolved += 1,
+                    None => self.unresolved(format_args!("present or CPU read of {a:#x}")),
                 }
             }
             Record::Ext(x) => self.apply_ext(cx, x),
@@ -303,5 +320,19 @@ impl Builder {
             self.sets.img |= 1 << i;
             self.img_list = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_handle_of_texture_id_zero_is_an_unbind() {
+        assert!(null_handle(0));
+        // The sampler id sits above the texture id; a sampler alone still binds no texture.
+        assert!(null_handle(5 << 20));
+        assert!(!null_handle(1));
+        assert!(!null_handle(0x1930_0385));
     }
 }
