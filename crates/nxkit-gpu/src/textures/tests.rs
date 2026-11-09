@@ -150,3 +150,97 @@ fn repeated_objects_over_the_same_storage_share_one_backing() {
     store.trim_views();
     assert!(store.aliases.is_empty());
 }
+
+fn bc4_3d() -> TextureDesc {
+    TextureDesc {
+        kind: TextureKind::D3,
+        width: 64,
+        height: 64,
+        depth: 64,
+        mip_levels: 1,
+        array_layers: 1,
+        allow_views: true,
+        format: Format::Bc(nxkit_metal::BcKind::Bc4Unorm),
+        shader_read: true,
+        shader_write: false,
+        render_target: false,
+        storage: Storage::Private,
+        shader_atomic: false,
+    }
+}
+
+#[test]
+fn a_block_view_is_an_uncompressed_format_of_the_block_size() {
+    let bc4 = Format::Bc(nxkit_metal::BcKind::Bc4Unorm);
+    let bc7 = Format::Bc(nxkit_metal::BcKind::Bc7);
+    // NVN 0x2C is RGBA16Uint (8 bytes, a BC4 block), 0x2F RGBA32Uint (16 bytes, a BC7 block).
+    assert_eq!(
+        blocks::block_view_format(bc4, Some(0x2C)),
+        Some(Format::Rgba16Uint)
+    );
+    assert_eq!(
+        blocks::block_view_format(bc7, Some(0x2F)),
+        Some(Format::Rgba32Uint)
+    );
+    assert_eq!(blocks::block_view_format(bc4, Some(0x2F)), None);
+    assert_eq!(blocks::block_view_format(bc4, None), None);
+    assert_eq!(blocks::block_view_format(bc4, Some(0x49)), None);
+    assert_eq!(
+        blocks::block_view_format(Format::Rg32Uint, Some(0x2C)),
+        None
+    );
+}
+
+#[test]
+fn a_block_shadow_has_one_texel_per_block_of_one_plane() {
+    let d = bc4_3d();
+    let s = blocks::shadow_desc(&d, 0, Format::Rgba16Uint);
+    assert_eq!(
+        (s.kind, s.width, s.height, s.depth),
+        (TextureKind::D2, 16, 16, 1)
+    );
+    assert_eq!((s.mip_levels, s.array_layers), (1, 1));
+    assert!(s.render_target && !s.format.is_compressed());
+    let r = blocks::block_region(&d, 0, 5);
+    assert_eq!(
+        (r.level, r.slice, r.origin, r.size),
+        (0, 0, [0, 0, 5], [64, 64, 1])
+    );
+    let mut a = d;
+    a.kind = TextureKind::D2Array;
+    a.depth = 1;
+    a.array_layers = 3;
+    a.mip_levels = 2;
+    let s = blocks::shadow_desc(&a, 1, Format::Rgba16Uint);
+    assert_eq!((s.width, s.height), (8, 8));
+    let r = blocks::block_region(&a, 1, 2);
+    assert_eq!(
+        (r.level, r.slice, r.origin, r.size),
+        (1, 2, [0; 3], [32, 32, 1])
+    );
+}
+
+#[test]
+fn compressed_textures_are_never_render_targets() {
+    let desc = nxkit_nvn::layout::TextureDesc {
+        target: Target::D3,
+        format: 0x49,
+        flags: 0,
+        samples: 0,
+        width: 64,
+        height: 64,
+        depth: 64,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let mut table = ResourceTable::new();
+    let id = table.create(desc, GpuAddr::new(0x2000).unwrap()).unwrap();
+    let u = Use {
+        attachment: true,
+        ..Use::default()
+    };
+    let (d, _) = describe(table.get(id).unwrap(), 1.0, u).unwrap();
+    assert!(!d.render_target);
+    assert_eq!(d.kind, TextureKind::D3);
+}
