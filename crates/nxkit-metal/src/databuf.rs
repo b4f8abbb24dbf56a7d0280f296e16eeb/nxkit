@@ -6,7 +6,7 @@
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
+use objc2_metal::{MTLBuffer, MTLDevice, MTLResource, MTLResourceOptions};
 
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
@@ -16,6 +16,7 @@ pub struct DataBuffer {
     pub(crate) raw: Retained<ProtocolObject<dyn MTLBuffer>>,
     ctx: Context,
     len: u64,
+    _tracked: crate::memstats::Tracked,
 }
 
 // SAFETY: the buffer is a thread safe Metal object. Writers are bounds checked and the caller keeps two writers off
@@ -37,10 +38,15 @@ impl DataBuffer {
         // SAFETY: `contents` points to `len` bytes of shared memory that nobody else uses yet.
         unsafe { std::ptr::write_bytes(raw.contents().cast::<u8>(), 0, len as usize) };
         ctx.add_allocation(ProtocolObject::from_ref(&*raw));
+        let tracked = crate::memstats::Tracked::new(
+            crate::memstats::Kind::Buffer,
+            raw.allocatedSize() as u64,
+        );
         Ok(Self {
             raw,
             ctx: ctx.clone(),
             len,
+            _tracked: tracked,
         })
     }
 

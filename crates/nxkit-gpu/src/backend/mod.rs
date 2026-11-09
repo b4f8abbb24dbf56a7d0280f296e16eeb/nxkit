@@ -345,9 +345,21 @@ impl GpuBackend {
     fn note_report(&self, report: &EncodeReport) {
         let n = self.reports.fetch_add(1, Ordering::Relaxed);
         if crate::diag("memory") && n.is_multiple_of(120) {
+            // The device total counts the no-copy guest buffer at its whole length, touched or not, so it is shown
+            // apart (`NXKIT_MEM_REPORT` of the host has the full split).
+            let m = nxkit_metal::mem_stats();
+            let mib = |v: u64| v / (1024 * 1024);
             eprintln!(
-                "DIAG memory frame {n}: Metal {} MiB, resident allocations {}",
-                self.ctx.allocated_bytes() / (1024 * 1024),
+                "DIAG memory frame {n}: Metal {} MiB of which guest buffer {} MiB, textures {} MiB ({}), buffers {} MiB ({}), \
+                 libraries {}, pipelines {}, resident allocations {}",
+                mib(self.ctx.allocated_bytes()),
+                mib(m.guest_bytes),
+                mib(m.texture_bytes),
+                m.textures,
+                mib(m.buffer_bytes),
+                m.buffers,
+                m.libraries,
+                m.pipelines,
                 self.ctx.resident_count()
             );
         }
