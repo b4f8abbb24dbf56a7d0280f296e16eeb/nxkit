@@ -179,6 +179,18 @@ impl SharedTensor {
         })
     }
 
+    /// Locks the pages and calls `f` with all of them: `height` rows of [`row_bytes`](Self::row_bytes) bytes, the second
+    /// argument being that pitch. For a writer that fills rows itself, in several threads. Nobody else may use the
+    /// tensor meanwhile.
+    pub fn write_bytes(&self, f: impl FnOnce(&mut [u8], usize)) -> Result<()> {
+        self.with_pages(false, |base, pitch| {
+            // SAFETY: the lock holds `height` rows of `pitch` bytes at `base`, valid for writes until it is released
+            // after `f`, and the caller is the only user of the tensor.
+            let all = unsafe { std::slice::from_raw_parts_mut(base, pitch * self.inner.height) };
+            f(all, pitch);
+        })
+    }
+
     /// Reads the values, row-major without padding, as the bits of f16. `out.len()` must be [`len`](Self::len).
     /// Nobody else may write the tensor meanwhile.
     pub fn read_f16_bits(&self, out: &mut [u16]) -> Result<()> {
@@ -239,6 +251,32 @@ mod tests {
         };
         assert_eq!((t.width(), t.height(), t.len()), (16, 24, 384));
         assert!(t.row_bytes() >= 32);
+    }
+
+    #[test]
+    fn write_bytes_gives_every_row_at_the_pitch() {
+        let Ok(t) = SharedTensor::new(&[3, 7]) else {
+            panic!("allocation failed")
+        };
+        let rows = t.height();
+        let r = t.write_bytes(|all, pitch| {
+            assert_eq!(all.len(), pitch * rows);
+            for (y, row) in all.chunks_exact_mut(pitch).enumerate() {
+                for v in row[..14].as_chunks_mut::<2>().0 {
+                    *v = (y as u16 + 1).to_le_bytes();
+                }
+            }
+        });
+        assert!(r.is_ok());
+        let mut out = vec![0u16; t.len()];
+        assert!(t.read_f16_bits(&mut out).is_ok());
+        assert!(
+            out.as_chunks::<7>()
+                .0
+                .iter()
+                .enumerate()
+                .all(|(y, r)| r.iter().all(|&v| v == y as u16 + 1))
+        );
     }
 
     #[test]

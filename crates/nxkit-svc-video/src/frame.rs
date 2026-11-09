@@ -1,5 +1,10 @@
 //! One decoded picture.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The next picture number. Numbers start at 1, so 0 is never a picture.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
 /// An NV12 picture in memory: a luma plane and one plane of interleaved Cb and Cr at half the size.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Nv12 {
@@ -25,6 +30,7 @@ pub(crate) enum Pixels {
 /// use. [`crate::texture::TextureCache`] turns it into textures without a copy (R20), and [`Frame::copy_nv12`] reads
 /// it for a game that wants the bytes.
 pub struct Frame {
+    id: u64,
     width: u32,
     height: u32,
     colorspace: u32,
@@ -36,6 +42,7 @@ impl Frame {
     /// 2 BT.601 full, 3 BT.709 limited, 4 BT.709 full.
     pub fn from_nv12(width: u32, height: u32, colorspace: u32, planes: Nv12) -> Frame {
         Frame {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             width,
             height,
             colorspace,
@@ -51,11 +58,18 @@ impl Frame {
         buffer: crate::sys::vt::PixelBuffer,
     ) -> Frame {
         Frame {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             width,
             height,
             colorspace,
             pixels: Pixels::Buffer(buffer),
         }
+    }
+
+    /// The number of this picture: every decoded picture gets the next one, so it names the picture for as long as the
+    /// process runs ([`crate::PictureSink`]).
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// Width in pixels.
@@ -104,6 +118,19 @@ impl Frame {
             }
             #[cfg(target_os = "macos")]
             Pixels::Buffer(b) => b.with_planes(copy),
+        }
+    }
+
+    /// Calls `f` with the luma plane, its stride, the chroma plane and its stride, without a copy. A plane may be longer
+    /// than `stride * rows` bytes or, for a decoder that cuts the last row short, shorter: read it with `get`.
+    pub fn with_planes<R>(
+        &self,
+        f: impl FnOnce(&[u8], usize, &[u8], usize) -> R,
+    ) -> Result<R, String> {
+        match &self.pixels {
+            Pixels::Memory(m) => Ok(f(&m.y, m.y_stride, &m.uv, m.uv_stride)),
+            #[cfg(target_os = "macos")]
+            Pixels::Buffer(b) => b.with_planes(f),
         }
     }
 
@@ -197,6 +224,19 @@ mod tests {
     fn a_destination_that_is_too_small_is_an_error() {
         let f = picture(4, 4);
         assert!(f.copy_nv12(&mut [0u8; 10], 4, 4).is_err());
+    }
+
+    #[test]
+    fn every_picture_has_its_own_number() {
+        let (a, b) = (picture(2, 2), picture(2, 2));
+        assert!(a.id() != 0 && b.id() > a.id());
+    }
+
+    #[test]
+    fn with_planes_gives_the_planes_as_they_are() {
+        let f = picture(6, 4);
+        let r = f.with_planes(|y, ys, uv, uvs| (y.len(), ys, uv.len(), uvs));
+        assert_eq!(r, Ok((24, 6, 12, 6)));
     }
 
     #[test]

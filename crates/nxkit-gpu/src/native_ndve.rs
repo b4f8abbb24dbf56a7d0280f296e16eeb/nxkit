@@ -7,7 +7,9 @@
 
 use nxkit_ndve::plan::{self, Plan};
 
-use crate::native::{BlobSpec, ModelPackage, Offload, Place, Replacement, ResourceSpec, Run};
+use crate::native::{
+    BlobSpec, ModelPackage, Offload, PictureSpec, Place, Replacement, ResourceSpec, Run,
+};
 
 #[cfg(not(test))]
 use nxkit_ndve::{fingerprint, kernels, msl};
@@ -140,19 +142,22 @@ impl Replacement for Ndve {
     }
 
     fn offload(&self) -> Option<Offload> {
-        let p = nxkit_ndve::kernels::ane_plans();
         Some(Offload {
-            input: p.input,
-            epilogue: p.epilogue,
+            epilogue: nxkit_ndve::kernels::ane_epilogue(),
             package: ane_package,
             cache_key: ane_cache_key,
-            input_tensor: (ANE_TENSORS[0].0, ANE_TENSORS[0].1),
-            output_tensors: &ANE_TENSORS[1..],
+            input_tensor: ANE_INPUT,
+            output_tensors: &ANE_OUTPUTS,
+            picture: PictureSpec {
+                luma: plan::LUMA_PLANE,
+                chroma: plan::CHROMA_PLANE,
+                convert: plan::CONVERSION_PUSH,
+            },
         })
     }
 }
 
-use nxkit_ndve::kernels::ANE_TENSORS;
+use nxkit_ndve::kernels::{ANE_INPUT, ANE_OUTPUTS};
 
 /// The cache key: the SHA-256 of the layer blob and the build of the OS.
 fn ane_cache_key(blobs: &[&[u8]], os_build: &str) -> String {

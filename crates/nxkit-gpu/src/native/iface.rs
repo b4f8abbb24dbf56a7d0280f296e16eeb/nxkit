@@ -59,10 +59,9 @@ pub(crate) struct ResourceSpec {
 }
 
 /// A Core ML model of the network and the GPU's share of running it (a network that can run on the Neural Engine). The
-/// tensors are `R16Float` textures over IOSurfaces; a tensor `[1, C, H, W]` is `W` wide and `C * H` high.
+/// tensors are `R16Float` textures over IOSurfaces; a tensor `[1, C, H, W]` is `W` wide and `C * H` high. The model runs
+/// on the decoded pictures ahead of the game, so the game's frame only makes the output from its results.
 pub(crate) struct Offload {
-    /// Writes the model's input from the game's resources. It runs for every picture.
-    pub(crate) input: Plan,
     /// Makes the game's output from the model's outputs. It runs in place of the plan.
     pub(crate) epilogue: Plan,
     /// The files of the `.mlpackage` and the shapes of its tensors, from the weight blobs (in the order of
@@ -70,10 +69,24 @@ pub(crate) struct Offload {
     pub(crate) package: fn(&[&[u8]]) -> Result<ModelPackage, String>,
     /// The key of the compiled model in the cache, from the weight blobs and the build of the OS.
     pub(crate) cache_key: fn(&[&[u8]], &str) -> String,
-    /// The name and the resource of the model's input.
-    pub(crate) input_tensor: (&'static str, GameResource),
+    /// The name of the model's input.
+    pub(crate) input_tensor: &'static str,
     /// The names and the resources of the model's outputs.
     pub(crate) output_tensors: &'static [(&'static str, GameResource)],
+    /// How the game binds the picture that the model's input is made from.
+    pub(crate) picture: PictureSpec,
+}
+
+/// The resources of the decoded picture that the game's colour conversion reads: the planes of NV12 (found in guest
+/// memory by their addresses) and the push block that holds the matrix and the offsets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PictureSpec {
+    /// The luma plane.
+    pub(crate) luma: GameResource,
+    /// The interleaved chroma plane.
+    pub(crate) chroma: GameResource,
+    /// The push constants of the conversion.
+    pub(crate) convert: GameResource,
 }
 
 /// The files of an `.mlpackage` as paths relative to its directory, and the model's tensors with their shapes.

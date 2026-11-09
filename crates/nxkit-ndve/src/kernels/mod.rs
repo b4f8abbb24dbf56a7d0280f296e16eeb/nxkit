@@ -27,7 +27,7 @@
 
 mod ane;
 
-pub use ane::{AnePlans, TENSORS as ANE_TENSORS, ane_plans};
+pub use ane::{INPUT as ANE_INPUT, OUTPUTS as ANE_OUTPUTS, ane_epilogue};
 
 use crate::pack::pack_layer;
 use crate::plan::{self, Binding, Buffer, GameResource, Plan, Source, Step};

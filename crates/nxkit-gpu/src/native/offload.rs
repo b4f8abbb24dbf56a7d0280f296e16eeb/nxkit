@@ -1,8 +1,13 @@
-//! The Neural Engine path in the frame: which picture writes which slot, which uses the previous result, and the
-//! health counts of both.
+//! The Neural Engine path in the frame: which picture's result the game's dispatch uses, and the health counts of it.
+//!
+//! The model runs ahead of the game ([`super::feed`]). When the dispatch of a picture is prepared, the picture is found
+//! by the guest memory its planes lie in; if its result is ready the frame runs the epilogue in place of the plan,
+//! otherwise the plan runs, as it does without the Neural Engine path. Either way no pass is added.
 
-use super::ane::{Session, SlotTextures, Ticket, bound, cache_root, textures};
-use super::ring::Miss;
+use super::ane::{Session, SlotTextures, bound, cache_root, textures};
+use super::conv::Params;
+use super::feed::{Hold, feed};
+use super::iface::PictureSpec;
 use super::run::{count_ane, count_ane_fallback};
 use super::*;
 
@@ -10,26 +15,23 @@ use super::*;
 pub(super) struct AneNet {
     session: Session,
     textures: Option<Result<Vec<SlotTextures>, String>>,
-    input: (&'static str, GameResource),
     outputs: &'static [(&'static str, GameResource)],
+    picture: PictureSpec,
 }
 
-/// What a picture's frame does with the Neural Engine.
+/// What a picture's frame does with the Neural Engine: it makes the output from the model's outputs.
 pub(super) struct AnePrepared {
-    pub(super) entries: Arc<AneEntries>,
-    /// The slot textures this frame binds: the input to write and, with the epilogue, the outputs to read.
+    /// The epilogue, in place of the plan.
+    pub(super) entry: Arc<Entry>,
+    /// The slot textures this frame binds: the outputs to read.
     pub(super) textures: Vec<(GameResource, Texture)>,
-    /// The frame writes the model's input.
-    pub(super) write: bool,
-    /// The frame makes the output from the model's outputs; otherwise the plan runs.
-    pub(super) epilogue: bool,
-    /// Settled when the frame has finished on the GPU.
-    pub(super) ticket: Mutex<Option<Ticket>>,
+    /// The claim on the result, released when the frame has finished on the GPU.
+    pub(super) hold: Mutex<Option<Hold>>,
 }
 
 impl Native {
-    /// Decides what the Neural Engine does for this picture and records it in `prepared`. Any problem leaves
-    /// `prepared` as it is: the plan runs, counted as `<name>.ane_fallback(reason)`.
+    /// Decides whether the Neural Engine's result of this picture is used and records it in `prepared`. Any problem
+    /// leaves `prepared` as it is: the plan runs, counted as `<name>.ane_fallback(reason)`.
     pub(super) fn attach_ane(
         &mut self,
         net: usize,
@@ -39,7 +41,7 @@ impl Native {
         cx: &PrepareCx<'_>,
     ) {
         let name = self.nets[net].name();
-        let Some(entries) = entry.ane.clone() else {
+        let Some(epilogue) = entry.epilogue.clone() else {
             return;
         };
         let key = (net, hash);
@@ -56,21 +58,39 @@ impl Native {
                     .as_deref(),
                 std::env::var("HOME").ok().as_deref(),
             );
-            let (input, outputs) = (off.input_tensor, off.output_tensors);
+            let (outputs, picture) = (off.output_tensors, off.picture);
             let session = Session::spawn(name, off, self.blobs.clone(), root, cache_key);
             self.ane.insert(
                 key,
                 AneNet {
                     session,
                     textures: None,
-                    input,
                     outputs,
+                    picture,
                 },
             );
         }
         let Some(net_ane) = self.ane.get_mut(&key) else {
             return;
         };
+        let feed = feed();
+        feed.attach(hash, &net_ane.session);
+        // The constants come first: the pictures the decoder has next are converted with them.
+        let spec = net_ane.picture;
+        let Some(params) = prepared
+            .pushes
+            .iter()
+            .find(|(r, _)| *r == spec.convert)
+            .and_then(|(_, b)| Params::from_push(b))
+        else {
+            count_ane_fallback(
+                name,
+                "params",
+                "the dispatch pushed no colour conversion constants",
+            );
+            return;
+        };
+        let epoch = feed.note_params(params);
         let loaded = match net_ane.session.get() {
             Ok(l) => l,
             Err(None) => {
@@ -88,39 +108,35 @@ impl Native {
         let slots = match &net_ane.textures {
             Some(Ok(t)) => t,
             Some(Err(why)) => {
-                count_ane_fallback(name, "textures", why);
+                count_ane_fallback(name, "error", why);
                 return;
             }
             None => return,
         };
-        let turn = loaded.begin();
-        let mut bound_textures = Vec::new();
-        if let Some(w) = turn.write {
-            bound_textures.push((net_ane.input.1, slots[w].input.clone()));
-        } else {
-            count_ane_fallback(name, "ring", "every slot is busy, the picture is not sent");
-        }
-        let epilogue = match turn.read {
-            Ok(r) => {
-                bound_textures.extend(bound(net_ane.outputs, &slots[r]));
-                count_ane(name);
-                true
-            }
-            Err(Miss::First) => {
-                count_ane_fallback(name, "first", "the first picture has no result before it");
-                false
-            }
-            Err(Miss::Late) => {
-                count_ane_fallback(name, "late", "the previous picture's result is not ready");
-                false
+        let host = |r: GameResource| {
+            let (_, gpu) = prepared.addrs.iter().find(|(g, _)| *g == r)?;
+            Some(cx.guest.host_base() + cx.guest_offset(*gpu, 1)?)
+        };
+        let (Some(luma), Some(chroma)) = (host(spec.luma), host(spec.chroma)) else {
+            count_ane_fallback(
+                name,
+                "unknown_picture",
+                "the picture's planes do not lie in guest memory",
+            );
+            return;
+        };
+        let hold = match feed.pick(epoch, luma, chroma) {
+            Ok(h) => h,
+            Err((reason, what)) => {
+                count_ane_fallback(name, reason, &what);
+                return;
             }
         };
+        count_ane(name);
         prepared.ane = Some(AnePrepared {
-            entries,
-            textures: bound_textures,
-            write: turn.write.is_some(),
-            epilogue,
-            ticket: Mutex::new(Some(Ticket::new(loaded, turn))),
+            entry: epilogue,
+            textures: bound(net_ane.outputs, &slots[hold.slot()]),
+            hold: Mutex::new(Some(hold)),
         });
     }
 }
