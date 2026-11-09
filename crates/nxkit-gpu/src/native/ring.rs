@@ -159,7 +159,9 @@ mod tests {
         // Picture 3 does not read picture 1 any more: it wants picture 2.
         let c = r.begin();
         assert_eq!(c.read, Err(Miss::Late));
-        assert_eq!(r.state(0), State::Free);
+        // Picture 1's result is dropped, and its slot is free again: picture 3 writes into it.
+        assert_eq!(c.write, Some(0));
+        assert_eq!(r.state(0), State::Filling(3));
     }
 
     #[test]
