@@ -49,11 +49,11 @@ pub(crate) fn pool_frame(t: u64, i: u32) -> Option<Arc<Frame>> {
 /// at once with a named line, so the game does not wait for pictures that never come.
 pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u32) -> u32 {
     let Some(cfg) = config() else {
-        red("a decoder was made before the video service was initialised");
+        warn("a decoder was made before the video service was initialised");
         return BAD;
     };
     if !matches!(codec, Codec::Vp9 | Codec::Av1) {
-        red(&format!(
+        warn(&format!(
             "nn::codec {} decoders are not implemented, only VP9 and AV1. Initialize answers an error",
             codec.name()
         ));
@@ -63,7 +63,7 @@ pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u
     let dec = {
         let mut all = lock(&DECODERS);
         let Some(id) = (1..=MAX_DECODERS).find(|id| !all.contains_key(id)) else {
-            red(&format!(
+            warn(&format!(
                 "nn::codec: more than {MAX_DECODERS} video decoders"
             ));
             return BAD;
@@ -76,7 +76,7 @@ pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u
     let id = lock(&dec).id();
     if guest::write_u64(t, handle_of(id)).is_err() {
         lock(&DECODERS).remove(&id);
-        red(&format!(
+        warn(&format!(
             "the decoder object at {t:#x} is outside guest memory"
         ));
         return BAD;
@@ -110,7 +110,7 @@ pub(crate) fn finalize(t: u64) -> u32 {
     // memory would find its event bound and not get one.
     match crate::guest_api::os_fns() {
         Ok(f) => (f.destroy_system_event)(event),
-        Err(e) => red(&format!(
+        Err(e) => warn(&format!(
             "the submission ready event of a decoder cannot be destroyed: {e}"
         )),
     }
@@ -145,7 +145,7 @@ pub(super) fn sync_reached_in(s: &SyncHandle) -> bool {
     if s.magic != SYNC_MAGIC {
         static LOGGED: AtomicU32 = AtomicU32::new(0);
         if (s.magic != 0 || s.dec != 0) && LOGGED.fetch_add(1, Ordering::Relaxed) == 0 {
-            red(&format!(
+            warn(&format!(
                 "nn::codec: a sync handle that the host did not make ({:#x}) reads as signalled",
                 s.magic
             ));

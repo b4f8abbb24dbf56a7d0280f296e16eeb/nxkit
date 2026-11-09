@@ -235,7 +235,7 @@ fn write_texels(
 ) -> AbiResult<()> {
     let t = Tex::load(t)?;
     if t.host == 0 {
-        eprintln!("[RED] NVN {name}: the texture has no storage");
+        eprintln!("nxkit-rt: warning: NVN {name}: the texture has no storage");
         return Ok(());
     }
     let Some(p) = plan(&t, view, region, row, img)? else {
@@ -257,7 +257,7 @@ fn read_texels(
 ) -> AbiResult<()> {
     let t = Tex::load(t)?;
     if t.host == 0 {
-        eprintln!("[RED] NVN {name}: the texture has no storage");
+        eprintln!("nxkit-rt: warning: NVN {name}: the texture has no storage");
         return Ok(());
     }
     let Some(p) = plan(&t, view, region, row, img)? else {

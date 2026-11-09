@@ -41,7 +41,7 @@ fn host() -> Option<&'static Host> {
 
 /// Stops the game with `msg`. Without a host it logs and aborts the process.
 pub(crate) fn fatal(msg: &str) -> ! {
-    eprintln!("nxkit-audio: [RED] {msg}");
+    eprintln!("nxkit-audio: warning: {msg}");
     if let Some(h) = host() {
         (h.fatal)(msg);
     }

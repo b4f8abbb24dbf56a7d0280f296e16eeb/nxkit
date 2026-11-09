@@ -71,7 +71,7 @@ impl Dec {
             pool.as_ref().is_some_and(|p| lock(p).native)
         ));
         let Some(s) = self.slots.get_mut(i as usize) else {
-            red(&format!(
+            warn(&format!(
                 "nn::codec: register of buffer {i}, a decoder has {BUFS}"
             ));
             return BAD;
@@ -85,7 +85,7 @@ impl Dec {
         if self.fifo.len() < FIFO {
             self.fifo.push_back(i);
         } else {
-            red(&format!(
+            warn(&format!(
                 "nn::codec: the queue of acquirable buffers is full at register {i}"
             ));
         }
@@ -168,7 +168,7 @@ impl Dec {
         if self.held.len() >= HOLD {
             if self.errors < 4 {
                 self.errors += 1;
-                red(&format!(
+                warn(&format!(
                     "nn::codec {}: a packet gave more pictures than the host holds, one is dropped",
                     self.codec.name()
                 ));
@@ -204,7 +204,7 @@ impl Dec {
             self.refusals += 1;
             if self.refused < 4 {
                 self.refused += 1;
-                red(&format!(
+                warn(&format!(
                     "nn::codec {}: a packet is refused with {} pictures and packets waiting",
                     self.codec.name(),
                     self.load()
@@ -225,7 +225,7 @@ impl Dec {
                     Err(e) => {
                         if self.errors < 4 {
                             self.errors += 1;
-                            red(&format!("nn::codec {}: {e}", self.codec.name()));
+                            warn(&format!("nn::codec {}: {e}", self.codec.name()));
                         }
                     }
                 }
@@ -259,7 +259,7 @@ impl Dec {
     /// Starts the worker of the stream, which owns `pipe`. The decoder must be in a `Mutex` that `me` names.
     pub(super) fn start_worker(&mut self, pipe: Box<dyn Pipeline>) {
         let Some(dec) = self.me.upgrade() else {
-            red("nn::codec: the decoder has no owner for a worker, it decodes in the call");
+            warn("nn::codec: the decoder has no owner for a worker, it decodes in the call");
             return;
         };
         self.lag = pipe.lag();
@@ -279,7 +279,7 @@ impl Dec {
             }
             Err(e) => {
                 self.lag = 0;
-                red(&format!("nn::codec: the worker did not start: {e}"));
+                warn(&format!("nn::codec: the worker did not start: {e}"));
             }
         }
     }
@@ -400,7 +400,7 @@ impl Dec {
                 s.filled = false;
             }
             _ => {
-                red(&format!(
+                warn(&format!(
                     "nn::codec: release of buffer {i}, which is not registered"
                 ));
                 return;
@@ -412,7 +412,7 @@ impl Dec {
         if self.fifo.len() < FIFO {
             self.fifo.push_back(i);
         } else {
-            red(&format!(
+            warn(&format!(
                 "nn::codec: the queue of acquirable buffers is full at release {i}"
             ));
         }

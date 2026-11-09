@@ -132,8 +132,8 @@ pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
     }
 }
 
-fn red(what: &str) {
-    eprintln!("[RED] video: {what}");
+fn warn(what: &str) {
+    eprintln!("nxkit-video: warning: {what}");
 }
 
 /// The codec of a decoder type of the SDK.

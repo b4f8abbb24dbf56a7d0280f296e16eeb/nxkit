@@ -486,7 +486,7 @@ impl Mixer {
             }
             Err(e) => {
                 eprintln!(
-                    "nxkit-audio: [RED] the output unit did not start ({e}), a silent sink paces the outputs"
+                    "nxkit-audio: warning: the output unit did not start ({e}), a silent sink paces the outputs"
                 );
                 self.spawn_silent();
                 *out = OutState::Silent;
@@ -565,7 +565,7 @@ impl Mixer {
             if f != faults_seen {
                 faults_seen = f;
                 eprintln!(
-                    "nxkit-audio: [RED] {f} buffers pointed outside guest memory or overflowed the released queue"
+                    "nxkit-audio: warning: {f} buffers pointed outside guest memory or overflowed the released queue"
                 );
             }
             if !join_logged
@@ -580,7 +580,7 @@ impl Mixer {
                     );
                 } else {
                     eprintln!(
-                        "nxkit-audio: [RED] os_workgroup_join returned {st}, the audio thread is outside the workgroup"
+                        "nxkit-audio: warning: os_workgroup_join returned {st}, the audio thread is outside the workgroup"
                     );
                 }
             }

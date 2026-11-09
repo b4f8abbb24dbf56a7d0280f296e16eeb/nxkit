@@ -278,7 +278,7 @@ extern "C" fn enqueue(gd: u64, consumed: u64, input: u64, in_size: u64) -> u32 {
     let n = in_size as usize;
     if in_size < 8 || n > MAX_PACKET {
         log(&format!(
-            "[RED] codec: Opus packet of {in_size} bytes enqueued"
+            "nxkit-svc-system: warning: codec: Opus packet of {in_size} bytes enqueued"
         ));
         return RES_OPUS;
     }
@@ -348,7 +348,7 @@ fn decode(d: &Dec, scratch: u64, pkt: &[u8]) -> Done {
     }
     if REFUSED.fetch_add(1, Ordering::Relaxed) < 4 {
         log(&format!(
-            "[RED] codec: software Opus decode of a {}-byte packet failed ({res:#x}), silence instead",
+            "nxkit-svc-system: warning: codec: software Opus decode of a {}-byte packet failed ({res:#x}), silence instead",
             pkt.len()
         ));
     }
@@ -376,7 +376,7 @@ extern "C" fn dequeue(gd: u64, samples: u64, out: u64, out_size: u64) -> u32 {
     };
     if front.pcm.len() as u64 > out_size {
         log(&format!(
-            "[RED] codec: a {}-byte Opus frame for a {out_size}-byte buffer",
+            "nxkit-svc-system: warning: codec: a {}-byte Opus frame for a {out_size}-byte buffer",
             front.pcm.len()
         ));
         return RES_OPUS;

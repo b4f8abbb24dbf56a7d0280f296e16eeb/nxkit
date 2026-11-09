@@ -378,7 +378,7 @@ impl Decoder {
             if st.logged & 1 == 0 {
                 st.logged |= 1;
                 eprintln!(
-                    "[RED] video: input {i} was sent while it or {MAX_PENDING} packets are still waiting for an output slot, the game sent more than the protocol allows"
+                    "nxkit-video: warning: input {i} was sent while it or {MAX_PENDING} packets are still waiting for an output slot, the game sent more than the protocol allows"
                 );
             }
             return ERR_BAD_ARG;

@@ -36,13 +36,13 @@ fn codec_of(c: u8) -> Codec {
     }
 }
 
-fn red(what: &str) {
-    eprintln!("[RED] video: {what}");
+fn warn(what: &str) {
+    eprintln!("nxkit-video: warning: {what}");
 }
 
 fn red_once(flag: &AtomicBool, what: &str) {
     if !flag.swap(true, Ordering::Relaxed) {
-        red(what);
+        warn(what);
     }
 }
 

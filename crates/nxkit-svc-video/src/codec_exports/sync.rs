@@ -41,7 +41,7 @@ pub(super) extern "C" fn spt_create(e: u64) -> u32 {
 pub(super) extern "C" fn spt_holder(holder: u64, e: u64) {
     match crate::guest_api::os_fns() {
         Ok(f) => (f.init_multi_wait_holder)(holder, e),
-        Err(err) => red(&format!(
+        Err(err) => warn(&format!(
             "nn::syncpt::sdk::InitializeMultiWaitHolder: {err}"
         )),
     }
@@ -54,7 +54,7 @@ pub(super) extern "C" fn spt_request(e: u64, sync: u64) -> u32 {
         return BAD;
     };
     if !arm(e, want) {
-        red("nn::syncpt: more than 64 armed events: signalled at once");
+        warn("nn::syncpt: more than 64 armed events: signalled at once");
         event_signal(e);
         return 0;
     }
@@ -74,7 +74,7 @@ pub(super) extern "C" fn spt_try_wait(e: u64) -> u32 {
     match crate::guest_api::os_fns() {
         Ok(f) => u32::from((f.try_wait_system_event)(e) & 0xff != 0),
         Err(err) => {
-            red(&format!("nn::syncpt::sdk::TryWaitSyncPointEvent: {err}"));
+            warn(&format!("nn::syncpt::sdk::TryWaitSyncPointEvent: {err}"));
             0
         }
     }
@@ -84,7 +84,7 @@ pub(super) extern "C" fn spt_destroy(e: u64) {
     unarm(e);
     match crate::guest_api::os_fns() {
         Ok(f) => (f.destroy_system_event)(e),
-        Err(err) => red(&format!("nn::syncpt::sdk::DestroySyncPointEvent: {err}")),
+        Err(err) => warn(&format!("nn::syncpt::sdk::DestroySyncPointEvent: {err}")),
     }
     let _ = guest::write_u32(e + SPT_MAGIC_AT, 0);
 }

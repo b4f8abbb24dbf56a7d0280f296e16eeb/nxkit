@@ -218,7 +218,7 @@ fn ar_exec(sys: u64) -> u32 {
         None => of_sys(sys),
     };
     let Some(a) = a else {
-        eprintln!("nxkit-audio: [RED] audren: a render of a renderer the host did not open");
+        eprintln!("nxkit-audio: warning: audren: a render of a renderer the host did not open");
         return RES_FAIL;
     };
     let mut frame = lk(&a.frame);
@@ -253,7 +253,7 @@ extern "C" fn render_main(idx: u64) {
     let m = mixer();
     let Some(out) = m.open(2, Notify::Wake(wake)) else {
         eprintln!(
-            "nxkit-audio: [RED] audren: no free output for renderer {}: it makes no sound",
+            "nxkit-audio: warning: audren: no free output for renderer {}: it makes no sound",
             a.idx
         );
         return;

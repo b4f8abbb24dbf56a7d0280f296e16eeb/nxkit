@@ -107,13 +107,13 @@ extern "C" fn buffer_initialize(buf: u64, b: u64) -> u32 {
         let bo = Obj(b);
         let (pool, off, len) = (bo.u64(B_POOL)?, bo.i64(B_OFF)?, bo.u64(B_SIZE)?);
         if pool == 0 {
-            eprintln!("[RED] NVN nvnBufferInitialize: the builder has no memory pool");
+            eprintln!("nxkit-rt: warning: NVN nvnBufferInitialize: the builder has no memory pool");
             return Ok(0);
         }
         let p = pool::view(pool)?;
         if p.mem == 0 {
             eprintln!(
-                "[RED] NVN nvnBufferInitialize: the pool has no storage (pool {pool:#x}, flags {:#x}, offset {off:#x}, size {len:#x})",
+                "nxkit-rt: warning: NVN nvnBufferInitialize: the pool has no storage (pool {pool:#x}, flags {:#x}, offset {off:#x}, size {len:#x})",
                 p.flags
             );
             return Ok(0);

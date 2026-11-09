@@ -6,8 +6,8 @@
 /// One line for the log of the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    /// The line needs attention: a request was refused or a game part was not found. The engine marks these `[RED]`.
-    pub red: bool,
+    /// The line needs attention: a request was refused or a game part was not found. The host prints it as a warning.
+    pub warn: bool,
     /// The text.
     pub text: String,
 }
@@ -16,15 +16,15 @@ impl Notice {
     /// A line that reports what the service did.
     pub fn info(text: impl Into<String>) -> Self {
         Self {
-            red: false,
+            warn: false,
             text: text.into(),
         }
     }
 
     /// A line that reports a refusal or something missing.
-    pub fn red(text: impl Into<String>) -> Self {
+    pub fn warn(text: impl Into<String>) -> Self {
         Self {
-            red: true,
+            warn: true,
             text: text.into(),
         }
     }

@@ -167,7 +167,7 @@ fn rows_of(cfg: &LimitsConfig, notices: &mut Vec<Notice>) -> Vec<Row> {
             }
             Site::Found { key, add } => match m.found.iter().find(|f| f.key == key) {
                 Some(f) => rows.push(Row::new(r.what, f.off + add, 0, r.kind, r.copies)),
-                None => notices.push(Notice::red(format!(
+                None => notices.push(Notice::warn(format!(
                     "main: {} ({key}) was not found by the rewriter, so the game's own value stays",
                     r.what
                 ))),
@@ -175,7 +175,7 @@ fn rows_of(cfg: &LimitsConfig, notices: &mut Vec<Notice>) -> Vec<Row> {
         }
     }
     if fixed > 0 && matched == 0 {
-        notices.push(Notice::red(format!(
+        notices.push(Notice::warn(format!(
             "main: build {} has no frame limit entry, so the game's own frame limit stays",
             m.build_id
         )));
@@ -192,7 +192,7 @@ impl Limits {
         let rows = rows_of(cfg, &mut notices);
         let reflected = cfg.reflected.as_ref().and_then(|spec| {
             if m.size == 0 {
-                notices.push(Notice::red(format!(
+                notices.push(Notice::warn(format!(
                     "main: the image of the module cannot be read, so the class {} is not searched",
                     spec.class
                 )));
@@ -201,11 +201,11 @@ impl Limits {
             match guest::with_slice(m.base, m.size, |img| reflect::find(img, m, spec)) {
                 Ok(Ok(f)) => Some(f),
                 Ok(Err(why)) => {
-                    notices.push(Notice::red(why.text(spec)));
+                    notices.push(Notice::warn(why.text(spec)));
                     None
                 }
                 Err(_) => {
-                    notices.push(Notice::red(format!(
+                    notices.push(Notice::warn(format!(
                         "main: the image of the module cannot be read, so the class {} is not searched",
                         spec.class
                     )));
@@ -221,7 +221,7 @@ impl Limits {
             logged: 0,
         };
         if !matches!(cfg.target, 0 | 30 | 60) {
-            notices.push(Notice::red(format!(
+            notices.push(Notice::warn(format!(
                 "the target frame rate {} must be 0, 30 or 60 for an engine limit, so the game's own limit stays",
                 cfg.target
             )));

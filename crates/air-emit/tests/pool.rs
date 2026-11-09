@@ -57,7 +57,7 @@ fn reinterpret_cast_of_an_address_and_of_a_pointer() {
 }
 
 #[test]
-fn dm_pool_mark_is_one_instantiation_per_pool_type() {
+fn pool_mark_is_one_instantiation_per_pool_type() {
     let ir = pool_shader();
     let def = "define internal i32 @_ZL12dm_pool_markI9spvPool_tEjPU11MTLconstantKT_j(%struct.spvPool_t addrspace(2)* noundef %a0, i32 noundef %a1)";
     assert!(ir.contains(def), "{ir}");

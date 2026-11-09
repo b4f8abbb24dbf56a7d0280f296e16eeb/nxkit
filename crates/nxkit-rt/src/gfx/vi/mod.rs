@@ -93,7 +93,7 @@ pub(crate) fn present_crop(window: Rect, texture: Option<(u32, u32)>) -> Rect {
         log_once_with(&CROP_NOTE, || {
             let (tw, th) = texture.unwrap_or((0, 0));
             format!(
-                "[RED] vi layer crop {x},{y} {w}x{h} does not fit the window texture {tw}x{th}: the present shows the whole texture"
+                "nxkit-rt: warning: vi layer crop {x},{y} {w}x{h} does not fit the window texture {tw}x{th}: the present shows the whole texture"
             )
         });
         return window;

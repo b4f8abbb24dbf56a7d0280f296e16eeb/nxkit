@@ -184,7 +184,7 @@ The C functions are in `nxkit-rt`, module `nvn` (R22 to R24). A game gets them b
 - A buffer keeps its pool at offset 8, its offset at 0x18 and its size at 0x20. The host reads them at every call, because guest ring allocators write them directly.
 - Host data of an object lives in a sharded registry keyed by the guest address (`abi::Registry`). The programs and the textures use it.
 - The front end, the resource table and the descriptor pools are behind one `Mutex` in `ctx::Gpu`. A wait on the GPU does not hold it.
-- A function that fails ends the game with `[RED] NVN <name>: <reason>` (R15). A guest address that is not in the guest range is such a failure.
+- A function that fails ends the game with `nxkit-rt: warning: NVN <name>: <reason>` (R15). A guest address that is not in the guest range is such a failure.
 - A name that a group does not export is handled as R24 says. A test per group compares the names of the group with its row in `FFI_GROUPS`.
 - `nvnProgramSetShaders` computes the key of every stage from its control section and code (`program::stages_of`) and tells the backend, so the backend can find the shader in the `_b.json` of the shader step by that key.
 - A sync that a queue fenced signals when the GPU finished the work submitted until then. A sync that a window acquire fenced is signalled at once, because `Backend::acquire` blocks until the image is free.
@@ -205,9 +205,9 @@ Refer to R51 and R52. The group `texture` is `texture.rs` and the modules below 
 
 Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN that the host takes over. They are guest exports of the `gpu` service, not entries of the NVN proc table. Each group of functions has one module. The groups have 47 names in all (checked on 2026-11-08).
 
-- `gfx::nv` has 8 names: the allocator and devtools allocator callbacks, `nv::InitializeGraphics` and `nv::FinalizeGraphics`, `nv::InitCheck`, `nn::gs::sdk::CheckGraphicsSystemInitialized` and the two memory info calls. The module records the callbacks and the pool of the game. `nv::InitCheck` ends the game with `[RED]` when `nv::InitializeGraphics` was not called.
+- `gfx::nv` has 8 names: the allocator and devtools allocator callbacks, `nv::InitializeGraphics` and `nv::FinalizeGraphics`, `nv::InitCheck`, `nn::gs::sdk::CheckGraphicsSystemInitialized` and the two memory info calls. The module records the callbacks and the pool of the game. `nv::InitCheck` ends the game with a warning when `nv::InitializeGraphics` was not called.
 - `gfx::vi` has 31 `nn::vi` names. The display, the layer and the native window are static objects of the host. The native window handle goes to `nvnWindowBuilderSetNativeWindow`, which stores it and never reads it, so any non-null pointer works. `OpenDisplay` accepts only the name `Default`.
-- `nn::vi::SetLayerCrop` records the crop. The present uses the crop of the window when it has one. Otherwise it uses the crop of the layer when it fits the window texture. A crop that does not fit is logged once with `[RED]` and the whole texture is shown.
+- `nn::vi::SetLayerCrop` records the crop. The present uses the crop of the window when it has one. Otherwise it uses the crop of the layer when it fits the window texture. A crop that does not fit is logged once with a warning and the whole texture is shown.
 - `nvnQueuePresentTexture` counts a frame of the layer. `nn::vi::GetLatestFrameNumber` reports the count. `nn::vi::ListFrameHistory` lists the last 8 frames, newest first, with 5 `u64` for each: the status, the frame number, the queue tick and the present tick twice.
 - The HDR, VRR and extended swap interval calls report SDR output and no VRR.
 - `gfx::native_image` has the 8 names of `nvnNativeImage*` and `nvnTextureInitializeFromNativeImage`. A texture on a native image is a linear texture over a memory pool of the picture memory of `nxkit-svc-video`. The pool and the scratch builders are in the 0x200 bytes of the `NVNnativeImage` of the game. The layout is in the doc comment of `native_image.rs`.

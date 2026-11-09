@@ -32,17 +32,17 @@ fn bin(op: BinOp, a: Expr, b: Expr) -> Expr {
 impl Cx {
     /// A call of `dm_pool_mark(p, i)`: the arguments are evaluated at the call, the body is the
     /// always-inline instantiation for the pool type.
-    pub(super) fn dm_pool_mark(&mut self, args: &[ast::Expr]) -> R<Expr> {
+    pub(super) fn pool_mark(&mut self, args: &[ast::Expr]) -> R<Expr> {
         let [p, i] = args else {
             return Err(Error::invalid("dm_pool_mark arity"));
         };
         let p = self.expr(p)?;
         let i = conv(self.expr(i)?, &Type::UINT)?;
-        let fid = match self.dm_pool_inst.iter().find(|(t, _)| *t == p.ty) {
+        let fid = match self.pool_inst.iter().find(|(t, _)| *t == p.ty) {
             Some((_, f)) => *f,
             None => {
-                let f = self.dm_pool_instantiate(&p.ty)?;
-                self.dm_pool_inst.push((p.ty.clone(), f));
+                let f = self.pool_instantiate(&p.ty)?;
+                self.pool_inst.push((p.ty.clone(), f));
                 f
             }
         };
@@ -50,14 +50,14 @@ impl Cx {
         Ok(Expr::new(ExprKind::Call(fid, args), Type::UINT))
     }
 
-    fn dm_pool_instantiate(&mut self, pt: &Type) -> R<usize> {
+    fn pool_instantiate(&mut self, pt: &Type) -> R<usize> {
         let saved = (
             std::mem::take(&mut self.locals),
             std::mem::take(&mut self.ref_locals),
             std::mem::take(&mut self.scopes),
             std::mem::replace(&mut self.ret, Type::UINT),
         );
-        let r = self.dm_pool_body(pt);
+        let r = self.pool_body(pt);
         let locals = std::mem::take(&mut self.locals);
         (self.locals, self.ref_locals, self.scopes, self.ret) = saved;
         let (params, body) = r?;
@@ -76,7 +76,7 @@ impl Cx {
         Ok(self.out.funcs.len() - 1)
     }
 
-    fn dm_pool_body(&mut self, pt: &Type) -> R<(Vec<Param>, Vec<Stmt>)> {
+    fn pool_body(&mut self, pt: &Type) -> R<(Vec<Param>, Vec<Stmt>)> {
         let mut params = Vec::new();
         for (name, ty) in [("p", pt.clone()), ("i", Type::UINT)] {
             let name: Rc<str> = name.into();

@@ -232,7 +232,7 @@ pub(crate) fn stages_of(name: &str, program: u64) -> Option<Vec<StageKey>> {
 /// Reads the stage array and records the stages. `stride` is 16 (`NVNshaderData`) or 24 (the NVN 55 extension).
 fn set_shaders(name: &'static str, p: u64, n: i32, sd: u64, stride: u64) -> AbiResult<u32> {
     if !(0..=MAX_STAGES).contains(&n) {
-        eprintln!("[RED] NVN {name}: stage count {n}");
+        eprintln!("nxkit-rt: warning: NVN {name}: stage count {n}");
         return Ok(0);
     }
     let g = gpu(name);

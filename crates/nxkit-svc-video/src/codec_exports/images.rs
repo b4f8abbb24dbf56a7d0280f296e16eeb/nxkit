@@ -106,7 +106,7 @@ pub(super) extern "C" fn read_rgba(
             let _ = guest::write(dst, &rgba);
             crate::guest_wrote(dst, rgba.len() as u64);
         }
-        Err(e) => red(&format!("nn::codec::ReadDecoderOutputImageRgba: {e}")),
+        Err(e) => warn(&format!("nn::codec::ReadDecoderOutputImageRgba: {e}")),
     }
     0
 }
@@ -189,7 +189,7 @@ pub(super) extern "C" fn read_nv12(
             crate::guest_wrote(ydst, yp.len() as u64);
             crate::guest_wrote(uvdst, uvp.len() as u64);
         }
-        Err(e) => red(&format!("nn::codec::ReadDecoderOutputImageNv12: {e}")),
+        Err(e) => warn(&format!("nn::codec::ReadDecoderOutputImageNv12: {e}")),
     }
     0
 }

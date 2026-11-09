@@ -72,43 +72,43 @@ fn object(this: u64) -> Option<Arc<Object>> {
     registry().get(&handle).cloned()
 }
 
-fn red(what: &str) {
-    eprintln!("[RED] video: {what}");
+fn warn(what: &str) {
+    eprintln!("nxkit-video: warning: {what}");
 }
 
 fn construct(this: u64, kind: u32, format: u32, mode: u32, out_align: u32) {
     let f = match fns() {
         Ok(f) => f,
         Err(e) => {
-            red(&format!("a movie decoder cannot be made: {e}"));
+            warn(&format!("a movie decoder cannot be made: {e}"));
             return;
         }
     };
     if guest::write_u64(this, f.vtable).is_err() || guest::write_u64(this + 8, 0).is_err() {
-        red(&format!(
+        warn(&format!(
             "the decoder object at {this:#x} is outside guest memory"
         ));
         return;
     }
     let Some(cfg) = config() else {
-        red("a movie decoder was made before the video service was initialised");
+        warn("a movie decoder was made before the video service was initialised");
         return;
     };
     if kind != TYPE_VP9 {
-        red(&format!(
+        warn(&format!(
             "decoder type {kind} is not implemented, only VP9 (3). Every call on it answers {ERR_NO_IMPL:#x}"
         ));
         return;
     }
     let format_ok = format == FORMAT_NV12 || (format == FORMAT_ABGR && mode == MODE_TEXTURE);
     if !format_ok || (mode != MODE_CPU && mode != MODE_TEXTURE) {
-        red(&format!(
+        warn(&format!(
             "output format {format} in mode {mode} is not implemented, only NV12 and ABGR in native texture mode"
         ));
         return;
     }
     if mode == MODE_TEXTURE && cfg.sink.is_none() {
-        red(
+        warn(
             "the game asks for decoder output in native textures and the host gave no texture sink",
         );
         return;
@@ -119,7 +119,7 @@ fn construct(this: u64, kind: u32, format: u32, mode: u32, out_align: u32) {
     let decoder = match Decoder::new(io, crate::backend::open) {
         Ok(d) => d,
         Err(e) => {
-            red(&e);
+            warn(&e);
             return;
         }
     };
@@ -176,7 +176,7 @@ extern "C" fn dtor_delete(this: u64) {
     destroy(this);
     match fns() {
         Ok(f) => (f.delete)(this),
-        Err(e) => red(&format!("a movie decoder cannot be deleted: {e}")),
+        Err(e) => warn(&format!("a movie decoder cannot be deleted: {e}")),
     }
 }
 
@@ -262,7 +262,7 @@ extern "C" fn get_input_buffer(this: u64, index: i32, buffer: u64) -> u32 {
     let f = match fns() {
         Ok(f) => f,
         Err(e) => {
-            red(&e);
+            warn(&e);
             return ERR_NO_IMPL;
         }
     };
@@ -353,7 +353,7 @@ fn format_call(this: u64, media_data: u64) -> u32 {
             0
         }
         Err(e) => {
-            red(&e);
+            warn(&e);
             ERR_NO_IMPL
         }
     }
@@ -396,7 +396,7 @@ fn output_to_memory(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
     let data = (f.data)(buffer);
     let capacity = (f.capacity)(buffer) as usize;
     if data == 0 || capacity < need {
-        red(&format!(
+        warn(&format!(
             "the output buffer of the game holds {capacity} bytes, a picture needs {need}"
         ));
         return ERR_BAD_ARG;
@@ -417,11 +417,11 @@ fn output_to_memory(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
             0
         }
         Ok(Err(e)) => {
-            red(&format!("a picture cannot be copied: {e}"));
+            warn(&format!("a picture cannot be copied: {e}"));
             ERR_BAD_ARG
         }
         Err(fault) => {
-            red(&format!(
+            warn(&format!(
                 "the output buffer of the game is not usable: {fault}"
             ));
             ERR_BAD_ARG
@@ -438,7 +438,7 @@ fn output_to_texture(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
     let texture = (f.data)(buffer);
     let capacity = (f.capacity)(buffer);
     if texture == 0 || capacity < 8 {
-        red(&format!(
+        warn(&format!(
             "the buffer of the game in native texture mode holds {capacity} bytes and needs 8 for a texture object"
         ));
         return ERR_BAD_ARG;
@@ -446,7 +446,7 @@ fn output_to_texture(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
     if let Some(p) = o.decoder.picture(index)
         && let Err(e) = sink.present(texture, &p)
     {
-        red(&format!(
+        warn(&format!(
             "a picture cannot go into the texture at {texture:#x}: {e}"
         ));
         return ERR_BAD_ARG;
@@ -456,7 +456,7 @@ fn output_to_texture(o: &Object, buffer: u64, f: &Fns, index: usize) -> u32 {
         if sync != 0
             && let Err(e) = sink.signal_sync(sync)
         {
-            red(&format!(
+            warn(&format!(
                 "the sync object at {sync:#x} cannot be signalled: {e}"
             ));
         }
@@ -479,7 +479,7 @@ fn output_buffer(this: u64, index: i32, buffer: u64, media_data: u64) -> u32 {
     let f = match fns() {
         Ok(f) => f,
         Err(e) => {
-            red(&e);
+            warn(&e);
             return ERR_NO_IMPL;
         }
     };

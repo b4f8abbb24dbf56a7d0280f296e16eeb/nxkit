@@ -32,17 +32,17 @@ impl AudioOutManager {
             _ => 2,
         };
         let Some(k) = kernel::kernel() else {
-            eprintln!("nxkit-audio: [RED] audout: no kernel, cannot open an output");
+            eprintln!("nxkit-audio: warning: audout: no kernel, cannot open an output");
             rsp.result = RES_FAIL;
             return;
         };
         let Ok((writable, readable)) = k.create_event() else {
-            eprintln!("nxkit-audio: [RED] audout: the buffer event could not be created");
+            eprintln!("nxkit-audio: warning: audout: the buffer event could not be created");
             rsp.result = RES_FAIL;
             return;
         };
         let Some(idx) = mixer().open(channels, Notify::Kernel(writable)) else {
-            eprintln!("nxkit-audio: [RED] audout: all outputs are in use");
+            eprintln!("nxkit-audio: warning: audout: all outputs are in use");
             let _ = k.close_handle(writable);
             let _ = k.close_handle(readable);
             rsp.result = RES_FAIL;
@@ -105,14 +105,14 @@ impl AudioOutIface {
             return;
         };
         let Some(b) = req.buffer(BufferKind::Send, 0) else {
-            eprintln!("nxkit-audio: [RED] audout: AppendAudioOutBuffer without a buffer");
+            eprintln!("nxkit-audio: warning: audout: AppendAudioOutBuffer without a buffer");
             rsp.result = RES_FAIL;
             return;
         };
         let mut ub = [0u8; USER_BUFFER];
         if b.size < USER_BUFFER as u64 || guest::read(b.addr, &mut ub).is_err() {
             eprintln!(
-                "nxkit-audio: [RED] audout: the AudioUserBuffer at {:#x} is not readable",
+                "nxkit-audio: warning: audout: the AudioUserBuffer at {:#x} is not readable",
                 b.addr
             );
             rsp.result = RES_FAIL;
@@ -137,7 +137,9 @@ impl AudioOutIface {
             host: false,
         };
         if !mixer().append(self.idx, buf) {
-            eprintln!("nxkit-audio: [RED] audout: the buffer queue is full, the buffer is dropped");
+            eprintln!(
+                "nxkit-audio: warning: audout: the buffer queue is full, the buffer is dropped"
+            );
             rsp.result = RES_FAIL;
         }
     }
@@ -160,7 +162,7 @@ impl AudioOutIface {
             && guest::write(b.addr, &tags).is_err()
         {
             eprintln!(
-                "nxkit-audio: [RED] audout: the released buffer list at {:#x} is not writable",
+                "nxkit-audio: warning: audout: the released buffer list at {:#x} is not writable",
                 b.addr
             );
         }
