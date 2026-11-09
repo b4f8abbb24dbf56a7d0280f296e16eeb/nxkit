@@ -420,6 +420,7 @@ pub const FFI_GROUPS: &[(&str, &[&str])] = &[
             "nvnCommandBufferClearColorui",
             "nvnCommandBufferClearDepthStencil",
             "nvnCommandBufferClearTexture",
+            "nvnCommandBufferClearTexturei",
             "nvnCommandBufferClearTextureui",
             "nvnCommandBufferCopyBufferToBuffer",
             "nvnCommandBufferCopyBufferToTexture",
