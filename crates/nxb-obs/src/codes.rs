@@ -68,9 +68,10 @@ pub const STEP: Code = c("NXB1004", "step", Severity::Info, "a step starts");
 pub const PROGRESS: Code = c("NXB1005", "progress", Severity::Debug, "a count update");
 /// A message.
 pub const SAY: Code = c("NXB1006", "say", Severity::Info, "a message");
-/// A message that starts with `[RED]`.
+/// A message that starts with `[RED]` or `nxb: error:`.
 pub const SAY_RED: Code = c("NXB1007", "say", Severity::Error, "an error message");
-/// A message that starts with `[YELLOW]`.
+/// A message that starts with `[YELLOW]`, or whose first words are `<program>: warning:` (`nxb: warning:`,
+/// `nxkit-rt: warning:`).
 pub const SAY_WARN: Code = c("NXB1008", "say", Severity::Warn, "a warning message");
 /// A phase starts.
 pub const PHASE: Code = c("NXB2001", "phase", Severity::Info, "a phase starts");
@@ -103,11 +104,21 @@ pub const TABLE: &[&Code] = &[
     &SUMMARY,
 ];
 
+/// Whether `msg` starts with `<program>: warning:`, the shape of the warnings of `nxb` and the nxkit crates.
+fn is_tagged_warning(msg: &str) -> bool {
+    msg.split_once(": warning:").is_some_and(|(program, _)| {
+        !program.is_empty()
+            && program
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    })
+}
+
 /// The code of a `say` message, from its prefix.
 pub fn say_code(msg: &str) -> &'static Code {
-    if msg.starts_with("[RED]") {
+    if msg.starts_with("[RED]") || msg.starts_with("nxb: error:") {
         &SAY_RED
-    } else if msg.starts_with("[YELLOW]") {
+    } else if msg.starts_with("[YELLOW]") || is_tagged_warning(msg) {
         &SAY_WARN
     } else {
         &SAY
@@ -133,5 +144,16 @@ mod tests {
             assert!(r.code[3..].bytes().all(|b| b.is_ascii_digit()));
             assert_eq!(lookup(r.code), Some(*r));
         }
+    }
+
+    #[test]
+    fn say_codes_by_prefix() {
+        assert_eq!(say_code("[RED] x"), &SAY_RED);
+        assert_eq!(say_code("nxb: error: x"), &SAY_RED);
+        assert_eq!(say_code("[YELLOW] x"), &SAY_WARN);
+        assert_eq!(say_code("nxb: warning: x"), &SAY_WARN);
+        assert_eq!(say_code("nxkit-rt: warning: x"), &SAY_WARN);
+        assert_eq!(say_code("a b: warning: x"), &SAY);
+        assert_eq!(say_code("hello"), &SAY);
     }
 }

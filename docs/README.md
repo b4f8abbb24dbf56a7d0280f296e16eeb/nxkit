@@ -12,7 +12,7 @@ Two parts do not give the same output as Apple's tools. The MSL of the Rust tran
 | 2 | [architecture.md](architecture.md) | layers, crates, data flow of the stages |
 | 3 | [titles.md](titles.md) | the title layer: engine families, title modules, hooks and evidence |
 | 4 | [shader-step.md](shader-step.md) | the shader step: versions, execution, store, errors |
-| 5 | [pipeline-stages.md](pipeline-stages.md) | extract, split, rewrite, NRO collection, pack, sign, iOS stages, events, cache export, pipeline archive |
+| 5 | [pipeline-stages.md](pipeline-stages.md) | extract, split, rewrite, bundle, sign, events, cache export, pipeline archive |
 | 6 | [frontend.md](frontend.md) | the own MSL to AIR front end and its results |
 | 7 | [air-conventions.md](air-conventions.md) | the AIR conventions that a front end must obey |
 | 8 | [gpu-differential-testing.md](gpu-differential-testing.md) | the `gpudiff` harness |

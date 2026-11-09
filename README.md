@@ -71,6 +71,8 @@ nxb build "<folder with the game files>" -k <prod.keys> --platform mac \
 
 - `--dry-run` prints the plan and writes nothing. Check it first.
 - A Switch 2 package needs `--nup <file>` and no keys.
+- `nxb` builds only nxkit apps: a game that has a title module, into an app with `nxkit-host` as its program. There is no
+  iOS build, no `--engine` and no Python.
 - The work folder takes many GB. A second build with the same files reuses the finished stages. After a change of the
   translator, only the shaders whose MSL changed compile again (refer to [docs/early-cutoff.md](docs/early-cutoff.md)).
 - `--progress bar` shows one live line with the stage, a bar and the time left.
@@ -93,7 +95,7 @@ explains the frame pacing, and [docs/diagnostics.md](docs/diagnostics.md) lists 
 
 | path | content |
 |---|---|
-| `crates/nxb-*` | the build tool: extract, split, rewrite, shader translator and compile, pipeline archive, app stage, signer |
+| `crates/nxb-*` | the build tool: extract, split, rewrite, shader translator and compile, pipeline archive, bundle, signer |
 | `crates/msl-*`, `crates/air-*`, `airc`, `mslcheck` | the own MSL to AIR front end, which makes Metal libraries without Apple's `metal` |
 | `crates/nxkit-*` | the runtime: host, kernel, IPC, services, NVN, GPU, Metal 4 backend |
 | `titles/` | engine families and title modules |

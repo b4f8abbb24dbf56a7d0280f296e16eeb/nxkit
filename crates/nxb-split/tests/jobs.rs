@@ -157,10 +157,7 @@ fn a_cra_archive_without_an_nro_table_fails_the_plan() {
     let Err(SplitError::Red(m)) = plan_with(&files, &NroSet::default()) else {
         panic!("the plan must fail");
     };
-    assert_eq!(
-        m,
-        "/42: a CRA archive, and no NRO in DM_NRO_DIR (None) holds its file table"
-    );
+    assert_eq!(m, "/42: a CRA archive, and no NRO holds its file table");
     // a file that the hook did not keep back is not an archive
     let files = [File {
         live: false,

@@ -8,7 +8,8 @@ fn build(args: &[&str]) -> (Option<i32>, String, String) {
     let o = Command::new(env!("CARGO_BIN_EXE_nxb"))
         .arg("build")
         .args(args)
-        .env_remove("NXB_ENGINE")
+        // any file stands for the host program: these runs stop before it is used
+        .env("NXB_NXKIT_HOST", env!("CARGO_BIN_EXE_nxb"))
         .output()
         .expect("run");
     (
@@ -74,36 +75,31 @@ fn exit_codes_by_class() {
     let p = d.to_str().unwrap();
     // bad arguments 2, a folder with no package 1
     assert_eq!(build(&[p, "--platform", "tv"]).0, Some(2));
+    assert_eq!(build(&[p, "--platform", "ios"]).0, Some(2));
     assert_eq!(build(&[p, "--threads"]).0, Some(2));
     assert_eq!(build(&[p, "--platform", "mac"]).0, Some(1));
-    assert_eq!(build(&[p, "--program", "3"]).0, Some(1));
-    assert_eq!(
-        build(&[p, "--platform", "mac-app", "--romfs", "separate"]).0,
-        Some(2)
-    );
-    assert_eq!(
-        build(&[p, "--platform", "ios", "--seen-shaders"]).0,
-        Some(2)
-    );
-    // a package, a profile, no keys: 2 without -k, 6 with a missing keys file
-    let t = "0100000000000000";
+    // the options of the engine path are gone
+    for gone in ["--engine", "--shaders", "--program", "--dump", "--romfs"] {
+        assert_eq!(build(&[p, gone, "x"]).0, Some(2), "{gone}");
+    }
+    // a game without a title module is refused: 4
+    let other = "0100000000000000";
     // an empty PFS0 (no files): a package for the folder scan, no content
     let mut pfs0 = vec![0u8; 0x200];
     pfs0[..4].copy_from_slice(b"PFS0");
+    std::fs::write(d.join(format!("Game [{other}][v0].nsp")), &pfs0).unwrap();
+    assert_eq!(build(&[p, "--progress", "json"]).0, Some(4));
+    std::fs::remove_file(d.join(format!("Game [{other}][v0].nsp"))).unwrap();
+    // a package of a game with a title module, no keys: 2 without -k, 6 with a missing keys file
+    let t = "01007EF00011E000";
     std::fs::write(d.join(format!("Game [{t}][v0].nsp")), &pfs0).unwrap();
-    let eng = d.join("engine");
-    std::fs::create_dir_all(eng.join("dm/games").join(t)).unwrap();
-    std::fs::write(eng.join("dm/games").join(t).join("game.tsv"), "name\tG\n").unwrap();
-    let lib = d.join("lib");
+    let u = "01007EF00011E800";
+    std::fs::write(d.join(format!("Game [{u}][v1114112].nsp")), &pfs0).unwrap();
     let work = d.join("work");
     let base = [
         p,
         "--platform",
         "mac-app",
-        "--engine",
-        eng.to_str().unwrap(),
-        "--shaders",
-        lib.to_str().unwrap(),
         "--work-dir",
         work.to_str().unwrap(),
         "--progress",
@@ -113,114 +109,4 @@ fn exit_codes_by_class() {
     let mut with_keys = base.to_vec();
     with_keys.extend(["-k", "/nonexistent-prod.keys"]);
     assert_eq!(build(&with_keys).0, Some(6));
-    // a game without a profile is surveyed first, from the package: it needs the keys like any package
-    std::fs::write(d.join("Other [0100000000001000][v0].nsp"), &pfs0).unwrap();
-    std::fs::remove_file(d.join(format!("Game [{t}][v0].nsp"))).unwrap();
-    assert_eq!(build(&base).0, Some(2));
-    assert_eq!(build(&with_keys).0, Some(6));
-}
-
-fn npdm(program: u64) -> Vec<u8> {
-    let mut d = vec![0u8; 0x200];
-    d[..4].copy_from_slice(b"META");
-    d[0x70..0x74].copy_from_slice(&0x100u32.to_le_bytes());
-    d[0x74..0x78].copy_from_slice(&0x40u32.to_le_bytes());
-    d[0x100..0x104].copy_from_slice(b"ACI0");
-    d[0x110..0x118].copy_from_slice(&program.to_le_bytes());
-    d
-}
-
-/// A dump folder is found by layout (folder, `--dump`), its versions and DLC are listed, and its title picks the profile.
-#[test]
-fn dump_folder_is_an_input() {
-    let app = 0x0100_0000_0000_2000u64;
-    let d = tmp("dump");
-    let put = |rel: &str, data: &[u8]| {
-        let p = d.join(rel);
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, data).unwrap();
-    };
-    put("base/exefs/main", &[1; 100]);
-    put("base/exefs/main.npdm", &npdm(app));
-    put("base/romfs/a.txt", b"a");
-    put("updates/65536/exefs/main", &[2; 100]);
-    put("updates/65536/exefs/main.npdm", &npdm(app));
-    put("updates/65536/romfs/a.txt", b"b");
-    put(&format!("dlc/{:016x}/1/romfs/x", app + 0x1001), b"x");
-    let eng = tmp("dump-engine");
-    let prof = eng.join("dm/games/0100000000002000");
-    std::fs::create_dir_all(&prof).unwrap();
-    std::fs::write(prof.join("game.tsv"), "name\tG\n").unwrap();
-    let lib = tmp("dump-lib");
-    let run = |extra: &[&str]| {
-        let mut a = vec![
-            "--dry-run",
-            "--platform",
-            "mac-app",
-            "--engine",
-            eng.to_str().unwrap(),
-            "--shaders",
-            lib.to_str().unwrap(),
-        ];
-        a.extend(extra);
-        build(&a)
-    };
-    for extra in [
-        vec![d.to_str().unwrap()],
-        vec!["--dump", d.to_str().unwrap()],
-    ] {
-        let (code, out, err) = run(&extra);
-        assert_eq!(code, Some(0), "{out}{err}");
-        assert!(out.contains("input Dump"), "{out}");
-        assert!(
-            out.contains("game 0100000000002000 package v65536"),
-            "{out}"
-        );
-        assert!(out.contains("update v65536"), "{out}");
-        assert!(
-            out.contains("dlc 0100000000003001") || out.contains("dlc 0100000000003"),
-            "{out}"
-        );
-    }
-    // a run unpacks the packed version and the base game into the work folder (the rewrite then stops: no real profile)
-    let work = d.join("work");
-    let (_, out, _) = build(&[
-        d.to_str().unwrap(),
-        "--platform",
-        "mac-app",
-        "--engine",
-        eng.to_str().unwrap(),
-        "--shaders",
-        lib.to_str().unwrap(),
-        "--work-dir",
-        work.to_str().unwrap(),
-        "--progress",
-        "json",
-    ]);
-    assert!(work.join("extract/v65536/RomFS.img").is_file(), "{out}");
-    assert!(work.join("extract/v0/RomFS.img").is_file(), "{out}");
-    // a Mac-only build has the Mac host and no app
-    let (code, out, err) = run(&[d.to_str().unwrap(), "--platform", "mac"]);
-    assert_eq!(code, Some(0), "{out}{err}");
-    assert!(
-        out.contains("Mac host") && !out.contains("Mac app"),
-        "{out}"
-    );
-    assert!(!out.contains("\napp "), "{out}");
-    // a dump is one program's files
-    let (code, out, _) = run(&[d.to_str().unwrap(), "--program", "1"]);
-    assert_eq!(code, Some(2));
-    assert!(
-        out.contains("A dump folder is read as one program's files"),
-        "{out}"
-    );
-    // the wrong game
-    let (code, out, _) = run(&[d.to_str().unwrap(), "--title-id", "0100000000009000"]);
-    assert_eq!(code, Some(1));
-    assert!(out.contains("no game 0100000000009000"), "{out}");
-    // a file that is no NUP
-    let f = d.join("base/exefs/main");
-    let (code, out, _) = run(&[f.to_str().unwrap()]);
-    assert_eq!(code, Some(1));
-    assert!(out.contains("not a folder or a NUP file"), "{out}");
 }

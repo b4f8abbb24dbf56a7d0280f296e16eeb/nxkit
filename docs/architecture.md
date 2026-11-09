@@ -7,7 +7,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 
 - The repository is one Cargo workspace. The crates of the build are in `crates/`. The families and title modules are in `titles/` (refer to [titles.md](titles.md)). The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
-- `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `rewrite`, `profile`, `rewrite-rules`, `nro`, `shaders`, `app`, `ipa`, `sign`, `pso`, `archive`, `ios` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
+- `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `shaders`, `sign`, `pso`, `archive` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
 - The workspace uses the standard library only, with one exception. `nxkit-metal`, `nxkit-svc-input` and `nxkit-host` use the `objc2` family of crates to bind Metal, GameController, Core Haptics and AppKit on macOS. `deps.toml` lists them.
 
 ## Layers
@@ -19,7 +19,7 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 ```mermaid
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
-  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
+  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-rt (unsafe code, the C ABI of the host)"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
@@ -35,7 +35,7 @@ The rules:
 
 1. L0 holds the identifiers, the digests, the error classes and the system calls.
 2. L1 does no I/O. Its crates are pure functions over bytes and text that return `Result`. L1 can call `nxb-sys` only for pure calculations.
-3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends. `nxb-nro` collects the NRO files of a game.
+3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends.
 4. L2 does not make output bytes of the shader step.
 5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-svc-video`, the module `sys` of `nxkit-hos`, of `nxkit-svc-fs`, of `nxkit-svc-offline`, of `nxkit-svc-system`, of `nxkit-svc-input` and of `nxkit-svc-audio`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
@@ -58,7 +58,6 @@ The rules:
 | nxb-bundle | nxb-plist | `Info.plist` |
 | nxb-zip | nxb-codec | deflate |
 | nxb-xlate | nxb-pyjson | the job file and the JSON of the reflection |
-| nxb-nro | nxb-split | the reader of the large archive |
 | nxb-pso | nxb-pyjson | tables and stamps |
 | nxb-cli, nxb-build | nxb-extract, nxb-pack, nxb-archive | the L3 stage crates (W19) |
 | nxb-cli | nxb-build | the `nxb build` orchestrator (W19) |
@@ -99,18 +98,17 @@ The rules:
 | nxkit-host | L2 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
 | nxkit-svc-system | L0 | no | impl | the system services as `Service` objects: `set`, `set:sys`, `apm`, `time:*`, `acc:*`, `appletOE`, `appletAE`, `pctl*`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u` (R37), and the SDK exports of the take-overs (R38a). The module `sys` holds the clock, time zone and guest call functions |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
-| nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |
-| nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. `nxb-build` uses it for `nxb profile` and the provisional profile |
+| nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. the title modules use it for their `profile.toml` |
 | nxb-tool | L2 | no | impl | `Tool` trait, `Invocation`, environment allow list, watchdog, circuit breaker, `FrontEnd` trait |
 | nxb-store | L2 | no | impl | content-addressed blobs, keyed entries with manifests, quarantine, cache export and import |
 | nxb-sched | L2 | no | impl | work-stealing executor with token and memory budgets, single-flight |
 | nxb-io | L2 | no | impl | parallel hashing of files and folders (`hash_files`, `hash_tree`) |
 | nxb-stages | L3 | no | impl | the shader step. It calls `nxb-xlate` in the process |
 | nxb-cli | L3 | no | impl | the program `nxb` with all commands |
-| nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ, NUP and dump folders. The commands are `nxb extract` and `nxb split` |
-| nxb-pack | L3 | no | impl | the Mac app stage, the ad-hoc signer, the IPA writer |
+| nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ and NUP. The commands are `nxb extract` and `nxb split` |
+| nxb-pack | L3 | no | impl | the ad-hoc signer and the staging of a file set into a bundle (`nxb sign`) |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
-| nxb-build | L3 | no | impl | the orchestrator `nxb build`, the rewrite step, the host stages and the iOS stages |
+| nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host` |
 | nxkit-nvn | L1 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal yet. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
 | nxkit-gpu | L2 | no | impl | the frame encoder of the nxkit host, macOS only: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
 | nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |
@@ -139,7 +137,6 @@ flowchart LR
   ST --> PLAN["bundle plan"]
   PLAN --> SEAL["seal and sign from known digests"]
   SEAL --> APP["Mac app"]
-  PLAN --> ZIP["IPA writer"]
 ```
 
 ## Store format and API stability

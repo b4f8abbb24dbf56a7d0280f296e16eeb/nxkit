@@ -1,5 +1,5 @@
 //! `shaderbuild build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D
-//! [--jobs N (default: the P-core equivalents)] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]`
+//! [--jobs N (default: the P-core equivalents)] [--batch N] [--batch-first N] [--scratch D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]`
 
 use nxb_stages::build::{BuildConfig, build};
 use std::io::Write;
@@ -20,7 +20,7 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
     if pos.len() < 2 {
         let _ = writeln!(
             err,
-            "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N (default: the P-core equivalents)] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
+            "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N (default: the P-core equivalents)] [--batch N] [--batch-first N] [--scratch D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
         );
         return 2;
     }
@@ -48,7 +48,6 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
         order: Vec::new(),
         manifest: Vec::new(),
         partial: false,
-        ios_out: opt.get("ios").map(PathBuf::from),
         // on by default (the raw tier, and own-identical shaders when verdicts exist). `--own-front off` or NXB_OWN_FRONT=0 turns it off
         own_front: match opt.get("own-front").map(String::as_str) {
             Some("off") => None,

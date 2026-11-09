@@ -1,12 +1,10 @@
-//! The survey's input from a RomFS image: `romfs_manifest.tsv` (path, size, first 32 bytes of every file, in path
-//! order) and the NRO modules under `romfs_nro/`, as `nx_extract --manifest` leaves them (`manifest::write` of
-//! `nxb-extract`). A NUP package has no manifest mode, so its `RomFS.img` is listed.
+//! The file list of a RomFS image: a `DMROMFS1` image (what the extract stage writes as `RomFS.img`) or a RomFS partition.
 
 use nxb_extract::romfs::read_tables;
 use nxb_extract::storage::{FileStorage, Storage};
 use std::path::Path;
 
-/// The files of a `DMROMFS1` image (`RomFS.img`, `dm/tools/romfs.py` `Image`): `(path, size, offset in the image)`.
+/// The files of a `DMROMFS1` image (`RomFS.img`): `(path, size, offset in the image)`.
 fn dm_image_files(img: &Path) -> Result<Vec<nxb_extract::romfs::RomEntry>, String> {
     use std::io::{Read, Seek, SeekFrom};
     let bad = |m: &str| format!("invalid RomFS image {m}: {}", img.display());
@@ -72,7 +70,7 @@ fn dm_image_files(img: &Path) -> Result<Vec<nxb_extract::romfs::RomEntry>, Strin
 }
 
 /// The files of a RomFS image (`DMROMFS1` or a RomFS partition): `(path, size, offset)`, directories left out.
-pub(crate) fn image_files(
+pub(super) fn image_files(
     s: &FileStorage,
     img: &Path,
 ) -> Result<Vec<nxb_extract::romfs::RomEntry>, String> {
@@ -87,35 +85,4 @@ pub(crate) fn image_files(
             .filter(|e| !e.dir)
             .collect())
     }
-}
-
-/// Lists the RomFS image `img` (a `DMROMFS1` image or a RomFS partition) into `out`. Returns the number of files.
-pub fn manifest_of_image(img: &Path, out: &Path) -> Result<usize, String> {
-    let s = FileStorage::open(img).map_err(|e| e.to_string())?;
-    let mut files = image_files(&s, img)?;
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let mut text = String::from("# path\tbytes\tfirst 32 bytes (hex)\n");
-    for e in &files {
-        let shown = String::from_utf8_lossy(&e.path).into_owned();
-        let mut head = vec![0u8; e.size.min(32) as usize];
-        s.read_at(e.offset, &mut head).map_err(|x| x.to_string())?;
-        text.push_str(&format!(
-            "{shown}\t{}\t{}\n",
-            e.size,
-            nxb_model::to_hex(&head)
-        ));
-        if shown.to_ascii_lowercase().ends_with(".nro") {
-            let op = out.join("romfs_nro").join(shown.trim_start_matches('/'));
-            if let Some(d) = op.parent() {
-                std::fs::create_dir_all(d).map_err(|x| format!("{}: {x}", d.display()))?;
-            }
-            let data = s
-                .read_vec(e.offset, e.size as usize)
-                .map_err(|x| x.to_string())?;
-            std::fs::write(&op, data).map_err(|x| format!("{}: {x}", op.display()))?;
-        }
-    }
-    std::fs::write(out.join("romfs_manifest.tsv"), text).map_err(|e| e.to_string())?;
-    Ok(files.len())
 }
