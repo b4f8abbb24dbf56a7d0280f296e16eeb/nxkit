@@ -126,7 +126,7 @@ fn occlusion(rc: &mut RenderConds, f: &mut Frame, cond_first: bool) {
 fn land(rc: &RenderConds, f: &Frame, samples: u64) {
     for w in &f.counters.writes {
         rc.landed()
-            .land(w.addr, u64::from(w.addr == 0x110) * samples, w.seq);
+            .land(w.addr, w.place, u64::from(w.addr == 0x110) * samples, w.seq);
     }
 }
 
@@ -175,9 +175,10 @@ fn a_condition_on_reports_of_its_own_frame_reads_the_last_landed_ones() {
 #[test]
 fn landed_keeps_the_newest_report() {
     let l = Landed::default();
-    l.land(0x100, 5, 2);
-    l.land(0x100, 9, 1);
+    l.land(0x100, (1, 0), 5, 2);
+    l.land(0x100, (1, 0), 9, 1);
     assert_eq!(l.get(0x100), Some((5, 2)));
+    assert_eq!(l.at_place((1, 0)), Some((5, 2)));
 }
 
 #[test]
@@ -203,4 +204,60 @@ fn counted_draws_leave_out_what_a_false_condition_leaves_out() {
     run(&mut rc, &mut f, Q, &s);
     let draws: Vec<u32> = counted_draws(&f).map(|(i, _)| i).collect();
     assert_eq!(draws, [0, 2]);
+}
+
+#[test]
+fn a_report_right_after_a_reset_is_zero_now_and_one_after_a_draw_is_not() {
+    let (mut rc, mut f) = (RenderConds::new(), Frame::new());
+    let cond = MarkOp::RenderIf {
+        mode: RENDER_IF_NOT_EQUAL,
+        addr: 0x100,
+    };
+    // Begin and end report with no draw between: both zero, the condition is false at once.
+    let s = stream(
+        1,
+        &[
+            (0, reset()),
+            (0, report(0x100)),
+            (0, report(0x110)),
+            (0, cond),
+        ],
+    );
+    run(&mut rc, &mut f, Q, &s);
+    assert!(f.skips(0));
+    assert_eq!(rc.take_stats().zero, 2);
+    // With a draw between, the end report waits for the GPU.
+    let s = stream(1, &[(0, reset()), (0, report(0x100)), (1, report(0x110))]);
+    run(&mut rc, &mut f, Q, &s);
+    assert_eq!(rc.take_stats().zero, 1);
+}
+
+#[test]
+fn a_report_at_a_new_address_reads_the_report_at_its_place_in_the_frame_before() {
+    let (mut rc, mut f) = (RenderConds::new(), Frame::new());
+    // The game moves its query memory every frame: frame 1 at 0x100, frame 2 at 0x200.
+    let frame = |rc: &mut RenderConds, f: &mut Frame, at: u64| {
+        let cond = MarkOp::RenderIf {
+            mode: RENDER_IF_NOT_EQUAL,
+            addr: at,
+        };
+        let s = stream(
+            2,
+            &[
+                (0, reset()),
+                (0, report(at)),
+                (1, report(at + 16)),
+                (1, cond),
+            ],
+        );
+        run(rc, f, Q, &s);
+    };
+    frame(&mut rc, &mut f, 0x100);
+    for w in &f.counters.writes {
+        rc.landed().land(w.addr, w.place, 0, w.seq);
+    }
+    next_frame(&mut rc, &mut f);
+    frame(&mut rc, &mut f, 0x200);
+    assert!(f.skips(1));
+    assert_eq!(rc.take_stats().placed, 1);
 }

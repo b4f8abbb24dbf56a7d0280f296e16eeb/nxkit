@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::counters::{Counters, Landed, Source};
+use crate::counters::{Counters, Landed, Place, Source};
 use crate::frame::{Cmd, Frame};
 use crate::marks::{Mark, MarkOp, RENDER_IF_EQUAL, RENDER_IF_NOT_EQUAL};
 use crate::mem::GuestMem;
@@ -35,14 +35,14 @@ use crate::space::{GpuAddr, GpuSpace};
 /// The flushes that a known report value stays in the table.
 pub const KEEP_FLUSHES: u64 = 8;
 /// The most entries of the report table. A full table drops its known values.
-const MAX_REPORTS: usize = 4096;
+const MAX_REPORTS: usize = 1 << 16;
 /// What the table knows of the counter of a report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Report {
     /// A counter that a recording wrote, with the flush of its frame.
     Known { value: u64, flush: u64 },
-    /// A counter that the host emulates: report `seq` writes it when the GPU finished its frame.
-    Gpu { seq: u64 },
+    /// A counter that the host emulates: report `seq` at `place` writes it when the GPU finished its frame.
+    Gpu { seq: u64, place: Place },
     /// A counter that only the GPU knows.
     Unknown,
 }
@@ -56,6 +56,8 @@ enum Read {
     Landed(u64),
     /// The last emulated counter that landed at the address, of an earlier report.
     Stale(u64),
+    /// The last emulated counter that landed at the place of the report in an earlier frame (another address).
+    Place(u64),
     /// Nothing that the host knows.
     Unknown,
 }
@@ -63,16 +65,23 @@ enum Read {
 impl Read {
     fn value(self) -> Option<u64> {
         match self {
-            Self::Known(v) | Self::Landed(v) | Self::Stale(v) => Some(v),
+            Self::Known(v) | Self::Landed(v) | Self::Stale(v) | Self::Place(v) => Some(v),
             Self::Unknown => None,
         }
     }
 }
 
-/// `NXKIT_RENDERCOND_STALE=0`: a condition does not read the counter of an earlier report.
-fn stale_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_RENDERCOND_STALE").map_or(true, |v| v != "0"))
+/// `NXKIT_RENDERCOND_STALE`: `0` reads no counter of an earlier report, `addr` only the one at the same address; by
+/// default the one at the same address, else the one at the same place of an earlier frame.
+fn stale_mode() -> u8 {
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(
+        || match std::env::var("NXKIT_RENDERCOND_STALE").as_deref() {
+            Ok("0") => 0,
+            Ok("addr") => 1,
+            _ => 2,
+        },
+    )
 }
 
 /// The counters of the render conditions since the last [`RenderConds::take_stats`].
@@ -92,6 +101,10 @@ pub struct CondStats {
     pub landed: u32,
     /// Conditions that read the counter of an earlier report at an address (one frame of latency).
     pub stale: u32,
+    /// Conditions that read the counter of the report at the same place of an earlier frame.
+    pub placed: u32,
+    /// Emulated reports that sum no draw: 0, known when they are recorded.
+    pub zero: u32,
     /// `ReportValue` writes that the table took.
     pub values: u32,
     /// Counter reports that the host emulates (`crate::counters`).
@@ -122,6 +135,8 @@ pub struct RenderConds {
     stats: CondStats,
     /// The slots and reports of the GPU counters.
     counters: Counters,
+    /// The one-shot lines of `NXKIT_DIAG=rendercond` per condition address.
+    diag: probe::Probe,
     /// The first evaluations, for `NXKIT_DIAG=rendercond`.
     pub evaluations: Vec<Evaluation>,
 }
@@ -210,9 +225,21 @@ impl RenderConds {
         }
         self.stats.kinds[kind.min(16) as usize] += 1;
         let r = match self.counters.report(queue, base, at, kind, addr, frame) {
-            Some(seq) => {
+            Some(id) => {
                 self.stats.emulated += 1;
-                Report::Gpu { seq }
+                self.stats.zero += u32::from(id.zero);
+                self.diag.reported(addr);
+                if id.zero {
+                    Report::Known {
+                        value: 0,
+                        flush: self.flush,
+                    }
+                } else {
+                    Report::Gpu {
+                        seq: id.seq,
+                        place: id.place,
+                    }
+                }
             }
             None => {
                 self.stats.counters += 1;
@@ -240,12 +267,15 @@ impl RenderConds {
             None => self.stats.unknown += 1,
         }
         if r.is_some() {
-            if matches!(ra, Read::Stale(_)) || matches!(rb, Read::Stale(_)) {
+            if matches!(ra, Read::Place(_)) || matches!(rb, Read::Place(_)) {
+                self.stats.placed += 1;
+            } else if matches!(ra, Read::Stale(_)) || matches!(rb, Read::Stale(_)) {
                 self.stats.stale += 1;
             } else if matches!(ra, Read::Landed(_)) || matches!(rb, Read::Landed(_)) {
                 self.stats.landed += 1;
             }
         }
+        self.probe(mode, addr, ra, rb, r);
         if self.evaluations.len() < 64 {
             self.evaluations.push((mode, addr, a, b, r));
         }
@@ -257,11 +287,17 @@ impl RenderConds {
             Some(Report::Known { value, flush }) if self.flush - flush < KEEP_FLUSHES => {
                 Read::Known(*value)
             }
-            Some(Report::Gpu { seq }) => match self.counters.landed().get(addr) {
-                Some((v, s)) if s == *seq => Read::Landed(v),
-                Some((v, _)) if stale_on() => Read::Stale(v),
-                _ => Read::Unknown,
-            },
+            Some(Report::Gpu { seq, place }) => {
+                let landed = self.counters.landed();
+                match landed.get(addr) {
+                    Some((v, s)) if s == *seq => Read::Landed(v),
+                    Some((v, _)) if stale_mode() >= 1 => Read::Stale(v),
+                    _ if stale_mode() >= 2 => landed
+                        .at_place(*place)
+                        .map_or(Read::Unknown, |(v, _)| Read::Place(v)),
+                    _ => Read::Unknown,
+                }
+            }
             Some(Report::Unknown) => Read::Unknown,
             _ => read(addr).map_or(Read::Unknown, Read::Known),
         }
@@ -269,8 +305,17 @@ impl RenderConds {
 
     fn report(&mut self, addr: u64, r: Report) {
         if self.reports.len() >= MAX_REPORTS {
-            self.reports
-                .retain(|_, r| !matches!(r, Report::Known { .. }));
+            // The known values and the older half of the emulated counters go; the unknown ones stay.
+            let newest = self.reports.values().fold(0, |m, r| match r {
+                Report::Gpu { seq, .. } => m.max(*seq),
+                _ => m,
+            });
+            let keep = newest.saturating_sub(MAX_REPORTS as u64 / 2);
+            self.reports.retain(|_, r| match r {
+                Report::Known { .. } => false,
+                Report::Gpu { seq, .. } => *seq >= keep,
+                Report::Unknown => true,
+            });
         }
         self.reports.insert(addr, r);
     }
@@ -284,6 +329,7 @@ impl RenderConds {
     pub fn flushed(&mut self) {
         self.flush += 1;
         self.counters.flushed();
+        self.diag.flushed();
     }
 
     /// Forgets the condition and the counter slots of a queue (`nvnQueueFinalize`).
@@ -373,7 +419,7 @@ pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
             .map(|(k, n)| format!("{k:#x}:{n}"))
             .collect();
         eprintln!(
-            "DIAG rendercond frame {n}: enable {} (off {}), conditions true {} false {} unknown {} (read landed {} stale {}), reports value {} emulated {} gpu-only {} by type [{}] in {} slots | left out: draws {d} clears {c} dispatches {x} copies {k} in {} ranges of {} commands",
+            "DIAG rendercond frame {n}: enable {} (off {}), conditions true {} false {} unknown {} (read landed {} stale {} by place {}), reports value {} emulated {} (zero {}) gpu-only {} by type [{}] in {} slots | left out: draws {d} clears {c} dispatches {x} copies {k} in {} ranges of {} commands",
             s.enables,
             s.disables,
             s.true_,
@@ -381,8 +427,10 @@ pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
             s.unknown,
             s.landed,
             s.stale,
+            s.placed,
             s.values,
             s.emulated,
+            s.zero,
             s.counters,
             kinds.join(" "),
             frame.counters.slots,
@@ -392,5 +440,6 @@ pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
     }
 }
 
+mod probe;
 #[cfg(test)]
 mod tests;

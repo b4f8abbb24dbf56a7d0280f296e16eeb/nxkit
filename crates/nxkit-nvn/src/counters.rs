@@ -42,8 +42,8 @@ pub const PRIMITIVES_GENERATED: u32 = 0xd;
 /// `NVN_COUNTER_TYPE_TIMESTAMP_TOP`.
 pub const TIMESTAMP_TOP: u32 = 0x10;
 
-/// The most entries of [`Landed`]. A full table starts again.
-const MAX_LANDED: usize = 4096;
+/// The most entries of each map of [`Landed`]. A full map keeps the newer half.
+const MAX_LANDED: usize = 1 << 16;
 
 /// How the host knows a counter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +78,23 @@ pub fn enabled() -> bool {
     *ON.get_or_init(|| std::env::var("NXKIT_COUNTERS").map_or(true, |v| v != "0"))
 }
 
+/// The place of a report in a frame: the queue and the number of the report among the reports of the queue. A game
+/// that writes its reports to other addresses every frame (a ring of query memory) reports the same objects in the
+/// same order, so the report at the same place of the frame before is the same test.
+pub type Place = (usize, u32);
+
+/// What [`Counters::report`] made of a report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReportId {
+    /// The sequence number.
+    pub seq: u64,
+    /// The place in the frame.
+    pub place: Place,
+    /// True when the counter was reset in the frame and no slot that the report sums has a draw: the counter is 0,
+    /// known now.
+    pub zero: bool,
+}
+
 /// A report that the backend writes when the GPU finished the frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CounterWrite {
@@ -87,6 +104,8 @@ pub struct CounterWrite {
     pub kind: u32,
     /// The sequence number of the report, for [`Landed`].
     pub seq: u64,
+    /// The place of the report: its queue and its number among the reports of the queue in the frame.
+    pub place: Place,
     /// The slots that the counter sums, as a range of [`FrameCounters::sums`].
     pub sums: Range<u32>,
 }
@@ -104,6 +123,8 @@ pub struct FrameCounters {
     pub writes: Vec<CounterWrite>,
     /// Where the backend puts the counters that landed. Set when the frame has a report.
     pub landed: Option<Arc<Landed>>,
+    /// Whether a slot has a draw, by slot.
+    pub drawn: Vec<bool>,
 }
 
 impl FrameCounters {
@@ -114,6 +135,7 @@ impl FrameCounters {
         self.sums.clear();
         self.writes.clear();
         self.landed = None;
+        self.drawn.clear();
     }
 
     /// The slot of command `i`, None when no counter counts it.
@@ -143,32 +165,90 @@ impl FrameCounters {
     }
 }
 
-/// The counters that landed: the value and the sequence number of the last report written at each address.
+/// The counters that landed: by address and by place, the value and the sequence number of the last report.
 #[derive(Debug, Default)]
 pub struct Landed {
-    map: Mutex<HashMap<u64, (u64, u64)>>,
+    maps: Mutex<LandedMaps>,
+}
+
+#[derive(Debug, Default)]
+struct LandedMaps {
+    by_addr: HashMap<u64, (u64, u64)>,
+    by_place: HashMap<Place, (u64, u64)>,
+    newest: u64,
+}
+
+/// Puts `(value, seq)` at `key` unless a newer report is there. A full map keeps the newer half.
+fn put<K: std::hash::Hash + Eq>(
+    m: &mut HashMap<K, (u64, u64)>,
+    key: K,
+    value: u64,
+    seq: u64,
+    newest: u64,
+) {
+    if m.len() >= MAX_LANDED {
+        let keep = newest.saturating_sub(MAX_LANDED as u64 / 2);
+        m.retain(|_, (_, s)| *s >= keep);
+    }
+    let e = m.entry(key).or_insert((value, seq));
+    if seq >= e.1 {
+        *e = (value, seq);
+    }
 }
 
 impl Landed {
-    /// The report `seq` wrote `value` at `addr`.
-    pub fn land(&self, addr: u64, value: u64, seq: u64) {
-        let mut m = self.map.lock().unwrap_or_else(PoisonError::into_inner);
-        if m.len() >= MAX_LANDED && !m.contains_key(&addr) {
-            m.clear();
-        }
-        let e = m.entry(addr).or_insert((value, seq));
-        if seq >= e.1 {
-            *e = (value, seq);
-        }
+    /// The report `seq` at `place` wrote `value` at `addr`.
+    pub fn land(&self, addr: u64, place: Place, value: u64, seq: u64) {
+        let mut m = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
+        m.newest = m.newest.max(seq);
+        let newest = m.newest;
+        put(&mut m.by_addr, addr, value, seq, newest);
+        put(&mut m.by_place, place, value, seq, newest);
     }
 
     /// The value and sequence number of the last report that landed at `addr`.
     pub fn get(&self, addr: u64) -> Option<(u64, u64)> {
-        self.map
+        let m = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
+        m.by_addr.get(&addr).copied()
+    }
+
+    /// The value and sequence number of the last report that landed at `place`.
+    pub fn at_place(&self, place: Place) -> Option<(u64, u64)> {
+        let m = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
+        m.by_place.get(&place).copied()
+    }
+
+    /// The landed addresses nearest to `addr`, below (or at) and above, with their value and sequence number. For
+    /// the diagnostic: it walks the whole map.
+    pub fn nearest(&self, addr: u64) -> [Option<(u64, u64, u64)>; 2] {
+        let m = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut out = [None, None];
+        for (&a, &(v, s)) in &m.by_addr {
+            let (i, d) = if a <= addr {
+                (0, addr - a)
+            } else {
+                (1, a - addr)
+            };
+            let closer = out[i].is_none_or(|(b, _, _): (u64, u64, u64)| d < b.abs_diff(addr));
+            if closer {
+                out[i] = Some((a, v, s));
+            }
+        }
+        out
+    }
+
+    /// The number of landed addresses.
+    pub fn len(&self) -> usize {
+        self.maps
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(&addr)
-            .copied()
+            .by_addr
+            .len()
+    }
+
+    /// True when nothing landed.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -183,6 +263,8 @@ struct QueueSlots {
     from: u32,
     /// For each counter type, the index in `slots` of the first slot after its last reset.
     resets: HashMap<u32, usize>,
+    /// The reports of the queue in the frame.
+    reports: u32,
 }
 
 /// The counted slots of the queues that use a GPU counter.
@@ -202,6 +284,11 @@ impl Counters {
     /// The counters that landed.
     pub fn landed(&self) -> &Arc<Landed> {
         &self.landed
+    }
+
+    /// The sequence number of the newest report.
+    pub fn newest_seq(&self) -> u64 {
+        self.seq
     }
 
     /// A stream of `queue` starts at command `base` of the frame.
@@ -229,8 +316,7 @@ impl Counters {
         q.resets.insert(kind, q.slots.len());
     }
 
-    /// `ReportCounter` of `kind` at `addr` before command `at`. The result is the sequence number of the report, None
-    /// for a counter that the host does not count.
+    /// `ReportCounter` of `kind` at `addr` before command `at`. None for a counter that the host does not count.
     pub fn report(
         &mut self,
         queue: usize,
@@ -239,7 +325,7 @@ impl Counters {
         kind: u32,
         addr: u64,
         frame: &mut Frame,
-    ) -> Option<u64> {
+    ) -> Option<ReportId> {
         if !counted(kind) {
             return None;
         }
@@ -248,20 +334,30 @@ impl Counters {
         let q = self.queue(queue, base);
         close(q, at, frame);
         q.open = None;
-        let first = q.resets.get(&kind).copied().unwrap_or(0);
+        let place = (queue, q.reports);
+        q.reports += 1;
+        let reset = q.resets.get(&kind).copied();
+        let first = reset.unwrap_or(0);
         let c = &mut frame.counters;
         let start = c.sums.len() as u32;
-        c.sums.extend(q.slots.get(first..).unwrap_or(&[]));
+        let sums = q.slots.get(first..).unwrap_or(&[]);
+        // Without a reset in the frame the counter is what the GPU counted before, which the host does not know now.
+        let zero = reset.is_some()
+            && sums
+                .iter()
+                .all(|s| !c.drawn.get(*s as usize).copied().unwrap_or(true));
+        c.sums.extend(sums);
         c.writes.push(CounterWrite {
             addr,
             kind,
             seq,
+            place,
             sums: start..c.sums.len() as u32,
         });
         if c.landed.is_none() {
             c.landed = Some(self.landed.clone());
         }
-        Some(seq)
+        Some(ReportId { seq, place, zero })
     }
 
     /// The frame was flushed: every queue starts the next one without slots.
@@ -270,6 +366,7 @@ impl Counters {
             q.slots.clear();
             q.open = None;
             q.resets.clear();
+            q.reports = 0;
         }
     }
 
@@ -300,7 +397,16 @@ fn close(q: &mut QueueSlots, at: u32, frame: &mut Frame) {
             q.slots.push(s);
             s
         });
-        frame.counters.range(q.from..at, slot);
+        let c = &mut frame.counters;
+        if c.drawn.len() <= slot as usize {
+            c.drawn.resize(slot as usize + 1, false);
+        }
+        let draws = frame
+            .cmds
+            .get(q.from as usize..at as usize)
+            .is_some_and(|r| r.iter().any(|c| matches!(c, Cmd::Draw { .. })));
+        c.drawn[slot as usize] |= draws;
+        c.range(q.from..at, slot);
     }
     q.from = q.from.max(at);
 }
