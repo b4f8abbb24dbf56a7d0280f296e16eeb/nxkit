@@ -53,6 +53,11 @@ fn encode_pass(
     // The run's inputs and the game's own chain (on a compare frame) come from earlier passes.
     cp.encode(&ComputeCommand::WaitForEarlierPasses)
         .map_err(ctx("wait"))?;
+    let mut prof = if super::prof::on() {
+        super::prof::begin(sh.ctx, &mut cp)
+    } else {
+        None
+    };
     let tex_of = |r: GameResource| -> Option<Texture> {
         if let Some(c) = &p.compare
             && let Some((_, t)) = c.twins.iter().find(|(g, _)| *g == r)
@@ -66,6 +71,10 @@ fn encode_pass(
     };
     let entry = &p.entry;
     for (i, step) in entry.plan.steps.iter().enumerate() {
+        // `NXKIT_SKIP_PROGRAMS` / `NXKIT_SKIP_FILE` name a step by its kernel, to measure what it costs.
+        if crate::diag::skipped_program(step.kernel) {
+            continue;
+        }
         if entry.barrier_before[i] {
             cp.encode(&ComputeCommand::Barrier)
                 .map_err(ctx("barrier"))?;
@@ -103,6 +112,12 @@ fn encode_pass(
             threads: step.threads,
         })
         .map_err(ctx("dispatch"))?;
+        if let Some(f) = prof.as_mut() {
+            super::prof::step(f, &mut cp, step.kernel);
+        }
+    }
+    if let Some(f) = prof.take() {
+        super::prof::end(f);
     }
     if let Some(c) = &p.compare {
         // The game's chain has finished (the wait above). Copy its picture next to the plan's for the CPU.

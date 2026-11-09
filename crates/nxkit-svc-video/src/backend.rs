@@ -207,7 +207,15 @@ mod apple {
             };
             let mut pics = Vec::new();
             let sent = d.send(packet, ts, &mut pics);
+            let first = out.len();
             Dav1dPipeline::collect(pics, out)?;
+            // One frame at a time: a picture that comes out of this send is the one this packet shows, so it carries
+            // the packet's time, as on the console. rav1d's own timestamp is the one of the packet that decoded the
+            // frame, and a `show_existing_frame` unit (Ocarina of Time's 3-byte units) shows a frame decoded earlier:
+            // its picture came out with an old time, and the movie player waited on it.
+            for pic in out.iter_mut().skip(first) {
+                pic.1 = ts;
+            }
             sent.map(|()| true)
         }
 

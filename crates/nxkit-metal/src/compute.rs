@@ -77,6 +77,13 @@ pub enum ComputeCommand {
     },
     /// Orders the later commands of this pass after the earlier ones.
     Barrier,
+    /// Writes a precise GPU timestamp into entry `index` of the heap, after the work before it.
+    Timestamp {
+        /// The heap.
+        heap: crate::timestamp::TimestampHeap,
+        /// The entry.
+        index: u32,
+    },
     /// A barrier with explicit stages. The stages must be `DISPATCH` or `BLIT` on the side of this pass.
     Depend(Dependency),
     /// Copies a box between compatible textures of the same sample count. Compressed and uncompressed textures
@@ -305,6 +312,21 @@ impl ComputePass<'_> {
                     MTL4VisibilityOptions::Device,
                 ),
             ComputeCommand::Depend(d) => d.encode(&*self.enc, Stages::DISPATCH | Stages::BLIT)?,
+            ComputeCommand::Timestamp { heap, index } => {
+                if *index as usize >= heap.len() {
+                    return Err(MetalError::Invalid("the timestamp index is out of range"));
+                }
+                // SAFETY: the index lies inside the heap (checked above), and the heap is retained until the GPU is
+                // done with the command buffer.
+                unsafe {
+                    self.enc.writeTimestampWithGranularity_intoHeap_atIndex(
+                        objc2_metal::MTL4TimestampGranularity::Precise,
+                        &heap.raw.0,
+                        *index as usize,
+                    );
+                }
+                self.cb.retain(heap.clone());
+            }
             ComputeCommand::CopyTexture {
                 src,
                 dst,

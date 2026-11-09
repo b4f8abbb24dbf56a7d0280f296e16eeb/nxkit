@@ -64,6 +64,7 @@ mod stats;
 mod table;
 mod texture;
 pub mod thread;
+mod timestamp;
 mod upscale;
 
 pub use address::AddressMap;
@@ -118,4 +119,5 @@ pub use stats::{
 };
 pub use table::ArgumentTable;
 pub use texture::{Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc};
+pub use timestamp::TimestampHeap;
 pub use upscale::{SpatialUpscaler, UpscaleDesc};

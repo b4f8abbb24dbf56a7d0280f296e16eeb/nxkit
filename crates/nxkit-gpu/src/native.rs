@@ -24,6 +24,7 @@
 
 mod book;
 mod build;
+mod prof;
 mod run;
 mod util;
 
