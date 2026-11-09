@@ -76,6 +76,7 @@ pub(super) fn build(
     shape: &Shape,
     info: &RunInfo<'_>,
     cx: &PrepareCx<'_>,
+    with_offload: bool,
 ) -> Result<Entry, Refusal> {
     let name = net.name();
     if !net.accepts_in(blobs, shape, info) {
@@ -87,6 +88,23 @@ pub(super) fn build(
     let plan = net
         .plan_in(blobs, shape, info)
         .map_err(|e| Refusal("build", format!("{name}: {e}")))?;
+    let mut entry = ready(name, net.source(), plan, cx)?;
+    if with_offload && let Some(o) = net.offload() {
+        entry.ane = Some(Arc::new(AneEntries {
+            input: ready(name, net.source(), o.input, cx)?,
+            epilogue: ready(name, net.source(), o.epilogue, cx)?,
+        }));
+    }
+    Ok(entry)
+}
+
+/// Makes one plan's buffers and pipelines.
+fn ready(
+    name: &'static str,
+    source: &str,
+    plan: Plan,
+    cx: &PrepareCx<'_>,
+) -> Result<Entry, Refusal> {
     let mut buffers = Vec::with_capacity(plan.buffers.len());
     for b in &plan.buffers {
         let made = DataBuffer::new(cx.ctx, b.bytes).and_then(|buf| match &b.init {
@@ -127,7 +145,7 @@ pub(super) fn build(
         }
         let p = cx
             .pipelines
-            .host_compute(name, net.source(), s.kernel)
+            .host_compute(name, source, s.kernel)
             .map_err(|_| {
                 Refusal(
                     "pipeline",
@@ -144,5 +162,6 @@ pub(super) fn build(
         pipelines,
         barrier_before,
         written,
+        ane: None,
     })
 }

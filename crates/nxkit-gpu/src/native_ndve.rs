@@ -7,7 +7,7 @@
 
 use nxkit_ndve::plan::{self, Plan};
 
-use crate::native::{BlobSpec, Place, Replacement, ResourceSpec, Run};
+use crate::native::{BlobSpec, ModelPackage, Offload, Place, Replacement, ResourceSpec, Run};
 
 #[cfg(not(test))]
 use nxkit_ndve::{fingerprint, kernels, msl};
@@ -138,6 +138,38 @@ impl Replacement for Ndve {
     fn resources(&self) -> &'static [ResourceSpec] {
         &RESOURCES
     }
+
+    fn offload(&self) -> Option<Offload> {
+        let p = nxkit_ndve::kernels::ane_plans();
+        Some(Offload {
+            input: p.input,
+            epilogue: p.epilogue,
+            package: ane_package,
+            cache_key: ane_cache_key,
+            input_tensor: (ANE_TENSORS[0].0, ANE_TENSORS[0].1),
+            output_tensors: &ANE_TENSORS[1..],
+        })
+    }
+}
+
+use nxkit_ndve::kernels::ANE_TENSORS;
+
+/// The cache key: the SHA-256 of the layer blob and the build of the OS.
+fn ane_cache_key(blobs: &[&[u8]], os_build: &str) -> String {
+    nxkit_ndve::ane::cache_key(blobs.first().copied().unwrap_or_default(), os_build)
+}
+
+/// The Core ML package of the whole network (`Variant::Full`) from the two weight blobs.
+fn ane_package(blobs: &[&[u8]]) -> Result<ModelPackage, String> {
+    let [layers, resampler] = blobs else {
+        return Err("the network needs two weight blobs".into());
+    };
+    let pkg = nxkit_ndve::ane::build_package(layers, resampler, nxkit_ndve::ane::Variant::Full)?;
+    Ok(ModelPackage {
+        files: pkg.files,
+        input: (pkg.input.name, pkg.input.shape),
+        outputs: pkg.outputs.into_iter().map(|o| (o.name, o.shape)).collect(),
+    })
 }
 
 // The four adapters. A rename in `nxkit-ndve` changes one of these and nothing else.

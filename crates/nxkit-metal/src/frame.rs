@@ -246,6 +246,7 @@ impl Frame {
         self.cb.raw().endCommandBuffer();
         let cpu_encode_ns = u64::try_from(self.t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let keep = self.cb.take_retained();
+        let after = Mutex::new(Some(self.cb.take_after()));
         let done = self.done.clone();
         let metrics = self.metrics.clone();
         let hooks = self.hooks.clone();
@@ -266,6 +267,10 @@ impl Frame {
                 };
                 if let Ok(mut k) = keep.lock() {
                     k.take();
+                }
+                let after = after.lock().ok().and_then(|mut a| a.take());
+                for f in after.into_iter().flatten() {
+                    f.run(!stats.failed);
                 }
                 metrics.record(&stats);
                 if let Some(h) = &hooks {
