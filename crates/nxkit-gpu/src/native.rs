@@ -25,7 +25,9 @@
 mod build;
 mod run;
 
-use build::{barrier_flags, build, used_resources, uses_resource, written_resources};
+#[cfg(test)]
+use build::{barrier_flags, written_resources};
+use build::{build, used_resources, uses_resource};
 use run::{Compare, PendingCompare, capture, count_fallback, count_native, make_compare};
 pub(crate) use run::{encode, health_lines};
 

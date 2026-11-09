@@ -711,7 +711,6 @@ mod support_tests {
             reg,
             dim: None,
             rw: false,
-            bank: 0,
             rscale,
             img: None,
         }
