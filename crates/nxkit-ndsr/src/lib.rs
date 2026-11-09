@@ -9,11 +9,12 @@
 //! `nxkit-gpu` finds the network with [`fingerprint`] and encodes the [`plan::Plan`] of [`kernels`].
 //!
 //! - [`plan`]: the native passes as data, shared with `nxkit-ndve` (`nxkit-native-plan`).
-//! - [`net`], [`fingerprint`], [`pack_file`], [`reference`]: package A, the table, the checks, the pack reader, the CPU
+//! - [`net`], [`fingerprint`], [`pack_file`], [`mod@reference`]: package A, the table, the checks, the pack reader, the CPU
 //!   reference.
 //! - [`pack`], [`msl`], [`kernels`]: package B, the weight layout, the Metal source and the plan.
 
 pub mod fingerprint;
+pub mod half;
 pub mod kernels;
 pub mod msl;
 pub mod net;
