@@ -171,6 +171,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `passes` | gpu | the render passes of a frame by their number of draws and by the size of their first attachment | every 300 frames | low |
 | `indirect` | gpu | draw records without arguments (transform feedback, `DrawTexture` or unknown draw kinds) | at powers of two per kind | low |
 | `mesh` | gpu | the mesh and indirect draws of the frame (`EncodeStats::kinds`): encoded and skipped by reason for each class (mesh, mesh-indirect, indirect, multi-indirect-count), the Metal draws they became, the compute pre-passes and their records, and what was clamped. The first frame with such draws prints the line without the category. `stats` turns it on too. | every 30 frames | low |
+| `meshvis` | gpu | how many samples each task and mesh draw passes. On a sampled frame (the first 3 frames with a mesh draw, then every 120th frame; the knob `meshvisall` samples every frame) every mesh draw gets a visibility offset of its own and counts its samples. When the GPU finished the frame, it prints a line for each render pass with mesh draws (colour and depth attachments, mesh draws, counted draws), a line for each group of its mesh draws with the same kind, task, mesh and fragment key, depth function, depth write and cull mode (draws, draws with samples, samples, the largest count of one draw; at most 200 groups per frame), a line for each depth pass on the same depth texture without mesh draws (load action, clear value, draws), and a summary (`counted`, `shared`, `over-limit`). A draw that the game's own occlusion report counts is `shared` and stays uncounted. At most 8192 mesh draws of a frame are counted. The frame waits for the GPU. | first 3 frames with mesh draws, then every 120th frame | medium |
 
 ## Knobs (`NXKIT_KNOB`)
 
@@ -204,6 +205,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `freshzero` | A Metal texture that the store made new for the frame and that gets no upload (a record that the GPU wrote last, a scaled or a widened texture) is cleared to zero before the frame uses it: colour 0,0,0,0, depth 0, stencil 0, every level, layer and depth plane, one render pass each in the first command buffer. Compressed, memoryless and stencil-only textures, and textures without render target usage, are skipped. A scaled texture whose guest copy is newer gets the scaled upload and is not cleared. |
 | `nosupersede` | The supersede rule of the texture store is off, the same as `NXKIT_TEX_SUPERSEDE=0`, switched while the game runs. It compares both at one place. |
 | `nobz` | The blend word of every pixel shader is 0, so a source colour whose blend factor is 0 is not set to 0 in the shader and the Apple blender gives NaN for `0 x NaN`. It shows the blots that the rule removes. |
+| `meshvisall` | With `NXKIT_DIAG=meshvis`, every frame is a sampled frame. |
 
 ## The render health report
 

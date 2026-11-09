@@ -271,7 +271,12 @@ pub(crate) fn render_pass(
     let mut memo = ArgsMemo::default();
     let off = disabled_draws(sh, pass, &range);
     let is_off = |n: u32| off.as_ref().is_some_and(|o| o[(n - range.start) as usize]);
-    let counts = |n: u32| vis.as_ref().and_then(|(q, v)| v.offset(q.draw_slot(n)?));
+    let counts = |n: u32| {
+        vis.as_ref().and_then(|(q, v)| match q.draw_slot(n) {
+            Some(slot) => v.offset(slot),
+            None => q.mesh_offset(n),
+        })
+    };
     // The visibility offset that counts now, None while nothing counts.
     let mut counting: Option<u64> = None;
     let mut n = range.start;
@@ -310,6 +315,13 @@ pub(crate) fn render_pass(
             && let Some(((q, _), slot)) = vis.as_ref().zip(sh.queries.and_then(|q| q.draw_slot(n)))
         {
             q.encoded(slot);
+        }
+        if counted
+            && want.is_some()
+            && stats.draws > before
+            && let Some((q, _)) = vis.as_ref()
+        {
+            q.mesh_encoded(n);
         }
         n += 1;
     }

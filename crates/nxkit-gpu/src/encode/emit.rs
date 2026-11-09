@@ -412,6 +412,9 @@ pub(super) fn draw(
         Ok(p) => p,
         Err(why) => return stats.skip_draw(Some(&d.args), why),
     };
+    if let Some(q) = sh.queries.filter(|_| d.args.is_mesh()) {
+        q.mesh_note(n, &p);
+    }
     let x = Driven { object, copies };
     match emit(rp, tr, pc, &d.dynamic, &p, &x, stats) {
         Ok(()) => {

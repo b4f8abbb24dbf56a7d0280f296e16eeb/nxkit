@@ -100,6 +100,8 @@ const KNOBS: &[&str] = &[
     // The blend word of every pixel shader is 0: a source colour with the blend factor 0 is not set to 0 in the shader,
     // and the Apple blender gives NaN for `0 x NaN`. It shows the blots that the rule removes.
     "nobz",
+    // With `NXKIT_DIAG=meshvis`, every frame is a sampled frame.
+    "meshvisall",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

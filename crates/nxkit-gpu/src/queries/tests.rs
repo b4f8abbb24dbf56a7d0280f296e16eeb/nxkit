@@ -123,7 +123,7 @@ fn counted_draws_get_offsets_of_their_pass_and_land_once_all_were_encoded() {
     let p = plan(&f);
     let ords = crate::draws::ordinals(&f);
     let pool = Arc::new(VisPool::default());
-    let q = prepare(&ctx, &pool, &f, &p, &detail(), &ords).unwrap();
+    let q = prepare(&ctx, &pool, &f, &p, &detail(), &ords, None).unwrap();
     let (s0, s1) = (q.draw_slot(0).unwrap(), q.draw_slot(1).unwrap());
     assert_ne!(s0, s1);
     assert_eq!(q.draw_slot(2), None);

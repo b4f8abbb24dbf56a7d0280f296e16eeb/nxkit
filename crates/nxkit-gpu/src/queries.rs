@@ -76,6 +76,8 @@ pub(crate) struct FrameQueries {
     expected: Vec<u32>,
     encoded: Vec<AtomicU32>,
     cpu: Vec<CpuCount>,
+    /// The mesh draws of `NXKIT_DIAG=meshvis`, with offsets after those of the reports.
+    mesh: Option<crate::meshvis::Plan>,
 }
 
 impl std::fmt::Debug for FrameQueries {
@@ -134,9 +136,11 @@ pub(crate) fn prepare(
     plan: &PassPlan,
     detail: &FrameDetail,
     ords: &[Ordinal],
+    mut mesh: Option<crate::meshvis::Plan>,
 ) -> Option<Arc<FrameQueries>> {
     let c = &frame.counters;
-    if c.writes.is_empty() {
+    let extra = mesh.as_ref().map_or(0, crate::meshvis::Plan::wanted);
+    if c.writes.is_empty() && extra == 0 {
         return None;
     }
     let slots = c.slots as usize;
@@ -203,12 +207,16 @@ pub(crate) fn prepare(
             pass_offsets.insert(pi, mine);
         }
     }
-    let buffer = if offset_slot.is_empty() {
+    let buffer = if offset_slot.is_empty() && extra == 0 {
         None
     } else {
         // Without a buffer no slot counts: every samples report stays uncounted.
-        pool.take(ctx, offset_slot.len() as u64 * 8)
+        pool.take(ctx, (offset_slot.len() + extra) as u64 * 8)
     };
+    if let Some(m) = mesh.as_mut() {
+        let room = buffer.as_ref().map_or(0, |b| (b.len() / 8) as usize);
+        m.bind(offset_slot.len(), room.saturating_sub(offset_slot.len()));
+    }
     if buffer.is_none() {
         draw_slot.iter_mut().for_each(|d| *d = None);
         pass_offsets.clear();
@@ -223,6 +231,7 @@ pub(crate) fn prepare(
         expected,
         encoded: (0..slots).map(|_| AtomicU32::new(0)).collect(),
         cpu,
+        mesh,
     }))
 }
 
@@ -243,10 +252,50 @@ fn vertices(args: &DrawArgs) -> Option<u64> {
 impl FrameQueries {
     /// The visibility offsets of render pass `index`, None when none of its draws counts samples.
     pub(crate) fn pass(&self, index: usize) -> Option<PassVis<'_>> {
-        Some(PassVis {
-            buffer: self.buffer.as_deref()?,
-            offsets: self.pass_offsets.get(&index)?,
-        })
+        let buffer = self.buffer.as_deref()?;
+        let offsets = self.pass_offsets.get(&index).map_or(&[][..], Vec::as_slice);
+        if offsets.is_empty() && !self.mesh.as_ref().is_some_and(|m| m.has_pass(index)) {
+            return None;
+        }
+        Some(PassVis { buffer, offsets })
+    }
+
+    /// The byte offset that mesh draw `n` (an ordinal) counts into for `NXKIT_DIAG=meshvis`. The caller asks only
+    /// for a draw that has no slot of the reports.
+    pub(crate) fn mesh_offset(&self, n: u32) -> Option<u64> {
+        self.mesh.as_ref()?.offset(n)
+    }
+
+    /// The state that mesh draw `n` really used.
+    pub(crate) fn mesh_note(&self, n: u32, p: &crate::draws::Prep) {
+        if let Some(m) = &self.mesh {
+            m.note(n, p);
+        }
+    }
+
+    /// A Metal draw of mesh draw `n` was encoded with its offset set. Nothing for a draw that a report counts.
+    pub(crate) fn mesh_encoded(&self, n: u32) {
+        if let Some(m) = self.mesh.as_ref().filter(|_| self.draw_slot(n).is_none()) {
+            m.encoded(n);
+        }
+    }
+
+    /// True when the frame has mesh draws to print (`NXKIT_DIAG=meshvis`).
+    pub(crate) fn has_mesh(&self) -> bool {
+        self.mesh.is_some()
+    }
+
+    /// Prints the counts of the mesh draws. The GPU has to be done with the frame.
+    pub(crate) fn mesh_print(&self) {
+        let Some(m) = &self.mesh else { return };
+        let read = |i: u64| {
+            let mut b = [0u8; 8];
+            self.buffer.as_ref()?.read(i * 8, &mut b).ok()?;
+            Some(u64::from_le_bytes(b))
+        };
+        for l in m.report(&|n| self.draw_slot(n).is_some(), &read) {
+            eprintln!("{l}");
+        }
     }
 
     /// The visibility result buffer, for the command buffer to keep alive.
