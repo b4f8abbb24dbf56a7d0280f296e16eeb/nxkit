@@ -1,1 +1,316 @@
-//! To be written: see docs/plans/ndsr-impl.md
+//! The plan of the network: the packed weights and the one dispatch of the kernel in [`crate::msl::SOURCE`], for the
+//! network program of `docs/plans/ndsr-native.md` section 7 (stage 1 of `docs/plans/ndsr-impl.md`: the SMAA passes stay
+//! the game's).
+//!
+//! There is one kernel per network program of the vr pack: five input scales (`in` = 10, 8, 7, 6, 4 of the 12-pixel
+//! grid, ratios 1.2, 1.5, 12/7, 2, 3) times three output variants (A: sRGB 8 bit, B: linear 10 bit, C: R11G11B10F). The
+//! specialisation is by C++ template in the MSL (the plan names a function, it cannot carry function constants), and
+//! [`KERNELS`] repeats the instantiations' parameters; a test compares the two.
+//!
+//! The kernel reads the sizes, the output offset, the unsharp strength and the dither switch from the game's push block
+//! (bank 24), so one plan serves every input and output size of its tile shape; only the threadgroup count depends on
+//! the input size.
+//!
+//! Only the vr input is implemented (`Y'` in the green channel of tex0, as the vr programs read it). The vr_light input
+//! (f16 luma of sqrt RGB) and the agl one (f32 luma) are open, see the end of `docs/plans/ndsr-native.md` section 13.
+
+use crate::pack;
+use crate::plan::{Binding, Buffer, GameResource, Plan, Source, Step};
+
+/// The texture the network reads: the neighbourhood blending's output (the game's tex0, with its sampler).
+pub const TEX0: GameResource = GameResource::Texture(0);
+/// The compute push block (bank 24) of the network dispatch.
+pub const PUSH: GameResource = GameResource::Push(0);
+/// The image the network writes (the game's img1): the result of the run.
+pub const OUT: GameResource = GameResource::Output;
+
+/// The output encoding of a network program (ndsr-native.md section 7.7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Variant {
+    /// sRGB encoded, 8-bit UNORM image, dither 1/255.
+    A,
+    /// Linear, 10-bit UNORM image, dither 1/1023.
+    B,
+    /// Linear, R11G11B10F image, dither of one unit of the last place.
+    C,
+}
+
+/// One network program of the vr pack: the parameters of its instantiation in `ndsr.metal`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KernelSpec {
+    /// The kernel's function name.
+    pub name: &'static str,
+    /// Input pixels per patch step (`in`; the grid is 12 cells per patch, so the ratio is `12 / in`).
+    pub in_px: u32,
+    /// The output encoding.
+    pub variant: Variant,
+    /// Input pixels per threadgroup in x and y (config bytes `b0`, `b1`).
+    pub step: [u32; 2],
+    /// The ratio immediate as f32 bits.
+    pub ratio_bits: u32,
+    /// The cell offset immediates `s`, `h`, `h1` of x and `h1` of y, as f32 bits (section 7.4).
+    pub cell: [u32; 4],
+    /// Whether the rows use the odd-row form of `ty` (all but the 1.2 programs).
+    pub ty_odd: bool,
+}
+
+impl KernelSpec {
+    /// Patches of a threadgroup along x and y.
+    #[must_use]
+    pub const fn patches(&self) -> [u32; 2] {
+        [
+            (self.step[0] + 1) / self.in_px,
+            (self.step[1] + 1) / self.in_px,
+        ]
+    }
+
+    /// The threadgroup memory the kernel declares, in bytes: the grid, the input window, the per-simdgroup result
+    /// scratch and, when the 32 KB budget allows, the staged weights (a mirror of `ndsr_main`).
+    #[must_use]
+    pub const fn threadgroup_bytes(&self) -> u32 {
+        let [npx, npy] = self.patches();
+        let grid = 144 * npx * npy;
+        let win = (self.in_px * (npx - 1) + 16) * (self.in_px * (npy - 1) + 16);
+        let base = (grid + win + 4 * 256) * 2;
+        if base + 12288 <= 32768 - 256 {
+            base + 12288
+        } else {
+            base
+        }
+    }
+
+    /// The threadgroups for an input of `in_size` pixels: the tile rule of section 7.6 needs exactly these.
+    #[must_use]
+    pub const fn groups(&self, in_size: [u32; 2]) -> [u32; 3] {
+        [
+            in_size[0].div_ceil(self.step[0]),
+            in_size[1].div_ceil(self.step[1]),
+            1,
+        ]
+    }
+}
+
+const fn spec(
+    name: &'static str,
+    in_px: u32,
+    variant: Variant,
+    step: [u32; 2],
+    ratio_bits: u32,
+    cell: [u32; 4],
+    ty_odd: bool,
+) -> KernelSpec {
+    KernelSpec {
+        name,
+        in_px,
+        variant,
+        step,
+        ratio_bits,
+        cell,
+        ty_odd,
+    }
+}
+
+const R10: u32 = 0x3f99_999a;
+const R8: u32 = 0x3fc0_0000;
+const R7: u32 = 0x3fdb_6db8;
+const R6: u32 = 0x4000_0000;
+const R4: u32 = 0x4040_0000;
+const C10: [u32; 4] = [0x3f55_5556, 0x3ed5_5556, 0x3fa0_0000, 0];
+const C8: [u32; 4] = [0x3f2a_aaab, 0x3eaa_aaab, 0x3f80_0000, 0x3f80_0000];
+const C7: [u32; 4] = [0x3f15_5556, 0x3e95_5556, 0x3f60_0000, 0x3f60_0001];
+const C6: [u32; 4] = [0x3f00_0000, 0x3e80_0000, 0x3f40_0000, 0x3f40_0000];
+const C4: [u32; 4] = [0x3eaa_aaab, 0x3e2a_aaab, 0x3f00_0000, 0x3f00_0000];
+
+use Variant::{A, B, C};
+
+/// The 15 network programs of the vr pack (ndsr-native.md section 4; the tile is the config bytes `b0 b1`).
+pub const KERNELS: [KernelSpec; 15] = [
+    spec("ndsr_in10_a", 10, A, [39, 29], R10, C10, false),
+    spec("ndsr_in10_b", 10, B, [39, 29], R10, C10, false),
+    spec("ndsr_in10_c", 10, C, [39, 39], R10, C10, false),
+    spec("ndsr_in8_a", 8, A, [31, 31], R8, C8, true),
+    spec("ndsr_in8_b", 8, B, [31, 31], R8, C8, true),
+    spec("ndsr_in8_c", 8, C, [31, 31], R8, C8, true),
+    spec("ndsr_in7_a", 7, A, [27, 27], R7, C7, true),
+    spec("ndsr_in7_b", 7, B, [55, 41], R7, C7, true),
+    spec("ndsr_in7_c", 7, C, [55, 20], R7, C7, true),
+    spec("ndsr_in6_a", 6, A, [23, 23], R6, C6, true),
+    spec("ndsr_in6_b", 6, B, [47, 23], R6, C6, true),
+    spec("ndsr_in6_c", 6, C, [47, 23], R6, C6, true),
+    spec("ndsr_in4_a", 4, A, [31, 23], R4, C4, true),
+    spec("ndsr_in4_b", 4, B, [31, 23], R4, C4, true),
+    spec("ndsr_in4_c", 4, C, [31, 23], R4, C4, true),
+];
+
+/// The kernel of an input scale (`in` = 10, 8, 7, 6, 4) and a variant.
+#[must_use]
+pub fn find(in_px: u32, variant: Variant) -> Option<&'static KernelSpec> {
+    KERNELS
+        .iter()
+        .find(|k| k.in_px == in_px && k.variant == variant)
+}
+
+/// The plan of one network program for an input of `in_size` pixels and an output of `out_size`: the packed weights as
+/// the only buffer and one dispatch. `blob` is the game's weight blob (ssbo 2 of the network dispatch): the vr pack's, 0x3000 bytes.
+///
+/// # Errors
+///
+/// When a size is zero, or `blob` is not the six layers of the vr pack.
+pub fn plan(
+    kernel: &KernelSpec,
+    blob: &[u8],
+    in_size: [u32; 2],
+    out_size: [u32; 2],
+) -> Result<Plan, String> {
+    if in_size.contains(&0) || out_size.contains(&0) {
+        return Err(format!(
+            "sizes {in_size:?} -> {out_size:?} have a zero side"
+        ));
+    }
+    let packed = pack::from_vr(blob)?;
+    let bind = |index, source, writes| Binding {
+        index,
+        source,
+        writes,
+    };
+    Ok(Plan {
+        buffers: vec![Buffer {
+            name: "ndsr.weights",
+            bytes: packed.len() as u64,
+            init: Some(packed),
+        }],
+        steps: vec![Step {
+            kernel: kernel.name,
+            groups: kernel.groups(in_size),
+            threads: [128, 1, 1],
+            threadgroup_bytes: 0,
+            buffers: vec![
+                bind(0, Source::Buffer(0), false),
+                bind(1, Source::Game(PUSH), false),
+            ],
+            textures: vec![
+                bind(0, Source::Game(TEX0), false),
+                bind(1, Source::Game(OUT), true),
+            ],
+        }],
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::msl::SOURCE;
+
+    fn blob() -> Vec<u8> {
+        (0..pack::BLOB_BYTES / 2)
+            .flat_map(|i| (0x3000 + (i % 0x400) as u16).to_le_bytes())
+            .collect()
+    }
+
+    /// The numbers of a `NDSR_KERNEL(...)` line of the MSL, name first.
+    fn instantiations() -> Vec<(String, Vec<u64>)> {
+        SOURCE
+            .lines()
+            .filter_map(|l| l.strip_prefix("NDSR_KERNEL(\"")?.strip_suffix(')'))
+            .map(|l| {
+                let (name, rest) = l.split_once("\", ").expect("name");
+                let nums = rest
+                    .split(", ")
+                    .map(|v| match v {
+                        "true" => 1,
+                        "false" => 0,
+                        _ => {
+                            let v = v.trim_end_matches('u');
+                            v.strip_prefix("0x").map_or_else(
+                                || v.parse().expect("number"),
+                                |h| u64::from_str_radix(h, 16).expect("hex"),
+                            )
+                        }
+                    })
+                    .collect();
+                (name.to_string(), nums)
+            })
+            .collect()
+    }
+
+    /// The Rust table and the MSL instantiations are the same 15 programs.
+    #[test]
+    fn table_matches_the_msl_instantiations() {
+        let inst = instantiations();
+        assert_eq!(inst.len(), KERNELS.len());
+        for (k, (name, n)) in KERNELS.iter().zip(&inst) {
+            assert_eq!(&k.name, name);
+            let variant = match k.variant {
+                Variant::A => 0,
+                Variant::B => 1,
+                Variant::C => 2,
+            };
+            let want = [
+                u64::from(k.in_px),
+                u64::from(k.step[0]),
+                u64::from(k.step[1]),
+                variant,
+                u64::from(k.ratio_bits),
+                u64::from(k.cell[0]),
+                u64::from(k.cell[1]),
+                u64::from(k.cell[2]),
+                u64::from(k.cell[3]),
+                u64::from(k.ty_odd),
+            ];
+            assert_eq!(n, &want, "{name}");
+        }
+    }
+
+    /// Names are unique and follow the scale and variant; the tile covers whole patches.
+    #[test]
+    fn table_is_consistent() {
+        for (i, k) in KERNELS.iter().enumerate() {
+            assert!(KERNELS[..i].iter().all(|o| o.name != k.name), "{}", k.name);
+            assert_eq!(find(k.in_px, k.variant), Some(k));
+            let [npx, npy] = k.patches();
+            assert!(npx >= 1 && npy >= 1, "{}", k.name);
+            assert_eq!(npx * k.in_px, k.step[0] + 1, "{}", k.name);
+            assert_eq!(npy * k.in_px, k.step[1] + 1, "{}", k.name);
+            // the network maps in to 12 cells: ratio 12 / in
+            let ratio = f32::from_bits(k.ratio_bits);
+            assert!((ratio - 12.0 / k.in_px as f32).abs() < 1e-6, "{}", k.name);
+            assert!(12 * npx <= 128, "the unsharp pass is a column a thread");
+            assert!(k.threadgroup_bytes() <= 32768, "{}", k.name);
+        }
+        assert_eq!(find(9, Variant::A), None);
+    }
+
+    #[test]
+    fn plan_shape() {
+        let k = find(10, Variant::A).expect("kernel");
+        let p = plan(k, &blob(), [1536, 864], [1920, 1080]).expect("plan");
+        assert_eq!(p.buffers.len(), 1);
+        assert_eq!(p.buffers[0].bytes, 0x3000);
+        assert_eq!(p.buffers[0].init.as_ref().map(Vec::len), Some(0x3000));
+        let [s] = &p.steps[..] else {
+            panic!("one step")
+        };
+        assert_eq!(s.kernel, "ndsr_in10_a");
+        assert_eq!(s.groups, [1536u32.div_ceil(39), 864u32.div_ceil(29), 1]);
+        assert_eq!(s.threads, [128, 1, 1]);
+        for b in s.buffers.iter().chain(&s.textures) {
+            if let Source::Buffer(i) = b.source {
+                assert!(i < p.buffers.len());
+            }
+        }
+        assert_eq!(s.textures[1].source, Source::Game(GameResource::Output));
+        assert!(s.textures[1].writes && !s.textures[0].writes);
+    }
+
+    #[test]
+    fn plan_errors() {
+        let k = find(8, Variant::B).expect("kernel");
+        assert!(plan(k, &blob()[..100], [64, 64], [128, 128]).is_err());
+        assert!(plan(k, &blob(), [0, 64], [128, 128]).is_err());
+        let short = &blob()[..pack::SHORT_BLOB_BYTES];
+        assert!(plan(k, short, [64, 64], [128, 128]).is_err());
+        // the vr repack differs from the identity
+        let v = plan(k, &blob(), [64, 64], [128, 128]).expect("plan");
+        assert_ne!(v.buffers[0].init.as_deref(), Some(&blob()[..]));
+    }
+}
