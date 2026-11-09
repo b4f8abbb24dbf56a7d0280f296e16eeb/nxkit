@@ -206,9 +206,25 @@ const NXKIT: Fact<Runtime> = Fact::new(
     },
 );
 
+/// The services whose clients the game links into its own `main` (`nn::sf::hipc`) and that the host answers with
+/// success and zeroed output. `prepo:u` takes play reports: the game saves one after the opening, and nothing is sent
+/// anywhere from the Mac.
+const SF_SERVICES: &[Fact<&str>] = &[Fact::new(
+    "prepo:u",
+    Evidence::Recorded {
+        source: "nxkit run log: after the opening the game connected to prepo:u through nn::sf::hipc, got \
+                 not-registered and stopped in nn::diag abort with Result 0xe15",
+        read: "2026-11-09",
+    },
+)];
+
 impl RuntimeHooks for Oot {
     fn needs(&self) -> &'static [Fact<Need>] {
         NEEDS
+    }
+
+    fn sf_services(&self) -> &'static [Fact<&'static str>] {
+        SF_SERVICES
     }
 
     fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
