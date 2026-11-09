@@ -23,6 +23,7 @@
 //! distinct run. `NXKIT_<NAME>_COMPARE=1` runs the game's chain and the plan on a sampled frame and prints the difference.
 
 mod ane;
+mod ane_trace;
 mod book;
 mod build;
 mod capture;
@@ -195,7 +196,7 @@ impl Native {
         stats: &mut EncodeStats,
     ) -> Option<Prepared> {
         if self.ane_switch.contains(&true) {
-            self.copies.ingest(&cx.detail.copies);
+            ane_trace::frame(&mut self.copies, cx);
         }
         if cx.detail.dispatches.len() < 2 {
             return None;
@@ -528,6 +529,7 @@ pub(crate) struct PrepareCx<'a> {
     pub(crate) view: &'a dyn EncodeView,
     pub(crate) textures: &'a FastMap<TexId, Res>,
     pub(crate) store: &'a crate::textures::TextureStore,
+    pub(crate) pools: (&'a crate::copyback::CopyBack, &'a [(u64, u64)]),
 }
 
 impl PrepareCx<'_> {
