@@ -251,3 +251,60 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
         assert_eq!(x.writes, want, "pass {i}");
     }
 }
+
+#[test]
+fn a_network_is_switched_by_its_own_name() {
+    assert_eq!(util::env_name("ndve", ""), "NXKIT_NDVE");
+    assert_eq!(util::env_name("ndsr", ""), "NXKIT_NDSR");
+    assert_eq!(util::env_name("ndsr", "_COMPARE"), "NXKIT_NDSR_COMPARE");
+}
+
+/// A network that uses none of the per-run hooks keeps the static interface.
+#[test]
+fn the_default_shape_is_the_static_blobs_with_no_tag() {
+    struct Plain;
+    static B: [BlobSpec; 1] = [BlobSpec {
+        dispatch: 0,
+        slot: 2,
+        offset: 0,
+        len: 8,
+    }];
+    impl Replacement for Plain {
+        fn name(&self) -> &'static str {
+            "plain"
+        }
+        fn find(&self, _: &[&str]) -> Option<Run> {
+            None
+        }
+        fn blobs(&self) -> &'static [BlobSpec] {
+            &B
+        }
+        fn accepts(&self, blobs: &[&[u8]]) -> bool {
+            blobs.len() == 1
+        }
+        fn plan(&self, _: &[&[u8]]) -> Result<Plan, String> {
+            Ok(Plan {
+                buffers: vec![],
+                steps: vec![],
+            })
+        }
+        fn source(&self) -> &'static str {
+            ""
+        }
+        fn resources(&self) -> &'static [ResourceSpec] {
+            &[]
+        }
+    }
+    let info = RunInfo {
+        keys: vec!["k"],
+        pushes: vec![None],
+        bound: vec![],
+    };
+    let shape = Plain.shape(&info);
+    assert_eq!(shape.blobs, &B);
+    assert!(shape.tag.is_empty() && shape.refusal.is_none());
+    assert!(Plain.accepts_in(&[&[0u8; 8]], &shape, &info));
+    assert!(Plain.plan_in(&[&[0u8; 8]], &shape, &info).is_ok());
+    assert_eq!(Plain.lead(), 0);
+    assert!(info.bound(GameResource::Output).is_none());
+}

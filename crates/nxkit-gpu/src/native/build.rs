@@ -73,17 +73,19 @@ pub(super) fn written_resources(plan: &Plan) -> Vec<GameResource> {
 pub(super) fn build(
     net: &dyn Replacement,
     blobs: &[&[u8]],
+    shape: &Shape,
+    info: &RunInfo<'_>,
     cx: &PrepareCx<'_>,
 ) -> Result<Entry, Refusal> {
     let name = net.name();
-    if !net.accepts(blobs) {
+    if !net.accepts_in(blobs, shape, info) {
         return refuse(
             "weights",
             format!("{name}: the bound weights are not the network's"),
         );
     }
     let plan = net
-        .plan(blobs)
+        .plan_in(blobs, shape, info)
         .map_err(|e| Refusal("build", format!("{name}: {e}")))?;
     let mut buffers = Vec::with_capacity(plan.buffers.len());
     for b in &plan.buffers {
