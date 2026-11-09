@@ -1,4 +1,4 @@
-//! The CPU reference of the vr network programs: a port of the Python model of `docs/plans/ndsr-native.md` section 7,
+//! The CPU reference of the vr network programs (and, in [`light`], of the vr_light ones): a port of the Python model of `docs/plans/ndsr-native.md` section 7,
 //! step for step (window, patches, six layers with an f16 rounding after every HMMA, grid with the f16 base sample,
 //! unsharp mask, tile rule, resample, chroma, encoding, hash dither).
 //!
@@ -12,6 +12,7 @@
 
 pub mod arith;
 pub mod grid;
+pub mod light;
 pub mod network;
 pub mod output;
 pub mod picture;
@@ -71,9 +72,9 @@ pub struct Tile {
 /// Why the reference refuses a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// Only vr programs are modelled.
+    /// The program is not of the pack the function models ([`run_tile`]: vr, [`light::run_tile`]: vr_light).
     NotVr,
-    /// The blob is not 0x3000 bytes.
+    /// The blob is not the network's: 0x3000 bytes for vr, 0x3000 or 0x1800 (the 4/3 model) for vr_light.
     BadBlob,
 }
 
@@ -99,6 +100,9 @@ pub fn run_tile(
         .as_ref()
         .filter(|_| net.pack == Pack::Vr)
         .ok_or(Error::NotVr)?;
+    if weights.layers() != network::LAYERS {
+        return Err(Error::BadBlob);
+    }
     let (nin, margin) = (usize::from(net.in_px), net.margin() as i64);
     let (npx, npy) = (net.patches_x(), net.patches_y());
     let (ww, wh) = net.window_size();

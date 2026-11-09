@@ -31,7 +31,7 @@ pub fn tile_range(wi: usize, step: usize, n_in: usize, n_out: usize) -> (usize, 
 }
 
 /// The sRGB encoding of variant A (`FSETP.GEU`: equal and NaN take the power branch).
-fn srgb(lin: f32) -> f32 {
+pub(crate) fn srgb(lin: f32) -> f32 {
     if lin >= k(0x3b4d_2e1c) || lin.is_nan() {
         let lg = if lin > 0.0 {
             (f64::log2(f64::from(lin))) as f32
