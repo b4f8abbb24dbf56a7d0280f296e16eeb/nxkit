@@ -125,6 +125,10 @@ pub struct FrameStep {
     /// Only the work judges a frame (`game.json` key `pace_work`): a frame is late when its cost does not fit the
     /// hold, not when it was shown longer; a hitch does not count; a trial waits at most [`FSTEP_HOLD_MAX_WORK`].
     pub work: bool,
+    /// Time that a late frame lost is dropped, not paid back (the `steady` profile). Paying it back with longer steps
+    /// needs frames that fit a longer hold; a steady hold has none, so the debt stayed at its maximum and every frame
+    /// stepped and showed two vsyncs (Ocarina of Time, 2026-11-09).
+    pub drop_debt: bool,
     /// Vsyncs at `kmin` in a row.
     pub run: f64,
     /// The running mean of the cost of the frames on time at `kmin`.
@@ -218,6 +222,10 @@ impl FrameStep {
         }
         if self.debt < -1.0 {
             self.debt = -1.0;
+        }
+        if self.drop_debt && self.debt > 0.0 {
+            self.dropped += self.debt;
+            self.debt = 0.0;
         }
         self.since += input.shown;
         let cap_probe = kmin < self.kmin && self.kmin <= FSTEP_MAX && self.k > kmin;

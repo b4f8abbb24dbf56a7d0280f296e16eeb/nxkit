@@ -200,10 +200,11 @@ fn a_steady_step_keeps_60_fps_through_long_frames_and_heat() {
     c.work = true;
     c.steady = true;
     let mut s = LoadStepper::new(c);
-    // Frames of 1.6 vsyncs of work, then a serious thermal state: the hold stays one vsync. The step pays the time
-    // back, so it may be longer.
+    // Frames of 1.6 vsyncs of work, then a serious thermal state: the hold stays one vsync.
     let out = run(&mut s, 1, 600, 1000.0 / 60.0 * 1.6, |_| {});
     assert_eq!((out.cap, out.hold, out.kmin), (60, 1, 1));
+    // A steady step drops the lost time instead of paying it back, so the step stays one vsync too.
+    assert_eq!(out.step, 1);
     let out = run(&mut s, 601, 600, 1000.0 / 60.0, |p| p.thermal = 2);
     assert_eq!((out.cap, out.hold, out.step), (60, 1, 1));
     // The same long frames without steady raise the hold.
