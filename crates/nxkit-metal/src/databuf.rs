@@ -28,6 +28,16 @@ unsafe impl Sync for DataBuffer {}
 impl DataBuffer {
     /// Makes a zeroed buffer of `len` bytes. It joins the residency set.
     pub fn new(ctx: &Context, len: u64) -> Result<Self> {
+        Self::make(ctx, len, true)
+    }
+
+    /// Makes a buffer of `len` bytes that the CPU does not fill with zeros first. Use it when everything that is read
+    /// is written before: a staging buffer that a kernel fills. It joins the residency set.
+    pub fn new_unfilled(ctx: &Context, len: u64) -> Result<Self> {
+        Self::make(ctx, len, false)
+    }
+
+    fn make(ctx: &Context, len: u64, zero: bool) -> Result<Self> {
         if len == 0 {
             return Err(MetalError::Invalid("a data buffer needs at least one byte"));
         }
@@ -35,8 +45,10 @@ impl DataBuffer {
             .device()
             .newBufferWithLength_options(len as usize, MTLResourceOptions::StorageModeShared)
             .ok_or_else(|| create("data buffer", "newBufferWithLength returned nil"))?;
-        // SAFETY: `contents` points to `len` bytes of shared memory that nobody else uses yet.
-        unsafe { std::ptr::write_bytes(raw.contents().cast::<u8>(), 0, len as usize) };
+        if zero {
+            // SAFETY: `contents` points to `len` bytes of shared memory that nobody else uses yet.
+            unsafe { std::ptr::write_bytes(raw.contents().cast::<u8>(), 0, len as usize) };
+        }
         ctx.add_allocation(ProtocolObject::from_ref(&*raw));
         let tracked = crate::memstats::Tracked::new(
             crate::memstats::Kind::Buffer,

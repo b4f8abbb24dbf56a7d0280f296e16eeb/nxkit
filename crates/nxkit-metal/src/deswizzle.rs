@@ -347,7 +347,7 @@ impl Deswizzler {
         &self.k.table
     }
 
-    /// Deswizzles a whole 2D level into a tightly packed buffer. Compressed blocks use this path before a
+    /// Deswizzles a whole 2D level into a tightly packed range of a buffer that starts at `dst_offset`. Compressed blocks use this path before a
     /// buffer-to-texture copy, because Metal cannot copy an integer texture directly into a compressed texture.
     #[allow(clippy::too_many_arguments)]
     pub fn encode_to_buffer(
@@ -356,13 +356,16 @@ impl Deswizzler {
         scratch: &Scratch,
         guest: &Arc<GuestMemory>,
         guest_offset: u64,
-        dst: &Arc<DataBuffer>,
+        (dst, dst_offset): (&Arc<DataBuffer>, u64),
         params: &DeswizzleParams,
     ) -> Result<()> {
         let level = params.level()?;
         let size =
             u64::from(params.width) * u64::from(params.height) * u64::from(params.bytes_per_block);
-        if size > dst.len() {
+        if dst_offset
+            .checked_add(size)
+            .is_none_or(|end| end > dst.len())
+        {
             return Err(MetalError::Invalid("the deswizzle buffer is too small"));
         }
         let base = guest.gpu_address_of_offset(guest_offset, params.storage_bytes())?;
@@ -387,7 +390,7 @@ impl Deswizzler {
         })?;
         pass.encode(&ComputeCommand::SetBuffer {
             index: 1,
-            gpu_addr: dst.gpu_address(),
+            gpu_addr: dst.gpu_address() + dst_offset,
         })?;
         pass.encode(&ComputeCommand::DispatchThreads {
             grid: job.extent,
