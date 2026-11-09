@@ -1443,7 +1443,10 @@ fn archive_hits_and_misses_are_told_apart() {
         },
     )
     .unwrap();
-    assert_eq!(second.render_traced(1, &desc()).unwrap().1, Source::Archive);
+    assert!(matches!(
+        second.render_traced(1, &desc()).unwrap().1,
+        Source::Archive(_)
+    ));
     let mut other = desc();
     other.fragment = None;
     let why = second.explain_miss(&other).unwrap();

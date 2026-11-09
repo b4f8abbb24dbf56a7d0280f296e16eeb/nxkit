@@ -97,7 +97,10 @@ fn a_shard_is_opened_by_the_first_lookup_and_found_through_the_index() {
     // nothing is open before the first lookup
     assert_eq!(cache.shard_stats(), Some((2, 2, 0, 0)));
     assert_eq!(mem_stats().archive_shards, 0);
-    assert_eq!(cache.render_traced(1, &desc()).unwrap().1, Source::Archive);
+    assert!(matches!(
+        cache.render_traced(1, &desc()).unwrap().1,
+        Source::Archive(_)
+    ));
     assert_eq!(cache.shard_stats(), Some((2, 2, 1, 1)));
     assert_eq!(mem_stats().archive_shards, 1);
     assert!(mem_stats().archive_shard_bytes > 0);
@@ -105,7 +108,10 @@ fn a_shard_is_opened_by_the_first_lookup_and_found_through_the_index() {
     cache.compute(2, &add, "add_words").unwrap();
     assert_eq!(cache.shard_stats(), Some((2, 2, 1, 2)));
     // the render shard is asked again for a pipeline of another key: it reopens
-    assert_eq!(cache.render_traced(3, &desc()).unwrap().1, Source::Archive);
+    assert!(matches!(
+        cache.render_traced(3, &desc()).unwrap().1,
+        Source::Archive(_)
+    ));
     assert_eq!(cache.shard_stats(), Some((2, 2, 1, 3)));
     assert_eq!(mem_stats().archive_shards, 1);
     std::fs::remove_dir_all(&dir).unwrap();
@@ -192,7 +198,10 @@ fn a_folder_without_an_index_leaves_the_single_archive_in_use() {
     .unwrap();
     assert!(cache.has_archive());
     assert_eq!(cache.shard_stats(), None);
-    assert_eq!(cache.render_traced(1, &desc()).unwrap().1, Source::Archive);
+    assert!(matches!(
+        cache.render_traced(1, &desc()).unwrap().1,
+        Source::Archive(_)
+    ));
     // the single archive is counted as one open archive with its file size
     assert!(mem_stats().archive_shard_bytes > 0);
     drop(cache);

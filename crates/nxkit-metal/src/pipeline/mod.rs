@@ -206,7 +206,7 @@ pub struct MeshPipelineDesc<'a> {
     pub payload_bytes: u32,
 }
 
-pub use cache::{ArchiveConfig, MissWhy, PipelineCache, Source};
+pub use cache::{ArchiveConfig, BaseStats, MissWhy, PipelineCache, Source};
 
 mod cache;
 mod lru;

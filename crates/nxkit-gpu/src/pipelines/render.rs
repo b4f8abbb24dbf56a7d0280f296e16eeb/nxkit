@@ -170,6 +170,10 @@ impl Pipelines {
             {
                 return Err(Skip::Pipeline);
             }
+            stats::pending_draw();
+            if self.builds.touch(key) {
+                return Err(Skip::Pending);
+            }
             let job = Job {
                 key,
                 what: format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str())),
@@ -255,6 +259,10 @@ impl Pipelines {
             )
         };
         if async_on() {
+            stats::pending_draw();
+            if self.builds.touch(key) {
+                return Err(Skip::Pending);
+            }
             let job = Job {
                 key,
                 what: what(),

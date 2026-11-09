@@ -96,8 +96,8 @@ pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{
-    ArchiveConfig, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache, RenderPipeline,
-    RenderPipelineDesc, ShaderLibrary, Source,
+    ArchiveConfig, BaseStats, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache,
+    RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source,
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
 pub use present::{
