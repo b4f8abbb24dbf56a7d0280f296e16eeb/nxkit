@@ -130,7 +130,8 @@ fn merging_adds_what_the_other_run_saw_after_the_own_entries() {
 #[test]
 fn another_version_or_no_header_is_refused() {
     assert!(Seen::parse("").is_err());
-    assert!(Seen::parse("nxkit-pipelines-seen 2\n").is_err());
+    assert!(Seen::parse("nxkit-pipelines-seen 1\n").is_err());
+    assert!(Seen::parse("nxkit-pipelines-seen 3\n").is_err());
     assert!(Seen::parse("C\t1\ta\tb\n").is_err());
 }
 
