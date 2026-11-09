@@ -37,8 +37,17 @@ impl Dec {
     }
 
     /// The packets and pictures that the decoder holds for the game: queued, in flight and waiting for a buffer.
+    ///
+    /// With a worker it is the input side only: packets queued and in flight. Its pictures are at most
+    /// [`LOOKAHEAD`](super::LOOKAHEAD), because the worker waits for a released buffer before it decodes more. Counting
+    /// them closed the input while the game held both its buffers, and a player that sends before it releases waited
+    /// for ever (Ocarina of Time's opening: 11 pictures held, the event down, no buffer released).
     pub(super) fn load(&self) -> usize {
-        self.held.len() + self.queued.len() + self.inflight
+        if self.worker.is_some() {
+            self.queued.len() + self.inflight
+        } else {
+            self.held.len() + self.queued.len() + self.inflight
+        }
     }
 
     /// The load at which the event goes down. A decoder with a lag has that many frames more in flight.
@@ -285,6 +294,10 @@ impl Dec {
 
     /// [`Dec::drain`] for a caller that changed the load itself: `before` is the load before it did.
     pub(super) fn drain_from(&mut self, before: usize, took: bool, fx: &mut Effects) {
+        if self.worker.is_some() && !self.pend.is_empty() && !self.held.is_empty() {
+            // Pictures leave for buffers: the worker may decode ahead again.
+            self.cv.notify_all();
+        }
         while !self.pend.is_empty() && (!self.held.is_empty() || self.eos_pending) {
             let Some(i) = self.pend.pop_front() else {
                 break;

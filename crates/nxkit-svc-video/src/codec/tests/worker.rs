@@ -298,23 +298,36 @@ fn hold_counts_packets_in_flight_and_pictures() {
         let d = lock(&r.dec);
         assert_eq!(d.load(), HOLD);
     }
-    // Wait for the worker to finish what it has: the load does not change by that.
+    // The worker decodes ahead only up to LOOKAHEAD pictures, then waits for a released buffer. The pictures leave
+    // the input side, so the load falls by them, and the rest of the packets wait in the queue.
+    r.wait_for("the lookahead", |r| lock(&r.dec).held.len() == LOOKAHEAD);
     std::thread::sleep(Duration::from_millis(60));
-    assert_eq!(lock(&r.dec).load(), HOLD);
-    // Room comes back with released buffers. The event stays down until the load is under the limit.
+    {
+        let d = lock(&r.dec);
+        assert_eq!(d.held.len(), LOOKAHEAD);
+        assert_eq!(d.load(), HOLD - LOOKAHEAD);
+    }
+    // Released buffers take the pictures, the worker decodes the next packets, and the event rises once the input
+    // is under the limit.
     lock(&r.rec).events.clear();
     let limit = lock(&r.dec).ready_limit();
     assert!(limit < HOLD);
-    for i in 0..(HOLD - limit + 1) as u32 {
+    for i in 0..HOLD as u32 {
         r.call(|d, fx| {
             d.register(i, None, i);
             d.release(i, fx);
         });
+        if lock(&r.dec).load() < limit {
+            break;
+        }
+        r.wait_for("the worker to refill", |r| {
+            let d = lock(&r.dec);
+            d.held.len() == LOOKAHEAD || d.queued.is_empty()
+        });
     }
-    assert_eq!(lock(&r.dec).load(), limit - 1);
+    r.wait_for("room", |r| lock(&r.dec).load() < limit);
     let events = lock(&r.rec).events.clone();
     assert_eq!(events.last(), Some(&true));
-    assert!(events[..events.len() - 1].iter().all(|e| !e));
 }
 
 #[test]

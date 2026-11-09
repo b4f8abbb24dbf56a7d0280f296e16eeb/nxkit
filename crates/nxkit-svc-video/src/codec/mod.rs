@@ -63,6 +63,9 @@ pub(crate) const READY: usize = 4;
 /// Decoded pictures that wait for a released buffer, at which packets are refused. A player that sends one packet per
 /// signal and ignores the result needs room for a signal that is in flight when the event goes down.
 pub(crate) const HOLD: usize = 12;
+/// Pictures that the worker of a CPU stream decodes ahead of the released buffers. Then it waits for the game, as a
+/// hardware decoder stops when its output buffers are full. The input queue keeps taking packets meanwhile.
+pub(crate) const LOOKAHEAD: usize = 3;
 /// The decoders that exist at once. The sync handle names one by a number from 1 to this.
 const MAX_DECODERS: u32 = 16;
 /// Where the submission ready event lies inside the decoder object of the SDK.

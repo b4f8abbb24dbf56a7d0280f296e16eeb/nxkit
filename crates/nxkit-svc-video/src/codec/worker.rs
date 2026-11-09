@@ -91,6 +91,17 @@ pub(super) fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
             cv.notify_all();
             continue;
         }
+        if d.held.len() >= super::LOOKAHEAD {
+            // Enough pictures wait for the game. A release wakes the worker (`drain`).
+            let (g, timeout) = cv
+                .wait_timeout(d, Duration::from_secs(1))
+                .unwrap_or_else(PoisonError::into_inner);
+            d = g;
+            if timeout.timed_out() && !d.stop {
+                d.diag_tick("worker");
+            }
+            continue;
+        }
         if let Some(job) = d.queued.pop_front() {
             d.inflight += 1;
             d.busy = true;
