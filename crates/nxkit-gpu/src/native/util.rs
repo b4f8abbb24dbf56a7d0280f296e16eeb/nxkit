@@ -17,6 +17,11 @@ pub(super) fn compare_on(net: &str) -> bool {
     std::env::var(env_name(net, "_COMPARE")).is_ok_and(|v| v == "1")
 }
 
+/// `NXKIT_<NAME>_ANE=1` runs the network on the Neural Engine, with the plan as the fallback.
+pub(super) fn ane_on(net: &str) -> bool {
+    std::env::var(env_name(net, "_ANE")).is_ok_and(|v| v == "1")
+}
+
 /// The storage buffer binding of a compute dispatch at `slot`.
 pub(super) fn sbuf_of(dd: &DispatchDetail, slot: u32) -> Option<&UboDetail> {
     dd.sbufs

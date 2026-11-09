@@ -172,6 +172,7 @@ fn a_prepared_run_skips_its_dispatches_and_anchors_the_last() {
             pipelines: vec![],
             barrier_before: vec![],
             written: vec![],
+            ane: None,
         }),
         name: "t",
         first: 3,
@@ -180,6 +181,7 @@ fn a_prepared_run_skips_its_dispatches_and_anchors_the_last() {
         pushes: vec![],
         reads_later: vec![],
         compare: None,
+        ane: None,
     };
     assert!(!p.skips(2) && p.skips(3) && p.skips(5) && !p.skips(6));
     assert!(p.is_anchor(5) && !p.is_anchor(4));
@@ -226,6 +228,7 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
             pipelines: vec![],
             barrier_before: vec![],
             written: vec![GameResource::Output],
+            ane: None,
         }),
         name: "t",
         first: 0,
@@ -237,6 +240,7 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
         pushes: vec![],
         reads_later: vec![],
         compare: None,
+        ane: None,
     };
     assert_eq!(p.writes(), vec![TexId(7)]);
     let ords = crate::draws::ordinals(&frame);

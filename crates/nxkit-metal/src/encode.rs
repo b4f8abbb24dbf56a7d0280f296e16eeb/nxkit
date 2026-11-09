@@ -16,10 +16,32 @@ use crate::table::Keep;
 
 pub(crate) type RawCommandBuffer = Retained<ProtocolObject<dyn MTL4CommandBuffer>>;
 
+/// A function that runs when the GPU finished a command buffer: with `true` when it ran without error, with `false`
+/// when it failed or when the command buffer was dropped without being committed. It runs exactly once.
+pub(crate) struct AfterGpu(Option<Box<dyn FnOnce(bool) + Send>>);
+
+impl AfterGpu {
+    /// Runs the function.
+    pub(crate) fn run(mut self, ok: bool) {
+        if let Some(f) = self.0.take() {
+            f(ok);
+        }
+    }
+}
+
+impl Drop for AfterGpu {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f(false);
+        }
+    }
+}
+
 /// A Metal 4 command buffer that is being encoded.
 pub struct CommandBuffer {
     pub(crate) raw: RawCommandBuffer,
     retained: Vec<Keep>,
+    after: Vec<AfterGpu>,
     pub(crate) encode_passes: u32,
     /// The pass descriptor that every render pass of this command buffer fills again, and what it holds.
     pub(crate) pass_desc: Option<crate::render::PassDescriptor>,
@@ -34,6 +56,7 @@ impl CommandBuffer {
         Self {
             raw,
             retained: Vec::new(),
+            after: Vec::new(),
             encode_passes: 0,
             pass_desc: None,
         }
@@ -45,6 +68,17 @@ impl CommandBuffer {
 
     pub(crate) fn take_retained(&mut self) -> Vec<Keep> {
         std::mem::take(&mut self.retained)
+    }
+
+    pub(crate) fn take_after(&mut self) -> Vec<AfterGpu> {
+        std::mem::take(&mut self.after)
+    }
+
+    /// Runs `f` on a Metal thread when the GPU finished this command buffer, with `true` when it did not fail. `f` runs
+    /// with `false` instead when the command buffer fails or is dropped without being committed, so it always runs
+    /// once. Use it to hand the buffer's results to other hardware (the Neural Engine) or to free what it used.
+    pub fn after_gpu(&mut self, f: impl FnOnce(bool) + Send + 'static) {
+        self.after.push(AfterGpu(Some(Box::new(f))));
     }
 
     /// Keeps a value alive until the GPU finished the command buffer.
