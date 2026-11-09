@@ -319,7 +319,7 @@ impl FrameQueries {
                 continue;
             }
             if let Some(l) = &self.counters.landed {
-                l.land(w.addr, value, w.seq);
+                l.land(w.addr, w.place, value, w.seq);
             }
             st.written += 1;
             if src == Source::Samples {
