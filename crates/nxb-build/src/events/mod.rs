@@ -4,13 +4,19 @@
 //! one live status line at the bottom of a terminal (spinner, stage, bar, count, ETA, elapsed time) that a ticker
 //! thread redraws, and prints the permanent lines above it.
 
+mod count;
+mod format;
+
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use nxb_obs::codes::{self, Code};
 use nxb_pyjson::Value;
+
+pub use count::Count;
+use format::{clock, eta, hms, live_line, now};
 
 /// How often the plain-lines mode prints the count of a long step, in seconds.
 const LINES_INTERVAL: f64 = 30.0;
@@ -76,33 +82,6 @@ pub struct Progress {
     out: Arc<Out>,
     bar: Option<Arc<Bar>>,
     ticker: Mutex<Option<std::thread::JoinHandle<()>>>,
-}
-
-/// A count that workers raise with one atomic add per item (or per chunk) and [`Progress::tracked`] reads: no lock and
-/// no allocation in the hot loop.
-#[derive(Debug, Default)]
-pub struct Count {
-    /// Items (or bytes) done.
-    pub done: AtomicU64,
-    /// Items (or bytes) in all, 0 while unknown.
-    pub total: AtomicU64,
-}
-
-impl Count {
-    /// `n` more done.
-    pub fn add(&self, n: u64) {
-        self.done.fetch_add(n, Ordering::Relaxed);
-    }
-
-    /// The total, once it is known.
-    pub fn set_total(&self, n: u64) {
-        self.total.store(n, Ordering::Relaxed);
-    }
-
-    /// `n` more in all.
-    pub fn add_total(&self, n: u64) {
-        self.total.fetch_add(n, Ordering::Relaxed);
-    }
 }
 
 const TICK: Duration = Duration::from_millis(100);
@@ -175,118 +154,6 @@ impl Bar {
             let _ = o.write_all(buf.as_bytes());
             let _ = o.flush();
         }
-    }
-}
-
-/// `n` bytes as `B`, `KiB`, `MiB` or `GiB`.
-fn size(n: u64) -> String {
-    if n < 1024 {
-        return format!("{n} B");
-    }
-    let (mut v, mut i) = (n as f64, 0);
-    while v >= 1024.0 && i < 3 {
-        v /= 1024.0;
-        i += 1;
-    }
-    format!("{v:.1} {}", ["B", "KiB", "MiB", "GiB"][i])
-}
-
-/// The seconds left from the last minute of counts, `None` while there is too little to say.
-fn eta(st: &Cur) -> Option<f64> {
-    match (st.total, st.hist.front(), st.hist.back(), st.done) {
-        (Some(t), Some(a), Some(b), Some(d))
-            if st.hist.len() >= 2 && b.0 - a.0 >= 3.0 && b.1 > a.1 =>
-        {
-            Some(t.saturating_sub(d) as f64 * (b.0 - a.0) / (b.1 - a.1) as f64)
-        }
-        _ => None,
-    }
-}
-
-/// `[k/n] name · step`, a bar with a percent when the total is known, the count, the ETA, the stage's running time and
-/// the note, cut to `width - 1` columns.
-fn live_line(c: &Cur, n: usize, spin: &str, width: usize) -> String {
-    let mut s = format!("{spin} [{}/{n}] {}", c.k, c.name);
-    if !c.step.is_empty() {
-        s.push_str(" · ");
-        s.push_str(&c.step);
-    }
-    let count = |d: u64, t: Option<u64>| {
-        let bytes = c.unit == "B";
-        let f = |v: u64| if bytes { size(v) } else { v.to_string() };
-        let mut x = match t {
-            Some(t) => format!("{}/{}", f(d), f(t)),
-            None => f(d),
-        };
-        if !bytes && !c.unit.is_empty() {
-            x.push(' ');
-            x.push_str(&c.unit);
-        }
-        x
-    };
-    match (c.done, c.total) {
-        (d, Some(t)) if t > 0 => {
-            let d = d.unwrap_or(0);
-            let bw = if width >= 100 {
-                24
-            } else if width >= 70 {
-                16
-            } else {
-                10
-            };
-            let frac = (d as f64 / t as f64).clamp(0.0, 1.0);
-            let fill = (frac * bw as f64) as usize;
-            s.push_str(&format!(
-                "  [{}{}] {:>3}%  {}",
-                "#".repeat(fill),
-                "-".repeat(bw - fill),
-                (frac * 100.0) as u64,
-                count(d, Some(t))
-            ));
-            if let Some(e) = eta(c) {
-                s.push_str(&format!("  ETA {}", hms(e)));
-            }
-        }
-        (Some(d), t) => s.push_str(&format!("  {}", count(d, t.filter(|t| *t > 0)))),
-        _ => {}
-    }
-    s.push_str(&format!("  {}", hms(c.t0.elapsed().as_secs_f64())));
-    if !c.note.is_empty() {
-        s.push_str("  ");
-        s.push_str(&c.note);
-    }
-    let max = width.saturating_sub(1).max(1);
-    if s.chars().count() > max {
-        s = s.chars().take(max - 1).collect();
-        s.push('…');
-    }
-    s
-}
-
-fn now() -> f64 {
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0);
-    (t * 1000.0).round() / 1000.0
-}
-
-fn clock() -> String {
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let (_, _, _, h, m, s) = nxb_pack::tz::local(t);
-    format!("{h:02}:{m:02}:{s:02}")
-}
-
-fn hms(s: f64) -> String {
-    let s = s as u64;
-    let (h, m) = ((s / 60) / 60, (s / 60) % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{:02}", s % 60)
-    } else {
-        format!("{m}:{:02}", s % 60)
     }
 }
 
@@ -719,71 +586,4 @@ impl Drop for Progress {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-
-    #[derive(Clone, Default)]
-    struct Buf(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for Buf {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// Schema: every line is one JSON object with `ev`, `code`, `severity`, `t` last, and the pair is a row of the table.
-    #[test]
-    fn every_event_has_a_table_code_and_old_fields_stay() {
-        let buf = Buf::default();
-        let p = Progress::new(Mode::Json, Box::new(buf.clone()));
-        p.plan(2);
-        p.stage("extract", "first");
-        p.set(Update {
-            step: Some("second"),
-            done: Some(1),
-            total: Some(4),
-            unit: Some("files"),
-            note: None,
-        });
-        p.say("plain");
-        p.say("[RED] broken");
-        p.say("[YELLOW] careful");
-        p.end("done", true);
-        p.stage("pack", "");
-        p.end("boom", false);
-        let text = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
-        let mut seen = Vec::new();
-        for line in text.lines() {
-            let v = nxb_pyjson::parse(line).unwrap();
-            let Value::Object(fields) = &v else {
-                panic!("{line}")
-            };
-            let ev = v.get("ev").and_then(Value::as_str).unwrap();
-            let code = v.get("code").and_then(Value::as_str).unwrap();
-            let sev = v.get("severity").and_then(Value::as_str).unwrap();
-            let row = nxb_obs::codes::lookup(code).unwrap();
-            assert_eq!((row.ev, row.severity.name()), (ev, sev), "{line}");
-            assert_eq!(fields.last().unwrap().0, "t");
-            seen.push((ev.to_string(), code.to_string()));
-        }
-        let want = |ev: &str, code: &str| {
-            assert!(
-                seen.contains(&(ev.into(), code.into())),
-                "{ev} {code} in {seen:?}"
-            )
-        };
-        want("stage", "NXB1001");
-        want("step", "NXB1004");
-        want("progress", "NXB1005");
-        want("say", "NXB1006");
-        want("say", "NXB1007");
-        want("say", "NXB1008");
-        want("stage_end", "NXB1002");
-        want("stage_end", "NXB1003");
-    }
-}
+mod tests;
