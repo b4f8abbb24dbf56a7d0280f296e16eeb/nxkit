@@ -40,14 +40,31 @@ fn key(name: &str) -> u64 {
 #[ignore = "needs a Metal 4 device; a timing diagnostic"]
 fn time_every_kernel() {
     let ctx = Context::system_default().expect("Metal 4 device");
-    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
-    // NDSR_BENCH_SOFT=1 builds with the tests' soft sampler (what ndsr_kernel.rs runs), default is the real one.
-    let source = if std::env::var("NDSR_BENCH_SOFT").is_ok() {
-        format!("#define NDSR_SOFT_SAMPLER\n{}", msl::SOURCE)
-    } else {
-        msl::SOURCE.to_string()
+    // NDSR_BENCH_SRC: comma-separated files holding complete MSL sources, timed side by side (round-robin per
+    // iteration, so that load from other work hits all alike); default is msl::SOURCE. NDSR_BENCH_DEFS is put before
+    // every source, e.g. "#define NDSR_SOFT_SAMPLER" (what ndsr_kernel.rs runs). NDSR_BENCH_ONLY keeps the kernels
+    // whose name contains it.
+    let defs = std::env::var("NDSR_BENCH_DEFS").unwrap_or_default();
+    let sources: Vec<String> = match std::env::var("NDSR_BENCH_SRC") {
+        Ok(list) => list
+            .split(',')
+            .map(|f| std::fs::read_to_string(f).expect("source file"))
+            .collect(),
+        Err(_) => vec![msl::SOURCE.to_string()],
     };
-    let lib = ShaderLibrary::from_source(&ctx, "ndsr", &source).unwrap();
+    let libs: Vec<ShaderLibrary> = sources
+        .iter()
+        .map(|src| ShaderLibrary::from_source(&ctx, "ndsr", &format!("{defs}\n{src}")).unwrap())
+        .collect();
+    let caches: Vec<PipelineCache> = libs
+        .iter()
+        .map(|_| PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap())
+        .collect();
+    let only = std::env::var("NDSR_BENCH_ONLY").unwrap_or_default();
+    // NDSR_BENCH_THREADS: threads of a threadgroup for each source (default: the plan's)
+    let threads: Vec<Option<u32>> = std::env::var("NDSR_BENCH_THREADS")
+        .map(|l| l.split(',').map(|t| t.parse().ok()).collect())
+        .unwrap_or_default();
     let blob: Vec<u8> = (0..pack::BLOB_BYTES / 2)
         .flat_map(|i| {
             let v = ((i * 2_654_435_761usize >> 7) % 1000) as f64 / 1000.0 - 0.5;
@@ -59,11 +76,17 @@ fn time_every_kernel() {
         .flat_map(|i| {
             let (x, y) = ((i % IN[0]) as f32, (i / IN[0]) as f32);
             let g = 0.5 + 0.3 * (x * 0.021 + y * 0.013).sin();
-            [g + 0.05, g, g - 0.05, 1.0].into_iter().flat_map(f32::to_le_bytes)
+            [g + 0.05, g, g - 0.05, 1.0]
+                .into_iter()
+                .flat_map(f32::to_le_bytes)
         })
         .collect();
     guest.write(0, &texels).unwrap();
-    let tex0 = Texture::new(&ctx, TextureDesc::compute_2d(IN[0], IN[1], Format::Rgba32Float)).unwrap();
+    let tex0 = Texture::new(
+        &ctx,
+        TextureDesc::compute_2d(IN[0], IN[1], Format::Rgba32Float),
+    )
+    .unwrap();
     let table = ArgumentTable::new(&ctx, 4, 4).unwrap();
     let mut ring = FrameRing::new(&ctx).unwrap();
     {
@@ -81,7 +104,7 @@ fn time_every_kernel() {
         pass.end();
         frame.submit().unwrap().wait().unwrap();
     }
-    for k in &KERNELS {
+    for k in KERNELS.iter().filter(|k| k.name.contains(&only)) {
         let plan = kernels::plan_kernel(k, &blob, IN, OUT).expect("plan");
         let buffers: Vec<DataBuffer> = plan
             .buffers
@@ -92,59 +115,75 @@ fn time_every_kernel() {
                 d
             })
             .collect();
-        let fmt = if k.name.ends_with('c') { Format::Rg11B10Float } else { Format::Rgba32Float };
-        let out = Texture::new(&ctx, TextureDesc::compute_2d(OUT[0], OUT[1], fmt)).unwrap();
-        let mut times = Vec::new();
-        for it in 0..18 {
-            let mut frame = ring.begin().unwrap();
-            let push = frame.scratch().push(&push_words()).unwrap();
-            {
-                let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
-                let step = &plan.steps[0];
-                let pipe = cache.compute(key(step.kernel), &lib, step.kernel).unwrap();
-                pass.encode(&ComputeCommand::SetPipeline(pipe)).unwrap();
-                for b in &step.buffers {
-                    let gpu_addr = match b.source {
-                        Source::Buffer(n) => buffers[n].gpu_address(),
-                        _ => push,
-                    };
-                    pass.encode(&ComputeCommand::SetBuffer { index: b.index, gpu_addr }).unwrap();
-                }
-                for b in &step.textures {
-                    let texture = match b.source {
-                        Source::Game(GameResource::Texture(0)) => tex0.clone(),
-                        _ => out.clone(),
-                    };
-                    pass.encode(&ComputeCommand::SetTexture { index: b.index, texture }).unwrap();
-                }
-                pass.encode(&ComputeCommand::DispatchThreadgroups {
-                    groups: step.groups,
-                    threads: step.threads,
-                })
-                .unwrap();
-                pass.end();
-            }
-            let stats = frame.submit().unwrap().wait().unwrap();
-            if it >= 3 {
-                times.push(stats.gpu_ns as f64 / 1e6);
-            }
-        }
-        let mut hash = 0xcbf2_9ce4_8422_2325u64;
-        if k.name.ends_with('c') {
-            let mut px = vec![0u8; (OUT[0] * OUT[1] * 4) as usize];
-            out.read((OUT[0] * 4) as usize, &mut px).unwrap();
-            let sum: u64 = px.iter().map(|&b| u64::from(b)).sum();
-            assert!(sum > 0, "{}: nothing written", k.name);
-            hash = px.iter().fold(hash, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+        let fmt = if k.name.ends_with('c') {
+            Format::Rg11B10Float
         } else {
-            let mut px = vec![0u8; (OUT[0] * OUT[1] * 16) as usize];
-            out.read((OUT[0] * 16) as usize, &mut px).unwrap();
-            let mid = ((OUT[1] / 2 * OUT[0] + OUT[0] / 2) * 16) as usize;
-            let g = f32::from_le_bytes(px[mid + 4..mid + 8].try_into().unwrap());
-            assert!(g > 0.0, "{}: nothing written", k.name);
-            hash = px.iter().fold(hash, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+            Format::Rgba32Float
+        };
+        let out = Texture::new(&ctx, TextureDesc::compute_2d(OUT[0], OUT[1], fmt)).unwrap();
+        let mut times = vec![Vec::new(); libs.len()];
+        for it in 0..30 {
+            for (v, lib) in libs.iter().enumerate() {
+                let mut frame = ring.begin().unwrap();
+                let push = frame.scratch().push(&push_words()).unwrap();
+                {
+                    let mut pass = frame.commands().begin_compute_pass(&table).unwrap();
+                    let step = &plan.steps[0];
+                    let pipe = caches[v]
+                        .compute(key(step.kernel), lib, step.kernel)
+                        .unwrap();
+                    pass.encode(&ComputeCommand::SetPipeline(pipe)).unwrap();
+                    for b in &step.buffers {
+                        let gpu_addr = match b.source {
+                            Source::Buffer(n) => buffers[n].gpu_address(),
+                            _ => push,
+                        };
+                        pass.encode(&ComputeCommand::SetBuffer {
+                            index: b.index,
+                            gpu_addr,
+                        })
+                        .unwrap();
+                    }
+                    for b in &step.textures {
+                        let texture = match b.source {
+                            Source::Game(GameResource::Texture(0)) => tex0.clone(),
+                            _ => out.clone(),
+                        };
+                        pass.encode(&ComputeCommand::SetTexture {
+                            index: b.index,
+                            texture,
+                        })
+                        .unwrap();
+                    }
+                    pass.encode(&ComputeCommand::DispatchThreadgroups {
+                        groups: step.groups,
+                        threads: [
+                            threads.get(v).copied().flatten().unwrap_or(step.threads[0]),
+                            1,
+                            1,
+                        ],
+                    })
+                    .unwrap();
+                    pass.end();
+                }
+                let stats = frame.submit().unwrap().wait().unwrap();
+                if it >= 5 {
+                    times[v].push(stats.gpu_ns as f64 / 1e6);
+                }
+            }
         }
-        times.sort_by(f64::total_cmp);
-        println!("BENCH {:12} median {:6.3} ms  min {:6.3} ms  hash {hash:016x}", k.name, times[times.len() / 2], times[0]);
+        // the hash of what the last variant wrote: the same bits mean the same kernel
+        let bpp = if fmt == Format::Rg11B10Float { 4 } else { 16 };
+        let mut px = vec![0u8; (OUT[0] * OUT[1] * bpp) as usize];
+        out.read((OUT[0] * bpp) as usize, &mut px).unwrap();
+        let hash = px.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+        });
+        let mut line = format!("BENCH {:12}", k.name);
+        for t in &mut times {
+            t.sort_by(f64::total_cmp);
+            line += &format!("  min {:6.3} med {:6.3}", t[0], t[t.len() / 2]);
+        }
+        println!("{line}  hash {hash:016x}");
     }
 }

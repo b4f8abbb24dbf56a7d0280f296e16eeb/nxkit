@@ -647,3 +647,45 @@ What differs (new code):
   NDVE's need no permutation.
 - Ratio and size: NDVE is fixed (1920x1080 -> 2560x1440, 4/3, 6 -> 8). NDSR has five vr models (in = 10, 8, 7, 6, 4,
   out = 12) and three tilings each, and the input and output sizes change every few frames.
+
+### 14.1 Speed of the native kernel (`crates/nxkit-ndsr/src/msl/ndsr.metal`, measured)
+
+Harness: `crates/nxkit-gpu/tests/ndsr_bench.rs` (`cargo test --release -p nxkit-gpu --test ndsr_bench -- --ignored
+--nocapture`): each of the 15 kernels alone in its own command buffer on the full picture 1536x864 -> 1920x1080, the
+real texture sampler, synthetic weights and picture; GPU start to end of the command buffer (`gpu_ns`), minimum of 25
+runs, best of three process runs. Apple M2 Max (38 cores), other GPU load on the machine (a game build) makes single
+runs noisy by 10 to 30 %. `NDSR_BENCH_SRC=a.metal,b.metal` times complete sources side by side, round-robin.
+
+| kernel | patches | before ms | after ms | simdgroups x patches at once |
+|---|---|---|---|---|
+| in10_a / b / c | 12 / 12 / 16 | 1.17 / 1.00 / 0.97 | 0.68 / 0.65 / 0.74 | 12x1 / 12x1 / 16x1 |
+| in8_a / b / c | 16 | 1.50 / 1.40 / 1.36 | 0.82 / 0.68 / 0.74 | 16x1 |
+| in7_a / b / c | 16 / 48 / 24 | 1.90 / 1.40 / 1.46 | 0.86 / 0.84 / 0.80 | 16x1 / 8x1 / 12x2 |
+| in6_a / b / c | 16 / 32 / 32 | 2.50 / 1.89 / 1.89 | 1.12 / 1.05 / 1.04 | 16x1 / 12x1 / 12x1 |
+| in4_a / b / c | 48 | 4.05 / 3.88 / 3.90 | 2.29 / 2.30 / 2.29 | 8x3 |
+
+What the numbers say:
+
+- The network is not 1.5 GMAC for every scale: one patch is 6 layers x 4 products of 16x16x16 = 98 304 MAC, a picture
+  has `(1536 / in) x (864 / in)` patches, so in = 10 / 8 / 7 / 6 / 4 cost 1.3 / 2.0 / 2.7 / 3.6 / 8.2 GMAC. At the
+  5.4 TMAC/s the in4 network reaches here (the M2 Max peaks near 6.8 for f32 FMA) the network alone is 1.5 ms for in4,
+  0.5 for in10. The rest of the in4 kernel is the cell samples (0.45 ms) and the window, staging and unsharp (0.45 ms).
+- The old kernel was latency bound, not MAC bound: one patch a simdgroup, four simdgroups a threadgroup and one
+  threadgroup resident per core (the grid takes up to 31 KB of the 32 KB), so every wait for the window, a cell sample
+  or a barrier idled the core. The gain came from (1) more simdgroups per threadgroup (8 to 16, 256 to 512 threads),
+  (2) the unsharp pass spread over all threads (a block of 6 columns by a few rows a thread, read into registers, one
+  barrier, write) instead of a column a thread with a barrier per row, (3) the base samples of all the cells of a
+  group requested together, before the epilogue stores and barriers, (4) the division-free pixel loop, (5) the
+  precise `exp2` / `log2` of the sRGB encoding replaced by the fast ones (the game's MUFU.EX2 / LG2; variant A only,
+  3 to 18 % of those kernels; `ndsr_kernel.rs` counts the same pixels equal and the same largest difference) and (6) several patches per simdgroup where it
+  pays (`NB` = 3 for in4, 2 for in7_c; elsewhere one patch a simdgroup with more simdgroups was equal or better).
+- Weights in threadgroup memory matter more than anything else tried: in4 with its weights read from the device
+  buffer is 3.5 ms, with them staged 2.3 ms. in7_b (96 x 72 cells) has room for 3 of the 6 layers only (24.5 KB
+  without them) and takes the other three from the device; it is the kernel furthest from its MAC floor.
+- 12 or 16 simdgroups are not free: the kernels declare `max_total_threads_per_threadgroup`, which makes the compiler
+  fit the registers to the threadgroup size; in4 and in6_b slow down at 12 or more simdgroups (registers), in10 and in8
+  speed up to 16. The choice per kernel is `simdgroups` and `patch_group` of `KernelSpec`, mirrored in the
+  `NDSR_KERNEL` lines (a test compares them).
+- The arithmetic is unchanged: all 15 kernels write the same bits as before for variants B and C, and A differs only by
+  the `exp2` / `log2` change; the f16 rounding after every K = 16 step and the W2-first order of layers 0, 2, 4 are as
+  before. `ndsr_kernel.rs` passes with its tolerances as they were.
