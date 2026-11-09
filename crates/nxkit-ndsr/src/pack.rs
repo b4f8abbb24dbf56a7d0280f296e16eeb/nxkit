@@ -75,13 +75,13 @@ pub fn from_agl(blob: &[u8]) -> Result<Vec<u8>, String> {
 ///
 /// # Errors
 ///
-/// When the blob is not 0x3000 bytes. The 3-layer blobs of vr_light are agl's permuted (ndsr-native.md section 5), a map
-/// that is not known, so they are refused.
+/// When the blob is not 0x3000 or 0x1800 bytes. The 3-layer blob of vr_light's 4/3 model is in the vr layout too: its
+/// repack is agl_ndsr's 4/3 blob, every value (ndsr-native.md section 15.2).
 pub fn from_vr(blob: &[u8]) -> Result<Vec<u8>, String> {
-    check_len(blob, "vr", &[BLOB_BYTES])?;
+    let layers = check_len(blob, "vr", &[BLOB_BYTES, SHORT_BLOB_BYTES])?;
     let src = |i: usize| [blob[2 * i], blob[2 * i + 1]];
-    let mut out = vec![0u8; BLOB_BYTES];
-    for layer in 0..LAYERS {
+    let mut out = vec![0u8; blob.len()];
+    for layer in 0..layers {
         let base = layer * LAYER_HALVES;
         let mut put = |dst: usize, from: usize| {
             out[2 * (base + dst)..2 * (base + dst) + 2].copy_from_slice(&src(from));
@@ -183,7 +183,10 @@ mod tests {
             Ok(BLOB_BYTES)
         );
         assert!(from_agl(&[0; 10]).is_err());
-        assert!(from_vr(&vec![0; SHORT_BLOB_BYTES]).is_err());
+        assert_eq!(
+            from_vr(&vec![0; SHORT_BLOB_BYTES]).map(|v| v.len()),
+            Ok(SHORT_BLOB_BYTES)
+        );
         assert!(from_vr(&[]).is_err());
     }
 
@@ -254,6 +257,16 @@ mod tests {
     /// `Y` bit for bit, every element. (With W1 first in every layer the roundings differ, so the kernel does not.)
     #[test]
     fn repacked_blob_gives_the_same_network() {
+        repacked(LAYERS);
+    }
+
+    /// The same for the 3-layer blob: an odd number of layers leaves the vr result transposed.
+    #[test]
+    fn repacked_short_blob_gives_the_same_network() {
+        repacked(3);
+    }
+
+    fn repacked(layers: usize) {
         // values k / 512 with |k| <= 128: products and 16-term sums are exact in f64, and rounding to f16 is exercised
         let mut state = 0x1234_5678_u32;
         let mut next = move || {
@@ -261,8 +274,9 @@ mod tests {
             f64::from(i32::try_from(state >> 24).unwrap_or(0) - 128) / 512.0
         };
         // the blob is stored as f16 bit patterns; keep the values in a side table keyed by the pattern index
-        let vals: Vec<f64> = (0..BLOB_BYTES / 2).map(|_| next()).collect();
-        let bytes: Vec<u8> = (0..BLOB_BYTES / 2)
+        let len = layers * LAYER_BYTES;
+        let vals: Vec<f64> = (0..len / 2).map(|_| next()).collect();
+        let bytes: Vec<u8> = (0..len / 2)
             .flat_map(|i| u16::try_from(i & 0xffff).unwrap_or(0).to_le_bytes())
             .collect();
         let canon = from_vr(&bytes).expect("packs");
@@ -281,7 +295,7 @@ mod tests {
         // vr form: X[k][n], Z = max(Y, 0)^T after each layer but the last
         let mut z = x;
         let mut y = x;
-        for layer in 0..LAYERS {
+        for layer in 0..layers {
             let mut d: Option<[[f64; 16]; 16]> = None;
             for t in 0..2 {
                 let s = 2 * layer + t;
@@ -291,16 +305,16 @@ mod tests {
                 d = Some(hmma(&h, &w2, d.as_ref()));
             }
             y = d.expect("two terms");
-            if layer < LAYERS - 1 {
+            if layer < layers - 1 {
                 z = transpose(&relu(&y));
             }
         }
-        let y_vr = y;
+        let y_vr = if layers % 2 == 1 { transpose(&y) } else { y };
 
         // canonical form: Z[row = y][col = x] = x^T
         let mut z = transpose(&x);
         let mut y = z;
-        for layer in 0..LAYERS {
+        for layer in 0..layers {
             let mut d: Option<[[f64; 16]; 16]> = None;
             for t in 0..2 {
                 let base = layer * LAYER_HALVES;
@@ -316,7 +330,7 @@ mod tests {
                 });
             }
             y = d.expect("two terms");
-            if layer < LAYERS - 1 {
+            if layer < layers - 1 {
                 z = relu(&y);
             }
         }

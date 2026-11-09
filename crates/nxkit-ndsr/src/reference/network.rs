@@ -1,4 +1,5 @@
-//! The six-layer separable network (section 7.3) on the vr weight layout (section 8.2).
+//! The separable network (section 7.3) on the vr weight layout (section 8.2): six layers, or three for the 4/3 model of
+//! the vr_light pack (section 15).
 
 use super::arith::{Mat, hmma, relu};
 use crate::half;
@@ -7,6 +8,8 @@ use crate::half;
 pub const LAYERS: usize = 6;
 /// Bytes of a vr weight blob.
 pub const BLOB_LEN: usize = LAYERS * crate::net::LAYER_BYTES;
+/// Bytes of the 3-layer blob of the vr_light 4/3 model.
+pub const SHORT_BLOB_LEN: usize = BLOB_LEN / 2;
 
 /// Element index of `W1_s[r][k]` in the vr blob, in halves.
 pub fn w1_index(s: usize, r: usize, k: usize) -> usize {
@@ -18,7 +21,7 @@ pub fn w2_index(s: usize, k: usize, n: usize) -> usize {
     512 * s + 256 + 8 * (4 * (n % 8) + (k % 8) / 2) + 4 * (n / 8) + 2 * (k / 8) + k % 2
 }
 
-/// The twelve sub-blocks of a vr blob as matrices.
+/// The sub-blocks of a vr blob as matrices: two per layer.
 #[derive(Clone, Debug)]
 pub struct Weights {
     w1: Vec<Mat>,
@@ -26,14 +29,15 @@ pub struct Weights {
 }
 
 impl Weights {
-    /// Decode a vr blob of [`BLOB_LEN`] bytes; `None` for any other length.
+    /// Decode a vr blob of [`BLOB_LEN`] or [`SHORT_BLOB_LEN`] bytes; `None` for any other length.
     pub fn from_vr_blob(blob: &[u8]) -> Option<Weights> {
-        if blob.len() != BLOB_LEN {
+        if blob.len() != BLOB_LEN && blob.len() != SHORT_BLOB_LEN {
             return None;
         }
+        let layers = blob.len() / crate::net::LAYER_BYTES;
         let at = |i: usize| half::to_f32(u16::from_le_bytes([blob[2 * i], blob[2 * i + 1]]));
         let build = |f: &dyn Fn(usize, usize, usize) -> usize| -> Vec<Mat> {
-            (0..2 * LAYERS)
+            (0..2 * layers)
                 .map(|s| std::array::from_fn(|i| std::array::from_fn(|j| at(f(s, i, j)))))
                 .collect()
         };
@@ -42,14 +46,20 @@ impl Weights {
             w2: build(&w2_index),
         })
     }
+
+    /// The number of layers: 6, or 3 for the short blob.
+    pub fn layers(&self) -> usize {
+        self.w1.len() / 2
+    }
 }
 
 /// The network on one patch. `x[k][n]` is the input with `k` along x and `n` along y; the result `y[r][c]` has `r`
-/// along y and `c` along x. Every `f16()` of the notes is one [`hmma`]; there is a ReLU and a transpose between layers.
+/// along y and `c` along x for six layers (an odd number of transposes), the other way round for three. Every `f16()` of the notes is one [`hmma`]; there is a ReLU and a transpose between layers.
 pub fn network(w: &Weights, x: &Mat) -> Mat {
     let mut z = *x;
     let mut d = [[0.0; 16]; 16];
-    for l in 0..LAYERS {
+    let layers = w.layers();
+    for l in 0..layers {
         let mut acc: Option<Mat> = None;
         for t in 0..2 {
             let s = 2 * l + t;
@@ -57,7 +67,7 @@ pub fn network(w: &Weights, x: &Mat) -> Mat {
             acc = Some(hmma(&h1, &w.w2[s], acc.as_ref()));
         }
         d = acc.unwrap_or(d);
-        if l < LAYERS - 1 {
+        if l < layers - 1 {
             z = std::array::from_fn(|k| std::array::from_fn(|n| relu(d[n][k])));
         }
     }
@@ -99,8 +109,15 @@ mod tests {
 
     #[test]
     fn wrong_length_is_refused() {
-        assert!(Weights::from_vr_blob(&[0; 0x1800]).is_none());
-        assert!(Weights::from_vr_blob(&vec![0; BLOB_LEN]).is_some());
+        assert!(Weights::from_vr_blob(&[0; 0x1000]).is_none());
+        assert_eq!(
+            Weights::from_vr_blob(&[0; 0x1800]).map(|w| w.layers()),
+            Some(3)
+        );
+        assert_eq!(
+            Weights::from_vr_blob(&vec![0; BLOB_LEN]).map(|w| w.layers()),
+            Some(6)
+        );
     }
 
     #[test]

@@ -11,8 +11,8 @@
 //! (bank 24), so one plan serves every input and output size of its tile shape; only the threadgroup count depends on
 //! the input size.
 //!
-//! Only the vr input is implemented (`Y'` in the green channel of tex0, as the vr programs read it). The vr_light input
-//! (f16 luma of sqrt RGB) and the agl one (f32 luma) are open, see the end of `docs/plans/ndsr-native.md` section 13.
+//! The vr_light programs have kernels of their own ([`light`], section 15 of the notes). The agl_ndsr input (f32 luma,
+//! graphics SMAA) is open, see the end of `docs/plans/ndsr-native.md` section 13.
 
 use crate::net::{Net, Pack};
 use crate::pack;
@@ -26,6 +26,8 @@ pub const PUSH: GameResource = GameResource::Push(0);
 pub const OUT: GameResource = GameResource::Output;
 
 pub use crate::net::Variant;
+
+pub mod light;
 
 /// One network program of the vr pack: the parameters of its instantiation in `ndsr.metal`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,8 +180,8 @@ pub fn find(in_px: u32, variant: Variant) -> Option<&'static KernelSpec> {
 ///
 /// # Errors
 ///
-/// When the network is not of the vr pack (the vr_light and agl inputs are open), the push block is missing, or
-/// [`plan_kernel`] refuses.
+/// When the network is of the agl pack (its input is open), the push block is missing, or [`plan_kernel`] or
+/// [`light::plan`] refuses.
 pub fn plan(
     net: &Net,
     blob: &[u8],
@@ -187,15 +189,19 @@ pub fn plan(
     out_size: [u32; 2],
     push: &[u8],
 ) -> Result<Plan, String> {
-    if net.pack != Pack::Vr {
-        return Err(format!(
-            "{}: the {} pack is not run natively yet (vr pack only)",
-            net.key,
-            net.pack.name()
-        ));
-    }
     if push.is_empty() {
         return Err(format!("{}: no push block", net.key));
+    }
+    match net.pack {
+        Pack::Vr => {}
+        Pack::VrLight => return light::plan(net, blob, in_size, push),
+        Pack::Agl => {
+            return Err(format!(
+                "{}: the {} pack is not run natively yet (vr and vr_light only)",
+                net.key,
+                net.pack.name()
+            ));
+        }
     }
     let kernel = find(u32::from(net.in_px), net.variant).ok_or_else(|| {
         format!(
@@ -221,6 +227,13 @@ pub fn plan_kernel(
     if in_size.contains(&0) || out_size.contains(&0) {
         return Err(format!(
             "sizes {in_size:?} -> {out_size:?} have a zero side"
+        ));
+    }
+    if blob.len() != pack::BLOB_BYTES {
+        return Err(format!(
+            "a vr blob is {:#x} bytes, expected {:#x}",
+            blob.len(),
+            pack::BLOB_BYTES
         ));
     }
     let packed = pack::from_vr(blob)?;
@@ -367,13 +380,16 @@ mod tests {
         assert!(s.textures[1].writes && !s.textures[0].writes);
     }
 
-    /// Every vr network of the table has a kernel of its scale and variant; the other packs refuse with a reason.
+    /// Every vr network of the table has a kernel of its scale and variant; agl refuses with a reason.
     #[test]
     fn plan_of_a_net() {
         let push = [0u8; 80];
         for n in &NETS {
             let r = plan(n, &blob(), [64, 64], [128, 128], &push);
-            if n.pack == Pack::Vr {
+            if n.pack == Pack::VrLight {
+                // the light plan wants its blob length and 29 push words with the game's tile (light.rs)
+                assert!(r.is_err(), "{}", n.key);
+            } else if n.pack == Pack::Vr {
                 let p = r.expect(n.key);
                 let k = find(u32::from(n.in_px), n.variant).expect("kernel");
                 assert_eq!(p.steps[0].kernel, k.name);
@@ -384,7 +400,7 @@ mod tests {
                     n.key
                 );
             } else {
-                assert!(r.is_err_and(|e| e.contains("vr pack only")), "{}", n.key);
+                assert!(r.is_err_and(|e| e.contains("vr_light only")), "{}", n.key);
             }
         }
         let n = NETS.iter().find(|n| n.pack == Pack::Vr).expect("vr");
