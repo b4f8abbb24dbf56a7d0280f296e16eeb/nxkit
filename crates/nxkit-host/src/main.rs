@@ -1,5 +1,10 @@
 //! `nxkit-host <run folder> [--fullscreen]` runs a game. `nxkit-host probe <run folder>` prints the R18 measurements.
 
+/// The allocator with the spy of `NXKIT_MEM_ALLOC` (see `docs/diagnostics.md`).
+#[cfg(target_os = "macos")]
+#[global_allocator]
+static ALLOC: nxkit_host::sys::allocspy::Spy = nxkit_host::sys::allocspy::Spy;
+
 #[cfg(target_os = "macos")]
 fn main() {
     use std::path::PathBuf;
