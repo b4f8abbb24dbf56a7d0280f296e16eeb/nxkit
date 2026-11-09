@@ -12,9 +12,9 @@
 //!
 //! On the CPU rather than on a queue of its own: the picture is already in memory here (the decoder's NV12), nothing
 //! has to be uploaded, the GPU the game renders on does no extra pass, and the work runs on the feeder's threads ahead
-//! of the game. The loops are plain scalar Rust over rows that the compiler turns into NEON.
-
-use std::sync::OnceLock;
+//! of the game. The loops run over blocks of 16 pixels with no table lookups and no branches that depend on the data
+//! (the chroma sums are made a row at a time, the byte to f16 is integer arithmetic), so the compiler turns them into
+//! NEON vectors; a picture takes about a millisecond on four cores. The constant fourth plane is written once per tensor.
 
 use nxkit_svc_video::Frame;
 
@@ -38,8 +38,14 @@ impl Params {
         Some(Self(w))
     }
 
+    #[cfg(test)]
     fn f(&self, i: usize) -> f32 {
         f32::from_bits(self.0[i])
+    }
+
+    /// The matrix and the offsets as floats.
+    fn floats(&self) -> [f32; 15] {
+        self.0.map(f32::from_bits)
     }
 }
 
@@ -61,8 +67,9 @@ fn f16_bits(v: f32) -> u16 {
 }
 
 /// The f16 bits of `k / 255` for every byte `k`.
+#[cfg(test)]
 fn lut() -> &'static [u16; 256] {
-    static LUT: OnceLock<[u16; 256]> = OnceLock::new();
+    static LUT: std::sync::OnceLock<[u16; 256]> = std::sync::OnceLock::new();
     LUT.get_or_init(|| {
         let mut t = [0u16; 256];
         for (k, v) in t.iter_mut().enumerate() {
@@ -73,7 +80,8 @@ fn lut() -> &'static [u16; 256] {
 }
 
 /// The bytes `k` of R, G and B of one pixel, from `Y` and the chroma sums `u` and `v` (weights in sixteenths, so
-/// `u = 16 * 255 * U`).
+/// `u = 16 * 255 * U`). The scalar form of `block`, which the tests hold it to.
+#[cfg(test)]
 #[inline(always)]
 fn pixel(p: &Params, y: u8, u: u16, v: u16) -> [u8; 3] {
     let yv = f32::from(y) / 255.0 + p.f(12);
@@ -87,7 +95,9 @@ fn pixel(p: &Params, y: u8, u: u16, v: u16) -> [u8; 3] {
 }
 
 /// The weighted sum of the four chroma texels around a pixel, in sixteenths: 9, 3, 3 and 1 for the nearest texel,
-/// the nearest across, the nearest down and the one that is both. One component of the interleaved pair at `c`.
+/// the nearest across, the nearest down and the one that is both. One component of the interleaved pair at `c`. The
+/// scalar form of `vertical` and `spread`, which the tests hold them to.
+#[cfg(test)]
 #[inline(always)]
 fn chroma_sum(near: &[u8], far: &[u8], x: usize, c: usize) -> u16 {
     let n = near.len() / 2;
@@ -115,40 +125,117 @@ fn chroma_rows(row: usize) -> (usize, usize) {
     (n, far)
 }
 
+/// The pixels a block of the conversion makes at once. Every step is a plain loop over arrays of this size, which the
+/// compiler turns into NEON vectors (checked in the assembly: `fmla`, `fdiv`, `frintn` on `.4s`).
+const LANES: usize = 16;
+
+/// The f16 bits of R, G and B of `LANES` pixels, from their `Y` and chroma sums: the formula of `pixel` (the scalar
+/// form in the tests) and the byte-to-f16 of [`f16_bits`]. `m` is the matrix and the offsets ([`Params::floats`]).
+#[inline(always)]
+fn block(m: &[f32; 15], y: &[u8; LANES], u: &[u16; LANES], v: &[u16; LANES]) -> [[u16; LANES]; 3] {
+    let mut out = [[0u16; LANES]; 3];
+    for i in 0..LANES {
+        let yv = f32::from(y[i]) / 255.0 + m[12];
+        let uv = f32::from(u[i]) / 4080.0 + m[13];
+        let vv = f32::from(v[i]) / 4080.0 + m[14];
+        for (r, o) in out.iter_mut().enumerate() {
+            let c = vv.mul_add(m[4 * r + 2], yv.mul_add(m[4 * r], uv * m[4 * r + 1]));
+            let k = (c.clamp(0.0, 1.0) * 255.0).round_ties_even() as u8;
+            o[i] = f16_bits(f32::from(k) / 255.0);
+        }
+    }
+    out
+}
+
+/// The vertical blend of the chroma rows `near` and `far` (interleaved U and V), per texel: three parts of the nearer
+/// row and one of the farther, in fourths.
+#[inline(always)]
+fn vertical(near: &[u8], far: &[u8], u: &mut [u16; WIDTH / 2], v: &mut [u16; WIDTH / 2]) {
+    let (n, f) = (near.as_chunks::<2>().0, far.as_chunks::<2>().0);
+    for (((u, v), n), f) in u.iter_mut().zip(v.iter_mut()).zip(n).zip(f) {
+        *u = 3 * u16::from(n[0]) + u16::from(f[0]);
+        *v = 3 * u16::from(n[1]) + u16::from(f[1]);
+    }
+}
+
+/// The horizontal blend of a vertically blended chroma row into the sums of the luma pixels, in sixteenths: an even
+/// pixel takes three parts of its texel and one of the one to the left, an odd pixel the one to the right (clamped at
+/// the ends).
+#[inline(always)]
+fn spread(t: &[u16; WIDTH / 2], s: &mut [u16; WIDTH]) {
+    let n = WIDTH / 2;
+    s[0] = 4 * t[0];
+    s[1] = 3 * t[0] + t[1];
+    s[WIDTH - 2] = 3 * t[n - 1] + t[n - 2];
+    s[WIDTH - 1] = 4 * t[n - 1];
+    for (w, pair) in t.windows(3).zip(s[2..WIDTH - 2].as_chunks_mut::<2>().0) {
+        pair[0] = 3 * w[1] + w[0];
+        pair[1] = 3 * w[1] + w[2];
+    }
+}
+
+/// Writes f16 bits as little-endian bytes.
+#[inline(always)]
+fn store(dst: &mut [u8; 2 * LANES], h: &[u16; LANES]) {
+    for (d, v) in dst.as_chunks_mut::<2>().0.iter_mut().zip(h) {
+        *d = v.to_le_bytes();
+    }
+}
+
 /// Converts the rows of a band that starts at row `first`. `out` holds the band of each of the four planes (R, G, B and
-/// the constant 1.0), `pitch` bytes a row.
+/// the constant 1.0), `pitch` bytes a row. The constant plane is only written when `ones` is set: the tensor keeps it.
 fn convert_rows(
     planes: (&[u8], usize, &[u8], usize),
     p: &Params,
     first: usize,
     out: [&mut [u8]; 4],
     pitch: usize,
+    ones: bool,
 ) {
     let (y, ys, uv, uvs) = planes;
-    let lut = lut();
+    let m = p.floats();
     let one = f16_bits(1.0).to_le_bytes();
     let [r, g, b, a] = out;
     let rows = r.len() / pitch;
-    let cw = WIDTH / 2;
+    let (mut tu, mut tv) = ([0u16; WIDTH / 2], [0u16; WIDTH / 2]);
+    let (mut su, mut sv) = ([0u16; WIDTH], [0u16; WIDTH]);
     for i in 0..rows {
         let row = first + i;
         let yr = &y[row * ys..row * ys + WIDTH];
         let (cn, cf) = chroma_rows(row);
-        let near = &uv[cn * uvs..cn * uvs + 2 * cw];
-        let far = &uv[cf * uvs..cf * uvs + 2 * cw];
+        vertical(
+            &uv[cn * uvs..cn * uvs + WIDTH],
+            &uv[cf * uvs..cf * uvs + WIDTH],
+            &mut tu,
+            &mut tv,
+        );
+        spread(&tu, &mut su);
+        spread(&tv, &mut sv);
         let o = i * pitch;
-        for (x, &luma) in yr.iter().enumerate() {
-            let k = pixel(
-                p,
-                luma,
-                chroma_sum(near, far, x, 0),
-                chroma_sum(near, far, x, 1),
-            );
-            let at = o + 2 * x..o + 2 * x + 2;
-            r[at.clone()].copy_from_slice(&lut[usize::from(k[0])].to_le_bytes());
-            g[at.clone()].copy_from_slice(&lut[usize::from(k[1])].to_le_bytes());
-            b[at.clone()].copy_from_slice(&lut[usize::from(k[2])].to_le_bytes());
-            a[at].copy_from_slice(&one);
+        let rows_out = [
+            r[o..].as_chunks_mut::<{ 2 * LANES }>().0.iter_mut(),
+            g[o..].as_chunks_mut::<{ 2 * LANES }>().0.iter_mut(),
+            b[o..].as_chunks_mut::<{ 2 * LANES }>().0.iter_mut(),
+        ];
+        let [mut ro, mut go, mut bo] = rows_out;
+        let blocks = yr
+            .as_chunks::<LANES>()
+            .0
+            .iter()
+            .zip(su.as_chunks::<LANES>().0)
+            .zip(sv.as_chunks::<LANES>().0);
+        for ((yc, uc), vc) in blocks {
+            let h = block(&m, yc, uc, vc);
+            if let (Some(rd), Some(gd), Some(bd)) = (ro.next(), go.next(), bo.next()) {
+                store(rd, &h[0]);
+                store(gd, &h[1]);
+                store(bd, &h[2]);
+            }
+        }
+        if ones {
+            for d in a[o..o + 2 * WIDTH].as_chunks_mut::<2>().0 {
+                *d = one;
+            }
         }
     }
 }
@@ -166,13 +253,15 @@ pub(super) fn check(frame: &Frame) -> Result<(), String> {
     }
 }
 
-/// Writes the model's input for `frame` into `tensor` (all four planes). The tensor's rows are `pitch` bytes.
+/// Writes the model's input for `frame` into `tensor`. The tensor's rows are `pitch` bytes. The fourth plane is the
+/// constant 1.0: it is written when `ones` is set, and a tensor that has it from an earlier picture keeps it.
 pub(super) fn convert(
     frame: &Frame,
     p: &Params,
     tensor: &mut [u8],
     pitch: usize,
     threads: usize,
+    ones: bool,
 ) -> Result<(), String> {
     check(frame)?;
     if pitch < WIDTH * 2 || tensor.len() < 4 * HEIGHT * pitch {
@@ -200,7 +289,9 @@ pub(super) fn convert(
                 .zip(b.chunks_mut(band * pitch))
                 .zip(a.chunks_mut(band * pitch));
             for (n, (((r, g), b), a)) in chunks.enumerate() {
-                s.spawn(move || convert_rows((y, ys, uv, uvs), p, n * band, [r, g, b, a], pitch));
+                s.spawn(move || {
+                    convert_rows((y, ys, uv, uvs), p, n * band, [r, g, b, a], pitch, ones)
+                });
             }
         });
         Ok(())
@@ -361,7 +452,7 @@ mod tests {
         let frame = Frame::from_nv12(WIDTH as u32, HEIGHT as u32, 3, planes.clone());
         let pitch = WIDTH * 2 + 64;
         let mut tensor = vec![0xeeu8; 4 * HEIGHT * pitch];
-        assert_eq!(convert(&frame, &p, &mut tensor, pitch, 3), Ok(()));
+        assert_eq!(convert(&frame, &p, &mut tensor, pitch, 3, true), Ok(()));
         let lut = lut();
         let at = |plane: usize, x: usize, y: usize| {
             let o = (plane * HEIGHT + y) * pitch + 2 * x;
@@ -387,6 +478,45 @@ mod tests {
     }
 
     #[test]
+    fn the_blocks_make_the_bits_of_the_scalar_pixels_everywhere() {
+        let (p, planes) = (bt709_limited(), picture());
+        let frame = Frame::from_nv12(WIDTH as u32, HEIGHT as u32, 3, planes.clone());
+        let mut tensor = vec![0u8; 4 * HEIGHT * WIDTH * 2];
+        assert_eq!(convert(&frame, &p, &mut tensor, WIDTH * 2, 4, true), Ok(()));
+        let lut = lut();
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let k = fast(&planes, &p, x, y);
+                for (c, k) in k.iter().enumerate() {
+                    let o = (c * HEIGHT + y) * WIDTH * 2 + 2 * x;
+                    let got = u16::from_le_bytes([tensor[o], tensor[o + 1]]);
+                    assert_eq!(got, lut[usize::from(*k)], "({x}, {y}) plane {c}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_constant_plane_is_written_only_when_asked() {
+        let p = bt709_limited();
+        let frame = Frame::from_nv12(WIDTH as u32, HEIGHT as u32, 3, picture());
+        let mut tensor = vec![0xeeu8; 4 * HEIGHT * WIDTH * 2];
+        assert_eq!(
+            convert(&frame, &p, &mut tensor, WIDTH * 2, 2, false),
+            Ok(())
+        );
+        assert!(tensor[3 * HEIGHT * WIDTH * 2..].iter().all(|b| *b == 0xee));
+        assert_eq!(convert(&frame, &p, &mut tensor, WIDTH * 2, 2, true), Ok(()));
+        assert!(
+            tensor[3 * HEIGHT * WIDTH * 2..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|v| *v == 0x3c00u16.to_le_bytes())
+        );
+    }
+
+    #[test]
     fn other_sizes_and_short_tensors_are_refused() {
         let p = bt709_limited();
         let small = Frame::from_nv12(
@@ -400,9 +530,9 @@ mod tests {
                 uv_stride: 16,
             },
         );
-        assert!(convert(&small, &p, &mut [], 0, 1).is_err());
+        assert!(convert(&small, &p, &mut [], 0, 1, true).is_err());
         let ok = Frame::from_nv12(WIDTH as u32, HEIGHT as u32, 3, picture());
-        assert!(convert(&ok, &p, &mut [0; 100], WIDTH * 2, 1).is_err());
+        assert!(convert(&ok, &p, &mut [0; 100], WIDTH * 2, 1, true).is_err());
     }
 
     #[test]
