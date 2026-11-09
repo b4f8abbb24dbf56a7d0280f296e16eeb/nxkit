@@ -29,10 +29,13 @@ mod capture;
 mod conv;
 mod feed;
 mod iface;
+mod matching;
 mod offload;
+mod print;
 mod prof;
 mod run;
 mod slots;
+mod trace;
 mod util;
 
 pub(crate) use book::book_writes;
@@ -124,6 +127,8 @@ pub(crate) struct Native {
     ane_switch: Vec<bool>,
     /// The models of the Neural Engine path by net and weight hash.
     ane: HashMap<(usize, u64), offload::AneNet>,
+    /// The copies the game recorded, to follow its NDVE planes back to the decoder's planes.
+    copies: trace::Copies,
     cache: Lru<(usize, Key), Verdict>,
     /// The runs the capture has printed: net, weight hash, tag.
     captured: HashSet<(usize, u64, Vec<u32>)>,
@@ -153,6 +158,7 @@ impl Native {
                 .collect(),
             ane_switch: nets.iter().map(|n| ane_on(n.name())).collect(),
             ane: HashMap::new(),
+            copies: trace::Copies::default(),
             nets,
             cache: Lru::new(cache_max()),
             captured: HashSet::new(),
@@ -188,6 +194,9 @@ impl Native {
         cx: &PrepareCx<'_>,
         stats: &mut EncodeStats,
     ) -> Option<Prepared> {
+        if self.ane_switch.contains(&true) {
+            self.copies.ingest(&cx.detail.copies);
+        }
         if cx.detail.dispatches.len() < 2 {
             return None;
         }
@@ -466,7 +475,7 @@ impl Native {
                         )
                     })?;
                     let desc = view.desc();
-                    addrs.push((spec.resource, header.address.get()));
+                    addrs.push(offload::Placed::of(spec.resource, header));
                     textures.push((spec.resource, view, desc, id));
                 }
             }
@@ -557,7 +566,7 @@ pub(crate) struct Prepared {
     /// The Neural Engine path of this picture, when it is on and the picture's result is ready.
     ane: Option<offload::AnePrepared>,
     /// The GPU address of the storage of each texture and image of the run, by resource.
-    addrs: Vec<(GameResource, u64)>,
+    addrs: Vec<offload::Placed>,
 }
 
 impl Prepared {
