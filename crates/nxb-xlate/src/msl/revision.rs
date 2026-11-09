@@ -30,11 +30,20 @@ pub struct Feature {
 /// The features of the translator.
 ///
 /// `hmma` 1: an F16 HMMA chain rounds its accumulator to half after every step (`msl/hmma.rs`).
-pub const FEATURES: &[Feature] = &[Feature {
-    name: "hmma",
-    revision: 1,
-    uses: uses_hmma,
-}];
+///
+/// `meshpos` 1: the position of a mesh shader is `invariant` (`msl/mesh.rs`), so two mesh shaders give equal depths.
+pub const FEATURES: &[Feature] = &[
+    Feature {
+        name: "hmma",
+        revision: 1,
+        uses: uses_hmma,
+    },
+    Feature {
+        name: "meshpos",
+        revision: 1,
+        uses: uses_mesh_position,
+    },
+];
 
 /// The emitter of every 128-bit word of Ampere code, the header included (an over-approximation of the decoded ops).
 fn ampere_emitters(code: &[u8]) -> impl Iterator<Item = AEmit> + '_ {
@@ -49,6 +58,11 @@ fn ampere_emitters(code: &[u8]) -> impl Iterator<Item = AEmit> + '_ {
 /// Ampere code with an HMMA. Maxwell code has no tensor instructions.
 fn uses_hmma(job: &Job, code: &[u8]) -> bool {
     job.arch_sm86 && ampere_emitters(code).any(|e| e == AEmit::AHmma)
+}
+
+/// A mesh shader (`ms`): the only stage whose wrapper declares the position the feature changes.
+fn uses_mesh_position(job: &Job, _code: &[u8]) -> bool {
+    job.mesh_stage.as_ref().is_some_and(|m| m.kind == "ms")
 }
 
 /// The feature field of a shader's key over `features`: `name=revision` of each feature it uses, `;`-joined, empty
@@ -99,6 +113,22 @@ mod tests {
         assert_eq!(tags(&job(true), &with), "hmma=1");
         assert_eq!(tags(&job(false), &with), "");
         assert_eq!(tags(&job(true), &code(&[(0, 0)])), "");
+    }
+
+    #[test]
+    fn a_mesh_shader_uses_the_mesh_position_feature() {
+        let mesh = |kind: &str| {
+            let mut j = job(true);
+            j.mesh_stage = Some(crate::job::MeshStage {
+                kind: kind.into(),
+                ..Default::default()
+            });
+            j
+        };
+        assert_eq!(tags(&mesh("ms"), &code(&[])), "meshpos=1");
+        assert_eq!(tags(&mesh("ms"), &code(&[HMMA])), "hmma=1;meshpos=1");
+        assert_eq!(tags(&mesh("ts"), &code(&[])), "");
+        assert_eq!(tags(&job(true), &code(&[])), "");
     }
 
     #[test]
