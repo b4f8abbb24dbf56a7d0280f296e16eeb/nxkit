@@ -136,6 +136,7 @@ impl Dec {
     /// A started decoder that has room takes packets, whatever became of the signal that Initialize gave. A player
     /// can clear that one and count only later signals.
     pub(crate) fn start(&self, fx: &mut Effects) {
+        crate::picture::stream_started();
         if self.event != 0 && self.load() < self.ready_limit() {
             fx.event = Some(true);
         }

@@ -12,6 +12,10 @@ pub trait PictureSink: Send + Sync {
     /// decoder held: take a clone of `frame` and return.
     fn decoded(&self, frame: &Arc<Frame>);
 
+    /// A video stream started (a decoder of the codec service was started). The consumer may try again what it gave up.
+    /// Called with the lock of the decoder held: return quickly.
+    fn stream_started(&self) {}
+
     /// The game read picture `frame` (a [`Frame::id`]) as NV12 into guest memory: the luma plane at the host address
     /// `luma` and the chroma plane at `chroma`, `width` by `height` pixels, tightly packed.
     fn read_nv12(&self, frame: u64, luma: u64, chroma: u64, width: u32, height: u32);
@@ -33,5 +37,11 @@ pub(crate) fn decoded(frame: &Arc<Frame>) {
 pub(crate) fn read_nv12(frame: u64, luma: u64, chroma: u64, width: u32, height: u32) {
     if let Some(s) = SINK.get() {
         s.read_nv12(frame, luma, chroma, width, height);
+    }
+}
+
+pub(crate) fn stream_started() {
+    if let Some(s) = SINK.get() {
+        s.stream_started();
     }
 }

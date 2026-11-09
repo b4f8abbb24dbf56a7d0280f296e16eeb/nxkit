@@ -1,6 +1,6 @@
 //! The records that set state: the extension dispatch, state objects, vertex states and settings.
 
-use super::copy::{clear_detail, copy_detail, faces, stride};
+use super::copy::{buffer_copy_detail, clear_detail, copy_detail, faces, stride};
 use super::*;
 
 impl Walker {
@@ -83,9 +83,10 @@ impl Walker {
             }
             ExtCode::VertexState => self.vertex_state(st, x),
             ExtCode::Setting => self.setting(st, x),
-            ExtCode::ClearBuffer | ExtCode::CopyBufferToBuffer | ExtCode::DownsampleView => {
+            ExtCode::ClearBuffer | ExtCode::DownsampleView => {
                 self.out.copies.push(CopyDetail::default())
             }
+            ExtCode::CopyBufferToBuffer => self.out.copies.push(buffer_copy_detail(x)),
             ExtCode::ClearTexture => self.out.copies.push(clear_detail(x)),
             ExtCode::CopyBufferToTexture
             | ExtCode::CopyTextureToBuffer
