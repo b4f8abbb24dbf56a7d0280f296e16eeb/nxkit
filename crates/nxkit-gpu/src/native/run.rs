@@ -61,8 +61,8 @@ fn encode_pass(
         }
         p.textures
             .iter()
-            .find(|(g, _, _)| *g == r)
-            .map(|(_, t, _)| t.clone())
+            .find(|(g, _, _, _)| *g == r)
+            .map(|(_, t, _, _)| t.clone())
     };
     let entry = &p.entry;
     for (i, step) in entry.plan.steps.iter().enumerate() {
@@ -216,10 +216,10 @@ fn picture_diff(a: &[u8], b: &[u8]) -> Diff {
 }
 
 pub(super) fn make_compare(entry: &Entry, p: &Prepared, cx: &PrepareCx<'_>) -> Option<Compare> {
-    let (_, out, out_desc) = p
+    let (_, out, out_desc, _) = p
         .textures
         .iter()
-        .find(|(g, _, _)| *g == GameResource::Output)?;
+        .find(|(g, _, _, _)| *g == GameResource::Output)?;
     if out_desc.format.bytes_per_pixel() != 4 {
         return None;
     }
@@ -231,7 +231,7 @@ pub(super) fn make_compare(entry: &Entry, p: &Prepared, cx: &PrepareCx<'_>) -> O
     };
     let mut twins = Vec::new();
     for r in &entry.written {
-        let (_, _, d) = p.textures.iter().find(|(g, _, _)| g == r)?;
+        let (_, _, d, _) = p.textures.iter().find(|(g, _, _, _)| g == r)?;
         twins.push((*r, Texture::new(cx.ctx, shared(d)).ok()?));
     }
     let snapshot = Texture::new(cx.ctx, shared(out_desc)).ok()?;

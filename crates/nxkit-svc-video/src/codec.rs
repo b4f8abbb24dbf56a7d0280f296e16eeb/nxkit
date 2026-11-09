@@ -14,16 +14,40 @@
 //!
 //! Pictures go into the released buffers in release order. A picture with no released buffer waits in a short queue,
 //! and a full queue refuses packets.
+//!
+//! # Threading
+//!
+//! A decoder is one `Dec` behind one mutex. The guest threads call it (submit, release, acquire, sync waits, reset),
+//! and so does, for a stream that decodes on the CPU, the worker thread of the stream.
+//!
+//! - VP9 and the AV1 of VideoToolbox decode in the calling thread of `submit`, on a scoped thread with a big stack.
+//! - AV1 on the CPU (rav1d) has a worker thread for each stream. The first packet that the backend answers with a
+//!   [`Pipeline`] switches the decoder to it. From then on `submit` only copies the packet and its time into the bounded
+//!   input queue (`Dec::queued`) and returns. The worker owns the rav1d context and sends the packets. rav1d runs one
+//!   frame at a time with tile and row threads (`Dav1d::streaming_delay`), so a unit's picture is out when its send
+//!   returns and a drain never blocks. The game's threads never wait for the decode.
+//! - The worker puts pictures into `Dec::held` under the lock and runs the same `drain` as the guest, which moves them
+//!   into released buffers and decides the event. The effects (`Effects`) are carried out after the lock is released,
+//!   on the worker thread: the host signals a system event of the kernel from any thread (the event is bound when the
+//!   decoder is made, on a guest thread). `Dec::order` is held from the decision to the effect, so two threads cannot
+//!   apply a clear and a signal in the wrong order.
+//! - [`HOLD`] counts packets queued, frames in flight and pictures held (`Dec::load`). The event goes down when the
+//!   load reaches `Dec::ready_limit` and up again when it falls below. Only the guest (release, submit, reset) and the
+//!   worker (a packet that gave no picture) lower the load, and each of them runs the event logic when it does.
+//! - Stop and Flush clear the queue, ask the worker to flush rav1d and wait until it is idle. Dropping the stream
+//!   (`Finalize`) stops the worker and joins it.
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use nxkit_abi::guest;
 
 use crate::config;
-use crate::decoder::{Backend, decode_av1, decode_packet};
+use crate::decoder::{Backend, Pic, Pipeline, decode_packet};
 use crate::frame::Frame;
 
 /// Marks a handle that this crate wrote into an SDK object, in the upper 32 bits.
@@ -50,6 +74,8 @@ const MAX_BLANK: usize = 32;
 const MAX_ARMED: usize = 64;
 /// The stack of the thread that decodes one packet. A guest stack can be 8 KB.
 const DECODE_STACK: usize = 2 << 20;
+/// The stack of the worker thread of a stream.
+const WORKER_STACK: usize = 8 << 20;
 
 /// An `nn::codec` result (module 111) with the description `desc`.
 pub(crate) const fn nn_result(desc: u32) -> u32 {
@@ -68,6 +94,14 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// `NXKIT_DIAG=codec` (or `all`): one line per decoder call, at most 600, to see where a player stops.
+fn diag_codec() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "codec" || c == "all"))
+    })
+}
+
 pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -458,6 +492,19 @@ pub(crate) struct Effects {
 
 type Stream = Option<(Box<dyn Backend>, u32, u32)>;
 
+/// Opens the AV1 backend of a stream.
+type OpenAv1 = fn() -> Result<Box<dyn Backend>, String>;
+
+/// Carries out the effects of a call: `(decoder id, event, effects)`.
+type Applier = Arc<dyn Fn(u32, u64, Effects) + Send + Sync>;
+
+/// A packet for the worker.
+struct Job {
+    data: Vec<u8>,
+    ts: i64,
+    eos: bool,
+}
+
 /// One decoder of the SDK.
 pub(crate) struct Dec {
     id: u32,
@@ -473,20 +520,54 @@ pub(crate) struct Dec {
     eos_pending: bool,
     errors: u32,
     refused: u32,
+    open_av1: OpenAv1,
+    applier: Applier,
+    me: Weak<Mutex<Dec>>,
+    // The worker of a stream that decodes on the CPU. All the fields below are idle for the other streams.
+    /// The worker, once the stream switched to it.
+    worker: Option<JoinHandle<()>>,
+    /// Wakes the worker (a packet, a flush, a stop) and the threads that wait for it (a flush).
+    cv: Arc<Condvar>,
+    /// Held from the decision of an effect to its execution.
+    order: Arc<Mutex<()>>,
+    /// Packets that wait for the worker.
+    queued: VecDeque<Job>,
+    /// Packets that the worker took and whose picture is not in `held` yet.
+    inflight: usize,
+    /// Frames the decoder works on at once, the room that the queue of packets has on top of [`READY`].
+    lag: usize,
+    /// The worker is to flush the decoder. Its pictures are dropped until it has.
+    flush_req: bool,
+    /// What the last effect did to the submission ready event: `Some(true)` signalled, `Some(false)` cleared.
+    event_state: Option<bool>,
+    /// The packets refused with BUSY, and the last state line (`NXKIT_DIAG=codec`).
+    refusals: u64,
+    last_diag: Instant,
+    /// The worker is in a call of the decoder, with the lock released.
+    busy: bool,
+    stop: bool,
+}
+
+/// What a packet did in the call that submitted it.
+enum Step {
+    Picture(Option<Arc<Frame>>),
+    /// The backend runs the stream on a worker from now on.
+    Pipeline(Box<dyn Pipeline>),
 }
 
 /// Decodes one packet on a thread with a big stack, because the caller can be a guest thread with 8 KB.
 fn decode_big(
     codec: Codec,
     stream: &mut Stream,
+    open_av1: OpenAv1,
     data: &[u8],
-) -> Result<Option<Arc<Frame>>, String> {
+) -> Result<Step, String> {
     std::thread::scope(|s| {
         let job = std::thread::Builder::new()
             .stack_size(DECODE_STACK)
             .spawn_scoped(s, || match codec {
-                Codec::Av1 => decode_av1(stream, crate::backend::open_av1, data),
-                _ => decode_packet(stream, crate::backend::open, data),
+                Codec::Av1 => decode_av1_step(stream, open_av1, data),
+                _ => decode_packet(stream, crate::backend::open, data).map(Step::Picture),
             });
         match job {
             Ok(h) => h
@@ -495,6 +576,24 @@ fn decode_big(
             Err(e) => Err(format!("the decoder thread did not start: {e}")),
         }
     })
+}
+
+/// One packet of an AV1 stream: the backend may take the stream over for a worker, else it decodes the packet.
+fn decode_av1_step(stream: &mut Stream, open: OpenAv1, data: &[u8]) -> Result<Step, String> {
+    if data.is_empty() {
+        return Ok(Step::Picture(None));
+    }
+    if stream.is_none() {
+        *stream = Some((open()?, 0, 0));
+    }
+    let Some((b, _, _)) = stream else {
+        return Ok(Step::Picture(None));
+    };
+    if let Some(p) = b.pipeline(data) {
+        *stream = None;
+        return Ok(Step::Pipeline(p));
+    }
+    b.decode(data).map(Step::Picture)
 }
 
 impl Dec {
@@ -513,7 +612,32 @@ impl Dec {
             eos_pending: false,
             errors: 0,
             refused: 0,
+            open_av1: crate::backend::open_av1,
+            applier: Arc::new(apply),
+            me: Weak::new(),
+            worker: None,
+            cv: Arc::new(Condvar::new()),
+            order: Arc::new(Mutex::new(())),
+            queued: VecDeque::new(),
+            inflight: 0,
+            lag: 0,
+            flush_req: false,
+            event_state: None,
+            refusals: 0,
+            last_diag: Instant::now(),
+            busy: false,
+            stop: false,
         }
+    }
+
+    /// The packets and pictures that the decoder holds for the game: queued, in flight and waiting for a buffer.
+    fn load(&self) -> usize {
+        self.held.len() + self.queued.len() + self.inflight
+    }
+
+    /// The load at which the event goes down. A decoder with a lag has that many frames more in flight.
+    fn ready_limit(&self) -> usize {
+        (READY + self.lag).min(HOLD - 2)
     }
 
     pub(crate) fn id(&self) -> u32 {
@@ -571,19 +695,58 @@ impl Dec {
     /// over at the next key frame.
     pub(crate) fn reset(&mut self, fx: &mut Effects) {
         self.held.clear();
+        self.queued.clear();
+        self.inflight = 0;
         self.eos_pending = false;
         self.stream = None;
+        if self.worker.is_some() {
+            self.flush_req = true;
+            self.cv.notify_all();
+        }
         if self.event != 0 {
             fx.event = Some(true);
         }
     }
 
+    /// Waits until the worker has flushed. Called by the thread that called [`Dec::reset`], with the guard of the lock.
+    fn wait_idle(guard: MutexGuard<'_, Dec>) -> MutexGuard<'_, Dec> {
+        let cv = Arc::clone(&guard.cv);
+        let mut d = guard;
+        while d.worker.is_some() && (d.flush_req || d.busy) {
+            d = cv.wait(d).unwrap_or_else(PoisonError::into_inner);
+        }
+        d
+    }
+
     /// A started decoder that has room takes packets, whatever became of the signal that Initialize gave. A player
     /// can clear that one and count only later signals.
     pub(crate) fn start(&self, fx: &mut Effects) {
-        if self.event != 0 && self.held.len() < READY {
+        if self.event != 0 && self.load() < self.ready_limit() {
             fx.event = Some(true);
         }
+    }
+
+    /// `NXKIT_DIAG=codec`: one line a second for this decoder, not capped, to see where a stream sticks.
+    fn diag_tick(&mut self, who: &str) {
+        if !diag_codec() || self.last_diag.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.last_diag = Instant::now();
+        eprintln!(
+            "DIAG codec state dec {} ({who}): held {} queued {} inflight {} pend {} fifo {} event {:?} pictures {} submits {} refusals {} busy {} flush {}",
+            self.id,
+            self.held.len(),
+            self.queued.len(),
+            self.inflight,
+            self.pend.len(),
+            self.fifo.len(),
+            self.event_state,
+            self.pictures,
+            self.submits,
+            self.refusals,
+            self.busy,
+            self.flush_req
+        );
     }
 
     fn hold(&mut self, frame: Arc<Frame>, ts: i64) -> bool {
@@ -621,13 +784,15 @@ impl Dec {
             self.held.len(),
             self.pend
         ));
-        if self.held.len() >= HOLD {
+        self.diag_tick("submit");
+        if self.load() >= HOLD {
+            self.refusals += 1;
             if self.refused < 4 {
                 self.refused += 1;
                 red(&format!(
-                    "nn::codec {}: a packet is refused with {} pictures waiting for a released buffer",
+                    "nn::codec {}: a packet is refused with {} pictures and packets waiting",
                     self.codec.name(),
-                    self.held.len()
+                    self.load()
                 ));
             }
             if self.event != 0 {
@@ -635,36 +800,85 @@ impl Dec {
             }
             return Err(BUSY);
         }
-        let mut got = false;
-        if !data.is_empty() {
-            match decode_big(self.codec, &mut self.stream, data) {
-                Ok(Some(frame)) => got = self.hold(frame, ts),
-                Ok(None) => {}
-                Err(e) => {
-                    if self.errors < 4 {
-                        self.errors += 1;
-                        red(&format!("nn::codec {}: {e}", self.codec.name()));
+        if self.worker.is_none() {
+            let mut got = false;
+            if !data.is_empty() {
+                match decode_big(self.codec, &mut self.stream, self.open_av1, data) {
+                    Ok(Step::Picture(Some(frame))) => got = self.hold(frame, ts),
+                    Ok(Step::Picture(None)) => {}
+                    Ok(Step::Pipeline(pipe)) => self.start_worker(pipe),
+                    Err(e) => {
+                        if self.errors < 4 {
+                            self.errors += 1;
+                            red(&format!("nn::codec {}: {e}", self.codec.name()));
+                        }
                     }
                 }
             }
-        }
-        if eos {
-            match self.held.back_mut() {
-                Some(last) if got => last.eos = true,
-                _ => self.eos_pending = true,
+            if self.worker.is_none() {
+                if eos {
+                    match self.held.back_mut() {
+                        Some(last) if got => last.eos = true,
+                        _ => self.eos_pending = true,
+                    }
+                }
+                self.submits += 1;
+                let n = self.submits;
+                self.drain(true, fx);
+                return Ok(n);
             }
         }
+        // The worker decodes. The packet only waits in the queue.
+        self.queued.push_back(Job {
+            data: data.to_vec(),
+            ts,
+            eos,
+        });
+        self.cv.notify_all();
         self.submits += 1;
         let n = self.submits;
         self.drain(true, fx);
         Ok(n)
     }
 
+    /// Starts the worker of the stream, which owns `pipe`. The decoder must be in a `Mutex` that `me` names.
+    fn start_worker(&mut self, pipe: Box<dyn Pipeline>) {
+        let Some(dec) = self.me.upgrade() else {
+            red("nn::codec: the decoder has no owner for a worker, it decodes in the call");
+            return;
+        };
+        self.lag = pipe.lag();
+        let spawned = std::thread::Builder::new()
+            .name(format!("codec-{}", self.id))
+            .stack_size(WORKER_STACK)
+            .spawn(move || run_worker(&dec, pipe));
+        match spawned {
+            Ok(h) => {
+                self.worker = Some(h);
+                eprintln!(
+                    "[codec] {} decoder {}: a worker thread decodes on the CPU, {} frame at a time",
+                    self.codec.name(),
+                    self.id,
+                    self.lag
+                );
+            }
+            Err(e) => {
+                self.lag = 0;
+                red(&format!("nn::codec: the worker did not start: {e}"));
+            }
+        }
+    }
+
     /// Puts pictures and the end of stream into the released buffers, in order. The event says that a packet can
     /// come: it rises when a packet was taken (`took`) or when room came back, not at every release. A player that
     /// counts each signal as one packet it may send would overrun [`HOLD`] if it rose at every release.
     fn drain(&mut self, took: bool, fx: &mut Effects) {
-        let before = self.held.len();
+        let before = self.load();
+        self.drain_from(before, took, fx);
+    }
+
+    /// [`Dec::drain`] for a caller that changed the load itself: `before` is the load before it did.
+    fn drain_from(&mut self, before: usize, took: bool, fx: &mut Effects) {
         while !self.pend.is_empty() && (!self.held.is_empty() || self.eos_pending) {
             let Some(i) = self.pend.pop_front() else {
                 break;
@@ -720,9 +934,12 @@ impl Dec {
             fx.filled.push((i, s.generation));
         }
         if self.event != 0 {
-            if self.held.len() >= READY {
+            let limit = self.ready_limit();
+            if self.load() >= limit {
                 fx.event = Some(false);
-            } else if took || before >= READY {
+            } else if took || before >= limit || self.event_state == Some(false) {
+                // The last case: the event is down and there is room. Whoever lowered the load raises it, and so does
+                // every later call, so it cannot stay down with room.
                 fx.event = Some(true);
             }
         }
@@ -804,6 +1021,191 @@ impl Dec {
     }
 }
 
+/// Carries out `fx` for the decoder behind `d` and releases its lock. The order lock is taken before the decoder lock
+/// is let go, so the effects of two calls happen in the order in which the calls decided them.
+fn deliver(mut d: MutexGuard<'_, Dec>, fx: Effects) {
+    d.event_state = fx.event.or(d.event_state);
+    let (id, event, applier, order) = (d.id, d.event, Arc::clone(&d.applier), Arc::clone(&d.order));
+    let turn = lock(&order);
+    drop(d);
+    applier(id, event, fx);
+    drop(turn);
+}
+
+fn has_effects(fx: &Effects) -> bool {
+    fx.event.is_some() || !fx.filled.is_empty()
+}
+
+/// The call of the decoder that the worker made.
+#[derive(Clone, Copy)]
+enum Call {
+    /// A packet. `taken` says whether the decoder took it in: if not, it is not in flight.
+    Job {
+        eos: bool,
+        taken: bool,
+    },
+    Wait,
+}
+
+/// What the worker found after a call of the decoder, under the lock.
+fn absorb(d: &mut Dec, call: Call, res: Result<(), String>, out: &mut Vec<Pic>) -> Effects {
+    let before = d.load();
+    let (job_eos, popped) = match call {
+        Call::Job { eos, taken } => (eos, !taken || res.is_err()),
+        Call::Wait => (false, false),
+    };
+    let mut fx = Effects::default();
+    if d.flush_req {
+        // A Stop or Flush came meanwhile: what the decoder gave belongs to the stream that ended.
+        out.clear();
+        return fx;
+    }
+    if popped {
+        // The packet was dropped or failed: no picture follows.
+        d.inflight = d.inflight.saturating_sub(1);
+    }
+    if let Err(e) = &res
+        && d.errors < 4
+    {
+        d.errors += 1;
+        red(&format!("nn::codec {}: {e}", d.codec.name()));
+    }
+    d.inflight = d.inflight.saturating_sub(out.len());
+    if matches!(call, Call::Wait) && res.is_ok() && out.is_empty() {
+        // Nothing was in flight: a packet that shows no picture (a sequence header alone) was counted.
+        d.inflight = 0;
+    }
+    if job_eos {
+        // The decoder was drained: nothing is in flight, and the last picture ends the stream.
+        d.inflight = 0;
+        if out.is_empty() {
+            d.eos_pending = true;
+        } else {
+            let last = out.len() - 1;
+            for (k, (frame, ts)) in out.drain(..).enumerate() {
+                if d.hold(frame, ts)
+                    && k == last
+                    && let Some(h) = d.held.back_mut()
+                {
+                    h.eos = true;
+                }
+            }
+        }
+    } else {
+        for (frame, ts) in out.drain(..) {
+            d.hold(frame, ts);
+        }
+    }
+    d.drain_from(before, false, &mut fx);
+    fx
+}
+
+/// The worker of a stream: sends the packets of the queue, and waits for pictures whenever frames are in flight and
+/// no packet is queued.
+fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
+    let cv = Arc::clone(&lock(dec).cv);
+    let mut out: Vec<Pic> = Vec::new();
+    // Pictures may still be inside the decoder, whatever the count says.
+    let mut maybe = false;
+    let mut d = lock(dec);
+    loop {
+        if d.stop {
+            return;
+        }
+        if d.flush_req {
+            pipe.flush();
+            maybe = false;
+            d.flush_req = false;
+            d.inflight = 0;
+            cv.notify_all();
+            continue;
+        }
+        if let Some(job) = d.queued.pop_front() {
+            d.inflight += 1;
+            d.busy = true;
+            drop(d);
+            out.clear();
+            let mut res = Ok(());
+            let mut taken = false;
+            if !job.data.is_empty() {
+                match pipe.push(&job.data, job.ts, &mut out) {
+                    Ok(t) => taken = t,
+                    Err(e) => res = Err(e),
+                }
+            }
+            maybe |= taken || !out.is_empty();
+            if job.eos && res.is_ok() {
+                res = pipe.finish(&mut out);
+                maybe = false;
+            }
+            d = lock(dec);
+            d.busy = false;
+            let fx = absorb(
+                &mut d,
+                Call::Job {
+                    eos: job.eos,
+                    taken,
+                },
+                res,
+                &mut out,
+            );
+            cv.notify_all();
+            if has_effects(&fx) {
+                deliver(d, fx);
+                d = lock(dec);
+            }
+        } else if d.inflight > 0 || maybe {
+            // Pictures may be inside: a unit can show more or fewer than one, so the count alone does not say.
+            d.busy = true;
+            drop(d);
+            out.clear();
+            let res = pipe.wait(&mut out);
+            if res.is_ok() && out.is_empty() {
+                maybe = false;
+            }
+            d = lock(dec);
+            d.busy = false;
+            let fx = absorb(&mut d, Call::Wait, res, &mut out);
+            cv.notify_all();
+            if has_effects(&fx) {
+                deliver(d, fx);
+                d = lock(dec);
+            }
+        } else {
+            // Idle. Every second the state line, and the event is checked: it must be up when there is room.
+            let (g, timeout) = cv
+                .wait_timeout(d, Duration::from_secs(1))
+                .unwrap_or_else(PoisonError::into_inner);
+            d = g;
+            if timeout.timed_out() && !d.stop {
+                d.diag_tick("worker");
+                let mut fx = Effects::default();
+                let load = d.load();
+                d.drain_from(load, false, &mut fx);
+                if has_effects(&fx) {
+                    deliver(d, fx);
+                    d = lock(dec);
+                }
+            }
+        }
+    }
+}
+
+/// Stops the worker of the decoder and joins it. The stream is dropped with it.
+pub(crate) fn stop_worker(dec: &Mutex<Dec>) {
+    let handle = {
+        let mut d = lock(dec);
+        d.stop = true;
+        d.cv.notify_all();
+        d.worker.take()
+    };
+    if let Some(h) = handle
+        && h.thread().id() != std::thread::current().id()
+    {
+        let _ = h.join();
+    }
+}
+
 static DECODERS: Mutex<BTreeMap<u32, Arc<Mutex<Dec>>>> = Mutex::new(BTreeMap::new());
 
 /// The decoder whose handle the SDK object at `t` holds.
@@ -822,13 +1224,22 @@ pub(crate) fn dec_event(d: &Mutex<Dec>) -> u64 {
 pub(crate) fn dec_call<R>(t: u64, f: impl FnOnce(&mut Dec, &mut Effects) -> R) -> Option<R> {
     let dec = dec_of(t)?;
     let mut fx = Effects::default();
-    let (r, id, event) = {
-        let mut d = lock(&dec);
-        let r = f(&mut d, &mut fx);
-        (r, d.id(), d.event())
-    };
-    apply(id, event, fx);
+    let mut d = lock(&dec);
+    let r = f(&mut d, &mut fx);
+    deliver(d, fx);
     Some(r)
+}
+
+/// Stop and Flush: [`Dec::reset`], and then waits until the worker of the stream, if it has one, is idle with
+/// everything dropped.
+pub(crate) fn dec_reset(t: u64) -> Option<()> {
+    let dec = dec_of(t)?;
+    let mut fx = Effects::default();
+    let mut d = lock(&dec);
+    d.reset(&mut fx);
+    let d = Dec::wait_idle(d);
+    deliver(d, fx);
+    Some(())
 }
 
 /// The picture in buffer `i` of the pool in the SDK object at `t`.
@@ -862,6 +1273,7 @@ pub(crate) fn create(t: u64, codec: Codec, w: u16, h: u16, input: u32, output: u
             return BAD;
         };
         let dec = Arc::new(Mutex::new(Dec::new(id, codec, event)));
+        lock(&dec).me = Arc::downgrade(&dec);
         all.insert(id, Arc::clone(&dec));
         dec
     };
@@ -895,6 +1307,8 @@ pub(crate) fn finalize(t: u64) -> u32 {
     let Some(dec) = lock(&DECODERS).remove(&id) else {
         return 0;
     };
+    // The worker first: it signals the event.
+    stop_worker(&dec);
     let event = lock(&dec).event();
     // The event goes with the decoder, as in the SDK. Kept, it would stay bound, and the next decoder made in the same
     // memory would find its event bound and not get one.
@@ -1153,6 +1567,416 @@ mod tests {
             && i.mem % NATIVE_ALIGN == 0));
         native_image_blank_free(h);
         assert_eq!(native_image(h), None);
+    }
+
+    // ---------- the worker ----------
+
+    use std::time::{Duration, Instant};
+
+    /// Lags like rav1d with frame threads: a picture comes out when `MOCK_LAG` more packets were pushed, or when it
+    /// is waited for.
+    const MOCK_LAG: usize = 3;
+
+    struct MockPipe {
+        /// Two pictures come out of every third packet, and every seventh packet shows nothing.
+        odd: bool,
+        pushed: u32,
+        inside: VecDeque<Pic>,
+        /// Where the pictures of `push` and `wait` came from, to see that the worker waits.
+        waits: Arc<AtomicU32>,
+    }
+
+    impl Pipeline for MockPipe {
+        fn lag(&self) -> usize {
+            MOCK_LAG
+        }
+
+        fn push(&mut self, _packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<bool, String> {
+            // The time that a frame takes.
+            std::thread::sleep(Duration::from_millis(2));
+            self.pushed += 1;
+            if self.odd && self.pushed.is_multiple_of(7) {
+                return Ok(true);
+            }
+            self.inside.push_back((Arc::new(grey()), ts));
+            if self.inside.len() > MOCK_LAG {
+                out.extend(self.inside.pop_front());
+                if self.odd && self.pushed.is_multiple_of(3) {
+                    out.extend(self.inside.pop_front());
+                }
+            }
+            Ok(true)
+        }
+
+        fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
+            self.waits.fetch_add(1, Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(2));
+            out.extend(self.inside.pop_front());
+            Ok(())
+        }
+
+        fn flush(&mut self) {
+            self.inside.clear();
+        }
+    }
+
+    struct MockBackend {
+        odd: bool,
+    }
+
+    impl Backend for MockBackend {
+        fn decode(&mut self, _packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
+            Ok(None)
+        }
+
+        fn pipeline(&mut self, _packet: &[u8]) -> Option<Box<dyn Pipeline>> {
+            Some(Box::new(MockPipe {
+                odd: self.odd,
+                pushed: 0,
+                inside: VecDeque::new(),
+                waits: Arc::new(AtomicU32::new(0)),
+            }))
+        }
+    }
+
+    fn open_mock() -> Result<Box<dyn Backend>, String> {
+        Ok(Box::new(MockBackend { odd: false }))
+    }
+
+    fn open_odd() -> Result<Box<dyn Backend>, String> {
+        Ok(Box::new(MockBackend { odd: true }))
+    }
+
+    /// The effects that the worker and the calls carried out.
+    #[derive(Default)]
+    struct Record {
+        events: Vec<bool>,
+        filled: Vec<(u32, u32)>,
+    }
+
+    struct Rig {
+        dec: Arc<Mutex<Dec>>,
+        rec: Arc<Mutex<Record>>,
+    }
+
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            stop_worker(&self.dec);
+        }
+    }
+
+    fn rig() -> Rig {
+        let rec = Arc::new(Mutex::new(Record::default()));
+        let dec = Arc::new(Mutex::new(Dec::new(1, Codec::Av1, 0x1000)));
+        {
+            let mut d = lock(&dec);
+            d.me = Arc::downgrade(&dec);
+            d.open_av1 = open_mock;
+            let r = Arc::clone(&rec);
+            d.applier = Arc::new(move |_, _, fx| {
+                let mut r = lock(&r);
+                r.events.extend(fx.event);
+                r.filled.extend(fx.filled);
+            });
+        }
+        Rig { dec, rec }
+    }
+
+    impl Rig {
+        fn call<R>(&self, f: impl FnOnce(&mut Dec, &mut Effects) -> R) -> R {
+            let mut fx = Effects::default();
+            let mut d = lock(&self.dec);
+            let r = f(&mut d, &mut fx);
+            deliver(d, fx);
+            r
+        }
+
+        fn submit(&self, ts: i64, eos: bool) -> Result<u64, u32> {
+            self.call(|d, fx| d.submit(&[1, 2, 3], ts, eos, fx))
+        }
+
+        /// Registers `n` buffers and releases them, so that pictures can go in.
+        fn buffers(&self, n: u32) {
+            for i in 0..n {
+                self.call(|d, fx| {
+                    d.register(i, None, i);
+                    d.release(i, fx);
+                });
+            }
+        }
+
+        fn properties(&self, i: u32) -> Result<(u16, u16, i64, bool), u32> {
+            lock(&self.dec).properties(i)
+        }
+
+        fn wait_for(&self, what: &str, mut ok: impl FnMut(&Rig) -> bool) {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !ok(self) {
+                assert!(Instant::now() < end, "timed out: {what}");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn state(&self) -> String {
+            let d = lock(&self.dec);
+            format!(
+                "held {} queued {} inflight {} busy {} event {:?}",
+                d.held.len(),
+                d.queued.len(),
+                d.inflight,
+                d.busy,
+                d.event_state
+            )
+        }
+
+        /// The game takes the filled buffers and releases them again.
+        fn take_all(&self) {
+            for i in 0..8 {
+                if self.properties(i).is_ok() {
+                    self.call(|d, fx| d.release(i, fx));
+                }
+            }
+        }
+
+        fn reset(&self) {
+            let mut fx = Effects::default();
+            let mut d = lock(&self.dec);
+            d.reset(&mut fx);
+            let d = Dec::wait_idle(d);
+            deliver(d, fx);
+        }
+    }
+
+    #[test]
+    fn pictures_arrive_without_further_submits() {
+        // The starvation case: the decoder keeps MOCK_LAG pictures until the next push, and the game sends the next
+        // packet only when it has a picture.
+        let r = rig();
+        r.buffers(8);
+        for ts in 0..3 {
+            assert!(r.submit(ts, false).is_ok());
+        }
+        r.wait_for("three pictures", |r| {
+            (0..3).all(|i| r.properties(i).is_ok())
+        });
+        for i in 0..3 {
+            assert_eq!(r.properties(i).map(|p| p.2), Ok(i64::from(i)));
+        }
+        assert!(lock(&r.rec).events.contains(&true));
+        assert_eq!(lock(&r.dec).load(), 0);
+    }
+
+    #[test]
+    fn pictures_keep_their_order_and_timestamps() {
+        let r = rig();
+        r.buffers(8);
+        let mut seen = Vec::new();
+        let mut sent = 0;
+        let end = Instant::now() + Duration::from_secs(10);
+        while seen.len() < 60 {
+            assert!(Instant::now() < end, "timed out with {seen:?}");
+            if sent < 60 && r.submit(1000 + sent, false).is_ok() {
+                sent += 1;
+            }
+            // Take the filled buffers in the order of their release, and release them again.
+            for i in 0..8 {
+                if let Ok((_, _, ts, _)) = r.properties(i) {
+                    seen.push(ts);
+                    r.call(|d, fx| d.release(i, fx));
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let want: Vec<i64> = (1000..1060).collect();
+        assert_eq!(seen, want);
+    }
+
+    #[test]
+    fn the_end_of_stream_drains_the_decoder_and_marks_the_last_picture() {
+        let r = rig();
+        r.buffers(8);
+        assert!(r.submit(10, false).is_ok());
+        assert!(r.submit(11, false).is_ok());
+        assert!(r.submit(12, true).is_ok());
+        r.wait_for("the last picture", |r| r.properties(2).is_ok());
+        assert_eq!(r.properties(0).map(|p| p.3), Ok(false));
+        assert_eq!(r.properties(1).map(|p| p.3), Ok(false));
+        assert_eq!(r.properties(2), Ok((2, 2, 12, true)));
+    }
+
+    #[test]
+    fn an_end_of_stream_without_a_picture_gets_a_buffer_of_its_own() {
+        let r = rig();
+        r.buffers(4);
+        assert!(r.submit(1, false).is_ok());
+        r.wait_for("the picture", |r| r.properties(0).is_ok());
+        assert!(r.call(|d, fx| d.submit(&[], 0, true, fx)).is_ok());
+        r.wait_for("the end", |r| r.properties(1).is_ok());
+        assert_eq!(r.properties(1), Ok((0, 0, 0, true)));
+    }
+
+    #[test]
+    fn a_flush_during_decode_drops_everything_and_the_worker_goes_on() {
+        let r = rig();
+        r.buffers(8);
+        for ts in 0..6 {
+            assert!(r.submit(ts, false).is_ok());
+        }
+        r.reset();
+        {
+            let d = lock(&r.dec);
+            assert!(!d.busy && !d.flush_req);
+            assert_eq!((d.load(), d.queued.len(), d.inflight), (0, 0, 0));
+        }
+        // No picture of the old stream shows up later.
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(lock(&r.dec).load(), 0);
+        let before = (0..8).filter(|&i| r.properties(i).is_ok()).count();
+        assert!(before < 6);
+        // The stream starts over.
+        for i in 0..8 {
+            r.call(|d, fx| d.release(i, fx));
+        }
+        assert!(r.submit(500, false).is_ok());
+        r.wait_for("the new picture", |r| {
+            (0..8).any(|i| r.properties(i).is_ok_and(|p| p.2 == 500))
+        });
+    }
+
+    #[test]
+    fn hold_counts_packets_in_flight_and_pictures() {
+        let r = rig();
+        // No buffer is released: nothing leaves `held`.
+        let mut accepted = 0;
+        let mut busy = None;
+        for ts in 0..HOLD as i64 + 4 {
+            let mut fx = Effects::default();
+            let res = lock(&r.dec).submit(&[1], ts, false, &mut fx);
+            match res {
+                Ok(_) => accepted += 1,
+                Err(e) => {
+                    busy = Some((e, fx.event));
+                    break;
+                }
+            }
+            r.call(|_, _| ());
+        }
+        assert_eq!(accepted, HOLD);
+        assert_eq!(busy, Some((BUSY, Some(false))));
+        {
+            let d = lock(&r.dec);
+            assert_eq!(d.load(), HOLD);
+        }
+        // Wait for the worker to finish what it has: the load does not change by that.
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(lock(&r.dec).load(), HOLD);
+        // Room comes back with released buffers. The event stays down until the load is under the limit.
+        lock(&r.rec).events.clear();
+        let limit = lock(&r.dec).ready_limit();
+        assert!(limit < HOLD);
+        for i in 0..(HOLD - limit + 1) as u32 {
+            r.call(|d, fx| {
+                d.register(i, None, i);
+                d.release(i, fx);
+            });
+        }
+        assert_eq!(lock(&r.dec).load(), limit - 1);
+        let events = lock(&r.rec).events.clone();
+        assert_eq!(events.last(), Some(&true));
+        assert!(events[..events.len() - 1].iter().all(|e| !e));
+    }
+
+    #[test]
+    fn a_player_that_sends_on_the_event_never_stalls() {
+        // Sends a packet only when the event is up, as a player does, and takes pictures as they come.
+        let r = rig();
+        r.buffers(8);
+        let mut got = Vec::new();
+        let mut sent = 0;
+        let mut up = true;
+        let mut seen_events = 0;
+        let end = Instant::now() + Duration::from_secs(10);
+        while got.len() < 40 {
+            assert!(
+                Instant::now() < end,
+                "stalled: sent {sent}, got {}",
+                got.len()
+            );
+            {
+                let ev = lock(&r.rec);
+                for &e in &ev.events[seen_events..] {
+                    up = e;
+                }
+                seen_events = ev.events.len();
+            }
+            if up && sent < 40 {
+                let mut fx = Effects::default();
+                let res = lock(&r.dec).submit(&[1], sent, false, &mut fx);
+                if res.is_ok() {
+                    sent += 1;
+                }
+                // The effect of the call, as `deliver` would.
+                let mut rec = lock(&r.rec);
+                rec.events.extend(fx.event);
+                rec.filled.extend(fx.filled);
+            }
+            for i in 0..8 {
+                if let Ok((_, _, ts, _)) = r.properties(i) {
+                    got.push(ts);
+                    r.call(|d, fx| d.release(i, fx));
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(got, (0..40).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn the_load_does_not_stick_with_packets_that_show_nothing_and_a_looping_stream() {
+        let r = rig();
+        lock(&r.dec).open_av1 = open_odd;
+        r.buffers(8);
+        let mut ts = 0;
+        for round in 0..4 {
+            // A stream of packets, the last one the end of the stream.
+            let mut sent = 0;
+            let end = Instant::now() + Duration::from_secs(10);
+            while sent < 17 {
+                assert!(Instant::now() < end, "round {round}: stuck, {}", r.state());
+                if r.submit(ts, round == 3 && sent == 16).is_ok() {
+                    sent += 1;
+                    ts += 1;
+                }
+                r.take_all();
+            }
+            // Nothing more is sent: the game takes what comes, and the load goes to nothing.
+            let end = Instant::now() + Duration::from_secs(10);
+            while lock(&r.dec).load() > 0 {
+                assert!(
+                    Instant::now() < end,
+                    "round {round}: load stuck, {}",
+                    r.state()
+                );
+                r.take_all();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            // The stream ends and a new one starts, as a loop of the movie does.
+            r.take_all();
+            let d = lock(&r.dec);
+            assert_eq!(d.inflight, 0, "round {round}");
+            assert!(d.queued.is_empty() && d.held.is_empty());
+        }
+        // The event is up again, so that the game sends.
+        assert_eq!(lock(&r.dec).event_state, Some(true));
+    }
+
+    #[test]
+    fn stopping_the_worker_joins_it() {
+        let r = rig();
+        r.buffers(2);
+        assert!(r.submit(1, false).is_ok());
+        stop_worker(&r.dec);
+        assert!(lock(&r.dec).worker.is_none());
     }
 
     fn grey() -> Frame {

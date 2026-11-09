@@ -365,11 +365,7 @@ extern "C" fn start(t: u64) -> u32 {
 }
 
 extern "C" fn reset(t: u64) -> u32 {
-    dec_call(t, |d, fx| {
-        d.reset(fx);
-        0
-    })
-    .unwrap_or(0)
+    crate::codec::dec_reset(t).map_or(0, |()| 0)
 }
 
 extern "C" fn ready_event_out(out: u64, t: u64) -> u32 {

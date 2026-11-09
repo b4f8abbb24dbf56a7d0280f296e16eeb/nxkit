@@ -929,16 +929,23 @@ impl Gpu {
         mark(t0, "resolve+fit");
         self.imgdump_step(view, detail, &textures);
         let ords = ordinals(frame);
-        let native = self.native.prepare(&crate::native::PrepareCx {
-            ctx: &self.ctx,
-            guest: &self.guest,
-            pipelines: &self.pipelines,
-            frame,
-            detail,
-            view,
-            textures: &textures,
-        });
-        let pass_images = crate::images::pass_images(frame, plan, &ords, &image_uses.per_draw);
+        let native = self.native.prepare(
+            &crate::native::PrepareCx {
+                ctx: &self.ctx,
+                guest: &self.guest,
+                pipelines: &self.pipelines,
+                frame,
+                detail,
+                view,
+                textures: &textures,
+                store: &self.store,
+            },
+            &mut stats,
+        );
+        let mut pass_images = crate::images::pass_images(frame, plan, &ords, &image_uses.per_draw);
+        if let Some(p) = &native {
+            crate::native::book_writes(p, frame, plan, &ords, &mut pass_images);
+        }
         let mut first_write: FastMap<TexId, usize> = FastMap::default();
         let mut gpu_wrote: Vec<TexId> = Vec::new();
         // The levels and layers that the frame wrote, and the last pass that wrote them, for the copy-back.
