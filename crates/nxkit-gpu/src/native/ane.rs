@@ -355,11 +355,11 @@ mod tests {
     #[test]
     fn the_cache_is_under_the_home_unless_overridden() {
         assert_eq!(
-            cache_root("ndve", None, Some("/Users/a")),
-            Some(PathBuf::from("/Users/a/Library/Caches/nxkit/ndve-ane"))
+            cache_root("ndve", None, Some("/home/u")),
+            Some(PathBuf::from("/home/u/Library/Caches/nxkit/ndve-ane"))
         );
         assert_eq!(
-            cache_root("ndve", Some("/x"), Some("/Users/a")),
+            cache_root("ndve", Some("/x"), Some("/home/u")),
             Some(PathBuf::from("/x"))
         );
         assert_eq!(cache_root("ndve", Some(""), None), None);
