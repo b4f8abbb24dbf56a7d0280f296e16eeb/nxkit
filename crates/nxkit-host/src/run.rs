@@ -128,5 +128,6 @@ pub fn run(opts: &Options) -> Result<()> {
         "nxkit-host: region use {}",
         crate::memreport::region_use(&layout)
     );
+    eprintln!("{}", crate::memreport::end_line(&layout));
     result
 }

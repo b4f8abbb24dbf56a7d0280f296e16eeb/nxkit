@@ -39,6 +39,7 @@ pub mod memory;
 pub mod memreport;
 #[cfg(target_os = "macos")]
 pub mod place;
+pub mod poolreport;
 #[cfg(target_os = "macos")]
 pub mod probe;
 #[cfg(target_os = "macos")]

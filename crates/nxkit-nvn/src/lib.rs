@@ -34,6 +34,7 @@ pub mod marks;
 pub mod mem;
 pub mod passes;
 pub mod passmerge;
+pub mod pools;
 pub mod prof;
 pub mod record;
 pub mod rendercond;

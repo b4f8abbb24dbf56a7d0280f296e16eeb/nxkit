@@ -21,6 +21,11 @@
 //! The third line, `nxkit-mem regions`, is [`region_use`]: how much of the heap, alias and stack regions the game used
 //! at most. The host prints it at the end of every run as well.
 //!
+//! The fourth line, `nxkit-mem pools`, is [`end_line`] (`poolreport`): the NVN memory pools that are live now, how much
+//! guest memory they cover (`pages`: each pool rounded out to 16 KiB pages, overlaps counted once), how it splits into
+//! heap, alias and other, and the pools by size. It shows how much of the range one no-copy buffer for each pool
+//! would have to reach. The host prints it at the end of every run as well.
+//!
 //! The second line, `nxkit-mem paging`, has rates per second over the interval since the line before:
 //! - `task`: the faults of this process, its page-ins (a page read from a file, the compressor or swap), its
 //!   decompressions and swap-ins (`TASK_VM_INFO`). Page-ins and decompressions above a few hundred per second while
@@ -31,8 +36,10 @@
 use std::time::{Duration, Instant};
 
 use nxkit_metal::Context;
+use nxkit_nvn::pools;
 
 use crate::layout::{Layout, PAGE};
+use crate::poolreport::pool_line;
 use crate::sys::paging::{self, SystemVm, TaskEvents, per_second};
 use crate::sys::vm::{self, TaskMemory};
 
@@ -63,12 +70,18 @@ pub fn start(ctx: &Context, layout: &Layout) {
                 let now = Sample::now();
                 eprintln!("{}", rates(&last, &now, t0.elapsed()));
                 eprintln!("nxkit-mem regions {}", region_use(&layout));
+                eprintln!("{}", pool_line(&layout, &pools::snapshot()));
                 last = now;
             }
         });
     if let Err(e) = spawned {
         eprintln!("nxkit-mem: the report thread did not start: {e}");
     }
+}
+
+/// The pool line, for the end of a run.
+pub fn end_line(l: &Layout) -> String {
+    pool_line(l, &pools::snapshot())
 }
 
 fn mib(v: u64) -> u64 {

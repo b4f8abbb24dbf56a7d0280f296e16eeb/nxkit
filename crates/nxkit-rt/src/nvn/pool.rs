@@ -24,6 +24,7 @@
 
 use nxkit_abi::guest;
 use nxkit_nvn::backend::PoolInfo;
+use nxkit_nvn::pools;
 
 use super::abi::{AbiResult, Obj, guard, log_once, magic, other, ret_bool, table, used};
 use super::ctx::gpu;
@@ -123,6 +124,11 @@ pub(crate) extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
                     len,
                     flags,
                 })?;
+            pools::made(PoolInfo {
+                host: mem,
+                len,
+                flags,
+            });
         } else if mem == 0 && !virt {
             eprintln!(
                 "nxkit-rt: warning: NVN nvnMemoryPoolInitialize: a pool that is not virtual has no storage (flags {flags:#x}, size {len:#x})"
@@ -139,6 +145,7 @@ pub(crate) extern "C" fn pool_finalize(p: u64) {
             gpu("nvnMemoryPoolFinalize")
                 .backend()
                 .unregister_pool(v.mem);
+            pools::gone(v.mem);
         }
         Obj(p).set_u32(0, 0)
     });
