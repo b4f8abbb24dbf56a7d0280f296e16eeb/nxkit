@@ -107,6 +107,9 @@ impl ScaledUploads {
             scaled: false,
             fresh: true,
             widened,
+            guest_address: 0,
+            guest_size: 0,
+            scale: 1.0,
         })
     }
 

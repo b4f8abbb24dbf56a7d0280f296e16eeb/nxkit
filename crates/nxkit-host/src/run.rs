@@ -129,5 +129,8 @@ pub fn run(opts: &Options) -> Result<()> {
         crate::memreport::region_use(&layout)
     );
     eprintln!("{}", crate::memreport::end_line(&layout));
+    for l in crate::texreport::lines() {
+        eprintln!("{l}");
+    }
     result
 }

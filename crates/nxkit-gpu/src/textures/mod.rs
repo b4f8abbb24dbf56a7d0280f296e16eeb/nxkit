@@ -12,6 +12,7 @@
 
 mod blocks;
 mod evict;
+pub mod inventory;
 #[cfg(test)]
 mod tests;
 mod views;
@@ -49,6 +50,13 @@ pub(crate) struct Res {
     pub(crate) fresh: bool,
     /// The Metal format has another layout than the NVN format (depth 24 bits).
     pub(crate) widened: bool,
+    /// The GPU address of the guest storage this texture was made for (the memory report keeps it; 0 for a staging
+    /// texture).
+    pub(crate) guest_address: u64,
+    /// The bytes of that storage in guest memory.
+    pub(crate) guest_size: u64,
+    /// The scale of the size when it was made: 1 for an unscaled texture.
+    pub(crate) scale: f32,
 }
 
 /// How a texture is used in this frame.
@@ -115,6 +123,8 @@ pub(crate) struct TextureStore {
     usage: FastMap<u64, evict::Usage>,
     /// The ids whose Metal texture was evicted and not made again yet.
     evicted_ids: FastSet<TexId>,
+    /// The memory report is on, so every scan publishes the inventory.
+    inventory: bool,
 }
 
 fn kind_of(t: Target) -> Option<TextureKind> {
@@ -234,6 +244,7 @@ impl TextureStore {
             evict_after: evict::frames_from_env(),
             usage: FastMap::default(),
             evicted_ids: FastSet::default(),
+            inventory: inventory::wanted(),
         }
     }
 
@@ -394,6 +405,9 @@ impl TextureStore {
                 scaled,
                 fresh: true,
                 widened,
+                guest_address: rec.address.get(),
+                guest_size: rec.layout.size,
+                scale: if scaled { scale } else { 1.0 },
             };
             self.aliases.insert(key, r.clone());
             stats.textures_created += 1;

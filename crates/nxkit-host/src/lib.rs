@@ -51,6 +51,7 @@ pub mod seams;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod sys;
+pub mod texreport;
 #[cfg(target_os = "macos")]
 pub mod thread;
 #[cfg(target_os = "macos")]

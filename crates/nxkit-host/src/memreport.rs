@@ -26,6 +26,13 @@
 //! heap, alias and other, and the pools by size. It shows how much of the range one no-copy buffer for each pool
 //! would have to reach. The host prints it at the end of every run as well.
 //!
+//! The `nxkit-mem tex` lines (`texreport`) say which Metal textures hold the bytes: the texture store by class
+//! (memoryless, attachment, gpu-written, cpu-read, scaled, widened, sampled), guest bytes against Metal bytes, the
+//! formats, the idle age of the sampled textures, the scale, the entries that share or overlap a guest range, and the
+//! largest textures. `nxkit-gpu` takes the inventory in the idle scan every 60 frames while the report is on, so the
+//! lines are up to a second old and appear after the 60th frame. The host prints them at the end of every run as well
+//! (only when the report was on).
+//!
 //! The second line, `nxkit-mem paging`, has rates per second over the interval since the line before:
 //! - `task`: the faults of this process, its page-ins (a page read from a file, the compressor or swap), its
 //!   decompressions and swap-ins (`TASK_VM_INFO`). Page-ins and decompressions above a few hundred per second while
@@ -71,6 +78,9 @@ pub fn start(ctx: &Context, layout: &Layout) {
                 eprintln!("{}", rates(&last, &now, t0.elapsed()));
                 eprintln!("nxkit-mem regions {}", region_use(&layout));
                 eprintln!("{}", pool_line(&layout, &pools::snapshot()));
+                for l in crate::texreport::lines() {
+                    eprintln!("{l}");
+                }
                 last = now;
             }
         });

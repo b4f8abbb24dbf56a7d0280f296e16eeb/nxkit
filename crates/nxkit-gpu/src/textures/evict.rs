@@ -87,6 +87,15 @@ impl TextureStore {
     /// many Metal textures it dropped. The textures are in `retired`; the caller drops them with `take_retired`.
     pub(crate) fn end_frame(&mut self) -> usize {
         self.frame += 1;
+        let dropped = self.evict_scan();
+        // The memory report wants the inventory after the scan, also when eviction is off.
+        if self.inventory && self.frame.is_multiple_of(SCAN_EVERY) {
+            self.publish_inventory();
+        }
+        dropped
+    }
+
+    fn evict_scan(&mut self) -> usize {
         let Some(after) = self.evict_after else {
             return 0;
         };

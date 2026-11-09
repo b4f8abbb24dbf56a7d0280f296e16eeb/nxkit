@@ -65,3 +65,4 @@ pub use pipelines::flush_runtime_cache;
 pub use settings::GpuSettings;
 pub use snapshot::{EncodeView, Live, Snapshot};
 pub use stats::{DrawClass, EncodeReport, EncodeStats, KindStats, Skip};
+pub use textures::inventory;
