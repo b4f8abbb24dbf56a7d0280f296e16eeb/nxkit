@@ -43,6 +43,7 @@ use crate::upload::{Dirty, Transfer};
 
 mod diag;
 mod frame;
+mod freshzero;
 mod handles;
 mod preload;
 mod timing;

@@ -292,6 +292,7 @@ impl Gpu {
             first.retain(b.clone());
         }
         self.transfer.begin_frame();
+        let mut zeroer = freshzero::Zeroer::new(crate::knob("freshzero"));
         let mut scaled_queued = Vec::new();
         for (id, res) in &textures {
             let Ok(rec) = view.record(*id) else { continue };
@@ -323,6 +324,9 @@ impl Gpu {
                 self.stale_diag(*id, rec, res);
             }
             if !TextureStore::needs_upload(res, rec) {
+                if zeroer.zero(&self.ctx, first, res) {
+                    self.barriers.seed(res.barrier_id, Stages::FRAGMENT);
+                }
                 continue;
             }
             let wait = self.copyback.upload_waits(rec);
@@ -363,6 +367,7 @@ impl Gpu {
             }
         }
 
+        zeroer.report();
         if !scaled_queued.is_empty() {
             let (scaled, lost) = self.transfer.flush_scaled(first);
             stats.scaled_uploads += scaled;
@@ -461,6 +466,9 @@ impl Gpu {
             native: native.as_ref(),
             queries: queries.as_deref(),
         };
+        if !frame.gates.is_empty() && crate::diag("rendercond") && crate::diag::sampled() {
+            crate::gatediag::frame(&sh);
+        }
         let mut start = 0;
         let ranges: Vec<Range<usize>> = ends
             .iter()

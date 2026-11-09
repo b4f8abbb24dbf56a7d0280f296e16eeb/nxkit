@@ -29,6 +29,7 @@ mod draws;
 mod encode;
 mod encthread;
 mod format_map;
+mod gatediag;
 mod geometry;
 mod gmem;
 mod gpu;

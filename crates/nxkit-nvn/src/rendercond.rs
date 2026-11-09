@@ -21,6 +21,9 @@
 //!
 //! The known values stay in the table for [`KEEP_FLUSHES`] flushes; by then the backend wrote them to guest memory.
 //! The GPU counters stay until a known value replaces them.
+//!
+//! The diagnostic switches of [`force`] change a decision at run time. They are off by default. [`gate`] records what
+//! each condition covered, when `NXKIT_DIAG=rendercond` is on.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -49,9 +52,11 @@ enum Report {
 
 /// What a condition reads of one counter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Read {
-    /// A value of a recording or of guest memory.
+pub enum Read {
+    /// A value of a recording (a report value or a timestamp).
     Known(u64),
+    /// A word of guest memory that no report of the table names. It counts as known everywhere else.
+    Memory(u64),
     /// The emulated counter of the report that the table names, landed.
     Landed(u64),
     /// The last emulated counter that landed at the address, of an earlier report.
@@ -63,17 +68,38 @@ enum Read {
 }
 
 impl Read {
-    fn value(self) -> Option<u64> {
+    /// The value, None when the host does not know it.
+    pub fn value(self) -> Option<u64> {
         match self {
-            Self::Known(v) | Self::Landed(v) | Self::Stale(v) | Self::Place(v) => Some(v),
+            Self::Known(v)
+            | Self::Memory(v)
+            | Self::Landed(v)
+            | Self::Stale(v)
+            | Self::Place(v) => Some(v),
             Self::Unknown => None,
+        }
+    }
+
+    /// The word of the diagnostic lines for where the value came from.
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::Known(_) => "known",
+            Self::Memory(_) => "memory",
+            Self::Landed(_) => "landed",
+            Self::Stale(_) => "stale",
+            Self::Place(_) => "place",
+            Self::Unknown => "unknown",
         }
     }
 }
 
 /// `NXKIT_RENDERCOND_STALE`: `0` reads no counter of an earlier report, `addr` only the one at the same address; by
-/// default the one at the same address, else the one at the same place of an earlier frame.
+/// default the one at the same address, else the one at the same place of an earlier frame. The switch
+/// [`force::NOSTALE`] gives 0.
 fn stale_mode() -> u8 {
+    if force::force() & force::NOSTALE != 0 {
+        return 0;
+    }
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(
         || match std::env::var("NXKIT_RENDERCOND_STALE").as_deref() {
@@ -113,6 +139,8 @@ pub struct CondStats {
     pub counters: u32,
     /// The GPU counter reports by `NVNcounterType` (16 and above in the last), emulated or not.
     pub kinds: [u32; 17],
+    /// Decisions that a diagnostic switch forced, by switch: `rcflag`, `rcunk`, `rcall`.
+    pub forced: [u32; 3],
 }
 
 impl CondStats {
@@ -137,6 +165,8 @@ pub struct RenderConds {
     counters: Counters,
     /// The one-shot lines of `NXKIT_DIAG=rendercond` per condition address.
     diag: probe::Probe,
+    /// The condition that each queue carries into its next submit, for the gate lines.
+    gates: gate::Gates,
     /// The first evaluations, for `NXKIT_DIAG=rendercond`.
     pub evaluations: Vec<Evaluation>,
 }
@@ -159,20 +189,26 @@ impl RenderConds {
     ) {
         let mut on = !self.off.get(&queue).copied().unwrap_or(false);
         self.counters.begin(queue, base);
-        if marks.is_empty() && on {
+        let rec = gate::enabled();
+        let mut cond = if rec { self.gates.get(queue) } else { None };
+        let mut cover_from = base;
+        if marks.is_empty() && on && cond.is_none() {
             self.counters.end(queue, frame.cmds.len() as u32, frame);
             return;
         }
         let mut from = base;
         for m in marks {
             let at = base + m.at;
-            let next = match m.op {
+            let (next, info) = match m.op {
                 MarkOp::RenderEnable(v) => {
                     self.stats.enables += 1;
                     self.stats.disables += u32::from(!v);
-                    v
+                    (v, None)
                 }
-                MarkOp::RenderIf { mode, addr } => self.evaluate(mode, addr, &read),
+                MarkOp::RenderIf { mode, addr } => {
+                    let i = self.evaluate(mode, addr, &read);
+                    (i.decision.render, Some(i))
+                }
                 MarkOp::ReportValue { addr, value } => {
                     self.stats.values += 1;
                     let value = u64::from(value);
@@ -193,10 +229,18 @@ impl RenderConds {
             if !on {
                 frame.disable(from..at);
             }
+            if rec {
+                Self::cover(frame, cover_from..at, cond);
+                (cond, cover_from) = (info, at);
+            }
             (on, from) = (next, at);
         }
         if !on {
             frame.disable(from..frame.cmds.len() as u32);
+        }
+        if rec {
+            Self::cover(frame, cover_from..frame.cmds.len() as u32, cond);
+            self.gates.set(queue, cond);
         }
         self.off.insert(queue, !on);
         self.counters.end(queue, frame.cmds.len() as u32, frame);
@@ -249,8 +293,19 @@ impl RenderConds {
         self.report(addr, r);
     }
 
-    /// Whether the condition renders. An unknown counter or mode renders.
-    fn evaluate(&mut self, mode: u32, addr: u64, read: &impl Fn(u64) -> Option<u64>) -> bool {
+    /// Decides the condition. An unknown counter or mode renders, unless a switch of [`force`] says otherwise.
+    fn evaluate(&mut self, mode: u32, addr: u64, read: &impl Fn(u64) -> Option<u64>) -> gate::Info {
+        self.evaluate_with(mode, addr, read, force::force())
+    }
+
+    /// [`RenderConds::evaluate`] with the switches `bits`, so that a test does not depend on the global ones.
+    fn evaluate_with(
+        &mut self,
+        mode: u32,
+        addr: u64,
+        read: &impl Fn(u64) -> Option<u64>,
+        bits: u8,
+    ) -> gate::Info {
         let (ra, rb) = (
             self.counter(addr, read),
             self.counter(addr.wrapping_add(16), read),
@@ -279,7 +334,21 @@ impl RenderConds {
         if self.evaluations.len() < 64 {
             self.evaluations.push((mode, addr, a, b, r));
         }
-        r.unwrap_or(true)
+        let source = force::source(r, ra, rb);
+        let decision = force::decide(r, source, bits);
+        if let Some(k) = [force::RCFLAG, force::RCUNK, force::RCALL]
+            .iter()
+            .position(|b| *b == decision.forced)
+        {
+            self.stats.forced[k] += 1;
+        }
+        gate::Info {
+            mode,
+            addr,
+            reads: [ra, rb],
+            source,
+            decision,
+        }
     }
 
     fn counter(&self, addr: u64, read: &impl Fn(u64) -> Option<u64>) -> Read {
@@ -299,7 +368,7 @@ impl RenderConds {
                 }
             }
             Some(Report::Unknown) => Read::Unknown,
-            _ => read(addr).map_or(Read::Unknown, Read::Known),
+            _ => read(addr).map_or(Read::Unknown, Read::Memory),
         }
     }
 
@@ -421,8 +490,16 @@ pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
             .filter(|(_, n)| **n > 0)
             .map(|(k, n)| format!("{k:#x}:{n}"))
             .collect();
+        let forced = if s.forced == [0; 3] {
+            String::new()
+        } else {
+            format!(
+                " | forced decisions rcflag {} rcunk {} rcall {}",
+                s.forced[0], s.forced[1], s.forced[2]
+            )
+        };
         eprintln!(
-            "DIAG rendercond frame {n}: enable {} (off {}), conditions true {} false {} unknown {} (read landed {} stale {} by place {}), reports value {} emulated {} (zero {}) gpu-only {} by type [{}] in {} slots | left out: draws {d} clears {c} dispatches {x} copies {k} in {} ranges of {} commands",
+            "DIAG rendercond frame {n}: enable {} (off {}), conditions true {} false {} unknown {} (read landed {} stale {} by place {}), reports value {} emulated {} (zero {}) gpu-only {} by type [{}] in {} slots | left out: draws {d} clears {c} dispatches {x} copies {k} in {} ranges of {} commands{forced}",
             s.enables,
             s.disables,
             s.true_,
@@ -443,6 +520,8 @@ pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
     }
 }
 
+pub mod force;
+pub mod gate;
 mod probe;
 #[cfg(test)]
 mod tests;

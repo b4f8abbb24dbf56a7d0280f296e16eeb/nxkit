@@ -230,6 +230,8 @@ pub struct Frame {
     pub disabled: Vec<Range<u32>>,
     /// The slots of the GPU counters and the reports that the backend writes (see [`crate::counters`]).
     pub counters: FrameCounters,
+    /// What each render condition covered. Filled only with `NXKIT_DIAG=rendercond`.
+    pub gates: Vec<crate::rendercond::gate::Seg>,
 }
 
 /// True for a command that a false render condition leaves out: draws, clears, and unless `NXKIT_RENDERCOND=3d`,
@@ -242,10 +244,12 @@ pub fn conditional(c: &Cmd) -> bool {
     }
 }
 
-/// `NXKIT_RENDERCOND=3d`: a render condition leaves out draws and clears only.
+/// `NXKIT_RENDERCOND=3d` or the switch `ONLY_3D` of `rendercond::force`: a render condition leaves out draws and
+/// clears only.
 fn only_3d() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_RENDERCOND").is_ok_and(|v| v == "3d"))
+    crate::rendercond::force::force() & crate::rendercond::force::ONLY_3D != 0
+        || *ON.get_or_init(|| std::env::var("NXKIT_RENDERCOND").is_ok_and(|v| v == "3d"))
 }
 
 impl Frame {
@@ -260,6 +264,7 @@ impl Frame {
         self.lists.clear();
         self.disabled.clear();
         self.counters.clear();
+        self.gates.clear();
     }
 
     /// Marks the commands of `r` as run under a false render condition. The ranges come in command order; one that

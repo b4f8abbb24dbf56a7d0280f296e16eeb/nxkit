@@ -205,6 +205,7 @@ impl GpuBackend {
         if let Some(q) = result.as_ref().ok().and_then(|r| r.queries.clone()) {
             locked(&self.queries).push((fence.0, q));
         }
+        crate::gatediag::hold(fence.0);
     }
 
     /// Writes the reports of the frames up to fence `upto` into guest memory, each a 16-byte `NVNcounterData` (the 64-bit
@@ -235,6 +236,7 @@ impl GpuBackend {
         for (_, q) in take_due(&self.queries, upto) {
             crate::queries::write_diag(&q.write(&self.guest, end));
         }
+        crate::gatediag::landed(upto, &self.guest);
     }
 }
 

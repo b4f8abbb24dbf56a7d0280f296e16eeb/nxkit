@@ -199,3 +199,134 @@ fn marks_of_a_spliced_stream_move_behind_the_caller() {
     caller.splice(&callee);
     assert_eq!(caller.marks[1].at, 2);
 }
+
+fn mem_read(mem: &'static [(u64, u64)]) -> impl Fn(u64) -> Option<u64> {
+    move |a| mem.iter().find(|(k, _)| *k == a).map(|(_, v)| *v)
+}
+
+const FLAG_FALSE: &[(u64, u64)] = &[(0x100, 5), (0x110, 6)];
+
+#[test]
+fn without_a_switch_the_decision_is_the_natural_one() {
+    use force::{Source as S, decide};
+    for (natural, source) in [
+        (Some(true), S::Counter),
+        (Some(false), S::Counter),
+        (Some(false), S::Memory),
+        (None, S::Unknown),
+    ] {
+        let d = decide(natural, source, 0);
+        assert_eq!(d.render, natural.unwrap_or(true));
+        assert_eq!(d.forced, 0);
+    }
+}
+
+#[test]
+fn each_switch_alone_forces_its_own_case() {
+    use force::{RCALL, RCFLAG, RCUNK, Source as S, decide};
+    // rcflag: memory operands render, nothing else changes.
+    assert!(decide(Some(false), S::Memory, RCFLAG).render);
+    assert_eq!(decide(Some(false), S::Memory, RCFLAG).forced, RCFLAG);
+    assert!(!decide(Some(false), S::Counter, RCFLAG).render);
+    assert_eq!(decide(Some(false), S::Counter, RCFLAG).forced, 0);
+    // rcunk: an unknown result is left out, a known one is not touched.
+    assert!(!decide(None, S::Unknown, RCUNK).render);
+    assert_eq!(decide(None, S::Unknown, RCUNK).forced, RCUNK);
+    assert!(decide(Some(true), S::Counter, RCUNK).render);
+    assert!(!decide(Some(false), S::Memory, RCUNK).render);
+    // rcall: everything renders.
+    for (natural, source) in [
+        (Some(false), S::Counter),
+        (Some(false), S::Memory),
+        (None, S::Unknown),
+    ] {
+        let d = decide(natural, source, RCALL);
+        assert!(d.render);
+        assert_eq!(d.forced, RCALL);
+    }
+    // The switches that act elsewhere decide nothing.
+    for bit in [force::NOSTALE, force::ONLY_3D] {
+        assert!(!decide(Some(false), S::Counter, bit).render);
+        assert!(decide(None, S::Unknown, bit).render);
+    }
+    // rcall wins over rcunk.
+    assert!(decide(None, S::Unknown, RCALL | RCUNK).render);
+}
+
+#[test]
+fn two_words_of_guest_memory_are_a_memory_condition() {
+    let mut rc = RenderConds::new();
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x100, &mem_read(FLAG_FALSE), 0);
+    assert_eq!(i.reads, [Read::Memory(5), Read::Memory(6)]);
+    assert_eq!(i.source, force::Source::Memory);
+    assert!(!i.decision.render);
+    assert_eq!(i.decision_name(), "skip");
+    assert_eq!(rc.take_stats().forced, [0; 3]);
+}
+
+#[test]
+fn a_known_report_value_is_not_memory() {
+    let mut rc = RenderConds::new();
+    let known = |value| Report::Known { value, flush: 0 };
+    rc.report(0x100, known(5));
+    rc.report(0x110, known(6));
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x100, &mem_read(&[]), force::RCFLAG);
+    assert_eq!(i.reads, [Read::Known(5), Read::Known(6)]);
+    assert_eq!(i.source, force::Source::Counter);
+    assert!(!i.decision.render);
+    assert_eq!(i.decision.forced, 0);
+    // One report and one word of memory is not a memory condition either.
+    let i = rc.evaluate_with(
+        RENDER_IF_EQUAL,
+        0x108,
+        &mem_read(&[(0x108, 1), (0x118, 2)]),
+        0,
+    );
+    assert_eq!(i.source, force::Source::Memory);
+    rc.report(0x200, known(1));
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x200, &mem_read(&[(0x210, 2)]), 0);
+    assert_eq!(i.reads, [Read::Known(1), Read::Memory(2)]);
+    assert_eq!(i.source, force::Source::Counter);
+}
+
+#[test]
+fn a_forced_decision_is_counted_and_named() {
+    let mut rc = RenderConds::new();
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x100, &mem_read(FLAG_FALSE), force::RCFLAG);
+    assert!(i.decision.render);
+    assert_eq!(i.decision_name(), "forced-rcflag-render");
+    // An unknown counter is left out with rcunk.
+    rc.report(0x300, Report::Unknown);
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x300, &mem_read(&[]), force::RCUNK);
+    assert_eq!(i.source, force::Source::Unknown);
+    assert_eq!(i.decision_name(), "forced-rcunk-skip");
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x100, &mem_read(FLAG_FALSE), force::RCALL);
+    assert_eq!(i.decision_name(), "forced-rcall-render");
+    assert_eq!(rc.take_stats().forced, [1, 1, 1]);
+}
+
+#[test]
+fn a_decision_with_no_switch_is_not_counted_as_forced() {
+    let mut rc = RenderConds::new();
+    rc.report(0x300, Report::Unknown);
+    let i = rc.evaluate_with(RENDER_IF_EQUAL, 0x300, &mem_read(&[]), 0);
+    assert!(i.decision.render);
+    assert_eq!(i.source, force::Source::Unknown);
+    assert_eq!(rc.take_stats().forced, [0; 3]);
+}
+
+#[test]
+fn a_run_under_a_condition_is_recorded_in_the_frame() {
+    let mut rc = RenderConds::new();
+    let info = rc.evaluate_with(RENDER_IF_EQUAL, 0x100, &mem_read(FLAG_FALSE), 0);
+    let mut f = Frame::new();
+    RenderConds::cover(&mut f, 2..5, Some(info));
+    // An empty run and a run under no condition are not recorded.
+    RenderConds::cover(&mut f, 5..5, Some(info));
+    RenderConds::cover(&mut f, 5..9, None);
+    assert_eq!(f.gates.len(), 1);
+    assert_eq!(f.gates[0].range, 2..5);
+    assert_eq!(f.gates[0].info.addr, 0x100);
+    f.clear();
+    assert!(f.gates.is_empty());
+}

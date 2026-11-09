@@ -21,7 +21,7 @@ pub(super) struct Probe {
     n: u32,
 }
 
-fn on() -> bool {
+pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::diag::on("rendercond"))
 }

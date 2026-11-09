@@ -82,6 +82,18 @@ const KNOBS: &[&str] = &[
     // Opt in: a colour attachment that the first draw of its pass visibly covers whole (one full-screen triangle with
     // no vertex input, full viewport, no blend, no test) loads nothing. The shader may still discard, so it is off.
     "coverload",
+    // A render condition whose two operands both are plain guest memory (not a report of the table) renders.
+    "rcflag",
+    // A render condition with an unknown result is left out instead of rendered.
+    "rcunk",
+    // Every `SetRenderEnableConditional` renders. `SetRenderEnable` is not changed.
+    "rcall",
+    // The same as `NXKIT_RENDERCOND_STALE=0`, switched while the game runs: no counter of an earlier report is read.
+    "rcnostale",
+    // The same as `NXKIT_RENDERCOND=3d`, switched while the game runs: a false condition leaves out draws and clears only.
+    "rc3d",
+    // A Metal texture that the frame made new and that gets no upload is cleared to zero before the frame uses it.
+    "freshzero",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
@@ -106,11 +118,21 @@ fn knobs() -> &'static Knobs {
     })
 }
 
-/// Hands the two knobs of the pass optimiser to `nxkit-nvn`, which makes the plan. Returns `flags`.
+/// Hands the knobs that `nxkit-nvn` acts on to it: the two of the pass optimiser, which makes the plan, and the five
+/// of the render conditions, which it decides on the guest thread. Returns `flags`.
 fn set_pass_options(flags: u32) -> u32 {
+    use nxkit_nvn::rendercond::force;
     nxkit_nvn::passes::set_options(
         flags & knob_bit("nopassmerge") == 0,
         flags & knob_bit("noloadstore") == 0,
+    );
+    let on = |name: &str, bit: u8| if flags & knob_bit(name) != 0 { bit } else { 0 };
+    force::set_force(
+        on("rcflag", force::RCFLAG)
+            | on("rcunk", force::RCUNK)
+            | on("rcall", force::RCALL)
+            | on("rcnostale", force::NOSTALE)
+            | on("rc3d", force::ONLY_3D),
     );
     flags
 }
