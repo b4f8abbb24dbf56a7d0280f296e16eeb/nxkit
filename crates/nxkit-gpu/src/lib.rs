@@ -41,6 +41,7 @@ mod json;
 mod lum;
 mod mesh;
 mod native;
+mod native_ndsr;
 mod native_ndve;
 mod overlap;
 mod passes;
