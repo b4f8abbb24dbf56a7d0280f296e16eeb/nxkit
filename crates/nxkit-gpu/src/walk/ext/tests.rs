@@ -231,6 +231,34 @@ fn unbound_vertex_inputs_get_a_constant_stream() {
     );
 }
 
+#[test]
+fn a_stream_with_stride_0_gets_a_constant_step_with_a_stride() {
+    let mut d = empty_draw();
+    d.attributes.push(AttributeDetail {
+        location: 0,
+        format: 0x0a,
+        offset: 8,
+        stream: 0,
+    });
+    d.streams.push(StreamDetail {
+        index: 0,
+        address: 0x2000,
+        size: 128,
+        stride: 0,
+        divisor: 0,
+    });
+    let inputs = [(0, nxkit_metal::VertexFormat::Float4)];
+    let layout = crate::translate::vertex_descriptor(&d, &inputs).unwrap();
+    let l = layout
+        .layouts
+        .iter()
+        .find(|l| l.buffer == crate::translate::stream_slot(0))
+        .unwrap();
+    // Metal refuses a stride of 0 even for a constant step.
+    assert_eq!(l.step, nxkit_metal::StepFunction::Constant);
+    assert_eq!(l.stride, 24);
+}
+
 fn copy_ext(code: ExtCode, arg: u16, words: &[u32]) -> Ext {
     words.iter().fold(Ext::new(code, arg), |x, w| x.u32(*w))
 }
