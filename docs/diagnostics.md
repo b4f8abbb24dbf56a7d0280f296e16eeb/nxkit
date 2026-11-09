@@ -207,7 +207,7 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `walk.draw-no-args` | walker | A draw record without draw arguments (transform feedback, `DrawTexture` or an unknown draw kind). The draw gets an empty detail. |
 | `walk.draw-no-vertex` | walker | The bound program has no vertex stage, or a mesh draw finds no program with a mesh stage. |
 | `walk.stage-ignored` | walker | A geometry or tessellation stage. The encoder runs the vertex, fragment, task and mesh stages only. It counts once per program key. |
-| `decode.unresolved` | decoder | A texture handle or address in a recording names no texture. It counts once per decoded recording. A recording that the cache answers does not count again. |
+| `decode.unresolved` | decoder | A texture handle or address in a recording names no texture. It counts once per decoded recording. A recording that the cache answers does not count again. A handle of texture id 0 is an unbind (NVN reserves the first descriptors) and does not count. The examples name the handle or address. |
 | `decode.bad-record` | decoder | A record could not be read. The rest of the recording is lost. |
 | `tex.handle-unresolved` | encoder | A texture handle has no descriptor or no texture record. This is the case of a pool slot that points to a dropped texture. |
 | `tex.format-unsupported` | encoder | A texture format or target that has no Metal equivalent. |
