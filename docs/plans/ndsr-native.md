@@ -52,9 +52,9 @@ prints the per-shader table of section 4, `lstn.py <key>` prints the SASS listin
   with cheaper networks (about 190 HMMA per program instead of up to 576). The vr weight blobs are the `agl_ndsr.pck`
   blobs of the same ratio with the f16 values reordered: the permutation is now known exactly (V for the 1.2 blob, all
   6144 values, section 8.3), and the agl_ndsr layout is the NDVE resampler's layout.
-- Which pack the game uses in gameplay is **R**. The repo's notes name `agl_ndsr_vr` (docs/analysis/oot-open-issues.md);
-  dynamic resolution (763x429 .. 1536x864) fits the vr pack, which takes any input/output ratio (I). The capture of
-  section 10 settles it in one run.
+- Ocarina of Time uses the **vr_light** pack in gameplay: network `fa3033d05c0a41d6` (4/3), 1536x864 -> 2048x1152
+  R11G11B10F (V from the capture, section 10.1). **All 15 vr_light programs are recovered bit for bit too** (section
+  15): they have a fixed ratio, the grid is the output tile, and the epilogue runs in f16 with a luma sharpening.
 - Cost (section 11): 98,304 MAC per 16x16 patch, about 1.3-1.5 GMAC per frame for the network at any ratio (V for the
   per-patch count, I for the frame), well under the movie network's 10.6 GMAC; on an M2 Max about 0.6-0.8 ms plus
   0.2-0.5 ms for the SMAA passes (I).
@@ -166,7 +166,7 @@ c8b20adc9d4978e0 / d99fbeeb53d38847 (1010, 3.0, 188). The 4/3 networks use a 0x1
 networks compute luma in f16 (`0.71484375` = f16(0.7152), `0.072143555` = f16(0.0722)) where vr gathers one channel.
 Key assignment for the two shared control sections follows entry order (I).
 
-Light network structure (V from the symbolic HMMA chains of 9327ea56aafa15b9, warp 0; not yet compared bit for bit):
+Light network structure (V from the symbolic HMMA chains of 9327ea56aafa15b9, warp 0; compared bit for bit in section 15):
 the same 6-layer, 2-term separable network as vr (section 7.3), the same weight sub-blocks (vr_light's 1.2 blob is
 vr's), ReLU by `HMNMX2`. The input element is computed per texel in f16 as
 `hfma2(G, 0x39b8, hfma2(R, 0x32cd, hmul2(B, 0x2c9e)))` from TLD4 gathers of R, G and B, i.e. the luma of the
@@ -513,9 +513,37 @@ draws, not dispatches.
 
 ## 10. What to capture at runtime (R)
 
-State of the log: `scratchpad/oot-work.log` had, at 02:52, only movie dispatches (`DIAG comp` lines for the NDVE keys
-`49dff010` .. `4f41ccf2`); the run that rewrote it at 03:02 logs `svc` and `codec` only (85,644 lines, no `DIAG comp`).
-No gameplay NDSR dispatch has been observed yet, so everything below is still open.
+### 10.1 Ocarina of Time: what the capture shows (V, `NXKIT_DIAG=ndsr`, `scratchpad/oot-ndsr60.log`, one gameplay minute)
+
+The game runs the **vr_light pack**, network **`fa3033d05c0a41d6`** (4/3, the B/C program, section 15), at **1536x864 ->
+2048x1152**. That was the only (key, size) pair in the whole minute: the minute showed no change of resolution and no
+other network.
+
+| Dispatch | Key | groups | What it binds (format, size) |
+|---|---|---|---|
+| -3 edge detection | `f8965bffbdf51d78` | 48 x 36 (= 1536/32 x 864/24) | tex3 scene colour Rg11B10Float 1536x864; img0 = tex4 Rg16Uint 384x216; img1 = tex5 Rgba8Unorm 1536x864; ssbo 8 (0xa2000 bytes) and 9 (0x10) |
+| -2 blending weights | `d17eefaff4f0bc23` | indirect (logged 0, 0, 0) | the same set; tex6 Rg8Unorm 192x128 (the pack's area texture) |
+| -1 neighbourhood blending | **`a335c1db6270c355`** | 96 x 54 (= 1536/16 x 864/16) | writes **img2 Rgb9E5Float 1536x864** (TexId 6149) |
+| 0 network | **`fa3033d05c0a41d6`** | **32 x 36** (= 1536/48 x 864/24) | tex0 = that img2 (Rgb9E5Float), sampler min/mag filter 1 (linear), wrap 7 (clamp to edge); ssbo 2 = 0x1800 bytes from the blob start (the 4/3 blob); **img1 Rg11B10Float 2048x1152** |
+
+- The descriptor set is shared by all four dispatches (the same 32 texture slots, img0 to img3), so tex0 of the network
+  is img2 of the neighbourhood blending (same TexId): the network reads `a335c1db`'s RGB9E5 output.
+- **Push words of the network** (29, hex): `0 0 5ff 35f 0 0 7ff 47f` (w2, w3 = W_in - 1, H_in - 1; w6, w7 = W_out - 1,
+  H_out - 1), `3a2aaaab 3a97b426` (1/1536, 1/864), `3a000000 3a638e39` (1/2048, 1/1152), `3a001559 3a63d1b9 3f7fd555
+  3f7fb426 39aaaaab 3a17b426` (w12 .. w17: 1/(1535 * 4/3), .., 1535/1536, 863/864, 0.5/1536, 0.5/864; not read by any
+  light program), `40 20` (**w18, w19 = 64, 32: the output tile**), `3f800000 3f800000` (**w20, w21 = 1.0: grid cells
+  per output pixel**), `0 0` (w22, w23 = grid origin), `800 480` (w24, w25 = 2048, 1152), `3a000000 3a638e39`
+  (w26, w27 = 1/2048, 1/1152) and `40200000` (**w28 = 2.5: sharpening strength**). Words 4 and 5 (output offset) are 0.
+- The SMAA dispatches push the 64 words of their own block (texel sizes, `5ff 35f` and `0x28800` at words 22 to 26).
+- Users of the images in the frame: img2 (TexId 6149) is written by the three SMAA passes (the edge pass and the
+  weights pass have it bound as well), read by the network, and **read again by two draws after the network** (cmd 15966
+  and 15985). So it cannot be fused away. img1 (TexId 634) is written only by the network and read by one draw
+  (cmd 15985: the consumer of the upscaled picture).
+- The selection rule (which ratio for which sizes) is still R. Only the exact 4/3 ratio was seen, with `w20 = 1`.
+
+What used to be open in this section and is now settled for Ocarina: the pack (vr_light, not vr), the variant (C:
+R11G11B10F out), the input format (RGB9E5) and producer (`a335c1db`), the sampler (linear, clamp to edge) and the
+readers of the images.
 
 **Step 1, already possible with today's `NXKIT_DIAG=comp`** (one gameplay minute, walking from a bright to a busy scene
 so the dynamic resolution moves). Per frame expect this order of `program` keys, with these `groups`:
@@ -604,8 +632,7 @@ Still open:
   exact sum once), the MUFU `rcp/sqrt/lg2/ex2` error (the model uses correctly rounded values; Metal's precise functions
   are within a few ulp, the 8-bit output hides that except for rare pixels), the texture unit's bilinear weight
   precision (NVIDIA uses 8 fractional bits; the model exact weights).
-- **Not emulated bit for bit yet**: the 15 vr_light programs (structure V, section 4; the epilogue with 29 push words
-  and the 256-thread 4/3 program) and the 22 agl_ndsr programs (structure and layout V; the LDSM/MOVM input staging,
+- **Not emulated bit for bit yet**: the 22 agl_ndsr programs (structure and layout V; the LDSM/MOVM input staging,
   the epilogue and variant B's sRGB decode). The tools of this pass run them (`s3.py` already gives their chains); the
   model needs their input element and epilogue.
 - The SMAA compute passes beyond their constants: the edge-list format, the indirect arguments, the meaning of the
@@ -689,3 +716,107 @@ What the numbers say:
 - The arithmetic is unchanged: all 15 kernels write the same bits as before for variants B and C, and A differs only by
   the `exp2` / `log2` change; the f16 rounding after every K = 16 step and the W2-first order of layers 0, 2, 4 are as
   before. `ndsr_kernel.rs` passes with its tolerances as they were.
+
+## 15. The vr_light network program (V emulated for all 15 programs unless marked)
+
+Scratch tools: `scratchpad/ndsr/light/`. `refl.py` is the model. `cmpall.py <key> <ct>` compares one threadgroup of the
+emulator (`CEmu`, all lanes) against the model on every image write. `batchl.py` runs the batch of 15.7. `ls3.py` prints
+the HMMA chains. `ltr.py` gives a one-lane trace. `cmpl.py` compares the threadgroup-memory stages (grid, luma,
+sharpening). `perm43.py` checks the 4/3 blob. `gen_golden_light.py` writes the fixture of `reference/light.rs`.
+
+### 15.1 The programs
+
+The pack holds 7 blobs x 3 entries. Where two entries share a program, the program is called by the letter of its
+first entry. Variant A encodes sRGB. B (= the B and C entries) writes linear values. The 3.0 blob has a third program
+(C, linear, f32 luma).
+
+| Ratio | in -> out | tile `b0 b1` | grid = output tile | layers | A | B (and C) | C |
+|---|---|---|---|---|---|---|---|
+| 1.2 | 10 -> 12 | 40 40 | 48 x 48 | 6 | 9327ea56aafa15b9 | 8df148d58b7cbe8e | |
+| 4/3 | 6 -> 8 | 48 48 / 48 24 | 64 x 64 / 64 x 32 | 3 | 927ceaf3cf1be240 (256 threads, TLD, f32 luma) | fa3033d05c0a41d6 | |
+| 1.5 | 8 -> 12 | 32 32 | 48 x 48 | 6 | 48d00da84b3484df | aad7ea7e5c02f41d | |
+| 12/7 | 7 -> 12 | 28 28 | 48 x 48 | 6 | 6160882513197af3 | b106afba1a18faa9 | |
+| 2.0 | 6 -> 12 | 24 24 | 48 x 48 | 6 | 2f9bca45ef842a3b | 04135bb812a0d66e | |
+| 2.4 | 5 -> 12 | 20 20 | 48 x 48 | 6 | d8fffc05afaaa981 | 7c511cc23ff85d14 | |
+| 3.0 | 4 -> 12 | 16 16 | 48 x 48 | 6 | bdb298c6aa71a298 | c8b20adc9d4978e0 | d99fbeeb53d38847 (TLD, f32 luma) |
+
+Patches per threadgroup: `npx = (b0 + 1) / in`, `npy = (b1 + 1) / in`, as in vr. That is 4 x 4 for all but 4/3 (8 x 4 and
+8 x 8). The emulation confirms the shared-control-section rule of section 4 for `d8ff` and `c8b2`: their keys follow
+the entry order. Program `d8ff` runs the 2.4 blob and matches the model.
+
+### 15.2 Window and network
+
+- Window texel `(i, j)` = `(b0 wx - m + i, b1 wy - m + j)`, with `m = (16 - in) / 2`, clamped to the picture. The
+  `TLD4.PTP` programs gather R, G, B (f16) at `u = (x + 1) w8`, `v = (y + 1) w9` (push words 8, 9). The `TLD` programs
+  (`927c`, `d99f`) clamp to `[0, w2] x [0, w3]` themselves.
+- Input element, f16 programs: `X = hfma(G, 0x39b8, hfma(R, 0x32cd, hmul(B, 0x2c9e)))`, every step rounded to f16 (B
+  first). `TLD` programs: `f16(fma(B, 0.0722f, fma(R, 0.2126f, G * 0.7152f)))`.
+- Network: the vr network of section 7.3 on the vr weight layout of section 8.2. It has 6 layers, or 3 for the 4/3
+  blob, with ReLU and a transpose between layers and no ReLU after the last. After 3 layers the result is transposed
+  relative to the 6-layer case. The grid cell is `N[out p + r][out q + c] = Y[c][r]` (3 layers) or `Y[r][c]` (6). In the
+  canonical layout of section 8.3 both are `Y[r][c]` with rows along y.
+- The 4/3 programs compute only the 8 used columns in the last layer. The `MOVM`s of the 4/3 pair move the result
+  fragments to the grid. They do not change values.
+- **The 0x1800 blob** is in the vr layout. Repacked by the map of section 8.3 (odd layers verbatim, even layers
+  transposed and swapped), it equals agl_ndsr's 4/3 blob (`0xdbf00`) in all 3072 halves (`perm43.py`). So the
+  "unknown weight permutation" of the plan is the known one.
+
+### 15.3 Output pixels (the grid is the tile)
+
+A threadgroup writes the tile of `w18 x w19` pixels starting at `(w18 wx, w19 wy)`. Pixels at or beyond `(w24, w25)`
+are not written. The written position adds `(w4, w5)`. Per pixel `(xl, yl)` of the tile, `(X, Y)` the picture
+position:
+
+```
+gx = fma(float(xl), w20, w22);  ix = floor(gx);  fx = f16(gx - ix);  if ix > gw - 2: ix = gw - 2, fx = 1   (y alike)
+lerp(a, b, f) = hfma(f, b, hfma(-f, a, a))                                             # f16
+up  = lerp(lerp(N[iy][ix], N[iy][ix+1], fx), lerp(N[iy+1][ix], N[iy+1][ix+1], fx), fy)
+S   = f16 RGB of the bilinear sample of tex0 at (fma(X, w26, 0.5 w26), fma(Y, w27, 0.5 w27))   # TEX .F16
+t_c = hadd(S_c, up);   lin_c = hmul(t_c, |t_c|)                                        # each channel gets the luma delta
+L   = hfma(lin_B, 0x2c9e, hfma(lin_R, 0x32cd, hmul(lin_G, 0x39b8)))                     # G first here
+```
+
+`N` is never sampled below cell 0 when `w22, w23 >= 0` (the game writes 0). For a negative origin the SASS would read
+outside the grid (I). The Rust reference and the kernel clamp to cell 0 there.
+
+### 15.4 Sharpening and encoding
+
+With `k1 = f16(w28 * 0.5)` and `k2 = f16(w28 * -0.125)` (no `+1`: this is a delta), and `L` clamped to the **tile** at
+its edges:
+
+```
+d   = hfma(L[y-1][x], k2, hadd(hfma(L[y][x-1], k2, hmul(L[y][x+1], k2)), hfma(L[y][x], k1, hmul(L[y+1][x], k2))))
+o_c = f32(hadd(lin_c, d))                       # HADD2.F32: -0 becomes +0
+A:  o_c = the sRGB encoding of section 7.7 (FSETP.GEU, MUFU lg2 / ex2);  B, C: o_c as is
+```
+
+The image write gets `(o_r, o_g, o_b, 1.0)`. There is **no dither** in any light program. Push words read: 4, 5, 8, 9
+(f16 programs) or 2, 3 (`TLD` programs), and 18 to 28. Words 6, 7 and 10 to 17 are not read.
+
+### 15.5 What was verified, and how
+
+- The network grid `N` (threadgroup memory after the last HMMA), the luma `L` and the sharpening delta `d` were each
+  compared separately on `fa30` (`cmpl.py`), then every image write of every program (`cmpall.py`).
+- `batchl.py` runs each of the 15 programs on 12 threadgroups (the first, the last and an inner one). There are four
+  set-ups: 1536x864 with the game's push (exact ratio, strength 2.5, random texture); 1280x720 with `w20, w21 = 0.97,
+  0.95`, `w22, w23 = 0.4, 0.7`, offset (5, 2), strength 1.0 (smooth texture); 960x540 with `w22 = 0.25`, strength 0.5;
+  763x429 (partial last tiles) with offset (3, 0). Result: **0 differing pixels for all 15 programs** (21,618 to 43,996
+  pixels each, all four channels as bits).
+- `crates/nxkit-ndsr/src/reference/light.rs` ports the model. Its test reproduces 20 golden threadgroups of `refl.py`
+  (5 programs, the grid and every pixel by digest).
+- What the emulation cannot verify: the same unknowns as section 7.10 (HMMA rounding, MUFU, sampler precision), and
+  the f16 `HFMA2` rounding, modelled as the exact value rounded to a double and then to f16.
+
+### 15.6 The native kernel (`crates/nxkit-ndsr/src/msl/ndsr_light.metal`, `kernels/light.rs`)
+
+There is one template, `ndsr_light`, with 15 instantiations (one per program, `LIGHT_KERNELS`). Steps:
+
+1. The window's luma goes to threadgroup memory.
+2. The network runs on NB patches per simdgroup, with the vr layer order of `ndsr.metal` (`ndsr_step` gained the layer
+   count) and the weights staged in threadgroup memory. The result goes straight into the grid (8x8 tiles for 4/3).
+3. Each thread keeps the linear colour of its pixels in registers and writes their luma over the dead window.
+4. After one barrier come the sharpening, the encoding and the write.
+
+The plan refuses a push block whose tile (`w18, w19`) is not the kernel's grid. The hook (`native_ndsr.rs`) runs the
+vr_light programs that have a kernel. It accepts RGB9E5 / R11G11B10F / float4 input, and for B and C an R11G11B10F,
+RGB10A2 or RGBA16F output. It tags plans by words 2 to 9 and 18 to 28.

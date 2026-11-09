@@ -41,16 +41,20 @@ Cut so that no two touch the same files. Package 0 is small and goes first (one 
 
 ### A0. Finish the recovery (scratch tools, then `docs/plans/ndsr-native.md` sections 7, 8, 13)
 
-**Status: done for the vr pack, structure only for vr_light and agl_ndsr.** All 15 vr network programs are recovered
+**Status: done for the vr and vr_light packs, structure only for agl_ndsr.** All 15 vr network programs are recovered
 bit for bit (ndsr-native.md section 7: a Python model, `scratchpad/ndsr/refvr.py`, equals the lane-exact emulation of
 the SASS on every output pixel of 12 threadgroups per program at four input sizes). The agl -> vr weight permutation is
 known (section 8.3), so one canonical layout (agl's, which is also NDVE's) serves all packs.
 
-Left (A0b, can run in parallel with A/B/C; same tools):
+A0b, vr_light: done. All 15 programs are bit for bit (ndsr-native.md section 15: `light/refl.py` equals the
+emulation on every pixel of 12 threadgroups per program at four set-ups). The 0x1800 blob is the vr layout over
+3 layers; repacked, it is agl's 4/3 blob. Ocarina of Time runs `fa3033d05c0a41d6` (section 10.1). The reference, the
+kernels (`ndsr_light.metal`, `kernels/light.rs`) and the hook are in place. The GPU test against the reference is
+`crates/nxkit-gpu/tests/ndsr_light_kernel.rs`.
 
-- vr_light (15 programs): input element (f16 luma of sqrt RGB) and epilogue (29 push words), compare with the model as
-  `batchvr.py` does; the 256-thread 4/3 program and the 3-layer 0x1800 blobs.
-- agl_ndsr (22 programs): only if the capture of section 10 shows the agl pack in gameplay.
+Left:
+
+- agl_ndsr (22 programs): only if a capture shows the agl pack in gameplay.
 - Nothing here blocks the vr path.
 
 ### A. Table, fingerprint, reference (`nxkit-ndsr`: `net.rs`, `fingerprint.rs`, `pack_file.rs`, `reference.rs`)
