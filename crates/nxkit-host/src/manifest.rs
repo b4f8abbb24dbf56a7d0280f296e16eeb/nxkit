@@ -139,12 +139,7 @@ fn memory(v: &Value) -> Result<Memory> {
             .ok_or_else(|| bad(format!("memory.{key} is not a boolean")))
     };
     let (reserve, alias, stack) = (n("reserve")?, n("alias")?, n("stack")?);
-    // The heap is the part of `reserve` that the front space, the stack region and the alias region leave.
-    let heap = reserve
-        .checked_sub(alias)
-        .and_then(|r| r.checked_sub(stack))
-        .and_then(|r| r.checked_sub(RESERVE_FRONT))
-        .ok_or_else(|| bad("memory.reserve is smaller than alias, stack and 0x10000000"))?;
+    let heap = heap_of(reserve, alias, stack)?;
     Ok(Memory {
         heap,
         alias,
@@ -156,6 +151,76 @@ fn memory(v: &Value) -> Result<Memory> {
         stdalloc_cap: n("stdalloc_cap")?,
         alloc_big_align: flag("alloc_big_align")?,
     })
+}
+
+/// The heap: the part of `reserve` that the front space, the stack region and the alias region leave.
+fn heap_of(reserve: u64, alias: u64, stack: u64) -> Result<u64> {
+    reserve
+        .checked_sub(alias)
+        .and_then(|r| r.checked_sub(stack))
+        .and_then(|r| r.checked_sub(RESERVE_FRONT))
+        .ok_or_else(|| bad("memory.reserve is smaller than alias, stack and 0x10000000"))
+}
+
+/// A size in bytes: a number, a `0x` number, or a number with `M` (MiB) or `G` (GiB).
+fn parse_size(v: &str) -> Option<u64> {
+    let v = v.trim();
+    let (n, unit) = match v.char_indices().last()? {
+        (i, 'M' | 'm') => (&v[..i], 1 << 20),
+        (i, 'G' | 'g') => (&v[..i], 1 << 30),
+        _ => (v, 1),
+    };
+    let n = match n.strip_prefix("0x") {
+        Some(h) => u64::from_str_radix(h, 16).ok()?,
+        None => n.parse().ok()?,
+    };
+    n.checked_mul(unit)
+}
+
+impl Memory {
+    /// The whole range that the game gets: `memory.reserve` of `game.json`.
+    pub fn reserve(&self) -> u64 {
+        self.heap + self.alias + self.stack + RESERVE_FRONT
+    }
+
+    /// The profile with another `reserve` or alias region; the heap region takes what is left. None keeps a size.
+    pub fn resized(self, reserve: Option<u64>, alias: Option<u64>) -> Result<Memory> {
+        let alias = alias.unwrap_or(self.alias);
+        let heap = heap_of(reserve.unwrap_or(self.reserve()), alias, self.stack)?;
+        Ok(Memory {
+            heap,
+            alias,
+            ..self
+        })
+    }
+
+    /// The profile with `NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` (sizes as [`parse_size`] reads them) in place of
+    /// the title's numbers, to try a smaller split before the title module gets it. The GPU buffer covers the heap,
+    /// stack and alias regions and the driver wires all of it, so each GiB less is a GiB of RAM; a region smaller than
+    /// the game's peak makes its `SetHeapSize` or `MapPhysicalMemory` fail (the host prints the peaks at the end of a
+    /// run).
+    pub fn with_env(self) -> Result<Memory> {
+        let size = |name: &str| -> Result<Option<u64>> {
+            std::env::var(name).ok().map_or(Ok(None), |v| {
+                parse_size(&v)
+                    .map(Some)
+                    .ok_or_else(|| bad(format!("{name}={v} is not a size")))
+            })
+        };
+        let (reserve, alias) = (size("NXKIT_MEM_RESERVE")?, size("NXKIT_MEM_ALIAS")?);
+        if reserve.is_none() && alias.is_none() {
+            return Ok(self);
+        }
+        let m = self.resized(reserve, alias)?;
+        eprintln!(
+            "nxkit-host: memory split from the environment: heap {} MiB (title {}), alias {} MiB (title {})",
+            m.heap >> 20,
+            self.heap >> 20,
+            m.alias >> 20,
+            self.alias >> 20
+        );
+        Ok(m)
+    }
 }
 
 fn main_thread(v: &Value) -> Result<MainThread> {
@@ -177,7 +242,9 @@ impl Game {
     pub fn read(root: &Path) -> Result<Game> {
         let path = root.join("game.json");
         let src = std::fs::read_to_string(&path).map_err(|e| HostError::io(&path, &e))?;
-        Game::parse(root, &src)
+        let mut game = Game::parse(root, &src)?;
+        game.memory = game.memory.with_env()?;
+        Ok(game)
     }
 
     /// Parses the text of a `game.json`. Keys that the host does not use are ignored: `nvn_functions` (the GPU
@@ -396,6 +463,35 @@ mod tests {
         assert!(g.memory.map_limit && g.memory.alloc_big_align);
         assert_eq!(g.memory.stdalloc_cap, 5);
         assert_eq!(g.memory.mem_used, 0x400_0000);
+    }
+
+    #[test]
+    fn a_smaller_split_shrinks_the_heap_or_the_alias_region() {
+        let r = parse("");
+        assert!(r.is_ok(), "{:?}", r.as_ref().err());
+        let Ok(g) = r else { return };
+        assert_eq!(g.memory.reserve(), 0x1_0000_0000);
+        let m = g.memory.resized(Some(0xc000_0000), None);
+        assert_eq!(
+            m.as_ref().map(|m| (m.heap, m.alias)).ok(),
+            Some((0x9000_0000, 0x1000_0000))
+        );
+        let m = g.memory.resized(None, Some(0x800_0000));
+        assert_eq!(
+            m.as_ref().map(|m| (m.heap, m.alias)).ok(),
+            Some((0xd800_0000, 0x800_0000))
+        );
+        assert!(g.memory.resized(Some(0x1000_0000), None).is_err());
+    }
+
+    #[test]
+    fn reads_sizes() {
+        assert_eq!(parse_size("4096"), Some(4096));
+        assert_eq!(parse_size("0x1000"), Some(4096));
+        assert_eq!(parse_size("512M"), Some(512 << 20));
+        assert_eq!(parse_size(" 6G "), Some(6 << 30));
+        assert_eq!(parse_size("6T"), None);
+        assert_eq!(parse_size(""), None);
     }
 
     #[test]

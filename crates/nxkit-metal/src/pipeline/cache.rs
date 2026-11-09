@@ -28,6 +28,7 @@ use specialize::Bases;
 
 mod miss;
 mod specialize;
+mod stats;
 
 /// The empty fragment function of a depth-only mesh pipeline.
 const NOP_FRAGMENT: &str = "fragment void nxkit_mesh_nop() {}";
@@ -576,28 +577,5 @@ impl PipelineCache {
             .unwrap_or_else(PoisonError::into_inner)
             .push(old);
         written
-    }
-
-    /// The number of lookups that found a pipeline.
-    pub fn hits(&self) -> u64 {
-        self.hits.load(Ordering::Relaxed)
-    }
-
-    /// The number of pipelines built through the compiler (an archive hit counts too).
-    pub fn builds(&self) -> u64 {
-        self.builds.load(Ordering::Relaxed)
-    }
-
-    /// True when an archive was found and attached: the single archive or the index of the shards.
-    pub fn has_archive(&self) -> bool {
-        self.loaded_archive
-    }
-
-    /// The shards of the archive: (files in the index, pipelines in it, open now, opened since the start). None when
-    /// the cache has no shards.
-    pub fn shard_stats(&self) -> Option<(usize, usize, usize, u64)> {
-        self.shards
-            .as_ref()
-            .map(|s| (s.shards(), s.pipelines(), s.open_now(), s.opens()))
     }
 }

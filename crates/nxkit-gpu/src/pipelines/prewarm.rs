@@ -12,6 +12,10 @@
 //! the first frames run (a draw that asks for a pipeline the threads have not reached builds it itself, as before). The
 //! work runs on several threads, as many as the background builds use. One line gives the counts and the time, and a
 //! line every 2 s says how far it is while the start waits.
+//!
+//! When the list is done the open shards of the build archive are closed (`NXKIT_SHARD_TRIM=0` keeps them).
+//! `newArchiveWithURL` holds each shard file in malloc memory (1.1 to 1.6 GB measured for 34 to 38 open archives), and
+//! idle after the prewarm it is the first memory macOS compresses; a later draw that needs a shard opens it again.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -212,6 +216,13 @@ fn worker(w: &Work) {
             .clear();
         if w.detached.load(Ordering::Acquire) {
             eprintln!("{}", w.line("finished in the background"));
+        }
+        // the shards of the build archive sit idle in malloc memory from here on (see the module)
+        if super::runtime::env_on("NXKIT_SHARD_TRIM") {
+            let closed = w.cache.close_shards();
+            if closed > 0 {
+                eprintln!("nxkit-gpu: prewarm over, {closed} archive shards closed");
+            }
         }
         let _g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
         w.over.1.notify_all();

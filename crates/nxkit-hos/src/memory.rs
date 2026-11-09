@@ -65,6 +65,18 @@ pub trait HostSpace: Send + Sync {
 
     /// Copies `len` bytes. The ranges do not overlap.
     fn copy(&self, dst: u64, src: u64, len: u64) -> bool;
+
+    /// True when `remap` and `release` may put other pages under `addr..addr + len`. False where the pages must stay
+    /// (`crate::pinned`): there `MapMemory` copies, and `release` zeroes the pages in place.
+    fn can_remap(&self, _addr: u64, _len: u64) -> bool {
+        true
+    }
+
+    /// Takes away a view that `remap` made, without writing to the pages it shows (they belong to the source). The
+    /// pages are not accessible afterwards.
+    fn drop_view(&self, addr: u64, len: u64) -> bool {
+        self.release(addr, len)
+    }
 }
 
 /// Guest memory backed by a vector of words, for tests and tools. Addresses start at `base`.

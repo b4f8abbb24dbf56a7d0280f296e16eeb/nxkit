@@ -160,6 +160,18 @@ impl<A: Clone> ShardSet<A> {
             .len()
     }
 
+    /// Closes every open shard and returns how many were open. A lookup that holds one keeps it until it is done, and
+    /// a later lookup opens its shard again.
+    pub(crate) fn close_all(&self) -> usize {
+        let drained = self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .open
+            .drain();
+        drained.len()
+    }
+
     /// How many times a shard was opened (a closed one that is asked again counts again).
     pub(crate) fn opens(&self) -> u64 {
         self.opens.load(Ordering::Relaxed)
@@ -309,6 +321,18 @@ mod tests {
             (calls.load(Ordering::SeqCst), s.opens(), s.open_now()),
             (4, 4, 2)
         );
+    }
+
+    #[test]
+    fn closing_all_shards_reopens_them_on_demand() {
+        let (s, calls) = set(4, 4, &[]);
+        let ask = |i: u32| s.compute((&format!("c{i}_b"), "kern"));
+        for i in [0, 1, 2] {
+            assert!(ask(i).is_some());
+        }
+        assert_eq!((s.close_all(), s.open_now()), (3, 0));
+        assert_eq!(ask(1).as_deref(), Some("s1"));
+        assert_eq!((calls.load(Ordering::SeqCst), s.open_now()), (4, 1));
     }
 
     #[test]

@@ -31,6 +31,7 @@ mod lend;
 mod memory;
 mod memsvc;
 mod os;
+pub mod pinned;
 mod process;
 mod result;
 mod role;
@@ -42,6 +43,7 @@ pub mod sys;
 mod sysevent;
 mod thread;
 mod tls;
+pub mod usage;
 mod vm;
 mod waitq;
 

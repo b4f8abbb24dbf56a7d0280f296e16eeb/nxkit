@@ -78,6 +78,12 @@ impl Kernel {
         if !sp.map.all(start, end, |b: &Block| b.state == state::FREE) {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
+        if !host.can_remap(start, host_len) {
+            // the GPU buffer keeps the pages that were here: the GPU does not see the view (see `crate::pinned`)
+            (self.config.log)(&format!(
+                "MapSharedMemory at {start:#x}: the view lies in the GPU buffer, the GPU does not see it"
+            ));
+        }
         if !host.remap(start, obj.base, host_len, new) {
             return Err(self.host_failed("MapSharedMemory"));
         }
@@ -102,7 +108,7 @@ impl Kernel {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
-        if !host.release(start, size.next_multiple_of(host.page_size())) {
+        if !host.drop_view(start, size.next_multiple_of(host.page_size())) {
             return Err(self.host_failed("UnmapSharedMemory"));
         }
         sp.map.set(start, end, state::FREE, perm::NONE, 0, 0);

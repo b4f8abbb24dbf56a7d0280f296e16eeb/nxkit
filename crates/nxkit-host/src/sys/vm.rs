@@ -153,6 +153,10 @@ pub struct TaskMemory {
     pub graphics: u64,
     /// The part of `graphics` that sits in the compressor.
     pub graphics_compressed: u64,
+    /// Pages of this process that came back from the compressor since the start (a count, not bytes).
+    pub decompressions: u64,
+    /// Pages of this process that came back from swap since the start (a count, not bytes).
+    pub swapins: u64,
 }
 
 /// Reads `TASK_VM_INFO`. None when the call fails.
@@ -183,6 +187,8 @@ pub fn task_memory() -> Option<TaskMemory> {
         compressed: info.compressed,
         graphics: pos(info.ledger_tag_graphics_footprint),
         graphics_compressed: pos(info.ledger_tag_graphics_footprint_compressed),
+        decompressions: u64::try_from(info.decompressions).unwrap_or(0),
+        swapins: pos(info.ledger_swapins),
     })
 }
 
@@ -197,6 +203,8 @@ pub struct Pages {
     pub dirty: u64,
     /// In the compressor or in swap.
     pub swapped: u64,
+    /// Wired: the system cannot compress or swap them. Only the page query fills it.
+    pub wired: u64,
 }
 
 impl Pages {
@@ -289,12 +297,16 @@ pub fn malloc_in_use() -> u64 {
     s.size_in_use as u64
 }
 
+// The bits of `<mach/vm_statistics.h>`. Until 2026-11-09 this file had DIRTY as 0x4 (which is REF) and PAGED_OUT as
+// 0x8 (which is DIRTY), so the report showed the dirty guest pages as compressed ("comp 12343").
 /// `VM_PAGE_QUERY_PAGE_PRESENT`.
 const PAGE_PRESENT: i32 = 0x1;
 /// `VM_PAGE_QUERY_PAGE_DIRTY`.
-const PAGE_DIRTY: i32 = 0x4;
-/// `VM_PAGE_QUERY_PAGE_PAGED_OUT`.
-const PAGE_PAGED_OUT: i32 = 0x8;
+const PAGE_DIRTY: i32 = 0x8;
+/// `VM_PAGE_QUERY_PAGE_PAGED_OUT`: in the compressor or in swap.
+const PAGE_PAGED_OUT: i32 = 0x10;
+/// `VM_PAGE_QUERY_PAGE_WIRED`.
+const PAGE_WIRED: i32 = 0x1000;
 
 /// Counts the pages of one query by their disposition bits.
 fn count_pages(dispositions: &[i32], page: u64) -> Pages {
@@ -309,14 +321,20 @@ fn count_pages(dispositions: &[i32], page: u64) -> Pages {
         if d & PAGE_PAGED_OUT != 0 {
             p.swapped += page;
         }
+        if d & PAGE_WIRED != 0 {
+            p.wired += page;
+        }
     }
     p
 }
 
-/// The pages of `[start, end)` that the kernel has resident, dirty or paged out, from a query of each page. The region
-/// walk of [`regions`] counts by VM object, and for the guest range (one anonymous mapping under a no-copy Metal buffer)
-/// it reported 12.6 GiB resident next to a footprint of 113 MiB. The per-page query is the ground truth. None when the
-/// kernel refuses the query. `mapped` is the length of the range.
+/// The pages of `[start, end)` that the kernel has resident, dirty, paged out or wired, from a query of each page. None
+/// when the kernel refuses the query. `mapped` is the length of the range.
+///
+/// The guest range is resident and wired as a whole while its no-copy Metal buffer is resident: the GPU driver wires
+/// every page of the buffer, touched or not, and charges none of it to `phys_footprint` (measured 2026-11-09 with a
+/// 4 GiB buffer: the system's wired count rose by 4 GiB at `requestResidency`, the footprint by 1 MiB). So 12.6 GiB
+/// resident next to a footprint of 113 MiB is real memory, not a counting error.
 pub fn page_query(start: u64, end: u64, page: u64) -> Option<Pages> {
     const CHUNK: u64 = 1 << 30;
     let mut out = Pages {
@@ -350,6 +368,7 @@ pub fn page_query(start: u64, end: u64, page: u64) -> Option<Pages> {
         out.resident += c.resident;
         out.dirty += c.dirty;
         out.swapped += c.swapped;
+        out.wired += c.wired;
         at += len;
     }
     Some(out)
@@ -367,10 +386,23 @@ mod tests {
             PAGE_PRESENT | PAGE_DIRTY,
             PAGE_PAGED_OUT,
             PAGE_PRESENT | PAGE_DIRTY | PAGE_PAGED_OUT,
+            PAGE_PRESENT | PAGE_WIRED,
         ];
         let p = count_pages(&d, 16384);
-        assert_eq!(p.resident, 3 * 16384);
+        assert_eq!(p.resident, 4 * 16384);
         assert_eq!(p.dirty, 2 * 16384);
         assert_eq!(p.swapped, 2 * 16384);
+        assert_eq!(p.wired, 16384);
+    }
+
+    #[test]
+    fn the_bits_are_those_of_the_sdk() {
+        // <mach/vm_statistics.h>: REF is 0x4 and must count as nothing here
+        assert_eq!(
+            (PAGE_DIRTY, PAGE_PAGED_OUT, PAGE_WIRED),
+            (0x8, 0x10, 0x1000)
+        );
+        let p = count_pages(&[0x4], 16384);
+        assert_eq!((p.resident, p.dirty, p.swapped, p.wired), (0, 0, 0, 0));
     }
 }

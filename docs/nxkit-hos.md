@@ -20,6 +20,8 @@ The host makes the reservation and gives the kernel its base and size. The layou
 
 The map records the state, permission and attribute of each block and answers `QueryMemory`. `SetMemoryAttribute` takes the uncached bit (8) and the permission lock bit (0x10, R58). The kernel asks the host to change page protection through `HostSpace`. The attribute bits do not change the host pages. `sys::HostMemory` is the implementation over the Mac's virtual memory. `MapMemory` of host-page aligned ranges uses `mach_vm_remap`, so both addresses see the same bytes. Other ranges are copied, and `UnmapMemory` copies back.
 
+The host pins the range of its no-copy GPU buffer (`pinned::set`). The GPU driver keeps using the pages it wired there, so inside that range `HostSpace::can_remap` is false: `MapMemory` copies instead of remapping, and `release` (heap shrink, `UnmapMemory`, `UnmapPhysicalMemory`) zeroes the pages in place and takes their access instead of mapping fresh pages. `UnmapSharedMemory` takes its view away with `HostSpace::drop_view`, which never writes to the pages of the service. `usage::get` reports the peak heap size, the peak of `MapPhysicalMemory`, and the highest ends reached in the alias and stack regions, so the host can say how much of the regions a title needs.
+
 A thread has one slot of 0x4000 bytes in the thread-local area. The first slot is the user exception context. A slot holds:
 
 | offset | content |

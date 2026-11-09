@@ -58,6 +58,32 @@ impl GuestMemory {
         self.res.as_gpu_memory(ctx, r.start, r.len)
     }
 
+    /// Keeps the pages under the GPU buffer where they are, after [`GuestMemory::gpu_memory`].
+    ///
+    /// The GPU driver wires every page of the buffer while it is resident and keeps using those pages, so a host call
+    /// that puts other pages under the range leaves the GPU on stale ones (measured 2026-11-09). `NXKIT_GUEST_KEEP`
+    /// (on unless `0`) pins the range in the kernel (`nxkit_hos::pinned`): there `MapMemory` copies, and giving memory
+    /// back zeroes it in place. `NXKIT_GUEST_WIRE=1` also wires the range with `mlock`, so macOS never compresses guest
+    /// pages when the driver lets go of them for a while; it takes the whole range in RAM at once.
+    pub fn keep_gpu_pages(&self) {
+        let r = self.gpu_range();
+        let on = |name: &str, default: bool| std::env::var(name).map_or(default, |v| v != "0");
+        if on("NXKIT_GUEST_KEEP", true) {
+            nxkit_hos::pinned::set(r.start, r.end());
+        }
+        if on("NXKIT_GUEST_WIRE", false) {
+            let t0 = std::time::Instant::now();
+            match self.res.lock(r.start, r.len) {
+                Ok(()) => eprintln!(
+                    "nxkit-host: the GPU range is wired ({} MiB, {} ms)",
+                    r.len >> 20,
+                    t0.elapsed().as_millis()
+                ),
+                Err(e) => eprintln!("nxkit-host: the GPU range is not wired: {e}"),
+            }
+        }
+    }
+
     /// Makes the lowest page of the main stack a guard page. It runs after the GPU buffer exists, because Metal
     /// refuses a range with a `PROT_NONE` page.
     pub fn seal(&self) -> Result<()> {

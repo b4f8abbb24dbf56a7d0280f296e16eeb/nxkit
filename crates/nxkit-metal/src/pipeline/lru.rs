@@ -38,6 +38,11 @@ impl<K: PartialEq, V> Lru<K, V> {
         out
     }
 
+    /// Takes every entry out, least recently used first.
+    pub(crate) fn drain(&mut self) -> Vec<(K, V)> {
+        std::mem::take(&mut self.items)
+    }
+
     /// The number of entries.
     pub(crate) fn len(&self) -> usize {
         self.items.len()
@@ -84,6 +89,16 @@ mod tests {
         assert_eq!(l.insert(1, "c"), vec![(1, "a")]);
         assert_eq!(l.len(), 2);
         assert_eq!(l.get(&1), Some(&"c"));
+    }
+
+    #[test]
+    fn drain_empties_the_map() {
+        let mut m = Lru::new(3);
+        drop(m.insert(1, 'a'));
+        drop(m.insert(2, 'b'));
+        assert_eq!(m.drain(), vec![(1, 'a'), (2, 'b')]);
+        assert_eq!(m.len(), 0);
+        assert!(m.get(&1).is_none());
     }
 
     #[test]

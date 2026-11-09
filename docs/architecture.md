@@ -183,9 +183,9 @@ Status: specialization, background builds, the runtime cache and the pull path a
 
 ### Memory
 
-- **The guest range** is one reservation of address space that is also one no-copy `MTLBuffer`. Its whole length counts in the Metal device total (and in the Metal HUD), touched or not. The pages that count for the process are the touched ones: `NXKIT_MEM_REPORT` counts the mapped, resident, dirty and compressed pages per page.
+- **The guest range** is one reservation of address space that is also one no-copy `MTLBuffer`. Its whole length counts in the Metal device total (and in the Metal HUD), touched or not. While the buffer is resident the GPU driver wires every page of it, touched or not, outside `phys_footprint`: about 12.4 GiB of wired RAM per run for the 12.5 GiB split of the first title (measured 2026-11-09, `docs/nxkit-host.md`, "What the GPU buffer costs"). The size of the heap and alias regions is therefore RAM; the host prints the game's peak use of them at the end of a run, and the title's `memory` profile sets them. Inside the buffer the kernel never puts other pages under the GPU (`nxkit_hos::pinned`): it zeroes in place and copies instead of remapping. `NXKIT_MEM_REPORT` counts the mapped, resident, dirty, compressed and wired pages per page.
 - **Textures** have a Metal copy and the guest copy. The Metal copy of a texture that no frame used for 600 frames (`NXKIT_TEX_EVICT`) is dropped when the guest copy is current, and made again when the game uses it. A render target, a texture a frame wrote, one the CPU reads back and a memoryless, widened or scaled texture stay.
-- **Pipeline archives** are heap while open: the shards, at most 32 (`NXKIT_SHARD_LRU`). Shader libraries stay loaded (`docs/nxkit-gpu.md`, "Memory").
+- **Pipeline archives** are heap while open: the shards, at most 32 (`NXKIT_SHARD_LRU`). The open shards close when the prewarm is over (`NXKIT_SHARD_TRIM=0` keeps them), because idle they are the first memory macOS compresses (1.1 to 1.6 GB measured with 34 to 38 archives open). Shader libraries stay loaded (`docs/nxkit-gpu.md`, "Memory").
 - **Caches are bounded:** native plans (4), batch scratch (8 MiB per slot, doubling up to 64 MiB), pooled staging buffers for compressed uploads.
 - `NXKIT_MEM_ALLOC=<MiB>` names who makes a large heap allocation.
 

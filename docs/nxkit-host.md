@@ -147,6 +147,14 @@ The reservation is mapped read and write, and the pages are not committed until 
 
 The GPU buffer covers the memory after the modules. It starts at the first thread block and ends with the alias region. The code of the modules is mapped from a file, and a residency set over file-mapped pages makes them unreadable (measured 2026-11-08). So the buffer holds no module page. The data and bss of the modules are not GPU visible. A guest address below the buffer gives an error that names the address and says that module memory is not GPU visible. The address map of the front end uses the host range of the buffer as its base. It is an open question whether a game puts an NVN memory pool into the data or bss of a module.
 
+### What the GPU buffer costs
+
+Measured on 2026-11-09 (32 GB Mac, probe programs, no game): when a no-copy `MTLBuffer` becomes resident, the GPU driver wires every page of it, touched or not, and none of it counts in `phys_footprint`. A 4 GiB buffer raised the system's wired memory from 3194 to 7465 MiB while the footprint went from 68 to 69 MiB; an 8 GiB one dropped the free level of `memory_pressure` from 84% to 58%. The first command buffer wires it as well as `requestResidency` does. With the 12.5 GiB split of the first title (8 GiB heap, 4 GiB alias, 256 MiB stack region) the buffer is 12.33 GiB, so every run takes about 12.4 GiB of wired RAM besides its footprint, whatever the game uses. That is what pushes the rest of the process (the pipeline archives first) into the compressor on a 32 GB machine.
+
+So the size of the regions is RAM, one to one. The host prints how much of them the game used at the end of every run (`nxkit-host: region use`, and every report with `NXKIT_MEM_REPORT`): the peak heap size, the peak of `MapPhysicalMemory` and the highest address it reached in the alias region, and how far `MapMemory` reached into the stack region. A title whose peaks are well below its regions can take a smaller `reserve` or `alias` in its title module (see "The memory profile"); `NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` try a split without a new build. The title's numbers stay the default, because a region smaller than the game's peak makes its `SetHeapSize` or `MapPhysicalMemory` fail.
+
+The driver keeps using the pages it wired. A host call that puts other pages under the buffer (`mmap` with `MAP_FIXED`, `mach_vm_remap` with overwrite) leaves the GPU on the old ones: a GPU copy after `MAP_FIXED` read the old page, a GPU fill was not seen by the CPU, and the old pages stayed wired until the buffer was freed (measured 2026-11-09). The host therefore pins the range of the buffer in the kernel (`nxkit_hos::pinned`, on unless `NXKIT_GUEST_KEEP=0`): there `SetHeapSize` shrinks, `UnmapMemory` and `UnmapPhysicalMemory` zero the pages in place and take their access, and `MapMemory` copies instead of sharing pages (and copies back at `UnmapMemory`). `MapSharedMemory` still shares the pages of the service, because the service writes them; the GPU does not see such a view, and the kernel logs each one that lies in the buffer. `NXKIT_GUEST_WIRE=1` also wires the range with `mlock` at start, so macOS cannot compress guest pages while the driver lets go of them; it takes the whole range in RAM at once and is off by default until a run shows that it helps.
+
 The whole reservation ends at or below `1 << 39`, the end of the address space that the kernel models. The host regions start behind the highest module. When dyld mapped the library, they start behind the `__LINKEDIT` segment, which lies behind the last module.
 
 ### The memory profile
@@ -164,6 +172,8 @@ Every key is required. Numbers are JSON numbers or strings with a decimal or `0x
 | `map_limit` | `true` makes `MapPhysicalMemory` fail past the application pool. |
 | `stdalloc_cap` | The largest block that the standard allocator of the guest hands out. 0 means no cap. |
 | `alloc_big_align` | Whether the allocator of the guest aligns big blocks to 2 MiB. |
+
+`NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` replace `reserve` and `alias` for one run (bytes, `0x` hex, or a number with `M` or `G`); the heap takes what is left, and the host prints the split it used. Every GiB that the heap or alias region loses is a GiB of wired RAM less (see "What the GPU buffer costs").
 
 The host gives these numbers and the region ranges to the kernel when it starts it (`sys::kernel_init`), together with the modules, the thread-local area, the shared memory area, the main stack and the main thread of the NPDM. `settings.core_preempt` turns the core rules of the kernel on.
 

@@ -50,7 +50,10 @@ const PATCHES_PY: Evidence = Evidence::Recorded {
 
 /// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The memory
 /// split is the engine's starting split ("to be measured" in its comment): 256 MB in front, a 4 GB alias region, a
-/// 256 MB stack region and the heap region, with the Switch 2's 9 GB application pool. 48 MB of system resource, as
+/// 256 MB stack region and the heap region, with the Switch 2's 9 GB application pool. The host's GPU buffer covers
+/// the heap, stack and alias regions, and the driver wires all of it: this split costs 12.4 GiB of wired RAM per run
+/// (measured 2026-11-09). Shrink `reserve` and `alias` to the peaks of the host's `region use` line of a long run
+/// (`NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` try them first); they stay as they are until then. 48 MB of system resource, as
 /// the NPDM declares, so virtual address memory is on. The build row names no display version (`v131072` twice), so
 /// the app shows the number of the update.
 const SETTINGS: Fact<Settings> = Fact::new(

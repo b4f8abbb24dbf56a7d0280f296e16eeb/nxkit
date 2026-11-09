@@ -476,7 +476,8 @@ mod posix {
 ///
 /// `protect` rounds outward when it grants access and inward when it removes it, so a host page that still has a
 /// Horizon page with access stays accessible. Two Horizon pages with different access on one host page get the
-/// access of the last call. `release` leaves a host page that it only partly releases readable and writable.
+/// access of the last call. `release` leaves a host page that it only partly releases readable and writable. Inside the
+/// pinned range (`crate::pinned`) `release` zeroes the pages and takes their access instead of replacing them.
 impl HostSpace for HostMemory {
     fn page_size(&self) -> u64 {
         posix::page_size().max(PAGE_SIZE)
@@ -499,14 +500,11 @@ impl HostSpace for HostMemory {
         if last <= first {
             return self.scrub(addr, len);
         }
-        let mut ok = posix::drop_pages(first, last - first);
-        if first > addr {
-            ok &= self.scrub(addr, first - addr);
+        if !self.can_remap(addr, len) {
+            // the GPU keeps the pages under the range: zero them in place instead of replacing them
+            return self.scrub(addr, len) && posix::protect(first, last - first, 0);
         }
-        if last < addr + len {
-            ok &= self.scrub(last, addr + len - last);
-        }
-        ok
+        self.drop_view(first, last - first) && self.release_edges(addr, len, first, last)
     }
 
     fn zero(&self, addr: u64, len: u64) -> bool {
@@ -520,9 +518,23 @@ impl HostSpace for HostMemory {
     fn copy(&self, dst: u64, src: u64, len: u64) -> bool {
         posix::copy(dst, src, len)
     }
+
+    fn can_remap(&self, addr: u64, len: u64) -> bool {
+        !crate::pinned::overlaps(addr, len)
+    }
+
+    fn drop_view(&self, addr: u64, len: u64) -> bool {
+        posix::drop_pages(addr, len)
+    }
 }
 
 impl HostMemory {
+    /// Zeros the parts of a released range that share a host page with memory that stays.
+    fn release_edges(&self, addr: u64, len: u64, first: u64, last: u64) -> bool {
+        (first == addr || self.scrub(addr, first - addr))
+            && (last == addr + len || self.scrub(last, addr + len - last))
+    }
+
     /// Zeros a range that shares a host page with memory that stays. The host page is made readable and writable.
     fn scrub(&self, addr: u64, len: u64) -> bool {
         let ps = self.page_size();

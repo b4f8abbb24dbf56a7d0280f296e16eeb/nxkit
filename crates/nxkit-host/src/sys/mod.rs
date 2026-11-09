@@ -10,6 +10,7 @@ mod dylib;
 pub mod exitflush;
 mod kernel;
 mod mouse;
+pub mod paging;
 pub mod vm;
 
 pub use dylib::{Dylib, Image};
@@ -65,6 +66,7 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
+    fn mlock(addr: *const c_void, len: usize) -> c_int;
     fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
     fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
@@ -233,6 +235,17 @@ impl Reservation {
         // SAFETY: the range lies inside the reservation and the page is readable by the contract.
         unsafe { std::ptr::copy_nonoverlapping(p.cast::<u8>(), b.as_mut_ptr(), 8) };
         Ok(u64::from_le_bytes(b))
+    }
+
+    /// Wires the pages of a range (`mlock`): the system neither compresses nor swaps them out until the process ends.
+    /// Every page gets memory, touched or not.
+    pub fn lock(&self, addr: u64, len: u64) -> Result<()> {
+        let p = self.check(addr, len)?;
+        // SAFETY: the range lies inside the reservation. `mlock` changes no content and no access.
+        if unsafe { mlock(p.cast_const(), len as usize) } != 0 {
+            return Err(mem_err("mlock", errno()));
+        }
+        Ok(())
     }
 
     /// Wraps `[start, start + len)` of the reservation as the buffer of the GPU backend (R3).

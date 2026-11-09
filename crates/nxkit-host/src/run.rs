@@ -76,8 +76,9 @@ pub fn run(opts: &Options) -> Result<()> {
     // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
+    mem.keep_gpu_pages();
     mem.seal()?;
-    crate::memreport::start(&ctx, (layout.all.start, layout.all.end()));
+    crate::memreport::start(&ctx, &layout);
 
     nxkit_rt::nxkit_init(mask);
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
@@ -123,5 +124,9 @@ pub fn run(opts: &Options) -> Result<()> {
         move || thread::start_main(boot, stack_top),
     );
     drop(loaded);
+    eprintln!(
+        "nxkit-host: region use {}",
+        crate::memreport::region_use(&layout)
+    );
     result
 }

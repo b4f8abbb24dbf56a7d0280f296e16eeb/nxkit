@@ -10,7 +10,7 @@
 //! (Atmosphere `svc_results.hpp`, checked on 2026-11-07). Where the two differ the code says which one it follows.
 
 use crate::kernel::Kernel;
-use crate::memory::PAGE_SIZE;
+use crate::memory::{HostSpace, PAGE_SIZE};
 use crate::result::{KResult, KResultOr};
 use crate::space::{Block, attr, perm, state};
 use crate::thread::lock;
@@ -32,6 +32,16 @@ pub(crate) fn page_range(addr: u64, size: u64) -> KResultOr<(u64, u64)> {
         .checked_add(size)
         .ok_or(KResult::INVALID_CURRENT_MEMORY)?;
     Ok((addr, end))
+}
+
+/// Whether `MapMemory` shares the pages: all three values are whole host pages, and the host may put other pages
+/// under both ranges. `UnmapMemory` asks the same and gets the same answer, because the pinned range never changes
+/// while the game runs.
+fn shares(host: &dyn HostSpace, d0: u64, s0: u64, size: u64) -> bool {
+    let page = host.page_size();
+    [d0, s0, size].iter().all(|v| v.is_multiple_of(page))
+        && host.can_remap(d0, size)
+        && host.can_remap(s0, size)
 }
 
 fn is_free(b: &Block) -> bool {
@@ -88,6 +98,7 @@ impl Kernel {
             sp.map.set(from, to, state::FREE, perm::NONE, 0, 0);
         }
         sp.heap_size = size;
+        crate::usage::heap(size);
         Ok(base)
     }
 
@@ -170,8 +181,7 @@ impl Kernel {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
-        let page = host.page_size();
-        let ok = if [d0, s0, size].iter().all(|v| v.is_multiple_of(page)) {
+        let ok = if shares(host.as_ref(), d0, s0, size) {
             host.remap(d0, s0, size, perm::RW) && host.protect(s0, size, perm::NONE)
         } else {
             host.protect(d0, size, perm::RW) && host.copy(d0, s0, size)
@@ -185,6 +195,7 @@ impl Kernel {
             ..*b
         });
         sp.map.set(d0, d1, state::STACK, perm::RW, 0, s0);
+        crate::usage::stack_top(d1 - vm.layout.stack_base);
         Ok(())
     }
 
@@ -205,8 +216,7 @@ impl Kernel {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
-        let page = host.page_size();
-        let ok = if [d0, s0, size].iter().all(|v| v.is_multiple_of(page)) {
+        let ok = if shares(host.as_ref(), d0, s0, size) {
             host.protect(s0, size, perm::RW) && host.release(d0, size)
         } else {
             host.copy(s0, d0, size) && host.release(d0, size)
@@ -289,6 +299,8 @@ impl Kernel {
             sp.map.set(s, e, state::NORMAL, perm::RW, 0, 0);
         }
         sp.physical_used += new;
+        crate::usage::physical(sp.physical_used);
+        crate::usage::alias_top(end - vm.layout.alias_base);
         Ok(())
     }
 
@@ -320,6 +332,7 @@ impl Kernel {
             freed += e - s;
         }
         sp.physical_used = sp.physical_used.saturating_sub(freed);
+        crate::usage::physical(sp.physical_used);
         Ok(())
     }
 }
