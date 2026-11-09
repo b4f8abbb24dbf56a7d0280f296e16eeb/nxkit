@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use objc2::rc::Retained;
@@ -96,6 +96,50 @@ pub struct MissWhy {
     pub rejected: Vec<&'static str>,
 }
 
+/// A compiler with the serializer that is bound to it when the compiler is made.
+struct Generation {
+    compiler: RawCompiler,
+    serializer: Option<Retained<ProtocolObject<dyn MTL4PipelineDataSetSerializer>>>,
+}
+
+// SAFETY: `MTL4Compiler` accepts calls from several threads, and the serializer is only called with the generation
+// quiet (`PipelineCache::rotate_archive`) or by the owner of the cache.
+unsafe impl Send for Generation {}
+// SAFETY: see `Send`.
+unsafe impl Sync for Generation {}
+
+impl Generation {
+    fn new(ctx: &Context, collect: bool) -> Result<Self> {
+        let desc = MTL4CompilerDescriptor::new();
+        let serializer = collect.then(|| {
+            let sd = MTL4PipelineDataSetSerializerDescriptor::new();
+            sd.setConfiguration(MTL4PipelineDataSetSerializerConfiguration::CaptureBinaries);
+            ctx.device().newPipelineDataSetSerializerWithDescriptor(&sd)
+        });
+        desc.setPipelineDataSetSerializer(serializer.as_deref());
+        let compiler = ctx
+            .device()
+            .newCompilerWithDescriptor_error(&desc)
+            .map_err(|e| create("pipeline compiler", e.localizedDescription()))?;
+        Ok(Self {
+            compiler,
+            serializer,
+        })
+    }
+
+    fn write(&self, path: &Path) -> Result<()> {
+        let s = self
+            .serializer
+            .as_ref()
+            .ok_or(MetalError::Invalid("the cache was made without `collect`"))?;
+        let p = path
+            .to_str()
+            .ok_or(MetalError::Invalid("the archive path is not UTF-8"))?;
+        s.serializeAsArchiveAndFlushToURL_error(&NSURL::fileURLWithPath(&ns(p)))
+            .map_err(|e| create("pipeline archive file", e.localizedDescription()))
+    }
+}
+
 enum Entry {
     Compute(ComputePipeline),
     Render(RenderPipeline),
@@ -103,8 +147,15 @@ enum Entry {
 
 /// Pipeline states under a caller-chosen hash.
 pub struct PipelineCache {
-    compiler: RawCompiler,
-    serializer: Option<Retained<ProtocolObject<dyn MTL4PipelineDataSetSerializer>>>,
+    /// The compiler that new compiles use, with the serializer bound to it. [`PipelineCache::rotate_archive`] swaps it.
+    current: RwLock<Arc<Generation>>,
+    /// The generations that were swapped out. Pipelines they made stay valid for as long as the cache lives.
+    retired: Mutex<Vec<Arc<Generation>>>,
+    ctx: Context,
+    /// Whether the compilers capture into a serializer.
+    collecting: bool,
+    /// Pipelines inserted since the serializer was made.
+    captured: AtomicU64,
     options: Retained<MTL4CompilerTaskOptions>,
     loaded_archive: bool,
     /// [`ArchiveConfig::compile_bases`].
@@ -137,17 +188,7 @@ unsafe impl Sync for PipelineCache {}
 impl PipelineCache {
     /// Makes a cache with its own compiler.
     pub fn new(ctx: &Context, archive: &ArchiveConfig) -> Result<Self> {
-        let desc = MTL4CompilerDescriptor::new();
-        let serializer = archive.collect.then(|| {
-            let sd = MTL4PipelineDataSetSerializerDescriptor::new();
-            sd.setConfiguration(MTL4PipelineDataSetSerializerConfiguration::CaptureBinaries);
-            ctx.device().newPipelineDataSetSerializerWithDescriptor(&sd)
-        });
-        desc.setPipelineDataSetSerializer(serializer.as_deref());
-        let compiler = ctx
-            .device()
-            .newCompilerWithDescriptor_error(&desc)
-            .map_err(|e| create("pipeline compiler", e.localizedDescription()))?;
+        let first = Generation::new(ctx, archive.collect)?;
         let options = MTL4CompilerTaskOptions::new();
         let mut loaded_archive = false;
         let mut archive_obj = None;
@@ -175,8 +216,11 @@ impl PipelineCache {
             options.setLookupArchives(Some(&NSArray::from_retained_slice(&all)));
         }
         Ok(Self {
-            compiler,
-            serializer,
+            current: RwLock::new(Arc::new(first)),
+            retired: Mutex::new(Vec::new()),
+            ctx: ctx.clone(),
+            collecting: archive.collect,
+            captured: AtomicU64::new(0),
             options,
             loaded_archive,
             compile_bases: archive.compile_bases,
@@ -235,6 +279,7 @@ impl PipelineCache {
             .as_ref()
             .and_then(|s| s.compute_options(lib, function));
         let raw = self
+            .generation()
             .compiler
             .newComputePipelineStateWithDescriptor_compilerTaskOptions_error(
                 &d,
@@ -280,6 +325,7 @@ impl PipelineCache {
             return Ok((p, Source::Archive(t0.elapsed())));
         }
         let raw = self
+            .generation()
             .compiler
             .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&d, Some(&self.options))
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
@@ -415,6 +461,7 @@ impl PipelineCache {
         }
         let t0 = Instant::now();
         let raw = self
+            .generation()
             .compiler
             .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&d, Some(&self.options))
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
@@ -430,7 +477,8 @@ impl PipelineCache {
             let d = MTL4LibraryDescriptor::new();
             d.setSource(Some(&ns(NOP_FRAGMENT)));
             d.setName(Some(&ns("nxkit-mesh-nop")));
-            self.compiler
+            self.generation()
+                .compiler
                 .newLibraryWithDescriptor_error(&d)
                 .map(ShaderLibrary::tracked)
                 .map_err(|e| e.localizedDescription().to_string())
@@ -463,6 +511,9 @@ impl PipelineCache {
 
     fn insert(&self, key: u64, e: Entry) -> Result<()> {
         self.builds.fetch_add(1, Ordering::Relaxed);
+        if self.collecting {
+            self.captured.fetch_add(1, Ordering::Relaxed);
+        }
         let fresh = self
             .entries
             .write()
@@ -475,17 +526,56 @@ impl PipelineCache {
         Ok(())
     }
 
-    /// Writes the archive of every pipeline built so far. The cache must have been made with `collect`.
+    /// The compiler and serializer in use now. A compile holds the `Arc` until it is done, which is how
+    /// [`PipelineCache::rotate_archive`] knows that a swapped-out generation is quiet.
+    fn generation(&self) -> Arc<Generation> {
+        self.current
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Writes the archive of every pipeline the current serializer captured. The cache must have been made with
+    /// `collect`. A long run should use [`PipelineCache::rotate_archive`]: a serializer has a store of limited size.
     pub fn save_archive(&self, path: &Path) -> Result<()> {
-        let s = self
-            .serializer
-            .as_ref()
-            .ok_or(MetalError::Invalid("the cache was made without `collect`"))?;
-        let p = path
-            .to_str()
-            .ok_or(MetalError::Invalid("the archive path is not UTF-8"))?;
-        s.serializeAsArchiveAndFlushToURL_error(&NSURL::fileURLWithPath(&ns(p)))
-            .map_err(|e| create("pipeline archive file", e.localizedDescription()))
+        self.generation().write(path)
+    }
+
+    /// The pipelines the current serializer has captured, about: the count of pipelines inserted since it was made.
+    pub fn captured(&self) -> u64 {
+        self.captured.load(Ordering::Relaxed)
+    }
+
+    /// Hands the capture over: from now on new compiles run on a new compiler with a fresh serializer, the old
+    /// serializer waits (up to 20 s) until the compiles that were running on its compiler are done, and then writes its
+    /// archive to `path`. The serializer's internal store is limited (about 10 MB); a full one hands Metal nil data and
+    /// the compiler crashes, so the host rotates well before. If compiles are still running after the wait, nothing is
+    /// written (their capture is lost, but the serializer is not touched under them).
+    pub fn rotate_archive(&self, path: &Path) -> Result<()> {
+        if !self.collecting {
+            return Err(MetalError::Invalid("the cache was made without `collect`"));
+        }
+        let fresh = Arc::new(Generation::new(&self.ctx, true)?);
+        let old = std::mem::replace(
+            &mut *self.current.write().unwrap_or_else(PoisonError::into_inner),
+            fresh,
+        );
+        self.captured.store(0, Ordering::Relaxed);
+        let t0 = Instant::now();
+        while Arc::strong_count(&old) > 1 && t0.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let quiet = Arc::strong_count(&old) == 1;
+        let written = if quiet {
+            old.write(path)
+        } else {
+            Err(MetalError::Invalid("compiles were still running"))
+        };
+        self.retired
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(old);
+        written
     }
 
     /// The number of lookups that found a pipeline.

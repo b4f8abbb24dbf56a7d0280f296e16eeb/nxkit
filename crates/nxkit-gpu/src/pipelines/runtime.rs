@@ -13,7 +13,7 @@
 //!
 //! Writes: `pipelines.seen` is written every `NXKIT_PIPELINE_CACHE_FLUSH` seconds (30) when the list grew; a new
 //! archive file when pipelines were compiled since the last one, at most every 30 s at first and then at doubling
-//! gaps up to 10 minutes (a file is another lookup archive, so a run should not make dozens), and both at the exit
+//! gaps up to 10 minutes, and at once when the serializer has captured `NXKIT_PIPELINE_CACHE_ROTATE` (1000) pipelines (a file is another lookup archive, so a run should not make dozens), and both at the exit
 //! ([`flush_runtime_cache`]). Every write goes to a temporary file and is renamed. The archives are bounded by
 //! `NXKIT_PIPELINE_CACHE_MB` (512) and 64 files: the oldest go first, and what they held compiles again when asked.
 
@@ -222,7 +222,7 @@ pub fn flush_runtime_cache() {
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
     if let Some(s) = s {
-        s.flush(true);
+        s.flush(true, false);
     }
 }
 
@@ -234,7 +234,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 impl Session {
-    fn flush(&self, force: bool) {
+    /// Writes the list and, when it is time or `force` or `full`, the archive. `full`: the serializer has captured as
+    /// many pipelines as a rotation allows, so it is handed over now whatever the gap.
+    fn flush(&self, force: bool, full: bool) {
         let mut io = self.io.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(mut mine) = record::take_dirty() {
             let path = self.dir.join(SEEN_FILE);
@@ -250,14 +252,18 @@ impl Session {
                 eprintln!("nxkit-gpu: {}: {e}", path.display());
             }
         }
-        if !force && io.last_archive.elapsed() < io.gap {
+        if !force && !full && io.last_archive.elapsed() < io.gap {
             return;
         }
         let fresh = record::take_fresh();
-        if fresh == 0 {
+        if fresh == 0 && !full {
             return;
         }
         match self.write_archive() {
+            // a rotation with nothing captured has no file to write
+            Err(_) if fresh == 0 => {
+                io.last_archive = Instant::now();
+            }
             Ok(()) => {
                 io.last_archive = Instant::now();
                 io.gap = (io.gap * 2).min(MAX_GAP);
@@ -275,7 +281,8 @@ impl Session {
             self.dir.join(&name),
             self.dir.join(format!("{name}.partial")),
         );
-        self.cache.save_archive(&tmp).map_err(|e| e.to_string())?;
+        // The serializer's store is limited, so every write hands the capture to a new serializer.
+        self.cache.rotate_archive(&tmp).map_err(|e| e.to_string())?;
         let size = std::fs::metadata(&tmp).map_err(|e| e.to_string())?.len();
         if size == 0 {
             let _ = std::fs::remove_file(&tmp);
@@ -304,6 +311,7 @@ impl Pipelines {
             self.prewarm(&plan.seen, shader_dir);
         }
         let flush_s = env_num("NXKIT_PIPELINE_CACHE_FLUSH", 30);
+        let rotate_at = env_num("NXKIT_PIPELINE_CACHE_ROTATE", 1000);
         let session = Arc::new(Session {
             dir: plan.dir,
             cache: self.cache.clone(),
@@ -318,9 +326,14 @@ impl Pipelines {
         let spawned = std::thread::Builder::new()
             .name("nxkit-pipecache".into())
             .spawn(move || {
+                let mut last = Instant::now();
                 loop {
-                    std::thread::sleep(Duration::from_secs(flush_s));
-                    session.flush(false);
+                    std::thread::sleep(Duration::from_secs(1));
+                    let full = session.cache.captured() >= rotate_at;
+                    if full || last.elapsed() >= Duration::from_secs(flush_s) {
+                        last = Instant::now();
+                        session.flush(false, full);
+                    }
                 }
             });
         if let Err(e) = spawned {

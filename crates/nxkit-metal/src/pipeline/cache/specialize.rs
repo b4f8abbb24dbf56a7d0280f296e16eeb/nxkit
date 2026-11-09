@@ -141,6 +141,7 @@ impl PipelineCache {
         d.setInputPrimitiveTopology(base.topology);
         let b = &self.bases;
         match self
+            .generation()
             .compiler
             .newRenderPipelineStateBySpecializationWithDescriptor_pipeline_error(
                 &d,
@@ -221,7 +222,8 @@ impl PipelineCache {
     /// such a base is compiled again without a class.
     fn compile_base(&self, d: &MTL4RenderPipelineDescriptor) -> Result<Base, String> {
         let compile = |d: &MTL4RenderPipelineDescriptor| {
-            self.compiler
+            self.generation()
+                .compiler
                 .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(
                     d,
                     Some(&self.options),
