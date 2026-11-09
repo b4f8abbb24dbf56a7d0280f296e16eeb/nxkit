@@ -11,6 +11,8 @@ const MOCK_LAG: usize = 3;
 struct MockPipe {
     /// Two pictures come out of every third packet, and every seventh packet shows nothing.
     odd: bool,
+    /// Like rav1d with more than one frame: no wait before the end of the stream.
+    no_wait: bool,
     pushed: u32,
     inside: VecDeque<Pic>,
     /// Where the pictures of `push` and `wait` came from, to see that the worker waits.
@@ -39,7 +41,18 @@ impl Pipeline for MockPipe {
         Ok(true)
     }
 
+    fn waits(&self) -> bool {
+        !self.no_wait
+    }
+
+    fn finish(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
+        out.extend(self.inside.drain(..));
+        Ok(())
+    }
+
     fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
+        // The worker stops here, so the test that waits for pictures times out.
+        assert!(!self.no_wait, "a pipeline that does not wait was waited on");
         self.waits.fetch_add(1, Ordering::Relaxed);
         std::thread::sleep(Duration::from_millis(2));
         out.extend(self.inside.pop_front());
@@ -53,6 +66,7 @@ impl Pipeline for MockPipe {
 
 struct MockBackend {
     odd: bool,
+    no_wait: bool,
 }
 
 impl Backend for MockBackend {
@@ -63,6 +77,7 @@ impl Backend for MockBackend {
     fn pipeline(&mut self, _packet: &[u8]) -> Option<Box<dyn Pipeline>> {
         Some(Box::new(MockPipe {
             odd: self.odd,
+            no_wait: self.no_wait,
             pushed: 0,
             inside: VecDeque::new(),
             waits: Arc::new(AtomicU32::new(0)),
@@ -71,11 +86,24 @@ impl Backend for MockBackend {
 }
 
 fn open_mock() -> Result<Box<dyn Backend>, String> {
-    Ok(Box::new(MockBackend { odd: false }))
+    Ok(Box::new(MockBackend {
+        odd: false,
+        no_wait: false,
+    }))
 }
 
 fn open_odd() -> Result<Box<dyn Backend>, String> {
-    Ok(Box::new(MockBackend { odd: true }))
+    Ok(Box::new(MockBackend {
+        odd: true,
+        no_wait: false,
+    }))
+}
+
+fn open_odd_no_wait() -> Result<Box<dyn Backend>, String> {
+    Ok(Box::new(MockBackend {
+        odd: true,
+        no_wait: true,
+    }))
 }
 
 /// The effects that the worker and the calls carried out.
@@ -412,6 +440,65 @@ fn the_load_does_not_stick_with_packets_that_show_nothing_and_a_looping_stream()
     }
     // The event is up again, so that the game sends.
     assert_eq!(lock(&r.dec).event_state, Some(true));
+}
+
+#[test]
+fn a_pipeline_that_does_not_wait_gets_its_pictures_from_the_next_packets() {
+    // rav1d with two frames: pictures come out of later pushes only, and the end of the stream drains. A player that
+    // sends on the event must reach the end, although packets that show nothing leave frames counted in flight.
+    let r = rig();
+    lock(&r.dec).open_av1 = open_odd_no_wait;
+    r.buffers(8);
+    let total = 40;
+    let mut got = Vec::new();
+    let mut sent = 0;
+    let mut up = true;
+    let mut seen_events = 0;
+    let mut last = false;
+    let mut order: VecDeque<u32> = (0..8).collect();
+    let end = Instant::now() + Duration::from_secs(10);
+    while !last {
+        assert!(
+            Instant::now() < end,
+            "stalled: sent {sent}, got {}, {}",
+            got.len(),
+            r.state()
+        );
+        {
+            let ev = lock(&r.rec);
+            for &e in &ev.events[seen_events..] {
+                up = e;
+            }
+            seen_events = ev.events.len();
+        }
+        if up && sent < total {
+            let mut fx = Effects::default();
+            let res = lock(&r.dec).submit(&[1], sent, sent == total - 1, &mut fx);
+            if res.is_ok() {
+                sent += 1;
+            }
+            let mut rec = lock(&r.rec);
+            rec.events.extend(fx.event);
+            rec.filled.extend(fx.filled);
+        }
+        // The buffers fill in the order of their release.
+        while let Some(&i) = order.front() {
+            let Ok((_, _, ts, eos)) = r.properties(i) else {
+                break;
+            };
+            got.push(ts);
+            last |= eos;
+            r.call(|d, fx| d.release(i, fx));
+            order.rotate_left(1);
+        }
+        // The frames in flight never pass the frames that the decoder works on.
+        assert!(lock(&r.dec).inflight <= MOCK_LAG + 1, "{}", r.state());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // Every seventh packet shows nothing, the rest come in order.
+    let want: Vec<i64> = (0..total).filter(|ts| (ts + 1) % 7 != 0).collect();
+    assert_eq!(got, want);
+    assert_eq!(lock(&r.dec).load(), 0);
 }
 
 #[test]

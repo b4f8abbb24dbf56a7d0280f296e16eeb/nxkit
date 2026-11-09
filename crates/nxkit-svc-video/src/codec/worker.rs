@@ -42,6 +42,11 @@ pub(super) fn absorb(
         red(&format!("nn::codec {}: {e}", d.codec.name()));
     }
     d.inflight = d.inflight.saturating_sub(out.len());
+    if matches!(call, Call::Job { .. }) && d.lag > 0 {
+        // After a push at most `lag` frames are inside. A packet that shows no picture would otherwise stay counted in
+        // a pipeline that never waits ([`Pipeline::waits`]), and the event would close with nothing inside.
+        d.inflight = d.inflight.min(d.lag);
+    }
     if matches!(call, Call::Wait) && res.is_ok() && out.is_empty() {
         // Nothing was in flight: a packet that shows no picture (a sequence header alone) was counted.
         d.inflight = 0;
@@ -75,6 +80,8 @@ pub(super) fn absorb(
 /// no packet is queued.
 pub(super) fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
     let cv = Arc::clone(&lock(dec).cv);
+    // A pipeline that does not wait in the middle of the stream gives its pictures from the next pushes.
+    let waits = pipe.waits();
     let mut out: Vec<Pic> = Vec::new();
     // Pictures may still be inside the decoder, whatever the count says.
     let mut maybe = false;
@@ -109,6 +116,7 @@ pub(super) fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
             out.clear();
             let mut res = Ok(());
             let mut taken = false;
+            let started = Instant::now();
             if !job.data.is_empty() {
                 match pipe.push(&job.data, job.ts, &mut out) {
                     Ok(t) => taken = t,
@@ -122,6 +130,16 @@ pub(super) fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
             }
             d = lock(dec);
             d.busy = false;
+            trace(format_args!(
+                "dec {} decoded {} bytes in {:.1} ms, {} pictures (held {}, queued {}, inflight {})",
+                d.id,
+                job.data.len(),
+                started.elapsed().as_secs_f64() * 1000.0,
+                out.len(),
+                d.held.len(),
+                d.queued.len(),
+                d.inflight
+            ));
             let fx = absorb(
                 &mut d,
                 Call::Job {
@@ -136,7 +154,7 @@ pub(super) fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
                 deliver(d, fx);
                 d = lock(dec);
             }
-        } else if d.inflight > 0 || maybe {
+        } else if waits && (d.inflight > 0 || maybe) {
             // Pictures may be inside: a unit can show more or fewer than one, so the count alone does not say.
             d.busy = true;
             drop(d);
