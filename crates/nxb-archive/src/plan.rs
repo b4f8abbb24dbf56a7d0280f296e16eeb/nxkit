@@ -145,8 +145,12 @@ pub struct Plan {
     pub left: [usize; 7],
 }
 
-/// `plan`.
-pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool) -> Plan {
+/// `plan`: the bases of the archive, one per pair, as the host asks for them. The host draws every vertex shader with
+/// its `_b` library and its `entry` (it neither pulls vertices through `_bp` nor uses `entry_z`) and looks a base up by
+/// exactly those functions (`nxkit-metal` `cache::specialize`), so a base of `_bp` or `main0_z` was never found. A vertex
+/// shader with stage inputs needs the vertex layout of the draw, which a base cannot have, and is left out (`left[2]`).
+/// `_zero` (depth mode `zero`) stays for the callers; the stamp records it.
+pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool) -> Plan {
     let mut js: HashMap<String, Option<Value>> = HashMap::new();
     let mut fns: HashMap<String, Option<Vec<(String, bool)>>> = HashMap::new();
     let mut layer: HashMap<String, bool> = HashMap::new();
@@ -181,13 +185,8 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
         };
-        let ventry = if zero && truthy_str(vj.get("entry_z")).is_some() {
-            truthy_str(vj.get("entry_z"))
-        } else {
-            vj.get("entry").and_then(Value::as_str).map(str::to_string)
-        };
+        let ventry = vj.get("entry").and_then(Value::as_str).map(str::to_string);
         let fentry = truthy_str(fj.get("entry")).unwrap_or_else(|| "main0".into());
-        let pull = matches!(vj.get("pull"), Some(Value::Object(_)));
         let has_inputs = match vj.get("vertex_inputs") {
             Some(Value::List(l)) => !l.is_empty(),
             Some(Value::Object(m)) => !m.is_empty(),
@@ -196,7 +195,7 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
             Some(Value::Bool(b)) => *b,
             _ => false,
         };
-        if !pull && has_inputs {
+        if has_inputs {
             out.left[2] += 1;
             continue;
         }
@@ -213,7 +212,7 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
             out.left[5] += 1;
             continue;
         }
-        let vl = format!("{vk}{}", if pull { "_bp" } else { "_b" });
+        let vl = format!("{vk}_b");
         let fl = format!("{fk}_b");
         let vf = fns
             .entry(vl.clone())

@@ -74,6 +74,15 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         .render(&draw, &vs, Some(&fs), &targets, false)
         .unwrap();
     assert!(pipelines.topology_fallbacks.lock().unwrap().contains(&key));
+    // the vertex function is remembered too: its other states skip the class without a refused compile first
+    let vertex = point_size_key(&draw.program.vertex, &vs.entry);
+    assert!(
+        pipelines
+            .topology_fallbacks
+            .lock()
+            .unwrap()
+            .contains(&vertex)
+    );
     for _ in 0..10 {
         assert_eq!(
             pipelines

@@ -4,9 +4,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nxkit_metal::{
-    ArchiveConfig, ArgumentTable, ColorAttachment, ColorTarget, Context, Format, FrameRing,
-    LoadAction, PipelineCache, Primitive, RenderCommand, RenderPassDesc, RenderPipeline,
-    RenderPipelineDesc, ShaderLibrary, Source, StoreAction, Texture, TextureDesc,
+    ArchiveConfig, ArgumentTable, BlendFactor, BlendOp, BlendState, ColorAttachment, ColorTarget,
+    Context, Format, FrameRing, LoadAction, PipelineCache, Primitive, RenderCommand,
+    RenderPassDesc, RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source, StoreAction,
+    Texture, TextureDesc, TopologyClass,
 };
 
 const DRAW_MSL: &str = r#"
@@ -199,4 +200,85 @@ fn an_archived_base_is_specialized_without_a_compile() {
     let b = second.base_stats();
     assert_eq!((b.found, b.compiled), (1, 0), "{b:?}");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Like UI text of a game: the vertex function writes the point size (NVN writes it for every draw), the fragment
+/// function a colour with half alpha.
+const TEXT_MSL: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+struct V { float4 pos [[position]]; float size [[point_size]]; };
+vertex V vs(uint id [[vertex_id]]) {
+    float2 p = float2((id << 1) & 2, id & 2);
+    V v; v.pos = float4(p * 2.0 - 1.0, 0.0, 1.0); v.size = 1.0; return v;
+}
+fragment float4 fs(V in [[stage_in]]) { return float4(1.0, 0.5, 0.0, 0.5); }
+"#;
+
+/// A specialized pipeline draws exactly what the pipeline compiled from the functions draws: straight and
+/// premultiplied alpha blending, a write mask, and alpha to coverage, which needs a base of its own. The specialized
+/// side asks for a triangle class with a vertex function that writes the point size, which Metal refuses, so its bases
+/// are made without a class as the host's full compile falls back to.
+#[test]
+fn a_specialized_pipeline_draws_what_the_full_compile_draws() {
+    let Some(ctx) = ctx() else { return };
+    let full = PipelineCache::new(
+        &ctx,
+        &ArchiveConfig {
+            exact_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let spec = PipelineCache::new(&ctx, &bases()).unwrap();
+    let lib = ShaderLibrary::from_source(&ctx, "text_b", TEXT_MSL).unwrap();
+    let premultiplied = BlendState {
+        src_rgb: BlendFactor::One,
+        dst_rgb: BlendFactor::OneMinusSrcAlpha,
+        op_rgb: BlendOp::Add,
+        src_alpha: BlendFactor::One,
+        dst_alpha: BlendFactor::OneMinusSrcAlpha,
+        op_alpha: BlendOp::Add,
+    };
+    let states = [
+        (
+            ColorTarget::new(Format::Rgba8Unorm).with_blend(BlendState::ALPHA),
+            false,
+        ),
+        (
+            ColorTarget::new(Format::Rgba8Unorm).with_blend(premultiplied),
+            false,
+        ),
+        (
+            ColorTarget {
+                write_mask: 0b0111,
+                ..ColorTarget::new(Format::Rgba8Unorm).with_blend(BlendState::ALPHA)
+            },
+            false,
+        ),
+        (
+            ColorTarget::new(Format::Rgba8Unorm).with_blend(BlendState::ALPHA),
+            true,
+        ),
+    ];
+    for (key, (target, a2c)) in (1u64..).zip(states) {
+        let mut d = RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[]);
+        d.colors = vec![Some(target)];
+        d.alpha_to_coverage = a2c;
+        d.topology = TopologyClass::Unspecified;
+        let (want, s) = full.render_traced(key, &d).unwrap();
+        assert!(matches!(s, Source::Compiled(_)), "{key}: {s:?}");
+        d.topology = TopologyClass::Triangle;
+        let (got, s) = spec.render_traced(key, &d).unwrap();
+        assert!(matches!(s, Source::Specialized(_)), "{key}: {s:?}");
+        let (want, got) = (draw(&ctx, want), draw(&ctx, got));
+        assert!(
+            want.chunks(4).all(|p| p != [0, 0, 255, 255]),
+            "{key}: nothing drawn"
+        );
+        assert_eq!(want, got, "{key}");
+    }
+    let b = spec.base_stats();
+    // one base in the archived state (no class) and one with alpha to coverage, made again without a class
+    assert_eq!((b.compiled, b.failed), (2, 0), "{b:?}");
 }

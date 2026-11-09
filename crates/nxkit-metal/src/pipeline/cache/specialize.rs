@@ -20,7 +20,10 @@ use std::sync::{Mutex, PoisonError, RwLock};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTL4Archive, MTL4Compiler, MTLPrimitiveTopologyClass, MTLRenderPipelineState};
+use objc2_metal::{
+    MTL4Archive, MTL4Compiler, MTL4RenderPipelineDescriptor, MTLPrimitiveTopologyClass,
+    MTLRenderPipelineState,
+};
 
 use super::PipelineCache;
 use super::miss::{assume_defaults, unspecialize_colors};
@@ -33,12 +36,20 @@ type Pair = ((String, usize), String, (String, usize), String);
 /// A base: the pair, and the hash of the state besides the colour attachments (0 for the state the build archived).
 type BaseKey = (Pair, u64);
 
+/// An unspecialized pipeline and the primitive class it was made with, which its specializations must ask for.
+#[derive(Clone)]
+struct Base {
+    pipeline: RenderPipeline,
+    topology: MTLPrimitiveTopologyClass,
+}
+
 /// The unspecialized pipelines fetched from the archive, and the counters of the specialization.
 #[derive(Default)]
 pub(super) struct Bases {
     /// By base; `None` when there is no unspecialized pipeline for it, so it is asked for once.
-    by_base: RwLock<HashMap<BaseKey, Option<RenderPipeline>>>,
+    by_base: RwLock<HashMap<BaseKey, Option<Base>>>,
     found: AtomicU64,
+    rejected: AtomicU64,
     compiled: AtomicU64,
     missing: AtomicU64,
     specialized: AtomicU64,
@@ -52,6 +63,9 @@ pub(super) struct Bases {
 pub struct BaseStats {
     /// Bases (a pair with the rest of the state) whose unspecialized pipeline the archive gave.
     pub found: u64,
+    /// Bases in the archived state whose pair the archive (its shard index) names, but whose lookup missed: the
+    /// archive holds other functions or another state than the host asks for.
+    pub rejected: u64,
     /// Bases whose unspecialized pipeline the archive lacked and that were compiled.
     pub compiled: u64,
     /// Bases without an unspecialized pipeline: not archived and not compiled, or the compile failed.
@@ -116,18 +130,22 @@ impl PipelineCache {
         archive: Option<&ProtocolObject<dyn MTL4Archive>>,
         desc: &RenderPipelineDesc<'_>,
     ) -> Option<Retained<ProtocolObject<dyn MTLRenderPipelineState>>> {
+        if self.exact_only {
+            return None;
+        }
         desc.fragment?;
         let base = self.base(archive, desc)?;
         let d = self.render_descriptor(desc).ok()?;
-        if archivable(desc) {
-            // That base has no class, and specialization keeps what is set; ask for what it has.
-            d.setInputPrimitiveTopology(MTLPrimitiveTopologyClass::Unspecified);
-        }
+        // Specialization keeps what the base has set; ask for the class it has (none for an archived base, none for a
+        // vertex function that writes the point size).
+        d.setInputPrimitiveTopology(base.topology);
         let b = &self.bases;
         match self
             .compiler
-            .newRenderPipelineStateBySpecializationWithDescriptor_pipeline_error(&d, &base.raw)
-        {
+            .newRenderPipelineStateBySpecializationWithDescriptor_pipeline_error(
+                &d,
+                &base.pipeline.raw,
+            ) {
             Ok(raw) => {
                 b.specialized.fetch_add(1, Ordering::Relaxed);
                 Some(raw)
@@ -145,7 +163,7 @@ impl PipelineCache {
         &self,
         archive: Option<&ProtocolObject<dyn MTL4Archive>>,
         desc: &RenderPipelineDesc<'_>,
-    ) -> Option<RenderPipeline> {
+    ) -> Option<Base> {
         let key = (pair_of(desc)?, rest_of_state(desc));
         let b = &self.bases;
         if let Some(found) = b
@@ -160,22 +178,27 @@ impl PipelineCache {
         let d = self.render_descriptor(desc).ok()?;
         let archived = if archivable(desc) {
             assume_defaults(&d);
-            archive.and_then(|a| a.newRenderPipelineStateWithDescriptor_error(&d).ok())
+            let found = archive.and_then(|a| a.newRenderPipelineStateWithDescriptor_error(&d).ok());
+            if archive.is_some() && found.is_none() {
+                b.rejected.fetch_add(1, Ordering::Relaxed);
+            }
+            found
         } else {
             unspecialize_colors(&d);
             None
         };
         let (found, counter) = match archived {
-            Some(raw) => (Some(RenderPipeline { raw }), &b.found),
-            None if self.compile_bases => match self
-                .compiler
-                .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(
-                    &d,
-                    Some(&self.options),
-                ) {
-                Ok(raw) => (Some(RenderPipeline { raw }), &b.compiled),
+            Some(raw) => (
+                Some(Base {
+                    pipeline: RenderPipeline { raw },
+                    topology: MTLPrimitiveTopologyClass::Unspecified,
+                }),
+                &b.found,
+            ),
+            None if self.compile_bases => match self.compile_base(&d) {
+                Ok(base) => (Some(base), &b.compiled),
                 Err(e) => {
-                    b.refused("base", desc, &e.localizedDescription().to_string());
+                    b.refused("base", desc, &e);
                     (None, &b.missing)
                 }
             },
@@ -193,11 +216,43 @@ impl PipelineCache {
         found
     }
 
+    /// Compiles the unspecialized pipeline of `d`. Metal refuses a vertex function that writes the point size with a
+    /// line or triangle class, as it does for a full compile (the host's `build_render` falls back the same way), so
+    /// such a base is compiled again without a class.
+    fn compile_base(&self, d: &MTL4RenderPipelineDescriptor) -> Result<Base, String> {
+        let compile = |d: &MTL4RenderPipelineDescriptor| {
+            self.compiler
+                .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(
+                    d,
+                    Some(&self.options),
+                )
+                .map(|raw| RenderPipeline { raw })
+                .map_err(|e| e.localizedDescription().to_string())
+        };
+        let topology = d.inputPrimitiveTopology();
+        match compile(d) {
+            Ok(pipeline) => Ok(Base { pipeline, topology }),
+            Err(e)
+                if e.contains("point size")
+                    && topology != MTLPrimitiveTopologyClass::Unspecified
+                    && topology != MTLPrimitiveTopologyClass::Point =>
+            {
+                d.setInputPrimitiveTopology(MTLPrimitiveTopologyClass::Unspecified);
+                compile(d).map(|pipeline| Base {
+                    pipeline,
+                    topology: MTLPrimitiveTopologyClass::Unspecified,
+                })
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// How the specialization of archived pipelines went so far.
     pub fn base_stats(&self) -> BaseStats {
         let b = &self.bases;
         BaseStats {
             found: b.found.load(Ordering::Relaxed),
+            rejected: b.rejected.load(Ordering::Relaxed),
             compiled: b.compiled.load(Ordering::Relaxed),
             missing: b.missing.load(Ordering::Relaxed),
             specialized: b.specialized.load(Ordering::Relaxed),
