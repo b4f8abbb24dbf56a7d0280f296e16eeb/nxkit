@@ -150,6 +150,16 @@ The log is a bitmap of 8192 bits (1024 bytes): bit `i` of word `i / 32` is set b
 
 The bindings are counted as `bind.img`, `bind.gmem-map` and `bind.gmem-log` (not losses). `NXKIT_DIAG=gmem` prints the table size and each pool learned.
 
+## Memory
+
+`NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:
+
+- The cache of native plans keeps 4 plans (`NXKIT_NATIVE_CACHE`), least recently used first out.
+- The batch scratch buffers start at 8 MiB per slot and double up to 64 MiB when a frame needs more.
+- Compressed uploads share pooled staging buffers (see "Textures").
+
+Shader libraries stay loaded on purpose. `Programs` keeps each `StageProgram` with its `ShaderLibrary` for the life of the shader directory, and the library cannot be dropped once the pipelines of a program exist: a program makes a new pipeline for every combination of render targets, blend state, vertex layout and topology, so a later draw can need the library again. The code does not know when the last such pipeline was made. `pipelines/render.rs` builds the pipeline description with `&vs.lib` before it looks the cache up, the background compile jobs (`RenderJob`, `MeshJob`) hold clones of the libraries, and the mesh path clones them as well. To release a library, the description would have to be built only on a miss, and `StageProgram.lib` would become a handle that loads the metallib again on demand. That changes the hot path of every draw for an unmeasured gain: the library counter (`libs` in the report) counts objects, not bytes, and Metal does not report what a library costs. Measure `libs` and the `files` regions in a long run before doing it.
+
 ## Diagnostics
 
 The encoder has opt-in diagnostics (`NXKIT_DIAG`), knobs for experiments (`NXKIT_KNOB`) and a render health report that counts every draw, upload, view and copy that was dropped (`NXKIT_DIAG=health`). [diagnostics.md](diagnostics.md) lists them all.
