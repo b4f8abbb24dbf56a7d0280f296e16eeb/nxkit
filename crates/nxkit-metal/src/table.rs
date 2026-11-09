@@ -1,8 +1,8 @@
-//! The argument table and the keep-alive list that the encoder uses.
+//! The argument table and the keep-alive value that the encoder uses.
 
 use std::any::Any;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -57,11 +57,10 @@ pub struct ArgumentTable {
     pub(crate) raw: Retained<ProtocolObject<dyn MTL4ArgumentTable>>,
     max_buffers: u32,
     max_textures: u32,
-    bound: Arc<Mutex<Vec<Texture>>>,
 }
 
-// SAFETY: the table is a Metal object that one thread fills while it encodes. The `bound` list has a lock. A table
-// is moved to the thread that encodes a pass and is not filled from two threads at once.
+// SAFETY: the table is a Metal object that one thread fills while it encodes. A table is moved to the thread that
+// encodes a pass and is not filled from two threads at once. It owns no texture, so nothing else moves with it.
 unsafe impl Send for ArgumentTable {}
 // SAFETY: see `Send`. Shared access only reads the slot counts.
 unsafe impl Sync for ArgumentTable {}
@@ -80,7 +79,6 @@ impl ArgumentTable {
             raw,
             max_buffers,
             max_textures,
-            bound: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -96,21 +94,19 @@ impl ArgumentTable {
         Ok(())
     }
 
-    /// Binds a texture to a texture slot. The table keeps the texture alive.
-    pub fn set_texture(&self, index: u32, texture: &Texture) -> Result<()> {
+    /// Binds a texture to a texture slot. The table does not keep the texture alive: the slot holds a resource id
+    /// only. The caller must retain the texture on the command buffer that uses the binding, as the passes do. The
+    /// method is crate private so that no caller can bind a texture without an owner.
+    pub(crate) fn set_texture(&self, index: u32, texture: &Texture) -> Result<()> {
         if index >= self.max_textures {
             return Err(MetalError::Invalid("texture slot above the table size"));
         }
         // SAFETY: the index is below the table's texture count (checked above) and the resource id comes from a
-        // live texture, which `bound` keeps alive.
+        // texture that the caller keeps alive until the GPU is done.
         unsafe {
             self.raw
                 .setTexture_atIndex(texture.raw().gpuResourceID(), index as usize)
         };
-        self.bound
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(texture.clone());
         Ok(())
     }
 }
@@ -130,5 +126,16 @@ mod tests {
             Err(MetalError::Invalid("a guest address reached Metal"))
         );
         assert!(check_real(GUEST_VA_MAX - 1).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_table_rejects_slots_above_its_size() {
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        let t = ArgumentTable::new(&ctx, 1, 0).unwrap();
+        assert!(t.set_buffer(0, 0).is_ok());
+        assert!(t.set_buffer(1, 0).is_err());
     }
 }

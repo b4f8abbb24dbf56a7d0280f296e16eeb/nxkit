@@ -221,7 +221,8 @@ impl ComputePass<'_> {
                 self.table.set_buffer(*index, *gpu_addr)?
             }
             ComputeCommand::SetTexture { index, texture } => {
-                self.table.set_texture(*index, texture)?
+                self.table.set_texture(*index, texture)?;
+                self.cb.retain(texture.clone());
             }
             ComputeCommand::DispatchThreadgroups { groups, threads } => {
                 self.need_pipeline()?;

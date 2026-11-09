@@ -302,7 +302,8 @@ impl RenderPass<'_> {
                 self.table.set_buffer(*index, *gpu_addr)?
             }
             RenderCommand::SetTexture { index, texture } => {
-                self.table.set_texture(*index, texture)?
+                self.table.set_texture(*index, texture)?;
+                self.cb.retain(texture.clone());
             }
             RenderCommand::SetFragmentBuffer { index, gpu_addr } => self
                 .fragment_table
