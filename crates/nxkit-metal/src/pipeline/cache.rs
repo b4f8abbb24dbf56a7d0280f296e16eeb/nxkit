@@ -10,20 +10,24 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSArray, NSURL};
 use objc2_metal::{
-    MTL4AlphaToCoverageState, MTL4Archive, MTL4BlendState, MTL4Compiler, MTL4CompilerDescriptor,
+    MTL4AlphaToCoverageState, MTL4Archive, MTL4Compiler, MTL4CompilerDescriptor,
     MTL4CompilerTaskOptions, MTL4ComputePipelineDescriptor, MTL4IndirectCommandBufferSupportState,
     MTL4LibraryDescriptor, MTL4MeshRenderPipelineDescriptor, MTL4PipelineDataSetSerializer,
     MTL4PipelineDataSetSerializerConfiguration, MTL4PipelineDataSetSerializerDescriptor,
-    MTL4RenderPipelineDescriptor, MTLBlendFactor, MTLBlendOperation, MTLColorWriteMask, MTLDevice,
-    MTLPixelFormat, MTLPrimitiveTopologyClass,
+    MTL4RenderPipelineDescriptor, MTLDevice,
 };
 
 use crate::device::{Context, RawCompiler, ns};
 use crate::error::{MetalError, Result, create};
-use crate::state::{TopologyClass, check_sample_count};
+use crate::state::check_sample_count;
 
 use super::shards::{self, ShardSet};
 use super::{ComputePipeline, MeshPipelineDesc, RenderPipeline, RenderPipelineDesc, ShaderLibrary};
+pub use specialize::BaseStats;
+use specialize::Bases;
+
+mod miss;
+mod specialize;
 
 /// The empty fragment function of a depth-only mesh pipeline.
 const NOP_FRAGMENT: &str = "fragment void nxkit_mesh_nop() {}";
@@ -42,17 +46,36 @@ pub struct ArchiveConfig {
     pub open_shards: usize,
     /// Collect every pipeline that the cache builds, so `save_archive` can write them.
     pub collect: bool,
+    /// Compile the unspecialized pipeline of a pair of functions that the archive lacks, once, and make every
+    /// pipeline of the pair whose state allows it by specializing that one (`cache::specialize`). Off: such a pair
+    /// compiles each of its states from the functions.
+    pub compile_bases: bool,
 }
 
-/// Where a pipeline of [`PipelineCache::render_traced`] came from.
+/// Where a pipeline of [`PipelineCache::render_traced`] came from, and what making it cost. A time is the whole call:
+/// archive lookups that missed count in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     /// The cache already held it.
     Cached,
-    /// The archive had it. Nothing was compiled.
-    Archive,
-    /// The archive lacked it (or there is none) and Metal compiled it, in this time.
+    /// The archive had it with this very state. Nothing was compiled.
+    Archive(Duration),
+    /// The archive had the unspecialized pipeline of its pair of functions, and the compiler specialized it to the
+    /// colour state of the draw (`newRenderPipelineStateBySpecializationWithDescriptor`): no compile from the
+    /// functions.
+    Specialized(Duration),
+    /// The archive lacked it (or there is none) and Metal compiled it from the functions.
     Compiled(Duration),
+}
+
+impl Source {
+    /// The time the pipeline took to make; zero for one the cache held.
+    pub fn took(self) -> Duration {
+        match self {
+            Self::Cached => Duration::ZERO,
+            Self::Archive(t) | Self::Specialized(t) | Self::Compiled(t) => t,
+        }
+    }
 }
 
 /// Why the archive lacked a render pipeline, found by asking it again with the pipeline's state taken apart
@@ -79,6 +102,8 @@ pub struct PipelineCache {
     serializer: Option<Retained<ProtocolObject<dyn MTL4PipelineDataSetSerializer>>>,
     options: Retained<MTL4CompilerTaskOptions>,
     loaded_archive: bool,
+    /// [`ArchiveConfig::compile_bases`].
+    compile_bases: bool,
     /// The archive of `load`, asked first for a render pipeline.
     archive: Option<Retained<ProtocolObject<dyn MTL4Archive>>>,
     /// The file of `archive` in the memory counters.
@@ -89,6 +114,8 @@ pub struct PipelineCache {
     entries: RwLock<HashMap<u64, Entry>>,
     hits: AtomicU64,
     builds: AtomicU64,
+    /// The unspecialized pipelines of the archive by pair of functions, and how specializing them went.
+    bases: Bases,
     /// The library of [`NOP_FRAGMENT`], compiled at the first depth-only mesh pipeline.
     nop: OnceLock<std::result::Result<ShaderLibrary, String>>,
 }
@@ -137,12 +164,14 @@ impl PipelineCache {
             serializer,
             options,
             loaded_archive,
+            compile_bases: archive.compile_bases,
             archive: archive_obj,
             _archive_bytes: archive_bytes,
             shards: shard_set,
             entries: RwLock::new(HashMap::new()),
             hits: AtomicU64::new(0),
             builds: AtomicU64::new(0),
+            bases: Bases::default(),
             nop: OnceLock::new(),
         })
     }
@@ -205,8 +234,11 @@ impl PipelineCache {
         self.render_traced(key, desc).map(|r| r.0)
     }
 
-    /// Like [`PipelineCache::render`], and tells where the pipeline came from. The archive is asked first, so a hit is
-    /// told from a compile and the compile time is measured.
+    /// Like [`PipelineCache::render`], and tells where the pipeline came from and what it cost. The archive is asked
+    /// first: the unspecialized pipeline of the pair, specialized to the draw's colour state when the rest of the
+    /// state is the one the build archived, then the exact state. Only when both miss does Metal compile the functions
+    /// (with [`ArchiveConfig::compile_bases`] the unspecialized pipeline of a pair the archive lacks is compiled once
+    /// and specialized instead).
     pub fn render_traced(
         &self,
         key: u64,
@@ -215,58 +247,28 @@ impl PipelineCache {
         if let Some(Entry::Render(p)) = self.lookup(key)? {
             return Ok((p, Source::Cached));
         }
+        let t0 = Instant::now();
+        let archive = self.render_archive(desc);
+        if let Some(raw) = self.specialize(archive.as_deref(), desc) {
+            let p = RenderPipeline { raw };
+            self.insert(key, Entry::Render(p.clone()))?;
+            return Ok((p, Source::Specialized(t0.elapsed())));
+        }
         let d = self.render_descriptor(desc)?;
-        if let Some(a) = self.render_archive(desc)
+        if let Some(a) = &archive
             && let Ok(raw) = a.newRenderPipelineStateWithDescriptor_error(&d)
         {
             let p = RenderPipeline { raw };
             self.insert(key, Entry::Render(p.clone()))?;
-            return Ok((p, Source::Archive));
+            return Ok((p, Source::Archive(t0.elapsed())));
         }
-        let t0 = Instant::now();
         let raw = self
             .compiler
             .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&d, Some(&self.options))
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
-        let took = t0.elapsed();
         let p = RenderPipeline { raw };
         self.insert(key, Entry::Render(p.clone()))?;
-        Ok((p, Source::Compiled(took)))
-    }
-
-    /// Why the archive lacks `desc`: asks it for the pair with the build's assumed state, then for that pair with one
-    /// group of the pipeline's state set at a time. Costs up to nine archive lookups, so call it for a diagnostic.
-    pub fn explain_miss(&self, desc: &RenderPipelineDesc<'_>) -> Result<MissWhy> {
-        let mut why = MissWhy::default();
-        let Some(a) = self.render_archive(desc) else {
-            return Ok(why);
-        };
-        let ask = |group: Option<&str>| -> Result<bool> {
-            let d = self.render_descriptor(desc)?;
-            assume_defaults(&d);
-            if let Some(g) = group {
-                set_group(&d, desc, g);
-            }
-            Ok(a.newRenderPipelineStateWithDescriptor_error(&d).is_ok())
-        };
-        why.pair_archived = ask(None)?;
-        if !why.pair_archived {
-            return Ok(why);
-        }
-        let set = |g: &str| match g {
-            "topology" => desc.topology != TopologyClass::Unspecified,
-            "samples" => desc.sample_count != 1,
-            "alpha-to-coverage" => desc.alpha_to_coverage,
-            "vertex-layout" => desc.vertex_layout.build().is_some(),
-            "icb" => desc.support_icb,
-            _ => desc.colors.iter().any(Option::is_some),
-        };
-        for g in GROUPS {
-            if set(g) && !ask(Some(g))? {
-                why.rejected.push(g);
-            }
-        }
-        Ok(why)
+        Ok((p, Source::Compiled(t0.elapsed())))
     }
 
     /// The archive to ask for a render pipeline: its shard when the cache has shards, else the single archive.
@@ -490,77 +492,5 @@ impl PipelineCache {
         self.shards
             .as_ref()
             .map(|s| (s.shards(), s.pipelines(), s.open_now(), s.opens()))
-    }
-}
-
-/// The state groups [`PipelineCache::explain_miss`] asks about.
-const GROUPS: [&str; 8] = [
-    "topology",
-    "samples",
-    "alpha-to-coverage",
-    "vertex-layout",
-    "color-formats",
-    "blend",
-    "write-mask",
-    "icb",
-];
-
-/// The state the build's archive assumes: eight unspecialized colour attachments, no vertex layout, no class, one
-/// sample, no alpha to coverage, no ICB support (`plan::script_text_with` of `nxb-archive`).
-fn assume_defaults(d: &MTL4RenderPipelineDescriptor) {
-    d.setVertexDescriptor(None);
-    d.setInputPrimitiveTopology(MTLPrimitiveTopologyClass::Unspecified);
-    // SAFETY: 1 is a supported sample count.
-    unsafe { d.setRasterSampleCount(1) };
-    d.setAlphaToCoverageState(MTL4AlphaToCoverageState::Disabled);
-    d.setSupportIndirectCommandBuffers(MTL4IndirectCommandBufferSupportState::Disabled);
-    let colors = d.colorAttachments();
-    for i in 0..8 {
-        // SAFETY: the index is a plain attachment slot below the limit of 8.
-        let a = unsafe { colors.objectAtIndexedSubscript(i) };
-        a.setPixelFormat(MTLPixelFormat::Unspecialized);
-        a.setWriteMask(MTLColorWriteMask::Unspecialized);
-        a.setBlendingState(MTL4BlendState::Unspecialized);
-        a.setAlphaBlendOperation(MTLBlendOperation::Unspecialized);
-        a.setRgbBlendOperation(MTLBlendOperation::Unspecialized);
-        a.setDestinationAlphaBlendFactor(MTLBlendFactor::Unspecialized);
-        a.setDestinationRGBBlendFactor(MTLBlendFactor::Unspecialized);
-        a.setSourceAlphaBlendFactor(MTLBlendFactor::Unspecialized);
-        a.setSourceRGBBlendFactor(MTLBlendFactor::Unspecialized);
-    }
-}
-
-/// Sets one state group of `desc` on a descriptor that [`assume_defaults`] made.
-fn set_group(d: &MTL4RenderPipelineDescriptor, desc: &RenderPipelineDesc<'_>, group: &str) {
-    let colors = d.colorAttachments();
-    match group {
-        "topology" => d.setInputPrimitiveTopology(desc.topology.to_mtl()),
-        // SAFETY: the count was checked when the descriptor was built.
-        "samples" => unsafe { d.setRasterSampleCount(desc.sample_count as usize) },
-        "alpha-to-coverage" => d.setAlphaToCoverageState(MTL4AlphaToCoverageState::Enabled),
-        "vertex-layout" => d.setVertexDescriptor(desc.vertex_layout.build().as_deref()),
-        "icb" => d.setSupportIndirectCommandBuffers(MTL4IndirectCommandBufferSupportState::Enabled),
-        _ => {
-            for (i, c) in desc.colors.iter().enumerate() {
-                let Some(c) = c else { continue };
-                // SAFETY: the index is a plain attachment slot. Metal checks the limit when it compiles.
-                let a = unsafe { colors.objectAtIndexedSubscript(i) };
-                match group {
-                    "color-formats" => a.setPixelFormat(c.format.to_mtl()),
-                    "write-mask" => a.setWriteMask(c.mask()),
-                    _ => {
-                        a.setBlendingState(c.blend_state());
-                        if let Some(b) = &c.blend {
-                            a.setSourceRGBBlendFactor(b.src_rgb.to_mtl());
-                            a.setDestinationRGBBlendFactor(b.dst_rgb.to_mtl());
-                            a.setRgbBlendOperation(b.op_rgb.to_mtl());
-                            a.setSourceAlphaBlendFactor(b.src_alpha.to_mtl());
-                            a.setDestinationAlphaBlendFactor(b.dst_alpha.to_mtl());
-                            a.setAlphaBlendOperation(b.op_alpha.to_mtl());
-                        }
-                    }
-                }
-            }
-        }
     }
 }

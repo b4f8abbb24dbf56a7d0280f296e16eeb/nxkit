@@ -30,6 +30,21 @@ pub fn set_utility() {
     }
 }
 
+/// Puts the calling thread in the user-initiated QoS class: below the threads that encode a frame, above background
+/// work. For the compile of a pipeline that draws of the frame on screen wait for; the class carries over to the
+/// system's shader compiler service, which at the utility class runs on the efficiency cores.
+pub fn set_user_initiated() {
+    #[cfg(target_vendor = "apple")]
+    {
+        const QOS_CLASS_USER_INITIATED: u32 = 0x19;
+        unsafe extern "C" {
+            fn pthread_set_qos_class_self_np(qos: u32, relative_priority: i32) -> i32;
+        }
+        // SAFETY: the call changes only the class of the calling thread and takes plain values.
+        let _ = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0) };
+    }
+}
+
 /// The CPU time of the calling thread in nanoseconds, 0 where the platform has no clock for it. With the wall time it
 /// tells whether a thread computed or waited (for a core or a lock).
 pub fn cpu_time_ns() -> u64 {

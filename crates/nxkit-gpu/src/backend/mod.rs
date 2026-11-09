@@ -344,6 +344,7 @@ impl GpuBackend {
     /// Prints the diagnostics of a finished encode.
     fn note_report(&self, report: &EncodeReport) {
         let n = self.reports.fetch_add(1, Ordering::Relaxed);
+        crate::pipelines::frame_done(n);
         if crate::diag("memory") && n.is_multiple_of(120) {
             // The device total counts the no-copy guest buffer at its whole length, touched or not, so it is shown
             // apart (`NXKIT_MEM_REPORT` of the host has the full split).
