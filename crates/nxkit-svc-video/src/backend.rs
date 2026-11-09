@@ -189,10 +189,13 @@ mod apple {
             self.lag
         }
 
-        fn push(&mut self, packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<(), String> {
+        fn push(&mut self, packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<bool, String> {
+            if packet.is_empty() {
+                return Ok(false);
+            }
             if !self.started {
                 if find_sequence(packet).is_none() {
-                    return Ok(());
+                    return Ok(false);
                 }
                 self.started = true;
             }
@@ -200,12 +203,12 @@ mod apple {
                 self.dav1d = Some(Dav1d::open_streaming()?);
             }
             let Some(d) = self.dav1d.as_mut() else {
-                return Ok(());
+                return Ok(false);
             };
             let mut pics = Vec::new();
             let sent = d.send(packet, ts, &mut pics);
             Dav1dPipeline::collect(pics, out)?;
-            sent
+            sent.map(|()| true)
         }
 
         fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
@@ -465,6 +468,52 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e}"));
         pipe.finish(&mut again).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(again.len(), 1);
+    }
+
+    #[test]
+    fn a_looping_stream_gives_every_picture_back() {
+        // The title movie loops: key frame, three inter frames, again. Every picture must come out, with the waits that
+        // the worker makes whenever it is idle.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut d = software();
+            let all = units(&FLAT_8_BIT);
+            let Some(mut pipe) = d.pipeline(all[0]) else {
+                let _ = tx.send(Err("no pipeline".to_string()));
+                return;
+            };
+            let mut out = Vec::new();
+            let mut ts = 0;
+            for round in 0..300 {
+                for unit in &all {
+                    if let Err(e) = pipe.push(unit, ts, &mut out) {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                    ts += 1;
+                }
+                if round % 3 == 2 {
+                    // Idle: wait until nothing comes any more.
+                    loop {
+                        let n = out.len();
+                        if let Err(e) = pipe.wait(&mut out) {
+                            let _ = tx.send(Err(e));
+                            return;
+                        }
+                        if out.len() == n {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = pipe.finish(&mut out);
+            let order_ok = out.windows(2).all(|w| w[0].1 < w[1].1);
+            let _ = tx.send(Ok((out.len(), order_ok)));
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(r) => assert_eq!(r, Ok((1200, true))),
+            Err(_) => panic!("the decoder hung"),
+        }
     }
 
     #[test]

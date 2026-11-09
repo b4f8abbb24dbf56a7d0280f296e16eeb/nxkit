@@ -44,6 +44,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use nxkit_abi::guest;
 
@@ -95,6 +96,14 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// `NXKIT_DIAG=codec` (or `all`): one line per decoder call, at most 600, to see where a player stops.
+fn diag_codec() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("NXKIT_DIAG").is_ok_and(|v| v.split(',').any(|c| c == "codec" || c == "all"))
+    })
+}
+
 pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -531,6 +540,11 @@ pub(crate) struct Dec {
     lag: usize,
     /// The worker is to flush the decoder. Its pictures are dropped until it has.
     flush_req: bool,
+    /// What the last effect did to the submission ready event: `Some(true)` signalled, `Some(false)` cleared.
+    event_state: Option<bool>,
+    /// The packets refused with BUSY, and the last state line (`NXKIT_DIAG=codec`).
+    refusals: u64,
+    last_diag: Instant,
     /// The worker is in a call of the decoder, with the lock released.
     busy: bool,
     stop: bool,
@@ -610,6 +624,9 @@ impl Dec {
             inflight: 0,
             lag: 0,
             flush_req: false,
+            event_state: None,
+            refusals: 0,
+            last_diag: Instant::now(),
             busy: false,
             stop: false,
         }
@@ -711,6 +728,29 @@ impl Dec {
         }
     }
 
+    /// `NXKIT_DIAG=codec`: one line a second for this decoder, not capped, to see where a stream sticks.
+    fn diag_tick(&mut self, who: &str) {
+        if !diag_codec() || self.last_diag.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.last_diag = Instant::now();
+        eprintln!(
+            "DIAG codec state dec {} ({who}): held {} queued {} inflight {} pend {} fifo {} event {:?} pictures {} submits {} refusals {} busy {} flush {}",
+            self.id,
+            self.held.len(),
+            self.queued.len(),
+            self.inflight,
+            self.pend.len(),
+            self.fifo.len(),
+            self.event_state,
+            self.pictures,
+            self.submits,
+            self.refusals,
+            self.busy,
+            self.flush_req
+        );
+    }
+
     fn hold(&mut self, frame: Arc<Frame>, ts: i64) -> bool {
         if self.held.len() >= HOLD {
             if self.errors < 4 {
@@ -746,7 +786,9 @@ impl Dec {
             self.held.len(),
             self.pend
         ));
+        self.diag_tick("submit");
         if self.load() >= HOLD {
+            self.refusals += 1;
             if self.refused < 4 {
                 self.refused += 1;
                 red(&format!(
@@ -897,7 +939,9 @@ impl Dec {
             let limit = self.ready_limit();
             if self.load() >= limit {
                 fx.event = Some(false);
-            } else if took || before >= limit {
+            } else if took || before >= limit || self.event_state == Some(false) {
+                // The last case: the event is down and there is room. Whoever lowered the load raises it, and so does
+                // every later call, so it cannot stay down with room.
                 fx.event = Some(true);
             }
         }
@@ -981,7 +1025,8 @@ impl Dec {
 
 /// Carries out `fx` for the decoder behind `d` and releases its lock. The order lock is taken before the decoder lock
 /// is let go, so the effects of two calls happen in the order in which the calls decided them.
-fn deliver(d: MutexGuard<'_, Dec>, fx: Effects) {
+fn deliver(mut d: MutexGuard<'_, Dec>, fx: Effects) {
+    d.event_state = fx.event.or(d.event_state);
     let (id, event, applier, order) = (d.id, d.event, Arc::clone(&d.applier), Arc::clone(&d.order));
     let turn = lock(&order);
     drop(d);
@@ -996,7 +1041,11 @@ fn has_effects(fx: &Effects) -> bool {
 /// The call of the decoder that the worker made.
 #[derive(Clone, Copy)]
 enum Call {
-    Job { eos: bool },
+    /// A packet. `taken` says whether the decoder took it in: if not, it is not in flight.
+    Job {
+        eos: bool,
+        taken: bool,
+    },
     Wait,
 }
 
@@ -1004,7 +1053,7 @@ enum Call {
 fn absorb(d: &mut Dec, call: Call, res: Result<(), String>, out: &mut Vec<Pic>) -> Effects {
     let before = d.load();
     let (job_eos, popped) = match call {
-        Call::Job { eos } => (eos, true),
+        Call::Job { eos, taken } => (eos, !taken || res.is_err()),
         Call::Wait => (false, false),
     };
     let mut fx = Effects::default();
@@ -1013,14 +1062,15 @@ fn absorb(d: &mut Dec, call: Call, res: Result<(), String>, out: &mut Vec<Pic>) 
         out.clear();
         return fx;
     }
-    if let Err(e) = &res {
-        if popped {
-            d.inflight = d.inflight.saturating_sub(1);
-        }
-        if d.errors < 4 {
-            d.errors += 1;
-            red(&format!("nn::codec {}: {e}", d.codec.name()));
-        }
+    if popped {
+        // The packet was dropped or failed: no picture follows.
+        d.inflight = d.inflight.saturating_sub(1);
+    }
+    if let Err(e) = &res
+        && d.errors < 4
+    {
+        d.errors += 1;
+        red(&format!("nn::codec {}: {e}", d.codec.name()));
     }
     d.inflight = d.inflight.saturating_sub(out.len());
     if matches!(call, Call::Wait) && res.is_ok() && out.is_empty() {
@@ -1057,6 +1107,8 @@ fn absorb(d: &mut Dec, call: Call, res: Result<(), String>, out: &mut Vec<Pic>) 
 fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
     let cv = Arc::clone(&lock(dec).cv);
     let mut out: Vec<Pic> = Vec::new();
+    // Pictures may still be inside the decoder, whatever the count says.
+    let mut maybe = false;
     let mut d = lock(dec);
     loop {
         if d.stop {
@@ -1064,6 +1116,7 @@ fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
         }
         if d.flush_req {
             pipe.flush();
+            maybe = false;
             d.flush_req = false;
             d.inflight = 0;
             cv.notify_all();
@@ -1075,25 +1128,43 @@ fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
             drop(d);
             out.clear();
             let mut res = Ok(());
+            let mut taken = false;
             if !job.data.is_empty() {
-                res = pipe.push(&job.data, job.ts, &mut out);
+                match pipe.push(&job.data, job.ts, &mut out) {
+                    Ok(t) => taken = t,
+                    Err(e) => res = Err(e),
+                }
             }
+            maybe |= taken || !out.is_empty();
             if job.eos && res.is_ok() {
                 res = pipe.finish(&mut out);
+                maybe = false;
             }
             d = lock(dec);
             d.busy = false;
-            let fx = absorb(&mut d, Call::Job { eos: job.eos }, res, &mut out);
+            let fx = absorb(
+                &mut d,
+                Call::Job {
+                    eos: job.eos,
+                    taken,
+                },
+                res,
+                &mut out,
+            );
             cv.notify_all();
             if has_effects(&fx) {
                 deliver(d, fx);
                 d = lock(dec);
             }
-        } else if d.inflight > 0 {
+        } else if d.inflight > 0 || maybe {
+            // Pictures may be inside: a unit can show more or fewer than one, so the count alone does not say.
             d.busy = true;
             drop(d);
             out.clear();
             let res = pipe.wait(&mut out);
+            if res.is_ok() && out.is_empty() {
+                maybe = false;
+            }
             d = lock(dec);
             d.busy = false;
             let fx = absorb(&mut d, Call::Wait, res, &mut out);
@@ -1103,7 +1174,21 @@ fn run_worker(dec: &Arc<Mutex<Dec>>, mut pipe: Box<dyn Pipeline>) {
                 d = lock(dec);
             }
         } else {
-            d = cv.wait(d).unwrap_or_else(PoisonError::into_inner);
+            // Idle. Every second the state line, and the event is checked: it must be up when there is room.
+            let (g, timeout) = cv
+                .wait_timeout(d, Duration::from_secs(1))
+                .unwrap_or_else(PoisonError::into_inner);
+            d = g;
+            if timeout.timed_out() && !d.stop {
+                d.diag_tick("worker");
+                let mut fx = Effects::default();
+                let load = d.load();
+                d.drain_from(load, false, &mut fx);
+                if has_effects(&fx) {
+                    deliver(d, fx);
+                    d = lock(dec);
+                }
+            }
         }
     }
 }
@@ -1495,6 +1580,9 @@ mod tests {
     const MOCK_LAG: usize = 3;
 
     struct MockPipe {
+        /// Two pictures come out of every third packet, and every seventh packet shows nothing.
+        odd: bool,
+        pushed: u32,
         inside: VecDeque<Pic>,
         /// Where the pictures of `push` and `wait` came from, to see that the worker waits.
         waits: Arc<AtomicU32>,
@@ -1505,14 +1593,21 @@ mod tests {
             MOCK_LAG
         }
 
-        fn push(&mut self, _packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<(), String> {
+        fn push(&mut self, _packet: &[u8], ts: i64, out: &mut Vec<Pic>) -> Result<bool, String> {
             // The time that a frame takes.
             std::thread::sleep(Duration::from_millis(2));
+            self.pushed += 1;
+            if self.odd && self.pushed.is_multiple_of(7) {
+                return Ok(true);
+            }
             self.inside.push_back((Arc::new(grey()), ts));
             if self.inside.len() > MOCK_LAG {
                 out.extend(self.inside.pop_front());
+                if self.odd && self.pushed.is_multiple_of(3) {
+                    out.extend(self.inside.pop_front());
+                }
             }
-            Ok(())
+            Ok(true)
         }
 
         fn wait(&mut self, out: &mut Vec<Pic>) -> Result<(), String> {
@@ -1527,7 +1622,9 @@ mod tests {
         }
     }
 
-    struct MockBackend;
+    struct MockBackend {
+        odd: bool,
+    }
 
     impl Backend for MockBackend {
         fn decode(&mut self, _packet: &[u8]) -> Result<Option<Arc<Frame>>, String> {
@@ -1536,6 +1633,8 @@ mod tests {
 
         fn pipeline(&mut self, _packet: &[u8]) -> Option<Box<dyn Pipeline>> {
             Some(Box::new(MockPipe {
+                odd: self.odd,
+                pushed: 0,
                 inside: VecDeque::new(),
                 waits: Arc::new(AtomicU32::new(0)),
             }))
@@ -1543,7 +1642,11 @@ mod tests {
     }
 
     fn open_mock() -> Result<Box<dyn Backend>, String> {
-        Ok(Box::new(MockBackend))
+        Ok(Box::new(MockBackend { odd: false }))
+    }
+
+    fn open_odd() -> Result<Box<dyn Backend>, String> {
+        Ok(Box::new(MockBackend { odd: true }))
     }
 
     /// The effects that the worker and the calls carried out.
@@ -1613,6 +1716,27 @@ mod tests {
             while !ok(self) {
                 assert!(Instant::now() < end, "timed out: {what}");
                 std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn state(&self) -> String {
+            let d = lock(&self.dec);
+            format!(
+                "held {} queued {} inflight {} busy {} event {:?}",
+                d.held.len(),
+                d.queued.len(),
+                d.inflight,
+                d.busy,
+                d.event_state
+            )
+        }
+
+        /// The game takes the filled buffers and releases them again.
+        fn take_all(&self) {
+            for i in 0..8 {
+                if self.properties(i).is_ok() {
+                    self.call(|d, fx| d.release(i, fx));
+                }
             }
         }
 
@@ -1807,6 +1931,45 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(got, (0..40).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn the_load_does_not_stick_with_packets_that_show_nothing_and_a_looping_stream() {
+        let r = rig();
+        lock(&r.dec).open_av1 = open_odd;
+        r.buffers(8);
+        let mut ts = 0;
+        for round in 0..4 {
+            // A stream of packets, the last one the end of the stream.
+            let mut sent = 0;
+            let end = Instant::now() + Duration::from_secs(10);
+            while sent < 17 {
+                assert!(Instant::now() < end, "round {round}: stuck, {}", r.state());
+                if r.submit(ts, round == 3 && sent == 16).is_ok() {
+                    sent += 1;
+                    ts += 1;
+                }
+                r.take_all();
+            }
+            // Nothing more is sent: the game takes what comes, and the load goes to nothing.
+            let end = Instant::now() + Duration::from_secs(10);
+            while lock(&r.dec).load() > 0 {
+                assert!(
+                    Instant::now() < end,
+                    "round {round}: load stuck, {}",
+                    r.state()
+                );
+                r.take_all();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            // The stream ends and a new one starts, as a loop of the movie does.
+            r.take_all();
+            let d = lock(&r.dec);
+            assert_eq!(d.inflight, 0, "round {round}");
+            assert!(d.queued.is_empty() && d.held.is_empty());
+        }
+        // The event is up again, so that the game sends.
+        assert_eq!(lock(&r.dec).event_state, Some(true));
     }
 
     #[test]
