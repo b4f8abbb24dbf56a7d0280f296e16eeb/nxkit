@@ -15,7 +15,9 @@ in_v = false
 nxtitle.workspace = true
 
 [dev-dependencies]
+nxb-a64.workspace = true
 nxb-profile.workspace = true
+nxb-rewrite.workspace = true
 
 [lints]
 workspace = true
