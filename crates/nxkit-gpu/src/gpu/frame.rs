@@ -219,6 +219,8 @@ impl Gpu {
         );
         stats.resolve_ns = nanos(t_resolve, t_fit);
         stats.fit_ns = nanos(t_fit, Instant::now());
+        // Textures that were idle for long and whose guest copy is current go here, with the replaced ones.
+        self.store.end_frame();
         drop(self.store.take_retired());
         self.store.trim_views();
 
@@ -290,6 +292,9 @@ impl Gpu {
             }
         }
 
+        for id in &gpu_wrote {
+            self.store.mark_written(*id);
+        }
         pass_shape_diag(frame, plan, &textures);
         mark(t0, "pre-ring");
         let keep: Arc<Keep> = {
