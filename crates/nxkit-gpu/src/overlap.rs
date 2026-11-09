@@ -107,7 +107,7 @@ impl Overlap {
     }
 
     /// The frame with fence `fence` goes to the GPU with the bindings of `detail`.
-    pub(crate) fn frame(&self, detail: &FrameDetail, fence: u64, mem: &nxkit_metal::GuestMemory) {
+    pub(crate) fn frame(&self, detail: &FrameDetail, fence: u64, mem: &nxkit_metal::GuestSpace) {
         let Ok(mut s) = self.state.lock() else { return };
         let frame = s.frame;
         let mut read: FastMap<u64, u8> = FastMap::default();

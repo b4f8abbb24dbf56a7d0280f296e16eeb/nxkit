@@ -147,7 +147,7 @@ fn read(cx: &PrepareCx<'_>, gpu: u64, n: usize) -> Option<Vec<u8>> {
 
 /// The GPU address of a host address of the guest memory.
 fn gpu_of(cx: &PrepareCx<'_>, host: u64) -> Option<u64> {
-    cx.guest.gpu_address(host, 1).ok()
+    cx.guest.address_map().gpu_address(host, 1).ok()
 }
 
 fn pool_line(cx: &PrepareCx<'_>, gpu: u64, end: u64) -> String {

@@ -6,11 +6,11 @@
 //! buffer of an indirect command buffer.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use nxkit_metal::{
     Context, CullMode, DepthBias, DepthClip, DepthStencilDesc, DepthStencilState, FillMode,
-    GuestMemory, IndexType, Primitive, RenderPipeline, Winding,
+    GuestSpace, IndexType, Primitive, RenderPipeline, Winding,
 };
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::PassPlan;
@@ -79,7 +79,7 @@ pub(crate) struct Shared<'a> {
     pub(crate) programs: &'a Programs,
     pub(crate) pipelines: &'a Pipelines,
     pub(crate) env: Env<'a>,
-    pub(crate) guest: &'a Arc<GuestMemory>,
+    pub(crate) guest: &'a GuestSpace,
     /// The pools at the flush of the frame. The batch keeps them alive.
     pub(crate) pools: &'a crate::guestpools::GuestPools,
     pub(crate) icbs: &'a Mutex<Icbs>,

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use nxkit_metal::GuestMemory;
+use nxkit_metal::{GUEST_VA_BASE, GuestMemory};
 
 use crate::pools::{Backing, PagePins, PoolSet, PoolSnapshot};
 
@@ -17,7 +17,7 @@ pub(crate) type GuestPoolSet = PoolSet<Arc<GuestMemory>>;
 
 impl Backing for Arc<GuestMemory> {
     fn real_base(&self) -> u64 {
-        self.address_map().gpu_base()
+        GuestMemory::real_base(self)
     }
 }
 
@@ -31,9 +31,13 @@ impl PagePins for NoPins {
     fn unpin(&self, _start: u64, _end: u64) {}
 }
 
-/// The set of the whole mode over `guest`: one pool over the whole range, at the real address of the buffer, so
-/// `resolve` gives back the address it was given.
+/// The set of the whole mode over `guest`: one pool over the whole range, at the virtual base `GUEST_VA_BASE`. Its
+/// backing is the one buffer, so `resolve` turns a guest address into the real address of the buffer.
 pub(crate) fn whole(guest: &Arc<GuestMemory>) -> GuestPoolSet {
-    let base = guest.address_map().gpu_base();
-    PoolSet::whole(base, guest.len(), Arc::clone(guest), Arc::new(NoPins))
+    PoolSet::whole(
+        GUEST_VA_BASE,
+        guest.len(),
+        Arc::clone(guest),
+        Arc::new(NoPins),
+    )
 }

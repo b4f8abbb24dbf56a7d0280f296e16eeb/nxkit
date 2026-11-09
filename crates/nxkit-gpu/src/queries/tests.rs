@@ -89,7 +89,14 @@ fn detail() -> FrameDetail {
     d
 }
 
-fn counter(guest: &GuestMemory, off: u64) -> (u64, u64) {
+/// The CPU space over a fresh guest memory. Its addresses are virtual: they start at `GUEST_VA_BASE`, not at the
+/// address of the Metal buffer.
+fn space(ctx: &Context, len: u64) -> GuestSpace {
+    let mem = Arc::new(nxkit_metal::GuestMemory::allocate(ctx, len).unwrap());
+    GuestSpace::over(&mem).unwrap()
+}
+
+fn counter(guest: &GuestSpace, off: u64) -> (u64, u64) {
     let mut b = [0u8; 16];
     guest.read(off, &mut b).unwrap();
     let w = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
@@ -108,8 +115,9 @@ fn counted_draws_get_offsets_of_their_pass_and_land_once_all_were_encoded() {
     let Ok(ctx) = Context::system_default() else {
         return;
     };
-    let guest = GuestMemory::allocate(&ctx, 0x1000).unwrap();
+    let guest = space(&ctx, 0x1000);
     let map = guest.address_map();
+    assert_eq!(map.gpu_base(), nxkit_metal::GUEST_VA_BASE);
     let addr = map.gpu_base() + 0x100;
     let f = frame(addr);
     let p = plan(&f);
@@ -150,10 +158,21 @@ fn a_report_outside_guest_memory_is_not_written() {
     let Ok(ctx) = Context::system_default() else {
         return;
     };
-    let guest = GuestMemory::allocate(&ctx, 0x1000).unwrap();
+    let guest = space(&ctx, 0x1000);
     let map = guest.address_map();
     let end = map.gpu_base() + map.len();
     assert!(write_report(&guest, &map, end - 8, 1, 2).is_none());
     assert!(write_report(&guest, &map, map.gpu_base() - 16, 1, 2).is_none());
     assert!(write_report(&guest, &map, end - 16, 1, 2).is_some());
+    // The counter lands at the offset of the virtual address, and the real address of the buffer is outside.
+    assert_eq!(counter(&guest, map.len() - 16), (1, 2));
+    let real = guest_real(&ctx);
+    assert!(write_report(&guest, &map, real, 1, 2).is_none());
+}
+
+/// The real address of a guest buffer. No virtual address may be equal to it, or near.
+fn guest_real(ctx: &Context) -> u64 {
+    nxkit_metal::GuestMemory::allocate(ctx, 0x1000)
+        .unwrap()
+        .real_base()
 }

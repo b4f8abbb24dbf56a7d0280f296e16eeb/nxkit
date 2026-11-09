@@ -14,7 +14,7 @@
 //! |---|---|
 //! | 0 | start of the range, u64, guest GPU address |
 //! | 8 | end of the range, u64, exclusive |
-//! | 16 | delta, u64: the address the GPU reads is `guest address + delta` (wrapping) |
+//! | 16 | delta, u64: the address the GPU reads is `guest address + delta` (wrapping); the real address of the pool minus its guest address, so it is not 0 and it may be negative |
 //! | 24 | hint, u32: `chunk << 13 \| entry index` for the 2 MiB chunk `chunk & 8191`, 0 for none |
 //! | 28 | padding |
 //!
@@ -496,6 +496,39 @@ mod tests {
         let buf = g.refresh(&ctx, &*set.current()).unwrap();
         assert_eq!(g.ranges(), Arc::new(vec![(0, 0), (0x4000, 0x8000)]));
         assert_eq!(delta_of_entry(&buf, 1), SHIFT);
+    }
+
+    #[test]
+    fn the_delta_of_the_whole_mode_is_the_real_address_minus_the_virtual_one() {
+        use nxkit_metal::GUEST_VA_BASE;
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
+        // The real address of the buffer lies below the window, so the delta is negative and wraps.
+        let real = 0x15_0000_0000u64;
+        let snap = PoolSnapshot::whole(GUEST_VA_BASE, 0x10_0000, Shifted(real));
+        let mut g = Gmem::new(&ctx).unwrap();
+        let start = GUEST_VA_BASE + 0x4000;
+        g.add_pool(start, 0x4000);
+        let buf = g.refresh(&ctx, &snap).unwrap();
+        assert_eq!(g.ranges(), Arc::new(vec![(0, 0), (start, start + 0x4000)]));
+        let delta = delta_of_entry(&buf, 1);
+        assert_eq!(delta, real.wrapping_sub(GUEST_VA_BASE));
+        assert_ne!(delta, 0);
+        // The shader adds the delta to the guest address, modulo 2^64.
+        assert_eq!((start + 0x10).wrapping_add(delta), real + 0x4010);
+    }
+
+    #[test]
+    fn the_whole_window_fits_the_chunk_numbers_of_the_hints() {
+        use nxkit_metal::{GUEST_VA_BASE, GUEST_VA_MAX};
+        // A hint holds 19 bits of the chunk number, so the last chunk of the window must fit.
+        const { assert!((GUEST_VA_MAX - 1) >> HINT_SHIFT < 1 << (32 - HINT_INDEX_BITS)) };
+        let size = 1u64 << HINT_SHIFT;
+        let t = build_table([(GUEST_VA_BASE, GUEST_VA_BASE + 4 * size, 7)]);
+        let c = GUEST_VA_BASE >> HINT_SHIFT;
+        let hint = u32_at(&t.bytes, (c as usize % ENTRIES) * ENTRY_BYTES + 24);
+        assert_eq!(u64::from(hint), c << 13 | 1);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use nxkit_metal::{
     ArchiveConfig, BatchRing, CommandBuffer, CommandBufferStats, Context, DataBuffer, GobOrder,
-    GuestMemory, MetalError, Metrics, Result, Scratch, Stages, SubmittedBatch, Texture,
+    GuestSpace, MetalError, Metrics, Result, Scratch, Stages, SubmittedBatch, Texture,
 };
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::{PassKind, PassPlan};
@@ -101,7 +101,7 @@ type Keep = (
 /// The frame encoder.
 pub struct Gpu {
     ctx: Context,
-    guest: Arc<GuestMemory>,
+    guest: GuestSpace,
     programs: Programs,
     /// The texture types that each shader declares for its texture bindings, by program key (fragment and compute
     /// first, vertex second), for [`Gpu::fit_handles`].
@@ -134,12 +134,12 @@ pub struct Gpu {
 
 impl Gpu {
     /// Makes the encoder with the default configuration. The shader directory is `shaders` in the working directory.
-    pub fn new(ctx: &Context, guest: Arc<GuestMemory>) -> Result<Self> {
+    pub fn new(ctx: &Context, guest: GuestSpace) -> Result<Self> {
         Self::with_config(ctx, guest, GpuConfig::default())
     }
 
     /// Makes the encoder.
-    pub fn with_config(ctx: &Context, guest: Arc<GuestMemory>, config: GpuConfig) -> Result<Self> {
+    pub fn with_config(ctx: &Context, guest: GuestSpace, config: GpuConfig) -> Result<Self> {
         let threads = config.threads.max(1);
         let mut archive = config.archive.clone();
         let cache_plan = crate::pipelines::runtime_plan(

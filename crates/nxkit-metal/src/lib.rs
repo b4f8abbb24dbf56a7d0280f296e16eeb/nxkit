@@ -5,6 +5,7 @@
 //!
 //! - [`Context`]: the device, the Metal 4 command queue, the compiler and the residency set.
 //! - [`GuestMemory`]: the guest memory as one no-copy `MTLBuffer`, with the address map `AddressMap`.
+//! - [`GuestSpace`]: the CPU half of the guest memory with the virtual guest GPU addresses; no buffer, no real address.
 //! - [`ShaderLibrary`], [`PipelineCache`]: pipelines through `MTL4Compiler`, keyed by a hash, with an archive. A
 //!   [`MeshPipelineDesc`] gives a mesh pipeline (object, mesh and fragment stage).
 //! - [`FrameRing`], [`Frame`]: two command allocators, one per frame in flight, with timing.
@@ -61,6 +62,7 @@ mod sampler;
 mod scale;
 mod schedule;
 mod scratch;
+mod space;
 mod state;
 mod stats;
 mod table;
@@ -117,6 +119,7 @@ pub use scale::{
 };
 pub use schedule::{Shown, TickAction, TickScheduler};
 pub use scratch::{SCRATCH_ALIGN, Scratch};
+pub use space::GuestSpace;
 pub use state::{
     BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, DepthBias, DepthClip,
     DepthStencilDesc, DepthStencilState, FillMode, StencilFace, StencilOp, StepFunction,

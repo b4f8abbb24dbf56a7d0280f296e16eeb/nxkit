@@ -1,11 +1,13 @@
 //! The addresses that `dm_fetch` reads, computed on the host, and the check `NXKIT_DIAG=pull` makes with them.
 //!
-//! `dm_fetch` (`dm_fetch.metal`) dereferences `base + rel` of the layout block as a `device` pointer: a Metal GPU
-//! address. The stream addresses of a draw are guest GPU addresses, which are the GPU address of the guest no-copy
-//! buffer plus the offset (`nxkit_metal::GuestMemory`), the same value the stage_in path binds with `setAddress`. So a
-//! pulled attribute reads the bytes that the stage_in fetch reads, as long as every element lies in the guest buffer.
-//! A read outside it is a GPU address fault, which the command buffer reports as an error and the GPU recovers from.
-//! [`check`] looks for such reads in the draws whose vertex range the host knows.
+//! `dm_fetch` (`dm_fetch.metal`) dereferences `base + rel` of the layout block as a `device` pointer: a real Metal GPU
+//! address. The stream addresses of a draw are guest GPU addresses, which are virtual (they start at
+//! `nxkit_metal::GUEST_VA_BASE`). The encoder resolves each stream start through the pool snapshot of the frame and
+//! writes the real address into the layout block (`pull::layout`), the same value the stage_in path binds with
+//! `setAddress`. So a pulled attribute reads the bytes that the stage_in fetch reads, as long as every element lies in
+//! the buffer of the pool of its stream. A read outside it is a GPU address fault, which the command buffer reports as
+//! an error and the GPU recovers from. [`check`] looks for such reads in the draws whose vertex range the host knows. It
+//! works on guest addresses, so it only knows whether an element lies in guest memory, not in the pool of its stream.
 
 use super::{ATTR_OFFSET, ATTRIBUTES, Block, STREAM_BYTES};
 use crate::detail::{DrawArgs, DrawDetail};

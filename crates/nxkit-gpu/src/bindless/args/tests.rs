@@ -232,7 +232,7 @@ fn a_snapshot_keeps_its_scratch_address_and_its_guest_address() {
 #[test]
 fn a_uniform_outside_every_pool_reads_the_zero_buffer_and_is_counted() {
     let pools = shifted();
-    let before = nxkit_nvn::diag::total(Reason::SkipBuffer);
+    let before = nxkit_nvn::diag::total(Reason::BindNoPool);
     let ubos = [
         ubo(1, GUEST + LEN + 0x10, 0x40, None),
         ubo(3, 0, 0x40, None),
@@ -250,7 +250,7 @@ fn a_uniform_outside_every_pool_reads_the_zero_buffer_and_is_counted() {
             }
         );
     }
-    assert!(nxkit_nvn::diag::total(Reason::SkipBuffer) >= before + 2);
+    assert!(nxkit_nvn::diag::total(Reason::BindNoPool) >= before + 2);
 }
 
 #[test]

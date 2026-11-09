@@ -12,7 +12,11 @@ impl Backend for GpuBackend {
     }
 
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()> {
-        let gpu_addr = self.guest.gpu_address(pool.host, pool.len).map_err(fail)?;
+        let gpu_addr = self
+            .guest
+            .address_map()
+            .gpu_address(pool.host, pool.len)
+            .map_err(fail)?;
         // A pool of no bytes holds no address. The encoder still hears of it, as before.
         let id = (pool.len > 0)
             .then(|| self.pools.register(gpu_addr, pool.len, pool.flags))
@@ -28,7 +32,7 @@ impl Backend for GpuBackend {
     }
 
     fn unregister_pool(&self, host: u64) {
-        if let Ok(gpu_addr) = self.guest.gpu_address(host, 1) {
+        if let Ok(gpu_addr) = self.guest.address_map().gpu_address(host, 1) {
             self.pools.unregister(gpu_addr);
             locked(&self.gpu).unregister_memory_pool(gpu_addr);
         }
@@ -216,6 +220,7 @@ impl Backend for GpuBackend {
         if overlap_diag()
             && let Ok(gpu) = self
                 .guest
+                .address_map()
                 .gpu_address(start, end.saturating_sub(start).max(1))
         {
             self.overlap.flushed(

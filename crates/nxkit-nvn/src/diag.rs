@@ -154,6 +154,9 @@ reasons! {
     /// Bindings: an `img` member with no usable image (nothing bound, or a texture a shader cannot write). It reads
     /// and writes nothing.
     ImgUnbound => "bind.img-unbound",
+    /// Bindings: a uniform or storage buffer whose guest address lies in no memory pool. The shader reads the zero
+    /// buffer instead.
+    BindNoPool => "bind.no-pool",
     /// Bindings: the raw global memory table (`gmem_map`) bound. A count, not a loss.
     BindGmemMap => "bind.gmem-map",
     /// Bindings: a raw global memory write log (`gmem_log`) bound. A count, not a loss.

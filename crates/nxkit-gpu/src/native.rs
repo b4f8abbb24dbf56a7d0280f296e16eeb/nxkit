@@ -61,7 +61,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
     ArgumentTable, CommandBuffer, ComputeCommand, ComputePipeline, Context, DataBuffer, Dependency,
-    GuestMemory, Scratch, Storage, Texture, TextureDesc,
+    GuestSpace, Scratch, Storage, Texture, TextureDesc,
 };
 use nxkit_native_plan::{Binding, GameResource, Plan, Source, Step};
 use nxkit_nvn::frame::{Cmd, Frame};
@@ -522,7 +522,7 @@ const COMPARE_DELAY: u64 = 4;
 /// What [`Native::prepare`] reads from the encoder.
 pub(crate) struct PrepareCx<'a> {
     pub(crate) ctx: &'a Context,
-    pub(crate) guest: &'a Arc<GuestMemory>,
+    pub(crate) guest: &'a GuestSpace,
     pub(crate) pipelines: &'a Pipelines,
     pub(crate) frame: &'a Frame,
     pub(crate) detail: &'a FrameDetail,

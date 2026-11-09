@@ -13,6 +13,7 @@ use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
 use crate::address::{AddressMap, check_outside_window};
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
+use crate::space::{copy_in, copy_out};
 
 /// The page size of Apple Silicon. A no-copy buffer needs a base and a length that are multiples of it.
 pub const PAGE_SIZE: u64 = 16 * 1024;
@@ -155,17 +156,19 @@ impl GuestMemory {
         })
     }
 
-    /// The map between host and GPU addresses.
+    /// The map between host addresses and the REAL GPU addresses of the buffer (`gpu_base` is
+    /// [`GuestMemory::real_base`]). The guest GPU addresses of the game are virtual and come from
+    /// [`crate::GuestSpace::address_map`].
     pub fn address_map(&self) -> AddressMap {
         self.map
     }
 
-    /// The GPU address of a host address. `len` is the number of bytes the shader will touch.
+    /// The real GPU address of a host address. `len` is the number of bytes the shader will touch.
     pub fn gpu_address(&self, host_addr: u64, len: u64) -> Result<u64> {
         self.map.gpu_address(host_addr, len)
     }
 
-    /// The GPU address of a byte offset into the guest memory.
+    /// The real GPU address of a byte offset into the guest memory.
     pub fn gpu_address_of_offset(&self, offset: u64, len: u64) -> Result<u64> {
         self.map.gpu_address_of_offset(offset, len)
     }
@@ -185,39 +188,31 @@ impl GuestMemory {
         self.map.host_base()
     }
 
+    /// The real GPU address of the first byte: the `gpuAddress` of the buffer. Only Metal and the shaders know it.
+    /// It is not the guest GPU address of the game, which starts at `GUEST_VA_BASE` (see [`crate::GuestSpace`]).
+    pub fn real_base(&self) -> u64 {
+        self.map.gpu_base()
+    }
+
     pub(crate) fn buffer(&self) -> &ProtocolObject<dyn MTLBuffer> {
         &self.buffer
     }
 
+    /// The host pointer of the first byte. A [`crate::GuestSpace`] over this memory copies through it.
+    pub(crate) fn base_ptr(&self) -> NonNull<u8> {
+        self.base
+    }
+
     /// Copies bytes out of the guest memory. The offset is from the start of the region.
     pub fn read(&self, offset: u64, out: &mut [u8]) -> Result<()> {
-        let at = self.check(offset, out.len())?;
-        // SAFETY: `check` proved `[at, at + out.len())` is inside the region, which is valid for reads.
-        // The slice `out` is a separate allocation, so the ranges cannot overlap.
-        unsafe {
-            std::ptr::copy_nonoverlapping(self.base.as_ptr().add(at), out.as_mut_ptr(), out.len())
-        };
-        Ok(())
+        // SAFETY: `base` is valid for `len` bytes for the life of the value (the contract of `wrap`).
+        unsafe { copy_out(self.base, self.map.len(), offset, out) }
     }
 
     /// Copies bytes into the guest memory. The offset is from the start of the region.
     pub fn write(&self, offset: u64, data: &[u8]) -> Result<()> {
-        let at = self.check(offset, data.len())?;
-        // SAFETY: `check` proved `[at, at + data.len())` is inside the region, which is valid for writes.
-        // `data` is a separate allocation, so the ranges cannot overlap.
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), self.base.as_ptr().add(at), data.len())
-        };
-        Ok(())
-    }
-
-    fn check(&self, offset: u64, len: usize) -> Result<usize> {
-        let len = len as u64;
-        if offset <= self.map.len() && len <= self.map.len() - offset {
-            Ok(offset as usize)
-        } else {
-            Err(MetalError::OutOfRange { addr: offset, len })
-        }
+        // SAFETY: `base` is valid for `len` bytes for the life of the value (the contract of `wrap`).
+        unsafe { copy_in(self.base, self.map.len(), offset, data) }
     }
 }
 

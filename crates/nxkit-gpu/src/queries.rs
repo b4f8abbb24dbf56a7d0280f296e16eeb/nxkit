@@ -14,7 +14,7 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use nxkit_metal::{Context, DataBuffer, GuestMemory};
+use nxkit_metal::{Context, DataBuffer, GuestSpace};
 use nxkit_nvn::counters::{FrameCounters, Source, counted_draws, primitives, source};
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::{PassKind, PassPlan};
@@ -290,7 +290,7 @@ impl FrameQueries {
 
     /// Writes the reports into guest memory and lands them. `ticks` is the GPU end time of the frame. Runs after the
     /// GPU finished the frame.
-    pub(crate) fn write(&self, guest: &GuestMemory, ticks: u64) -> WriteStats {
+    pub(crate) fn write(&self, guest: &GuestSpace, ticks: u64) -> WriteStats {
         let mut st = WriteStats::default();
         let samples = self.buffer.as_ref().map(|_| self.samples());
         let map = guest.address_map();
@@ -335,7 +335,7 @@ impl FrameQueries {
 /// Writes a 16-byte `NVNcounterData` at the GPU address `addr`: the 64-bit counter, then the 64-bit timestamp, little
 /// endian, as the GPU writes a four-word report. Only when all 16 bytes lie in guest memory; None otherwise.
 pub(crate) fn write_report(
-    guest: &GuestMemory,
+    guest: &GuestSpace,
     map: &nxkit_metal::AddressMap,
     addr: u64,
     counter: u64,

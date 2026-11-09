@@ -39,7 +39,7 @@ pub trait Backing: Send + Sync + 'static {
 
 impl Backing for GuestMemory {
     fn real_base(&self) -> u64 {
-        self.address_map().gpu_base()
+        self.real_base()
     }
 }
 

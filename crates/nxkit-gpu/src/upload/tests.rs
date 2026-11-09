@@ -6,9 +6,10 @@ use nxkit_metal::{
 };
 use nxkit_nvn::{resource::ResourceTable, space::GpuAddr};
 
-/// The snapshot of the whole mode over `guest`: one pool at the real address of the buffer.
+/// The snapshot of the whole mode over `guest`: one pool at the virtual base. The game's addresses are virtual, so a
+/// site that does not resolve them through the snapshot misses the pool and the test fails.
 fn whole(guest: &Arc<GuestMemory>) -> GuestPools {
-    GuestPools::whole(guest.address_map().gpu_base(), guest.len(), guest.clone())
+    GuestPools::whole(nxkit_metal::GUEST_VA_BASE, guest.len(), guest.clone())
 }
 
 /// Uploads `desc` from a pattern in guest memory, clears the memory, copies `dirty` back and returns the
@@ -30,7 +31,7 @@ fn round_trip(
     let id = resources
         .create(
             desc,
-            GpuAddr::new(guest.address_map().gpu_base() + 0x1000).unwrap(),
+            GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap(),
         )
         .unwrap();
     let rec = *resources.get(id).unwrap();
@@ -168,7 +169,7 @@ fn compressed_upload_preserves_every_mip_and_array_layer() {
     };
     let mut resources = ResourceTable::new();
     let id = resources
-        .create(desc, GpuAddr::new(guest.address_map().gpu_base()).unwrap())
+        .create(desc, GpuAddr::new(nxkit_metal::GUEST_VA_BASE).unwrap())
         .unwrap();
     let rec = resources.get(id).unwrap();
     // Every block in a level has a constant BC1 colour, with a distinct colour in each level and layer.
@@ -360,7 +361,7 @@ fn a_texture_across_the_end_of_its_pool_is_not_uploaded() {
         return;
     };
     let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
-    let base = guest.address_map().gpu_base();
+    let base = nxkit_metal::GUEST_VA_BASE;
     // The pool ends 0x1000 bytes into the texture, which needs more.
     let pools = GuestPools::whole(base, 0x1000 + 0x1000, guest.clone());
     let desc = nxkit_nvn::layout::TextureDesc {

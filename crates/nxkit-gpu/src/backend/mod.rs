@@ -14,13 +14,17 @@
 
 mod api;
 mod encpace;
+#[cfg(test)]
+mod tests;
 mod tick;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
-use nxkit_metal::{Context, DisplayTick, GuestMemory, Pacer, Shown, Texture, TickAction, TickSink};
+use nxkit_metal::{
+    Context, DisplayTick, GuestMemory, GuestSpace, Pacer, Shown, Texture, TickAction, TickSink,
+};
 use nxkit_nvn::backend::{
     Backend, BackendError, BackendResult, Deferred, Fence, FlushCx, PoolInfo, Present, StageKey,
     WaitResult,
@@ -62,7 +66,7 @@ struct Pending {
 /// The backend of the front end and the sink of the display ticks.
 pub struct GpuBackend {
     ctx: Context,
-    guest: Arc<GuestMemory>,
+    guest: GuestSpace,
     /// The NVN memory pools. It has a lock of its own, so a registration never waits for an encode. `flush_frame`
     /// takes the snapshot of a frame from it.
     pools: GuestPoolSet,
@@ -114,8 +118,9 @@ impl GpuBackend {
         guest: Arc<GuestMemory>,
         settings: &GpuSettings,
     ) -> nxkit_metal::Result<Arc<Self>> {
-        let gpu = Gpu::with_config(ctx, guest.clone(), settings.config())?;
-        let walker = Walker::new(settings.shader_dir.clone(), guest.address_map());
+        let space = GuestSpace::over(&guest)?;
+        let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
+        let walker = Walker::new(settings.shader_dir.clone(), space.address_map());
         let invalidations = walker.invalidations();
         let pools = crate::guestpools::whole(&guest);
         if settings.overlap {
@@ -139,7 +144,7 @@ impl GpuBackend {
                 .flatten();
             Self {
                 ctx: ctx.clone(),
-                guest,
+                guest: space,
                 pools,
                 gpu: Mutex::new(gpu),
                 walker: Mutex::new(walker),

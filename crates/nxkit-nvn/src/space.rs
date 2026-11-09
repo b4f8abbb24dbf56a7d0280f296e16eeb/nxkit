@@ -1,9 +1,9 @@
 //! The GPU address space of the guest.
 //!
-//! The backend maps guest memory as one buffer without copies, and Metal assigns the GPU address of that buffer.
-//! The address that NVN gives the game is this Metal address:
+//! The address that NVN gives the game is a guest address:
 //! `gpu = gpu_base + (host - host_base)`. No translation table exists.
-//! The backend supplies the two bases. A [`GpuSpace`] is the small interface for them.
+//! The backend supplies the two bases; the GPU backend uses a virtual base and turns a guest address into the address
+//! the GPU uses when it encodes. A [`GpuSpace`] is the small interface for them.
 
 use crate::error::{NvnError, Result};
 
@@ -46,7 +46,7 @@ pub trait GpuSpace {
     fn host_address(&self, gpu: GpuAddr, len: u64) -> Result<u64>;
 }
 
-/// One mapped range: the host base, the GPU base that Metal chose and the length.
+/// One mapped range: the host base, the guest GPU base and the length.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinearSpace {
     host_base: u64,

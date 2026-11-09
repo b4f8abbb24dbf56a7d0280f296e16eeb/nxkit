@@ -6,8 +6,9 @@
 //! The backend sees the work of the game at these points. The optional notices ([`Backend::device_modes`],
 //! [`Backend::acquire`], [`Backend::submit`], [`Backend::program_set`]) have empty defaults.
 //!
-//! - A memory pool appears or goes away ([`Backend::register_pool`], [`Backend::unregister_pool`]). The backend maps the
-//!   range as a Metal buffer without copies. The GPU address of the pool is then `gpu_base + (host - host_base)`.
+//! - A memory pool appears or goes away ([`Backend::register_pool`], [`Backend::unregister_pool`]). The GPU address of the
+//!   pool is `gpu_base + (host - host_base)`. It is a guest address that the backend owns; the backend turns it into the
+//!   address the GPU uses.
 //! - A frame ends ([`Backend::flush_frame`]). The call hands over the commands, the pass plan and a [`Fence`].
 //! - The game presents a window texture ([`Backend::present`]). It follows the flush of the frame that drew it.
 //! - The CPU waits ([`Backend::wait_fence`], [`Backend::wait_idle`]).
@@ -139,7 +140,8 @@ pub type Deferred<'a> = Box<dyn FnOnce() + Send + 'a>;
 
 /// The GPU backend as the front end sees it. A call may come from any guest thread.
 pub trait Backend: Send + Sync {
-    /// The GPU address that Metal gave to the first byte of the mapped guest memory. The front end builds its
+    /// The guest GPU address of the first byte of the mapped guest memory. It is the address that NVN gives the game,
+    /// and it need not be an address the GPU hardware uses: the backend resolves it. The front end builds its
     /// `LinearSpace` from this value and the range of guest memory.
     fn gpu_base(&self) -> u64;
 

@@ -151,7 +151,7 @@ fn locate<B: Backing>(pools: &PoolSnapshot<B>, guest: u64, size: u32) -> Option<
             size.min(u32::try_from(loc.room).unwrap_or(u32::MAX)),
         )),
         Err(_) => {
-            note_n(Reason::SkipBuffer, 1);
+            note_n(Reason::BindNoPool, 1);
             None
         }
     }
