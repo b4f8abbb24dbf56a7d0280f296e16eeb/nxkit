@@ -7,6 +7,7 @@
 //! separate object that Metal binds per draw and not per pipeline.
 
 mod builds;
+mod keys;
 mod prewarm;
 mod record;
 mod render;
@@ -15,6 +16,7 @@ mod stats;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use keys::KEY_SCHEME;
 pub use runtime::flush_runtime_cache;
 pub(crate) use runtime::plan as runtime_plan;
 pub(crate) use stats::frame_done;
@@ -37,6 +39,7 @@ use crate::stats::Skip;
 use crate::translate;
 
 use builds::{Builds, Job, JobKind, MeshJob, RenderJob, async_on};
+use keys::{MeshKey, RenderKey, compute_key, mesh_key, point_size_key, render_key};
 
 /// Counts a pipeline that Metal did not build for the health report and prints it under the `pipe` category (at most
 /// 300 lines). Gives back `Skip::Pipeline`.
@@ -158,14 +161,6 @@ pub(crate) fn specialize_on() -> bool {
 /// The point size fallback of [`build_render`] has this key.
 const FALLBACK_KEY: u64 = 0x9e37_79b9_7f4a_7c15;
 
-/// The key under which `fallbacks` remembers that the vertex function `entry` of the program `vertex` writes the
-/// point size, so every later state of it skips the class at once.
-fn point_size_key(vertex: &str, entry: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    ("point-size", vertex, entry).hash(&mut h);
-    h.finish()
-}
-
 /// Whether the pipeline `key` of the vertex function `vertex` (its [`point_size_key`]) is built without a class.
 fn falls_back(fallbacks: &Mutex<FastSet<u64>>, key: u64, vertex: u64) -> bool {
     let set = fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
@@ -277,9 +272,7 @@ impl Pipelines {
 
     /// The compute pipeline of a program.
     pub(crate) fn compute(&self, key: &str, p: &StageProgram) -> Result<ComputePipeline, Skip> {
-        let mut h = DefaultHasher::new();
-        ("compute", key).hash(&mut h);
-        let key = h.finish();
+        let key = compute_key(key);
         let made = self.cache.compute(key, &p.lib, &p.entry);
         if made.is_ok() {
             record::compute(key, &p.lib, &p.entry);

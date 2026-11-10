@@ -1,6 +1,6 @@
 # Pipeline prewarm: no compile while playing
 
-Status: runtime cache built, build-side shipping not built, 2026-11-09. Mac only.
+Status: runtime cache built (identity by key scheme), build-side shipping not built, 2026-11-09. Mac only.
 
 ## The problem
 
@@ -12,12 +12,12 @@ The host owns a cache next to the title (details: `docs/shader-step.md` "The run
 
 1. Every pipeline that the cache of `nxkit-metal` makes is captured by the pipeline data set serializer and written as an `rt-*.mtl4archive` file; its description goes into `pipelines.seen` (`nxkit-gpu/src/pipelines/record.rs`, hooked in `build_render`, the mesh builds and `Pipelines::compute`).
 2. At the next start the `rt-` files are extra lookup archives (`ArchiveConfig::runtime`) and `prewarm.rs` makes every pipeline of the list under the key the encoder uses, before the first frame. Anything new compiles once and is written for the run after.
-3. The folder is named by an identity of the app build, the host executable, the macOS build and the GPU; another identity removes it. The size is cut to 512 MiB and 64 files, oldest first.
+3. The folder is named by an identity of the app build, the key scheme, the macOS build and the GPU; another identity removes it. The size is cut to 512 MiB and 64 files, oldest first.
 
 Choices:
 
 - Blocking start with a budget (20 s) over a background thread. A background list races the first frames: their draws build the same pipelines and wait. A start that is a few seconds longer is cheaper than the hitches of the first minutes. The budget keeps a list that grew over many sessions from stalling the first GPU call for long; the rest goes on in threads.
-- The recorded key makes the pipeline of the start the one the first draw finds, without a copy of the hashing of `render.rs`. The price: keys depend on the host build, so the identity holds the executable's size and time and every host build starts a cache (see open points).
+- The recorded key makes the pipeline of the start the one the first draw finds, without a copy of the hashing of `render.rs`. The price: the recorded keys follow the key scheme of the host (`KEY_SCHEME`, `keys.rs`), so the identity holds the scheme and a change of how a key is computed needs the constant raised. Tests pin one key of each kind (render, mesh, compute, point size), so such a change fails them.
 - Several small files over one rewritten archive: the serializer flushes what it captured (to be confirmed, see open points) and Metal cannot merge archives at run time, so a run writes few files (doubling gap) and the folder is cut by size.
 
 ## Not done
@@ -29,7 +29,7 @@ Choices:
 
 - Whether `serializeAsArchiveAndFlushToURL` writes only what was captured since the last call or everything. The code assumes the first (a file per write, new content only). If it writes everything, the `rt-` files repeat each other and the size cut removes the oldest; check the file sizes after a long run.
 - Whether the serializer captures a pipeline that Metal found in a lookup archive or made by specialization. If it does not capture a specialization, the archive holds the base and the start specializes it (still no compile). The `compiled` count of the second run tells.
-- The host executable in the identity drops the cache at every host build. The binaries do not depend on the host, only the keys of `pipelines.seen` do; a constant for the key scheme could replace the executable stamp and keep the archives.
+- Done: the identity holds `KEY_SCHEME` and not the host executable, so a host build keeps the cache. The keys come from `DefaultHasher`, whose algorithm Rust does not fix across releases; the pinned key tests fail after such a change and the scheme is raised then.
 - `pipelines.seen` grows with every state a run met and is not cut (200,000 entries at most). A list entry whose archive was cut compiles at the start.
 - A cache folder in the run folder is lost with the app when the app is replaced; the fallback folder in `~/Library/Caches` is not.
 

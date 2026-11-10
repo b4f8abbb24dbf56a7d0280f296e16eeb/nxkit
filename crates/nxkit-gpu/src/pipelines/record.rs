@@ -8,8 +8,9 @@
 //!
 //! The text holds no game data: the stems are shader keys (hashes), the rest are Metal state names and numbers. It also
 //! holds the key of the pipeline cache, the hash that the encoder computes for the draw, so that a pipeline made at the
-//! start is found by the first draw that asks. The keys depend on the host build, so a list is only read by the build
-//! that wrote it (the folder of the cache is named by that identity).
+//! start is found by the first draw that asks. The keys follow the key scheme
+//! (`KEY_SCHEME` in `keys.rs`), and the folder of the cache is named by it, so a list is only read by a host with the
+//! same scheme.
 //!
 //! ```text
 //! nxkit-pipelines-seen 2

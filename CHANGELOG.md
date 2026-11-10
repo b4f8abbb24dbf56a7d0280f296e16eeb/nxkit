@@ -78,6 +78,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
+- The runtime pipeline cache survives a new host build. Its folder was named by the size and time of the host executable, so every host build removed the cache and a game compiled all its pipelines again while it ran. The folder is now named by the app build, a constant for the key scheme (`KEY_SCHEME`), the macOS build and the GPU. Tests pin one key of each kind of pipeline, so a change of a key function cannot go unnoticed. The first start after this change has an empty cache.
 - Signed integer arithmetic in shaders wraps on overflow. Apple's compiler gets `-fwrapv` (Mac and iOS) and the own front end writes no `nsw` on signed add, sub, mul and negation. The identity of every shader library changes, so the next build compiles all shaders again.
 - Variable frame step only under VRR. On a fixed screen the game keeps the load-driven step at 60; Ocarina of Time ran at about 10 fps on a fixed 120 Hz screen. Under VRR each frame is presented when it is ready inside the range of the screen, and the step follows the shown interval. Timed presents are off by default, because on a ProMotion screen frames waited several vsyncs.
 - NDVE is faster: the layers 1+2 and 11+12 are fused, the weights of fused pairs stay in registers, one colour conversion pass, 8 simdgroups in the resampler and unrolled channel blocks. 5.8 to 4.9 ms on the full picture (measured, M2 Max, `docs/plans/ndve-impl.md`). A timing harness runs the whole network at the movie size.

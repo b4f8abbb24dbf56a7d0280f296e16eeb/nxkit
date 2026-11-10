@@ -148,25 +148,20 @@ impl Pipelines {
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;
         desc.support_icb = icb;
-        let mut h = DefaultHasher::new();
-        (
-            &d.program.vertex,
-            d.program.fragment.as_deref(),
+        let key = render_key(&RenderKey {
+            vertex: &d.program.vertex,
+            fragment: d.program.fragment.as_deref(),
             targets,
             icb,
-        )
-            .hash(&mut h);
-        desc.colors.hash(&mut h);
-        desc.vertex_layout.hash(&mut h);
-        if vs.pull {
-            "pull".hash(&mut h);
-        }
-        class.hash(&mut h);
-        d.raster.alpha_to_coverage.hash(&mut h);
-        flat.hash(&mut h);
-        paint.hash(&mut h);
-        paint_dir.hash(&mut h);
-        let key = h.finish();
+            colors: &desc.colors,
+            layout: &desc.vertex_layout,
+            pull: vs.pull,
+            class,
+            alpha_to_coverage: d.raster.alpha_to_coverage,
+            flat,
+            paint,
+            paint_dir,
+        });
         let vertex = point_size_key(&d.program.vertex, desc.vertex.1);
         if async_on() && !icb {
             let fallback =
@@ -237,19 +232,15 @@ impl Pipelines {
         let info = |p: &StageProgram| p.mesh.ok_or(Skip::Program);
         let mi = info(ms)?;
         let ti = ts.map(info).transpose()?;
-        let mut h = DefaultHasher::new();
-        (
-            "mesh",
-            d.program.task.as_deref(),
-            d.program.mesh.as_deref(),
-            d.program.fragment.as_deref(),
-            fragment.map(|(_, e)| e),
+        let key = mesh_key(&MeshKey {
+            task: d.program.task.as_deref(),
+            mesh: d.program.mesh.as_deref(),
+            fragment: d.program.fragment.as_deref(),
+            fragment_entry: fragment.map(|(_, e)| e),
             targets,
-        )
-            .hash(&mut h);
-        colors.hash(&mut h);
-        d.raster.alpha_to_coverage.hash(&mut h);
-        let key = h.finish();
+            colors: &colors,
+            alpha_to_coverage: d.raster.alpha_to_coverage,
+        });
         if let Some(p) = self.cache.cached_render(key) {
             return Ok((p, key));
         }

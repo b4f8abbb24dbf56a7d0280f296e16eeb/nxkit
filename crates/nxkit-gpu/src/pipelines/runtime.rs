@@ -8,8 +8,9 @@
 //! frame: archive lookups, no compiles. Whatever is new compiles once and is written for the run after.
 //!
 //! The folder is `<root>/pipecache/id-<identity>/`. The identity is a hash of the app build (`GpuConfig::build_id`), the
-//! host executable, the macOS build and the GPU: the keys and the binaries are only good for that combination, so the
-//! folder of any other identity is removed at the start. `NXKIT_PIPELINE_CACHE=0` turns the whole cache off.
+//! key scheme ([`KEY_SCHEME`], see `keys.rs`), the macOS build and the GPU: the binaries are only good for that app
+//! build, macOS and GPU, and the keys of the list only for that scheme, so the folder of any other identity is removed
+//! at the start. The host executable is not part of it: a new host build with the same key scheme keeps the cache. `NXKIT_PIPELINE_CACHE=0` turns the whole cache off.
 //!
 //! Writes: `pipelines.seen` is written every `NXKIT_PIPELINE_CACHE_FLUSH` seconds (30) when the list grew; a new
 //! archive file when pipelines were compiled since the last one, at most every 30 s at first and then at doubling
@@ -24,6 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nxkit_metal::{ArchiveConfig, Context, PipelineCache};
 
+use super::KEY_SCHEME;
 use super::Pipelines;
 use super::record::{self, Seen};
 
@@ -68,21 +70,6 @@ fn os_build() -> String {
             let rest = t.split("<key>ProductBuildVersion</key>").nth(1)?;
             let v = rest.split("<string>").nth(1)?.split("</string>").next()?;
             Some(v.trim().to_string())
-        })
-        .unwrap_or_default()
-}
-
-/// The size and the modification time of the running executable: another host build makes other keys.
-fn exe_stamp() -> String {
-    std::env::current_exe()
-        .and_then(std::fs::metadata)
-        .map(|m| {
-            let t = m
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_nanos());
-            format!("{}:{t}", m.len())
         })
         .unwrap_or_default()
 }
@@ -147,9 +134,9 @@ pub(crate) fn plan(
 ) -> Option<Plan> {
     let root = root.filter(|_| env_on("NXKIT_PIPELINE_CACHE"))?;
     let id = identity(&[
-        "nxkit pipecache 1",
+        "nxkit pipecache 2",
         &build_id.to_string(),
-        &exe_stamp(),
+        &KEY_SCHEME.to_string(),
         &os_build(),
         &ctx.name(),
     ]);
@@ -160,7 +147,9 @@ pub(crate) fn plan(
         eprintln!("nxkit-gpu: pipeline cache {}: {e}", dir.display());
         return None;
     }
-    // Another identity is another host, app build, macOS or GPU: nothing of it can be used.
+    // An identity is an app build, a key scheme, a macOS build and a GPU. The archives hold binaries of that app
+    // build for that macOS and GPU, and `pipelines.seen` holds keys of that scheme: nothing of another identity can be
+    // used. Another host build with the same key scheme is the same identity.
     for e in std::fs::read_dir(&base).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         if name.starts_with("id-") && name != own {
