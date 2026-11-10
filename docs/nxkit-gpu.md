@@ -239,6 +239,70 @@ With the overlap on (`NXKIT_OVERLAP=1`, `overlap` in `game.json`) the CPU writes
 
 What the host cannot know: a game that writes its re-initialisation of a renamed range between its wait and the next flush gets the write-back of the frame before it in the middle (the swap needs the word to still hold `start`, and a word that the CPU zeroed holds the same value as `start`); the frame that follows then starts from the sum. A game that reads the range in a place other than after its wait, or a shader that reaches the range through raw global memory in a pool that was not yet seen to be written, is not seen either. The counters are `overlap.renamed`, `overlap.writeback-words`, `overlap.writeback-skipped` and `overlap.rename-excluded` (`docs/diagnostics.md`).
 
+## Private GPU memory, step 1: tracking (`NXKIT_PRIVATE=track`)
+
+With the overlap, the CPU writes the data of frame N + 1 while frame N runs, and the learned copies of `rename` do not
+cover every range that both sides touch. A GPU-private copy of the guest pages that the GPU writes would remove the race
+at its root: the GPU would work on the copy, the CPU would write guest memory, and the host would move bytes between the
+two in queue order. Step 1 builds no copy. It measures what the dirty tracking that such a copy needs would cost and how
+often the CPU touches a page while a frame that writes it is on the GPU. `NXKIT_PRIVATE=track` turns it on; unset, the
+code is not reached: no signal handler is installed, no page is protected, and a guest memory access costs one extra
+load in `nxkit-abi`.
+
+**Pages.** The host page is 16 KiB, so the tracker (`nxkit-metal/src/pages.rs`) holds one atomic word per 16 KiB of guest
+memory. A page is free (not tracked), clean (read only), dirty (read and write) or tagged with a frame (no access).
+
+**At the flush of each frame** (`private::at_flush`, on the CPU thread) the host computes the pages the frame may write:
+the storage buffer bindings of draws and dispatches whose shader may write them (the encoder reflects each program once
+and tells the host; a program it has not reflected yet counts as writing, and so does a binding of a task or mesh
+stage), the destinations of buffer copies and fills, and the pools that shaders wrote through raw pointers
+(`Gmem::learned`, the whole pool). A single range above 256 MiB or a frame above 1 GiB is left out and counted. Then:
+
+1. The pages that the CPU dirtied since the last flush go back to clean and read only (the state first, the protection
+   second, so a store in between is either in guest memory already or faults again).
+2. The pages of the frame's ranges are tagged with the frame and lose all access. They become tracked if they were not.
+   Once tracked, a page stays tracked.
+3. When the frame's batch is complete on the GPU (`SubmittedBatch::on_complete`, on the Metal completion thread), the
+   pages still tagged with that frame become clean and read only.
+
+**Faults.** The handler (`SIGBUS` and `SIGSEGV`, chained before the crash report) tells a read from a write by the write
+bit of the exception syndrome, and acts on atomics only, plus `mprotect`:
+
+- write to a clean page: the page is dirty, logged for the next flush, opened read and write;
+- write to a page tagged with a frame that is not complete: counted as a **write in flight** with its program counter,
+  then dirty and opened;
+- read of such a page: counted as a **read in flight** with its program counter and opened read only (its tag stays, so a
+  later write is seen);
+- anything else (a race with a flush or a completion) is opened and counted as other.
+
+Guest memory is the truth in this step: the handler never copies and never waits. That is what makes it safe to protect
+a page against all access: the CPU reads the same bytes it would have read, a little later by the cost of the fault.
+
+**Threads and system calls.** A thread that the host marked internal (the encoder thread, the code that writes counter
+reports) is counted apart from the game's. A fault cannot hold a system call back: `read(2)` into a page without access
+returns `EFAULT`. `nxkit_abi::guest::with_slice` and `with_slice_mut` (the paths that hand guest bytes to a system call)
+and the permission changes of `nxkit-hos` (`protect`, `release`, `remap`, `drop_view`) call `before_host_access` first,
+which opens the tracked pages in the range (`with_slice_mut` marks them dirty; a permission change or a release makes
+them free). A system call that gets a guest pointer by another way is not covered.
+
+**What the counters say, and their limits.** `DIAG private` (see `docs/diagnostics.md`) prints every 300 frames the
+tracked pages and MiB, the pages a frame may write, the faults per frame by kind and by origin (guest code, host code,
+internal threads), the time in the handler, the pages dirtied per frame, the `mprotect` calls, and the top 10 program
+counters for writes in flight, reads in flight and writes to clean pages.
+
+- "In flight" means: between the flush of the frame and the completion of its batch. With the encoder thread, that
+  includes the time before the frame is encoded. With the honest wait, the game waits for the fence before it touches
+  the pages and the counts are near zero; with the overlap they are the accesses a private copy would have to order.
+- Only the first access to a protected page is seen. A page opened by a read in flight does not show the second read; a
+  page opened by a write does not show the stores after it. The count is of pages touched, not of accesses.
+- The program counter is the faulting instruction, which may be a `memset` or `memcpy` of the host or the game; the
+  caller is not listed.
+- A page becomes tracked when a frame binds it as a possible write, and stays tracked. A program that the encoder had
+  not reflected when its first frame was flushed makes its read-only bindings tracked until the end of the run, so the
+  tracked MiB is an upper bound.
+- A frame whose batch is not reported complete (an encode that failed) is released when 24 newer frames wait.
+- The frame number is kept in 29 bits.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:

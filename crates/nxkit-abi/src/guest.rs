@@ -8,7 +8,7 @@
 //! Tests point the range at a host buffer of their own.
 #![allow(unsafe_code)]
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 static BASE: AtomicU64 = AtomicU64::new(0);
 static END: AtomicU64 = AtomicU64::new(0);
@@ -33,6 +33,35 @@ impl std::fmt::Display for Fault {
 }
 
 impl std::error::Error for Fault {}
+
+/// The hook of [`before_host_access`], as the address of an `fn(u64, u64, u32)`; 0 for none.
+static ACCESS_HOOK: AtomicUsize = AtomicUsize::new(0);
+
+/// [`before_host_access`]: the host reads the range.
+pub const ACCESS_READ: u32 = 0;
+/// [`before_host_access`]: the host writes the range.
+pub const ACCESS_WRITE: u32 = 1;
+/// [`before_host_access`]: the host changes the permission of the range or gives it back.
+pub const ACCESS_FORGET: u32 = 2;
+
+/// Sets the function that [`before_host_access`] calls: the page tracker of the GPU path (`NXKIT_PRIVATE=track`). It is
+/// set once, when the tracker is attached.
+pub fn set_guard_hook(hook: fn(u64, u64, u32)) {
+    ACCESS_HOOK.store(hook as usize, Ordering::Release);
+}
+
+/// Called before the host does something to guest pages that a fault handler cannot hold back: a system call that reads
+/// or writes them (it returns `EFAULT` for a page without access) or a change of their permission. With a tracker
+/// attached it opens the tracked pages in the range. Otherwise it costs one load.
+pub fn before_host_access(addr: u64, len: u64, access: u32) {
+    let h = ACCESS_HOOK.load(Ordering::Acquire);
+    if h != 0 {
+        // SAFETY: the value is the address of an `fn(u64, u64, u32)` that `set_guard_hook` stored; function pointers
+        // and `usize` have the same size.
+        let f = unsafe { std::mem::transmute::<usize, fn(u64, u64, u32)>(h) };
+        f(addr, len, access);
+    }
+}
 
 /// Names the guest range `[base, base + len)`. The host calls it once after it reserved guest memory. A later call
 /// replaces the range, which only tests do.
@@ -100,6 +129,8 @@ pub fn with_slice<R>(addr: u64, len: u64, f: impl FnOnce(&[u8]) -> R) -> Result<
     if len == 0 {
         return Ok(f(&[]));
     }
+    // The closure may let a system call read the bytes, which cannot wait in a fault handler.
+    before_host_access(addr, len, ACCESS_READ);
     // SAFETY: the bytes lie in the mapped guest range. The slice does not outlive the call.
     let s = unsafe { std::slice::from_raw_parts(addr as *const u8, len as usize) };
     Ok(f(s))
@@ -112,6 +143,8 @@ pub fn with_slice_mut<R>(addr: u64, len: u64, f: impl FnOnce(&mut [u8]) -> R) ->
     if len == 0 {
         return Ok(f(&mut []));
     }
+    // The closure may let a system call write into the bytes, which cannot wait in a fault handler.
+    before_host_access(addr, len, ACCESS_WRITE);
     // SAFETY: the bytes lie in the mapped writable guest range. The slice does not outlive the call. The game owns
     // the buffer it passed and does not touch it during the call, as on the Switch.
     let s = unsafe { std::slice::from_raw_parts_mut(addr as *mut u8, len as usize) };

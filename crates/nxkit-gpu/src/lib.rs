@@ -55,6 +55,7 @@ mod passprof;
 mod pipelines;
 mod poolreg;
 mod pools;
+mod private;
 mod programs;
 mod pull;
 mod queries;

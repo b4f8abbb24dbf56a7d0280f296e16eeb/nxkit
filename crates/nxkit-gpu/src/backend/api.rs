@@ -84,6 +84,8 @@ impl Backend for GpuBackend {
             detail.rename = capture.map(Arc::new);
             detail.rename_check = check;
         }
+        // `NXKIT_PRIVATE=track`: protects the pages the frame may write and the pages the CPU wrote, and counts.
+        crate::private::at_flush(&detail, fence.0, &self.guest.address_map());
         // The snapshot of the flush: a pool the game finalizes after this point still serves the frame.
         let pools = self.pools.current();
         if let Some(enc) = &self.enc {

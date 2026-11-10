@@ -16,6 +16,7 @@
 //! - [`DataBuffer`]: a persistent shared buffer for argument buffers of resource IDs and addresses.
 //! - [`Sampler`], [`Texture::gpu_resource_id`]: the resource IDs that bindless shaders read.
 //! - [`BatchRing`], [`Batch`]: a frame in several command buffers, encoded on several threads, committed in order.
+//! - [`Pages`]: the dirty tracking of guest memory pages (`NXKIT_PRIVATE=track`).
 //! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at any whole rate through `FrameHooks::display_tick`.
 //! - [`display`]: the refresh rate of a display mode and a switch to another one for the run.
 //! - [`Pacer`], [`TickScheduler`], [`TickSink`]: what each tick shows, by a [`PresentPlan`] from [`choose_present_plan`].
@@ -52,6 +53,7 @@ mod interpolate;
 mod memstats;
 mod metrics;
 mod pacing;
+mod pages;
 mod pipeline;
 mod policy;
 mod present;
@@ -98,6 +100,10 @@ pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
 pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
+pub use pages::{
+    FaultKind, FaultOrigin, FlushStats, InternalThread, PageStats, Pages, mark_internal_thread, name_pc,
+    set_pc_namer,
+};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{
     ArchiveConfig, BaseStats, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache,

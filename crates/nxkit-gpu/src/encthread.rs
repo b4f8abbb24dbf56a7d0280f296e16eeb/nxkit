@@ -152,6 +152,8 @@ fn panic_text(p: &(dyn Any + Send)) -> String {
 }
 
 fn run(rx: Receiver<Msg>, shared: Arc<Shared>, mut handler: impl FnMut(Msg) -> Reply) {
+    // The page tracker counts the accesses of this thread to tracked pages apart from the game's.
+    let _internal = nxkit_metal::mark_internal_thread();
     for msg in rx {
         let is_job = matches!(msg, Msg::Job(_));
         match catch_unwind(AssertUnwindSafe(|| handler(msg))) {

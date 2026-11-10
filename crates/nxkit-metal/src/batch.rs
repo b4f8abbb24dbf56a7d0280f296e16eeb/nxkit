@@ -50,9 +50,14 @@ pub const BATCH_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 /// The largest buffer that a slot adds to its scratch.
 pub const BATCH_SCRATCH_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
+type Callback = Box<dyn FnOnce() + Send>;
+
 #[derive(Default)]
 struct DoneState {
     pending: bool,
+    /// The last handler is running the callbacks; the batch is not yet reported as complete.
+    finishing: bool,
+    callbacks: Vec<Callback>,
     stats: CommandBufferStats,
 }
 
@@ -63,10 +68,9 @@ struct Completion {
 
 impl Completion {
     fn set_pending(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pending = true;
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        st.pending = true;
+        st.finishing = false;
     }
 
     fn add(&self, s: &CommandBufferStats, last: bool) {
@@ -83,9 +87,31 @@ impl Completion {
         a.gpu_end_s = a.gpu_end_s.max(s.gpu_end_s);
         a.failed |= s.failed;
         if last {
-            st.pending = false;
+            // The callbacks come first and the waiters after them, so that a thread that waits for the batch and then
+            // touches guest memory finds the pages released.
+            st.finishing = true;
+            let callbacks = std::mem::take(&mut st.callbacks);
             drop(st);
+            for f in callbacks {
+                f();
+            }
+            self.state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pending = false;
             self.cv.notify_all();
+        }
+    }
+
+    /// Runs `f` when the batch is complete, on the thread of the Metal completion handler and before `wait` returns; at
+    /// once on this thread when the batch is complete already.
+    fn on_complete(&self, f: Callback) {
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if st.pending && !st.finishing {
+            st.callbacks.push(f);
+        } else {
+            drop(st);
+            f();
         }
     }
 
@@ -225,6 +251,13 @@ impl SubmittedBatch {
     /// The number of the batch.
     pub fn number(&self) -> u64 {
         self.number
+    }
+
+    /// Runs `f` when the GPU finished every command buffer of the batch. It runs on the thread of the Metal completion
+    /// handler, before a `wait` for the batch returns, so it must not wait for anything or take a lock that a thread
+    /// holds while it waits for this batch. When the batch is complete already, `f` runs at once on this thread.
+    pub fn on_complete(&self, f: impl FnOnce() + Send + 'static) {
+        self.done.on_complete(Box::new(f));
     }
 
     /// Waits until the GPU finished every command buffer. The numbers are the sum of the GPU times, the widest

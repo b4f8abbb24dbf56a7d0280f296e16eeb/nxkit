@@ -136,6 +136,7 @@ impl GpuBackend {
         if settings.overlap {
             crate::overlap::set_on();
         }
+        crate::private::attach(guest.host_base(), guest.len());
         let threaded =
             settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {
@@ -297,6 +298,7 @@ impl GpuBackend {
             );
             (r, gpu.last_submitted())
         };
+        crate::private::encoded(job.fence.0, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(job.fence.0, b);
         }
@@ -355,6 +357,7 @@ impl GpuBackend {
             let r = gpu.encode_frame(frame, plan, &view, pools, detail, self.scale);
             (r, gpu.last_submitted())
         };
+        crate::private::encoded(fence.0, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(fence.0, b);
         }

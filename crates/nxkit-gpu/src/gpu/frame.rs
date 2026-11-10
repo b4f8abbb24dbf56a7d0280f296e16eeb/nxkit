@@ -109,6 +109,9 @@ impl Gpu {
         // The ring waited for the batch that used this slot before, so its write logs are final.
         let region = ((batch.number() - 1) % nxkit_metal::BATCHES_IN_FLIGHT as u64) as usize;
         self.gmem.learn(region);
+        // `NXKIT_PRIVATE=track`: what the programs write and which pools shaders wrote.
+        crate::private::note_rw(detail, &self.programs);
+        crate::private::note_learned(self.gmem.learned());
         // The storage ranges that this frame reads from a copy of its own (the overlap, `rename`). The slot's earlier
         // frame is written back first.
         let (rename_map, rename_buf, merges) = if crate::overlap::on() {

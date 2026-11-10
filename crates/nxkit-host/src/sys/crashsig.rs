@@ -178,6 +178,15 @@ pub fn thread_stack() {
     unsafe { sigaltstack(&ss, std::ptr::null_mut()) };
 }
 
+/// `module+offset` of a guest address, None outside the guest modules.
+pub fn guest_place(addr: u64) -> Option<String> {
+    MODULES
+        .get()?
+        .iter()
+        .find(|(_, s, e)| (*s..*e).contains(&addr))
+        .map(|(n, s, _)| format!("{n}+{:#x}", addr - s))
+}
+
 /// Names the guest modules for the report: name, start and end of each.
 pub fn set_modules(modules: Vec<(String, u64, u64)>) {
     let _ = MODULES.set(modules);

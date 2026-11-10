@@ -486,6 +486,8 @@ impl HostSpace for HostMemory {
     }
 
     fn protect(&self, addr: u64, len: u64, perm: u32) -> bool {
+        // Pages that the page tracker holds (`NXKIT_PRIVATE=track`) are let go before their permission changes.
+        nxkit_abi::guest::before_host_access(addr, len, nxkit_abi::guest::ACCESS_FORGET);
         let ps = self.page_size();
         let (start, end) = if perm & 7 != 0 {
             (addr & !(ps - 1), (addr + len).div_ceil(ps) * ps)
@@ -496,6 +498,7 @@ impl HostSpace for HostMemory {
     }
 
     fn release(&self, addr: u64, len: u64) -> bool {
+        nxkit_abi::guest::before_host_access(addr, len, nxkit_abi::guest::ACCESS_FORGET);
         self.release_range(addr, len)
     }
 
@@ -504,6 +507,8 @@ impl HostSpace for HostMemory {
     }
 
     fn remap(&self, dst: u64, src: u64, len: u64, perm: u32) -> bool {
+        nxkit_abi::guest::before_host_access(dst, len, nxkit_abi::guest::ACCESS_FORGET);
+        nxkit_abi::guest::before_host_access(src, len, nxkit_abi::guest::ACCESS_FORGET);
         posix::remap(dst, src, len) && self.protect(dst, len, perm)
     }
 
@@ -516,6 +521,7 @@ impl HostSpace for HostMemory {
     }
 
     fn drop_view(&self, addr: u64, len: u64) -> bool {
+        nxkit_abi::guest::before_host_access(addr, len, nxkit_abi::guest::ACCESS_FORGET);
         posix::drop_pages(addr, len)
     }
 }

@@ -161,6 +161,8 @@ impl GpuBackend {
     /// The clock lock is held from taking the due reports to the last write, so a wait that finds nothing due returns
     /// only after the wait that took them has written them.
     pub(super) fn write_counters(&self, upto: u64, finished: &[(u64, CommandBufferStats)]) {
+        // The page tracker counts the writes of this code to tracked pages apart from the game's.
+        let _internal = nxkit_metal::mark_internal_thread();
         let mut clock = locked(&self.ts);
         let due = take_due(&self.counters, upto);
         let due_queries = take_due(&self.queries, upto);

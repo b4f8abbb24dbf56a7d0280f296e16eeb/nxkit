@@ -104,6 +104,7 @@ pub fn run(opts: &Options) -> Result<()> {
             })
             .collect(),
     );
+    nxkit_metal::set_pc_namer(sys::crashsig::guest_place);
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
