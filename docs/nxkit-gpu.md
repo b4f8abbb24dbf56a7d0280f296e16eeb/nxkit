@@ -518,6 +518,79 @@ the frame 3 before (count, ms per frame, longest) and the full waits by reason; 
 `DIAG private in flight`; `DIAG private between flush and commit` (two lines) and `DIAG private between sample` (the first
 writes into bound bytes); `DIAG private forced submits` when a flush ran submits before their CPU signals.
 
+## Private GPU memory, step 4: accesses outside the bytes a frame writes (`NXKIT_PRIVATE=1`)
+
+With early fences (step 3) the CPU reads and writes pages that the frame in flight may write, and each such first access waited for
+the whole batch (in Ocarina of Time about 5 reads a frame, 140 to 350 ms in all, single waits up to 320 ms). Measured at the byte,
+none of those accesses was inside the bytes the frame may write: they were in the same 16 KiB page as a written range (false
+sharing at the page). Step 4 handles them by byte.
+
+**The stale blocks.** Each tracked page has a mask of 256 bits, one per block of 64 bytes (`PageInfo::stale`). The flush of a frame
+adds the blocks of every range the frame may write, rounded outward to whole blocks: the storage bindings and copy destinations by
+their bytes, a pool that shaders wrote through raw pointers by all its bytes (`range_masks`, after the page is tagged). The bits
+are the bytes whose truth is in the mirror: guest memory is stale there. They stay set until a copy from the mirror makes guest
+memory current, so the mask of a page is the union of the frames since its last copy. The copy from the mirror into guest memory
+(`copy_from_mirror`) moves the stale blocks only, and clears the mask when the writer is complete. The other blocks hold the CPU's
+bytes and stay. `privpoison` fills only the stale blocks.
+
+**The alias.** `Pages::make_alias` (called when the mirror is made) maps guest memory a second time with read and write access:
+for each VM region of the range it calls `mach_vm_remap` without a copy into one reservation (`VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE`
+over an anonymous `PROT_NONE` mapping, so the second mapping sits at a fixed offset from the first), then raises the protection of the
+copy to read and write. Both mappings show the same pages (one VM object), and each has its own protection, so a page that has no
+access in guest memory can be read and written through the alias. A region that was never touched has no VM object yet, and the
+call makes one; for a touched region the object id and offset must be the same after the call (a copy would leave the GPU on the
+old pages, see `nxkit-hos` `pinned`), else the alias is dropped with a message and every access waits as in step 3. The alias
+costs address space only. `NXKIT_PRIVATE=1` prints one line at the start saying whether it exists.
+
+**The emulation** (`pages/a64.rs`, `try_emulate`). In the fault handler, for an access by a game thread (not an internal one) to a
+page tagged with a frame in flight, the handler reads the instruction at the program counter, decodes it, computes its address from
+the saved registers (the faulting address of the signal is only checked to lie inside the access), and when the access lies in
+one page and touches no stale block it does the access through the alias: a load fills the destination registers of the saved
+thread state, a store reads the source registers and writes the bytes, a pre or post index writes the base register back, and the
+program counter moves by 4. The page stays without access and the thread does not wait. The forms:
+
+| form | encodings |
+|---|---|
+| `ldr`, `str` | `LDR`/`STR` of `b`, `h`, `w`, `x` (unsigned offset, pre and post index, register offset with `UXTW`/`LSL`/`SXTW`/`SXTX` and optional shift), `LDUR`/`STUR`, `LDRB`, `LDRH`, `STRB`, `STRH` |
+| `ldrs` | `LDRSB`, `LDRSH`, `LDRSW` into `w` or `x`, in the same addressing modes |
+| `ldp`, `stp`, `ldpsw` | `LDP`/`STP` of `w` or `x`, `LDPSW`, `LDNP`/`STNP`, signed offset, pre and post index |
+| `simd ldr`, `simd str`, `simd ldp`, `simd stp` | the same for `b`, `h`, `s`, `d`, `q` registers |
+| `ldar`, `stlr` | `LDAR`, `LDARB`, `LDARH`, `STLR`, `STLRB`, `STLRH`, `LDAPR` (as an acquire load) |
+
+An aligned access of 1 to 8 bytes is one atomic access (relaxed; acquire for a load-acquire, release for a store-release), a
+16-byte access is two 8-byte accesses, a misaligned access copies bytes. The access is not atomic as a whole against a GPU write,
+which the stale mask makes irrelevant: the GPU never writes the bytes touched.
+
+Everything else takes the path of step 3 (wait for the writer, copy the stale blocks, open the page) and is counted by class:
+`exclusive` (`LDXR`, `STXR` and the others), `atomic` (`LDADD`, `SWP`, `CAS`), `ld1/st1` (structure loads and stores), `dc zva`,
+`prefetch`, `other` (literal loads, unprivileged accesses, tagged and authenticated loads, anything else), `touches written bytes`
+(the access reaches a stale block) and `page border or address mismatch` (the access crosses the page, or the signal's address is not
+inside it).
+
+**Stores and the next frame.** A store done by the handler lands in guest memory only. The mirror does not see it, so the frame on
+the GPU keeps reading what it read, and the next flush hands it over: the first store to a page since the flush sets a flag on the
+page and logs it; the flush clears the flag, reads the page through the alias and stages it with the mask of its stale blocks
+(`Stager::stage_masked`). The copy-in pass leaves the blocks of the mask alone (`nxkit_private_in` takes a 256-bit skip mask per
+page), so the frame's own results in those blocks survive, and the CPU's bytes in the others reach the mirror at the start of the
+next frame. The frame's view of guest memory (`Overlay::read`) takes the skipped blocks from the mirror and the others from
+the staging buffer. The late capture of a flush that ran submits before the CPU signals they wait for (`Pages::flush_late`) stages
+these pages too. A page that is dirty (a store that took the ordinary path) is staged whole with the mask it has, which is empty
+after a copy from the mirror.
+
+**Limits.** The emulation is for game threads and host code alike (a `memcpy` of the host faults and is emulated the same way),
+but only with an alias and only for a page whose frame is still in flight; after the completion the ordinary copy is one page
+copy and needs no emulation. The stale mask is only as exact as the ranges of the flush: a shader that writes beyond the bound size of a
+storage buffer, or into a raw pool before the encoder learned it, writes bytes that are not in the mask, and the copy from the
+mirror no longer moves them (before step 4 the copy moved the whole page). A load of a block outside the mask sees guest memory,
+which holds the CPU's own bytes. `privnoemu` (knob) turns the emulation off. A store of the CPU into a block that is
+not stale and that the GPU reads in the same frame is seen by the next frame only, as every CPU write after the flush.
+
+**Counters** (`NXKIT_DIAG=private`, `DIAG private emulated accesses per frame`): loads and stores done by the handler, by form,
+the milliseconds they took in the handler, the pages the flush staged for them, and the accesses that were not emulated and waited
+for the writer, by class; `DIAG private top program counters, not emulated` lists the program counters of those. The faults of
+step 3 (`read in flight`, `write in flight`) and the waits for a writer now count only what was not emulated; the first store to a
+page since the flush still counts in the line of writes to member pages by phase.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:

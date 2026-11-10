@@ -31,6 +31,16 @@
 //! Limits: the frame numbers are kept in 29 bits. The kind of access comes from the write bit of the exception
 //! syndrome; an atomic read-modify-write that faults on a protected page counts as a read first and as a write at its
 //! second fault. A thread that does not know the host marks no pages as internal, so its accesses count as the game's.
+//!
+//! Step 4 (mirrored mode): a page tagged with a frame knows the 64-byte blocks that the frames since its last copy from
+//! the mirror may have written (the stale blocks). A copy from the mirror moves those blocks only. A CPU access to a
+//! page of a frame in flight that lies outside the stale blocks is done by the handler itself through a second mapping
+//! of guest memory ([`Pages::make_alias`], [`a64`]), without waiting and without opening the page; a store of that
+//! kind is logged, and the next flush stages the page without its stale blocks.
+
+pub(crate) mod a64;
+
+pub use a64::{Form, Reason};
 
 use std::collections::VecDeque;
 use std::ffi::{c_int, c_void};
@@ -88,6 +98,47 @@ const TIMEOUT_NS: u64 = 4_000_000_000;
 const SLICE_NS: u64 = 20_000_000;
 const OS_CLOCK_MACH_ABSOLUTE_TIME: u32 = 32;
 
+/// The bytes per block of the stale mask: a page of 16 KiB has 256 blocks, four 64-bit words.
+const BLOCK: u64 = 64;
+/// The blocks of a page as bits.
+type Mask = [u64; 4];
+/// The program counter table of the accesses that were not emulated.
+const PC_FALLBACK: usize = 4;
+
+/// What the handler reads for a page besides its table word (step 4).
+struct PageInfo {
+    /// The blocks that the frames since the last copy from the mirror may have written: guest memory is stale there.
+    stale: [AtomicU64; 4],
+    /// Bit 0: the handler emulated a store to the page since the last flush took it.
+    emu: AtomicU32,
+}
+
+impl PageInfo {
+    fn stale(&self) -> Mask {
+        [
+            self.stale[0].load(Ordering::Acquire),
+            self.stale[1].load(Ordering::Acquire),
+            self.stale[2].load(Ordering::Acquire),
+            self.stale[3].load(Ordering::Acquire),
+        ]
+    }
+
+    fn or_stale(&self, m: &Mask) {
+        for (a, b) in self.stale.iter().zip(m) {
+            if *b != 0 {
+                a.fetch_or(*b, Ordering::AcqRel);
+            }
+        }
+    }
+
+    fn clear(&self) {
+        for a in &self.stale {
+            a.store(0, Ordering::Release);
+        }
+        self.emu.store(0, Ordering::Release);
+    }
+}
+
 /// What kind of fault, for the counters and the program counter tables.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaultKind {
@@ -138,7 +189,31 @@ struct SigInfo {
 
 type Handler = extern "C" fn(c_int, *mut SigInfo, *mut c_void);
 
+const MAP_PRIVATE: c_int = 0x2;
+const MAP_ANON: c_int = 0x1000;
+const MAP_NORESERVE: c_int = 0x40;
+const VM_FLAGS_FIXED: c_int = 0;
+const VM_FLAGS_OVERWRITE: c_int = 0x4000;
+const VM_INHERIT_NONE: c_int = 2;
+
 unsafe extern "C" {
+    static mach_task_self_: u32;
+    fn mach_vm_remap(
+        target_task: u32,
+        target_address: *mut u64,
+        size: u64,
+        mask: u64,
+        flags: c_int,
+        src_task: u32,
+        src_address: u64,
+        copy: c_int,
+        cur_protection: *mut c_int,
+        max_protection: *mut c_int,
+        inheritance: c_int,
+    ) -> c_int;
+    fn mach_vm_protect(task: u32, address: u64, size: u64, set_maximum: c_int, prot: c_int) -> c_int;
+    fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void;
+    fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
     fn getpagesize() -> c_int;
     fn sigaction(sig: c_int, act: *const SigAction, old: *mut SigAction) -> c_int;
@@ -249,8 +324,21 @@ struct Shared {
     member_bits: AtomicPtr<AtomicU64>,
     member_gen: AtomicU64,
     /// Program counters by [`FaultKind`] 0 to 2: the counter and how often it faulted.
-    pcs: [[(AtomicU64, AtomicU64); PC_SLOTS]; 4],
+    pcs: [[(AtomicU64, AtomicU64); PC_SLOTS]; 5],
     pc_overflow: AtomicU64,
+    /// The per-page stale blocks and flags: `npages` entries.
+    info: AtomicPtr<PageInfo>,
+    /// The address of the alias of the byte at `base` (a second mapping of guest memory with read and write access), 0
+    /// when there is none.
+    alias: AtomicU64,
+    /// The handler emulates accesses outside the stale blocks.
+    emulate: AtomicBool,
+    /// Emulated accesses by form, the time they took in the handler, and the accesses that fell back by reason.
+    emu: [AtomicU64; Form::COUNT],
+    emu_ns: AtomicU64,
+    fallback: [AtomicU64; Reason::COUNT],
+    /// Pages the flush staged because the handler stored to them.
+    emu_staged: AtomicU64,
 }
 
 struct OldAction {
@@ -316,8 +404,15 @@ static SHARED: Shared = Shared {
     wait_timeouts: AtomicU64::new(0),
     member_bits: AtomicPtr::new(std::ptr::null_mut()),
     member_gen: AtomicU64::new(0),
-    pcs: [PC_TABLE; 4],
+    pcs: [PC_TABLE; 5],
     pc_overflow: AtomicU64::new(0),
+    info: AtomicPtr::new(std::ptr::null_mut()),
+    alias: AtomicU64::new(0),
+    emulate: AtomicBool::new(true),
+    emu: [const { AtomicU64::new(0) }; Form::COUNT],
+    emu_ns: AtomicU64::new(0),
+    fallback: [const { AtomicU64::new(0) }; Reason::COUNT],
+    emu_staged: AtomicU64::new(0),
 };
 
 /// What only the holders of the mutex touch.
@@ -357,6 +452,17 @@ fn word(page: usize) -> Option<&'static AtomicU32> {
     }
     // SAFETY: the table has `npages` words that are never freed while the process runs (a new `attach` leaks the old
     // one), and `page` is inside it.
+    Some(unsafe { &*p.add(page) })
+}
+
+/// The stale blocks and flags of `page`, None when there is no table or the page is outside it.
+fn info(page: usize) -> Option<&'static PageInfo> {
+    let p = SHARED.info.load(Ordering::Acquire);
+    if p.is_null() || page >= SHARED.npages.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: the array has `npages` entries that are never freed while the process runs (a new `attach` leaks the old
+    // one), zero bytes are a valid entry, and `page` is inside it.
     Some(unsafe { &*p.add(page) })
 }
 
@@ -502,6 +608,108 @@ fn fault_regs(uctx: *mut c_void) -> (u64, bool) {
     }
 }
 
+/// The registers of the faulting thread in the saved state of the signal, and the address of its program counter.
+///
+/// # Safety
+/// `uctx` must be the context that the kernel passed to an `SA_SIGINFO` handler of this thread on arm64 macOS.
+unsafe fn thread_regs(uctx: *mut c_void) -> Option<(a64::Regs, *mut u64)> {
+    if uctx.is_null() {
+        return None;
+    }
+    // SAFETY: the `ucontext_t` is valid; its `uc_mcontext` pointer is at byte 48. The `__darwin_mcontext64` it points
+    // at holds the exception state (16 bytes), then x0 to x30 (31 words in a row, `fp` and `lr` are x29 and x30), the
+    // stack pointer at byte 264, the program counter at 272, `cpsr` and a pad word, and the SIMD registers v0 to v31 at
+    // byte 288. The pointers stay valid until the handler returns.
+    unsafe {
+        let mc = *uctx.cast::<u8>().add(48).cast::<*mut u8>();
+        if mc.is_null() {
+            return None;
+        }
+        Some((
+            a64::Regs {
+                x: mc.add(16).cast(),
+                sp: mc.add(264).cast(),
+                v: mc.add(288).cast(),
+            },
+            mc.add(272).cast(),
+        ))
+    }
+}
+
+fn count_fallback(why: Reason, pc: u64) {
+    SHARED.fallback[why as usize].fetch_add(1, Ordering::Relaxed);
+    count_pc_in(PC_FALLBACK, pc);
+}
+
+/// Does the access that faulted on the page `pg` in place of the thread, when it lies outside the blocks that a frame
+/// in flight may write: the access runs through the alias, the registers are filled or read, and the program counter
+/// moves on. Returns false when the access must take the ordinary path (wait for the writer, copy, open). Atomics and
+/// the access itself; no lock, no allocation, no system call.
+fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -> bool {
+    let alias = SHARED.alias.load(Ordering::Acquire);
+    if alias == 0 || pc == 0 || !SHARED.emulate.load(Ordering::Relaxed) {
+        return false;
+    }
+    let cur = w.load(Ordering::Acquire);
+    if !matches!(cur & STATE_MASK, GPU | OPEN) || !in_flight(cur >> FRAME_SHIFT) {
+        return false;
+    }
+    let Some(info) = info(pg) else { return false };
+    let t0 = now_ns();
+    // SAFETY: a fault at `pc` means the instruction there was fetched, so its word is readable.
+    let insn = unsafe { (pc as *const u32).read() };
+    let op = match a64::decode(insn) {
+        Ok(op) => op,
+        Err(why) => {
+            count_fallback(why, pc);
+            return false;
+        }
+    };
+    // SAFETY: the context comes from the handler of this thread.
+    let Some((regs, pc_at)) = (unsafe { thread_regs(uctx) }) else {
+        return false;
+    };
+    // SAFETY: `regs` points into the saved state of this thread.
+    let plan = unsafe { a64::plan(&op, &regs) };
+    let (base, p) = (SHARED.base.load(Ordering::Relaxed), page());
+    let (first, last) = (plan.ea, plan.ea.wrapping_add(plan.len - 1));
+    let in_page = |a: u64| a >= base && ((a - base) / p) as usize == pg;
+    if !in_page(first) || !in_page(last) || far < first || far > last {
+        count_fallback(Reason::Mismatch, pc);
+        return false;
+    }
+    let stale = info.stale();
+    let (lo, hi) = (((first - base) % p) / BLOCK, ((last - base) % p) / BLOCK);
+    if (lo..=hi).any(|b| stale[(b / 64) as usize] >> (b % 64) & 1 != 0) {
+        count_fallback(Reason::Overlap, pc);
+        return false;
+    }
+    // SAFETY: the alias maps the same pages as guest memory with read and write access, and `plan` lies inside the
+    // page `pg`, which lies inside guest memory. The registers are the thread's own.
+    unsafe {
+        a64::perform(&op, &regs, &plan, (alias + (first - base)) as *mut u8);
+        pc_at.write(pc + 4);
+    }
+    if !op.load && info.emu.fetch_or(1, Ordering::AcqRel) & 1 == 0 {
+        // The first store since the flush took the page: the next flush stages it, and it counts as a first write by the phase
+        // of the newest frame, as a write that dirties a page does.
+        log_dirty(pg);
+        let (ph, newest) = phase_now();
+        SHARED.phase_writes[ph].fetch_add(1, Ordering::Relaxed);
+        if ph == 1 {
+            let r = newest as usize % P1_RING;
+            let n = SHARED.p1_n[r].fetch_add(1, Ordering::AcqRel) as usize;
+            if n < P1_CAP {
+                SHARED.p1_log[r][n].store(first.wrapping_sub(base) + 1, Ordering::Release);
+            }
+            count_pc_in(3, pc);
+        }
+    }
+    SHARED.emu[op.form as usize].fetch_add(1, Ordering::Relaxed);
+    SHARED.emu_ns.fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
+    true
+}
+
 /// True when `frame` (28 bits) is a frame whose completion has not been reported.
 fn in_flight(frame: u32) -> bool {
     u64::from(frame) > SHARED.completed.load(Ordering::Acquire) & FRAME_MASK
@@ -598,19 +806,35 @@ fn wait_complete(frame: u32, write: bool) -> bool {
     timed_out
 }
 
-/// Copies the mirror page `pg` into guest memory. The guest page must be writable.
+/// Copies the stale blocks of the mirror page `pg` into guest memory: the blocks that a frame may have written. The
+/// other blocks of the guest page hold the CPU's bytes (the handler stores to them without waiting) and stay. The guest
+/// page must be writable.
 fn copy_from_mirror(pg: usize, mirror: u64) {
     let p = page();
     let base = SHARED.base.load(Ordering::Acquire);
-    // SAFETY: the guest page is whole host page inside the range that `attach` named and the caller made it writable;
-    // the mirror page at the same offset lies in the reservation of the mirror, which is readable while the page is a
-    // member. The two regions are different mappings.
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            (mirror + pg as u64 * p) as *const u8,
-            (base + pg as u64 * p) as *mut u8,
-            p as usize,
-        );
+    let stale = info(pg).map_or([u64::MAX; 4], PageInfo::stale);
+    let blocks = (p / BLOCK) as usize;
+    let mut b = 0;
+    while b < blocks {
+        if stale[b / 64] >> (b % 64) & 1 == 0 {
+            b += 1;
+            continue;
+        }
+        let first = b;
+        while b < blocks && stale[b / 64] >> (b % 64) & 1 != 0 {
+            b += 1;
+        }
+        let off = pg as u64 * p + first as u64 * BLOCK;
+        // SAFETY: the blocks lie in the guest page, a whole host page inside the range that `attach` named, which the
+        // caller made writable; the mirror blocks at the same offset lie in the reservation of the mirror, which is
+        // readable while the page is a member. The two regions are different mappings.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                (mirror + off) as *const u8,
+                (base + off) as *mut u8,
+                (b - first) * BLOCK as usize,
+            );
+        }
     }
     SHARED.synced.fetch_add(1, Ordering::Relaxed);
 }
@@ -679,6 +903,13 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                 protect_pages(p, p + 1, PROT_RW, false);
                 if !(flying && fresh) {
                     copy_from_mirror(pg, mirror);
+                    if !flying && let Some(i) = info(pg) {
+                        // Guest memory is current here again. (A page read in flight stays stale: the frame may
+                        // still write it.)
+                        for a in &i.stale {
+                            a.store(0, Ordering::Release);
+                        }
+                    }
                 }
                 if flying {
                     SHARED.internal_opens.fetch_add(1, Ordering::Relaxed);
@@ -724,7 +955,7 @@ extern "C" fn on_signal(sig: c_int, info: *mut SigInfo, uctx: *mut c_void) {
             let t0 = now_ns();
             SHARED.last_signal.store(sig as u64, Ordering::Relaxed);
             let (pc, write) = fault_regs(uctx);
-            on_tracked(pg, w, pc, write, addr);
+            on_tracked(pg, w, pc, write, addr, uctx);
             SHARED
                 .handler_ns
                 .fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
@@ -747,12 +978,16 @@ fn origin_of(pc: u64, internal: bool) -> FaultOrigin {
     }
 }
 
-/// Serves a fault on the tracked page `pg`. Atomics, `mprotect` and nothing else.
-fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool, addr: u64) {
+/// Serves a fault on the tracked page `pg`. Atomics, `mprotect` and nothing else (the emulation of an access adds the
+/// access itself).
+fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool, addr: u64, uctx: *mut c_void) {
     let internal = is_internal();
     let origin = origin_of(pc, internal);
     let mirror = SHARED.mirror.load(Ordering::Acquire);
     if mirror != 0 {
+        if !internal && try_emulate(pg, w, pc, addr, uctx) {
+            return;
+        }
         let kind = serve_mirrored(pg, w, write, internal, mirror, addr);
         SHARED.faults[kind as usize][origin as usize].fetch_add(1, Ordering::Relaxed);
         if !internal {
@@ -908,6 +1143,85 @@ pub fn name_pc(pc: u64) -> String {
     format!("{pc:#x}")
 }
 
+/// Makes a second mapping of `[base, base + len)` with read and write access that shares the pages of the first (the
+/// pages are the same VM object, so a store through one is a store through the other, and the protection of the two
+/// mappings is independent). Every VM region of the range is mapped by itself, so holes and regions without write
+/// permission leave a gap in the alias instead of failing the whole call. Returns the address of the byte at `base`.
+fn build_alias(base: u64, len: u64) -> Result<u64, String> {
+    // SAFETY: an anonymous reservation without access; the kernel picks the address.
+    let target = unsafe {
+        mmap(
+            std::ptr::null_mut(),
+            len as usize,
+            PROT_NONE,
+            MAP_PRIVATE | MAP_ANON | MAP_NORESERVE,
+            -1,
+            0,
+        )
+    };
+    if target as isize == -1 {
+        return Err("no address range for the alias".to_string());
+    }
+    let target = target as u64;
+    let end = base + len;
+    let (mut at, mut mapped) = (base, 0u64);
+    while at < end {
+        let Some(r) = crate::vmregion::region_at_or_after(at) else {
+            break;
+        };
+        if r.start >= end {
+            break;
+        }
+        let (s, e) = (r.start.max(at), (r.start + r.size).min(end));
+        at = e;
+        if e <= s {
+            continue;
+        }
+        let before = (r.object, r.offset_of(s));
+        let (mut t, mut cur, mut max) = (target + (s - base), 0, 0);
+        // SAFETY: the source range lies in this task; the target range is inside the reservation made above, which the
+        // call replaces with the second mapping (no copy: the pages are shared).
+        let kr = unsafe {
+            mach_vm_remap(
+                mach_task_self_,
+                &mut t,
+                e - s,
+                0,
+                VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+                mach_task_self_,
+                s,
+                0,
+                &mut cur,
+                &mut max,
+                VM_INHERIT_NONE,
+            )
+        };
+        if kr != 0 || t != target + (s - base) {
+            continue;
+        }
+        // SAFETY: the range was mapped by the call above.
+        let ok = unsafe { mach_vm_protect(mach_task_self_, t, e - s, 0, PROT_RW) } == 0;
+        if !ok {
+            continue;
+        }
+        // The first mapping must be the same object after the call (a copy would leave the GPU on the old pages). A region
+        // that was never touched has no object yet (id 0): the call makes one, and no page can be under the GPU.
+        let after = crate::vmregion::vm_region(s).map(|r| (r.object, r.offset_of(s)));
+        if before.0 != 0 && after != Some(before) {
+            // SAFETY: the reservation made above.
+            unsafe { munmap(target as *mut c_void, len as usize) };
+            return Err("the remap moved the guest pages to another VM object".to_string());
+        }
+        mapped += e - s;
+    }
+    if mapped == 0 {
+        // SAFETY: the reservation made above.
+        unsafe { munmap(target as *mut c_void, len as usize) };
+        return Err("no region of guest memory could be mapped twice".to_string());
+    }
+    Ok(target)
+}
+
 /// The numbers of the tracker since the process started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PageStats {
@@ -952,6 +1266,14 @@ pub struct PageStats {
     pub wait_ns: [u64; 2],
     /// How many of those waits began before the frame was committed.
     pub wait_uncommitted: [u64; 2],
+    /// Accesses the handler did itself, by [`Form`], and the time they took in the handler.
+    pub emulated: [u64; Form::COUNT],
+    /// Time of the emulated accesses.
+    pub emulated_ns: u64,
+    /// Accesses of a page in flight that the handler could not do, by [`Reason`]; they waited for the writer.
+    pub fallbacks: [u64; Reason::COUNT],
+    /// Pages the flush staged because the handler stored to them.
+    pub emu_staged: u64,
 }
 
 /// What one flush did.
@@ -975,6 +1297,8 @@ pub struct FlushStats {
     pub staged: u32,
     /// Pages that the CPU wrote between the staging and the tag (mirrored mode); they are staged again.
     pub raced: u32,
+    /// Pages staged because the handler stored to them while a frame wrote others of their blocks (part of `staged`).
+    pub emu_staged: u32,
 }
 
 /// The page tracker of the process. There is one, because the signal handler needs its table.
@@ -1010,6 +1334,42 @@ fn span_runs(ranges: &[(u64, u64)]) -> Vec<(u32, u32)> {
         match out.last_mut() {
             Some(last) if s <= last.1 => last.1 = last.1.max(e),
             _ => out.push((s, e)),
+        }
+    }
+    out
+}
+
+/// Sets the blocks that the byte offsets `[lo, hi)` of a page touch (rounded outward). `hi` must be above `lo`.
+fn set_blocks(m: &mut Mask, lo: u64, hi: u64) {
+    for b in lo / BLOCK..=(hi - 1) / BLOCK {
+        m[(b / 64) as usize] |= 1 << (b % 64);
+    }
+}
+
+/// The blocks that the host ranges `(address, length)` touch in each page of `runs` (the runs of the same ranges, as
+/// [`span_runs`] makes them): one mask per page, per run.
+fn range_masks(runs: &[(u32, u32)], ranges: &[(u64, u64)]) -> Vec<Vec<Mask>> {
+    let mut out: Vec<Vec<Mask>> = runs.iter().map(|&(s, e)| vec![[0; 4]; (e - s) as usize]).collect();
+    let base = SHARED.base.load(Ordering::Acquire);
+    let total = SHARED.len.load(Ordering::Acquire);
+    let npages = SHARED.npages.load(Ordering::Acquire) as u64;
+    let p = page();
+    for &(a, l) in ranges {
+        let lo = a.max(base);
+        let hi = a.saturating_add(l.max(1)).min(base.saturating_add(total));
+        if lo >= hi {
+            continue;
+        }
+        let (first, last) = ((lo - base) / p, (hi - 1 - base) / p);
+        for pg in first..=last.min(npages.saturating_sub(1)) {
+            let i = runs.partition_point(|&(_, e)| u64::from(e) <= pg);
+            let Some(&(s, e)) = runs.get(i) else { break };
+            if pg < u64::from(s) || pg >= u64::from(e) {
+                continue;
+            }
+            let from = if pg == first { (lo - base) % p } else { 0 };
+            let to = if pg == last { (hi - 1 - base) % p + 1 } else { p };
+            set_blocks(&mut out[i][(pg - u64::from(s)) as usize], from, to);
         }
     }
     out
@@ -1081,6 +1441,9 @@ pub trait Stager {
     fn begin(&mut self, max_pages: usize);
     /// The bytes of the guest page `page`. A page that is staged twice keeps the later bytes.
     fn stage(&mut self, page: u32, bytes: &[u8]);
+    /// Like [`stage`](Self::stage), for a page whose bytes in the blocks of `skip` (bit `b % 64` of word `b / 64` is the
+    /// block `b` of 64 bytes) are stale and must not reach the mirror: a frame in flight may have written them there.
+    fn stage_masked(&mut self, page: u32, bytes: &[u8], skip: [u64; 4]);
 }
 
 impl Pages {
@@ -1124,6 +1487,16 @@ impl Pages {
         if bits.is_null() {
             return;
         }
+        let Ok(info_layout) = std::alloc::Layout::array::<PageInfo>(n.max(1)) else {
+            return;
+        };
+        // SAFETY: as for the table: zero bytes are a valid `PageInfo`, and the array is never freed.
+        let infos = unsafe { std::alloc::alloc_zeroed(info_layout) }.cast::<PageInfo>();
+        if infos.is_null() {
+            return;
+        }
+        SHARED.alias.store(0, Ordering::Release);
+        SHARED.info.store(infos, Ordering::Release);
         SHARED.members.store(0, Ordering::Release);
         SHARED.completed.store(0, Ordering::Release);
         SHARED.flushed.store(0, Ordering::Release);
@@ -1144,6 +1517,45 @@ impl Pages {
         }
         install_handler();
         nxkit_abi::guest::set_guard_hook(hook);
+    }
+
+    /// Maps guest memory a second time with read and write access, for the emulation of accesses outside the blocks a frame
+    /// in flight writes (step 4). It needs the guest range to be readable and writable, so the host calls it before the
+    /// pages are protected, and with the mirror. Returns an error text when it could not (the handler then waits, as in
+    /// step 3). A host page of more than 16 KiB cannot be covered by the four-word mask.
+    pub fn make_alias(&self) -> Result<(), String> {
+        if !self.attached() {
+            return Err("the tracker is not attached".to_string());
+        }
+        if page() > 4 * 64 * BLOCK {
+            return Err("the host page has more blocks than the mask holds".to_string());
+        }
+        let (base, len) = (SHARED.base.load(Ordering::Acquire), SHARED.len.load(Ordering::Acquire));
+        let alias = build_alias(base, len)?;
+        SHARED.alias.store(alias, Ordering::Release);
+        Ok(())
+    }
+
+    /// Turns the emulation on or off (on by default once the alias exists); off, every access to a page in flight waits.
+    pub fn set_emulation(&self, on: bool) {
+        SHARED.emulate.store(on, Ordering::Release);
+    }
+
+    /// True when the handler can emulate accesses (the alias exists and the emulation is on).
+    pub fn emulating(&self) -> bool {
+        SHARED.alias.load(Ordering::Acquire) != 0 && SHARED.emulate.load(Ordering::Acquire)
+    }
+
+    /// The bytes of the guest page `page` through the alias, whatever its protection; None without an alias.
+    fn alias_page(&self, pg: u32) -> Option<&'static [u8]> {
+        let alias = SHARED.alias.load(Ordering::Acquire);
+        if alias == 0 {
+            return None;
+        }
+        let p = page();
+        // SAFETY: the alias maps the whole guest range with read access and `pg` is a page inside the table; the bytes
+        // may change under a reader (the CPU stores through it), which the staging accepts.
+        Some(unsafe { std::slice::from_raw_parts((alias + u64::from(pg) * p) as *const u8, p as usize) })
     }
 
     /// Whether [`attach`](Self::attach) ran.
@@ -1471,6 +1883,11 @@ impl Pages {
         }
         dirty.sort_unstable();
         dirty.dedup();
+        let emu: Vec<u32> = dirty
+            .iter()
+            .copied()
+            .filter(|&pg| info(pg as usize).is_some_and(|i| i.emu.load(Ordering::Acquire) & 1 != 0))
+            .collect();
         let mut back: Vec<u32> = Vec::new();
         for pg in dirty {
             if word(pg as usize)
@@ -1479,7 +1896,7 @@ impl Pages {
                 back.push(pg);
             }
         }
-        stager.begin(back.len());
+        stager.begin(back.len() + emu.len());
         for (s, e) in runs_of(&back) {
             protect_pages(s, e, PROT_READ, true);
             for pg in s..e {
@@ -1487,10 +1904,37 @@ impl Pages {
                 let bytes = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
-                stager.stage(pg, bytes);
+                stager.stage_masked(pg, bytes, info(pg as usize).map_or([0; 4], PageInfo::stale));
             }
         }
+        if self.stage_emulated(&emu, &back, stager) > 0 {
+            let extra: Vec<u32> = emu.iter().copied().filter(|pg| back.binary_search(pg).is_err()).collect();
+            back.extend(extra);
+            back.sort_unstable();
+        }
         back
+    }
+
+    /// Stages the pages of `emu` (page numbers, sorted) that the handler stored to, except the ones in `done` (sorted),
+    /// which were staged whole. The bytes come through the alias, because a page of a frame in flight has no access; the
+    /// stale blocks go along with a mask and are not copied into the mirror. The flag is taken first: a store after it
+    /// sets it again and logs the page for the next flush. Returns the pages staged.
+    fn stage_emulated(&self, emu: &[u32], done: &[u32], stager: &mut dyn Stager) -> u32 {
+        let mut n = 0;
+        for &pg in emu {
+            let Some(i) = info(pg as usize) else { continue };
+            if i.emu.swap(0, Ordering::AcqRel) & 1 == 0 || done.binary_search(&pg).is_ok() {
+                continue;
+            }
+            if word(pg as usize).is_none_or(|w| w.load(Ordering::Acquire) & STATE_MASK == FREE) {
+                continue;
+            }
+            let Some(bytes) = self.alias_page(pg) else { continue };
+            stager.stage_masked(pg, bytes, i.stale());
+            n += 1;
+        }
+        SHARED.emu_staged.fetch_add(u64::from(n), Ordering::Relaxed);
+        n
     }
 
     /// The host reads or writes the range through a system call, and there is a mirror: the pages in the range that
@@ -1620,7 +2064,24 @@ impl Pages {
             dirty.sort_unstable();
             dirty.dedup();
         }
-        stager.begin(dirty.len() + 64);
+        // The pages the handler stored to without opening them.
+        let mut emu: Vec<u32> = dirty
+            .iter()
+            .copied()
+            .filter(|&pg| info(pg as usize).is_some_and(|i| i.emu.load(Ordering::Acquire) & 1 != 0))
+            .collect();
+        if st.scanned {
+            for pg in 0..SHARED.npages.load(Ordering::Acquire) {
+                if word(pg).is_some_and(|w| w.load(Ordering::Relaxed) & STATE_MASK != FREE)
+                    && info(pg).is_some_and(|i| i.emu.load(Ordering::Acquire) & 1 != 0)
+                {
+                    emu.push(pg as u32);
+                }
+            }
+            emu.sort_unstable();
+            emu.dedup();
+        }
+        stager.begin(dirty.len() + emu.len() + 64);
         let mut back: Vec<u32> = Vec::with_capacity(dirty.len());
         for pg in dirty {
             if word(pg as usize).is_some_and(|w| {
@@ -1637,7 +2098,7 @@ impl Pages {
                 let bytes = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
-                stager.stage(pg, bytes);
+                stager.stage_masked(pg, bytes, info(pg as usize).map_or([0; 4], PageInfo::stale));
             }
         };
         for (s, e) in runs_of(&back) {
@@ -1645,8 +2106,11 @@ impl Pages {
             stage_run(stager, s, e);
         }
         st.staged = back.len() as u32;
+        st.emu_staged = self.stage_emulated(&emu, &back, stager);
+        st.staged += st.emu_staged;
         // 3. The pages of the frame.
-        for &(s, e) in &runs_w {
+        let masks = range_masks(&runs_w, written);
+        for (ri, &(s, e)) in runs_w.iter().enumerate() {
             for pg in s..e {
                 let Some(w) = word(pg as usize) else { continue };
                 let mut fresh = back.binary_search(&pg).is_ok();
@@ -1677,6 +2141,11 @@ impl Pages {
                         }
                     }
                 }
+                // The blocks the frame may write are stale from here on, in guest memory, until a copy from the
+                // mirror (the tag came first: a thread that copies the page waits for the frame, which is not done).
+                if let Some(i) = info(pg as usize) {
+                    i.or_stale(&masks[ri][(pg - s) as usize]);
+                }
             }
             // The pages lose all access first: from here a thread that touches a page faults, finds it tagged and
             // waits for the frame and copies the mirror. Only then is the pattern written, one page at a time, so a page
@@ -1684,11 +2153,20 @@ impl Pages {
             protect_pages(s, e, PROT_NONE, true);
             if let Some(pattern) = poison {
                 for pg in s..e {
+                    let stale = info(pg as usize).map_or([u64::MAX; 4], PageInfo::stale);
                     protect_pages(pg, pg + 1, PROT_RW, true);
-                    // SAFETY: the page is writable now and lies in guest memory.
-                    unsafe {
-                        std::slice::from_raw_parts_mut((base + u64::from(pg) * p) as *mut u32, (p / 4) as usize)
+                    for b in 0..(p / BLOCK) {
+                        if stale[(b / 64) as usize] >> (b % 64) & 1 == 0 {
+                            continue;
+                        }
+                        // SAFETY: the page is writable now and lies in guest memory; the block lies in the page.
+                        unsafe {
+                            std::slice::from_raw_parts_mut(
+                                (base + u64::from(pg) * p + b * BLOCK) as *mut u32,
+                                (BLOCK / 4) as usize,
+                            )
                             .fill(pattern);
+                        }
                     }
                     protect_pages(pg, pg + 1, PROT_NONE, true);
                 }
@@ -1785,6 +2263,9 @@ impl Pages {
             {
                 freed += 1;
                 member_bit(p as usize, false);
+                if let Some(i) = info(p as usize) {
+                    i.clear();
+                }
             }
         }
         let members = SHARED.members.load(Ordering::Acquire);
@@ -1827,6 +2308,10 @@ impl Pages {
             waits: [g(&SHARED.wait_n[0]), g(&SHARED.wait_n[1])],
             wait_ns: [g(&SHARED.wait_ns[0]), g(&SHARED.wait_ns[1])],
             wait_uncommitted: [g(&SHARED.wait_uncommitted[0]), g(&SHARED.wait_uncommitted[1])],
+            emulated: std::array::from_fn(|i| g(&SHARED.emu[i])),
+            emulated_ns: g(&SHARED.emu_ns),
+            fallbacks: std::array::from_fn(|i| g(&SHARED.fallback[i])),
+            emu_staged: g(&SHARED.emu_staged),
         }
     }
 
@@ -1852,6 +2337,11 @@ impl Pages {
     /// is emptied.
     pub fn take_top_between_pcs(&self, n: usize) -> Vec<(u64, u64)> {
         self.take_top(3, n)
+    }
+
+    /// The `n` program counters whose access to a page in flight was not emulated, most first. The table is emptied.
+    pub fn take_top_fallback_pcs(&self, n: usize) -> Vec<(u64, u64)> {
+        self.take_top(PC_FALLBACK, n)
     }
 
     fn take_top(&self, k: usize, n: usize) -> Vec<(u64, u64)> {
@@ -2173,14 +2663,21 @@ mod tests {
     #[derive(Default)]
     struct Collect {
         pages: Vec<(u32, Vec<u8>)>,
+        skips: Vec<(u32, [u64; 4])>,
     }
 
     impl Stager for Collect {
         fn begin(&mut self, _max: usize) {}
 
         fn stage(&mut self, page: u32, bytes: &[u8]) {
+            self.stage_masked(page, bytes, [0; 4]);
+        }
+
+        fn stage_masked(&mut self, page: u32, bytes: &[u8], skip: [u64; 4]) {
             self.pages.retain(|p| p.0 != page);
+            self.skips.retain(|p| p.0 != page);
             self.pages.push((page, bytes.to_vec()));
+            self.skips.push((page, skip));
         }
     }
 
@@ -2321,7 +2818,8 @@ mod tests {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = mirrored(4);
         let mut st = Collect::default();
-        let _ = pg.flush_mirrored(3, &[], &[(m.addr(0), 1)], None, &mut st);
+        // The frame may write bytes 0 to 127 (a copy from the mirror moves the 64-byte blocks of the written ranges).
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(0), 128)], None, &mut st);
         mir.store(0, 100, 5);
         let s0 = pg.stats();
         let base = m.base as usize;
@@ -2443,5 +2941,351 @@ mod tests {
         let r = vec![(1, 4), (7, 9)];
         assert!(in_runs(&r, 1) && in_runs(&r, 3) && in_runs(&r, 8));
         assert!(!in_runs(&r, 0) && !in_runs(&r, 4) && !in_runs(&r, 9));
+    }
+
+    /// An anonymous mapping (the alias needs real VM regions, not heap blocks).
+    struct Map {
+        base: *mut u8,
+        len: usize,
+    }
+
+    impl Map {
+        fn new(pages: u64) -> Self {
+            let len = (pages * P) as usize;
+            // SAFETY: an anonymous private mapping; the kernel picks the address.
+            let base = unsafe { mmap(std::ptr::null_mut(), len, PROT_RW, MAP_PRIVATE | MAP_ANON, -1, 0) };
+            assert!(base as isize != -1);
+            Self { base: base.cast(), len }
+        }
+
+        fn addr(&self, page: u64) -> u64 {
+            self.base as u64 + page * P
+        }
+
+        fn store(&self, page: u64, off: u64, v: u8) {
+            // SAFETY: inside the mapping.
+            unsafe { self.base.add((page * P + off) as usize).write_volatile(v) }
+        }
+
+        fn load(&self, page: u64, off: u64) -> u8 {
+            // SAFETY: inside the mapping.
+            unsafe { self.base.add((page * P + off) as usize).read_volatile() }
+        }
+    }
+
+    impl Drop for Map {
+        fn drop(&mut self) {
+            // SAFETY: the mapping came from `mmap`; make it writable first so nothing is left protected.
+            unsafe {
+                mprotect(self.base.cast(), self.len, PROT_RW);
+                munmap(self.base.cast(), self.len);
+            }
+        }
+    }
+
+    /// A tracker over a mapped guest and a mapped mirror, with the alias.
+    fn emulating(pages: u64) -> (Map, Map, &'static Pages) {
+        let m = Map::new(pages);
+        let mir = Map::new(pages);
+        let pg = Pages::global();
+        pg.attach(m.addr(0), pages * P);
+        pg.set_mirror(mir.addr(0));
+        pg.make_alias().expect("alias");
+        pg.set_emulation(true);
+        (m, mir, pg)
+    }
+
+    fn pat(i: u64) -> u8 {
+        (i * 7 + 3) as u8
+    }
+
+    #[test]
+    fn the_alias_is_the_same_memory_with_its_own_protection() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = emulating(4);
+        m.store(1, 9, 77);
+        let alias = pg.alias_page(1).expect("alias");
+        assert_eq!(alias[9], 77, "a store through the guest mapping shows in the alias");
+        // The guest page loses all access; the alias still reads and writes it.
+        protect_pages(1, 2, PROT_NONE, false);
+        let alias_w = alias.as_ptr().cast_mut();
+        // SAFETY: inside the alias page, which is writable.
+        unsafe { alias_w.add(10).write_volatile(78) };
+        protect_pages(1, 2, PROT_RW, false);
+        assert_eq!(m.load(1, 10), 78, "a store through the alias shows in guest memory");
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn written_ranges_become_blocks_rounded_outward() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = emulating(8);
+        let ranges = [
+            (m.addr(1) + 100, 8),               // block 1
+            (m.addr(1) + 127, 2),               // blocks 1 and 2
+            (m.addr(2) + 16, 3 * P),            // from block 0 of page 2 to block 0 of page 5, partly
+            (m.addr(6), 1),                     // block 0 of page 6
+        ];
+        let runs = span_runs(&ranges);
+        let masks = range_masks(&runs, &ranges);
+        assert_eq!(runs, vec![(1, 6), (6, 7)].into_iter().fold(Vec::new(), |mut v: Vec<(u32, u32)>, r| {
+            match v.last_mut() {
+                Some(l) if l.1 == r.0 => l.1 = r.1,
+                _ => v.push(r),
+            }
+            v
+        }));
+        let at = |pg: u32| masks[0][(pg - 1) as usize];
+        assert_eq!(at(1), [0b110, 0, 0, 0]);
+        assert_eq!(at(2), [u64::MAX; 4]);
+        assert_eq!(at(3), [u64::MAX; 4]);
+        assert_eq!(at(4), [u64::MAX; 4]);
+        assert_eq!(at(5), [0b1, 0, 0, 0], "the range ends 16 bytes into page 5");
+        assert_eq!(masks[0][5], [0b1, 0, 0, 0]);
+        pg.set_mirror(0);
+    }
+
+    /// Loads and stores of several forms at `r` (a region of 256 bytes), from a thread of the test. Returns what the
+    /// loads got.
+    ///
+    /// # Safety
+    /// `r` must be valid for 256 bytes of reads and writes.
+    #[allow(clippy::type_complexity)]
+    unsafe fn exercise(r: *mut u8) -> (u64, u64, u64, i64, u64, u64, u64, u64, u64, u64) {
+        use std::arch::asm;
+        let (x0, x1, x2, sw, b, qlo, qhi, d, pre, post): (u64, u64, u64, i64, u64, u64, u64, u64, u64, u64);
+        let (mut p1, mut p2) = (r, r);
+        // SAFETY: per the caller, the accesses lie inside the region; the registers are declared.
+        unsafe {
+            asm!(
+                "ldr {x0}, [{r}, #0]",
+                "ldp {x1}, {x2}, [{r}, #8]",
+                "ldrsw {sw}, [{r}, #24]",
+                "ldrb {b:w}, [{r}, #28]",
+                "ldr q0, [{r}, #32]",
+                "fmov {qlo}, d0",
+                "mov {qhi}, v0.d[1]",
+                "ldr d1, [{r}, #48]",
+                "fmov {d}, d1",
+                "ldr {pre}, [{p1}, #56]!",
+                "ldr {post}, [{p2}], #8",
+                r = in(reg) r,
+                p1 = inout(reg) p1,
+                p2 = inout(reg) p2,
+                x0 = out(reg) x0, x1 = out(reg) x1, x2 = out(reg) x2, sw = out(reg) sw, b = out(reg) b,
+                qlo = out(reg) qlo, qhi = out(reg) qhi, d = out(reg) d, pre = out(reg) pre, post = out(reg) post,
+                out("v0") _, out("v1") _,
+                options(nostack),
+            );
+        }
+        assert_eq!(p1 as usize, r as usize + 56, "the pre-index wrote the base back");
+        assert_eq!(p2 as usize, r as usize + 8, "the post-index wrote the base back");
+        // Stores into the second half of the region.
+        let (s0, s1, s2) = (0x1122_3344_5566_7788u64, 0x99aa_bbcc_ddee_ff00u64, 0xa5u64);
+        // SAFETY: as above.
+        unsafe {
+            asm!(
+                "str {s0}, [{r}, #128]",
+                "stp {s0}, {s1}, [{r}, #136]",
+                "fmov d0, {s0}",
+                "mov v0.d[1], {s1}",
+                "str q0, [{r}, #160]",
+                "strh {s2:w}, [{r}, #176]",
+                "stur {s0:w}, [{r}, #181]",
+                "stp q0, q0, [{r}, #192]",
+                "str d0, [{r}, #224]",
+                "strb {s2:w}, [{r}, #232]",
+                r = in(reg) r,
+                s0 = in(reg) s0, s1 = in(reg) s1, s2 = in(reg) s2,
+                out("v0") _,
+                options(nostack),
+            );
+        }
+        (x0, x1, x2, sw, b, qlo, qhi, d, pre, post)
+    }
+
+    fn le(bytes: impl Fn(u64) -> u8, at: u64, n: u64) -> u64 {
+        (0..n).fold(0u64, |a, k| a | u64::from(bytes(at + k)) << (8 * k))
+    }
+
+    #[test]
+    fn accesses_outside_the_written_bytes_are_done_by_the_handler_on_several_threads_without_a_wait() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = emulating(4);
+        for i in 0..P {
+            m.store(1, i, pat(i));
+        }
+        let mut st = Collect::default();
+        // The frame may write the first 200 bytes of page 1: blocks 0 to 3.
+        let f = pg.flush_mirrored(1, &[], &[(m.addr(1), 200)], None, &mut st);
+        assert_eq!((f.new_members, f.written), (1, 1));
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(1)");
+        let s0 = pg.stats();
+        let base = m.addr(1) as usize;
+        let handles: Vec<_> = (0..4usize)
+            .map(|t| {
+                std::thread::spawn(move || {
+                    let off = 1024 + 1024 * t as u64;
+                    let mut last = None;
+                    for _ in 0..50 {
+                        // SAFETY: the region lies inside page 1 of the test mapping, which outlives the joined thread.
+                        last = Some(unsafe { exercise((base + off as usize) as *mut u8) });
+                    }
+                    (off, last)
+                })
+            })
+            .collect();
+        for h in handles {
+            let (off, last) = h.join().unwrap();
+            let (x0, x1, x2, sw, b, qlo, qhi, d, pre, post) = last.unwrap();
+            let g = |i: u64| pat(off + i);
+            assert_eq!(x0, le(g, 0, 8));
+            assert_eq!((x1, x2), (le(g, 8, 8), le(g, 16, 8)));
+            assert_eq!(sw, i64::from(le(g, 24, 4) as u32 as i32));
+            assert_eq!(b, u64::from(g(28)));
+            assert_eq!((qlo, qhi), (le(g, 32, 8), le(g, 40, 8)));
+            assert_eq!(d, le(g, 48, 8));
+            assert_eq!(pre, le(g, 56, 8));
+            assert_eq!(post, le(g, 0, 8), "the post-index load reads before the base moves");
+            // The stores landed in guest memory (through the alias).
+            let alias = pg.alias_page(1).unwrap();
+            let at = |i: u64| alias[(off + i) as usize];
+            let word = |i: u64, n: u64| le(at, i, n);
+            assert_eq!(word(128, 8), 0x1122_3344_5566_7788);
+            assert_eq!(word(136, 8), 0x1122_3344_5566_7788);
+            assert_eq!(word(144, 8), 0x99aa_bbcc_ddee_ff00);
+            assert_eq!(word(160, 8), 0x1122_3344_5566_7788);
+            assert_eq!(word(168, 8), 0x99aa_bbcc_ddee_ff00);
+            assert_eq!(word(176, 2), 0x00a5);
+            assert_eq!(word(181, 4), 0x5566_7788);
+            assert_eq!(word(192, 8), 0x1122_3344_5566_7788);
+            assert_eq!(word(216, 8), 0x99aa_bbcc_ddee_ff00);
+            assert_eq!(word(224, 8), 0x1122_3344_5566_7788);
+            assert_eq!(at(232), 0xa5);
+        }
+        let s1 = pg.stats();
+        let total = |s: &PageStats| s.emulated.iter().sum::<u64>();
+        assert_eq!(total(&s1) - total(&s0), 4 * 50 * 16, "every access was done by the handler");
+        assert_eq!(s1.fallbacks, s0.fallbacks, "none fell back");
+        assert_eq!(s1.writer_waits, s0.writer_waits, "no wait for the writer happened");
+        assert_eq!(s1.waits, s0.waits);
+        assert_eq!(s1.faults, s0.faults, "the faults were not served by the ordinary path");
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(1)", "the page stayed closed");
+        // The GPU wrote the first 200 bytes of the mirror meanwhile.
+        for i in 0..200 {
+            mir.store(1, i, 0xee);
+        }
+        // The next flush stages the page with the mask of the stale blocks, and the stores are in the bytes.
+        let mut st2 = Collect::default();
+        let f2 = pg.flush_mirrored(2, &[], &[], None, &mut st2);
+        assert_eq!((f2.staged, f2.emu_staged), (1, 1));
+        assert_eq!(st2.skips, vec![(1, [0b1111, 0, 0, 0])]);
+        assert_eq!(st2.pages[0].1[(1024 + 128) as usize], 0x88, "the staged bytes hold the CPU's stores");
+        assert_eq!(pg.stats().emu_staged - s1.emu_staged, 1);
+        // Nothing new was stored: the page is not staged again.
+        let mut st3 = Collect::default();
+        let f3 = pg.flush_mirrored(3, &[], &[], None, &mut st3);
+        assert_eq!(f3.staged, 0);
+        // The frame completes; a read copies the written blocks only: the stores stay, the GPU's bytes arrive.
+        pg.complete(3);
+        let sync0 = pg.stats().synced;
+        assert_eq!(m.load(1, 5), 0xee, "the GPU's byte is copied back");
+        assert_eq!(m.load(1, 199), 0xee);
+        assert_eq!(m.load(1, 200), pat(200), "a byte outside the blocks is not touched");
+        for t in 0..4u64 {
+            let off = 1024 + 1024 * t;
+            assert_eq!(m.load(1, off + 128), 0x88, "the store survives the copy back");
+            assert_eq!(m.load(1, off + 232), 0xa5);
+            assert_eq!(m.load(1, off + 8), pat(off + 8), "so do the bytes that were only read");
+        }
+        assert_eq!(pg.stats().synced - sync0, 1);
+        assert_eq!(pg.state_of(m.addr(1)), "clean");
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn an_access_that_touches_the_written_bytes_waits_and_is_counted() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = emulating(4);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(7, &[], &[(m.addr(1) + 64, 64)], None, &mut st);
+        mir.store(1, 70, 1);
+        let s0 = pg.stats();
+        let base = m.addr(1) as usize;
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let d2 = done.clone();
+        // An 8-byte load whose last byte is in the written block (bytes 56 to 63 are block 0, 64 to 127 block 1).
+        let reader = std::thread::spawn(move || {
+            let v: u64;
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread.
+            unsafe {
+                std::arch::asm!("ldr {v}, [{p}, #60]", p = in(reg) base, v = out(reg) v, options(nostack));
+            }
+            d2.store(true, Ordering::Release);
+            v
+        });
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(!done.load(Ordering::Acquire), "an access that touches written bytes waits for the frame");
+        mir.store(1, 66, 0x42);
+        pg.complete(7);
+        let v = reader.join().unwrap();
+        assert_eq!((v >> 48) & 0xff, 0x42, "the load saw the GPU's byte");
+        let s1 = pg.stats();
+        assert_eq!(s1.fallbacks[Reason::Overlap as usize] - s0.fallbacks[Reason::Overlap as usize], 1);
+        assert_eq!(s1.writer_waits - s0.writer_waits, 1);
+        assert_eq!(s1.emulated, s0.emulated);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn what_cannot_be_emulated_waits_and_is_counted_by_class() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = emulating(4);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(9, &[], &[(m.addr(1), 64)], None, &mut st);
+        mir.store(1, 0, 1);
+        let s0 = pg.stats();
+        let base = m.addr(1) as usize + 1024;
+        let reader = std::thread::spawn(move || {
+            let v: u64;
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread; an exclusive load of an
+            // aligned word.
+            unsafe {
+                std::arch::asm!("ldxr {v}, [{p}]", "clrex", p = in(reg) base, v = out(reg) v, options(nostack));
+            }
+            v
+        });
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        pg.complete(9);
+        let _ = reader.join().unwrap();
+        let s1 = pg.stats();
+        assert_eq!(s1.fallbacks[Reason::Exclusive as usize] - s0.fallbacks[Reason::Exclusive as usize], 1);
+        assert_eq!(s1.writer_waits - s0.writer_waits, 1, "it waited for the writer");
+        assert_eq!(s1.emulated, s0.emulated);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn with_the_emulation_off_every_access_waits() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = emulating(4);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(11, &[], &[(m.addr(1), 64)], None, &mut st);
+        pg.set_emulation(false);
+        assert!(!pg.emulating());
+        let base = m.addr(1) as usize + 1024;
+        let s0 = pg.stats();
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread.
+            unsafe { (base as *const u8).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        pg.complete(11);
+        reader.join().unwrap();
+        let s1 = pg.stats();
+        assert_eq!(s1.writer_waits - s0.writer_waits, 1);
+        assert_eq!(s1.emulated, s0.emulated);
+        pg.set_emulation(true);
+        pg.set_mirror(0);
     }
 }

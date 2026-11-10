@@ -37,6 +37,12 @@
 //! exception is a flush that ran submits before the CPU signals they wait for ([`late_expect`], [`late_stage`]). The overlap
 //! and the renamer are off. Without the variable nothing here runs.
 //!
+//! Step 4 keeps the CPU from waiting for accesses that are not in the bytes a frame writes. A page that a frame writes knows
+//! which 64-byte blocks the frames since its last copy may have written, and the fault handler of `nxkit-metal` does a load
+//! or store outside those blocks itself, through a second mapping of guest memory. The stores reach the mirror at the next flush:
+//! the page is staged with the mask of its stale blocks (`Stager::stage_masked`) and the copy-in pass skips those blocks
+//! ([`CopyJob`]).
+//!
 //! The counters print every [`REPORT_EVERY`] frames (`NXKIT_DIAG=private`, also with the variable set).
 
 use std::collections::VecDeque;
@@ -46,8 +52,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use nxkit_metal::{
-    AddressMap, ArgumentTable, CommandBuffer, ComputeCommand, Context, DataBuffer, Dependency, FaultKind,
-    FaultOrigin, GuestMemory, Mirror, PageStats, Pages, Scope, Scratch, Stager, Stages, SubmittedBatch,
+    AccessForm, AddressMap, ArgumentTable, CommandBuffer, ComputeCommand, Context, DataBuffer, Dependency, FaultKind,
+    FallbackReason, FaultOrigin, GuestMemory, Mirror, PageStats, Pages, Scope, Scratch, Stager, Stages, SubmittedBatch,
     Visibility,
 };
 
@@ -364,6 +370,21 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
         match Mirror::new(ctx, len) {
             Ok(m) => {
                 pages.set_mirror(m.host_base());
+                match pages.make_alias() {
+                    Ok(()) => {
+                        let off = crate::knob("privnoemu");
+                        pages.set_emulation(!off);
+                        eprintln!(
+                            "nxkit-gpu: NXKIT_PRIVATE=1: accesses of the CPU to a page that a frame writes, outside the bytes it \
+                             writes, are done by the fault handler through a second mapping of guest memory{}",
+                            if off { " (off: the knob privnoemu)" } else { "" }
+                        );
+                    }
+                    Err(e) => eprintln!(
+                        "nxkit-gpu: NXKIT_PRIVATE=1: no second mapping of guest memory ({e}); every CPU access to a page that a \
+                         frame writes waits for the frame"
+                    ),
+                }
                 *locked(&state().mirror) = Some(MirrorState {
                     ctx: ctx.clone(),
                     mirror: m,
@@ -903,6 +924,8 @@ struct Sink<'a> {
     cap: usize,
     slots: Vec<(u32, u32)>,
     index: FastMap<u32, u32>,
+    /// The stale blocks of the pages staged with a mask.
+    skips: FastMap<u32, [u64; 4]>,
     failed: bool,
 }
 
@@ -915,8 +938,17 @@ impl<'a> Sink<'a> {
             cap: 0,
             slots: Vec::new(),
             index: FastMap::default(),
+            skips: FastMap::default(),
             failed: false,
         }
+    }
+
+    /// What the sink took: the buffer, the slots, the masks sorted by page, and whether it failed.
+    #[allow(clippy::type_complexity)]
+    fn finish(&mut self) -> (Option<Arc<DataBuffer>>, Vec<(u32, u32)>, Vec<(u32, [u64; 4])>, bool) {
+        let mut skips: Vec<(u32, [u64; 4])> = self.skips.drain().collect();
+        skips.sort_unstable_by_key(|s| s.0);
+        (self.buf.take(), std::mem::take(&mut self.slots), skips, self.failed)
     }
 
     fn grow(&mut self) {
@@ -958,8 +990,17 @@ impl Stager for Sink<'_> {
     }
 
     fn stage(&mut self, page: u32, bytes: &[u8]) {
+        self.stage_masked(page, bytes, [0; 4]);
+    }
+
+    fn stage_masked(&mut self, page: u32, bytes: &[u8], skip: [u64; 4]) {
         if self.failed {
             return;
+        }
+        if skip.iter().any(|w| *w != 0) {
+            self.skips.insert(page, skip);
+        } else {
+            self.skips.remove(&page);
         }
         let slot = match self.index.get(&page) {
             Some(&s) => s,
@@ -1065,7 +1106,7 @@ fn flush_mirror(
     let poison = poison_on().then_some(POISON);
     let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
     let f = pages.flush_mirrored(fence, &member_ranges, &written, poison, &mut sink);
-    let (buf, slots, failed) = (sink.buf.take(), std::mem::take(&mut sink.slots), sink.failed);
+    let (buf, slots, skips, failed) = sink.finish();
     drop(sink);
     if failed {
         static SAID: std::sync::Once = std::sync::Once::new();
@@ -1076,7 +1117,7 @@ fn flush_mirror(
             ms.pool.busy.push((fence, b.clone()));
             let mut slots = slots;
             slots.sort_unstable();
-            Some(Staged { buf: b, slots })
+            Some(Staged { buf: b, slots, skips })
         }
         Some(b) => {
             ms.pool.free.push(b);
@@ -1183,24 +1224,34 @@ fn flush_mirror(
     Some(overlay)
 }
 
-/// The kernel that copies staged pages into the mirror: one page per 256 threads, 16 bytes each, four times.
+/// One page of the copy into the mirror: the mirror address, the staging address, and the 64-byte blocks to leave alone
+/// (bit `b % 64` of word `b / 64`; they hold what a frame in flight writes).
+pub(crate) type CopyJob = (u64, u64, [u64; 4]);
+
+/// The kernel that copies staged pages into the mirror: one page per 256 threads, 16 bytes each, four times, except the
+/// blocks of 64 bytes that the job skips.
 const COPY_IN_MSL: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 struct page_job {
     device uint4 *dst;
     device const uint4 *src;
+    ulong skip[4];
 };
 kernel void nxkit_private_in(device const page_job *jobs [[buffer(0)]], uint t [[thread_position_in_grid]]) {
     page_job j = jobs[t >> 8];
     uint lane = t & 255u;
-    for (uint i = lane; i < 1024u; i += 256u) j.dst[i] = j.src[i];
+    for (uint i = lane; i < 1024u; i += 256u) {
+        uint b = i >> 2;
+        if (((j.skip[b >> 6] >> (b & 63u)) & 1ul) != 0ul) continue;
+        j.dst[i] = j.src[i];
+    }
 }
 "#;
 
-/// The `(mirror address, staging address)` of every page that the frame's first command buffer copies, and the number of
+/// The [`CopyJob`] of every page that the frame's first command buffer copies, and the number of
 /// staged pages whose page is no longer a member of the view (they are dropped).
-pub(crate) fn copy_in_jobs(o: &GuestOverlay) -> (Vec<(u64, u64)>, u32) {
+pub(crate) fn copy_in_jobs(o: &GuestOverlay) -> (Vec<CopyJob>, u32) {
     let Some(st) = o.staged() else {
         return (Vec::new(), 0);
     };
@@ -1212,7 +1263,7 @@ pub(crate) fn copy_in_jobs(o: &GuestOverlay) -> (Vec<(u64, u64)>, u32) {
         .filter_map(|&(page, slot)| {
             let va = o.va_base() + u64::from(page) * PAGE;
             match o.locate(va) {
-                Some((_, real, _)) => Some((real, base + u64::from(slot) * PAGE)),
+                Some((_, real, _)) => Some((real, base + u64::from(slot) * PAGE, st.skip_of(page).unwrap_or([0; 4]))),
                 None => {
                     lost += 1;
                     None
@@ -1230,14 +1281,19 @@ pub(crate) fn encode_copy_in(
     cb: &mut CommandBuffer,
     table: &ArgumentTable,
     scratch: &Scratch,
-    jobs: &[(u64, u64)],
+    jobs: &[CopyJob],
 ) -> Result<u32, Skip> {
     if jobs.is_empty() {
         return Ok(0);
     }
     let bytes: Vec<u8> = jobs
         .iter()
-        .flat_map(|&(dst, src)| dst.to_le_bytes().into_iter().chain(src.to_le_bytes()))
+        .flat_map(|&(dst, src, skip)| {
+            dst.to_le_bytes()
+                .into_iter()
+                .chain(src.to_le_bytes())
+                .chain(skip.into_iter().flat_map(u64::to_le_bytes))
+        })
         .collect();
     let job = scratch.push(&bytes).map_err(|_| Skip::Buffer)?;
     let pipeline = pipelines.host_compute("nxkit-private", COPY_IN_MSL, "nxkit_private_in")?;
@@ -1462,7 +1518,7 @@ fn report_in_flight(w: &mut Window) {
 }
 
 /// A staging buffer and the `(page, slot)` of the pages in it.
-type Captured = (Arc<DataBuffer>, Vec<(u32, u32)>);
+type Captured = (Arc<DataBuffer>, Vec<(u32, u32)>, Vec<(u32, [u64; 4])>);
 
 /// The byte ranges a flushed frame reads (with the kind of binding), may write, and may write by source, for the report.
 type DiagSets = (Vec<(u64, u64, u8)>, Vec<(u64, u64)>, Vec<(u64, u64, u8)>);
@@ -1513,7 +1569,7 @@ fn late_capture(fence: u64, fr: &mut LateFrame) {
     let Some(ms) = guard.as_mut() else { return };
     let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
     Pages::global().flush_late(&mut sink);
-    let (buf, slots, failed) = (sink.buf.take(), std::mem::take(&mut sink.slots), sink.failed);
+    let (buf, slots, skips, failed) = sink.finish();
     drop(sink);
     let Some(b) = buf else { return };
     if slots.is_empty() || failed {
@@ -1523,7 +1579,7 @@ fn late_capture(fence: u64, fr: &mut LateFrame) {
     ms.pool.busy.push((fence, b.clone()));
     drop(guard);
     locked(&state().window).late_staged += slots.len() as u64;
-    fr.staged = Some((b, slots));
+    fr.staged = Some((b, slots, skips));
 }
 
 /// The flush of `fence` counted `n` CPU signals that its forced submits wait for (before the flush captures anything, so a
@@ -1551,7 +1607,7 @@ pub(crate) fn late_signal(fence: u64) {
     }
 }
 
-/// The jobs `(mirror address, staging address)` of a second copy-in pass for the frame of `o`, to encode before its first
+/// The jobs ([`CopyJob`]) of a second copy-in pass for the frame of `o`, to encode before its first
 /// command buffer is committed:
 ///
 /// - a frame whose flush ran submits before the CPU signals they wait for waits here (at most [`LATE_WAIT`]) until the
@@ -1559,7 +1615,7 @@ pub(crate) fn late_signal(fence: u64) {
 ///   them, which the flush could not capture;
 /// - with the knob `privlatestage`, every frame gets the pages the CPU wrote since the flush, whatever they were written
 ///   for (for comparing; with the CPU ahead of the encoder it also hands the frame the data of the next one).
-pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<(u64, u64)> {
+pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<CopyJob> {
     if !mirrored() {
         return Vec::new();
     }
@@ -1602,7 +1658,7 @@ pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<(u64, u64)> {
             let fence = o.frame();
             let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
             Pages::global().flush_late(&mut sink);
-            let (buf, slots, failed) = (sink.buf.take(), std::mem::take(&mut sink.slots), sink.failed);
+            let (buf, slots, skips, failed) = sink.finish();
             drop(sink);
             if let Some(b) = buf {
                 if slots.is_empty() || failed {
@@ -1611,18 +1667,21 @@ pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<(u64, u64)> {
                     ms.pool.busy.push((fence, b.clone()));
                     drop(guard);
                     locked(&state().window).late_staged += slots.len() as u64;
-                    taken.push((b, slots));
+                    taken.push((b, slots, skips));
                 }
             }
         }
     }
     taken
         .iter()
-        .flat_map(|(b, slots)| {
+        .flat_map(|(b, slots, skips)| {
             let base = b.gpu_address();
             slots.iter().filter_map(move |&(page, slot)| {
+                let skip = skips
+                    .binary_search_by_key(&page, |s| s.0)
+                    .map_or([0; 4], |i| skips[i].1);
                 o.locate(o.va_base() + u64::from(page) * PAGE)
-                    .map(|(_, real, _)| (real, base + u64::from(slot) * PAGE))
+                    .map(|(_, real, _)| (real, base + u64::from(slot) * PAGE, skip))
             })
         })
         .collect()
@@ -1771,6 +1830,51 @@ fn print_report(frame: u64) {
             waits(0),
             waits(1),
         );
+        if pages.emulating() {
+            let per = |f: AccessForm| now.emulated[f as usize] - base.emulated[f as usize];
+            let part = |loads: bool| {
+                let list: Vec<String> = AccessForm::ALL
+                    .iter()
+                    .filter(|f| f.is_load() == loads && per(**f) > 0)
+                    .map(|f| format!("{} {:.2}", f.name(), per(*f) as f64 / n))
+                    .collect();
+                let sum: u64 = AccessForm::ALL.iter().filter(|f| f.is_load() == loads).map(|f| per(*f)).sum();
+                format!(
+                    "{:.2} ({})",
+                    sum as f64 / n,
+                    if list.is_empty() { "none".to_string() } else { list.join(", ") }
+                )
+            };
+            let missed: Vec<String> = FallbackReason::ALL
+                .iter()
+                .filter(|r| now.fallbacks[**r as usize] > base.fallbacks[**r as usize])
+                .map(|r| {
+                    format!(
+                        "{} {:.2}",
+                        r.name(),
+                        (now.fallbacks[*r as usize] - base.fallbacks[*r as usize]) as f64 / n
+                    )
+                })
+                .collect();
+            eprintln!(
+                "DIAG private emulated accesses per frame (outside the bytes a frame in flight writes, done in the handler \
+                 without a wait): loads {}; stores {}; {:.3} ms in the handler for them; pages the flush staged for the \
+                 stores {:.2}; not emulated, they waited for the writer: {}",
+                part(true),
+                part(false),
+                (now.emulated_ns - base.emulated_ns) as f64 / n / 1e6,
+                (now.emu_staged - base.emu_staged) as f64 / n,
+                if missed.is_empty() { "none".to_string() } else { missed.join(", ") },
+            );
+            let tops = pages.take_top_fallback_pcs(TOP);
+            if !tops.is_empty() {
+                let line: Vec<String> = tops
+                    .iter()
+                    .map(|&(pc, c)| format!("{} {:.1}", nxkit_metal::name_pc(pc), c as f64 / n))
+                    .collect();
+                eprintln!("DIAG private top program counters, not emulated (per frame): {}", line.join(", "));
+            }
+        }
         eprintln!(
             "DIAG private writes to member pages per frame (first write of a page): after the GPU was done or before the \
              next flush {:.1}, between the flush and the commit {:.1}, after the commit before the GPU was done {:.1}; \
@@ -2077,6 +2181,77 @@ mod tests {
         assert_eq!(&m[..8], &[5; 8], "the GPU's bytes are kept");
         assert_eq!(&m[8..], &[6; 8], "and the CPU's landed");
         encoded(2, None);
+        FORCE.with(|f| f.set(None));
+    }
+
+    #[test]
+    fn a_cpu_store_outside_the_bytes_a_frame_writes_needs_no_wait_and_reaches_the_next_frame_beside_the_gpus_bytes() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
+            return;
+        };
+        if !Pages::global().emulating() {
+            eprintln!("skipped: no second mapping of guest memory here");
+            return;
+        }
+        let page = PAGE;
+        let addr = VA + 50 * page;
+        let detail = dispatch(addr, 0x100);
+        // Frame 1 writes the first 0x100 bytes of page 50; the GPU writes eight of them in the mirror.
+        let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
+        let pools = pools_of(&g, o1.clone());
+        let loc = pools.resolve(addr, 0x100).unwrap();
+        o1.runs()[loc.run as usize].mem.write(loc.offset, &[5; 8]).unwrap();
+        // The frame is in flight. The CPU stores and loads elsewhere in the page and does not wait.
+        let s0 = Pages::global().stats();
+        let t0 = Instant::now();
+        g.mem.write(50 * page + 0x2000, &[9; 8]).unwrap();
+        let mut b = [0u8; 8];
+        g.mem.read(50 * page + 0x3000, &mut b).unwrap();
+        g.mem.read(50 * page + 0x2000, &mut b).unwrap();
+        assert_eq!(b, [9; 8], "a load sees the store");
+        assert!(t0.elapsed() < std::time::Duration::from_millis(500), "no wait for the frame");
+        let s1 = Pages::global().stats();
+        assert_eq!(s1.writer_waits, s0.writer_waits);
+        assert!(s1.emulated.iter().sum::<u64>() > s0.emulated.iter().sum::<u64>(), "the handler did them");
+        // Frame 2 stages the page without the blocks that frame 1 writes.
+        let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
+        let staged = o2.staged().expect("a staged page");
+        assert_eq!(staged.slots.len(), 1);
+        assert_eq!(staged.skip_of(50), Some([0b1111, 0, 0, 0]));
+        // The frame's view: the CPU's bytes from the staging buffer, the GPU's from the mirror.
+        let mut v = [0u8; 8];
+        assert!(o2.read(addr + 0x2000, &mut v));
+        assert_eq!(v, [9; 8]);
+        assert!(o2.read(addr, &mut v));
+        assert_eq!(v, [5; 8]);
+        let (jobs, lost) = copy_in_jobs(&o2);
+        assert_eq!((jobs.len(), lost), (1, 0));
+        assert_eq!(jobs[0].2, [0b1111, 0, 0, 0]);
+        let scratch = Scratch::new(&g.ctx, 1 << 16).unwrap();
+        let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
+        let mut ring = nxkit_metal::FrameRing::new(&g.ctx).unwrap();
+        let mut frame = ring.begin().unwrap();
+        assert_eq!(encode_copy_in(&pipelines, frame.commands(), &table, &scratch, &jobs).unwrap(), 1);
+        g.ctx.commit_residency();
+        frame.submit().unwrap().wait().unwrap();
+        let pools2 = pools_of(&g, o2.clone());
+        let loc2 = pools2.resolve(addr, 0x100).unwrap();
+        let run2 = &o2.runs()[loc2.run as usize];
+        let mut m = [0u8; 8];
+        run2.mem.read(loc2.offset, &mut m).unwrap();
+        assert_eq!(m, [5; 8], "the GPU's bytes were not overwritten by the stale guest bytes");
+        let loc3 = pools2.resolve(addr + 0x2000, 8).unwrap();
+        o2.runs()[loc3.run as usize].mem.read(loc3.offset, &mut m).unwrap();
+        assert_eq!(m, [9; 8], "the CPU's store landed in the mirror");
+        encoded(1, None);
+        // After frame 1 the CPU reads its bytes: the GPU's arrive, the store stays.
+        encoded(2, None);
+        g.mem.read(50 * page, &mut b).unwrap();
+        assert_eq!(b, [5; 8]);
+        g.mem.read(50 * page + 0x2000, &mut b).unwrap();
+        assert_eq!(b, [9; 8]);
         FORCE.with(|f| f.set(None));
     }
 

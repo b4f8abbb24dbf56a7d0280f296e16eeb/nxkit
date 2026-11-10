@@ -56,6 +56,9 @@ const KNOBS: &[&str] = &[
     // With `NXKIT_PRIVATE=1`, the pages that the CPU wrote between the flush of a frame and the commit of its first
     // command buffer are staged again and copied into the mirror at the end of that buffer.
     "privlatestage",
+    // With `NXKIT_PRIVATE=1`, the fault handler does not do the CPU's accesses to a page that a frame writes (outside the bytes
+    // it writes) itself: every such access waits for the frame, as in step 3.
+    "privnoemu",
     // With `NXKIT_PRIVATE=1`, a wait for a fence waits for the GPU in full (the behaviour of step 2) and the walk takes no
     // copies of the bound ranges that are not private.
     "privhonest",

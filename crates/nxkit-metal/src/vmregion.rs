@@ -90,6 +90,11 @@ impl VmRegion {
 
 /// The VM region that holds `addr`, or `None` when the address is not mapped.
 pub fn vm_region(addr: u64) -> Option<VmRegion> {
+    region_at_or_after(addr).filter(|r| r.start <= addr)
+}
+
+/// The first VM region that ends after `addr` (it holds `addr` or starts later), or `None` when there is none.
+pub(crate) fn region_at_or_after(addr: u64) -> Option<VmRegion> {
     let mut at = addr;
     let mut depth = 0u32;
     loop {
@@ -114,9 +119,6 @@ pub fn vm_region(addr: u64) -> Option<VmRegion> {
         if info.is_submap != 0 && depth < MAX_DEPTH {
             depth += 1;
             continue;
-        }
-        if at > addr {
-            return None;
         }
         return Some(VmRegion {
             start: at,

@@ -105,8 +105,8 @@ pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use mirror::{Ensured, Mirror, MirrorRun, MirrorView, SEGMENT as MIRROR_SEGMENT};
 pub use pages::{
-    FaultKind, FaultOrigin, FlushStats, InternalThread, PageStats, Pages, Stager, mark_internal_thread, name_pc,
-    set_pc_namer,
+    FaultKind, FaultOrigin, FlushStats, Form as AccessForm, InternalThread, PageStats, Pages, Reason as FallbackReason,
+    Stager, mark_internal_thread, name_pc, set_pc_namer,
 };
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
 pub use pipeline::{

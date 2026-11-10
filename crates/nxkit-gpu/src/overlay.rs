@@ -56,12 +56,25 @@ pub struct Staged {
     pub buf: Arc<DataBuffer>,
     /// `(page, slot)` sorted by page: the bytes of the page are at `slot * PAGE` in the buffer.
     pub slots: Vec<(u32, u32)>,
+    /// `(page, mask)` sorted by page, for the staged pages whose bytes in some 64-byte blocks are stale (a frame in flight
+    /// may have written them): bit `b % 64` of word `b / 64` is block `b`. The copy into the mirror leaves those blocks
+    /// alone, and a read of the frame's view takes them from the mirror.
+    pub skips: Vec<(u32, [u64; 4])>,
 }
+
+/// The bytes per block of a skip mask.
+pub(crate) const BLOCK: u64 = 64;
 
 impl Staged {
     fn slot_of(&self, page: u32) -> Option<u32> {
         let i = self.slots.binary_search_by_key(&page, |s| s.0).ok()?;
         Some(self.slots[i].1)
+    }
+
+    /// The blocks of `page` that the copy into the mirror skips, None when it copies the whole page.
+    pub(crate) fn skip_of(&self, page: u32) -> Option<[u64; 4]> {
+        let i = self.skips.binary_search_by_key(&page, |s| s.0).ok()?;
+        Some(self.skips[i].1).filter(|m| m.iter().any(|w| *w != 0))
     }
 }
 
@@ -280,10 +293,30 @@ impl<B: Backing> Overlay<B> {
                 .as_ref()
                 .and_then(|s| s.slot_of(page as u32).map(|k| (s, k)));
             let ok = match slot {
-                Some((s, k)) => s
-                    .buf
-                    .read(u64::from(k) * PAGE + off as u64, &mut out[done..done + n])
-                    .is_ok(),
+                Some((s, k)) => match s.skip_of(page as u32) {
+                    // A page staged with stale blocks: those come from the mirror, the others from the staging buffer.
+                    Some(skip) => {
+                        let mut ok = true;
+                        let mut x = off as u64;
+                        let end = off as u64 + n as u64;
+                        while x < end && ok {
+                            let b = x / BLOCK;
+                            let upto = ((b + 1) * BLOCK).min(end);
+                            let piece = &mut out[done + (x - off as u64) as usize..done + (upto - off as u64) as usize];
+                            ok = if skip[(b / 64) as usize] >> (b % 64) & 1 != 0 {
+                                mirror.read(at - self.va_base + (x - off as u64), piece).is_ok()
+                            } else {
+                                s.buf.read(u64::from(k) * PAGE + x, piece).is_ok()
+                            };
+                            x = upto;
+                        }
+                        ok
+                    }
+                    None => s
+                        .buf
+                        .read(u64::from(k) * PAGE + off as u64, &mut out[done..done + n])
+                        .is_ok(),
+                },
                 None => mirror
                     .read(at - self.va_base, &mut out[done..done + n])
                     .is_ok(),
@@ -412,6 +445,7 @@ mod tests {
         o.staged = Some(Staged {
             buf: Arc::new(buf),
             slots: vec![(2, 1)],
+            skips: Vec::new(),
         });
         let mut out = [0u8; 8];
         assert!(o.read(BASE + 2 * PAGE + 4, &mut out));
