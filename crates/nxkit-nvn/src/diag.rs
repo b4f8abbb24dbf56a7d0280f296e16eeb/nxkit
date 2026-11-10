@@ -168,6 +168,9 @@ reasons! {
     /// Raw global memory: memory pools that do not fit the 8191 entries of the table; addresses in them are not
     /// reached.
     GmemPoolsOver => "gmem.pools-over",
+    /// Raw global memory: a registered memory pool that the pool snapshot does not resolve. It is left out of the
+    /// table, so raw loads into it read 0. The example gives the range.
+    GmemPoolUnresolved => "gmem.pool-unresolved",
     /// Raw global memory: more draws and dispatches with a write log than the batch has logs; they share the last one.
     GmemLogsShared => "gmem.logs-shared",
     /// Raw global memory: pools that shaders wrote through raw pointers, learned from the logs. Not a loss.

@@ -153,7 +153,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `bc` | gpu | the first bytes of each compressed texture in guest memory | 200 distinct | low |
 | `prog` | gpu | programs that did not load, unknown binding kinds, draws without a vertex stage | once per program, first 40 draws | low |
 | `pipe` | gpu | render, compute and depth-stencil states that Metal did not build; every 60 frames the state of the background builds (see "Archive coverage") | first 300; one line per 60 frames | low |
-| `gmem` | gpu | the size of the raw global memory table when it is built, and each pool that the write logs showed written (`docs/nxkit-gpu.md`) | each rebuild and each new pool | low |
+| `gmem` | gpu | the size of the raw global memory table when it is built (`DIAG gmem table of N ranges (pools P, overlapping O, unresolved U, over V)`), and each pool that the write logs showed written (`docs/nxkit-gpu.md`) | each rebuild and each new pool | low |
 | `overlap` | gpu | the flushes of the CPU, the dynamic pages, and per kind of buffer binding the bytes bound and the bytes changed since the last frame (`docs/plans/fence-overlap.md`) | every 120 frames | high (hashes every bound range) |
 | `judder` | nvn | the histogram of the refreshes each shown frame stayed, and the mean (see above) | every 120 shown frames | low |
 | `hitch` | gpu | each frame whose encode took 7 ms or more or that built pipelines or textures, with the wall clock in ms, to put next to the late frames of `NXKIT_PACE_DIAG` | each such frame | low |
@@ -275,6 +275,8 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `pool.wanted` | encoder | The texture IDs that shaders read through the pool table (marked in the bitmap in the last two sweeps), summed over the frames that have a pool binding. A count, not a loss. |
 | `pool.filled` | encoder | Elements of the texture table written because a shader marked their ID. A count, not a loss. |
 | `pool.unresolved` | encoder | A marked ID with no slot in the pool or with a dead texture. Its element is 0 and the shader reads the null texture. The example names an ID. |
+| `gmem.pools-over` | encoder | Memory pools that do not fit the 8191 entries of the raw global memory table. Raw loads into them read 0. |
+| `gmem.pool-unresolved` | encoder | A registered memory pool that the pool snapshot does not resolve. It is left out of the raw global memory table, so raw loads into it read 0. The example gives the range. |
 | `pool.cleared` | encoder | Elements set to 0 because the Metal texture behind them was dropped or replaced. A count, not a loss: the next frame fills a wanted ID again. |
 
 The native replacement of a chain of dispatches (`ndve`, see `NXKIT_NDVE`) prints its own block after the report, with the same cadence, and when a counter shows up that the last block did not have. It is not in the table above, because the reasons live in `nxkit-nvn`, which knows no network:

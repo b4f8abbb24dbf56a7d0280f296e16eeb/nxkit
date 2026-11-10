@@ -33,13 +33,15 @@
 //! shaders wrote are learned. This is a diagnostic and a hint: guest memory is the buffer itself, so a store through
 //! the table reaches it at once and no copy has to follow.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{BATCHES_IN_FLIGHT, Context, DataBuffer};
 use nxkit_nvn::diag::{Reason, note, note_n};
 
+mod registry;
+
+use self::registry::{Registry, count_overlapping};
 use crate::pools::{Backing, PoolSnapshot};
 
 /// Entries of the table (`GlobalToStorage.GmemMapLog2` = 13).
@@ -72,7 +74,8 @@ fn put_u64(b: &mut [u8], at: usize, v: u64) {
     b[at..at + 8].copy_from_slice(&v.to_le_bytes());
 }
 
-/// Builds the table of the pools `(start, end, delta)`, which must be sorted by start.
+/// Builds the table of the pools `(start, end, delta)`, which must be sorted by start, the longer pool first for equal
+/// starts. A pool that lies inside the ranges before it adds nothing.
 pub(crate) fn build_table(pools: impl IntoIterator<Item = (u64, u64, u64)>) -> Table {
     let mut bytes = vec![0u8; TABLE_BYTES as usize];
     for k in 1..ENTRIES {
@@ -114,10 +117,29 @@ pub(crate) fn build_table(pools: impl IntoIterator<Item = (u64, u64, u64)>) -> T
     }
 }
 
+/// Gives each registration its delta from the snapshot. Returns the pools that resolve and the number that do not.
+fn resolve_all<B: Backing>(
+    sorted: &[(u64, u64)],
+    snapshot: &PoolSnapshot<B>,
+) -> (Vec<(u64, u64, u64)>, u32) {
+    let mut unresolved = 0u32;
+    let pools = sorted
+        .iter()
+        .filter_map(|&(s, e)| match snapshot.resolve(s, e - s) {
+            Ok(at) => Some((s, e, at.real.wrapping_sub(s))),
+            Err(_) => {
+                unresolved += 1;
+                None
+            }
+        })
+        .collect();
+    (pools, unresolved)
+}
+
 /// The memory pools of the game, and the table built from them.
 pub(crate) struct Gmem {
-    /// `start -> end` of each pool, in guest GPU addresses. Pools do not overlap.
-    pools: BTreeMap<u64, u64>,
+    /// Every registered pool until it is removed. The table is the union of them.
+    pools: Registry,
     /// Counts the changes of `pools`.
     generation: u64,
     /// The generation of `pools` and the generation of the pool snapshot that the table was built from. The table is
@@ -133,7 +155,7 @@ pub(crate) struct Gmem {
 impl Gmem {
     pub(crate) fn new(ctx: &Context) -> Result<Self, nxkit_metal::MetalError> {
         Ok(Self {
-            pools: BTreeMap::new(),
+            pools: Registry::default(),
             generation: 1,
             built: None,
             buffer: None,
@@ -143,34 +165,23 @@ impl Gmem {
         })
     }
 
-    /// A pool appeared. It replaces the pools it overlaps.
+    /// A pool appeared. It is added to the pools it overlaps; none of them is dropped.
     pub(crate) fn add_pool(&mut self, start: u64, len: u64) {
-        let end = start.saturating_add(len);
-        if len == 0 {
-            return;
+        if self.pools.add(start, len) {
+            self.generation += 1;
         }
-        let stale: Vec<u64> = self
-            .pools
-            .range(..end)
-            .filter(|(s, e)| **s < end && **e > start)
-            .map(|(s, _)| *s)
-            .collect();
-        for s in stale {
-            self.pools.remove(&s);
-        }
-        self.pools.insert(start, end);
-        self.generation += 1;
     }
 
-    /// A pool went away.
+    /// A pool went away. The oldest registration with this start goes: a newer pool at the same start stays.
     pub(crate) fn remove_pool(&mut self, start: u64) {
-        if self.pools.remove(&start).is_some() {
+        if self.pools.remove(start) {
             self.generation += 1;
         }
     }
 
     /// Builds the table again when the pools or the snapshot changed. The delta of a pool is the snapshot's real
-    /// address of its start minus the start; a pool that the snapshot does not resolve is left out. Returns the
+    /// address of its start minus the start; a pool that the snapshot does not resolve is left out and counted
+    /// (`gmem.pool-unresolved`). Returns the
     /// table's buffer, which the batch must keep alive.
     pub(crate) fn refresh<B: Backing>(
         &mut self,
@@ -179,10 +190,13 @@ impl Gmem {
     ) -> Option<Arc<DataBuffer>> {
         let stamp = (self.generation, snapshot.generation());
         if self.built != Some(stamp) {
-            let t = build_table(self.pools.iter().filter_map(|(s, e)| {
-                let at = snapshot.resolve(*s, *e - *s).ok()?;
-                Some((*s, *e, at.real.wrapping_sub(*s)))
-            }));
+            let sorted = self.pools.sorted();
+            let overlapping = count_overlapping(&sorted);
+            let (resolved, unresolved) = resolve_all(&sorted, snapshot);
+            let t = build_table(resolved);
+            if unresolved != 0 {
+                note_n(Reason::GmemPoolUnresolved, u64::from(unresolved));
+            }
             if t.over != 0 {
                 note_n(Reason::GmemPoolsOver, u64::from(t.over));
             }
@@ -192,9 +206,11 @@ impl Gmem {
                     self.ranges = Arc::new(t.ranges);
                     if crate::diag("gmem") {
                         eprintln!(
-                            "DIAG gmem table of {} ranges (pools {}, over {})",
+                            "DIAG gmem table of {} ranges (pools {}, overlapping {}, unresolved {}, over {})",
                             self.ranges.len() - 1,
-                            self.pools.len(),
+                            sorted.len(),
+                            overlapping,
+                            unresolved,
                             t.over
                         );
                     }
@@ -437,16 +453,17 @@ mod tests {
     }
 
     #[test]
-    fn pools_replace_the_pools_they_overlap() {
-        let Ok(ctx) = Context::system_default() else {
-            return;
-        };
-        let mut g = Gmem::new(&ctx).unwrap();
-        g.add_pool(0x1000, 0x1000);
-        g.add_pool(0x1800, 0x1000);
-        assert_eq!(g.pools.len(), 1);
-        g.remove_pool(0x1800);
-        assert!(g.pools.is_empty());
+    fn the_pools_the_snapshot_does_not_resolve_are_counted() {
+        let set = shifted_set();
+        set.register(0x4000, 0x4000, 0).unwrap();
+        let sorted = [
+            (0x4000, 0x8000),
+            (0x10_0000, 0x10_1000),
+            (0x20_0000, 0x20_1000),
+        ];
+        let (resolved, unresolved) = resolve_all(&sorted, &*set.current());
+        assert_eq!(resolved, vec![(0x4000, 0x8000, SHIFT)]);
+        assert_eq!(unresolved, 2);
     }
 
     /// A backing whose real address is a fixed distance from the host address, so a table delta is visible.
