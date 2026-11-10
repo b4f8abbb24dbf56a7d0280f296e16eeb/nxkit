@@ -912,7 +912,7 @@ fn renamer_cost_of_a_big_frame() {
     }
     // Slot 0 of each stage may be written.
     let rw_of = |_: &str, _: bool, slot: u32| slot == 0;
-    renamer.note_rw_with(&detail, &rw_of);
+    renamer.note_rw_with(&detail, None, &rw_of);
     {
         let mut st = lock(&renamer.state);
         let n = st.cands.len();
@@ -939,8 +939,17 @@ fn renamer_cost_of_a_big_frame() {
     }
     let frames = 200;
     let t = std::time::Instant::now();
+    // The encoder learns whether the programs write, then the flush places the bindings and sends it the few that it could
+    // not place.
+    renamer.note_rw_with(&detail, None, &rw_of);
+    let check = {
+        let mut st = lock(&renamer.state);
+        let (bindings, _) = st.bindings(&detail);
+        st.adopt(&bindings)
+    };
+    eprintln!("  bindings left for the encoder: {}", check.len());
     for _ in 0..frames {
-        renamer.note_rw_with(&detail, &rw_of);
+        renamer.note_rw_with(&detail, Some(&check), &rw_of);
     }
     let note = t.elapsed();
     let t = std::time::Instant::now();
@@ -959,8 +968,13 @@ fn renamer_cost_of_a_big_frame() {
             t.elapsed().as_secs_f64() * 1e3 / frames as f64
         );
     };
-    time("bound_sbufs", &|| {
-        std::hint::black_box(bound_sbufs(&detail));
+    time("bindings", &|| {
+        std::hint::black_box(lock(&renamer.state).bindings(&detail));
+    });
+    let (bs, _) = lock(&renamer.state).bindings(&detail);
+    eprintln!("  distinct bindings: {}", bs.len());
+    time("adopt", &|| {
+        lock(&renamer.state).adopt(&bs);
     });
     time("others", &|| {
         std::hint::black_box(others(&detail));
@@ -977,4 +991,175 @@ fn renamer_cost_of_a_big_frame() {
         note.as_secs_f64() * 1e3 / frames as f64,
         flush.as_secs_f64() * 1e3 / frames as f64
     );
+}
+
+fn key(prog: u64, slot: u32, size: u32) -> Key {
+    Key {
+        prog,
+        slot_stage: slot,
+        size: size.next_multiple_of(256),
+    }
+}
+
+fn binding(addr: u64, size: u32, k: Key) -> Binding {
+    Binding {
+        addr,
+        size,
+        key: k,
+        at: (0, 0, 0),
+    }
+}
+
+/// A state that has learned from the range at `SUM` that the binding `k` is a merge range.
+fn taught(k: Key) -> State {
+    let mut st = State::default();
+    st.candidate(SUM, 0x40);
+    {
+        let c = st.cands.get_mut(&SUM).unwrap();
+        c.learn.set(Class::Merge);
+        c.hits = SNAPSHOT_HITS;
+        c.cmask = vec![0b0010];
+        c.gmask = vec![0b0100];
+    }
+    st.adopt(&[binding(SUM, 0x40, k)]);
+    st.push_keys(SUM);
+    st
+}
+
+#[test]
+fn a_new_address_of_a_known_key_gets_the_class_and_masks_at_once() {
+    let k = key(7, 1, 0x40);
+    let mut st = taught(k);
+    assert_eq!(st.keys[&k].class, Class::Merge);
+    // The ring comes round at another address, with a size of the same block.
+    st.adopt(&[binding(SUM + 0x1000, 0x30, k)]);
+    let c = &st.cands[&(SUM + 0x1000)];
+    assert_eq!(c.learn.class(), Class::Merge);
+    assert!(c.derived);
+    assert_eq!(
+        (c.cmask.clone(), c.gmask.clone()),
+        (vec![0b0010], vec![0b0100])
+    );
+    // The next flush captures it as a merge range, with no learning frame.
+    let g = Guest(RefCell::new(vec![0; 0x2000]));
+    let f = st.flush(
+        1,
+        &[(SUM + 0x1000, 0x30)],
+        &|r| vec![false; r.len()],
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    assert_eq!(f.renamed.len(), 1);
+    assert_eq!(f.renamed[0].kind, Kind::Merge);
+    assert!(!f.sampling);
+    // A binding of another program or slot is not taught.
+    st.adopt(&[binding(SUM + 0x2000, 0x40, key(8, 1, 0x40))]);
+    assert!(!st.cands.contains_key(&(SUM + 0x2000)));
+}
+
+#[test]
+fn a_range_that_a_snapshot_binding_also_reads_stays_a_merge_range() {
+    let (km, ks) = (key(1, 1, 0x40), key(2, 2, 0x40));
+    let mut st = taught(km);
+    st.keys.insert(
+        ks,
+        KeyInfo {
+            class: Class::Snapshot,
+            ro: true,
+            cmask: Vec::new(),
+            gmask: Vec::new(),
+            grown: 0,
+        },
+    );
+    st.adopt(&[
+        binding(SUM + 0x1000, 0x40, km),
+        binding(SUM + 0x1000, 0x40, ks),
+    ]);
+    let c = &st.cands[&(SUM + 0x1000)];
+    assert_eq!(c.learn.class(), Class::Merge);
+    assert_eq!(c.keys, vec![km, ks]);
+}
+
+#[test]
+fn bindings_that_need_a_merge_and_a_renamed_range_cannot_be_combined() {
+    let (km, kr) = (key(1, 1, 0x40), key(2, 2, 0x40));
+    let mut st = taught(km);
+    st.keys.insert(
+        kr,
+        KeyInfo {
+            class: Class::Rename,
+            ro: false,
+            cmask: Vec::new(),
+            gmask: Vec::new(),
+            grown: 0,
+        },
+    );
+    let before = nxkit_nvn::diag::total(Reason::OverlapKeyDisagree);
+    st.adopt(&[
+        binding(SUM + 0x1000, 0x40, km),
+        binding(SUM + 0x1000, 0x40, kr),
+    ]);
+    assert_eq!(st.cands[&(SUM + 0x1000)].learn.class(), Class::Conflict);
+    assert!(nxkit_nvn::diag::total(Reason::OverlapKeyDisagree) > before);
+    // The frame waits in full.
+    let g = Guest(RefCell::new(vec![0; 0x2000]));
+    let f = st.flush(
+        1,
+        &[(SUM + 0x1000, 0x40)],
+        &|r| vec![false; r.len()],
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    assert!(f.conflict && f.renamed.is_empty());
+}
+
+#[test]
+fn a_range_that_is_never_for_its_own_reasons_does_not_unteach_the_key() {
+    let k = key(1, 1, 0x40);
+    let mut st = taught(k);
+    st.adopt(&[binding(SUM + 0x1000, 0x40, k)]);
+    // The other address is found in a pool of raw stores and demoted.
+    assert!(st.demote(SUM + 0x1000));
+    st.push_keys(SUM + 0x1000);
+    assert_eq!(st.keys[&k].class, Class::Merge);
+    // A binding that a shader writes does unteach a snapshot key.
+    let ks = key(5, 1, 0x40);
+    st.keys.insert(
+        ks,
+        KeyInfo {
+            class: Class::Snapshot,
+            ro: true,
+            cmask: Vec::new(),
+            gmask: Vec::new(),
+            grown: 0,
+        },
+    );
+    st.adopt(&[binding(SUM + 0x3000, 0x40, ks)]);
+    st.candidate(SUM + 0x3000, 0x40);
+    assert_eq!(st.keys[&ks].class, Class::Never);
+}
+
+#[test]
+fn the_distinct_bindings_of_a_frame_are_found_once_and_keyed_by_block() {
+    let mut detail = FrameDetail::default();
+    let prog: Arc<str> = Arc::from("prog");
+    for size in [100u32, 100, 200] {
+        let mut d = crate::walk::empty_draw();
+        d.program.vertex = prog.clone();
+        d.sbufs.push(crate::detail::UboDetail {
+            stage: Stage::Vertex,
+            slot: 1,
+            address: SUM,
+            size,
+            snapshot: None,
+        });
+        detail.draws.push(Arc::new(d));
+    }
+    let mut st = State::default();
+    let (b, ranges) = st.bindings(&detail);
+    assert_eq!(ranges, vec![(SUM, 100), (SUM, 200)]);
+    // Two sizes, one key.
+    assert_eq!(b.len(), 2);
+    assert_eq!(b[0].key, b[1].key);
+    assert_eq!(b[0].key.size, 256);
 }

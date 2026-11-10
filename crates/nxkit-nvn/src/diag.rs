@@ -224,6 +224,9 @@ reasons! {
     /// Overlap: ranges whose words that the CPU writes in flight and words that the GPU writes overlap. The wait for a
     /// frame that binds one is a full wait. Counted once per range.
     OverlapMergeConflict => "overlap.merge-conflict",
+    /// Overlap: a range that two bindings (programs or slots) need in ways that cannot be combined (a merge and a
+    /// renamed range). The wait for a frame that binds it is a full one. A count, not a loss.
+    OverlapKeyDisagree => "overlap.key-disagree",
 }
 
 impl Reason {
@@ -252,6 +255,7 @@ impl Reason {
             && self != Reason::OverlapRenameExcluded
             && self != Reason::OverlapSnapshotBytes
             && self != Reason::OverlapMergeRanges
+            && self != Reason::OverlapKeyDisagree
     }
 }
 

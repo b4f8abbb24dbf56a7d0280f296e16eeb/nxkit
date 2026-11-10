@@ -80,7 +80,9 @@ impl Backend for GpuBackend {
         // The overlap: the ranges that this frame reads from a copy of its own take their bytes now, before the CPU
         // writes the next frame.
         if crate::overlap::on() {
-            detail.rename = self.rename.at_flush(&detail, fence.0).map(Arc::new);
+            let (capture, check) = self.rename.at_flush(&detail, fence.0);
+            detail.rename = capture.map(Arc::new);
+            detail.rename_check = check;
         }
         // The snapshot of the flush: a pool the game finalizes after this point still serves the frame.
         let pools = self.pools.current();

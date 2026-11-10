@@ -450,6 +450,9 @@ pub struct FrameDetail {
     /// The storage ranges that this frame reads and writes from a copy of its own (`rename`), taken at the flush. Only
     /// with the overlap on.
     pub(crate) rename: Option<Arc<crate::rename::Capture>>,
+    /// The storage bindings of the frame whose use (written or only read) the encoder has to look at; `None` means all of
+    /// them. The flush places the others (`rename`).
+    pub(crate) rename_check: Option<Vec<(u8, u32, u32)>>,
 }
 
 /// The [`CounterReport::kind`] of `nvnCommandBufferReportValue`: the counter is [`CounterReport::value`].

@@ -661,7 +661,69 @@ struct Cand {
     sample: Option<Sample>,
     /// The flush counter at the last frame that bound the range.
     last: u64,
+    /// The bindings that bound the range, up to [`MAX_KEYS`]: what it teaches and what teaches it.
+    keys: Vec<Key>,
+    /// The class comes from the keys of its bindings, not from judging the range.
+    derived: bool,
 }
+
+/// The class and masks of a range that is bound by one more key.
+fn combine(c: &mut Cand, ki: &KeyInfo) {
+    use Class::*;
+    let (a, b) = (c.learn.class(), ki.class);
+    let class = match (a, b) {
+        (x, y) if x == y => x,
+        (Conflict, _) | (_, Conflict) => Conflict,
+        (Merge, Rename) | (Rename, Merge) => {
+            note_n(Reason::OverlapKeyDisagree, 1);
+            Conflict
+        }
+        // Reading needs nothing; a range that nothing else needs stays as it is.
+        (Snapshot, x) | (x, Snapshot) | (Never, x) | (x, Never) => x,
+        (x, _) => x,
+    };
+    c.learn.set(class);
+    c.ro = c.ro && ki.ro;
+    union_mask(&mut c.cmask, &ki.cmask);
+    union_mask(&mut c.gmask, &ki.gmask);
+}
+
+/// A binding as a class is learned for it: the program, the stage and slot, and the size in blocks of 256 bytes. The ring
+/// buffers of a game change their address from frame to frame, and the binding stays the same.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Key {
+    /// The hash of the program key.
+    prog: u64,
+    /// The slot, with the stage in the high bits.
+    slot_stage: u32,
+    /// The size rounded up to 256 bytes.
+    size: u32,
+}
+
+/// What is known of the ranges that a key binds: their class and the masks of their words (from the start of the range).
+#[derive(Clone, Debug)]
+struct KeyInfo {
+    class: Class,
+    ro: bool,
+    cmask: Vec<u32>,
+    gmask: Vec<u32>,
+    grown: u32,
+}
+
+/// A storage binding of a frame.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Binding {
+    addr: u64,
+    size: u32,
+    key: Key,
+    at: Recheck,
+}
+
+/// Where a binding is in the detail of its frame: `(0, draw, buffer)` or `(1, dispatch, buffer)`.
+pub(crate) type Recheck = (u8, u32, u32);
+
+/// Keys that one range remembers.
+const MAX_KEYS: usize = 4;
 
 /// A range that a frame renames.
 struct Renamed {
@@ -707,6 +769,13 @@ struct State {
     /// The flushes so far.
     frame: u64,
     cands: FastMap<u64, Cand>,
+    /// What is known of each key.
+    keys: FastMap<Key, KeyInfo>,
+    /// Whether the program of a key may write the binding (what the encoder found), so that the flush does not send a
+    /// binding that is only read to the encoder again.
+    rw_known: FastMap<Key, bool>,
+    /// The hash of a program key, by the allocation of the key (draws), which the cache keeps alive.
+    prog_hash: FastMap<usize, (Arc<str>, u64)>,
     /// Whether a program may write a binding, by the key's allocation (draws) or the hash of the key (dispatches), with
     /// the slot and stage.
     rw_ptr: FastMap<(usize, u32), (Arc<str>, bool)>,
@@ -741,6 +810,201 @@ struct Inflight {
 }
 
 impl State {
+    /// The hash of the program key `k`, cached by its allocation.
+    fn prog_of(&mut self, k: &Arc<str>) -> u64 {
+        use std::hash::BuildHasher;
+        let id = Arc::as_ptr(k).cast::<u8>() as usize;
+        if let Some((_, h)) = self.prog_hash.get(&id) {
+            return *h;
+        }
+        if self.prog_hash.len() > 50_000 {
+            self.prog_hash.clear();
+        }
+        let h = foldhash::fast::FixedState::default().hash_one(&**k);
+        self.prog_hash.insert(id, (k.clone(), h));
+        h
+    }
+
+    /// The storage bindings of a frame, each distinct binding once.
+    fn bindings(&mut self, detail: &FrameDetail) -> (Vec<Binding>, Vec<(u64, u32)>) {
+        use std::hash::BuildHasher;
+        let mut out = Vec::new();
+        // The distinct ranges, sorted, for the checks of the frame.
+        let mut ranges: Vec<(u64, u32)> = Vec::new();
+        let mut seen_range = vec![(0u64, 0u32); 4096];
+        // A direct-mapped table of the bindings seen lately drops the repeats: the same few hundred buffers are bound by
+        // thousands of draws.
+        let mut seen = vec![(0u64, 0u32, 0u32, 0u64); 4096];
+        let mut push = |s: &crate::detail::UboDetail, prog: u64, at: Recheck| {
+            if s.address == 0 || s.size == 0 || s.size > SNAPSHOT_MAX_BYTES {
+                return;
+            }
+            let slot_stage = s.slot | (s.stage as u32) << 24;
+            let ix = ((s.address >> 4) ^ (s.address >> 16) ^ prog ^ u64::from(slot_stage)) as usize
+                & 4095;
+            let id = (s.address, s.size, slot_stage, prog);
+            if seen[ix] == id {
+                return;
+            }
+            seen[ix] = id;
+            let rat = ((s.address >> 4) ^ (s.address >> 16) ^ u64::from(s.size)) as usize & 4095;
+            if seen_range[rat] != (s.address, s.size) {
+                seen_range[rat] = (s.address, s.size);
+                ranges.push((s.address, s.size));
+            }
+            out.push(Binding {
+                addr: s.address,
+                size: s.size,
+                key: Key {
+                    prog,
+                    slot_stage,
+                    size: s.size.next_multiple_of(256),
+                },
+                at,
+            });
+        };
+        // The hash of the last program key of each stage, by its allocation.
+        let mut vs: Option<(usize, u64)> = None;
+        let mut fs: Option<(usize, u64)> = None;
+        for (di, d) in detail.draws.iter().enumerate() {
+            if d.args.is_mesh() || d.sbufs.is_empty() {
+                continue;
+            }
+            for (si, s) in d.sbufs.iter().enumerate() {
+                let (k, memo) = match s.stage {
+                    Stage::Vertex => (Some(&d.program.vertex), &mut vs),
+                    Stage::Fragment => (d.program.fragment.as_ref(), &mut fs),
+                    _ => continue,
+                };
+                let Some(k) = k else { continue };
+                let ptr = Arc::as_ptr(k).cast::<u8>() as usize;
+                let prog = match memo {
+                    Some((p, h)) if *p == ptr => *h,
+                    _ => {
+                        let h = self.prog_of(k);
+                        *memo = Some((ptr, h));
+                        h
+                    }
+                };
+                push(s, prog, (0, di as u32, si as u32));
+            }
+        }
+        for (di, d) in detail.dispatches.iter().enumerate() {
+            let mut prog = None;
+            for (si, s) in d.sbufs.iter().enumerate() {
+                if s.stage != Stage::Compute {
+                    continue;
+                }
+                let h = *prog.get_or_insert_with(|| {
+                    foldhash::fast::FixedState::default().hash_one(d.program.as_str())
+                });
+                push(s, h, (1, di as u32, si as u32));
+            }
+        }
+        ranges.sort_unstable();
+        ranges.dedup();
+        (out, ranges)
+    }
+
+    /// The bindings of a frame meet the ranges that the host knows. A range that is not known, bound by a key with a
+    /// class, gets the class at once; a range that several keys bind gets what all of them need (a snapshot only reads,
+    /// so it asks for nothing; a merge and a renamed range cannot be combined: `Conflict`, the frame waits in full).
+    fn adopt(&mut self, bindings: &[Binding]) -> Vec<Recheck> {
+        let now = self.frame;
+        let State {
+            cands,
+            keys,
+            rw_known,
+            ..
+        } = self;
+        // The bindings that the encoder has to look at: whether a shader writes them is not known yet.
+        let mut recheck = Vec::new();
+        for b in bindings {
+            if let Some(c) = cands.get_mut(&b.addr) {
+                let read_only = c.ro || c.learn.class() == Class::Snapshot;
+                if b.size > c.size || (read_only && rw_known.get(&b.key) != Some(&false)) {
+                    recheck.push(b.at);
+                }
+                if c.keys.len() < MAX_KEYS && !c.keys.contains(&b.key) {
+                    c.keys.push(b.key);
+                    if c.derived
+                        && let Some(ki) = keys.get(&b.key)
+                    {
+                        combine(c, ki);
+                    }
+                }
+            } else if cands.len() < MAX_CANDIDATES
+                && let Some(ki) = keys.get(&b.key)
+            {
+                let mut learn = Learn::new();
+                learn.set(ki.class);
+                let mut c = Cand {
+                    ro: ki.ro,
+                    hits: SNAPSHOT_HITS,
+                    cmask: ki.cmask.clone(),
+                    gmask: ki.gmask.clone(),
+                    grown: ki.grown,
+                    // A range of a known class is not judged again soon.
+                    rest_until: now + WATCH_PAUSE,
+                    size: b.size,
+                    learn,
+                    sample: None,
+                    last: now,
+                    keys: vec![b.key],
+                    derived: true,
+                };
+                if ki.class == Class::Merge && !probeable(b.addr, b.size) {
+                    c.learn.set(Class::Never);
+                }
+                cands.insert(b.addr, c);
+            } else {
+                recheck.push(b.at);
+            }
+        }
+        recheck
+    }
+
+    /// Tells the keys of the range at `addr` what was found for it.
+    fn push_keys(&mut self, addr: u64) {
+        let State { cands, keys, .. } = self;
+        let Some(c) = cands.get(&addr) else {
+            return;
+        };
+        let class = c.learn.class();
+        if !matches!(
+            class,
+            Class::Rename | Class::Snapshot | Class::Merge | Class::Conflict | Class::Never
+        ) {
+            return;
+        }
+        for k in &c.keys {
+            match keys.get_mut(k) {
+                None => {
+                    keys.insert(
+                        *k,
+                        KeyInfo {
+                            class,
+                            ro: c.ro,
+                            cmask: c.cmask.clone(),
+                            gmask: c.gmask.clone(),
+                            grown: c.grown,
+                        },
+                    );
+                }
+                // A range that is `Never` for its own reasons does not unteach a key.
+                Some(_) if class == Class::Never => {}
+                Some(ki) if ki.class == Class::Conflict => {}
+                Some(ki) => {
+                    ki.class = class;
+                    ki.ro = c.ro;
+                    union_mask(&mut ki.cmask, &c.cmask);
+                    union_mask(&mut ki.gmask, &c.gmask);
+                    ki.grown = ki.grown.max(c.grown);
+                }
+            }
+        }
+    }
+
     /// A candidate at `addr` is added: it is an event when the address was never a candidate.
     fn fresh(&mut self, addr: u64) {
         if self.seen.len() > 100_000 {
@@ -785,6 +1049,8 @@ impl State {
                     learn: Learn::watch(),
                     sample: None,
                     last: self.frame,
+                    keys: Vec::new(),
+                    derived: false,
                 },
             );
         }
@@ -795,6 +1061,12 @@ impl State {
     fn candidate(&mut self, addr: u64, size: u32) {
         if let Some(c) = self.cands.get_mut(&addr) {
             if c.learn.class() == Class::Snapshot {
+                // A binding that is written is no snapshot, for any address it binds.
+                for k in &c.keys {
+                    if let Some(ki) = self.keys.get_mut(k) {
+                        ki.class = Class::Never;
+                    }
+                }
                 c.learn.set(Class::Never);
                 c.ro = false;
                 c.sample = None;
@@ -819,6 +1091,8 @@ impl State {
                     learn: Learn::new(),
                     sample: None,
                     last: self.frame,
+                    keys: Vec::new(),
+                    derived: false,
                 },
             );
         }
@@ -1003,6 +1277,10 @@ impl State {
         }
         if !out.news.is_empty() {
             self.last_event = now;
+            let addrs: Vec<u64> = out.news.iter().map(|n| n.0).collect();
+            for a in addrs {
+                self.push_keys(a);
+            }
         }
         if let Some(t) = t_judge {
             out.judge_ns = t.elapsed().as_nanos() as u64;
@@ -1240,6 +1518,7 @@ impl State {
             e.words = e.words.max(n);
         }
         self.classify();
+        self.push_keys(addr);
     }
 
     /// The wait for `fence` begins: takes the bytes of the ranges that are judged in that frame before the GPU is known to
@@ -1335,7 +1614,7 @@ struct Slot {
 }
 
 /// The entry points that `NXKIT_DIAG=rename` times.
-const COST_NAMES: [&str; 8] = [
+const COST_NAMES: [&str; 9] = [
     "at_flush",
     "judge",
     "capture",
@@ -1344,14 +1623,15 @@ const COST_NAMES: [&str; 8] = [
     "before_wait",
     "after_wait",
     "merge",
+    "bindings",
 ];
 
 /// The time of each entry point since the last report: sum, longest and number of calls.
 #[derive(Default)]
 struct Cost {
-    sum: [AtomicU64; 8],
-    max: [AtomicU64; 8],
-    calls: [AtomicU64; 8],
+    sum: [AtomicU64; 9],
+    max: [AtomicU64; 9],
+    calls: [AtomicU64; 9],
 }
 
 impl Cost {
@@ -1510,13 +1790,17 @@ impl Renamer {
     /// that are small to the candidates. The bindings of a task or mesh stage are not looked at.
     pub(crate) fn note_rw(&self, detail: &FrameDetail, programs: &Programs) {
         self.timed(3, || {
-            self.note_rw_with(detail, &|key, vertex, slot| {
-                programs.stage(key, vertex).is_ok_and(|p| {
-                    p.binds
-                        .iter()
-                        .any(|b| b.kind == BindKind::Sbuf && b.reg == slot && b.rw)
-                })
-            });
+            self.note_rw_with(
+                detail,
+                detail.rename_check.as_deref(),
+                &|key, vertex, slot| {
+                    programs.stage(key, vertex).is_ok_and(|p| {
+                        p.binds
+                            .iter()
+                            .any(|b| b.kind == BindKind::Sbuf && b.reg == slot && b.rw)
+                    })
+                },
+            );
         });
     }
 
@@ -1524,7 +1808,12 @@ impl Renamer {
     ///
     /// A range that is a written candidate already needs nothing, so most bindings cost one lookup. The answer for a
     /// program is cached by the allocation of its key (the walker shares one per key) and the slot.
-    fn note_rw_with(&self, detail: &FrameDetail, rw_of: &dyn Fn(&str, bool, u32) -> bool) {
+    fn note_rw_with(
+        &self,
+        detail: &FrameDetail,
+        check: Option<&[Recheck]>,
+        rw_of: &dyn Fn(&str, bool, u32) -> bool,
+    ) {
         use std::hash::BuildHasher;
         let mut st = lock(&self.state);
         st.watch = crate::diag("rename");
@@ -1535,7 +1824,8 @@ impl Renamer {
             st.rw_str.clear();
         }
         // The same binding comes draw after draw.
-        let mut last = (0u64, 0u32, 0u32, 0usize);
+        // A direct-mapped table of the bindings seen lately drops the repeats.
+        let mut seen = vec![(0u64, 0u32, 0u32, 0usize); 4096];
         let mut look =
             |st: &mut State,
              key: Result<&Arc<str>, &str>,
@@ -1546,14 +1836,16 @@ impl Renamer {
                     Ok(k) => Arc::as_ptr(k).cast::<u8>() as usize,
                     Err(k) => k.as_ptr() as usize,
                 };
-                if s.size == 0
-                    || s.size > SNAPSHOT_MAX_BYTES
-                    || s.address == 0
-                    || (s.address, s.size, slot_stage, id) == last
-                {
+                if s.size == 0 || s.size > SNAPSHOT_MAX_BYTES || s.address == 0 {
                     return;
                 }
-                last = (s.address, s.size, slot_stage, id);
+                let at = ((s.address >> 4) ^ (s.address >> 16) ^ id as u64 ^ u64::from(slot_stage))
+                    as usize
+                    & 4095;
+                if seen[at] == (s.address, s.size, slot_stage, id) {
+                    return;
+                }
+                seen[at] = (s.address, s.size, slot_stage, id);
                 if st.cands.get(&s.address).is_some_and(|c| {
                     !c.ro && s.size <= c.size && c.learn.class() != Class::Snapshot
                 }) {
@@ -1582,6 +1874,21 @@ impl Renamer {
                             .or_insert_with(|| rw_of(k, vertex, s.slot))
                     }
                 };
+                if st.rw_known.len() > 100_000 {
+                    st.rw_known.clear();
+                }
+                let prog = match key {
+                    Ok(k) => st.prog_of(k),
+                    Err(k) => foldhash::fast::FixedState::default().hash_one(k),
+                };
+                st.rw_known.insert(
+                    Key {
+                        prog,
+                        slot_stage,
+                        size: s.size.next_multiple_of(256),
+                    },
+                    rw,
+                );
                 if rw && s.size <= MAX_BYTES {
                     st.candidate(s.address, s.size);
                 } else if rw {
@@ -1591,42 +1898,77 @@ impl Renamer {
                     st.watch_read_only(s.address, s.size);
                 }
             };
-        for d in &detail.draws {
-            if d.args.is_mesh() {
-                continue;
-            }
-            for s in &d.sbufs {
+        let mut visit = |st: &mut State, kind: u8, i: usize, j: usize| {
+            if kind == 0 {
+                let Some(d) = detail.draws.get(i) else { return };
+                if d.args.is_mesh() {
+                    return;
+                }
+                let Some(s) = d.sbufs.get(j) else { return };
                 match s.stage {
-                    Stage::Vertex => look(&mut st, Ok(&d.program.vertex), true, s),
+                    Stage::Vertex => look(st, Ok(&d.program.vertex), true, s),
                     Stage::Fragment => {
                         if let Some(k) = &d.program.fragment {
-                            look(&mut st, Ok(k), false, s);
+                            look(st, Ok(k), false, s);
                         }
                     }
                     _ => {}
                 }
+            } else if let Some(d) = detail.dispatches.get(i)
+                && let Some(s) = d.sbufs.get(j)
+                && s.stage == Stage::Compute
+            {
+                look(st, Err(&d.program), false, s);
             }
-        }
-        for d in &detail.dispatches {
-            for s in d.sbufs.iter().filter(|s| s.stage == Stage::Compute) {
-                look(&mut st, Err(&d.program), false, s);
+        };
+        match check {
+            // Only the bindings that the flush could not place.
+            Some(list) => {
+                for &(kind, i, j) in list {
+                    visit(&mut st, kind, i as usize, j as usize);
+                }
+            }
+            None => {
+                for (i, d) in detail.draws.iter().enumerate() {
+                    for j in 0..d.sbufs.len() {
+                        visit(&mut st, 0, i, j);
+                    }
+                }
+                for (i, d) in detail.dispatches.iter().enumerate() {
+                    for j in 0..d.sbufs.len() {
+                        visit(&mut st, 1, i, j);
+                    }
+                }
             }
         }
     }
 
     /// The flush of a frame, on the CPU thread. Takes the `pre` bytes of the ranges that are judged and the `start`
     /// bytes of those that this frame renames. Returns the capture of the renamed ranges, when there are any.
-    pub(crate) fn at_flush(&self, detail: &FrameDetail, fence: u64) -> Option<Capture> {
+    pub(crate) fn at_flush(
+        &self,
+        detail: &FrameDetail,
+        fence: u64,
+    ) -> (Option<Capture>, Option<Vec<Recheck>>) {
         self.timed(0, || self.at_flush_inner(detail, fence))
     }
 
-    fn at_flush_inner(&self, detail: &FrameDetail, fence: u64) -> Option<Capture> {
+    fn at_flush_inner(
+        &self,
+        detail: &FrameDetail,
+        fence: u64,
+    ) -> (Option<Capture>, Option<Vec<Recheck>>) {
         let mut st = lock(&self.state);
-        if st.cands.is_empty() {
+        if st.cands.is_empty() && st.keys.is_empty() {
             self.honest.store(0, Ordering::Release);
-            return None;
+            return (None, None);
         }
-        let bound = bound_sbufs(detail);
+        let t_bind = crate::diag("rename").then(std::time::Instant::now);
+        let (bindings, bound) = st.bindings(detail);
+        let check = st.adopt(&bindings);
+        if let Some(t) = t_bind {
+            self.cost.add(8, t.elapsed().as_nanos() as u64);
+        }
         st.watch = crate::diag("rename");
         st.conflict_wait = crate::knob("conflictwait");
         let read = self.reader();
@@ -1734,11 +2076,11 @@ impl Renamer {
             note_n(Reason::OverlapSnapshotBytes, f.snapshot_bytes);
         }
         if f.renamed.is_empty() {
-            return None;
+            return (None, Some(check));
         }
         let sampled = crate::diag("rename")
             && (fence.is_multiple_of(60) || fence < self.young_until.load(Ordering::Relaxed));
-        Some(Capture {
+        let capture = Capture {
             fence,
             sampled,
             epoch: self.wait_epoch.load(Ordering::Acquire),
@@ -1757,7 +2099,8 @@ impl Renamer {
                     cprefix: x.cprefix,
                 })
                 .collect(),
-        })
+        };
+        (Some(capture), Some(check))
     }
 
     /// The encode of a frame in batch slot `region`, after the batch ring waited for the slot. Writes back the frame that
@@ -2085,33 +2428,6 @@ fn copy_writes(detail: &FrameDetail) -> Vec<(u64, u64)> {
             (a != 0).then_some((a, a.saturating_add(len)))
         })
         .collect()
-}
-
-/// The storage bindings of a frame as `(address, size)`.
-fn bound_sbufs(detail: &FrameDetail) -> Vec<(u64, u32)> {
-    let mut v: Vec<(u64, u32)> = Vec::new();
-    // A direct-mapped table of the bindings seen lately drops the repeats cheaply: the same few hundred buffers are bound
-    // by thousands of draws.
-    let mut seen = vec![(0u64, 0u32); 4096];
-    for s in detail
-        .draws
-        .iter()
-        .flat_map(|d| d.sbufs.iter())
-        .chain(detail.dispatches.iter().flat_map(|d| d.sbufs.iter()))
-    {
-        if s.address == 0 || s.size == 0 {
-            continue;
-        }
-        let key = (s.address, s.size);
-        let slot = ((s.address >> 4) ^ (s.address >> 16) ^ u64::from(s.size)) as usize & 4095;
-        if seen[slot] != key {
-            seen[slot] = key;
-            v.push(key);
-        }
-    }
-    v.sort_unstable();
-    v.dedup();
-    v
 }
 
 /// The ranges that a frame reads or writes in ways other than a storage binding: uniform buffers, vertex, index and
