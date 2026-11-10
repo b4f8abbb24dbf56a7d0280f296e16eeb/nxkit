@@ -79,6 +79,47 @@ mod tests {
     }
 
     #[test]
+    fn the_pass_after_a_buffer_command_waits_once_for_it() {
+        let dispatch = Cmd::Dispatch {
+            reads: Span::default(),
+            writes: Span::default(),
+        };
+        let frame = Frame {
+            cmds: vec![dispatch, Cmd::BufferCopy, dispatch, Cmd::BufferCopy],
+            ..Frame::default()
+        };
+        let mut plan = PassPlan::default();
+        Analyser::new()
+            .analyse(&frame, &ResourceTable::new(), &mut plan)
+            .unwrap();
+        let kinds: Vec<_> = plan.passes.iter().map(|p| p.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                PassKind::Compute,
+                PassKind::Copy,
+                PassKind::Compute,
+                PassKind::Copy
+            ]
+        );
+        let mut state = BarrierState::default();
+        let barriers = state.plan(
+            &frame,
+            &plan,
+            &FastMap::default(),
+            &[],
+            &[],
+            &FastSet::default(),
+        );
+        assert!(barriers.before[0].is_none());
+        // The dispatch after the first command waits for its blit and dispatch stages.
+        let dep = barriers.before[2].unwrap();
+        assert_eq!(dep.after, Stages::DISPATCH | Stages::BLIT);
+        assert_eq!(dep.before, Stages::DISPATCH | Stages::BLIT);
+        assert_eq!(dep.visibility, Visibility::Device);
+    }
+
+    #[test]
     fn a_render_pass_holds_its_vertex_stage_only_when_a_vertex_shader_samples() {
         let mut rec = nxkit_nvn::frame::CmdStream::new();
         let mut rt = nxkit_nvn::frame::RtSet::default();
@@ -195,6 +236,9 @@ fn join(a: Option<Stages>, b: Stages) -> Option<Stages> {
 #[derive(Default)]
 pub(crate) struct BarrierState {
     pending: FastMap<TexId, Hazard>,
+    /// The stages of the buffer copies and fills that no barrier has covered yet. They write guest memory, and the
+    /// planner does not know which buffers later passes read, so every later pass waits for them once.
+    buffer_write: Option<Stages>,
 }
 
 /// The barrier before each pass and the counts.
@@ -304,6 +348,17 @@ impl BarrierState {
                     writes_involved |= h.write.is_some();
                 }
             }
+            // A buffer copy or fill of an earlier pass: this pass waits in every stage it can read a buffer in.
+            if let Some(w) = self.buffer_write {
+                after = join(after, w);
+                writes_involved = true;
+                before = before
+                    | if p.kind == PassKind::Render {
+                        Stages::VERTEX | Stages::FRAGMENT | Stages::OBJECT | Stages::MESH
+                    } else {
+                        Stages::DISPATCH | Stages::BLIT
+                    };
+            }
             let dep = after.map(|after| Dependency {
                 scope: Scope::FromEarlierPasses,
                 after,
@@ -348,6 +403,15 @@ impl BarrierState {
             first = false;
             if let Some(d) = &dep {
                 self.cover(d.after);
+                if self.buffer_write.is_some_and(|w| (d.after | w) == d.after) {
+                    self.buffer_write = None;
+                }
+            }
+            if p.cmds
+                .clone()
+                .any(|i| matches!(frame.cmds.get(i as usize), Some(Cmd::BufferCopy)))
+            {
+                self.buffer_write = join(self.buffer_write, Stages::DISPATCH | Stages::BLIT);
             }
             for id in &t.writes {
                 let id = aliases.get(id).unwrap_or(id);

@@ -56,8 +56,8 @@ impl Copies {
             let (src_texture, size) = match c.kind {
                 CopyKind::BufferToTexture => (false, c.size),
                 CopyKind::TextureToBuffer | CopyKind::TextureToTexture => (true, c.size),
-                CopyKind::Other => (false, [0; 3]),
-                CopyKind::Clear => continue,
+                CopyKind::Other | CopyKind::BufferToBuffer => (false, [0; 3]),
+                CopyKind::Clear | CopyKind::BufferFill => continue,
             };
             if c.src_addr == 0 || c.dst_addr == 0 {
                 continue;

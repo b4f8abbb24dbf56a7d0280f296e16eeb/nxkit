@@ -18,7 +18,7 @@ fn scaled(v: [u32; 3], s: f32) -> [u32; 3] {
 
 /// Prints a refused copy under the `copy` category (at most 400 lines), keeps it as an example of the health report
 /// and gives back `Skip::Copy`.
-fn copy_skip(what: std::fmt::Arguments<'_>) -> Skip {
+pub(super) fn copy_skip(what: std::fmt::Arguments<'_>) -> Skip {
     static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     nxkit_nvn::diag::example(nxkit_nvn::diag::Reason::SkipCopy, what);
     if crate::diag("copy") && crate::diag::first(&SHOWN, 400) {
@@ -299,6 +299,16 @@ pub(super) fn copy(
                 entry
             );
         }
+    }
+    if matches!(cmd, Cmd::BufferCopy) {
+        return match entry
+            .filter(|c| matches!(c.kind, CopyKind::BufferToBuffer | CopyKind::BufferFill))
+        {
+            Some(c) => super::buffers::run(sh, cp, scratch, c),
+            None => Err(copy_skip(format_args!(
+                "buffer command {n} has no detail: {entry:?}"
+            ))),
+        };
     }
     if let Some(c) = entry.filter(|c| {
         matches!(

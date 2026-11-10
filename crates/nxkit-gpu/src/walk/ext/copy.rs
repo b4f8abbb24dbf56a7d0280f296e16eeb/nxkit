@@ -119,15 +119,33 @@ pub(super) fn stride(x: &Ext) -> u64 {
     u64::try_from(x.word64(0) as i64).unwrap_or(0)
 }
 
-/// The detail of a `CopyBufferToBuffer` record (words: source (2), destination (2), size (2), flags). It has no box, only
-/// the two addresses; a record that is too short keeps the default entry.
+/// The detail of a `CopyBufferToBuffer` record (words: source (2), destination (2), size (2), flags). It has no box:
+/// the addresses and the byte count. The flags change nothing the encoder does. A record that is too short for the
+/// size keeps the default entry.
 pub(super) fn buffer_copy_detail(x: &Ext) -> CopyDetail {
-    if x.words().len() < 4 {
+    if x.words().len() < 6 {
         return CopyDetail::default();
     }
     CopyDetail {
+        kind: CopyKind::BufferToBuffer,
         src_addr: x.word64(0),
         dst_addr: x.word64(2),
+        bytes: x.word64(4),
+        ..CopyDetail::default()
+    }
+}
+
+/// The detail of a `ClearBuffer` record (words: address (2), size (2), value). A record that is too short for the
+/// value keeps the default entry.
+pub(super) fn buffer_fill_detail(x: &Ext) -> CopyDetail {
+    if x.words().len() < 5 {
+        return CopyDetail::default();
+    }
+    CopyDetail {
+        kind: CopyKind::BufferFill,
+        dst_addr: x.word64(0),
+        bytes: x.word64(2),
+        value: x.word(4),
         ..CopyDetail::default()
     }
 }

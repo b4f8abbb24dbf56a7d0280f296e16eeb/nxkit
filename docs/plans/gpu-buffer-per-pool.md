@@ -136,9 +136,12 @@ copy); `encode/diag.rs:35`; `native.rs:292-303, 537-541`; `native/offload.rs:152
 `ctx.rs:299`, `cmdbuf/seam.rs:62`; `nxkit-host/src/sys/mod.rs:250-275`, `probe.rs:255`. The crates `nxkit-ndve`,
 `nxkit-ndsr` and `nxkit-native-plan` have no GPU address.
 
-Not encoded on the GPU today, so no site yet: `CopyBufferToBuffer` and `ClearBuffer` (only walked,
-`walk/ext/records.rs:94-97`), buffer textures (`tbuf`), `sbuf_ubo` and `geometry` bindings (refused in
-`programs.rs:343-379`). Each needs a resolve when it is built.
+`CopyBufferToBuffer` and `ClearBuffer` run on the GPU (`passes/buffers.rs`, a class 1 site): the walker keeps the
+addresses and the byte count (`CopyKind::BufferToBuffer`, `BufferFill`), and the kernel gets real addresses from
+`PoolSnapshot::resolve`; a range outside one pool is skipped (`skip.copy`).
+
+Not encoded on the GPU today, so no site yet: buffer textures (`tbuf`), `sbuf_ubo` and `geometry` bindings
+(refused in `programs.rs:343-379`). Each needs a resolve when it is built.
 
 Count: class 1, 11 Metal-side sites and 16 producing sites in `nxkit-gpu`; class 2, 6; class 2v, 2; class 3, 9 (5
 need work); class 4, about 25.

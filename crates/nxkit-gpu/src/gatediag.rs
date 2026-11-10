@@ -50,7 +50,7 @@ fn kind(c: &Cmd) -> Option<&'static str> {
         Cmd::Draw { .. } => Some("draw"),
         Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => Some("clear"),
         Cmd::Dispatch { .. } => Some("dispatch"),
-        Cmd::Copy { .. } | Cmd::Downsample { .. } => Some("copy"),
+        Cmd::Copy { .. } | Cmd::BufferCopy | Cmd::Downsample { .. } => Some("copy"),
         _ => None,
     }
 }

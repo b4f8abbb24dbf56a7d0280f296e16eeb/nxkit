@@ -83,6 +83,10 @@ impl Recorder {
         self.stream.cmds.push(Cmd::Copy { src, dst });
     }
 
+    pub(crate) fn buffer_copy(&mut self) {
+        self.stream.cmds.push(Cmd::BufferCopy);
+    }
+
     pub(crate) fn barrier(&mut self, bits: u32) {
         self.stream.cmds.push(Cmd::Barrier(bits));
     }

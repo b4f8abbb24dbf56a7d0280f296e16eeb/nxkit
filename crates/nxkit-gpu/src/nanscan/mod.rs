@@ -12,6 +12,11 @@
 //!   the pass renders to them,
 //! - prints the fragment and mesh programs of the pass once per run (`pass programs`).
 //!
+//! The storage images that the dispatches of a compute pass bind (`image` lines) are counted before the pass (`at
+//! load`) and after it, outside the pass of the game. This runs for the dispatches of the listed compute programs when
+//! `NXKIT_DIAG_FS` is set (it lists compute program keys as well), and for every dispatch with the knob `nancomp`. A
+//! line prints when the result or the count at load is above 0.
+//!
 //! The kernels (`kernel.rs`) read a texel with `read()` and test the exponent bits of the float they get, so they
 //! cover `Rgba16Float`, `Rg16Float`, `R16Float`, `Rgba32Float`, `Rg32Float`, `R32Float` and `Rg11B10Float`, in 2D,
 //! 2D array, 3D, cube and cube array textures (a cube is read as an array of its faces through a view). A texture
@@ -55,6 +60,8 @@ enum Kind {
     Load,
     /// A texture that a program of the pass samples.
     Sample { stage: &'static str, slot: u32 },
+    /// A storage image of a compute pass after the pass. `load` is the record of the same image before the pass.
+    Image { slot: u32, load: Option<usize> },
 }
 
 /// One counted texture.
@@ -460,6 +467,152 @@ impl Scan {
     }
 }
 
+/// A float storage image that the dispatches of a compute pass bind.
+struct Bound {
+    id: TexId,
+    tex: Texture,
+    slot: u32,
+    /// The compute program keys that bind it, in order of first use.
+    keys: Vec<String>,
+    /// The record of the count before the pass.
+    load: Option<usize>,
+}
+
+/// What `compute_before` found for a compute pass and `ComputeScan::after` needs.
+pub(crate) struct ComputeScan {
+    pass: usize,
+    images: Vec<Bound>,
+}
+
+/// Collects the float storage images of the dispatches of the compute pass `pass` (number `index`) and encodes their
+/// count before the pass. It has to run before the compute pass of the game begins. None when nothing is scanned: the
+/// category is off, or neither `NXKIT_DIAG_FS` nor the knob `nancomp` selects a dispatch.
+pub(crate) fn compute_before(
+    sh: &Shared<'_>,
+    cb: &mut CommandBuffer,
+    index: usize,
+    pass: &Pass,
+) -> Option<ComputeScan> {
+    if !active() {
+        return None;
+    }
+    let listed = crate::diag::fs_programs();
+    let all = crate::diag::knob("nancomp");
+    if listed.is_empty() && !all {
+        return None;
+    }
+    let mut images: Vec<Bound> = Vec::new();
+    // The textures that listed dispatches sample: key, slot and id.
+    let mut sampled: Vec<(String, u32, TexId)> = Vec::new();
+    for i in pass.cmds.clone() {
+        if sh.frame.skips(i) {
+            continue;
+        }
+        let ord = sh.ordinals.get(i as usize).copied().unwrap_or_default();
+        let Some(dd) = sh.detail.dispatches.get(ord.dispatch as usize) else {
+            continue;
+        };
+        let is_listed = listed.contains(&dd.program);
+        if !all && !is_listed {
+            continue;
+        }
+        if is_listed {
+            for t in dd
+                .textures
+                .iter()
+                .filter(|t| t.handle != 0 && t.stage == Stage::Compute)
+            {
+                if let Some(id) = crate::barr::texture_of(t.handle) {
+                    sampled.push((dd.program.clone(), t.slot, id));
+                }
+            }
+        }
+        for t in dd.images.iter().filter(|t| t.handle != 0) {
+            let Some(id) = crate::barr::texture_of(t.handle) else {
+                continue;
+            };
+            let Some(res) = sh.textures.get(&id) else {
+                continue;
+            };
+            if !float_format(res.desc.format) {
+                continue;
+            }
+            match images.iter_mut().find(|b| b.id == id) {
+                Some(b) => {
+                    if !b.keys.contains(&dd.program) {
+                        b.keys.push(dd.program.clone());
+                    }
+                }
+                None => images.push(Bound {
+                    id,
+                    tex: res.tex.clone(),
+                    slot: t.slot,
+                    keys: vec![dd.program.clone()],
+                    load: None,
+                }),
+            }
+        }
+    }
+    for (key, slot, id) in sampled {
+        let Some(res) = sh.textures.get(&id) else {
+            continue;
+        };
+        if !float_format(res.desc.format)
+            || images.iter().any(|b| {
+                b.id == id
+                    || sh
+                        .textures
+                        .get(&b.id)
+                        .is_some_and(|r| r.barrier_id == res.barrier_id)
+            })
+        {
+            continue;
+        }
+        let first = STATE
+            .lock()
+            .ok()
+            .and_then(|mut st| st.as_mut().map(|s| s.seen.insert(id)))
+            .unwrap_or(false);
+        if first {
+            let kind = Kind::Sample { stage: "cs", slot };
+            scan_texture(sh, cb, index, id, &res.tex, &key, kind);
+        }
+    }
+    if images.is_empty() {
+        return None;
+    }
+    for b in &mut images {
+        let prog = prog_text(&b.keys);
+        b.load = scan_texture(sh, cb, index, b.id, &b.tex, &prog, Kind::Load);
+    }
+    Some(ComputeScan {
+        pass: index,
+        images,
+    })
+}
+
+/// The program keys of a line, at most `KEYS`.
+fn prog_text(keys: &[String]) -> String {
+    keys.iter()
+        .take(KEYS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+impl ComputeScan {
+    /// Encodes the count of the images, right after the compute pass.
+    pub(crate) fn after(self, sh: &Shared<'_>, cb: &mut CommandBuffer) {
+        for b in self.images {
+            let kind = Kind::Image {
+                slot: b.slot,
+                load: b.load,
+            };
+            scan_texture(sh, cb, self.pass, b.id, &b.tex, &prog_text(&b.keys), kind);
+        }
+    }
+}
+
 /// Prints the textures with non-finite texels in pass order. The GPU has to be done with the frame.
 pub(crate) fn dump() {
     let Ok(mut st) = STATE.lock() else { return };
@@ -478,9 +631,29 @@ pub(crate) fn dump() {
         .collect();
     let counts = |slot: usize| Counts::from_words(&words[slot * WORDS..(slot + 1) * WORDS]);
     let frame = crate::diag::frame();
-    let (mut targets, mut samples) = (0, 0);
+    let (mut targets, mut samples, mut images) = (0, 0, 0);
+    // An image prints once per frame for each texture and program set, when the count changed over the pass or when
+    // the texture shows non-finite texels for the first time in the frame.
+    let mut shown: HashSet<(TexId, String)> = HashSet::new();
+    let mut dirty: HashSet<TexId> = HashSet::new();
     for r in recs {
         let c = counts(r.slot);
+        if let Kind::Image { slot, load } = r.kind {
+            let at_load = load.map(|l| words[l * WORDS]);
+            let first_bad = c.total > 0 && dirty.insert(r.subject.id);
+            let changed = at_load.is_some_and(|l| l != c.total);
+            if (changed || first_bad)
+                && images < LINES
+                && shown.insert((r.subject.id, r.prog.clone()))
+            {
+                images += 1;
+                eprintln!(
+                    "{}",
+                    text::image_line(frame, r.pass, &r.prog, &r.subject, slot, &c, at_load)
+                );
+            }
+            continue;
+        }
         if c.total == 0 {
             continue;
         }

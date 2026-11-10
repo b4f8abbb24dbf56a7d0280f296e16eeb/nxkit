@@ -162,6 +162,7 @@ impl Scan<'_> {
                 src: None,
                 dst: None,
             } => self.plan.stats.buffer_copies_absorbed += 1,
+            Cmd::BufferCopy => self.foreign_pass(i, PassKind::Copy, &[], &[]),
             Cmd::Copy { src, dst } => {
                 let (r, w) = (src.as_slice(), dst.as_slice());
                 self.foreign_pass(i, PassKind::Copy, r, w);

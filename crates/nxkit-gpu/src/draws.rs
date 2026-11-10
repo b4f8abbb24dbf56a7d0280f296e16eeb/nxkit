@@ -59,7 +59,7 @@ pub(crate) fn ordinals(frame: &Frame) -> Vec<Ordinal> {
         match c {
             Cmd::Draw { .. } => n.draw += 1,
             Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => n.clear += 1,
-            Cmd::Copy { .. } | Cmd::Downsample { .. } => n.copy += 1,
+            Cmd::Copy { .. } | Cmd::BufferCopy | Cmd::Downsample { .. } => n.copy += 1,
             Cmd::Dispatch { .. } => n.dispatch += 1,
             _ => {}
         }

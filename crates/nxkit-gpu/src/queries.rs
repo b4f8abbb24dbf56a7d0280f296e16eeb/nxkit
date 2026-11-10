@@ -286,7 +286,11 @@ impl FrameQueries {
     }
 
     /// Prints the counts of the mesh draws. The GPU has to be done with the frame.
-    pub(crate) fn mesh_print(&self, guest: &GuestSpace) {
+    pub(crate) fn mesh_print(
+        &self,
+        guest: &GuestSpace,
+        place: &dyn Fn(u64) -> crate::meshvis::Where,
+    ) {
         let Some(m) = &self.mesh else { return };
         let read = |i: u64| {
             let mut b = [0u8; 8];
@@ -299,6 +303,16 @@ impl FrameQueries {
             Some(u32::from_le_bytes(b))
         };
         for l in m.report(&|n| self.draw_slot(n).is_some(), &read, &record) {
+            eprintln!("{l}");
+        }
+        let words = |off: u64| {
+            let mut b = [0u8; 16];
+            guest.read(off, &mut b).ok()?;
+            Some(std::array::from_fn(|i| {
+                u32::from_le_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]])
+            }))
+        };
+        for l in m.record_lines(&words, place) {
             eprintln!("{l}");
         }
     }

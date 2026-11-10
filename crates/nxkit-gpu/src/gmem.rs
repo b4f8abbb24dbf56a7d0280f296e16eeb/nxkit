@@ -233,6 +233,16 @@ impl Gmem {
         self.ranges.clone()
     }
 
+    /// The range of the current table that holds `addr`.
+    pub(crate) fn range_of(&self, addr: u64) -> Option<(u64, u64)> {
+        in_ranges(self.ranges.get(1..)?, addr)
+    }
+
+    /// The learned pool that holds `addr`.
+    pub(crate) fn learned_range_of(&self, addr: u64) -> Option<(u64, u64)> {
+        in_ranges(&self.learned, addr)
+    }
+
     /// The pools that shaders wrote through raw pointers, as far as the logs of finished batches showed.
     pub(crate) fn learned(&self) -> &[(u64, u64)] {
         &self.learned
@@ -259,6 +269,14 @@ impl Gmem {
             }
         }
     }
+}
+
+/// The first of `ranges` with `lo <= addr < hi`.
+fn in_ranges(ranges: &[(u64, u64)], addr: u64) -> Option<(u64, u64)> {
+    ranges
+        .iter()
+        .copied()
+        .find(|&(lo, hi)| (lo..hi).contains(&addr))
 }
 
 /// The ranges of a table, shared with the logs that index it.

@@ -139,6 +139,7 @@ fn plan_of(n: usize) -> Plan {
             mesh: "m".to_owned(),
             fragment: "-".to_owned(),
             work: Source::Direct(2),
+            indirect: 0,
         })
         .collect::<Vec<_>>();
     Plan {

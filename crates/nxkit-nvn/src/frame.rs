@@ -136,6 +136,10 @@ pub enum Cmd {
         /// The destination texture.
         dst: Option<TexId>,
     },
+    /// A copy between buffers or a fill of a buffer (`nvnCommandBufferCopyBufferToBuffer` and `ClearBuffer`). It names no
+    /// texture. The GPU runs it in order with the dispatches and copies around it, and it cuts a render pass. What it
+    /// copies is in the copy entry of the walker, which counts it like a [`Cmd::Copy`].
+    BufferCopy,
     /// A resolve of a multisample texture (`nvnCommandBufferDownsample`).
     Downsample {
         /// The multisample texture.
@@ -239,7 +243,9 @@ pub struct Frame {
 pub fn conditional(c: &Cmd) -> bool {
     match c {
         Cmd::Draw { .. } | Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => true,
-        Cmd::Dispatch { .. } | Cmd::Copy { .. } | Cmd::Downsample { .. } => !only_3d(),
+        Cmd::Dispatch { .. } | Cmd::Copy { .. } | Cmd::BufferCopy | Cmd::Downsample { .. } => {
+            !only_3d()
+        }
         _ => false,
     }
 }

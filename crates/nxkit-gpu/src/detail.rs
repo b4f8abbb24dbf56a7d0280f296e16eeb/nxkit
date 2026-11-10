@@ -323,8 +323,8 @@ pub struct ClearDetail {
 /// What a `Cmd::Copy` or `Cmd::Downsample` does, as far as the walker could read it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CopyKind {
-    /// No box was read: a downsample, a buffer to buffer copy, an inline update, a clear, or a copy of a recording
-    /// that has no extension record. The entry only keeps the ordinals aligned.
+    /// No box was read: a downsample, an inline update, or a copy of a recording that has no extension record. The
+    /// entry only keeps the ordinals aligned.
     #[default]
     Other,
     /// `nvnCommandBufferCopyBufferToTexture`. The destination texture side is in the `dst_*` fields.
@@ -336,9 +336,15 @@ pub enum CopyKind {
     /// `nvnCommandBufferClearTexture` and `ClearTextureui`. The destination texture side is in the `dst_*` fields and
     /// the colour in [`CopyDetail::clear`].
     Clear,
+    /// `nvnCommandBufferCopyBufferToBuffer`. The addresses are in `src_addr` and `dst_addr`, the byte count in
+    /// [`CopyDetail::bytes`]. The command is a [`Cmd::BufferCopy`](nxkit_nvn::frame::Cmd::BufferCopy).
+    BufferToBuffer,
+    /// `nvnCommandBufferClearBuffer`. The address is in `dst_addr`, the byte count in [`CopyDetail::bytes`] and the
+    /// 32-bit pattern in [`CopyDetail::value`]. The command is a [`Cmd::BufferCopy`](nxkit_nvn::frame::Cmd::BufferCopy).
+    BufferFill,
 }
 
-/// The box of a `Cmd::Copy`, one entry per `Cmd::Copy` and `Cmd::Downsample`.
+/// The box of a `Cmd::Copy`, one entry per `Cmd::Copy`, `Cmd::BufferCopy` and `Cmd::Downsample`.
 ///
 /// The origins and sizes are the raw `NVNcopyRegion` values. The walker does not know the target of a texture, so the
 /// third value is the first layer of the region for array and cube textures (added to the layer of the view) and the
@@ -376,12 +382,15 @@ pub struct CopyDetail {
     /// The bytes between two layers or depth slices of the buffer (`SetCopyImageStride`). 0 means tightly packed.
     pub image_stride: u64,
     /// The GPU address of what the copy reads (a buffer, or the storage of a texture), 0 when the walker did not read
-    /// it. Set for the copies between buffers and textures and for a buffer to buffer copy (which is
-    /// [`CopyKind::Other`]).
+    /// it. Set for the copies between buffers and textures and for a buffer to buffer copy.
     pub src_addr: u64,
     /// The GPU address of what the copy writes, 0 when the walker did not read it. The address of a texture side is the
     /// plain address, without the texture id the record word carries above it.
     pub dst_addr: u64,
+    /// The bytes of a [`CopyKind::BufferToBuffer`] or [`CopyKind::BufferFill`].
+    pub bytes: u64,
+    /// The 32-bit pattern of a [`CopyKind::BufferFill`].
+    pub value: u32,
 }
 
 /// A `Cmd::Dispatch`.
@@ -422,7 +431,7 @@ pub struct FrameDetail {
     pub draws: Vec<Arc<DrawDetail>>,
     /// One entry per `Cmd::ClearColor` and `Cmd::ClearDepthStencil`, in command order. May be empty.
     pub clears: Vec<ClearDetail>,
-    /// One entry per `Cmd::Copy` and `Cmd::Downsample`, in command order. May be empty.
+    /// One entry per `Cmd::Copy`, `Cmd::BufferCopy` and `Cmd::Downsample`, in command order. May be empty.
     pub copies: Vec<CopyDetail>,
     /// One entry per `Cmd::Dispatch`. May be empty.
     pub dispatches: Vec<DispatchDetail>,

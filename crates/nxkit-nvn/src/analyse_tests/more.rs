@@ -357,3 +357,41 @@ fn the_merge_report_counts_default_loads() {
         (1, 1, 0, 1)
     );
 }
+
+#[test]
+fn a_buffer_command_is_a_copy_pass_between_the_dispatches_around_it() {
+    let mut f = Fx::new();
+    f.rec.dispatch();
+    f.rec.buffer_copy();
+    f.rec.buffer_copy();
+    f.rec.dispatch();
+    f.run().unwrap();
+    let kinds: Vec<_> = f
+        .plan
+        .passes
+        .iter()
+        .map(|p| (p.kind, p.cmds.clone()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            (PassKind::Compute, 0..1),
+            (PassKind::Copy, 1..3),
+            (PassKind::Compute, 3..4)
+        ]
+    );
+    assert_eq!(f.plan.stats.buffer_copies_absorbed, 0);
+}
+
+#[test]
+fn a_buffer_command_cuts_the_render_pass() {
+    let mut f = Fx::new();
+    let c = f.tex(RGBA8);
+    f.rec.set_render_targets(&[c], None);
+    f.rec.draw(paint());
+    f.rec.buffer_copy();
+    f.rec.draw(paint());
+    f.run().unwrap();
+    let kinds: Vec<_> = f.plan.passes.iter().map(|p| p.kind).collect();
+    assert_eq!(kinds, [PassKind::Render, PassKind::Copy, PassKind::Render]);
+}

@@ -441,7 +441,7 @@ fn the_walker_and_the_decoder_count_the_same_entries_with_templates() {
                 Cmd::Draw { .. } => n[0] += 1,
                 Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => n[1] += 1,
                 Cmd::Dispatch { .. } => n[2] += 1,
-                Cmd::Copy { .. } | Cmd::Downsample { .. } => n[3] += 1,
+                Cmd::Copy { .. } | Cmd::Downsample { .. } | Cmd::BufferCopy => n[3] += 1,
                 _ => {}
             }
         }

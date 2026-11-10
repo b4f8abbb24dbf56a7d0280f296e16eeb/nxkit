@@ -1,6 +1,6 @@
 //! The tests of the extension records.
 
-use super::copy::{clear_detail, copy_detail};
+use super::copy::{buffer_copy_detail, buffer_fill_detail, clear_detail, copy_detail};
 use super::draw::{draw_args, mesh_args};
 use super::*;
 use nxkit_metal::AddressMap;
@@ -408,6 +408,35 @@ fn a_clear_texture_record_reads_colour_mask_view_and_region() {
 }
 
 #[test]
+fn a_buffer_copy_record_reads_addresses_and_size() {
+    // source 0x1_0000_1000, destination 0x2_0000_2000, size 0x1_0000_0010, flags 3.
+    let words = [0x1000, 1, 0x2000, 2, 0x10, 1, 3];
+    let d = buffer_copy_detail(&copy_ext(ExtCode::CopyBufferToBuffer, 0, &words));
+    assert_eq!(d.kind, CopyKind::BufferToBuffer);
+    assert_eq!(
+        (d.src_addr, d.dst_addr, d.bytes),
+        (0x1_0000_1000, 0x2_0000_2000, 0x1_0000_0010)
+    );
+    // Without the size the entry stays empty.
+    let d = buffer_copy_detail(&copy_ext(ExtCode::CopyBufferToBuffer, 0, &words[..5]));
+    assert_eq!(d, CopyDetail::default());
+}
+
+#[test]
+fn a_clear_buffer_record_keeps_its_address_size_and_value() {
+    let words = [0x3000, 4, 0x40, 0, 0xdead_beef];
+    let d = buffer_fill_detail(&copy_ext(ExtCode::ClearBuffer, 0, &words));
+    assert_eq!(d.kind, CopyKind::BufferFill);
+    assert_eq!(
+        (d.dst_addr, d.bytes, d.value),
+        (0x4_0000_3000, 0x40, 0xdead_beef)
+    );
+    assert_eq!(d.src_addr, 0);
+    let d = buffer_fill_detail(&copy_ext(ExtCode::ClearBuffer, 0, &words[..4]));
+    assert_eq!(d, CopyDetail::default());
+}
+
+#[test]
 fn a_short_copy_record_keeps_an_empty_entry() {
     let d = copy_detail(
         &State::default(),
@@ -446,7 +475,7 @@ fn copy_like(tex: [u64; 2]) -> Vec<(Ext, CopyKind)> {
     vec![
         (
             copy_ext(ExtCode::ClearBuffer, 0, &[0x100, 0, 4, 0, 0]),
-            CopyKind::Other,
+            CopyKind::BufferFill,
         ),
         (
             copy_ext(
@@ -462,7 +491,7 @@ fn copy_like(tex: [u64; 2]) -> Vec<(Ext, CopyKind)> {
                 0,
                 &[0x100, 0, 0x200, 0, 4, 0, 0],
             ),
-            CopyKind::Other,
+            CopyKind::BufferToBuffer,
         ),
         (
             copy_ext(
@@ -554,7 +583,12 @@ fn the_walker_and_the_decoder_count_the_same_copies() {
         .frame()
         .cmds
         .iter()
-        .filter(|c| matches!(c, Cmd::Copy { .. } | Cmd::Downsample { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Cmd::Copy { .. } | Cmd::BufferCopy | Cmd::Downsample { .. }
+            )
+        })
         .count();
 
     let map = AddressMap::new(HOST, GPU, SIZE).unwrap();

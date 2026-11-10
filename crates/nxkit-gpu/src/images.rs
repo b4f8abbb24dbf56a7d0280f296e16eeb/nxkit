@@ -278,6 +278,9 @@ fn one(
         crate::tex_skip(what)
     })?;
     let id = slot.texture;
+    if crate::diag("barr") || crate::diag("nanscan") {
+        crate::barr::note(handle, id);
+    }
     if let std::collections::hash_map::Entry::Vacant(e) = textures.entry(id) {
         let rec = view
             .record(id)

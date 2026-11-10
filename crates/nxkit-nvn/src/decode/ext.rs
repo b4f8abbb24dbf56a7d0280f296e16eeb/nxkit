@@ -37,7 +37,11 @@ impl Builder {
                 }
             }
             ExtCode::ClearDepthStencil => self.apply(cx, Record::ClearDepthStencil),
-            ExtCode::ClearBuffer | ExtCode::CopyBufferToBuffer | ExtCode::UpdateUniform => {
+            ExtCode::ClearBuffer | ExtCode::CopyBufferToBuffer => {
+                self.blockers |= super::BLOCK_COPY;
+                self.stream.cmds.push(Cmd::BufferCopy);
+            }
+            ExtCode::UpdateUniform => {
                 self.apply(cx, Record::Copy { src: 0, dst: 0 });
             }
             ExtCode::ClearTexture | ExtCode::CopyBufferToTexture => {

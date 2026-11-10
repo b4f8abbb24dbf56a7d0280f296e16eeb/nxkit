@@ -99,7 +99,7 @@ reasons! {
     SkipPipeline => "skip.pipeline",
     /// Encoder: a buffer outside guest memory, or the scratch buffer is full (`Skip::Buffer`).
     SkipBuffer => "skip.buffer",
-    /// Encoder: a copy between textures that cannot be copied (`Skip::Copy`).
+    /// Encoder: a copy, clear or buffer copy that cannot run: textures that do not match, or a buffer range outside one pool (`Skip::Copy`).
     SkipCopy => "skip.copy",
     /// Encoder: a texture upload or copy-back failed (`Skip::Transfer`).
     SkipTransfer => "skip.transfer",
@@ -189,6 +189,11 @@ reasons! {
     /// Texture pool: elements set to 0 because the Metal texture behind them was dropped or replaced. A count, not a
     /// loss: the next frame fills a wanted ID again.
     PoolCleared => "pool.cleared",
+    /// Buffer copies and fills (`CopyBufferToBuffer`, `ClearBuffer`) that the GPU ran. A count, not a loss.
+    BufferOps => "copy.buffer-ops",
+    /// Buffer copies whose ranges overlap. One GPU thread runs them in order, which is slow for a large range. A
+    /// count, not a loss.
+    BufferOpsSerial => "copy.buffer-serial",
 }
 
 impl Reason {
@@ -207,6 +212,8 @@ impl Reason {
             && self != Reason::PoolFilled
             && self != Reason::PoolCleared
             && self != Reason::GmemPoolWritten
+            && self != Reason::BufferOps
+            && self != Reason::BufferOpsSerial
     }
 }
 

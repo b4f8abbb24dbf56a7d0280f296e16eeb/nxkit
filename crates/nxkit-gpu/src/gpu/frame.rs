@@ -567,7 +567,10 @@ impl Gpu {
         }
         if let Some(q) = queries.as_ref().filter(|q| q.has_mesh()) {
             let _ = self.wait();
-            q.mesh_print(&self.guest);
+            q.mesh_print(&self.guest, &|a| crate::meshvis::Where {
+                table: self.gmem.range_of(a),
+                written: self.gmem.learned_range_of(a),
+            });
         }
         crate::health::frame(diag_frame, &stats);
         Ok(EncodeReport {

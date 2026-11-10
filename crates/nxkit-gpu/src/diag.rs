@@ -105,6 +105,9 @@ const KNOBS: &[&str] = &[
     // With `NXKIT_DIAG=nanscan`, a pass that loads its colour target counts the target before the pass too, also when
     // `NXKIT_DIAG_FS` is empty.
     "nanload",
+    // With `NXKIT_DIAG=nanscan`, the storage images of every compute dispatch are counted before and after the compute
+    // pass, also when `NXKIT_DIAG_FS` is empty.
+    "nancomp",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

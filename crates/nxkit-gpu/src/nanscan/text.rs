@@ -150,6 +150,25 @@ pub(super) fn sample_line(
     )
 }
 
+/// The line of a storage image of a compute pass after the pass. `load` is the count before the pass.
+pub(super) fn image_line(
+    frame: u64,
+    pass: usize,
+    prog: &str,
+    s: &Subject,
+    slot: u32,
+    c: &Counts,
+    load: Option<u32>,
+) -> String {
+    format!(
+        "DIAG nanscan frame {frame} pass {pass} prog {prog} image {:?} {:?} {} slot {slot}{}",
+        s.id,
+        s.format,
+        s.size_text(),
+        counts_text(c, channels_of(s.format), s.depth.is_some(), load)
+    )
+}
+
 /// The two lines that list every fragment program and every mesh program of a pass.
 pub(super) fn programs_lines(fragment: &[String], mesh: &[String]) -> [String; 2] {
     let list = |keys: &[String]| {

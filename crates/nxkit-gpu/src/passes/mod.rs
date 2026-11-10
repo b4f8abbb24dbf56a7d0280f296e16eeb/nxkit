@@ -5,11 +5,14 @@
 //! between a scaled and an unscaled texture is not encoded. A CPU read of a texture the GPU wrote swizzles the
 //! texture back into guest memory (R4).
 
+mod buffers;
 mod copy;
 
 use self::copy::copy;
 
-use nxkit_metal::{CommandBuffer, ComputeCommand, ComputePass, Scratch};
+use nxkit_metal::{
+    CommandBuffer, ComputeCommand, ComputePass, Dependency, Scope, Scratch, Stages, Visibility,
+};
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::passes::{Pass, PassKind};
 use nxkit_nvn::resource::{Residency, TexId};
@@ -81,6 +84,11 @@ pub(crate) fn compute_pass(
     pass: &Pass,
     stats: &mut EncodeStats,
 ) {
+    let nan = if pass.kind == PassKind::Compute {
+        crate::nanscan::compute_before(sh, cb, index, pass)
+    } else {
+        None
+    };
     let Ok(mut cp) = cb.begin_compute_pass(&tables.vertex) else {
         stats.skipped[Skip::Encode as usize] += pass.cmds.len() as u32;
         return;
@@ -93,6 +101,24 @@ pub(crate) fn compute_pass(
         && cp.encode(&ComputeCommand::Depend(dep)).is_err()
     {
         stats.skip(Skip::Encode);
+    }
+    // The kernel of a buffer copy or fill reads what earlier dispatches, copies and draws wrote and writes what later
+    // work reads. The barrier planner follows textures only, so the pass waits for all earlier work.
+    if pass.kind == PassKind::Copy
+        && pass
+            .cmds
+            .clone()
+            .any(|i| matches!(sh.frame.cmds.get(i as usize), Some(Cmd::BufferCopy)))
+    {
+        let dep = Dependency {
+            scope: Scope::FromEarlierPasses,
+            after: Stages::ALL,
+            before: Stages::DISPATCH | Stages::BLIT,
+            visibility: Visibility::Device,
+        };
+        if cp.encode(&ComputeCommand::Depend(dep)).is_err() {
+            stats.skip(Skip::Encode);
+        }
     }
     let mut native_here = None;
     for i in pass.cmds.clone() {
@@ -113,7 +139,7 @@ pub(crate) fn compute_pass(
             (PassKind::Compute, Cmd::Dispatch { .. }) => {
                 dispatch(sh, &mut cp, scratch, ord.dispatch)
             }
-            (PassKind::Copy, Cmd::Copy { .. } | Cmd::Downsample { .. }) => {
+            (PassKind::Copy, Cmd::Copy { .. } | Cmd::BufferCopy | Cmd::Downsample { .. }) => {
                 copy(sh, &mut cp, scratch, cmd, ord.copy)
             }
             _ => Ok(()),
@@ -123,12 +149,30 @@ pub(crate) fn compute_pass(
             && let (PassKind::Compute, Some(dd)) =
                 (pass.kind, sh.detail.dispatches.get(ord.dispatch as usize))
         {
+            let images: Vec<String> = dd
+                .images
+                .iter()
+                .filter(|t| t.handle != 0)
+                .map(|t| {
+                    let id = crate::barr::texture_of(t.handle);
+                    let shape = id.and_then(|id| sh.textures.get(&id)).map(|r| {
+                        let d = r.tex.desc();
+                        format!("{}x{}x{} {:?}", d.width, d.height, d.depth, d.format)
+                    });
+                    format!(
+                        "{}:{id:?}:{}",
+                        t.slot,
+                        shape.as_deref().unwrap_or("unknown")
+                    )
+                })
+                .collect();
             eprintln!(
-                "DIAG comp pass {index} cmd {i} program {:?} groups {:?} textures {} sbufs {} result {:?}",
+                "DIAG comp pass {index} cmd {i} program {:?} groups {:?} textures {} sbufs {} images [{}] result {:?}",
                 dd.program,
                 dd.groups,
                 dd.textures.len(),
                 dd.sbufs.len(),
+                images.join(", "),
                 r
             );
         }
@@ -137,6 +181,9 @@ pub(crate) fn compute_pass(
         }
     }
     cp.end();
+    if let Some(n) = nan {
+        n.after(sh, cb);
+    }
     if let Some(p) = native_here {
         crate::native::encode(sh, cb, scratch, index, p, stats);
     }

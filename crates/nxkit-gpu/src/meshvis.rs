@@ -68,6 +68,8 @@ struct Entry {
     mesh: String,
     fragment: String,
     work: Source,
+    /// The guest GPU address of the record of an indirect draw, 0 for a direct one.
+    indirect: u64,
 }
 
 /// What the encoder saw of a mesh draw.
@@ -96,6 +98,23 @@ pub(crate) struct Plan {
     /// The render passes with a draw that has an offset.
     with_offsets: FastSet<usize>,
     live: Mutex<Vec<Live>>,
+}
+
+/// The most lines for indirect draws with no workgroups that a frame prints.
+const MAX_ZERO_LINES: usize = 8;
+
+/// The most lines for indirect draws with a task shader and workgroups that a frame prints.
+const MAX_OK_LINES: usize = 4;
+
+/// Where a GPU address lies in the raw global memory: the range of the current table and the pool that shaders wrote.
+pub(crate) struct Where {
+    pub(crate) table: Option<(u64, u64)>,
+    pub(crate) written: Option<(u64, u64)>,
+}
+
+/// The text of an optional range.
+fn range_text(r: Option<(u64, u64)>, none: &str) -> String {
+    r.map_or_else(|| none.to_owned(), |(lo, hi)| format!("{lo:#x}..{hi:#x}"))
 }
 
 /// The offset in guest memory of the `bytes` at the GPU address `addr`, None when they lie outside it.
@@ -153,12 +172,13 @@ pub(crate) fn plan(
             let Some(d) = detail.draws.get(ord as usize).filter(|d| d.args.is_mesh()) else {
                 continue;
             };
-            let (kind, work) = match d.args {
+            let (kind, work, indirect) = match d.args {
                 DrawArgs::MeshTasksIndirect { indirect } => (
                     Kind::MeshIndirect,
                     Source::Record(guest_offset(guest, indirect, 4)),
+                    indirect,
                 ),
-                DrawArgs::MeshTasks { count, .. } => (Kind::Mesh, Source::Direct(count)),
+                DrawArgs::MeshTasks { count, .. } => (Kind::Mesh, Source::Direct(count), 0),
                 _ => continue,
             };
             entries.push(Entry {
@@ -169,6 +189,7 @@ pub(crate) fn plan(
                 mesh: key(d.program.mesh.as_ref()),
                 fragment: key(d.program.fragment.as_ref()),
                 work,
+                indirect,
             });
         }
         if entries.len() > before {
@@ -256,6 +277,59 @@ impl Plan {
         if let Some(l) = live.get_mut(*i) {
             l.encoded = true;
         }
+    }
+
+    /// The lines of the indirect draws: `zero-draw` for the first draws whose record holds the count 0, `ok-draw` for
+    /// the first draws with a task shader and a count above 0. `words` reads 4 words at an offset in guest memory and
+    /// `place` tells where a GPU address lies in the raw global memory. Runs after the GPU finished the frame.
+    pub(crate) fn record_lines(
+        &self,
+        words: &dyn Fn(u64) -> Option<[u32; 4]>,
+        place: &dyn Fn(u64) -> Where,
+    ) -> Vec<String> {
+        let (mut zero, mut ok) = (0, 0);
+        let mut out = Vec::new();
+        for e in &self.entries {
+            let Source::Record(at) = e.work else { continue };
+            let Some(w) = at.and_then(words) else {
+                continue;
+            };
+            let (tag, taken) = if w[0] == 0 {
+                ("zero-draw", &mut zero)
+            } else if e.task != "-" {
+                ("ok-draw", &mut ok)
+            } else {
+                continue;
+            };
+            if *taken
+                >= if w[0] == 0 {
+                    MAX_ZERO_LINES
+                } else {
+                    MAX_OK_LINES
+                }
+            {
+                continue;
+            }
+            *taken += 1;
+            let p = place(e.indirect);
+            out.push(format!(
+                "DIAG meshvis frame {} pass {} {tag} ms {} indirect {:#x} words [{:#x} {:#x} {:#x} {:#x}] gmem {} written {}",
+                self.frame,
+                e.pass,
+                e.mesh,
+                e.indirect,
+                w[0],
+                w[1],
+                w[2],
+                w[3],
+                p.table.map_or_else(
+                    || "not in table".to_owned(),
+                    |(lo, hi)| format!("in table range {lo:#x}..{hi:#x}")
+                ),
+                range_text(p.written, "no"),
+            ));
+        }
+        out
     }
 
     /// The text of the frame. `shared` tells whether the game's report counts a draw (by ordinal), `samples` gives the
