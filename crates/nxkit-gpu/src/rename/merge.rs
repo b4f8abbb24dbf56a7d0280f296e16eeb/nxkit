@@ -26,7 +26,7 @@ use crate::stats::Skip;
 /// The threads of a threadgroup.
 const GROUP: u32 = 64;
 /// The bytes of a job.
-pub(crate) const JOB_BYTES: usize = 48;
+pub(crate) const JOB_BYTES: usize = 64;
 
 pub(crate) const MSL: &str = r#"
 #include <metal_stdlib>
@@ -37,14 +37,27 @@ struct merge_job {
     device const uint *cvals;
     device const uint *cmask;
     device const uint *gmask;
+    device uint *copy2;
+    device const uint *cprefix;
     uint words;
     uint pad;
 };
 kernel void nxkit_merge_in(device const merge_job *jp [[buffer(0)]], uint t [[thread_position_in_grid]]) {
     merge_job j = jp[0];
     if (t >= j.words) return;
-    bool c = ((j.cmask[t >> 5] >> (t & 31u)) & 1u) != 0u;
-    j.slot[t] = c ? j.cvals[t] : j.guest[t];
+    uint block = j.cmask[t >> 5];
+    bool c = ((block >> (t & 31u)) & 1u) != 0u;
+    // The words of the CPU are packed in `cvals`; `cprefix` counts those before each block of 32 words.
+    uint v = c ? j.cvals[j.cprefix[t >> 5] + popcount(block & ((1u << (t & 31u)) - 1u))] : j.guest[t];
+    j.slot[t] = v;
+    // A probe keeps a second copy of the state at the start of the frame.
+    if (j.copy2 != nullptr) j.copy2[t] = v;
+}
+kernel void nxkit_probe_out(device const merge_job *jp [[buffer(0)]], uint t [[thread_position_in_grid]]) {
+    merge_job j = jp[0];
+    if (t >= j.words) return;
+    uint v = j.slot[t];
+    if (v != j.copy2[t]) j.guest[t] = v;
 }
 kernel void nxkit_merge_out(device const merge_job *jp [[buffer(0)]], uint t [[thread_position_in_grid]]) {
     merge_job j = jp[0];
@@ -63,26 +76,27 @@ pub(crate) struct MergeRun {
     pub(crate) guest: u64,
     /// The real address of the copy.
     pub(crate) slot: u64,
+    /// For a probe, the real address of the copy as it started; 0 for a merge range.
+    pub(crate) copy2: u64,
 }
 
-/// The bytes of a job as the kernels read them.
-pub(crate) fn job_bytes(
-    guest: u64,
-    slot: u64,
-    cvals: u64,
-    cmask: u64,
-    gmask: u64,
-    words: u32,
-) -> [u8; JOB_BYTES] {
+/// The bytes of a job as the kernels read them: the addresses of the guest range, the copy, the packed words of the CPU,
+/// the mask of the CPU, the mask for the end of the frame, the copy of the start state and the block counts, in this
+/// order, and the number of words.
+pub(crate) fn job_bytes(addrs: [u64; 7], words: u32) -> [u8; JOB_BYTES] {
     let mut b = [0u8; JOB_BYTES];
-    for (i, v) in [guest, slot, cvals, cmask, gmask].into_iter().enumerate() {
+    for (i, v) in addrs.into_iter().enumerate() {
         b[8 * i..8 * i + 8].copy_from_slice(&v.to_le_bytes());
     }
-    b[40..44].copy_from_slice(&words.to_le_bytes());
+    b[56..60].copy_from_slice(&words.to_le_bytes());
     b
 }
 
+/// The bytes of a mask. An empty mask is one word of zeros, so that it still has an address.
 fn mask_bytes(mask: &[u32]) -> Vec<u8> {
+    if mask.is_empty() {
+        return vec![0; 4];
+    }
     mask.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
 
@@ -95,7 +109,8 @@ pub(crate) enum Phase {
     Out,
 }
 
-/// Encodes the kernel of `phase` for `runs` as a compute pass of `cb`.
+/// Encodes the kernel of `phase` for `runs` as a compute pass of `cb`. At the end of a frame a merge range runs
+/// `nxkit_merge_out` (the words of `G`) and a probe `nxkit_probe_out` (every word that differs from the start copy).
 pub(crate) fn encode(
     pipelines: &Pipelines,
     cb: &mut CommandBuffer,
@@ -107,26 +122,36 @@ pub(crate) fn encode(
     if runs.is_empty() {
         return Ok(());
     }
-    let entry = match phase {
-        Phase::In => "nxkit_merge_in",
-        Phase::Out => "nxkit_merge_out",
-    };
-    let pipeline = pipelines.host_compute("nxkit-merge", MSL, entry)?;
-    let mut jobs = Vec::with_capacity(runs.len());
+    // The kernel of each run: its entry and its job.
+    let mut jobs: Vec<(&'static str, u64, u32)> = Vec::with_capacity(runs.len());
     for r in runs {
         let range = &r.cap.ranges[r.idx];
-        let words = (range.start.len() / 4) as u32;
+        let words = range.len / 4;
         let push = |b: &[u8]| scratch.push(b).map_err(|_| Skip::Buffer);
-        let cvals = if phase == Phase::In {
-            push(&range.start)?
+        let entry = match (phase, r.copy2 != 0) {
+            (Phase::In, _) => "nxkit_merge_in",
+            (Phase::Out, false) => "nxkit_merge_out",
+            (Phase::Out, true) => "nxkit_probe_out",
+        };
+        let (cvals, cprefix) = if phase == Phase::In {
+            // The words of the CPU, packed (an empty list still needs an address).
+            let vals: Vec<u8> = range.cvals.iter().flat_map(|w| w.to_le_bytes()).collect();
+            (
+                push(if vals.is_empty() { &[0; 4] } else { &vals })?,
+                push(&mask_bytes(&range.cprefix))?,
+            )
         } else {
-            0
+            (0, 0)
         };
         let cmask = push(&mask_bytes(&range.cmask))?;
         let gmask = push(&mask_bytes(&range.gmask))?;
-        let job = push(&job_bytes(r.guest, r.slot, cvals, cmask, gmask, words))?;
-        jobs.push((job, words));
+        let job = push(&job_bytes(
+            [r.guest, r.slot, cvals, cmask, gmask, r.copy2, cprefix],
+            words,
+        ))?;
+        jobs.push((entry, job, words));
     }
+    jobs.sort_by_key(|j| j.0);
     let mut cp = cb.begin_compute_pass(table).map_err(|_| Skip::Encode)?;
     let enc = |cp: &mut nxkit_metal::ComputePass<'_>, c: ComputeCommand| {
         cp.encode(&c).map_err(|_| Skip::Encode)
@@ -140,8 +165,13 @@ pub(crate) fn encode(
             visibility: Visibility::Device,
         }),
     )?;
-    enc(&mut cp, ComputeCommand::SetPipeline(pipeline))?;
-    for (job, words) in jobs {
+    let mut current = "";
+    for (entry, job, words) in jobs {
+        if entry != current {
+            let pipeline = pipelines.host_compute("nxkit-merge", MSL, entry)?;
+            enc(&mut cp, ComputeCommand::SetPipeline(pipeline))?;
+            current = entry;
+        }
         enc(
             &mut cp,
             ComputeCommand::SetBuffer {

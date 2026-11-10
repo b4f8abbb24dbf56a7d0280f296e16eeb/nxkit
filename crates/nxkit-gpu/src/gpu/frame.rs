@@ -120,13 +120,14 @@ impl Gpu {
             let runs: Vec<crate::rename::MergeRun> = b
                 .merges
                 .into_iter()
-                .filter_map(|(cap, idx, addr, size, slot)| {
+                .filter_map(|(cap, idx, addr, size, slot, copy2)| {
                     let guest = pools.resolve(addr, u64::from(size)).ok()?.real;
                     Some(crate::rename::MergeRun {
                         cap,
                         idx,
                         guest,
                         slot,
+                        copy2,
                     })
                 })
                 .collect();
@@ -479,6 +480,7 @@ impl Gpu {
         let preloaded = preload::finish(preload);
         mark(t0, "preload");
         // The merge ranges are filled from guest memory on the GPU before the first pass of the frame.
+        let t_merge = crate::diag("rename").then(Instant::now);
         if let Some(table) = &merge_table
             && !ends.is_empty()
             && crate::rename::merge_encode(
@@ -492,6 +494,9 @@ impl Gpu {
             .is_err()
         {
             stats.skip(Skip::Encode);
+        }
+        if let Some(t) = t_merge {
+            self.rename.cost_add(7, nanos(t, Instant::now()));
         }
         let uploaded = Mutex::new(FastMap::default());
         let prof = if crate::passprof::on() {
@@ -597,6 +602,7 @@ impl Gpu {
         };
 
         // And their words that the GPU wrote go back into guest memory after the last pass.
+        let t_merge = crate::diag("rename").then(Instant::now);
         if let (Some(table), Some(cb)) = (&merge_table, rest.last_mut())
             && crate::rename::merge_encode(
                 &self.pipelines,
@@ -609,6 +615,9 @@ impl Gpu {
             .is_err()
         {
             stats.skip(Skip::Encode);
+        }
+        if let Some(t) = t_merge {
+            self.rename.cost_add(7, nanos(t, Instant::now()));
         }
         if let Some(p) = prof {
             crate::passprof::end_frame(p);

@@ -49,12 +49,18 @@ pub(crate) const QUIET_LIMIT: u32 = 32;
 /// Ranges are judged only in one flush in this many (and in the flush after it, which takes `pre_next`): the wait for a
 /// judged frame is a full wait, so the judging costs the overlap of one frame in this many.
 pub(crate) const LEARN_PERIOD: u64 = 16;
+/// Frames without a new candidate or a change of class after which the judging backs off to [`SLOW_PERIOD`].
+pub(crate) const QUIET_FRAMES: u64 = 300;
+/// One judged flush in this many once nothing new was found for [`QUIET_FRAMES`].
+pub(crate) const SLOW_PERIOD: u64 = 300;
 /// The largest range of a snapshot (a range that shaders only read and the CPU writes in flight).
 pub(crate) const SNAPSHOT_MAX_BYTES: u32 = 1 << 20;
 /// The bytes of all snapshots of one frame.
 pub(crate) const SNAPSHOT_BUDGET: u64 = 8 << 20;
 /// The bytes that the judged ranges of one flush may read.
-const WATCH_BUDGET: u64 = 16 << 20;
+const WATCH_BUDGET: u64 = 8 << 20;
+/// Judged frames in which the masks of a merge range may grow before it is given up.
+const MAX_GROWN: u32 = 3;
 /// Judged frames in which the CPU wrote a read-only range in flight before it becomes a snapshot.
 const SNAPSHOT_HITS: u32 = 2;
 /// Frames that a range rests after a judged frame in which the CPU did not write it in flight.
@@ -298,15 +304,15 @@ fn overlaps(a: (u64, u64), b: (u64, u64)) -> bool {
 ///
 /// - `bound` are the storage bindings of the frame. A range is renamed only if every binding that overlaps it lies
 ///   wholly inside it, because a binding that reaches out of the range cannot read two buffers.
-/// - `others` are the bytes that the frame reads or writes in other ways (copies, vertex, index and indirect buffers,
-///   uniform buffers) as `(start, end)`. A range that one of them overlaps is left as it is.
+/// - `blocked[i]` says that bytes which the frame reads or writes in other ways (copies, vertex, index and indirect
+///   buffers, uniform buffers) overlap range `i` ([`blocked_flags`]). Such a range is left as it is.
 /// - A range that overlaps one that was already taken is left as it is.
 ///
 /// Returns the indexes into `cands` that are renamed, and how many were left out.
 pub(crate) fn plan(
     cands: &[(u64, u32)],
     bound: &[(u64, u32)],
-    others: &[(u64, u64)],
+    blocked: &[bool],
 ) -> (Vec<usize>, usize) {
     let mut taken: Vec<(u64, u64)> = Vec::new();
     let mut accepted = Vec::new();
@@ -318,7 +324,7 @@ pub(crate) fn plan(
             overlaps(r, b) && !(r.0 <= b.0 && b.1 <= r.1)
         });
         let ok = !partial
-            && !others.iter().any(|&o| overlaps(r, o))
+            && !blocked.get(i).copied().unwrap_or(false)
             && !taken.iter().any(|&t| overlaps(r, t));
         if ok {
             taken.push(r);
@@ -328,6 +334,38 @@ pub(crate) fn plan(
         }
     }
     (accepted, left)
+}
+
+/// Which of a list of ranges the other uses of a frame overlap ([`blocked_flags`]).
+type BlockedBy<'a> = dyn Fn(&[(u64, u32)]) -> Vec<bool> + 'a;
+
+/// Which of the ranges `ranges` (`(address, size)`, sorted by address) one of `items` (`(start, end)`) overlaps. One
+/// binary search per item, so a frame with thousands of draws costs little however many ranges there are.
+pub(crate) fn blocked_flags(
+    ranges: &[(u64, u32)],
+    items: impl IntoIterator<Item = (u64, u64)>,
+) -> Vec<bool> {
+    let mut blocked = vec![false; ranges.len()];
+    // The largest end among the ranges up to each index, so that the search finds the first range an item can reach.
+    let mut reach = Vec::with_capacity(ranges.len());
+    let mut m = 0u64;
+    for &(a, s) in ranges {
+        m = m.max(a + u64::from(s));
+        reach.push(m);
+    }
+    for (start, end) in items {
+        let mut i = reach.partition_point(|&e| e <= start);
+        while i < ranges.len() && ranges[i].0 < end {
+            if overlaps(
+                (ranges[i].0, ranges[i].0 + u64::from(ranges[i].1)),
+                (start, end),
+            ) {
+                blocked[i] = true;
+            }
+            i += 1;
+        }
+    }
+    blocked
 }
 
 /// The words of a range that the GPU changed: `(word index, start, end)` where `end` differs from `start`. A tail of
@@ -361,34 +399,103 @@ pub(crate) fn cpu_mask(pre: &[u8], atwait: &[u8]) -> Vec<u32> {
     m
 }
 
-/// The words that the GPU wrote after the wait began (`post` differs from `atwait`), one bit per word.
-pub(crate) fn gpu_mask(post: &[u8], atwait: &[u8]) -> Vec<u32> {
-    let mut m = vec![0u32; post.len().div_ceil(4).div_ceil(32)];
-    for (i, (q, a)) in post.chunks(4).zip(atwait.chunks(4)).enumerate() {
-        if q != a {
+/// The words where `end` differs from `start`, one bit per word.
+pub(crate) fn gpu_words(end: &[u8], start: &[u8]) -> Vec<u32> {
+    let mut m = vec![0u32; end.len().div_ceil(4).div_ceil(32)];
+    for (i, (e, a)) in end.chunks(4).zip(start.chunks(4)).enumerate() {
+        if e != a {
             m[i / 32] |= 1 << (i % 32);
         }
     }
     m
 }
 
+/// The words of `mask` read from guest memory at `addr`, packed, and for each block of 32 words the number of words
+/// before it. `None` when a read fails.
+fn read_packed(
+    read: &dyn Fn(u64, &mut [u8]) -> bool,
+    addr: u64,
+    mask: &[u32],
+) -> Option<(Vec<u32>, Vec<u32>)> {
+    let mut vals = Vec::new();
+    let mut prefix = Vec::with_capacity(mask.len());
+    let mut total = 0u32;
+    for m in mask {
+        prefix.push(total);
+        total += m.count_ones();
+    }
+    let n = mask.len() * 32;
+    let mut w = 0;
+    while w < n {
+        if mask[w / 32] >> (w % 32) & 1 == 0 {
+            w += 1;
+            continue;
+        }
+        let first = w;
+        while w < n && mask[w / 32] >> (w % 32) & 1 != 0 {
+            w += 1;
+        }
+        let mut bytes = vec![0u8; 4 * (w - first)];
+        if !read(addr + 4 * first as u64, &mut bytes) {
+            return None;
+        }
+        vals.extend(
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| u32::from_le_bytes(*b)),
+        );
+    }
+    Some((vals, prefix))
+}
+
+/// A range that the kernels can fill: whole 32-bit words at a 4 byte aligned address.
+fn probeable(addr: u64, size: u32) -> bool {
+    size.is_multiple_of(4) && addr.is_multiple_of(4)
+}
+
 /// Adds the bits of `add` to `into`.
-pub(crate) fn union_mask(into: &mut Vec<u32>, add: &[u32]) {
+pub(crate) fn union_mask(into: &mut Vec<u32>, add: &[u32]) -> bool {
     if into.len() < add.len() {
         into.resize(add.len(), 0);
     }
+    let mut grew = false;
     for (a, b) in into.iter_mut().zip(add) {
+        grew |= *b & !*a != 0;
         *a |= b;
     }
-}
-
-/// True when a word is in both masks.
-pub(crate) fn masks_overlap(a: &[u32], b: &[u32]) -> bool {
-    a.iter().zip(b).any(|(x, y)| x & y != 0)
+    grew
 }
 
 pub(crate) fn is_empty_mask(a: &[u32]) -> bool {
     a.iter().all(|w| *w == 0)
+}
+
+/// The words of a range that the host writes back in the wait: `(word index, start, end)` where `end` differs from `start`.
+/// A renamed range writes back every word that changed; a merge range only the words that both the CPU and the GPU write
+/// (the kernel writes the others at the end of the frame).
+fn written_words(r: &CapRange, end: &[u8]) -> Vec<(usize, u32, u32)> {
+    if r.kind != Kind::Merge {
+        return changed_words(&r.start, end).collect();
+    }
+    let mut v = Vec::new();
+    for (b, m) in r.rmask.iter().enumerate() {
+        let mut bits = *m;
+        while bits != 0 {
+            let w = b * 32 + bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let e = end
+                .get(4 * w..4 * w + 4)
+                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]));
+            if let (Some(cur), Some(e)) = (r.cvalue(w), e)
+                && cur != e
+            {
+                v.push((w, cur, e));
+            }
+        }
+    }
+    v
 }
 
 /// What to swap into a guest word of a renamed range when the frame is written back, or `None` to leave the word.
@@ -432,17 +539,45 @@ pub(crate) enum Kind {
     Snapshot,
     /// The GPU merges the copy with guest memory at the start and the end of the frame.
     Merge,
+    /// A written range in a judged frame: the GPU reads and writes a copy that it fills from guest memory at the start
+    /// (a second copy keeps the start state), and writes the words that it changed back at the end. Guest memory is
+    /// written by the CPU only while the frame runs, so the host can tell the CPU's words from the GPU's.
+    Probe,
 }
 
 /// A renamed range of one frame with the guest bytes at its flush.
 #[derive(Debug)]
 pub(crate) struct CapRange {
     pub(crate) addr: u64,
+    /// The bytes of the range.
+    pub(crate) len: u32,
+    /// The bytes at the flush: the whole range for `Rename` and `Snapshot`, nothing for the others.
     pub(crate) start: Vec<u8>,
     pub(crate) kind: Kind,
-    /// For a merge range: the words that the CPU writes in flight, and the words that the GPU writes, one bit per word.
+    /// For a merge range, one bit per word: `cmask` the words that the CPU writes in flight, `gmask` the words that only
+    /// the GPU writes (`P`: the kernel at the end of the frame writes these into guest memory) and `rmask` the words that
+    /// both write (`R`: the host writes the GPU's value back in the wait, if the CPU has not written the word since).
     pub(crate) cmask: Vec<u32>,
     pub(crate) gmask: Vec<u32>,
+    pub(crate) rmask: Vec<u32>,
+    /// For a merge range: the bytes of the words of `cmask` at the flush, packed, and for each block of 32 words the
+    /// number of such words before it.
+    pub(crate) cvals: Vec<u32>,
+    pub(crate) cprefix: Vec<u32>,
+}
+
+impl CapRange {
+    /// The bytes of the word `w` at the flush, for a word of `cmask` of a merge range.
+    pub(crate) fn cvalue(&self, w: usize) -> Option<u32> {
+        let block = *self.cmask.get(w / 32)?;
+        if block >> (w % 32) & 1 == 0 {
+            return None;
+        }
+        let before = (block & ((1u32 << (w % 32)) - 1)).count_ones();
+        self.cvals
+            .get((self.cprefix.get(w / 32)? + before) as usize)
+            .copied()
+    }
 }
 
 /// The renamed ranges of a frame, taken at its flush on the CPU thread.
@@ -517,6 +652,8 @@ struct Cand {
     /// The words that the CPU wrote in flight and the words that the GPU wrote, over the judged frames (bit per word).
     cmask: Vec<u32>,
     gmask: Vec<u32>,
+    /// Judged frames of a merge range in which a mask grew: the host did not know all the words yet.
+    grown: u32,
     /// The flush counter before which the range is not judged for CPU writes in flight again.
     rest_until: u64,
     size: u32,
@@ -529,10 +666,14 @@ struct Cand {
 /// A range that a frame renames.
 struct Renamed {
     addr: u64,
+    len: u32,
     start: Vec<u8>,
     kind: Kind,
     cmask: Vec<u32>,
     gmask: Vec<u32>,
+    rmask: Vec<u32>,
+    cvals: Vec<u32>,
+    cprefix: Vec<u32>,
 }
 
 /// One flush's result for the capture.
@@ -542,6 +683,11 @@ struct Flushed {
     renamed: Vec<Renamed>,
     /// A frame binds a range that needs a full wait.
     conflict: bool,
+    /// A read-only range is measured in this frame: the start of the wait for it is looked at.
+    watching: bool,
+    /// The time of the judging and of the capture in this flush (`NXKIT_DIAG=rename`).
+    judge_ns: u64,
+    capture_ns: u64,
     /// The bytes of the snapshots among them.
     snapshot_bytes: u64,
     /// Snapshots left out because the frame is over the budget.
@@ -561,8 +707,16 @@ struct State {
     /// The flushes so far.
     frame: u64,
     cands: FastMap<u64, Cand>,
-    /// The bindings whose program was looked at: address, size, slot and stage, hash of the program key.
-    evaluated: FastSet<(u64, u32, u32, u64)>,
+    /// Whether a program may write a binding, by the key's allocation (draws) or the hash of the key (dispatches), with
+    /// the slot and stage.
+    rw_ptr: FastMap<(usize, u32), (Arc<str>, bool)>,
+    rw_str: FastMap<(u64, u32), bool>,
+    /// The flush counter at the last event: a candidate with an address not seen before, or a change of class.
+    last_event: u64,
+    /// Every address that was a candidate, so that a ring of buffers that comes round is not new each time.
+    seen: FastSet<u64>,
+    /// Judge one flush in [`LEARN_PERIOD`] always (for tests).
+    fast_only: bool,
     /// The knob `conflictwait`: a frame that binds a range that the CPU writes in flight waits in full.
     conflict_wait: bool,
     /// `NXKIT_DIAG=rename`: ranges that are watched although they are not learned (`Never`, `Idle`, read-only).
@@ -587,6 +741,26 @@ struct Inflight {
 }
 
 impl State {
+    /// A candidate at `addr` is added: it is an event when the address was never a candidate.
+    fn fresh(&mut self, addr: u64) {
+        if self.seen.len() > 100_000 {
+            self.seen.clear();
+        }
+        if self.seen.insert(addr) {
+            self.last_event = self.frame;
+        }
+    }
+
+    /// The flushes between two judged flushes now: every [`LEARN_PERIOD`] while something new is found, every
+    /// [`SLOW_PERIOD`] after [`QUIET_FRAMES`] flushes without an event.
+    fn period(&self) -> u64 {
+        if !self.fast_only && self.frame.saturating_sub(self.last_event) >= QUIET_FRAMES {
+            SLOW_PERIOD
+        } else {
+            LEARN_PERIOD
+        }
+    }
+
     /// Adds a range that is only read. Its frames are judged for CPU writes in flight; it may become a snapshot.
     fn watch_read_only(&mut self, addr: u64, size: u32) {
         if let Some(c) = self.cands.get_mut(&addr) {
@@ -597,6 +771,7 @@ impl State {
                 c.learn = Learn::watch();
             }
         } else if self.cands.len() < MAX_CANDIDATES {
+            self.fresh(addr);
             self.cands.insert(
                 addr,
                 Cand {
@@ -604,6 +779,7 @@ impl State {
                     hits: 0,
                     cmask: Vec::new(),
                     gmask: Vec::new(),
+                    grown: 0,
                     rest_until: 0,
                     size,
                     learn: Learn::watch(),
@@ -629,6 +805,7 @@ impl State {
                 c.sample = None;
             }
         } else if self.cands.len() < MAX_CANDIDATES {
+            self.fresh(addr);
             self.cands.insert(
                 addr,
                 Cand {
@@ -636,6 +813,7 @@ impl State {
                     hits: 0,
                     cmask: Vec::new(),
                     gmask: Vec::new(),
+                    grown: 0,
                     rest_until: 0,
                     size,
                     learn: Learn::new(),
@@ -664,6 +842,8 @@ impl State {
             Kind::Rename => Class::Rename,
             Kind::Snapshot => Class::Snapshot,
             Kind::Merge => Class::Merge,
+            // A probe is judged by the class that it measures; it has no class of its own.
+            Kind::Probe => return true,
         };
         self.cands
             .get(&addr)
@@ -682,12 +862,13 @@ impl State {
         &mut self,
         fence: u64,
         bound: &[(u64, u32)],
-        others: &dyn Fn() -> Vec<(u64, u64)>,
+        others: &BlockedBy,
         written: &dyn Fn() -> Vec<(u64, u64)>,
         read: &dyn Fn(u64, &mut [u8]) -> bool,
     ) -> Flushed {
         self.frame += 1;
         let mut out = Flushed::default();
+        let t_judge = self.watch.then(std::time::Instant::now);
         for addr in std::mem::take(&mut self.pending_news) {
             if let Some(c) = self.cands.get(&addr) {
                 out.news
@@ -702,7 +883,7 @@ impl State {
         touched.sort_unstable();
         touched.dedup();
         let now = self.frame;
-        let learn_frame = now.is_multiple_of(LEARN_PERIOD);
+        let learn_frame = now.is_multiple_of(self.period());
         // A sample is judged at the flush right after its frame or never: its `post` and `pre_next` must be neighbours.
         for c in self.cands.values_mut() {
             if c.sample.as_ref().is_some_and(|s| s.frame + 1 != now) {
@@ -716,7 +897,7 @@ impl State {
                 let age = now - c.last;
                 c.sample.is_some()
                     || match c.learn.class() {
-                        Class::Learning | Class::Idle | Class::Watch => age <= 60,
+                        Class::Learning | Class::Idle | Class::Watch => age <= 120,
                         Class::Never => age <= 600,
                         Class::Rename | Class::Snapshot | Class::Merge => age <= 3000,
                         Class::Conflict => age <= 600,
@@ -730,9 +911,18 @@ impl State {
             let Some(c) = self.cands.get_mut(&addr) else {
                 continue;
             };
+            let class = c.learn.class();
+            // A range that only waits to be judged (or has nothing to do) is looked at once in 60 flushes, to keep it from
+            // being forgotten; the others are looked at in every flush.
+            if matches!(class, Class::Never | Class::Watch)
+                && !learn_frame
+                && !now.is_multiple_of(60)
+                && !(self.conflict_wait && !c.ro)
+            {
+                continue;
+            }
             c.last = self.frame;
             c.learn.tick();
-            let class = c.learn.class();
             if class == Class::Snapshot {
                 // A copy or fill that writes the range makes it state.
                 let dsts = copy_dsts.get_or_insert_with(written);
@@ -760,13 +950,19 @@ impl State {
                 && now >= c.rest_until
                 && (matches!(class, Class::Watch | Class::Never | Class::Merge)
                     || (self.watch && class == Class::Idle))
+                && (c.ro || probeable(addr, c.size) || class == Class::Idle)
                 && u64::from(c.size) <= budget;
             let learn_judge = matches!(class, Class::Learning | Class::Rename);
-            let mut pre = vec![0u8; c.size as usize];
-            let have = ((c.sample.is_some() && learn_judge)
+            // Only a range that is judged in this flush is read; most bound ranges are not.
+            let want = (c.sample.is_some() && learn_judge)
                 || (learn_frame && c.learn.sampling())
-                || in_flight)
-                && read(addr, &mut pre);
+                || in_flight;
+            let mut pre = if want {
+                vec![0u8; c.size as usize]
+            } else {
+                Vec::new()
+            };
+            let have = want && read(addr, &mut pre);
             if have {
                 budget = budget.saturating_sub(u64::from(c.size));
             }
@@ -782,7 +978,7 @@ impl State {
             if c.learn.class() == Class::Rename && !judged_now {
                 renaming.push((addr, c.size, Kind::Rename));
             } else if c.learn.class() == Class::Merge && !in_flight {
-                if c.size.is_multiple_of(4) && addr.is_multiple_of(4) {
+                if probeable(addr, c.size) {
                     renaming.push((addr, c.size, Kind::Merge));
                 }
             } else if (judged_now || in_flight) && have {
@@ -793,20 +989,39 @@ impl State {
                     post: None,
                     atwait: None,
                 });
-                out.sampling = true;
-                out.checking |= c.learn.class() == Class::Rename;
+                if !c.ro && matches!(c.learn.class(), Class::Never | Class::Merge) {
+                    // A written range is judged on a copy (`Kind::Probe`); the flush says below whether it got one.
+                    renaming.push((addr, c.size, Kind::Probe));
+                } else if c.ro {
+                    // A read-only range is measured when the wait begins; the frame needs no full wait.
+                    out.watching = true;
+                } else {
+                    out.sampling = true;
+                    out.checking |= c.learn.class() == Class::Rename;
+                }
             }
+        }
+        if !out.news.is_empty() {
+            self.last_event = now;
+        }
+        if let Some(t) = t_judge {
+            out.judge_ns = t.elapsed().as_nanos() as u64;
         }
         if renaming.is_empty() {
             return out;
         }
+        let t_capture = self.watch.then(std::time::Instant::now);
         renaming.sort_unstable();
         let ranges: Vec<(u64, u32)> = renaming.iter().map(|&(a, s, _)| (a, s)).collect();
-        let (accepted, left) = plan(&ranges, bound, &others());
+        let (accepted, left) = plan(&ranges, bound, &others(&ranges));
         out.excluded = left;
         let mut snapshot_budget = SNAPSHOT_BUDGET;
-        for i in accepted {
+        let mut probed: Vec<u64> = Vec::new();
+        for &i in &accepted {
             let (addr, size, kind) = renaming[i];
+            if kind == Kind::Probe {
+                probed.push(addr);
+            }
             let snapshot = kind == Kind::Snapshot;
             if snapshot {
                 if u64::from(size) > snapshot_budget {
@@ -815,25 +1030,73 @@ impl State {
                 }
                 snapshot_budget -= u64::from(size);
             }
-            let mut start = vec![0u8; size as usize];
-            if read(addr, &mut start) {
-                if snapshot {
-                    out.snapshot_bytes += u64::from(size);
+            if snapshot {
+                out.snapshot_bytes += u64::from(size);
+            }
+            let words = (size as usize / 4).div_ceil(32);
+            let mut x = Renamed {
+                addr,
+                len: size,
+                start: Vec::new(),
+                kind,
+                cmask: Vec::new(),
+                gmask: Vec::new(),
+                rmask: Vec::new(),
+                cvals: Vec::new(),
+                cprefix: Vec::new(),
+            };
+            let ok = match kind {
+                // A probe's copy is the guest range, filled on the GPU.
+                Kind::Probe => {
+                    x.cmask = vec![0; words];
+                    x.cprefix = vec![0; words];
+                    true
                 }
-                let (cmask, gmask) = match (kind, self.cands.get(&addr)) {
-                    (Kind::Merge, Some(c)) => (c.cmask.clone(), c.gmask.clone()),
-                    _ => (Vec::new(), Vec::new()),
-                };
-                out.renamed.push(Renamed {
-                    addr,
-                    start,
-                    kind,
-                    cmask,
-                    gmask,
-                });
+                // A merge range needs only the words that the CPU writes in flight.
+                Kind::Merge => match self.cands.get(&addr) {
+                    Some(c) => {
+                        let (g, cm) = (&c.gmask, &c.cmask);
+                        let at = |m: &Vec<u32>, i: usize| m.get(i).copied().unwrap_or(0);
+                        x.cmask = (0..words).map(|i| at(cm, i)).collect();
+                        x.gmask = (0..words).map(|i| at(g, i) & !at(cm, i)).collect();
+                        x.rmask = (0..words).map(|i| at(g, i) & at(cm, i)).collect();
+                        match read_packed(read, addr, &x.cmask) {
+                            Some((vals, prefix)) => {
+                                x.cvals = vals;
+                                x.cprefix = prefix;
+                                true
+                            }
+                            None => false,
+                        }
+                    }
+                    None => false,
+                },
+                _ => {
+                    x.start = vec![0u8; size as usize];
+                    read(addr, &mut x.start)
+                }
+            };
+            if ok {
+                out.renamed.push(x);
             } else {
                 out.excluded += 1;
             }
+        }
+        // A probe that was not given a copy (another use of the range, the budget) judges nothing, and its frame needs
+        // no full wait.
+        for &(addr, _, kind) in &renaming {
+            if kind == Kind::Probe
+                && !probed.contains(&addr)
+                && let Some(c) = self.cands.get_mut(&addr)
+            {
+                c.sample = None;
+            }
+        }
+        out.sampling |= !probed.is_empty();
+        out.renamed
+            .retain(|x| x.kind != Kind::Probe || probed.contains(&x.addr));
+        if let Some(t) = t_capture {
+            out.capture_ns = t.elapsed().as_nanos() as u64;
         }
         out
     }
@@ -845,6 +1108,10 @@ impl State {
         let mut found: Vec<(u64, Inflight, usize)> = Vec::new();
         let mut news: Vec<u64> = Vec::new();
         for (addr, c) in &mut self.cands {
+            // A written range that is judged on a copy is measured in `probed`.
+            if c.ro || matches!(c.learn.class(), Class::Never | Class::Merge) {
+                continue;
+            }
             if let Some(s) = &mut c.sample
                 && s.post.is_none()
                 && s.fence == newest
@@ -865,14 +1132,6 @@ impl State {
                             },
                             n,
                         ));
-                        if !c.ro {
-                            union_mask(&mut c.cmask, &cm);
-                            union_mask(&mut c.gmask, &gpu_mask(&post, aw));
-                        }
-                        if c.learn.class() == Class::Merge {
-                            // A merge range is looked at again after a while.
-                            c.rest_until = now + WATCH_PAUSE;
-                        }
                         if n > 0 {
                             c.hits += 1;
                             // A range that shaders only read and the CPU writes while frames run is a snapshot.
@@ -888,30 +1147,8 @@ impl State {
                 }
             }
         }
-        // A written range that the CPU writes in flight is a merge range when the words of the CPU and of the GPU are
-        // disjoint, and one that needs a full wait when they are not.
-        for (addr, c) in &mut self.cands {
-            if c.ro
-                || c.hits < SNAPSHOT_HITS
-                || !matches!(c.learn.class(), Class::Never | Class::Merge)
-            {
-                continue;
-            }
-            if masks_overlap(&c.cmask, &c.gmask) {
-                c.learn.set(Class::Conflict);
-                note_n(Reason::OverlapMergeConflict, 1);
-                news.push(*addr);
-            } else if c.learn.class() == Class::Never
-                && !is_empty_mask(&c.gmask)
-                && c.size.is_multiple_of(4)
-                && addr.is_multiple_of(4)
-            {
-                c.learn.set(Class::Merge);
-                c.rest_until = now + WATCH_PAUSE;
-                news.push(*addr);
-            }
-        }
         self.pending_news.extend(news);
+        self.classify();
         for (addr, f, n) in found {
             let e = self.inflight.entry(addr).or_default();
             e.size = f.size;
@@ -925,9 +1162,92 @@ impl State {
         }
     }
 
+    /// A written range that the CPU writes in flight is a merge range (one class for all of them): the words that only
+    /// the GPU writes (`P`) are merged on the GPU, the words that both write (`R`) are written back by the host in the
+    /// wait. A merge range whose masks keep growing after it was classified is not understood: `Conflict`, the wait for
+    /// its frame is a full one. What cannot be seen: an `R` word that the CPU writes in flight after the GPU wrote it in
+    /// the same frame looks like one written before; its GPU value is dropped, as for a word that the CPU re-initialises.
+    fn classify(&mut self) {
+        let now = self.frame;
+        let mut news: Vec<u64> = Vec::new();
+        for (addr, c) in &mut self.cands {
+            if c.ro
+                || c.hits < SNAPSHOT_HITS
+                || !matches!(c.learn.class(), Class::Never | Class::Merge)
+            {
+                continue;
+            }
+            if c.learn.class() == Class::Merge {
+                if c.grown > MAX_GROWN {
+                    c.learn.set(Class::Conflict);
+                    note_n(Reason::OverlapMergeConflict, 1);
+                    news.push(*addr);
+                }
+            } else if !is_empty_mask(&c.gmask) && probeable(*addr, c.size) {
+                c.learn.set(Class::Merge);
+                c.grown = 0;
+                c.rest_until = now + WATCH_PAUSE;
+                news.push(*addr);
+            }
+        }
+        self.pending_news.extend(news);
+    }
+
+    /// The GPU is done with the judged frame `fence`, in which the written range `addr` read and wrote a copy: `end` is the
+    /// copy after the frame and `start` the copy as the kernel filled it. The words that the GPU wrote are those where the
+    /// two differ. The words that the CPU wrote are those where guest memory at the start of the wait differs from `pre`,
+    /// except where it holds what the GPU wrote (the frame can end before the wait begins and its words go back into guest
+    /// memory).
+    fn probed(&mut self, fence: u64, addr: u64, end: &[u8], start: &[u8]) {
+        let now = self.frame;
+        let Some(c) = self.cands.get_mut(&addr) else {
+            return;
+        };
+        let Some(s) = c.sample.as_ref().filter(|s| s.fence == fence) else {
+            return;
+        };
+        let Some(aw) = &s.atwait else {
+            return;
+        };
+        let gm = gpu_words(end, start);
+        let mut cm = cpu_mask(&s.pre, aw);
+        for (i, (a, e)) in aw.chunks(4).zip(end.chunks(4)).enumerate() {
+            if gm[i / 32] >> (i % 32) & 1 != 0 && a == e {
+                cm[i / 32] &= !(1 << (i % 32));
+            }
+        }
+        let n = cm.iter().map(|w| w.count_ones() as usize).sum::<usize>();
+        let grew = union_mask(&mut c.cmask, &cm) | union_mask(&mut c.gmask, &gm);
+        if grew && c.learn.class() == Class::Merge {
+            c.grown += 1;
+        }
+        if c.learn.class() == Class::Merge {
+            // A merge range is looked at again after a while.
+            c.rest_until = now + WATCH_PAUSE;
+        }
+        if n > 0 {
+            c.hits += 1;
+        } else {
+            c.rest_until = now + WATCH_PAUSE;
+        }
+        let e = self.inflight.entry(addr).or_default();
+        e.size = c.size;
+        e.class = c.learn.class().name();
+        e.ro = false;
+        e.frames += 1;
+        if n > 0 {
+            e.hit += 1;
+            e.words = e.words.max(n);
+        }
+        self.classify();
+    }
+
     /// The wait for `fence` begins: takes the bytes of the ranges that are judged in that frame before the GPU is known to
-    /// be done, for `NXKIT_DIAG=rename`.
+    /// be done. A read-only range is measured now: the words that changed since the flush are the CPU's writes in flight,
+    /// and the GPU cannot have written them.
     fn before_wait(&mut self, fence: u64, read: &dyn Fn(u64, &mut [u8]) -> bool) {
+        let now = self.frame;
+        let mut seen: Vec<(u64, usize)> = Vec::new();
         for (addr, c) in &mut self.cands {
             if let Some(s) = &mut c.sample
                 && s.fence == fence
@@ -935,10 +1255,44 @@ impl State {
             {
                 let mut b = vec![0u8; c.size as usize];
                 if read(*addr, &mut b) {
+                    if c.ro {
+                        let n = cpu_mask(&s.pre, &b)
+                            .iter()
+                            .map(|w| w.count_ones() as usize)
+                            .sum();
+                        seen.push((*addr, n));
+                    }
                     s.atwait = Some(b);
                 }
             }
         }
+        let mut news = Vec::new();
+        for (addr, n) in seen {
+            let Some(c) = self.cands.get_mut(&addr) else {
+                continue;
+            };
+            if n > 0 {
+                c.hits += 1;
+                // A range that shaders only read and the CPU writes while frames run is a snapshot.
+                if c.learn.class() == Class::Watch && c.hits >= SNAPSHOT_HITS {
+                    c.learn.set(Class::Snapshot);
+                    news.push(addr);
+                }
+            } else {
+                c.rest_until = now + WATCH_PAUSE;
+            }
+            c.sample = None;
+            let e = self.inflight.entry(addr).or_default();
+            e.size = c.size;
+            e.class = c.learn.class().name();
+            e.ro = true;
+            e.frames += 1;
+            if n > 0 {
+                e.hit += 1;
+                e.words = e.words.max(n);
+            }
+        }
+        self.pending_news.extend(news);
     }
 
     /// The classes of the candidates: learning, rename, never, idle.
@@ -964,6 +1318,8 @@ struct Pending {
     cap: Arc<Capture>,
     /// For each range of the capture, its offset in the buffer.
     offsets: Vec<(usize, u64)>,
+    /// The probes of the frame: the range of the capture and the offsets of the copy and of the copy as it started.
+    probes: Vec<(usize, u64, u64)>,
 }
 
 /// The last write-back of a range.
@@ -978,14 +1334,64 @@ struct Slot {
     pending: Option<Pending>,
 }
 
+/// The entry points that `NXKIT_DIAG=rename` times.
+const COST_NAMES: [&str; 8] = [
+    "at_flush",
+    "judge",
+    "capture",
+    "note_rw",
+    "begin_slot",
+    "before_wait",
+    "after_wait",
+    "merge",
+];
+
+/// The time of each entry point since the last report: sum, longest and number of calls.
+#[derive(Default)]
+struct Cost {
+    sum: [AtomicU64; 8],
+    max: [AtomicU64; 8],
+    calls: [AtomicU64; 8],
+}
+
+impl Cost {
+    fn add(&self, k: usize, ns: u64) {
+        self.sum[k].fetch_add(ns, Ordering::Relaxed);
+        self.max[k].fetch_max(ns, Ordering::Relaxed);
+        self.calls[k].fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn take(&self) -> String {
+        let ms = |ns: u64| ns as f64 / 1e6;
+        COST_NAMES
+            .iter()
+            .enumerate()
+            .map(|(k, name)| {
+                let (sum, max, n) = (
+                    self.sum[k].swap(0, Ordering::Relaxed),
+                    self.max[k].swap(0, Ordering::Relaxed),
+                    self.calls[k].swap(0, Ordering::Relaxed),
+                );
+                format!(
+                    "{name} {:.3}/{:.3} ({n})",
+                    ms(sum) / n.max(1) as f64,
+                    ms(max)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 /// What `begin_slot` gives the encode of a frame.
 pub(crate) struct Slotted {
     /// Where the bindings of renamed ranges read.
     pub(crate) map: RenameMap,
     /// The buffer of the slot, which the batch keeps alive.
     pub(crate) buf: Option<Arc<DataBuffer>>,
-    /// The merge ranges: capture, index in it, guest address, size and the real address of the copy.
-    pub(crate) merges: Vec<(Arc<Capture>, usize, u64, u32, u64)>,
+    /// The merge ranges and probes: capture, index in it, guest address, size, the real address of the copy and, for a
+    /// probe, of the copy as it started (0 for a merge range).
+    pub(crate) merges: Vec<(Arc<Capture>, usize, u64, u32, u64, u64)>,
 }
 
 /// The learner and the copies of the renamed ranges. One per [`crate::Gpu`], shared with the backend.
@@ -997,6 +1403,8 @@ pub(crate) struct Renamer {
     slots: Mutex<Vec<Slot>>,
     /// The fence whose wait must be honest because a range is judged in its frame, 0 for none.
     honest: AtomicU64,
+    /// The fence whose wait begins with a look at the read-only ranges that are measured in its frame, 0 for none.
+    watching: AtomicU64,
     /// Why the wait for `honest` must be honest: 1 a range is learned, 2 a renamed range is checked.
     honest_why: AtomicU64,
     /// Waits by kind: honest because of learning, of a check, of another reason, overlapped, honest because of a conflict.
@@ -1008,6 +1416,8 @@ pub(crate) struct Renamer {
     chains: Mutex<FastMap<u64, Chain>>,
     /// Fences up to which the flushes print their capture because a range became `Rename` lately.
     young_until: AtomicU64,
+    /// `NXKIT_DIAG=rename`: the time of the entry points.
+    cost: Cost,
     /// A sample waits for its bytes or a frame waits for its write-back: a wait has work.
     active: AtomicBool,
 }
@@ -1025,8 +1435,10 @@ impl Renamer {
             slots: Mutex::new((0..BATCHES_IN_FLIGHT).map(|_| Slot::default()).collect()),
             honest: AtomicU64::new(0),
             honest_why: AtomicU64::new(0),
+            watching: AtomicU64::new(0),
             waits: Default::default(),
             young_until: AtomicU64::new(0),
+            cost: Cost::default(),
             wait_epoch: AtomicU64::new(0),
             chains: Mutex::new(FastMap::default()),
             active: AtomicBool::new(false),
@@ -1049,7 +1461,11 @@ impl Renamer {
     /// A wait for `fence` begins (`NXKIT_DIAG=rename`): in a frame whose ranges are judged, the bytes of the ranges are taken
     /// now, before the wait for the GPU, to find what the CPU wrote in flight.
     pub(crate) fn before_wait(&self, fence: u64) {
-        if self.honest(fence) {
+        self.timed(5, || self.before_wait_inner(fence));
+    }
+
+    fn before_wait_inner(&self, fence: u64) {
+        if self.honest(fence) || (fence != 0 && self.watching.load(Ordering::Acquire) == fence) {
             lock(&self.state).before_wait(fence, &self.reader());
         }
     }
@@ -1069,6 +1485,22 @@ impl Renamer {
         self.waits[k].fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Runs `f`, and with `NXKIT_DIAG=rename` adds its time to entry point `k`.
+    fn timed<R>(&self, k: usize, f: impl FnOnce() -> R) -> R {
+        if !crate::diag("rename") {
+            return f();
+        }
+        let t = std::time::Instant::now();
+        let r = f();
+        self.cost.add(k, t.elapsed().as_nanos() as u64);
+        r
+    }
+
+    /// Adds `ns` to entry point `k` of the cost report (the merge passes are encoded by the encoder).
+    pub(crate) fn cost_add(&self, k: usize, ns: u64) {
+        self.cost.add(k, ns);
+    }
+
     fn reader(&self) -> impl Fn(u64, &mut [u8]) -> bool + '_ {
         let base = self.guest.address_map().gpu_base();
         move |addr, buf| addr >= base && self.guest.read(addr - base, buf).is_ok()
@@ -1077,50 +1509,98 @@ impl Renamer {
     /// Looks at the storage bindings of an encoded frame and adds those that a shader may write (`rw` of the binding) and
     /// that are small to the candidates. The bindings of a task or mesh stage are not looked at.
     pub(crate) fn note_rw(&self, detail: &FrameDetail, programs: &Programs) {
+        self.timed(3, || {
+            self.note_rw_with(detail, &|key, vertex, slot| {
+                programs.stage(key, vertex).is_ok_and(|p| {
+                    p.binds
+                        .iter()
+                        .any(|b| b.kind == BindKind::Sbuf && b.reg == slot && b.rw)
+                })
+            });
+        });
+    }
+
+    /// [`Renamer::note_rw`] with `rw_of(program key, vertex, slot)` saying whether the program may write the binding.
+    ///
+    /// A range that is a written candidate already needs nothing, so most bindings cost one lookup. The answer for a
+    /// program is cached by the allocation of its key (the walker shares one per key) and the slot.
+    fn note_rw_with(&self, detail: &FrameDetail, rw_of: &dyn Fn(&str, bool, u32) -> bool) {
         use std::hash::BuildHasher;
         let mut st = lock(&self.state);
         st.watch = crate::diag("rename");
-        if st.evaluated.len() > 100_000 {
-            st.evaluated.clear();
+        if st.rw_ptr.len() > 50_000 {
+            st.rw_ptr.clear();
         }
-        let hash = |key: &str| foldhash::fast::FixedState::default().hash_one(key);
-        let look = |st: &mut State, key: &str, vertex: bool, s: &crate::detail::UboDetail| {
-            if s.size == 0 || s.size > SNAPSHOT_MAX_BYTES || s.address == 0 {
-                return;
-            }
-            let id = (
-                s.address,
-                s.size,
-                s.slot | (s.stage as u32) << 24,
-                hash(key),
-            );
-            if !st.evaluated.insert(id) {
-                return;
-            }
-            let rw = programs.stage(key, vertex).is_ok_and(|p| {
-                p.binds
-                    .iter()
-                    .any(|b| b.kind == BindKind::Sbuf && b.reg == s.slot && b.rw)
-            });
-            if rw && s.size <= MAX_BYTES {
-                st.candidate(s.address, s.size);
-            } else if rw {
-                // Too large to rename; a snapshot that is written is state.
-                st.demote(s.address);
-            } else {
-                st.watch_read_only(s.address, s.size);
-            }
-        };
+        if st.rw_str.len() > 50_000 {
+            st.rw_str.clear();
+        }
+        // The same binding comes draw after draw.
+        let mut last = (0u64, 0u32, 0u32, 0usize);
+        let mut look =
+            |st: &mut State,
+             key: Result<&Arc<str>, &str>,
+             vertex: bool,
+             s: &crate::detail::UboDetail| {
+                let slot_stage = s.slot | (s.stage as u32) << 24;
+                let id = match key {
+                    Ok(k) => Arc::as_ptr(k).cast::<u8>() as usize,
+                    Err(k) => k.as_ptr() as usize,
+                };
+                if s.size == 0
+                    || s.size > SNAPSHOT_MAX_BYTES
+                    || s.address == 0
+                    || (s.address, s.size, slot_stage, id) == last
+                {
+                    return;
+                }
+                last = (s.address, s.size, slot_stage, id);
+                if st.cands.get(&s.address).is_some_and(|c| {
+                    !c.ro && s.size <= c.size && c.learn.class() != Class::Snapshot
+                }) {
+                    return;
+                }
+                let rw = match key {
+                    Ok(k) => {
+                        let id = (Arc::as_ptr(k).cast::<u8>() as usize, slot_stage);
+                        match st.rw_ptr.get(&id) {
+                            Some((_, rw)) => *rw,
+                            None => {
+                                let rw = rw_of(k, vertex, s.slot);
+                                // The cache keeps the key alive, so its address names it for good.
+                                st.rw_ptr.insert(id, (k.clone(), rw));
+                                rw
+                            }
+                        }
+                    }
+                    Err(k) => {
+                        let id = (
+                            foldhash::fast::FixedState::default().hash_one(k),
+                            slot_stage,
+                        );
+                        *st.rw_str
+                            .entry(id)
+                            .or_insert_with(|| rw_of(k, vertex, s.slot))
+                    }
+                };
+                if rw && s.size <= MAX_BYTES {
+                    st.candidate(s.address, s.size);
+                } else if rw {
+                    // Too large to rename; a snapshot that is written is state.
+                    st.demote(s.address);
+                } else {
+                    st.watch_read_only(s.address, s.size);
+                }
+            };
         for d in &detail.draws {
             if d.args.is_mesh() {
                 continue;
             }
             for s in &d.sbufs {
                 match s.stage {
-                    Stage::Vertex => look(&mut st, &d.program.vertex, true, s),
+                    Stage::Vertex => look(&mut st, Ok(&d.program.vertex), true, s),
                     Stage::Fragment => {
                         if let Some(k) = &d.program.fragment {
-                            look(&mut st, k, false, s);
+                            look(&mut st, Ok(k), false, s);
                         }
                     }
                     _ => {}
@@ -1129,7 +1609,7 @@ impl Renamer {
         }
         for d in &detail.dispatches {
             for s in d.sbufs.iter().filter(|s| s.stage == Stage::Compute) {
-                look(&mut st, &d.program, false, s);
+                look(&mut st, Err(&d.program), false, s);
             }
         }
     }
@@ -1137,6 +1617,10 @@ impl Renamer {
     /// The flush of a frame, on the CPU thread. Takes the `pre` bytes of the ranges that are judged and the `start`
     /// bytes of those that this frame renames. Returns the capture of the renamed ranges, when there are any.
     pub(crate) fn at_flush(&self, detail: &FrameDetail, fence: u64) -> Option<Capture> {
+        self.timed(0, || self.at_flush_inner(detail, fence))
+    }
+
+    fn at_flush_inner(&self, detail: &FrameDetail, fence: u64) -> Option<Capture> {
         let mut st = lock(&self.state);
         if st.cands.is_empty() {
             self.honest.store(0, Ordering::Release);
@@ -1149,10 +1633,18 @@ impl Renamer {
         let f = st.flush(
             fence,
             &bound,
-            &|| others(detail),
+            &|ranges| blocked_flags(ranges, others(detail)),
             &|| copy_writes(detail),
             &read,
         );
+        if st.watch {
+            self.cost.add(1, f.judge_ns);
+            if f.capture_ns != 0 {
+                self.cost.add(2, f.capture_ns);
+            }
+        }
+        self.watching
+            .store(if f.watching { fence } else { 0 }, Ordering::Release);
         self.honest.store(
             if f.sampling || f.conflict { fence } else { 0 },
             Ordering::Release,
@@ -1199,6 +1691,11 @@ impl Renamer {
                     e.size, e.words, e.hit, e.frames
                 );
             }
+            eprintln!(
+                "DIAG rename cost ms per call (mean/max (calls)): {}; period {}",
+                self.cost.take(),
+                st.period()
+            );
             let [l, r, n, i, wa, sn, mg, cf] = st.classes();
             let w: Vec<u64> = self
                 .waits
@@ -1250,10 +1747,14 @@ impl Renamer {
                 .into_iter()
                 .map(|x| CapRange {
                     addr: x.addr,
+                    len: x.len,
                     start: x.start,
                     kind: x.kind,
                     cmask: x.cmask,
                     gmask: x.gmask,
+                    rmask: x.rmask,
+                    cvals: x.cvals,
+                    cprefix: x.cprefix,
                 })
                 .collect(),
         })
@@ -1264,6 +1765,15 @@ impl Renamer {
     /// them, and the buffer, which the batch must keep alive. A range that lies in a pool that raw global writes
     /// touched (`learned`) is not renamed.
     pub(crate) fn begin_slot(
+        &self,
+        region: usize,
+        capture: Option<&Arc<Capture>>,
+        learned: &[(u64, u64)],
+    ) -> Slotted {
+        self.timed(4, || self.begin_slot_inner(region, capture, learned))
+    }
+
+    fn begin_slot_inner(
         &self,
         region: usize,
         capture: Option<&Arc<Capture>>,
@@ -1281,6 +1791,7 @@ impl Renamer {
         };
         if let Some(p) = slot.pending.take() {
             self.write_back(&p, format_args!("begin_slot {region}"));
+            self.report_probes(&p);
         }
         let Some(cap) = capture.filter(|_| !off) else {
             return none();
@@ -1289,7 +1800,7 @@ impl Renamer {
         let mut offsets = Vec::new();
         let mut total = 0u64;
         for (i, r) in cap.ranges.iter().enumerate() {
-            let end = r.addr + r.start.len() as u64;
+            let end = r.addr + u64::from(r.len);
             if learned.iter().any(|&l| overlaps((r.addr, end), l)) {
                 // A snapshot or merge range that raw global stores can reach is state.
                 if r.kind != Kind::Rename {
@@ -1300,12 +1811,20 @@ impl Renamer {
             }
             // A snapshot or merge range that was found written since the flush (a shader of this frame writes it, or the
             // masks overlap now) is bound as before.
-            if r.kind != Kind::Rename && !lock(&self.state).has_kind(r.addr, r.kind) {
+            if matches!(r.kind, Kind::Snapshot | Kind::Merge)
+                && !lock(&self.state).has_kind(r.addr, r.kind)
+            {
                 left += 1;
                 continue;
             }
             offsets.push((i, total));
-            total += (r.start.len() as u64).next_multiple_of(ALIGN);
+            let size = u64::from(r.len).next_multiple_of(ALIGN);
+            // A probe has a second copy, which keeps the state at the start of the frame.
+            total += if r.kind == Kind::Probe {
+                2 * size
+            } else {
+                size
+            };
         }
         if left != 0 {
             note_n(Reason::OverlapRenameExcluded, left);
@@ -1324,44 +1843,64 @@ impl Renamer {
         };
         let mut entries = Vec::with_capacity(offsets.len());
         let mut merges = Vec::new();
+        let mut probes = Vec::new();
         for &(i, off) in &offsets {
             let r = &cap.ranges[i];
-            // A merge range is filled on the GPU; the bytes are the fallback if its kernel is not encoded.
-            if buf.write(off, &r.start).is_err() {
+            // Merge ranges and probes are filled on the GPU; the others take their bytes now.
+            if !r.start.is_empty() && buf.write(off, &r.start).is_err() {
                 return none();
             }
             let real = buf.gpu_address() + off;
-            entries.push((r.addr, r.start.len() as u32, real));
-            if r.kind == Kind::Merge {
-                merges.push((i, r.addr, r.start.len() as u32, real));
+            let size = r.len;
+            entries.push((r.addr, size, real));
+            match r.kind {
+                Kind::Merge => merges.push((i, r.addr, size, real, 0)),
+                Kind::Probe => {
+                    let second = off + u64::from(size).next_multiple_of(ALIGN);
+                    probes.push((i, off, second));
+                    merges.push((i, r.addr, size, real, buf.gpu_address() + second));
+                }
+                _ => {}
             }
         }
+        // The ranges whose words the host writes back in the wait: a renamed range, and the words that the CPU and the GPU
+        // both write of a merge range.
         let offsets: Vec<(usize, u64)> = offsets
             .into_iter()
-            .filter(|&(i, _)| cap.ranges[i].kind == Kind::Rename)
+            .filter(|&(i, _)| {
+                let r = &cap.ranges[i];
+                r.kind == Kind::Rename || (r.kind == Kind::Merge && !is_empty_mask(&r.rmask))
+            })
             .collect();
+        let merge_count = merges.iter().filter(|m| m.4 == 0).count();
         note_n(Reason::OverlapRenamed, offsets.len() as u64);
-        if !merges.is_empty() {
-            note_n(Reason::OverlapMergeRanges, merges.len() as u64);
+        if merge_count != 0 {
+            note_n(Reason::OverlapMergeRanges, merge_count as u64);
         }
         if cap.sampled {
             for &(i, _) in &offsets {
                 let r = &cap.ranges[i];
                 eprintln!(
-                    "DIAG rename capture fence {} addr {:#x} size {} slot {region} words {}",
+                    "DIAG rename capture fence {} addr {:#x} size {} slot {region} {:?} words {}",
                     cap.fence,
                     r.addr,
-                    r.start.len(),
-                    nonzero_words(&r.start)
+                    r.len,
+                    r.kind,
+                    if r.kind == Kind::Rename {
+                        nonzero_words(&r.start)
+                    } else {
+                        format!("{} of the CPU", r.cvals.len())
+                    }
                 );
             }
         }
-        if !offsets.is_empty() {
+        if !offsets.is_empty() || !probes.is_empty() {
             slot.pending = Some(Pending {
                 fence: cap.fence,
                 buf: buf.clone(),
                 cap: cap.clone(),
                 offsets,
+                probes,
             });
             self.active.store(true, Ordering::Release);
         }
@@ -1370,7 +1909,9 @@ impl Renamer {
             buf: Some(buf),
             merges: merges
                 .into_iter()
-                .map(|(idx, addr, size, slot_real)| (cap.clone(), idx, addr, size, slot_real))
+                .map(|(idx, addr, size, slot_real, copy2)| {
+                    (cap.clone(), idx, addr, size, slot_real, copy2)
+                })
                 .collect(),
         }
     }
@@ -1385,6 +1926,10 @@ impl Renamer {
         newest: u64,
         who: std::fmt::Arguments<'_>,
     ) {
+        self.timed(6, || self.after_wait_inner(waited, done, newest, who));
+    }
+
+    fn after_wait_inner(&self, waited: u64, done: u64, newest: u64, who: std::fmt::Arguments<'_>) {
         if !self.active.load(Ordering::Acquire) {
             return;
         }
@@ -1399,6 +1944,7 @@ impl Renamer {
             due.sort_unstable_by_key(|p| p.fence);
             for p in &due {
                 self.write_back(p, format_args!("{who}"));
+                self.report_probes(p);
             }
         }
         let mut st = lock(&self.state);
@@ -1407,6 +1953,25 @@ impl Renamer {
         drop(st);
         let pending = lock(&self.slots).iter().any(|s| s.pending.is_some());
         self.active.store(waiting || pending, Ordering::Release);
+    }
+
+    /// The GPU is done with a frame: tells the learner what the probes of the frame saw.
+    fn report_probes(&self, p: &Pending) {
+        let mut seen = Vec::new();
+        for &(i, off, second) in &p.probes {
+            let r = &p.cap.ranges[i];
+            let n = r.len as usize;
+            let (mut end, mut start) = (vec![0u8; n], vec![0u8; n]);
+            if p.buf.read(off, &mut end).is_ok() && p.buf.read(second, &mut start).is_ok() {
+                seen.push((r.addr, end, start));
+            }
+        }
+        if !seen.is_empty() {
+            let mut st = lock(&self.state);
+            for (addr, end, start) in seen {
+                st.probed(p.cap.fence, addr, &end, &start);
+            }
+        }
     }
 
     /// Writes the changed words of the ranges of a frame into guest memory, each only if the guest word still holds the
@@ -1419,18 +1984,18 @@ impl Renamer {
         let (mut written, mut skipped) = (0, 0);
         for &(i, off) in &p.offsets {
             let r = &p.cap.ranges[i];
-            let mut end = vec![0u8; r.start.len()];
+            let mut end = vec![0u8; r.len as usize];
             if p.buf.read(off, &mut end).is_err() || r.addr < base {
                 continue;
             }
             let at = r.addr - base;
             let mut shown = 0;
-            let words = r.start.len() / 4;
+            let words = r.len as usize / 4;
             let mut chains = lock(&self.chains);
             let prev = chains.remove(&r.addr);
             let mut wrote: Vec<Option<u32>> = vec![None; words];
             let (mut w, mut sk) = (0, 0);
-            for (i, cur, new) in changed_words(&r.start, &end) {
+            for (i, cur, new) in written_words(r, &end) {
                 let word = at + 4 * i as u64;
                 let guest = self.guest.load_u32(word).unwrap_or(0);
                 let before = prev
@@ -1524,14 +2089,26 @@ fn copy_writes(detail: &FrameDetail) -> Vec<(u64, u64)> {
 
 /// The storage bindings of a frame as `(address, size)`.
 fn bound_sbufs(detail: &FrameDetail) -> Vec<(u64, u32)> {
-    let mut v: Vec<(u64, u32)> = detail
+    let mut v: Vec<(u64, u32)> = Vec::new();
+    // A direct-mapped table of the bindings seen lately drops the repeats cheaply: the same few hundred buffers are bound
+    // by thousands of draws.
+    let mut seen = vec![(0u64, 0u32); 4096];
+    for s in detail
         .draws
         .iter()
         .flat_map(|d| d.sbufs.iter())
         .chain(detail.dispatches.iter().flat_map(|d| d.sbufs.iter()))
-        .filter(|s| s.address != 0 && s.size != 0)
-        .map(|s| (s.address, s.size))
-        .collect();
+    {
+        if s.address == 0 || s.size == 0 {
+            continue;
+        }
+        let key = (s.address, s.size);
+        let slot = ((s.address >> 4) ^ (s.address >> 16) ^ u64::from(s.size)) as usize & 4095;
+        if seen[slot] != key {
+            seen[slot] = key;
+            v.push(key);
+        }
+    }
     v.sort_unstable();
     v.dedup();
     v
@@ -1541,8 +2118,12 @@ fn bound_sbufs(detail: &FrameDetail) -> Vec<(u64, u32)> {
 /// indirect buffers, and the buffer sides of copies and fills.
 fn others(detail: &FrameDetail) -> Vec<(u64, u64)> {
     let mut v: Vec<(u64, u64)> = Vec::new();
+    // A direct-mapped table of the uses seen lately drops the repeats: draw after draw binds the same buffers.
+    let mut seen = vec![(0u64, 0u64); 4096];
     let mut add = |addr: u64, len: u64| {
-        if addr != 0 {
+        let slot = ((addr >> 4) ^ (addr >> 16) ^ len) as usize & 4095;
+        if addr != 0 && seen[slot] != (addr, len) {
+            seen[slot] = (addr, len);
             v.push((addr, addr.saturating_add(len.max(1))));
         }
     };
