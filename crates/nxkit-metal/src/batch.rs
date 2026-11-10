@@ -87,13 +87,6 @@ impl Completion {
         }
         st.stats
     }
-
-    fn reset(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .stats = CommandBufferStats::default();
-    }
 }
 
 struct Slot {
@@ -158,7 +151,7 @@ impl BatchRing {
     /// used the slot.
     pub fn begin(&mut self, count: usize) -> Result<Batch> {
         let number = self.next + 1;
-        let slot = &self.slots[(self.next % BATCHES_IN_FLIGHT as u64) as usize];
+        let slot = &mut self.slots[(self.next % BATCHES_IN_FLIGHT as u64) as usize];
         if count == 0 || count > slot.allocators.len() {
             return Err(MetalError::Invalid(
                 "the batch has no buffers or more than the ring allows",
@@ -167,7 +160,12 @@ impl BatchRing {
         slot.done.wait();
         self.next = number;
         let t0 = Instant::now();
-        slot.done.reset();
+        // A completion of its own for each batch: a `SubmittedBatch` that is waited for after the slot came round
+        // still gives the numbers of its own batch, not those of the batch that uses the slot now.
+        slot.done = Arc::new(Completion {
+            state: Mutex::new(DoneState::default()),
+            cv: Condvar::new(),
+        });
         slot.scratch.reset();
         self.ctx.commit_residency();
         let mut buffers = Vec::with_capacity(count);

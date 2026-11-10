@@ -71,7 +71,6 @@ const SETTINGS: Fact<Settings> = Fact::new(
         fps_max: 120,
         pad_layout: "full",
         render_cond: true,
-        gpu_ts_segment: true,
         draw_barriers_game: true,
         tex_flush_upload: true,
         tex_dirty_upload: true,

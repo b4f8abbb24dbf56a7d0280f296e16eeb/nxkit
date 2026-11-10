@@ -38,7 +38,6 @@ const TYPED: &[&str] = &[
     "render_cond",
     "vertex_stream_null_bind",
     "vconv_range",
-    "gpu_ts_segment",
     "draw_barriers_game",
     "shader_key_skip",
     "upscaler_keys",
@@ -108,8 +107,6 @@ pub struct Settings {
     pub vertex_stream_null_bind: bool,
     /// Whether the vertex conversion keeps the range.
     pub vconv_range: bool,
-    /// Whether GPU timestamps segment the frame.
-    pub gpu_ts_segment: bool,
     /// Whether the game's draws get barriers.
     pub draw_barriers_game: bool,
     /// The part of a shader key that the pipeline lookup skips, as `(offset, length)`.
@@ -250,7 +247,6 @@ impl Settings {
             render_cond: flag(v, "render_cond")?,
             vertex_stream_null_bind: flag(v, "vertex_stream_null_bind")?,
             vconv_range: flag(v, "vconv_range")?,
-            gpu_ts_segment: flag(v, "gpu_ts_segment")?,
             draw_barriers_game: flag(v, "draw_barriers_game")?,
             shader_key_skip: (
                 num(skip, "offset", "settings.shader_key_skip")?,
@@ -308,7 +304,7 @@ pub(crate) mod samples {
         "core_preempt": true, "present_display": false, "fps_target": 30, "fps_max": 60, "fps_hold": false,
         "present_snap": true, "pso_mtl4": true, "enc_thread": false, "screen_aspect": false,
         "pad_layout": "nintendo", "op_mode": "docked", "perf_boost": false, "tex_flush_upload": false, "tex_dirty_upload": false,
-        "tex_dyn_slots": false, "render_cond": false, "vertex_stream_null_bind": false, "vconv_range": false, "gpu_ts_segment": false, "draw_barriers_game": false,
+        "tex_dyn_slots": false, "render_cond": false, "vertex_stream_null_bind": false, "vconv_range": false, "draw_barriers_game": false,
         "shader_key_skip": {"offset": 8, "length": 4}, "upscaler_keys": ["k"], "nvn_api": {"major": 53, "minor": 12}, "engine_key": 1}"#;
 }
 

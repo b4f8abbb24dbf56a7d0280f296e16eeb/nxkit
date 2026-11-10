@@ -89,8 +89,6 @@ pub struct Settings {
     pub render_cond: bool,
     /// `vconv_range`.
     pub vconv_range: bool,
-    /// `gpu_timestamps`: `true` is `segment`, `false` is `submission`.
-    pub gpu_ts_segment: bool,
     /// `draw_barriers`: `true` is `game`, `false` is `full`.
     pub draw_barriers_game: bool,
     /// `shader_key_skip`: (offset, length) of the control bytes the shader keys hash as zeros, (0, 0) for none.
@@ -141,7 +139,6 @@ impl Settings {
         tex_dyn_slots: false,
         render_cond: false,
         vconv_range: false,
-        gpu_ts_segment: false,
         draw_barriers_game: false,
         shader_key_skip: (0, 0),
         upscaler_keys: &[],

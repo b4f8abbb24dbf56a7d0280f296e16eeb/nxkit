@@ -34,7 +34,6 @@
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::Instant;
 
 use nxkit_abi::guest;
 use nxkit_nvn::backend::{Backend, Fence, FlushCx, Present, WaitResult};
@@ -88,8 +87,9 @@ pub struct Settings {
     /// binaries that the host translates. Default 1.16, the range that the shader step translates. A game of an older
     /// SDK still gets 1.16, because it rejects a shader of a newer compiler when the device reports less.
     pub gpu_code: (u32, u32),
-    /// The guest clock in nanoseconds, for `nvnDeviceGetCurrentTimestampInNanoseconds`. The default is a monotonic
-    /// clock that starts at zero at the first call.
+    /// The guest clock in nanoseconds, for `nvnDeviceGetCurrentTimestampInNanoseconds`. The default is the monotonic
+    /// clock of the host (`mach_absolute_time` in nanoseconds), the base of the system tick and of the GPU times in
+    /// the reports.
     pub clock_ns: fn() -> u64,
 }
 
@@ -100,14 +100,9 @@ impl Default for Settings {
             api_minor: 15,
             shader_key_skip: None,
             gpu_code: (1, 16),
-            clock_ns: monotonic_ns,
+            clock_ns: nxkit_hos::sys::monotonic_ns,
         }
     }
-}
-
-fn monotonic_ns() -> u64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_nanos() as u64
 }
 
 /// Why [`install`] failed.

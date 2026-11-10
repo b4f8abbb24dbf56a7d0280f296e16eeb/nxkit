@@ -61,7 +61,6 @@ const SETTINGS: Fact<Settings> = Fact::new(
         pso_mtl4: true,
         screen_aspect: true,
         pad_layout: "full",
-        gpu_ts_segment: true,
         ..Settings::DEFAULT
     },
     GAME_TSV,

@@ -131,7 +131,6 @@ fn settings(m: &Manifest) -> Value {
         ("render_cond", flag(t.render_cond)),
         ("vertex_stream_null_bind", flag(m.vertex_stream_null_bind)),
         ("vconv_range", flag(t.vconv_range)),
-        ("gpu_ts_segment", flag(t.gpu_ts_segment)),
         ("draw_barriers_game", flag(t.draw_barriers_game)),
         (
             "shader_key_skip",

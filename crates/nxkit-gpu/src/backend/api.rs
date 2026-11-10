@@ -147,13 +147,13 @@ impl Backend for GpuBackend {
                 let result = locked(&self.gpu).wait_older();
                 match result {
                     Ok(Some(stats)) => {
-                        *locked(&self.last_gpu) = Some((stats.gpu_start_s, stats.gpu_end_s));
                         nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                     }
                     Ok(None) => {}
                     Err(_) => return WaitResult::Failed,
                 }
-                self.write_counters(older);
+                let (finished, _) = self.finish_batches(older);
+                self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
             }
             return WaitResult::Done;
@@ -174,23 +174,14 @@ impl Backend for GpuBackend {
                 if !enc.wait_for(reached) || enc.has_error() {
                     return WaitResult::Failed;
                 }
-                let batches: Vec<_> = {
-                    let mut q = locked(&self.inflight);
-                    let n = q.iter().take_while(|(f, _)| *f <= older).count();
-                    q.drain(..n).collect()
-                };
-                let mut last = None;
-                for (_, b) in &batches {
-                    match b.wait() {
-                        Ok(stats) => last = Some(stats),
-                        Err(_) => return WaitResult::Failed,
-                    }
+                let (finished, ok) = self.finish_batches(older);
+                if !ok {
+                    return WaitResult::Failed;
                 }
-                if let Some(stats) = last {
-                    *locked(&self.last_gpu) = Some((stats.gpu_start_s, stats.gpu_end_s));
+                if let Some((_, stats)) = finished.last() {
                     nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                 }
-                self.write_counters(older);
+                self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
             }
             return WaitResult::Done;

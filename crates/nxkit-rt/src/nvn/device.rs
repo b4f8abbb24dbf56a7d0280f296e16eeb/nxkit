@@ -27,6 +27,7 @@
 //! few items from the description of the GPU at run time. These keep the Switch value below 0x60 and are 0 above it.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use nxkit_abi::guest;
 use nxkit_abi::platform::{self, Platform};
@@ -44,9 +45,6 @@ const OFF_DBG_CB: u64 = 16;
 const OFF_DBG_DATA: u64 = 24;
 /// `NVN_WINDOW_ORIGIN_MODE_LOWER_LEFT`.
 const ORIGIN_LOWER_LEFT: i32 = 0;
-/// One tick of the GPU counter lasts 625/384 nanoseconds (614.4 MHz).
-const TICK_NUM: u128 = 625;
-const TICK_DEN: u128 = 384;
 /// `NVN_DEVICE_INFO_*` items from this number on are not in the table.
 const INFO_TABLE_LEN: usize = 0x60;
 /// The one item above the table that the engine answers.
@@ -342,14 +340,36 @@ extern "C" fn device_get_integer(_d: u64, item: i32, out: u64) {
     });
 }
 
-/// Converts GPU counter ticks to nanoseconds, rounded down.
-fn ticks_to_ns(ticks: u64) -> u64 {
-    (u128::from(ticks) * TICK_NUM / TICK_DEN) as u64
+/// The time of the report at `counter` (`NVNcounterData`: the 64-bit counter, then the time in report ticks) in
+/// nanoseconds on `platform`. A tick is 625/384 ns on the Switch and 32 ns, a system tick, on the Switch 2
+/// (`Platform::report_ns_from_ticks`).
+fn report_ns(platform: Platform, counter: u64) -> AbiResult<u64> {
+    Ok(platform.report_ns_from_ticks(Obj(counter).u64(8)?))
+}
+
+/// `NXKIT_DIAG=gputs`: the first 200 reads and then every 600th.
+fn read_diag(counter: u64, ticks: u64, ns: u64) {
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    static PREVIOUS: AtomicU64 = AtomicU64::new(0);
+    if !nxkit_nvn::diag::on("gputs") {
+        return;
+    }
+    let n = CALLS.fetch_add(1, Ordering::Relaxed);
+    let delta = i128::from(ns) - i128::from(PREVIOUS.swap(ns, Ordering::Relaxed));
+    if n < 200 || n.is_multiple_of(600) {
+        eprintln!(
+            "DIAG gputs read addr {counter:#x} ticks {ticks} ns {ns} delta-to-previous-read {delta}"
+        );
+    }
 }
 
 extern "C" fn device_get_timestamp_in_nanoseconds(_d: u64, counter: u64) -> u64 {
     guard("nvnDeviceGetTimestampInNanoseconds", || {
-        Ok(ticks_to_ns(Obj(counter).u64(8)?))
+        let ns = report_ns(platform::get(), counter)?;
+        if nxkit_nvn::diag::on("gputs") {
+            read_diag(counter, Obj(counter).u64(8)?, ns);
+        }
+        Ok(ns)
     })
 }
 
@@ -520,14 +540,20 @@ mod tests {
     }
 
     #[test]
-    fn counter_ticks_become_nanoseconds_at_614_4_mhz() {
-        assert_eq!(ticks_to_ns(0), 0);
-        assert_eq!(ticks_to_ns(384), 625);
-        assert_eq!(ticks_to_ns(614_400_000), 1_000_000_000);
-        assert_eq!(
-            ticks_to_ns(u64::MAX),
-            (u128::from(u64::MAX) * 625 / 384) as u64
-        );
+    fn the_time_of_a_report_follows_the_tick_of_the_console() {
+        // The 16 bytes of an `NVNcounterData` in the test arena: the counter, then the time in ticks.
+        let ns = |p: Platform, ticks: u64| {
+            let report = super::super::abi::testing::alloc(16);
+            Obj(report).set_u64(8, ticks).unwrap();
+            report_ns(p, report).unwrap()
+        };
+        for n in [0, 1, 384, 31_250_000, 614_400_000, 123_456_789] {
+            assert_eq!(ns(Platform::Ounce, n), n * 32);
+            assert_eq!(ns(Platform::Nx, n), n * 625 / 384);
+        }
+        assert_eq!(ns(Platform::Nx, 384), 625);
+        assert_eq!(ns(Platform::Ounce, 31_250_000), 1_000_000_000);
+        assert_eq!(ns(Platform::Nx, 614_400_000), 1_000_000_000);
     }
 
     #[test]

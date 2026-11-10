@@ -14,6 +14,7 @@
 
 mod api;
 mod encpace;
+mod gputs;
 #[cfg(test)]
 mod tests;
 mod tick;
@@ -96,8 +97,8 @@ pub struct GpuBackend {
     /// The GPU counters of encoded frames (`queries`) that the GPU has not been seen to finish, with the fence of their
     /// frame.
     queries: Mutex<Vec<(u64, Arc<crate::queries::FrameQueries>)>>,
-    /// The GPU start and end of the last finished frame, in seconds of the host clock.
-    last_gpu: Mutex<Option<(f64, f64)>>,
+    /// The last time written into a report (`gputs`). Its lock also orders the waits that write reports.
+    ts: Mutex<gputs::Clock>,
     blit_failed: AtomicBool,
     /// The encoder thread, when `enc_thread` is on.
     enc: Option<Encoder>,
@@ -106,8 +107,8 @@ pub struct GpuBackend {
     /// The presents of the game, counted when it presents, and the newest present number a tick showed.
     asked: AtomicU64,
     shown_upto: AtomicU64,
-    /// With the encoder thread: the batches on the GPU with the fence of their frame, so that a wait for the GPU needs
-    /// no lock that the encoder holds.
+    /// The batches on the GPU with the fence of their frame, until their reports are written (`gputs`). With the encoder
+    /// thread a wait for the GPU needs no lock that the encoder holds.
     inflight: Mutex<std::collections::VecDeque<(u64, nxkit_metal::SubmittedBatch)>>,
     /// Whether the last encoded frame copied textures back to CPU memory. The overlap then waits in full, because the
     /// next frame likely copies back too and the CPU reads what it copied.
@@ -166,7 +167,7 @@ impl GpuBackend {
                 reports: AtomicU64::new(0),
                 counters: Mutex::new(Vec::new()),
                 queries: Mutex::new(Vec::new()),
-                last_gpu: Mutex::new(None),
+                ts: Mutex::new(gputs::Clock::default()),
                 blit_failed: AtomicBool::new(false),
                 enc,
                 flushed: AtomicU64::new(0),
@@ -189,10 +190,10 @@ impl GpuBackend {
         let result = gpu.wait();
         drop(gpu);
         if let Ok(Some(stats)) = &result {
-            *locked(&self.last_gpu) = Some((stats.gpu_start_s, stats.gpu_end_s));
             nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
-        self.write_counters(upto);
+        let (finished, _) = self.finish_batches(upto);
+        self.write_counters(upto, &finished);
         self.done.fetch_max(upto, Ordering::AcqRel);
         result.is_ok()
     }
@@ -211,37 +212,6 @@ impl GpuBackend {
             locked(&self.queries).push((fence.0, q));
         }
         crate::gatediag::hold(fence.0);
-    }
-
-    /// Writes the reports of the frames up to fence `upto` into guest memory, each a 16-byte `NVNcounterData` (the 64-bit
-    /// counter, then the 64-bit time in GPU ticks of 19.2 MHz), only where all 16 bytes lie in guest memory
-    /// (`queries::write_report`).
-    ///
-    /// - A `TIMESTAMP_TOP` gets the GPU start of the last finished frame and a `TIMESTAMP` its end, with a counter of 0.
-    ///   The game takes its GPU time from the difference and picks its frame interval from it; without the reports it
-    ///   saw no GPU time and kept a 30 fps step on frames that took longer, which ran the game in slow motion.
-    /// - A `ReportValue` writes its 32-bit value as the counter (zero-extended, as the GPU writes the payload of a
-    ///   four-word report) and the end time. The render conditions of later frames read it (`nxkit_nvn::rendercond`).
-    /// - The GPU counters (samples passed, vertices, primitives) are written and landed by `queries`.
-    fn write_counters(&self, upto: u64) {
-        let gpu_time = *locked(&self.last_gpu);
-        let ticks = |s: f64| (s.max(0.0) * 1e9 * 384.0 / 625.0) as u64;
-        let map = self.guest.address_map();
-        if let Some((start, end)) = gpu_time {
-            for (_, r) in take_due(&self.counters, upto) {
-                let t = ticks(if r.kind == 0x10 { start } else { end });
-                if crate::queries::write_report(&self.guest, &map, r.addr, u64::from(r.value), t)
-                    .is_none()
-                {
-                    report_refused(r.addr);
-                }
-            }
-        }
-        let end = gpu_time.map_or(0, |(_, end)| ticks(end));
-        for (_, q) in take_due(&self.queries, upto) {
-            crate::queries::write_diag(&q.write(&self.guest, end));
-        }
-        crate::gatediag::landed(upto, &self.guest);
     }
 }
 
@@ -298,13 +268,7 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         if let Some(b) = submitted {
-            let mut q = locked(&self.inflight);
-            if q.back().is_none_or(|(_, last)| last.number() != b.number()) {
-                q.push_back((job.fence.0, b));
-            }
-            while q.len() > 8 {
-                q.pop_front();
-            }
+            self.keep_batch(job.fence.0, b);
         }
         if let Ok(r) = &result {
             self.copied_recent
@@ -356,7 +320,14 @@ impl GpuBackend {
             descriptors: cx.descriptors,
         };
         self.pools.drain_graveyard();
-        let result = locked(&self.gpu).encode_frame(frame, plan, &view, pools, detail, self.scale);
+        let (result, submitted) = {
+            let mut gpu = locked(&self.gpu);
+            let r = gpu.encode_frame(frame, plan, &view, pools, detail, self.scale);
+            (r, gpu.last_submitted())
+        };
+        if let Some(b) = submitted {
+            self.keep_batch(fence.0, b);
+        }
         self.hold_counters(fence, detail, &result);
         self.encoded.fetch_max(fence.0, Ordering::AcqRel);
         let report = result.map_err(fail)?;

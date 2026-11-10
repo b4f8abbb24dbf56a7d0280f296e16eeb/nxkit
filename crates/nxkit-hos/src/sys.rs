@@ -533,7 +533,9 @@ pub fn system_tick() -> u64 {
 }
 
 #[cfg(target_vendor = "apple")]
-fn monotonic_ns() -> u64 {
+/// The host's monotonic clock in nanoseconds (`mach_absolute_time`). It is the base of the system tick and of the GPU
+/// times that Metal reports, and counts from an arbitrary start.
+pub fn monotonic_ns() -> u64 {
     #[repr(C)]
     struct TimebaseInfo {
         numer: u32,
@@ -561,7 +563,8 @@ fn monotonic_ns() -> u64 {
 }
 
 #[cfg(not(target_vendor = "apple"))]
-fn monotonic_ns() -> u64 {
+/// The host's monotonic clock in nanoseconds, from the first call.
+pub fn monotonic_ns() -> u64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     u64::try_from(
         START
