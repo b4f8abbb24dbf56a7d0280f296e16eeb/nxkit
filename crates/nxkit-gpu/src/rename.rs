@@ -733,6 +733,18 @@ pub(crate) struct Binding {
 /// Where a binding is in the detail of its frame: `(0, draw, buffer)` or `(1, dispatch, buffer)`.
 pub(crate) type Recheck = (u8, u32, u32);
 
+/// The knobs that force a full wait for a frame, by the bit of `Flushed::forced`: the classes of the ranges that the frame
+/// binds (0 to 4), changed buffers that the renamer does not cover (5) and every frame (6).
+const FORCE_KNOBS: [&str; 7] = [
+    "waitnever",
+    "waitwatch",
+    "waitmerge",
+    "waitsnap",
+    "waitrename",
+    "waitother",
+    "waitall",
+];
+
 /// Keys that one range remembers.
 const MAX_KEYS: usize = 4;
 
@@ -756,6 +768,8 @@ struct Flushed {
     renamed: Vec<Renamed>,
     /// A frame binds a range that needs a full wait.
     conflict: bool,
+    /// The classes of the ranges that this frame binds, as the bits of the knobs that ask for a full wait for them.
+    forced: u8,
     /// A read-only range is measured in this frame: the start of the wait for it is looked at.
     watching: bool,
     /// The time of the judging and of the capture in this flush (`NXKIT_DIAG=rename`).
@@ -799,6 +813,8 @@ struct State {
     fast_only: bool,
     /// The knob `conflictwait`: a frame that binds a range that the CPU writes in flight waits in full.
     conflict_wait: bool,
+    /// The knobs `waitnever` to `waitrename`, by bit.
+    force: u8,
     /// `NXKIT_DIAG=rename`: ranges that are watched although they are not learned (`Never`, `Idle`, read-only).
     watch: bool,
     /// `NXKIT_DIAG=rename`: for each watched range, the judged frames and the CPU writes in flight found in them.
@@ -1241,6 +1257,19 @@ impl State {
                 continue;
             };
             let class = c.learn.class();
+            if self.force != 0 {
+                let bit = match class {
+                    Class::Rename => 4,
+                    Class::Merge => 2,
+                    Class::Snapshot => 3,
+                    Class::Conflict => 7,
+                    _ if c.ro => 1,
+                    _ => 0,
+                };
+                if bit < 5 && self.force >> bit & 1 != 0 {
+                    out.forced |= 1 << bit;
+                }
+            }
             // A range that only waits to be judged (or has nothing to do) is looked at once in 60 flushes, to keep it from
             // being forgotten; the others are looked at in every flush.
             if matches!(class, Class::Never | Class::Watch)
@@ -1788,6 +1817,11 @@ pub(crate) struct Renamer {
     honest_why: AtomicU64,
     /// Waits by kind: honest because of learning, of a check, of another reason, overlapped, honest because of a conflict.
     waits: [AtomicU64; 5],
+    /// The knobs that forced the full wait for `honest`, by bit, and how many waits each forced.
+    forced_mask: AtomicU64,
+    forced: [AtomicU64; 7],
+    /// The hash of each buffer of the last flush that `waitother` looks at.
+    other_hashes: Mutex<FastMap<(u64, u64), u64>>,
     /// The CPU waits so far (`note_wait`).
     wait_epoch: AtomicU64,
     /// For each renamed range, the words that the last write-back wrote and the epoch of its frame, to carry a sum over
@@ -1814,6 +1848,9 @@ impl Renamer {
             slots: Mutex::new((0..BATCHES_IN_FLIGHT).map(|_| Slot::default()).collect()),
             honest: AtomicU64::new(0),
             honest_why: AtomicU64::new(0),
+            forced_mask: AtomicU64::new(0),
+            forced: Default::default(),
+            other_hashes: Mutex::new(FastMap::default()),
             watching: AtomicU64::new(0),
             waits: Default::default(),
             young_until: AtomicU64::new(0),
@@ -1856,12 +1893,52 @@ impl Renamer {
             match self.honest_why.load(Ordering::Relaxed) {
                 2 => 1,
                 3 => 4,
+                4 => 2,
                 _ => 0,
             }
         } else {
             2
         };
         self.waits[k].fetch_add(1, Ordering::Relaxed);
+        if !overlapped && self.honest(fence) {
+            let m = self.forced_mask.load(Ordering::Relaxed);
+            for (i, n) in self.forced.iter().enumerate() {
+                if m >> i & 1 != 0 {
+                    n.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// The knob `waitother`: whether a vertex, index or indirect buffer, or the source of a buffer copy, of at most 1 MiB
+    /// has other bytes than at the flush before. The renamer does not cover these.
+    fn other_changed(&self, detail: &FrameDetail, read: &dyn Fn(u64, &mut [u8]) -> bool) -> bool {
+        let mut now: FastMap<(u64, u64), u64> = FastMap::default();
+        let mut changed = false;
+        let mut prev = lock(&self.other_hashes);
+        for (a, e) in unguarded(detail) {
+            let len = e - a;
+            if len == 0 || len > u64::from(SNAPSHOT_MAX_BYTES) || now.contains_key(&(a, len)) {
+                continue;
+            }
+            let mut b = vec![0u8; len as usize];
+            if !read(a, &mut b) {
+                continue;
+            }
+            let h = b.chunks(8).fold(0xcbf2_9ce4_8422_2325u64, |h, c| {
+                let mut w = [0u8; 8];
+                w[..c.len()].copy_from_slice(c);
+                (h ^ u64::from_le_bytes(w))
+                    .wrapping_mul(0x100_0000_01b3)
+                    .rotate_left(23)
+            });
+            if prev.get(&(a, len)).is_some_and(|p| *p != h) {
+                changed = true;
+            }
+            now.insert((a, len), h);
+        }
+        *prev = now;
+        changed
     }
 
     /// Runs `f`, and with `NXKIT_DIAG=rename` adds its time to entry point `k`.
@@ -2058,8 +2135,19 @@ impl Renamer {
         fence: u64,
     ) -> (Option<Capture>, Option<Vec<Recheck>>) {
         let mut st = lock(&self.state);
+        let mut force = 0u8;
+        for (i, n) in FORCE_KNOBS.iter().enumerate() {
+            if crate::knob(n) {
+                force |= 1 << i;
+            }
+        }
         if st.cands.is_empty() && st.keys.is_empty() {
-            self.honest.store(0, Ordering::Release);
+            let all = force >> 6 & 1 != 0;
+            self.honest
+                .store(if all { fence } else { 0 }, Ordering::Release);
+            self.honest_why.store(4, Ordering::Relaxed);
+            self.forced_mask
+                .store(if all { 1 << 6 } else { 0 }, Ordering::Relaxed);
             return (None, None);
         }
         let t_bind = crate::diag("rename").then(std::time::Instant::now);
@@ -2070,6 +2158,7 @@ impl Renamer {
         }
         st.watch = crate::diag("rename");
         st.conflict_wait = crate::knob("conflictwait");
+        st.force = force & 0b11111;
         let read = self.reader();
         let f = st.flush(
             fence,
@@ -2084,10 +2173,21 @@ impl Renamer {
                 self.cost.add(2, f.capture_ns);
             }
         }
+        let mut forced = f.forced;
+        if force >> 5 & 1 != 0 && self.other_changed(detail, &read) {
+            forced |= 1 << 5;
+        }
+        if force >> 6 & 1 != 0 {
+            forced |= 1 << 6;
+        }
         self.watching
             .store(if f.watching { fence } else { 0 }, Ordering::Release);
         self.honest.store(
-            if f.sampling || f.conflict { fence } else { 0 },
+            if f.sampling || f.conflict || forced != 0 {
+                fence
+            } else {
+                0
+            },
             Ordering::Release,
         );
         self.honest_why.store(
@@ -2095,11 +2195,14 @@ impl Renamer {
                 2
             } else if f.sampling {
                 1
-            } else {
+            } else if f.conflict {
                 3
+            } else {
+                4
             },
             Ordering::Relaxed,
         );
+        self.forced_mask.store(u64::from(forced), Ordering::Relaxed);
         if f.news.iter().any(|n| n.2 == Class::Rename) {
             self.young_until.store(fence + 20, Ordering::Relaxed);
         }
@@ -2143,6 +2246,17 @@ impl Renamer {
                 .iter()
                 .map(|w| w.swap(0, Ordering::Relaxed))
                 .collect();
+            let forced: Vec<String> = FORCE_KNOBS
+                .iter()
+                .zip(&self.forced)
+                .filter_map(|(n, c)| {
+                    let v = c.swap(0, Ordering::Relaxed);
+                    (v != 0).then(|| format!("{n} {v}"))
+                })
+                .collect();
+            if !forced.is_empty() {
+                eprintln!("DIAG rename waits forced by knobs: {}", forced.join(", "));
+            }
             eprintln!(
                 "DIAG rename waits honest {} (learning range {}, re-check {}, conflict {}, other {}) overlapped {}; learning {l} candidates {} (rename {r} never {n} idle {i} watch {wa} snapshot {sn} merge {mg} conflict {cf})",
                 w[0] + w[1] + w[2] + w[4],
@@ -2509,6 +2623,59 @@ fn nonzero_words(bytes: &[u8]) -> String {
         .take(24)
         .collect();
     v.join(" ")
+}
+
+/// The buffers that a frame reads and that nothing in the renamer covers: vertex, index and indirect buffers and the
+/// source of buffer copies, as `(start, end)`.
+fn unguarded(detail: &FrameDetail) -> Vec<(u64, u64)> {
+    let mut v = Vec::new();
+    let mut add = |addr: u64, len: u64| {
+        if addr != 0 {
+            v.push((addr, addr.saturating_add(len)));
+        }
+    };
+    for d in &detail.draws {
+        let verts = match d.args {
+            DrawArgs::Arrays { first, count, .. } => Some(u64::from(first) + u64::from(count)),
+            _ => None,
+        };
+        for st in &d.streams {
+            let used = verts.map_or(UNKNOWN_BYTES, |n| n * u64::from(st.stride.max(1)));
+            add(st.address, st.size.min(used).min(UNKNOWN_BYTES));
+        }
+        match d.args {
+            DrawArgs::Indexed {
+                index_type,
+                address,
+                count,
+                ..
+            } => add(address, u64::from(count) << index_type.min(2)),
+            DrawArgs::ArraysIndirect { indirect } | DrawArgs::MeshTasksIndirect { indirect } => {
+                add(indirect, 32);
+            }
+            DrawArgs::IndexedIndirect {
+                address, indirect, ..
+            } => {
+                add(address, UNKNOWN_BYTES);
+                add(indirect, 32);
+            }
+            _ => {}
+        }
+    }
+    for d in &detail.dispatches {
+        if let Some(a) = d.indirect {
+            add(a, 12);
+        }
+    }
+    for c in &detail.copies {
+        let len = if c.bytes != 0 { c.bytes } else { UNKNOWN_BYTES };
+        match c.kind {
+            crate::detail::CopyKind::BufferToTexture => add(c.buffer, len),
+            crate::detail::CopyKind::BufferToBuffer => add(c.src_addr, len),
+            _ => {}
+        }
+    }
+    v
 }
 
 /// The ranges that copies and fills of the frame write.

@@ -1223,3 +1223,40 @@ fn a_range_that_passed_the_check_against_other_uses_is_trusted_for_a_while() {
     assert!(f.renamed.is_empty());
     assert_eq!(st.cands[&SUM].clear_run, 0);
 }
+
+#[test]
+fn the_wait_knobs_force_a_full_wait_for_the_class_that_they_name() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    // (the class, whether it is only read, the bit of the knob)
+    for (class, ro, bit) in [
+        (Class::Never, false, 0u8),
+        (Class::Learning, false, 0),
+        (Class::Idle, false, 0),
+        (Class::Watch, true, 1),
+        (Class::Merge, false, 2),
+        (Class::Snapshot, true, 3),
+        (Class::Rename, false, 4),
+    ] {
+        let mut st = State::default();
+        st.candidate(SUM, 0x40);
+        let c = st.cands.get_mut(&SUM).unwrap();
+        c.learn.set(class);
+        c.ro = ro;
+        c.rest_until = u64::MAX;
+        for force in [1u8 << bit, 0b11111 & !(1 << bit), 0] {
+            st.force = force;
+            let f = st.flush(
+                st.frame + 1,
+                &[(SUM, 0x40)],
+                &|r| vec![false; r.len()],
+                &|| Vec::new(),
+                &|a, b| g.read(a, b),
+            );
+            assert_eq!(
+                f.forced,
+                if force >> bit & 1 != 0 { 1 << bit } else { 0 },
+                "{class:?} {force:#b}"
+            );
+        }
+    }
+}

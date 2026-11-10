@@ -117,6 +117,22 @@ const KNOBS: &[&str] = &[
     // With the overlap on, a frame that binds a written range that the CPU also writes while the frame runs waits in full
     // (`rename`).
     "conflictwait",
+    // With the overlap on, a frame that binds a written storage range that is `Never`, `Idle` or undecided waits in full
+    // (`rename`).
+    "waitnever",
+    // The same for a frame that binds a read-only storage range that is not a snapshot.
+    "waitwatch",
+    // The same for a frame that binds a merge range.
+    "waitmerge",
+    // The same for a frame that binds a snapshot.
+    "waitsnap",
+    // The same for a frame that binds a renamed range.
+    "waitrename",
+    // The same for a frame with a vertex, index or indirect buffer, or a buffer copy source, of at most 1 MiB whose bytes
+    // changed since the flush before.
+    "waitother",
+    // Every frame waits in full: the control.
+    "waitall",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
