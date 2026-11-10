@@ -5,6 +5,16 @@ use super::copy::{
 };
 use super::*;
 
+/// The size of a `Dispatch` record: the direct group counts (arg 0), or the guest GPU address of the counts of an
+/// indirect dispatch (arg 1, words 0 and 1) with zero counts, because the GPU reads them when the dispatch runs.
+pub(super) fn dispatch_size(x: &Ext) -> ([u32; 3], Option<u64>) {
+    if x.arg == 0 {
+        ([x.word(0), x.word(1), x.word(2)], None)
+    } else {
+        ([0; 3], Some(x.word64(0)))
+    }
+}
+
 impl Walker {
     pub(in crate::walk) fn ext<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, x: &Ext) {
         match x.code {
@@ -172,13 +182,8 @@ impl Walker {
                 self.prof.lap(&self.prof.alloc_draw_ns, t);
             }
             ExtCode::Dispatch => {
-                let groups = if x.arg == 0 {
-                    [x.word(0), x.word(1), x.word(2)]
-                } else {
-                    [0; 3]
-                };
                 let t = self.prof.start();
-                let d = self.dispatch(&*mem, st, groups);
+                let d = self.dispatch(&*mem, st, dispatch_size(x));
                 self.prof.lap(&self.prof.detail_ns, t);
                 self.track
                     .patches_of(&d.textures, self.out.dispatches.len(), true);

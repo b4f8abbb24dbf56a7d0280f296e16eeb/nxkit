@@ -8,7 +8,7 @@ mod tests;
 
 /// What a stage of one draw or dispatch binds.
 /// The constant bank that holds push constants (the translator's `PUSH_BANK`).
-const PUSH_BANK: u32 = 24;
+pub(crate) const PUSH_BANK: u32 = 24;
 
 pub(crate) struct StageInputs<'a> {
     pub(crate) stage: Stage,

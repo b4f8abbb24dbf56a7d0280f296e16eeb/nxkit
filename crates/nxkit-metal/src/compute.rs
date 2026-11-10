@@ -48,6 +48,14 @@ pub enum ComputeCommand {
         /// The threads per threadgroup.
         threads: [u32; 3],
     },
+    /// Runs whole threadgroups over the grid that the GPU reads from `gpu_addr` when the dispatch runs: an
+    /// `MTLDispatchThreadgroupsIndirectArguments` (three u32 counts).
+    DispatchThreadgroupsIndirect {
+        /// The GPU address of the counts, 4 byte aligned.
+        gpu_addr: u64,
+        /// The threads per threadgroup.
+        threads: [u32; 3],
+    },
     /// Runs `grid` threads, with partial threadgroups at the edge.
     DispatchThreads {
         /// The threads per grid.
@@ -228,6 +236,23 @@ impl ComputePass<'_> {
                 self.need_pipeline()?;
                 self.enc
                     .dispatchThreadgroups_threadsPerThreadgroup(size3(*groups), size3(*threads));
+            }
+            ComputeCommand::DispatchThreadgroupsIndirect { gpu_addr, threads } => {
+                self.need_pipeline()?;
+                if *gpu_addr == 0 || !gpu_addr.is_multiple_of(4) {
+                    return Err(MetalError::Invalid(
+                        "the indirect arguments are not at a 4 byte aligned address",
+                    ));
+                }
+                // SAFETY: the address is 4 byte aligned (checked above). The caller keeps the buffer resident and
+                // holds three counts there.
+                unsafe {
+                    self.enc
+                        .dispatchThreadgroupsWithIndirectBuffer_threadsPerThreadgroup(
+                            *gpu_addr,
+                            size3(*threads),
+                        );
+                }
             }
             ComputeCommand::DispatchThreads { grid, threads } => {
                 self.need_pipeline()?;

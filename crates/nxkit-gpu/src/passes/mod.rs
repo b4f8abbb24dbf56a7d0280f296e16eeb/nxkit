@@ -7,6 +7,7 @@
 
 mod buffers;
 mod copy;
+mod indirect_dispatch;
 
 use self::copy::copy;
 
@@ -57,6 +58,9 @@ fn dispatch(
         &mut ScratchSink::new(scratch, sh.uploaded, None).with_preloaded(sh.preloaded),
     )?;
     let enc = |cp: &mut ComputePass<'_>, c| cp.encode(&c).map_err(|_| Skip::Encode);
+    if let Some(indirect) = dd.indirect {
+        return indirect_dispatch::encode(sh, cp, scratch, &p, pipeline, args, indirect);
+    }
     enc(cp, ComputeCommand::SetPipeline(pipeline))?;
     enc(
         cp,
@@ -167,14 +171,24 @@ pub(crate) fn compute_pass(
                 })
                 .collect();
             eprintln!(
-                "DIAG comp pass {index} cmd {i} program {:?} groups {:?} textures {} sbufs {} images [{}] result {:?}",
+                "DIAG comp pass {index} cmd {i} program {:?} groups {:?}{} textures {} sbufs {} images [{}] result {:?}",
                 dd.program,
                 dd.groups,
+                dd.indirect
+                    .map_or_else(String::new, |a| format!(" indirect {a:#x}")),
                 dd.textures.len(),
                 dd.sbufs.len(),
                 images.join(", "),
                 r
             );
+        }
+        if crate::diag("ubodump")
+            && crate::diag::sampled()
+            && let (PassKind::Compute, Some(dd)) =
+                (pass.kind, sh.detail.dispatches.get(ord.dispatch as usize))
+            && (crate::diag::fs_programs().contains(&dd.program) || crate::knob("ubodumpall"))
+        {
+            ubo_dump(sh, index, i, dd);
         }
         if let Err(why) = r {
             stats.skip(why);
@@ -221,4 +235,70 @@ pub(crate) fn cpu_read(
         }
     }
     done
+}
+
+/// `DIAG ubodump`: the 64-bit values at byte offsets 192 to 448 (step 16) of each uniform buffer of a dispatch, and
+/// its push constants. At most 64 lines per frame.
+fn ubo_dump(sh: &Shared<'_>, pass: usize, cmd: u32, dd: &crate::detail::DispatchDetail) {
+    use std::sync::atomic::AtomicU64;
+    static BUDGET: AtomicU64 = AtomicU64::new(0);
+    let max = if crate::knob("ubodumpall") { 400 } else { 64 };
+    for s in &dd.sbufs {
+        if !crate::diag::sample_budget(&BUDGET, max) {
+            return;
+        }
+        eprintln!(
+            "DIAG ubodump pass {pass} cmd {cmd} program {} sbuf {} addr {:#x} size {}",
+            dd.program, s.slot, s.address, s.size
+        );
+    }
+    for u in &dd.ubos {
+        if !crate::diag::sample_budget(&BUDGET, max) {
+            return;
+        }
+        let want = 456usize.min(u.size as usize);
+        let bytes: Option<Vec<u8>> = match &u.snapshot {
+            Some(s) => Some(s.iter().copied().take(want).collect()),
+            None => sh.guest_offset(u.address, want as u64).and_then(|off| {
+                let mut b = vec![0u8; want];
+                sh.guest.read(off, &mut b).ok().map(|()| b)
+            }),
+        };
+        let mut vals = String::new();
+        if let Some(b) = &bytes {
+            for off in (192..=448usize).step_by(16) {
+                if let Some(w) = b.get(off..off + 8) {
+                    let v = u64::from_le_bytes(w.try_into().unwrap_or([0; 8]));
+                    vals.push_str(&format!(
+                        "{}@{off} {v:#x}",
+                        if vals.is_empty() { "" } else { " " }
+                    ));
+                }
+            }
+        }
+        eprintln!(
+            "DIAG ubodump pass {pass} cmd {cmd} program {} cbuf {} addr {:#x} size {} u64 [{}]{}",
+            dd.program,
+            u.slot,
+            u.address,
+            u.size,
+            vals,
+            if bytes.is_none() { " unreadable" } else { "" }
+        );
+    }
+    if let Some(p) = &dd.push {
+        let words: Vec<String> = p
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .take(16)
+            .map(|c| format!("{:#010x}", u32::from_le_bytes(*c)))
+            .collect();
+        eprintln!(
+            "DIAG ubodump pass {pass} cmd {cmd} program {} push {} bytes u32 [{}]",
+            dd.program,
+            p.len(),
+            words.join(" ")
+        );
+    }
 }

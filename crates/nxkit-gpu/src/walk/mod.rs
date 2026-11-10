@@ -381,7 +381,7 @@ impl Walker {
             }
             Record::Draw => self.out.draws.push(Arc::new(empty_draw())),
             Record::Dispatch => {
-                let d = self.dispatch(&*mem, st, [0; 3]);
+                let d = self.dispatch(&*mem, st, ([0; 3], None));
                 self.track
                     .patches_of(&d.textures, self.out.dispatches.len(), true);
                 self.out.dispatches.push(d);
@@ -391,7 +391,12 @@ impl Walker {
         }
     }
 
-    fn dispatch<M: GuestMem>(&mut self, mem: &M, st: &State, groups: [u32; 3]) -> DispatchDetail {
+    fn dispatch<M: GuestMem>(
+        &mut self,
+        mem: &M,
+        st: &State,
+        (groups, indirect): ([u32; 3], Option<u64>),
+    ) -> DispatchDetail {
         self.track.program(COMPUTE, st.program[COMPUTE]);
         self.track.read(&cache::DISPATCH_READS);
         let program = self
@@ -407,6 +412,7 @@ impl Walker {
             program,
             push: st.push[1].clone(),
             groups,
+            indirect,
             ubos: self.ubos(mem, st, 2, Stage::Compute),
             sbufs: sbufs(st, 2, Stage::Compute),
             textures: textures(st, 2, Stage::Compute),

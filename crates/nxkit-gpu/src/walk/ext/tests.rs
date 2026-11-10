@@ -617,3 +617,12 @@ fn the_walker_and_the_decoder_count_the_same_copies() {
     let ords = crate::draws::ordinals(f.frame());
     assert_eq!(ords.last().map(|o| o.copy), Some(cmds as u32 - 1));
 }
+
+#[test]
+fn a_dispatch_record_gives_direct_counts_or_the_indirect_address() {
+    use super::records::dispatch_size;
+    let direct = copy_ext(ExtCode::Dispatch, 0, &[4, 5, 6]);
+    assert_eq!(dispatch_size(&direct), ([4, 5, 6], None));
+    let indirect = copy_ext(ExtCode::Dispatch, 1, &[0x2000, 0x1]);
+    assert_eq!(dispatch_size(&indirect), ([0; 3], Some(0x1_0000_2000)));
+}

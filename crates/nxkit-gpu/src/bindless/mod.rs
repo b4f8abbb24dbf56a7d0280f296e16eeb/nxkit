@@ -11,7 +11,7 @@ pub(crate) mod marks;
 #[cfg(test)]
 mod pool_tests;
 
-pub(crate) use self::args::{Env, StageInputs, fill_args, fill_args_scaled};
+pub(crate) use self::args::{Env, PUSH_BANK, StageInputs, fill_args, fill_args_scaled};
 
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -38,7 +38,7 @@ pub(crate) const POOL_ELEMENT: u64 = 8;
 pub(crate) const DRV_SIZE: usize = 0xA00;
 const DRV_C2_TEX: usize = 0x20;
 const DRV_C2_TEX_SLOTS: usize = 41;
-const DRV_DISPATCH: usize = 0x200;
+pub(crate) const DRV_DISPATCH: usize = 0x200;
 const DRV_CS_UBO: usize = 0x210;
 const DRV_CS_UBO_SLOTS: usize = 16;
 const DRV_BASE_INSTANCE: usize = 0x644;

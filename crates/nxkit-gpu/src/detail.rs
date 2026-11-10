@@ -400,8 +400,11 @@ pub struct DispatchDetail {
     pub program: String,
     /// The compute push constants (`nvnCommandBufferPushComputeConstants`, bank 24), when any were pushed.
     pub push: Option<std::sync::Arc<[u8]>>,
-    /// The threadgroups.
+    /// The threadgroups. Zero for an indirect dispatch: the walker cannot know them, so they are never encoded.
     pub groups: [u32; 3],
+    /// The guest GPU address of the three u32 group counts (NVN layout: x, y, z) of
+    /// `nvnCommandBufferDispatchComputeIndirect`, `None` for a direct dispatch.
+    pub indirect: Option<u64>,
     /// The uniform buffers.
     pub ubos: Vec<UboDetail>,
     /// The bound storage buffers. `snapshot` is always `None`.

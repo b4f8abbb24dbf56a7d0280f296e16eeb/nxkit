@@ -108,6 +108,8 @@ const KNOBS: &[&str] = &[
     // With `NXKIT_DIAG=nanscan`, the storage images of every compute dispatch are counted before and after the compute
     // pass, also when `NXKIT_DIAG_FS` is empty.
     "nancomp",
+    // With `NXKIT_DIAG=ubodump`, every dispatch of a sampled frame is dumped, not only the listed programs (400 lines).
+    "ubodumpall",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
