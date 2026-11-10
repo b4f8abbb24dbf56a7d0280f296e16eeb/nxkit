@@ -88,6 +88,7 @@ pub(super) fn copy_detail(st: &State, x: &Ext) -> CopyDetail {
             dst_origin,
             size,
             dst_size,
+            flags: x.word(4),
             src_addr: untag_address(x.word64(0)),
             dst_addr: untag_address(x.word64(2)),
             ..d

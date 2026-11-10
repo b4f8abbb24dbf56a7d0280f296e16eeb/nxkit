@@ -367,8 +367,11 @@ pub struct CopyDetail {
     pub dst_origin: [u32; 3],
     /// The size in texels of the source.
     pub size: [u32; 3],
-    /// The size in texels of the destination. A copy between textures only runs when it equals `size`.
+    /// The size in texels of the destination. A copy between textures stretches the source box onto the destination
+    /// box when the sizes differ (see `passes::scale`).
     pub dst_size: [u32; 3],
+    /// The copy flags of a [`CopyKind::TextureToTexture`] (`NVNcopyFlags`). Bit 0 asks for linear filtering.
+    pub flags: u32,
     /// The colour of a [`CopyKind::Clear`] as the raw words: `f32` bits for kind 0, `u32` values for kind 2.
     pub clear: [u32; 4],
     /// The value type of a [`CopyKind::Clear`]: 0 for `f32` and 2 for `u32`, as in `ExtCode::ClearColor`.

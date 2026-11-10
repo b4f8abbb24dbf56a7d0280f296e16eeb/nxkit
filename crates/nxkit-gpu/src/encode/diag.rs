@@ -14,6 +14,8 @@ thread_local! {
     /// True while the encoded render pass has an attachment that passes `NXKIT_DIAG_TEX`, or always without it. The
     /// per-draw categories print the draws of such passes only.
     pub(super) static FOCUS_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// The index of the render pass that is being encoded, for the lines of the diagnostics.
+    pub(super) static DIAG_PASS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The most lines that one per-draw category prints on one sampled frame.
@@ -68,6 +70,106 @@ pub(super) fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
             st.address,
             st.stride,
             floats(st.address, 8)
+        );
+    }
+}
+
+/// `DIAG ubodump` for a draw of a listed fragment program: once per frame for each program and storage buffer slot
+/// (and stage), the words 16 to 31 and the count of non-finite words of the storage buffers of the draw, from the
+/// snapshot of the walk (what the shader reads) and from guest memory now. At most 64 lines per frame.
+pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
+    use std::sync::atomic::AtomicU64;
+    static BUDGET: AtomicU64 = AtomicU64::new(0);
+    type Seen = (u64, Vec<(String, u8, u32)>);
+    static SEEN: std::sync::Mutex<Seen> =
+        std::sync::Mutex::new((0, Vec::new()));
+    let Some(key) = d.program.fragment.as_deref() else {
+        return;
+    };
+    if !crate::diag::fs_programs().iter().any(|k| k == key) {
+        return;
+    }
+    let pass = DIAG_PASS.with(std::cell::Cell::get);
+    for s in &d.sbufs {
+        let stage = match s.stage {
+            crate::detail::Stage::Fragment => "fs",
+            crate::detail::Stage::Vertex => "vs",
+            crate::detail::Stage::Mesh => "ms",
+            crate::detail::Stage::Task => "ts",
+            crate::detail::Stage::Compute => "cs",
+        };
+        {
+            let Ok(mut seen) = SEEN.lock() else {
+                return;
+            };
+            let f = crate::diag::frame();
+            if seen.0 != f {
+                seen.0 = f;
+                seen.1.clear();
+            }
+            let id = (key.to_owned(), s.stage as u8, s.slot);
+            if seen.1.contains(&id) {
+                continue;
+            }
+            seen.1.push(id);
+        }
+        if !crate::diag::sample_budget(&BUDGET, 64) {
+            return;
+        }
+        let count = (s.size as usize / 4).min(4096);
+        let live: Option<Vec<u32>> = sh
+            .guest_offset(s.address, (count * 4) as u64)
+            .and_then(|off| {
+                let mut b = vec![0u8; count * 4];
+                sh.guest.read(off, &mut b).ok()?;
+                Some(
+                    b.as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|c| u32::from_le_bytes(*c))
+                        .collect(),
+                )
+            });
+        let snap: Option<Vec<u32>> = s.snapshot.as_ref().map(|b| {
+            b.as_chunks::<4>()
+                .0
+                .iter()
+                .take(count)
+                .map(|c| u32::from_le_bytes(*c))
+                .collect()
+        });
+        let show = |w: &Option<Vec<u32>>| -> String {
+            w.as_ref().map_or_else(
+                || "unreadable".to_owned(),
+                |w| {
+                    w.iter()
+                        .skip(16)
+                        .take(16)
+                        .map(|v| format!("{:e}", f32::from_bits(*v)))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                },
+            )
+        };
+        let bad = |w: &Option<Vec<u32>>| -> usize {
+            w.as_ref().map_or(0, |w| {
+                w.iter().filter(|v| !f32::from_bits(**v).is_finite()).count()
+            })
+        };
+        let (f32s, nonfinite) = if snap.is_some() {
+            (
+                format!("snap [{}] guest [{}]", show(&snap), show(&live)),
+                format!("{} (guest {})", bad(&snap), bad(&live)),
+            )
+        } else {
+            (format!("[{}]", show(&live)), bad(&live).to_string())
+        };
+        eprintln!(
+            "DIAG ubodump pass {pass} draw {n} fs {key} stage {stage} sbuf {} addr {:#x} size {} snapshot {} f32 {f32s} nonfinite {nonfinite}",
+            s.slot,
+            s.address,
+            s.size,
+            if snap.is_some() { "yes" } else { "no" }
         );
     }
 }

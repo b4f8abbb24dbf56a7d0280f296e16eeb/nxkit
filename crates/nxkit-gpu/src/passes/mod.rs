@@ -1,13 +1,15 @@
 //! Compute, copy and copy-back passes.
 //!
 //! Dispatches run the translated compute shaders with an argument buffer that carries the dispatch size and the
-//! uniform buffer table in its driver block (see `bindless`). Copies are texture to texture on the GPU. A copy
-//! between a scaled and an unscaled texture is not encoded. A CPU read of a texture the GPU wrote swizzles the
+//! uniform buffer table in its driver block (see `bindless`). Copies are texture to texture on the GPU, and a copy
+//! with a destination box of another size stretches the source box (`scale`). A copy between a scaled and an
+//! unscaled texture is not encoded. A CPU read of a texture the GPU wrote swizzles the
 //! texture back into guest memory (R4).
 
 mod buffers;
 mod copy;
 mod indirect_dispatch;
+mod scale;
 
 use self::copy::copy;
 
@@ -93,7 +95,12 @@ pub(crate) fn compute_pass(
     } else {
         None
     };
-    let Ok(mut cp) = cb.begin_compute_pass(&tables.vertex) else {
+    let table = if pass.kind == PassKind::Copy {
+        &tables.copy
+    } else {
+        &tables.vertex
+    };
+    let Ok(mut cp) = cb.begin_compute_pass(table) else {
         stats.skipped[Skip::Encode as usize] += pass.cmds.len() as u32;
         return;
     };

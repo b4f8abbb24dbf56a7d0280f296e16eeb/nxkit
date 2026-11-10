@@ -356,6 +356,9 @@ pub(super) fn draw(
             d.textures
         );
     }
+    if crate::diag("ubodump") && crate::diag::sampled() {
+        ubo_dump_draw(sh, n, d);
+    }
     static UBO_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     if draw_diag("ubo", &UBO_SHOWN) {
         ubo_diag(sh, n, d);

@@ -49,6 +49,8 @@ pub(crate) struct Tables {
     pub(crate) vertex: ArgumentTable,
     pub(crate) fragment: ArgumentTable,
     pub(crate) object: ArgumentTable,
+    /// The table of a copy pass: the kernel of a stretching texture copy binds two textures and a buffer.
+    pub(crate) copy: ArgumentTable,
 }
 
 impl Tables {
@@ -58,6 +60,7 @@ impl Tables {
             vertex: ArgumentTable::new(ctx, 31, 0)?,
             fragment: ArgumentTable::new(ctx, 31, 0)?,
             object: ArgumentTable::new(ctx, 31, 0)?,
+            copy: ArgumentTable::new(ctx, 31, 2)?,
         })
     }
 }
@@ -124,6 +127,7 @@ pub(crate) fn render_pass(
     stats: &mut EncodeStats,
 ) {
     let range = draw_range(sh, pass);
+    DIAG_PASS.with(|c| c.set(index));
     if crate::diag::tex_filtered() {
         let focus = sh.plan.attachments_of(pass).iter().any(|a| {
             sh.textures.get(&a.tex).is_some_and(|r| {

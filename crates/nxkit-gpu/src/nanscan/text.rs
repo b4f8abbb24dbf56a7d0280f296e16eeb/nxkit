@@ -3,7 +3,7 @@
 use nxkit_metal::Format;
 use nxkit_nvn::resource::TexId;
 
-use super::kernel::{FIRST, FIRST_AT, SLICE_AT, SLICES};
+use super::kernel::{FIRST, FIRST_AT, NAN_AT, SLICE_AT, SLICES};
 
 /// The slices a line names.
 const SLICES_SHOWN: usize = 16;
@@ -15,6 +15,10 @@ pub(super) struct Counts {
     pub(super) total: u32,
     /// The texels with a non-finite R, G, B and A.
     pub(super) channel: [u32; 4],
+    /// The texels with a NaN in R, G, B and A.
+    pub(super) nan: [u32; 4],
+    /// The +Inf and -Inf values of R, G and B together.
+    pub(super) inf: [u32; 2],
     /// The texels with a non-finite RGB, by alpha: exactly 0, finite and not 0, non-finite.
     pub(super) alpha: [u32; 3],
     /// The first texels the kernel found: x, y and slice.
@@ -30,6 +34,8 @@ impl Counts {
         Self {
             total,
             channel: [w[1], w[2], w[3], w[4]],
+            nan: [w[NAN_AT], w[NAN_AT + 1], w[NAN_AT + 2], w[NAN_AT + 3]],
+            inf: [w[NAN_AT + 4], w[NAN_AT + 5]],
             alpha: [w[5], w[6], w[7]],
             first: (0..(total as usize).min(FIRST))
                 .map(|i| {
@@ -73,13 +79,18 @@ pub(super) fn channels_of(f: Format) -> usize {
     }
 }
 
-/// The part of a line after the total: the channels the format has, the alpha classes when it has alpha, the count
+/// The part of a line after the total: the channels the format has, the NaN and Inf counts, the alpha classes when it has alpha, the count
 /// before the pass, the first texels and the slices.
 fn counts_text(c: &Counts, channels: usize, layered: bool, load: Option<u32>) -> String {
     let mut s = format!(" nonfinite {}", c.total);
     for (name, n) in ["r", "g", "b", "a"].iter().zip(c.channel).take(channels) {
         s.push_str(&format!(" {name} {n}"));
     }
+    s.push_str(" | nan");
+    for (name, n) in ["r", "g", "b", "a"].iter().zip(c.nan).take(channels) {
+        s.push_str(&format!(" {name} {n}"));
+    }
+    s.push_str(&format!(" inf+ {} inf- {}", c.inf[0], c.inf[1]));
     if channels == 4 {
         s.push_str(&format!(
             " | rgb with alpha 0: {}, finite: {}, non-finite: {}",
@@ -202,6 +213,7 @@ mod tests {
         w[0] = 10;
         w[1..5].copy_from_slice(&[10, 9, 8, 1]);
         w[5..8].copy_from_slice(&[6, 3, 1]);
+        w[NAN_AT..NAN_AT + 6].copy_from_slice(&[4, 3, 2, 1, 5, 6]);
         w[FIRST_AT..FIRST_AT + 6].copy_from_slice(&[1, 2, 0, 3, 4, 5]);
         w
     }
@@ -224,6 +236,8 @@ mod tests {
         assert_eq!(c.total, 10);
         assert_eq!(c.channel, [10, 9, 8, 1]);
         assert_eq!(c.alpha, [6, 3, 1]);
+        assert_eq!(c.nan, [4, 3, 2, 1]);
+        assert_eq!(c.inf, [5, 6]);
         assert_eq!(
             c.first,
             vec![[1, 2, 0], [3, 4, 5]]
@@ -249,7 +263,7 @@ mod tests {
         );
         assert_eq!(
             l,
-            "DIAG nanscan frame 9 pass 4 prog abc target TexId(7) Rgba16Float 768x432 nonfinite 2 r 10 g 9 b 8 a 1 | rgb with alpha 0: 6, finite: 3, non-finite: 1 at load 2 first (1,2) (3,4)"
+            "DIAG nanscan frame 9 pass 4 prog abc target TexId(7) Rgba16Float 768x432 nonfinite 2 r 10 g 9 b 8 a 1 | nan r 4 g 3 b 2 a 1 inf+ 5 inf- 6 | rgb with alpha 0: 6, finite: 3, non-finite: 1 at load 2 first (1,2) (3,4)"
         );
     }
 
@@ -257,13 +271,13 @@ mod tests {
     fn a_format_without_alpha_prints_its_channels_only() {
         let c = Counts::from_words(&record());
         let rgb = target_line(1, 0, "p", &subject(Format::Rg11B10Float, None), &c, None);
-        assert!(rgb.contains("nonfinite 10 r 10 g 9 b 8 first"), "{rgb}");
+        assert!(rgb.contains("nonfinite 10 r 10 g 9 b 8 | nan r 4 g 3 b 2 inf+ 5 inf- 6 first"), "{rgb}");
         assert!(!rgb.contains(" a ") && !rgb.contains("alpha"), "{rgb}");
         assert!(!rgb.contains("at load"), "{rgb}");
         let rg = target_line(1, 0, "p", &subject(Format::Rg16Float, None), &c, None);
-        assert!(rg.contains("nonfinite 10 r 10 g 9 first"), "{rg}");
+        assert!(rg.contains("nonfinite 10 r 10 g 9 | nan r 4 g 3 inf+ 5 inf- 6 first"), "{rg}");
         let r = target_line(1, 0, "p", &subject(Format::R32Float, None), &c, None);
-        assert!(r.contains("nonfinite 10 r 10 first"), "{r}");
+        assert!(r.contains("nonfinite 10 r 10 | nan r 4 inf+ 5 inf- 6 first"), "{r}");
     }
 
     #[test]

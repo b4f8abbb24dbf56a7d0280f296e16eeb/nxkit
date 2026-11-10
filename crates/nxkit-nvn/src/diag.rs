@@ -194,6 +194,12 @@ reasons! {
     /// Buffer copies whose ranges overlap. One GPU thread runs them in order, which is slow for a large range. A
     /// count, not a loss.
     BufferOpsSerial => "copy.buffer-serial",
+    /// Texture copies with a destination region of another size than the source region that the GPU ran as a
+    /// stretch, counted per layer. A count, not a loss.
+    CopyScaled => "copy.scaled",
+    /// The stretched copies among them that filtered linearly (`NVN_COPY_FLAGS_LINEAR_FILTER_BIT`). A count, not a
+    /// loss.
+    CopyScaledLinear => "copy.scaled-linear",
 }
 
 impl Reason {
@@ -214,6 +220,8 @@ impl Reason {
             && self != Reason::GmemPoolWritten
             && self != Reason::BufferOps
             && self != Reason::BufferOpsSerial
+            && self != Reason::CopyScaled
+            && self != Reason::CopyScaledLinear
     }
 }
 

@@ -1,4 +1,7 @@
 //! Texture copies, clears and buffer copies of the copy passes, with the region helpers they share.
+//!
+//! A texture copy whose destination box has another size than the source box stretches the source onto it with a
+//! host kernel (`scale`, filter from the copy flags). The other copies are blits.
 
 use nxkit_metal::{ComputeCommand, ComputePass, Scratch, TextureDesc, TextureKind, TextureRegion};
 use nxkit_nvn::frame::Cmd;
@@ -378,14 +381,9 @@ pub(super) fn copy(
     let factor = if rs.scaled { sh.scale } else { 1.0 };
     let fits =
         |o: [u32; 3], s: [u32; 3], e: [u32; 3]| (0..3).all(|i| o[i].saturating_add(s[i]) <= e[i]);
+    let mut flags = 0;
     let (src_box, dst_box, count) = match entry.filter(|c| c.kind == CopyKind::TextureToTexture) {
         Some(c) => {
-            if c.size != c.dst_size {
-                return Err(copy_skip(format_args!(
-                    "scaled copy {src:?} {:?} -> {dst:?} {:?}",
-                    c.size, c.dst_size
-                )));
-            }
             let (from, count) = side(
                 &rs.desc,
                 c.src_level,
@@ -407,6 +405,7 @@ pub(super) fn copy(
                     "copy {src:?} -> {dst:?} has {count} source and {dst_count} destination layers"
                 )));
             }
+            flags = c.flags;
             (from, to, count)
         }
         None if rs.desc.level_extent(0) == rd.desc.level_extent(0) => {
@@ -431,11 +430,32 @@ pub(super) fn copy(
         )
         || !fits(
             dst_box.origin,
-            src_box.size,
+            dst_box.size,
             rd.desc.level_extent(dst_box.level),
         )
     {
         return Err(Skip::Copy);
+    }
+    if src_box.size[0] == 0 || src_box.size[1] == 0 || dst_box.size[0] == 0 || dst_box.size[1] == 0
+    {
+        return Ok(());
+    }
+    if src_box.size != dst_box.size {
+        if src == dst {
+            return Err(copy_skip(format_args!(
+                "scaled copy {src:?} {:?} -> itself {:?}",
+                src_box.size, dst_box.size
+            )));
+        }
+        return super::scale::encode(
+            sh,
+            cp,
+            scratch,
+            &rs.tex,
+            &rd.tex,
+            (src_box, dst_box, count),
+            flags,
+        );
     }
     for i in 0..count {
         cp.encode(&ComputeCommand::CopyTexture {
