@@ -52,7 +52,7 @@ pub(crate) const LEARN_PERIOD: u64 = 16;
 /// Frames without a new candidate or a change of class after which the judging backs off to [`SLOW_PERIOD`].
 pub(crate) const QUIET_FRAMES: u64 = 300;
 /// One judged flush in this many once nothing new was found for [`QUIET_FRAMES`].
-pub(crate) const SLOW_PERIOD: u64 = 300;
+pub(crate) const SLOW_PERIOD: u64 = 120;
 /// The largest range of a snapshot (a range that shaders only read and the CPU writes in flight).
 pub(crate) const SNAPSHOT_MAX_BYTES: u32 = 1 << 20;
 /// The bytes of all snapshots of one frame.
@@ -62,9 +62,16 @@ const WATCH_BUDGET: u64 = 8 << 20;
 /// Judged frames in which the masks of a merge range may grow before it is given up.
 const MAX_GROWN: u32 = 3;
 /// Judged frames in which the CPU wrote a read-only range in flight before it becomes a snapshot.
-const SNAPSHOT_HITS: u32 = 2;
+const SNAPSHOT_HITS: u32 = 1;
 /// Frames that a range rests after a judged frame in which the CPU did not write it in flight.
 const WATCH_PAUSE: u64 = 600;
+/// Judged frames in a row without a CPU write in flight after which a written range is settled as `Never`.
+pub(crate) const SETTLE_PROBES: u32 = 30;
+/// Flushes after which a settled range is judged again.
+const REPROBE: u64 = 120;
+/// Flushes in a row in which a classified range passed the check against other uses before the check is skipped for it
+/// (it is made again once in 60 flushes).
+const CLEAR_RUN: u16 = 8;
 /// The largest range that is renamed.
 pub(crate) const MAX_BYTES: u32 = 64 * 1024;
 /// The most candidate ranges.
@@ -661,6 +668,10 @@ struct Cand {
     sample: Option<Sample>,
     /// The flush counter at the last frame that bound the range.
     last: u64,
+    /// Judged frames in a row without a CPU write in flight.
+    quiet: u32,
+    /// Flushes in a row in which the range passed the check against other uses.
+    clear_run: u16,
     /// The bindings that bound the range, up to [`MAX_KEYS`]: what it teaches and what teaches it.
     keys: Vec<Key>,
     /// The class comes from the keys of its bindings, not from judging the range.
@@ -866,10 +877,34 @@ impl State {
         // The hash of the last program key of each stage, by its allocation.
         let mut vs: Option<(usize, u64)> = None;
         let mut fs: Option<(usize, u64)> = None;
+        // Draws that a template made are one allocation, and draws of a run bind the same buffers: a draw that binds what the
+        // draw before it bound adds nothing.
+        let mut prev_ptr = 0usize;
+        let mut prev_sig = 0u64;
         for (di, d) in detail.draws.iter().enumerate() {
             if d.args.is_mesh() || d.sbufs.is_empty() {
                 continue;
             }
+            let ptr = Arc::as_ptr(d) as usize;
+            if ptr == prev_ptr {
+                continue;
+            }
+            prev_ptr = ptr;
+            let mut sig = Arc::as_ptr(&d.program.vertex).cast::<u8>() as u64;
+            sig = sig.rotate_left(7)
+                ^ d.program
+                    .fragment
+                    .as_ref()
+                    .map_or(0, |f| Arc::as_ptr(f).cast::<u8>() as u64);
+            for s in &d.sbufs {
+                sig = (sig.rotate_left(5) ^ s.address).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                    ^ u64::from(s.size)
+                    ^ u64::from(s.slot | (s.stage as u32) << 24);
+            }
+            if sig == prev_sig {
+                continue;
+            }
+            prev_sig = sig;
             for (si, s) in d.sbufs.iter().enumerate() {
                 let (k, memo) = match s.stage {
                     Stage::Vertex => (Some(&d.program.vertex), &mut vs),
@@ -944,12 +979,24 @@ impl State {
                     cmask: ki.cmask.clone(),
                     gmask: ki.gmask.clone(),
                     grown: ki.grown,
-                    // A range of a known class is not judged again soon.
-                    rest_until: now + WATCH_PAUSE,
+                    // A range of a known class is not judged again soon, but a settled one is looked at again.
+                    rest_until: if ki.class == Class::Never {
+                        now
+                    } else {
+                        now + WATCH_PAUSE
+                    },
                     size: b.size,
                     learn,
                     sample: None,
                     last: now,
+                    // A settled key means a settled range: it is judged at the next judged flush, and for a long time
+                    // only if it is quiet again.
+                    quiet: if ki.class == Class::Never {
+                        SETTLE_PROBES
+                    } else {
+                        0
+                    },
+                    clear_run: 0,
                     keys: vec![b.key],
                     derived: true,
                 };
@@ -975,6 +1022,10 @@ impl State {
             class,
             Class::Rename | Class::Snapshot | Class::Merge | Class::Conflict | Class::Never
         ) {
+            return;
+        }
+        // `Never` is taught only once the range is settled: until then the CPU may still write it in some frames.
+        if class == Class::Never && c.quiet < SETTLE_PROBES {
             return;
         }
         for k in &c.keys {
@@ -1049,6 +1100,8 @@ impl State {
                     learn: Learn::watch(),
                     sample: None,
                     last: self.frame,
+                    quiet: 0,
+                    clear_run: 0,
                     keys: Vec::new(),
                     derived: false,
                 },
@@ -1091,6 +1144,8 @@ impl State {
                     learn: Learn::new(),
                     sample: None,
                     last: self.frame,
+                    quiet: 0,
+                    clear_run: 0,
                     keys: Vec::new(),
                     derived: false,
                 },
@@ -1291,8 +1346,36 @@ impl State {
         let t_capture = self.watch.then(std::time::Instant::now);
         renaming.sort_unstable();
         let ranges: Vec<(u64, u32)> = renaming.iter().map(|&(a, s, _)| (a, s)).collect();
-        let (accepted, left) = plan(&ranges, bound, &others(&ranges));
+        // A range that passed the check against other uses in the last flushes is trusted for a while (the buffers that a
+        // game binds do not move); the check is made for all others, and for all once in 60 flushes.
+        let trusted: Vec<bool> = renaming
+            .iter()
+            .map(|&(a, _, k)| {
+                k != Kind::Probe
+                    && !now.is_multiple_of(60)
+                    && self.cands.get(&a).is_some_and(|c| c.clear_run >= CLEAR_RUN)
+            })
+            .collect();
+        let blocked = if trusted.iter().all(|t| *t) {
+            vec![false; ranges.len()]
+        } else {
+            let mut b = others(&ranges);
+            for (flag, t) in b.iter_mut().zip(&trusted) {
+                *flag &= !t;
+            }
+            b
+        };
+        let (accepted, left) = plan(&ranges, bound, &blocked);
         out.excluded = left;
+        for (i, &(addr, _, _)) in renaming.iter().enumerate() {
+            if let Some(c) = self.cands.get_mut(&addr) {
+                c.clear_run = if accepted.contains(&i) {
+                    c.clear_run.saturating_add(1)
+                } else {
+                    0
+                };
+            }
+        }
         let mut snapshot_budget = SNAPSHOT_BUDGET;
         let mut probed: Vec<u64> = Vec::new();
         for &i in &accepted {
@@ -1461,7 +1544,7 @@ impl State {
                     note_n(Reason::OverlapMergeConflict, 1);
                     news.push(*addr);
                 }
-            } else if !is_empty_mask(&c.gmask) && probeable(*addr, c.size) {
+            } else if probeable(*addr, c.size) {
                 c.learn.set(Class::Merge);
                 c.grown = 0;
                 c.rest_until = now + WATCH_PAUSE;
@@ -1505,8 +1588,18 @@ impl State {
         }
         if n > 0 {
             c.hits += 1;
+            c.quiet = 0;
         } else {
-            c.rest_until = now + WATCH_PAUSE;
+            // A range that the CPU writes only in some frames (while the player moves) is not given up for one quiet
+            // frame; after [`SETTLE_PROBES`] it is settled and looked at again after [`REPROBE`] flushes.
+            c.quiet += 1;
+            if c.learn.class() != Class::Merge {
+                c.rest_until = if c.quiet >= SETTLE_PROBES {
+                    now + REPROBE
+                } else {
+                    now
+                };
+            }
         }
         let e = self.inflight.entry(addr).or_default();
         e.size = c.size;
@@ -1552,13 +1645,19 @@ impl State {
             };
             if n > 0 {
                 c.hits += 1;
+                c.quiet = 0;
                 // A range that shaders only read and the CPU writes while frames run is a snapshot.
                 if c.learn.class() == Class::Watch && c.hits >= SNAPSHOT_HITS {
                     c.learn.set(Class::Snapshot);
                     news.push(addr);
                 }
             } else {
-                c.rest_until = now + WATCH_PAUSE;
+                c.quiet += 1;
+                c.rest_until = if c.quiet >= SETTLE_PROBES {
+                    now + REPROBE
+                } else {
+                    now
+                };
             }
             c.sample = None;
             let e = self.inflight.entry(addr).or_default();
