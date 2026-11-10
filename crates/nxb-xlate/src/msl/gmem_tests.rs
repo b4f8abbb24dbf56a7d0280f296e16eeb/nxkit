@@ -129,6 +129,9 @@ fn a_signed_shared_compare_and_swap_is_a_bit_exact_unsigned_one() {
     let _ = b.def(AggType::S32, cas);
     let m = msl(&b);
     assert!(m.contains("atomic_compare_exchange_weak_explicit("), "{m}");
-    assert!(m.contains("uint t3 = 4294967295u;"), "{m}");
+    assert!(m.contains("uint t3 = 4294967295u; uint t3c = t3;"), "{m}");
+    // a weak exchange that fails with the expected value in memory tries again
+    assert!(m.contains("while (!atomic_compare_exchange_weak_explicit("), "{m}");
+    assert!(m.contains("&& t3 == t3c) {}"), "{m}");
     assert!(m.contains("gl_GlobalInvocationID.y"), "{m}");
 }

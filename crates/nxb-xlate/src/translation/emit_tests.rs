@@ -299,6 +299,23 @@ fn nvn2_compute_c0_maps_separate_textures_and_samplers() {
 }
 
 #[test]
+fn nvn2_compute_workgroup_counts_read_the_driver_block() {
+    let layout = r#", "nvn2_cs": [0, 0, 0, 16, 0]"#;
+    // the byte offset in c[0] the load is made of
+    let at = |offset| {
+        let t = ampere_cs_text_with(layout, &[ampere_ldc(0, 255, 0, offset, 0)]).expect("emit");
+        t.lines()
+            .find(|l| l.starts_with("  op 2 ") && l.contains("s=#0,#"))
+            .map(|l| l.trim_end_matches(',').to_string())
+            .unwrap_or_default()
+    };
+    // c[0] + 4, 8 and 12 are the driver block's dispatch words at 0x200, 0x204 and 0x208
+    assert!(at(4).ends_with("s=#0,#200"), "{}", at(4));
+    assert!(at(8).ends_with("s=#0,#204"), "{}", at(8));
+    assert!(at(12).ends_with("s=#0,#208"), "{}", at(12));
+}
+
+#[test]
 fn red_f32_add_is_a_compare_and_swap_loop() {
     // RED.E.ADD.F32.FTZ.RN [R0.64], R2
     let red = (0x98e | APT | 2 << 32, 3 << 9);

@@ -257,6 +257,9 @@ pub fn unfillable(reads: &[DrvRead], stage: &str) -> Vec<String> {
                 (C2_SAMP, C2_SAMP + C2_ROW * C2_SEP_SLOTS),
             ]
         };
+        if d.bank == 0 && stage == "cs" {
+            fill.push((C0_DISPATCH, C0_DISPATCH + 12));
+        }
         if d.bank == 0 && stage == "ps" {
             fill.push((C0_SAMPLE_TABLE, C0_SAMPLE_TABLE + C0_SAMPLE_BYTES));
             fill.push((C0_SAMPLE_INFO, C0_SAMPLE_INFO + C0_ROW));

@@ -20,7 +20,7 @@ This is early cutoff, as in the build systems Shake, Bazel and Salsa.
 
 | stage | store domain | version part | content part |
 |---|---|---|---|
-| translator | `nxb.xlate.v2` | translator identity: a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.19`) and `NXB_TEST_XLATE_SALT`; the revisions of the features the code uses (`features`, only when it uses one) | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
+| translator | `nxb.xlate.v2` | translator identity: a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.20`) and `NXB_TEST_XLATE_SALT`; the revisions of the features the code uses (`features`, only when it uses one) | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
 | Metal compile and link | `nxb.metallib.v2` | target record (flags), compiler identity (`metal` and `metallib` versions, SDK), own front-end tag (`air-front@0.10.0+f<FORMAT>`, no crate version) | the last MSL text |
 | pipeline archive batch | `nxb-archive batch 1` | architecture, platform, minimum OS, `metal-tt` version, driver (`metal-tt` or `applegpu-nt -j N`) | library bytes and the entries of the bases of the batch |
 

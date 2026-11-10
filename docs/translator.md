@@ -75,6 +75,8 @@ The emitter produces everything a vertex shader needs from one trace. The code i
 
 ## Compute kernels
 
+The workgroup counts of an NVN2 compute shader are c0 bytes 4, 8 and 12 (`C0_DISPATCH_NVN2`). `map_c0` reads them from the dispatch words of the driver block at `C0_DISPATCH` (0x200), which the host writes for every dispatch, and the read shows in `drv_reads`. An atomic compare-and-swap loops on a weak exchange that fails with the expected value still in memory (`while (!atomic_compare_exchange_weak_explicit(...) && t == tc) {}`).
+
 A kernel with more than 32 KB of shared memory takes its arrays from a device buffer at `buffer(30)` (`spill`). The reflection field `tg_spill` has the bytes of one workgroup slice. The stores that only the first invocation of a dispatch makes leave the kernel, and the reflection field `first_store` lists them as `{reg, word, value}` for the host. A task or mesh shader keeps its shared memory in the threadgroup and is refused past the limit.
 
 ## Pixel variants and side units
@@ -211,7 +213,7 @@ The effect on a sample of 190 shaders of Ocarina of Time: the `_b` text is 44% s
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.19`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.20`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 A change that alters the MSL only of shaders that use one feature of `nxb_xlate::msl::revision::FEATURES` (now `hmma`, `meshpos` and `blendz`) increases that feature's revision instead of `TRANSLATOR_ID`. The key of a shader whose code uses the feature has the field `features` (`hmma=1`, `meshpos=1`, `blendz=1`), so only these shaders translate again. A shader that uses no feature has no such field.

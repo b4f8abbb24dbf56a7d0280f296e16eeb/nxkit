@@ -158,9 +158,11 @@ impl Em<'_> {
         let inside = Self::inside(&img, t.ty, &coord, c.get(1).map(|_| layer.as_str()))?;
         let body = if f == "compare" {
             let cmp = self.tsrc(o, &mut i, comp)?.s;
-            self.pre.push(format!("{v4} t{n}x = {v4}({cmp});"));
+            // a weak exchange may fail with the expected value still in the image: try again
+            self.pre
+                .push(format!("{v4} t{n}x = {v4}({cmp}); {v4} t{n}c = t{n}x;"));
             format!(
-                "{img}.atomic_compare_exchange_weak({args}, &t{n}x, {v4}({value})); t{n} = t{n}x.x;"
+                "while (!{img}.atomic_compare_exchange_weak({args}, &t{n}x, {v4}({value})) && all(t{n}x == t{n}c)) {{}} t{n} = t{n}x.x;"
             )
         } else {
             let one = matches!(t.flags & ATOMIC_MASK, x if x == 3 << 16 || x == 4 << 16);

@@ -6,6 +6,7 @@ use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::regtype;
 use crate::maxwell::ampere::AmpOp;
 use crate::maxwell::ampere_table::has_uniform_guard;
+use crate::msl::abi::{C0_DISPATCH, C0_DISPATCH_NVN2};
 
 pub type Ctx<'a, 'b> = EmitterContext<'a, 'b>;
 pub type R = Result<(), String>;
@@ -169,7 +170,8 @@ fn cbuf_operand(ctx: &Ctx, x: &AmpOp, neg: bool, abs: bool) -> Result<ASrc, Stri
     })
 }
 
-/// `AMapC0`: NVN2 compute shaders' c0 layout.
+/// `AMapC0`: NVN2 compute shaders' c0 layout. The workgroup counts at bytes 4, 8 and 12 map to the dispatch words of
+/// the driver block (`C0_DISPATCH`).
 pub fn map_c0(ctx: &Ctx, bank: i32, offset: i32) -> (i32, i32) {
     let layout = if bank == 0 {
         ctx.acc.query_ampere_compute_c0_layout()
@@ -186,7 +188,11 @@ pub fn map_c0(ctx: &Ctx, bank: i32, offset: i32) -> (i32, i32) {
     let sep_textures = hb + 8 * textures;
     let sep_samplers = sep_textures + 8 * l.get(5).copied().unwrap_or(0);
     let ib = sep_samplers + 8 * l.get(6).copied().unwrap_or(0);
-    if (0x10..ub).contains(&offset) {
+    let (d0, d1) = (C0_DISPATCH_NVN2 as i32, C0_DISPATCH_NVN2 as i32 + 12);
+    if (d0..d1).contains(&offset) {
+        // the workgroup counts: the host writes them into the driver block at `C0_DISPATCH`
+        (0, C0_DISPATCH as i32 + (offset - d0))
+    } else if (0x10..ub).contains(&offset) {
         (24, offset - 0x10)
     } else if (ub..sb).contains(&offset) {
         (0, 0x210 + (offset - ub))
