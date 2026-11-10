@@ -39,9 +39,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use nxkit_metal::{BATCHES_IN_FLIGHT, Context, DataBuffer};
 use nxkit_nvn::diag::{Reason, note, note_n};
 
-mod registry;
-
-use self::registry::{Registry, count_overlapping};
+use crate::poolreg::{Registry, count_overlapping};
 use crate::pools::{Backing, PoolSnapshot};
 
 /// Entries of the table (`GlobalToStorage.GmemMapLog2` = 13).

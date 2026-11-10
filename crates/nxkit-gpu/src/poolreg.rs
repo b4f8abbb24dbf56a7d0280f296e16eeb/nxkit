@@ -1,50 +1,92 @@
-//! The registrations of the memory pools of `gmem`.
+//! The registrations of memory pools, shared by the raw global memory table (`gmem`) and the copy-back (`copyback`).
 
 use std::collections::BTreeMap;
 
-/// The registrations of the memory pools: every pool until it is removed. Pools may overlap and may share a start.
-#[derive(Debug, Default)]
-pub(super) struct Registry {
-    /// `start -> ends` of the pools with that start, in guest GPU addresses, in the order they were registered.
-    by_start: BTreeMap<u64, Vec<u64>>,
+/// One registration: its end, its order of registration and the value the owner keeps with it.
+#[derive(Debug, Clone, Copy)]
+struct Entry<V> {
+    end: u64,
+    seq: u64,
+    value: V,
 }
 
-impl Registry {
-    /// Adds one registration. An empty pool is not kept. Returns whether one was added.
-    pub(super) fn add(&mut self, start: u64, len: u64) -> bool {
+/// The registrations of the memory pools: every pool until it is removed. Pools may overlap and may share a start.
+#[derive(Debug)]
+pub(crate) struct Registry<V = ()> {
+    /// `start -> registrations` with that start, in guest GPU addresses, in the order they were registered.
+    by_start: BTreeMap<u64, Vec<Entry<V>>>,
+    /// The order number of the next registration.
+    next: u64,
+}
+
+impl<V> Default for Registry<V> {
+    fn default() -> Self {
+        Self {
+            by_start: BTreeMap::new(),
+            next: 0,
+        }
+    }
+}
+
+impl Registry<()> {
+    /// Adds one registration without a value. Returns whether one was added.
+    pub(crate) fn add(&mut self, start: u64, len: u64) -> bool {
+        self.add_with(start, len, ())
+    }
+}
+
+impl<V: Copy> Registry<V> {
+    /// Adds one registration with a value. An empty pool is not kept. Returns whether one was added.
+    pub(crate) fn add_with(&mut self, start: u64, len: u64, value: V) -> bool {
         if len == 0 {
             return false;
         }
-        self.by_start
-            .entry(start)
-            .or_default()
-            .push(start.saturating_add(len));
+        let seq = self.next;
+        self.next += 1;
+        self.by_start.entry(start).or_default().push(Entry {
+            end: start.saturating_add(len),
+            seq,
+            value,
+        });
         true
     }
 
+    /// The newest registration that holds all of `[start, end)`: its start, end and value. The newest one describes
+    /// what the game mapped last.
+    pub(crate) fn newest_holding(&self, start: u64, end: u64) -> Option<(u64, u64, V)> {
+        self.by_start
+            .range(..=start)
+            .flat_map(|(s, es)| es.iter().map(move |e| (*s, e)))
+            .filter(|(_, e)| e.end >= end)
+            .max_by_key(|(_, e)| e.seq)
+            .map(|(s, e)| (s, e.end, e.value))
+    }
+}
+
+impl<V> Registry<V> {
     /// Removes the oldest registration with this start, the one whose removal arrives. Returns whether there was one.
-    pub(super) fn remove(&mut self, start: u64) -> bool {
-        let Some(ends) = self.by_start.get_mut(&start) else {
+    pub(crate) fn remove(&mut self, start: u64) -> bool {
+        let Some(es) = self.by_start.get_mut(&start) else {
             return false;
         };
-        ends.remove(0);
-        if ends.is_empty() {
+        es.remove(0);
+        if es.is_empty() {
             self.by_start.remove(&start);
         }
         true
     }
 
     /// The number of registrations.
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.by_start.values().map(Vec::len).sum()
     }
 
     /// Every registration `(start, end)`, sorted by start; for equal starts the longer one comes first.
-    pub(super) fn sorted(&self) -> Vec<(u64, u64)> {
+    pub(crate) fn sorted(&self) -> Vec<(u64, u64)> {
         let mut out = Vec::with_capacity(self.len());
-        for (s, ends) in &self.by_start {
+        for (s, es) in &self.by_start {
             let first = out.len();
-            out.extend(ends.iter().map(|e| (*s, *e)));
+            out.extend(es.iter().map(|e| (*s, e.end)));
             out[first..].sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
         }
         out
@@ -52,7 +94,7 @@ impl Registry {
 }
 
 /// The number of registrations in `sorted` (see `Registry::sorted`) that overlap an earlier one.
-pub(super) fn count_overlapping(sorted: &[(u64, u64)]) -> u32 {
+pub(crate) fn count_overlapping(sorted: &[(u64, u64)]) -> u32 {
     let (mut reach, mut n) = (0u64, 0u32);
     for &(start, end) in sorted {
         if start < reach {
@@ -87,8 +129,25 @@ mod tests {
     }
 
     #[test]
+    fn the_newest_registration_that_holds_a_range_is_found() {
+        let mut r = Registry::<u32>::default();
+        r.add_with(0x1000, 0x4000, 1);
+        r.add_with(0x2000, 0x800, 2);
+        assert_eq!(r.newest_holding(0x2100, 0x2200), Some((0x2000, 0x2800, 2)));
+        // the newer pool does not hold the whole range
+        assert_eq!(r.newest_holding(0x2100, 0x3000), Some((0x1000, 0x5000, 1)));
+        assert_eq!(r.newest_holding(0x5000, 0x5001), None);
+        // the newer pool starts before the older one
+        r.add_with(0x800, 0x1000, 3);
+        assert_eq!(r.newest_holding(0x1000, 0x1100), Some((0x800, 0x1800, 3)));
+        assert_eq!(r.newest_holding(0x1000, 0x2100), Some((0x1000, 0x5000, 1)));
+        assert!(r.remove(0x800));
+        assert_eq!(r.newest_holding(0x1000, 0x1100), Some((0x1000, 0x5000, 1)));
+    }
+
+    #[test]
     fn a_pool_inside_another_does_not_remove_it() {
-        let mut r = Registry::default();
+        let mut r = Registry::<()>::default();
         r.add(0x1000, 0x4000);
         r.add(0x2000, 0x800);
         let t = table_of(&r);
@@ -107,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_new_pool_at_the_start_of_an_old_one_survives_the_removal_of_the_old_one() {
-        let mut r = Registry::default();
+        let mut r = Registry::<()>::default();
         r.add(0x1000, 0x1000);
         r.add(0x1000, 0x3000);
         // the table covers the union while both live
@@ -120,7 +179,7 @@ mod tests {
 
     #[test]
     fn overlapping_pools_cover_their_union() {
-        let mut r = Registry::default();
+        let mut r = Registry::<()>::default();
         r.add(0x1000, 0x2000);
         r.add(0x2000, 0x2000);
         let t = table_of(&r);
@@ -138,7 +197,7 @@ mod tests {
 
     #[test]
     fn removing_the_last_registration_of_a_start_removes_the_range() {
-        let mut r = Registry::default();
+        let mut r = Registry::<()>::default();
         r.add(0x1000, 0x1000);
         r.add(0x8000, 0x1000);
         assert!(r.remove(0x1000));
@@ -150,7 +209,7 @@ mod tests {
 
     #[test]
     fn the_oldest_registration_of_a_start_goes_first() {
-        let mut r = Registry::default();
+        let mut r = Registry::<()>::default();
         r.add(0x1000, 0x1000);
         r.add(0x1000, 0x3000);
         r.remove(0x1000);

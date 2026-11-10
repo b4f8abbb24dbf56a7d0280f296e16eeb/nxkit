@@ -13,7 +13,6 @@
 //! `NXKIT_COPYBACK=0` turns it off. `NXKIT_COPYBACK_MAX_MB` caps the storage copied back per frame (128 MiB).
 //! `NXKIT_DIAG=copyback` names each texture the first time it is copied back, and prints a summary now and then.
 
-use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use nxkit_nvn::format::{Aspects, format_info};
@@ -21,6 +20,7 @@ use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::resource::{TexId, TextureRecord};
 
 use crate::draws::FastSet;
+use crate::poolreg::Registry;
 use crate::textures::Res;
 use crate::upload::Dirty;
 
@@ -53,8 +53,8 @@ pub(crate) fn budget() -> u64 {
 /// What the encoder knows for the copy-back: the memory pools with their flags, and the copy-backs in flight.
 #[derive(Debug, Default)]
 pub(crate) struct CopyBack {
-    /// The memory pools by GPU start address: (end, `NVNmemoryPoolFlags`).
-    pools: BTreeMap<u64, (u64, u32)>,
+    /// The memory pools with their `NVNmemoryPoolFlags`. Every pool stays until its removal; pools may overlap.
+    pools: Registry<u32>,
     /// Textures the game presented. They are never candidates.
     presented: FastSet<TexId>,
     /// The storage ranges copied back in the last batches: (start, end, batch).
@@ -68,38 +68,27 @@ pub(crate) struct CopyBack {
 }
 
 impl CopyBack {
-    /// A memory pool of the game at GPU address `start`. A pool that overlaps it is forgotten.
+    /// A memory pool of the game at GPU address `start`. It is added to the pools it overlaps; none is forgotten.
     pub(crate) fn add_pool(&mut self, start: u64, len: u64, flags: u32) {
-        let end = start.saturating_add(len);
-        let stale: Vec<u64> = self
-            .pools
-            .range(..end)
-            .filter(|(s, (e, _))| **s < end && *e > start)
-            .map(|(s, _)| *s)
-            .collect();
-        for s in stale {
-            self.pools.remove(&s);
-        }
-        if len != 0 {
-            self.pools.insert(start, (end, flags));
-        }
+        self.pools.add_with(start, len, flags);
     }
 
-    /// The memory pool that holds `addr`: its GPU start and end and its flags.
+    /// The memory pool that holds `addr`: its GPU start and end and its flags. When several pools hold it, the
+    /// newest one counts: it describes what the game mapped last.
     pub(crate) fn pool_of(&self, addr: u64) -> Option<(u64, u64, u32)> {
-        let (s, (e, f)) = self.pools.range(..=addr).next_back()?;
-        (addr < *e).then_some((*s, *e, *f))
+        self.pools.newest_holding(addr, addr.checked_add(1)?)
     }
 
-    /// The game finalised the pool at GPU address `start`.
+    /// The game finalised the pool at GPU address `start`. The oldest pool with that start goes.
     pub(crate) fn remove_pool(&mut self, start: u64) {
-        self.pools.remove(&start);
+        self.pools.remove(start);
     }
 
-    /// The flags of the pool that holds all of `[start, end)`, if one does.
+    /// The flags of the newest pool that holds all of `[start, end)`, if one does.
     pub(crate) fn pool_flags(&self, start: u64, end: u64) -> Option<u32> {
-        let (_, (pool_end, flags)) = self.pools.range(..=start).next_back()?;
-        (end <= *pool_end).then_some(*flags)
+        self.pools
+            .newest_holding(start, end)
+            .map(|(_, _, flags)| flags)
     }
 
     /// Remembers the textures that the frame presents.
@@ -219,14 +208,52 @@ mod tests {
     }
 
     #[test]
-    fn a_new_pool_replaces_the_pools_it_overlaps() {
+    fn a_pool_inside_another_does_not_remove_it() {
+        let mut c = CopyBack::default();
+        c.add_pool(0x1_0000, 0x4_0000, 0x4);
+        c.add_pool(0x2_0000, 0x1_0000, CPU_NO_ACCESS);
+        assert_eq!(c.pool_of(0x1_1000), Some((0x1_0000, 0x5_0000, 0x4)));
+        assert_eq!(
+            c.pool_of(0x2_8000),
+            Some((0x2_0000, 0x3_0000, CPU_NO_ACCESS))
+        );
+        // a range that the inner pool does not hold whole belongs to the outer one
+        assert_eq!(c.pool_flags(0x2_8000, 0x3_8000), Some(0x4));
+        c.remove_pool(0x2_0000);
+        assert_eq!(c.pool_of(0x2_8000), Some((0x1_0000, 0x5_0000, 0x4)));
+        assert_eq!(c.pool_flags(0x2_8000, 0x2_9000), Some(0x4));
+    }
+
+    #[test]
+    fn a_new_pool_at_the_start_of_an_old_one_survives_the_removal_of_the_old_one() {
+        let mut c = CopyBack::default();
+        c.add_pool(0x1_0000, 0x1_0000, 0x4);
+        c.add_pool(0x1_0000, 0x2_0000, CPU_NO_ACCESS);
+        c.remove_pool(0x1_0000);
+        assert_eq!(
+            c.pool_of(0x2_8000),
+            Some((0x1_0000, 0x3_0000, CPU_NO_ACCESS))
+        );
+        c.remove_pool(0x1_0000);
+        assert_eq!(c.pool_of(0x2_8000), None);
+    }
+
+    #[test]
+    fn pool_of_gives_the_newest_pool_for_an_address_in_two_pools() {
         let mut c = CopyBack::default();
         c.add_pool(0x1_0000, 0x1_0000, 0x4);
         c.add_pool(0x1_8000, 0x1_0000, CPU_NO_ACCESS);
-        assert_eq!(c.pool_flags(0x1_0000, 0x1_1000), None);
+        assert_eq!(c.pool_of(0x1_1000), Some((0x1_0000, 0x2_0000, 0x4)));
+        assert_eq!(
+            c.pool_of(0x1_9000),
+            Some((0x1_8000, 0x2_8000, CPU_NO_ACCESS))
+        );
         assert_eq!(c.pool_flags(0x1_8000, 0x1_9000), Some(CPU_NO_ACCESS));
+        // the older pool holds the whole range that the newer one does not
+        assert_eq!(c.pool_flags(0x1_0000, 0x1_1000), Some(0x4));
         c.remove_pool(0x1_8000);
-        assert_eq!(c.pool_flags(0x1_8000, 0x1_9000), None);
+        assert_eq!(c.pool_of(0x1_9000), Some((0x1_0000, 0x2_0000, 0x4)));
+        assert_eq!(c.pool_of(0x2_1000), None);
     }
 
     #[test]

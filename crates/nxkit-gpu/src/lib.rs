@@ -52,6 +52,7 @@ mod native_ndve;
 mod overlap;
 mod passes;
 mod pipelines;
+mod poolreg;
 mod pools;
 mod programs;
 mod pull;
