@@ -24,6 +24,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use nxkit_nvn::backend::ForcedWait;
 use nxkit_nvn::cmdbuf::CommandHandle;
 use nxkit_nvn::marks::{MarkOp, event_signalled, event_wait_done};
 
@@ -104,6 +105,9 @@ pub(crate) struct Gate {
     pub(crate) stats: GateStats,
     /// Whether waits hold work (`NXKIT_QUEUE_ORDER` is not `0`).
     pub(crate) on: bool,
+    /// The waits for CPU event signals of the ops that a flush ran without their signal, until the flush that ran them
+    /// reports them to the backend.
+    pub(crate) forced_waits: Vec<ForcedWait>,
 }
 
 impl Gate {

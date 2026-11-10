@@ -69,6 +69,12 @@ const FRAME_MASK: u64 = (1 << 28) - 1;
 const LOG_CAP: usize = 1 << 16;
 /// The slots of the table of internal threads.
 const INTERNAL: usize = 32;
+/// The frames whose first writes between flush and commit are logged (a ring by frame number).
+const P1_RING: usize = 8;
+/// The pages logged for one frame.
+const P1_CAP: usize = 2048;
+/// The accesses to pages in flight that the log of [`Pages::take_in_flight`] holds.
+const FLIGHT_CAP: usize = 1024;
 /// The slots of each table of program counters.
 const PC_SLOTS: usize = 512;
 /// How far a program counter probes before it is counted as overflow.
@@ -207,10 +213,27 @@ struct Shared {
     mirror: AtomicU64,
     /// Bumped, and woken on, at each completion and each finished copy.
     wake: AtomicU32,
-    /// Where the newest frame is: 0 done (or no frame yet), 1 flushed and not committed, 2 committed and running. Writes
-    /// that dirty a page are counted by it.
-    phase: AtomicU32,
+    /// The newest frame whose flush ran, and the newest whose commit was reported. Where the newest frame is follows from
+    /// them and `completed`: 1 flushed and not committed, 2 committed and running, 0 done. Writes that dirty a page are
+    /// counted by it.
+    flushed: AtomicU64,
+    committed: AtomicU64,
     phase_writes: [AtomicU64; 3],
+    /// The addresses of the first writes to member pages between the flush of a frame and its commit, by frame number
+    /// modulo [`P1_RING`], as the byte offset in guest memory plus one, and how many writes the frame logged (the log
+    /// holds [`P1_CAP`]).
+    p1_n: [AtomicU32; P1_RING],
+    p1_log: [[AtomicU64; P1_CAP]; P1_RING],
+    /// Waits of a thread for the writer of a page, by access (0 read, 1 write): count, time, the longest, and how many
+    /// began before the frame was committed (the wait then includes the encode).
+    wait_n: [AtomicU64; 2],
+    wait_ns: [AtomicU64; 2],
+    wait_max_ns: [AtomicU64; 2],
+    wait_uncommitted: [AtomicU64; 2],
+    /// The first access of a game thread to a page of a frame in flight, as `frame << 36 | write << 35 | page + 1`, and
+    /// how many there were since the last [`Pages::take_in_flight`].
+    flight_n: AtomicU32,
+    flight_log: [AtomicU64; FLIGHT_CAP],
     /// With a mirror: copy every page of a completed frame back into guest memory at once (a bisecting aid).
     eager: AtomicBool,
     /// Pages copied from the mirror into guest memory.
@@ -274,8 +297,17 @@ static SHARED: Shared = Shared {
     last_signal: AtomicU64::new(0),
     mirror: AtomicU64::new(0),
     wake: AtomicU32::new(0),
-    phase: AtomicU32::new(0),
+    flushed: AtomicU64::new(0),
+    committed: AtomicU64::new(0),
     phase_writes: [const { AtomicU64::new(0) }; 3],
+    p1_n: [const { AtomicU32::new(0) }; P1_RING],
+    p1_log: [const { [const { AtomicU64::new(0) }; P1_CAP] }; P1_RING],
+    wait_n: [const { AtomicU64::new(0) }; 2],
+    wait_ns: [const { AtomicU64::new(0) }; 2],
+    wait_max_ns: [const { AtomicU64::new(0) }; 2],
+    wait_uncommitted: [const { AtomicU64::new(0) }; 2],
+    flight_n: AtomicU32::new(0),
+    flight_log: [const { AtomicU64::new(0) }; FLIGHT_CAP],
     eager: AtomicBool::new(false),
     synced: AtomicU64::new(0),
     writer_waits: AtomicU64::new(0),
@@ -516,9 +548,24 @@ fn wake_all() {
     }
 }
 
-/// Waits until the completion of `frame` is reported. Returns true when the wait ended at the timeout.
-fn wait_complete(frame: u32) -> bool {
+/// Where the newest frame is, and its number: 1 flushed and not committed, 2 committed and running, 0 done.
+fn phase_now() -> (usize, u64) {
+    let f = SHARED.flushed.load(Ordering::Acquire);
+    let c = SHARED.committed.load(Ordering::Acquire);
+    if f > c {
+        (1, f)
+    } else if c > SHARED.completed.load(Ordering::Acquire) {
+        (2, c)
+    } else {
+        (0, c)
+    }
+}
+
+/// Waits until the completion of `frame` is reported, for an access that `write` says is a write. Returns true when the
+/// wait ended at the timeout.
+fn wait_complete(frame: u32, write: bool) -> bool {
     let t0 = now_ns();
+    let uncommitted = u64::from(frame) > SHARED.committed.load(Ordering::Acquire) & FRAME_MASK;
     let mut waited = false;
     let mut timed_out = false;
     loop {
@@ -534,10 +581,16 @@ fn wait_complete(frame: u32) -> bool {
         sleep_on_wake(seen);
     }
     if waited {
+        let ns = now_ns().saturating_sub(t0);
+        let k = usize::from(write);
         SHARED.writer_waits.fetch_add(1, Ordering::Relaxed);
-        SHARED
-            .writer_wait_ns
-            .fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
+        SHARED.writer_wait_ns.fetch_add(ns, Ordering::Relaxed);
+        SHARED.wait_n[k].fetch_add(1, Ordering::Relaxed);
+        SHARED.wait_ns[k].fetch_add(ns, Ordering::Relaxed);
+        SHARED.wait_max_ns[k].fetch_max(ns, Ordering::Relaxed);
+        if uncommitted {
+            SHARED.wait_uncommitted[k].fetch_add(1, Ordering::Relaxed);
+        }
     }
     if timed_out {
         SHARED.wait_timeouts.fetch_add(1, Ordering::Relaxed);
@@ -565,7 +618,7 @@ fn copy_from_mirror(pg: usize, mirror: u64) {
 /// Serves a fault on the tracked page `pg` when there is a mirror. A page tagged with a frame holds stale bytes: the
 /// thread waits for the frame to complete (an internal thread does not wait), copies the page from the mirror and opens
 /// it. Atomics, `mprotect`, `memcpy` and the wake word; no lock, no allocation.
-fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror: u64) -> FaultKind {
+fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror: u64, at: u64) -> FaultKind {
     let p = pg as u32;
     let mut kind: Option<FaultKind> = None;
     let mut gave_up = false;
@@ -590,6 +643,14 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
             }
             GPU | OPEN => {
                 let flying = in_flight(frame) && !gave_up;
+                if kind.is_none() && flying && !internal {
+                    let n = SHARED.flight_n.fetch_add(1, Ordering::AcqRel) as usize;
+                    if n < FLIGHT_CAP {
+                        let off = at.wrapping_sub(SHARED.base.load(Ordering::Relaxed)) & ((1 << 35) - 2);
+                        let v = u64::from(frame) << 36 | u64::from(write) << 35 | (off + 1);
+                        SHARED.flight_log[n].store(v, Ordering::Release);
+                    }
+                }
                 let k = *kind.get_or_insert(if flying {
                     if write {
                         FaultKind::WriteInFlight
@@ -605,7 +666,7 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                     return k;
                 }
                 if flying && !internal {
-                    gave_up = wait_complete(frame);
+                    gave_up = wait_complete(frame, write);
                     continue;
                 }
                 // The claim: one thread copies, the others sleep on the wake word and run their access again.
@@ -663,7 +724,7 @@ extern "C" fn on_signal(sig: c_int, info: *mut SigInfo, uctx: *mut c_void) {
             let t0 = now_ns();
             SHARED.last_signal.store(sig as u64, Ordering::Relaxed);
             let (pc, write) = fault_regs(uctx);
-            on_tracked(pg, w, pc, write);
+            on_tracked(pg, w, pc, write, addr);
             SHARED
                 .handler_ns
                 .fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
@@ -687,21 +748,29 @@ fn origin_of(pc: u64, internal: bool) -> FaultOrigin {
 }
 
 /// Serves a fault on the tracked page `pg`. Atomics, `mprotect` and nothing else.
-fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool) {
+fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool, addr: u64) {
     let internal = is_internal();
     let origin = origin_of(pc, internal);
     let mirror = SHARED.mirror.load(Ordering::Acquire);
     if mirror != 0 {
-        let kind = serve_mirrored(pg, w, write, internal, mirror);
+        let kind = serve_mirrored(pg, w, write, internal, mirror, addr);
         SHARED.faults[kind as usize][origin as usize].fetch_add(1, Ordering::Relaxed);
         if !internal {
             count_pc(kind, pc);
         }
+        let base = SHARED.base.load(Ordering::Relaxed);
         if write && matches!(kind, FaultKind::CleanWrite | FaultKind::WriteInFlight) {
-            let ph = SHARED.phase.load(Ordering::Acquire).min(2) as usize;
+            let (ph, newest) = phase_now();
             SHARED.phase_writes[ph].fetch_add(1, Ordering::Relaxed);
-            if ph == 1 && !internal {
-                count_pc_in(3, pc);
+            if ph == 1 {
+                let r = newest as usize % P1_RING;
+                let n = SHARED.p1_n[r].fetch_add(1, Ordering::AcqRel) as usize;
+                if n < P1_CAP {
+                    SHARED.p1_log[r][n].store(addr.wrapping_sub(base) + 1, Ordering::Release);
+                }
+                if !internal {
+                    count_pc_in(3, pc);
+                }
             }
         }
         return;
@@ -877,6 +946,12 @@ pub struct PageStats {
     /// Writes to member pages (first write of a page) by where the newest frame was: after its GPU work or before the
     /// next flush, between its flush and its commit, after its commit and before the GPU is done.
     pub phase_writes: [u64; 3],
+    /// Waits of a thread for the writer of a page by access (0 read, 1 write), and their time.
+    pub waits: [u64; 2],
+    /// Time of those waits.
+    pub wait_ns: [u64; 2],
+    /// How many of those waits began before the frame was committed.
+    pub wait_uncommitted: [u64; 2],
 }
 
 /// What one flush did.
@@ -1051,6 +1126,8 @@ impl Pages {
         }
         SHARED.members.store(0, Ordering::Release);
         SHARED.completed.store(0, Ordering::Release);
+        SHARED.flushed.store(0, Ordering::Release);
+        SHARED.committed.store(0, Ordering::Release);
         SHARED.mirror.store(0, Ordering::Release);
         SHARED.npages.store(0, Ordering::Release);
         SHARED.member_bits.store(bits, Ordering::Release);
@@ -1108,9 +1185,65 @@ impl Pages {
         SHARED.mirror.store(host_base, Ordering::Release);
     }
 
-    /// Tells where the newest frame is: 0 done, 1 flushed and not committed, 2 committed and running.
-    pub fn set_phase(&self, phase: u32) {
-        SHARED.phase.store(phase, Ordering::Release);
+    /// The first command buffer of `frame` was committed: the writes of the CPU from here on are no longer "between the
+    /// flush and the commit" of that frame.
+    pub fn note_committed(&self, frame: u64) {
+        SHARED.committed.store(frame, Ordering::Release);
+    }
+
+    /// Copies `buf.len()` bytes of guest memory at the host address `addr` into `buf`, when every page of the range is a
+    /// member that is readable now (clean or dirty, not tagged for a frame). Returns false otherwise. For the
+    /// diagnostics: the pages may change state right after the check.
+    pub fn peek(&self, addr: u64, buf: &mut [u8]) -> bool {
+        let base = SHARED.base.load(Ordering::Acquire);
+        let total = SHARED.len.load(Ordering::Acquire);
+        if buf.is_empty() || addr < base || addr.saturating_add(buf.len() as u64) > base.saturating_add(total) {
+            return false;
+        }
+        let Some((first, end)) = page_span(addr, buf.len() as u64) else {
+            return false;
+        };
+        let readable = (first..end).all(|p| {
+            word(p as usize).is_some_and(|w| matches!(w.load(Ordering::Acquire) & STATE_MASK, CLEAN | DIRTY))
+        });
+        if !readable {
+            return false;
+        }
+        // SAFETY: the range lies in the guest memory that `attach` named (checked above) and every page of it is a member
+        // that is clean (read only) or dirty (read and write), so the read cannot fault.
+        unsafe {
+            std::ptr::copy_nonoverlapping(addr as *const u8, buf.as_mut_ptr(), buf.len());
+        }
+        true
+    }
+
+    /// The first accesses of game threads to pages of a frame in flight since the last call, as `(frame, host address,
+    /// write)` (at most 1024; the second number is how many there were).
+    pub fn take_in_flight(&self) -> (Vec<(u32, u64, bool)>, u32) {
+        let base = SHARED.base.load(Ordering::Acquire);
+        let n = SHARED.flight_n.swap(0, Ordering::AcqRel);
+        let out = SHARED.flight_log[..(n as usize).min(FLIGHT_CAP)]
+            .iter()
+            .map(|s| s.load(Ordering::Acquire))
+            .filter(|&v| v != 0)
+            .map(|v| ((v >> 36) as u32, base + (v & ((1 << 35) - 1)) - 1, v >> 35 & 1 != 0))
+            .collect();
+        (out, n)
+    }
+
+    /// The host addresses of the first writes of the CPU to member pages after the flush of `frame` and before its commit,
+    /// as logged (at most [`P1_CAP`]; the second number is how many there were). The log of the frame is emptied.
+    pub fn take_between(&self, frame: u64) -> (Vec<u64>, u32) {
+        let base = SHARED.base.load(Ordering::Acquire);
+        let r = frame as usize % P1_RING;
+        let n = SHARED.p1_n[r].swap(0, Ordering::AcqRel);
+        let out = SHARED.p1_log[r][..(n as usize).min(P1_CAP)]
+            .iter()
+            .map(|s| s.load(Ordering::Acquire))
+            .filter(|&v| v != 0)
+            .map(|v| v - 1 + base)
+            .collect();
+        (out, n)
     }
 
     /// With a mirror, copies every page of a frame back into guest memory when the frame completes (it makes guest memory
@@ -1145,6 +1278,18 @@ impl Pages {
         let a = std::sync::Arc::new(v);
         c.snap = Some((gen_, a.clone()));
         (a, gen_)
+    }
+
+    /// True when every page of `[addr, addr + len)` is tracked (a member of the private set), so the mirror holds the
+    /// bytes the GPU reads there. An empty or untracked range gives false.
+    pub fn all_members(&self, addr: u64, len: u64) -> bool {
+        let Some((first, end)) = page_span(addr, len) else {
+            return false;
+        };
+        first < end
+            && (first..end).all(|p| {
+                word(p as usize).is_some_and(|w| w.load(Ordering::Acquire) & STATE_MASK != FREE)
+            })
     }
 
     /// True when a page of the host range `[addr, addr + len)` is tagged with a frame: its guest bytes may be stale.
@@ -1275,7 +1420,7 @@ impl Pages {
                             let Some(w) = word(pg as usize) else { continue };
                             let cur = w.load(Ordering::Acquire);
                             if cur & STATE_MASK == GPU && u64::from(cur >> FRAME_SHIFT) == f & FRAME_MASK {
-                                serve_mirrored(pg as usize, w, false, true, mirror);
+                                serve_mirrored(pg as usize, w, false, true, mirror, 0);
                             }
                         }
                     }
@@ -1363,12 +1508,12 @@ impl Pages {
                 let state = w.load(Ordering::Acquire) & STATE_MASK;
                 match state {
                     GPU => {
-                        let k = serve_mirrored(p as usize, w, write, internal, mirror);
+                        let k = serve_mirrored(p as usize, w, write, internal, mirror, addr);
                         SHARED.faults[k as usize][FaultOrigin::Host as usize]
                             .fetch_add(1, Ordering::Relaxed);
                     }
                     OPEN if write => {
-                        let k = serve_mirrored(p as usize, w, write, internal, mirror);
+                        let k = serve_mirrored(p as usize, w, write, internal, mirror, addr);
                         SHARED.faults[k as usize][FaultOrigin::Host as usize]
                             .fetch_add(1, Ordering::Relaxed);
                     }
@@ -1411,6 +1556,9 @@ impl Pages {
         let mut c = ctrl();
         let p = page();
         let base = SHARED.base.load(Ordering::Acquire);
+        // From here until the commit of the frame, first writes of the CPU are counted and logged for it.
+        SHARED.p1_n[frame as usize % P1_RING].store(0, Ordering::Release);
+        SHARED.flushed.store(frame, Ordering::Release);
         let runs_w = span_runs(written);
         let mut all: Vec<(u64, u64)> = members.to_vec();
         all.extend_from_slice(written);
@@ -1676,7 +1824,18 @@ impl Pages {
                 g(&SHARED.phase_writes[1]),
                 g(&SHARED.phase_writes[2]),
             ],
+            waits: [g(&SHARED.wait_n[0]), g(&SHARED.wait_n[1])],
+            wait_ns: [g(&SHARED.wait_ns[0]), g(&SHARED.wait_ns[1])],
+            wait_uncommitted: [g(&SHARED.wait_uncommitted[0]), g(&SHARED.wait_uncommitted[1])],
         }
+    }
+
+    /// The longest wait for a writer since the last call, by access (0 read, 1 write), in ns.
+    pub fn take_wait_max(&self) -> [u64; 2] {
+        [
+            SHARED.wait_max_ns[0].swap(0, Ordering::Relaxed),
+            SHARED.wait_max_ns[1].swap(0, Ordering::Relaxed),
+        ]
     }
 
     /// The `n` program counters that faulted most for `kind` (only the kinds with a table: a clean write, a read and a
@@ -2098,6 +2257,66 @@ mod tests {
     }
 
     #[test]
+    fn waits_for_a_writer_are_counted_by_access_with_their_time_and_whether_the_frame_was_committed() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        // Frame 21 is flushed and not committed; it may write pages 1 and 2.
+        let _ = pg.flush_mirrored(21, &[], &[(m.addr(1), 1), (m.addr(2), 1)], None, &mut st);
+        let _ = (pg.take_wait_max(), pg.take_in_flight());
+        let s0 = pg.stats();
+        let base = m.base as usize;
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside the allocation of the test, which outlives the joined thread.
+            unsafe { (base as *const u8).add(P as usize).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        // The commit: a wait that begins now begins after it.
+        pg.note_committed(21);
+        let writer = std::thread::spawn(move || {
+            // SAFETY: as above.
+            unsafe { (base as *mut u8).add(2 * P as usize).write_volatile(3) };
+        });
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        mir.store(1, 0, 9);
+        pg.complete(21);
+        assert_eq!(reader.join().unwrap(), 9);
+        writer.join().unwrap();
+        let s1 = pg.stats();
+        assert_eq!((s1.waits[0] - s0.waits[0], s1.waits[1] - s0.waits[1]), (1, 1), "one read wait, one write wait");
+        assert_eq!(
+            (s1.wait_uncommitted[0] - s0.wait_uncommitted[0], s1.wait_uncommitted[1] - s0.wait_uncommitted[1]),
+            (1, 0),
+            "the read began before the commit, the write after it"
+        );
+        assert!(s1.wait_ns[0] - s0.wait_ns[0] >= 60_000_000, "the read waited for both sleeps");
+        assert!(s1.wait_ns[1] - s0.wait_ns[1] >= 30_000_000);
+        let longest = pg.take_wait_max();
+        assert!(longest[0] >= longest[1] && longest[1] >= 30_000_000);
+        let (log, total) = pg.take_in_flight();
+        assert_eq!(total, 2);
+        assert!(log.contains(&(21, m.addr(1), false)) && log.contains(&(21, m.addr(2), true)), "{log:?}");
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn first_writes_after_a_flush_are_logged_for_the_frame_until_its_commit() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(31, &[(m.addr(1), 1), (m.addr(3), 1)], &[], None, &mut st);
+        m.store(1, 40, 1);
+        // A second write to the same page is not a first write.
+        m.store(1, 80, 1);
+        pg.note_committed(31);
+        m.store(3, 0, 1);
+        let (log, total) = pg.take_between(31);
+        assert_eq!((log, total), (vec![m.addr(1) + 40], 1), "only the write before the commit, at its address");
+        assert_eq!(pg.take_between(31).1, 0, "the log is emptied");
+        pg.set_mirror(0);
+    }
+
+    #[test]
     fn a_write_in_flight_waits_then_the_cpu_write_lands_on_the_gpus_bytes() {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = mirrored(4);
@@ -2197,12 +2416,13 @@ mod tests {
         let (m, mir, pg) = mirrored(4);
         let mut st = Collect::default();
         // A member page that the CPU writes while the frame is flushed and not committed (phase 1).
+        pg.note_committed(0);
         let _ = pg.flush_mirrored(1, &[(m.addr(2), 1)], &[(m.addr(1), 1)], None, &mut st);
-        pg.set_phase(1);
         let s0 = pg.stats();
         m.store(2, 0, 4);
         let s1 = pg.stats();
         assert_eq!(s1.phase_writes[1] - s0.phase_writes[1], 1);
+        assert_eq!(pg.take_between(1), (vec![m.addr(2)], 1), "the write is logged for the frame");
         // The late staging takes the page again.
         let late = pg.flush_late(&mut st);
         assert_eq!(late, vec![2]);
@@ -2213,7 +2433,7 @@ mod tests {
         assert_eq!(pg.state_of(m.addr(1)), "clean", "copied back without a CPU access");
         assert_eq!(m.load(1, 0), 9);
         pg.set_eager_sync(false);
-        pg.set_phase(0);
+        pg.note_committed(1);
         pg.set_mirror(0);
     }
 

@@ -222,9 +222,11 @@ impl Walker {
     }
 
     fn read_knobs(&mut self) {
-        let overlap = crate::overlap::on();
-        self.copy_all = overlap && !crate::knob("nosnap");
-        self.snap_sbufs = overlap && !crate::knob("nosnapsbuf");
+        // The CPU runs ahead of the GPU with the overlap, and with the early fences of `NXKIT_PRIVATE=1`: the bytes of
+        // a bound range that is not private are copied when the work is submitted.
+        let ahead = crate::overlap::on() || (crate::private::early() && !crate::knob("privhonest"));
+        self.copy_all = ahead && !crate::knob("nosnap");
+        self.snap_sbufs = ahead && !crate::knob("nosnapsbuf");
     }
 
     pub(crate) fn program_set(&mut self, program: u64, keys: &[StageKey]) {

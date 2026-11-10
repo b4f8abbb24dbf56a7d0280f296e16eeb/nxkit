@@ -116,6 +116,14 @@ pub struct GpuBackend {
     /// Whether the last encoded frame copied textures back to CPU memory. The overlap then waits in full, because the
     /// next frame likely copies back too and the CPU reads what it copied.
     copied_recent: AtomicBool,
+    /// The newest fence whose frame copied textures back (`NXKIT_PRIVATE=1`: the frames after it keep the full wait).
+    copied_fence: AtomicU64,
+    /// The newest fence whose flush captured its inputs (`NXKIT_PRIVATE=1`).
+    captured: AtomicU64,
+    /// The waits of held submits for CPU event signals that the next flush ran (`forced_waits`).
+    forced: Mutex<Vec<nxkit_nvn::backend::ForcedWait>>,
+    /// The waits of the frames in the capture that stays open for CPU signals, with the fence of their frame.
+    forced_pending: Mutex<Vec<(u64, nxkit_nvn::backend::ForcedWait)>>,
 }
 
 impl GpuBackend {
@@ -183,6 +191,10 @@ impl GpuBackend {
                 shown_upto: AtomicU64::new(0),
                 inflight: Mutex::new(std::collections::VecDeque::new()),
                 copied_recent: AtomicBool::new(false),
+                copied_fence: AtomicU64::new(0),
+                captured: AtomicU64::new(0),
+                forced: Mutex::new(Vec::new()),
+                forced_pending: Mutex::new(Vec::new()),
             }
         }))
     }
@@ -306,6 +318,9 @@ impl GpuBackend {
         if let Ok(r) = &result {
             self.copied_recent
                 .store(!r.copied_back.is_empty(), Ordering::Release);
+            if !r.copied_back.is_empty() {
+                self.copied_fence.fetch_max(job.fence.0, Ordering::AcqRel);
+            }
             if crate::diag("frame") && job.fence.0.is_multiple_of(60) {
                 eprintln!(
                     "DIAG frame copyback fence {} copied_back {}",
@@ -379,6 +394,7 @@ impl GpuBackend {
             );
         }
         if !report.copied_back.is_empty() {
+            self.copied_fence.fetch_max(fence.0, Ordering::AcqRel);
             self.drain(None);
         }
         let synced: crate::draws::FastSet<TexId> = report

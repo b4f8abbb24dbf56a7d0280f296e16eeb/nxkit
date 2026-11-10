@@ -80,6 +80,9 @@ pub struct Overlay<B: Backing> {
     generation: u64,
     /// The resolve classes that use guest memory in this frame (the `privno*` knobs).
     off: u8,
+    /// The fence of the flush this view belongs to, and whether that flush ran submits before the CPU signals they wait for.
+    frame: u64,
+    forced: bool,
 }
 
 impl<B: Backing> Overlay<B> {
@@ -100,7 +103,28 @@ impl<B: Backing> Overlay<B> {
             staged,
             generation,
             off: 0,
+            frame: 0,
+            forced: false,
         }
+    }
+
+    /// The same view, marked as the view of the flush `frame`; `forced` says that the flush ran submits before the CPU
+    /// signals they wait for, so what the CPU writes until those signals belongs to the frame.
+    #[must_use]
+    pub fn with_frame(mut self, frame: u64, forced: bool) -> Self {
+        self.frame = frame;
+        self.forced = forced;
+        self
+    }
+
+    /// The fence of the flush this view belongs to.
+    pub fn frame(&self) -> u64 {
+        self.frame
+    }
+
+    /// True when the flush ran submits before the CPU signals they wait for.
+    pub fn forced(&self) -> bool {
+        self.forced
     }
 
     /// The same view with the resolve classes in `off` bound to guest memory.

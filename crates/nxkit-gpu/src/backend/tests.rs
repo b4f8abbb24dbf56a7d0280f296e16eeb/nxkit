@@ -65,3 +65,39 @@ fn the_space_of_the_backend_maps_host_addresses_to_virtual_ones() {
         Ok(GUEST_VA_BASE + 0x40)
     );
 }
+
+#[test]
+fn with_the_mirror_a_fence_wait_returns_at_the_flush_and_the_gpu_is_not_asked() {
+    let _t = crate::private::TEST_TURN
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    crate::private::test_mode(Some(crate::private::Mode::Mirror));
+    let Some((_guest, backend)) = backend(64 << 20) else {
+        crate::private::test_mode(None);
+        return;
+    };
+    // Fence 3 is flushed and captured; the GPU has not seen it and nothing was encoded.
+    backend.flushed.store(3, Ordering::Release);
+    backend.captured.store(3, Ordering::Release);
+    let t0 = std::time::Instant::now();
+    assert_eq!(
+        Backend::wait_fence(&*backend, Fence(3), u64::MAX),
+        WaitResult::Done
+    );
+    assert!(
+        t0.elapsed() < Duration::from_millis(100),
+        "no wait for the GPU"
+    );
+    assert_eq!(
+        backend.done.load(Ordering::Acquire),
+        0,
+        "the GPU is not done with it, and nothing says so"
+    );
+    // A fence that is done answers as before.
+    backend.done.store(3, Ordering::Release);
+    assert_eq!(
+        Backend::wait_fence(&*backend, Fence(2), u64::MAX),
+        WaitResult::AlreadyDone
+    );
+    crate::private::test_mode(None);
+}

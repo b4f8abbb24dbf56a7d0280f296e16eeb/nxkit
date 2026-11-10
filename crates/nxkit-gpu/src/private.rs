@@ -1,5 +1,5 @@
-//! Private GPU memory: step 1, tracking (`NXKIT_PRIVATE=track`), and step 2, the mirror (`NXKIT_PRIVATE=1`; see
-//! `docs/nxkit-gpu.md`).
+//! Private GPU memory: step 1, tracking (`NXKIT_PRIVATE=track`), step 2, the mirror, and step 3, early fences
+//! (`NXKIT_PRIVATE=1`; see `docs/nxkit-gpu.md`).
 //!
 //! The question of step 1 is what a private copy of guest memory for the GPU would cost, before any copy exists. At
 //! the flush of each frame the host computes the pages the frame may write on the GPU, the would-be members of the
@@ -31,12 +31,17 @@
 //!   snapshot ([`crate::overlay`], [`crate::pools::PoolSnapshot::resolve`]); the table of raw global memory is split at
 //!   the member pages.
 //!
-//! The fence logic is the same as without it: the overlap and the renamer are off. Without the variable nothing here runs.
+//! Step 3 answers the waits for fences when the flush has run, not when the GPU is done (`GpuBackend::wait_early`): the
+//! inputs of the frame are in the staging buffer and its outputs are guarded, so the CPU goes on and waits only where it
+//! touches a page that a frame in flight may write. The flush is the boundary for the data the frame reads; the one
+//! exception is a flush that ran submits before the CPU signals they wait for ([`late_expect`], [`late_stage`]). The overlap
+//! and the renamer are off. Without the variable nothing here runs.
 //!
 //! The counters print every [`REPORT_EVERY`] frames (`NXKIT_DIAG=private`, also with the variable set).
 
+use std::collections::VecDeque;
 use std::hash::BuildHasher;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
@@ -78,7 +83,7 @@ pub(crate) enum Mode {
     Off,
     /// `track`: step 1, the counters only.
     Track,
-    /// `1`: step 2, the mirror.
+    /// `1`: steps 2 and 3, the mirror and the early fences.
     Mirror,
 }
 
@@ -106,6 +111,17 @@ pub(crate) fn mode() -> Mode {
         }
         _ => Mode::Off,
     })
+}
+
+/// One test at a time may use the page tracker, which is one per process.
+#[cfg(test)]
+pub(crate) static TEST_TURN: Mutex<()> = Mutex::new(());
+
+/// A test sets the mirror mode for its own thread (`None` clears it).
+#[cfg(test)]
+pub(crate) fn test_mode(m: Option<Mode>) {
+    FORCE.with(|f| f.set(m));
+    FAILED.store(false, Ordering::Relaxed);
 }
 
 /// True when the knob `privpoison` is on (a test can set it for its thread).
@@ -191,6 +207,32 @@ struct Window {
     copy_in_lost: u64,
     /// Pages the knob `privlatestage` staged a second time.
     late_staged: u64,
+    /// Frames whose flush ran submits before the CPU signals they wait for, the time the encodes waited for the signals and
+    /// the waits that ended at the limit.
+    late_frames: u64,
+    late_wait_ns: u64,
+    late_timeouts: u64,
+    /// The first writes of the CPU to member pages between the flush of a frame and its commit, by what the frame binds:
+    /// frames counted, pages (all, written by the frame, read by it through a binding, in no binding of it), and the
+    /// frames whose flush ran submits before their CPU event signal with the pages of theirs that the frame reads.
+    between_frames: u64,
+    between_pages: u64,
+    between_written: u64,
+    between_reads: [u64; 6],
+    between_same_page: u64,
+    between_other: u64,
+    between_samples: u64,
+    /// At the commit, the bound read ranges of a frame whose bytes in a page written since the flush differ from what the
+    /// frame sees (by kind), the bytes of them, and the written pages that could not be compared.
+    changed_ranges: [u64; 6],
+    changed_bytes: u64,
+    uncompared: u64,
+    /// First accesses to pages of a frame in flight by the source of the frame's right to write them (binding or copy, raw
+    /// pool, no source, frame not kept) and read or write, and the pages touched most with how often.
+    flight_by_source: [[u64; 2]; 4],
+    flight_pages: Vec<(u64, u64, bool, String)>,
+    forced_frames: u64,
+    forced_reads: u64,
     /// The partial resolves (`overlay::partial`) at the start of the window.
     partial_base: u64,
     base: PageStats,
@@ -215,6 +257,23 @@ struct Private {
     frames: std::sync::atomic::AtomicU64,
     peak_members: std::sync::atomic::AtomicU64,
     mirror: Mutex<Option<MirrorState>>,
+    /// What each flushed frame binds, until its commit, to sort the writes between flush and commit (`NXKIT_DIAG=private`).
+    sets: Mutex<VecDeque<Arc<FrameSets>>>,
+}
+
+/// The pages a flushed frame reads and writes through its bindings, and whether its flush ran submits before their CPU
+/// event signals.
+struct FrameSets {
+    fence: u64,
+    /// The host byte ranges `(start, end, kind)` that the frame reads through a binding, and the ranges it may write.
+    reads: Vec<(u64, u64, u8)>,
+    written: Vec<(u64, u64)>,
+    /// The ranges the frame may write by where they come from: 0 a storage binding or a copy, 1 a pool that shaders wrote
+    /// through raw pointers.
+    sources: Vec<(u64, u64, u8)>,
+    forced: u32,
+    /// What the frame sees of guest memory: the staged bytes of the flush, else the mirror.
+    view: Arc<GuestOverlay>,
 }
 
 fn state() -> &'static Private {
@@ -226,7 +285,68 @@ fn state() -> &'static Private {
         frames: std::sync::atomic::AtomicU64::new(0),
         peak_members: std::sync::atomic::AtomicU64::new(0),
         mirror: Mutex::new(None),
+        sets: Mutex::new(VecDeque::new()),
     })
+}
+
+/// What the fence waits did, for the report (`NXKIT_PRIVATE=1`).
+struct WaitCounters {
+    early: AtomicU64,
+    bounded: AtomicU64,
+    bounded_ns: AtomicU64,
+    bounded_max_ns: AtomicU64,
+    full: [AtomicU64; 4],
+}
+
+static WAITS: WaitCounters = WaitCounters {
+    early: AtomicU64::new(0),
+    bounded: AtomicU64::new(0),
+    bounded_ns: AtomicU64::new(0),
+    bounded_max_ns: AtomicU64::new(0),
+    full: [const { AtomicU64::new(0) }; 4],
+};
+
+/// Why a wait for a fence waited for the GPU in full.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FullWait {
+    /// The knob `privhonest`.
+    Knob = 0,
+    /// A frame that copied back to CPU memory came shortly before.
+    CopyBack = 1,
+    /// `nvnQueueFinish` or another wait for an idle GPU (also the drain of a frame that makes a page a member).
+    Idle = 2,
+    /// The flush of the fence did not finish capturing.
+    NotCaptured = 3,
+}
+
+/// True when a wait for a fence returns once the flush ran, not when the GPU is done (`NXKIT_PRIVATE=1`).
+pub(crate) fn early() -> bool {
+    mirrored()
+}
+
+/// A fence wait was answered at the flush.
+pub(crate) fn note_early() {
+    WAITS.early.fetch_add(1, Ordering::Relaxed);
+}
+
+/// A fence wait that was answered at the flush also waited `d` for the frame [`nxkit_metal::BATCHES_IN_FLIGHT`] before.
+pub(crate) fn note_bounded(d: std::time::Duration) {
+    let ns = d.as_nanos() as u64;
+    WAITS.bounded.fetch_add(u64::from(ns > 50_000), Ordering::Relaxed);
+    WAITS.bounded_ns.fetch_add(ns, Ordering::Relaxed);
+    WAITS.bounded_max_ns.fetch_max(ns, Ordering::Relaxed);
+}
+
+/// A wait waited for the GPU in full, for `why`.
+pub(crate) fn note_full(why: FullWait) {
+    if on() {
+        WAITS.full[why as usize].fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// The newest frame whose batch the GPU finished.
+pub(crate) fn completed() -> u64 {
+    Pages::global().completed()
 }
 
 /// Names the guest memory to the page tracker, when the tracker is on, and makes the mirror in the mirror mode. Called
@@ -468,13 +588,15 @@ pub(crate) fn at_flush(
     detail: &FrameDetail,
     fence: u64,
     map: &AddressMap,
+    forced: u32,
+    late: bool,
     drain: &dyn Fn(),
 ) -> Option<Arc<GuestOverlay>> {
     if !on() || fence == 0 {
         return None;
     }
     if mirrored() {
-        return flush_mirror(detail, fence, map, drain);
+        return flush_mirror(detail, fence, map, forced, late, drain);
     }
     let st = state();
     let t_plan = Instant::now();
@@ -594,19 +716,21 @@ fn stream_extent(s: &StreamDetail, args: &DrawArgs) -> u64 {
 /// The ranges (GPU address, length) that the frame's GPU work reads through a binding: uniform and storage buffers,
 /// vertex streams, indices, indirect arguments and copy sources. A binding that touches a member page makes the rest
 /// of its range members too.
-fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64)> {
-    let mut out: Vec<(u64, u64)> = Vec::new();
-    let mut seen = vec![(0u64, 0u64); 4096];
-    let mut add = |a: u64, len: u64| {
+///
+/// The third number is the kind of binding: [`UBO`], [`SBUF`], [`STREAM`], [`INDEX`], [`INDIRECT`] or [`COPY`].
+fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64, u8)> {
+    let mut out: Vec<(u64, u64, u8)> = Vec::new();
+    let mut seen = vec![(0u64, 0u64, 0u8); 4096];
+    let mut add = |a: u64, len: u64, kind: u8| {
         if a == 0 || len == 0 {
             return;
         }
         let at = ((a >> 4) ^ (a >> 17) ^ len) as usize & 4095;
-        if seen[at] == (a, len) {
+        if seen[at] == (a, len, kind) {
             return;
         }
-        seen[at] = (a, len);
-        out.push((a, len));
+        seen[at] = (a, len, kind);
+        out.push((a, len, kind));
     };
     let mut prev = 0usize;
     for d in &detail.draws {
@@ -615,11 +739,14 @@ fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64)> {
             continue;
         }
         prev = ptr;
-        for u in d.ubos.iter().chain(&d.sbufs) {
-            add(u.address, u64::from(u.size));
+        for u in &d.ubos {
+            add(u.address, u64::from(u.size), BIND_UBO);
+        }
+        for u in &d.sbufs {
+            add(u.address, u64::from(u.size), BIND_SBUF);
         }
         for s in &d.streams {
-            add(s.address, stream_extent(s, &d.args));
+            add(s.address, stream_extent(s, &d.args), BIND_STREAM);
         }
         match d.args {
             DrawArgs::Indexed {
@@ -627,11 +754,11 @@ fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64)> {
                 address,
                 count,
                 ..
-            } => add(address, u64::from(count) << index_type.min(2)),
-            DrawArgs::ArraysIndirect { indirect } => add(indirect, 16),
+            } => add(address, u64::from(count) << index_type.min(2), BIND_INDEX),
+            DrawArgs::ArraysIndirect { indirect } => add(indirect, 16, BIND_INDIRECT),
             DrawArgs::IndexedIndirect { address, indirect, .. } => {
-                add(address, UNKNOWN_BYTES);
-                add(indirect, 20);
+                add(address, UNKNOWN_BYTES, BIND_INDEX);
+                add(indirect, 20, BIND_INDIRECT);
             }
             DrawArgs::MultiIndirectCount {
                 index,
@@ -641,45 +768,57 @@ fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64)> {
                 stride,
             } => {
                 if let Some((_, a)) = index {
-                    add(a, UNKNOWN_BYTES);
+                    add(a, UNKNOWN_BYTES, BIND_INDEX);
                 }
-                add(indirect, (u64::from(max) * stride.max(20)).min(RANGE_MAX_BYTES));
-                add(count, 4);
+                add(indirect, (u64::from(max) * stride.max(20)).min(RANGE_MAX_BYTES), BIND_INDIRECT);
+                add(count, 4, BIND_INDIRECT);
             }
-            DrawArgs::MeshTasksIndirect { indirect } => add(indirect, 8),
+            DrawArgs::MeshTasksIndirect { indirect } => add(indirect, 8, BIND_INDIRECT),
             _ => {}
         }
     }
     for d in &detail.dispatches {
-        for u in d.ubos.iter().chain(&d.sbufs) {
-            add(u.address, u64::from(u.size));
+        for u in &d.ubos {
+            add(u.address, u64::from(u.size), BIND_UBO);
+        }
+        for u in &d.sbufs {
+            add(u.address, u64::from(u.size), BIND_SBUF);
         }
         if let Some(a) = d.indirect {
-            add(a, 12);
+            add(a, 12, BIND_INDIRECT);
         }
     }
     for c in &detail.copies {
         match c.kind {
-            CopyKind::BufferToBuffer => add(c.src_addr, c.bytes),
-            CopyKind::BufferToTexture => add(c.buffer, UNKNOWN_BYTES),
+            CopyKind::BufferToBuffer => add(c.src_addr, c.bytes, BIND_COPY),
+            CopyKind::BufferToTexture => add(c.buffer, UNKNOWN_BYTES, BIND_COPY),
             _ => {}
         }
     }
     out
 }
 
+/// The kinds of binding of [`read_ranges`], and their names for the report.
+const BIND_UBO: u8 = 0;
+const BIND_SBUF: u8 = 1;
+const BIND_STREAM: u8 = 2;
+const BIND_INDEX: u8 = 3;
+const BIND_INDIRECT: u8 = 4;
+const BIND_COPY: u8 = 5;
+const BIND_NAMES: [&str; 6] = ["uniform", "storage", "vertex", "index", "indirect", "copy source"];
+
 /// The pages that become members because a binding of the frame touches a member (the written ranges included): up to two
 /// rounds, since a range that is made whole can touch another binding.
 fn closure(
     pages: &Pages,
-    reads: &[(u64, u64)],
+    reads: &[(u64, u64, u8)],
     map: &AddressMap,
     members: &mut Members<'_>,
 ) -> u64 {
     let mut added_pages = 0u64;
     for _ in 0..2 {
         let mut new: Vec<(u32, u32)> = Vec::new();
-        for &(a, len) in reads {
+        for &(a, len, _) in reads {
             let len = len.min(RANGE_MAX_BYTES);
             let Ok(h) = map.host_address(a, len) else {
                 continue;
@@ -849,6 +988,8 @@ fn flush_mirror(
     detail: &FrameDetail,
     fence: u64,
     map: &AddressMap,
+    forced: u32,
+    late: bool,
     drain: &dyn Fn(),
 ) -> Option<Arc<GuestOverlay>> {
     let st = state();
@@ -943,6 +1084,33 @@ fn flush_mirror(
         }
         None => None,
     };
+    let mut diag_sets: Option<DiagSets> = None;
+    if crate::diag("private") {
+        // What the frame binds, to sort the writes of the CPU between its flush and its commit.
+        let r: Vec<(u64, u64, u8)> = reads
+            .iter()
+            .filter_map(|&(a, len, kind)| {
+                let len = len.min(RANGE_MAX_BYTES);
+                let h = map.host_address(a, len).ok()?;
+                Some((h, h + len, kind))
+            })
+            .collect();
+        let mut sources: Vec<(u64, u64, u8)> = {
+            let rw = locked(&st.rw);
+            written_ranges(detail, &[], &rw)
+                .iter()
+                .filter_map(|&(a, len)| {
+                    let h = map.host_address(a, len.max(1)).ok()?;
+                    Some((h, h + len.max(1), 0))
+                })
+                .collect()
+        };
+        sources.extend(learned.iter().filter_map(|&(lo, hi)| {
+            let h = map.host_address(lo, hi - lo).ok()?;
+            Some((h, h + (hi - lo), 1))
+        }));
+        diag_sets = Some((r, written.iter().map(|&(h, l)| (h, h + l)).collect(), sources));
+    }
     let (bits, member_gen) = pages.member_snapshot();
     let runs: Vec<Run<Arc<GuestMemory>>> = ms
         .mirror
@@ -971,9 +1139,10 @@ fn flush_mirror(
     // With a class bound to guest memory, guest memory must be current: every page a frame wrote is copied back when the
     // frame completes.
     pages.set_eager_sync(off != 0);
-    let overlay = Overlay::new(ms.va_base, bits, runs, Some(ms.mirror.view()), staged, generation).with_off(off);
+    let overlay = Overlay::new(ms.va_base, bits, runs, Some(ms.mirror.view()), staged, generation)
+        .with_off(off)
+        .with_frame(fence, late);
     drop(guard);
-    pages.set_phase(1);
     let n = st.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let report = {
         let mut w = locked(&st.window);
@@ -996,7 +1165,22 @@ fn flush_mirror(
     if report {
         print_report(n);
     }
-    Some(Arc::new(overlay))
+    let overlay = Arc::new(overlay);
+    if let Some((reads, written, sources)) = diag_sets {
+        let mut q = locked(&st.sets);
+        q.push_back(Arc::new(FrameSets {
+            fence,
+            reads,
+            written,
+            sources,
+            forced,
+            view: overlay.clone(),
+        }));
+        while q.len() > 12 {
+            q.pop_front();
+        }
+    }
+    Some(overlay)
 }
 
 /// The kernel that copies staged pages into the mirror: one page per 256 threads, 16 bytes each, four times.
@@ -1109,6 +1293,12 @@ pub(crate) fn gpu_owned(host_addr: u64, len: u64) -> bool {
     mirrored() && Pages::global().any_gpu_owned(host_addr, len)
 }
 
+/// True when every page of the guest range is a member, so a frame that binds it reads the mirror (the walk takes no
+/// snapshot of the range).
+pub(crate) fn mirror_covers(host_addr: u64, len: u64) -> bool {
+    mirrored() && Pages::global().all_members(host_addr, len)
+}
+
 /// The encoder submitted the frame of `fence`: its pages are released when the batch is complete on the GPU. A frame
 /// without a batch is complete at once.
 pub(crate) fn encoded(fence: u64, batch: Option<&SubmittedBatch>) {
@@ -1116,48 +1306,324 @@ pub(crate) fn encoded(fence: u64, batch: Option<&SubmittedBatch>) {
         return;
     }
     // The frame is committed and runs; the completion says it is done.
-    Pages::global().set_phase(2);
-    let done = move || {
-        Pages::global().complete(fence);
-        Pages::global().set_phase(0);
-    };
+    Pages::global().note_committed(fence);
+    note_between(fence);
+    let done = move || Pages::global().complete(fence);
     match batch {
         Some(b) => b.on_complete(done),
         None => done(),
     }
 }
 
-/// The knob `privlatestage`: the pages that the CPU wrote since the flush are staged a second time, right before the frame's
-/// first command buffer is committed. Returns the `(mirror address, staging address)` of each page for a second copy-in pass.
-pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<(u64, u64)> {
-    if !mirrored() || !crate::knob("privlatestage") {
-        return Vec::new();
+/// The commit of `fence` is reported: sorts the writes that the CPU first made to member pages since its flush by what the
+/// frame binds. A write is in a byte range that the frame writes, in one it reads through a binding (by kind), in a page of
+/// such a range but outside its bytes, or in no binding of the frame.
+fn note_between(fence: u64) {
+    if !crate::diag("private") {
+        return;
     }
-    let mut guard = locked(&state().mirror);
-    let Some(ms) = guard.as_mut() else {
-        return Vec::new();
+    drain_in_flight();
+    let pages = Pages::global();
+    let (writes, total) = pages.take_between(fence);
+    let sets = locked(&state().sets).iter().find(|f| f.fence == fence).cloned();
+    let mut w = locked(&state().window);
+    w.between_frames += 1;
+    w.between_pages += u64::from(total);
+    let Some(sets) = sets else {
+        w.between_other += u64::from(total);
+        return;
     };
-    let fence = ms.last_fence;
+    let psize = pages.page_size();
+    let page_of = |a: u64| (a - pages.host_base()) / psize;
+    let mut reads_forced = 0u64;
+    for &a in &writes {
+        if sets.written.iter().any(|&(s, e)| s <= a && a < e) {
+            w.between_written += 1;
+        } else if let Some(&(_, _, kind)) = sets.reads.iter().find(|&&(s, e, _)| s <= a && a < e) {
+            w.between_reads[kind as usize] += 1;
+            reads_forced += 1;
+            if w.between_samples < 12 {
+                w.between_samples += 1;
+                let (s, e, _) = *sets.reads.iter().find(|&&(s, e, _)| s <= a && a < e).unwrap_or(&(0, 0, 0));
+                eprintln!(
+                    "DIAG private between sample: fence {fence} write at {a:#x} (offset {:#x} in its page) inside a {} binding \
+                     {s:#x}..{e:#x} ({} bytes)",
+                    (a - pages.host_base()) % psize,
+                    BIND_NAMES[kind as usize],
+                    e - s,
+                );
+            }
+        } else if sets.written.iter().any(|&(s, e)| page_of(s) <= page_of(a) && page_of(a) <= page_of(e - 1))
+            || sets.reads.iter().any(|&(s, e, _)| page_of(s) <= page_of(a) && page_of(a) <= page_of(e - 1))
+        {
+            w.between_same_page += 1;
+        } else {
+            w.between_other += 1;
+        }
+    }
+    w.between_other += u64::from(total).saturating_sub(writes.len() as u64);
+    // The exact test: the bytes of the bound ranges in those pages now against what the frame sees.
+    let mut seen_pages: Vec<u64> = writes.iter().map(|&a| page_of(a)).collect();
+    seen_pages.sort_unstable();
+    seen_pages.dedup();
+    for page in seen_pages {
+        let pa = pages.host_base() + page * psize;
+        for &(s, e, kind) in &sets.reads {
+            let (lo, hi) = (s.max(pa), e.min(pa + psize));
+            if lo >= hi {
+                continue;
+            }
+            let mut now = vec![0u8; (hi - lo) as usize];
+            let mut seen = vec![0u8; (hi - lo) as usize];
+            if !pages.peek(lo, &mut now) {
+                w.uncompared += 1;
+                continue;
+            }
+            if !sets.view.read(sets.view.va_base() + (lo - pages.host_base()), &mut seen) {
+                w.uncompared += 1;
+                continue;
+            }
+            let diff = now.iter().zip(&seen).filter(|(a, b)| a != b).count() as u64;
+            if diff > 0 {
+                w.changed_ranges[kind as usize] += 1;
+                w.changed_bytes += diff;
+            }
+        }
+    }
+    if sets.forced > 0 {
+        w.forced_frames += 1;
+        w.forced_reads += reads_forced;
+    }
+}
+
+/// Sorts the first accesses of game threads to pages of frames in flight, as of now, by where the frame's right to write the
+/// page comes from, into the window (`NXKIT_DIAG=private`). Called at each commit, while the sets of the frames are kept.
+fn drain_in_flight() {
+    let pages = Pages::global();
+    let (log, _) = pages.take_in_flight();
+    if log.is_empty() {
+        return;
+    }
+    let psize = pages.page_size();
+    let sets = locked(&state().sets).clone();
+    let mut w = locked(&state().window);
+    for &(frame, a, write) in &log {
+        let pa = a - (a - pages.host_base()) % psize;
+        let set = sets.iter().find(|f| (f.fence & 0x0fff_ffff) as u32 == frame);
+        let exact = set.and_then(|f| f.sources.iter().find(|&&(s, e, _)| s <= a && a < e));
+        let (class, what) = match (set, exact) {
+            (_, Some(&(s, e, 0))) => (0usize, format!("inside a binding or copy {s:#x}..{e:#x} ({} bytes)", e - s)),
+            (_, Some(&(s, e, _))) => (1, format!("inside a raw-store pool {s:#x}..{e:#x} ({} MiB)", (e - s) >> 20)),
+            (Some(f), None) => {
+                let near = f.sources.iter().find(|&&(s, e, _)| s < pa + psize && pa < e);
+                match near {
+                    Some(&(s, e, _)) => (2, format!("outside the bytes of the range {s:#x}..{e:#x} that shares the page")),
+                    None => (2, "in no source of its frame".to_string()),
+                }
+            }
+            (None, None) => (3, format!("frame {frame} not kept")),
+        };
+        w.flight_by_source[class][usize::from(write)] += 1;
+        if let Some(e) = w.flight_pages.iter_mut().find(|e| e.0 == a) {
+            e.1 += 1;
+        } else if w.flight_pages.len() < 64 {
+            w.flight_pages.push((a, 1, write, what));
+        }
+    }
+}
+
+/// `DIAG private in flight`: what game threads touched while the frame that tags it was in flight.
+fn report_in_flight(w: &mut Window) {
+    let t = |c: usize| w.flight_by_source[c][0] + w.flight_by_source[c][1];
+    if (0..4).all(|c| t(c) == 0) {
+        return;
+    }
+    w.flight_pages.sort_unstable_by_key(|e| std::cmp::Reverse(e.1));
+    let top: Vec<String> = w
+        .flight_pages
+        .iter()
+        .take(6)
+        .map(|(a, c, write, what)| format!("{a:#x} {c} first {} ({what})", if *write { "writes" } else { "reads" }))
+        .collect();
+    eprintln!(
+        "DIAG private in flight (first accesses of game threads to a page of a frame in flight, in the window; read/write): \
+         at an address inside the bytes of a binding or copy the frame may write {}/{}, inside a raw-store pool {}/{}, outside \
+         those bytes in a page they share (false sharing) {}/{}, the frame was not kept {}/{}; most touched addresses: {}",
+        w.flight_by_source[0][0],
+        w.flight_by_source[0][1],
+        w.flight_by_source[1][0],
+        w.flight_by_source[1][1],
+        w.flight_by_source[2][0],
+        w.flight_by_source[2][1],
+        w.flight_by_source[3][0],
+        w.flight_by_source[3][1],
+        top.join("; "),
+    );
+}
+
+/// A staging buffer and the `(page, slot)` of the pages in it.
+type Captured = (Arc<DataBuffer>, Vec<(u32, u32)>);
+
+/// The byte ranges a flushed frame reads (with the kind of binding), may write, and may write by source, for the report.
+type DiagSets = (Vec<(u64, u64, u8)>, Vec<(u64, u64)>, Vec<(u64, u64, u8)>);
+
+/// A frame whose flush ran submits before the CPU signals they wait for: the capture of the CPU's writes stays open until
+/// the signals come (the data those submits read is written until then).
+#[derive(Default)]
+struct LateFrame {
+    /// The signals the frame still waits for; negative when signals came before the flush counted them.
+    waiting: i32,
+    /// The flush counted the signals.
+    expected: bool,
+    /// The capture ran. `staged` holds the pages: the buffer and `(page, slot)`.
+    done: bool,
+    staged: Option<Captured>,
+}
+
+static LATE: Mutex<Vec<(u64, LateFrame)>> = Mutex::new(Vec::new());
+static LATE_CV: std::sync::Condvar = std::sync::Condvar::new();
+/// Consecutive frames whose signals did not come in time, and the number after which the capture stops waiting for them.
+static LATE_MISSED: AtomicU64 = AtomicU64::new(0);
+const LATE_MISSED_MAX: u64 = 4;
+/// How long the encode of a frame waits for the signals of its forced submits.
+const LATE_WAIT: std::time::Duration = std::time::Duration::from_millis(15);
+
+/// True when the capture still waits for CPU signals (it stops after [`LATE_MISSED_MAX`] frames in a row whose signals did
+/// not come in time: the game does not signal what the submits wait for, or very late).
+pub(crate) fn late_enabled() -> bool {
+    mirrored() && LATE_MISSED.load(Ordering::Relaxed) < LATE_MISSED_MAX
+}
+
+fn late_entry(v: &mut Vec<(u64, LateFrame)>, fence: u64) -> &mut LateFrame {
+    if let Some(i) = v.iter().position(|(f, _)| *f == fence) {
+        return &mut v[i].1;
+    }
+    v.push((fence, LateFrame::default()));
+    if v.len() > 16 {
+        v.remove(0);
+    }
+    let i = v.iter().position(|(f, _)| *f == fence).unwrap_or(0);
+    &mut v[i].1
+}
+
+/// The pages the CPU wrote since the last capture go into a staging buffer for `fence`.
+fn late_capture(fence: u64, fr: &mut LateFrame) {
+    fr.done = true;
+    let mut guard = locked(&state().mirror);
+    let Some(ms) = guard.as_mut() else { return };
     let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
     Pages::global().flush_late(&mut sink);
     let (buf, slots, failed) = (sink.buf.take(), std::mem::take(&mut sink.slots), sink.failed);
     drop(sink);
-    let Some(b) = buf else {
-        return Vec::new();
-    };
+    let Some(b) = buf else { return };
     if slots.is_empty() || failed {
         ms.pool.free.push(b);
-        return Vec::new();
+        return;
     }
     ms.pool.busy.push((fence, b.clone()));
     drop(guard);
     locked(&state().window).late_staged += slots.len() as u64;
-    let base = b.gpu_address();
-    slots
+    fr.staged = Some((b, slots));
+}
+
+/// The flush of `fence` counted `n` CPU signals that its forced submits wait for (before the flush captures anything, so a
+/// signal that comes meanwhile is not lost).
+pub(crate) fn late_expect(fence: u64, n: u32) {
+    let mut v = locked(&LATE);
+    let fr = late_entry(&mut v, fence);
+    fr.expected = true;
+    fr.waiting += n as i32;
+    if fr.waiting <= 0 && !fr.done {
+        late_capture(fence, fr);
+        LATE_CV.notify_all();
+    }
+    locked(&state().window).late_frames += 1;
+}
+
+/// A signal that a submit of `fence` waited for came: the last one closes the capture.
+pub(crate) fn late_signal(fence: u64) {
+    let mut v = locked(&LATE);
+    let fr = late_entry(&mut v, fence);
+    fr.waiting -= 1;
+    if fr.expected && fr.waiting <= 0 && !fr.done {
+        late_capture(fence, fr);
+        LATE_CV.notify_all();
+    }
+}
+
+/// The jobs `(mirror address, staging address)` of a second copy-in pass for the frame of `o`, to encode before its first
+/// command buffer is committed:
+///
+/// - a frame whose flush ran submits before the CPU signals they wait for waits here (at most [`LATE_WAIT`]) until the
+///   signals came, and gets the pages the CPU wrote until the last of them: those submits read what the CPU wrote for
+///   them, which the flush could not capture;
+/// - with the knob `privlatestage`, every frame gets the pages the CPU wrote since the flush, whatever they were written
+///   for (for comparing; with the CPU ahead of the encoder it also hands the frame the data of the next one).
+pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<(u64, u64)> {
+    if !mirrored() {
+        return Vec::new();
+    }
+    let mut taken: Vec<Captured> = Vec::new();
+    if o.forced() {
+        let t0 = Instant::now();
+        let fence = o.frame();
+        let mut v = locked(&LATE);
+        let mut timed_out = false;
+        loop {
+            let fr = late_entry(&mut v, fence);
+            if fr.done {
+                break;
+            }
+            let left = LATE_WAIT.saturating_sub(t0.elapsed());
+            if left.is_zero() {
+                timed_out = true;
+                late_capture(fence, fr);
+                break;
+            }
+            v = LATE_CV.wait_timeout(v, left).unwrap_or_else(PoisonError::into_inner).0;
+        }
+        let fr = late_entry(&mut v, fence);
+        if let Some(s) = fr.staged.take() {
+            taken.push(s);
+        }
+        drop(v);
+        if timed_out {
+            LATE_MISSED.fetch_add(1, Ordering::Relaxed);
+        } else {
+            LATE_MISSED.store(0, Ordering::Relaxed);
+        }
+        let mut w = locked(&state().window);
+        w.late_wait_ns += t0.elapsed().as_nanos() as u64;
+        w.late_timeouts += u64::from(timed_out);
+    }
+    if crate::knob("privlatestage") {
+        let mut guard = locked(&state().mirror);
+        if let Some(ms) = guard.as_mut() {
+            let fence = o.frame();
+            let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
+            Pages::global().flush_late(&mut sink);
+            let (buf, slots, failed) = (sink.buf.take(), std::mem::take(&mut sink.slots), sink.failed);
+            drop(sink);
+            if let Some(b) = buf {
+                if slots.is_empty() || failed {
+                    ms.pool.free.push(b);
+                } else {
+                    ms.pool.busy.push((fence, b.clone()));
+                    drop(guard);
+                    locked(&state().window).late_staged += slots.len() as u64;
+                    taken.push((b, slots));
+                }
+            }
+        }
+    }
+    taken
         .iter()
-        .filter_map(|&(page, slot)| {
-            o.locate(o.va_base() + u64::from(page) * PAGE)
-                .map(|(_, real, _)| (real, base + u64::from(slot) * PAGE))
+        .flat_map(|(b, slots)| {
+            let base = b.gpu_address();
+            slots.iter().filter_map(move |&(page, slot)| {
+                o.locate(o.va_base() + u64::from(page) * PAGE)
+                    .map(|(_, real, _)| (real, base + u64::from(slot) * PAGE))
+            })
         })
         .collect()
 }
@@ -1272,14 +1738,96 @@ fn print_report(frame: u64) {
     }
     if mirrored() {
         let ph = |i: usize| (now.phase_writes[i] - base.phase_writes[i]) as f64 / n;
+        let longest = pages.take_wait_max();
+        let waits = |k: usize| {
+            format!(
+                "{:.2} ({:.2} ms, longest {:.2} ms, {} began before the commit)",
+                (now.waits[k] - base.waits[k]) as f64 / n,
+                (now.wait_ns[k] - base.wait_ns[k]) as f64 / n / 1e6,
+                longest[k] as f64 / 1e6,
+                now.wait_uncommitted[k] - base.wait_uncommitted[k],
+            )
+        };
+        let full = |i: usize| WAITS.full[i].swap(0, Ordering::Relaxed);
+        let (early, bounded) = (WAITS.early.swap(0, Ordering::Relaxed), WAITS.bounded.swap(0, Ordering::Relaxed));
+        let (bounded_ns, bounded_max) = (
+            WAITS.bounded_ns.swap(0, Ordering::Relaxed),
+            WAITS.bounded_max_ns.swap(0, Ordering::Relaxed),
+        );
+        eprintln!(
+            "DIAG private fences frame {frame}: {early} waits answered at the flush ({bounded} of them also waited for \
+             the frame {} before, {:.3} ms per frame, longest {:.2} ms); full waits: privhonest {}, copy-back {}, \
+             idle GPU {}, flush not finished {}",
+            nxkit_metal::BATCHES_IN_FLIGHT,
+            bounded_ns as f64 / n / 1e6,
+            bounded_max as f64 / 1e6,
+            full(0),
+            full(1),
+            full(2),
+            full(3),
+        );
+        eprintln!(
+            "DIAG private CPU waits for a writer, per frame: read in flight {}; write in flight {}",
+            waits(0),
+            waits(1),
+        );
         eprintln!(
             "DIAG private writes to member pages per frame (first write of a page): after the GPU was done or before the \
              next flush {:.1}, between the flush and the commit {:.1}, after the commit before the GPU was done {:.1}; \
-             staged a second time (privlatestage) {:.1}",
+             staged a second time (late captures for forced submits, privlatestage) {:.1}",
             ph(0),
             ph(1),
             ph(2),
             w.late_staged as f64 / n,
+        );
+        let n_between = w.between_frames.max(1) as f64;
+        if w.late_frames > 0 || !late_enabled() {
+            eprintln!(
+                "DIAG private forced submits: {} frames had a flush that ran submits before the CPU signals they wait for; the \
+                 encodes waited {:.2} ms per such frame for the signals, {} of the waits ended at the limit of {} ms{}",
+                w.late_frames,
+                w.late_wait_ns as f64 / w.late_frames.max(1) as f64 / 1e6,
+                w.late_timeouts,
+                LATE_WAIT.as_millis(),
+                if late_enabled() { "" } else { "; the capture no longer waits for them (signals missed)" },
+            );
+        }
+        report_in_flight(&mut w);
+        let by_kind: Vec<String> = BIND_NAMES
+            .iter()
+            .zip(&w.between_reads)
+            .filter(|(_, c)| **c > 0)
+            .map(|(k, c)| format!("{k} {:.2}", *c as f64 / n_between))
+            .collect();
+        let reads_total: u64 = w.between_reads.iter().sum();
+        let changed: Vec<String> = BIND_NAMES
+            .iter()
+            .zip(&w.changed_ranges)
+            .filter(|(_, c)| **c > 0)
+            .map(|(k, c)| format!("{k} {:.2}", *c as f64 / n_between))
+            .collect();
+        eprintln!(
+            "DIAG private between flush and commit, exact: bound read ranges per frame whose bytes in a page the CPU wrote \
+             since the flush differ at the commit from what the frame sees: {} ({} bytes in all; {} ranges could not be \
+             compared)",
+            if changed.is_empty() { "none".to_string() } else { changed.join(", ") },
+            w.changed_bytes,
+            w.uncompared,
+        );
+        eprintln!(
+            "DIAG private between flush and commit, per frame, first writes of the CPU to member pages: {:.2} in all: {:.2} in \
+             bytes the frame writes, {:.2} in bytes it reads through a binding ({}), {:.2} in a page of one of its bindings but \
+             outside its bytes, {:.2} in no binding of the frame; {} of {} frames had a flush that ran submits before the CPU \
+             signal they wait for ({:.2} writes into read bytes per such frame)",
+            w.between_pages as f64 / n_between,
+            w.between_written as f64 / n_between,
+            reads_total as f64 / n_between,
+            if by_kind.is_empty() { "none".to_string() } else { by_kind.join(", ") },
+            w.between_same_page as f64 / n_between,
+            w.between_other as f64 / n_between,
+            w.forced_frames,
+            w.between_frames,
+            w.forced_reads as f64 / w.forced_frames.max(1) as f64,
         );
         let tops = pages.take_top_between_pcs(TOP);
         if !tops.is_empty() {
@@ -1379,7 +1927,7 @@ mod tests {
 
     // ----- the mirror -----
 
-    static TURN: Mutex<()> = Mutex::new(());
+    use super::TEST_TURN as TURN;
     const VA: u64 = nxkit_metal::GUEST_VA_BASE;
 
     struct Guest {
@@ -1434,7 +1982,7 @@ mod tests {
         let addr = VA + 10 * page + 0x100;
         g.mem.write(10 * page + 0x100, &[7; 16]).unwrap();
         let detail = dispatch(addr, 0x400);
-        let o = at_flush(&detail, 1, &g.map, &|| {}).expect("overlay");
+        let o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         let pools = pools_of(&g, o.clone());
         let loc = pools.resolve(addr, 0x400).unwrap();
         assert_ne!(loc.run, crate::pools::NO_RUN, "the written range lies in the mirror");
@@ -1465,7 +2013,7 @@ mod tests {
         let mut detail = dispatch(VA + 20 * page, 64);
         detail.dispatches[0].ubos[0].address = VA + 20 * page - 0x100;
         detail.dispatches[0].ubos[0].size = 0x200;
-        let o = at_flush(&detail, 1, &g.map, &|| {}).expect("overlay");
+        let o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         assert!(o.member(VA + 19 * page + 0x3f00), "the part before the member is a member");
         assert!(o.all_members(VA + 20 * page - 0x100, 0x200));
         let pools = pools_of(&g, o);
@@ -1487,7 +2035,7 @@ mod tests {
         let addr = VA + 30 * page;
         let detail = dispatch(addr, 0x100);
         // Frame 1 makes page 30 a member and the GPU writes it.
-        let o1 = at_flush(&detail, 1, &g.map, &|| {}).expect("overlay");
+        let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         let pools = pools_of(&g, o1.clone());
         let loc = pools.resolve(addr, 0x100).unwrap();
         let run = &o1.runs()[loc.run as usize];
@@ -1500,7 +2048,7 @@ mod tests {
         g.mem.write(30 * page + 8, &[6; 8]).unwrap();
         assert_eq!(Pages::global().state_of(g.mem.host_base() + 30 * page), "dirty");
         // Frame 2 stages the page whole, and the first command buffer of the frame copies it into the mirror.
-        let o2 = at_flush(&detail, 2, &g.map, &|| {}).expect("overlay");
+        let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
         let staged = o2.staged().expect("a staged page");
         assert_eq!(staged.slots.len(), 1);
         assert_eq!(Pages::global().state_of(g.mem.host_base() + 30 * page), "gpu(2, fresh)");
@@ -1541,10 +2089,10 @@ mod tests {
         let addr = VA + 40 * page;
         // The page is a member; the CPU writes it, and the frame that writes it starts: it is fresh, guest memory holds
         // its bytes, and the poison covers them.
-        let o = at_flush(&dispatch(addr, 0x100), 1, &g.map, &|| {}).expect("overlay");
+        let o = at_flush(&dispatch(addr, 0x100), 1, &g.map, 0, false, &|| {}).expect("overlay");
         encoded(1, None);
         g.mem.write(40 * page + 4, &[3; 4]).unwrap();
-        let o2 = at_flush(&dispatch(addr, 0x100), 2, &g.map, &|| {}).expect("overlay");
+        let o2 = at_flush(&dispatch(addr, 0x100), 2, &g.map, 0, false, &|| {}).expect("overlay");
         assert!(o2.staged().is_some());
         drop(o);
         let host = g.mem.host_base() + 40 * page;
@@ -1574,7 +2122,7 @@ mod tests {
         // The program is unknown, so the binding counts as written; the GPU writes nothing.
         let addr = VA + 60 * page;
         g.mem.write(60 * page + 8, &[0x21; 8]).unwrap();
-        let o = at_flush(&dispatch(addr, 0x100), 1, &g.map, &|| {}).expect("overlay");
+        let o = at_flush(&dispatch(addr, 0x100), 1, &g.map, 0, false, &|| {}).expect("overlay");
         encoded(1, None);
         let mut b = [0u8; 8];
         g.mem.read(60 * page + 8, &mut b).unwrap();
@@ -1599,7 +2147,7 @@ mod tests {
             g.mem.write((first + p) * page, &[p as u8 + 1; 8]).unwrap();
         }
         let detail = dispatch(VA + first * page, (200 * page) as u32);
-        let _o = at_flush(&detail, 1, &g.map, &|| {}).expect("overlay");
+        let _o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         let mem = g.mem.clone();
         let readers: Vec<_> = (0..4)
             .map(|t| {
@@ -1622,6 +2170,61 @@ mod tests {
         let bad: u32 = readers.into_iter().map(|h| h.join().unwrap()).sum();
         assert_eq!(bad, 0, "no reader saw the pattern");
         FORCE_POISON.with(|f| f.set(false));
+        FORCE.with(|f| f.set(None));
+    }
+
+    #[test]
+    fn a_frame_with_forced_submits_gets_the_pages_the_cpu_writes_until_their_signal() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let page = PAGE;
+        // Page 90 is a member that frame 40 wrote and finished; frame 41 writes page 80 only.
+        let _o40 = at_flush(&dispatch(VA + 90 * page, 0x100), 40, &g.map, 0, false, &|| {}).expect("overlay");
+        encoded(40, None);
+        late_expect(41, 1);
+        let o = at_flush(&dispatch(VA + 80 * page, 0x100), 41, &g.map, 1, true, &|| {}).expect("overlay");
+        assert!(o.forced() && o.frame() == 41);
+        // The CPU writes page 90 after the flush and before the signal that the forced submit waits for.
+        g.mem.write(90 * page + 16, &[5; 8]).unwrap();
+        assert_eq!(Pages::global().state_of(g.mem.host_base() + 90 * page), "dirty");
+        late_signal(41);
+        assert_eq!(Pages::global().state_of(g.mem.host_base() + 90 * page), "clean", "the capture took the page");
+        let t0 = Instant::now();
+        let jobs = late_stage(&o);
+        assert!(t0.elapsed() < std::time::Duration::from_millis(10), "the signal came, no wait");
+        assert_eq!(jobs.len(), 1, "one page goes into the mirror before the commit");
+        // A write after the signal is the next frame's: it stays dirty for the next flush.
+        g.mem.write(90 * page + 32, &[6; 8]).unwrap();
+        assert_eq!(Pages::global().state_of(g.mem.host_base() + 90 * page), "dirty");
+        encoded(41, None);
+        FORCE.with(|f| f.set(None));
+    }
+
+    #[test]
+    fn a_signal_that_comes_before_the_flush_counted_it_closes_the_capture_and_one_that_never_comes_times_out() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let page = PAGE;
+        let _o = at_flush(&dispatch(VA + 100 * page, 0x100), 50, &g.map, 0, false, &|| {}).expect("overlay");
+        encoded(50, None);
+        // The signal first, the count second.
+        late_signal(51);
+        late_expect(51, 1);
+        let o = at_flush(&dispatch(VA + 110 * page, 0x100), 51, &g.map, 1, true, &|| {}).expect("overlay");
+        let t0 = Instant::now();
+        assert!(late_stage(&o).is_empty());
+        assert!(t0.elapsed() < std::time::Duration::from_millis(10));
+        encoded(51, None);
+        // No signal: the encode waits for the limit, then goes on, and the miss is counted.
+        let missed = LATE_MISSED.load(Ordering::Relaxed);
+        late_expect(52, 1);
+        let o = at_flush(&dispatch(VA + 120 * page, 0x100), 52, &g.map, 1, true, &|| {}).expect("overlay");
+        let t0 = Instant::now();
+        assert!(late_stage(&o).is_empty());
+        assert!(t0.elapsed() >= std::time::Duration::from_millis(10), "waited for the signal");
+        assert_eq!(LATE_MISSED.load(Ordering::Relaxed), missed + 1);
+        LATE_MISSED.store(0, Ordering::Relaxed);
+        encoded(52, None);
         FORCE.with(|f| f.set(None));
     }
 

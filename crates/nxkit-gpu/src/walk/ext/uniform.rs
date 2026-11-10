@@ -132,7 +132,15 @@ impl Walker {
         // shader still reads. Copying only the updated prefix makes those reads escape the scratch allocation.
         // With the overlap on, every bound block gets its copy: the CPU may write it for the next frame while the GPU
         // still reads this one.
-        if !self.copy_all && !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
+        // A range whose pages are all private is read from the mirror, which holds the bytes of the flush: only an inline
+        // update makes it a copy.
+        let private = self.copy_all
+            && crate::private::early()
+            && self
+                .map
+                .host_address(addr, u64::from(size))
+                .is_ok_and(|host| crate::private::mirror_covers(host, u64::from(size)));
+        if (!self.copy_all || private) && !self.updated.iter().any(|(s, e)| addr < *e && *s < end) {
             // Most bound blocks have no inline updates. Remember that result as well: scanning the update
             // history for every UBO of every draw otherwise dominates the command walker on large frames.
             self.snaps.borrow_mut().insert(key, None);

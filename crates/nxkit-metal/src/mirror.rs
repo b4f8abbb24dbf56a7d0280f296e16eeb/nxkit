@@ -380,14 +380,12 @@ mod tests {
         assert_eq!(m.runs().len(), 1);
         assert_eq!((m.runs()[0].start, m.runs()[0].end), (SEGMENT, 3 * SEGMENT));
         // SAFETY: inside the usable segment.
-        assert_eq!(
-            unsafe {
-                (m.host_base() as *const u8)
-                    .add(SEGMENT as usize + 7)
-                    .read()
-            },
-            9
-        );
+        let seen = unsafe {
+            (m.host_base() as *const u8)
+                .add(SEGMENT as usize + 7)
+                .read()
+        };
+        assert_eq!(seen, 9);
         // A far segment is a second run; filling the gap joins all.
         m.ensure(&[(10 * SEGMENT, 11 * SEGMENT)]).unwrap();
         assert_eq!(m.runs().len(), 2);

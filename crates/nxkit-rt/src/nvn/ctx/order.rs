@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{MutexGuard, PoisonError};
 
-use nxkit_nvn::backend::Fence;
+use nxkit_nvn::backend::{Fence, ForcedWait};
 use nxkit_nvn::cmdbuf::CommandHandle;
 use nxkit_nvn::marks::MarkOp;
 
@@ -190,6 +190,7 @@ impl Gpu {
             ));
         }
         gateseq::cpu_signal(word);
+        self.backend.cpu_event_signalled(word);
         let held = {
             let mut gate = self.gate();
             gate.cpu_signalled(word);
@@ -240,6 +241,13 @@ impl Gpu {
                 break;
             };
             gate.stats.forced += 1;
+            // An op that waits for a signal of the CPU runs before the signal: what it reads is written until the signal.
+            if let Some(MarkOp::WaitEvent { event, mode, value }) = blocker
+                && let Some((word, _)) = gate.counter(event, &Guest)
+                && !gate.signalled_by_held(word, h.queue, &Guest)
+            {
+                gate.forced_waits.push(ForcedWait { word, mode, value });
+            }
             if gateseq::active() {
                 note(format_args!(
                     "FORCE q {:#x} {} at the flush, {} ops of other queues ran meanwhile | {}",

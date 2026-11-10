@@ -320,11 +320,11 @@ impl Gpu {
                 self.gate().held.len()
             ));
         }
-        let held = {
+        let (held, forced) = {
             let mut gate = self.gate();
             let held = self.release_all(front, &mut gate);
             self.gate_report(&mut gate, self.flushed() + 1);
-            held
+            (held, std::mem::take(&mut gate.forced_waits))
         };
         if let Err(e) = held {
             log_once(
@@ -347,6 +347,9 @@ impl Gpu {
             ));
         }
         front.end_frame(reason)?;
+        if !forced.is_empty() {
+            self.backend.forced_waits(fence, &forced);
+        }
         let (frame, plan, table, descriptors) = front.flush_parts();
         let sent =
             self.backend

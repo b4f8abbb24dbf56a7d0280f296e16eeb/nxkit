@@ -54,6 +54,18 @@ pub struct FlushCx<'a> {
     pub descriptors: &'a Descriptors,
 }
 
+/// A wait of a held submit for the signal of an event that the CPU gives. A flush that had to run the submit before the
+/// signal came reports it: the submit sits in the frame, and the data it reads is written until the signal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ForcedWait {
+    /// The guest address of the counter of the event.
+    pub word: u64,
+    /// The `NVNeventWaitMode`.
+    pub mode: u32,
+    /// The value the wait compares with.
+    pub value: u32,
+}
+
 /// The number of a flush. The GPU finishes the fences in order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Fence(pub u64);
@@ -168,6 +180,14 @@ pub trait Backend: Send + Sync {
         fence: Fence,
         cx: FlushCx<'_>,
     ) -> BackendResult<()>;
+
+    /// The flush of `fence` (the call comes just before [`Backend::flush_frame`]) ran held submits whose waits for CPU
+    /// event signals were not satisfied: the game gives those signals later, after the flush. The default does nothing.
+    fn forced_waits(&self, _fence: Fence, _waits: &[ForcedWait]) {}
+
+    /// The game signalled the event whose counter is at the guest address `word` (`nvnEventSignal`); the counter holds
+    /// the new value. The call may come from any thread. The default does nothing.
+    fn cpu_event_signalled(&self, _word: u64) {}
 
     /// The game presents a window texture. The frame that drew it was flushed before this call.
     fn present(&self, present: Present) -> BackendResult<()>;

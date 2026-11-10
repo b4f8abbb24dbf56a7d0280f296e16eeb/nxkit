@@ -430,6 +430,94 @@ program counters of the middle class.
 - A page that was staged for a frame that is never encoded (an encode that failed) is not copied into the mirror.
 - The frame number and the table keep the limits of step 1 (28 bits, 24 frames of runs).
 
+## Private GPU memory, step 3: fences at the flush (`NXKIT_PRIVATE=1`)
+
+With the mirror in place the CPU's writes for frame N + 1 cannot reach frame N on the GPU, so a wait for the fence of frame N
+does not have to wait for the GPU. Step 3 answers it at the flush. The overlap and the renamer stay off.
+
+**The wait** (`GpuBackend::wait_fence`, `wait_early`). A wait for fence N returns when the flush of N has run
+(`captured`, set after `private::at_flush`): the CPU's writes are in the staging buffer, the pages the frame may write have no
+access, and the walk has taken what it takes. It does not wait for the encoder thread or the GPU. Still bounded: the wait for
+fence N also waits until the frame `BATCHES_IN_FLIGHT` (3) before it is done, which keeps the batch ring, the staging buffers
+and `MAX_PENDING` presents from running away. A wait that finds the fence done answers `AlreadyDone` as before. Every answer
+also writes the counter and timestamp reports of the frames the GPU has finished (`harvest`, no wait), so the reports are as
+fresh as the GPU allows, not later than before; the report of the frame that was just flushed is not there yet (the game
+reads the report of the frame before, as with the overlap).
+
+Waits that stay full (`DIAG private fences`, `full waits`):
+
+- `privhonest` (knob): the behaviour of step 2, for comparing.
+- copy-back: a frame that copied textures back to CPU memory (`copied_recent`, `copied_fence`) and the `COPYBACK_SPAN` (3)
+  frames after it; the copy-back is not guarded yet (step 5).
+- `idle GPU`: `nvnQueueFinish` and the other `wait_idle` callers, and the drain at a flush that makes a page a member while a
+  frame in flight may still write it in guest memory.
+- `flush not finished`: a fence that is not captured yet.
+
+**Copies of what the CPU may still write.** With early fences the CPU also writes the data of frame N + 1 into pages that are
+not members, while frame N reads them from guest memory. The walk (`walk/mod.rs`) therefore takes the copies it takes with the
+overlap (every bound uniform buffer, and the storage buffers that draws only read) when `NXKIT_PRIVATE=1` answers early, as of
+the submit of the commands; a range whose pages are all members is not copied (the mirror holds the bytes of the flush), unless an
+inline update changed it. `nosnap` and `nosnapsbuf` still turn them off.
+
+**What belongs to a frame: the boundary.** The rule is: *the flush is the boundary for all data the frame reads through the
+mirror*, except for submits that the flush ran before the CPU signalled what they wait for.
+
+- The pages the CPU wrote before the flush are staged at the flush and copied into the mirror at the start of the frame. A
+  write after the flush is the data of the next frame and goes into the next flush's staging buffer. With the CPU ahead of the
+  encoder this is the only boundary that does not hand a frame the data of the one after it: the commit comes some
+  milliseconds after the flush (the encode), and the game writes the next frame's data in that time.
+- Evidence (OoT, from the start to the intro movie and the first scene; `DIAG private between flush and commit`): the CPU
+  first-writes 0.0 to 1.1 member pages per frame between the flush and the commit (0.3 to 1.0 per frame in the movie). The address of
+  each first write is compared with the byte ranges (not the pages) that the frame binds. In nearly all windows none is inside the bytes of a
+  range that the frame reads as storage, uniform, vertex, index, indirect or copy source (0.00 per frame); 0.03 to 0.35 per frame are in a page that one of
+  its bindings shares (false sharing), 0.2 to 0.7 in pages of no binding of the frame, and 0.00 to 0.03 in the bytes that the
+  frame may write (those are writes in flight: the CPU waits for the frame and the write lands on the GPU's bytes). At the commit the
+  bytes of the bound ranges in the written pages were compared with what the frame sees (staged bytes, else the mirror): equal in
+  all windows but two, where 0.01 and 0.03 storage ranges per frame changed (1123 and 6273 bytes in 300 frames): a ring range
+  that the CPU rewrites for the next frame right after the present, which the flush rule leaves to the next frame, as intended.
+  Raw pointer reads of a shader are not bindings, so the pages in no binding cannot be excluded this way; the argument for them
+  is the order of events: the game writes after its present, which is the flush.
+- The exception is the queue gate (`nxkit-rt/src/nvn/ctx/gate.rs`, `order.rs`): a submit that waits for an event that only the
+  CPU signals is held, and a flush runs it without the signal. The game writes what the submit reads until the signal, which
+  comes after the flush. Such a flush now reports the waits (`Backend::forced_waits`, `ForcedWait`), and the backend registers
+  them with the frame (`forced_pending`, `private::late_expect`). The CPU's `nvnEventSignal` reports the signal
+  (`Backend::cpu_event_signalled`); when the last signal of a frame has come, `private::late_signal` captures the pages the CPU
+  wrote since the flush into a second staging buffer. The encode of the frame waits for that capture (at most 15 ms; after
+  4 frames in a row whose signals did not come in time the capture stops waiting) and adds a second copy-in pass before the
+  commit. Each submit so sees the data as of the time its wait was satisfied, which is the time it ran on the console. In OoT no
+  flush ran such a submit (0 of the frames in the windows, `DIAG private forced submits` is not printed); the gate showed
+  `forced at a flush 0` in the queue diagnostic. The path is tested with a unit test and has not run in a game.
+- `privlatestage` stays as a knob. It stages every page the CPU wrote since the flush a second time and copies it in before the
+  commit. With the CPU ahead of the encoder it hands frame N the data of frame N + 1, so it is a comparison for honest waits
+  (`privhonest`), not a setting for early fences.
+- Counter: `DIAG private between flush and commit` (pages in all, in bytes the frame writes, in bytes it reads by kind, in a page
+  of one of its bindings but outside the bytes, in no binding; frames with forced submits) and the line `exact`: the bound ranges per
+  frame whose bytes in a written page differ at the commit from what the frame sees. Both print only with
+  `NXKIT_DIAG=private`; the first writes are logged with their address per frame (`Pages::take_between`).
+
+**Reads and writes in flight** (as in step 2: the page is tagged with the frame that may write it, and the CPU waits for the
+whole batch of that frame, copies the page from the mirror and goes on; a write in flight does the same and then lets the store
+land). What step 3 adds is the count: `DIAG private CPU waits for a writer` has, for reads and for writes, the waits per
+frame, their milliseconds per frame (all threads together), the longest one and how many began before the commit of the frame
+(the wait then includes the encode); `DIAG private in flight` sorts the first accesses to pages in flight by address: inside
+the bytes of a binding or copy the frame may write, inside a raw-store pool, or outside those bytes in a page they share.
+
+Measured in the OoT intro movie (a scene with a GPU time of 2 to 3 vsyncs at 60 Hz): the CPU first-reads pages in flight about
+5 times per frame, waiting 140 to 330 ms per frame in all threads (single waits up to 320 ms: a read of a page tagged by the newest
+frame waits for that frame, and for the two before it that the GPU still works on). All of these first reads (1650 to 1900 per 300
+frames, 0 inside) are at an address outside the bytes that the frame may write: the page is tagged because a binding starts or ends
+in it (a pool puts data of the CPU next to a buffer of the GPU), and the game reads the neighbouring data. A write in flight
+is rare (0.02 to 0.07 per frame; 1 to 3 ms per frame, single waits up to 320 ms). So the wait is for the whole frame by
+page granularity, not by a data dependency, and splitting the commit after the last pass that writes a page the CPU reads
+(option (b) of the design) would shorten it only as far as these writers are early in the frame; the pages need a byte-exact
+answer (emulate the faulting load for an address outside the written bytes, which needs the decoder of step 4 for loads, or make the
+buffers of the GPU start on page boundaries). That is the next step; the split commit is not built.
+
+**Counters** (`NXKIT_DIAG=private`, every 300 frames): `DIAG private fences`: waits answered at the flush, those that also waited for
+the frame 3 before (count, ms per frame, longest) and the full waits by reason; `DIAG private CPU waits for a writer`;
+`DIAG private in flight`; `DIAG private between flush and commit` (two lines) and `DIAG private between sample` (the first
+writes into bound bytes); `DIAG private forced submits` when a flush ran submits before their CPU signals.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:

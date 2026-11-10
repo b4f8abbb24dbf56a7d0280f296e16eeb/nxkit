@@ -86,12 +86,27 @@ impl Backend for GpuBackend {
         }
         // `NXKIT_PRIVATE`: protects the pages the frame may write and the pages the CPU wrote, and counts. With the mirror
         // it also stages the pages the CPU wrote and gives the view that resolves member ranges to the mirror.
+        // Submits that the flush ran before the CPU signals they wait for read what the CPU writes until the signals: the
+        // capture of this frame stays open for them (`private::late_stage`).
+        let waits = std::mem::take(&mut *locked(&self.forced));
+        let pending = if crate::private::late_enabled() {
+            self.unsatisfied(&waits)
+        } else {
+            Vec::new()
+        };
+        if !pending.is_empty() {
+            locked(&self.forced_pending).extend(pending.iter().map(|w| (fence.0, *w)));
+            crate::private::late_expect(fence.0, pending.len() as u32);
+        }
         let overlay = crate::private::at_flush(
             &detail,
             fence.0,
             &self.guest.address_map(),
+            waits.len() as u32,
+            !pending.is_empty(),
             &|| self.wait_idle(),
         );
+        self.captured.fetch_max(fence.0, Ordering::AcqRel);
         // The snapshot of the flush: a pool the game finalizes after this point still serves the frame.
         let pools = match overlay {
             Some(o) => Arc::new(self.pools.current().with_overlay(o)),
@@ -131,6 +146,33 @@ impl Backend for GpuBackend {
         r
     }
 
+    fn forced_waits(&self, _fence: Fence, waits: &[nxkit_nvn::backend::ForcedWait]) {
+        if crate::private::mirrored() {
+            locked(&self.forced).extend_from_slice(waits);
+        }
+    }
+
+    fn cpu_event_signalled(&self, word: u64) {
+        let mut pending = locked(&self.forced_pending);
+        if pending.is_empty() {
+            return;
+        }
+        let value = self.counter_of(word);
+        let mut closed: Vec<u64> = Vec::new();
+        pending.retain(|(fence, w)| {
+            let done = w.word == word
+                && value.is_some_and(|v| nxkit_nvn::marks::event_wait_done(w.mode, v, w.value));
+            if done {
+                closed.push(*fence);
+            }
+            !done
+        });
+        drop(pending);
+        for fence in closed {
+            crate::private::late_signal(fence);
+        }
+    }
+
     fn settle(&self, table: &mut ResourceTable) {
         if let Some(update) = self.enc.as_ref().and_then(|enc| enc.settle().update) {
             update.apply(table);
@@ -159,6 +201,10 @@ impl Backend for GpuBackend {
         }
         if crate::knob("nowait") {
             return WaitResult::AlreadyDone;
+        }
+        // `NXKIT_PRIVATE=1`: the frame's inputs are captured and its outputs are guarded, so the CPU goes on.
+        if let Some(r) = self.wait_early(fence) {
+            return r;
         }
         // One frame of overlap: a wait for the newest frame waits for the one before it. A frame that copied back to
         // CPU memory waited in full when it was encoded, so `done` covers it already.
@@ -236,6 +282,7 @@ impl Backend for GpuBackend {
     }
 
     fn wait_idle(&self) {
+        crate::private::note_full(crate::private::FullWait::Idle);
         if let Some(enc) = &self.enc {
             enc.wait_idle();
         }
@@ -313,4 +360,126 @@ impl Backend for GpuBackend {
     fn sampler_registered(&self, _id: u32, _sampler: &Tsc) {}
 
     fn sampler_released(&self, _id: u32) {}
+}
+
+impl GpuBackend {
+    /// The wait of `NXKIT_PRIVATE=1` that returns when the flush of `fence` has run: its inputs are in the staging buffer
+    /// and its outputs are guarded, so the GPU's work on the frame has no effect on what the CPU does next. Returns None
+    /// when the wait must be a full one: the knob `privhonest`, a frame that copies back to CPU memory (the copy-back is
+    /// not guarded yet), or a flush that did not finish. The frames in flight are bounded: the wait for `fence` also waits
+    /// until the frame [`BATCHES_IN_FLIGHT`] before it is done.
+    fn wait_early(&self, fence: Fence) -> Option<WaitResult> {
+        use crate::private::{FullWait, note_bounded, note_early, note_full};
+        if !crate::private::early() {
+            return None;
+        }
+        if crate::knob("privhonest") {
+            note_full(FullWait::Knob);
+            return None;
+        }
+        // The copy-back of a frame writes guest memory when the GPU is done, and the CPU reads it: the frames after a
+        // copy-back keep the full wait.
+        let copied = self.copied_fence.load(Ordering::Acquire);
+        if self.copied_recent.load(Ordering::Acquire)
+            || (copied != 0 && fence.0 <= copied + COPYBACK_SPAN)
+        {
+            note_full(FullWait::CopyBack);
+            return None;
+        }
+        if fence.0 > self.captured.load(Ordering::Acquire) {
+            note_full(FullWait::NotCaptured);
+            return None;
+        }
+        let ahead = nxkit_metal::BATCHES_IN_FLIGHT as u64;
+        if fence.0 > ahead {
+            let older = fence.0 - ahead;
+            if older > self.done.load(Ordering::Acquire) {
+                let t0 = std::time::Instant::now();
+                let ok = self.wait_done(older);
+                note_bounded(t0.elapsed());
+                if !ok {
+                    return Some(WaitResult::Failed);
+                }
+            }
+        }
+        self.harvest();
+        note_early();
+        Some(WaitResult::Done)
+    }
+
+    /// Waits until the GPU is done with `older` and every frame before it, and writes the reports of those frames.
+    fn wait_done(&self, older: u64) -> bool {
+        if let Some(enc) = &self.enc {
+            let reached = || self.encoded.load(Ordering::Acquire) >= older;
+            if !enc.wait_for(reached) || enc.has_error() {
+                return false;
+            }
+            let (finished, ok) = self.finish_batches(older);
+            if !ok {
+                return false;
+            }
+            if let Some((_, stats)) = finished.last() {
+                nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            }
+            self.write_counters(older, &finished);
+            self.done.fetch_max(older, Ordering::AcqRel);
+            return true;
+        }
+        let (finished, ok) = self.finish_batches(older);
+        if !ok {
+            return false;
+        }
+        if let Some((_, stats)) = finished.last() {
+            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+        }
+        self.write_counters(older, &finished);
+        self.done.fetch_max(older, Ordering::AcqRel);
+        true
+    }
+
+    /// Writes the reports of the frames that the GPU finished and that no wait has taken yet, without waiting for any.
+    /// The counters of a frame are written when it is seen to be done, which is later than the end of the frame when the
+    /// CPU does not wait for it.
+    fn harvest(&self) {
+        let upto = crate::private::completed().min(self.encoded.load(Ordering::Acquire));
+        if upto <= self.done.load(Ordering::Acquire) {
+            return;
+        }
+        let (finished, ok) = self.finish_batches(upto);
+        if let Some((_, stats)) = finished.last() {
+            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+        }
+        self.write_counters(upto, &finished);
+        if ok {
+            self.done.fetch_max(upto, Ordering::AcqRel);
+        }
+    }
+}
+
+/// The frames after a frame that copied back keep the full wait.
+const COPYBACK_SPAN: u64 = 3;
+
+impl GpuBackend {
+    /// The 32-bit counter of an event at the host address `word`.
+    fn counter_of(&self, word: u64) -> Option<u32> {
+        let mut b = [0u8; 4];
+        nxkit_nvn::mem::GuestMem::read(&GuestView(self.guest.clone()), word, &mut b).ok()?;
+        Some(u32::from_le_bytes(b))
+    }
+
+    /// The waits of `waits` that the counter of their event does not satisfy yet.
+    fn unsatisfied(
+        &self,
+        waits: &[nxkit_nvn::backend::ForcedWait],
+    ) -> Vec<nxkit_nvn::backend::ForcedWait> {
+        waits
+            .iter()
+            .filter(|w| {
+                !self
+                    .counter_of(w.word)
+                    .is_some_and(|v| nxkit_nvn::marks::event_wait_done(w.mode, v, w.value))
+            })
+            .copied()
+            .collect()
+    }
 }
