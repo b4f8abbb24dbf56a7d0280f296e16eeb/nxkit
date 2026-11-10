@@ -26,6 +26,7 @@ mod life;
 #[cfg(test)]
 mod tests;
 
+use crate::overlay::Overlay;
 use life::{Dead, Pinner, Yard};
 
 /// The page size that a no-copy buffer needs for its start and its length.
@@ -92,9 +93,15 @@ pub struct Loc {
     pub offset: u64,
     /// The real address of the first byte.
     pub real: u64,
-    /// The bytes from the first byte to the end of the pool.
+    /// The bytes from the first byte to the end of the pool. For a range in the mirror: to the end of its run.
     pub room: u64,
+    /// The index of the mirror run in [`Overlay::runs`] when the range lies in the mirror ([`NO_RUN`] otherwise); then
+    /// `offset` is the offset in the buffer of that run and `real` the address in it.
+    pub run: u32,
 }
+
+/// [`Loc::run`] of a range in guest memory.
+pub(crate) const NO_RUN: u32 = u32::MAX;
 
 /// A range that cannot be a pool: empty, or it wraps, or it starts below the base of the address space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,6 +240,8 @@ impl<B: Backing> Clone for PoolEntry<B> {
 pub struct PoolSnapshot<B: Backing = GuestMemory> {
     generation: u64,
     entries: Vec<PoolEntry<B>>,
+    /// The mirror of this flush (`NXKIT_PRIVATE=1`): member pages resolve to it.
+    overlay: Option<Arc<Overlay<B>>>,
 }
 
 impl<B: Backing> PoolSnapshot<B> {
@@ -241,6 +250,7 @@ impl<B: Backing> PoolSnapshot<B> {
         Self {
             generation: 0,
             entries: Vec::new(),
+            overlay: None,
         }
     }
 
@@ -265,7 +275,24 @@ impl<B: Backing> PoolSnapshot<B> {
         Self {
             generation: 0,
             entries: vec![entry],
+            overlay: None,
         }
+    }
+
+    /// The same pools with the mirror of one flush: a range whose pages are all members resolves to the mirror. The entries
+    /// are cloned (an `Arc` and four numbers each), so this is for the whole mode, which has one.
+    #[must_use]
+    pub fn with_overlay(&self, overlay: Arc<Overlay<B>>) -> Self {
+        Self {
+            generation: self.generation,
+            entries: self.entries.clone(),
+            overlay: Some(overlay),
+        }
+    }
+
+    /// The mirror of this snapshot, if it has one.
+    pub fn overlay(&self) -> Option<&Arc<Overlay<B>>> {
+        self.overlay.as_ref()
     }
 
     /// The number of changes that led to this snapshot.
@@ -285,8 +312,8 @@ impl<B: Backing> PoolSnapshot<B> {
         (va < self.entries[i].end).then_some(i)
     }
 
-    /// The pool of the first byte. The range is not checked.
-    pub fn resolve_start(&self, va: u64) -> Result<Loc, Miss> {
+    /// The pool of the first byte, in guest memory. The range is not checked.
+    fn resolve_start_guest(&self, va: u64) -> Result<Loc, Miss> {
         let i = self.find(va).ok_or(Miss::NoPool)?;
         let e = &self.entries[i];
         let mem = e.buf.mem.as_ref().ok_or(Miss::NoBuffer)?;
@@ -296,13 +323,62 @@ impl<B: Backing> PoolSnapshot<B> {
             offset,
             real: mem.real_base().wrapping_add(offset),
             room: e.end - va,
+            run: NO_RUN,
         })
     }
 
+    /// The pool of the first byte. The range is not checked. With a mirror, a member page gives the mirror: `real` is the
+    /// address in the buffer of its run and `room` runs to the end of the run.
+    pub fn resolve_start(&self, va: u64) -> Result<Loc, Miss> {
+        let loc = self.resolve_start_guest(va)?;
+        if let Some(o) = &self.overlay
+            && let Some((run, real, room)) = o.locate(va)
+        {
+            return Ok(Loc {
+                pool: loc.pool,
+                offset: va - o.runs()[run].va_start,
+                real,
+                room: room.min(loc.room),
+                run: run as u32,
+            });
+        }
+        Ok(loc)
+    }
+
     /// The pool of `[va, va + len)`. The whole range must lie in one pool. A `len` of 0 resolves when `va` lies in a
-    /// pool. The end of a pool is not in it.
+    /// pool. The end of a pool is not in it. With a mirror, a range whose pages are all members gives the mirror; a range
+    /// that starts on a member page and reaches past the members is counted and gives guest memory.
     pub fn resolve(&self, va: u64, len: u64) -> Result<Loc, Miss> {
         let loc = self.resolve_start(va)?;
+        if loc.run != NO_RUN {
+            let whole = self
+                .overlay
+                .as_ref()
+                .is_some_and(|o| len <= loc.room && o.all_members(va, len));
+            if whole {
+                return Ok(loc);
+            }
+            crate::overlay::note_partial();
+            return self.resolve_guest(va, len);
+        }
+        if len > loc.room {
+            let pool_end = self.entries[loc.pool as usize].end;
+            return Err(Miss::CrossesEdge { pool_end });
+        }
+        if let Some(o) = &self.overlay
+            && len > 1
+            && o.any_member(va, len)
+        {
+            // Starts outside the members and reaches into them: guest memory is stale there.
+            crate::overlay::note_partial();
+        }
+        Ok(loc)
+    }
+
+    /// Like [`resolve`](Self::resolve) but always in guest memory, for the table of raw global memory, which splits the
+    /// pools at the member runs itself.
+    pub fn resolve_guest(&self, va: u64, len: u64) -> Result<Loc, Miss> {
+        let loc = self.resolve_start_guest(va)?;
         if len > loc.room {
             let pool_end = self.entries[loc.pool as usize].end;
             return Err(Miss::CrossesEdge { pool_end });
@@ -493,6 +569,7 @@ impl<B: Backing> PoolSet<B> {
         st.current = Arc::new(PoolSnapshot {
             generation: st.generation,
             entries,
+            overlay: None,
         });
     }
 

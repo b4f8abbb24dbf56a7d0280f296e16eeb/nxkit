@@ -16,6 +16,10 @@ use std::sync::{Mutex, OnceLock};
 /// the frame before it, and every bound uniform buffer reads a copy that the walk takes, so that the CPU's writes for
 /// the next frame do not reach the frame on the GPU. See `docs/plans/fence-overlap.md`.
 pub(crate) fn on() -> bool {
+    // The mirror (`NXKIT_PRIVATE=1`) replaces the learned copies: the overlap and the renamer stay off.
+    if crate::private::mirrored() {
+        return false;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
     SETTING.load(std::sync::atomic::Ordering::Relaxed)
         || *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))

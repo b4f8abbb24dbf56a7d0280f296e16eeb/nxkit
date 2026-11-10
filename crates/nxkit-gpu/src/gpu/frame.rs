@@ -332,6 +332,25 @@ impl Gpu {
             .split_first_mut()
             .ok_or(MetalError::Invalid("the batch has no buffers"))?;
         first.retain(keep.clone());
+        // `NXKIT_PRIVATE=1`: the pages that the CPU wrote since the frame before go into the mirror before anything of this
+        // frame reads or writes it (the texture uploads below may read member pages).
+        if let Some(o) = pools.overlay() {
+            let (jobs, lost) = crate::private::copy_in_jobs(o);
+            if !jobs.is_empty() || lost > 0 {
+                let done = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
+                    .ok()
+                    .and_then(|t| {
+                        crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs).ok()
+                    });
+                match done {
+                    Some(n) => crate::private::note_copy_in(n, lost),
+                    None => {
+                        stats.skip(Skip::Encode);
+                        crate::private::note_copy_in(0, lost + jobs.len() as u32);
+                    }
+                }
+            }
+        }
         let mesh = crate::meshvis::plan(
             diag_frame,
             frame,

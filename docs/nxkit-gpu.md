@@ -301,7 +301,122 @@ counters for writes in flight, reads in flight and writes to clean pages.
   not reflected when its first frame was flushed makes its read-only bindings tracked until the end of the run, so the
   tracked MiB is an upper bound.
 - A frame whose batch is not reported complete (an encode that failed) is released when 24 newer frames wait.
-- The frame number is kept in 29 bits.
+- The frame number is kept in 28 bits (29 in step 1 before the mirror took a bit for "fresh").
+
+## Private GPU memory, step 2: the mirror (`NXKIT_PRIVATE=1`)
+
+Step 2 gives the GPU its own copy of the guest pages that it works on, so that the CPU's writes for the next frame cannot
+race with the frame on the GPU. It changes no fence: the waits are the honest ones, the overlap and the renamer are off
+(`overlap::on()` is false, the `overlap` knob and `NXKIT_OVERLAP` are ignored), and the picture and the frame rate must be
+those of a run without the variable. What it proves is the mirror, the redirection of every GPU access, the copy of the
+CPU's writes into the mirror in queue order, and the copy of the GPU's results back on a CPU access. Step 3 can then answer
+a fence at the flush. Unset, nothing here runs. A value other than `track` and `1` leaves it off.
+
+**The mirror** (`nxkit-metal/src/mirror.rs`). A host reservation as large as guest memory (an anonymous mapping without
+access, no physical memory); byte `o` of guest memory has its mirror byte at `reservation + o`. The reservation is cut into
+segments of 2 MiB. A segment becomes readable and writable when it holds a member page and stays so. Each maximal run of
+adjacent usable segments has one no-copy `MTLBuffer` (`GuestMemory::from_raw_uncommitted`), so the GPU address of a mirror
+byte is the real base of its run plus the offset in the run. When a run grows or two runs join, a new buffer is made over the
+larger range of the same host memory (the bytes do not move). The old buffer joins the retired list and stays in the
+residency set while a frame in flight, a cached ICB or the overlay of a frame holds it; `Mirror::ensure` drops it on the CPU
+thread, never in a completion handler, and commits the residency set when it drops one. The encoder commits the residency set
+before it submits a frame that uses a new buffer, as for the pools. The mirror of OoT should be 100 to 130 MiB of runs.
+
+**Members.** A page is a member from the flush that first needs it. The pages that a frame may write (step 1: storage
+bindings a shader may write or that are not yet known read only, buffer copy and fill destinations, texture to buffer
+destinations, pools that shaders wrote through raw pointers) are members. So is every page of a binding that touches a member
+(`private::closure`, two rounds): uniform and storage ranges, vertex streams (the extent an arrays draw reaches, 1 MiB for an
+indexed draw), indices, indirect arguments, the count word of a multi-draw, the source of a buffer copy (1 MiB for the buffer of
+a buffer to texture copy), the indirect group counts of a dispatch. A mirror binding must be contiguous and current, so a range
+that touches a member becomes whole; the closure adds at most 256 MiB per flush. A range above 256 MiB and the part of a frame
+above 1 GiB are not made members (counted). A page stays a member until the game releases or re-protects its memory
+(`before_host_access` frees it, after copying the page from the mirror).
+
+**At the flush** (`private::at_flush`, then `Pages::flush_mirrored`, on the CPU thread):
+
+1. The segments that hold the members are made usable.
+2. A page that becomes a member goes read only and its guest bytes are copied into the mirror (the protection first, so a
+   store after it faults and is staged below or at the next flush). A page that raw stores wrote and that a frame in flight
+   may still write in guest memory makes the flush wait for the frames in flight once (`enter waits`).
+3. The pages that the CPU wrote since the last flush (write faults on read only pages) go back to read only, then their bytes
+   are copied into a staging buffer (`Sink`, a pool of shared buffers that a buffer returns to when its frame is complete).
+4. The pages of the written ranges are tagged with the frame and lose all access. A page that was staged is tagged fresh
+   (guest memory holds the bytes the frame starts from). A page that the CPU wrote between 3 and 4 is staged again.
+5. The pool snapshot of the frame gets an overlay (`overlay.rs`): the member bitmap, the mirror runs, and the staged pages.
+
+**On the GPU.** The first command buffer of the frame starts with a compute pass (`nxkit_private_in`, `private::encode_copy_in`)
+that copies each staged page from the staging buffer into the mirror, with a barrier from all earlier work (the frame before still reads and writes the
+mirror) and one for all later work. It comes before the texture uploads, which may read member pages. The bytes for frame N + 1
+land after frame N.
+
+**Every site that turns a guest address into a GPU address** asks the overlay first, because `PoolSnapshot::resolve_start` and
+`resolve` do. A range whose pages are all members resolves to the mirror: the `Loc` has the run, the offset in the run's buffer,
+the real address and the room to the end of the run. A range that starts on a member page and reaches past the members, or one
+that starts outside and reaches into them, is counted (`partial resolves`) and gives guest memory; the closure should make it
+impossible. The sites:
+
+- `bindless/args.rs` `locate`, used by `ubo_words` and `sbuf_word`: uniform buffers and storage buffers (the walk's snapshot of
+  a range is used where there is one; the walker takes none for a range that a frame wrote, `walk/ext/uniform.rs`).
+- `geometry.rs` `stream_loc`, `index_loc`, `word_loc`, `indirect_args`, `index_room`, and through them `indirect.rs`,
+  `passes/indirect_dispatch.rs`, the multi-draw count and the indirect draws.
+- `passes/buffers.rs` `real` (buffer copy and fill source and destination) and `passes/copy.rs` through `upload::locate` (the
+  buffer side of texture and buffer copies).
+- `upload/mod.rs` `locate` for every texture upload source and the scaled uploads: the buffer of the mirror run and the offset.
+- `draws.rs` `pull::layout` (vertex pulling: the stream bases).
+- `icbs.rs`: `icb_buffer` gets the buffer of a run (`PoolRefs::take` keeps it alive with the ICB), and the signature of an ICB hashes the
+  mirror addresses of its uniform, storage, vertex and index bindings, so an ICB made over a run's buffer is built again when the run
+  grew.
+- `gmem.rs` `resolve_all`: the table of raw global memory splits every pool at its member pages: a member piece has the delta of its
+  mirror run, the rest the delta of guest memory. The table is built again when the members or the runs change (the third part
+  of its stamp is the overlay generation). The c0 tables of compute and mesh stages hold guest addresses that shaders look up
+  in this table, so they reach the mirror too.
+- CPU reads that feed the frame (`Shared::read_guest`): the 8-bit indices that are widened, the pulled indices of `NXKIT_DIAG=pull`,
+  the `ubo` and `ubodump` diagnostics read member pages from the staged bytes or the mirror, and the rest from guest memory.
+
+**What a CPU access does** (`nxkit-metal/src/pages.rs`, `serve_mirrored`). A page tagged with a frame holds stale guest
+bytes. The signal handler (on atomics, `mprotect`, `memcpy` and the wake word) serves a fault on it:
+
+- the frame is complete: the thread claims the page (a `sync` state), opens it, copies the page from the mirror (about 1 µs),
+  and the page is clean (read) or dirty (write); the instruction runs again. Other threads that fault meanwhile sleep on the wake
+  word and run their access again;
+- the frame is in flight (the batch is not reported complete): a game thread sleeps on the wake word until the completion
+  callback of the batch reports it (`SubmittedBatch::on_complete`, before the waiters of the batch wake), then copies. This is
+  option (a) of the plan: the wait is for the whole batch, whichever pass writes the page. A write in flight is served the same
+  way (wait, copy the page from the mirror, let the write land on the GPU's bytes), so the write is not lost and the GPU's
+  bytes are not overwritten with stale ones. A wait that lasts 4 s copies anyway and is counted;
+- a thread that the host marked internal (the encoder thread, the thread that writes counter reports, the game thread inside
+  `flush_sync`) never waits. It gets the page open for reading: copied from the mirror unless the page is fresh (then guest memory
+  is right). The completion of the frame takes the access away again. The encoder reads member pages through the overlay
+  instead (`Shared::read_guest`, `Overlay::read`: staged bytes, else the mirror), so it does not fault; the internal open is the
+  safety net, and counted (`internal opens`).
+
+A page that the CPU writes while it is clean or synced goes dirty and is staged at the next flush. System calls that read or
+write guest pages (`with_slice`, `with_slice_mut`, permission changes) go through `before_host_access`, which brings the pages
+up to date first (for a system call in the host, which may wait for a writer).
+
+**The knob `privpoison`** overwrites the guest bytes of the pages a frame writes with a quiet NaN (`0x7fc00000`) when they are
+handed to the GPU. The CPU never sees it, because its access copies the page from the mirror first; a GPU path that still reads
+guest memory shows it as NaN in the picture where something was missed. The overwrite opens the page for a moment: a CPU store in
+that instant is lost, so use it for finding sites only.
+
+**Counters** (`NXKIT_DIAG=private`, every 300 frames, `DIAG private mirror`): the mirror's MiB and runs and the buffers that wait
+to be dropped; the pages staged per frame (and the ones the CPU wrote again after they were staged), the pages the copy-in pass
+moved and lost, the pages copied from the mirror into guest memory (and how many by a fault of guest code), the pages the closure
+added, the waits for a writer (count, milliseconds per frame, timeouts), the accesses of internal threads, the waits at the
+flush, the partial resolves and whether the poison is on. The fault lines of step 1 follow, with the faults that copied a page
+counted as other.
+
+**What step 2 does not cover.**
+
+- The texture copy-back (`copyback.rs`) and the native replacements (`native`, the ANE offload) still use guest memory; a member
+  page that one of them reads or writes is stale or lost there. The counter reports and the guest range of a copied-back texture
+  keep going through the host's writes after the batch, which are plain CPU writes (dirty pages) for a member page.
+- Textures are Metal textures; only their upload sources redirect.
+- A CPU access that reaches the page while another thread copies it can read half a page. The copy runs for about a
+  microsecond with the page open; threads that fault in that time sleep and retry, but a thread whose access began before the page
+  opened is not held back.
+- A page that was staged for a frame that is never encoded (an encode that failed) is not copied into the mirror.
+- The frame number and the table keep the limits of step 1 (28 bits, 24 frames of runs).
 
 ## Memory
 

@@ -217,15 +217,14 @@ fn widen_u8_indices(
     count: u32,
     sink: &mut dyn Sink,
 ) -> Result<u64, Skip> {
-    let off = sh
-        .guest_offset(addr, u64::from(count))
+    sh.guest_offset(addr, u64::from(count))
         .ok_or_else(|| crate::buf_skip(format_args!("8-bit index addr {addr:#x} count {count}")))?;
     let mut bytes = vec![0u8; count as usize];
-    sh.guest.read(off, &mut bytes).map_err(|_| {
-        crate::buf_skip(format_args!(
+    if !sh.read_guest(addr, &mut bytes) {
+        return Err(crate::buf_skip(format_args!(
             "8-bit index addr {addr:#x} count {count}: unreadable"
-        ))
-    })?;
+        )));
+    }
     let wide: Vec<u8> = bytes
         .iter()
         .flat_map(|&b| u16::from(b).to_le_bytes())

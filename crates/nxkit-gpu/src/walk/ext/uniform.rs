@@ -119,6 +119,15 @@ impl Walker {
             return snapshot.clone();
         }
         let end = addr + u64::from(size);
+        // With the mirror, a range that a frame wrote on the GPU holds stale bytes in guest memory: the draw binds the
+        // mirror, which has the current ones, so there is nothing to copy.
+        if crate::private::mirrored()
+            && let Ok(host) = self.map.host_address(addr, u64::from(size))
+            && crate::private::gpu_owned(host, u64::from(size))
+        {
+            self.snaps.borrow_mut().insert(key, None);
+            return None;
+        }
         // A partial update does not reduce the bound range. Its unchanged tail can contain constants that the
         // shader still reads. Copying only the updated prefix makes those reads escape the scratch allocation.
         // With the overlap on, every bound block gets its copy: the CPU may write it for the next frame while the GPU

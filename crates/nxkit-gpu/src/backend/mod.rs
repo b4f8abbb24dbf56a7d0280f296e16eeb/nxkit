@@ -136,7 +136,8 @@ impl GpuBackend {
         if settings.overlap {
             crate::overlap::set_on();
         }
-        crate::private::attach(guest.host_base(), guest.len());
+        // `NXKIT_PRIVATE`: the page tracker and, for `1`, the mirror. With the mirror the overlap and the renamer are off.
+        crate::private::attach(ctx, guest.host_base(), guest.len(), space.address_map().gpu_base());
         let threaded =
             settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {
@@ -347,6 +348,9 @@ impl GpuBackend {
         detail: &FrameDetail,
         cx: FlushCx<'_>,
     ) -> BackendResult<()> {
+        // The encode reads the frame's pages through the mirror, not through guest memory: this thread must not wait for the
+        // frame it is about to submit.
+        let _internal = crate::private::on().then(nxkit_metal::mark_internal_thread);
         let view = Live {
             table: &*cx.table,
             descriptors: cx.descriptors,

@@ -104,6 +104,20 @@ pub(crate) struct Shared<'a> {
 }
 
 impl Shared<'_> {
+    /// Reads guest memory as the frame sees it: a member page comes from the bytes that the flush staged or from the
+    /// mirror, the rest from guest memory. A page that the GPU wrote is stale in guest memory, so a CPU read that feeds the
+    /// frame (the indices that are widened, the data that is scanned) goes through here. False when a part is unreadable.
+    pub(crate) fn read_guest(&self, addr: u64, out: &mut [u8]) -> bool {
+        let guest = |a: u64, part: &mut [u8]| {
+            self.guest_offset(a, part.len() as u64)
+                .is_some_and(|off| self.guest.read(off, part).is_ok())
+        };
+        match self.pools.overlay() {
+            Some(o) => o.read_with(addr, out, &mut |a, part| guest(a, part)),
+            None => guest(addr, out),
+        }
+    }
+
     /// The offset of a guest GPU address in guest memory, or `None` when it lies outside.
     pub(crate) fn guest_offset(&self, addr: u64, len: u64) -> Option<u64> {
         let map = self.guest.address_map();

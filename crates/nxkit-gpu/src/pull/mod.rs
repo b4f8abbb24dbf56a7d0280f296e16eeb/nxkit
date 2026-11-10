@@ -134,9 +134,9 @@ pub(crate) fn diag_draw(sh: &crate::draws::Shared<'_>, d: &DrawDetail, inputs: &
     let block = &layout(d, Some);
     let indices = |index_type: u32, address: u64, count: u32| {
         let size = 1u64 << index_type.min(2);
-        let off = sh.guest_offset(address, u64::from(count) * size)?;
+        sh.guest_offset(address, u64::from(count) * size)?;
         let mut bytes = vec![0u8; (u64::from(count) * size) as usize];
-        sh.guest.read(off, &mut bytes).ok()?;
+        sh.read_guest(address, &mut bytes).then_some(())?;
         index_range(index_type, &bytes)
     };
     let Some(ranges) = model::ranges(d, indices) else {

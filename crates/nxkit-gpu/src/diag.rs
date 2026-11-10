@@ -39,6 +39,10 @@ pub(crate) fn diag_dir() -> &'static PathBuf {
 /// The knobs, by name. Each one changes what the encoder does, for experiments while debugging a game. They are not
 /// meant to render correctly.
 const KNOBS: &[&str] = &[
+    // With `NXKIT_PRIVATE=1`, the guest bytes of the pages that a frame writes are overwritten with a quiet NaN pattern
+    // when the pages are handed to the GPU, so a GPU path that still reads guest memory instead of the mirror shows. The
+    // CPU's own reads go through the copy from the mirror and are not affected.
+    "privpoison",
     // The depth and stencil tests are off.
     "nodepth",
     // Culling is off.

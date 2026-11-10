@@ -35,7 +35,7 @@ pub(super) fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
     let floats = |addr: u64, count: usize| -> Vec<f32> {
         let mut bytes = vec![0u8; count * 4];
         match sh.guest_offset(addr, bytes.len() as u64) {
-            Some(off) if sh.guest.read(off, &mut bytes).is_ok() => bytes
+            Some(_) if sh.read_guest(addr, &mut bytes) => bytes
                 .as_chunks::<4>()
                 .0
                 .iter()
@@ -142,9 +142,9 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
         let count = (s.size as usize / 4).min(4096);
         let live: Option<Vec<u32>> = sh
             .guest_offset(s.address, (count * 4) as u64)
-            .and_then(|off| {
+            .and_then(|_| {
                 let mut b = vec![0u8; count * 4];
-                sh.guest.read(off, &mut b).ok()?;
+                sh.read_guest(s.address, &mut b).then_some(())?;
                 Some(
                     b.as_chunks::<4>()
                         .0

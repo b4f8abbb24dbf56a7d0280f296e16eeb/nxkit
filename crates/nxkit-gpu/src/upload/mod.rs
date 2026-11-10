@@ -92,6 +92,14 @@ pub(crate) fn locate<B: Backing>(
     len: u64,
 ) -> Result<(&B, u64), Skip> {
     let loc = pools.resolve(address, len).map_err(|_| Skip::Buffer)?;
+    if loc.run != crate::pools::NO_RUN {
+        // A member range lies in the mirror: the buffer of its run, and the offset in it.
+        let run = pools
+            .overlay()
+            .and_then(|o| o.runs().get(loc.run as usize))
+            .ok_or(Skip::Buffer)?;
+        return Ok((&run.mem, loc.offset));
+    }
     let mem = pools.entries()[loc.pool as usize]
         .buf
         .mem()

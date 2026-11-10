@@ -52,10 +52,18 @@ const FREE: u32 = 0;
 const CLEAN: u32 = 1;
 const DIRTY: u32 = 2;
 const GPU: u32 = 3;
+/// A thread is copying the page from the mirror into guest memory (mirrored mode).
+const SYNC: u32 = 4;
+/// Like `GPU`, but a host thread opened the page for reading while its frame was in flight (mirrored mode); the
+/// completion of the frame protects it again.
+const OPEN: u32 = 5;
 const STATE_MASK: u32 = 7;
-/// The frame of a `GPU` word is in the bits above the state: 29 bits.
-const FRAME_SHIFT: u32 = 3;
-const FRAME_MASK: u64 = (1 << 29) - 1;
+/// Set on a `GPU` word whose guest bytes are current: the CPU wrote the page and the flush staged it, so guest memory
+/// holds what the frame starts from and the mirror gets it at the start of the frame (mirrored mode).
+const FRESH: u32 = 1 << 3;
+/// The frame of a `GPU` word is in the bits above the state and the fresh bit: 28 bits.
+const FRAME_SHIFT: u32 = 4;
+const FRAME_MASK: u64 = (1 << 28) - 1;
 
 /// The pages the log of dirty pages holds. A frame that dirties more makes the flush scan the table.
 const LOG_CAP: usize = 1 << 16;
@@ -68,6 +76,11 @@ const PC_PROBE: usize = 16;
 /// The frames whose runs wait for their completion. A frame that never completes (an encode that failed) is released
 /// when this many newer ones are waiting.
 const MAX_FRAMES: usize = 24;
+/// How long a thread waits for the writer of a page before it copies the page anyway.
+const TIMEOUT_NS: u64 = 4_000_000_000;
+/// One sleep on the wake word.
+const SLICE_NS: u64 = 20_000_000;
+const OS_CLOCK_MACH_ABSOLUTE_TIME: u32 = 32;
 
 /// What kind of fault, for the counters and the program counter tables.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +93,9 @@ pub enum FaultKind {
     WriteInFlight = 2,
     /// Anything else: a race with a flush or a completion, an access to a page whose frame is complete.
     Other = 3,
+    /// An access to a page whose frame is complete: the page was copied from the mirror into guest memory (mirrored
+    /// mode).
+    Sync = 4,
 }
 
 /// Who faulted: guest code, host code on a game thread, or a thread the host marked internal.
@@ -122,6 +138,15 @@ unsafe extern "C" {
     fn sigaction(sig: c_int, act: *const SigAction, old: *mut SigAction) -> c_int;
     fn pthread_self() -> usize;
     fn clock_gettime_nsec_np(clock: u32) -> u64;
+    fn os_sync_wait_on_address_with_timeout(
+        addr: *mut c_void,
+        value: u64,
+        size: usize,
+        flags: u32,
+        clockid: u32,
+        timeout_ns: u64,
+    ) -> c_int;
+    fn os_sync_wake_by_address_all(addr: *mut c_void, size: usize, flags: u32) -> c_int;
     fn dladdr(addr: *const c_void, info: *mut DlInfo) -> c_int;
 }
 
@@ -162,7 +187,7 @@ struct Shared {
     internal: [AtomicUsize; INTERNAL],
     old: [OldAction; 2],
     /// Faults by `[kind][origin]`.
-    faults: [[AtomicU64; 3]; 4],
+    faults: [[AtomicU64; 3]; 5],
     /// Time in the handler, for tracked pages.
     handler_ns: AtomicU64,
     /// Accesses by system calls (the hook) to pages of a frame in flight: read, write.
@@ -177,6 +202,23 @@ struct Shared {
     log_overflows: AtomicU64,
     /// The last signal of a tracked fault.
     last_signal: AtomicU64,
+    /// The host address of the mirror of guest memory (byte `o` of guest memory is at `mirror + o`), 0 when there is no
+    /// mirror. With a mirror, a page tagged with a frame holds stale guest bytes and the handler copies it.
+    mirror: AtomicU64,
+    /// Bumped, and woken on, at each completion and each finished copy.
+    wake: AtomicU32,
+    /// Pages copied from the mirror into guest memory.
+    synced: AtomicU64,
+    /// Waits for a writer that was still running, and their time.
+    writer_waits: AtomicU64,
+    writer_wait_ns: AtomicU64,
+    /// Accesses of internal threads to pages in flight, served without waiting.
+    internal_opens: AtomicU64,
+    /// Waits that ended at the timeout.
+    wait_timeouts: AtomicU64,
+    /// The member bitmap (one bit per page, set while the page is not free) and its generation.
+    member_bits: AtomicPtr<AtomicU64>,
+    member_gen: AtomicU64,
     /// Program counters by [`FaultKind`] 0 to 2: the counter and how often it faulted.
     pcs: [[(AtomicU64, AtomicU64); PC_SLOTS]; 3],
     pc_overflow: AtomicU64,
@@ -215,7 +257,7 @@ static SHARED: Shared = Shared {
     log_n: AtomicUsize::new(0),
     internal: [const { AtomicUsize::new(0) }; INTERNAL],
     old: [OldAction::new(), OldAction::new()],
-    faults: [ZERO3; 4],
+    faults: [ZERO3; 5],
     handler_ns: AtomicU64::new(0),
     host_access: [const { AtomicU64::new(0) }; 2],
     hook_dirtied: AtomicU64::new(0),
@@ -224,6 +266,15 @@ static SHARED: Shared = Shared {
     mprotect_failed: AtomicU64::new(0),
     log_overflows: AtomicU64::new(0),
     last_signal: AtomicU64::new(0),
+    mirror: AtomicU64::new(0),
+    wake: AtomicU32::new(0),
+    synced: AtomicU64::new(0),
+    writer_waits: AtomicU64::new(0),
+    writer_wait_ns: AtomicU64::new(0),
+    internal_opens: AtomicU64::new(0),
+    wait_timeouts: AtomicU64::new(0),
+    member_bits: AtomicPtr::new(std::ptr::null_mut()),
+    member_gen: AtomicU64::new(0),
     pcs: [PC_TABLE; 3],
     pc_overflow: AtomicU64::new(0),
 };
@@ -232,10 +283,13 @@ static SHARED: Shared = Shared {
 struct Ctrl {
     /// The runs of pages (first, end) that each frame in flight protected, oldest first.
     frames: VecDeque<(u64, Vec<(u32, u32)>)>,
+    /// The member bitmap at a generation, for [`Pages::member_snapshot`].
+    snap: Option<(u64, std::sync::Arc<Vec<u64>>)>,
 }
 
 static CTRL: Mutex<Ctrl> = Mutex::new(Ctrl {
     frames: VecDeque::new(),
+    snap: None,
 });
 static INSTALL: Once = Once::new();
 
@@ -399,9 +453,184 @@ fn fault_regs(uctx: *mut c_void) -> (u64, bool) {
     }
 }
 
-/// True when `frame` (29 bits) is a frame whose completion has not been reported.
+/// True when `frame` (28 bits) is a frame whose completion has not been reported.
 fn in_flight(frame: u32) -> bool {
     u64::from(frame) > SHARED.completed.load(Ordering::Acquire) & FRAME_MASK
+}
+
+/// Sets or clears the member bit of `page`. Not for the signal handler.
+fn member_bit(page: usize, set: bool) {
+    let p = SHARED.member_bits.load(Ordering::Acquire);
+    if p.is_null() || page >= SHARED.npages.load(Ordering::Acquire) {
+        return;
+    }
+    // SAFETY: the bitmap has `npages.div_ceil(64)` words that are never freed while the process runs (a new `attach`
+    // leaks the old one), and `page` is inside the table.
+    let w = unsafe { &*p.add(page / 64) };
+    let bit = 1u64 << (page % 64);
+    if set {
+        w.fetch_or(bit, Ordering::AcqRel);
+    } else {
+        w.fetch_and(!bit, Ordering::AcqRel);
+    }
+    SHARED.member_gen.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Sleeps until the wake word changes from `seen` or the slice ends.
+fn sleep_on_wake(seen: u32) {
+    // SAFETY: the address of a static atomic of 4 bytes; the kernel reads 4 bytes. Safe in a signal handler.
+    unsafe {
+        os_sync_wait_on_address_with_timeout(
+            (&raw const SHARED.wake).cast_mut().cast(),
+            u64::from(seen),
+            4,
+            0,
+            OS_CLOCK_MACH_ABSOLUTE_TIME,
+            SLICE_NS,
+        );
+    }
+}
+
+fn wake_all() {
+    SHARED.wake.fetch_add(1, Ordering::AcqRel);
+    // SAFETY: the address of a static atomic of 4 bytes.
+    unsafe {
+        os_sync_wake_by_address_all((&raw const SHARED.wake).cast_mut().cast(), 4, 0);
+    }
+}
+
+/// Waits until the completion of `frame` is reported. Returns true when the wait ended at the timeout.
+fn wait_complete(frame: u32) -> bool {
+    let t0 = now_ns();
+    let mut waited = false;
+    let mut timed_out = false;
+    loop {
+        let seen = SHARED.wake.load(Ordering::Acquire);
+        if !in_flight(frame) {
+            break;
+        }
+        waited = true;
+        if now_ns().saturating_sub(t0) > TIMEOUT_NS {
+            timed_out = true;
+            break;
+        }
+        sleep_on_wake(seen);
+    }
+    if waited {
+        SHARED.writer_waits.fetch_add(1, Ordering::Relaxed);
+        SHARED
+            .writer_wait_ns
+            .fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
+    }
+    if timed_out {
+        SHARED.wait_timeouts.fetch_add(1, Ordering::Relaxed);
+    }
+    timed_out
+}
+
+/// Copies the mirror page `pg` into guest memory. The guest page must be writable.
+fn copy_from_mirror(pg: usize, mirror: u64) {
+    let p = page();
+    let base = SHARED.base.load(Ordering::Acquire);
+    // SAFETY: the guest page is whole host page inside the range that `attach` named and the caller made it writable;
+    // the mirror page at the same offset lies in the reservation of the mirror, which is readable while the page is a
+    // member. The two regions are different mappings.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            (mirror + pg as u64 * p) as *const u8,
+            (base + pg as u64 * p) as *mut u8,
+            p as usize,
+        );
+    }
+    SHARED.synced.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Serves a fault on the tracked page `pg` when there is a mirror. A page tagged with a frame holds stale bytes: the
+/// thread waits for the frame to complete (an internal thread does not wait), copies the page from the mirror and opens
+/// it. Atomics, `mprotect`, `memcpy` and the wake word; no lock, no allocation.
+fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror: u64) -> FaultKind {
+    let p = pg as u32;
+    let mut kind: Option<FaultKind> = None;
+    let mut gave_up = false;
+    loop {
+        let cur = w.load(Ordering::Acquire);
+        let state = cur & STATE_MASK;
+        let frame = cur >> FRAME_SHIFT;
+        match state {
+            CLEAN => {
+                if write {
+                    if w.compare_exchange(cur, DIRTY, Ordering::AcqRel, Ordering::Acquire)
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    log_dirty(pg);
+                    protect_pages(p, p + 1, PROT_RW, false);
+                    return kind.unwrap_or(FaultKind::CleanWrite);
+                }
+                protect_pages(p, p + 1, PROT_READ, false);
+                return kind.unwrap_or(FaultKind::Other);
+            }
+            GPU | OPEN => {
+                let flying = in_flight(frame) && !gave_up;
+                let k = *kind.get_or_insert(if flying {
+                    if write {
+                        FaultKind::WriteInFlight
+                    } else {
+                        FaultKind::ReadInFlight
+                    }
+                } else {
+                    FaultKind::Sync
+                });
+                if state == OPEN && !write {
+                    // Open for reading already: a race with the thread that opened it.
+                    protect_pages(p, p + 1, PROT_READ, false);
+                    return k;
+                }
+                if flying && !internal {
+                    gave_up = wait_complete(frame);
+                    continue;
+                }
+                // The claim: one thread copies, the others sleep on the wake word and run their access again.
+                if w.compare_exchange(cur, pack(SYNC, u64::from(frame)), Ordering::AcqRel, Ordering::Acquire)
+                    .is_err()
+                {
+                    continue;
+                }
+                let fresh = cur & FRESH != 0;
+                protect_pages(p, p + 1, PROT_RW, false);
+                if !(flying && fresh) {
+                    copy_from_mirror(pg, mirror);
+                }
+                if flying {
+                    SHARED.internal_opens.fetch_add(1, Ordering::Relaxed);
+                }
+                if write {
+                    w.store(DIRTY, Ordering::Release);
+                    log_dirty(pg);
+                } else if flying {
+                    let open = pack(OPEN, u64::from(frame)) | (cur & FRESH);
+                    w.store(open, Ordering::Release);
+                    protect_pages(p, p + 1, PROT_READ, false);
+                } else {
+                    w.store(CLEAN, Ordering::Release);
+                    protect_pages(p, p + 1, PROT_READ, false);
+                }
+                wake_all();
+                return k;
+            }
+            SYNC => {
+                // Another thread copies the page. Sleep on the wake word and run the access again.
+                sleep_on_wake(SHARED.wake.load(Ordering::Acquire));
+                return kind.unwrap_or(FaultKind::Other);
+            }
+            _ => {
+                // Dirty (a race with a flush), or free (a race with a release): open it.
+                protect_pages(p, p + 1, PROT_RW, false);
+                return kind.unwrap_or(FaultKind::Other);
+            }
+        }
+    }
 }
 
 extern "C" fn on_signal(sig: c_int, info: *mut SigInfo, uctx: *mut c_void) {
@@ -444,6 +673,15 @@ fn origin_of(pc: u64, internal: bool) -> FaultOrigin {
 fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool) {
     let internal = is_internal();
     let origin = origin_of(pc, internal);
+    let mirror = SHARED.mirror.load(Ordering::Acquire);
+    if mirror != 0 {
+        let kind = serve_mirrored(pg, w, write, internal, mirror);
+        SHARED.faults[kind as usize][origin as usize].fetch_add(1, Ordering::Relaxed);
+        if !internal {
+            count_pc(kind, pc);
+        }
+        return;
+    }
     let p = pg as u32;
     let kind = loop {
         let cur = w.load(Ordering::Acquire);
@@ -583,7 +821,7 @@ pub struct PageStats {
     /// The pages that are tracked now.
     pub members: u64,
     /// Faults by `[kind][origin]`, with the kinds of [`FaultKind`] and the origins of [`FaultOrigin`].
-    pub faults: [[u64; 3]; 4],
+    pub faults: [[u64; 3]; 5],
     /// Time that the handler ran for tracked pages.
     pub handler_ns: u64,
     /// Accesses of system calls to pages of a frame in flight (the hook): read, write.
@@ -602,6 +840,16 @@ pub struct PageStats {
     pub pc_overflow: u64,
     /// The signal of the last tracked fault: 10 `SIGBUS`, 11 `SIGSEGV`, 0 for none.
     pub last_signal: u64,
+    /// Pages copied from the mirror into guest memory (mirrored mode).
+    pub synced: u64,
+    /// Waits for a writer that still ran, and the time they took.
+    pub writer_waits: u64,
+    /// Time of those waits.
+    pub writer_wait_ns: u64,
+    /// Accesses of internal threads to pages in flight, served without a wait.
+    pub internal_opens: u64,
+    /// Waits that ended at the timeout, with the page copied anyway.
+    pub wait_timeouts: u64,
 }
 
 /// What one flush did.
@@ -621,6 +869,10 @@ pub struct FlushStats {
     pub ns: u64,
     /// The log overflowed and the flush scanned the table.
     pub scanned: bool,
+    /// Pages handed to the stager (mirrored mode).
+    pub staged: u32,
+    /// Pages that the CPU wrote between the staging and the tag (mirrored mode); they are staged again.
+    pub raced: u32,
 }
 
 /// The page tracker of the process. There is one, because the signal handler needs its table.
@@ -691,7 +943,55 @@ fn release_runs(frame: u64, runs: &[(u32, u32)]) {
     }
 }
 
+/// The pages of `runs` that a host thread opened for reading in frame `frame` lose their access again.
+fn close_opened(frame: u64, runs: &[(u32, u32)]) {
+    for &(first, end) in runs {
+        let mut start: Option<u32> = None;
+        for p in first..end {
+            let done = word(p as usize).is_some_and(|w| loop {
+                let cur = w.load(Ordering::Acquire);
+                if cur & STATE_MASK != OPEN || u64::from(cur >> FRAME_SHIFT) != frame & FRAME_MASK {
+                    break false;
+                }
+                let back = pack(GPU, frame) | (cur & FRESH);
+                if w.compare_exchange(cur, back, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                    break true;
+                }
+            });
+            match (done, start) {
+                (true, None) => start = Some(p),
+                (false, Some(s)) => {
+                    protect_pages(s, p, PROT_NONE, true);
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = start {
+            protect_pages(s, end, PROT_NONE, true);
+        }
+    }
+}
+
+/// Receives the guest pages that the CPU wrote, to carry them into the mirror on the GPU.
+pub trait Stager {
+    /// At most `max_pages` pages follow.
+    fn begin(&mut self, max_pages: usize);
+    /// The bytes of the guest page `page`. A page that is staged twice keeps the later bytes.
+    fn stage(&mut self, page: u32, bytes: &[u8]);
+}
+
 impl Pages {
+    /// The host address of the first tracked page (the guest base rounded up to a page).
+    pub fn host_base(&self) -> u64 {
+        SHARED.base.load(Ordering::Acquire)
+    }
+
+    /// The page numbers (first, end) of the host range, for callers that keep their own tables.
+    pub fn page_range(&self, addr: u64, len: u64) -> Option<(u32, u32)> {
+        page_span(addr, len)
+    }
+
     /// The tracker.
     pub fn global() -> &'static Pages {
         &PAGES
@@ -714,15 +1014,30 @@ impl Pages {
         if table.is_null() {
             return;
         }
+        let Ok(bits_layout) = std::alloc::Layout::array::<AtomicU64>(n.div_ceil(64).max(1)) else {
+            return;
+        };
+        // SAFETY: as for the table: a non-empty layout, zeroed memory is a valid bitmap, and it is never freed.
+        let bits = unsafe { std::alloc::alloc_zeroed(bits_layout) }.cast::<AtomicU64>();
+        if bits.is_null() {
+            return;
+        }
         SHARED.members.store(0, Ordering::Release);
         SHARED.completed.store(0, Ordering::Release);
+        SHARED.mirror.store(0, Ordering::Release);
         SHARED.npages.store(0, Ordering::Release);
+        SHARED.member_bits.store(bits, Ordering::Release);
+        SHARED.member_gen.fetch_add(1, Ordering::AcqRel);
         SHARED.table.store(table, Ordering::Release);
         SHARED.base.store(b, Ordering::Release);
         SHARED.len.store(len, Ordering::Release);
         SHARED.npages.store(n, Ordering::Release);
         SHARED.log_n.store(0, Ordering::Release);
-        ctrl().frames.clear();
+        {
+            let mut c = ctrl();
+            c.frames.clear();
+            c.snap = None;
+        }
         install_handler();
         nxkit_abi::guest::set_guard_hook(hook);
     }
@@ -752,8 +1067,56 @@ impl Pages {
             FREE => "free".to_string(),
             CLEAN => "clean".to_string(),
             DIRTY => "dirty".to_string(),
+            SYNC => "sync".to_string(),
+            OPEN => format!("open({})", v >> FRAME_SHIFT),
+            _ if v & FRESH != 0 => format!("gpu({}, fresh)", v >> FRAME_SHIFT),
             _ => format!("gpu({})", v >> FRAME_SHIFT),
         }
+    }
+
+    /// Declares the mirror: the host address of a reservation as large as guest memory, whose byte `o` is the GPU's copy
+    /// of guest byte `o`. From now on a page tagged with a frame holds stale guest bytes, and a CPU access to it waits
+    /// for the frame and copies the page from the mirror ([`flush_mirrored`](Self::flush_mirrored)). 0 turns it off.
+    pub fn set_mirror(&self, host_base: u64) {
+        SHARED.mirror.store(host_base, Ordering::Release);
+    }
+
+    /// The newest frame whose completion was reported.
+    pub fn completed(&self) -> u64 {
+        SHARED.completed.load(Ordering::Acquire) & FRAME_MASK
+    }
+
+    /// The member bitmap (bit `i` of word `i / 64` is set while page `i` is tracked) and its generation. The copy is
+    /// remade only when a page joined or left since the last call.
+    pub fn member_snapshot(&self) -> (std::sync::Arc<Vec<u64>>, u64) {
+        let gen_ = SHARED.member_gen.load(Ordering::Acquire);
+        let mut c = ctrl();
+        if let Some((g, a)) = &c.snap
+            && *g == gen_
+        {
+            return (a.clone(), gen_);
+        }
+        let n = SHARED.npages.load(Ordering::Acquire).div_ceil(64);
+        let p = SHARED.member_bits.load(Ordering::Acquire);
+        let v: Vec<u64> = if p.is_null() {
+            Vec::new()
+        } else {
+            // SAFETY: the bitmap has `n` words that are never freed.
+            (0..n).map(|i| unsafe { &*p.add(i) }.load(Ordering::Acquire)).collect()
+        };
+        let a = std::sync::Arc::new(v);
+        c.snap = Some((gen_, a.clone()));
+        (a, gen_)
+    }
+
+    /// True when a page of the host range `[addr, addr + len)` is tagged with a frame: its guest bytes may be stale.
+    pub fn any_gpu_owned(&self, addr: u64, len: u64) -> bool {
+        let Some((first, end)) = page_span(addr, len) else {
+            return false;
+        };
+        (first..end).any(|p| {
+            word(p as usize).is_some_and(|w| matches!(w.load(Ordering::Acquire) & STATE_MASK, GPU | OPEN | SYNC))
+        })
     }
 
     /// The flush of frame `frame`. First the pages that the CPU dirtied since the last flush go back to clean and read
@@ -825,6 +1188,7 @@ impl Pages {
                     && w.swap(pack(GPU, frame), Ordering::AcqRel) & STATE_MASK == FREE
                 {
                     added += 1;
+                    member_bit(p as usize, true);
                 }
             }
             protect_pages(s, e, PROT_NONE, true);
@@ -850,6 +1214,25 @@ impl Pages {
     /// protected for it go to clean and read only. It runs on the thread of the Metal completion handler.
     pub fn complete(&self, frame: u64) {
         SHARED.completed.fetch_max(frame, Ordering::AcqRel);
+        if SHARED.mirror.load(Ordering::Acquire) != 0 {
+            // With a mirror the pages stay tagged: the guest bytes are stale until a CPU access copies them. Pages that
+            // a host thread opened for reading while the frame ran lose their access again.
+            let due: Vec<(u64, Vec<(u32, u32)>)> = {
+                let mut c = ctrl();
+                let mut due = Vec::new();
+                while c.frames.front().is_some_and(|(f, _)| *f <= frame) {
+                    if let Some(x) = c.frames.pop_front() {
+                        due.push(x);
+                    }
+                }
+                due
+            };
+            for (f, runs) in due {
+                close_opened(f, &runs);
+            }
+            wake_all();
+            return;
+        }
         let due: Vec<(u64, Vec<(u32, u32)>)> = {
             let mut c = ctrl();
             let mut due = Vec::new();
@@ -863,6 +1246,217 @@ impl Pages {
         for (f, runs) in due {
             release_runs(f, &runs);
         }
+    }
+
+    /// The host reads or writes the range through a system call, and there is a mirror: the pages in the range that
+    /// are tagged with a frame are brought up to date (the caller waits for the writer, an internal thread does not),
+    /// so that the system call finds current bytes. A write leaves them dirty.
+    fn settle(&self, addr: u64, len: u64, write: bool) {
+        let Some((first, end)) = page_span(addr, len) else {
+            return;
+        };
+        let mirror = SHARED.mirror.load(Ordering::Acquire);
+        let internal = is_internal();
+        for p in first..end {
+            let Some(w) = word(p as usize) else { break };
+            for _ in 0..64 {
+                let state = w.load(Ordering::Acquire) & STATE_MASK;
+                match state {
+                    GPU => {
+                        let k = serve_mirrored(p as usize, w, write, internal, mirror);
+                        SHARED.faults[k as usize][FaultOrigin::Host as usize]
+                            .fetch_add(1, Ordering::Relaxed);
+                    }
+                    OPEN if write => {
+                        let k = serve_mirrored(p as usize, w, write, internal, mirror);
+                        SHARED.faults[k as usize][FaultOrigin::Host as usize]
+                            .fetch_add(1, Ordering::Relaxed);
+                    }
+                    SYNC => sleep_on_wake(SHARED.wake.load(Ordering::Acquire)),
+                    _ => break,
+                }
+            }
+        }
+    }
+
+    /// The flush of frame `frame` when there is a mirror ([`set_mirror`](Self::set_mirror)); the mirror of every page
+    /// in `members` must be readable and writable.
+    ///
+    /// 1. The pages of `members` (host address and length) that are not tracked yet become tracked and read only, and
+    ///    their guest bytes are copied into the mirror (the protection first, the copy second: a store after the
+    ///    protection faults and is staged below or at the next flush).
+    /// 2. The pages that the CPU dirtied since the last flush go back to clean and read only, and `stager` takes their
+    ///    bytes (protection first, copy second).
+    /// 3. The pages of `written` are tagged with the frame and lose all access. A page that was staged is tagged fresh.
+    ///    With `poison` their guest bytes are first overwritten with the pattern, so that a read of guest memory that
+    ///    should have gone to the mirror shows.
+    ///
+    /// The completion of the frame ([`complete`](Self::complete)) leaves the pages tagged: guest memory is stale until a
+    /// CPU access copies the page from the mirror.
+    pub fn flush_mirrored(
+        &self,
+        frame: u64,
+        members: &[(u64, u64)],
+        written: &[(u64, u64)],
+        poison: Option<u32>,
+        stager: &mut dyn Stager,
+    ) -> FlushStats {
+        let mut st = FlushStats::default();
+        let mirror = SHARED.mirror.load(Ordering::Acquire);
+        if !self.attached() || mirror == 0 {
+            return st;
+        }
+        let t0 = now_ns();
+        let calls0 = SHARED.mprotects.load(Ordering::Relaxed);
+        let mut c = ctrl();
+        let p = page();
+        let base = SHARED.base.load(Ordering::Acquire);
+        let runs_w = span_runs(written);
+        let mut all: Vec<(u64, u64)> = members.to_vec();
+        all.extend_from_slice(written);
+        let runs_m = span_runs(&all);
+        // 1. New members.
+        let mut newly: Vec<u32> = Vec::new();
+        for &(s, e) in &runs_m {
+            for pg in s..e {
+                if let Some(w) = word(pg as usize)
+                    && w.compare_exchange(FREE, CLEAN, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                {
+                    newly.push(pg);
+                    member_bit(pg as usize, true);
+                }
+            }
+        }
+        for (s, e) in runs_of(&newly) {
+            protect_pages(s, e, PROT_READ, true);
+            // SAFETY: both ranges lie inside guest memory and its mirror (page numbers are clipped to the table); the
+            // guest pages are readable (just protected read only), the mirror pages are writable (the caller made them
+            // usable) and the two are different mappings.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (base + u64::from(s) * p) as *const u8,
+                    (mirror + u64::from(s) * p) as *mut u8,
+                    ((e - s) as u64 * p) as usize,
+                );
+            }
+        }
+        SHARED.members.fetch_add(newly.len() as u64, Ordering::AcqRel);
+        st.new_members = newly.len() as u32;
+        // 2. The dirty pages.
+        let n = SHARED.log_n.swap(0, Ordering::AcqRel);
+        let mut dirty: Vec<u32> = Vec::new();
+        if n > LOG_CAP {
+            st.scanned = true;
+            let total = SHARED.npages.load(Ordering::Acquire);
+            for pg in 0..total {
+                if word(pg).is_some_and(|w| w.load(Ordering::Relaxed) == DIRTY) {
+                    dirty.push(pg as u32);
+                }
+            }
+        } else {
+            for slot in &SHARED.log[..n] {
+                let mut spins = 0;
+                let v = loop {
+                    let v = slot.swap(0, Ordering::AcqRel);
+                    if v != 0 || spins > 10_000 {
+                        break v;
+                    }
+                    spins += 1;
+                    std::hint::spin_loop();
+                };
+                if v != 0 {
+                    dirty.push(v - 1);
+                }
+            }
+            dirty.sort_unstable();
+            dirty.dedup();
+        }
+        stager.begin(dirty.len() + 64);
+        let mut back: Vec<u32> = Vec::with_capacity(dirty.len());
+        for pg in dirty {
+            if word(pg as usize).is_some_and(|w| {
+                w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            }) {
+                back.push(pg);
+            }
+        }
+        st.dirtied = back.len() as u32;
+        let stage_run = |stager: &mut dyn Stager, s: u32, e: u32| {
+            for pg in s..e {
+                // SAFETY: the page lies in guest memory and is readable (read only or open) since the protection above.
+                let bytes = unsafe {
+                    std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
+                };
+                stager.stage(pg, bytes);
+            }
+        };
+        for (s, e) in runs_of(&back) {
+            protect_pages(s, e, PROT_READ, true);
+            stage_run(stager, s, e);
+        }
+        st.staged = back.len() as u32;
+        // 3. The pages of the frame.
+        for &(s, e) in &runs_w {
+            for pg in s..e {
+                let Some(w) = word(pg as usize) else { continue };
+                let mut fresh = back.binary_search(&pg).is_ok();
+                let mut tries = 0;
+                loop {
+                    let cur = w.load(Ordering::Acquire);
+                    match cur & STATE_MASK {
+                        DIRTY => {
+                            // Written after step 2: take it back to clean and stage it again.
+                            if w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                                protect_pages(pg, pg + 1, PROT_READ, true);
+                                stage_run(stager, pg, pg + 1);
+                                fresh = true;
+                                st.raced += 1;
+                                st.staged += 1;
+                            }
+                        }
+                        SYNC if tries < 1000 => {
+                            // A thread copies the page right now; let it finish.
+                            tries += 1;
+                            std::thread::yield_now();
+                        }
+                        _ => {
+                            let tag = pack(GPU, frame) | if fresh { FRESH } else { 0 };
+                            if w.compare_exchange(cur, tag, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // The pages lose all access first: from here a thread that touches a page faults, finds it tagged and
+            // waits for the frame and copies the mirror. Only then is the pattern written, one page at a time, so a page
+            // is open and holds the pattern for a few microseconds, not for the time of the whole run.
+            protect_pages(s, e, PROT_NONE, true);
+            if let Some(pattern) = poison {
+                for pg in s..e {
+                    protect_pages(pg, pg + 1, PROT_RW, true);
+                    // SAFETY: the page is writable now and lies in guest memory.
+                    unsafe {
+                        std::slice::from_raw_parts_mut((base + u64::from(pg) * p) as *mut u32, (p / 4) as usize)
+                            .fill(pattern);
+                    }
+                    protect_pages(pg, pg + 1, PROT_NONE, true);
+                }
+            }
+            st.written += e - s;
+        }
+        st.written_runs = runs_w.len() as u32;
+        if !runs_w.is_empty() {
+            c.frames.push_back((frame, runs_w));
+        }
+        while c.frames.len() > MAX_FRAMES {
+            c.frames.pop_front();
+        }
+        st.mprotects = (SHARED.mprotects.load(Ordering::Relaxed) - calls0) as u32;
+        st.ns = now_ns().saturating_sub(t0);
+        st
     }
 
     /// The host reads or writes the range through a system call. A tracked page that a read needs and that is protected
@@ -879,7 +1473,7 @@ impl Pages {
             loop {
                 let cur = w.load(Ordering::Acquire);
                 let state = cur & STATE_MASK;
-                if write && (state == CLEAN || state == GPU) {
+                if write && (state == CLEAN || state == GPU || state == OPEN) {
                     if state == GPU && in_flight(cur >> FRAME_SHIFT) {
                         SHARED.host_access[1].fetch_add(1, Ordering::Relaxed);
                     }
@@ -942,6 +1536,7 @@ impl Pages {
                 && w.swap(FREE, Ordering::AcqRel) & STATE_MASK != FREE
             {
                 freed += 1;
+                member_bit(p as usize, false);
             }
         }
         let members = SHARED.members.load(Ordering::Acquire);
@@ -953,7 +1548,7 @@ impl Pages {
     /// The numbers since the process started.
     pub fn stats(&self) -> PageStats {
         let g = |a: &AtomicU64| a.load(Ordering::Relaxed);
-        let mut faults = [[0u64; 3]; 4];
+        let mut faults = [[0u64; 3]; 5];
         for (k, row) in faults.iter_mut().enumerate() {
             for (o, v) in row.iter_mut().enumerate() {
                 *v = g(&SHARED.faults[k][o]);
@@ -971,6 +1566,11 @@ impl Pages {
             log_overflows: g(&SHARED.log_overflows),
             pc_overflow: g(&SHARED.pc_overflow),
             last_signal: g(&SHARED.last_signal),
+            synced: g(&SHARED.synced),
+            writer_waits: g(&SHARED.writer_waits),
+            writer_wait_ns: g(&SHARED.writer_wait_ns),
+            internal_opens: g(&SHARED.internal_opens),
+            wait_timeouts: g(&SHARED.wait_timeouts),
         }
     }
 
@@ -1002,10 +1602,26 @@ fn hook(addr: u64, len: u64, access: u32) {
     if SHARED.members.load(Ordering::Acquire) == 0 {
         return;
     }
+    let mirrored = SHARED.mirror.load(Ordering::Acquire) != 0;
     match access {
-        nxkit_abi::guest::ACCESS_READ => PAGES.open(addr, len, false),
-        nxkit_abi::guest::ACCESS_WRITE => PAGES.open(addr, len, true),
-        _ => PAGES.forget(addr, len),
+        nxkit_abi::guest::ACCESS_READ => {
+            if mirrored {
+                PAGES.settle(addr, len, false);
+            }
+            PAGES.open(addr, len, false);
+        }
+        nxkit_abi::guest::ACCESS_WRITE => {
+            if mirrored {
+                PAGES.settle(addr, len, true);
+            }
+            PAGES.open(addr, len, true);
+        }
+        _ => {
+            if mirrored {
+                PAGES.settle(addr, len, false);
+            }
+            PAGES.forget(addr, len);
+        }
     }
 }
 
@@ -1277,6 +1893,187 @@ mod tests {
         assert_eq!(w.unwrap().unwrap(), 16);
         nxkit_abi::guest::set_range(0, 0);
         pg.complete(3);
+    }
+
+    /// Collects the staged pages of a test flush.
+    #[derive(Default)]
+    struct Collect {
+        pages: Vec<(u32, Vec<u8>)>,
+    }
+
+    impl Stager for Collect {
+        fn begin(&mut self, _max: usize) {}
+
+        fn stage(&mut self, page: u32, bytes: &[u8]) {
+            self.pages.retain(|p| p.0 != page);
+            self.pages.push((page, bytes.to_vec()));
+        }
+    }
+
+    fn mirrored(pages: u64) -> (Mem, Mem, &'static Pages) {
+        let (m, pg) = setup(pages);
+        let mir = Mem::new(pages);
+        pg.set_mirror(mir.addr(0));
+        (m, mir, pg)
+    }
+
+    #[test]
+    fn a_new_member_is_copied_into_the_mirror_and_a_gpu_written_page_is_copied_back_on_a_read() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(8);
+        m.store(2, 5, 42);
+        let mut st = Collect::default();
+        let f = pg.flush_mirrored(1, &[(m.addr(2), 8)], &[(m.addr(2), 8)], None, &mut st);
+        assert_eq!((f.new_members, f.written, f.staged), (1, 1, 0));
+        assert_eq!(mir.load(2, 5), 42, "the guest bytes went into the mirror");
+        assert_eq!(pg.state_of(m.addr(2)), "gpu(1)");
+        // The GPU writes the mirror; the guest page is stale and has no access.
+        mir.store(2, 5, 77);
+        mir.store(2, 6, 78);
+        // The frame completes; a read copies the page.
+        pg.complete(1);
+        assert_eq!(pg.state_of(m.addr(2)), "gpu(1)", "the completion leaves the page tagged");
+        let s0 = pg.stats();
+        assert_eq!(m.load(2, 5), 77);
+        assert_eq!(m.load(2, 6), 78);
+        assert_eq!(pg.state_of(m.addr(2)), "clean");
+        let s1 = pg.stats();
+        assert_eq!(s1.synced - s0.synced, 1);
+        assert_eq!(s1.writer_waits, s0.writer_waits, "no wait: the writer was complete");
+        // A write now dirties it; the flush stages the whole page and tags it fresh when a frame writes it.
+        m.store(2, 7, 9);
+        assert_eq!(pg.state_of(m.addr(2)), "dirty");
+        let f = pg.flush_mirrored(2, &[], &[(m.addr(2), 8)], None, &mut st);
+        assert_eq!((f.staged, f.written), (1, 1));
+        assert_eq!(st.pages.len(), 1);
+        assert_eq!(st.pages[0].1[5], 77, "the page holds the GPU's bytes and the CPU's");
+        assert_eq!(st.pages[0].1[7], 9);
+        assert_eq!(pg.state_of(m.addr(2)), "gpu(2, fresh)");
+        pg.complete(2);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_read_of_a_page_in_flight_waits_for_the_completion() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(5, &[], &[(m.addr(1), 1)], None, &mut st);
+        mir.store(1, 0, 11);
+        let s0 = pg.stats();
+        let base = m.base as usize;
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let d2 = done.clone();
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside the allocation of the test, which outlives the joined thread.
+            let v = unsafe { (base as *const u8).add(P as usize).read_volatile() };
+            d2.store(true, Ordering::Release);
+            v
+        });
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        assert!(!done.load(Ordering::Acquire), "the reader waits for the writer");
+        // The GPU finishes: it wrote the mirror before the completion.
+        mir.store(1, 0, 12);
+        pg.complete(5);
+        assert_eq!(reader.join().unwrap(), 12);
+        let s1 = pg.stats();
+        assert_eq!(s1.writer_waits - s0.writer_waits, 1);
+        assert!(s1.writer_wait_ns > s0.writer_wait_ns);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_write_in_flight_waits_then_the_cpu_write_lands_on_the_gpus_bytes() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(0), 1)], None, &mut st);
+        mir.store(0, 100, 5);
+        let s0 = pg.stats();
+        let base = m.base as usize;
+        let writer = std::thread::spawn(move || {
+            // SAFETY: inside the allocation of the test, which outlives the joined thread.
+            unsafe { (base as *mut u8).add(101).write_volatile(6) };
+        });
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        mir.store(0, 100, 7);
+        pg.complete(3);
+        writer.join().unwrap();
+        assert_eq!(m.load(0, 100), 7, "the GPU's byte is there");
+        assert_eq!(m.load(0, 101), 6, "and the CPU's");
+        assert_eq!(pg.state_of(m.addr(0)), "dirty");
+        let s1 = pg.stats();
+        let d = |k: FaultKind| {
+            s1.faults[k as usize].iter().sum::<u64>() - s0.faults[k as usize].iter().sum::<u64>()
+        };
+        assert_eq!(d(FaultKind::WriteInFlight), 1);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn an_internal_thread_does_not_wait_and_the_page_loses_its_access_at_the_completion() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        // A page that the frame writes and that the CPU had not written: the mirror is the truth.
+        m.store(1, 0, 1);
+        let _ = pg.flush_mirrored(9, &[(m.addr(1), 1)], &[(m.addr(1), 1)], None, &mut st);
+        mir.store(1, 0, 2);
+        let base = m.base as usize;
+        let v = std::thread::spawn(move || {
+            let _g = mark_internal_thread();
+            // SAFETY: inside the allocation of the test, which outlives the joined thread.
+            unsafe { (base as *const u8).add(P as usize).read_volatile() }
+        })
+        .join()
+        .unwrap();
+        assert_eq!(v, 2, "the internal thread got the mirror's bytes at once");
+        assert_eq!(pg.state_of(m.addr(1)), "open(9)");
+        assert!(pg.stats().internal_opens > 0);
+        pg.complete(9);
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(9)");
+        // The GPU wrote more; the game's read after the completion sees it.
+        mir.store(1, 0, 3);
+        assert_eq!(m.load(1, 0), 3);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_poisoned_page_holds_the_pattern_until_a_cpu_access_copies_the_mirror() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        m.store(3, 0, 8);
+        let _ = pg.flush_mirrored(1, &[], &[(m.addr(3), 1)], Some(0x7fc0_0000), &mut st);
+        assert_eq!(mir.load(3, 0), 8);
+        pg.complete(1);
+        // The access copies the mirror over the pattern.
+        assert_eq!(m.load(3, 0), 8);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_system_call_reading_a_gpu_written_page_finds_the_mirrors_bytes() {
+        use std::io::Write;
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        nxkit_abi::guest::set_range(m.addr(0), 4 * P);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(1, &[], &[(m.addr(1), P)], None, &mut st);
+        mir.store(1, 0, 0x5a);
+        pg.complete(1);
+        let out = std::env::temp_dir().join(format!("nxkit-mirror-{}", std::process::id()));
+        let mut o = std::fs::File::create(&out).unwrap();
+        let w = nxkit_abi::guest::with_slice(m.addr(1), 16, |b| {
+            let r = o.write(b);
+            (r, b[0])
+        });
+        let _ = std::fs::remove_file(&out);
+        let (r, first) = w.unwrap();
+        assert_eq!(r.unwrap(), 16);
+        assert_eq!(first, 0x5a);
+        nxkit_abi::guest::set_range(0, 0);
+        pg.set_mirror(0);
     }
 
     #[test]

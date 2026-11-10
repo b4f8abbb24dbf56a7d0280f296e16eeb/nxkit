@@ -84,10 +84,19 @@ impl Backend for GpuBackend {
             detail.rename = capture.map(Arc::new);
             detail.rename_check = check;
         }
-        // `NXKIT_PRIVATE=track`: protects the pages the frame may write and the pages the CPU wrote, and counts.
-        crate::private::at_flush(&detail, fence.0, &self.guest.address_map());
+        // `NXKIT_PRIVATE`: protects the pages the frame may write and the pages the CPU wrote, and counts. With the mirror
+        // it also stages the pages the CPU wrote and gives the view that resolves member ranges to the mirror.
+        let overlay = crate::private::at_flush(
+            &detail,
+            fence.0,
+            &self.guest.address_map(),
+            &|| self.wait_idle(),
+        );
         // The snapshot of the flush: a pool the game finalizes after this point still serves the frame.
-        let pools = self.pools.current();
+        let pools = match overlay {
+            Some(o) => Arc::new(self.pools.current().with_overlay(o)),
+            None => self.pools.current(),
+        };
         if let Some(enc) = &self.enc {
             let settled = enc.settle();
             if let Some(update) = &settled.update {

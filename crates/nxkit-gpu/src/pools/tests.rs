@@ -463,3 +463,61 @@ fn the_counters_follow_the_buffers() {
     assert_eq!((s.graveyard, s.pins, s.pin_bytes), (0, 1, K16));
     assert_eq!((s.live, s.live_bytes), (1, K16));
 }
+
+fn overlay_over(snap: &PoolSnapshot<Fake>, members: &[usize], log: &Log) -> PoolSnapshot<Fake> {
+    use crate::overlay::{Overlay, Run};
+    let mut bits = vec![0u64; 2];
+    for &p in members {
+        bits[p / 64] |= 1 << (p % 64);
+    }
+    // Pages 4 to 8 of the guest range have a run; a Fake's real base is 0x1000_0000 plus its start.
+    let runs = vec![Run {
+        va_start: VA + 4 * K16,
+        va_end: VA + 9 * K16,
+        mem: Fake {
+            start: 0x7_0000,
+            log: log.clone(),
+        },
+    }];
+    snap.with_overlay(Arc::new(Overlay::new(VA, Arc::new(bits), runs, None, None, 3)))
+}
+
+#[test]
+fn a_member_range_resolves_to_the_mirror_run_and_the_rest_to_the_pool() {
+    let (set, log) = set();
+    set.register(VA, 0x20 * K16, 0).unwrap();
+    let base = set.current();
+    let snap = overlay_over(&base, &[4, 5, 6], &log);
+    assert_eq!(snap.generation(), base.generation());
+    // Inside the members: the run's buffer, the offset in it and the room to the end of the run.
+    let loc = snap.resolve(VA + 5 * K16 + 0x10, 0x20).unwrap();
+    assert_eq!(loc.run, 0);
+    assert_eq!(loc.offset, K16 + 0x10);
+    assert_eq!(loc.real, 0x1000_0000 + 0x7_0000 + K16 + 0x10);
+    assert_eq!(loc.room, 4 * K16 - 0x10);
+    // Outside: the pool, as before.
+    let out = snap.resolve(VA + 12 * K16, 8).unwrap();
+    assert_eq!(out.run, NO_RUN);
+    assert_eq!(out, base.resolve(VA + 12 * K16, 8).unwrap());
+    // The guest resolve ignores the mirror.
+    assert_eq!(snap.resolve_guest(VA + 5 * K16, 8).unwrap().run, NO_RUN);
+}
+
+#[test]
+fn a_range_from_a_member_into_a_non_member_falls_back_to_guest_and_is_counted() {
+    let (set, log) = set();
+    set.register(VA, 0x20 * K16, 0).unwrap();
+    let base = set.current();
+    let snap = overlay_over(&base, &[4, 5], &log);
+    let before = crate::overlay::partial();
+    let loc = snap.resolve(VA + 5 * K16, 2 * K16).unwrap();
+    assert_eq!(loc.run, NO_RUN, "page 6 is no member");
+    assert!(crate::overlay::partial() > before);
+    // A range that starts outside and reaches into a member is counted too.
+    let before = crate::overlay::partial();
+    let loc = snap.resolve(VA + 3 * K16, 2 * K16).unwrap();
+    assert_eq!(loc.run, NO_RUN);
+    assert!(crate::overlay::partial() > before);
+    // The start alone has no length to check.
+    assert_eq!(snap.resolve_start(VA + 5 * K16).unwrap().run, 0);
+}

@@ -44,6 +44,9 @@ pub(crate) struct PoolRefs<B: Backing> {
     /// The generation of the snapshot in which every pool was last seen to be current.
     generation: u64,
     pools: Vec<Named<B>>,
+    /// The buffers of the mirror runs that the ICB names. They stay alive with it; a run that grew is another buffer, and
+    /// the signature of the ICB holds the real addresses, so such an ICB is built again.
+    runs: Vec<B>,
 }
 
 struct Named<B: Backing> {
@@ -60,11 +63,20 @@ impl<B: Backing + Clone> PoolRefs<B> {
         Self {
             generation: snap.generation(),
             pools: Vec::new(),
+            runs: Vec::new(),
         }
     }
 
     /// Notes the pool of `loc` (once per pool) and gives its backing, or `None` when the pool has none.
     pub(crate) fn take(&mut self, snap: &PoolSnapshot<B>, loc: Loc) -> Option<B> {
+        if loc.run != crate::pools::NO_RUN {
+            // A range in the mirror: the buffer of its run, which the ICB keeps alive.
+            let mem = snap.overlay()?.runs().get(loc.run as usize)?.mem.clone();
+            if !self.runs.iter().any(|m| m.real_base() == mem.real_base()) {
+                self.runs.push(mem.clone());
+            }
+            return Some(mem);
+        }
         let e = snap.entries().get(loc.pool as usize)?;
         let mem = e.buf.mem()?.clone();
         if !self.pools.iter().any(|n| n.id == e.id) {
@@ -167,6 +179,19 @@ fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut impl Hasher) {
     // A renamed range reads the copy of the batch slot, whose address differs from frame to frame.
     for s in &d.sbufs {
         sh.env.rename.resolve(s.address, s.size).hash(h);
+    }
+    // A range in the mirror has the address of its run's buffer, which is another one when the run grew.
+    if sh.pools.overlay().is_some() {
+        let real = |a: u64| sh.pools.resolve_start(a).ok().map(|l| (l.run, l.real));
+        for u in d.ubos.iter().chain(&d.sbufs) {
+            real(u.address).hash(h);
+        }
+        for s in &d.streams {
+            real(s.address).hash(h);
+        }
+        if let crate::detail::DrawArgs::Indexed { address, .. } = d.args {
+            real(address).hash(h);
+        }
     }
     for t in &d.textures {
         t.hash(h);

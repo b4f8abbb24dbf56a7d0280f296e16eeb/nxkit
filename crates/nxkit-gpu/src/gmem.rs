@@ -115,23 +115,43 @@ pub(crate) fn build_table(pools: impl IntoIterator<Item = (u64, u64, u64)>) -> T
     }
 }
 
-/// Gives each registration its delta from the snapshot. Returns the pools that resolve and the number that do not.
+/// Gives each registration its delta from the snapshot. Returns the pieces `(start, end, delta)` that resolve and the
+/// number of pools that do not. With a mirror (`NXKIT_PRIVATE=1`) a pool is split at its member pages: a member piece has
+/// the delta of the mirror run that holds it, the rest the delta of guest memory, so a raw pointer into a member page
+/// reaches the mirror.
 fn resolve_all<B: Backing>(
     sorted: &[(u64, u64)],
     snapshot: &PoolSnapshot<B>,
 ) -> (Vec<(u64, u64, u64)>, u32) {
     let mut unresolved = 0u32;
-    let pools = sorted
-        .iter()
-        .filter_map(|&(s, e)| match snapshot.resolve(s, e - s) {
-            Ok(at) => Some((s, e, at.real.wrapping_sub(s))),
-            Err(_) => {
-                unresolved += 1;
-                None
+    let mut out = Vec::with_capacity(sorted.len());
+    for &(s, e) in sorted {
+        let Ok(at) = snapshot.resolve_guest(s, e - s) else {
+            unresolved += 1;
+            continue;
+        };
+        let guest = at.real.wrapping_sub(s);
+        let Some(o) = snapshot.overlay() else {
+            out.push((s, e, guest));
+            continue;
+        };
+        let mut from = s;
+        for (a, b) in o.member_runs_in(s, e) {
+            let Some((_, real, room)) = o.locate(a) else {
+                continue;
+            };
+            let b = b.min(a.saturating_add(room));
+            if a > from {
+                out.push((from, a, guest));
             }
-        })
-        .collect();
-    (pools, unresolved)
+            out.push((a, b, real.wrapping_sub(a)));
+            from = b;
+        }
+        if from < e {
+            out.push((from, e, guest));
+        }
+    }
+    (out, unresolved)
 }
 
 /// The memory pools of the game, and the table built from them.
@@ -140,9 +160,9 @@ pub(crate) struct Gmem {
     pools: Registry,
     /// Counts the changes of `pools`.
     generation: u64,
-    /// The generation of `pools` and the generation of the pool snapshot that the table was built from. The table is
-    /// built again when either differs.
-    built: Option<(u64, u64)>,
+    /// The generation of `pools`, of the pool snapshot and of its mirror (members and runs) that the table was built from.
+    /// The table is built again when one differs.
+    built: Option<(u64, u64, u64)>,
     buffer: Option<Arc<DataBuffer>>,
     ranges: Arc<Vec<(u64, u64)>>,
     logs: Arc<GmemLogs>,
@@ -186,7 +206,11 @@ impl Gmem {
         ctx: &Context,
         snapshot: &PoolSnapshot<B>,
     ) -> Option<Arc<DataBuffer>> {
-        let stamp = (self.generation, snapshot.generation());
+        let stamp = (
+            self.generation,
+            snapshot.generation(),
+            snapshot.overlay().map_or(0, |o| o.generation()),
+        );
         if self.built != Some(stamp) {
             let sorted = self.pools.sorted();
             let overlapping = count_overlapping(&sorted);
@@ -612,5 +636,51 @@ mod tests {
         // drained and cleared
         assert!(logs.drain(1).is_empty());
         assert_eq!(logs.take(1), a);
+    }
+
+    #[derive(Clone)]
+    struct Fake(u64);
+
+    impl Backing for Fake {
+        fn real_base(&self) -> u64 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn a_pool_is_split_at_its_member_pages_with_the_delta_of_the_mirror_run() {
+        use crate::overlay::{Overlay, PAGE, Run};
+        const VA: u64 = 0xc0_0000_0000;
+        let snap = PoolSnapshot::whole(VA, 64 * PAGE, Fake(0x9000_0000_0000));
+        // Pages 10, 11 and 14 are members; the run for them starts at page 8.
+        let mut bits = vec![0u64; 1];
+        for p in [10, 11, 14] {
+            bits[0] |= 1 << p;
+        }
+        let runs = vec![Run {
+            va_start: VA + 8 * PAGE,
+            va_end: VA + 16 * PAGE,
+            mem: Fake(0x7000_0000_0000),
+        }];
+        let snap = snap.with_overlay(std::sync::Arc::new(Overlay::new(VA, std::sync::Arc::new(bits), runs, None, None, 1)));
+        // One registered pool, from page 9 to page 20.
+        let (pieces, unresolved) = resolve_all(&[(VA + 9 * PAGE, VA + 20 * PAGE)], &snap);
+        assert_eq!(unresolved, 0);
+        let guest = 0x9000_0000_0000u64.wrapping_sub(VA);
+        // The mirror address of a byte is the run base plus its offset in the run: delta = run_real - run_va.
+        let mirror_delta = 0x7000_0000_0000u64.wrapping_sub(VA + 8 * PAGE);
+        assert_eq!(
+            pieces,
+            vec![
+                (VA + 9 * PAGE, VA + 10 * PAGE, guest),
+                (VA + 10 * PAGE, VA + 12 * PAGE, mirror_delta),
+                (VA + 12 * PAGE, VA + 14 * PAGE, guest),
+                (VA + 14 * PAGE, VA + 15 * PAGE, mirror_delta),
+                (VA + 15 * PAGE, VA + 20 * PAGE, guest),
+            ]
+        );
+        // The table built from the pieces holds them in order.
+        let t = build_table(pieces);
+        assert_eq!(t.ranges.len(), 6);
     }
 }

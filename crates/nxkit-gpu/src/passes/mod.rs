@@ -277,10 +277,10 @@ fn ubo_dump(sh: &Shared<'_>, pass: usize, cmd: u32, dd: &crate::detail::Dispatch
         let want = 456usize.min(u.size as usize);
         let bytes: Option<Vec<u8>> = match &u.snapshot {
             Some(s) => Some(s.iter().copied().take(want).collect()),
-            None => sh.guest_offset(u.address, want as u64).and_then(|off| {
+            None => {
                 let mut b = vec![0u8; want];
-                sh.guest.read(off, &mut b).ok().map(|()| b)
-            }),
+                sh.read_guest(u.address, &mut b).then_some(b)
+            }
         };
         let mut vals = String::new();
         if let Some(b) = &bytes {
