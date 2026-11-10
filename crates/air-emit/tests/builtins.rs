@@ -1,5 +1,5 @@
 //! Lowering of `mulhi`, the simd builtins, `front_facing` and `calculate_*_lod` on synthetic MSL.
-//! The expected lines are what `metal -c -O1 -fpreserve-invariance -fwrapv` emits for the same source.
+//! The expected lines are what `metal -c -O1 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv` emits for the same source.
 
 use air_emit::{compile_source, Target};
 
@@ -49,13 +49,13 @@ fn simd_shuffle_freezes_the_data_and_votes_are_convergent() {
     for (ty, f) in [
         (
             "float",
-            "nnan ninf nsz arcp afn float @air.simd_shuffle.f32(float",
+            "nsz arcp afn float @air.simd_shuffle.f32(float",
         ),
         ("i32", "i32 @air.simd_shuffle.s.i32(i32"),
         ("i32", "i32 @air.simd_shuffle.u.i32(i32"),
         (
             "<2 x float>",
-            "nnan ninf nsz arcp afn <2 x float> @air.simd_shuffle.v2f32(<2 x float>",
+            "nsz arcp afn <2 x float> @air.simd_shuffle.v2f32(<2 x float>",
         ),
     ] {
         // the data operand is a frozen value, the lane an i16

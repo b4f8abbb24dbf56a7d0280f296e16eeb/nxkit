@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end compile speed, own path vs Apple's, over a list of MSL inputs with N worker processes.
 own:   airc emit -> air-opt -O1 -> air-opt --discard-value-names -> metallib
-apple: metal -c -O1 -fpreserve-invariance -fwrapv [-include-pch PCH] (source on stdin) -> metallib
+apple: metal -c -O1 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv [-include-pch PCH] (source on stdin) -> metallib
 usage: speed.py LIST [-j 6] [--pch PCH]   Prints wall time, inputs/s, per-input median and p90, load average."""
 import os, statistics, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
@@ -34,7 +34,7 @@ def apple(i):
     p = lambda e: os.path.join(tmp, 'a%d.%s' % (i, e))
     t = time.time()
     with open(srcs[i], 'rb') as f:
-        run([METAL, '-c', '-O1', '-fpreserve-invariance', '-fwrapv', *(['-include-pch', PCH] if PCH else []), '-x', 'metal', '-', '-o', p('air')], f)
+        run([METAL, '-c', '-O1', '-fmetal-math-mode=relaxed', '-fpreserve-invariance', '-fwrapv', *(['-include-pch', PCH] if PCH else []), '-x', 'metal', '-', '-o', p('air')], f)
     run([LIB, p('air'), '-o', p('lib')])
     return time.time() - t
 

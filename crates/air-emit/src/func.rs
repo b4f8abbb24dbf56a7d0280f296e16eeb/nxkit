@@ -18,7 +18,7 @@ use crate::ModCx;
 type R<T> = Result<T, Error>;
 
 /// Fast-math flags clang sets on float operations for the engine's flags
-/// (`-O1 -fpreserve-invariance -fwrapv`, no `contract`/`reassoc`).
+/// (`-O1 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv`, no `contract`/`reassoc`).
 pub const FM: &str = "nnan ninf nsz arcp afn";
 
 /// A value: its LLVM spelling and its type (value form).

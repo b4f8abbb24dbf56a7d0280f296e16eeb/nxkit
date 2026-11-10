@@ -76,12 +76,12 @@ The samples did not show the value 5 or values more than 7.
 
 ## Function attributes
 
-Under fast math, the definitions have `"approx-func-fp-math"`, `"no-infs-fp-math"`, `"no-nans-fp-math"`,
+Under fast math (not used by the engine, both targets compile with relaxed math), the definitions have `"approx-func-fp-math"`, `"no-infs-fp-math"`, `"no-nans-fp-math"`,
 `"no-signed-zeros-fp-math"` and `"unsafe-fp-math"` set to `true`, and arithmetic has `fast` flags.
 All definitions have `"frame-pointer"="all"`, `"min-legal-vector-width"`, `"no-builtins"`, `"no-trapping-math"="true"` and `"stack-protector-buffer-size"="8"`.
 
-## iOS differences
+## Relaxed math and iOS differences
 
-The iOS convention uses relaxed math. It has no `nnan` and `ninf` flags and no `no-infs` and `no-nans` attributes.
+Both conventions use relaxed math (`-fmetal-math-mode=relaxed`). They have no `nnan` and `ninf` flags and no `no-infs` and `no-nans` attributes.
 Vectors have the `omnipotent char` TBAA node (Metal before version 4). Texture `read` has no read sampler and no offset operand.
 The builtin intrinsics, the module flags and the compile options are the same as on macOS.

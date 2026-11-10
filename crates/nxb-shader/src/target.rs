@@ -17,12 +17,15 @@ pub struct TargetConv {
 /// `ios_metal.py`). A source within the default limit compiles to the same bytes with it, so the record does not name it.
 pub const BRACKET_DEPTH: &str = "-fbracket-depth=1024";
 
-/// The Mac convention: `metal -c -O1 -fpreserve-invariance -fwrapv`, then `metallib` (RM 3.3).
+/// The Mac convention: `metal -c -O1 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv`, then `metallib` (RM 3.3).
+/// Relaxed math keeps NaN and Inf: the shader code of the console relies on them (`0 x Inf`, the `isnan` guard of a
+/// texture coordinate), and fast math may fold both away.
 pub const MAC: TargetConv = TargetConv {
     target: Target::Mac,
     compile_flags: &[
         "-c",
         "-O1",
+        "-fmetal-math-mode=relaxed",
         "-fpreserve-invariance",
         "-fwrapv",
         BRACKET_DEPTH,
@@ -78,12 +81,13 @@ mod tests {
     fn mac_record_matches_python() {
         assert_eq!(
             MAC.record(),
-            "xcrun -sdk macosx metal -c -O1 -fpreserve-invariance -fwrapv; xcrun -sdk macosx metallib"
+            "xcrun -sdk macosx metal -c -O1 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv; xcrun -sdk macosx metallib"
         );
         assert_eq!(
             MAC.pch_flags(),
             [
                 "-O1",
+                "-fmetal-math-mode=relaxed",
                 "-fpreserve-invariance",
                 "-fwrapv",
                 "-fbracket-depth=1024"
@@ -93,6 +97,14 @@ mod tests {
             IOS.record(),
             "xcrun -sdk iphoneos metal -c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv; xcrun -sdk iphoneos metallib"
         );
+    }
+
+    #[test]
+    fn both_targets_keep_nan_and_inf() {
+        for conv in [&MAC, &IOS] {
+            assert!(conv.compile_flags.contains(&"-fmetal-math-mode=relaxed"));
+            assert!(conv.pch_flags().contains(&"-fmetal-math-mode=relaxed"));
+        }
     }
 
     #[test]

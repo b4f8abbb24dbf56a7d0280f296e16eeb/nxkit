@@ -469,6 +469,7 @@ fn gaps_metal_compiles_the_samples() {
                 "metal",
                 "-c",
                 "-O1",
+                "-fmetal-math-mode=relaxed",
                 "-fpreserve-invariance",
                 "-fwrapv",
                 "-std=metal3.1",

@@ -551,6 +551,7 @@ fn metal_compiles_the_task_and_mesh_functions() {
                 "metal",
                 "-c",
                 "-O1",
+                "-fmetal-math-mode=relaxed",
                 "-fpreserve-invariance",
                 "-fwrapv",
                 "-std=metal3.0",

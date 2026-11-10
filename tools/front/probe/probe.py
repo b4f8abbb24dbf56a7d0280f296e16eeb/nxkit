@@ -15,7 +15,7 @@ def compile_ll(src):
     d = tempfile.mkdtemp(prefix='probe')
     p = os.path.join(d, 'p.metal')
     open(p, 'w').write(src)
-    r = subprocess.run([tool('metal'), '-c', '-O1', '-fpreserve-invariance', '-fwrapv', '-Xclang', '-disable-llvm-passes',
+    r = subprocess.run([tool('metal'), '-c', '-O1', '-fmetal-math-mode=relaxed', '-fpreserve-invariance', '-fwrapv', '-Xclang', '-disable-llvm-passes',
                         '-S', '-emit-llvm', p, '-o', os.path.join(d, 'p.ll')], env={'SDKROOT': SDK, 'PATH': '/usr/bin:/bin'},
                        capture_output=True, text=True)
     if r.returncode:

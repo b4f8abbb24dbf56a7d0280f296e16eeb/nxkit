@@ -61,7 +61,7 @@ impl Target {
             air_version: (2, 9, 0),
             language: (4, 1, 0),
             sdk: (27, 2),
-            relaxed: false,
+            relaxed: true,
             vec_tbaa_char: false,
             read_sampler: true,
         }

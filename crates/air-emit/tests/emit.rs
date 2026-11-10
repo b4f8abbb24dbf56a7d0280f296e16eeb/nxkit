@@ -67,7 +67,8 @@ fn ios_convention() {
     assert!(!ios.contains("air.get_read_sampler"));
     assert!(ios.contains("!{!\"omnipotent char\""));
     let mac = compile_source(&src, &Target::macos(), "-").expect("emits");
-    assert!(mac.contains("air.get_read_sampler") && mac.contains("nnan ninf"));
+    assert!(mac.contains("air.get_read_sampler"));
+    assert!(!mac.contains("nnan") && !mac.contains("no-nans-fp-math"));
 }
 
 #[test]

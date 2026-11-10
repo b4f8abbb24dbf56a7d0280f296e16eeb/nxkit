@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 9;
+pub const FORMAT: u32 = 10;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]

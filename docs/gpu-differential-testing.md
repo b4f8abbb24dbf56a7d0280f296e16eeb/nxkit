@@ -1,7 +1,7 @@
 # GPU differential testing
 
 `gpudiff` decides if two compiled versions of one MSL shader give the same bits on the GPU.
-A is the reference (Apple's `metal -c -O1 -fpreserve-invariance -fwrapv` and `metallib`). B is the candidate (the own front end).
+A is the reference (Apple's `metal -c -O1 -fmetal-math-mode=relaxed -fpreserve-invariance -fwrapv` and `metallib`). B is the candidate (the own front end).
 The tool makes a pipeline for each entry point of A and B and gives the two the same random inputs.
 Then it runs them on the GPU and compares each output word bit for bit.
 

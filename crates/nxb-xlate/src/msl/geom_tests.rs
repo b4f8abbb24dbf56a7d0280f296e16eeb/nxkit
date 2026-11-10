@@ -173,6 +173,7 @@ pub(super) fn compile_metal(name: &str, msl: &str) {
             "metal",
             "-c",
             "-O1",
+            "-fmetal-math-mode=relaxed",
             "-fpreserve-invariance",
             "-fwrapv",
             "-std=metal3.0",
