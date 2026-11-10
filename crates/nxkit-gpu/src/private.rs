@@ -189,6 +189,8 @@ struct Window {
     enter_waits: u64,
     copy_in_pages: u64,
     copy_in_lost: u64,
+    /// Pages the knob `privlatestage` staged a second time.
+    late_staged: u64,
     /// The partial resolves (`overlay::partial`) at the start of the window.
     partial_base: u64,
     base: PageStats,
@@ -201,6 +203,8 @@ struct MirrorState {
     /// The guest GPU address of the first byte of guest memory.
     va_base: u64,
     pool: StagePool,
+    /// The fence of the newest flush.
+    last_fence: u64,
 }
 
 struct Private {
@@ -245,6 +249,7 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                     mirror: m,
                     va_base,
                     pool: StagePool::default(),
+                    last_fence: 0,
                 });
                 eprintln!(
                     "nxkit-gpu: NXKIT_PRIVATE=1, the GPU works on a mirror of {} MiB of guest memory in pages of {} KiB; \
@@ -950,8 +955,25 @@ fn flush_mirror(
         })
         .collect();
     let generation = member_gen << 24 | (ms.mirror.generation() & 0xff_ffff);
-    let overlay = Overlay::new(ms.va_base, bits, runs, Some(ms.mirror.view()), staged, generation);
+    ms.last_fence = fence;
+    // The knobs that bind a class of resolves to guest memory, to find which class a defect comes from.
+    let off = [
+        ("privnoubo", crate::overlay::UBO),
+        ("privnosbuf", crate::overlay::SBUF),
+        ("privnostream", crate::overlay::STREAM),
+        ("privnoupload", crate::overlay::UPLOAD),
+        ("privnogmem", crate::overlay::GMEM),
+        ("privnocopy", crate::overlay::COPY),
+    ]
+    .iter()
+    .filter(|(k, _)| crate::knob(k))
+    .fold(0u8, |a, (_, c)| a | c);
+    // With a class bound to guest memory, guest memory must be current: every page a frame wrote is copied back when the
+    // frame completes.
+    pages.set_eager_sync(off != 0);
+    let overlay = Overlay::new(ms.va_base, bits, runs, Some(ms.mirror.view()), staged, generation).with_off(off);
     drop(guard);
+    pages.set_phase(1);
     let n = st.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let report = {
         let mut w = locked(&st.window);
@@ -1093,10 +1115,51 @@ pub(crate) fn encoded(fence: u64, batch: Option<&SubmittedBatch>) {
     if !on() {
         return;
     }
+    // The frame is committed and runs; the completion says it is done.
+    Pages::global().set_phase(2);
+    let done = move || {
+        Pages::global().complete(fence);
+        Pages::global().set_phase(0);
+    };
     match batch {
-        Some(b) => b.on_complete(move || Pages::global().complete(fence)),
-        None => Pages::global().complete(fence),
+        Some(b) => b.on_complete(done),
+        None => done(),
     }
+}
+
+/// The knob `privlatestage`: the pages that the CPU wrote since the flush are staged a second time, right before the frame's
+/// first command buffer is committed. Returns the `(mirror address, staging address)` of each page for a second copy-in pass.
+pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<(u64, u64)> {
+    if !mirrored() || !crate::knob("privlatestage") {
+        return Vec::new();
+    }
+    let mut guard = locked(&state().mirror);
+    let Some(ms) = guard.as_mut() else {
+        return Vec::new();
+    };
+    let fence = ms.last_fence;
+    let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
+    Pages::global().flush_late(&mut sink);
+    let (buf, slots, failed) = (sink.buf.take(), std::mem::take(&mut sink.slots), sink.failed);
+    drop(sink);
+    let Some(b) = buf else {
+        return Vec::new();
+    };
+    if slots.is_empty() || failed {
+        ms.pool.free.push(b);
+        return Vec::new();
+    }
+    ms.pool.busy.push((fence, b.clone()));
+    drop(guard);
+    locked(&state().window).late_staged += slots.len() as u64;
+    let base = b.gpu_address();
+    slots
+        .iter()
+        .filter_map(|&(page, slot)| {
+            o.locate(o.va_base() + u64::from(page) * PAGE)
+                .map(|(_, real, _)| (real, base + u64::from(slot) * PAGE))
+        })
+        .collect()
 }
 
 fn kind_sum(s: &PageStats, k: FaultKind) -> u64 {
@@ -1206,6 +1269,26 @@ fn print_report(frame: u64) {
             partial - w.partial_base,
             if poison_on() { "on" } else { "off" },
         );
+    }
+    if mirrored() {
+        let ph = |i: usize| (now.phase_writes[i] - base.phase_writes[i]) as f64 / n;
+        eprintln!(
+            "DIAG private writes to member pages per frame (first write of a page): after the GPU was done or before the \
+             next flush {:.1}, between the flush and the commit {:.1}, after the commit before the GPU was done {:.1}; \
+             staged a second time (privlatestage) {:.1}",
+            ph(0),
+            ph(1),
+            ph(2),
+            w.late_staged as f64 / n,
+        );
+        let tops = pages.take_top_between_pcs(TOP);
+        if !tops.is_empty() {
+            let line: Vec<String> = tops
+                .iter()
+                .map(|&(pc, c)| format!("{} {:.1}", nxkit_metal::name_pc(pc), c as f64 / n))
+                .collect();
+            eprintln!("DIAG private top program counters, write between flush and commit (per frame): {}", line.join(", "));
+        }
     }
     for (kind, label) in [
         (FaultKind::WriteInFlight, "write in flight"),

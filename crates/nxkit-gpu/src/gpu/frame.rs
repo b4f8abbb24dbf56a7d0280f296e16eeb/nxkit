@@ -653,6 +653,19 @@ impl Gpu {
         stats.encode_ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
         hitch_diag(&stats, detail.draws.len());
 
+        // `privlatestage`: the pages the CPU wrote since the flush are copied into the mirror again, at the end of the first
+        // command buffer, which runs before the others.
+        if let Some(o) = pools.overlay() {
+            let jobs = crate::private::late_stage(o);
+            if !jobs.is_empty() {
+                let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0).ok().and_then(|t| {
+                    crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs).ok()
+                });
+                if ok.is_none() {
+                    stats.skip(Skip::Encode);
+                }
+            }
+        }
         // ICBs and argument buffers made during the encode join the residency set before the commit.
         let t_commit = Instant::now();
         self.ctx.commit_residency();

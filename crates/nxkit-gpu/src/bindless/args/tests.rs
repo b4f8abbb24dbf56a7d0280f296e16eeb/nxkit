@@ -318,7 +318,7 @@ fn a_renamed_range_reads_its_copy_whatever_the_binding_says() {
 #[test]
 fn the_identity_backing_gives_the_address_back() {
     let pools = PoolSnapshot::whole(GUEST, LEN, Shifted(GUEST));
-    assert_eq!(locate(&pools, GUEST + 0x123, 8), Some((GUEST + 0x123, 8)));
+    assert_eq!(locate(&pools, GUEST + 0x123, 8, 0), Some((GUEST + 0x123, 8)));
 }
 
 /// A sink that keeps what it gets.

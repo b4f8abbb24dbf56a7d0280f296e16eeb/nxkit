@@ -39,6 +39,23 @@ pub(crate) fn diag_dir() -> &'static PathBuf {
 /// The knobs, by name. Each one changes what the encoder does, for experiments while debugging a game. They are not
 /// meant to render correctly.
 const KNOBS: &[&str] = &[
+    // With `NXKIT_PRIVATE=1`, a class of resolves binds guest memory instead of the mirror for the frame (the pages stay
+    // members), and while any of them is on every page a frame wrote is copied back into guest memory when the frame
+    // completes, so that guest memory is current and the knob isolates the class. `privnoubo`: uniform buffers.
+    "privnoubo",
+    // Storage buffers.
+    "privnosbuf",
+    // Vertex streams, indices, indirect arguments and the pull layout.
+    "privnostream",
+    // Texture upload sources and texture and buffer copies.
+    "privnoupload",
+    // The table of raw global memory.
+    "privnogmem",
+    // Buffer copies and fills.
+    "privnocopy",
+    // With `NXKIT_PRIVATE=1`, the pages that the CPU wrote between the flush of a frame and the commit of its first
+    // command buffer are staged again and copied into the mirror at the end of that buffer.
+    "privlatestage",
     // With `NXKIT_PRIVATE=1`, the guest bytes of the pages that a frame writes are overwritten with a quiet NaN pattern
     // when the pages are handed to the GPU, so a GPU path that still reads guest memory instead of the mirror shows. The
     // CPU's own reads go through the copy from the mirror and are not affected.

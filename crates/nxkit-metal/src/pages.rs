@@ -34,7 +34,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::{c_int, c_void};
-use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
 
 const PROT_NONE: c_int = 0;
@@ -207,6 +207,12 @@ struct Shared {
     mirror: AtomicU64,
     /// Bumped, and woken on, at each completion and each finished copy.
     wake: AtomicU32,
+    /// Where the newest frame is: 0 done (or no frame yet), 1 flushed and not committed, 2 committed and running. Writes
+    /// that dirty a page are counted by it.
+    phase: AtomicU32,
+    phase_writes: [AtomicU64; 3],
+    /// With a mirror: copy every page of a completed frame back into guest memory at once (a bisecting aid).
+    eager: AtomicBool,
     /// Pages copied from the mirror into guest memory.
     synced: AtomicU64,
     /// Waits for a writer that was still running, and their time.
@@ -220,7 +226,7 @@ struct Shared {
     member_bits: AtomicPtr<AtomicU64>,
     member_gen: AtomicU64,
     /// Program counters by [`FaultKind`] 0 to 2: the counter and how often it faulted.
-    pcs: [[(AtomicU64, AtomicU64); PC_SLOTS]; 3],
+    pcs: [[(AtomicU64, AtomicU64); PC_SLOTS]; 4],
     pc_overflow: AtomicU64,
 }
 
@@ -268,6 +274,9 @@ static SHARED: Shared = Shared {
     last_signal: AtomicU64::new(0),
     mirror: AtomicU64::new(0),
     wake: AtomicU32::new(0),
+    phase: AtomicU32::new(0),
+    phase_writes: [const { AtomicU64::new(0) }; 3],
+    eager: AtomicBool::new(false),
     synced: AtomicU64::new(0),
     writer_waits: AtomicU64::new(0),
     writer_wait_ns: AtomicU64::new(0),
@@ -275,7 +284,7 @@ static SHARED: Shared = Shared {
     wait_timeouts: AtomicU64::new(0),
     member_bits: AtomicPtr::new(std::ptr::null_mut()),
     member_gen: AtomicU64::new(0),
-    pcs: [PC_TABLE; 3],
+    pcs: [PC_TABLE; 4],
     pc_overflow: AtomicU64::new(0),
 };
 
@@ -413,7 +422,15 @@ impl Drop for InternalThread {
 
 fn count_pc(kind: FaultKind, pc: u64) {
     let k = kind as usize;
-    if k > 2 || pc == 0 {
+    if k > 2 {
+        return;
+    }
+    count_pc_in(k, pc);
+}
+
+/// Counts `pc` in table `k` (0 to 2 by fault kind, 3 for writes between a flush and the commit of its frame).
+fn count_pc_in(k: usize, pc: u64) {
+    if pc == 0 {
         return;
     }
     let table = &SHARED.pcs[k];
@@ -680,6 +697,13 @@ fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool) {
         if !internal {
             count_pc(kind, pc);
         }
+        if write && matches!(kind, FaultKind::CleanWrite | FaultKind::WriteInFlight) {
+            let ph = SHARED.phase.load(Ordering::Acquire).min(2) as usize;
+            SHARED.phase_writes[ph].fetch_add(1, Ordering::Relaxed);
+            if ph == 1 && !internal {
+                count_pc_in(3, pc);
+            }
+        }
         return;
     }
     let p = pg as u32;
@@ -850,6 +874,9 @@ pub struct PageStats {
     pub internal_opens: u64,
     /// Waits that ended at the timeout, with the page copied anyway.
     pub wait_timeouts: u64,
+    /// Writes to member pages (first write of a page) by where the newest frame was: after its GPU work or before the
+    /// next flush, between its flush and its commit, after its commit and before the GPU is done.
+    pub phase_writes: [u64; 3],
 }
 
 /// What one flush did.
@@ -1081,6 +1108,17 @@ impl Pages {
         SHARED.mirror.store(host_base, Ordering::Release);
     }
 
+    /// Tells where the newest frame is: 0 done, 1 flushed and not committed, 2 committed and running.
+    pub fn set_phase(&self, phase: u32) {
+        SHARED.phase.store(phase, Ordering::Release);
+    }
+
+    /// With a mirror, copies every page of a frame back into guest memory when the frame completes (it makes guest memory
+    /// fresh, for bisecting a defect with the knobs that bind guest memory instead of the mirror).
+    pub fn set_eager_sync(&self, on: bool) {
+        SHARED.eager.store(on, Ordering::Release);
+    }
+
     /// The newest frame whose completion was reported.
     pub fn completed(&self) -> u64 {
         SHARED.completed.load(Ordering::Acquire) & FRAME_MASK
@@ -1227,8 +1265,21 @@ impl Pages {
                 }
                 due
             };
+            let eager = SHARED.eager.load(Ordering::Acquire);
+            let mirror = SHARED.mirror.load(Ordering::Acquire);
             for (f, runs) in due {
                 close_opened(f, &runs);
+                if eager {
+                    for &(first, end) in &runs {
+                        for pg in first..end {
+                            let Some(w) = word(pg as usize) else { continue };
+                            let cur = w.load(Ordering::Acquire);
+                            if cur & STATE_MASK == GPU && u64::from(cur >> FRAME_SHIFT) == f & FRAME_MASK {
+                                serve_mirrored(pg as usize, w, false, true, mirror);
+                            }
+                        }
+                    }
+                }
             }
             wake_all();
             return;
@@ -1246,6 +1297,55 @@ impl Pages {
         for (f, runs) in due {
             release_runs(f, &runs);
         }
+    }
+
+    /// The late staging of `NXKIT_PRIVATE=1` with the knob `privlatestage`: the pages that the CPU wrote since the flush of
+    /// the frame go back to read only and `stager` takes their bytes again. Returns the pages.
+    pub fn flush_late(&self, stager: &mut dyn Stager) -> Vec<u32> {
+        if !self.attached() || SHARED.mirror.load(Ordering::Acquire) == 0 {
+            return Vec::new();
+        }
+        let _c = ctrl();
+        let p = page();
+        let base = SHARED.base.load(Ordering::Acquire);
+        let n = SHARED.log_n.swap(0, Ordering::AcqRel).min(LOG_CAP);
+        let mut dirty: Vec<u32> = Vec::new();
+        for slot in &SHARED.log[..n] {
+            let mut spins = 0;
+            let v = loop {
+                let v = slot.swap(0, Ordering::AcqRel);
+                if v != 0 || spins > 10_000 {
+                    break v;
+                }
+                spins += 1;
+                std::hint::spin_loop();
+            };
+            if v != 0 {
+                dirty.push(v - 1);
+            }
+        }
+        dirty.sort_unstable();
+        dirty.dedup();
+        let mut back: Vec<u32> = Vec::new();
+        for pg in dirty {
+            if word(pg as usize)
+                .is_some_and(|w| w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok())
+            {
+                back.push(pg);
+            }
+        }
+        stager.begin(back.len());
+        for (s, e) in runs_of(&back) {
+            protect_pages(s, e, PROT_READ, true);
+            for pg in s..e {
+                // SAFETY: the page lies in guest memory and is readable since the protection above.
+                let bytes = unsafe {
+                    std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
+                };
+                stager.stage(pg, bytes);
+            }
+        }
+        back
     }
 
     /// The host reads or writes the range through a system call, and there is a mirror: the pages in the range that
@@ -1571,6 +1671,11 @@ impl Pages {
             writer_wait_ns: g(&SHARED.writer_wait_ns),
             internal_opens: g(&SHARED.internal_opens),
             wait_timeouts: g(&SHARED.wait_timeouts),
+            phase_writes: [
+                g(&SHARED.phase_writes[0]),
+                g(&SHARED.phase_writes[1]),
+                g(&SHARED.phase_writes[2]),
+            ],
         }
     }
 
@@ -1581,6 +1686,16 @@ impl Pages {
         if k > 2 {
             return Vec::new();
         }
+        self.take_top(k, n)
+    }
+
+    /// The `n` program counters that wrote member pages between a flush and the commit of its frame, most first. The table
+    /// is emptied.
+    pub fn take_top_between_pcs(&self, n: usize) -> Vec<(u64, u64)> {
+        self.take_top(3, n)
+    }
+
+    fn take_top(&self, k: usize, n: usize) -> Vec<(u64, u64)> {
         let mut v: Vec<(u64, u64)> = Vec::new();
         for (key, c) in &SHARED.pcs[k] {
             let pc = key.load(Ordering::Relaxed);
@@ -2073,6 +2188,32 @@ mod tests {
         assert_eq!(r.unwrap(), 16);
         assert_eq!(first, 0x5a);
         nxkit_abi::guest::set_range(0, 0);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn eager_sync_copies_the_pages_back_when_the_frame_completes_and_writes_are_counted_by_phase() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(4);
+        let mut st = Collect::default();
+        // A member page that the CPU writes while the frame is flushed and not committed (phase 1).
+        let _ = pg.flush_mirrored(1, &[(m.addr(2), 1)], &[(m.addr(1), 1)], None, &mut st);
+        pg.set_phase(1);
+        let s0 = pg.stats();
+        m.store(2, 0, 4);
+        let s1 = pg.stats();
+        assert_eq!(s1.phase_writes[1] - s0.phase_writes[1], 1);
+        // The late staging takes the page again.
+        let late = pg.flush_late(&mut st);
+        assert_eq!(late, vec![2]);
+        assert_eq!(pg.state_of(m.addr(2)), "clean");
+        pg.set_eager_sync(true);
+        mir.store(1, 0, 9);
+        pg.complete(1);
+        assert_eq!(pg.state_of(m.addr(1)), "clean", "copied back without a CPU access");
+        assert_eq!(m.load(1, 0), 9);
+        pg.set_eager_sync(false);
+        pg.set_phase(0);
         pg.set_mirror(0);
     }
 

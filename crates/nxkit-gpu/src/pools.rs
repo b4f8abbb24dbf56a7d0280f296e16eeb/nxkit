@@ -375,6 +375,22 @@ impl<B: Backing> PoolSnapshot<B> {
         Ok(loc)
     }
 
+    /// [`resolve_start`](Self::resolve_start) for a resolve class that a knob may bind to guest memory.
+    pub(crate) fn resolve_start_c(&self, va: u64, class: u8) -> Result<Loc, Miss> {
+        if self.overlay.as_ref().is_some_and(|o| o.off(class)) {
+            return self.resolve_start_guest(va);
+        }
+        self.resolve_start(va)
+    }
+
+    /// [`resolve`](Self::resolve) for a resolve class that a knob may bind to guest memory.
+    pub(crate) fn resolve_c(&self, va: u64, len: u64, class: u8) -> Result<Loc, Miss> {
+        if self.overlay.as_ref().is_some_and(|o| o.off(class)) {
+            return self.resolve_guest(va, len);
+        }
+        self.resolve(va, len)
+    }
+
     /// Like [`resolve`](Self::resolve) but always in guest memory, for the table of raw global memory, which splits the
     /// pools at the member runs itself.
     pub fn resolve_guest(&self, va: u64, len: u64) -> Result<Loc, Miss> {

@@ -406,6 +406,18 @@ added, the waits for a writer (count, milliseconds per frame, timeouts), the acc
 flush, the partial resolves and whether the poison is on. The fault lines of step 1 follow, with the faults that copied a page
 counted as other.
 
+**Bisecting knobs.** `privnoubo`, `privnosbuf`, `privnostream`, `privnoupload`, `privnogmem` and `privnocopy` (read every frame)
+bind one class of resolves to guest memory instead of the mirror (the overlay holds a class mask; `PoolSnapshot::resolve_c` and
+`resolve_start_c` honour it). Guest memory is stale for the pages a frame wrote, so while any of them is on the tracker copies
+every page of a completed frame back into guest memory at the batch completion (`Pages::set_eager_sync`), which makes guest
+memory current and the knob isolate "mirror against guest" for that class. A page that the GPU did not write already equals the
+mirror in the honest-wait mode, so a defect that stays with the knob on is not in that class. `privlatestage` stages the pages
+the CPU wrote between the flush and the commit of the first command buffer a second time (`Pages::flush_late`) and copies them
+in at the end of that buffer, to test whether CPU writes after the flush are the defect. The write counters of the report split
+the first write of each member page by where the newest frame is (done or before the next flush, between flush and commit,
+after commit and before done; "before the flush" and "after done" cannot be told apart for a game that waits) and list the top
+program counters of the middle class.
+
 **What step 2 does not cover.**
 
 - The texture copy-back (`copyback.rs`) and the native replacements (`native`, the ANE offload) still use guest memory; a member

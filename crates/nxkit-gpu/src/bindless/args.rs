@@ -148,8 +148,13 @@ struct UboWord {
 
 /// The real address of a guest range and its size cut to the room of its pool. A range in no pool is counted and
 /// gives `None`, so the caller binds the zero buffer as for an unbound slot.
-fn locate<B: Backing>(pools: &PoolSnapshot<B>, guest: u64, size: u32) -> Option<(u64, u32)> {
-    match pools.resolve_start(guest) {
+fn locate<B: Backing>(
+    pools: &PoolSnapshot<B>,
+    guest: u64,
+    size: u32,
+    class: u8,
+) -> Option<(u64, u32)> {
+    match pools.resolve_start_c(guest, class) {
         Ok(loc) => Some((
             loc.real,
             size.min(u32::try_from(loc.room).unwrap_or(u32::MAX)),
@@ -183,7 +188,7 @@ fn ubo_words<B: Backing>(
                 guest: u.address,
                 size: u.size,
             },
-            None => match locate(pools, u.address, u.size) {
+            None => match locate(pools, u.address, u.size, crate::overlay::UBO) {
                 Some((real, size)) => UboWord {
                     slot: u.slot,
                     word: real,
@@ -223,7 +228,7 @@ fn sbuf_word<B: Backing>(
     }
     match &s.snapshot {
         Some(bytes) if !rw => put(bytes),
-        _ => Ok(locate(pools, s.address, s.size).map_or(zero, |(real, _)| real)),
+        _ => Ok(locate(pools, s.address, s.size, crate::overlay::SBUF).map_or(zero, |(real, _)| real)),
     }
 }
 

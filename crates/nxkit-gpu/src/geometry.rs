@@ -33,7 +33,7 @@ pub(crate) fn stream_loc<B: Backing>(
     pools: &PoolSnapshot<B>,
     s: &StreamDetail,
 ) -> Result<Loc, Skip> {
-    pools.resolve_start(s.address).map_err(|m| {
+    pools.resolve_start_c(s.address, crate::overlay::STREAM).map_err(|m| {
         crate::buf_skip(format_args!(
             "stream {} addr {:#x} size {:#x}: {}",
             s.index,
@@ -51,7 +51,7 @@ pub(crate) fn index_loc<B: Backing>(
     count: u32,
     width: u64,
 ) -> Result<Loc, Skip> {
-    pools.resolve(addr, u64::from(count) * width).map_err(|m| {
+    pools.resolve_c(addr, u64::from(count) * width, crate::overlay::STREAM).map_err(|m| {
         crate::buf_skip(format_args!(
             "index addr {addr:#x} count {count}: {}",
             why(m)
@@ -69,7 +69,7 @@ pub(crate) fn word_loc<B: Backing>(
     if !addr.is_multiple_of(4) {
         return Err("not 4 byte aligned".into());
     }
-    let loc = pools.resolve(addr, bytes).map_err(why)?;
+    let loc = pools.resolve_c(addr, bytes, crate::overlay::STREAM).map_err(why)?;
     if !loc.real.is_multiple_of(4) {
         return Err(format!("real address {:#x} not 4 byte aligned", loc.real));
     }
@@ -96,7 +96,7 @@ pub(crate) fn index_room<B: Backing>(
     addr: u64,
 ) -> Result<(Loc, u64), Skip> {
     let loc = pools
-        .resolve_start(addr)
+        .resolve_start_c(addr, crate::overlay::STREAM)
         .map_err(|m| crate::buf_skip(format_args!("index addr {addr:#x}: {}", why(m))))?;
     Ok((loc, loc.room.min(u64::from(u32::MAX))))
 }

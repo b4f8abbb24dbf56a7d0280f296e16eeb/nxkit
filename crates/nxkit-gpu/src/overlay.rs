@@ -27,6 +27,19 @@ pub(crate) fn partial() -> u64 {
     PARTIAL.load(Ordering::Relaxed)
 }
 
+/// Resolve classes for the bisecting knobs `privnoubo` and the others: a class that is off resolves to guest memory.
+pub(crate) const UBO: u8 = 1;
+/// Storage buffer bindings.
+pub(crate) const SBUF: u8 = 2;
+/// Vertex streams, indices, indirect arguments and the pull layout.
+pub(crate) const STREAM: u8 = 4;
+/// Texture upload sources and texture and buffer copies.
+pub(crate) const UPLOAD: u8 = 8;
+/// The table of raw global memory.
+pub(crate) const GMEM: u8 = 16;
+/// Buffer copies and fills.
+pub(crate) const COPY: u8 = 32;
+
 /// A run of the mirror: the guest GPU addresses it covers and the buffer over it.
 pub struct Run<B> {
     /// The guest address of the first byte.
@@ -65,6 +78,8 @@ pub struct Overlay<B: Backing> {
     staged: Option<Staged>,
     /// Changes when the members or the runs do.
     generation: u64,
+    /// The resolve classes that use guest memory in this frame (the `privno*` knobs).
+    off: u8,
 }
 
 impl<B: Backing> Overlay<B> {
@@ -84,7 +99,20 @@ impl<B: Backing> Overlay<B> {
             mirror,
             staged,
             generation,
+            off: 0,
         }
+    }
+
+    /// The same view with the resolve classes in `off` bound to guest memory.
+    #[must_use]
+    pub fn with_off(mut self, off: u8) -> Self {
+        self.off = off;
+        self
+    }
+
+    /// True when `class` binds guest memory in this frame.
+    pub fn off(&self, class: u8) -> bool {
+        self.off & class != 0
     }
 
     /// Changes when the members or the runs do.

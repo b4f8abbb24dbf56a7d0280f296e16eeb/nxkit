@@ -91,7 +91,9 @@ pub(crate) fn locate<B: Backing>(
     address: u64,
     len: u64,
 ) -> Result<(&B, u64), Skip> {
-    let loc = pools.resolve(address, len).map_err(|_| Skip::Buffer)?;
+    let loc = pools
+        .resolve_c(address, len, crate::overlay::UPLOAD)
+        .map_err(|_| Skip::Buffer)?;
     if loc.run != crate::pools::NO_RUN {
         // A member range lies in the mirror: the buffer of its run, and the offset in it.
         let run = pools

@@ -151,7 +151,7 @@ impl Job {
 /// The real address of `bytes` at the guest address `addr`, or why they do not lie whole in one pool.
 fn real<B: Backing>(pools: &PoolSnapshot<B>, addr: u64, bytes: u64) -> Result<u64, String> {
     pools
-        .resolve(addr, bytes)
+        .resolve_c(addr, bytes, crate::overlay::COPY)
         .map(|l| l.real)
         .map_err(|m| format!("{addr:#x} + {bytes:#x}: {m:?}"))
 }
