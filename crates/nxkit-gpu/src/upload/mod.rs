@@ -107,6 +107,28 @@ fn guest_offset<'p, B: Backing>(
     locate(pools, rec.address.get(), rec.layout.size)
 }
 
+/// `NXKIT_DIAG=tiny`: the guest bytes of a texture of at most 256 bytes, as the upload reads them.
+fn tiny_upload(rec: &TextureRecord, res: &Res, guest: &Arc<GuestMemory>, base: u64) {
+    let size = rec.layout.size;
+    if size == 0 || size > crate::diag::TINY_MAX || !crate::diag::tiny_line() {
+        return;
+    }
+    let mut buf = vec![0u8; size as usize];
+    if guest.read(base, &mut buf).is_err() {
+        return;
+    }
+    let d = res.desc;
+    eprintln!(
+        "DIAG tiny upload {:?} {:?} {}x{} at 0x{:x} {}",
+        rec.id,
+        d.format,
+        d.width,
+        d.height,
+        rec.address.get(),
+        crate::diag::tiny_words(&buf)
+    );
+}
+
 fn extent(d: &TextureDesc, level: u32) -> [u32; 3] {
     d.level_extent(level)
 }
@@ -217,6 +239,7 @@ impl Transfer {
         let surf = surface(rec, res, self.order)?;
         let (guest, base) = guest_offset(rec, pools)?;
         let d = res.desc;
+        tiny_upload(rec, res, guest, base);
         let buffered = buffered::via_buffer(d.format);
         let mut pass = cb
             .begin_compute_pass(self.deswizzler.table())
@@ -330,6 +353,7 @@ impl Transfer {
     ) -> Result<(), Skip> {
         let d = res.desc;
         let (guest, base) = guest_offset(rec, pools)?;
+        tiny_upload(rec, res, guest, base);
         let mut pass = cb
             .begin_compute_pass(self.deswizzler.table())
             .map_err(|_| Skip::Transfer)?;

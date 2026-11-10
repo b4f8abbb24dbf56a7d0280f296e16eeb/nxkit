@@ -572,6 +572,10 @@ impl Gpu {
                 written: self.gmem.learned_range_of(a),
             });
         }
+        if crate::diag("tiny") && crate::diag::sampled() {
+            let _ = self.wait();
+            self.tiny_frame_end(view, &textures, &mirrored);
+        }
         crate::health::frame(diag_frame, &stats);
         Ok(EncodeReport {
             batch: number,
@@ -582,5 +586,54 @@ impl Gpu {
             stats,
             queries,
         })
+    }
+}
+
+impl Gpu {
+    /// `NXKIT_DIAG=tiny` at the end of a sampled frame, after the GPU finished: the guest bytes of the tiny textures
+    /// that were copied back, and the ranges of `NXKIT_DIAG_WATCH`.
+    fn tiny_frame_end(
+        &self,
+        view: &dyn EncodeView,
+        textures: &FastMap<TexId, Res>,
+        mirrored: &[TexId],
+    ) {
+        let base = self.guest.address_map().gpu_base();
+        let read = |addr: u64, len: usize| {
+            let mut buf = vec![0u8; len];
+            self.guest
+                .read(addr.wrapping_sub(base), &mut buf)
+                .ok()
+                .map(|()| buf)
+        };
+        for id in mirrored {
+            let (Some(res), Ok(rec)) = (textures.get(id), view.record(*id)) else {
+                continue;
+            };
+            if rec.layout.size == 0
+                || rec.layout.size > crate::diag::TINY_MAX
+                || !crate::diag::tiny_line()
+            {
+                continue;
+            }
+            if let Some(buf) = read(rec.address.get(), rec.layout.size as usize) {
+                eprintln!(
+                    "DIAG tiny copyback {id:?} {:?} {}x{} at 0x{:x} {}",
+                    res.desc.format,
+                    res.desc.width,
+                    res.desc.height,
+                    rec.address.get(),
+                    crate::diag::tiny_words(&buf)
+                );
+            }
+        }
+        for &(addr, len) in crate::diag::watch_ranges() {
+            if let Some(buf) = read(addr, len) {
+                eprintln!(
+                    "DIAG tiny watch 0x{addr:x} {}",
+                    crate::diag::tiny_words(&buf)
+                );
+            }
+        }
     }
 }

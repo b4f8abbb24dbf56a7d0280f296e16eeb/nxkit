@@ -460,3 +460,50 @@ mod tests {
         );
     }
 }
+
+/// The largest texture (in bytes) that `NXKIT_DIAG=tiny` prints.
+pub(crate) const TINY_MAX: u64 = 256;
+
+/// True for the first 400 `tiny` lines of the run, then only on sampled frames.
+pub(crate) fn tiny_line() -> bool {
+    static N: AtomicU32 = AtomicU32::new(0);
+    diag("tiny") && (N.fetch_add(1, Ordering::Relaxed) < 400 || sampled())
+}
+
+/// The bytes as little-endian floats and as hex words, `f32 [..] hex [..]`. A tail below 4 bytes is left out.
+pub(crate) fn tiny_words(bytes: &[u8]) -> String {
+    let words: Vec<u32> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
+        .collect();
+    let f: Vec<String> = words
+        .iter()
+        .map(|w| format!("{}", f32::from_bits(*w)))
+        .collect();
+    let h: Vec<String> = words.iter().map(|w| format!("{w:08x}")).collect();
+    format!("f32 [{}] hex [{}]", f.join(", "), h.join(" "))
+}
+
+/// The ranges `(address, len)` of `NXKIT_DIAG_WATCH=0xADDR:LEN,..` (len at most 512).
+pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
+    static R: OnceLock<Vec<(u64, usize)>> = OnceLock::new();
+    R.get_or_init(|| {
+        let Ok(v) = std::env::var("NXKIT_DIAG_WATCH") else {
+            return Vec::new();
+        };
+        v.split(',')
+            .filter_map(|s| {
+                let (a, l) = s.trim().split_once(':')?;
+                let a = u64::from_str_radix(a.trim().trim_start_matches("0x"), 16).ok()?;
+                let l = l.trim();
+                let l = match l.strip_prefix("0x") {
+                    Some(h) => usize::from_str_radix(h, 16).ok()?,
+                    None => l.parse().ok()?,
+                };
+                Some((a, l.min(512)))
+            })
+            .collect()
+    })
+}

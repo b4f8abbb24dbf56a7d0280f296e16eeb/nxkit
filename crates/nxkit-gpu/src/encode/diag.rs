@@ -75,7 +75,7 @@ pub(super) fn ubo_diag(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
 }
 
 /// `DIAG ubodump` for a draw of a listed fragment program: once per frame for each program and storage buffer slot
-/// (and stage), the words 16 to 31 and the count of non-finite words of the storage buffers of the draw, from the
+/// (and stage; with the knob `ubodumpall` every draw, by program set, without the words, 600 lines), the words 16 to 31 and the count of non-finite words of the storage buffers of the draw, from the
 /// snapshot of the walk (what the shader reads) and from guest memory now. At most 64 lines per frame.
 pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDetail) {
     use std::sync::atomic::AtomicU64;
@@ -83,12 +83,25 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
     type Seen = (u64, Vec<(String, u8, u32)>);
     static SEEN: std::sync::Mutex<Seen> =
         std::sync::Mutex::new((0, Vec::new()));
-    let Some(key) = d.program.fragment.as_deref() else {
-        return;
-    };
-    if !crate::diag::fs_programs().iter().any(|k| k == key) {
+    let all = crate::knob("ubodumpall");
+    let fs = d.program.fragment.as_deref();
+    let listed = fs.is_some_and(|k| crate::diag::fs_programs().iter().any(|l| l == k));
+    if !all && !listed {
         return;
     }
+    let max = if all { 600 } else { 64 };
+    let key: String = if all {
+        format!(
+            "{}/{}/{}/{}",
+            d.program.vertex,
+            fs.unwrap_or("-"),
+            d.program.task.as_deref().unwrap_or("-"),
+            d.program.mesh.as_deref().unwrap_or("-")
+        )
+    } else {
+        fs.unwrap_or_default().to_owned()
+    };
+    let key = key.as_str();
     let pass = DIAG_PASS.with(std::cell::Cell::get);
     for s in &d.sbufs {
         let stage = match s.stage {
@@ -113,8 +126,18 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
             }
             seen.1.push(id);
         }
-        if !crate::diag::sample_budget(&BUDGET, 64) {
+        if !crate::diag::sample_budget(&BUDGET, max) {
             return;
+        }
+        if all {
+            eprintln!(
+                "DIAG ubodump pass {pass} draw {n} program {key} stage {stage} sbuf {} addr {:#x} size {} snapshot {}",
+                s.slot,
+                s.address,
+                s.size,
+                if s.snapshot.is_some() { "yes" } else { "no" }
+            );
+            continue;
         }
         let count = (s.size as usize / 4).min(4096);
         let live: Option<Vec<u32>> = sh
