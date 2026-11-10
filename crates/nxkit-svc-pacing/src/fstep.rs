@@ -12,7 +12,10 @@
 //! A probe is a trial back to the shortest hold that the cost does not justify. It starts while the caller reports that
 //! the CPU runs slow for a reason other than heat, or when the cost at the longer hold is the cost that held the shorter
 //! one. The first frames of a probe may be late without failing it, because the clock of the processor needs time to rise
-//! for the shorter deadline.
+//! for the shorter deadline. A probe that failed makes the next slowed or same-scene probe wait twice as long (at most 60 s)
+//! and records the cost at the longer hold and the cost at `kmin`. The cost at the longer hold can stay up when the scene gets lighter,
+//! because the GPU lowers its clock, so the record only lets a probe start early: when the cost at the longer hold has
+//! fallen by the share that the probe missed its hold. The record and the wait end when `kmin` holds or `kmin` changes.
 //!
 //! The logic is ported from `dm/gfx/nvn/nvn_fstep.h` (`nvn_fstep_next`, `nvn_fstep_gpu_slowed`) at the head of
 //! pull request 76, read on 2026-11-07. The thresholds are own and come from measurements on its devices
@@ -36,6 +39,8 @@ pub const FSTEP_HOLD_MAX: f64 = 480.0;
 /// The longest wait before a trial when only the work judges a frame ([`FrameStep::work`], 2 s): after a few failed
 /// trials the frame rate stayed down for seconds although the frames fitted again, and the GPU clock fell further.
 pub const FSTEP_HOLD_MAX_WORK: f64 = 120.0;
+/// The longest wait between two probes that fail in a row (60 s).
+pub const FSTEP_RETRY_MAX: f64 = 3600.0;
 /// With [`FrameStep::work`]: a frame whose work took this many vsyncs more than `k` is a hitch (a load, a stall), not a
 /// sign that the work does not fit. Its time is paid back as debt, and it does not count toward a step up.
 pub const FSTEP_HITCH: f64 = 3.0;
@@ -112,6 +117,20 @@ pub struct FrameStep {
     pb: f64,
     plate: i32,
     ptotal: i32,
+    // The cost of the frames of the probe in progress (a ring), and the cost at the longer hold and that hold when the
+    // probe started. 0.0 is not known.
+    plast: [f64; 16],
+    pcount: usize,
+    plong: f64,
+    plong_k: i32,
+    /// 0.0 is no cost on record. Otherwise the cost at the longer hold `retry_k` at or below which a probe may start
+    /// before its wait is over.
+    pub retry_below: f64,
+    /// The hold that `retry_below` belongs to.
+    pub retry_k: i32,
+    /// The vsyncs since the last step up that a slowed or same-scene probe waits while a probe has failed. It doubles with
+    /// each failed probe, up to [`FSTEP_RETRY_MAX`]. 0.0 is no wait.
+    pub retry_hold: f64,
     /// Vsyncs that a trial waits after a step up.
     pub hold: f64,
     /// Vsyncs since the last step up.
@@ -166,7 +185,30 @@ impl FrameStep {
         self.cref > 0.0 && self.cn >= FSTEP_RUN && self.ccur <= FSTEP_SAME * self.cref
     }
 
+    /// Whether a slowed or same-scene probe may start: no probe failed in this scene, or the wait after the failure is
+    /// over, or the cost at the longer hold shows a lighter scene. The cost at the longer hold can stay up when the
+    /// scene gets lighter (the GPU lowers its clock), so a failed probe delays the next one and never forbids it.
+    pub fn may_probe(&self) -> bool {
+        self.retry_hold == 0.0
+            || self.since >= self.retry_hold
+            || (self.retry_below > 0.0
+                && self.ck <= self.retry_k
+                && self.cn >= FSTEP_RUN
+                && self.ccur <= self.retry_below)
+    }
+
+    /// The median cost of the last frames of the probe in progress.
+    fn probe_cost(&self) -> f64 {
+        let n = self.pcount.min(16);
+        let mut v = self.plast;
+        v[..n].sort_by(f64::total_cmp);
+        v[n / 2]
+    }
+
     fn start_probe(&mut self, kmin: i32) {
+        self.plong = if self.cn >= FSTEP_RUN { self.ccur } else { 0.0 };
+        self.plong_k = self.ck;
+        self.pcount = 0;
         self.k = kmin;
         self.probes += 1;
         self.trial = FSTEP_RUN;
@@ -205,6 +247,8 @@ impl FrameStep {
             self.probe = 0;
             self.grace = 0;
             self.run = 0.0;
+            self.retry_below = 0.0;
+            self.retry_hold = 0.0;
             self.kmin = FSTEP_MAX + 1;
             return self.step;
         }
@@ -229,6 +273,10 @@ impl FrameStep {
         }
         self.since += input.shown;
         let cap_probe = kmin < self.kmin && self.kmin <= FSTEP_MAX && self.k > kmin;
+        if kmin != self.kmin {
+            self.retry_below = 0.0;
+            self.retry_hold = 0.0;
+        }
         if cap_probe {
             self.start_probe(kmin);
         } else if kmin < self.kmin || self.k < kmin {
@@ -280,6 +328,10 @@ impl FrameStep {
                 self.pb = 0.0;
                 self.plate = 0;
             }
+        }
+        if self.probe == 1 && !cap_probe {
+            self.plast[self.pcount % 16] = input.cost;
+            self.pcount += 1;
         }
         if late {
             self.late += 1;
@@ -339,6 +391,19 @@ impl FrameStep {
                 .min(kmax);
             if self.trial > 0 || (self.probe == 2 && self.since < hold_max) {
                 self.failed += 1;
+                if self.probe == 1 {
+                    self.retry_hold = if self.retry_hold == 0.0 {
+                        2.0 * hold_max
+                    } else {
+                        2.0 * self.retry_hold
+                    }
+                    .min(FSTEP_RETRY_MAX * pv);
+                }
+                if self.probe == 1 && self.plong > 0.0 && self.pcount > 0 {
+                    let at = self.probe_cost();
+                    self.retry_below = self.plong * (f64::from(kmin) / at).min(1.0);
+                    self.retry_k = self.plong_k;
+                }
                 self.trial = 0;
                 self.hold = (self.hold * 2.0).min(hold_max);
             } else if self.probe == 2 {
@@ -356,6 +421,10 @@ impl FrameStep {
         } else if self.trial > 0 && !grace {
             self.trial -= 1;
             if self.trial == 0 {
+                if self.k <= kmin {
+                    self.retry_below = 0.0;
+                    self.retry_hold = 0.0;
+                }
                 if self.probe > 0 {
                     self.probe = 2;
                     self.since = 0.0;
@@ -377,6 +446,7 @@ impl FrameStep {
             self.trial = FSTEP_RUN;
             self.fit_run = 0;
         } else if (input.slow || self.same_scene())
+            && self.may_probe()
             && self.k > kmin
             && self.since >= self.hold
             && self.trial == 0

@@ -423,7 +423,7 @@ fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
         );
         *a = [0.0; 5];
         eprintln!(
-            "nxkit-pacing: diag state fit_run {} late_run {} trial {} probe {} hold {:.0} since {:.0} late {} ups {} downs {} probes {} failed {} debt {:.2} {cfg}",
+            "nxkit-pacing: diag state fit_run {} late_run {} trial {} probe {} hold {:.0} since {:.0} late {} ups {} downs {} probes {} failed {} debt {:.2} retry {:.2}@{} wait {:.0} {cfg}",
             fs.fit_run,
             fs.late_run,
             fs.trial,
@@ -435,7 +435,10 @@ fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
             fs.downs,
             fs.probes,
             fs.failed,
-            fs.debt
+            fs.debt,
+            fs.retry_below,
+            fs.retry_k,
+            fs.retry_hold
         );
     }
 }

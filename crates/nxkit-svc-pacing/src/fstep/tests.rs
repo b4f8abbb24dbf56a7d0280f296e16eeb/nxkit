@@ -309,3 +309,146 @@ fn the_gpu_reference_is_kept_per_kmin_and_not_taken_in_a_probe() {
     assert!(slow);
     assert!(!g.slowed(0.5, 1, 4, 0));
 }
+
+/// A scene whose cost is 1.3 at hold 2, with a slow report and the profile `work` (the longest hold wait is 120). The
+/// first probe runs at the costs that `at1` gives for its frames (counted from 1) and ends when it has failed.
+fn failed_probe(at1: impl Fn(i32) -> f64) -> Sim {
+    let mut m = Sim::default();
+    m.s.work = true;
+    m.run(60, 0.5, 1, 3, 0);
+    m.run(300, 1.3, 1, 3, 0);
+    m.slow = true;
+    let (mut n, mut frames) = (0, 0);
+    while m.s.failed == 0 && n < 600 {
+        let w = if m.s.k == 1 {
+            frames += 1;
+            at1(frames)
+        } else {
+            1.3
+        };
+        m.run(1, w, 1, 3, 0);
+        n += 1;
+    }
+    assert!(m.s.failed == 1 && m.s.probes == 1 && m.s.k == 2);
+    m
+}
+
+/// Runs a heavy scene (1.4 at hold 1, 1.3 at hold 2) and returns `since` at each start of a probe.
+fn heavy_starts(m: &mut Sim, frames: usize) -> Vec<f64> {
+    let mut starts = Vec::new();
+    for _ in 0..frames {
+        let probes = m.s.probes;
+        let w = if m.s.k == 1 { 1.4 } else { 1.3 };
+        m.run(1, w, 1, 3, 0);
+        if m.s.probes != probes {
+            starts.push(m.s.since);
+        }
+    }
+    starts
+}
+
+const WAIT0: f64 = 2.0 * FSTEP_HOLD_MAX_WORK;
+
+#[test]
+fn a_failed_probe_records_the_cost_that_would_hold_kmin() {
+    let mut m = failed_probe(|_| 1.4);
+    assert!((m.s.retry_below - 1.3 / 1.4).abs() < 0.01 && m.s.retry_k == 2);
+    assert_eq!(m.s.retry_hold, WAIT0);
+    m.run(110, 1.3, 1, 3, 0);
+    assert!(m.s.probes == 1 && !m.s.may_probe());
+    m.run(15, 1.3, 1, 3, 0);
+    assert!(m.s.probes == 2 && m.s.since >= WAIT0);
+}
+
+#[test]
+fn each_failed_probe_doubles_the_wait() {
+    let mut m = failed_probe(|_| 1.4);
+    let starts = heavy_starts(&mut m, 3000);
+    assert_eq!(starts[..3], [WAIT0, 2.0 * WAIT0, 4.0 * WAIT0]);
+    assert_eq!(m.s.failed, starts.len() as u64 + 1);
+}
+
+#[test]
+fn the_wait_has_a_maximum() {
+    let mut m = failed_probe(|_| 1.4);
+    let starts = heavy_starts(&mut m, 9000);
+    assert!(starts.len() >= 6);
+    assert!(starts.iter().all(|&s| s <= FSTEP_RETRY_MAX));
+    assert!(starts[4..].iter().all(|&s| s == FSTEP_RETRY_MAX));
+    assert_eq!(m.s.retry_hold, FSTEP_RETRY_MAX);
+}
+
+#[test]
+fn a_cheaper_scene_at_the_longer_hold_starts_a_probe_before_the_wait_is_over() {
+    let mut m = failed_probe(|_| 1.4);
+    m.run(70, 0.9, 1, 3, 0);
+    assert!(m.s.probes == 2 && m.s.k == 1);
+    assert!(m.s.retry_hold > 0.0 && m.s.since < m.s.retry_hold);
+}
+
+#[test]
+fn a_lighter_scene_behind_a_lowered_clock_is_found_after_the_wait() {
+    let mut m = failed_probe(|_| 1.4);
+    for _ in 0..400 {
+        let w = if m.s.k == 1 { 0.6 } else { 1.3 };
+        m.run(1, w, 1, 3, 0);
+    }
+    assert!(m.s.probes == 2 && m.s.failed == 1 && m.s.k == 1 && m.s.retry_hold == 0.0);
+}
+
+#[test]
+fn a_probe_that_holds_ends_the_record() {
+    let mut m = failed_probe(|_| 1.4);
+    m.run(200, 0.9, 1, 3, 0);
+    assert!(m.s.k == 1 && m.s.trial == 0);
+    assert!(m.s.retry_below == 0.0 && m.s.retry_hold == 0.0);
+}
+
+#[test]
+fn a_change_of_kmin_ends_the_record() {
+    let mut m = failed_probe(|_| 1.4);
+    assert!(m.s.retry_below > 0.0 && m.s.retry_hold > 0.0);
+    m.run(1, 1.3, 2, 3, 0);
+    assert!(m.s.retry_below == 0.0 && m.s.retry_hold == 0.0);
+}
+
+#[test]
+fn a_failed_probe_without_a_cost_at_the_longer_hold_still_waits() {
+    let mut m = Sim::default();
+    m.s.work = true;
+    m.run(600, 0.86, 1, 3, 0);
+    m.run(600, 1.5, 2, 2, 0);
+    m.run(1, 1.5, 1, 3, 0);
+    assert!(m.s.probes == 1 && m.s.plong == 0.0);
+    let mut frames = 0;
+    while m.s.k == 1 && frames < 100 {
+        m.run(1, 1.3, 1, 3, 0);
+        frames += 1;
+    }
+    assert!(m.s.failed == 1 && m.s.retry_below == 0.0 && m.s.retry_hold == WAIT0);
+    assert!(!m.s.may_probe());
+    m.run(125, 1.3, 1, 3, 0);
+    assert!(m.s.may_probe());
+}
+
+#[test]
+fn a_probe_that_mostly_fit_keeps_the_cost_at_the_longer_hold() {
+    let mut m = failed_probe(|f| if f > 40 { 1.4 } else { 0.6 });
+    assert!((m.s.retry_below - 1.3).abs() < 1e-9 && m.s.retry_k == 2);
+    m.run(40, 1.3, 1, 3, 0);
+    assert!(m.s.may_probe());
+}
+
+#[test]
+fn the_probe_cost_is_the_median_of_its_frames() {
+    let mut s = FrameStep {
+        plast: [1.0; 16],
+        pcount: 16,
+        ..FrameStep::default()
+    };
+    s.plast[3] = 50.0;
+    assert_eq!(s.probe_cost(), 1.0);
+    s.plast[..3].copy_from_slice(&[1.0, 9.0, 1.2]);
+    s.pcount = 3;
+    assert_eq!(s.probe_cost(), 1.2);
+}

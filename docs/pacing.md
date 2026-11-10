@@ -66,6 +66,16 @@ The load-driven step holds a frame for a number of vsyncs of 1/60 s from the cos
 | `work` | A frame is late when its cost does not fit the hold, not when it was shown longer; the verdict of the screen is ignored too. A frame over three vsyncs past the hold is a hitch that is paid back and not counted. On a ProMotion screen the `hold` profile stepped one title from 30 to 20 fps at 0.71 vsyncs per frame (measured). |
 | `steady` | The step never leaves the cap's frame rate: no hold above the cap and no thermal cap (a movie still caps it). A frame that runs long shows late once and the game pays the time back. Lost time is dropped and not paid back: with no longer hold the debt never cleared and frames showed two vsyncs. One title fell to 30 fps for short hitches under `hold`, but under `steady` its presents fell behind and the game waited up to 400 ms for a window texture, so that title uses `work` (measured). |
 
+### A probe that failed
+
+A probe goes back to the shortest hold (`kmin`) while the CPU is slow or the cost at the longer hold is the cost that held `kmin`. In a heavy scene the cost at `kmin` stays above its deadline, so a probe fails, the next one starts after the wait, and it fails again; the player sees a disturbance every few seconds (measured: 50 probes, 50 failed, at a cost of 1.2 to 1.5 vsyncs at hold 2 and 1.25 to 1.55 at hold 1).
+
+A probe that failed in its own trial makes the next slowed or same-scene probe wait longer. The wait (`retry_hold`) is counted from the step up that ended the probe. It is twice the longest wait before a trial (4 s with `work`, 16 s otherwise) after the first failure, doubles with each probe that fails in a row, and is at most `FSTEP_RETRY_MAX` (3600 vsyncs, 60 s). A probe that held first (the scene changed, not the hold) adds nothing.
+
+The failed probe also records the cost at the longer hold, scaled by how far the median cost of its frames missed `kmin` (`retry_below` at the hold `retry_k`). When the cost at that hold falls to the record, a probe may start before the wait is over. The record can only let a probe start early. It cannot forbid one, because the cost at the longer hold does not measure the work of the scene: the GPU lowers its clock when it idles part of each frame (see "GPU time and the clock of the GPU (DVFS)"), so in a lighter scene the cost at the longer hold can stay where it was. The wait alone ends that case.
+
+The record and the wait end when a probe holds `kmin`, when `kmin` changes and when the game sets its own step. The ordinary trial after 30 frames that fit is not delayed. `NXKIT_PACE_DIAG` prints the state as `retry <cost>@<hold> wait <vsyncs>` on the `diag state` line.
+
 ## The variable step only under VRR
 
 The variable step (`StepMode::Variable`: the time between the last two shown frames) runs only when the screen is adaptive and the link has a range (see "Variable refresh (VRR)"). On a fixed screen the game keeps the load-driven step at 60. One title ran at about 10 fps on a fixed 120 Hz screen with the variable step (measured). `NXKIT_VRR=0` keeps the fixed grid on an adaptive screen.
