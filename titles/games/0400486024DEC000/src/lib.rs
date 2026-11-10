@@ -74,9 +74,11 @@ const SETTINGS: Fact<Settings> = Fact::new(
         draw_barriers_game: true,
         tex_flush_upload: true,
         tex_dirty_upload: true,
-        // Measured on nxkit: without it the main thread waited about three quarters of a frame for the GPU in
-        // nvnSyncWait and the opening movie fell to 18-30 fps; with it the opening holds 60.
-        overlap: true,
+        // Measured on nxkit: with it on, `nvnSyncWait` for the newest frame waits only for the frame before, so the
+        // game's CPU writes for frame N+1 (the storage buffers of its GPU foliage culling, which the overlap does not
+        // copy) raced with frame N on the GPU and the foliage showed large white blotches; with it off the picture is
+        // right. The cost is the opening movie, which was faster with it on (18-30 fps without).
+        overlap: false,
         // Measured on nxkit: judged by how long frames were shown, the step went to 20 fps at a cost of 0.71 vsyncs
         // (the movie player and an adaptive screen), and after a load hitch it stayed down for seconds.
         pace_profile: "work",
