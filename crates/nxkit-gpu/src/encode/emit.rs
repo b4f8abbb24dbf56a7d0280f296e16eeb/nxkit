@@ -241,6 +241,19 @@ pub(super) fn emit(
     })
 }
 
+/// True when `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE` lists a program of the draw.
+fn listed_skip(p: &crate::detail::ProgramRef) -> bool {
+    let keys = [
+        Some(&p.vertex),
+        p.fragment.as_ref(),
+        p.task.as_ref(),
+        p.mesh.as_ref(),
+    ];
+    keys.into_iter()
+        .flatten()
+        .any(|k| !k.is_empty() && crate::diag::skipped_program(k))
+}
+
 /// The most `draw` lines that `NXKIT_DIAG_FS` prints for one fragment program in a run.
 const FS_DRAW_LINES: u32 = 200;
 
@@ -308,6 +321,9 @@ pub(super) fn draw(
         return stats.skip(Skip::Detail);
     };
     static DRAW_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if crate::diag::skip_list_on() && listed_skip(&d.program) {
+        return stats.skip_draw(Some(&d.args), Skip::Listed);
+    }
     // With NXKIT_DIAG_FS, every draw of a listed fragment program prints, on every frame.
     let listed = crate::diag("draw") && listed_draw(d);
     if listed || draw_diag("draw", &DRAW_SHOWN) {

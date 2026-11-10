@@ -102,6 +102,9 @@ const KNOBS: &[&str] = &[
     "nobz",
     // With `NXKIT_DIAG=meshvis`, every frame is a sampled frame.
     "meshvisall",
+    // With `NXKIT_DIAG=nanscan`, a pass that loads its colour target counts the target before the pass too, also when
+    // `NXKIT_DIAG_FS` is empty.
+    "nanload",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
@@ -354,12 +357,33 @@ pub(crate) fn gpu_labels() -> bool {
     *ON.get_or_init(|| std::env::var("NXKIT_GPU_LABELS").is_ok_and(|v| v == "1"))
 }
 
-/// `NXKIT_SKIP_PROGRAMS=<key>,<key>`: dispatches whose compute shader has one of these keys are not run. A debugging aid
+/// Whether `NXKIT_SKIP_PROGRAMS` names a key or `NXKIT_SKIP_FILE` is set. One load of a cached value, so the check
+/// of every draw costs nothing without a list.
+pub(crate) fn skip_list_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        skip_list_set(
+            std::env::var("NXKIT_SKIP_PROGRAMS").ok().as_deref(),
+            std::env::var_os("NXKIT_SKIP_FILE").is_some(),
+        )
+    })
+}
+
+/// True when the value of `NXKIT_SKIP_PROGRAMS` holds a key or `NXKIT_SKIP_FILE` is set.
+fn skip_list_set(programs: Option<&str>, file: bool) -> bool {
+    file || programs.is_some_and(|v| !v.trim().is_empty())
+}
+
+/// `NXKIT_SKIP_PROGRAMS=<key>,<key>`: dispatches whose compute shader has one of these keys are not run, and draws whose vertex, task, mesh or fragment
+/// program has one are left out (`Skip::Listed`). A debugging aid
 /// to find which pass of a chain turns a picture black, or which pass costs the GPU time.
 ///
 /// `NXKIT_SKIP_FILE=<path>` does the same with the keys in a file (comma or line separated), read again twice a
 /// second, so one run can measure one program after the other while the game stays in the same scene.
 pub(crate) fn skipped_program(key: &str) -> bool {
+    if !skip_list_on() {
+        return false;
+    }
     use std::sync::{Mutex, OnceLock, PoisonError};
     use std::time::{Duration, Instant};
     fn parse(v: &str) -> Vec<String> {
@@ -400,6 +424,23 @@ pub(crate) fn skipped_program(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_skip_list_means_the_fast_path() {
+        assert!(!skip_list_set(None, false));
+        assert!(!skip_list_set(Some(""), false));
+        assert!(skip_list_set(Some("abc"), false));
+        assert!(skip_list_set(None, true));
+        // Without a list, no key is skipped, whatever the process environment.
+        if !skip_list_on() {
+            assert!(!skipped_program("abc"));
+        }
+    }
+
+    #[test]
+    fn nanload_is_a_knob() {
+        assert_ne!(knob_bit("nanload"), 0);
+    }
 
     #[test]
     fn every_knob_has_its_own_bit() {

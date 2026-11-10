@@ -108,6 +108,9 @@ reasons! {
     /// Encoder: the pipeline still compiles on a background thread, the draw waits for it (`Skip::Pending`). It is
     /// a draw that shows a frame or two late, not a loss.
     SkipPending => "skip.pending",
+    /// Encoder: a draw whose vertex, task, mesh or fragment program key is listed in `NXKIT_SKIP_PROGRAMS` or
+    /// `NXKIT_SKIP_FILE` (`Skip::Listed`). A debugging aid: the frame does not render correctly.
+    SkipListed => "skip.listed",
     /// Walker: a draw record without draw arguments (an indirect or unknown draw kind), so the draw has no detail.
     DrawNoArgs => "walk.draw-no-args",
     /// Walker: a draw without a vertex stage in the bound program.

@@ -267,50 +267,61 @@ impl Bindings {
             .collect()
     }
 
-    /// The buttons and the stick deflections of the held keys and mouse buttons. Opposite directions cancel.
-    pub(crate) fn read(&self, keys: &KeySet, mouse: MouseButtons) -> RawKeys {
-        let mut buttons = 0;
-        let mut walk = false;
-        // Left up, down, left, right, then the same for the right stick.
-        let mut dirs = [false; 8];
-        for &(source, action) in &self.list {
-            let held = match source {
+    /// The actions of the held keys and mouse buttons, one entry for each bound source that is held.
+    pub(crate) fn held(&self, keys: &KeySet, mouse: MouseButtons) -> Vec<Action> {
+        self.list
+            .iter()
+            .filter(|(source, _)| match *source {
                 Source::Key(k) => keys.get(k),
                 Source::Mouse(m) => mouse.buttons & m != 0,
                 Source::WheelUp => mouse.wheel_up,
                 Source::WheelDown => mouse.wheel_down,
-            };
-            if !held {
-                continue;
-            }
-            let dir_index = |d: Dir| match d {
-                Dir::Up => 0,
-                Dir::Down => 1,
-                Dir::Left => 2,
-                Dir::Right => 3,
-            };
-            match action {
-                Action::Button(b) => buttons |= b,
-                Action::LeftStick(d) => dirs[dir_index(d)] = true,
-                Action::RightStick(d) => dirs[4 + dir_index(d)] = true,
-                Action::Walk => walk = true,
-            }
+            })
+            .map(|&(_, action)| action)
+            .collect()
+    }
+
+    /// The buttons and the stick deflections of the held keys and mouse buttons. Opposite directions cancel.
+    #[cfg(test)]
+    pub(crate) fn read(&self, keys: &KeySet, mouse: MouseButtons) -> RawKeys {
+        raw_from(&self.held(keys, mouse))
+    }
+}
+
+/// The buttons and the stick deflections of a list of held actions. Opposite directions cancel.
+pub(crate) fn raw_from(actions: &[Action]) -> RawKeys {
+    let mut buttons = 0;
+    let mut walk = false;
+    // Left up, down, left, right, then the same for the right stick.
+    let mut dirs = [false; 8];
+    let dir_index = |d: Dir| match d {
+        Dir::Up => 0,
+        Dir::Down => 1,
+        Dir::Left => 2,
+        Dir::Right => 3,
+    };
+    for &action in actions {
+        match action {
+            Action::Button(b) => buttons |= b,
+            Action::LeftStick(d) => dirs[dir_index(d)] = true,
+            Action::RightStick(d) => dirs[4 + dir_index(d)] = true,
+            Action::Walk => walk = true,
         }
-        let axis = |neg: bool, pos: bool, full: i32| match (neg, pos) {
-            (true, false) => -full,
-            (false, true) => full,
-            _ => 0,
-        };
-        let left = if walk { WALK } else { FULL };
-        RawKeys {
-            buttons,
-            sticks: [
-                axis(dirs[2], dirs[3], left),
-                axis(dirs[1], dirs[0], left),
-                axis(dirs[6], dirs[7], FULL),
-                axis(dirs[5], dirs[4], FULL),
-            ],
-        }
+    }
+    let axis = |neg: bool, pos: bool, full: i32| match (neg, pos) {
+        (true, false) => -full,
+        (false, true) => full,
+        _ => 0,
+    };
+    let left = if walk { WALK } else { FULL };
+    RawKeys {
+        buttons,
+        sticks: [
+            axis(dirs[2], dirs[3], left),
+            axis(dirs[1], dirs[0], left),
+            axis(dirs[6], dirs[7], FULL),
+            axis(dirs[5], dirs[4], FULL),
+        ],
     }
 }
 

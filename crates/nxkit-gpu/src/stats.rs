@@ -38,11 +38,13 @@ pub enum Skip {
     Encode,
     /// The pipeline is still compiling on a background thread. The draw is left out until it is ready.
     Pending,
+    /// The draw's program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`.
+    Listed,
 }
 
 impl Skip {
     /// The number of reasons.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     /// Every reason, in index order.
     pub const ALL: [Self; Self::COUNT] = [
@@ -61,6 +63,7 @@ impl Skip {
         Self::Transfer,
         Self::Encode,
         Self::Pending,
+        Self::Listed,
     ];
 
     /// The reason as a short name for logs.
@@ -81,6 +84,7 @@ impl Skip {
             Self::Transfer => "transfer",
             Self::Encode => "encode",
             Self::Pending => "pending",
+            Self::Listed => "listed",
         }
     }
 }

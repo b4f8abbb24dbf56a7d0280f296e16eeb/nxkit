@@ -23,6 +23,7 @@ const SKIPS: [Reason; Skip::COUNT] = [
     Reason::SkipTransfer,
     Reason::SkipEncode,
     Reason::SkipPending,
+    Reason::SkipListed,
 ];
 
 /// Counts what frame `n` left out and prints the report when it is due.

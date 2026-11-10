@@ -216,6 +216,7 @@ pub(crate) fn render_pass(
     // The draws of a slot of the GPU counters count their samples (`queries`).
     let vis = sh.queries.and_then(|q| Some((q, q.pass(index)?)));
     let visibility = vis.as_ref().map(|(_, v)| v.buffer);
+    let scan = crate::nanscan::before(sh, cb, index, pass, range.clone(), &s.desc);
     let Ok(mut rp) =
         cb.begin_render_pass_counted(&s.desc, &tables.vertex, &tables.fragment, visibility)
     else {
@@ -286,7 +287,10 @@ pub(crate) fn render_pass(
             n += 1;
             continue;
         }
-        if let Some(run) = sh.run_at.get(&n).filter(|r| n + r.draws <= range.end)
+        if let Some(run) = sh
+            .run_at
+            .get(&n)
+            .filter(|r| n + r.draws <= range.end && !crate::diag::skip_list_on())
             && (n..n + run.draws).all(|d| !is_off(d) && counts(d).is_none())
             && set_counting(&mut rp, &mut counting, None, stats)
             && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
@@ -331,23 +335,8 @@ pub(crate) fn render_pass(
     if !blocks::copy(sh.ctx, cb, &tables.vertex, &stores, blocks::Way::Store) {
         stats.skipped[Skip::Copy as usize] += stores.len() as u32;
     }
-    if crate::nanscan::active() {
-        let stored: Vec<(TexId, &nxkit_metal::Texture)> = sh
-            .plan
-            .attachments_of(pass)
-            .iter()
-            .filter_map(|a| {
-                let Slot::Color(slot) = a.slot else {
-                    return None;
-                };
-                if a.store != StoreAction::Store {
-                    return None;
-                }
-                let color = s.desc.colors.get(usize::from(slot))?.as_ref()?;
-                Some((a.tex, &color.texture))
-            })
-            .collect();
-        crate::nanscan::pass(sh, cb, index, range.clone(), &stored);
+    if let Some(scan) = scan {
+        scan.after(sh, cb);
     }
     if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
         for a in sh.plan.attachments_of(pass) {

@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::bind::Bindings;
+use crate::bind::{Action, Bindings, raw_from};
 use crate::config::Config;
 use crate::keys::{KEYBOARD_STATE_SIZE, KeySet};
 use crate::motion::{MotionMap, MotionState, SixAxisData};
@@ -15,6 +15,7 @@ use crate::npad::{
 };
 use crate::pointer;
 use crate::rumble::{Rumble, VibrationValue};
+use crate::script;
 use crate::seam;
 use crate::shmem::SharedMemory;
 use crate::slots::Slots;
@@ -202,19 +203,45 @@ impl Input {
             return NpadState::default();
         };
         let pad = self.raw_pad(player, layout.one_player());
-        let keys = (player == 0 && self.config.keyboard).then(|| self.keyboard_mouse());
+        let keys = if player == 0 {
+            self.player_one_keys()
+        } else {
+            None
+        };
         build_state(style, &pad, keys.as_ref())
     }
 
+    /// What the keyboard, the mouse and the scripted input (`NXKIT_INPUT_FILE`) give player 1. `None` when the
+    /// keyboard is off and no file is set.
+    fn player_one_keys(&self) -> Option<RawKeys> {
+        let scripted = script::active();
+        if !self.config.keyboard && !scripted {
+            return None;
+        }
+        let held = if scripted {
+            script::held(Instant::now())
+        } else {
+            Vec::new()
+        };
+        Some(if self.config.keyboard {
+            self.keyboard_mouse(held)
+        } else {
+            raw_from(&held)
+        })
+    }
+
     /// What the keyboard and the mouse give player 1 in the layout of the title: the bound buttons and sticks, and
-    /// the mouse camera on the right stick. Nothing while the window has no focus.
-    fn keyboard_mouse(&self) -> RawKeys {
+    /// the mouse camera on the right stick. `scripted` are the held actions of the input file; they join the bound
+    /// ones before the sticks are worked out, so opposite directions cancel. The keyboard and the mouse give nothing
+    /// while the window has no focus, the scripted actions stay.
+    fn keyboard_mouse(&self, mut scripted: Vec<Action>) -> RawKeys {
         if !crate::focused() {
-            return RawKeys::default();
+            return raw_from(&scripted);
         }
         let now = Instant::now();
         let (mouse, look) = pointer::with(|p| (p.buttons(now), p.look(now)));
-        let mut raw = self.bindings.read(&self.keys(), mouse);
+        scripted.extend(self.bindings.held(&self.keys(), mouse));
+        let mut raw = raw_from(&scripted);
         raw.sticks[2] = pick(raw.sticks[2], to_stick(look[0]));
         raw.sticks[3] = pick(raw.sticks[3], to_stick(look[1]));
         raw

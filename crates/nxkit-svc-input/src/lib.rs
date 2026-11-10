@@ -23,6 +23,7 @@ mod motion;
 mod npad;
 mod pointer;
 mod rumble;
+mod script;
 mod seam;
 mod shmem;
 mod slots;
