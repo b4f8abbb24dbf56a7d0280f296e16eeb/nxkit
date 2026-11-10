@@ -447,6 +447,9 @@ pub struct FrameDetail {
     /// The timestamp reports (`nvnCommandBufferReportCounter`) and value reports (`nvnCommandBufferReportValue`) of the
     /// frame, in command order.
     pub reports: Vec<CounterReport>,
+    /// The storage ranges that this frame reads and writes from a copy of its own (`rename`), taken at the flush. Only
+    /// with the overlap on.
+    pub(crate) rename: Option<Arc<crate::rename::Capture>>,
 }
 
 /// The [`CounterReport::kind`] of `nvnCommandBufferReportValue`: the counter is [`CounterReport::value`].

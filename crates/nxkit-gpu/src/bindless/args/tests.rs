@@ -16,6 +16,8 @@ fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
     }
 }
 
+static NO_RENAME: crate::rename::RenameMap = crate::rename::RenameMap::new();
+
 fn env<'a>(
     handles: &'a crate::draws::FastMap<u64, Resolved>,
     fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
@@ -29,6 +31,7 @@ fn env<'a>(
         images,
         gmem: crate::gmem::GmemEnv::NONE,
         pools: (0, 0),
+        rename: &NO_RENAME,
         guest_pools: NO_POOLS.get_or_init(crate::guestpools::GuestPools::empty),
         default_sampler: 0,
         statics: (0, 0),
@@ -269,7 +272,8 @@ fn a_storage_buffer_word_is_real_or_zero() {
     let pools = shifted();
     let inside = ubo(0, GUEST + 0x20, 0x10, None);
     let outside = ubo(1, GUEST + 2 * LEN, 0x10, None);
-    let word = |s: Option<&UboDetail>| sbuf_word(&pools, s, true, 0x77, &mut no_put).unwrap();
+    let word =
+        |s: Option<&UboDetail>| sbuf_word(&pools, &NO_RENAME, s, true, 0x77, &mut no_put).unwrap();
     assert_eq!(word(Some(&inside)), REAL + 0x20);
     assert_eq!(word(Some(&outside)), 0x77);
     assert_eq!(word(None), 0x77);
@@ -277,12 +281,37 @@ fn a_storage_buffer_word_is_real_or_zero() {
     let copy = ubo(0, GUEST + 0x20, 4, Some(Arc::from(vec![9u8; 4])));
     let mut put = |_: &Arc<[u8]>| -> Result<u64, Skip> { Ok(0x5555) };
     assert_eq!(
-        sbuf_word(&pools, Some(&copy), false, 0x77, &mut put).unwrap(),
+        sbuf_word(&pools, &NO_RENAME, Some(&copy), false, 0x77, &mut put).unwrap(),
         0x5555
     );
     assert_eq!(
-        sbuf_word(&pools, Some(&copy), true, 0x77, &mut no_put).unwrap(),
+        sbuf_word(&pools, &NO_RENAME, Some(&copy), true, 0x77, &mut no_put).unwrap(),
         REAL + 0x20
+    );
+}
+
+#[test]
+fn a_renamed_range_reads_its_copy_whatever_the_binding_says() {
+    let pools = shifted();
+    let map = crate::rename::RenameMap::from_entries(vec![(GUEST + 0x40, 0x40, 0x9000)]);
+    let whole = ubo(0, GUEST + 0x40, 0x40, None);
+    let inner = ubo(1, GUEST + 0x50, 4, Some(Arc::from(vec![9u8; 4])));
+    let reaches = ubo(2, GUEST + 0x70, 0x20, None);
+    for rw in [true, false] {
+        assert_eq!(
+            sbuf_word(&pools, &map, Some(&whole), rw, 0x77, &mut no_put).unwrap(),
+            0x9000
+        );
+        // The same offset into the copy, and a snapshot of a read-only binding is not used.
+        assert_eq!(
+            sbuf_word(&pools, &map, Some(&inner), rw, 0x77, &mut no_put).unwrap(),
+            0x9010
+        );
+    }
+    // A binding that reaches out of the range keeps the buffer itself.
+    assert_eq!(
+        sbuf_word(&pools, &map, Some(&reaches), true, 0x77, &mut no_put).unwrap(),
+        REAL + 0x70
     );
 }
 

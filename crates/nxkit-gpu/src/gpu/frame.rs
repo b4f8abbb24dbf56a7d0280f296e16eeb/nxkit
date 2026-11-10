@@ -109,6 +109,36 @@ impl Gpu {
         // The ring waited for the batch that used this slot before, so its write logs are final.
         let region = ((batch.number() - 1) % nxkit_metal::BATCHES_IN_FLIGHT as u64) as usize;
         self.gmem.learn(region);
+        // The storage ranges that this frame reads from a copy of its own (the overlap, `rename`). The slot's earlier
+        // frame is written back first.
+        let (rename_map, rename_buf, merges) = if crate::overlap::on() {
+            self.rename.note_rw(detail, &self.programs);
+            let b = self
+                .rename
+                .begin_slot(region, detail.rename.as_ref(), self.gmem.learned());
+            // The merge ranges: where the guest range really is. The copy of each is filled and merged back on the GPU.
+            let runs: Vec<crate::rename::MergeRun> = b
+                .merges
+                .into_iter()
+                .filter_map(|(cap, idx, addr, size, slot)| {
+                    let guest = pools.resolve(addr, u64::from(size)).ok()?.real;
+                    Some(crate::rename::MergeRun {
+                        cap,
+                        idx,
+                        guest,
+                        slot,
+                    })
+                })
+                .collect();
+            (b.map, b.buf, runs)
+        } else {
+            (crate::rename::RenameMap::new(), None, Vec::new())
+        };
+        let merge_table = if merges.is_empty() {
+            None
+        } else {
+            nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0).ok()
+        };
         let gmem_buf = self.gmem.refresh(&self.ctx, pools);
         self.gmem.logs().begin(region, self.gmem.ranges());
         let gmem_logs = self.gmem.logs().clone();
@@ -285,7 +315,8 @@ impl Gpu {
             // Every write of the frame to the pool tables is done (`pool_prepare`, `resolve_handles`, `pool_release`,
             // the images). The ring waited for the batch that used `region` before, so no frame reads its copy.
             self.bindless.sync(region);
-            let tables = self.bindless.pool_buffers(region);
+            let mut tables = self.bindless.pool_buffers(region);
+            tables.extend(rename_buf);
             let mut all: Vec<Texture> = textures.values().map(|r| r.tex.clone()).collect();
             all.extend(handles.keep);
             Arc::new((all, tables, gmem_buf.clone(), pools.clone()))
@@ -447,6 +478,21 @@ impl Gpu {
             detail.runs.iter().map(|r| (r.first_draw, *r)).collect();
         let preloaded = preload::finish(preload);
         mark(t0, "preload");
+        // The merge ranges are filled from guest memory on the GPU before the first pass of the frame.
+        if let Some(table) = &merge_table
+            && !ends.is_empty()
+            && crate::rename::merge_encode(
+                &self.pipelines,
+                first,
+                table,
+                &scratch,
+                &merges,
+                crate::rename::Phase::In,
+            )
+            .is_err()
+        {
+            stats.skip(Skip::Encode);
+        }
         let uploaded = Mutex::new(FastMap::default());
         let prof = if crate::passprof::on() {
             crate::passprof::begin_frame(&self.ctx, plan, |i| {
@@ -474,6 +520,7 @@ impl Gpu {
                     logs: Some((&*gmem_logs, region)),
                 },
                 pools: self.bindless.pools(region),
+                rename: &rename_map,
                 guest_pools: pools,
                 default_sampler: self.bindless.default_sampler_id(),
                 statics: self.bindless.statics(),
@@ -549,6 +596,20 @@ impl Gpu {
             _ => Default::default(),
         };
 
+        // And their words that the GPU wrote go back into guest memory after the last pass.
+        if let (Some(table), Some(cb)) = (&merge_table, rest.last_mut())
+            && crate::rename::merge_encode(
+                &self.pipelines,
+                cb,
+                table,
+                &scratch,
+                &merges,
+                crate::rename::Phase::Out,
+            )
+            .is_err()
+        {
+            stats.skip(Skip::Encode);
+        }
         if let Some(p) = prof {
             crate::passprof::end_frame(p);
         }

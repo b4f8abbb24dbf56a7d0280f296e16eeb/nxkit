@@ -58,6 +58,7 @@ mod pools;
 mod programs;
 mod pull;
 mod queries;
+mod rename;
 mod scaled;
 mod settings;
 pub mod snapshot;

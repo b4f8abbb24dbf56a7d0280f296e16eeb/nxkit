@@ -77,6 +77,11 @@ impl Backend for GpuBackend {
             );
             detail = FrameDetail::default();
         }
+        // The overlap: the ranges that this frame reads from a copy of its own take their bytes now, before the CPU
+        // writes the next frame.
+        if crate::overlap::on() {
+            detail.rename = self.rename.at_flush(&detail, fence.0).map(Arc::new);
+        }
         // The snapshot of the flush: a pool the game finalizes after this point still serves the frame.
         let pools = self.pools.current();
         if let Some(enc) = &self.enc {
@@ -129,7 +134,14 @@ impl Backend for GpuBackend {
     }
 
     fn wait_fence(&self, fence: Fence, _timeout_ns: u64) -> WaitResult {
+        if fence.0 != 0 && crate::overlap::on() {
+            self.rename.note_wait();
+            self.rename.before_wait(fence.0);
+        }
         if fence.0 == 0 || fence.0 <= self.done.load(Ordering::Acquire) {
+            if fence.0 != 0 {
+                self.renamed_wait(fence.0, format_args!("wait done already for fence {}", fence.0));
+            }
             return WaitResult::AlreadyDone;
         }
         if crate::knob("nowait") {
@@ -141,8 +153,10 @@ impl Backend for GpuBackend {
             && self.enc.is_none()
             && fence.0 == self.encoded.load(Ordering::Acquire)
             && fence.0 > 1
+            && !self.rename.honest(fence.0)
         {
             let older = fence.0 - 1;
+            self.rename.count_wait(fence.0, true);
             if older > self.done.load(Ordering::Acquire) {
                 let result = locked(&self.gpu).wait_older();
                 match result {
@@ -152,9 +166,12 @@ impl Backend for GpuBackend {
                     Ok(None) => {}
                     Err(_) => return WaitResult::Failed,
                 }
-                let (finished, _) = self.finish_batches(older);
+                let (finished, ok) = self.finish_batches(older);
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
+                if ok {
+                    self.renamed_wait(older, format_args!("wait older={older} for fence {}", fence.0));
+                }
             }
             return WaitResult::Done;
         }
@@ -165,10 +182,12 @@ impl Backend for GpuBackend {
             && fence.0 > 2
             && fence.0 == self.flushed.load(Ordering::Acquire)
             && !self.copied_recent.load(Ordering::Acquire)
+            && !self.rename.honest(fence.0)
         {
             // The `overlap2` knob waits for the frame two back: the encode on its own thread makes the way from a
             // present to the GPU's end longer than one frame.
             let older = fence.0 - if crate::knob("overlap2") { 2 } else { 1 };
+            self.rename.count_wait(fence.0, true);
             if older > self.done.load(Ordering::Acquire) {
                 let reached = || self.encoded.load(Ordering::Acquire) >= older;
                 if !enc.wait_for(reached) || enc.has_error() {
@@ -183,8 +202,12 @@ impl Backend for GpuBackend {
                 }
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
+                self.renamed_wait(older, format_args!("wait older={older} for fence {}", fence.0));
             }
             return WaitResult::Done;
+        }
+        if crate::overlap::on() {
+            self.rename.count_wait(fence.0, false);
         }
         if let Some(enc) = &self.enc {
             let reached = || self.encoded.load(Ordering::Acquire) >= fence.0;
@@ -192,7 +215,7 @@ impl Backend for GpuBackend {
                 return WaitResult::Failed;
             }
         }
-        if self.drain() {
+        if self.drain(Some(fence.0)) {
             WaitResult::Done
         } else {
             WaitResult::Failed
@@ -203,7 +226,7 @@ impl Backend for GpuBackend {
         if let Some(enc) = &self.enc {
             enc.wait_idle();
         }
-        self.drain();
+        self.drain(Some(self.encoded.load(Ordering::Acquire)));
     }
 
     fn program_set(&self, program: u64, stages: &[StageKey]) {

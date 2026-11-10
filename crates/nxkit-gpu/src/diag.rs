@@ -110,6 +110,13 @@ const KNOBS: &[&str] = &[
     "nancomp",
     // With `NXKIT_DIAG=ubodump`, every dispatch of a sampled frame is dumped, not only the listed programs (400 lines).
     "ubodumpall",
+    // With the overlap on, the renamed storage ranges are bound as usual but never written back (`rename`).
+    "renamenowb",
+    // With the overlap on, no storage range is renamed at bind time; the learning still runs (`rename`).
+    "renameoff",
+    // With the overlap on, a frame that binds a written range that the CPU also writes while the frame runs waits in full
+    // (`rename`).
+    "conflictwait",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
@@ -131,14 +138,14 @@ pub(crate) fn knobs_on() -> Vec<&'static str> {
 }
 
 struct Knobs {
-    flags: AtomicU32,
+    flags: AtomicU64,
     file: Option<PathBuf>,
 }
 
 fn knobs() -> &'static Knobs {
     static K: OnceLock<Knobs> = OnceLock::new();
     K.get_or_init(|| Knobs {
-        flags: AtomicU32::new(set_pass_options(parse_knobs(
+        flags: AtomicU64::new(set_pass_options(parse_knobs(
             &std::env::var("NXKIT_KNOB").unwrap_or_default(),
         ))),
         file: std::env::var_os("NXKIT_KNOB_FILE").map(PathBuf::from),
@@ -147,7 +154,7 @@ fn knobs() -> &'static Knobs {
 
 /// Hands the knobs that `nxkit-nvn` acts on to it: the two of the pass optimiser, which makes the plan, and the five
 /// of the render conditions, which it decides on the guest thread. Returns `flags`.
-fn set_pass_options(flags: u32) -> u32 {
+fn set_pass_options(flags: u64) -> u64 {
     use nxkit_nvn::rendercond::force;
     nxkit_nvn::passes::set_options(
         flags & knob_bit("nopassmerge") == 0,
@@ -164,11 +171,11 @@ fn set_pass_options(flags: u32) -> u32 {
     flags
 }
 
-fn knob_bit(name: &str) -> u32 {
+fn knob_bit(name: &str) -> u64 {
     KNOBS.iter().position(|k| *k == name).map_or(0, |i| 1 << i)
 }
 
-fn parse_knobs(list: &str) -> u32 {
+fn parse_knobs(list: &str) -> u64 {
     list.split(',')
         .map(|s| knob_bit(s.trim()))
         .fold(0, |a, b| a | b)
@@ -449,7 +456,7 @@ mod tests {
 
     #[test]
     fn every_knob_has_its_own_bit() {
-        assert!(KNOBS.len() <= 32);
+        assert!(KNOBS.len() <= 64);
         for (i, k) in KNOBS.iter().enumerate() {
             assert_eq!(knob_bit(k), 1 << i);
         }

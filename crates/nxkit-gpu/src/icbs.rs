@@ -164,6 +164,10 @@ fn hash_draw(sh: &Shared<'_>, d: &DrawDetail, h: &mut impl Hasher) {
     d.streams.hash(h);
     d.args.hash(h);
     d.ubos.hash(h);
+    // A renamed range reads the copy of the batch slot, whose address differs from frame to frame.
+    for s in &d.sbufs {
+        sh.env.rename.resolve(s.address, s.size).hash(h);
+    }
     for t in &d.textures {
         t.hash(h);
         sh.env

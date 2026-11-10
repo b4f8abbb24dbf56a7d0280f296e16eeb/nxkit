@@ -1,0 +1,664 @@
+use super::*;
+use std::cell::RefCell;
+
+fn words(w: &[u32]) -> Vec<u8> {
+    w.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+#[test]
+fn a_frame_in_which_the_gpu_wrote_nothing_is_quiet() {
+    let a = words(&[1, 2, 3]);
+    assert_eq!(judge(&a, &a, &words(&[9, 9, 9])), Verdict::Quiet);
+}
+
+#[test]
+fn a_word_that_the_cpu_changed_again_is_clean() {
+    // The GPU summed into word 0, the CPU read it and reset it.
+    let pre = words(&[0, 5]);
+    let post = words(&[7, 5]);
+    let next = words(&[0, 5]);
+    assert_eq!(judge(&pre, &post, &next), Verdict::Clean);
+}
+
+#[test]
+fn a_word_that_the_cpu_left_alone_is_dirty() {
+    let pre = words(&[0, 5]);
+    let post = words(&[7, 5]);
+    assert_eq!(judge(&pre, &post, &post), Verdict::Dirty);
+    // One word re-initialised and one kept is dirty too.
+    let post = words(&[7, 8]);
+    let next = words(&[0, 8]);
+    assert_eq!(judge(&pre, &post, &next), Verdict::Dirty);
+}
+
+#[test]
+fn only_the_words_that_the_gpu_wrote_must_be_reset() {
+    // Word 1 is CPU data that does not change; the GPU did not write it.
+    let pre = words(&[0, 5, 0]);
+    let post = words(&[3, 5, 4]);
+    let next = words(&[0, 5, 0]);
+    assert_eq!(judge(&pre, &post, &next), Verdict::Clean);
+}
+
+#[test]
+fn a_tail_shorter_than_a_word_counts() {
+    assert_eq!(
+        judge(&[1, 2, 3, 4, 5], &[1, 2, 3, 4, 6], &[1, 2, 3, 4, 5]),
+        Verdict::Clean
+    );
+    assert_eq!(
+        judge(&[1, 2, 3, 4, 5], &[1, 2, 3, 4, 6], &[1, 2, 3, 4, 6]),
+        Verdict::Dirty
+    );
+}
+
+fn frame(l: &mut Learn, v: Verdict) -> Option<Class> {
+    l.tick();
+    l.observe(v)
+}
+
+#[test]
+fn a_range_is_renamed_after_the_clean_frames() {
+    let mut l = Learn::new();
+    for _ in 0..LEARN_FRAMES - 1 {
+        assert_eq!(frame(&mut l, Verdict::Clean), None);
+        assert!(l.sampling() && !l.renaming());
+    }
+    assert_eq!(frame(&mut l, Verdict::Clean), Some(Class::Rename));
+    assert!(l.renaming() && !l.sampling());
+    assert_eq!(l.frames(), u64::from(LEARN_FRAMES));
+}
+
+#[test]
+fn quiet_frames_neither_count_nor_reset() {
+    let mut l = Learn::new();
+    for _ in 0..LEARN_FRAMES - 1 {
+        frame(&mut l, Verdict::Clean);
+        for _ in 0..3 {
+            assert_eq!(frame(&mut l, Verdict::Quiet), None);
+        }
+    }
+    assert_eq!(l.class(), Class::Learning);
+    assert_eq!(frame(&mut l, Verdict::Clean), Some(Class::Rename));
+}
+
+#[test]
+fn one_dirty_frame_makes_a_learning_range_never() {
+    let mut l = Learn::new();
+    for _ in 0..LEARN_FRAMES - 1 {
+        frame(&mut l, Verdict::Clean);
+    }
+    assert_eq!(frame(&mut l, Verdict::Dirty), Some(Class::Never));
+    assert!(!l.sampling() && !l.renaming());
+    // Nothing brings it back.
+    for _ in 0..1000 {
+        assert_eq!(frame(&mut l, Verdict::Clean), None);
+    }
+    assert_eq!(l.class(), Class::Never);
+}
+
+#[test]
+fn a_range_that_stays_quiet_rests_and_learns_again() {
+    let mut l = Learn::new();
+    for _ in 0..QUIET_LIMIT - 1 {
+        assert_eq!(frame(&mut l, Verdict::Quiet), None);
+    }
+    assert_eq!(frame(&mut l, Verdict::Quiet), Some(Class::Idle));
+    assert!(!l.sampling());
+    for _ in 0..RECHECK_EVERY - 1 {
+        l.tick();
+        assert_eq!(l.class(), Class::Idle);
+    }
+    l.tick();
+    assert_eq!(l.class(), Class::Learning);
+    assert!(l.sampling());
+}
+
+fn renamed() -> Learn {
+    let mut l = Learn::new();
+    for _ in 0..LEARN_FRAMES {
+        frame(&mut l, Verdict::Clean);
+    }
+    assert_eq!(l.class(), Class::Rename);
+    l
+}
+
+#[test]
+fn a_renamed_range_is_checked_every_so_many_frames() {
+    let mut l = renamed();
+    for _ in 0..RECHECK_EVERY - 1 {
+        l.tick();
+        assert!(l.renaming());
+    }
+    l.tick();
+    // The check frame is bound to the guest range.
+    assert!(l.sampling() && !l.renaming());
+    assert_eq!(l.observe(Verdict::Clean), None);
+    assert!(l.renaming());
+    // The next check comes after another period.
+    for _ in 0..RECHECK_EVERY - 1 {
+        l.tick();
+    }
+    assert!(l.renaming());
+    l.tick();
+    assert!(l.sampling());
+}
+
+#[test]
+fn a_dirty_check_demotes_a_renamed_range() {
+    let mut l = renamed();
+    for _ in 0..RECHECK_EVERY {
+        l.tick();
+    }
+    assert_eq!(l.observe(Verdict::Dirty), Some(Class::Never));
+    assert!(!l.renaming() && !l.sampling());
+}
+
+#[test]
+fn a_check_that_hears_nothing_ends_after_the_quiet_limit() {
+    let mut l = renamed();
+    for _ in 0..RECHECK_EVERY {
+        l.tick();
+    }
+    for _ in 0..QUIET_LIMIT - 1 {
+        assert_eq!(l.observe(Verdict::Quiet), None);
+        assert!(l.sampling());
+    }
+    assert_eq!(l.observe(Verdict::Quiet), None);
+    assert!(l.renaming());
+}
+
+#[test]
+fn a_verdict_outside_a_check_does_not_touch_a_renamed_range() {
+    let mut l = renamed();
+    assert_eq!(l.observe(Verdict::Dirty), None);
+    assert!(l.renaming());
+}
+
+#[test]
+fn a_range_is_renamed_unless_something_else_touches_it() {
+    let cands = [
+        (0x1000, 0x40),
+        (0x2000, 0x40),
+        (0x3000, 0x40),
+        (0x3020, 0x40),
+    ];
+    // The binding of the first reaches out of its range; the second has a copy over it; the last two overlap.
+    let bound = [
+        (0x0ff0, 0x40),
+        (0x2000, 0x40),
+        (0x3000, 0x40),
+        (0x3020, 0x40),
+    ];
+    let others = [(0x2010, 0x2014)];
+    let (ok, left) = plan(&cands, &bound, &others);
+    // 0x3000..0x3040 holds a binding that starts at 0x3020 and reaches out of it, so both are left.
+    assert_eq!(ok, Vec::<usize>::new());
+    assert_eq!(left, 4);
+    let (ok, left) = plan(&cands[2..3], &bound[2..3], &[]);
+    assert_eq!((ok, left), (vec![0], 0));
+}
+
+#[test]
+fn a_binding_inside_a_range_does_not_exclude_it() {
+    let cands = [(0x1000, 0x40)];
+    let bound = [(0x1000, 0x40), (0x1010, 0x10), (0x1030, 0x10)];
+    assert_eq!(plan(&cands, &bound, &[(0x1040, 0x1050)]), (vec![0], 0));
+}
+
+#[test]
+fn two_ranges_that_overlap_are_not_both_renamed() {
+    let cands = [(0x1000, 0x40), (0x1020, 0x40)];
+    let (ok, left) = plan(&cands, &[], &[]);
+    assert_eq!((ok, left), (vec![0], 1));
+}
+
+#[test]
+fn the_map_gives_the_copy_with_the_same_offset() {
+    let m = RenameMap::from_entries(vec![(0x2000, 0xc0, 0x9040), (0x1000, 0x40, 0x9000)]);
+    assert_eq!(m.resolve(0x1000, 0x40), Some(0x9000));
+    assert_eq!(m.resolve(0x1010, 8), Some(0x9010));
+    assert_eq!(m.resolve(0x2030, 0x10), Some(0x9070));
+    // Reaches out, lies outside, or is before the first range.
+    assert_eq!(m.resolve(0x1030, 0x20), None);
+    assert_eq!(m.resolve(0x1040, 4), None);
+    assert_eq!(m.resolve(0x500, 4), None);
+    assert_eq!(RenameMap::new().resolve(0x1000, 4), None);
+}
+
+#[test]
+fn a_word_goes_back_only_where_the_cpu_left_it() {
+    // The guest word still holds the start: the end goes in.
+    assert_eq!(decide_word(0, 0, 7, None, false), Some(7));
+    // The CPU wrote it since the flush.
+    assert_eq!(decide_word(1, 0, 7, None, false), None);
+}
+
+#[test]
+fn two_frames_without_a_wait_between_them_add_up() {
+    let f = |v: f32| v.to_bits();
+    // The write-back of the frame before wrote 25.0; this frame added 24.0 onto 0.0.
+    let new = decide_word(f(25.0), f(0.0), f(24.0), Some(f(25.0)), true).unwrap();
+    assert_eq!(f32::from_bits(new), 49.0);
+}
+
+#[test]
+fn a_wait_between_two_frames_replaces_the_older_value() {
+    assert_eq!(decide_word(5, 0, 9, Some(5), false), Some(9));
+    // A word that the CPU changed after the write-back stays.
+    assert_eq!(decide_word(6, 0, 9, Some(5), false), None);
+    assert_eq!(decide_word(6, 0, 9, Some(5), true), None);
+}
+
+/// A guest memory for the state machine: bytes by address.
+struct Guest(RefCell<Vec<u8>>);
+
+impl Guest {
+    fn read(&self, addr: u64, buf: &mut [u8]) -> bool {
+        let m = self.0.borrow();
+        let a = (addr - BASE) as usize;
+        match m.get(a..a + buf.len()) {
+            Some(s) => {
+                buf.copy_from_slice(s);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn set(&self, addr: u64, w: &[u32]) {
+        let mut m = self.0.borrow_mut();
+        let a = (addr - BASE) as usize;
+        m[a..a + 4 * w.len()].copy_from_slice(&words(w));
+    }
+}
+
+const BASE: u64 = 0x1000;
+const SUM: u64 = BASE + 0x100;
+
+fn state_with_sum() -> State {
+    let mut st = State::default();
+    st.candidate(SUM, 0x40);
+    st
+}
+
+/// One game frame as the host sees it: the CPU resets the word, the frame is flushed, the GPU adds `sum` into it and the
+/// wait reads the bytes after the frame.
+fn play(st: &mut State, g: &Guest, fence: u64, sum: u32, reset: bool) -> Flushed {
+    if reset {
+        g.set(SUM, &[0]);
+    }
+    let bound = [(SUM, 0x40)];
+    let f = st.flush(fence, &bound, &|| Vec::new(), &|| Vec::new(), &|a, b| {
+        g.read(a, b)
+    });
+    // The GPU adds into the guest word when the frame is not renamed.
+    if f.renamed.is_empty() {
+        let mut w = [0u8; 4];
+        g.read(SUM, &mut w);
+        g.set(SUM, &[u32::from_le_bytes(w) + sum]);
+    }
+    st.waited(fence, fence, &|a, b| g.read(a, b));
+    f
+}
+
+#[test]
+fn a_sum_that_the_cpu_resets_is_learned_and_then_renamed() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = state_with_sum();
+    let mut renamed_at = None;
+    for fence in 1..=300u64 {
+        let f = play(&mut st, &g, fence, 3, true);
+        if !f.renamed.is_empty() {
+            renamed_at.get_or_insert(fence);
+            assert_eq!(f.renamed[0].addr, SUM);
+            assert_eq!(f.renamed[0].start.len(), 0x40);
+            // The frame is renamed: the capture holds the reset word.
+            assert_eq!(&f.renamed[0].start[..4], &[0, 0, 0, 0]);
+        }
+    }
+    // Only one frame in LEARN_PERIOD is judged, at the flush after it: the flush after the eighth clean frame already
+    // reads a copy.
+    assert_eq!(renamed_at, Some(LEARN_PERIOD * u64::from(LEARN_FRAMES) + 1));
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Rename);
+}
+
+#[test]
+fn a_flush_that_overtakes_the_wait_is_not_judged() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = state_with_sum();
+    // The CPU flushes the next frame before the wait for the one before: `post` is not read in time.
+    for fence in 1..=200u64 {
+        g.set(SUM, &[0]);
+        let f = st.flush(
+            fence,
+            &[(SUM, 0x40)],
+            &|| Vec::new(),
+            &|| Vec::new(),
+            &|a, b| g.read(a, b),
+        );
+        assert!(f.renamed.is_empty());
+        g.set(SUM, &[5]);
+        // The wait for the frame before the newest: the newest flush has not finished.
+        st.waited(fence - 1, fence, &|a, b| g.read(a, b));
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Learning);
+}
+
+#[test]
+fn state_that_the_gpu_keeps_is_never_renamed() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = state_with_sum();
+    for fence in 1..=200u64 {
+        // The CPU does not reset the word: the GPU keeps adding.
+        let f = play(&mut st, &g, fence, 3, false);
+        assert!(f.renamed.is_empty());
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Never);
+}
+
+#[test]
+fn a_renamed_range_that_turns_into_state_is_demoted_by_the_check() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = state_with_sum();
+    let mut fence = 0;
+    while st.cands[&SUM].learn.class() != Class::Rename {
+        fence += 1;
+        play(&mut st, &g, fence, 3, true);
+    }
+    // Renamed frames: the host copies and writes back; here the range is only counted until the check is due.
+    let mut checked = false;
+    for _ in 0..RECHECK_EVERY + 40 {
+        fence += 1;
+        // From now on the CPU keeps what the GPU wrote.
+        let f = play(&mut st, &g, fence, 3, false);
+        if st.cands[&SUM].learn.sampling() {
+            checked = true;
+        }
+        if f.sampling && st.cands[&SUM].learn.class() == Class::Never {
+            break;
+        }
+    }
+    assert!(checked);
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Never);
+}
+
+#[test]
+fn a_range_that_no_frame_binds_is_forgotten_in_time() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = state_with_sum();
+    for fence in 1..=3600u64 {
+        st.flush(fence, &[], &|| Vec::new(), &|| Vec::new(), &|a, b| {
+            g.read(a, b)
+        });
+    }
+    assert!(st.cands.is_empty());
+}
+
+#[test]
+fn a_binding_larger_than_the_range_grows_it_and_starts_again() {
+    let mut st = state_with_sum();
+    st.cands.get_mut(&SUM).unwrap().learn = renamed();
+    st.candidate(SUM, 0x80);
+    assert_eq!(st.cands[&SUM].size, 0x80);
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Learning);
+}
+
+#[test]
+fn a_watched_range_reports_what_the_cpu_wrote_while_its_frame_ran() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = State {
+        watch: true,
+        ..State::default()
+    };
+    st.watch_read_only(SUM, 0x40);
+    // The frame that is judged: the 16th flush.
+    for fence in 1..LEARN_PERIOD {
+        st.flush(
+            fence,
+            &[(SUM, 0x40)],
+            &|| Vec::new(),
+            &|| Vec::new(),
+            &|a, b| g.read(a, b),
+        );
+    }
+    let fence = LEARN_PERIOD;
+    let f = st.flush(
+        fence,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    assert!(f.sampling);
+    // The wait begins, the CPU has written word 1 meanwhile, then the GPU is done.
+    g.set(SUM + 4, &[7]);
+    st.before_wait(fence, &|a, b| g.read(a, b));
+    st.waited(fence, fence, &|a, b| g.read(a, b));
+    let e = &st.inflight[&SUM];
+    assert_eq!((e.frames, e.hit, e.words), (1, 1, 1));
+    assert!(e.ro);
+}
+
+/// One judged frame of a read-only range: the flush, the CPU writing a word in flight, the wait.
+fn judged_frame(st: &mut State, g: &Guest, fence: u64, write: bool) -> Flushed {
+    let f = st.flush(
+        fence,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    if write {
+        g.set(SUM + 4, &[fence as u32]);
+    }
+    st.before_wait(fence, &|a, b| g.read(a, b));
+    st.waited(fence, fence, &|a, b| g.read(a, b));
+    f
+}
+
+fn run_to(st: &mut State, g: &Guest, last: u64) {
+    for fence in st.frame + 1..=last {
+        st.flush(
+            fence,
+            &[(SUM, 0x40)],
+            &|| Vec::new(),
+            &|| Vec::new(),
+            &|a, b| g.read(a, b),
+        );
+    }
+}
+
+#[test]
+fn a_read_only_range_that_the_cpu_writes_in_flight_becomes_a_snapshot() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = State::default();
+    st.watch_read_only(SUM, 0x40);
+    run_to(&mut st, &g, LEARN_PERIOD - 1);
+    judged_frame(&mut st, &g, LEARN_PERIOD, true);
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Watch);
+    run_to(&mut st, &g, 2 * LEARN_PERIOD - 1);
+    judged_frame(&mut st, &g, 2 * LEARN_PERIOD, true);
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Snapshot);
+    // The next flush announces it and copies the range.
+    let f = st.flush(
+        2 * LEARN_PERIOD + 1,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    assert!(f.news.iter().any(|n| n.2 == Class::Snapshot));
+    assert_eq!(f.renamed.len(), 1);
+    assert_eq!(f.renamed[0].kind, Kind::Snapshot);
+    assert_eq!(f.snapshot_bytes, 0x40);
+}
+
+#[test]
+fn a_read_only_range_that_the_cpu_leaves_alone_rests() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = State::default();
+    st.watch_read_only(SUM, 0x40);
+    run_to(&mut st, &g, LEARN_PERIOD - 1);
+    judged_frame(&mut st, &g, LEARN_PERIOD, false);
+    // It is not judged again, and not forced to a full wait, for a long time.
+    for k in 2..10 {
+        run_to(&mut st, &g, k * LEARN_PERIOD - 1);
+        let f = judged_frame(&mut st, &g, k * LEARN_PERIOD, true);
+        assert!(!f.sampling);
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Watch);
+}
+
+#[test]
+fn a_snapshot_that_a_shader_writes_is_never() {
+    let mut st = State::default();
+    st.watch_read_only(SUM, 0x40);
+    st.cands.get_mut(&SUM).unwrap().learn.set(Class::Snapshot);
+    assert!(st.is_snapshot(SUM));
+    st.candidate(SUM, 0x40);
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Never);
+    assert!(!st.is_snapshot(SUM));
+}
+
+#[test]
+fn a_snapshot_that_a_copy_writes_is_never() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = State::default();
+    st.watch_read_only(SUM, 0x40);
+    st.cands.get_mut(&SUM).unwrap().learn.set(Class::Snapshot);
+    let f = st.flush(
+        1,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| vec![(SUM + 8, SUM + 16)],
+        &|a, b| g.read(a, b),
+    );
+    assert!(f.renamed.is_empty());
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Never);
+}
+
+#[test]
+fn snapshots_over_the_budget_of_a_frame_are_left_out() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = State::default();
+    let big = (SNAPSHOT_BUDGET / 2 + 1) as u32;
+    // Reads past the small guest fail; the state only needs the sizes, so the reader says yes.
+    let read = |_: u64, b: &mut [u8]| {
+        b.fill(0);
+        true
+    };
+    for k in 0..2u64 {
+        let a = 0x1000_0000 * (k + 1);
+        st.watch_read_only(a, big);
+        st.cands.get_mut(&a).unwrap().learn.set(Class::Snapshot);
+    }
+    let _ = &g;
+    let bound = [(0x1000_0000, big), (0x2000_0000, big)];
+    let f = st.flush(1, &bound, &|| Vec::new(), &|| Vec::new(), &read);
+    assert_eq!(f.renamed.len(), 1);
+    assert_eq!(f.over_budget, 1);
+    assert_eq!(f.snapshot_bytes, u64::from(big));
+}
+
+#[test]
+fn the_masks_of_the_cpu_and_the_gpu_are_found_from_the_three_copies() {
+    // Word 0: the GPU wrote it after the wait began. Word 1: the CPU wrote it in flight. Word 2: nobody.
+    let pre = words(&[0, 1, 2]);
+    let atwait = words(&[0, 5, 2]);
+    let post = words(&[9, 5, 2]);
+    assert_eq!(cpu_mask(&pre, &atwait), vec![0b010]);
+    assert_eq!(gpu_mask(&post, &atwait), vec![0b001]);
+    let mut m = vec![0b100];
+    union_mask(&mut m, &[0b001, 0b1]);
+    assert_eq!(m, vec![0b101, 1]);
+    assert!(masks_overlap(&[0b110], &[0b010]));
+    assert!(!masks_overlap(&[0b110], &[0b001]));
+    assert!(is_empty_mask(&[0, 0]) && !is_empty_mask(&[0, 2]));
+}
+
+/// A judged frame of a written range: the CPU writes `cpu_word` after the flush, the GPU writes `gpu_word` after the
+/// wait began.
+fn judged_rw(st: &mut State, g: &Guest, fence: u64, cpu_word: u32, gpu_word: u32) -> Flushed {
+    let f = st.flush(
+        fence,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    g.set(SUM + 4 * u64::from(cpu_word), &[fence as u32]);
+    st.before_wait(fence, &|a, b| g.read(a, b));
+    g.set(SUM + 4 * u64::from(gpu_word), &[fence as u32 + 1000]);
+    st.waited(fence, fence, &|a, b| g.read(a, b));
+    f
+}
+
+fn never_range() -> State {
+    let mut st = State::default();
+    st.candidate(SUM, 0x40);
+    st.cands.get_mut(&SUM).unwrap().learn.set(Class::Never);
+    st
+}
+
+#[test]
+fn a_written_range_with_disjoint_words_of_cpu_and_gpu_becomes_a_merge_range() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = never_range();
+    for k in 1..=2 {
+        run_to(&mut st, &g, k * LEARN_PERIOD - 1);
+        judged_rw(&mut st, &g, k * LEARN_PERIOD, 1, 2);
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Merge);
+    // The next flush copies it as a merge range with the learned masks.
+    let f = st.flush(
+        2 * LEARN_PERIOD + 1,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    assert_eq!(f.renamed.len(), 1);
+    assert_eq!(f.renamed[0].kind, Kind::Merge);
+    assert_eq!(f.renamed[0].cmask, vec![0b010]);
+    assert_eq!(f.renamed[0].gmask, vec![0b100]);
+}
+
+#[test]
+fn overlapping_words_make_a_conflict_that_waits_in_full() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = never_range();
+    for k in 1..=2 {
+        run_to(&mut st, &g, k * LEARN_PERIOD - 1);
+        // The CPU writes word 1 in flight and the GPU writes it after.
+        judged_rw(&mut st, &g, k * LEARN_PERIOD, 1, 1);
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Conflict);
+    let f = st.flush(
+        2 * LEARN_PERIOD + 1,
+        &[(SUM, 0x40)],
+        &|| Vec::new(),
+        &|| Vec::new(),
+        &|a, b| g.read(a, b),
+    );
+    assert!(f.conflict && f.renamed.is_empty());
+}
+
+#[test]
+fn the_knob_makes_a_frame_with_a_range_that_the_cpu_writes_in_flight_wait_in_full() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = never_range();
+    st.cands.get_mut(&SUM).unwrap().hits = SNAPSHOT_HITS;
+    let flush = |st: &mut State| {
+        st.flush(
+            1,
+            &[(SUM, 0x40)],
+            &|| Vec::new(),
+            &|| Vec::new(),
+            &|a, b| g.read(a, b),
+        )
+    };
+    assert!(!flush(&mut st).conflict);
+    st.conflict_wait = true;
+    assert!(flush(&mut st).conflict);
+}

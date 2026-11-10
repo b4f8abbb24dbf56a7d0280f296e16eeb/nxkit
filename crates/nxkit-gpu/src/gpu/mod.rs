@@ -135,6 +135,8 @@ pub struct Gpu {
     native: crate::native::Native,
     /// The visibility result buffers of the GPU counters (`queries`).
     vis_pool: Arc<crate::queries::VisPool>,
+    /// The learner and the per-slot copies of the storage ranges that the overlap renames (`rename`). The backend shares it.
+    rename: Arc<crate::rename::Renamer>,
 }
 
 impl Gpu {
@@ -158,6 +160,7 @@ impl Gpu {
             pipelines.runtime_start(plan, &config.shader_dir);
         }
         let transfer = Transfer::new(ctx, pipelines.cache(), config.gob_order)?;
+        let rename = Arc::new(crate::rename::Renamer::new(ctx, guest.clone()));
         Ok(Self {
             ctx: ctx.clone(),
             guest,
@@ -183,7 +186,14 @@ impl Gpu {
             copyback: CopyBack::default(),
             native: crate::native::Native::new(),
             vis_pool: Arc::default(),
+            rename,
         })
+    }
+
+    /// The learner and the copies of the renamed storage ranges. The backend takes the capture at the flush of a frame
+    /// and writes the ranges back in a CPU wait.
+    pub(crate) fn renamer(&self) -> Arc<crate::rename::Renamer> {
+        self.rename.clone()
     }
 
     /// The texture ids that shaders read through the pool table and the sampler epoch of the table. The front end reads

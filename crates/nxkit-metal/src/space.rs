@@ -142,6 +142,46 @@ impl GuestSpace {
         // SAFETY: `base` is valid for `len` bytes for the life of the space (see `Send`).
         unsafe { copy_in(self.base, self.map.len(), offset, data) }
     }
+
+    /// Sets the 32-bit word at `offset` to `new` when it holds `current`, with one atomic compare-and-swap. Returns
+    /// whether it did. The offset must be a multiple of 4 and inside the region. A game thread that writes the word at
+    /// the same time either comes before the swap (the word differs and stays) or after it.
+    pub fn compare_exchange_u32(&self, offset: u64, current: u32, new: u32) -> Result<bool> {
+        let word = self.word(offset)?;
+        Ok(word
+            .compare_exchange(
+                current,
+                new,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok())
+    }
+
+    /// Loads the 32-bit word at `offset` with an atomic load. The offset must be a multiple of 4.
+    pub fn load_u32(&self, offset: u64) -> Result<u32> {
+        Ok(self
+            .word(offset)?
+            .load(std::sync::atomic::Ordering::Acquire))
+    }
+
+    fn word(&self, offset: u64) -> Result<&std::sync::atomic::AtomicU32> {
+        if !offset.is_multiple_of(4) {
+            return Err(MetalError::Invalid("an atomic word needs a 4 byte offset"));
+        }
+        let at = check(self.map.len(), offset, 4)?;
+        // SAFETY: `at` is inside the region (checked above), which `base` keeps valid for the life of the space (see
+        // `Send`).
+        let ptr = unsafe { self.base.as_ptr().add(at) };
+        if !(ptr as usize).is_multiple_of(4) {
+            return Err(MetalError::Invalid(
+                "an atomic word needs an aligned address",
+            ));
+        }
+        // SAFETY: the four bytes at `ptr` lie inside the region and `ptr` is 4 byte aligned (checked above). Other
+        // threads access guest memory through the same atomic or plain copies, which the caller orders.
+        Ok(unsafe { std::sync::atomic::AtomicU32::from_ptr(ptr.cast::<u32>()) })
+    }
 }
 
 /// The map of a region of `len` bytes at `host_base` whose guest GPU addresses start at `GUEST_VA_BASE`. Fails when
@@ -169,6 +209,21 @@ mod tests {
     fn space(mem: &mut [u8]) -> GuestSpace {
         // SAFETY: `mem` outlives the space in every test, and nothing moves or frees it.
         unsafe { GuestSpace::from_raw(mem.as_mut_ptr() as u64, mem.len() as u64) }.unwrap()
+    }
+
+    #[test]
+    fn a_word_swaps_only_when_it_holds_the_expected_value() {
+        let mut mem = region();
+        let s = space(&mut mem);
+        s.write(0x40, &7u32.to_le_bytes()).unwrap();
+        assert_eq!(s.compare_exchange_u32(0x40, 6, 9), Ok(false));
+        assert_eq!(s.load_u32(0x40), Ok(7));
+        assert_eq!(s.compare_exchange_u32(0x40, 7, 9), Ok(true));
+        let mut b = [0u8; 4];
+        s.read(0x40, &mut b).unwrap();
+        assert_eq!(u32::from_le_bytes(b), 9);
+        assert!(s.compare_exchange_u32(0x42, 0, 1).is_err());
+        assert!(s.compare_exchange_u32(LEN as u64, 0, 1).is_err());
     }
 
     #[test]
