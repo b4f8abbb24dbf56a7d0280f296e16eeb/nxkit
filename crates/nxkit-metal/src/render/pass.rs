@@ -380,6 +380,22 @@ impl RenderPass<'_> {
                 // above); a disabled test writes nothing.
                 unsafe { self.enc.setVisibilityResultMode_offset(mode, offset) };
             }
+            RenderCommand::Timestamp { heap, index } => {
+                if *index as usize >= heap.len() {
+                    return Err(MetalError::Invalid("the timestamp index is out of range"));
+                }
+                // SAFETY: the index lies inside the heap (checked above), and the heap is retained until the GPU is
+                // done with the command buffer.
+                unsafe {
+                    self.enc
+                        .writeTimestampWithGranularity_afterStage_intoHeap_atIndex(
+                            objc2_metal::MTL4TimestampGranularity::Precise,
+                            objc2_metal::MTLRenderStages::Fragment,
+                            &heap.raw.0,
+                            *index as usize,
+                        );
+                }
+            }
             RenderCommand::WaitForEarlierPasses => self
                 .enc
                 .barrierAfterQueueStages_beforeStages_visibilityOptions(

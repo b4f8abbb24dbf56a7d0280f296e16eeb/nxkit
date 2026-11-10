@@ -99,6 +99,8 @@ pub(crate) struct Shared<'a> {
     pub(crate) native: Option<&'a crate::native::Prepared>,
     /// The visibility offsets and counted draws of the GPU counters of the frame (`queries`).
     pub(crate) queries: Option<&'a crate::queries::FrameQueries>,
+    /// The pass profile of this frame (`NXKIT_DIAG=passprof`).
+    pub(crate) prof: Option<&'a crate::passprof::FrameProf>,
 }
 
 impl Shared<'_> {

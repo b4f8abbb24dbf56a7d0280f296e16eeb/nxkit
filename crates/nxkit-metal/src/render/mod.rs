@@ -228,6 +228,13 @@ pub enum RenderCommand {
         /// The number of commands.
         count: u32,
     },
+    /// Writes a precise GPU timestamp into entry `index` of the heap, once the fragment work before it is done.
+    Timestamp {
+        /// The heap.
+        heap: crate::timestamp::TimestampHeap,
+        /// The entry.
+        index: u32,
+    },
     /// Runs the range of an ICB that the GPU reads from a buffer when the command executes.
     ExecuteIcbIndirect {
         /// The ICB.

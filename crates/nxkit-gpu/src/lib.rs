@@ -51,6 +51,7 @@ mod native_ndsr;
 mod native_ndve;
 mod overlap;
 mod passes;
+mod passprof;
 mod pipelines;
 mod poolreg;
 mod pools;

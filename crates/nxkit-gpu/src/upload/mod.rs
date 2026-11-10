@@ -375,7 +375,8 @@ impl Transfer {
         r
     }
 
-    /// Encodes the copy of the whole texture back into guest memory, in its block-linear layout.
+    /// Encodes the copy of the whole texture back into guest memory, in its block-linear layout. `end` encodes the
+    /// last command of the compute pass (the pass profile's timestamp).
     pub(crate) fn copy_back(
         &self,
         cb: &mut CommandBuffer,
@@ -383,6 +384,7 @@ impl Transfer {
         pools: &GuestPools,
         rec: &TextureRecord,
         res: &Res,
+        end: Option<&dyn Fn(&mut ComputePass<'_>)>,
     ) -> Result<(), Skip> {
         let d = res.desc;
         if res.widened || res.scaled || matches!(d.format, Format::Bc(_) | Format::Astc { .. }) {
@@ -414,6 +416,9 @@ impl Transfer {
                     .map_err(|_| Skip::Transfer);
             }
         }
+        if let Some(end) = end {
+            end(&mut pass);
+        }
         pass.end();
         r
     }
@@ -423,12 +428,25 @@ impl Transfer {
     /// block-linear texture goes through the swizzle kernel, a pitch-linear one is a plain copy of its rows. The
     /// result of each item is the number of texel bytes it copied, or why it was refused. A refused item may have
     /// written part of its storage.
+    #[cfg(test)]
     pub(crate) fn copy_back_many(
         &self,
         cb: &mut CommandBuffer,
         scratch: &Scratch,
         pools: &GuestPools,
         items: &[(&TextureRecord, &Res, &Dirty)],
+    ) -> Vec<Result<u64, Skip>> {
+        self.copy_back_many_with(cb, scratch, pools, items, None)
+    }
+
+    /// [`Transfer::copy_back_many`], where `end` encodes the last command of the compute pass.
+    pub(crate) fn copy_back_many_with(
+        &self,
+        cb: &mut CommandBuffer,
+        scratch: &Scratch,
+        pools: &GuestPools,
+        items: &[(&TextureRecord, &Res, &Dirty)],
+        end: Option<&dyn Fn(&mut ComputePass<'_>)>,
     ) -> Vec<Result<u64, Skip>> {
         if items.is_empty() {
             return Vec::new();
@@ -445,6 +463,9 @@ impl Transfer {
             .iter()
             .map(|(rec, res, dirty)| self.copy_back_one(&mut pass, scratch, pools, rec, res, dirty))
             .collect();
+        if let Some(end) = end {
+            end(&mut pass);
+        }
         pass.end();
         out
     }

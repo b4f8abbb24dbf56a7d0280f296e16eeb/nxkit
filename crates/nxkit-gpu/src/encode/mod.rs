@@ -333,6 +333,9 @@ pub(crate) fn render_pass(
         }
         n += 1;
     }
+    if let Some(p) = sh.prof {
+        p.end_pass_render(&mut rp, index);
+    }
     rp.end();
     // The barrier plan counts the blit stage as a writer of a compressed attachment (`BarrierState::plan`).
     let stores: Vec<&BlockTarget> = s.blocks.iter().filter(|b| b.2).map(|b| &b.0).collect();

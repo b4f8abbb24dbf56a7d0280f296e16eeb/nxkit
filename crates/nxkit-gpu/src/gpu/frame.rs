@@ -26,6 +26,9 @@ pub(super) fn run_chunk_inner(
         stats.skipped[Skip::Encode as usize] += 1;
         return (stats, copied);
     };
+    if let Some(p) = sh.prof {
+        p.chunk_start(range.start);
+    }
     for index in range {
         let Some(pass) = sh.plan.passes.get(index) else {
             continue;
@@ -445,6 +448,13 @@ impl Gpu {
         let preloaded = preload::finish(preload);
         mark(t0, "preload");
         let uploaded = Mutex::new(FastMap::default());
+        let prof = if crate::passprof::on() {
+            crate::passprof::begin_frame(&self.ctx, plan, |i| {
+                describe_pass(frame, plan, detail, &ords, &textures, i)
+            })
+        } else {
+            None
+        };
         let sh = Shared {
             ctx: &self.ctx,
             frame,
@@ -482,6 +492,7 @@ impl Gpu {
             preloaded: &preloaded,
             native: native.as_ref(),
             queries: queries.as_deref(),
+            prof: prof.as_ref(),
         };
         if !frame.gates.is_empty() && crate::diag("rendercond") && crate::diag::sampled() {
             crate::gatediag::frame(&sh);
@@ -530,6 +541,7 @@ impl Gpu {
                     &dirty,
                     &copied_back,
                     (pools.as_ref(), &mut stats),
+                    prof.as_ref(),
                 );
                 PHASES.with(|p| p.borrow_mut()[1] = nanos(t_cb, Instant::now()));
                 r
@@ -537,6 +549,9 @@ impl Gpu {
             _ => Default::default(),
         };
 
+        if let Some(p) = prof {
+            crate::passprof::end_frame(p);
+        }
         stats.chunks_ns = chunks_ns;
         stats.barriers_emitted = barrier_plan.emitted;
         stats.barriers_avoided = barrier_plan.avoided;
@@ -638,5 +653,132 @@ impl Gpu {
                 );
             }
         }
+    }
+}
+
+/// `NXKIT_DIAG=passprof`: what a pass is, for the report.
+fn describe_pass(
+    frame: &Frame,
+    plan: &PassPlan,
+    detail: &FrameDetail,
+    ords: &[crate::draws::Ordinal],
+    textures: &FastMap<TexId, Res>,
+    i: usize,
+) -> String {
+    use crate::detail::CopyKind;
+    let p = &plan.passes[i];
+    let n = p.cmds.len();
+    let cmds = || {
+        p.cmds
+            .clone()
+            .filter_map(|c| Some((frame.cmds.get(c as usize)?, ords.get(c as usize).copied()?)))
+    };
+    match p.kind {
+        PassKind::Render => {
+            let what = plan
+                .attachments_of(p)
+                .first()
+                .and_then(|a| textures.get(&a.tex))
+                .map_or_else(String::new, |r| {
+                    format!(" {}x{} {:?}", r.desc.width, r.desc.height, r.desc.format)
+                });
+            let draws = cmds().filter(|(c, _)| matches!(c, Cmd::Draw { .. }));
+            let count = draws.clone().count();
+            let fs = draws
+                .clone()
+                .next()
+                .and_then(|(_, o)| detail.draws.get(o.draw as usize))
+                .map_or_else(
+                    || "none".to_string(),
+                    |d| {
+                        d.program
+                            .fragment
+                            .as_deref()
+                            .map_or_else(|| "depth-only".to_string(), str::to_string)
+                    },
+                );
+            format!("render cmds {n} draws {count} fs {fs}{what}")
+        }
+        PassKind::Compute => {
+            let ds: Vec<String> = cmds()
+                .filter(|(c, _)| matches!(c, Cmd::Dispatch { .. }))
+                .map(|(_, o)| {
+                    detail.dispatches.get(o.dispatch as usize).map_or_else(
+                        || "?".to_string(),
+                        |d| {
+                            let [x, y, z] = d.groups;
+                            match d.indirect {
+                                Some(a) => format!("{} indirect@{a:#x}", d.program),
+                                None => format!("{} {x}x{y}x{z}", d.program),
+                            }
+                        },
+                    )
+                })
+                .collect();
+            let more = ds.len().saturating_sub(3);
+            let mut s = format!("compute cmds {n} [{}]", ds.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
+            if more > 0 {
+                s.push_str(&format!(" +{more}"));
+            }
+            s
+        }
+        PassKind::Copy => {
+            let items: Vec<String> = cmds()
+                .map(|(c, o)| {
+                    let d = detail.copies.get(o.copy as usize);
+                    let [w, h, dp] = d.map_or([0; 3], |d| d.size);
+                    match (c, d.map(|d| d.kind)) {
+                        (Cmd::Copy { src, dst }, k) => format!(
+                            "{} {w}x{h}x{dp} {src:?}->{dst:?}",
+                            match k {
+                                Some(CopyKind::TextureToTexture) => "tex-copy",
+                                Some(CopyKind::BufferToTexture) => "buf-to-tex",
+                                Some(CopyKind::TextureToBuffer) => "tex-to-buf",
+                                Some(CopyKind::Clear) => "clear",
+                                _ => "copy",
+                            }
+                        ),
+                        (Cmd::BufferCopy, _) => d.map_or_else(
+                            || "buffer".to_string(),
+                            |d| match d.kind {
+                                CopyKind::BufferFill => {
+                                    format!("fill {} bytes @{:#x}", d.bytes, d.dst_addr)
+                                }
+                                _ => format!(
+                                    "buffer-copy {} bytes {:#x}->{:#x}",
+                                    d.bytes, d.src_addr, d.dst_addr
+                                ),
+                            },
+                        ),
+                        (Cmd::Downsample { src, dst }, _) => {
+                            format!("downsample {w}x{h} {src:?}->{dst:?}")
+                        }
+                        _ => "other".to_string(),
+                    }
+                })
+                .collect();
+            let more = items.len().saturating_sub(3);
+            let mut s = format!("copy cmds {n} [{}]", items.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
+            if more > 0 {
+                s.push_str(&format!(" +{more}"));
+            }
+            s
+        }
+        PassKind::CpuRead => {
+            let items: Vec<String> = cmds()
+                .filter_map(|(c, _)| match c {
+                    Cmd::CpuRead(id) => Some(match textures.get(id) {
+                        Some(r) => format!(
+                            "{id:?} {}x{} {:?}",
+                            r.desc.width, r.desc.height, r.desc.format
+                        ),
+                        None => format!("{id:?}"),
+                    }),
+                    _ => None,
+                })
+                .collect();
+            format!("cpuread [{}]", items.join("; "))
+        }
+        _ => format!("other cmds {n}"),
     }
 }

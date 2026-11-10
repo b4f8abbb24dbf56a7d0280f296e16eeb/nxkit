@@ -6,6 +6,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- `NXKIT_DIAG=passprof` prints every 120 frames the GPU time of each pass of a frame (precise timestamps at the end of each render, compute, copy and CPU-read pass, and of the copy-back at the end of the frame) with the 40 most expensive passes, their programs, targets and copies, and the mean total.
 - `NXKIT_DIAG=gateseq` traces the calls that matter to the queue gate of one frame in 300 with their thread, the waits and their return times, the flushes and the GPU start and end of the batches.
 - `NXKIT_DIAG=ubodump` prints, for the dispatches of the compute programs in `NXKIT_DIAG_FS`, the 64-bit values at the offsets 192 to 448 of each uniform buffer and the push constants, to compare the pointers a compute pass reads with the addresses of empty indirect records (`meshvis`).
 - `NXKIT_DIAG=nanscan` also counts the float storage images that the dispatches of a compute pass bind, before the pass (`at load`) and after it, to find the dispatch that writes non-finite values into an image (`image` lines, once per frame for each texture and program set, when the count changed or the texture first shows non-finite texels), and the float textures that listed compute programs sample (`samples`, stage `cs`). It runs for the dispatches of the compute programs listed in `NXKIT_DIAG_FS`, or for every dispatch with the knob `nancomp`. `DIAG comp` lists the images of a dispatch (slot, texture, size and format).

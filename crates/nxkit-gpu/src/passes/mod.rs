@@ -201,6 +201,9 @@ pub(crate) fn compute_pass(
             stats.skip(why);
         }
     }
+    if let Some(p) = sh.prof {
+        p.end_pass_compute(&mut cp, index);
+    }
     cp.end();
     if let Some(n) = nan {
         n.after(sh, cb);
@@ -232,7 +235,15 @@ pub(crate) fn cpu_read(
         if !(rec.residency == Residency::GpuNewer || written_here) || done.contains(&id) {
             continue;
         }
-        match sh.transfer.copy_back(cb, scratch, sh.pools, rec, res) {
+        let stamp = |cp: &mut nxkit_metal::ComputePass<'_>| {
+            if let Some(p) = sh.prof {
+                p.end_pass_compute(cp, index);
+            }
+        };
+        match sh
+            .transfer
+            .copy_back(cb, scratch, sh.pools, rec, res, Some(&stamp))
+        {
             Ok(()) => {
                 stats.copybacks += 1;
                 stats.compute_passes += 1;
