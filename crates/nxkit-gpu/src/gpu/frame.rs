@@ -291,7 +291,15 @@ impl Gpu {
             .split_first_mut()
             .ok_or(MetalError::Invalid("the batch has no buffers"))?;
         first.retain(keep.clone());
-        let mesh = crate::meshvis::plan(diag_frame, frame, plan, detail, &ords, &textures);
+        let mesh = crate::meshvis::plan(
+            diag_frame,
+            frame,
+            plan,
+            detail,
+            &ords,
+            &textures,
+            &self.guest,
+        );
         let queries =
             crate::queries::prepare(&self.ctx, &self.vis_pool, frame, plan, detail, &ords, mesh);
         if let Some(b) = queries.as_ref().and_then(|q| q.buffer()) {
@@ -559,7 +567,7 @@ impl Gpu {
         }
         if let Some(q) = queries.as_ref().filter(|q| q.has_mesh()) {
             let _ = self.wait();
-            q.mesh_print();
+            q.mesh_print(&self.guest);
         }
         crate::health::frame(diag_frame, &stats);
         Ok(EncodeReport {

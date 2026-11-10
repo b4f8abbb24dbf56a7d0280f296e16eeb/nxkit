@@ -111,6 +111,17 @@ pub(crate) fn knob(name: &str) -> bool {
     knobs().flags.load(Ordering::Relaxed) & bit != 0
 }
 
+/// The names of the knobs that are on now.
+pub(crate) fn knobs_on() -> Vec<&'static str> {
+    let flags = knobs().flags.load(Ordering::Relaxed);
+    KNOBS
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| flags & (1 << i) != 0)
+        .map(|(_, k)| *k)
+        .collect()
+}
+
 struct Knobs {
     flags: AtomicU32,
     file: Option<PathBuf>,

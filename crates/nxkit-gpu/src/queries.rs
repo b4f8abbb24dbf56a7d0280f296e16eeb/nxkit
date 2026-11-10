@@ -286,14 +286,19 @@ impl FrameQueries {
     }
 
     /// Prints the counts of the mesh draws. The GPU has to be done with the frame.
-    pub(crate) fn mesh_print(&self) {
+    pub(crate) fn mesh_print(&self, guest: &GuestSpace) {
         let Some(m) = &self.mesh else { return };
         let read = |i: u64| {
             let mut b = [0u8; 8];
             self.buffer.as_ref()?.read(i * 8, &mut b).ok()?;
             Some(u64::from_le_bytes(b))
         };
-        for l in m.report(&|n| self.draw_slot(n).is_some(), &read) {
+        let record = |off: u64| {
+            let mut b = [0u8; 4];
+            guest.read(off, &mut b).ok()?;
+            Some(u32::from_le_bytes(b))
+        };
+        for l in m.report(&|n| self.draw_slot(n).is_some(), &read, &record) {
             eprintln!("{l}");
         }
     }

@@ -54,9 +54,10 @@ pub(super) struct Gates {
     open: HashMap<usize, Info>,
 }
 
-/// Whether the segments are recorded.
+/// Whether the segments are recorded: with `NXKIT_DIAG=rendercond`, and with `meshvis`, whose time lines of the depth
+/// textures name the conditions of clears.
 pub fn enabled() -> bool {
-    super::probe::on()
+    super::probe::on() || crate::diag::on("meshvis")
 }
 
 impl Gates {
