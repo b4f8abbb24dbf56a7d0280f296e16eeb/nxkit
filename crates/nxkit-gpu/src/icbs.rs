@@ -105,8 +105,8 @@ impl<B: Backing + Clone> PoolRefs<B> {
 }
 
 /// Drops the entries of `map` whose pools include one of `ids`.
-fn forget<V, B: Backing + Clone>(
-    map: &mut FastMap<u64, V>,
+fn forget<K, V, B: Backing + Clone>(
+    map: &mut FastMap<K, V>,
     ids: &[u64],
     refs: impl Fn(&V) -> &PoolRefs<B>,
 ) {
@@ -136,7 +136,11 @@ pub(crate) struct Built {
 /// The ICBs of all candidate recordings.
 #[derive(Default)]
 pub(crate) struct Icbs {
-    entries: FastMap<u64, Entry>,
+    /// By recording and table: the argument buffers of a draw with a `tex_pool` or `samp_pool` binding hold the address
+    /// of the pool table of the batch slot that built them, and a later frame in another slot must not read an older
+    /// copy of the table. So such an ICB is kept per slot (second key part: the address of the slot's texture table, at
+    /// most one ICB per slot in flight), and any other ICB once (second key part 0).
+    entries: FastMap<(u64, u64), Entry>,
     candidates: FastSet<u64>,
 }
 
@@ -196,12 +200,12 @@ impl Icbs {
     pub(crate) fn set_candidates(&mut self, handles: impl IntoIterator<Item = u64>) {
         self.candidates = handles.into_iter().collect();
         let keep = &self.candidates;
-        self.entries.retain(|h, _| keep.contains(h));
+        self.entries.retain(|(h, _), _| keep.contains(h));
     }
 
     /// Forgets the ICB of a recording.
     pub(crate) fn drop_recording(&mut self, handle: u64) {
-        self.entries.remove(&handle);
+        self.entries.retain(|(h, _), _| *h != handle);
         self.candidates.remove(&handle);
     }
 
@@ -236,26 +240,29 @@ impl Icbs {
             return None;
         }
         let sig = signature(sh, pc, draws);
-        if let Some(e) = self.entries.get_mut(&run.handle) {
-            if e.signature == sig && e.pools.current(sh.pools) {
-                return Some(Built {
-                    icb: e.icb.clone(),
-                    slots: e.slots,
-                    skipped: e.skipped.clone(),
-                    rebuilt: false,
-                });
+        for key in [(run.handle, 0), (run.handle, sh.env.pools.0)] {
+            if let Some(e) = self.entries.get_mut(&key) {
+                if e.signature == sig && e.pools.current(sh.pools) {
+                    return Some(Built {
+                        icb: e.icb.clone(),
+                        slots: e.slots,
+                        skipped: e.skipped.clone(),
+                        rebuilt: false,
+                    });
+                }
+                // Another signature, or a pool it named is gone: the old buffer is of no use.
+                self.entries.remove(&key);
             }
-            // Another signature, or a pool it named is gone: the old buffer is of no use.
-            self.entries.remove(&run.handle);
         }
-        let e = build(sh, pc, draws, sig)?;
+        let (e, pooled) = build(sh, pc, draws, sig)?;
         let b = Built {
             icb: e.icb.clone(),
             slots: e.slots,
             skipped: e.skipped.clone(),
             rebuilt: true,
         };
-        self.entries.insert(run.handle, e);
+        let table = if pooled { sh.env.pools.0 } else { 0 };
+        self.entries.insert((run.handle, table), e);
         Some(b)
     }
 }
@@ -265,14 +272,18 @@ fn build(
     pc: &PassCtx,
     draws: &[Arc<DrawDetail>],
     signature: u64,
-) -> Option<Entry> {
+) -> Option<(Entry, bool)> {
     let mut arena = Arena::new(sh.ctx, DRAW_ARENA_BYTES * draws.len() as u64).ok()?;
     let mut cmds: Vec<Vec<IcbCommand>> = Vec::with_capacity(draws.len());
     let mut skipped = Vec::new();
     let mut pools = PoolRefs::new(sh.pools);
+    let mut pooled = false;
     for d in draws {
         match slot_commands(sh, pc, d, &mut arena, &mut pools) {
-            Ok(c) => cmds.push(c),
+            Ok((c, p)) => {
+                cmds.push(c);
+                pooled |= p;
+            }
             Err(why) => skipped.push(why),
         }
     }
@@ -292,13 +303,14 @@ fn build(
     for (slot, c) in cmds.iter().enumerate() {
         icb.encode(slot as u32, c).ok()?;
     }
-    Some(Entry {
+    let entry = Entry {
         icb,
         pools,
         signature,
         slots: cmds.len() as u32,
         skipped,
-    })
+    };
+    Some((entry, pooled))
 }
 
 /// The buffer of the pool that holds a guest address and the offset in it. `None` (an address outside guest memory) or
@@ -322,7 +334,7 @@ fn slot_commands(
     d: &DrawDetail,
     arena: &mut Arena,
     pools: &mut PoolRefs<Arc<GuestMemory>>,
-) -> Result<Vec<IcbCommand>, Skip> {
+) -> Result<(Vec<IcbCommand>, bool), Skip> {
     let p = prepare(sh, pc, d, arena, true)?;
     let data = |addr: u64| (arena.buffer.clone(), arena.offset_of(addr));
     let mut c = vec![IcbCommand::SetPipeline(p.pipeline.clone())];
@@ -402,5 +414,5 @@ fn slot_commands(
         | Geom::Mesh { .. }
         | Geom::MeshIndirect { .. } => return Err(Skip::Encode),
     });
-    Ok(c)
+    Ok((c, p.pooled))
 }

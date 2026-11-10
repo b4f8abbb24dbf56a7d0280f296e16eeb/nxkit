@@ -7,6 +7,7 @@
 //! resource IDs by descriptor id and one of sampler resource IDs by sampler id.
 
 mod args;
+mod changes;
 pub(crate) mod marks;
 #[cfg(test)]
 mod pool_tests;
@@ -294,22 +295,45 @@ pub(crate) struct Bindless {
     ctx: Context,
     samplers: crate::draws::FastMap<u64, Sampler>,
     default_sampler: Sampler,
-    tex_pool: Arc<DataBuffer>,
-    samp_pool: Arc<DataBuffer>,
+    /// The copies of the two tables, one per batch slot in flight. A frame binds the copy of its own slot, so an earlier
+    /// frame that still runs never sees an element that a later frame wrote ([`Bindless::sync`]).
+    slots: Vec<TableSlot>,
+    /// The elements of the master tables that changed, for each slot's copy.
+    tex_changes: changes::Changes,
+    samp_changes: changes::Changes,
     /// The bitmap of the texture IDs that shaders read (`seen` of the texture table), and of the sampler IDs, which no
     /// generated code marks: it only makes `seen` of the sampler table an address that is valid.
     tex_seen: Arc<DataBuffer>,
     samp_seen: Arc<DataBuffer>,
+    /// The master of the texture table: the non-zero resource ID of each element. All writes go here.
     tex_mirror: crate::draws::FastMap<u32, u64>,
+    /// The master of the sampler table.
     samp_mirror: crate::draws::FastMap<u32, u64>,
     /// The texture and Metal texture (store generation) behind each element of the texture table that is not 0.
     tex_owner: crate::draws::FastMap<u32, (TexId, u64)>,
-    /// `n` of the two tables as written.
+    /// `n` of the two master tables.
     tex_n: u32,
     samp_n: u32,
     marks: marks::Marks,
     support: Arc<DataBuffer>,
     zero: Arc<DataBuffer>,
+}
+
+/// The two tables of one batch slot, and the `n` of each as last copied into them.
+struct TableSlot {
+    tex: Arc<DataBuffer>,
+    samp: Arc<DataBuffer>,
+    synced_n: (u32, u32),
+}
+
+/// The log of changed elements is cut at this many entries; a slot behind the cut copies its whole table.
+const CHANGE_LOG_CAP: usize = 1 << 20;
+
+/// True when a stage program has a `tex_pool` or `samp_pool` binding.
+pub(crate) fn binds_pool(p: &StageProgram) -> bool {
+    p.binds
+        .iter()
+        .any(|b| matches!(b.kind, BindKind::TexPool | BindKind::SampPool))
 }
 
 /// Bytes of the support buffer and of the zero buffer. 64 KiB is the largest uniform block a shader declares.
@@ -366,10 +390,18 @@ impl Bindless {
             ctx,
             (u64::from(nxkit_nvn::descriptors::MAX_SAMPLER_ID) + 1) / 8,
         )?);
-        let tex_pool = Arc::new(DataBuffer::new(ctx, tex_bytes)?);
-        let samp_pool = Arc::new(DataBuffer::new(ctx, samp_bytes)?);
-        tex_pool.write(POOL_SEEN, &tex_seen.gpu_address().to_le_bytes())?;
-        samp_pool.write(POOL_SEEN, &samp_seen.gpu_address().to_le_bytes())?;
+        let mut slots = Vec::with_capacity(nxkit_metal::BATCHES_IN_FLIGHT);
+        for _ in 0..nxkit_metal::BATCHES_IN_FLIGHT {
+            let tex = Arc::new(DataBuffer::new(ctx, tex_bytes)?);
+            let samp = Arc::new(DataBuffer::new(ctx, samp_bytes)?);
+            tex.write(POOL_SEEN, &tex_seen.gpu_address().to_le_bytes())?;
+            samp.write(POOL_SEEN, &samp_seen.gpu_address().to_le_bytes())?;
+            slots.push(TableSlot {
+                tex,
+                samp,
+                synced_n: (0, 0),
+            });
+        }
         let support = Arc::new(DataBuffer::new(ctx, STATIC_BYTES)?);
         for i in 0..SUPPORT_RENDER_SCALES {
             support.write(SUPPORT_RENDER_SCALE + 16 * i, &1.0f32.to_le_bytes())?;
@@ -381,8 +413,9 @@ impl Bindless {
             default_sampler,
             support,
             zero,
-            tex_pool,
-            samp_pool,
+            tex_changes: changes::Changes::new(slots.len(), CHANGE_LOG_CAP),
+            samp_changes: changes::Changes::new(slots.len(), CHANGE_LOG_CAP),
+            slots,
             tex_seen,
             samp_seen,
             tex_mirror: Default::default(),
@@ -424,55 +457,68 @@ impl Bindless {
         self.publish_sampler(samp, r.sampler);
     }
 
-    /// Writes the element of texture ID `id`, when it changed, and raises `n` to `id` when that is higher.
+    /// Sets the element of texture ID `id` in the master, when it changed, and raises `n` to `id` when that is higher.
+    /// The tables that the GPU reads change at [`Bindless::sync`].
     pub(crate) fn publish_texture(&mut self, id: u32, resource: u64, owner: (TexId, u64)) -> bool {
-        let at = POOL_HEAD + POOL_ELEMENT * u64::from(id);
         let changed = self.tex_mirror.get(&id) != Some(&resource);
-        if changed && self.tex_pool.write(at, &resource.to_le_bytes()).is_ok() {
+        if changed {
             self.tex_mirror.insert(id, resource);
-        } else if changed {
-            return false;
+            self.tex_changes.note(id);
         }
         self.tex_owner.insert(id, owner);
-        Self::raise(&self.tex_pool, &mut self.tex_n, id);
+        Self::raise(&mut self.tex_n, id);
         changed
     }
 
-    /// Writes the element of sampler ID `id`, when it changed, and raises `n` to `id` when that is higher.
+    /// Sets the element of sampler ID `id` in the master, when it changed, and raises `n` to `id` when that is higher.
     pub(crate) fn publish_sampler(&mut self, id: u32, resource: u64) {
         if self.samp_mirror.get(&id) != Some(&resource) {
-            let at = POOL_HEAD + POOL_ELEMENT * u64::from(id);
-            if self.samp_pool.write(at, &resource.to_le_bytes()).is_ok() {
-                self.samp_mirror.insert(id, resource);
-            }
+            self.samp_mirror.insert(id, resource);
+            self.samp_changes.note(id);
         }
-        Self::raise(&self.samp_pool, &mut self.samp_n, id);
+        Self::raise(&mut self.samp_n, id);
     }
 
     /// Raises `n` of the texture table to the highest ID a read can name: the last slot of the texture pools. The
     /// elements past the IDs that the host filled stay 0, so a read there gets the null texture, and its bit in the
     /// bitmap tells the host to fill it. It never shrinks.
     pub(crate) fn raise_texture_limit(&mut self, limit: u32) {
-        Self::raise(&self.tex_pool, &mut self.tex_n, limit);
+        Self::raise(&mut self.tex_n, limit);
     }
 
-    fn raise(table: &DataBuffer, n: &mut u32, id: u32) {
-        if id > *n && table.write(0, &id.to_le_bytes()).is_ok() {
-            *n = id;
-        }
+    fn raise(n: &mut u32, id: u32) {
+        *n = (*n).max(id);
     }
 
     /// Sets the element of texture ID `id` to 0 and forgets it. Returns true when it held a resource ID.
     pub(crate) fn clear_texture(&mut self, id: u32) -> bool {
         self.tex_owner.remove(&id);
-        let Some(held) = self.tex_mirror.get(&id).map(|r| *r != 0) else {
+        let Some(held) = self.tex_mirror.remove(&id) else {
             return false;
         };
-        let at = POOL_HEAD + POOL_ELEMENT * u64::from(id);
-        if self.tex_pool.write(at, &0u64.to_le_bytes()).is_ok() {
-            self.tex_mirror.remove(&id);
-        }
-        held
+        self.tex_changes.note(id);
+        held != 0
+    }
+
+    /// Brings the tables of batch slot `slot` up to date with the master. Call it after the batch ring has waited
+    /// for the batch that used the slot before (`BatchRing::begin`), so that no frame reads the tables, and after the
+    /// last write of the frame to the master. Only the elements that changed since the slot last took them are copied.
+    pub(crate) fn sync(&mut self, slot: usize) {
+        let s = &mut self.slots[slot];
+        sync_table(
+            &s.tex,
+            self.tex_changes.take(slot),
+            &self.tex_mirror,
+            self.tex_n,
+            &mut s.synced_n.0,
+        );
+        sync_table(
+            &s.samp,
+            self.samp_changes.take(slot),
+            &self.samp_mirror,
+            self.samp_n,
+            &mut s.synced_n.1,
+        );
     }
 
     /// Sets to 0 every element of the texture table whose texture `gone` names (by the texture and the generation of
@@ -513,9 +559,10 @@ impl Bindless {
         )
     }
 
-    /// The addresses of the two pool tables.
-    pub(crate) fn pools(&self) -> (u64, u64) {
-        (self.tex_pool.gpu_address(), self.samp_pool.gpu_address())
+    /// The addresses of the two pool tables of batch slot `slot`.
+    pub(crate) fn pools(&self, slot: usize) -> (u64, u64) {
+        let s = &self.slots[slot];
+        (s.tex.gpu_address(), s.samp.gpu_address())
     }
 
     /// The GPU addresses of the support buffer (render scale 1.0, no BGRA swap) and of a buffer of zeros.
@@ -523,12 +570,13 @@ impl Bindless {
         (self.support.gpu_address(), self.zero.gpu_address())
     }
 
-    /// The pool tables and their bitmaps, which the command buffers keep alive. They join the residency set when they are
-    /// made, like every `DataBuffer`.
-    pub(crate) fn pool_buffers(&self) -> Vec<Arc<DataBuffer>> {
+    /// The pool tables of batch slot `slot` and the bitmaps, which the command buffers keep alive. They join the
+    /// residency set when they are made, like every `DataBuffer`.
+    pub(crate) fn pool_buffers(&self, slot: usize) -> Vec<Arc<DataBuffer>> {
+        let s = &self.slots[slot];
         vec![
-            self.tex_pool.clone(),
-            self.samp_pool.clone(),
+            s.tex.clone(),
+            s.samp.clone(),
             self.tex_seen.clone(),
             self.samp_seen.clone(),
         ]
@@ -538,5 +586,40 @@ impl Bindless {
     #[cfg(test)]
     pub(crate) fn seen(&self) -> (u64, u64) {
         (self.tex_seen.gpu_address(), self.samp_seen.gpu_address())
+    }
+}
+
+/// Writes the pending elements of the master into one table and `n` into its head.
+fn sync_table(
+    table: &DataBuffer,
+    pending: changes::Pending<'_>,
+    master: &crate::draws::FastMap<u32, u64>,
+    n: u32,
+    synced_n: &mut u32,
+) {
+    let at = |id: u32| POOL_HEAD + POOL_ELEMENT * u64::from(id);
+    match pending {
+        changes::Pending::Ids(ids) => {
+            for id in ids {
+                let v = master.get(id).copied().unwrap_or(0);
+                let _ = table.write(at(*id), &v.to_le_bytes());
+            }
+        }
+        changes::Pending::All => {
+            // Zero the elements up to `n` (the master has none above it), then write the non-zero ones.
+            static ZEROS: [u8; 1 << 16] = [0; 1 << 16];
+            let (mut off, end) = (POOL_HEAD, at(n) + POOL_ELEMENT);
+            while off < end {
+                let len = (end - off).min(ZEROS.len() as u64);
+                let _ = table.write(off, &ZEROS[..len as usize]);
+                off += len;
+            }
+            for (id, v) in master {
+                let _ = table.write(at(*id), &v.to_le_bytes());
+            }
+        }
+    }
+    if *synced_n != n && table.write(0, &n.to_le_bytes()).is_ok() {
+        *synced_n = n;
     }
 }

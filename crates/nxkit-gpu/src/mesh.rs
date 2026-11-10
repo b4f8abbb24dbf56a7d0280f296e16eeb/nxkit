@@ -188,6 +188,9 @@ pub(crate) fn prepare(
         streams: Vec::new(),
         stream_locs: Vec::new(),
         pulled: false,
+        pooled: crate::bindless::binds_pool(&ms)
+            || ts.as_deref().is_some_and(crate::bindless::binds_pool)
+            || fs.as_deref().is_some_and(crate::bindless::binds_pool),
         cull: f.cull,
         winding: f.winding,
         fill: f.fill,

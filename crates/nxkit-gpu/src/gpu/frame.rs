@@ -279,7 +279,10 @@ impl Gpu {
         pass_shape_diag(frame, plan, &textures);
         mark(t0, "pre-ring");
         let keep: Arc<Keep> = {
-            let tables = self.bindless.pool_buffers();
+            // Every write of the frame to the pool tables is done (`pool_prepare`, `resolve_handles`, `pool_release`,
+            // the images). The ring waited for the batch that used `region` before, so no frame reads its copy.
+            self.bindless.sync(region);
+            let tables = self.bindless.pool_buffers(region);
             let mut all: Vec<Texture> = textures.values().map(|r| r.tex.clone()).collect();
             all.extend(handles.keep);
             Arc::new((all, tables, gmem_buf.clone(), pools.clone()))
@@ -460,7 +463,7 @@ impl Gpu {
                     map: gmem_buf.as_ref().map_or(0, |b| b.gpu_address()),
                     logs: Some((&*gmem_logs, region)),
                 },
-                pools: self.bindless.pools(),
+                pools: self.bindless.pools(region),
                 guest_pools: pools,
                 default_sampler: self.bindless.default_sampler_id(),
                 statics: self.bindless.statics(),

@@ -204,6 +204,9 @@ pub(crate) struct Prep {
     pub(crate) stream_locs: Vec<Option<crate::pools::Loc>>,
     /// The vertex function pulls its inputs (`crate::pull`).
     pub(crate) pulled: bool,
+    /// A stage of the draw has a `tex_pool` or `samp_pool` binding: its argument buffer holds the address of the pool
+    /// table of the batch slot of the frame.
+    pub(crate) pooled: bool,
     pub(crate) cull: CullMode,
     pub(crate) winding: Winding,
     pub(crate) fill: FillMode,
@@ -308,6 +311,8 @@ pub(crate) fn prepare(
         streams,
         stream_locs,
         pulled: vs.pull,
+        pooled: crate::bindless::binds_pool(&vs)
+            || fs.as_deref().is_some_and(crate::bindless::binds_pool),
         cull: f.cull,
         winding: f.winding,
         fill: f.fill,

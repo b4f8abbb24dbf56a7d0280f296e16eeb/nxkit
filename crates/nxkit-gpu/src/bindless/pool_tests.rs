@@ -38,7 +38,7 @@ fn resolved(texture: u64, sampler: u64) -> Resolved {
 fn the_head_of_each_table_holds_its_bitmap_and_n_follows_the_highest_published_id() {
     let Some(ctx) = context() else { return };
     let mut b = Bindless::new(&ctx).unwrap();
-    let [tex, samp, tex_seen, samp_seen] = b.pool_buffers().try_into().ok().unwrap();
+    let [tex, samp, tex_seen, samp_seen] = b.pool_buffers(0).try_into().ok().unwrap();
     assert_eq!(tex_seen.len(), 131072);
     assert_eq!(samp_seen.len(), 512);
     assert_eq!(b.seen(), (tex_seen.gpu_address(), samp_seen.gpu_address()));
@@ -51,12 +51,14 @@ fn the_head_of_each_table_holds_its_bitmap_and_n_follows_the_highest_published_i
         resolved(0x50, 0x20),
         (TexId(1), 1),
     );
+    b.sync(0);
     assert_eq!((word(&tex, 0), word(&samp, 0)), (5, 2));
     b.publish(
         Descriptors::handle(9, 4),
         resolved(0x90, 0x40),
         (TexId(2), 1),
     );
+    b.sync(0);
     assert_eq!((word(&tex, 0), word(&samp, 0)), (9, 4));
     // A lower id does not lower n.
     b.publish(
@@ -64,6 +66,7 @@ fn the_head_of_each_table_holds_its_bitmap_and_n_follows_the_highest_published_i
         resolved(0x30, 0x10),
         (TexId(3), 1),
     );
+    b.sync(0);
     assert_eq!((word(&tex, 0), word(&samp, 0)), (9, 4));
     assert_eq!(long(&tex, POOL_HEAD + POOL_ELEMENT * 5), 0x50);
     assert_eq!(long(&tex, POOL_HEAD + POOL_ELEMENT * 9), 0x90);
@@ -71,8 +74,10 @@ fn the_head_of_each_table_holds_its_bitmap_and_n_follows_the_highest_published_i
     // The head is untouched by the elements, and the pool limit raises n without an element.
     assert_eq!(long(&tex, 8), tex_seen.gpu_address());
     b.raise_texture_limit(1000);
+    b.sync(0);
     assert_eq!(word(&tex, 0), 1000);
     b.raise_texture_limit(10);
+    b.sync(0);
     assert_eq!(word(&tex, 0), 1000);
 }
 
@@ -80,7 +85,7 @@ fn the_head_of_each_table_holds_its_bitmap_and_n_follows_the_highest_published_i
 fn an_element_is_cleared_when_its_texture_or_generation_goes() {
     let Some(ctx) = context() else { return };
     let mut b = Bindless::new(&ctx).unwrap();
-    let tex = b.pool_buffers().remove(0);
+    let tex = b.pool_buffers(0).remove(0);
     let at = |id: u64| POOL_HEAD + POOL_ELEMENT * id;
     assert!(b.publish_texture(5, 0x50, (TexId(1), 7)));
     assert!(b.publish_texture(6, 0x60, (TexId(2), 8)));
@@ -88,24 +93,69 @@ fn an_element_is_cleared_when_its_texture_or_generation_goes() {
     assert!(!b.publish_texture(6, 0x60, (TexId(2), 8)));
     assert_eq!(b.release_gone(|_, _| false), 0);
     assert_eq!(b.release_gone(|t, g| t == TexId(1) && g == 7), 1);
+    b.sync(0);
     assert_eq!(long(&tex, at(5)), 0);
     assert_eq!(long(&tex, at(6)), 0x60);
     assert_eq!(b.owners(), 1);
     // A new Metal texture of the same texture: the generation changed.
     assert_eq!(b.release_gone(|t, g| t == TexId(2) && g != 9), 1);
+    b.sync(0);
     assert_eq!(long(&tex, at(6)), 0);
     assert_eq!(b.owners(), 0);
     // The element is filled again by the next frame.
     assert!(b.publish_texture(6, 0x61, (TexId(2), 9)));
+    b.sync(0);
     assert_eq!(long(&tex, at(6)), 0x61);
     assert!(!b.clear_texture(99));
+}
+
+/// A frame in flight keeps the table of its slot: what a later frame clears or rewrites reaches only the slots that
+/// take it, and each slot catches up on everything it missed.
+#[test]
+fn each_batch_slot_has_its_own_table_that_catches_up_when_it_syncs() {
+    let Some(ctx) = context() else { return };
+    let mut b = Bindless::new(&ctx).unwrap();
+    let at = |id: u64| POOL_HEAD + POOL_ELEMENT * id;
+    let t: Vec<_> = (0..3).map(|s| b.pool_buffers(s).remove(0)).collect();
+    let s: Vec<_> = (0..3).map(|s| b.pool_buffers(s).remove(1)).collect();
+    assert_ne!(b.pools(0), b.pools(1));
+    assert_ne!(b.pools(1), b.pools(2));
+    assert_eq!(long(&t[1], 8), long(&t[0], 8), "one shared bitmap");
+
+    b.publish(
+        Descriptors::handle(5, 2),
+        resolved(0x50, 0x20),
+        (TexId(1), 1),
+    );
+    b.sync(0);
+    assert_eq!(long(&t[0], at(5)), 0x50);
+    assert_eq!(long(&t[1], at(5)), 0, "slot 1 has not taken it yet");
+    // Frame 2 clears the element and rewrites the sampler while frame 1 (slot 0) is still on the GPU.
+    b.release_gone(|id, _| id == TexId(1));
+    b.publish_sampler(2, 0x21);
+    b.sync(1);
+    assert_eq!(
+        long(&t[0], at(5)),
+        0x50,
+        "slot 0 still holds what frame 1 reads"
+    );
+    assert_eq!(long(&s[0], at(2)), 0x20);
+    assert_eq!((long(&t[1], at(5)), long(&s[1], at(2))), (0, 0x21));
+    assert_eq!(word(&t[1], 0), 5);
+    // Slot 0 comes round and catches up.
+    b.sync(0);
+    assert_eq!((long(&t[0], at(5)), long(&s[0], at(2))), (0, 0x21));
+    // Slot 2 takes the whole history.
+    b.sync(2);
+    assert_eq!((long(&t[2], at(5)), long(&s[2], at(2))), (0, 0x21));
+    assert_eq!(word(&t[2], 0), 5);
 }
 
 #[test]
 fn the_bitmap_gives_the_marked_ids_and_a_sweep_clears_it() {
     let Some(ctx) = context() else { return };
     let mut b = Bindless::new(&ctx).unwrap();
-    let seen = b.pool_buffers().remove(2);
+    let seen = b.pool_buffers(0).remove(2);
     seen.write(0, &((1u32 << 3) | (1 << 7)).to_le_bytes())
         .unwrap();
     // An ID past the limit is not read.
@@ -200,13 +250,14 @@ fn a_shader_reads_the_texture_of_its_id_clamped_to_n_and_marks_the_bit() {
     let Some(ctx) = context() else { return };
     const SIZE: u32 = 4;
     let mut bindless = Bindless::new(&ctx).unwrap();
-    let [_, _, tex_seen, _] = bindless.pool_buffers().try_into().ok().unwrap();
+    let [_, _, tex_seen, _] = bindless.pool_buffers(0).try_into().ok().unwrap();
     // Two 1x1 textures with different colours: a clear pass writes each.
     let (red, green) = (target(&ctx, 1), target(&ctx, 1));
     bindless.publish_texture(3, red.gpu_resource_id(), (TexId(1), 1));
     bindless.publish_texture(7, green.gpu_resource_id(), (TexId(2), 1));
+    bindless.sync(0);
     let set = DataBuffer::new(&ctx, 16).unwrap();
-    set.write(0, &bindless.pools().0.to_le_bytes()).unwrap();
+    set.write(0, &bindless.pools(0).0.to_le_bytes()).unwrap();
     let ids = [3u32, 7, 1000];
     let id_buffers: Vec<DataBuffer> = ids
         .iter()
