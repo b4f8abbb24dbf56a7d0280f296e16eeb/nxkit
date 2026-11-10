@@ -402,6 +402,20 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.frame.cmds.is_empty()
     }
 
+    /// The draws, dispatches and copies in the open frame, which is the work since the last flush.
+    pub fn frame_work(&self) -> usize {
+        self.frame
+            .cmds
+            .iter()
+            .filter(|c| {
+                matches!(
+                    c,
+                    Cmd::Draw { .. } | Cmd::Dispatch { .. } | Cmd::Copy { .. } | Cmd::BufferCopy
+                )
+            })
+            .count()
+    }
+
     /// The frame ends. This runs the pass analysis and returns its result.
     pub fn end_frame(&mut self, reason: FlushReason) -> Result<&PassPlan> {
         match reason {

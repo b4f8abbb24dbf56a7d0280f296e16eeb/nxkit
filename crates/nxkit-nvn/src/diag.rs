@@ -374,3 +374,35 @@ mod tests {
         );
     }
 }
+
+/// Hooks that the encoder's backend calls for the trace `gateseq` of the host: a batch was kept for a fence, and a batch
+/// completed on the GPU. The host sets them once; without them the calls do nothing.
+#[derive(Clone, Copy)]
+pub struct BatchHooks {
+    /// `(fence, batch number)`: the batch of a flush was committed.
+    pub kept: fn(u64, u64),
+    /// `(batch number, command buffers, GPU start, GPU end)` with the times in seconds of the host clock
+    /// (`CACurrentMediaTime`).
+    pub done: fn(u64, usize, f64, f64),
+}
+
+static BATCH_HOOKS: OnceLock<BatchHooks> = OnceLock::new();
+
+/// Sets the hooks of the batches. The first call wins.
+pub fn set_batch_hooks(h: BatchHooks) {
+    let _ = BATCH_HOOKS.set(h);
+}
+
+/// A batch was committed for `fence`.
+pub fn batch_kept(fence: u64, number: u64) {
+    if let Some(h) = BATCH_HOOKS.get() {
+        (h.kept)(fence, number);
+    }
+}
+
+/// A batch completed on the GPU.
+pub fn batch_done(number: u64, cbs: usize, start_s: f64, end_s: f64) {
+    if let Some(h) = BATCH_HOOKS.get() {
+        (h.done)(number, cbs, start_s, end_s);
+    }
+}

@@ -11,6 +11,7 @@ use nxkit_nvn::marks::MarkOp;
 use super::gate::{Gate, Held, Op, Words};
 use super::{Front, Gpu};
 use crate::nvn::abi::{AbiResult, Obj, log_once};
+use crate::nvn::gateseq::{self, note};
 use crate::nvn::sync;
 
 /// Guest words for the gate.
@@ -49,6 +50,59 @@ fn op_name(op: &Op) -> &'static str {
     }
 }
 
+/// A mark that orders queues, for the trace of `NXKIT_DIAG=gateseq`.
+fn describe(gate: &Gate, m: &MarkOp) -> Option<String> {
+    let word = |event| {
+        gate.counter(event, &Guest)
+            .map_or("no counter".to_string(), |(w, v)| {
+                format!("word {w:#x} counter {v}")
+            })
+    };
+    Some(match *m {
+        MarkOp::SignalEvent { event, mode, value } => {
+            format!("signal ev {event:#x} ({}) mode {mode} val {value}", word(event))
+        }
+        MarkOp::WaitEvent { event, mode, value } => {
+            format!("wait ev {event:#x} ({}) mode {mode} val {value}", word(event))
+        }
+        MarkOp::FenceSync { sync } => format!("fence sync {sync:#x}"),
+        MarkOp::WaitSync { sync } => format!("waitsync {sync:#x}"),
+        _ => return None,
+    })
+}
+
+fn describe_marks(gate: &Gate, marks: &[MarkOp]) -> String {
+    let v: Vec<String> = marks.iter().filter_map(|m| describe(gate, m)).collect();
+    if v.is_empty() {
+        "no waits or signals".to_string()
+    } else {
+        v.join("; ")
+    }
+}
+
+/// What a blocked op of `queue` waits for and who would satisfy it.
+fn why_blocked(gate: &Gate, queue: u64, b: &MarkOp) -> String {
+    match *b {
+        MarkOp::WaitEvent { event, mode, value } => {
+            let Some((word, cur)) = gate.counter(event, &Guest) else {
+                return format!("wait ev {event:#x} without counter");
+            };
+            format!(
+                "wait ev {event:#x} word {word:#x} mode {mode} val {value}, counter {cur}; \
+                 held signallers {:x?}; {}",
+                gate.held_signallers(word, queue, &Guest),
+                gateseq::last_event_signals(word)
+            )
+        }
+        MarkOp::WaitSync { sync } => format!(
+            "waitsync {sync:#x}; held fencers {:x?}; {}",
+            gate.held_fencers(sync, queue),
+            gateseq::last_fence(sync)
+        ),
+        _ => format!("{b:x?}"),
+    }
+}
+
 impl Gpu {
     pub(super) fn gate(&self) -> MutexGuard<'_, Gate> {
         self.gate.lock().unwrap_or_else(PoisonError::into_inner)
@@ -64,9 +118,20 @@ impl Gpu {
         let mut front = self.lock();
         let mut gate = self.gate();
         let check = crate::nvn::cmdbuf::waits_recorded() || !gate.is_empty();
+        if gateseq::active() {
+            let mut m = Vec::new();
+            let _ = front.queue_marks(queue as usize, handles, &mut m);
+            note(format_args!(
+                "SUBMIT q {queue:#x} recs {:x?} gated {check}, held ops {} | {}",
+                handles.iter().map(|h| h.0).collect::<Vec<_>>(),
+                gate.held.len(),
+                describe_marks(&gate, &m)
+            ));
+        }
         if !check {
             drop(gate);
-            return self.run_submit(&mut front, queue, handles, origin_lower_left);
+            let r = self.run_submit(&mut front, queue, handles, origin_lower_left);
+            return r;
         }
         gate.push(
             queue,
@@ -75,7 +140,9 @@ impl Gpu {
                 origin: origin_lower_left,
             },
         );
-        self.pump(&mut front, &mut gate)
+        let r = self.pump(&mut front, &mut gate);
+        drop(gate);
+        r
     }
 
     /// `nvnQueueFenceSync`. The fence is the open frame when work is in it or held; a held queue keeps the fence
@@ -84,6 +151,10 @@ impl Gpu {
         sync::set_queue_fence(Obj(s), self.fence_now())?;
         let _front = self.lock();
         let mut gate = self.gate();
+        note(format_args!(
+            "QUEUE FENCE q {queue:#x} sync {s:#x}, queue holds work {}",
+            gate.holds(queue)
+        ));
         if gate.holds(queue) {
             gate.push(queue, Op::Fence { sync: s });
         }
@@ -94,15 +165,31 @@ impl Gpu {
     pub(crate) fn queue_wait(&self, queue: u64, s: u64) -> AbiResult<()> {
         let mut front = self.lock();
         let mut gate = self.gate();
+        note(format_args!(
+            "QUEUE WAIT q {queue:#x} sync {s:#x}, queue holds work {}, fenced by held {} | {}",
+            gate.holds(queue),
+            gate.fenced_by_held(s, queue),
+            gateseq::last_fence(s)
+        ));
         if gate.holds(queue) || gate.fenced_by_held(s, queue) {
             gate.push(queue, Op::Wait { sync: s });
-            return self.pump(&mut front, &mut gate);
+            let r = self.pump(&mut front, &mut gate);
+            drop(gate);
+            return r;
         }
         Ok(())
     }
 
     /// `nvnEventSignal` wrote the counter at `word`: a held wait for it may run now.
     pub(crate) fn event_signalled(&self, word: u64) -> AbiResult<()> {
+        if gateseq::active() {
+            note(format_args!(
+                "CPU EVENT SIGNAL word {word:#x} counter now {:?}, held ops {}",
+                Guest.u32(word),
+                self.gate().held.len()
+            ));
+        }
+        gateseq::cpu_signal(word);
         let held = {
             let mut gate = self.gate();
             gate.cpu_signalled(word);
@@ -111,13 +198,17 @@ impl Gpu {
         if held {
             let mut front = self.lock();
             let mut gate = self.gate();
-            return self.pump(&mut front, &mut gate);
+            // The signal may release held submits into the frame: they are work now.
+            let r = self.pump(&mut front, &mut gate);
+            drop(gate);
+            return r;
         }
         Ok(())
     }
 
     /// Runs every held op now (`nvnQueueFinalize`).
     pub(crate) fn release_held(&self) -> AbiResult<()> {
+        note(format_args!("QUEUE FINALIZE releases the held ops"));
         let mut front = self.lock();
         let mut gate = self.gate();
         self.release_all(&mut front, &mut gate)
@@ -149,6 +240,15 @@ impl Gpu {
                 break;
             };
             gate.stats.forced += 1;
+            if gateseq::active() {
+                note(format_args!(
+                    "FORCE q {:#x} {} at the flush, {} ops of other queues ran meanwhile | {}",
+                    h.queue,
+                    op_name(&h.op),
+                    h.passed,
+                    blocker.map_or("not blocked".to_string(), |b| why_blocked(gate, h.queue, &b))
+                ));
+            }
             if diag() {
                 static SHOWN: AtomicU32 = AtomicU32::new(0);
                 if nxkit_nvn::diag::first(&SHOWN, 100) {
@@ -182,6 +282,13 @@ impl Gpu {
                 if let Some(b) = gate.blocker(queue, &marks, &Guest) {
                     if !gate.held[i].counted {
                         gate.held[i].counted = true;
+                        if gateseq::active() {
+                            note(format_args!(
+                                "HOLD q {queue:#x} {} | {}",
+                                op_name(&gate.held[i].op),
+                                why_blocked(gate, queue, &b)
+                            ));
+                        }
                         let cur = match b {
                             MarkOp::WaitEvent { event, .. } => gate.event_value(event, &Guest),
                             _ => None,
@@ -211,6 +318,12 @@ impl Gpu {
                 };
                 if h.counted && gate.on {
                     gate.stats.released += 1;
+                    note(format_args!(
+                        "RELEASE q {:#x} {} after {} ops of other queues",
+                        h.queue,
+                        op_name(&h.op),
+                        h.passed
+                    ));
                     if diag() {
                         static SHOWN: AtomicU32 = AtomicU32::new(0);
                         if nxkit_nvn::diag::first(&SHOWN, 100) {
@@ -255,6 +368,26 @@ impl Gpu {
         let marks = self.marks_of(front, &mut h);
         if matches!(h.op, Op::Submit { .. }) {
             gate.stats.checked += 1;
+        }
+        if gateseq::active() {
+            note(format_args!(
+                "RUN q {:#x} {} into the frame ({} cmds so far) | {}",
+                h.queue,
+                op_name(&h.op),
+                front.frame().cmds.len(),
+                describe_marks(gate, &marks)
+            ));
+        }
+        for m in &marks {
+            match *m {
+                MarkOp::SignalEvent { event, .. } => {
+                    if let Some((word, _)) = gate.counter(event, &Guest) {
+                        gateseq::gpu_signal(word, h.queue);
+                    }
+                }
+                MarkOp::FenceSync { sync } => gateseq::fenced(sync, h.queue),
+                _ => {}
+            }
         }
         let r = match &h.op {
             Op::Submit { handles, origin } => self.run_submit(front, h.queue, handles, *origin),

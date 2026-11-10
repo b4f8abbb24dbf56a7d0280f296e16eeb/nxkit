@@ -29,6 +29,7 @@ pub(crate) mod ctx;
 pub(crate) mod device;
 pub(crate) mod event;
 pub(crate) mod frametime;
+pub(crate) mod gateseq;
 pub(crate) mod pool;
 pub(crate) mod program;
 pub(crate) mod queue;

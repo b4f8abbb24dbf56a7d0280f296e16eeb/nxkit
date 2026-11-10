@@ -313,6 +313,13 @@ impl Gpu {
     /// Ends the open frame and hands it to the backend, with the lock held by the caller. An empty frame ends nothing.
     /// The result is the fence of the work that was flushed, which is the last fence when the frame was empty.
     pub(crate) fn flush_locked(&self, front: &mut Front, reason: FlushReason) -> AbiResult<Fence> {
+        if super::gateseq::active() {
+            super::gateseq::note(format_args!(
+                "FLUSH {reason:?} begins: {} cmds in the frame, held ops {}",
+                front.frame().cmds.len(),
+                self.gate().held.len()
+            ));
+        }
         let held = {
             let mut gate = self.gate();
             let held = self.release_all(front, &mut gate);
@@ -326,9 +333,19 @@ impl Gpu {
             );
         }
         if front.frame_is_empty() {
+            super::gateseq::note(format_args!("FLUSH {reason:?} found an empty frame"));
             return Ok(Fence(self.flushed()));
         }
         let fence = Fence(self.flushed() + 1);
+        if super::gateseq::active() {
+            super::gateseq::note(format_args!(
+                "FLUSH {reason:?} sends fence {} with {} cmds (work {}), held ops {}",
+                fence.0,
+                front.frame().cmds.len(),
+                front.frame_work(),
+                self.gate().held.len()
+            ));
+        }
         front.end_frame(reason)?;
         let (frame, plan, table, descriptors) = front.flush_parts();
         let sent =
@@ -360,6 +377,15 @@ impl Gpu {
     /// Waits for `fence` for at most `timeout_ns` nanoseconds (`u64::MAX` for no limit). The open frame is flushed
     /// first when `fence` belongs to it. The lock is not held during the wait.
     pub(crate) fn wait(&self, fence: Fence, timeout_ns: u64) -> AbiResult<WaitResult> {
+        super::gateseq::note(format_args!(
+            "CPU WAIT fence {} (flushed {}), timeout {timeout_ns}",
+            fence.0,
+            self.flushed()
+        ));
+        super::gateseq::timed("CPU WAIT", || self.wait_in(fence, timeout_ns))
+    }
+
+    fn wait_in(&self, fence: Fence, timeout_ns: u64) -> AbiResult<WaitResult> {
         if fence.0 > self.flushed() {
             let mut front = self.lock();
             if fence.0 > self.flushed() {
@@ -417,6 +443,7 @@ impl Gpu {
 
     /// `nvnQueuePresentTexture`: puts the present into the frame, flushes the frame and tells the backend.
     pub(crate) fn present(&self, present: Present) -> AbiResult<()> {
+        super::gateseq::note(format_args!("PRESENT"));
         {
             let mut front = self.lock();
             let held = self.release_all(&mut front, &mut self.gate());
@@ -429,7 +456,9 @@ impl Gpu {
             front.present(present.texture);
             super::frametime::sub(0, || self.flush_locked(&mut front, FlushReason::Present))?;
         }
-        Ok(super::frametime::sub(1, || self.backend.present(present))?)
+        let r = super::frametime::sub(1, || self.backend.present(present));
+        super::gateseq::end_frame();
+        Ok(r?)
     }
 
     /// The number that the front end uses for the command buffer at the guest address `addr`. The same address gives the

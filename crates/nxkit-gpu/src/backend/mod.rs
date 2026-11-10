@@ -122,6 +122,7 @@ impl GpuBackend {
         guest: Arc<GuestMemory>,
         settings: &GpuSettings,
     ) -> nxkit_metal::Result<Arc<Self>> {
+        nxkit_metal::set_done_hook(nxkit_nvn::diag::batch_done);
         let space = GuestSpace::over(&guest)?;
         let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
         let pool_hint = gpu.pool_hint();

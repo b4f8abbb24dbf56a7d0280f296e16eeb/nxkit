@@ -162,7 +162,7 @@ impl Gate {
     }
 
     /// The counter of an event: what the GPU signals left, else guest memory. None when the event has no counter.
-    fn counter(&self, event: u64, mem: &impl Words) -> Option<(u64, u32)> {
+    pub(crate) fn counter(&self, event: u64, mem: &impl Words) -> Option<(u64, u32)> {
         let word = mem.u64(event + EVENT_COUNTER).filter(|w| *w != 0)?;
         let v = self.events.get(&word).copied().or_else(|| mem.u32(word))?;
         Some((word, v))
@@ -256,6 +256,39 @@ impl Gate {
             }
         });
         free.or(blockers.first()).map_or(0, |(i, _)| *i)
+    }
+
+    /// The queues of held ops (not `queue`) that signal the event whose counter is at `word`, for the trace.
+    pub(crate) fn held_signallers(&self, word: u64, queue: u64, mem: &impl Words) -> Vec<u64> {
+        self.held
+            .iter()
+            .filter(|h| h.queue != queue)
+            .filter(|h| {
+                h.marks.as_ref().is_some_and(|m| {
+                    m.iter().any(|op| match *op {
+                        MarkOp::SignalEvent { event, .. } => {
+                            self.counter(event, mem).is_some_and(|(w, _)| w == word)
+                        }
+                        _ => false,
+                    })
+                })
+            })
+            .map(|h| h.queue)
+            .collect()
+    }
+
+    /// The queues of held ops (not `queue`) that fence `sync`, for the trace.
+    pub(crate) fn held_fencers(&self, sync: u64, queue: u64) -> Vec<u64> {
+        self.held
+            .iter()
+            .filter(|h| {
+                h.queue != queue
+                    && h.marks
+                        .as_ref()
+                        .is_some_and(|m| m.contains(&MarkOp::FenceSync { sync }))
+            })
+            .map(|h| h.queue)
+            .collect()
     }
 
     /// The counter of an event as the gate sees it, for the diagnostic.

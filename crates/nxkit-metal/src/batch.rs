@@ -30,6 +30,15 @@ use crate::metrics::{CommandBufferStats, Metrics};
 use crate::scratch::Scratch;
 use crate::table::Keep;
 
+/// Called when a batch completes on the GPU: `(batch number, command buffers, GPU start, GPU end)`, the times in
+/// seconds of the host clock. For the diagnostics of the host; set once.
+static DONE_HOOK: std::sync::OnceLock<fn(u64, usize, f64, f64)> = std::sync::OnceLock::new();
+
+/// Sets the hook of [`DONE_HOOK`]. The first call wins.
+pub fn set_done_hook(f: fn(u64, usize, f64, f64)) {
+    let _ = DONE_HOOK.set(f);
+}
+
 /// The number of batches the CPU can run ahead of the GPU.
 pub const BATCHES_IN_FLIGHT: usize = 3;
 
@@ -277,6 +286,7 @@ impl Batch {
             });
         }
         let held = Mutex::new(Some(held));
+        let cbs = list.len();
         let done = self.done.clone();
         let metrics = self.metrics.clone();
         let handler: FeedbackBlock =
@@ -304,6 +314,9 @@ impl Batch {
                 }
                 held.lock().unwrap_or_else(PoisonError::into_inner).take();
                 metrics.record(&stats);
+                if let Some(h) = DONE_HOOK.get() {
+                    h(number, cbs, stats.gpu_start_s, stats.gpu_end_s);
+                }
                 done.add(&stats, true);
             });
         let opts = MTL4CommitOptions::new();

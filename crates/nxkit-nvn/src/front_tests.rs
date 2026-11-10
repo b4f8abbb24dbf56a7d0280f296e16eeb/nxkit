@@ -335,6 +335,26 @@ fn a_recording_that_calls_itself_is_an_error() {
 }
 
 #[test]
+fn frame_work_counts_submitted_work_at_once_and_restarts_after_a_flush() {
+    let mut f = fe();
+    assert_eq!(f.frame_work(), 0);
+    // The commands of a submit are in the frame as soon as the submit returns, not at the flush.
+    let a = record(&mut f, CMD, &[Record::Draw, Record::Draw, Record::Barrier(1)]);
+    f.submit(a).unwrap();
+    assert_eq!(f.frame_work(), 2);
+    assert!(!f.frame_is_empty());
+    let b = record(&mut f, CMD + 0x1000, &[Record::Draw]);
+    f.submit(b).unwrap();
+    f.submit(a).unwrap();
+    assert_eq!(f.frame_work(), 5);
+    f.end_frame(FlushReason::CpuWait).unwrap();
+    f.begin_frame();
+    assert_eq!(f.frame_work(), 0);
+    f.submit(b).unwrap();
+    assert_eq!(f.frame_work(), 1);
+}
+
+#[test]
 fn flushes_are_counted_by_reason() {
     let mut f = fe();
     f.end_frame(FlushReason::CpuWait).unwrap();

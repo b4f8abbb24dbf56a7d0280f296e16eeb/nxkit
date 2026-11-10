@@ -207,6 +207,7 @@ impl GpuBackend {
     /// Keeps the batch of a fence until its reports are written. Only the newest [`KEPT_BATCHES`] stay.
     pub(super) fn keep_batch(&self, fence: u64, batch: nxkit_metal::SubmittedBatch) {
         let mut q = locked(&self.inflight);
+        nxkit_nvn::diag::batch_kept(fence, batch.number());
         if q.back()
             .is_none_or(|(_, last)| last.number() != batch.number())
         {
