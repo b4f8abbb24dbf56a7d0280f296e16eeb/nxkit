@@ -420,3 +420,25 @@ fn the_rule_restores_the_console_result() {
         }
     }
 }
+
+/// The multiply blend: source factor `ZERO`, destination factor `SRC_COLOR`. The destination factor reads the
+/// source colour, so the rule must not change it. D x 0.5 is exact in both formats, so the compare is exact.
+#[test]
+fn the_rule_must_not_touch_a_colour_that_the_destination_factor_reads() {
+    let Some(ctx) = ctx() else { return };
+    let (cache, lib) = setup(&ctx);
+    let multiply = Some(factors(BlendFactor::Zero, BlendFactor::SrcColor));
+    for format in FORMATS {
+        let case = |kind| single("K multiply", draw(rgb(HALF, ONE), multiply, kind));
+        // Kind 0, as the host sets it for this blend: the destination times the source colour.
+        let px = run(&ctx, &cache, &lib, format, &case(0), "fs_rule");
+        let (raw, v) = decode(format, &px);
+        eprintln!("multiply kind 0 | {format:?} | {raw} | {v:?}");
+        assert_eq!(v, [D[0] * 0.5, D[1] * 0.5, D[2] * 0.5], "{format:?}");
+        // Kind 1 zeroes the source colour and so the product. It documents why the host must not set it here.
+        let px = run(&ctx, &cache, &lib, format, &case(1), "fs_rule");
+        let (raw, v) = decode(format, &px);
+        eprintln!("multiply kind 1 | {format:?} | {raw} | {v:?}");
+        assert_eq!(v, [0.0; 3], "{format:?}");
+    }
+}

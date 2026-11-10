@@ -120,6 +120,8 @@ Every pixel shader has the argument buffer member `constant uint* dm_bz` (bindin
 
 When the word is not 0, `main0` calls `dm_body_main0` and then, for every float colour output, writes RGB 0 if `dm_bz_zero` says the factor is 0. The tests are on integer bits (`as_type<uint>`), so fast math cannot fold them away. Alpha is never changed, because it is also a factor and feeds alpha to coverage. Integer outputs, pads, the second source (`index(1)`) and the side entries (`main0_a`, `main0_l`, `_bf`) get no rule. `main0_m` and `main0_d` have the rule for their float members; `main0_d` passes the alpha of its second source as the second factor of kinds 4 and 5. The host sets the kinds 4 and 5 never, because it uses no dual source entry.
 
+The rule changes the source RGB, so it needs that nothing else reads it. A target whose destination RGB factor is `SRC_COLOR` or `ONE_MINUS_SRC_COLOR` (the multiply blend is `ZERO` / `SRC_COLOR`) gets kind 0, because the destination term reads the source colour. The alpha blend reads the source alpha only and needs no condition.
+
 The rule does not cover a destination term with factor 0 (the shader does not see the destination), the factors `DST_*`, `SRC_ALPHA_SATURATE` and the constant colour factors, and the colour of `SRC1_COLOR` per channel. These stay at kind 0. With a stale NaN in the destination, `NaN x 0` can still differ from the console.
 
 The feature revision `blendz` (now 1) is in the key of every pixel shader that is not a mesh stage job, so these shaders translate again. `TRANSLATOR_ID` does not change. A translation without the binding (an old store) works: the host does not fill what the program does not have, and the rule is off.

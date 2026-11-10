@@ -208,6 +208,14 @@ fn blend_zero_kind(src_rgb: u32) -> u32 {
     }
 }
 
+/// True when the destination RGB factor reads the source RGB: `SRC_COLOR` (3) and `ONE_MINUS_SRC_COLOR` (4). The
+/// rule writes RGB 0 into the source, so every other reader of the source RGB must be absent, or the multiply blend
+/// (`ZERO` / `SRC_COLOR`) would give black. The other factors of [`blend_factor`] read the source alpha (never
+/// changed), the destination, the constant colour or the second source, not this source RGB.
+fn dst_reads_source_rgb(dst_rgb: u32) -> bool {
+    matches!(dst_rgb, 3 | 4)
+}
+
 /// The blend word of a draw for the pixel shader `fs`: 3 bits per colour target, the kind of its source RGB factor
 /// (see [`blend_zero_kind`]). The shader writes RGB 0 for a pixel whose factor is exactly 0, because the console's
 /// blender gives 0 for `0 x NaN` and Metal's gives NaN. The word is 0 for the knob `nobz`.
@@ -225,8 +233,10 @@ pub(crate) fn blend_zero_word(
 }
 
 /// [`blend_zero_word`] over its parts. `written` lists the colours that the shader writes, `None` when it is not
-/// known (all of them). A target has kind 0 unless it blends, has a float format, is written and has an equation
-/// other than MIN and MAX. The kinds 4 and 5 (the second source) are never set: the host runs no dual source shader.
+/// known (all of them). A target has kind 0 unless it blends, has a float format, is written, has an equation
+/// other than MIN and MAX and its destination RGB factor does not read the source RGB ([`dst_reads_source_rgb`]).
+/// The alpha blend needs no condition: its equation reads the source alpha only (`color_target` maps the alpha
+/// factors to Metal's alpha channel), and the rule never changes alpha. The kinds 4 and 5 (the second source) are never set: the host runs no dual source shader.
 fn blend_zero_bits(
     blend: &[BlendDetail],
     colors: &[Option<Format>],
@@ -241,7 +251,12 @@ fn blend_zero_bits(
         let Some(format) = *format else { continue };
         let Some(b) = blend.get(i) else { continue };
         let is_written = written.is_none_or(|c| c.contains(&(i as u8)));
-        if !b.enable || is_integer(format) || !is_written || matches!(b.op_rgb, 4 | 5) {
+        if !b.enable
+            || is_integer(format)
+            || !is_written
+            || matches!(b.op_rgb, 4 | 5)
+            || dst_reads_source_rgb(b.dst_rgb)
+        {
             continue;
         }
         word |= blend_zero_kind(b.src_rgb) << (3 * i);
@@ -472,48 +487,40 @@ mod tests {
 
     const F16: Option<Format> = Some(Format::Rgba16Float);
 
+    fn word(b: &[BlendDetail], colors: &[Option<Format>]) -> u32 {
+        blend_zero_bits(b, colors, None, false)
+    }
+
     #[test]
     fn the_blend_word_is_zero_without_blending() {
         let off = BlendDetail::default();
-        assert_eq!(blend_zero_bits(&[off, off], &[F16, F16], None, false), 0);
-        assert_eq!(blend_zero_bits(&[], &[F16], None, false), 0);
+        assert_eq!(word(&[off, off], &[F16, F16]), 0);
+        assert_eq!(word(&[], &[F16]), 0);
     }
 
     #[test]
     fn the_blend_word_has_three_bits_per_target() {
         let off = BlendDetail::default();
         let b = [off, blend(5), blend(6), blend(1)];
-        let colors = [F16, F16, F16, F16];
-        assert_eq!(
-            blend_zero_bits(&b, &colors, None, false),
-            (2 << 3) | (3 << 6) | (1 << 9)
-        );
-        // The lone SRC_ALPHA on target 1.
-        assert_eq!(
-            blend_zero_bits(&[off, blend(5)], &[F16, F16], None, false),
-            2 << 3
-        );
+        assert_eq!(word(&b, &[F16; 4]), (2 << 3) | (3 << 6) | (1 << 9));
+        assert_eq!(word(&b[..2], &[F16; 2]), 2 << 3);
     }
 
     #[test]
     fn the_blend_word_skips_what_the_rule_does_not_cover() {
         let int = Some(Format::Rgba8Uint);
-        assert_eq!(blend_zero_bits(&[blend(5)], &[int], None, false), 0);
-        assert_eq!(blend_zero_bits(&[blend(5)], &[None], None, false), 0);
+        assert_eq!(word(&[blend(5)], &[int]), 0);
+        assert_eq!(word(&[blend(5)], &[None]), 0);
         for op in [4, 5] {
             let b = BlendDetail {
                 op_rgb: op,
                 ..blend(5)
             };
-            assert_eq!(blend_zero_bits(&[b], &[F16], None, false), 0, "op {op}");
+            assert_eq!(word(&[b], &[F16]), 0, "op {op}");
         }
         // SRC1_ALPHA, DST_ALPHA, ONE, BLEND_COLOR and SRC_ALPHA_SATURATE.
         for f in [0x12, 0x13, 7, 2, 0x61, 11, 0] {
-            assert_eq!(
-                blend_zero_bits(&[blend(f)], &[F16], None, false),
-                0,
-                "factor {f}"
-            );
+            assert_eq!(word(&[blend(f)], &[F16]), 0, "factor {f}");
         }
         let b = [blend(5), blend(5)];
         // A target that the shader does not write.
@@ -522,8 +529,21 @@ mod tests {
     }
 
     #[test]
+    fn a_destination_factor_that_reads_the_source_colour_gives_kind_zero() {
+        let with = |src_rgb, dst_rgb| {
+            [BlendDetail {
+                dst_rgb,
+                ..blend(src_rgb)
+            }]
+        };
+        let w = |b: [BlendDetail; 1]| word(&b, &[F16]);
+        assert_eq!((w(with(1, 3)), w(with(5, 4)), w(with(6, 3))), (0, 0, 0));
+        assert_eq!((w(with(5, 6)), w(with(1, 2))), (2, 1));
+    }
+
+    #[test]
     fn the_knob_nobz_gives_the_word_zero() {
-        assert_eq!(blend_zero_bits(&[blend(5)], &[F16], None, false), 2);
+        assert_eq!(word(&[blend(5)], &[F16]), 2);
         assert_eq!(blend_zero_bits(&[blend(5)], &[F16], None, true), 0);
     }
 
