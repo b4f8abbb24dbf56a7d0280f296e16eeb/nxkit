@@ -253,6 +253,17 @@ impl PipelineCache {
         lib: &ShaderLibrary,
         function: &str,
     ) -> Result<ComputePipeline> {
+        self.compute_with(key, lib, function, false).map(|r| r.0)
+    }
+
+    /// Like [`PipelineCache::compute`], and tells where the pipeline came from: `Archive` when the archive of the build
+    /// held it, `Compiled` when the compiler made it (a runtime archive of an earlier run may have served that).
+    pub fn compute_traced(
+        &self,
+        key: u64,
+        lib: &ShaderLibrary,
+        function: &str,
+    ) -> Result<(ComputePipeline, Source)> {
         self.compute_with(key, lib, function, false)
     }
 
@@ -263,7 +274,7 @@ impl PipelineCache {
         lib: &ShaderLibrary,
         function: &str,
     ) -> Result<ComputePipeline> {
-        self.compute_with(key, lib, function, true)
+        self.compute_with(key, lib, function, true).map(|r| r.0)
     }
 
     fn compute_with(
@@ -272,15 +283,31 @@ impl PipelineCache {
         lib: &ShaderLibrary,
         function: &str,
         support_icb: bool,
-    ) -> Result<ComputePipeline> {
+    ) -> Result<(ComputePipeline, Source)> {
         if let Some(Entry::Compute(p)) = self.lookup(key)? {
-            return Ok(p);
+            return Ok((p, Source::Cached));
         }
+        let t0 = Instant::now();
         let d = MTL4ComputePipelineDescriptor::new();
         let f = lib.function(function)?;
         d.setComputeFunctionDescriptor(Some(&f));
         if support_icb {
             d.setSupportIndirectCommandBuffers(MTL4IndirectCommandBufferSupportState::Enabled);
+        }
+        // the archive of the build is asked directly: a hit is a load, and the answer says so
+        let archive = match &self.shards {
+            Some(s) => s.compute_archive(lib, function),
+            None => self.archive.clone(),
+        };
+        let runtime = self._runtime.iter().map(|o| &o.archive);
+        if let Some(raw) = archive
+            .iter()
+            .chain(runtime)
+            .find_map(|a| a.newComputePipelineStateWithDescriptor_error(&d).ok())
+        {
+            let p = ComputePipeline { raw };
+            self.insert(key, Entry::Compute(p.clone()))?;
+            return Ok((p, Source::Archive(t0.elapsed())));
         }
         // a shard has its compute pipelines: the compiler finds them in the shard's archive
         let options = self
@@ -297,7 +324,7 @@ impl PipelineCache {
             .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
         let p = ComputePipeline { raw };
         self.insert(key, Entry::Compute(p.clone()))?;
-        Ok(p)
+        Ok((p, Source::Compiled(t0.elapsed())))
     }
 
     /// The render pipeline for `key`. The first call compiles it.
@@ -305,11 +332,14 @@ impl PipelineCache {
         self.render_traced(key, desc).map(|r| r.0)
     }
 
-    /// Like [`PipelineCache::render`], and tells where the pipeline came from and what it cost. The archive is asked
-    /// first: the unspecialized pipeline of the pair, specialized to the draw's colour state when the rest of the
-    /// state is the one the build archived, then the exact state. Only when both miss does Metal compile the functions
-    /// (with [`ArchiveConfig::compile_bases`] the unspecialized pipeline of a pair the archive lacks is compiled once
-    /// and specialized instead).
+    /// Like [`PipelineCache::render`], and tells where the pipeline came from and what it cost. The archives are asked
+    /// first for the exact pipeline of this descriptor: the exact shards of the pair, which hold the states a title
+    /// recorded fully specialized, and the runtime archives of earlier runs. Then the unspecialized pipeline of the
+    /// pair, specialized to the draw's colour state when the rest of the state is the one the build archived, then the
+    /// exact state in the base archive. Only when all miss does Metal compile the functions (with
+    /// [`ArchiveConfig::compile_bases`] the unspecialized pipeline of a pair the archive lacks is compiled once and
+    /// specialized instead). A description with [`RenderPipelineDesc::persist`] skips the specialization: it is
+    /// compiled, which the serializer captures for the runtime archive.
     pub fn render_traced(
         &self,
         key: u64,
@@ -319,8 +349,22 @@ impl PipelineCache {
             return Ok((p, Source::Cached));
         }
         let t0 = Instant::now();
-        let archive = self.render_archive(desc);
-        if let Some(raw) = self.specialize(archive.as_deref(), desc) {
+        // The exact pipeline of a recorded state, which the build archived fully specialized in a shard of its own:
+        // an archive load, no compile and no specialization.
+        if let Some(raw) = self.exact_pipeline(desc) {
+            let p = RenderPipeline { raw };
+            self.insert(key, Entry::Render(p.clone()))?;
+            return Ok((p, Source::Archive(t0.elapsed())));
+        }
+        // a pipeline that is made to be kept compiles: the serializer captures compiles and not specializations
+        let archive = if desc.persist {
+            None
+        } else {
+            self.render_archive(desc)
+        };
+        if !desc.persist
+            && let Some(raw) = self.specialize(archive.as_deref(), desc)
+        {
             let p = RenderPipeline { raw };
             self.insert(key, Entry::Render(p.clone()))?;
             return Ok((p, Source::Specialized(t0.elapsed())));
@@ -341,6 +385,27 @@ impl PipelineCache {
         let p = RenderPipeline { raw };
         self.insert(key, Entry::Render(p.clone()))?;
         Ok((p, Source::Compiled(t0.elapsed())))
+    }
+
+    /// The pipeline of exactly this descriptor from the archives of the build that hold exact pipelines of its pair (the
+    /// shards the index names for the pair, or the single archive), then from the runtime archives of earlier runs.
+    /// None when there is none.
+    fn exact_pipeline(
+        &self,
+        desc: &RenderPipelineDesc<'_>,
+    ) -> Option<Retained<ProtocolObject<dyn objc2_metal::MTLRenderPipelineState>>> {
+        let mut archives = match &self.shards {
+            Some(s) => s.exact_archives(desc),
+            None => self.archive.iter().cloned().collect(),
+        };
+        archives.extend(self._runtime.iter().map(|o| o.archive.clone()));
+        if archives.is_empty() {
+            return None;
+        }
+        let d = self.render_descriptor(desc).ok()?;
+        archives
+            .iter()
+            .find_map(|a| a.newRenderPipelineStateWithDescriptor_error(&d).ok())
     }
 
     /// The archive to ask for a render pipeline: its shard when the cache has shards, else the single archive.

@@ -178,6 +178,18 @@ which specialization covers at runtime anyway.
 
 Size: ≈ 140 kB per archived pipeline today (4.6 GB / 33 365); 1 431 recorded states add ≈ 200 MB.
 
+Built (2026-11-11, step 3 above): the build archives each recorded render pipeline fully specialized (`nxb-archive`
+`exact.rs`: colour formats, blend, write masks, vertex layout, class, samples, alpha to coverage, ICB, the descriptor
+that the host builds) in batches of their own, one per stream group, listed in a second section of the shard index
+(`nxkit_abi::shards`, version 2). The host asks them first (`PipelineCache::render_traced`: exact in the exact shards of
+the pair, exact in the runtime archives, specialization of the base, compile), so a recorded state is an archive load.
+The list's compute pipelines are archived too. Ocarina of Time, 1 676 render pipelines of the list through the host's
+prewarm: 1 614 archive loads, 62 compiles (states whose vertex attribute lies beyond its stream's stride, which
+`applegpu-nt` refuses), 0.3 s; with the 100 compute pipelines (all loads) and the 52 mesh pipelines (compiled, not
+archivable yet) 18.6 s, which is the mesh compiles. What no archive holds is compiled at the start and written to the
+runtime archive before the start reports done (the serializer does not capture specializations), so the second start
+loads it. See pipeline-stages.md "Recorded states".
+
 ## 5. Fallback: the ubershader pipeline
 
 One pipeline per (pair, colour formats, sample count) that draws any blend state, write mask and logic op correctly:

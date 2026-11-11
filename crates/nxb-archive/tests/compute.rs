@@ -2,7 +2,9 @@
 //! the script with `compute_pipeline_descriptors`, the batches and the streamed groups.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use nxb_archive::compute::{COMPUTE_BATCH, chunks, plan_compute, read_computes, summary};
+use nxb_archive::compute::{
+    COMPUTE_BATCH, chunks, plan_compute, read_computes, read_computes_with, summary,
+};
 use nxb_archive::plan::{archive_tsv, script_text, script_text_with};
 use nxb_archive::script::Script;
 use nxb_archive::stream::{Stream, StreamInputs};
@@ -250,6 +252,7 @@ fn streamed_groups_wait_for_their_compute_shaders() {
         pairs: vec![("v".into(), "f".into())],
         computes: (0..20).map(|i| format!("k{i}_b")).collect(),
         extras: Vec::new(),
+        exacts: Vec::new(),
         zero: false,
         group_target: 8,
         limits: nxb_sched::Limits::new(1, 1, 0),
@@ -261,4 +264,28 @@ fn streamed_groups_wait_for_their_compute_shaders() {
     assert_eq!(order.len(), 22);
     assert!(order.contains(&"k19".to_string()));
     assert!(!order.iter().any(|k| k.ends_with("_b")));
+}
+
+#[test]
+fn the_computes_the_host_recorded_follow_the_manifest_and_come_before_the_map() {
+    let d = dir("compute_list");
+    fs::write(d.join("manifest.tsv"), "C\tb1_b\n").unwrap();
+    fs::write(d.join("map.tsv"), "k\tv\tcompute\tm1\nk\tv\tcompute\ta0\n").unwrap();
+    // the host's list: `C <key> <stem> <entry>`; render rows, a stem that is not a `_b` library and short rows are skipped
+    fs::write(
+        d.join("seen.list"),
+        "nxkit-pipelines-seen 2\nR\t1\t2\t0\tv_b\tmain0\tf_b\tmain0\t0\tTriangle\t1\t0\t-\t-\nC\t0000000000000001\ta0_b\tmain0\nC\t0000000000000002\tb1_b\tmain0\nC\t0000000000000003\tz9_b\tmain0\nC\t0000000000000004\tnot-a-lib\tmain0\nC\t5\n",
+    )
+    .unwrap();
+    let got = read_computes_with(
+        &[d.join("map.tsv")],
+        &[d.join("manifest.tsv")],
+        &[d.join("seen.list")],
+    );
+    assert_eq!(got, strings(&["b1_b", "a0_b", "z9_b", "m1_b"]));
+    // no list: what `read_computes` gives
+    assert_eq!(
+        read_computes_with(&[d.join("map.tsv")], &[d.join("manifest.tsv")], &[]),
+        read_computes(&[d.join("map.tsv")], &[d.join("manifest.tsv")])
+    );
 }

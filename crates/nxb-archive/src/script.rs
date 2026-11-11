@@ -154,21 +154,36 @@ impl Script {
         Ok(out)
     }
 
-    /// Whether the base is a recorded state ([`crate::seen`]): a render pipeline with a member besides the two functions
-    /// and the colour attachments, which a plain base never has.
+    /// Whether the base is a recorded state ([`crate::seen`], [`crate::exact`]): a render pipeline with a member besides
+    /// the two functions and the colour attachments, or with colour attachments that are not the eight unspecialized
+    /// ones, which a plain base never has.
     pub fn is_extra(&self, b: &Base) -> bool {
         if b.compute {
             return false;
         }
         match self.pipelines.get(b.index) {
-            Some(Value::Object(m)) => m.iter().any(|(k, _)| {
-                !matches!(
-                    k.as_str(),
-                    "vertex_function_descriptor"
-                        | "fragment_function_descriptor"
-                        | "color_attachments"
-                )
-            }),
+            Some(Value::Object(m)) => {
+                let other = m.iter().any(|(k, _)| {
+                    !matches!(
+                        k.as_str(),
+                        "vertex_function_descriptor"
+                            | "fragment_function_descriptor"
+                            | "color_attachments"
+                    )
+                });
+                let unspecialized = m
+                    .iter()
+                    .find(|(k, _)| k == "color_attachments")
+                    .and_then(|(_, v)| v.as_list())
+                    .is_some_and(|l| {
+                        l.len() == 8
+                            && l.iter().all(|a| {
+                                a.get("pixel_format").and_then(Value::as_str)
+                                    == Some("Unspecialized")
+                            })
+                    });
+                other || !unspecialized
+            }
             _ => false,
         }
     }

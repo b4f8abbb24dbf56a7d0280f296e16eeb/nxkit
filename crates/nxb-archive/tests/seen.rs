@@ -1,7 +1,7 @@
 //! Recorded states as bases: which ones the plan accepts, and the script they make.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use nxb_archive::plan::{plan, script_text_all};
+use nxb_archive::plan::{plan, script_text_all, script_text_full};
 use nxb_archive::script::Script;
 use nxb_archive::seen::{read_list, usable};
 use std::fs;
@@ -175,11 +175,19 @@ fn real_build() {
         .to_string_lossy()
         .trim_start_matches("b-")
         .to_string();
-    let states = nxb_archive::seen::read_lists(&[PathBuf::from(list)]);
+    let states = nxb_archive::seen::read_lists(&[PathBuf::from(&list)]);
     let (ok, refused) = usable(&lib, &chain, &states, false);
     eprintln!(
         "states {} usable {} refused {}",
         states.len(),
+        ok.len(),
+        refused.len()
+    );
+    let exact = nxb_archive::exact::read_lists(&[PathBuf::from(list)]);
+    let (ok, refused) = nxb_archive::exact::usable(&lib, &chain, &exact, false);
+    eprintln!(
+        "exact states {} usable {} refused {}",
+        exact.len(),
         ok.len(),
         refused.len()
     );
@@ -209,4 +217,140 @@ fn a_pull_shader_gets_its_stage_input_base_from_the_b_library() {
     assert_eq!(plan(&d, "abc", &pairs, false).bases[0].0, "v1_bp");
     let states = read_list(&state_list("v1_b", "f1_b"));
     assert_eq!(usable(&d, "abc", &states, false).0, states);
+}
+
+fn exact_line(key: u32, colors: &str, layout: &str) -> String {
+    format!(
+        "R\t{key:016x}\t00000000000000bb\t0\tv1_b\tmain0\tf1_b\tmain0\t0\tTriangle\t1\t0\t{colors}\t{layout}"
+    )
+}
+
+#[test]
+fn exact_states_are_pipelines_of_their_own_in_the_script() {
+    let d = dir("exact_script");
+    library(
+        &d,
+        "v1_b",
+        r#"{"chain": "abc", "entry": "main0", "vertex_inputs": [{"slot": 0, "location": 0}]}"#,
+        Some(&[("main0", false)]),
+    );
+    library(
+        &d,
+        "f1_b",
+        r#"{"chain": "abc", "entry": "main0"}"#,
+        Some(&[("main0", false)]),
+    );
+    library(
+        &d,
+        "v2_b",
+        r#"{"chain": "abc", "entry": "main0"}"#,
+        Some(&[("main0", true)]),
+    );
+    let layout = "a0.Float3.0.0,l0.12.PerVertex.1";
+    let mut text = format!("{}\n", nxb_archive::seen::HEADER);
+    for (k, c) in [
+        (1, "Rg11B10Float:f:-"),
+        (
+            2,
+            "Rgba16Float:f:SrcAlpha/OneMinusSrcAlpha/Add/One/Zero/Add",
+        ),
+        (3, "Rg11B10Float:f:-"),
+    ] {
+        text.push_str(&exact_line(k, c, layout));
+        text.push('\n');
+    }
+    // a pair with function constants is the device's, not the archive's
+    text.push_str(&exact_line(9, "Rg11B10Float:f:-", layout).replace("v1_b", "v2_b"));
+    text.push('\n');
+    let all = nxb_archive::exact::read_list(&text);
+    assert_eq!(all.len(), 3 + 1 - 1);
+    let (ok, refused) = nxb_archive::exact::usable(&d, "abc", &all, false);
+    assert_eq!(ok.len(), 2);
+    assert!(refused.is_empty());
+    let s = Script::parse(&script_text_full(&d, &[], &[], &ok, &[])).unwrap();
+    assert_eq!(s.pipelines.len(), 2);
+    // each is a recorded state, never taken for a plain base
+    let digests = s
+        .library_paths()
+        .unwrap()
+        .into_keys()
+        .map(|l| (l.clone(), nxb_model::sha256(l.as_bytes())))
+        .collect();
+    let bases = s.bases(&digests).unwrap();
+    assert!(bases.iter().all(|b| s.is_extra(b)));
+    assert_ne!(bases[0].hash, bases[1].hash);
+    // the plain base of the same pair is not
+    let plain = Script::parse(&script_text_all(
+        &d,
+        &[("v1_b".into(), "main0".into(), "f1_b".into(), "main0".into())],
+        &[],
+        &[],
+    ))
+    .unwrap();
+    let plain_bases = plain.bases(&digests).unwrap();
+    assert!(!plain.is_extra(&plain_bases[0]));
+    // a script without exact states is the one `script_text_all` writes
+    assert_eq!(
+        script_text_full(&d, &[], &[], &[], &[]),
+        script_text_all(&d, &[], &[], &[])
+    );
+}
+
+#[test]
+fn exact_pipelines_get_shards_of_their_own_in_the_index() {
+    use nxb_archive::shards::{Ident, Shard, index_bytes};
+    use nxkit_abi::shards::ShardIndex;
+    let f = |l: &str| (l.to_string(), "main0".to_string());
+    let shard = |key: &str, idents| Shard {
+        key: key.into(),
+        path: PathBuf::from(key),
+        idents,
+    };
+    let ix = ShardIndex::decode(&index_bytes(&[
+        shard("base", vec![Ident::Render(f("v1_b"), f("f1_b"))]),
+        shard("e1", vec![Ident::Exact(f("v1_b"), f("f1_b"))]),
+        shard("e2", vec![Ident::Exact(f("v1_b"), f("f1_b"))]),
+    ]))
+    .unwrap();
+    assert_eq!(ix.exact(("v1_b", "main0"), ("f1_b", "main0")), &[1, 2]);
+    let base = ix.render(("v1_b", "main0"), ("f1_b", "main0")).unwrap();
+    assert_eq!(ix.file(base), Some("base.mtl4archive"));
+}
+
+#[test]
+fn a_recorded_state_may_use_the_pull_library_and_the_integer_entry() {
+    let d = dir("seen_acceptor");
+    library(
+        &d,
+        "v1_b",
+        r#"{"chain": "abc", "entry": "main0", "vertex_inputs": [{"slot": 0}], "pull": {"slot": 16, "entry": "main0"}}"#,
+        Some(&[("main0", false)]),
+    );
+    library(&d, "v1_bp", "{}", Some(&[("main0", false)]));
+    // the fragment has the integer entry next to the plain one, and another with function constants
+    library(
+        &d,
+        "f1_b",
+        r#"{"chain": "abc", "entry": "main0"}"#,
+        Some(&[("main0", false), ("main0_u", false), ("main0_l", true)]),
+    );
+    let line = |v: &str, fe: &str| {
+        format!("R\t1\t2\t0\t{v}\tmain0\tf1_b\t{fe}\t0\tTriangle\t1\t0\tRgba8Unorm:f:-\t-\n")
+    };
+    let mut text = format!("{}\n", nxb_archive::seen::HEADER);
+    // drawn through the pull library: the plan accepts the pair as a plain base with the `_bp` stem
+    text.push_str(&line("v1_bp", "main0"));
+    // the integer entry of the fragment, which the plan does not choose
+    text.push_str(&line("v1_b", "main0_u"));
+    // an entry with function constants is the device's, and one that the library lacks is nobody's
+    text.push_str(&line("v1_b", "main0_l"));
+    text.push_str(&line("v1_b", "gone"));
+    let all = nxb_archive::exact::read_list(&text);
+    assert_eq!(all.len(), 4);
+    let (ok, _) = nxb_archive::exact::usable(&d, "abc", &all, false);
+    let got: Vec<(&str, &str)> = ok
+        .iter()
+        .map(|s| (s.vertex.0.as_str(), s.fragment.1.as_str()))
+        .collect();
+    assert_eq!(got, [("v1_bp", "main0"), ("v1_b", "main0_u")]);
 }

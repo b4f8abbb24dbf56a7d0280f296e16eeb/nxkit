@@ -28,6 +28,12 @@ impl PipelineCache {
             .map(|s| (s.shards(), s.pipelines(), s.open_now(), s.opens()))
     }
 
+    /// The pairs of functions that have exact pipelines (recorded states archived fully specialized) in the shards;
+    /// 0 without shards.
+    pub fn exact_pairs(&self) -> usize {
+        self.shards.as_ref().map_or(0, |s| s.exact_pairs())
+    }
+
     /// Closes every open archive shard. `newArchiveWithURL` keeps the whole file in malloc memory, and once the
     /// prewarm made the pipelines of the list the shards sit idle: they are the first memory that the system
     /// compresses, and a later lookup then waits for the decompression. A later lookup opens its shard again.

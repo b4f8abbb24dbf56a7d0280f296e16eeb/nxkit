@@ -8,6 +8,7 @@
 //! rows of the shader maps. Each gets a compute pipeline in the archive. `--no-compute` builds the bases alone.
 //! Every `--pipeline-list` (a `pipelines.seen` or `seen-<scheme>.list` of the host) adds the states that the title recorded
 //! and the plain base cannot serve (vertex layout, samples, alpha to coverage, ICB support) as bases ([`crate::seen`]).
+//! Each recorded render pipeline of them is added again fully specialized ([`crate::exact`]), so the host's lookup of its exact descriptor hits.
 //! `--gpu none` writes the stamp and tables but no archive (the Mac's "no offline archive" mode).
 
 use std::path::PathBuf;
@@ -88,7 +89,7 @@ fn run(a: &[String]) -> Result<(), String> {
     let shaders = if flags.contains("no-compute") {
         Vec::new()
     } else {
-        crate::compute::read_computes(&maps, &manifests)
+        crate::compute::read_computes_with(&maps, &manifests, &lists)
     };
     let (computes, cleft) = crate::compute::plan_compute(&lib_dir, &chain, &shaders);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -96,7 +97,9 @@ fn run(a: &[String]) -> Result<(), String> {
     let js = work.join("bases.mtl4-json");
     let (states, refused) =
         crate::seen::usable(&lib_dir, &chain, &crate::seen::read_lists(&lists), zero);
-    let script = crate::plan::script_text_all(&lib_dir, &p.bases, &states, &computes);
+    let all_exacts = crate::exact::read_lists(&lists);
+    let (exacts, exact_refused) = crate::exact::usable(&lib_dir, &chain, &all_exacts, zero);
+    let script = crate::plan::script_text_full(&lib_dir, &p.bases, &states, &exacts, &computes);
     if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {
         std::fs::write(&js, &script).map_err(|e| e.to_string())?;
     }
@@ -125,6 +128,15 @@ fn run(a: &[String]) -> Result<(), String> {
         for r in refused.iter().take(5) {
             println!("pso_offline:   {}: {}", r.what, r.reason);
         }
+        println!(
+            "pso_offline: {} of {} recorded render pipelines added fully specialized, {} left out as invalid",
+            exacts.len(),
+            all_exacts.len(),
+            exact_refused.len()
+        );
+        for r in exact_refused.iter().take(5) {
+            println!("pso_offline:   {}: {}", r.what, r.reason);
+        }
     }
     if !shaders.is_empty() {
         println!(
@@ -139,7 +151,7 @@ fn run(a: &[String]) -> Result<(), String> {
     if !ps.is_empty() && p.bases.is_empty() && p.rest.is_empty() {
         return Err("no base to build".into());
     }
-    if p.bases.is_empty() && computes.is_empty() && states.is_empty() {
+    if p.bases.is_empty() && computes.is_empty() && states.is_empty() && exacts.is_empty() {
         archs.clear();
     }
     let platform = o.get("platform").cloned().unwrap_or_else(|| "ios".into());

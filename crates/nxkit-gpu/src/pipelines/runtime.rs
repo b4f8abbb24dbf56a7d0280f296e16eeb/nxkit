@@ -1,11 +1,15 @@
 //! The runtime pipeline cache: what the host compiled in earlier runs, kept for the next one.
 //!
-//! The build ships unspecialized pipelines only, so a title compiles (or specializes) the pipelines of every colour
-//! state it uses while it plays. The host keeps them. Every pipeline that Metal made is captured by the cache's
-//! pipeline data set serializer and written to `rt-*.mtl4archive` files in a writable folder of the title, together
-//! with `pipelines.seen` (see `record.rs`), the list of the descriptions. At the next start the archives are lookup
-//! archives of every compile of the cache, and `prewarm.rs` makes each pipeline of the list from them before the first
-//! frame: archive lookups, no compiles. Whatever is new compiles once and is written for the run after.
+//! The build ships the pipelines of the states that a title recorded fully specialized, and unspecialized pipelines
+//! for the rest (`nxb-archive`), so a title specializes or compiles the pipelines of a colour state that it had not
+//! recorded while it plays. The host keeps them. Every pipeline that Metal **compiled** is captured by the cache's
+//! pipeline data set serializer (a specialization is not: the capture of 59 specializations and one compile was 43 KB,
+//! of 60 compiles 3.6 MB) and written to `rt-*.mtl4archive` files in a writable folder of the title, together with
+//! `pipelines.seen` (see `record.rs`), the list of the descriptions. At the next start the archives are lookup
+//! archives of the cache, and `prewarm.rs` makes each pipeline of the list from them before the first frame: archive
+//! lookups, no compiles. A pipeline that no archive has is compiled by that start (not specialized, so that it is
+//! captured), and the archive is written when the start's last worker is done, before the start reports and before
+//! `prewarm.done`, so the run after loads it.
 //!
 //! The archives are in `<root>/pipecache/id-<identity>/`; the list is not: it is kept in
 //! `<root>/pipecache/seen-<scheme>.list` across builds (`carry.rs`), so a rebuilt app starts with the list of the
@@ -311,15 +315,9 @@ impl Pipelines {
                 ""
             }
         );
-        if env_on("NXKIT_PIPELINE_PREWARM") && !plan.seen.is_empty() {
-            self.prewarm(
-                &plan.seen,
-                shader_dir,
-                plan.full.then(|| plan.dir.join(carry::DONE_FILE)),
-            );
-        }
         let flush_s = env_num("NXKIT_PIPELINE_CACHE_FLUSH", 30);
         let rotate_at = env_num("NXKIT_PIPELINE_CACHE_ROTATE", 1000);
+        let marker = plan.full.then(|| plan.dir.join(carry::DONE_FILE));
         let session = Arc::new(Session {
             dir: plan.dir,
             list: plan.list,
@@ -332,6 +330,18 @@ impl Pipelines {
             }),
         });
         *SESSION.lock().unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+        if env_on("NXKIT_PIPELINE_PREWARM") && !plan.seen.is_empty() {
+            // The start compiles what no archive holds, and the runtime archive of it is written when the last
+            // pipeline of the list is made, before the start reports done and before the marker: a start that is
+            // killed right after has what it made on disk.
+            let s = session.clone();
+            self.prewarm(
+                &plan.seen,
+                shader_dir,
+                marker,
+                Some(Box::new(move || s.flush(true, false))),
+            );
+        }
         let spawned = std::thread::Builder::new()
             .name("nxkit-pipecache".into())
             .spawn(move || {

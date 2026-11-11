@@ -2,8 +2,12 @@
 //!
 //! The list (`record.rs`) says which pipelines the earlier runs needed. This module makes each one under the key that
 //! the encoder will ask for, so the cache holds it when the first draw comes. A pipeline is made through the same
-//! calls as a draw's (`build_render`, `mesh_traced`, `compute`), and the runtime archives are lookup archives of the
-//! compiler, so it is an archive lookup and not a compile; one that the archives lack compiles here, once.
+//! calls as a draw's (`build_render`, `mesh_traced`, `compute_traced`). A render pipeline the build archived fully
+//! specialized (a recorded state, `nxb-archive` `exact.rs`), a pipeline of a runtime archive and a compute pipeline
+//! of a shard are archive loads. One that no archive holds is compiled here, once, not specialized
+//! (`RenderPipelineDesc::persist`: the serializer captures compiles and not specializations), and the runtime archive
+//! is written when the last worker is done, before `prewarm.done` and before the line that reports the start, so the
+//! next start loads it. A mesh pipeline is always a compile (an archive cannot be asked for one).
 //!
 //! The start waits for the work, up to `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20), unless the list is one this app
 //! build has not made yet (the identity folder has no `prewarm.done`, see `carry.rs`): then it waits for all of it,
@@ -82,6 +86,9 @@ struct Work {
     over: (Mutex<()>, Condvar),
     /// Written when every pipeline is made (`carry::DONE_FILE`).
     marker: Option<PathBuf>,
+    /// Runs once when the last worker is done, before the marker is written and the start is told: the runtime
+    /// archive and the list are written there, so that what the start had to compile is on disk when it reports done.
+    after: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl Work {
@@ -123,6 +130,8 @@ impl Work {
         desc.sample_count = r.samples;
         desc.alpha_to_coverage = r.a2c;
         desc.support_icb = r.icb;
+        // what no archive holds is compiled, so that the runtime archive keeps it for the next start
+        desc.persist = true;
         let at = if r.fallback {
             r.key ^ FALLBACK_KEY
         } else {
@@ -187,9 +196,14 @@ impl Work {
             Entry::Render(r) => self.render(r),
             Entry::Mesh(m) => self.mesh(m),
             Entry::Compute(c) => self.lib(&c.function.0).map(|l| {
-                self.cache
-                    .compute(c.key, &l, &c.function.1)
-                    .map_or(Outcome::Failed, |_| Outcome::Compute)
+                self.cache.compute_traced(c.key, &l, &c.function.1).map_or(
+                    Outcome::Failed,
+                    |(_, s)| match s {
+                        // a compute pipeline of the build's archive is a load, like a render pipeline's
+                        Source::Compiled(_) => Outcome::Compute,
+                        other => other.into(),
+                    },
+                )
             }),
         };
         done.unwrap_or(Outcome::Skipped)
@@ -237,6 +251,14 @@ fn worker(w: &Work) {
                 eprintln!("nxkit-gpu: prewarm over, {closed} archive shards closed");
             }
         }
+        if let Some(f) = w
+            .after
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            f();
+        }
         if let Some(m) = &w.marker {
             let _ = std::fs::write(m, b"");
         }
@@ -262,7 +284,13 @@ impl Pipelines {
     /// Makes the pipelines of `seen` from the libraries in `shader_dir`. Waits for them up to the budget (see the
     /// module); what is left goes on in the background. `all` is the marker file to write when every pipeline is
     /// made, and says that the start waits for all of them without a budget.
-    pub(super) fn prewarm(&self, seen: &Seen, shader_dir: &Path, all: Option<PathBuf>) {
+    pub(super) fn prewarm(
+        &self,
+        seen: &Seen,
+        shader_dir: &Path,
+        all: Option<PathBuf>,
+        after: Option<Box<dyn FnOnce() + Send>>,
+    ) {
         if seen.is_empty() {
             return;
         }
@@ -282,6 +310,7 @@ impl Pipelines {
             detached: AtomicBool::new(false),
             over: (Mutex::new(()), Condvar::new()),
             marker: all.clone(),
+            after: Mutex::new(after),
         });
         eprintln!(
             "nxkit-gpu: compiling shaders: making {} pipelines on {n} threads{}",
@@ -350,7 +379,8 @@ impl Pipelines {
 /// A check against a real app, run by hand: `NXKIT_LOOKUP_APP=<run folder of the app> [NXKIT_LOOKUP_N=40]
 /// NXKIT_DIAG=stats cargo test -p nxkit-gpu --lib lookup_of_a_real_app -- --ignored --nocapture`. It makes the first N
 /// render pipelines of the app's list (`pipecache/seen-*.list`) from the app's shards and shaders, and prints what the
-/// archive lookup did for each: the source, and for a compile the reason (`coverage.rs`). `NXKIT_LOOKUP_ARCHIVE=<file>`
+/// archive lookup did for each: the source, and for a compile the reason (`coverage.rs`). `NXKIT_LOOKUP_ALL=1` takes the
+/// mesh and compute lines too, `NXKIT_PIPELINE_PREWARM_WAIT=600` waits for all of them. `NXKIT_LOOKUP_ARCHIVE=<file>`
 /// uses one archive file instead of the shards, `NXKIT_LOOKUP_LIST=<file>` another list, `NXKIT_LOOKUP_SHADERS=<folder>`
 /// another shader folder.
 #[cfg(test)]
@@ -385,7 +415,11 @@ mod lookup {
         let text = std::fs::read_to_string(list).unwrap();
         let mut keep = format!("{}\n", super::super::record::HEADER);
         let mut k = 0;
-        for l in text.lines().filter(|l| l.starts_with("R\t")) {
+        // `NXKIT_LOOKUP_ALL=1`: the mesh and compute lines too (`N` counts them all)
+        let all = std::env::var_os("NXKIT_LOOKUP_ALL").is_some();
+        for l in text.lines().filter(|l| {
+            l.starts_with("R\t") || all && (l.starts_with("M\t") || l.starts_with("C\t"))
+        }) {
             if k < n {
                 keep.push_str(l);
                 keep.push('\n');
@@ -407,7 +441,92 @@ mod lookup {
         let shaders = std::env::var("NXKIT_LOOKUP_SHADERS")
             .map_or_else(|_| app.join("shaders"), PathBuf::from);
         let p = Pipelines::new(&ctx, &archive).unwrap();
-        p.prewarm(&seen, &shaders, None);
+        p.prewarm(&seen, &shaders, None, None);
         eprintln!("{}", crate::coverage::describe());
+    }
+
+    /// The runtime archive of the host keeps what a start had to make: `NXKIT_LOOKUP_APP=<run folder> [NXKIT_LOOKUP_N=60]
+    /// cargo test -p nxkit-gpu --lib runtime_archive_keeps_what_the_start_made -- --ignored --nocapture`. A first
+    /// pipeline cache with a serializer makes the first N render pipelines of the list, hands its capture to an archive
+    /// file (`rotate_archive`, what `runtime.rs` does), and a second cache with that file as a runtime archive makes
+    /// the same pipelines again. The counts of both lines say what the second one found.
+    #[test]
+    #[ignore = "needs NXKIT_LOOKUP_APP, the run folder of a built app"]
+    fn runtime_archive_keeps_what_the_start_made() {
+        let Ok(app) = std::env::var("NXKIT_LOOKUP_APP") else {
+            return;
+        };
+        let app = PathBuf::from(app);
+        let n: usize = std::env::var("NXKIT_LOOKUP_N")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+        let list = std::env::var("NXKIT_LOOKUP_LIST")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::fs::read_dir(app.join("pipecache"))
+                    .unwrap()
+                    .flatten()
+                    .map(|e| e.path())
+                    .find(|p| {
+                        p.file_name()
+                            .is_some_and(|n| n.to_string_lossy().starts_with("seen-"))
+                    })
+                    .expect("a seen-*.list in pipecache")
+            });
+        let text = std::fs::read_to_string(list).unwrap();
+        let mut keep = format!("{}\n", super::super::record::HEADER);
+        let all = std::env::var_os("NXKIT_LOOKUP_ALL").is_some();
+        for l in text
+            .lines()
+            .filter(|l| {
+                l.starts_with("R\t") || all && (l.starts_with("M\t") || l.starts_with("C\t"))
+            })
+            .take(n)
+        {
+            keep.push_str(l);
+            keep.push('\n');
+        }
+        let seen = Seen::parse(&keep).unwrap();
+        let ctx = Context::system_default().unwrap();
+        let shaders = app.join("shaders");
+        let tmp = std::env::temp_dir().join(format!("nxkit-rt-keep-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let file = tmp.join("rt-0001.mtl4archive");
+        // the build's archive: shards of the app, or one file (`NXKIT_LOOKUP_ARCHIVE`)
+        let build =
+            |runtime: Vec<PathBuf>, collect: bool| match std::env::var("NXKIT_LOOKUP_ARCHIVE") {
+                Ok(f) => nxkit_metal::ArchiveConfig {
+                    load: Some(PathBuf::from(f)),
+                    runtime,
+                    collect,
+                    ..Default::default()
+                },
+                Err(_) => nxkit_metal::ArchiveConfig {
+                    shards: Some(app.join("pipelines")),
+                    runtime,
+                    collect,
+                    ..Default::default()
+                },
+            };
+        let first = nxkit_metal::ArchiveConfig {
+            exact_only: std::env::var_os("NXKIT_LOOKUP_EXACT_ONLY").is_some(),
+            ..build(Vec::new(), true)
+        };
+        let p = Pipelines::new(&ctx, &first).unwrap();
+        p.prewarm(&seen, &shaders, None, None);
+        let t = std::time::Instant::now();
+        let written = p.cache.rotate_archive(&file);
+        eprintln!(
+            "capture: {:?}, {} bytes, {:.1} s",
+            written.map_err(|e| e.to_string()),
+            std::fs::metadata(&file).map_or(0, |m| m.len()),
+            t.elapsed().as_secs_f64()
+        );
+        drop(p);
+        let second = build(vec![file], false);
+        let p = Pipelines::new(&ctx, &second).unwrap();
+        p.prewarm(&seen, &shaders, None, None);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

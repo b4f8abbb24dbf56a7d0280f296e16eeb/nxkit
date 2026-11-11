@@ -17,8 +17,14 @@
 //! u32 n_shards    { u32 string }*              the file names of the shards
 //! u32 n_render    { vlib ventry flib fentry shard : 5 x u32 }*
 //! u32 n_compute   { lib entry shard : 3 x u32 }*
+//! u32 n_exact     { vlib ventry flib fentry shard : 5 x u32 }*     version 2 only
 //! u64 checksum                                  FNV-1a of every byte before it
 //! ```
+//!
+//! Version 2 adds the exact pipelines: the render pipelines of the states that a title recorded, archived fully
+//! specialized (colour formats, blend, write masks, vertex layout, samples, alpha to coverage), in shards of their
+//! own. A pair has one entry for each shard that holds some of its states, and the host asks each of them for the exact
+//! descriptor of the draw before it specializes the pair's base. A version 1 index has none; this reader takes both.
 
 use std::collections::HashMap;
 
@@ -32,7 +38,10 @@ pub const INDEX_FILE: &str = "index.nxpi";
 pub const SHARD_EXT: &str = "mtl4archive";
 
 const MAGIC: &[u8; 4] = b"NXPI";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+
+/// The oldest version that [`ShardIndex::decode`] still reads.
+const VERSION_MIN: u32 = 1;
 
 /// A function of a library: the library's file stem and the entry name.
 pub type Func<'a> = (&'a str, &'a str);
@@ -45,6 +54,7 @@ pub struct IndexBuilder {
     shards: Vec<u32>,
     render: Vec<[u32; 5]>,
     compute: Vec<[u32; 3]>,
+    exact: Vec<[u32; 5]>,
 }
 
 impl IndexBuilder {
@@ -92,6 +102,21 @@ impl IndexBuilder {
         self.compute.push(r);
     }
 
+    /// An exact render pipeline (a recorded state, fully specialized) of vertex and fragment function in `shard`. The
+    /// same pair may be in several shards.
+    pub fn exact(&mut self, vertex: Func<'_>, fragment: Func<'_>, shard: u32) {
+        let r = [
+            self.string(vertex.0),
+            self.string(vertex.1),
+            self.string(fragment.0),
+            self.string(fragment.1),
+            shard,
+        ];
+        if !self.exact.contains(&r) {
+            self.exact.push(r);
+        }
+    }
+
     /// The bytes of the index file.
     pub fn encode(&self) -> Vec<u8> {
         let mut o = Vec::new();
@@ -108,6 +133,8 @@ impl IndexBuilder {
         self.render.iter().flatten().for_each(|v| put(&mut o, *v));
         put(&mut o, self.compute.len() as u32);
         self.compute.iter().flatten().for_each(|v| put(&mut o, *v));
+        put(&mut o, self.exact.len() as u32);
+        self.exact.iter().flatten().for_each(|v| put(&mut o, *v));
         let sum = fnv(&o);
         o.extend_from_slice(&sum.to_le_bytes());
         o
@@ -165,6 +192,8 @@ pub struct ShardIndex {
     names: HashMap<String, u32>,
     render: HashMap<[u32; 4], u32>,
     compute: HashMap<[u32; 2], u32>,
+    /// The shards of the exact pipelines of a pair, in the order of the file.
+    exact: HashMap<[u32; 4], Vec<u32>>,
 }
 
 impl ShardIndex {
@@ -185,9 +214,9 @@ impl ShardIndex {
             return Err("not a shard index".into());
         }
         let v = r.u32()?;
-        if v != VERSION {
+        if !(VERSION_MIN..=VERSION).contains(&v) {
             return Err(format!(
-                "shard index version {v}, this host reads {VERSION}"
+                "shard index version {v}, this host reads {VERSION_MIN} to {VERSION}"
             ));
         }
         let n = r.count(4)?;
@@ -235,7 +264,29 @@ impl ShardIndex {
         for _ in 0..n {
             compute.push(([ids(r.u32()?)?, ids(r.u32()?)?], r.u32()?));
         }
+        let mut exact = Vec::new();
+        if v >= 2 {
+            let n = r.count(20)?;
+            for _ in 0..n {
+                let k = [
+                    ids(r.u32()?)?,
+                    ids(r.u32()?)?,
+                    ids(r.u32()?)?,
+                    ids(r.u32()?)?,
+                ];
+                exact.push((k, r.u32()?));
+            }
+        }
         let shards = ix.files.len() as u32;
+        for (k, s) in exact {
+            if s >= shards {
+                return Err("a pipeline names a missing shard".into());
+            }
+            let list = ix.exact.entry(k).or_default();
+            if !list.contains(&s) {
+                list.push(s);
+            }
+        }
         for (k, s) in render {
             if s >= shards {
                 return Err("a pipeline names a missing shard".into());
@@ -270,6 +321,25 @@ impl ShardIndex {
     pub fn compute(&self, function: Func<'_>) -> Option<u32> {
         let k = [self.name(function.0)?, self.name(function.1)?];
         self.compute.get(&k).copied()
+    }
+
+    /// The shards that hold exact pipelines of the pair of these two functions (recorded states of it, fully
+    /// specialized), in the order of the index. Empty when none does.
+    pub fn exact(&self, vertex: Func<'_>, fragment: Func<'_>) -> &[u32] {
+        let (Some(a), Some(b), Some(c), Some(d)) = (
+            self.name(vertex.0),
+            self.name(vertex.1),
+            self.name(fragment.0),
+            self.name(fragment.1),
+        ) else {
+            return &[];
+        };
+        self.exact.get(&[a, b, c, d]).map_or(&[], Vec::as_slice)
+    }
+
+    /// The number of pairs that have exact pipelines.
+    pub fn exact_pairs(&self) -> usize {
+        self.exact.len()
     }
 
     /// The file name of shard `n`.
@@ -329,6 +399,48 @@ mod tests {
     }
 
     #[test]
+    fn exact_pipelines_are_found_by_pair_in_every_shard_that_has_them() {
+        let mut b = IndexBuilder::new();
+        let (s0, s1) = (b.shard("a.mtl4archive"), b.shard("e1.mtl4archive"));
+        let s2 = b.shard("e2.mtl4archive");
+        b.render(("v1_b", "main0"), ("f1_b", "main0"), s0);
+        b.exact(("v1_b", "main0"), ("f1_b", "main0"), s1);
+        b.exact(("v1_b", "main0"), ("f1_b", "main0"), s2);
+        b.exact(("v1_b", "main0"), ("f1_b", "main0"), s2);
+        let ix = ShardIndex::decode(&b.encode()).unwrap();
+        assert_eq!(ix.exact(("v1_b", "main0"), ("f1_b", "main0")), &[1, 2]);
+        assert_eq!(ix.exact_pairs(), 1);
+        assert!(ix.exact(("v1_b", "main0"), ("f9_b", "main0")).is_empty());
+        assert!(ix.exact(("zz", "main0"), ("f1_b", "main0")).is_empty());
+        // an exact entry is no base
+        assert_eq!(ix.pipelines(), 1);
+    }
+
+    #[test]
+    fn a_version_1_index_is_read_and_has_no_exact_pipelines() {
+        // version 1 is the same layout without the exact count
+        let mut b = IndexBuilder::new();
+        let s = b.shard("a.mtl4archive");
+        b.render(("v1_b", "main0"), ("f1_b", "main0"), s);
+        let v2 = b.encode();
+        let mut v1 = v2[..v2.len() - 8 - 4].to_vec();
+        v1[4] = 1;
+        let sum = fnv(&v1);
+        v1.extend_from_slice(&sum.to_le_bytes());
+        let ix = ShardIndex::decode(&v1).unwrap();
+        assert_eq!(ix.pipelines(), 1);
+        assert_eq!(ix.exact_pairs(), 0);
+    }
+
+    #[test]
+    fn an_exact_pipeline_cannot_name_a_missing_shard() {
+        let mut b = IndexBuilder::new();
+        b.shard("a.mtl4archive");
+        b.exact(("v_b", "m"), ("f_b", "m"), 3);
+        assert!(ShardIndex::decode(&b.encode()).is_err());
+    }
+
+    #[test]
     fn an_empty_index_is_valid() {
         let ix = ShardIndex::decode(&IndexBuilder::new().encode()).unwrap();
         assert_eq!((ix.shards(), ix.pipelines()), (0, 0));
@@ -348,6 +460,11 @@ mod tests {
         let sum = fnv(&v);
         v.extend_from_slice(&sum.to_le_bytes());
         assert!(ShardIndex::decode(&v).unwrap_err().contains("version 9"));
+        let mut v = good[..good.len() - 8].to_vec();
+        v[4] = 0;
+        let sum = fnv(&v);
+        v.extend_from_slice(&sum.to_le_bytes());
+        assert!(ShardIndex::decode(&v).is_err());
     }
 
     #[test]

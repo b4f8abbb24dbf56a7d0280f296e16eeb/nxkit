@@ -71,6 +71,10 @@ pub struct StreamInputs {
     /// The bases of the states that a title recorded ([`crate::seen`]). Each goes into the group of its pair, and only
     /// when the pair is in `pairs` and the plan accepts its functions.
     pub extras: Vec<crate::seen::StateBase>,
+    /// The recorded states as fully specialized pipelines ([`crate::exact`]). Each goes into the group of its pair, and
+    /// only when the pair is in `pairs` and the plan accepts its functions. A group compiles them in batches of their
+    /// own, apart from its bases.
+    pub exacts: Vec<crate::exact::ExactState>,
     /// `depth_mode zero`.
     pub zero: bool,
     /// Pairs per group (about, a group's identity hash cuts it, at most 4x).
@@ -392,30 +396,65 @@ fn group(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .extend(refused);
-    if bases.is_empty() && pipes.is_empty() && states.is_empty() {
+    let mine_exact: Vec<crate::exact::ExactState> = inp
+        .exacts
+        .iter()
+        .filter(|e| {
+            e.pair_keys()
+                .is_some_and(|(v, f)| here.contains(&(v.as_str(), f.as_str())))
+        })
+        .cloned()
+        .collect();
+    let (exacts, refused) = crate::exact::usable(&inp.lib_dir, &inp.chain, &mine_exact, inp.zero);
+    dropped
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .extend(refused);
+    if bases.is_empty() && pipes.is_empty() && states.is_empty() && exacts.is_empty() {
         crate::Batches::replanned(c, 1, 0);
         return Ok(Vec::new());
     }
-    let script = Script::parse(&plan::script_text_all(
-        &inp.lib_dir,
-        &bases,
-        &states,
-        &pipes,
-    ))?;
-    let mut digests = HashMap::new();
-    for (label, path) in script.library_paths()? {
-        let b = fs::read(Path::new(&path)).map_err(|e| format!("{path}: {e}"))?;
-        digests.insert(label, sha256(&b));
-    }
     let mut out = Vec::new();
-    let mut batches = cut(script.bases(&digests)?, c.target);
-    batches.extend(crate::compute::chunks(script.compute_bases(&digests)?));
-    crate::Batches::replanned(c, 1, batches.len());
-    for batch in batches {
+    // the bases and the computes in batches cut by content, the exact states in a batch of their own: a change of the
+    // list recompiles that batch and leaves the bases of the group in the store
+    let mut jobs: Vec<(std::sync::Arc<Script>, Vec<crate::cut::Base>, bool)> = Vec::new();
+    if !(bases.is_empty() && pipes.is_empty() && states.is_empty()) {
+        let script = Script::parse(&plan::script_text_all(
+            &inp.lib_dir,
+            &bases,
+            &states,
+            &pipes,
+        ))?;
+        let digests = digests_of(&script)?;
+        let mut batches = cut(script.bases(&digests)?, c.target);
+        batches.extend(crate::compute::chunks(script.compute_bases(&digests)?));
+        let script = std::sync::Arc::new(script);
+        jobs.extend(batches.into_iter().map(|b| (script.clone(), b, false)));
+    }
+    if !exacts.is_empty() {
+        let script = Script::parse(&plan::script_text_full(
+            &inp.lib_dir,
+            &[],
+            &[],
+            &exacts,
+            &[],
+        ))?;
+        let digests = digests_of(&script)?;
+        let batches = crate::cut::whole(script.bases(&digests)?);
+        let script = std::sync::Arc::new(script);
+        jobs.extend(batches.into_iter().map(|b| (script.clone(), b, true)));
+    }
+    crate::Batches::replanned(c, 1, jobs.len());
+    for (script, batch, exact) in jobs {
         let done = crate::compile_resilient(c, &script, &batch, store, reg, Some(headroom))?;
         crate::Batches::finished(c);
         for (key, piece, rep, kept) in done.pieces {
-            out.push((key, piece, rep, crate::shards::idents(&script, &kept)?));
+            let idents = if exact {
+                crate::shards::exact_idents(&script, &kept)?
+            } else {
+                crate::shards::idents(&script, &kept)?
+            };
+            out.push((key, piece, rep, idents));
         }
         dropped
             .lock()
@@ -423,6 +462,16 @@ fn group(
             .extend(done.dropped);
     }
     Ok(out)
+}
+
+/// The digest of every library of the script, by label.
+fn digests_of(script: &Script) -> Result<HashMap<String, nxb_model::Digest>, String> {
+    let mut digests = HashMap::new();
+    for (label, path) in script.library_paths()? {
+        let b = fs::read(Path::new(&path)).map_err(|e| format!("{path}: {e}"))?;
+        digests.insert(label, sha256(&b));
+    }
+    Ok(digests)
 }
 
 #[cfg(test)]
@@ -438,6 +487,7 @@ mod tests {
                 .collect(),
             computes: Vec::new(),
             extras: Vec::new(),
+            exacts: Vec::new(),
             zero: false,
             group_target: 8,
             limits: Limits::new(1, 1, 0),

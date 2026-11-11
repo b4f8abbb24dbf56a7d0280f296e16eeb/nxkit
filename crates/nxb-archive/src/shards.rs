@@ -26,6 +26,9 @@ pub enum Ident {
     Render(Func, Func),
     /// A compute pipeline: its function.
     Compute(Func),
+    /// A recorded state of a render pipeline, fully specialized (`crate::exact`): the vertex and the fragment function
+    /// say which pair it belongs to.
+    Exact(Func, Func),
 }
 
 /// One batch archive and what is in it.
@@ -96,6 +99,17 @@ pub fn idents(script: &Script, batch: &[Base]) -> Result<Vec<Ident>, String> {
         .collect()
 }
 
+/// The pipelines of `batch` of exact states ([`idents`] for a batch of those): each is an [`Ident::Exact`].
+pub fn exact_idents(script: &Script, batch: &[Base]) -> Result<Vec<Ident>, String> {
+    Ok(idents(script, batch)?
+        .into_iter()
+        .map(|i| match i {
+            Ident::Render(v, f) => Ident::Exact(v, f),
+            other => other,
+        })
+        .collect())
+}
+
 /// The bytes of the index file of these shards, in the order given.
 pub fn index_bytes(shards: &[Shard]) -> Vec<u8> {
     let mut ix = IndexBuilder::new();
@@ -105,6 +119,7 @@ pub fn index_bytes(shards: &[Shard]) -> Vec<u8> {
             match id {
                 Ident::Render(v, f) => ix.render((&v.0, &v.1), (&f.0, &f.1), n),
                 Ident::Compute(c) => ix.compute((&c.0, &c.1), n),
+                Ident::Exact(v, f) => ix.exact((&v.0, &v.1), (&f.0, &f.1), n),
             }
         }
     }

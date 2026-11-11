@@ -207,3 +207,115 @@ fn a_folder_without_an_index_leaves_the_single_archive_in_use() {
     drop(cache);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A blended four sample state with a vertex-less shader: a state no base serves.
+fn recorded<'a>(lib: &'a ShaderLibrary, a2c: bool) -> RenderPipelineDesc<'a> {
+    let mut d = RenderPipelineDesc::new((lib, "vs"), Some((lib, "fs")), &[Format::Rgba8Unorm]);
+    d.colors[0] = Some(
+        nxkit_metal::ColorTarget::new(Format::Rgba8Unorm).with_blend(nxkit_metal::BlendState {
+            src_rgb: nxkit_metal::BlendFactor::SrcAlpha,
+            dst_rgb: nxkit_metal::BlendFactor::OneMinusSrcAlpha,
+            op_rgb: nxkit_metal::BlendOp::Add,
+            src_alpha: nxkit_metal::BlendFactor::One,
+            dst_alpha: nxkit_metal::BlendFactor::OneMinusSrcAlpha,
+            op_alpha: nxkit_metal::BlendOp::Add,
+        }),
+    );
+    d.sample_count = 4;
+    d.alpha_to_coverage = a2c;
+    d
+}
+
+#[test]
+fn an_exact_shard_serves_the_recorded_state_without_opening_the_base_shard() {
+    let _one = ONE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(ctx) = ctx() else { return };
+    let dir = scratch("exact");
+    let draw = ShaderLibrary::from_source(&ctx, "draw_b", DRAW_MSL).unwrap();
+    // the exact shard holds the fully specialized pipeline, the base shard is another file
+    shard(&ctx, &dir, "e.mtl4archive", |c| {
+        c.render(1, &recorded(&draw, true)).unwrap();
+    });
+    shard(&ctx, &dir, "b.mtl4archive", |c| {
+        c.render(
+            1,
+            &RenderPipelineDesc::new((&draw, "vs"), Some((&draw, "fs")), &[Format::Bgra8Unorm]),
+        )
+        .unwrap();
+    });
+    let mut ix = IndexBuilder::new();
+    let (e, b) = (ix.shard("e.mtl4archive"), ix.shard("b.mtl4archive"));
+    ix.render(("draw_b", "vs"), ("draw_b", "fs"), b);
+    ix.exact(("draw_b", "vs"), ("draw_b", "fs"), e);
+    std::fs::write(dir.join(INDEX_FILE), ix.encode()).unwrap();
+    let cache = PipelineCache::new(
+        &ctx,
+        &ArchiveConfig {
+            shards: Some(dir.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(cache.exact_pairs(), 1);
+    // an archive load: no specialization, no compile, and the base shard stays closed
+    let (_, s) = cache.render_traced(7, &recorded(&draw, true)).unwrap();
+    assert!(matches!(s, Source::Archive(_)), "{s:?}");
+    assert_eq!(cache.shard_stats(), Some((2, 1, 1, 1)));
+    assert_eq!(cache.base_stats().specialized, 0);
+    // a state the exact shard lacks falls through to the compile (the base shard holds another colour state)
+    let (_, s) = cache.render_traced(8, &recorded(&draw, false)).unwrap();
+    assert!(matches!(s, Source::Compiled(_)), "{s:?}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn what_one_run_compiled_is_a_load_in_the_next() {
+    let _one = ONE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(ctx) = ctx() else { return };
+    let dir = scratch("runtime");
+    let draw = ShaderLibrary::from_source(&ctx, "draw_b", DRAW_MSL).unwrap();
+    let add = ShaderLibrary::from_source(&ctx, "add_b", ADD_MSL).unwrap();
+    let first = PipelineCache::new(
+        &ctx,
+        &ArchiveConfig {
+            collect: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut d = recorded(&draw, true);
+    d.persist = true;
+    assert!(matches!(
+        first.render_traced(1, &d).unwrap().1,
+        Source::Compiled(_)
+    ));
+    assert!(matches!(
+        first.compute_traced(2, &add, "add_words").unwrap().1,
+        Source::Compiled(_)
+    ));
+    let file = dir.join("rt-0001.mtl4archive");
+    first.rotate_archive(&file).unwrap();
+    drop(first);
+    let second = PipelineCache::new(
+        &ctx,
+        &ArchiveConfig {
+            runtime: vec![file],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // both are loads from the runtime archive, nothing is compiled or specialized
+    assert!(matches!(
+        second.render_traced(1, &d).unwrap().1,
+        Source::Archive(_)
+    ));
+    assert!(matches!(
+        second.compute_traced(2, &add, "add_words").unwrap().1,
+        Source::Archive(_)
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

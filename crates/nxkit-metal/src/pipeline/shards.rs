@@ -111,6 +111,21 @@ impl<A: Clone> ShardSet<A> {
         self.shard(self.index.render(vertex, fragment)?)
     }
 
+    /// The shards that hold exact pipelines of the pair of these two functions (recorded states, fully specialized),
+    /// each opened when it is not yet. Empty when the index has none for the pair or a shard cannot be opened.
+    pub(crate) fn exact(&self, vertex: Func<'_>, fragment: Func<'_>) -> Vec<A> {
+        self.index
+            .exact(vertex, fragment)
+            .iter()
+            .filter_map(|n| self.shard(*n))
+            .collect()
+    }
+
+    /// The number of pairs that have exact pipelines.
+    pub(crate) fn exact_pairs(&self) -> usize {
+        self.index.exact_pairs()
+    }
+
     /// The shard that holds the compute pipeline of this function.
     pub(crate) fn compute(&self, function: Func<'_>) -> Option<A> {
         self.shard(self.index.compute(function)?)
@@ -217,6 +232,34 @@ impl ShardSet<Open> {
         Some(found.archive)
     }
 
+    /// The archives that hold the exact pipelines of the pair of `desc`. A library that was not loaded from a file has
+    /// no stem and is in no shard.
+    pub(crate) fn exact_archives(
+        &self,
+        desc: &RenderPipelineDesc<'_>,
+    ) -> Vec<Retained<ProtocolObject<dyn MTL4Archive>>> {
+        let Some((fl, fe)) = desc.fragment else {
+            return Vec::new();
+        };
+        let (vl, ve) = desc.vertex;
+        let (Some(vs), Some(fs)) = (vl.stem(), fl.stem()) else {
+            return Vec::new();
+        };
+        self.exact((vs, ve), (fs, fe))
+            .into_iter()
+            .map(|o| o.archive)
+            .collect()
+    }
+
+    /// The archive that holds the compute pipeline of `function` of `lib`.
+    pub(crate) fn compute_archive(
+        &self,
+        lib: &super::ShaderLibrary,
+        function: &str,
+    ) -> Option<Retained<ProtocolObject<dyn MTL4Archive>>> {
+        Some(self.compute((lib.stem()?, function))?.archive)
+    }
+
     /// The task options of a compute compile: they look the pipeline up in its shard, when it has one.
     pub(crate) fn compute_options(
         &self,
@@ -290,6 +333,39 @@ mod tests {
         assert_eq!(
             (calls.load(Ordering::SeqCst), s.open_now(), s.opens()),
             (1, 1, 1)
+        );
+    }
+
+    #[test]
+    fn exact_pipelines_open_every_shard_of_their_pair_and_no_other() {
+        let mut b = IndexBuilder::new();
+        let base = b.shard("base");
+        let (e1, e2) = (b.shard("e1"), b.shard("e2"));
+        b.render(("v_b", "main0"), ("f_b", "main0"), base);
+        b.exact(("v_b", "main0"), ("f_b", "main0"), e1);
+        b.exact(("v_b", "main0"), ("f_b", "main0"), e2);
+        let index = ShardIndex::decode(&b.encode()).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let s = ShardSet::new(
+            PathBuf::from("/dir"),
+            index,
+            4,
+            Box::new(move |p: &Path| {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok(p.file_name().unwrap().to_string_lossy().to_string())
+            }),
+        );
+        assert_eq!(s.exact_pairs(), 1);
+        // a pair without exact pipelines opens nothing
+        assert!(s.exact(("v_b", "main0"), ("g_b", "main0")).is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(s.exact(("v_b", "main0"), ("f_b", "main0")), ["e1", "e2"]);
+        // the base shard stays closed: asking for exact pipelines does not read it
+        assert_eq!((calls.load(Ordering::SeqCst), s.open_now()), (2, 2));
+        assert_eq!(
+            s.render(("v_b", "main0"), ("f_b", "main0")).as_deref(),
+            Some("base")
         );
     }
 

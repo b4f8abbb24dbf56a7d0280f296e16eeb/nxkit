@@ -92,7 +92,7 @@ fn a_missing_or_foreign_list_gives_an_empty_one() {
     };
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&Seen::default(), Path::new("/nonexistent"), None);
+    p.prewarm(&Seen::default(), Path::new("/nonexistent"), None, None);
     assert_eq!(p.counts(), before);
 }
 
@@ -107,6 +107,36 @@ fn a_list_of_missing_libraries_is_skipped() {
     assert_eq!(seen.len(), 1);
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&seen, Path::new("/nonexistent"), None);
+    p.prewarm(&seen, Path::new("/nonexistent"), None, None);
     assert_eq!(p.counts(), before);
+}
+
+/// The hook of the prewarm runs once the work is over and before the marker of a finished start is written, so that
+/// what the start made is on disk when the marker says it is all there.
+#[test]
+fn the_after_hook_runs_before_the_marker() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let d = std::env::temp_dir().join(format!("nxkit-after-hook-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let marker = d.join("prewarm.done");
+    let text = format!("{}\nC\t0000000000000001\tgone_b\tmain0\n", record::HEADER);
+    let seen = Seen::parse(&text).unwrap();
+    let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let (flag, m) = (std::sync::Arc::new(AtomicU32::new(0)), marker.clone());
+    let f = flag.clone();
+    p.prewarm(
+        &seen,
+        Path::new("/nonexistent"),
+        Some(marker.clone()),
+        Some(Box::new(move || {
+            // the marker is not there yet
+            f.store(if m.exists() { 2 } else { 1 }, Ordering::SeqCst);
+        })),
+    );
+    assert_eq!(flag.load(Ordering::SeqCst), 1);
+    assert!(marker.is_file());
+    std::fs::remove_dir_all(&d).unwrap();
 }

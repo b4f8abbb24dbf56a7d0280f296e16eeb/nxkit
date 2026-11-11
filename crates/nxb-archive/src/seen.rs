@@ -13,6 +13,9 @@
 //! to the colour state, as it does for a plain base. The colour state of the list is not needed: it is what the host
 //! specializes.
 //!
+//! The same lines also give the fully specialized pipelines of the recorded states, which the host loads without
+//! specializing ([`crate::exact`]).
+//!
 //! The list is text, one line per pipeline, tab separated. Only the lines of render pipelines (`R`) are used:
 //!
 //! ```text
@@ -132,7 +135,7 @@ fn format_name(host: &str) -> Option<String> {
     FORMATS.contains(&name.as_str()).then_some(name)
 }
 
-fn layout_of(s: &str) -> Option<(Vec<Attribute>, Vec<Layout>)> {
+pub(crate) fn layout_of(s: &str) -> Option<(Vec<Attribute>, Vec<Layout>)> {
     let (mut attributes, mut layouts) = (Vec::new(), Vec::new());
     if s == "-" {
         return Some((attributes, layouts));
@@ -164,7 +167,7 @@ fn layout_of(s: &str) -> Option<(Vec<Attribute>, Vec<Layout>)> {
     Some((attributes, layouts))
 }
 
-fn flag(s: &str) -> Option<bool> {
+pub(crate) fn flag(s: &str) -> Option<bool> {
     match s {
         "0" => Some(false),
         "1" => Some(true),
@@ -172,7 +175,7 @@ fn flag(s: &str) -> Option<bool> {
     }
 }
 
-fn stage(a: &str, b: &str) -> Option<Option<Func>> {
+pub(crate) fn stage(a: &str, b: &str) -> Option<Option<Func>> {
     let ok = |s: &str| !s.is_empty() && !s.contains(|c: char| c.is_control() || c.is_whitespace());
     match (a, b) {
         ("-", "-") => Some(None),
@@ -293,46 +296,102 @@ fn format_size(name: &str) -> Option<u32> {
     (1..=4).contains(&count).then_some(each * count)
 }
 
+/// Why the compiler would refuse a vertex descriptor, or none. The host's descriptors come from the game's vertex
+/// state, and a game may declare an attribute beyond the stride of its stream (the host sets it as it is and Metal
+/// compiles it at run time), but `applegpu-nt` checks the descriptor and fails the whole batch. The rules, from
+/// Metal's: a buffer index and an attribute index below 31, every attribute's buffer has a layout, the attribute lies
+/// inside the stride (`offset + size <= stride`), a per vertex or per instance layout has a stride. With `used` (the
+/// attribute locations that the vertex function reads) only those attributes are checked.
+pub(crate) fn layout_invalid(
+    attributes: &[Attribute],
+    layouts: &[Layout],
+    used: Option<&HashSet<u32>>,
+) -> Option<String> {
+    for (buffer, stride, step, _) in layouts {
+        if *buffer >= 31 {
+            return Some(format!("layout of buffer {buffer}: buffer index over 30"));
+        }
+        if *stride == 0 && step != "Constant" {
+            return Some(format!(
+                "layout of buffer {buffer}: stride 0 with step {step}"
+            ));
+        }
+    }
+    for (i, format, offset, buffer) in attributes {
+        // the compiler checks the attributes that the vertex function reads; the others pass as they are
+        if used.is_some_and(|u| !u.contains(i)) {
+            continue;
+        }
+        if *i >= 31 {
+            return Some(format!("attribute {i}: index over 30"));
+        }
+        let Some(size) = format_size(format) else {
+            return Some(format!("attribute {i}: unknown format {format}"));
+        };
+        let Some(layout) = layouts.iter().find(|l| l.0 == *buffer) else {
+            return Some(format!("attribute {i}: buffer {buffer} has no layout"));
+        };
+        if layout.2 != "Constant" && offset + size > layout.1 {
+            return Some(format!(
+                "attribute {i} ({format} at {offset}) does not fit the stride {} of buffer {buffer}",
+                layout.1
+            ));
+        }
+    }
+    None
+}
+
+/// The vertex descriptor: attributes by index and layouts by buffer, a slot nobody sets at its default. The host
+/// gives a constant step no rate (0) and any other step at least 1.
+pub(crate) fn vertex_descriptor(attributes: &[Attribute], layouts: &[Layout]) -> Value {
+    let n = |v: u32| Value::Int(i64::from(v));
+    let mut attrs = Vec::new();
+    if let Some(top) = attributes.iter().map(|a| a.0).max() {
+        attrs =
+            vec![Value::Object(vec![("format".into(), Value::str("Invalid"))]); top as usize + 1];
+        for (i, format, offset, buffer) in attributes {
+            attrs[*i as usize] = Value::Object(vec![
+                ("buffer_index".into(), n(*buffer)),
+                ("offset".into(), n(*offset)),
+                ("format".into(), Value::str(format.clone())),
+            ]);
+        }
+    }
+    let mut lays = Vec::new();
+    if let Some(top) = layouts.iter().map(|l| l.0).max() {
+        let unset = Value::Object(vec![
+            ("stride".into(), n(0)),
+            ("step_function".into(), Value::str("PerVertex")),
+            ("step_rate".into(), n(1)),
+        ]);
+        lays = vec![unset; top as usize + 1];
+        for (buffer, stride, step, rate) in layouts {
+            let rate = if step == "Constant" {
+                0
+            } else {
+                (*rate).max(1)
+            };
+            lays[*buffer as usize] = Value::Object(vec![
+                ("stride".into(), n(*stride)),
+                ("step_function".into(), Value::str(step.clone())),
+                ("step_rate".into(), n(rate)),
+            ]);
+        }
+    }
+    let mut o = Vec::new();
+    if !attrs.is_empty() {
+        o.push(("attributes".to_string(), Value::List(attrs)));
+    }
+    if !lays.is_empty() {
+        o.push(("layouts".to_string(), Value::List(lays)));
+    }
+    Value::Object(o)
+}
+
 impl StateBase {
-    /// Why the compiler would refuse the vertex descriptor of this state, or none. The host's descriptors come from
-    /// the game's vertex state, and a game may declare an attribute beyond the stride of its stream (the host sets it
-    /// as it is and Metal compiles it at run time), but `applegpu-nt` checks the descriptor and fails the whole batch.
-    /// The rules, from Metal's: a buffer index and an attribute index below 31, every attribute's buffer has a layout,
-    /// the attribute lies inside the stride (`offset + size <= stride`), a per vertex or per instance layout has a
-    /// stride. With `used` (the attribute locations that the vertex function reads) only those attributes are checked.
+    /// Why the compiler would refuse the vertex descriptor of this state, or none ([`layout_invalid`]).
     pub fn invalid(&self, used: Option<&HashSet<u32>>) -> Option<String> {
-        for (buffer, stride, step, _) in &self.layouts {
-            if *buffer >= 31 {
-                return Some(format!("layout of buffer {buffer}: buffer index over 30"));
-            }
-            if *stride == 0 && step != "Constant" {
-                return Some(format!(
-                    "layout of buffer {buffer}: stride 0 with step {step}"
-                ));
-            }
-        }
-        for (i, format, offset, buffer) in &self.attributes {
-            // the compiler checks the attributes that the vertex function reads; the others pass as they are
-            if used.is_some_and(|u| !u.contains(i)) {
-                continue;
-            }
-            if *i >= 31 {
-                return Some(format!("attribute {i}: index over 30"));
-            }
-            let Some(size) = format_size(format) else {
-                return Some(format!("attribute {i}: unknown format {format}"));
-            };
-            let Some(layout) = self.layouts.iter().find(|l| l.0 == *buffer) else {
-                return Some(format!("attribute {i}: buffer {buffer} has no layout"));
-            };
-            if layout.2 != "Constant" && offset + size > layout.1 {
-                return Some(format!(
-                    "attribute {i} ({format} at {offset}) does not fit the stride {} of buffer {buffer}",
-                    layout.1
-                ));
-            }
-        }
-        None
+        layout_invalid(&self.attributes, &self.layouts, used)
     }
 
     /// The shader keys of the pair: the stems without `_b` or `_bp`. None for a stem the build does not make.
@@ -394,59 +453,14 @@ impl StateBase {
         Value::Object(m)
     }
 
-    /// The vertex descriptor: attributes by index and layouts by buffer, a slot nobody sets at its default. The host
-    /// gives a constant step no rate (0) and any other step at least 1.
     fn vertex_descriptor(&self) -> Value {
-        let n = |v: u32| Value::Int(i64::from(v));
-        let mut attributes = Vec::new();
-        if let Some(top) = self.attributes.iter().map(|a| a.0).max() {
-            attributes = vec![
-                Value::Object(vec![("format".into(), Value::str("Invalid"))]);
-                top as usize + 1
-            ];
-            for (i, format, offset, buffer) in &self.attributes {
-                attributes[*i as usize] = Value::Object(vec![
-                    ("buffer_index".into(), n(*buffer)),
-                    ("offset".into(), n(*offset)),
-                    ("format".into(), Value::str(format.clone())),
-                ]);
-            }
-        }
-        let mut layouts = Vec::new();
-        if let Some(top) = self.layouts.iter().map(|l| l.0).max() {
-            let unset = Value::Object(vec![
-                ("stride".into(), n(0)),
-                ("step_function".into(), Value::str("PerVertex")),
-                ("step_rate".into(), n(1)),
-            ]);
-            layouts = vec![unset; top as usize + 1];
-            for (buffer, stride, step, rate) in &self.layouts {
-                let rate = if step == "Constant" {
-                    0
-                } else {
-                    (*rate).max(1)
-                };
-                layouts[*buffer as usize] = Value::Object(vec![
-                    ("stride".into(), n(*stride)),
-                    ("step_function".into(), Value::str(step.clone())),
-                    ("step_rate".into(), n(rate)),
-                ]);
-            }
-        }
-        let mut o = Vec::new();
-        if !attributes.is_empty() {
-            o.push(("attributes".to_string(), Value::List(attributes)));
-        }
-        if !layouts.is_empty() {
-            o.push(("layouts".to_string(), Value::List(layouts)));
-        }
-        Value::Object(o)
+        vertex_descriptor(&self.attributes, &self.layouts)
     }
 }
 
 /// The attribute locations that the vertex function of the library reads, from its reflection (`vertex_inputs`). None
 /// when the reflection cannot be read.
-fn vertex_inputs(lib_dir: &Path, stem: &str) -> Option<HashSet<u32>> {
+pub(crate) fn vertex_inputs(lib_dir: &Path, stem: &str) -> Option<HashSet<u32>> {
     let text = std::fs::read(lib_dir.join(format!("{stem}.json"))).ok()?;
     let v = nxb_pyjson::parse(&String::from_utf8_lossy(&text)).ok()?;
     let list = v.get("vertex_inputs")?.as_list()?;
@@ -460,9 +474,63 @@ fn vertex_inputs(lib_dir: &Path, stem: &str) -> Option<HashSet<u32>> {
     )
 }
 
+/// The pairs of shaders that the archive can hold at all, and the functions of their libraries: the check that a
+/// recorded state passes before it enters the script ([`usable`], `crate::exact::usable`).
+///
+/// A pair is accepted when the plan accepts it under the rules of a plain base (reflection of this chain, no mesh
+/// stage, no function constants, no layer output, no primitive ID, the libraries have their functions), as the host
+/// draws it with stage inputs (the `_b` library) or pulling (the `_bp` library). The state's own functions must be in
+/// the libraries without function constants; they need not be the entries the plan chose: the host draws a pair with
+/// the integer entry (`main0_u`) when its targets are integer formats.
+pub(crate) struct Acceptor<'a> {
+    lib_dir: &'a Path,
+    /// The (vertex library stem, fragment library stem) of every accepted pair.
+    stems: HashSet<(String, String)>,
+    functions: std::collections::HashMap<String, Option<Vec<(String, bool)>>>,
+}
+
+impl<'a> Acceptor<'a> {
+    pub(crate) fn new(
+        lib_dir: &'a Path,
+        chain: &str,
+        pairs: &[(String, String)],
+        zero: bool,
+    ) -> Self {
+        let mut stems = HashSet::new();
+        for with_inputs in [false, true] {
+            for b in plan_with(lib_dir, chain, pairs, zero, with_inputs).bases {
+                stems.insert((b.0, b.2));
+            }
+        }
+        Self {
+            lib_dir,
+            stems,
+            functions: Default::default(),
+        }
+    }
+
+    /// Whether the library `stem` has `entry`, and it has no function constants.
+    fn entry_ok(&mut self, stem: &str, entry: &str) -> bool {
+        let dir = self.lib_dir;
+        let fns = self
+            .functions
+            .entry(stem.to_string())
+            .or_insert_with(|| crate::plan::functions(&dir.join(format!("{stem}.metallib"))));
+        fns.as_ref()
+            .and_then(|f| f.iter().rev().find(|(n, _)| n == entry))
+            .is_some_and(|(_, constants)| !constants)
+    }
+
+    /// Whether a state with these functions can be archived.
+    pub(crate) fn accepts(&mut self, vertex: &Func, fragment: &Func) -> bool {
+        self.stems.contains(&(vertex.0.clone(), fragment.0.clone()))
+            && self.entry_ok(&vertex.0, &vertex.1)
+            && self.entry_ok(&fragment.0, &fragment.1)
+    }
+}
+
 /// The bases of `states` that the archive can hold: those whose pair the plan accepts under the same rules as a plain
-/// base (reflection of this chain, no mesh stage, no function constants, no layer output, no primitive ID, the
-/// functions in the libraries) and that name the functions the host draws with. The libraries of the pairs must be in
+/// base (see [`Acceptor`]) and that name functions of the libraries. The libraries of the pairs must be in
 /// `lib_dir`. A vertex shader with stage inputs is accepted here, which the plain plan leaves out. A state whose vertex
 /// descriptor the compiler would refuse ([`StateBase::invalid`]) is left out and comes back in the second list.
 pub fn usable(
@@ -480,14 +548,11 @@ pub fn usable(
             pairs.push(p);
         }
     }
-    let ok: HashSet<PlannedBase> = plan_with(lib_dir, chain, &pairs, zero, true)
-        .bases
-        .into_iter()
-        .collect();
+    let mut ok = Acceptor::new(lib_dir, chain, &pairs, zero);
     let (mut kept, mut dropped) = (Vec::new(), Vec::new());
     let mut inputs: std::collections::HashMap<String, Option<HashSet<u32>>> = Default::default();
     for s in states {
-        if s.pair_keys().is_none() || !ok.contains(&s.planned()) {
+        if s.pair_keys().is_none() || !ok.accepts(&s.vertex, &s.fragment) {
             continue;
         }
         let used = inputs

@@ -48,6 +48,21 @@ pub fn cut_for_slots(bases: Vec<Base>, slots: usize, max_target: usize) -> Vec<V
     cut_ranges(bases, ranges, cap)
 }
 
+/// All of `bases` in one batch, in the order [`cut`] sorts them. The exact pipelines of a stream group are compiled
+/// this way: the batch holds the group's states and nothing else, so it changes when one of them does.
+pub fn whole(mut bases: Vec<Base>) -> Vec<Vec<Base>> {
+    if bases.is_empty() {
+        return Vec::new();
+    }
+    bases.sort_by(|a, b| {
+        a.group
+            .cmp(&b.group)
+            .then(a.hash.cmp(&b.hash))
+            .then(a.index.cmp(&b.index))
+    });
+    vec![bases]
+}
+
 fn cut_ranges(mut bases: Vec<Base>, ranges: usize, cap: usize) -> Vec<Vec<Base>> {
     bases.sort_by(|a, b| {
         a.group
@@ -118,6 +133,19 @@ mod tests {
         let old: std::collections::BTreeSet<_> = before.iter().map(key).collect();
         let changed = after.iter().filter(|v| !old.contains(&key(v))).count();
         assert!(changed <= 3, "{changed} batches changed");
+    }
+
+    #[test]
+    fn whole_is_one_sorted_batch_whatever_its_size() {
+        let b = bases(5_000, 3);
+        let one = whole(b.clone());
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].len(), 5_000);
+        // the order does not depend on the order of the input
+        let mut r = b;
+        r.reverse();
+        assert_eq!(whole(r), one);
+        assert!(whole(Vec::new()).is_empty());
     }
 
     #[test]

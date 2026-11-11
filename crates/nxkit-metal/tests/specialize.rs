@@ -285,3 +285,17 @@ fn a_specialized_pipeline_draws_what_the_full_compile_draws() {
     // one base in the archived state (no class) and one with alpha to coverage, made again without a class
     assert_eq!((b.compiled, b.failed), (2, 0), "{b:?}");
 }
+
+#[test]
+fn a_pipeline_made_to_be_kept_compiles_instead_of_specializing() {
+    let Some(ctx) = ctx() else { return };
+    let cache = PipelineCache::new(&ctx, &bases()).unwrap();
+    let lib = ShaderLibrary::from_source(&ctx, "draw_b", DRAW_MSL).unwrap();
+    let mut d = RenderPipelineDesc::new((&lib, "vs"), Some((&lib, "fs")), &[Format::Rgba8Unorm]);
+    // the serializer of the runtime cache captures compiles and not specializations
+    d.persist = true;
+    let (_, s) = cache.render_traced(1, &d).unwrap();
+    assert!(matches!(s, Source::Compiled(_)), "{s:?}");
+    let b = cache.base_stats();
+    assert_eq!((b.found, b.compiled, b.specialized), (0, 0, 0));
+}

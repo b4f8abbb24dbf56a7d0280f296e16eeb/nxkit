@@ -157,6 +157,10 @@ pub struct RenderPipelineDesc<'a> {
     pub alpha_to_coverage: bool,
     /// Whether an indirect command buffer may use the pipeline. Metal needs the flag at build time.
     pub support_icb: bool,
+    /// The pipeline is made to be kept: when no archive has it, compile it from the functions instead of specializing
+    /// an archived base. The serializer of the cache captures a compile and not a specialization, so only a compiled
+    /// pipeline reaches the runtime archive that the next run finds it in (`nxkit-gpu` `pipelines/runtime.rs`).
+    pub persist: bool,
 }
 
 impl<'a> RenderPipelineDesc<'a> {
@@ -178,6 +182,7 @@ impl<'a> RenderPipelineDesc<'a> {
             sample_count: 1,
             alpha_to_coverage: false,
             support_icb: false,
+            persist: false,
         }
     }
 }

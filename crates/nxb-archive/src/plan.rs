@@ -318,6 +318,18 @@ pub fn script_text_all(
     states: &[crate::seen::StateBase],
     computes: &[crate::compute::ComputePipe],
 ) -> String {
+    script_text_full(lib_dir, bases, states, &[], computes)
+}
+
+/// [`script_text_all`] and the exact pipelines of recorded states ([`crate::exact`]), fully specialized, after the
+/// bases of the states. With none the text is the same as [`script_text_all`] gives.
+pub fn script_text_full(
+    lib_dir: &Path,
+    bases: &[PlannedBase],
+    states: &[crate::seen::StateBase],
+    exacts: &[crate::exact::ExactState],
+    computes: &[crate::compute::ComputePipe],
+) -> String {
     let dir = fs::canonicalize(lib_dir).unwrap_or_else(|_| lib_dir.to_path_buf());
     let (mut libs, mut fns, mut pipes) = (Vec::new(), Vec::new(), Vec::new());
     let (mut seen_l, mut seen_f) = (HashSet::new(), HashSet::new());
@@ -367,6 +379,11 @@ pub fn script_text_all(
         let v = fd(&st.vertex.0, &st.vertex.1, &mut libs, &mut fns);
         let f = fd(&st.fragment.0, &st.fragment.1, &mut libs, &mut fns);
         pipes.push(st.descriptor(v, f, &colour));
+    }
+    for ex in exacts {
+        let v = fd(&ex.vertex.0, &ex.vertex.1, &mut libs, &mut fns);
+        let f = fd(&ex.fragment.0, &ex.fragment.1, &mut libs, &mut fns);
+        pipes.push(ex.descriptor(v, f));
     }
     let mut descriptors = vec![("render_pipeline_descriptors".into(), Value::List(pipes))];
     if !computes.is_empty() {

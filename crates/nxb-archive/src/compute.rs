@@ -25,6 +25,16 @@ pub type ComputeLeft = [usize; 4];
 /// first, in their order. The shader maps' rows of stage `compute` follow (the key is column 4, with `_b` added).
 /// Each library is listed once. Missing files are skipped.
 pub fn read_computes(maps: &[PathBuf], manifests: &[PathBuf]) -> Vec<String> {
+    read_computes_with(maps, manifests, &[])
+}
+
+/// [`read_computes`] and the compute pipelines that the host recorded: the `C` rows of its pipeline lists
+/// (`C <key> <stem> <entry>`, `nxkit-gpu` `pipelines/record.rs`) follow the manifests' rows, before the shader maps'.
+pub fn read_computes_with(
+    maps: &[PathBuf],
+    manifests: &[PathBuf],
+    lists: &[PathBuf],
+) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
     let mut add = |name: String| {
@@ -50,6 +60,14 @@ pub fn read_computes(maps: &[PathBuf], manifests: &[PathBuf]) -> Vec<String> {
             let c: Vec<&str> = l.split('\t').collect();
             if c.len() >= 2 && c[0] == "C" && !c[1].is_empty() {
                 add(c[1].to_string());
+            }
+        }
+    }
+    for p in lists {
+        for l in lines(p) {
+            let c: Vec<&str> = l.split('\t').collect();
+            if c.len() == 4 && c[0] == "C" && c[2].ends_with("_b") {
+                add(c[2].to_string());
             }
         }
     }

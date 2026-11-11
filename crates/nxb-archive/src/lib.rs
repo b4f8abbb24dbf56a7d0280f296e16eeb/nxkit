@@ -16,6 +16,7 @@
 pub mod cli;
 pub mod compute;
 pub mod cut;
+pub mod exact;
 #[cfg(test)]
 mod key_tests;
 pub mod plan;

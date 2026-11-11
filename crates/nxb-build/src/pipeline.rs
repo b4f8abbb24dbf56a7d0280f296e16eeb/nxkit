@@ -53,11 +53,13 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
 }
 
 /// The compute shaders that get compute pipelines in the archive: the profile's prewarm list (`pso_manifest.tsv`, `C`
-/// rows first) and the compute rows of its `shader_map.tsv`, as `pso_offline.py --game` reads them.
+/// rows first), the compute pipelines that the host recorded (`C` rows of the pipeline lists) and the compute rows of
+/// its `shader_map.tsv`, as `pso_offline.py --game` reads them.
 fn compute_shaders(b: &Build) -> Vec<String> {
-    nxb_archive::compute::read_computes(
+    nxb_archive::compute::read_computes_with(
         &[b.profile.0.join("shader_map.tsv")],
         &[b.profile.0.join("pso_manifest.tsv")],
+        &b.pipeline_lists,
     )
 }
 
@@ -173,6 +175,7 @@ pub fn shaders_and_archive(
         pairs: nxb_archive::plan::read_pairs(&text),
         computes: compute_shaders(b),
         extras: nxb_archive::seen::read_lists(&b.pipeline_lists),
+        exacts: nxb_archive::exact::read_lists(&b.pipeline_lists),
         zero,
         group_target: GROUP_TARGET,
         limits: acfg.as_ref().map_or_else(
