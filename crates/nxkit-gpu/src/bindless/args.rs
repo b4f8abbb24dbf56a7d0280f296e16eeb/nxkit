@@ -155,10 +155,13 @@ fn locate<B: Backing>(
     class: u8,
 ) -> Option<(u64, u32)> {
     match pools.resolve_start_c(guest, class) {
-        Ok(loc) => Some((
-            loc.real,
-            size.min(u32::try_from(loc.room).unwrap_or(u32::MAX)),
-        )),
+        Ok(loc) => {
+            pools.check_span(guest, u64::from(size), class);
+            Some((
+                loc.real,
+                size.min(u32::try_from(loc.room).unwrap_or(u32::MAX)),
+            ))
+        }
         Err(_) => {
             note_n(Reason::BindNoPool, 1);
             None

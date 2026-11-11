@@ -605,6 +605,58 @@ for the writer, by class; `DIAG private top program counters, not emulated` list
 step 3 (`read in flight`, `write in flight`) and the waits for a writer now count only what was not emulated; the first store to a
 page since the flush still counts in the line of writes to member pages by phase.
 
+## Private GPU memory, step 5: whole bindings, and less work on the game thread (`NXKIT_PRIVATE=1`)
+
+Step 5 closes a gap of the mirror and takes the cost of the model off the game thread.
+
+**Whole bindings.** A range that is partly on member pages resolved to guest memory (`partial`): it could read bytes that the GPU
+wrote in the mirror, or the GPU could write guest bytes that the next frame does not see. The flush now makes every
+binding range that touches a member whole before the frame is encoded: the closure over the read ranges (uniform,
+storage, stream, index, indirect and copy source) runs rounds until a round adds nothing (up to 8; it was 2), looks at each
+range once and drops the ranges that are whole, and cuts a range that reaches past the end of guest memory to it instead of
+leaving it out. Ranges that no part of `FrameDetail` announces (texture upload sources, copy boxes) are learned: every
+resolve that finds a range split between members and non-members (`overlay::note_partial`, called from `resolve`/`resolve_c`
+by class and from the uniform and storage sites through `check_span`) remembers `(address, length)`, and the next flush adds
+the remembered ranges (at most 2048) to the closure. A range is therefore split at most once, in the frame that first
+uses it; a second split resolve of the same range means a limit of the closure kept it (`CLOSURE_MAX_BYTES`, `RANGE_MAX_BYTES`,
+the rounds), and is counted apart. Before this the line printed the count of a whole window (300 frames), not a per-frame figure:
+601 in a window is about 2 per frame.
+
+**Cost of the model.** Measured with a synthetic frame of the live shape (71 bindings of 72 pages, 77 written pages read and
+written by the CPU, 154 pages beside them that the CPU writes every frame; test
+`the_adaptive_settings_keep_the_bytes_exact_and_the_numbers_are_printed`): the flush spent 3.1 of 3.7 ms in the tags of the
+written pages, and 2.9 of those in `range_masks`, which set the 256 block bits of every written page one by one. It sets
+whole words now (0.3 ms for the same pages). The flush also tests a page's word before the compare-exchange (new members)
+and the stale bits before the `fetch_or` (the tags), and `DIAG private cost per frame` splits the flush: plan of the written
+ranges, read ranges, closure, growth of the mirror, the pages (new members, dirty log, staging, writable pages, tags, and the
+`mprotect` time in all of it), the rest, and the fault handler.
+
+**Copy back after completion.** A game thread that waits for a copy from the mirror (a fault on a page whose frame is done)
+marks the page `eager` for the epoch (256 flushes). When a frame completes, a thread of its own copies the stale blocks of
+the marked pages that are still tagged with that frame from the mirror into the page through the alias, then opens the run
+for reading and sets the pages clean, with one `mprotect` per run of marked pages and the control mutex held per run (a flush
+never sees a page half done; the handler's own claim, the `SYNC` state, covers a thread that faults at the same time). A
+page that nobody faults on any more loses the mark after two epochs and faults once to get it back, so the copies a page
+does not need are bounded. It needs the alias (no alias, no copy back). The knob
+`privnoeager` turns it off.
+
+**Writable pages.** A page that the CPU dirtied in 3 flushes in a row (`HOT_AFTER`) and that no frame writes in this flush
+stays read and write: the flush keeps a copy of the bytes it staged for it, compares the live page with it at each flush,
+stages the page when it differs, and after 8 flushes without a change (`HOT_QUIET`) protects it again and compares once more
+(a store between the last compare and the protection is staged then). The CPU never faults on such a page; the cost is one
+16 KiB compare per page per flush and one copy when it changed. A page that a frame writes in a flush leaves the set and
+takes the old path (tag, stale blocks). A store during the flush lands in this frame or the next, as for every other page;
+the shadow is what was staged, so no store is lost. The knob `privnohot` turns it off.
+
+**Counters** (`NXKIT_DIAG=private`): `DIAG private partial resolves per frame` (class and split: starts in and leaves, starts out
+and reaches in, past the run; the learned ranges; the repeats), `DIAG private cost per frame, game thread` (the milliseconds of
+the flush by part, the fault handler and the sum, "the model costs"), `DIAG private adaptive per frame` (writable pages, staged
+and unchanged, promotions and demotions; pages copied back after completion, `mprotect` calls and milliseconds on the copy-back
+thread). Synthetic numbers, per frame, with 304 faults per frame without step 5: the copy back leaves 1 copied by a fault of
+77, the writable pages take the faults to 83 (the 77 CPU writes to written pages remain: such a page is tagged every
+frame and cannot stay writable); the flush costs 0.9 ms (it was 3.7), plus 0.5 ms for the 150 writable pages. A fault costs
+2 us in this test and about 12 us live (3.9 ms for 313 faults), so the live saving is the faults times 10.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:

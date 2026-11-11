@@ -239,8 +239,35 @@ struct Window {
     flight_pages: Vec<(u64, u64, bool, String)>,
     forced_frames: u64,
     forced_reads: u64,
-    /// The partial resolves (`overlay::partial`) at the start of the window.
-    partial_base: u64,
+    /// The partial resolves (`overlay::partial_table`) at the start of the window.
+    partial_base: [[u64; 3]; 7],
+    /// `overlay::partial_repeats` at the start of the window.
+    repeats_base: u64,
+    /// Where the CPU time of the flush went, summed over the window (ns): the plan of the written ranges, the read ranges
+    /// and the closure, the growth of the mirror, the flush of the pages (its parts are the next fields), the rest
+    /// (overlay, staging bookkeeping), and the whole.
+    t_plan_written: u64,
+    t_reads: u64,
+    t_closure: u64,
+    t_ensure: u64,
+    t_pages: u64,
+    t_rest: u64,
+    t_total: u64,
+    /// The parts of the flush of the pages: new members, the log, staging the dirty pages, the writable pages, the tags.
+    t_new: u64,
+    t_log: u64,
+    t_stage: u64,
+    t_hot: u64,
+    t_tag: u64,
+    /// The time of `mprotect` in the flush of the pages.
+    t_prot: u64,
+    /// The writable pages: their number after each flush (summed), the ones staged, the unchanged ones, promotions and
+    /// demotions.
+    hot_pages: u64,
+    hot_staged: u64,
+    hot_same: u64,
+    promoted: u64,
+    demoted: u64,
     base: PageStats,
 }
 
@@ -370,6 +397,15 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
         match Mirror::new(ctx, len) {
             Ok(m) => {
                 pages.set_mirror(m.host_base());
+                let (no_eager, no_hot) = (crate::knob("privnoeager"), crate::knob("privnohot"));
+                pages.set_adaptive(!no_eager, !no_hot);
+                if no_eager || no_hot {
+                    eprintln!(
+                        "nxkit-gpu: NXKIT_PRIVATE=1: adaptive page handling off: copy back after completion {}, writable hot pages {}",
+                        if no_eager { "off (privnoeager)" } else { "on" },
+                        if no_hot { "off (privnohot)" } else { "on" }
+                    );
+                }
                 match pages.make_alias() {
                     Ok(()) => {
                         let off = crate::knob("privnoemu");
@@ -828,25 +864,45 @@ const BIND_INDIRECT: u8 = 4;
 const BIND_COPY: u8 = 5;
 const BIND_NAMES: [&str; 6] = ["uniform", "storage", "vertex", "index", "indirect", "copy source"];
 
-/// The pages that become members because a binding of the frame touches a member (the written ranges included): up to two
-/// rounds, since a range that is made whole can touch another binding.
+/// The host address of the GPU range `[a, a + len)` and its length cut to the end of guest memory.
+fn clamped_host(map: &AddressMap, a: u64, len: u64) -> Option<(u64, u64)> {
+    let h = map.host_address(a, 1).ok()?;
+    let room = map.host_base() + map.len() - h;
+    Some((h, len.min(room)))
+}
+
+/// The most rounds of the closure: a range that is made whole can touch another binding, which makes its range whole in
+/// the next round. The rounds stop when a round adds nothing.
+const CLOSURE_ROUNDS: usize = 8;
+
+/// The pages that become members because a binding of the frame touches a member (the written ranges included): rounds
+/// until nothing is added, at most [`CLOSURE_ROUNDS`].
 fn closure(
     pages: &Pages,
     reads: &[(u64, u64, u8)],
     map: &AddressMap,
     members: &mut Members<'_>,
 ) -> u64 {
+    // The page range of each binding, once. Members only grow, so a range that is whole stays whole and leaves the list;
+    // the others are looked at again in the next round.
+    let mut todo: Vec<(u32, u32)> = Vec::with_capacity(reads.len());
+    for &(a, len, _) in reads {
+        let len = len.min(RANGE_MAX_BYTES);
+        // A range that reaches past the end of guest memory (a placeholder size) is cut to it.
+        let Some((h, len)) = clamped_host(map, a, len) else {
+            continue;
+        };
+        if let Some((first, end)) = pages.page_range(h, len)
+            && !members.all(first, end)
+        {
+            todo.push((first, end));
+        }
+    }
+    let page = pages.page_size();
     let mut added_pages = 0u64;
-    for _ in 0..2 {
+    for _ in 0..CLOSURE_ROUNDS {
         let mut new: Vec<(u32, u32)> = Vec::new();
-        for &(a, len, _) in reads {
-            let len = len.min(RANGE_MAX_BYTES);
-            let Ok(h) = map.host_address(a, len) else {
-                continue;
-            };
-            let Some((first, end)) = pages.page_range(h, len) else {
-                continue;
-            };
+        for &(first, end) in &todo {
             if members.any(first, end) && !members.all(first, end) {
                 new.push((first, end));
             }
@@ -854,7 +910,6 @@ fn closure(
         if new.is_empty() {
             break;
         }
-        let page = pages.page_size();
         let mut budget = CLOSURE_MAX_BYTES.saturating_sub(added_pages * page);
         new.retain(|&(s, e)| {
             let bytes = u64::from(e - s) * page;
@@ -871,6 +926,7 @@ fn closure(
         if after == before {
             break;
         }
+        todo.retain(|&(first, end)| !members.all(first, end));
     }
     added_pages
 }
@@ -1035,12 +1091,14 @@ fn flush_mirror(
 ) -> Option<Arc<GuestOverlay>> {
     let st = state();
     let pages = Pages::global();
+    let t_all = Instant::now();
     let t_plan = Instant::now();
     let learned = locked(&st.learned).clone();
     let (written, clipped) = {
         let rw = locked(&st.rw);
         plan_written(detail, &learned, &rw, map)
     };
+    let t_written_ns = t_plan.elapsed().as_nanos() as u64;
     // The members after this flush: the tracked pages, the written ranges and what the bindings touch.
     let (bits, _) = pages.member_snapshot();
     let mut members = Members {
@@ -1052,8 +1110,16 @@ fn flush_mirror(
         .filter_map(|&(h, l)| pages.page_range(h, l))
         .collect();
     members.added.add(&written_runs);
-    let reads = read_ranges(detail);
+    let t_r = Instant::now();
+    let mut reads = read_ranges(detail);
+    // Ranges that the encoder found split between members and non-members in an earlier frame and that no binding of
+    // this one announces (texture upload sources, ranges of recordings): they become whole too.
+    let learned_partial = crate::overlay::partial_ranges();
+    reads.extend(learned_partial.iter().map(|&(a, l)| (a, l, BIND_COPY)));
+    let t_reads_ns = t_r.elapsed().as_nanos() as u64;
+    let t_c = Instant::now();
     let closure_pages = closure(pages, &reads, map, &mut members);
+    let t_closure_ns = t_c.elapsed().as_nanos() as u64;
     let psize = pages.page_size();
     let host_of = |p: u32| pages.host_base() + u64::from(p) * psize;
     let member_ranges: Vec<(u64, u64)> = members
@@ -1065,6 +1131,7 @@ fn flush_mirror(
     let plan_ns = t_plan.elapsed().as_nanos() as u64;
     let mut guard = locked(&st.mirror);
     let ms = guard.as_mut()?;
+    let t_e = Instant::now();
     // The segments of the mirror that hold them.
     let host0 = map.host_base();
     let offsets: Vec<(u64, u64)> = member_ranges
@@ -1079,6 +1146,7 @@ fn flush_mirror(
         FAILED.store(true, Ordering::Relaxed);
         return None;
     }
+    let t_ensure_ns = t_e.elapsed().as_nanos() as u64;
     // A page that becomes a member in a pool that raw stores wrote may still be written in guest memory by a frame in
     // flight: wait for those frames once, before the page is copied.
     let enters_learned = members.added.0.iter().any(|&(s, e)| {
@@ -1201,6 +1269,25 @@ fn flush_mirror(
         w.raced += u64::from(f.raced);
         w.closure_pages += closure_pages;
         w.enter_waits += u64::from(enter_wait);
+        w.t_plan_written += t_written_ns;
+        w.t_reads += t_reads_ns;
+        w.t_closure += t_closure_ns;
+        w.t_ensure += t_ensure_ns;
+        w.t_pages += f.ns;
+        let total = t_all.elapsed().as_nanos() as u64;
+        w.t_total += total;
+        w.t_rest += total.saturating_sub(t_written_ns + t_reads_ns + t_closure_ns + t_ensure_ns + f.ns);
+        w.t_new += f.new_ns;
+        w.t_log += f.log_ns;
+        w.t_stage += f.stage_ns;
+        w.t_hot += f.hot_ns;
+        w.t_tag += f.tag_ns;
+        w.t_prot += f.mprotect_ns;
+        w.hot_pages += u64::from(f.hot);
+        w.hot_staged += u64::from(f.hot_staged);
+        w.hot_same += u64::from(f.hot_same);
+        w.promoted += u64::from(f.promoted);
+        w.demoted += u64::from(f.demoted);
         n.is_multiple_of(REPORT_EVERY)
     };
     if report {
@@ -1767,7 +1854,8 @@ fn print_report(frame: u64) {
         let (usable, runs, retired) = locked(&st.mirror)
             .as_ref()
             .map_or((0, 0, 0), |m| (m.mirror.usable_bytes(), m.mirror.runs().len(), m.mirror.retired()));
-        let partial = crate::overlay::partial();
+        let partial_now = crate::overlay::partial_table();
+        let partial: u64 = partial_now.iter().flatten().sum::<u64>() - w.partial_base.iter().flatten().sum::<u64>();
         let sync = |o: FaultOrigin| now.faults[FaultKind::Sync as usize][o as usize]
             - base.faults[FaultKind::Sync as usize][o as usize];
         eprintln!(
@@ -1775,7 +1863,7 @@ fn print_report(frame: u64) {
              members {} pages; per frame: staged {:.1} pages ({:.2} MiB, {:.2} written again), copy-in {:.1} pages \
              (lost {}), pages copied mirror to guest {:.1} (by a fault of guest code {:.1}), closure added {:.1} pages, \
              waits for a writer {:.2} ({:.3} ms; {} timeouts), internal opens {:.2}, enter waits {}, \
-             partial resolves {}, poison {}",
+             partial resolves {} in the window, poison {}",
             usable as f64 / (1024.0 * 1024.0),
             now.members,
             w.staged as f64 / n,
@@ -1791,11 +1879,70 @@ fn print_report(frame: u64) {
             now.wait_timeouts - base.wait_timeouts,
             (now.internal_opens - base.internal_opens) as f64 / n,
             w.enter_waits,
-            partial - w.partial_base,
+            partial,
             if poison_on() { "on" } else { "off" },
         );
     }
     if mirrored() {
+        let t = crate::overlay::partial_table();
+        let mut parts: Vec<String> = Vec::new();
+        for (c, row) in t.iter().enumerate() {
+            for (k, v) in row.iter().enumerate() {
+                let d = v - w.partial_base[c][k];
+                if d != 0 {
+                    parts.push(format!(
+                        "{} {}: {:.2}",
+                        crate::overlay::CLASS_NAMES[c],
+                        crate::overlay::SPLIT_NAMES[k],
+                        d as f64 / n
+                    ));
+                }
+            }
+        }
+        eprintln!(
+            "DIAG private partial resolves per frame: {} ({} ranges learned for the closure, {} partial resolves of a \
+             learned range in the window: a limit of the closure kept it split)",
+            if parts.is_empty() { "none".to_string() } else { parts.join(", ") },
+            crate::overlay::partial_range_count(),
+            crate::overlay::partial_repeats() - w.repeats_base
+        );
+        let ms = |v: u64| v as f64 / n / 1e6;
+        let handler = (now.handler_ns - base.handler_ns) as f64 / n / 1e6;
+        let waited = (now.writer_wait_ns - base.writer_wait_ns) as f64 / n / 1e6;
+        eprintln!(
+            "DIAG private cost per frame, game thread: flush {:.3} ms = plan of written ranges {:.3} + read ranges {:.3} + \
+             closure {:.3} + mirror growth {:.3} + pages {:.3} (new members {:.3}, dirty log {:.3}, staging the dirty pages \
+             {:.3}, writable pages {:.3}, tags of the written pages {:.3}; mprotect in all of it {:.3}) + rest {:.3}; fault handler {:.3} ms (of it \
+             waiting for writers {:.3}); the model costs {:.3} ms per frame",
+            ms(w.t_total),
+            ms(w.t_plan_written),
+            ms(w.t_reads),
+            ms(w.t_closure),
+            ms(w.t_ensure),
+            ms(w.t_pages),
+            ms(w.t_new),
+            ms(w.t_log),
+            ms(w.t_stage),
+            ms(w.t_hot),
+            ms(w.t_tag),
+            ms(w.t_prot),
+            ms(w.t_rest),
+            handler,
+            waited,
+            ms(w.t_total) + handler,
+        );
+        eprintln!(
+            "DIAG private adaptive per frame: writable pages {:.1} (staged {:.1}, unchanged {:.1}; {:.2} promoted, {:.2} \
+             protected again); copy-back after completion {:.1} pages in {:.2} mprotect calls, {:.3} ms on its own thread",
+            w.hot_pages as f64 / n,
+            w.hot_staged as f64 / n,
+            w.hot_same as f64 / n,
+            w.promoted as f64 / n,
+            w.demoted as f64 / n,
+            (now.eager_pages - base.eager_pages) as f64 / n,
+            (now.eager_runs - base.eager_runs) as f64 / n,
+            (now.eager_ns - base.eager_ns) as f64 / n / 1e6,
+        );
         let ph = |i: usize| (now.phase_writes[i] - base.phase_writes[i]) as f64 / n;
         let longest = pages.take_wait_max();
         let waits = |k: usize| {
@@ -1959,7 +2106,8 @@ fn print_report(frame: u64) {
     }
     *w = Window {
         base: now,
-        partial_base: crate::overlay::partial(),
+        partial_base: crate::overlay::partial_table(),
+        repeats_base: crate::overlay::partial_repeats(),
         ..Window::default()
     };
 }
@@ -2400,6 +2548,152 @@ mod tests {
         assert_eq!(LATE_MISSED.load(Ordering::Relaxed), missed + 1);
         LATE_MISSED.store(0, Ordering::Relaxed);
         encoded(52, None);
+        FORCE.with(|f| f.set(None));
+    }
+
+    #[test]
+    fn a_range_that_resolved_partly_on_members_is_made_whole_by_the_next_flush() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let page = PAGE;
+        // Page 50 is written by the frame and so a member; a texture-like source starts in page 49, which no binding
+        // announces, and reaches into page 50.
+        let detail = dispatch(VA + 50 * page, 0x100);
+        let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
+        let src = VA + 49 * page + 0x3000;
+        let len = 0x2000u64;
+        assert!(!o1.all_members(src, len));
+        let pools = pools_of(&g, o1);
+        let before = crate::overlay::partial_table();
+        let _ = pools.resolve_c(src, len, crate::overlay::UPLOAD);
+        let after = crate::overlay::partial_table();
+        let upload = 4usize;
+        assert_eq!(after[upload][1] - before[upload][1], 1, "counted as starting out and reaching in");
+        encoded(1, None);
+        // The next flush has the range from the encoder and makes it whole.
+        let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
+        assert!(o2.all_members(src, len), "the range is whole on members now");
+        let pools = pools_of(&g, o2);
+        let before = crate::overlay::partial_table();
+        let loc = pools.resolve_c(src, len, crate::overlay::UPLOAD).unwrap();
+        assert_ne!(loc.run, crate::pools::NO_RUN);
+        assert_eq!(crate::overlay::partial_table(), before, "no partial resolve any more");
+        encoded(2, None);
+        FORCE.with(|f| f.set(None));
+    }
+
+    /// The live case in small: 71 bindings of 72 pages that every frame may write, 154 pages the CPU writes every frame
+    /// that no frame touches and 77 pages of the written ones that it reads and writes every frame. The three settings give
+    /// the same bytes; the times are printed.
+    #[test]
+    fn the_adaptive_settings_keep_the_bytes_exact_and_the_numbers_are_printed() {
+        let _t = locked(&TURN);
+        // The tests before this one left pages of their guest tracked and without access; the tracker still covers them.
+        Pages::global().release_all();
+        let Some(g) = guest(256 << 20) else { return };
+        let page = PAGE;
+        let mut dispatches = Vec::new();
+        let mut written_pages: Vec<u64> = Vec::new();
+        let mut hot: Vec<u64> = Vec::new();
+        for i in 0..71u64 {
+            let first = 400 + i * 100;
+            let mut d = dispatch(VA + first * page, (72 * page) as u32);
+            // A uniform that starts in the last written page and reaches 2 or 3 pages past it: those pages are members
+            // that no frame writes.
+            let extra = if i < 12 { 4 } else { 3 };
+            d.dispatches[0].ubos = vec![UboDetail {
+                stage: Stage::Compute,
+                slot: 0,
+                address: VA + (first + 71) * page + 0x100,
+                size: (extra * page) as u32,
+                snapshot: None,
+            }];
+            hot.extend((0..extra - 1).map(|k| first + 72 + k));
+            dispatches.push(d.dispatches.remove(0));
+            written_pages.push(first);
+            if i < 6 {
+                written_pages.push(first + 1);
+            }
+        }
+        let detail = FrameDetail {
+            dispatches,
+            ..Default::default()
+        };
+        let pages = Pages::global();
+        let mut fence = 0u64;
+        let mut out = Vec::new();
+        let mut results: Vec<(bool, bool, u64, u64)> = Vec::new();
+        for (name, eager, hot_on) in [("off", false, false), ("copy-back", true, false), ("copy-back and writable", true, true)] {
+            pages.set_adaptive(eager, hot_on);
+            let (mut cpu_ns, mut flush_ns) = (0u128, 0u128);
+            let frames = 80u64;
+            let mut prev = 0u8;
+            let s0 = pages.stats();
+            for k in 0..frames {
+                fence += 1;
+                let v = (fence % 251) as u8 + 1;
+                let t = Instant::now();
+                for &h in &hot {
+                    g.mem.write(h * page + 100, &[v]).unwrap();
+                }
+                for &w in &written_pages {
+                    if k > 0 {
+                        let mut b = [0u8; 1];
+                        g.mem.read(w * page, &mut b).unwrap();
+                        assert_eq!(b[0], prev, "{name}: the GPU's byte of the last frame");
+                    }
+                    g.mem.write(w * page + 512, &[v]).unwrap();
+                }
+                cpu_ns += t.elapsed().as_nanos();
+                let t = Instant::now();
+                let o = at_flush(&detail, fence, &g.map, 0, false, &|| {}).expect("overlay");
+                flush_ns += t.elapsed().as_nanos();
+                // The hot pages reach the frame's view with the CPU's byte.
+                for &h in hot.iter().step_by(17) {
+                    let mut b = [0u8; 1];
+                    assert!(o.read(VA + h * page + 100, &mut b));
+                    assert_eq!(b[0], v, "{name}: staged or mirrored byte of page {h}");
+                }
+                // The GPU writes the first byte of every written page.
+                for &w in &written_pages {
+                    let va = VA + w * page;
+                    let run = o.runs().iter().find(|r| r.va_start <= va && va < r.va_end).expect("run");
+                    run.mem.write(va - run.va_start, &[v]).unwrap();
+                }
+                encoded(fence, None);
+                prev = v;
+                std::thread::sleep(std::time::Duration::from_millis(3));
+            }
+            let s1 = pages.stats();
+            eprintln!("--- {name}");
+            print_report(fence);
+            results.push((
+                eager,
+                hot_on,
+                s1.faults.iter().flatten().sum::<u64>() - s0.faults.iter().flatten().sum::<u64>(),
+                s1.eager_pages - s0.eager_pages,
+            ));
+            out.push(format!(
+                "{name}: cpu {:.3} ms, flush {:.3} ms per frame, faults {:.1}, copied by faults {:.1}, copy-back {:.1} pages",
+                cpu_ns as f64 / frames as f64 / 1e6,
+                flush_ns as f64 / frames as f64 / 1e6,
+                (s1.faults.iter().flatten().sum::<u64>() - s0.faults.iter().flatten().sum::<u64>()) as f64 / frames as f64,
+                (s1.synced - s0.synced) as f64 / frames as f64,
+                (s1.eager_pages - s0.eager_pages) as f64 / frames as f64,
+            ));
+        }
+        pages.set_adaptive(false, false);
+        pages.quiesce();
+        // The next test allocates from the same heap: leave no page of this guest without access (the allocator may write
+        // to the block again before the next `attach`).
+        pages.release_all();
+        assert_eq!(results[0].3, 0, "nothing copies back with the setting off");
+        assert!(results[1].3 > 0, "the completion copies back the pages game threads waited for");
+        assert!(results[1].2 < results[0].2, "fewer faults with the copy-back");
+        assert!(results[2].2 < results[1].2, "fewer faults with writable pages");
+        for l in out {
+            eprintln!("adaptive test {l}");
+        }
         FORCE.with(|f| f.set(None));
     }
 

@@ -20,11 +20,75 @@ use crate::pools::Backing;
 /// The page size of the member bitmap: the host page.
 pub(crate) const PAGE: u64 = nxkit_metal::PAGE_SIZE;
 
-static PARTIAL: AtomicU64 = AtomicU64::new(0);
+/// Partial resolves by resolve class (index 0 is a resolve without a class, then one per class bit) and by how the range
+/// is split: 0 it starts on a member page and reaches past the members, 1 it starts outside the members and reaches into
+/// them, 2 all its pages are members but it reaches past the end of its run or pool.
+static PARTIAL: [[AtomicU64; 3]; 7] = [const { [const { AtomicU64::new(0) }; 3] }; 7];
 
-/// Ranges that started on a member page and reached past the members, since the process started.
+/// The names of the classes of [`PARTIAL`], index 0 first.
+pub(crate) const CLASS_NAMES: [&str; 7] = ["other", "uniform", "storage", "stream", "upload", "gmem", "copy"];
+/// The names of the splits of [`PARTIAL`].
+pub(crate) const SPLIT_NAMES: [&str; 3] = ["starts in, leaves", "starts out, reaches in", "past run"];
+
+/// Partial resolves of a range that an earlier one had announced to the flush: the closure did not make it whole (a limit).
+static REPEATS: AtomicU64 = AtomicU64::new(0);
+
+/// The partial resolves of ranges seen before.
+pub(crate) fn partial_repeats() -> u64 {
+    REPEATS.load(Ordering::Relaxed)
+}
+
+/// Ranges that were not wholly on members or wholly off them, since the process started.
+#[cfg(test)]
 pub(crate) fn partial() -> u64 {
-    PARTIAL.load(Ordering::Relaxed)
+    partial_table().iter().flatten().sum()
+}
+
+/// The counts by class and split.
+pub(crate) fn partial_table() -> [[u64; 3]; 7] {
+    let mut t = [[0u64; 3]; 7];
+    for (c, row) in PARTIAL.iter().enumerate() {
+        for (k, n) in row.iter().enumerate() {
+            t[c][k] = n.load(Ordering::Relaxed);
+        }
+    }
+    t
+}
+
+fn class_index(class: u8) -> usize {
+    if class == 0 { 0 } else { class.trailing_zeros() as usize + 1 }.min(6)
+}
+
+/// The ranges `(guest address, length)` that were partial, until the flush takes them: the next flush makes each whole
+/// (a range the flush does not know beforehand, like a texture upload source, is learned at its first resolve).
+static SEEN: std::sync::LazyLock<std::sync::Mutex<Seen>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Seen::default()));
+
+#[derive(Default)]
+struct Seen {
+    /// The index in `list` of each range.
+    index: std::collections::HashMap<(u64, u64), usize>,
+    list: Vec<(u64, u64)>,
+    /// How many of `list` a flush has taken.
+    announced: usize,
+}
+
+/// The most ranges that are remembered.
+const SEEN_MAX: usize = 2048;
+
+/// The ranges that resolved partially, for the closure of the next flush.
+pub(crate) fn partial_ranges() -> Vec<(u64, u64)> {
+    SEEN.lock()
+        .map(|mut s| {
+            s.announced = s.list.len();
+            s.list.clone()
+        })
+        .unwrap_or_default()
+}
+
+/// The count of ranges that [`partial_ranges`] holds.
+pub(crate) fn partial_range_count() -> usize {
+    SEEN.lock().map(|s| s.list.len()).unwrap_or(0)
 }
 
 /// Resolve classes for the bisecting knobs `privnoubo` and the others: a class that is off resolves to guest memory.
@@ -335,9 +399,24 @@ impl<B: Backing> Overlay<B> {
     }
 }
 
-/// Counts a range that started on a member page and reached past the members.
-pub(crate) fn note_partial() {
-    PARTIAL.fetch_add(1, Ordering::Relaxed);
+/// Counts a range of `class` that was split between members and non-members (`split` as for [`PARTIAL`]) and remembers
+/// it for the closure of the next flush.
+pub(crate) fn note_partial(class: u8, split: usize, va: u64, len: u64) {
+    PARTIAL[class_index(class)][split.min(2)].fetch_add(1, Ordering::Relaxed);
+    if let Ok(mut s) = SEEN.lock() {
+        match s.index.get(&(va, len)) {
+            Some(&i) if i < s.announced => {
+                REPEATS.fetch_add(1, Ordering::Relaxed);
+            }
+            Some(_) => {}
+            None if s.list.len() < SEEN_MAX => {
+                let i = s.list.len();
+                s.index.insert((va, len), i);
+                s.list.push((va, len));
+            }
+            None => {}
+        }
+    }
 }
 
 #[cfg(test)]

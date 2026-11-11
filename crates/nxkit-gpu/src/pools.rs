@@ -349,6 +349,10 @@ impl<B: Backing> PoolSnapshot<B> {
     /// pool. The end of a pool is not in it. With a mirror, a range whose pages are all members gives the mirror; a range
     /// that starts on a member page and reaches past the members is counted and gives guest memory.
     pub fn resolve(&self, va: u64, len: u64) -> Result<Loc, Miss> {
+        self.resolve_in(va, len, 0)
+    }
+
+    fn resolve_in(&self, va: u64, len: u64, class: u8) -> Result<Loc, Miss> {
         let loc = self.resolve_start(va)?;
         if loc.run != NO_RUN {
             let whole = self
@@ -358,7 +362,8 @@ impl<B: Backing> PoolSnapshot<B> {
             if whole {
                 return Ok(loc);
             }
-            crate::overlay::note_partial();
+            let split = if self.overlay.as_ref().is_some_and(|o| o.all_members(va, len)) { 2 } else { 0 };
+            crate::overlay::note_partial(class, split, va, len);
             return self.resolve_guest(va, len);
         }
         if len > loc.room {
@@ -370,9 +375,24 @@ impl<B: Backing> PoolSnapshot<B> {
             && o.any_member(va, len)
         {
             // Starts outside the members and reaches into them: guest memory is stale there.
-            crate::overlay::note_partial();
+            crate::overlay::note_partial(class, 1, va, len);
         }
         Ok(loc)
+    }
+
+    /// Counts a binding `[va, va + len)` that is partly on members and partly off them, for the sites that resolve only
+    /// the start of a range and clip the length to the room ([`resolve_start_c`](Self::resolve_start_c)).
+    pub(crate) fn check_span(&self, va: u64, len: u64, class: u8) {
+        let Some(o) = &self.overlay else { return };
+        if len <= 1 || o.off(class) {
+            return;
+        }
+        let first = o.member(va);
+        if first && !o.all_members(va, len) {
+            crate::overlay::note_partial(class, 0, va, len);
+        } else if !first && o.any_member(va, len) {
+            crate::overlay::note_partial(class, 1, va, len);
+        }
     }
 
     /// [`resolve_start`](Self::resolve_start) for a resolve class that a knob may bind to guest memory.
@@ -388,7 +408,7 @@ impl<B: Backing> PoolSnapshot<B> {
         if self.overlay.as_ref().is_some_and(|o| o.off(class)) {
             return self.resolve_guest(va, len);
         }
-        self.resolve(va, len)
+        self.resolve_in(va, len, class)
     }
 
     /// Like [`resolve`](Self::resolve) but always in guest memory, for the table of raw global memory, which splits the

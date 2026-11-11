@@ -42,7 +42,7 @@ pub(crate) mod a64;
 
 pub use a64::{Form, Reason};
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{c_int, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
@@ -111,6 +111,9 @@ struct PageInfo {
     stale: [AtomicU64; 4],
     /// Bit 0: the handler emulated a store to the page since the last flush took it.
     emu: AtomicU32,
+    /// The epoch plus one in which a game thread last faulted on the page for a copy from the mirror, 0 for never: the
+    /// completion of a frame copies the page back on its own while the epoch is no later than this (step 5).
+    eager: AtomicU32,
 }
 
 impl PageInfo {
@@ -125,7 +128,8 @@ impl PageInfo {
 
     fn or_stale(&self, m: &Mask) {
         for (a, b) in self.stale.iter().zip(m) {
-            if *b != 0 {
+            // A page that frames write over and over has the bits already: no read-modify-write then.
+            if *b != 0 && a.load(Ordering::Relaxed) & *b != *b {
                 a.fetch_or(*b, Ordering::AcqRel);
             }
         }
@@ -136,6 +140,7 @@ impl PageInfo {
             a.store(0, Ordering::Release);
         }
         self.emu.store(0, Ordering::Release);
+        self.eager.store(0, Ordering::Release);
     }
 }
 
@@ -339,6 +344,16 @@ struct Shared {
     fallback: [AtomicU64; Reason::COUNT],
     /// Pages the flush staged because the handler stored to them.
     emu_staged: AtomicU64,
+    /// Step 5: the completion of a frame copies back, on its own thread, the pages that game threads faulted on for a
+    /// copy lately; pages that the CPU writes in many flushes in a row stay writable and are diffed at each flush.
+    eager_on: AtomicBool,
+    hot_on: AtomicBool,
+    /// The epoch (`frame / EPOCH_FRAMES`) of the newest flush.
+    epoch: AtomicU32,
+    /// Pages the eager copy moved, the time it took, and the pages it found changed by someone else.
+    eager_pages: AtomicU64,
+    eager_ns: AtomicU64,
+    eager_runs: AtomicU64,
 }
 
 struct OldAction {
@@ -413,7 +428,20 @@ static SHARED: Shared = Shared {
     emu_ns: AtomicU64::new(0),
     fallback: [const { AtomicU64::new(0) }; Reason::COUNT],
     emu_staged: AtomicU64::new(0),
+    eager_on: AtomicBool::new(false),
+    hot_on: AtomicBool::new(false),
+    epoch: AtomicU32::new(0),
+    eager_pages: AtomicU64::new(0),
+    eager_ns: AtomicU64::new(0),
+    eager_runs: AtomicU64::new(0),
 };
+
+/// Flushes per epoch of the eager copy: a page that game threads stop faulting on loses its place after two epochs.
+const EPOCH_FRAMES: u64 = 256;
+/// Consecutive flushes in which the CPU dirtied a page before it stays writable.
+const HOT_AFTER: u8 = 3;
+/// Consecutive flushes in which a writable page did not change before it is protected again.
+const HOT_QUIET: u8 = 8;
 
 /// What only the holders of the mutex touch.
 struct Ctrl {
@@ -421,11 +449,27 @@ struct Ctrl {
     frames: VecDeque<(u64, Vec<(u32, u32)>)>,
     /// The member bitmap at a generation, for [`Pages::member_snapshot`].
     snap: Option<(u64, std::sync::Arc<Vec<u64>>)>,
+    /// Step 5: for each page, in how many flushes in a row the CPU dirtied it (capped), and the pages dirtied in the last
+    /// flush.
+    streak: Vec<u8>,
+    prev_dirty: Vec<u32>,
+    /// The pages that stay writable.
+    hot: BTreeMap<u32, Hot>,
+}
+
+/// A page that stays writable: the bytes staged for it last (empty until the first staging) and the flushes since they
+/// changed.
+struct Hot {
+    shadow: Vec<u8>,
+    quiet: u8,
 }
 
 static CTRL: Mutex<Ctrl> = Mutex::new(Ctrl {
     frames: VecDeque::new(),
     snap: None,
+    streak: Vec::new(),
+    prev_dirty: Vec::new(),
+    hot: BTreeMap::new(),
 });
 static INSTALL: Once = Once::new();
 
@@ -814,8 +858,13 @@ fn wait_complete(frame: u32, write: bool) -> bool {
 /// other blocks of the guest page hold the CPU's bytes (the handler stores to them without waiting) and stay. The guest
 /// page must be writable.
 fn copy_from_mirror(pg: usize, mirror: u64) {
+    copy_stale(pg, mirror, SHARED.base.load(Ordering::Acquire), true);
+}
+
+/// [`copy_from_mirror`] into the page at `dst_base + pg * page` (the guest range itself, or its alias), counted as a copy
+/// of the handler when `count` says so.
+fn copy_stale(pg: usize, mirror: u64, dst_base: u64, count: bool) {
     let p = page();
-    let base = SHARED.base.load(Ordering::Acquire);
     let stale = info(pg).map_or([u64::MAX; 4], PageInfo::stale);
     let blocks = (p / BLOCK) as usize;
     let mut b = 0;
@@ -829,18 +878,21 @@ fn copy_from_mirror(pg: usize, mirror: u64) {
             b += 1;
         }
         let off = pg as u64 * p + first as u64 * BLOCK;
-        // SAFETY: the blocks lie in the guest page, a whole host page inside the range that `attach` named, which the
-        // caller made writable; the mirror blocks at the same offset lie in the reservation of the mirror, which is
-        // readable while the page is a member. The two regions are different mappings.
+        // SAFETY: the blocks lie in the guest page, a whole host page inside the range that `attach` named; the caller
+        // made the destination writable (the page itself, or its alias, which is always writable); the mirror blocks at
+        // the same offset lie in the reservation of the mirror, which is readable while the page is a member. The two
+        // regions are different mappings.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 (mirror + off) as *const u8,
-                (base + off) as *mut u8,
+                (dst_base + off) as *mut u8,
                 (b - first) * BLOCK as usize,
             );
         }
     }
-    SHARED.synced.fetch_add(1, Ordering::Relaxed);
+    if count {
+        SHARED.synced.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 /// Serves a fault on the tracked page `pg` when there is a mirror. A page tagged with a frame holds stale bytes: the
@@ -907,6 +959,11 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                 protect_pages(p, p + 1, PROT_RW, false);
                 if !(flying && fresh) {
                     copy_from_mirror(pg, mirror);
+                    if !flying && !internal && let Some(i) = info(pg) {
+                        // A game thread waited for this copy: the completion of the next frame that writes the page copies
+                        // it on its own (step 5).
+                        i.eager.store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+                    }
                     if !flying && let Some(i) = info(pg) {
                         // Guest memory is current here again. (A page read in flight stays stale: the frame may
                         // still write it.)
@@ -1278,6 +1335,12 @@ pub struct PageStats {
     pub fallbacks: [u64; Reason::COUNT],
     /// Pages the flush staged because the handler stored to them.
     pub emu_staged: u64,
+    /// Pages the eager copy moved after a frame completed, `mprotect` calls it made and the time it took (on its own thread).
+    pub eager_pages: u64,
+    /// `mprotect` calls of the eager copy.
+    pub eager_runs: u64,
+    /// Time of the eager copy.
+    pub eager_ns: u64,
 }
 
 /// What one flush did.
@@ -1303,6 +1366,30 @@ pub struct FlushStats {
     pub raced: u32,
     /// Pages staged because the handler stored to them while a frame wrote others of their blocks (part of `staged`).
     pub emu_staged: u32,
+    /// Step 5: pages that stay writable after this flush, the ones among them staged (part of `staged`) and the ones
+    /// found unchanged, the pages that became writable and the ones protected again.
+    pub hot: u32,
+    /// Writable pages that differed from the bytes staged last and were staged.
+    pub hot_staged: u32,
+    /// Writable pages that were unchanged.
+    pub hot_same: u32,
+    /// Pages that became writable in this flush.
+    pub promoted: u32,
+    /// Pages that were protected again in this flush.
+    pub demoted: u32,
+    /// Where the flush spent its time (mirrored mode): new members, the log of dirty pages, staging with the protection of
+    /// the dirty pages, the writable pages, and the tags of the pages the frame writes.
+    pub new_ns: u64,
+    /// Time collecting the dirty pages from the log.
+    pub log_ns: u64,
+    /// Time protecting and staging the dirty pages.
+    pub stage_ns: u64,
+    /// Time diffing the writable pages.
+    pub hot_ns: u64,
+    /// Time tagging the pages the frame writes.
+    pub tag_ns: u64,
+    /// Time in `mprotect` during the flush (part of the times above).
+    pub mprotect_ns: u64,
 }
 
 /// The page tracker of the process. There is one, because the signal handler needs its table.
@@ -1345,8 +1432,16 @@ fn span_runs(ranges: &[(u64, u64)]) -> Vec<(u32, u32)> {
 
 /// Sets the blocks that the byte offsets `[lo, hi)` of a page touch (rounded outward). `hi` must be above `lo`.
 fn set_blocks(m: &mut Mask, lo: u64, hi: u64) {
-    for b in lo / BLOCK..=(hi - 1) / BLOCK {
-        m[(b / 64) as usize] |= 1 << (b % 64);
+    let (first, last) = (lo / BLOCK, (hi - 1) / BLOCK);
+    // One mask per word of the bits `first..=last` that lie in it.
+    for (w, word) in m.iter_mut().enumerate() {
+        let (from, to) = (w as u64 * 64, w as u64 * 64 + 63);
+        if last < from || first > to {
+            continue;
+        }
+        let (a, b) = (first.max(from) - from, last.min(to) - from);
+        let bits = if b - a == 63 { u64::MAX } else { ((1u64 << (b - a + 1)) - 1) << a };
+        *word |= bits;
     }
 }
 
@@ -1439,6 +1534,131 @@ fn close_opened(frame: u64, runs: &[(u32, u32)]) {
     }
 }
 
+/// A completed frame and the page runs it protected.
+type FrameRuns = (u64, Vec<(u32, u32)>);
+
+/// The completed frames whose pages the eager thread looks at, oldest first.
+struct EagerQueue {
+    jobs: Mutex<VecDeque<FrameRuns>>,
+    wake: std::sync::Condvar,
+}
+
+static EAGER: EagerQueue = EagerQueue {
+    jobs: Mutex::new(VecDeque::new()),
+    wake: std::sync::Condvar::new(),
+};
+static EAGER_THREAD: Once = Once::new();
+/// True while the eager thread holds a job (set under the queue lock when it takes one).
+static EAGER_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// Drops the queued jobs and waits for the one in progress: a new `attach` replaces the tables and the host may unmap the
+/// guest range the job writes through the alias.
+fn eager_quiesce() {
+    EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner).clear();
+    while EAGER_BUSY.load(Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+}
+/// The most completed frames that wait for the eager thread; older ones are dropped (their pages copy on a fault).
+const EAGER_QUEUE_MAX: usize = 16;
+
+fn eager_submit(jobs: Vec<FrameRuns>) {
+    EAGER_THREAD.call_once(|| {
+        let _ = std::thread::Builder::new().name("nxkit-pages-copyback".into()).spawn(|| {
+            loop {
+                let job = {
+                    let mut q = EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+                    while q.is_empty() {
+                        q = EAGER.wake.wait(q).unwrap_or_else(PoisonError::into_inner);
+                    }
+                    let job = q.pop_front();
+                    if job.is_some() {
+                        EAGER_BUSY.store(true, Ordering::Release);
+                    }
+                    job
+                };
+                if let Some((f, runs)) = job {
+                    eager_copy(f, &runs);
+                    EAGER_BUSY.store(false, Ordering::Release);
+                }
+            }
+        });
+    });
+    let mut q = EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+    q.extend(jobs);
+    while q.len() > EAGER_QUEUE_MAX {
+        q.pop_front();
+    }
+    drop(q);
+    EAGER.wake.notify_one();
+}
+
+/// The eager copy of the completed frame `frame`: the pages of `runs` that are still tagged with it, that a game thread
+/// faulted on for a copy in the last epochs and that nobody touched since are copied from the mirror through the alias,
+/// opened for reading and set clean, in the background, so that the game thread does not take the fault. It holds the
+/// control mutex per run, so a flush never sees a page in the middle of it.
+fn eager_copy(frame: u64, runs: &[(u32, u32)]) {
+    let alias = SHARED.alias.load(Ordering::Acquire);
+    let mirror = SHARED.mirror.load(Ordering::Acquire);
+    if alias == 0 || mirror == 0 || !SHARED.eager_on.load(Ordering::Acquire) {
+        return;
+    }
+    let t0 = now_ns();
+    let epoch = SHARED.epoch.load(Ordering::Relaxed);
+    let (mut pages, mut calls) = (0u64, 0u64);
+    for &(first, end) in runs {
+        let _c = ctrl();
+        let mut run: Option<(u32, u32)> = None;
+        let finish = |r: (u32, u32), calls: &mut u64| {
+            protect_pages(r.0, r.1, PROT_READ, false);
+            *calls += 1;
+            for pg in r.0..r.1 {
+                if let Some(w) = word(pg as usize) {
+                    w.store(CLEAN, Ordering::Release);
+                }
+            }
+            wake_all();
+        };
+        for pg in first..end {
+            let claimed = (|| {
+                let i = info(pg as usize)?;
+                let e = i.eager.load(Ordering::Relaxed);
+                if e == 0 || epoch > e {
+                    return None;
+                }
+                let w = word(pg as usize)?;
+                let cur = w.load(Ordering::Acquire);
+                if cur & STATE_MASK != GPU || u64::from(cur >> FRAME_SHIFT) != frame & FRAME_MASK {
+                    return None;
+                }
+                w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire).ok()?;
+                copy_stale(pg as usize, mirror, alias, false);
+                for a in &i.stale {
+                    a.store(0, Ordering::Release);
+                }
+                Some(())
+            })()
+            .is_some();
+            match (claimed, run) {
+                (true, None) => run = Some((pg, pg + 1)),
+                (true, Some((s, _))) => run = Some((s, pg + 1)),
+                (false, Some(r)) => {
+                    finish(r, &mut calls);
+                    run = None;
+                }
+                (false, None) => {}
+            }
+            pages += u64::from(claimed);
+        }
+        if let Some(r) = run {
+            finish(r, &mut calls);
+        }
+    }
+    SHARED.eager_pages.fetch_add(pages, Ordering::Relaxed);
+    SHARED.eager_runs.fetch_add(calls, Ordering::Relaxed);
+    SHARED.eager_ns.fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
+}
+
 /// Receives the guest pages that the CPU wrote, to carry them into the mirror on the GPU.
 pub trait Stager {
     /// At most `max_pages` pages follow.
@@ -1470,6 +1690,7 @@ impl Pages {
     /// `nxkit_abi::guest`. The host calls it once, after the crash report is installed, because the handler hands the
     /// faults it does not own to the handler it finds.
     pub fn attach(&self, base: u64, len: u64) {
+        eager_quiesce();
         let p = page();
         let (b, e) = (base.div_ceil(p) * p, (base + len) & !(p - 1));
         let len = e.saturating_sub(b);
@@ -1518,6 +1739,9 @@ impl Pages {
             let mut c = ctrl();
             c.frames.clear();
             c.snap = None;
+            c.streak = vec![0; n];
+            c.prev_dirty.clear();
+            c.hot.clear();
         }
         install_handler();
         nxkit_abi::guest::set_guard_hook(hook);
@@ -1599,6 +1823,28 @@ impl Pages {
     /// for the frame and copies the page from the mirror ([`flush_mirrored`](Self::flush_mirrored)). 0 turns it off.
     pub fn set_mirror(&self, host_base: u64) {
         SHARED.mirror.store(host_base, Ordering::Release);
+    }
+
+    /// Step 5, off by default: `eager` copies back, after a frame completes and on a thread of its own, the pages that game
+    /// threads faulted on lately for a copy from the mirror (it needs the alias); `hot` keeps the pages that the CPU
+    /// dirties in many flushes in a row writable and diffs them at each flush instead of faulting on them.
+    pub fn set_adaptive(&self, eager: bool, hot: bool) {
+        SHARED.eager_on.store(eager, Ordering::Release);
+        SHARED.hot_on.store(hot, Ordering::Release);
+    }
+
+    /// Stops tracking every page and gives them all read and write access again: for a host that lets the range go, and for
+    /// tests whose guest memory goes back to the allocator.
+    pub fn release_all(&self) {
+        if self.attached() {
+            self.forget(SHARED.base.load(Ordering::Acquire), SHARED.len.load(Ordering::Acquire));
+        }
+    }
+
+    /// Drops the queued eager copies and waits for the one that runs. The host calls it before it unmaps the guest range
+    /// (the copy writes through the alias); `attach` does it too.
+    pub fn quiesce(&self) {
+        eager_quiesce();
     }
 
     /// The first command buffer of `frame` was committed: the writes of the CPU from here on are no longer "between the
@@ -1828,8 +2074,13 @@ impl Pages {
             };
             let eager = SHARED.eager.load(Ordering::Acquire);
             let mirror = SHARED.mirror.load(Ordering::Acquire);
+            let copy_back = SHARED.eager_on.load(Ordering::Acquire) && SHARED.alias.load(Ordering::Acquire) != 0;
+            let mut later: Vec<FrameRuns> = Vec::new();
             for (f, runs) in due {
                 close_opened(f, &runs);
+                if copy_back {
+                    later.push((f, runs.clone()));
+                }
                 if eager {
                     for &(first, end) in &runs {
                         for pg in first..end {
@@ -1843,6 +2094,9 @@ impl Pages {
                 }
             }
             wake_all();
+            if !later.is_empty() {
+                eager_submit(later);
+            }
             return;
         }
         let due: Vec<(u64, Vec<(u32, u32)>)> = {
@@ -2000,8 +2254,18 @@ impl Pages {
             return st;
         }
         let t0 = now_ns();
+        let mut lap = t0;
+        let mut tick = || {
+            let now = now_ns();
+            let d = now.saturating_sub(lap);
+            lap = now;
+            d
+        };
         let calls0 = SHARED.mprotects.load(Ordering::Relaxed);
+        let prot0 = SHARED.mprotect_ns.load(Ordering::Relaxed);
         let mut c = ctrl();
+        let cc = &mut *c;
+        SHARED.epoch.store((frame / EPOCH_FRAMES) as u32, Ordering::Relaxed);
         let p = page();
         let base = SHARED.base.load(Ordering::Acquire);
         // From here until the commit of the frame, first writes of the CPU are counted and logged for it.
@@ -2016,6 +2280,7 @@ impl Pages {
         for &(s, e) in &runs_m {
             for pg in s..e {
                 if let Some(w) = word(pg as usize)
+                    && w.load(Ordering::Relaxed) & STATE_MASK == FREE
                     && w.compare_exchange(FREE, CLEAN, Ordering::AcqRel, Ordering::Acquire)
                         .is_ok()
                 {
@@ -2039,6 +2304,7 @@ impl Pages {
         }
         SHARED.members.fetch_add(newly.len() as u64, Ordering::AcqRel);
         st.new_members = newly.len() as u32;
+        st.new_ns = tick();
         // 2. The dirty pages.
         let n = SHARED.log_n.swap(0, Ordering::AcqRel);
         let mut dirty: Vec<u32> = Vec::new();
@@ -2085,9 +2351,34 @@ impl Pages {
             emu.sort_unstable();
             emu.dedup();
         }
-        stager.begin(dirty.len() + emu.len() + 64);
+        st.log_ns = tick();
+        stager.begin(dirty.len() + emu.len() + cc.hot.len() + 64);
+        // The pages the CPU dirtied in several flushes in a row stay writable (step 5).
+        let hot_on = SHARED.hot_on.load(Ordering::Acquire);
+        let mut to_hot: Vec<u32> = Vec::new();
+        if hot_on {
+            for &pg in &cc.prev_dirty {
+                if dirty.binary_search(&pg).is_err()
+                    && let Some(x) = cc.streak.get_mut(pg as usize)
+                {
+                    *x = 0;
+                }
+            }
+            for &pg in &dirty {
+                if let Some(x) = cc.streak.get_mut(pg as usize) {
+                    *x = x.saturating_add(1);
+                    if *x >= HOT_AFTER && !in_runs(&runs_w, pg) && !cc.hot.contains_key(&pg) {
+                        to_hot.push(pg);
+                    }
+                }
+            }
+            cc.prev_dirty.clone_from(&dirty);
+        }
         let mut back: Vec<u32> = Vec::with_capacity(dirty.len());
         for pg in dirty {
+            if cc.hot.contains_key(&pg) || to_hot.binary_search(&pg).is_ok() {
+                continue;
+            }
             if word(pg as usize).is_some_and(|w| {
                 w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
@@ -2112,6 +2403,77 @@ impl Pages {
         st.staged = back.len() as u32;
         st.emu_staged = self.stage_emulated(&emu, &back, stager);
         st.staged += st.emu_staged;
+        st.stage_ns = tick();
+        // The writable pages: each is compared with the bytes staged for it last, and staged when it differs. A page that
+        // did not change for [`HOT_QUIET`] flushes is protected again; the compare after the protection catches a store
+        // that came in between.
+        st.promoted = to_hot.len() as u32;
+        for pg in to_hot {
+            cc.hot.insert(pg, Hot { shadow: Vec::new(), quiet: 0 });
+        }
+        if !cc.hot.is_empty() {
+            let mut gone: Vec<u32> = Vec::new();
+            let mut quiet: Vec<u32> = Vec::new();
+            for (&pg, h) in cc.hot.iter_mut() {
+                let still = word(pg as usize).is_some_and(|w| w.load(Ordering::Acquire) & STATE_MASK == DIRTY);
+                if !still || in_runs(&runs_w, pg) {
+                    // A frame writes it (step 3 stages it and tags it) or it is not tracked any more.
+                    gone.push(pg);
+                    continue;
+                }
+                // SAFETY: the page lies in guest memory and is readable and writable (it is dirty); the CPU may store
+                // to it at the same time, which the staging accepts: the shadow is what is staged, so a later store is
+                // found at the next flush.
+                let live = unsafe { std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize) };
+                if h.shadow.len() == p as usize && h.shadow[..] == *live {
+                    st.hot_same += 1;
+                    h.quiet += 1;
+                    if h.quiet >= HOT_QUIET {
+                        quiet.push(pg);
+                    }
+                    continue;
+                }
+                h.quiet = 0;
+                h.shadow.resize(p as usize, 0);
+                h.shadow.copy_from_slice(live);
+                stager.stage_masked(pg, &h.shadow, info(pg as usize).map_or([0; 4], PageInfo::stale));
+                st.hot_staged += 1;
+            }
+            for pg in &gone {
+                cc.hot.remove(pg);
+                if let Some(x) = cc.streak.get_mut(*pg as usize) {
+                    *x = 0;
+                }
+            }
+            let mut demote: Vec<(u32, Vec<u8>)> = Vec::new();
+            for pg in quiet {
+                if let Some(h) = cc.hot.remove(&pg)
+                    && word(pg as usize)
+                        .is_some_and(|w| w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok())
+                {
+                    demote.push((pg, h.shadow));
+                }
+                if let Some(x) = cc.streak.get_mut(pg as usize) {
+                    *x = 0;
+                }
+            }
+            let pgs: Vec<u32> = demote.iter().map(|d| d.0).collect();
+            for (s, e) in runs_of(&pgs) {
+                protect_pages(s, e, PROT_READ, true);
+            }
+            for (pg, shadow) in &demote {
+                // SAFETY: as above; the page is read only now, so nothing changes under the compare.
+                let live = unsafe { std::slice::from_raw_parts((base + u64::from(*pg) * p) as *const u8, p as usize) };
+                if shadow[..] != *live {
+                    stager.stage_masked(*pg, live, info(*pg as usize).map_or([0; 4], PageInfo::stale));
+                    st.hot_staged += 1;
+                }
+            }
+            st.demoted = demote.len() as u32;
+            st.staged += st.hot_staged;
+        }
+        st.hot = cc.hot.len() as u32;
+        st.hot_ns = tick();
         // 3. The pages of the frame.
         let masks = range_masks(&runs_w, written);
         for (ri, &(s, e)) in runs_w.iter().enumerate() {
@@ -2179,11 +2541,13 @@ impl Pages {
         }
         st.written_runs = runs_w.len() as u32;
         if !runs_w.is_empty() {
-            c.frames.push_back((frame, runs_w));
+            cc.frames.push_back((frame, runs_w));
         }
-        while c.frames.len() > MAX_FRAMES {
-            c.frames.pop_front();
+        while cc.frames.len() > MAX_FRAMES {
+            cc.frames.pop_front();
         }
+        st.tag_ns = tick();
+        st.mprotect_ns = SHARED.mprotect_ns.load(Ordering::Relaxed).saturating_sub(prot0);
         st.mprotects = (SHARED.mprotects.load(Ordering::Relaxed) - calls0) as u32;
         st.ns = now_ns().saturating_sub(t0);
         st
@@ -2316,6 +2680,9 @@ impl Pages {
             emulated_ns: g(&SHARED.emu_ns),
             fallbacks: std::array::from_fn(|i| g(&SHARED.fallback[i])),
             emu_staged: g(&SHARED.emu_staged),
+            eager_pages: g(&SHARED.eager_pages),
+            eager_runs: g(&SHARED.eager_runs),
+            eager_ns: g(&SHARED.eager_ns),
         }
     }
 
@@ -2937,6 +3304,19 @@ mod tests {
         pg.set_eager_sync(false);
         pg.note_committed(1);
         pg.set_mirror(0);
+    }
+
+    #[test]
+    fn set_blocks_sets_the_blocks_a_byte_range_touches() {
+        for (lo, hi) in [(0u64, 1u64), (0, 64), (1, 65), (63, 64), (100, 16384), (4000, 4096), (0, 16384), (4032, 4160), (8191, 8193)] {
+            let mut got: Mask = [0; 4];
+            set_blocks(&mut got, lo, hi);
+            let mut want: Mask = [0; 4];
+            for b in lo / BLOCK..=(hi - 1) / BLOCK {
+                want[(b / 64) as usize] |= 1 << (b % 64);
+            }
+            assert_eq!(got, want, "{lo}..{hi}");
+        }
     }
 
     #[test]
