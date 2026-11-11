@@ -390,7 +390,11 @@ impl GpuBackend {
             note_full(FullWait::NotCaptured);
             return None;
         }
-        let ahead = nxkit_metal::BATCHES_IN_FLIGHT as u64;
+        let ahead = crate::private::run_ahead();
+        if ahead == 0 {
+            note_full(FullWait::Knob);
+            return None;
+        }
         if fence.0 > ahead {
             let older = fence.0 - ahead;
             if older > self.done.load(Ordering::Acquire) {

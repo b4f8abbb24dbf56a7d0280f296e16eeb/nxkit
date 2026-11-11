@@ -373,6 +373,19 @@ pub(crate) fn early() -> bool {
     mirrored()
 }
 
+/// How many frames the CPU may run ahead of the GPU (`NXKIT_PRIVATE_AHEAD`, default 1, at most the batch ring): a wait for
+/// fence N returns once the flush of N is captured and frame N - n is complete. 0 is the honest wait.
+pub(crate) fn run_ahead() -> u64 {
+    static N: OnceLock<u64> = OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("NXKIT_PRIVATE_AHEAD")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(1)
+            .min(nxkit_metal::BATCHES_IN_FLIGHT as u64)
+    })
+}
+
 /// A fence wait was answered at the flush.
 pub(crate) fn note_early() {
     WAITS.early.fetch_add(1, Ordering::Relaxed);
@@ -2250,9 +2263,9 @@ fn print_report(frame: u64) {
         );
         eprintln!(
             "DIAG private fences frame {frame}: {early} waits answered at the flush ({bounded} of them also waited for \
-             the frame {} before, {:.3} ms per frame, longest {:.2} ms); full waits: privhonest {}, copy-back {}, \
+             the frame {} before (NXKIT_PRIVATE_AHEAD), {:.3} ms per frame, longest {:.2} ms); full waits: privhonest {}, copy-back {}, \
              idle GPU {}, flush not finished {}",
-            nxkit_metal::BATCHES_IN_FLIGHT,
+            run_ahead(),
             bounded_ns as f64 / n / 1e6,
             bounded_max as f64 / 1e6,
             full(0),
@@ -2274,7 +2287,7 @@ fn print_report(frame: u64) {
         };
         eprintln!(
             "DIAG private pass signals, per frame: waits ended by the signal of the page's last pass (the frame still ran) {}, \
-             by the completion of the whole frame {}; accesses that found their page released {:.2}; {} CPU-read GPU results \
+             by the completion of the whole frame {}; accesses that found their page already released when they first faulted (the signal came before the reader) {:.2}; {} CPU-read GPU results \
              known now, the set changed {} times in the window; frames cut {:.2} ({:.2} cuts each, at {:.0}% of the passes on \
              average, {:.1} pages released per frame, {} of them committed while the rest was encoded); readers per frame {:.2}, \
              without a cut {:.2}; planning {:.3} ms",

@@ -703,6 +703,10 @@ claim the page, copy the stale blocks from the mirror, clear the stale mask, cle
 the mirror is written by the GPU before the commit's feedback. A later frame that flushes the page again tags it with its own
 number, and `ready` of an older frame does not release it. `try_emulate` leaves a released page to the copy.
 
+**Run-ahead.** With early fences the CPU used to run up to `BATCHES_IN_FLIGHT` (3) frames ahead, and a read of a GPU result waited
+behind the whole queue. `NXKIT_PRIVATE_AHEAD=<n>` (default 1, at most the ring) makes a wait for fence N return once flush N is
+captured and frame N - n is complete; 0 is the honest wait. `DIAG private fences` reports the time spent waiting for frame N - n.
+
 **Counters** (`NXKIT_DIAG=private`): `DIAG private pass signals, per frame`: the waits that ended at a pass signal while the frame
 still ran and those that ended at the completion of the whole frame (count and ms per frame; the sum equals `DIAG private CPU
 waits for a writer`), the accesses that found their page released, the size of the learned set and how often it changed in the
