@@ -117,3 +117,12 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. To repor
 GPL-3.0-only. See [LICENSE](LICENSE). Anyone may use nxkit. Whoever passes on a changed version must publish its source
 under the same license. Releases up to 0.9.2 were published under MIT and stay under MIT. Notes about formats, external
 tools and third-party code are in [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## WebAssembly libraries
+
+The byte-based `nxb-rewrite`, `nxb-split`, `nxb-romfs`, `nxb-xlate`, and `air-front`
+libraries build for `wasm32-unknown-unknown` with Rust 1.99. `nxb-extract` exposes
+its parsers and storage views with `--no-default-features`. Its default `host`
+feature enables file extraction and timing. Native zlib is not available on WebAssembly.
+The caller provides WebAssembly exports and input budgets. Native extraction,
+app execution, signing and IPA packaging are not ported by this change.

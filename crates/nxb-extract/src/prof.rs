@@ -32,11 +32,13 @@ pub static COUNTERS: Counters = Counters {
     image_hash: AtomicU64::new(0),
 };
 
-/// Runs `f` and adds its duration to `c`.
+/// Runs `f` and adds its duration to `c` when the host feature is enabled.
 pub fn timed<T>(c: &AtomicU64, f: impl FnOnce() -> T) -> T {
-    let t = Instant::now();
+    let t = cfg!(feature = "host").then(Instant::now);
     let r = f();
-    c.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    if let Some(t) = t {
+        c.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
     r
 }
 

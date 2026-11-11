@@ -319,11 +319,13 @@ impl Nca {
 
 /// Opens an NSP, or the secure partition of an XCI: imports the common tickets into `ks` and opens every NCA.
 /// `file` names the package in messages.
+#[cfg(feature = "host")]
 pub fn open_nsp(ks: &mut KeySet, pkg: Arc<dyn Storage>) -> Result<Vec<Nca>> {
     open_package(ks, pkg, "the package")
 }
 
 /// [`open_nsp`] with the package's file name for the messages.
+#[cfg(feature = "host")]
 pub fn open_package(ks: &mut KeySet, pkg: Arc<dyn Storage>, file: &str) -> Result<Vec<Nca>> {
     let (pkg, entries) = if pkg.size() > 0x104 && pkg.read_vec(0x100, 4)? == b"HEAD" {
         let sec = xci_secure(&pkg, file)?;

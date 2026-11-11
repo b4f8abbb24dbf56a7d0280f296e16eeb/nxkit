@@ -14,4 +14,5 @@ pub mod sha1;
 pub mod sha256;
 pub mod stdio;
 pub mod system;
+#[cfg(not(target_family = "wasm"))]
 pub mod zlib;

@@ -11,6 +11,10 @@ publish.workspace = true
 layer = "L3"
 in_v = false
 
+[features]
+default = ["host"]
+host = []
+
 [dependencies]
 nxb-model.workspace = true
 nxb-sys.workspace = true
