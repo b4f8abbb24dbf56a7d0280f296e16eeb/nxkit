@@ -39,6 +39,26 @@ pub fn set_done_hook(f: fn(u64, usize, f64, f64)) {
     let _ = DONE_HOOK.set(f);
 }
 
+/// Called when the first command buffer group of a batch is committed: `(batch number, host clock in ns)`, the clock of
+/// `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)`, which the GPU start and end times use too. For the diagnostics of the host;
+/// set once.
+static COMMIT_HOOK: std::sync::OnceLock<fn(u64, u64)> = std::sync::OnceLock::new();
+
+/// Sets the hook of [`COMMIT_HOOK`]. The first call wins.
+pub fn set_commit_hook(f: fn(u64, u64)) {
+    let _ = COMMIT_HOOK.set(f);
+}
+
+unsafe extern "C" {
+    fn clock_gettime_nsec_np(clock_id: u32) -> u64;
+}
+
+/// The host clock in ns (`CLOCK_UPTIME_RAW`).
+fn uptime_ns() -> u64 {
+    // SAFETY: `clock_gettime_nsec_np` has no preconditions.
+    unsafe { clock_gettime_nsec_np(8) }
+}
+
 /// The number of batches the CPU can run ahead of the GPU.
 pub const BATCHES_IN_FLIGHT: usize = 3;
 
@@ -355,6 +375,11 @@ impl Split {
         let opts = MTL4CommitOptions::new();
         opts.addFeedbackHandler(&handler);
         self.ctx.commit_residency();
+        if g == 0
+            && let Some(h) = COMMIT_HOOK.get()
+        {
+            h(number, uptime_ns());
+        }
         // SAFETY: `list` holds ended command buffers that `held` keeps alive until the feedback.
         unsafe {
             self.ctx
@@ -540,6 +565,20 @@ impl Batch {
         });
         self.ahead = Some(ahead.clone());
         Some(ahead)
+    }
+
+    /// Streams the batch: the first `count` command buffers are committed as soon as each one is ended (by
+    /// [`Ahead::finish`], on the thread that encoded it) while the other command buffers are still being encoded, so
+    /// the GPU starts after that prefix and not after the whole batch. The order of the command buffers stays the order of
+    /// the slice. Returns None when `count` is 0 or not smaller than the number of command buffers, or when the groups are
+    /// fixed already. Every command buffer of the prefix must be handed to [`Ahead::finish`], and nothing may be encoded
+    /// into them afterwards; [`submit`](Self::submit) then commits only the rest. The commit costs the GPU a short pause at
+    /// the boundary (about 0.2 ms).
+    pub fn stream_prefix(&mut self, count: usize) -> Option<Arc<Ahead>> {
+        if !self.on_prefix_complete(count, || {}) {
+            return None;
+        }
+        self.commit_ahead()
     }
 
     /// Ends every command buffer and commits them in order. Returns at once.

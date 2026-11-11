@@ -27,6 +27,12 @@
 //! in the frame (`gate` decides, `order` runs). A flush runs what is still held first. A game that never records a
 //! wait or an event signal skips the gate.
 //!
+//! A CPU event signal that releases held submits with at least `NXKIT_RELEASE_FLUSH_MIN` draws, dispatches and copies
+//! (default 64) flushes the frame at once (`FlushReason::Release`, `NXKIT_RELEASE_FLUSH=0` turns it off): the game
+//! signals the event when it has recorded the work of the frame, and the present comes a few ms later, so the encode
+//! of the work starts those ms earlier. The flush runs no held op. The submits that it carries and the fences they make
+//! belong to its number; what is still held and what comes after goes into the next flush, which the present makes.
+//!
 //! A backend may encode a flushed frame on a thread of its own. [`Backend::wait_fence`] and [`Backend::wait_idle`] then
 //! wait for that thread, and [`Backend::settle`] brings the texture table up to date before the front end reads the
 //! residency of a texture (`nvnTextureReadTexels`). [`Backend::flush_frame`] settles the frame before it.
@@ -181,6 +187,8 @@ pub(crate) struct Gpu {
     flushed: AtomicU64,
     /// The work that waits for a signal of another queue (`gate`). Taken after the front lock, never before it.
     gate: Mutex<gate::Gate>,
+    /// Whether a CPU event signal that released a lot of work flushes the frame at once, and how much work is a lot.
+    release_flush: order::ReleaseFlush,
     /// The ranges of `nvnMemoryPoolFlushMappedRange` that [`Gpu::lock`] has not yet told the front end.
     pending_writes: Mutex<Vec<(u64, u64)>>,
     /// True when `pending_writes` may hold a range. Keeps the common case of [`Gpu::lock`] to one atomic load.
@@ -213,6 +221,7 @@ impl Gpu {
             settings,
             flushed: AtomicU64::new(0),
             gate: Mutex::new(gate::Gate::new(order::ordering_on())),
+            release_flush: order::release_flush_config(),
             pending_writes: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),
             textures: Registry::new(),
@@ -320,9 +329,14 @@ impl Gpu {
                 self.gate().held.len()
             ));
         }
+        // A release flush runs nothing that is still held: what waits for a signal stays held for the flush after.
         let (held, forced) = {
             let mut gate = self.gate();
-            let held = self.release_all(front, &mut gate);
+            let held = if reason == FlushReason::Release {
+                Ok(())
+            } else {
+                self.release_all(front, &mut gate)
+            };
             self.gate_report(&mut gate, self.flushed() + 1);
             (held, std::mem::take(&mut gate.forced_waits))
         };
@@ -346,6 +360,7 @@ impl Gpu {
                 self.gate().held.len()
             ));
         }
+        super::flushstat::flush(fence.0, reason);
         front.end_frame(reason)?;
         if !forced.is_empty() {
             self.backend.forced_waits(fence, &forced);
@@ -512,6 +527,8 @@ mod tests {
     struct Spy {
         waits: Mutex<Vec<(Fence, u64)>>,
         idle: AtomicU64,
+        /// The flushes that reached the backend: reason, fence and commands of the frame.
+        flushes: Mutex<Vec<(FlushReason, Fence, usize)>>,
     }
 
     impl Backend for Spy {
@@ -524,12 +541,15 @@ mod tests {
         fn unregister_pool(&self, _: u64) {}
         fn flush_frame(
             &self,
-            _: &Frame,
+            frame: &Frame,
             _: &PassPlan,
-            _: FlushReason,
-            _: Fence,
+            reason: FlushReason,
+            fence: Fence,
             _: FlushCx<'_>,
         ) -> BackendResult<()> {
+            if let Ok(mut f) = self.flushes.lock() {
+                f.push((reason, fence, frame.cmds.len()));
+            }
             Ok(())
         }
         fn present(&self, _: Present) -> BackendResult<()> {
@@ -598,5 +618,79 @@ mod tests {
         assert!(s.shader_key_skip.is_none());
         let t = (s.clock_ns)();
         assert!((s.clock_ns)() >= t);
+    }
+
+    use nxkit_nvn::frame::Cmd;
+
+    fn work(g: &Gpu, n: usize) {
+        g.lock().frame_mut().cmds.extend((0..n).map(|_| Cmd::BufferCopy));
+    }
+
+    fn sent(spy: &Spy) -> Vec<(FlushReason, u64, usize)> {
+        let f = spy.flushes.lock().expect("lock");
+        f.iter().map(|(r, f, n)| (*r, f.0, *n)).collect()
+    }
+
+    #[test]
+    fn a_release_that_brought_a_lot_of_work_flushes_the_frame_and_the_fences_follow() {
+        let spy = Arc::new(Spy::default());
+        let mut g = gpu_with(spy.clone());
+        g.release_flush = order::ReleaseFlush { on: true, min_work: 4 };
+        // Two commands were in the frame before the release; five came with it.
+        work(&g, 2);
+        let from = g.lock().frame().cmds.len();
+        work(&g, 5);
+        g.flush_released(&mut g.lock(), from).expect("flush");
+        assert_eq!(sent(&spy), vec![(FlushReason::Release, 1, 7)]);
+        assert_eq!(g.flushed(), 1);
+        assert!(g.lock().frame_is_empty());
+        // The work of the game after the release, and the present, are the next fence.
+        assert_eq!(g.fence_now(), Fence(1));
+        work(&g, 1);
+        assert_eq!(g.fence_now(), Fence(2));
+        assert_eq!(g.flush(FlushReason::Present).expect("present flush"), Fence(2));
+        assert_eq!(
+            sent(&spy),
+            vec![(FlushReason::Release, 1, 7), (FlushReason::Present, 2, 1)]
+        );
+        let stats = g.lock().flushes();
+        assert_eq!((stats.release, stats.present), (1, 1));
+    }
+
+    #[test]
+    fn a_release_with_little_work_or_with_the_setting_off_flushes_nothing() {
+        let spy = Arc::new(Spy::default());
+        let mut g = gpu_with(spy.clone());
+        g.release_flush = order::ReleaseFlush { on: true, min_work: 4 };
+        work(&g, 3);
+        g.flush_released(&mut g.lock(), 0).expect("flush");
+        // The work before the release does not count: only the 2 commands that came with it.
+        work(&g, 2);
+        g.flush_released(&mut g.lock(), 3).expect("flush");
+        g.release_flush.on = false;
+        work(&g, 10);
+        g.flush_released(&mut g.lock(), 5).expect("flush");
+        assert!(sent(&spy).is_empty());
+        assert_eq!(g.fence_now(), Fence(1));
+    }
+
+    #[test]
+    fn a_release_flush_leaves_the_held_ops_held() {
+        let spy = Arc::new(Spy::default());
+        let mut g = gpu_with(spy.clone());
+        g.release_flush = order::ReleaseFlush { on: true, min_work: 1 };
+        work(&g, 3);
+        g.gate().push(
+            0xa,
+            gate::Op::Submit {
+                handles: vec![CommandHandle(1)],
+                origin: false,
+            },
+        );
+        g.flush_released(&mut g.lock(), 0).expect("flush");
+        assert_eq!(sent(&spy), vec![(FlushReason::Release, 1, 3)]);
+        assert_eq!(g.gate().held.len(), 1, "the op that waits stays held");
+        // Held work is work of the next flush: its fence is the next number.
+        assert_eq!(g.fence_now(), Fence(2));
     }
 }

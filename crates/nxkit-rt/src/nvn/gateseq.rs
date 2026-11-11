@@ -13,18 +13,11 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 /// One frame in this many is traced.
 const EVERY: u64 = 300;
 
-/// Whether the category is on. The first call also sets the hooks for the batches of the GPU.
+/// Whether the category is on. The hooks for the batches of the GPU are set by [`super::flushstat`].
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        let on = nxkit_nvn::diag::on("gateseq");
-        if on {
-            nxkit_nvn::diag::set_batch_hooks(nxkit_nvn::diag::BatchHooks {
-                kept: batch_kept,
-                done: batch_done,
-            });
-        }
-        on
+        nxkit_nvn::diag::on("gateseq")
     })
 }
 
@@ -36,16 +29,7 @@ static TRACED: AtomicU64 = AtomicU64::new(0);
 static TRACE_START: AtomicU64 = AtomicU64::new(0);
 static START: AtomicU64 = AtomicU64::new(0);
 
-unsafe extern "C" {
-    fn clock_gettime_nsec_np(clock_id: u32) -> u64;
-}
-
-/// The host clock in ns: `CLOCK_UPTIME_RAW`, which is `mach_absolute_time` in ns, the clock that `CACurrentMediaTime`
-/// and the GPU start and end times of Metal use.
-fn now_ns() -> u64 {
-    // SAFETY: `clock_gettime_nsec_np` has no preconditions.
-    unsafe { clock_gettime_nsec_np(8) }
-}
+use super::flushstat::now_ns;
 
 /// ms of the host clock `ns` on the clock of the trace (since the start of the traced frame).
 fn rel_ms(ns: u64) -> f64 {
@@ -67,7 +51,7 @@ struct Batches {
     /// Batch number to fence, for the batches committed while a frame was traced and not completed yet.
     waiting: HashMap<u64, u64>,
     /// Completions that came before their commit was noted: number to (cbs, start s, end s).
-    early: HashMap<u64, (usize, f64, f64)>,
+    early: HashMap<u64, (usize, f64, f64, Option<String>)>,
 }
 
 static BATCHES: Mutex<Option<Batches>> = Mutex::new(None);
@@ -77,19 +61,20 @@ fn batches<R>(f: impl FnOnce(&mut Batches) -> R) -> R {
     f(g.get_or_insert_with(Batches::default))
 }
 
-fn print_batch(number: u64, fence: u64, cbs: usize, start_s: f64, end_s: f64) {
+fn print_batch(number: u64, fence: u64, cbs: usize, start_s: f64, end_s: f64, flush: Option<String>) {
     let (s, e) = (start_s * 1e3, end_s * 1e3);
     let base = TRACE_START.load(Ordering::Relaxed) as f64 / 1e6;
     line(format_args!(
-        "BATCH {number} (fence {fence}) completed: {cbs} command buffers, GPU start +{:.2} end +{:.2} ({:.2} ms on the GPU)",
+        "BATCH {number} (fence {fence}) completed: {cbs} command buffers, GPU start +{:.2} end +{:.2} ({:.2} ms on the GPU){}",
         s - base,
         e - base,
-        e - s
+        e - s,
+        flush.map_or(String::new(), |f| format!(" | {f}"))
     ));
 }
 
 /// A batch was committed for `fence` (the hook of the backend). It is waited for when it belongs to a traced frame.
-fn batch_kept(fence: u64, number: u64) {
+pub(super) fn batch_kept(fence: u64, number: u64) {
     if !active() {
         return;
     }
@@ -100,26 +85,26 @@ fn batch_kept(fence: u64, number: u64) {
         }
         e
     });
-    if let Some((cbs, s, e)) = early {
-        print_batch(number, fence, cbs, s, e);
+    if let Some((cbs, s, e, flush)) = early {
+        print_batch(number, fence, cbs, s, e, flush);
     }
 }
 
 /// A batch completed on the GPU (the hook of the metal crate): printed when it belongs to a traced frame, also after
 /// the frame ended.
-fn batch_done(number: u64, cbs: usize, start_s: f64, end_s: f64) {
+pub(super) fn batch_done(number: u64, cbs: usize, start_s: f64, end_s: f64, flush: Option<String>) {
     let fence = batches(|b| {
         let f = b.waiting.remove(&number);
         if f.is_none() {
             if b.early.len() > 64 {
                 b.early.clear();
             }
-            b.early.insert(number, (cbs, start_s, end_s));
+            b.early.insert(number, (cbs, start_s, end_s, flush.clone()));
         }
         f
     });
     if let Some(f) = fence {
-        print_batch(number, f, cbs, start_s, end_s);
+        print_batch(number, f, cbs, start_s, end_s, flush);
     }
 }
 

@@ -1518,3 +1518,39 @@ fn image_atomics_get_an_r32_view_over_a_four_byte_colour_texture() {
     .unwrap();
     assert!(plain.atomic_view(&view(Format::Rgba8Unorm), false).is_err());
 }
+
+static COMMITTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn note_commit(number: u64, _ns: u64) {
+    COMMITTED.store(number, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[test]
+fn a_streamed_prefix_is_committed_before_the_rest_is_encoded_and_the_order_holds() {
+    use std::sync::atomic::Ordering;
+
+    let Some(ctx) = ctx() else { return };
+    nxkit_metal::set_commit_hook(note_commit);
+    let mut ring = nxkit_metal::BatchRing::new(&ctx, 4).unwrap();
+    let mut batch = ring.begin(4).unwrap();
+    let number = batch.number();
+    assert!(batch.stream_prefix(0).is_none());
+    assert!(batch.stream_prefix(4).is_none(), "the whole batch is no prefix");
+    let ahead = batch.stream_prefix(2).expect("a prefix");
+    assert_eq!(ahead.count(), 2);
+    assert!(batch.stream_prefix(3).is_none(), "the groups are fixed");
+    {
+        let bufs = batch.buffers();
+        assert!(!ahead.finish(0, &mut bufs[0]), "one of two");
+        assert_eq!(COMMITTED.load(Ordering::SeqCst), 0, "nothing is committed before the group is complete");
+        assert!(ahead.finish(1, &mut bufs[1]), "the second command buffer commits the group");
+    }
+    // The group is on the queue while the batch is not submitted: the other two command buffers are not even ended.
+    assert_eq!(COMMITTED.load(Ordering::SeqCst), number);
+    ctx.commit_residency();
+    let submitted = batch.submit().unwrap();
+    let stats = submitted.wait().unwrap();
+    assert!(!stats.failed);
+    // The ring serves the next batch as after any batch.
+    ring.begin(2).unwrap().submit().unwrap().wait().unwrap();
+}

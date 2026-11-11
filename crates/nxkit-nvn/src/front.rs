@@ -35,6 +35,9 @@ pub enum FlushReason {
     Present,
     /// The CPU waits for the GPU, for a fence, a finish or a read back.
     CpuWait,
+    /// A CPU event signal released held submits with a lot of work: the frame goes to the GPU before the present, so the
+    /// encode starts earlier (`NXKIT_RELEASE_FLUSH`).
+    Release,
 }
 
 /// How often each reason ended a frame.
@@ -44,6 +47,8 @@ pub struct FlushStats {
     pub present: u64,
     /// Frames that a CPU wait ended early.
     pub cpu_wait: u64,
+    /// Frames that the release of held submits by a CPU event signal ended early.
+    pub release: u64,
 }
 
 /// The memory callback of a game (`nvnCommandBufferSetMemoryCallback`). The host implements it
@@ -404,9 +409,16 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
 
     /// The draws, dispatches and copies in the open frame, which is the work since the last flush.
     pub fn frame_work(&self) -> usize {
+        self.frame_work_since(0)
+    }
+
+    /// The draws, dispatches and copies of the open frame from command `from` on: the work that the submits since the
+    /// frame had `from` commands added.
+    pub fn frame_work_since(&self, from: usize) -> usize {
         self.frame
             .cmds
             .iter()
+            .skip(from)
             .filter(|c| {
                 matches!(
                     c,
@@ -416,17 +428,25 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             .count()
     }
 
+    /// The open frame, to put commands into it without a recording. For the tests of the layers above.
+    #[doc(hidden)]
+    pub fn frame_mut(&mut self) -> &mut Frame {
+        &mut self.frame
+    }
+
     /// The frame ends. This runs the pass analysis and returns its result.
     pub fn end_frame(&mut self, reason: FlushReason) -> Result<&PassPlan> {
         match reason {
             FlushReason::Present => self.flushes.present += 1,
             FlushReason::CpuWait => self.flushes.cpu_wait += 1,
+            FlushReason::Release => self.flushes.release += 1,
         }
         self.analyser
             .analyse(&self.frame, &self.table, &mut self.plan)?;
         crate::rendercond::frame_diag(&mut self.render, &self.frame);
         self.render.flushed();
-        if (self.flushes.present + self.flushes.cpu_wait).is_multiple_of(SCAN_EVERY) {
+        let flushed = self.flushes.present + self.flushes.cpu_wait + self.flushes.release;
+        if flushed.is_multiple_of(SCAN_EVERY) {
             self.scan_outside_pools();
         }
         Ok(&self.plan)

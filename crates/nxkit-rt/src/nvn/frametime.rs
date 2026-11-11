@@ -89,6 +89,7 @@ fn close(end: u64) {
     let (sum, calls, max) = (take(&SUM), take(&CALLS), take(&MAX));
     let gap = GAP.swap(0, Ordering::Relaxed);
     let subs = SUB.each_ref().map(|x| x.swap(0, Ordering::Relaxed));
+    let flushes = super::flushstat::take();
     if start == 0 {
         return;
     }
@@ -103,7 +104,7 @@ fn close(end: u64) {
         .map_or(0, |d| d.as_millis() % 1_000_000);
     eprintln!(
         "DIAG frame t {t} {:.2} ms: wait {:.2} ({} calls, max {:.2}) submit {:.2} ({} calls, max {:.2}) present {:.2} \
-         rest {:.2} (longest stretch {:.2}) [{}]",
+         rest {:.2} (longest stretch {:.2}) [{}] flushes {}",
         ms(frame),
         ms(sum[0]),
         calls[0],
@@ -120,5 +121,11 @@ fn close(end: u64) {
             .map(|(n, v)| format!("{n} {:.2}", ms(v)))
             .collect::<Vec<_>>()
             .join(" "),
+        super::flushstat::NAMES
+            .iter()
+            .zip(flushes)
+            .map(|(n, v)| format!("{n} {}", v.describe()))
+            .collect::<Vec<_>>()
+            .join(", "),
     );
 }

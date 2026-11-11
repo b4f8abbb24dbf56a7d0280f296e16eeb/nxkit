@@ -6,6 +6,7 @@ use std::sync::{MutexGuard, PoisonError};
 
 use nxkit_nvn::backend::{Fence, ForcedWait};
 use nxkit_nvn::cmdbuf::CommandHandle;
+use nxkit_nvn::front::FlushReason;
 use nxkit_nvn::marks::MarkOp;
 
 use super::gate::{Gate, Held, Op, Words};
@@ -40,6 +41,24 @@ fn diag() -> bool {
 /// Whether waits hold work: on unless `NXKIT_QUEUE_ORDER=0`.
 pub(super) fn ordering_on() -> bool {
     std::env::var("NXKIT_QUEUE_ORDER").map_or(true, |v| v != "0")
+}
+
+/// The flush after a release: `NXKIT_RELEASE_FLUSH` (on unless `0`) and `NXKIT_RELEASE_FLUSH_MIN`, the least work (draws,
+/// dispatches and copies) that the released submits bring (default 64).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ReleaseFlush {
+    pub(super) on: bool,
+    pub(super) min_work: usize,
+}
+
+pub(super) fn release_flush_config() -> ReleaseFlush {
+    ReleaseFlush {
+        on: std::env::var("NXKIT_RELEASE_FLUSH").map_or(true, |v| v != "0"),
+        min_work: std::env::var("NXKIT_RELEASE_FLUSH_MIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(64),
+    }
 }
 
 fn op_name(op: &Op) -> &'static str {
@@ -197,14 +216,33 @@ impl Gpu {
             !gate.is_empty()
         };
         if held {
+            crate::nvn::flushstat::release_begins();
             let mut front = self.lock();
+            let from = front.frame().cmds.len();
             let mut gate = self.gate();
             // The signal may release held submits into the frame: they are work now.
             let r = self.pump(&mut front, &mut gate);
             drop(gate);
-            return r;
+            return r.and(self.flush_released(&mut front, from));
         }
         Ok(())
+    }
+
+    /// After a CPU event signal released held submits: when the submits that went into the frame since it had `from`
+    /// commands bring at least [`ReleaseFlush::min_work`] draws, dispatches and copies, the frame goes to the backend now
+    /// ([`FlushReason::Release`]) and does not wait for the present. Nothing that is still held runs. The fence of the
+    /// released submits is the number of this flush; the present then flushes what comes after.
+    pub(super) fn flush_released(&self, front: &mut Front, from: usize) -> AbiResult<()> {
+        let cfg = self.release_flush;
+        if !cfg.on {
+            return Ok(());
+        }
+        let work = front.frame_work_since(from);
+        if work == 0 || work < cfg.min_work {
+            return Ok(());
+        }
+        note(format_args!("RELEASE FLUSH: the released submits brought {work} draws, dispatches and copies"));
+        self.flush_locked(front, FlushReason::Release).map(|_| ())
     }
 
     /// Runs every held op now (`nvnQueueFinalize`).
@@ -399,7 +437,13 @@ impl Gpu {
         }
         let r = match &h.op {
             Op::Submit { handles, origin } => self.run_submit(front, h.queue, handles, *origin),
-            Op::Fence { .. } | Op::Wait { .. } => Ok(()),
+            // The fence of a held queue was taken as the next flush when the game made it; the flush of a release may have
+            // come since, so it names the flush that carries the work before it.
+            Op::Fence { sync: s } => {
+                let _ = sync::set_queue_fence(Obj(*s), Fence(self.flushed() + 1));
+                Ok(())
+            }
+            Op::Wait { .. } => Ok(()),
         };
         // A fence in a recording marks its sync when the recording is in the frame, so `nvnSyncWait` waits for it.
         let fence = Fence(self.flushed() + 1);

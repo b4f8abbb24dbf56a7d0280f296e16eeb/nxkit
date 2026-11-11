@@ -418,6 +418,8 @@ pub struct BatchHooks {
     /// `(batch number, command buffers, GPU start, GPU end)` with the times in seconds of the host clock
     /// (`CACurrentMediaTime`).
     pub done: fn(u64, usize, f64, f64),
+    /// `(batch number, host clock in ns)`: the first command buffers of a batch were committed (`CLOCK_UPTIME_RAW`).
+    pub committed: fn(u64, u64),
 }
 
 static BATCH_HOOKS: OnceLock<BatchHooks> = OnceLock::new();
@@ -431,6 +433,13 @@ pub fn set_batch_hooks(h: BatchHooks) {
 pub fn batch_kept(fence: u64, number: u64) {
     if let Some(h) = BATCH_HOOKS.get() {
         (h.kept)(fence, number);
+    }
+}
+
+/// The first command buffers of a batch were committed.
+pub fn batch_committed(number: u64, ns: u64) {
+    if let Some(h) = BATCH_HOOKS.get() {
+        (h.committed)(number, ns);
     }
 }
 

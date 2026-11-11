@@ -2,6 +2,52 @@
 
 use super::*;
 
+/// The weight of each pass of the plan for the cut into chunks: its commands and one.
+fn weights_of(plan: &PassPlan) -> Vec<u32> {
+    plan.passes
+        .iter()
+        .map(|p| p.cmds.len() as u32 + 1)
+        .collect()
+}
+
+/// Whether the encode streams its command buffers (`NXKIT_STREAM_COMMIT`, on unless `0`): the first command buffers of
+/// a frame are committed as soon as they are encoded, while the others are encoded.
+fn stream_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !matches!(std::env::var("NXKIT_STREAM_COMMIT").as_deref(), Ok("0")))
+}
+
+/// The share of the weight of a frame that its lead chunk takes at least: one in this many.
+const LEAD_SHARE: u64 = 8;
+
+/// The frames with fewer passes than this are not streamed: their encode is short.
+const STREAM_MIN_PASSES: usize = 8;
+
+/// Puts a lead chunk in front of `ends` (the end of each chunk): the first passes up to about one in [`LEAD_SHARE`] of
+/// the weight. Returns true when the lead was added, which needs at least [`STREAM_MIN_PASSES`] passes, a first chunk
+/// that is larger than the lead, one chunk more after it (the last command buffer is never in the streamed group), and
+/// room for `1 + ends.len() + 1` command buffers within `max_buffers`.
+fn lead_chunk(weights: &[u32], ends: &mut Vec<usize>, max_buffers: usize) -> bool {
+    if weights.len() < STREAM_MIN_PASSES || ends.len() < 2 || 2 + ends.len() > max_buffers {
+        return false;
+    }
+    let total: u64 = weights.iter().map(|w| u64::from(*w)).sum();
+    let want = total.div_ceil(LEAD_SHARE).max(1);
+    let (mut acc, mut lead) = (0u64, 0usize);
+    for (i, w) in weights.iter().enumerate() {
+        acc += u64::from(*w);
+        lead = i + 1;
+        if acc >= want {
+            break;
+        }
+    }
+    if lead >= ends[0] {
+        return false;
+    }
+    ends.insert(0, lead);
+    true
+}
+
 pub(super) fn run_chunk(
     sh: &Shared<'_>,
     cb: &mut CommandBuffer,
@@ -96,12 +142,7 @@ impl Gpu {
         let mut ends = if plan.passes.is_empty() {
             Vec::new()
         } else {
-            let weights: Vec<u32> = plan
-                .passes
-                .iter()
-                .map(|p| p.cmds.len() as u32 + 1)
-                .collect();
-            jobs::split(&weights, self.threads * CHUNKS_PER_THREAD)
+            jobs::split(&weights_of(plan), self.threads * CHUNKS_PER_THREAD)
         };
         // `NXKIT_PRIVATE=1`: the pages that game threads waited for lately as the results of this GPU are signalled when the
         // last pass that writes them is done. The frame is cut after those passes: each cut ends a command buffer, and the
@@ -124,6 +165,14 @@ impl Gpu {
                 ends.insert(at, cut.after_pass + 1);
             }
         }
+        // The first part of the frame is committed while the rest is encoded (`stream_commit`): a small lead chunk comes
+        // first, so that the group of the first command buffer (uploads) and the lead chunk is ready early. A frame with
+        // early cuts has its own prefix.
+        let max_buffers = self.threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS;
+        let stream = early.cuts.is_empty()
+            && stream_enabled()
+            && !crate::private::mirrored()
+            && lead_chunk(&weights_of(plan), &mut ends, max_buffers);
         let t_ring = Instant::now();
         let mut batch = self.ring.begin(1 + ends.len())?;
         PHASES.with(|p| p.borrow_mut()[0] = nanos(t_ring, Instant::now()));
@@ -381,6 +430,10 @@ impl Gpu {
             {
                 ahead = batch.commit_ahead();
             }
+        }
+
+        if stream && ahead.is_none() {
+            ahead = batch.stream_prefix(2);
         }
 
         let mut deswizzled = Vec::new();
@@ -958,5 +1011,37 @@ fn describe_pass(
             format!("cpuread [{}]", items.join("; "))
         }
         _ => format!("other cmds {n}"),
+    }
+}
+
+#[cfg(test)]
+mod lead_tests {
+    use super::*;
+
+    #[test]
+    fn a_lead_chunk_takes_the_first_eighth_of_the_weight_and_the_chunks_keep_their_ends() {
+        let weights = vec![10u32; 40];
+        let mut ends = jobs::split(&weights, 4);
+        assert_eq!(ends, vec![10, 20, 30, 40]);
+        assert!(lead_chunk(&weights, &mut ends, 8));
+        assert_eq!(ends, vec![5, 10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn no_lead_chunk_for_a_short_frame_one_chunk_a_full_ring_or_a_big_first_pass() {
+        let weights = vec![10u32; 40];
+        let mut one = vec![40];
+        assert!(!lead_chunk(&weights, &mut one, 8));
+        assert_eq!(one, vec![40]);
+        let mut ends = jobs::split(&weights, 4);
+        assert!(!lead_chunk(&weights, &mut ends, 5), "1 + 5 command buffers do not fit 5");
+        assert_eq!(ends.len(), 4);
+        let short = vec![10u32; 4];
+        let mut e = jobs::split(&short, 2);
+        assert!(!lead_chunk(&short, &mut e, 8));
+        let heavy = [1000u32, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        let mut e = vec![1, 6, 10];
+        assert!(!lead_chunk(&heavy, &mut e, 8), "the first chunk is the lead already");
+        assert_eq!(e, vec![1, 6, 10]);
     }
 }
