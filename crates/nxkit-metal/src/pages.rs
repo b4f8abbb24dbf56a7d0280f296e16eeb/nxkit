@@ -79,6 +79,10 @@ const FRAME_MASK: u64 = (1 << 28) - 1;
 const LOG_CAP: usize = 1 << 16;
 /// The slots of the table of internal threads.
 const INTERNAL: usize = 32;
+/// The pages the log of readers holds between two calls of [`Pages::readers`].
+const READERS_CAP: usize = 1024;
+/// How many frames a page stays a CPU-read GPU result after a game thread last waited for its writer.
+const LEARN_FRAMES: u64 = 240;
 /// The frames whose first writes between flush and commit are logged (a ring by frame number).
 const P1_RING: usize = 8;
 /// The pages logged for one frame.
@@ -114,6 +118,11 @@ struct PageInfo {
     /// The epoch plus one in which a game thread last faulted on the page for a copy from the mirror, 0 for never: the
     /// completion of a frame copies the page back on its own while the epoch is no later than this (step 5).
     eager: AtomicU32,
+    /// The newest frame (28 bits) whose writer is done with this page although the frame is not complete: its last pass
+    /// that writes the page ran (step 6). Zero for none.
+    ready: AtomicU32,
+    /// The frame (28 bits) of the newest wait of a game thread for this page's writer, 0 for never (step 6).
+    waited: AtomicU32,
 }
 
 impl PageInfo {
@@ -141,6 +150,8 @@ impl PageInfo {
         }
         self.emu.store(0, Ordering::Release);
         self.eager.store(0, Ordering::Release);
+        self.ready.store(0, Ordering::Release);
+        self.waited.store(0, Ordering::Release);
     }
 }
 
@@ -354,6 +365,18 @@ struct Shared {
     eager_pages: AtomicU64,
     eager_ns: AtomicU64,
     eager_runs: AtomicU64,
+    /// Step 6: the pages a game thread waited for (page plus one), until [`Pages::readers`] takes them.
+    readers_log: [AtomicU32; READERS_CAP],
+    readers_n: AtomicUsize,
+    /// Waits by what ended them (0 the pass signal of the page, the frame still running; 1 the completion of the whole
+    /// frame) and their time.
+    wait_end: [AtomicU64; 2],
+    wait_end_ns: [AtomicU64; 2],
+    /// Calls of [`Pages::release_early`], the pages they released, and the faults that found a page released while its frame
+    /// ran.
+    early_calls: AtomicU64,
+    early_pages: AtomicU64,
+    early_syncs: AtomicU64,
 }
 
 struct OldAction {
@@ -434,6 +457,13 @@ static SHARED: Shared = Shared {
     eager_pages: AtomicU64::new(0),
     eager_ns: AtomicU64::new(0),
     eager_runs: AtomicU64::new(0),
+    readers_log: [const { AtomicU32::new(0) }; READERS_CAP],
+    readers_n: AtomicUsize::new(0),
+    wait_end: [const { AtomicU64::new(0) }; 2],
+    wait_end_ns: [const { AtomicU64::new(0) }; 2],
+    early_calls: AtomicU64::new(0),
+    early_pages: AtomicU64::new(0),
+    early_syncs: AtomicU64::new(0),
 };
 
 /// Flushes per epoch of the eager copy: a page that game threads stop faulting on loses its place after two epochs.
@@ -456,6 +486,18 @@ struct Ctrl {
     /// The pages that stay writable.
     hot: BTreeMap<u32, Hot>,
 }
+
+/// The pages that game threads waited for lately: CPU-read GPU results (step 6). Its own lock: the encoder takes it, not the
+/// flush.
+struct Learned {
+    pages: std::collections::BTreeSet<u32>,
+    changes: u64,
+}
+
+static LEARNED: Mutex<Learned> = Mutex::new(Learned {
+    pages: std::collections::BTreeSet::new(),
+    changes: 0,
+});
 
 /// A page that stays writable: the bytes staged for it last (empty until the first staging) and the flushes since they
 /// changed.
@@ -695,7 +737,7 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
         return false;
     }
     let cur = w.load(Ordering::Acquire);
-    if !matches!(cur & STATE_MASK, GPU | OPEN) || !in_flight(cur >> FRAME_SHIFT) {
+    if !matches!(cur & STATE_MASK, GPU | OPEN) || !page_flying(pg, cur >> FRAME_SHIFT) {
         return false;
     }
     let Some(info) = info(pg) else { return false };
@@ -763,6 +805,25 @@ fn in_flight(frame: u32) -> bool {
     u64::from(frame) > SHARED.completed.load(Ordering::Acquire) & FRAME_MASK
 }
 
+/// True when the writer of page `pg` in `frame` still runs: the frame is not complete and the last pass that writes the page
+/// has not reported (step 6).
+fn page_flying(pg: usize, frame: u32) -> bool {
+    in_flight(frame) && info(pg).is_none_or(|i| i.ready.load(Ordering::Acquire) < frame)
+}
+
+/// A game thread is about to wait for the writer of `pg` in `frame`: the page becomes a CPU-read GPU result for
+/// [`Pages::readers`] (atomics only).
+fn learn_reader(pg: usize, frame: u32) {
+    let Some(i) = info(pg) else { return };
+    let prev = i.waited.swap(frame, Ordering::Relaxed);
+    if prev == 0 || u64::from(frame.saturating_sub(prev)) >= LEARN_FRAMES / 4 {
+        let n = SHARED.readers_n.fetch_add(1, Ordering::AcqRel);
+        if n < READERS_CAP {
+            SHARED.readers_log[n].store(pg as u32 + 1, Ordering::Release);
+        }
+    }
+}
+
 /// Sets or clears the member bit of `page`. Not for the signal handler.
 fn member_bit(page: usize, set: bool) {
     let p = SHARED.member_bits.load(Ordering::Acquire);
@@ -817,16 +878,17 @@ fn phase_now() -> (usize, u64) {
     }
 }
 
-/// Waits until the completion of `frame` is reported, for an access that `write` says is a write. Returns true when the
-/// wait ended at the timeout.
-fn wait_complete(frame: u32, write: bool) -> bool {
+/// Waits until the writer of page `pg` in `frame` is done: the completion of the frame is reported or the last pass that
+/// writes the page signalled (step 6), for an access that `write` says is a write. Returns true when the wait ended at the
+/// timeout.
+fn wait_complete(pg: usize, frame: u32, write: bool) -> bool {
     let t0 = now_ns();
     let uncommitted = u64::from(frame) > SHARED.committed.load(Ordering::Acquire) & FRAME_MASK;
     let mut waited = false;
     let mut timed_out = false;
     loop {
         let seen = SHARED.wake.load(Ordering::Acquire);
-        if !in_flight(frame) {
+        if !page_flying(pg, frame) {
             break;
         }
         waited = true;
@@ -847,6 +909,10 @@ fn wait_complete(frame: u32, write: bool) -> bool {
         if uncommitted {
             SHARED.wait_uncommitted[k].fetch_add(1, Ordering::Relaxed);
         }
+        // The frame still runs when the pass signal ended the wait.
+        let by_pass = usize::from(!(in_flight(frame) && !timed_out));
+        SHARED.wait_end[by_pass].fetch_add(1, Ordering::Relaxed);
+        SHARED.wait_end_ns[by_pass].fetch_add(ns, Ordering::Relaxed);
     }
     if timed_out {
         SHARED.wait_timeouts.fetch_add(1, Ordering::Relaxed);
@@ -922,8 +988,9 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                 return kind.unwrap_or(FaultKind::Other);
             }
             GPU | OPEN => {
-                let flying = in_flight(frame) && !gave_up;
+                let flying = page_flying(pg, frame) && !gave_up;
                 if kind.is_none() && flying && !internal {
+                    learn_reader(pg, frame);
                     let n = SHARED.flight_n.fetch_add(1, Ordering::AcqRel) as usize;
                     if n < FLIGHT_CAP {
                         let off = at.wrapping_sub(SHARED.base.load(Ordering::Relaxed)) & ((1 << 35) - 2);
@@ -946,7 +1013,7 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                     return k;
                 }
                 if flying && !internal {
-                    gave_up = wait_complete(frame, write);
+                    gave_up = wait_complete(pg, frame, write);
                     continue;
                 }
                 // The claim: one thread copies, the others sleep on the wake word and run their access again.
@@ -974,6 +1041,9 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                 }
                 if flying {
                     SHARED.internal_opens.fetch_add(1, Ordering::Relaxed);
+                } else if !internal && in_flight(frame) {
+                    // The frame runs on, but the last pass that writes this page is done (step 6).
+                    SHARED.early_syncs.fetch_add(1, Ordering::Relaxed);
                 }
                 if write {
                     w.store(DIRTY, Ordering::Release);
@@ -1341,6 +1411,22 @@ pub struct PageStats {
     pub eager_runs: u64,
     /// Time of the eager copy.
     pub eager_ns: u64,
+    /// Waits for a writer by what ended them (0 the pass signal of the page while the frame still ran, 1 the completion of
+    /// the whole frame or the timeout), and their time.
+    pub wait_ends: [u64; 2],
+    /// Time of those waits.
+    pub wait_end_ns: [u64; 2],
+    /// Calls of [`Pages::release_early`], the pages they released, and the accesses that found a page released while its frame
+    /// still ran (they copied the page without a wait).
+    pub early_calls: u64,
+    /// Pages released by the pass signals.
+    pub early_pages: u64,
+    /// Accesses that found their page released.
+    pub early_syncs: u64,
+    /// The pages that are CPU-read GPU results now, and how often the set changed (a page joined or left).
+    pub readers: u64,
+    /// Changes of that set.
+    pub reader_changes: u64,
 }
 
 /// What one flush did.
@@ -1735,6 +1821,11 @@ impl Pages {
         SHARED.len.store(len, Ordering::Release);
         SHARED.npages.store(n, Ordering::Release);
         SHARED.log_n.store(0, Ordering::Release);
+        SHARED.readers_n.store(0, Ordering::Release);
+        {
+            let mut l = LEARNED.lock().unwrap_or_else(PoisonError::into_inner);
+            l.pages.clear();
+        }
         {
             let mut c = ctrl();
             c.frames.clear();
@@ -2053,6 +2144,58 @@ impl Pages {
         st.mprotects = (SHARED.mprotects.load(Ordering::Relaxed) - calls0) as u32;
         st.ns = now_ns().saturating_sub(t0);
         st
+    }
+
+    /// The pages that game threads waited for as the writer of a frame lately (within [`LEARN_FRAMES`] frames of `now`), sorted:
+    /// CPU-read GPU results. The encoder of a frame cuts the frame after the last pass that writes such a page and calls
+    /// [`release_early`](Self::release_early) when that part is done (step 6).
+    pub fn readers(&self, now: u64) -> Vec<u32> {
+        let mut l = LEARNED.lock().unwrap_or_else(PoisonError::into_inner);
+        let n = SHARED.readers_n.swap(0, Ordering::AcqRel).min(READERS_CAP);
+        let mut changed = 0u64;
+        for slot in &SHARED.readers_log[..n] {
+            let v = slot.swap(0, Ordering::AcqRel);
+            if v != 0 && l.pages.insert(v - 1) {
+                changed += 1;
+            }
+        }
+        let now = now & FRAME_MASK;
+        let old: Vec<u32> = l
+            .pages
+            .iter()
+            .copied()
+            .filter(|&pg| {
+                info(pg as usize).is_none_or(|i| {
+                    let w = u64::from(i.waited.load(Ordering::Relaxed));
+                    w == 0 || now.saturating_sub(w) > LEARN_FRAMES
+                })
+            })
+            .collect();
+        for pg in &old {
+            l.pages.remove(pg);
+        }
+        changed += old.len() as u64;
+        l.changes += changed;
+        l.pages.iter().copied().collect()
+    }
+
+    /// The last pass of `frame` that writes the pages of `runs` (page numbers, first and end) is done on the GPU: a thread that
+    /// waits for the writer of one of them goes on, before the rest of the frame completes. Only pages that no later pass
+    /// of the frame writes may be named (step 6).
+    pub fn release_early(&self, frame: u64, runs: &[(u32, u32)]) {
+        let frame = (frame & FRAME_MASK) as u32;
+        let mut n = 0u64;
+        for &(first, end) in runs {
+            for pg in first..end {
+                if let Some(i) = info(pg as usize) {
+                    i.ready.fetch_max(frame, Ordering::AcqRel);
+                    n += 1;
+                }
+            }
+        }
+        SHARED.early_calls.fetch_add(1, Ordering::Relaxed);
+        SHARED.early_pages.fetch_add(n, Ordering::Relaxed);
+        wake_all();
     }
 
     /// The GPU finished frame `frame` (and, by the order of the queue, every frame before it). Its pages that are still
@@ -2651,6 +2794,10 @@ impl Pages {
                 *v = g(&SHARED.faults[k][o]);
             }
         }
+        let learned = {
+            let l = LEARNED.lock().unwrap_or_else(PoisonError::into_inner);
+            (l.pages.len() as u64, l.changes)
+        };
         PageStats {
             members: g(&SHARED.members),
             faults,
@@ -2683,6 +2830,13 @@ impl Pages {
             eager_pages: g(&SHARED.eager_pages),
             eager_runs: g(&SHARED.eager_runs),
             eager_ns: g(&SHARED.eager_ns),
+            wait_ends: [g(&SHARED.wait_end[0]), g(&SHARED.wait_end[1])],
+            wait_end_ns: [g(&SHARED.wait_end_ns[0]), g(&SHARED.wait_end_ns[1])],
+            early_calls: g(&SHARED.early_calls),
+            early_pages: g(&SHARED.early_pages),
+            early_syncs: g(&SHARED.early_syncs),
+            readers: learned.0,
+            reader_changes: learned.1,
         }
     }
 
@@ -3121,6 +3275,69 @@ mod tests {
         let s1 = pg.stats();
         assert_eq!(s1.writer_waits - s0.writer_waits, 1);
         assert!(s1.writer_wait_ns > s0.writer_wait_ns);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_reader_goes_on_at_the_pass_signal_of_its_page_while_the_frame_runs_and_the_other_page_waits_for_the_frame() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(6);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(31, &[], &[(m.addr(1), 1), (m.addr(2), 1)], None, &mut st);
+        mir.store(1, 0, 11);
+        mir.store(2, 0, 21);
+        let s0 = pg.stats();
+        let base = m.base as usize;
+        let read = move |page: usize| {
+            std::thread::spawn(move || {
+                // SAFETY: inside the allocation of the test, which outlives the joined thread.
+                unsafe { (base as *const u8).add(page * P as usize).read_volatile() }
+            })
+        };
+        let (r1, r2) = (read(1), read(2));
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(!r1.is_finished() && !r2.is_finished(), "both wait for their writers");
+        // The pass that writes page 1 is done; the frame is not.
+        pg.release_early(31, &[(1, 2)]);
+        assert_eq!(r1.join().unwrap(), 11, "the bytes of the pass");
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        assert!(!r2.is_finished(), "page 2 is written by a later pass");
+        assert_eq!(pg.completed(), 0, "the frame did not complete");
+        assert_eq!(pg.state_of(m.addr(1)), "clean");
+        mir.store(2, 0, 22);
+        pg.complete(31);
+        assert_eq!(r2.join().unwrap(), 22);
+        let s1 = pg.stats();
+        assert_eq!(s1.wait_ends[0] - s0.wait_ends[0], 1, "one wait ended at a pass signal");
+        assert_eq!(s1.wait_ends[1] - s0.wait_ends[1], 1, "one at the completion");
+        assert_eq!(s1.early_pages - s0.early_pages, 1);
+        assert_eq!(s1.early_calls - s0.early_calls, 1);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_page_a_reader_waited_for_is_learned_for_a_while_and_forgotten() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = mirrored(6);
+        let mut st = Collect::default();
+        let _ = pg.readers(0);
+        let _ = pg.flush_mirrored(40, &[], &[(m.addr(3), 1)], None, &mut st);
+        mir.store(3, 0, 5);
+        let base = m.base as usize;
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside the allocation of the test, which outlives the joined thread.
+            unsafe { (base as *const u8).add(3 * P as usize).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        pg.complete(40);
+        assert_eq!(reader.join().unwrap(), 5);
+        let c0 = pg.stats().reader_changes;
+        assert_eq!(pg.readers(41), vec![3], "the page waited for the writer");
+        assert_eq!(pg.stats().reader_changes - c0, 1, "the set changed once");
+        assert_eq!(pg.readers(42), vec![3], "it stays");
+        assert_eq!(pg.stats().reader_changes - c0, 1);
+        assert!(pg.readers(40 + LEARN_FRAMES + 5).is_empty(), "and decays");
+        assert_eq!(pg.stats().reader_changes - c0, 2);
         pg.set_mirror(0);
     }
 

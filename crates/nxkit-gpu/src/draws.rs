@@ -67,6 +67,24 @@ pub(crate) fn ordinals(frame: &Frame) -> Vec<Ordinal> {
     out
 }
 
+/// [`ordinals`] with one more entry: how many draws, clears, copies and dispatches the whole frame has, so that
+/// `[ords[a], ords[b])` is what the commands `a..b` hold for every `b` up to the number of commands.
+pub(crate) fn ordinals_with_end(frame: &Frame) -> Vec<Ordinal> {
+    let mut out = ordinals(frame);
+    let mut n = out.last().copied().unwrap_or_default();
+    if let Some(c) = frame.cmds.last() {
+        match c {
+            Cmd::Draw { .. } => n.draw += 1,
+            Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => n.clear += 1,
+            Cmd::Copy { .. } | Cmd::BufferCopy | Cmd::Downsample { .. } => n.copy += 1,
+            Cmd::Dispatch { .. } => n.dispatch += 1,
+            _ => {}
+        }
+    }
+    out.push(n);
+    out
+}
+
 /// What the encoding tasks of one frame read. Nothing in it changes while the tasks run.
 pub(crate) struct Shared<'a> {
     pub(crate) ctx: &'a Context,

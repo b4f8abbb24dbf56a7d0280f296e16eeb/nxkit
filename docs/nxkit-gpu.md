@@ -657,6 +657,65 @@ thread). Synthetic numbers, per frame, with 304 faults per frame without step 5:
 frame and cannot stay writable); the flush costs 0.9 ms (it was 3.7), plus 0.5 ms for the 150 writable pages. A fault costs
 2 us in this test and about 12 us live (3.9 ms for 313 faults), so the live saving is the faults times 10.
 
+## Private GPU memory, step 6: pass signals for the results the CPU reads (`NXKIT_PRIVATE=1`)
+
+Step 4 and 5 left the accesses that touch bytes a frame really writes. In Ocarina of Time these are the results that the game
+reads back each frame (a visibility sum, spherical-harmonics coefficients): the CPU read waited 0.9 times per frame for 31 ms
+(longest 89 ms) and a write 0.15 times for 9 ms, for the whole batch of the frame, and for the encode of the frame when the
+access began before the commit. The GPU idled meanwhile and its clock dropped. A reader needs the bytes of one pass, not the
+end of the frame.
+
+**What is learned.** The handler records the page of every first access of a game thread that waits for a writer
+(`learn_reader` in `pages.rs`, atomics only). `Pages::readers(frame)` (the encoder calls it, with its own lock, not the
+flush's) drains that log into a set of CPU-read GPU results and drops a page whose last wait is more than 240 frames old
+(`LEARN_FRAMES`, 4 s at 60 fps). Accesses the handler emulates never wait and never teach.
+
+**Where the frame is cut.** `private::early_cuts`, called by `encode_frame_inner` before the batch is made, finds for each such
+page the last pass of the frame that may write it. The ranges a pass may write come from the same rules as the flush
+(`written_in`, storage bindings a shader may write, buffer copy and fill destinations), but taken from the commands of the pass
+(`ordinals_with_end` gives the draws, dispatches and copies of each pass). The unit is the page: a later pass that writes
+other bytes of the page moves the cut after itself, because the copy from the mirror moves every stale block of the page.
+A page has no cut when a pool that shaders wrote through raw pointers covers it (any pass may write it), when the flush's
+whole-frame ranges touch it and no pass was found for it, when a texture that the frame copies back or the CPU reads shares
+its range (those are written by the last command buffer), or when its last pass is the last pass of the frame. At most
+`EARLY_CUTS` (3) cuts are made: the earliest two and the last, the pages of the others join the next cut after them
+(`plan_cuts`, a pure function with a test). A cut after pass `p` puts `p + 1` into the chunk ends of `jobs::split`, so the
+chunk with that pass ends a command buffer; no pass moves. The ring holds `EARLY_CUTS` more allocators than before.
+
+**How the signal is given.** `Batch::on_prefix_complete(count, f)` (`nxkit-metal` `batch.rs`) makes the batch commit in groups:
+the command buffers up to the cut in one `commit`, the rest in another, each with its own feedback. Group `g` reports when every
+group up to it is done (the feedback handlers may run in any order), and the callback of the cut, `Pages::release_early(frame,
+runs)`, sets `ready = frame` on the pages of the cut and wakes the sleepers. Metal 4 has no event inside a command buffer, so
+a commit is the finest unit; the price is one more commit per cut (the older comment on `submit` measured 0.2 to 1 ms of GPU
+pause when every command buffer was committed one by one, here it is one to three extra commits). The knob `privnosplit` turns
+the cuts off.
+
+**Committing early.** `Batch::commit_ahead` returns an `Ahead` for the first group. The encode hands each command buffer of the
+group to `Ahead::finish` as soon as its chunk is encoded (the first one, with the uploads and the copy-in, before the chunks), and the
+thread that ends the last one commits the group while the other chunks still encode. A reader whose access began before the
+commit (114 of the window) no longer waits for the whole encode. Not used when the frame has a late stage (`forced` flush, knob
+`privlatestage`: the first command buffer still gets the pages the CPU writes until the CPU signal), and the knob
+`privnoahead` turns it off. The group never contains the last command buffer, which carries the copy-back of textures.
+
+**The wait.** A page is in flight for a thread while its frame is not complete **and** `ready < frame`
+(`page_flying` in `pages.rs`). `wait_complete(page, frame, write)` sleeps on that, so a signal ends it; then the normal path runs:
+claim the page, copy the stale blocks from the mirror, clear the stale mask, clean or dirty. The bytes are the pass's:
+the mirror is written by the GPU before the commit's feedback. A later frame that flushes the page again tags it with its own
+number, and `ready` of an older frame does not release it. `try_emulate` leaves a released page to the copy.
+
+**Counters** (`NXKIT_DIAG=private`): `DIAG private pass signals, per frame`: the waits that ended at a pass signal while the frame
+still ran and those that ended at the completion of the whole frame (count and ms per frame; the sum equals `DIAG private CPU
+waits for a writer`), the accesses that found their page released, the size of the learned set and how often it changed in the
+window, the frames cut with the cuts per frame, their position (pass index plus one over the passes, average), the pages
+released, the frames committed ahead, the readers per frame with and without a cut, and the planning time (encoder thread).
+
+**Tests.** `plan_cuts` (cut positions, the cap of cuts, blocked and unwritten pages), `early_cuts` on a real analysed frame of
+three passes after a real wait taught the pages, the exclusion of copy-back pages, and, on real Metal, a batch of three command
+buffers where pass 0 writes a learned page and pass 1 spins for 0.5 s on the GPU: the reader returns 0.4 ms after the first
+group was committed and 490 ms before the batch completes, while the third command buffer is not even encoded yet; in
+`pages.rs` a reader goes on at `release_early` while a second page waits for the completion, and the learned set grows and
+decays.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:

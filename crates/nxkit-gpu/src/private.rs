@@ -43,6 +43,11 @@
 //! the page is staged with the mask of its stale blocks (`Stager::stage_masked`) and the copy-in pass skips those blocks
 //! ([`CopyJob`]).
 //!
+//! Step 6 gives the CPU's reads of the GPU's results a signal of their own: the pages that game threads waited for as the
+//! writer of a frame are learned, the encoder cuts the frame after the last pass that writes each ([`early_cuts`]), and the
+//! command buffers up to the cut are committed on their own; when they are done the waiting thread copies the page and goes on,
+//! while the frame runs to its end.
+//!
 //! The counters print every [`REPORT_EVERY`] frames (`NXKIT_DIAG=private`, also with the variable set).
 
 use std::collections::VecDeque;
@@ -193,6 +198,17 @@ impl Rw {
 /// The counters of the window since the last report.
 #[derive(Default)]
 struct Window {
+    /// Step 6: frames cut for pass signals, cuts, the position of the cuts (pass index plus one over passes, summed), pages
+    /// the cuts release, frames whose first part was committed while the rest was encoded, readers known and not served,
+    /// the time of the planning.
+    early_frames: u64,
+    early_cuts: u64,
+    early_pos: f64,
+    early_pages: u64,
+    early_ahead: u64,
+    early_readers: u64,
+    early_unserved: u64,
+    early_plan_ns: u64,
     flushes: u64,
     written_pages: u64,
     written_runs: u64,
@@ -534,9 +550,32 @@ pub(crate) fn note_learned(learned: &[(u64, u64)]) {
 
 /// The ranges (GPU address, length) that the frame may write.
 fn written_ranges(detail: &FrameDetail, learned: &[(u64, u64)], rw: &Rw) -> Vec<(u64, u64)> {
-    let mut out: Vec<(u64, u64)> = Vec::new();
-    // Draws after draws bind the same buffers: a direct-mapped table of the bindings seen lately drops the repeats.
     let mut seen = vec![(0u64, 0u32, 0u32, 0u64); 4096];
+    let mut out = written_in(
+        detail,
+        rw,
+        0..detail.draws.len(),
+        0..detail.dispatches.len(),
+        0..detail.copies.len(),
+        &mut seen,
+    );
+    out.extend(learned.iter().map(|&(lo, hi)| (lo, hi.saturating_sub(lo))));
+    out
+}
+
+/// The ranges (GPU address, length) that the draws, dispatches and copies in the given index ranges of `detail` may write
+/// (not the pools that shaders wrote through raw pointers). `seen` is a direct-mapped table of the bindings seen lately: draws
+/// after draws bind the same buffers, and it drops the repeats; a power of two long.
+fn written_in(
+    detail: &FrameDetail,
+    rw: &Rw,
+    draws: std::ops::Range<usize>,
+    dispatches: std::ops::Range<usize>,
+    copies: std::ops::Range<usize>,
+    seen: &mut [(u64, u32, u32, u64)],
+) -> Vec<(u64, u64)> {
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    let mask = seen.len() - 1;
     let mut add = |s: &crate::detail::UboDetail, prog: Option<u64>| {
         if s.address == 0 || s.size == 0 {
             return;
@@ -546,7 +585,7 @@ fn written_ranges(detail: &FrameDetail, learned: &[(u64, u64)], rw: &Rw) -> Vec<
             return;
         }
         let p = prog.unwrap_or(0);
-        let at = ((s.address >> 4) ^ (s.address >> 16) ^ p ^ u64::from(slot_stage)) as usize & 4095;
+        let at = ((s.address >> 4) ^ (s.address >> 16) ^ p ^ u64::from(slot_stage)) as usize & mask;
         if seen[at] == (s.address, s.size, slot_stage, p) {
             return;
         }
@@ -560,7 +599,7 @@ fn written_ranges(detail: &FrameDetail, learned: &[(u64, u64)], rw: &Rw) -> Vec<
             .map(|(_, h)| *h)
     };
     let mut prev_ptr = 0usize;
-    for d in &detail.draws {
+    for d in detail.draws.get(draws).unwrap_or(&[]) {
         if d.sbufs.is_empty() {
             continue;
         }
@@ -583,7 +622,7 @@ fn written_ranges(detail: &FrameDetail, learned: &[(u64, u64)], rw: &Rw) -> Vec<
             add(s, prog);
         }
     }
-    for d in &detail.dispatches {
+    for d in detail.dispatches.get(dispatches).unwrap_or(&[]) {
         let h = hash_str(&d.program);
         for s in &d.sbufs {
             if s.stage == Stage::Compute {
@@ -593,7 +632,7 @@ fn written_ranges(detail: &FrameDetail, learned: &[(u64, u64)], rw: &Rw) -> Vec<
             }
         }
     }
-    for c in &detail.copies {
+    for c in detail.copies.get(copies).unwrap_or(&[]) {
         let (a, len) = match c.kind {
             CopyKind::BufferFill | CopyKind::BufferToBuffer => (c.dst_addr, c.bytes),
             CopyKind::TextureToBuffer => (c.buffer, 0),
@@ -603,7 +642,6 @@ fn written_ranges(detail: &FrameDetail, learned: &[(u64, u64)], rw: &Rw) -> Vec<
             out.push((a, if len != 0 { len } else { UNKNOWN_BYTES }));
         }
     }
-    out.extend(learned.iter().map(|&(lo, hi)| (lo, hi.saturating_sub(lo))));
     out
 }
 
@@ -632,6 +670,256 @@ fn plan_written(
         }
     }
     (host, clipped)
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Step 6: pass signals for the pages that the CPU reads from the GPU's results.
+
+/// How many extra command buffers a frame is cut into at most, for pass signals.
+pub(crate) const EARLY_CUTS: usize = 3;
+
+/// A cut of a frame: after pass `after_pass` the command buffers so far go to the GPU on their own, and when they are done the
+/// writer of `pages` (runs of page numbers) is done too.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EarlyCut {
+    pub(crate) after_pass: usize,
+    pub(crate) pages: Vec<(u32, u32)>,
+}
+
+/// What [`early_cuts`] found for a frame.
+#[derive(Default)]
+pub(crate) struct EarlyPlan {
+    pub(crate) cuts: Vec<EarlyCut>,
+    /// The CPU-read GPU results the planner knew, and how many of them no cut serves (a pass writes them through a pool that
+    /// shaders wrote through raw pointers, or no pass of the frame writes them).
+    pub(crate) readers: usize,
+    pub(crate) blocked: usize,
+}
+
+/// True when frames are cut for pass signals (`NXKIT_PRIVATE=1`; the knob `privnosplit` turns it off).
+pub(crate) fn early_enabled() -> bool {
+    mirrored() && !crate::knob("privnosplit")
+}
+
+/// Page numbers to runs.
+fn runs_of_pages(pages: &[u32]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for &p in pages {
+        match out.last_mut() {
+            Some(last) if last.1 == p => last.1 = p + 1,
+            _ => out.push((p, p + 1)),
+        }
+    }
+    out
+}
+
+/// The cuts for `readers` (sorted page numbers): `pass_runs[i]` are the page runs that pass `i` may write, `blocked` the runs
+/// that some pass writes without saying which (pools that shaders wrote through raw pointers) or that no pass was found for.
+/// A reader goes to the cut after the last pass that writes its page. At most `max_cuts` cuts come out: the earliest
+/// `max_cuts - 1` and the last one, the pages of the others join the next cut after them. A cut after the last pass is no
+/// cut. Returns the cuts and how many readers no cut serves.
+pub(crate) fn plan_cuts(
+    readers: &[u32],
+    pass_runs: &[Vec<(u32, u32)>],
+    blocked: &[(u32, u32)],
+    max_cuts: usize,
+) -> (Vec<EarlyCut>, usize) {
+    let mut last: Vec<Option<usize>> = vec![None; readers.len()];
+    let mut stop = vec![false; readers.len()];
+    let span = |runs: &[(u32, u32)], f: &mut dyn FnMut(usize)| {
+        for &(a, b) in runs {
+            let lo = readers.partition_point(|&p| p < a);
+            let hi = readers.partition_point(|&p| p < b);
+            (lo..hi).for_each(&mut *f);
+        }
+    };
+    for (i, runs) in pass_runs.iter().enumerate() {
+        span(runs, &mut |k| last[k] = Some(i));
+    }
+    span(blocked, &mut |k| stop[k] = true);
+    let mut by_pass: std::collections::BTreeMap<usize, Vec<u32>> = std::collections::BTreeMap::new();
+    let mut unserved = 0;
+    for (k, &page) in readers.iter().enumerate() {
+        match last[k] {
+            Some(i) if !stop[k] && i + 1 < pass_runs.len() => by_pass.entry(i).or_default().push(page),
+            _ => unserved += 1,
+        }
+    }
+    let keys: Vec<usize> = by_pass.keys().copied().collect();
+    let keep = max_cuts.max(1);
+    let mut cuts: Vec<EarlyCut> = Vec::new();
+    let mut pending: Vec<u32> = Vec::new();
+    for (n, key) in keys.iter().enumerate() {
+        pending.extend(by_pass.remove(key).unwrap_or_default());
+        if n + 1 < keep || n + 1 == keys.len() {
+            pending.sort_unstable();
+            cuts.push(EarlyCut {
+                after_pass: *key,
+                pages: runs_of_pages(&pending),
+            });
+            pending.clear();
+        }
+    }
+    (cuts, unserved)
+}
+
+/// The cuts of the frame of `fence`: finds the CPU-read GPU results that game threads waited for lately
+/// ([`Pages::readers`]), the last pass of the frame that may write each, and the cuts after those passes.
+pub(crate) fn early_cuts(
+    frame: &nxkit_nvn::frame::Frame,
+    plan: &nxkit_nvn::passes::PassPlan,
+    detail: &FrameDetail,
+    fence: u64,
+    map: &AddressMap,
+    learned: &[(u64, u64)],
+) -> EarlyPlan {
+    use nxkit_nvn::passes::PassKind;
+    let pages = Pages::global();
+    let readers = pages.readers(fence);
+    if readers.is_empty() || plan.passes.len() < 2 {
+        return EarlyPlan::default();
+    }
+    let t0 = Instant::now();
+    let ords = crate::draws::ordinals_with_end(frame);
+    let runs_of_ranges = |ranges: &[(u64, u64)]| -> Vec<(u32, u32)> {
+        ranges
+            .iter()
+            .filter(|&&(_, len)| len <= RANGE_MAX_BYTES)
+            .filter_map(|&(a, len)| {
+                let len = len.max(1);
+                let h = map.host_address(a, len).ok()?;
+                pages.page_range(h, len)
+            })
+            .collect()
+    };
+    let rw = locked(&state().rw);
+    let mut seen = [(0u64, 0u32, 0u32, 0u64); 64];
+    let mut attributed: Vec<(u32, u32)> = Vec::new();
+    let mut pass_runs: Vec<Vec<(u32, u32)>> = Vec::with_capacity(plan.passes.len());
+    for pass in &plan.passes {
+        if !matches!(pass.kind, PassKind::Render | PassKind::Compute | PassKind::Copy) {
+            pass_runs.push(Vec::new());
+            continue;
+        }
+        let (Some(lo), Some(hi)) = (ords.get(pass.cmds.start as usize), ords.get(pass.cmds.end as usize)) else {
+            // A pass that names commands outside the frame: nothing can be said about it.
+            return EarlyPlan {
+                readers: readers.len(),
+                blocked: readers.len(),
+                ..Default::default()
+            };
+        };
+        seen.fill((0, 0, 0, 0));
+        let ranges = written_in(
+            detail,
+            &rw,
+            lo.draw as usize..hi.draw as usize,
+            lo.dispatch as usize..hi.dispatch as usize,
+            lo.copy as usize..hi.copy as usize,
+            &mut seen,
+        );
+        let runs = runs_of_ranges(&ranges);
+        attributed.extend_from_slice(&runs);
+        pass_runs.push(runs);
+    }
+    // What the flush counts as written, whatever the passes say: the pools that shaders wrote through raw pointers can be
+    // written by any pass, and a range that no pass was found for belongs to no cut.
+    let mut seen = vec![(0u64, 0u32, 0u32, 0u64); 4096];
+    let whole = written_in(
+        detail,
+        &rw,
+        0..detail.draws.len(),
+        0..detail.dispatches.len(),
+        0..detail.copies.len(),
+        &mut seen,
+    );
+    drop(rw);
+    let mut blocked = runs_of_ranges(&learned.iter().map(|&(lo, hi)| (lo, hi.saturating_sub(lo))).collect::<Vec<_>>());
+    attributed.sort_unstable();
+    let known = |p: u32| {
+        let i = attributed.partition_point(|&(_, e)| e <= p);
+        attributed.get(i).is_some_and(|&(s, _)| s <= p)
+    };
+    for (a, b) in runs_of_ranges(&whole) {
+        let mut p = a;
+        while p < b {
+            if !known(p) {
+                let from = p;
+                while p < b && !known(p) {
+                    p += 1;
+                }
+                blocked.push((from, p));
+            } else {
+                p += 1;
+            }
+        }
+    }
+    blocked.sort_unstable();
+    let (cuts, unserved) = plan_cuts(&readers, &pass_runs, &blocked, EARLY_CUTS);
+    let mut w = locked(&state().window);
+    w.early_plan_ns += t0.elapsed().as_nanos() as u64;
+    EarlyPlan {
+        cuts,
+        readers: readers.len(),
+        blocked: unserved,
+    }
+}
+
+/// Removes the pages of the GPU address ranges `excluded` from the cuts (they are written in the last command buffer, by the
+/// copy-back of textures), and drops the cuts that serve no page any more.
+pub(crate) fn early_exclude(cuts: &mut Vec<EarlyCut>, excluded: &[(u64, u64)], map: &AddressMap) {
+    if excluded.is_empty() {
+        return;
+    }
+    let pages = Pages::global();
+    let mut ex: Vec<(u32, u32)> = excluded
+        .iter()
+        .filter_map(|&(s, e)| {
+            let h = map.host_address(s, e.saturating_sub(s).max(1)).ok()?;
+            pages.page_range(h, e.saturating_sub(s).max(1))
+        })
+        .collect();
+    ex.sort_unstable();
+    for cut in cuts.iter_mut() {
+        let mut out: Vec<(u32, u32)> = Vec::new();
+        for &(a, b) in &cut.pages {
+            let mut from = a;
+            for &(s, e) in ex.iter().filter(|&&(s, e)| s < b && a < e) {
+                if s > from {
+                    out.push((from, s));
+                }
+                from = from.max(e);
+            }
+            if from < b {
+                out.push((from, b));
+            }
+        }
+        cut.pages = out;
+    }
+    cuts.retain(|c| !c.pages.is_empty());
+}
+
+/// What the encode did with the plan of a frame, for the report.
+pub(crate) fn note_split(plan: &EarlyPlan, passes: usize, ahead: bool) {
+    let cuts = &plan.cuts;
+    let mut w = locked(&state().window);
+    w.early_readers += plan.readers as u64;
+    w.early_unserved += plan.blocked as u64;
+    if cuts.is_empty() {
+        return;
+    }
+    w.early_frames += 1;
+    w.early_cuts += cuts.len() as u64;
+    w.early_ahead += u64::from(ahead);
+    for c in cuts {
+        w.early_pos += (c.after_pass + 1) as f64 / passes.max(1) as f64;
+        w.early_pages += c.pages.iter().map(|&(a, b)| u64::from(b - a)).sum::<u64>();
+    }
+}
+
+/// The callback of a cut: the writer of its pages in the frame of `fence` is done.
+pub(crate) fn early_release(fence: u64, pages: Vec<(u32, u32)>) -> impl FnOnce() + Send + 'static {
+    move || Pages::global().release_early(fence, &pages)
 }
 
 /// The flush of a frame, on the CPU thread: protects the member pages and the pages the frame may write, and counts. The
@@ -1977,6 +2265,33 @@ fn print_report(frame: u64) {
             waits(0),
             waits(1),
         );
+        let by_end = |k: usize| {
+            format!(
+                "{:.2} ({:.2} ms)",
+                (now.wait_ends[k] - base.wait_ends[k]) as f64 / n,
+                (now.wait_end_ns[k] - base.wait_end_ns[k]) as f64 / n / 1e6,
+            )
+        };
+        eprintln!(
+            "DIAG private pass signals, per frame: waits ended by the signal of the page's last pass (the frame still ran) {}, \
+             by the completion of the whole frame {}; accesses that found their page released {:.2}; {} CPU-read GPU results \
+             known now, the set changed {} times in the window; frames cut {:.2} ({:.2} cuts each, at {:.0}% of the passes on \
+             average, {:.1} pages released per frame, {} of them committed while the rest was encoded); readers per frame {:.2}, \
+             without a cut {:.2}; planning {:.3} ms",
+            by_end(0),
+            by_end(1),
+            (now.early_syncs - base.early_syncs) as f64 / n,
+            now.readers,
+            now.reader_changes - base.reader_changes,
+            w.early_frames as f64 / n,
+            w.early_cuts as f64 / w.early_frames.max(1) as f64,
+            100.0 * w.early_pos / w.early_cuts.max(1) as f64,
+            w.early_pages as f64 / n,
+            w.early_ahead,
+            w.early_readers as f64 / n,
+            w.early_unserved as f64 / n,
+            w.early_plan_ns as f64 / n / 1e6,
+        );
         if pages.emulating() {
             let per = |f: AccessForm| now.emulated[f as usize] - base.emulated[f as usize];
             let part = |loads: bool| {
@@ -2774,5 +3089,321 @@ mod tests {
         assert_eq!(r.0, vec![(1, 4), (5, 10)]);
         assert!(r.contains(1) && r.contains(3) && r.contains(9));
         assert!(!r.contains(0) && !r.contains(4) && !r.contains(10));
+    }
+
+    // ----- step 6: pass signals -----
+
+    #[test]
+    fn the_cuts_follow_the_last_pass_that_writes_a_page_and_the_earliest_ones_are_kept() {
+        // Passes 0..5; readers are pages 10, 20, 30, 40, 50, 60.
+        let runs = |v: &[u32]| runs_of_pages(v);
+        let pass_runs = vec![
+            vec![(10, 11)],
+            vec![(10, 11), (20, 21)],
+            vec![(30, 31)],
+            vec![(30, 31), (40, 41)],
+            vec![(50, 51)],
+            vec![(60, 61)],
+        ];
+        let readers = [10, 20, 30, 40, 50, 60];
+        let (cuts, unserved) = plan_cuts(&readers, &pass_runs, &[], 8);
+        assert_eq!(unserved, 1, "page 60 is written by the last pass");
+        let at: Vec<usize> = cuts.iter().map(|c| c.after_pass).collect();
+        assert_eq!(at, vec![1, 3, 4], "page 10 is written again by pass 1");
+        assert_eq!(cuts[0].pages, runs(&[10, 20]));
+        assert_eq!(cuts[1].pages, runs(&[30, 40]));
+        // With two cuts at most the earliest stays and the last takes the rest.
+        let (cuts, _) = plan_cuts(&readers, &pass_runs, &[], 2);
+        assert_eq!(cuts.len(), 2);
+        assert_eq!((cuts[0].after_pass, cuts[0].pages.clone()), (1, runs(&[10, 20])));
+        assert_eq!((cuts[1].after_pass, cuts[1].pages.clone()), (4, runs(&[30, 40, 50])));
+        // A page that some pass writes through a pool of raw stores has no cut.
+        let (cuts, unserved) = plan_cuts(&readers, &pass_runs, &[(20, 21), (30, 31)], 8);
+        assert_eq!(unserved, 3);
+        assert_eq!(cuts.iter().map(|c| c.after_pass).collect::<Vec<_>>(), vec![1, 3, 4]);
+        assert_eq!(cuts[0].pages, runs(&[10]));
+        assert_eq!(cuts[1].pages, runs(&[40]));
+        // A page that no pass writes has none either.
+        let (cuts, unserved) = plan_cuts(&[99], &pass_runs, &[], 8);
+        assert!(cuts.is_empty());
+        assert_eq!(unserved, 1);
+    }
+
+    /// A frame of three passes (a dispatch, a buffer fill, a dispatch): the first dispatch writes `a`, the fill `z`, the last
+    /// dispatch `y`.
+    fn three_passes(a: u64, z: u64, y: u64) -> (nxkit_nvn::frame::Frame, nxkit_nvn::passes::PassPlan, FrameDetail) {
+        use crate::detail::CopyDetail;
+        use nxkit_nvn::frame::{Cmd, Frame, Span};
+        let ubo = |address| UboDetail {
+            stage: Stage::Compute,
+            slot: 0,
+            address,
+            size: 64,
+            snapshot: None,
+        };
+        let disp = |at| DispatchDetail {
+            program: "cs".into(),
+            push: None,
+            groups: [1, 1, 1],
+            indirect: None,
+            ubos: Vec::new(),
+            sbufs: vec![ubo(at)],
+            textures: Vec::new(),
+            images: Vec::new(),
+        };
+        let d = Cmd::Dispatch {
+            reads: Span::default(),
+            writes: Span::default(),
+        };
+        let frame = Frame {
+            cmds: vec![d, Cmd::BufferCopy, d],
+            ..Frame::default()
+        };
+        let mut plan = nxkit_nvn::passes::PassPlan::default();
+        nxkit_nvn::analyse::Analyser::new()
+            .analyse(&frame, &nxkit_nvn::resource::ResourceTable::new(), &mut plan)
+            .unwrap();
+        let detail = FrameDetail {
+            dispatches: vec![disp(a), disp(y)],
+            copies: vec![CopyDetail {
+                kind: CopyKind::BufferFill,
+                dst_addr: z,
+                bytes: 32,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        (frame, plan, detail)
+    }
+
+    /// Reads one byte of `page` on a thread of its own.
+    fn read_on_thread(g: &Guest, page: u64) -> std::thread::JoinHandle<u8> {
+        let mem = g.mem.clone();
+        std::thread::spawn(move || {
+            let mut b = [0u8; 1];
+            mem.read(page * PAGE, &mut b).unwrap();
+            b[0]
+        })
+    }
+
+    #[test]
+    fn the_planner_cuts_a_real_frame_after_the_passes_that_write_the_pages_a_thread_waited_for() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let (page_a, page_z, page_y) = (80u64, 81u64, 82u64);
+        let (frame, plan, detail) = three_passes(VA + page_a * PAGE, VA + page_z * PAGE, VA + page_y * PAGE);
+        assert_eq!(plan.passes.len(), 3, "dispatch, fill, dispatch");
+        let _ = Pages::global().readers(0);
+        // Frame 1: three threads wait for the writers of the three pages.
+        let _o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
+        let readers: Vec<_> = [page_a, page_z, page_y].iter().map(|&p| read_on_thread(&g, p)).collect();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(readers.iter().all(|r| !r.is_finished()), "the writers run");
+        encoded(1, None);
+        readers.into_iter().for_each(|r| {
+            r.join().unwrap();
+        });
+        // Frame 2 has the same passes: a cut after the dispatch and one after the fill; the last dispatch's page has none.
+        let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
+        assert_eq!(o2.frame(), 2);
+        let pg = |p: u64| {
+            let h = g.mem.host_base() + p * PAGE;
+            Pages::global().page_range(h, 1).unwrap()
+        };
+        let plan2 = early_cuts(&frame, &plan, &detail, 2, &g.map, &[]);
+        assert_eq!(plan2.readers, 3);
+        assert_eq!(plan2.blocked, 1, "the last pass writes page y");
+        assert_eq!(plan2.cuts.len(), 2);
+        assert_eq!((plan2.cuts[0].after_pass, plan2.cuts[0].pages.clone()), (0, vec![pg(page_a)]));
+        assert_eq!((plan2.cuts[1].after_pass, plan2.cuts[1].pages.clone()), (1, vec![pg(page_z)]));
+        // The same frame with a pool of raw stores over page a: no cut serves it.
+        let learned = [(VA + page_a * PAGE, VA + (page_a + 1) * PAGE)];
+        let plan3 = early_cuts(&frame, &plan, &detail, 2, &g.map, &learned);
+        assert_eq!(plan3.cuts.len(), 1);
+        assert_eq!(plan3.cuts[0].after_pass, 1);
+        // The pages of a texture that is copied back are left out.
+        let mut cuts = plan2.cuts.clone();
+        early_exclude(&mut cuts, &[(VA + page_z * PAGE, VA + (page_z + 1) * PAGE)], &g.map);
+        assert_eq!(cuts.len(), 1);
+        assert_eq!(cuts[0].after_pass, 0);
+        encoded(2, None);
+        FORCE.with(|f| f.set(None));
+    }
+
+    const WRITE_MSL: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+kernel void nxkit_test_write(device uint *p [[buffer(0)]]) { p[0] = 0x600df00du; }
+kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [[buffer(1)]], uint t [[thread_position_in_grid]]) {
+    uint x = t + 1u;
+    for (uint i = 0u; i < n[0]; i++) { x = x * 1664525u + 1013904223u; }
+    p[t] = x;
+}
+"#;
+
+    /// One compute pass of `cb` that runs `kernel` over one thread with the buffers `bufs` (index, GPU address).
+    fn kernel_pass(
+        pipelines: &Pipelines,
+        table: &ArgumentTable,
+        cb: &mut CommandBuffer,
+        kernel: &str,
+        bufs: &[(u32, u64)],
+    ) {
+        let pipeline = pipelines.host_compute("nxkit-private-test", WRITE_MSL, kernel).unwrap();
+        let mut cp = cb.begin_compute_pass(table).unwrap();
+        cp.encode(&ComputeCommand::SetPipeline(pipeline)).unwrap();
+        for &(index, gpu_addr) in bufs {
+            cp.encode(&ComputeCommand::SetBuffer { index, gpu_addr }).unwrap();
+        }
+        cp.encode(&ComputeCommand::DispatchThreads {
+            grid: [1, 1, 1],
+            threads: [1, 1, 1],
+        })
+        .unwrap();
+        cp.end();
+    }
+
+    #[test]
+    fn a_reader_of_a_page_written_by_pass_0_goes_on_at_its_signal_while_a_long_pass_1_runs_and_before_the_rest_is_encoded() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
+            return;
+        };
+        let (page_a, page_y) = (90u64, 91u64);
+        let (frame, plan, detail) = three_passes(VA + page_a * PAGE, VA + 95 * PAGE, VA + page_y * PAGE);
+        let _ = Pages::global().readers(0);
+        let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
+        let mut ring = nxkit_metal::BatchRing::new(&g.ctx, 3).unwrap();
+        // Calibration of the long pass: one thread spins for about `n` rounds.
+        let spin = |ring: &mut nxkit_metal::BatchRing, n: u32| -> std::time::Duration {
+            let mut batch = ring.begin(1).unwrap();
+            let scratch = batch.scratch();
+            let out = scratch.push(&[0u8; 64]).unwrap();
+            let count = scratch.push(&n.to_le_bytes()).unwrap();
+            kernel_pass(&pipelines, &table, &mut batch.buffers()[0], "nxkit_test_spin", &[(0, out), (1, count)]);
+            g.ctx.commit_residency();
+            let t0 = Instant::now();
+            batch.submit().unwrap().wait().unwrap();
+            t0.elapsed()
+        };
+        let _ = spin(&mut ring, 1000);
+        let probe = spin(&mut ring, 20_000_000);
+        let rounds = (20_000_000f64 * 0.5 / probe.as_secs_f64().max(0.001)).clamp(1e6, 4e9) as u32;
+        // Frame 1 teaches the planner: threads wait for the writers of both pages.
+        let _o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
+        let readers: Vec<_> = [page_a, page_y].iter().map(|&p| read_on_thread(&g, p)).collect();
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        encoded(1, None);
+        readers.into_iter().for_each(|r| {
+            r.join().unwrap();
+        });
+        // Frame 2: flush, plan, then encode in the order of `encode_frame_inner`.
+        let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
+        let pools = pools_of(&g, o2.clone());
+        let loc = pools.resolve(VA + page_a * PAGE, 64).unwrap();
+        let mut ep = early_cuts(&frame, &plan, &detail, 2, &g.map, &[]);
+        assert_eq!(ep.cuts.len(), 1, "a cut after pass 0: {:?}", ep.cuts);
+        assert_eq!(ep.cuts[0].after_pass, 0);
+        // Pass 0 is in the command buffer 1 (the command buffer 0 is the first one), the other passes in the command buffer 2.
+        let reader = read_on_thread(&g, page_a);
+        let other = read_on_thread(&g, page_y);
+        let s0 = Pages::global().stats();
+        let done_at = std::sync::Arc::new(Mutex::new(None::<Instant>));
+        let mut batch = ring.begin(3).unwrap();
+        assert!(batch.on_prefix_complete(2, early_release(2, ep.cuts.remove(0).pages)));
+        let ahead = batch.commit_ahead().expect("a prefix");
+        assert_eq!(ahead.count(), 2);
+        let scratch = batch.scratch();
+        let out = scratch.push(&[0u8; 64]).unwrap();
+        let count = scratch.push(&rounds.to_le_bytes()).unwrap();
+        {
+            let bufs = batch.buffers();
+            ahead.finish(0, &mut bufs[0]);
+            // Pass 0 writes the page in the mirror.
+            kernel_pass(&pipelines, &table, &mut bufs[1], "nxkit_test_write", &[(0, loc.real)]);
+            assert!(ahead.finish(1, &mut bufs[1]), "the second command buffer completes the group");
+        }
+        // The group is on the GPU. The rest of the frame is not encoded yet: the reader must not wait for that.
+        let t_group = Instant::now();
+        let first_byte = reader.join().unwrap();
+        let waited = t_group.elapsed();
+        assert_eq!(first_byte, 0x0d, "the bytes of pass 0 (low byte of 0x600df00d)");
+        assert!(waited < std::time::Duration::from_millis(1500), "the reader went on before the rest was encoded: {waited:?}");
+        assert!(!other.is_finished(), "the page of the later pass still waits for the frame");
+        // Now the long pass is encoded and the rest is committed.
+        {
+            let bufs = batch.buffers();
+            kernel_pass(&pipelines, &table, &mut bufs[2], "nxkit_test_spin", &[(0, out), (1, count)]);
+        }
+        g.ctx.commit_residency();
+        let submitted = batch.submit().unwrap();
+        let t_done = done_at.clone();
+        submitted.on_complete(move || *locked(&t_done) = Some(Instant::now()));
+        encoded(2, Some(&submitted));
+        let t_reader_done = t_group + waited;
+        assert!(!other.is_finished() || locked(&done_at).is_some());
+        let stats = submitted.wait().unwrap();
+        let _ = other.join().unwrap();
+        let finished = locked(&done_at).expect("the batch completed");
+        assert!(
+            t_reader_done + std::time::Duration::from_millis(100) < finished,
+            "the reader was released at least 100 ms before the batch completed (long pass {:?})",
+            std::time::Duration::from_nanos(stats.gpu_ns)
+        );
+        eprintln!(
+            "pass signal test: reader released {waited:?} after the group was committed, {:?} before the batch completed (long pass {:?})",
+            finished.duration_since(t_reader_done),
+            std::time::Duration::from_nanos(stats.gpu_ns)
+        );
+        let s1 = Pages::global().stats();
+        assert_eq!(s1.wait_ends[0] - s0.wait_ends[0], 1, "one wait ended at the signal of a pass");
+        assert!(s1.early_pages > s0.early_pages);
+        FORCE.with(|f| f.set(None));
+    }
+
+    #[test]
+    fn a_batch_with_a_prefix_is_committed_in_two_groups_and_the_prefix_reports_before_the_rest_is_done() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
+            return;
+        };
+        let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
+        let mut ring = nxkit_metal::BatchRing::new(&g.ctx, 3).unwrap();
+        for with_prefix in [false, true] {
+            let mut batch = ring.begin(3).unwrap();
+            let scratch = batch.scratch();
+            let out = scratch.push(&[0u8; 64]).unwrap();
+            let count = scratch.push(&20_000_000u32.to_le_bytes()).unwrap();
+            let at = std::sync::Arc::new(Mutex::new(None::<Instant>));
+            if with_prefix {
+                let a = at.clone();
+                assert!(batch.on_prefix_complete(2, move || *locked(&a) = Some(Instant::now())));
+                assert!(!batch.on_prefix_complete(3, || {}), "the whole batch is no prefix");
+                assert!(!batch.on_prefix_complete(0, || {}));
+            }
+            {
+                let bufs = batch.buffers();
+                kernel_pass(&pipelines, &table, &mut bufs[0], "nxkit_test_write", &[(0, out)]);
+                kernel_pass(&pipelines, &table, &mut bufs[1], "nxkit_test_write", &[(0, out)]);
+                kernel_pass(&pipelines, &table, &mut bufs[2], "nxkit_test_spin", &[(0, out), (1, count)]);
+            }
+            g.ctx.commit_residency();
+            let submitted = batch.submit().unwrap();
+            let end = std::sync::Arc::new(Mutex::new(None::<Instant>));
+            let e = end.clone();
+            submitted.on_complete(move || *locked(&e) = Some(Instant::now()));
+            let stats = submitted.wait().unwrap();
+            assert!(stats.gpu_ns > 0);
+            let end = locked(&end).expect("the batch completed");
+            if with_prefix {
+                let prefix = locked(&at).expect("the prefix reported");
+                assert!(prefix <= end, "the prefix reports before the batch completes");
+            } else {
+                assert!(locked(&at).is_none());
+            }
+        }
+        FORCE.with(|f| f.set(None));
     }
 }

@@ -11,7 +11,7 @@
 //! last handler ran. Presenting a drawable is not part of a batch.
 
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Instant;
 
@@ -222,6 +222,9 @@ impl BatchRing {
             ctx: self.ctx.clone(),
             metrics: self.metrics.clone(),
             t0,
+            early: Vec::new(),
+            split: None,
+            ahead: None,
         })
     }
 }
@@ -238,6 +241,179 @@ pub struct Batch {
     ctx: Context,
     metrics: Arc<Metrics>,
     t0: Instant,
+    /// The prefixes that report early: `(command buffers in the prefix, callback)`.
+    early: Vec<(usize, Callback)>,
+    /// The groups the batch is committed in, once [`Batch::commit_ahead`] or the commit made them.
+    split: Option<Arc<Split>>,
+    ahead: Option<Arc<Ahead>>,
+}
+
+/// A command buffer that was ended, as the pointer the commit takes.
+struct Ended(NonNull<ProtocolObject<dyn MTL4CommandBuffer>>);
+
+// SAFETY: the pointer names an ended command buffer that its batch keeps alive until the commit; the queue takes it from
+// any thread.
+unsafe impl Send for Ended {}
+
+/// An ended command buffer and what it keeps alive.
+type Entry = (Ended, Vec<Keep>);
+
+/// The commit groups of a batch with prefixes that report early: group `g` holds the command buffers from the end of group
+/// `g - 1` to `bounds[g]`, and is committed on its own, so its feedback says when the GPU is done with it.
+struct Split {
+    number: u64,
+    ctx: Context,
+    done: Arc<Completion>,
+    metrics: Arc<Metrics>,
+    /// The end of each group, in command buffers; the last is the whole batch.
+    bounds: Vec<usize>,
+    /// Groups whose feedback has not come yet.
+    remaining: AtomicUsize,
+    state: Mutex<SplitState>,
+}
+
+struct SplitState {
+    finished: Vec<bool>,
+    /// The callbacks of the prefixes, by the group that ends the prefix.
+    callbacks: Vec<(usize, Option<Callback>)>,
+    start: f64,
+    end: f64,
+}
+
+impl Split {
+    /// Commits group `g`: `entries` are its ended command buffers with what they keep alive.
+    fn commit(
+        self: &Arc<Self>,
+        g: usize,
+        entries: Vec<Entry>,
+        scratch: Arc<Scratch>,
+        encode_ns: u64,
+    ) {
+        let mut held: Vec<Keep> = vec![Keep::new(scratch)];
+        let mut list: Vec<NonNull<ProtocolObject<dyn MTL4CommandBuffer>>> =
+            Vec::with_capacity(entries.len());
+        for (cb, keep) in entries {
+            list.push(cb.0);
+            held.push(Keep::new(keep));
+        }
+        let held = Mutex::new(Some(held));
+        let me = self.clone();
+        let (number, total) = (self.number, *self.bounds.last().unwrap_or(&0));
+        let handler: FeedbackBlock =
+            RcBlock::new(move |fb: NonNull<ProtocolObject<dyn MTL4CommitFeedback>>| {
+                // SAFETY: Metal passes a valid feedback object that lives for the call.
+                let fb = unsafe { fb.as_ref() };
+                let (start, end) = (fb.GPUStartTime(), fb.GPUEndTime());
+                let stats = CommandBufferStats {
+                    frame: number,
+                    cpu_encode_ns: encode_ns,
+                    gpu_ns: ((end - start).max(0.0) * 1e9) as u64,
+                    gpu_start_s: start,
+                    gpu_end_s: end,
+                    failed: fb.error().is_some(),
+                };
+                if let Some(e) = fb.error() {
+                    static SHOWN: AtomicUsize = AtomicUsize::new(0);
+                    if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
+                        eprintln!(
+                            "nxkit-metal: warning: batch {number} command buffer failed: {} {:?}",
+                            e.localizedDescription(),
+                            e.userInfo()
+                        );
+                    }
+                }
+                held.lock().unwrap_or_else(PoisonError::into_inner).take();
+                me.metrics.record(&stats);
+                // The prefixes that ended: every group up to this one is done.
+                let ready: Vec<Callback> = {
+                    let mut st = me.state.lock().unwrap_or_else(PoisonError::into_inner);
+                    st.finished[g] = true;
+                    if st.start == 0.0 || (start != 0.0 && start < st.start) {
+                        st.start = start;
+                    }
+                    st.end = st.end.max(end);
+                    let upto = st.finished.iter().take_while(|f| **f).count();
+                    st.callbacks
+                        .iter_mut()
+                        .filter(|(group, _)| *group < upto)
+                        .filter_map(|(_, f)| f.take())
+                        .collect()
+                };
+                for f in ready {
+                    f();
+                }
+                let last = me.remaining.fetch_sub(1, Ordering::AcqRel) == 1;
+                if last && let Some(h) = DONE_HOOK.get() {
+                    let (a, b) = {
+                        let st = me.state.lock().unwrap_or_else(PoisonError::into_inner);
+                        (st.start, st.end)
+                    };
+                    h(number, total, a, b);
+                }
+                me.done.add(&stats, last);
+            });
+        let opts = MTL4CommitOptions::new();
+        opts.addFeedbackHandler(&handler);
+        self.ctx.commit_residency();
+        // SAFETY: `list` holds ended command buffers that `held` keeps alive until the feedback.
+        unsafe {
+            self.ctx
+                .queue()
+                .commit_count_options(NonNull::from(&list[0]), list.len(), &opts)
+        };
+    }
+}
+
+/// The first group of a batch, committed while the rest of the batch is still being encoded: each thread that ends one of its
+/// command buffers hands it in with [`finish`](Self::finish), and the one that hands in the last commits the group.
+pub struct Ahead {
+    split: Arc<Split>,
+    scratch: Arc<Scratch>,
+    t0: Instant,
+    slots: Mutex<Vec<Option<Entry>>>,
+    left: AtomicUsize,
+    committed: AtomicBool,
+}
+
+impl Ahead {
+    /// The number of command buffers in the group.
+    pub fn count(&self) -> usize {
+        self.slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
+    /// Ends command buffer `index` of the group (the thread that encoded it calls this once it is done with it). When it is
+    /// the last one of the group, the group is committed on this thread. Returns true then.
+    pub fn finish(&self, index: usize, cb: &mut CommandBuffer) -> bool {
+        cb.raw().endCommandBuffer();
+        let entry = (
+            Ended(NonNull::from(&**cb.raw())),
+            vec![Keep::new(cb.take_retained())],
+        );
+        let full = {
+            let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
+            if slots.get(index).is_none_or(Option::is_some) {
+                return false;
+            }
+            slots[index] = Some(entry);
+            self.left.fetch_sub(1, Ordering::AcqRel) == 1
+        };
+        if !full || self.committed.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        let entries: Vec<Entry> = self
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter_mut()
+            .filter_map(Option::take)
+            .collect();
+        let ns = u64::try_from(self.t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.split.commit(0, entries, self.scratch.clone(), ns);
+        true
+    }
 }
 
 /// A batch that is on the GPU. A clone waits for the same batch.
@@ -287,24 +463,95 @@ impl Batch {
         self.scratch.clone()
     }
 
-    /// Ends every command buffer and commits them in order, in one commit. Returns at once.
+    /// Runs `f` when the GPU is done with the first `count` command buffers of the batch, before the batch is complete: the
+    /// batch is committed in groups then, one commit for the prefix and one for the rest. Call it before
+    /// [`commit_ahead`](Self::commit_ahead) and [`submit`](Self::submit). Returns false (and drops `f`) when `count` is 0 or
+    /// not smaller than the number of command buffers, or the groups are fixed already.
+    ///
+    /// The queue runs the commits in order, so the prefix is done when its commit is; a commit costs the GPU a short pause
+    /// at the boundary (about 0.2 ms), which is the price of the early report.
+    pub fn on_prefix_complete(&mut self, count: usize, f: impl FnOnce() + Send + 'static) -> bool {
+        if count == 0 || count >= self.buffers.len() || self.split.is_some() {
+            return false;
+        }
+        self.early.push((count, Box::new(f)));
+        true
+    }
+
+    fn split(&mut self) -> Arc<Split> {
+        if let Some(s) = &self.split {
+            return s.clone();
+        }
+        let mut bounds: Vec<usize> = self.early.iter().map(|e| e.0).collect();
+        bounds.push(self.buffers.len());
+        bounds.sort_unstable();
+        bounds.dedup();
+        let callbacks: Vec<(usize, Option<Callback>)> = std::mem::take(&mut self.early)
+            .into_iter()
+            .map(|(count, f)| {
+                (
+                    bounds.iter().position(|b| *b == count).unwrap_or(0),
+                    Some(f),
+                )
+            })
+            .collect();
+        let split = Arc::new(Split {
+            number: self.number,
+            ctx: self.ctx.clone(),
+            done: self.done.clone(),
+            metrics: self.metrics.clone(),
+            remaining: AtomicUsize::new(bounds.len()),
+            state: Mutex::new(SplitState {
+                finished: vec![false; bounds.len()],
+                callbacks,
+                start: 0.0,
+                end: 0.0,
+            }),
+            bounds,
+        });
+        self.split = Some(split.clone());
+        split
+    }
+
+    /// For a batch with a prefix: the handle that commits the first group while the rest of the batch is encoded. Every
+    /// command buffer of the group must be handed to [`Ahead::finish`] by the thread that encoded it (the first one,
+    /// `buffers()[0]`, included), and nothing may be encoded into them afterwards. [`submit`](Self::submit) then commits
+    /// only the other groups. None when the batch has no prefix.
+    pub fn commit_ahead(&mut self) -> Option<Arc<Ahead>> {
+        if let Some(a) = &self.ahead {
+            return Some(a.clone());
+        }
+        if self.early.is_empty() && self.split.is_none() {
+            return None;
+        }
+        let split = self.split();
+        if split.bounds.len() < 2 {
+            return None;
+        }
+        let n = split.bounds[0];
+        self.done.set_pending();
+        let ahead = Arc::new(Ahead {
+            split,
+            scratch: self.scratch.clone(),
+            t0: self.t0,
+            slots: Mutex::new((0..n).map(|_| None).collect()),
+            left: AtomicUsize::new(n),
+            committed: AtomicBool::new(false),
+        });
+        self.ahead = Some(ahead.clone());
+        Some(ahead)
+    }
+
+    /// Ends every command buffer and commits them in order. Returns at once.
     ///
     /// One commit for the whole batch: committed one by one, the GPU paused 0.2 to 1 ms at every command buffer
-    /// boundary (Breath of the Wild, six command buffers a frame).
+    /// boundary (Breath of the Wild, six command buffers a frame). A batch with prefixes
+    /// ([`on_prefix_complete`](Self::on_prefix_complete)) is committed in as many groups as it has prefixes plus one.
     pub fn submit(mut self) -> Result<SubmittedBatch> {
         let cpu_encode_ns = u64::try_from(self.t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let number = self.number;
-        self.done.set_pending();
-        let queue = self.ctx.queue();
-        let mut held = vec![Keep::new(self.scratch.clone())];
-        let mut list: Vec<NonNull<ProtocolObject<dyn MTL4CommandBuffer>>> =
-            Vec::with_capacity(self.buffers.len());
-        for cb in &mut self.buffers {
-            cb.raw().endCommandBuffer();
-            list.push(NonNull::from(&**cb.raw()));
-            held.push(Keep::new(cb.take_retained()));
-        }
-        if list.is_empty() {
+        if self.buffers.is_empty() {
+            self.done.set_pending();
             self.done.add(
                 &CommandBufferStats {
                     frame: number,
@@ -318,44 +565,49 @@ impl Batch {
                 done: self.done.clone(),
             });
         }
-        let held = Mutex::new(Some(held));
-        let cbs = list.len();
-        let done = self.done.clone();
-        let metrics = self.metrics.clone();
-        let handler: FeedbackBlock =
-            RcBlock::new(move |fb: NonNull<ProtocolObject<dyn MTL4CommitFeedback>>| {
-                // SAFETY: Metal passes a valid feedback object that lives for the call.
-                let fb = unsafe { fb.as_ref() };
-                let (start, end) = (fb.GPUStartTime(), fb.GPUEndTime());
-                let stats = CommandBufferStats {
-                    frame: number,
-                    cpu_encode_ns,
-                    gpu_ns: ((end - start).max(0.0) * 1e9) as u64,
-                    gpu_start_s: start,
-                    gpu_end_s: end,
-                    failed: fb.error().is_some(),
-                };
-                if let Some(e) = fb.error() {
-                    static SHOWN: AtomicUsize = AtomicUsize::new(0);
-                    if SHOWN.fetch_add(1, Ordering::Relaxed) < 32 {
-                        eprintln!(
-                            "nxkit-metal: warning: batch {number} command buffer failed: {} {:?}",
-                            e.localizedDescription(),
-                            e.userInfo()
-                        );
-                    }
-                }
-                held.lock().unwrap_or_else(PoisonError::into_inner).take();
-                metrics.record(&stats);
-                if let Some(h) = DONE_HOOK.get() {
-                    h(number, cbs, stats.gpu_start_s, stats.gpu_end_s);
-                }
-                done.add(&stats, true);
+        let has_ahead = self.ahead.is_some();
+        let split = self.split();
+        if !has_ahead {
+            self.done.set_pending();
+        }
+        let ahead = self.ahead.clone();
+        let ahead_done = ahead
+            .as_ref()
+            .is_some_and(|a| a.committed.load(Ordering::Acquire));
+        // The command buffers of the groups still to commit, as ended.
+        let mut ended: Vec<Entry> = Vec::with_capacity(self.buffers.len());
+        for (i, cb) in self.buffers.iter_mut().enumerate() {
+            let from_ahead = ahead.as_ref().and_then(|a| {
+                a.slots
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get_mut(i)
+                    .and_then(Option::take)
             });
-        let opts = MTL4CommitOptions::new();
-        opts.addFeedbackHandler(&handler);
-        // SAFETY: `list` holds `list.len()` valid, ended command buffers, kept alive by `held` until the feedback.
-        unsafe { queue.commit_count_options(NonNull::from(&list[0]), list.len(), &opts) };
+            if ahead_done && i < split.bounds[0] {
+                continue;
+            }
+            match from_ahead {
+                Some(e) => ended.push(e),
+                None => {
+                    cb.raw().endCommandBuffer();
+                    ended.push((
+                        Ended(NonNull::from(&**cb.raw())),
+                        vec![Keep::new(cb.take_retained())],
+                    ));
+                }
+            }
+        }
+        let mut at = if ahead_done { split.bounds[0] } else { 0 };
+        let mut entries = ended.into_iter();
+        for (g, &end) in split.bounds.iter().enumerate() {
+            if ahead_done && g == 0 {
+                continue;
+            }
+            let group: Vec<Entry> = entries.by_ref().take(end - at).collect();
+            at = end;
+            split.commit(g, group, self.scratch.clone(), cpu_encode_ns);
+        }
         Ok(SubmittedBatch {
             number,
             done: self.done.clone(),

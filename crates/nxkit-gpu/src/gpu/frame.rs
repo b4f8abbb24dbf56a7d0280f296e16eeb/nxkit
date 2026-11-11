@@ -93,7 +93,7 @@ impl Gpu {
 
         // The batch comes first, so that the uniform snapshots go to its scratch memory on a helper thread while this
         // one resolves the textures; the chunks need both.
-        let ends = if plan.passes.is_empty() {
+        let mut ends = if plan.passes.is_empty() {
             Vec::new()
         } else {
             let weights: Vec<u32> = plan
@@ -103,6 +103,27 @@ impl Gpu {
                 .collect();
             jobs::split(&weights, self.threads * CHUNKS_PER_THREAD)
         };
+        // `NXKIT_PRIVATE=1`: the pages that game threads waited for lately as the results of this GPU are signalled when the
+        // last pass that writes them is done. The frame is cut after those passes: each cut ends a command buffer, and the
+        // part before it is committed on its own.
+        let fence = pools.overlay().map_or(0, |o| o.frame());
+        let mut early = if fence != 0 && !plan.passes.is_empty() && crate::private::early_enabled() {
+            crate::private::early_cuts(
+                frame,
+                plan,
+                detail,
+                fence,
+                &self.guest.address_map(),
+                self.gmem.learned(),
+            )
+        } else {
+            crate::private::EarlyPlan::default()
+        };
+        for cut in &early.cuts {
+            if let Err(at) = ends.binary_search(&(cut.after_pass + 1)) {
+                ends.insert(at, cut.after_pass + 1);
+            }
+        }
         let t_ring = Instant::now();
         let mut batch = self.ring.begin(1 + ends.len())?;
         PHASES.with(|p| p.borrow_mut()[0] = nanos(t_ring, Instant::now()));
@@ -325,6 +346,42 @@ impl Gpu {
             all.extend(handles.keep);
             Arc::new((all, tables, gmem_buf.clone(), pools.clone()))
         };
+
+        // The pass signals: the pages of a cut that a texture copy-back or a read of the CPU writes are left out (the last command
+        // buffer writes them, whichever pass the planner named).
+        let mut ahead = None;
+        if !early.cuts.is_empty() {
+            let mut excluded: Vec<(u64, u64)> = Vec::new();
+            let ids = dirty.keys().copied().chain(frame.cmds.iter().filter_map(|c| match c {
+                Cmd::CpuRead(id) => Some(*id),
+                _ => None,
+            }));
+            for id in ids {
+                if let Ok(rec) = view.record(id) {
+                    excluded.push((rec.address.get(), rec.end()));
+                }
+            }
+            crate::private::early_exclude(&mut early.cuts, &excluded, &self.guest.address_map());
+            let mut registered = Vec::new();
+            for cut in std::mem::take(&mut early.cuts) {
+                let end = cut.after_pass + 1;
+                let count = ends.iter().position(|e| *e == end).map_or(0, |i| i + 2);
+                if batch.on_prefix_complete(count, crate::private::early_release(fence, cut.pages.clone())) {
+                    registered.push(cut);
+                }
+            }
+            early.cuts = registered;
+            // The first part can go to the GPU while the rest is encoded, unless the first command buffer still gets the pages
+            // of a late stage.
+            if let Some(o) = pools.overlay()
+                && !early.cuts.is_empty()
+                && !o.forced()
+                && !crate::knob("privlatestage")
+                && !crate::knob("privnoahead")
+            {
+                ahead = batch.commit_ahead();
+            }
+        }
 
         let mut deswizzled = Vec::new();
         let (first, rest) = batch
@@ -580,13 +637,28 @@ impl Gpu {
                 r
             })
             .collect();
-        let items: Vec<(&mut CommandBuffer, Range<usize>)> = rest.iter_mut().zip(ranges).collect();
+        let items: Vec<(usize, &mut CommandBuffer, Range<usize>)> = rest
+            .iter_mut()
+            .zip(ranges)
+            .enumerate()
+            .map(|(i, (cb, r))| (i + 1, cb, r))
+            .collect();
         mark(t0, "pre-chunks");
         let t_chunks = Instant::now();
-        let results = jobs::run_all(self.threads, items, |(cb, range)| {
+        // Nothing more is encoded into the first command buffer in this case: the part before the first cut is committed as soon
+        // as the thread that ends its last command buffer is done.
+        if let Some(a) = &ahead {
+            a.finish(0, first);
+        }
+        let results = jobs::run_all(self.threads, items, |(index, cb, range)| {
             let (start, cpu0) = (Instant::now(), nxkit_metal::thread::cpu_time_ns());
             let passes = range.len();
             let r = run_chunk(&sh, cb, &scratch, &keep, range);
+            if let Some(a) = &ahead
+                && index < a.count()
+            {
+                nxkit_metal::autorelease_pool(|| a.finish(index, cb));
+            }
             let timing = ChunkTiming {
                 delay_ns: nanos(t_chunks, start),
                 wall_ns: nanos(start, Instant::now()),
@@ -671,6 +743,7 @@ impl Gpu {
         self.ctx.commit_residency();
         let t_submit = Instant::now();
         let submitted = batch.submit()?;
+        crate::private::note_split(&early, plan.passes.len(), ahead.is_some());
         PHASES.with(|p| {
             let mut p = p.borrow_mut();
             p[2] = nanos(t_commit, t_submit);
