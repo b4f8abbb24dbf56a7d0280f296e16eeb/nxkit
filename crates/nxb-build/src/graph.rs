@@ -22,6 +22,9 @@ pub struct Build {
     pub shaders: PathBuf,
     /// GPU architectures of the pipeline archive (empty: none).
     pub gpus: Vec<String>,
+    /// Lists of the pipelines a title asked for while it played (`pipelines.seen`). The archive compiles the states in
+    /// them that a plain base cannot serve. Empty: none.
+    pub pipeline_lists: Vec<PathBuf>,
     /// What the game is read from.
     pub src: crate::inputs::Inputs,
 }

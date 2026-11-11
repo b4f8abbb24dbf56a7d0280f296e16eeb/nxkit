@@ -1,6 +1,6 @@
 # Pipeline prewarm: no compile while playing
 
-Status: runtime cache built (identity by key scheme), build-side shipping not built, 2026-11-09. Mac only.
+Status: runtime cache built (identity by key scheme); the list is kept across builds (`seen-<scheme>.list`); the build compiles the recorded states into the archive (`--pipeline-list`, the lists of the app it replaces); the start waits for all pipelines of a list that its build has not made, with a loading screen; 2026-11-11. Not yet run on a title: the compile of the recorded bases by `metal-tt` and their lookup by the host are untested outside synthetic data. Mac only.
 
 ## The problem
 
@@ -12,7 +12,10 @@ The host owns a cache next to the title (details: `docs/shader-step.md` "The run
 
 1. Every pipeline that the cache of `nxkit-metal` makes is captured by the pipeline data set serializer and written as an `rt-*.mtl4archive` file; its description goes into `pipelines.seen` (`nxkit-gpu/src/pipelines/record.rs`, hooked in `build_render`, the mesh builds and `Pipelines::compute`).
 2. At the next start the `rt-` files are extra lookup archives (`ArchiveConfig::runtime`) and `prewarm.rs` makes every pipeline of the list under the key the encoder uses, before the first frame. Anything new compiles once and is written for the run after.
-3. The folder is named by an identity of the app build, the key scheme, the macOS build and the GPU; another identity removes it. The size is cut to 512 MiB and 64 files, oldest first.
+3. The archives are in a folder named by an identity of the app build, the key scheme, the macOS build and the GPU; another identity removes it. The size is cut to 512 MiB and 64 files, oldest first.
+4. The list is not in that folder. It is kept in `pipecache/seen-<scheme>.list` across builds, because it depends on the key scheme only. A rebuild drops the archives (binaries of the old build) but starts with the full list.
+5. The build side: `nxb build` reads the list of the app it replaces (or `--pipeline-list`) and adds a base for each recorded state that the plain base cannot serve (vertex layout, samples, alpha to coverage, ICB support) to the archive script, so the new app ships them compiled for the GPU. The host finds them in the archive and specializes them.
+6. A start with a list that its build has not made waits for all of it (a loading screen shows the count), then writes `prewarm.done`.
 
 Choices:
 
@@ -22,8 +25,10 @@ Choices:
 
 ## Not done
 
-- Shipping recorded states in the build (`nxb-archive` reading a `seen` file and adding specialized descriptors to the script and the shard index): dropped because the user does not rebuild. The format in `record.rs` has what it needs (the stems, entries and the whole colour state). The batch keys would stay content keys, the index would need a section from the full description to the shard (index version 2).
-- Pairs whose vertex shader has stage inputs are left out of the build's archive; they are in the list with their vertex layout and in the runtime archive after one run.
+- Pairs whose vertex shader has stage inputs were left out of the build's archive. They are now covered when a list of recorded states exists: the base with the vertex layout of the state is in the archive. Without a list (the first build of a title) they compile at the first start, once.
+- Mesh and compute pipelines of the list are not added to the archive by the list (compute has its own list from the profile; mesh pipelines are built by the host).
+- The recorded colour state is not used by the build: the host specializes colours. A state that Metal cannot specialize from the base compiles at run time.
+- The shard of a state is the shard of its pair unless a very large group is cut between them; a lookup in the wrong shard misses and the pipeline compiles.
 
 ## Open points
 

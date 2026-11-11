@@ -152,7 +152,21 @@ pub struct Plan {
 /// with its `_b` library and its `entry`. A vertex shader with stage inputs and no `pull` field needs the vertex layout
 /// of the draw, which a base cannot have, and is left out (`left[2]`). `entry_z` is not used.
 /// `_zero` (depth mode `zero`) stays for the callers; the stamp records it.
-pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool) -> Plan {
+pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool) -> Plan {
+    plan_with(lib_dir, chain, pairs, zero, false)
+}
+
+/// [`plan`], and with `with_inputs` a vertex shader with stage inputs and no `pull` field is accepted as well (its
+/// base is the `_b` library and the `entry`). The bases of recorded states with a vertex layout ([`crate::seen`]) are
+/// checked this way: the checks are the same as for a plain base, only the missing vertex layout is not held against
+/// the pair.
+pub fn plan_with(
+    lib_dir: &Path,
+    chain: &str,
+    pairs: &[(String, String)],
+    _zero: bool,
+    with_inputs: bool,
+) -> Plan {
     let mut js: HashMap<String, Option<Value>> = HashMap::new();
     let mut fns: HashMap<String, Option<Vec<(String, bool)>>> = HashMap::new();
     let mut layer: HashMap<String, bool> = HashMap::new();
@@ -198,7 +212,7 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], _zero: bool
             _ => false,
         };
         let pull = pull_entry(&vj);
-        if has_inputs && pull.is_none() {
+        if has_inputs && pull.is_none() && !with_inputs {
             out.left[2] += 1;
             continue;
         }
@@ -291,6 +305,17 @@ pub fn script_text_with(
     bases: &[PlannedBase],
     computes: &[crate::compute::ComputePipe],
 ) -> String {
+    script_text_all(lib_dir, bases, &[], computes)
+}
+
+/// [`script_text_with`] and the bases of recorded states ([`crate::seen`]) after the plain bases. With no states the
+/// text is the same as [`script_text_with`] gives.
+pub fn script_text_all(
+    lib_dir: &Path,
+    bases: &[PlannedBase],
+    states: &[crate::seen::StateBase],
+    computes: &[crate::compute::ComputePipe],
+) -> String {
     let dir = fs::canonicalize(lib_dir).unwrap_or_else(|_| lib_dir.to_path_buf());
     let (mut libs, mut fns, mut pipes) = (Vec::new(), Vec::new(), Vec::new());
     let (mut seen_l, mut seen_f) = (HashSet::new(), HashSet::new());
@@ -335,6 +360,11 @@ pub fn script_text_with(
                 Value::List(vec![colour.clone(); 8]),
             ),
         ]));
+    }
+    for st in states {
+        let v = fd(&st.vertex.0, &st.vertex.1, &mut libs, &mut fns);
+        let f = fd(&st.fragment.0, &st.fragment.1, &mut libs, &mut fns);
+        pipes.push(st.descriptor(v, f, &colour));
     }
     let mut descriptors = vec![("render_pipeline_descriptors".into(), Value::List(pipes))];
     if !computes.is_empty() {

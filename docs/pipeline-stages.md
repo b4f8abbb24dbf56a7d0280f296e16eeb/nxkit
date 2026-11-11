@@ -195,7 +195,8 @@ A game without a title module stops with exit code 4. `--platform` takes `mac` o
 | `-o`, `--app-name`, `--bundle-id`, `--work-dir` | where the app and the work folder go, and the names |
 | `--dry-run` | prints the plan (inputs, paths, stages) and writes nothing |
 | `--allow-damaged` | files that fail the hash check are written as read and the build goes on |
-| `--gpu ARCH\|none` | the GPU architecture of the pipeline archive. `none` skips the archive. Without the option, a game with `shader_pairs.tsv` uses the architecture of this Mac |
+| `--gpu ARCH\|none` | the GPU architecture of the pipeline archive. `none` skips the archive (and with it the recorded states below). Without the option, a game with `shader_pairs.tsv` uses the architecture of this Mac |
+| `--pipeline-list FILE` | a list of the pipelines that the host recorded while the title played (`pipelines.seen` or `seen-<scheme>.list`). Without the option the build takes the lists of the app that it replaces (see "Recorded states") |
 | `--threads`, `--load-limit` | the workers, and the share of CPU and memory that the archive may use |
 | `--own-front on\|off\|VERDICTS` | the own front end for the shader libraries |
 | `--shader-manifest FILE`, `--partial` | refer to the section on manifest-first builds |
@@ -245,6 +246,17 @@ The archive stage compiles one Metal 4 render pipeline base for each shader pair
 - Measured on the reference title, cold: 207 s, and 958 to 1,076 CPU seconds.
   The loader probe found all 18,300 bases. The machine load was 7 to 33.
 - Measured: `bases.mtl4-json` and `prebuilt.tsv` are byte-identical (18,301 pairs). The `metal-tt` output is not deterministic. Thus the tests compare archives by content.
+
+### Recorded states
+
+A plain base has no vertex layout, one sample, no alpha to coverage and no ICB support. The host specializes it to the colour state of a draw, which costs little. A pipeline whose other state differs (a vertex layout, several samples, alpha to coverage, ICB support) has no base, and the host compiled it from the functions while the title played: seconds each, with the draw skipped until it was done. The host records every pipeline it makes (`pipelines.seen`, see [shader-step.md](shader-step.md#the-runtime-pipeline-cache)), so the build can compile them ahead.
+
+- The build reads the lists, merged without repeats. It takes `--pipeline-list FILE` if given. Else it takes, from the app at the output path (the build replaces that app): `Contents/Resources/nxkit/pipecache/seen-*.list` and `pipecache/id-*/pipelines.seen`. It looks in `~/Library/Caches/nxkit/<title id>/pipecache/` (where the host keeps the cache when the app cannot be written) and in `$NXKIT_PIPELINE_CACHE_DIR/pipecache/` in the same way. A dry run prints the files it found, and a build prints one `pipeline list:` line for each.
+- Each `R` line whose state is not the plain one (`nxb-archive::seen`) gives one more base in the script, after the plain bases: the pair, the vertex descriptor, the primitive class, the sample count, alpha to coverage and ICB support of the state, and eight colour attachments that are all `Unspecialized`. The colour state is not needed: the host specializes it. A state with other colours is the same base. A pipeline that the point size fallback made (`fallback` is 1) also gets the base without a primitive class.
+- A base is added only when the plan accepts its pair by the rules of a plain base (same chain, no mesh stage, no function constants, no layer output, no primitive ID, the functions are in the libraries). The vertex shader may have stage inputs. A line that does not parse, or that names a vertex format the script has no name for (`FloatRg11B10`), is left out. Mesh and compute lines are not used: the archive has compute pipelines from the profile already, and the host builds mesh pipelines itself.
+- The bases go into the batches like the plain ones (grouped by vertex function, so a state is in the shard of its pair unless a batch of a very large group is cut between them). The streamed archive gives each state to the group of its pair. `nxb pso` takes `--pipeline-list` (repeatable) and has the states in `bases.mtl4-json`.
+- The host (`nxkit-metal`, `cache::specialize`) asks the archive for the unspecialized pipeline of such a state first, with the primitive class of the draw and then without one, and specializes it to the colours. When the archive has none, it compiles the base as before.
+- The script and the cut are tested with synthetic lists and libraries. The compile of such a base by `metal-tt` and the lookup by the host were not run in this change: check a build of a title with a list. The lookup of a state with a vertex layout depends on Metal matching the vertex descriptor of the script with the one the host sets, and a descriptor that differs only gives a miss (the pipeline then compiles at run time as it did before).
 
 ### Where the state of an archive pipeline comes from
 

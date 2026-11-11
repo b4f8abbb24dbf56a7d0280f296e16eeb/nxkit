@@ -183,16 +183,16 @@ impl PipelineCache {
             if archive.is_some() && found.is_none() {
                 b.rejected.fetch_add(1, Ordering::Relaxed);
             }
-            found
+            found.map(|raw| (raw, MTLPrimitiveTopologyClass::Unspecified))
         } else {
             unspecialize_colors(&d);
-            None
+            self.archived_state_base(archive, &d)
         };
         let (found, counter) = match archived {
-            Some(raw) => (
+            Some((raw, topology)) => (
                 Some(Base {
                     pipeline: RenderPipeline { raw },
-                    topology: MTLPrimitiveTopologyClass::Unspecified,
+                    topology,
                 }),
                 &b.found,
             ),
@@ -215,6 +215,33 @@ impl PipelineCache {
             counter.fetch_add(1, Ordering::Relaxed);
         }
         found
+    }
+
+    /// The unspecialized pipeline of a state that the plain base does not have (a vertex layout, several samples, alpha
+    /// to coverage, ICB support), from the archive: the build adds the bases of the states a title recorded
+    /// (`nxb-archive` `seen`). `d` has its colour attachments unspecialized and the primitive class of the draw. The
+    /// class of the draw is asked first, then none, which is what a base that the point size fallback made has. The
+    /// answer comes with the class the pipeline was archived with, which its specializations must ask for.
+    fn archived_state_base(
+        &self,
+        archive: Option<&ProtocolObject<dyn MTL4Archive>>,
+        d: &MTL4RenderPipelineDescriptor,
+    ) -> Option<(
+        Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+        MTLPrimitiveTopologyClass,
+    )> {
+        let a = archive?;
+        let topology = d.inputPrimitiveTopology();
+        if let Ok(raw) = a.newRenderPipelineStateWithDescriptor_error(d) {
+            return Some((raw, topology));
+        }
+        if topology == MTLPrimitiveTopologyClass::Unspecified {
+            return None;
+        }
+        d.setInputPrimitiveTopology(MTLPrimitiveTopologyClass::Unspecified);
+        let found = a.newRenderPipelineStateWithDescriptor_error(d).ok();
+        d.setInputPrimitiveTopology(topology);
+        found.map(|raw| (raw, MTLPrimitiveTopologyClass::Unspecified))
     }
 
     /// Compiles the unspecialized pipeline of `d`. Metal refuses a vertex function that writes the point size with a

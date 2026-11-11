@@ -9,6 +9,7 @@ pub mod crashsig;
 mod dylib;
 pub mod exitflush;
 mod kernel;
+pub mod loading;
 mod mouse;
 pub mod paging;
 pub mod vm;

@@ -177,8 +177,11 @@ pub fn install(
     settings: &Settings,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
-    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings))
-        .map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
+    // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
+    nxkit_gpu::set_prewarm_screen(Some(Arc::new(crate::sys::loading::LoadingScreen)));
+    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings));
+    nxkit_gpu::set_prewarm_screen(None);
+    let backend = backend.map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
     nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))
         .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
     if !nvn::set_command_settings(CommandSettings {

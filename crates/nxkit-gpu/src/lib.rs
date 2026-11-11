@@ -73,7 +73,7 @@ mod walk;
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use guestpools::GuestPools;
-pub use pipelines::flush_runtime_cache;
+pub use pipelines::{PrewarmScreen, flush_runtime_cache, set_prewarm_screen};
 pub use pools::{
     Backing, BadRange, Drained, Loc, MakeBacking, MetalPoolSet, Miss, PAGE, PagePins, PoolBuffer,
     PoolEntry, PoolSet, PoolSnapshot, PoolStats,

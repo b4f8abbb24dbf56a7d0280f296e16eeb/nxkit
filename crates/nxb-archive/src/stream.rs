@@ -68,6 +68,9 @@ pub struct StreamInputs {
     pub pairs: Vec<(String, String)>,
     /// The compute libraries (`<key>_b`) that get compute pipelines, in [`crate::compute::read_computes`] order.
     pub computes: Vec<String>,
+    /// The bases of the states that a title recorded ([`crate::seen`]). Each goes into the group of its pair, and only
+    /// when the pair is in `pairs` and the plan accepts its functions.
+    pub extras: Vec<crate::seen::StateBase>,
     /// `depth_mode zero`.
     pub zero: bool,
     /// Pairs per group (about, a group's identity hash cuts it, at most 4x).
@@ -361,11 +364,30 @@ fn group(
             .collect();
         (b, c)
     };
-    if bases.is_empty() && pipes.is_empty() {
+    let here: HashSet<(&str, &str)> = pairs
+        .iter()
+        .map(|(v, f)| (v.as_str(), f.as_str()))
+        .collect();
+    let mine: Vec<crate::seen::StateBase> = inp
+        .extras
+        .iter()
+        .filter(|e| {
+            e.pair_keys()
+                .is_some_and(|(v, f)| here.contains(&(v.as_str(), f.as_str())))
+        })
+        .cloned()
+        .collect();
+    let states = crate::seen::usable(&inp.lib_dir, &inp.chain, &mine, inp.zero);
+    if bases.is_empty() && pipes.is_empty() && states.is_empty() {
         crate::Batches::replanned(c, 1, 0);
         return Ok(Vec::new());
     }
-    let script = Script::parse(&plan::script_text_with(&inp.lib_dir, &bases, &pipes))?;
+    let script = Script::parse(&plan::script_text_all(
+        &inp.lib_dir,
+        &bases,
+        &states,
+        &pipes,
+    ))?;
     let mut digests = HashMap::new();
     for (label, path) in script.library_paths()? {
         let b = fs::read(Path::new(&path)).map_err(|e| format!("{path}: {e}"))?;
@@ -396,6 +418,7 @@ mod tests {
                 .map(|i| (format!("v{i}"), format!("f{}", i % 7)))
                 .collect(),
             computes: Vec::new(),
+            extras: Vec::new(),
             zero: false,
             group_target: 8,
             limits: Limits::new(1, 1, 0),

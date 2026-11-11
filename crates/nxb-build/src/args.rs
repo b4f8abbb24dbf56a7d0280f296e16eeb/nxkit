@@ -23,6 +23,9 @@ pub struct Args {
     pub work_dir: Option<PathBuf>,
     /// `--gpu` (`none` or architectures).
     pub gpu: Option<String>,
+    /// `--pipeline-list FILE`: the list of recorded pipelines (`pipelines.seen` or `seen-<scheme>.list` of the host)
+    /// whose states the pipeline archive compiles. Without it the build takes the lists of the app it replaces.
+    pub pipeline_list: Option<PathBuf>,
     /// `--progress`.
     pub progress: String,
     /// `--dry-run`: print the plan and write nothing.
@@ -63,6 +66,7 @@ const VALUE: &[&str] = &[
     "--platform",
     "--work-dir",
     "--gpu",
+    "--pipeline-list",
     "--progress",
     "--threads",
     "--load-limit",
@@ -163,6 +167,7 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--platform" => a.platform = v,
                 "--work-dir" => a.work_dir = Some(v.into()),
                 "--gpu" => a.gpu = Some(v),
+                "--pipeline-list" => a.pipeline_list = Some(v.into()),
                 "--progress" => a.progress = v,
                 "--own-front" => a.own_front = v,
                 "--load-limit" => {

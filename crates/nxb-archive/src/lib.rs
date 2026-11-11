@@ -21,6 +21,7 @@ mod key_tests;
 pub mod plan;
 mod progress;
 pub mod script;
+pub mod seen;
 pub mod shards;
 pub mod stream;
 

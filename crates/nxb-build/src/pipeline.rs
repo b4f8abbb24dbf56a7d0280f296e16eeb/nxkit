@@ -151,6 +151,7 @@ pub fn shaders_and_archive(
         chain: cfg.chain.clone(),
         pairs: nxb_archive::plan::read_pairs(&text),
         computes: compute_shaders(b),
+        extras: nxb_archive::seen::read_lists(&b.pipeline_lists),
         zero,
         group_target: GROUP_TARGET,
         limits: acfg.as_ref().map_or_else(

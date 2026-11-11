@@ -1,11 +1,13 @@
 //! `nxb-pso --msl <b-<chain>> --out <dir> --work <dir> --store <dir> --pairs <tsv> [--pairs <tsv>] [--depth gl|zero]
 //! [--gpu g18p[,g17p]|none] [--platform ios|macos] [--os-min 27.0] [--script-only] [--target 1000] [--tokens N]
-//! [--shader-map <tsv>] [--manifest <tsv>] [--no-compute]`
+//! [--shader-map <tsv>] [--manifest <tsv>] [--pipeline-list <list>] [--no-compute]`
 //!
 //! `pso_offline.py` in Rust: the plan (pairs to bases), the script, `prebuilt.tsv`, `rest_pairs.tsv`, `archive.tsv`, and
 //! one archive per architecture through [`crate::build`] (content-cut batches, store, merge cache).
 //! Every `--shader-map` and `--manifest` adds compute shaders: the `C` rows of the manifests first, then the compute
 //! rows of the shader maps. Each gets a compute pipeline in the archive. `--no-compute` builds the bases alone.
+//! Every `--pipeline-list` (a `pipelines.seen` or `seen-<scheme>.list` of the host) adds the states that the title recorded
+//! and the plain base cannot serve (vertex layout, samples, alpha to coverage, ICB support) as bases ([`crate::seen`]).
 //! `--gpu none` writes the stamp and tables but no archive (the Mac's "no offline archive" mode).
 
 use std::path::PathBuf;
@@ -23,7 +25,7 @@ pub fn main(args: &[String]) -> i32 {
 
 fn run(a: &[String]) -> Result<(), String> {
     let mut pairs = Vec::new();
-    let (mut maps, mut manifests) = (Vec::new(), Vec::new());
+    let (mut maps, mut manifests, mut lists) = (Vec::new(), Vec::new(), Vec::new());
     let mut o = std::collections::BTreeMap::new();
     let mut flags = std::collections::BTreeSet::new();
     let mut i = 0;
@@ -42,6 +44,8 @@ fn run(a: &[String]) -> Result<(), String> {
             pairs.push(PathBuf::from(v));
         } else if k == "shader-map" {
             maps.push(PathBuf::from(v));
+        } else if k == "pipeline-list" {
+            lists.push(PathBuf::from(v));
         } else if k == "manifest" {
             manifests.push(PathBuf::from(v));
         } else {
@@ -90,7 +94,8 @@ fn run(a: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let js = work.join("bases.mtl4-json");
-    let script = crate::plan::script_text_with(&lib_dir, &p.bases, &computes);
+    let states = crate::seen::usable(&lib_dir, &chain, &crate::seen::read_lists(&lists), zero);
+    let script = crate::plan::script_text_all(&lib_dir, &p.bases, &states, &computes);
     if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {
         std::fs::write(&js, &script).map_err(|e| e.to_string())?;
     }
@@ -110,6 +115,12 @@ fn run(a: &[String]) -> Result<(), String> {
         l[6],
         t0.elapsed().as_secs_f64()
     );
+    if !lists.is_empty() {
+        println!(
+            "pso_offline: {} recorded states added as bases",
+            states.len()
+        );
+    }
     if !shaders.is_empty() {
         println!(
             "pso_offline: {}",
@@ -123,7 +134,7 @@ fn run(a: &[String]) -> Result<(), String> {
     if !ps.is_empty() && p.bases.is_empty() && p.rest.is_empty() {
         return Err("no base to build".into());
     }
-    if p.bases.is_empty() && computes.is_empty() {
+    if p.bases.is_empty() && computes.is_empty() && states.is_empty() {
         archs.clear();
     }
     let platform = o.get("platform").cloned().unwrap_or_else(|| "ios".into());

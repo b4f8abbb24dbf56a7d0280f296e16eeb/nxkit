@@ -5,13 +5,18 @@
 //! calls as a draw's (`build_render`, `mesh_traced`, `compute`), and the runtime archives are lookup archives of the
 //! compiler, so it is an archive lookup and not a compile; one that the archives lack compiles here, once.
 //!
-//! The start waits for the work, up to `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20): a draw that finds its pipeline
+//! The start waits for the work, up to `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20), unless the list is one this app
+//! build has not made yet (the identity folder has no `prewarm.done`, see `carry.rs`): then it waits for all of it,
+//! however long, because a pipeline that is neither in the shipped archive nor in a runtime archive is compiled here,
+//! once, and a draw that meets it later waits a frame or more for a background compile and is skipped meanwhile. The
+//! list was recorded by an earlier build, so this is a one-time cost of a rebuilt app. A line says how far it is every
+//! second, and the host's loading screen (`screen.rs`) shows it. A draw that finds its pipeline
 //! missing waits a frame or more for a background compile, and a start that is a few seconds longer costs less than the
 //! hitches of the first minutes. Waiting is bounded because the guest's first call into the GPU must not stall for a
 //! long time on a list that grew over many sessions: what is not done by then goes on in the background threads while
 //! the first frames run (a draw that asks for a pipeline the threads have not reached builds it itself, as before). The
 //! work runs on several threads, as many as the background builds use. One line gives the counts and the time, and a
-//! line every 2 s says how far it is while the start waits.
+//! line says how far it is while the start waits (every 2 s, every second when it waits for all).
 //!
 //! When the list is done the open shards of the build archive are closed (`NXKIT_SHARD_TRIM=0` keeps them).
 //! `newArchiveWithURL` holds each shard file in malloc memory (1.1 to 1.6 GB measured for 34 to 38 open archives), and
@@ -75,6 +80,8 @@ struct Work {
     /// The start stopped waiting: the last worker prints the line.
     detached: AtomicBool,
     over: (Mutex<()>, Condvar),
+    /// Written when every pipeline is made (`carry::DONE_FILE`).
+    marker: Option<PathBuf>,
 }
 
 impl Work {
@@ -224,10 +231,16 @@ fn worker(w: &Work) {
                 eprintln!("nxkit-gpu: prewarm over, {closed} archive shards closed");
             }
         }
+        if let Some(m) = &w.marker {
+            let _ = std::fs::write(m, b"");
+        }
         let _g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
         w.over.1.notify_all();
     }
 }
+
+/// The time the start waits before it shows the loading screen: a quick start shows none.
+const SCREEN_AFTER: Duration = Duration::from_secs(1);
 
 fn threads() -> usize {
     std::env::var("NXKIT_PIPELINE_THREADS")
@@ -241,8 +254,9 @@ fn threads() -> usize {
 
 impl Pipelines {
     /// Makes the pipelines of `seen` from the libraries in `shader_dir`. Waits for them up to the budget (see the
-    /// module); what is left goes on in the background.
-    pub(super) fn prewarm(&self, seen: &Seen, shader_dir: &Path) {
+    /// module); what is left goes on in the background. `all` is the marker file to write when every pipeline is
+    /// made, and says that the start waits for all of them without a budget.
+    pub(super) fn prewarm(&self, seen: &Seen, shader_dir: &Path, all: Option<PathBuf>) {
         if seen.is_empty() {
             return;
         }
@@ -261,10 +275,16 @@ impl Pipelines {
             start: Instant::now(),
             detached: AtomicBool::new(false),
             over: (Mutex::new(()), Condvar::new()),
+            marker: all.clone(),
         });
         eprintln!(
-            "nxkit-gpu: compiling shaders: making {} pipelines on {n} threads",
-            seen.len()
+            "nxkit-gpu: compiling shaders: making {} pipelines on {n} threads{}",
+            seen.len(),
+            if all.is_some() {
+                ", waiting for all of them (the list is from an earlier build, one time)"
+            } else {
+                ""
+            }
         );
         let mut started = 0;
         for i in 0..n {
@@ -280,21 +300,33 @@ impl Pipelines {
         }
         let budget =
             Duration::from_secs(super::runtime::env_num("NXKIT_PIPELINE_PREWARM_WAIT", 20));
+        let every = Duration::from_secs(if all.is_some() { 1 } else { 2 });
+        let screen = super::screen::current();
+        let mut screened = false;
         let mut shown = Instant::now();
         let mut g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
-        while w.alive.load(Ordering::Acquire) > 0 && w.start.elapsed() < budget {
+        while w.alive.load(Ordering::Acquire) > 0 && (all.is_some() || w.start.elapsed() < budget) {
             g = w
                 .over
                 .1
-                .wait_timeout(g, Duration::from_millis(250))
+                .wait_timeout(g, Duration::from_millis(100))
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
-            if shown.elapsed() >= Duration::from_secs(2) {
+            if w.start.elapsed() >= SCREEN_AFTER
+                && let Some(s) = &screen
+            {
+                screened = true;
+                s.update(w.finished.load(Ordering::Relaxed), w.entries.len());
+            }
+            if shown.elapsed() >= every {
                 shown = Instant::now();
                 eprintln!("{}", w.line("progress"));
             }
         }
         drop(g);
+        if screened && let Some(s) = &screen {
+            s.finish();
+        }
         if w.alive.load(Ordering::Acquire) == 0 {
             eprintln!("{}", w.line("done"));
         } else {

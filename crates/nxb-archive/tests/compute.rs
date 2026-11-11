@@ -249,6 +249,7 @@ fn streamed_groups_wait_for_their_compute_shaders() {
         chain: "c".into(),
         pairs: vec![("v".into(), "f".into())],
         computes: (0..20).map(|i| format!("k{i}_b")).collect(),
+        extras: Vec::new(),
         zero: false,
         group_target: 8,
         limits: nxb_sched::Limits::new(1, 1, 0),

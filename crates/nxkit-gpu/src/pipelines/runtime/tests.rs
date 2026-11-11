@@ -74,7 +74,7 @@ fn an_atomic_write_leaves_no_temporary_file() {
     let d = std::env::temp_dir().join(format!("nxkit-runtime-write-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    let p = d.join(SEEN_FILE);
+    let p = d.join("a.list");
     write_atomic(&p, b"one").unwrap();
     write_atomic(&p, b"two").unwrap();
     assert_eq!(std::fs::read(&p).unwrap(), b"two");
@@ -92,7 +92,7 @@ fn a_missing_or_foreign_list_gives_an_empty_one() {
     };
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&Seen::default(), Path::new("/nonexistent"));
+    p.prewarm(&Seen::default(), Path::new("/nonexistent"), None);
     assert_eq!(p.counts(), before);
 }
 
@@ -107,6 +107,6 @@ fn a_list_of_missing_libraries_is_skipped() {
     assert_eq!(seen.len(), 1);
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&seen, Path::new("/nonexistent"));
+    p.prewarm(&seen, Path::new("/nonexistent"), None);
     assert_eq!(p.counts(), before);
 }

@@ -16,6 +16,7 @@ mod manifest;
 mod modules;
 mod npdm;
 mod nvn;
+mod pipelist;
 mod romfs;
 mod shaders;
 
@@ -159,6 +160,9 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
     s.push_str(&format!("  work:      {}\n", b.work.display()));
     s.push_str(&format!("  host:      {}\n", host.display()));
     s.push_str(&format!("  app:       {}\n", out.display()));
+    for l in &b.pipeline_lists {
+        s.push_str(&format!("  pipelines: {}\n", l.display()));
+    }
     s.push_str("  stages:    extract, romfs, rewrite, manifest, link, shaders, bundle\n");
     s
 }
@@ -224,6 +228,16 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             .join("shader/cache")
             .join(format!("b-{}", nxb_shader::chain::standalone_version())),
         gpus: Vec::new(),
+        pipeline_lists: pipelist::find(
+            a.pipeline_list.as_deref(),
+            &out,
+            &format!("{:016X}", t.id),
+            std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+            std::env::var_os("NXKIT_PIPELINE_CACHE_DIR")
+                .filter(|d| !d.is_empty())
+                .map(PathBuf::from)
+                .as_deref(),
+        ),
         src,
     };
     if a.dry_run {
@@ -424,6 +438,11 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), format!("{}, signed ad hoc", mib(n))))
     })?;
     b.gpus = gpus(a, &work, &b.profile.0)?;
+    if !b.gpus.is_empty() {
+        for l in &b.pipeline_lists {
+            p.say(&format!("pipeline list: {}", l.display()));
+        }
+    }
     stage(p, "shaders", "shaders and pipeline archive", || {
         let d = shaders::run(a, &b, p, &run_dir)?;
         Ok(((), d.summary))
