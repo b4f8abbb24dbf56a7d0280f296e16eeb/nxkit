@@ -85,7 +85,7 @@ fn a_vertex_shader_with_stage_inputs_gets_a_base_only_for_its_recorded_state() {
     assert_eq!(p.left[2], 1);
     let states = read_list(&state_list("v1_b", "f1_b"));
     assert_eq!(states.len(), 1);
-    let ok = usable(&d, "abc", &states, false);
+    let (ok, _) = usable(&d, "abc", &states, false);
     assert_eq!(ok, states);
     // the script holds the base with the layout
     let s = Script::parse(&script_text_all(&d, &[], &ok, &[])).unwrap();
@@ -141,12 +141,12 @@ fn a_state_the_libraries_cannot_serve_is_left_out() {
     }
     let states = read_list(&all);
     assert_eq!(states.len(), 4);
-    let ok = usable(&d, "abc", &states, false);
+    let (ok, _) = usable(&d, "abc", &states, false);
     assert_eq!(ok.len(), 1);
     assert_eq!(ok[0].vertex.0, "v1_b");
     // a missing entry
     let none = read_list(&state_list("v1_b", "f1_b").replace("\tmain0\t0", "\tother\t0"));
-    assert!(usable(&d, "abc", &none, false).is_empty());
+    assert!(usable(&d, "abc", &none, false).0.is_empty());
 }
 
 /// By hand, against the files of a real build: `NXKIT_SEEN_WORK=<work folder> NXKIT_SEEN_LIST=<list> cargo test -p
@@ -176,8 +176,16 @@ fn real_build() {
         .trim_start_matches("b-")
         .to_string();
     let states = nxb_archive::seen::read_lists(&[PathBuf::from(list)]);
-    let ok = usable(&lib, &chain, &states, false);
-    eprintln!("states {} usable {}", states.len(), ok.len());
+    let (ok, refused) = usable(&lib, &chain, &states, false);
+    eprintln!(
+        "states {} usable {} refused {}",
+        states.len(),
+        ok.len(),
+        refused.len()
+    );
+    for r in refused.iter().take(3) {
+        eprintln!("  {}: {}", r.what, r.reason);
+    }
 }
 
 #[test]
@@ -200,5 +208,5 @@ fn a_pull_shader_gets_its_stage_input_base_from_the_b_library() {
     let pairs = vec![("v1".to_string(), "f1".to_string())];
     assert_eq!(plan(&d, "abc", &pairs, false).bases[0].0, "v1_bp");
     let states = read_list(&state_list("v1_b", "f1_b"));
-    assert_eq!(usable(&d, "abc", &states, false), states);
+    assert_eq!(usable(&d, "abc", &states, false).0, states);
 }

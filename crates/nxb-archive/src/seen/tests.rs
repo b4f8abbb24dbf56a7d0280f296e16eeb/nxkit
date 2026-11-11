@@ -181,3 +181,104 @@ fn the_pair_keys_come_from_the_stems() {
     c.vertex.0 = "other".into();
     assert_eq!(c.pair_keys(), None);
 }
+
+const REAL_BAD: &str = "a0.Float2.0.16,a1.Int1010102Norm.8.16,a2.Int1010102Norm.12.16,a8.Half2.20.16,a12.UChar4Norm.16.16,l16.8.PerVertex.1";
+
+fn state(layout: &str) -> StateBase {
+    read_list(&list(&[line(1, 0, "Unspecified", 1, 0, layout)])).remove(0)
+}
+
+#[test]
+fn the_sizes_of_the_vertex_formats() {
+    for (f, n) in [
+        ("Float", 4),
+        ("Float3", 12),
+        ("Half2", 4),
+        ("Half4", 8),
+        ("UChar4Normalized", 4),
+        ("UChar4Normalized_BGRA", 4),
+        ("Char3", 3),
+        ("UShort2Normalized", 4),
+        ("Short3", 6),
+        ("Int1010102Normalized", 4),
+        ("UInt4", 16),
+    ] {
+        assert_eq!(format_size(f), Some(n), "{f}");
+    }
+    assert_eq!(format_size("Float5"), None);
+    assert_eq!(format_size("Invalid"), None);
+}
+
+#[test]
+fn an_attribute_past_the_stride_of_a_used_location_is_invalid() {
+    // the state of Ocarina of Time that made applegpu-nt refuse the whole batch: attribute 2 at 12 of a stride of 8
+    let s = state(REAL_BAD);
+    let all: HashSet<u32> = [0, 1, 2, 8, 12].into();
+    assert!(
+        s.invalid(Some(&all))
+            .expect("invalid")
+            .contains("attribute 1")
+    );
+    let two: HashSet<u32> = [2].into();
+    assert!(
+        s.invalid(Some(&two))
+            .expect("invalid")
+            .contains("attribute 2")
+    );
+    assert!(s.invalid(None).is_some());
+    // the compiler checks what the function reads: attribute 0 fits
+    let some: HashSet<u32> = [0].into();
+    assert_eq!(s.invalid(Some(&some)), None);
+}
+
+#[test]
+fn a_missing_layout_or_a_zero_stride_is_invalid() {
+    assert!(
+        state("a0.Float4.0.3")
+            .invalid(None)
+            .expect("no layout")
+            .contains("no layout")
+    );
+    assert!(
+        state("a0.Float4.0.3,l3.0.PerVertex.1")
+            .invalid(None)
+            .expect("stride")
+            .contains("stride 0")
+    );
+    assert_eq!(state("a0.Float4.0.3,l3.16.PerVertex.1").invalid(None), None);
+    assert_eq!(state("a0.Float4.0.3,l3.0.Constant.1").invalid(None), None);
+}
+
+#[test]
+fn a_plain_base_is_not_an_extra_and_a_state_is() {
+    let dir = std::env::temp_dir();
+    let bases = vec![(
+        "v_b".to_string(),
+        "main0".to_string(),
+        "f_b".to_string(),
+        "main0".to_string(),
+    )];
+    let st = read_list(&list(&[line(0, 0, "Triangle", 4, 0, "-")]));
+    let s = Script::parse(&script_text_all(&dir, &bases, &st, &[])).expect("script");
+    let digests: std::collections::HashMap<String, nxb_model::Digest> = s
+        .library_paths()
+        .expect("libs")
+        .into_keys()
+        .map(|k| (k, nxb_model::sha256(b"x")))
+        .collect();
+    let b = s.bases(&digests).expect("bases");
+    assert_eq!(b.len(), 2);
+    assert!(!s.is_extra(&b[0]));
+    assert!(s.is_extra(&b[1]));
+    assert_eq!(s.describe(&b[1]), "v1_b.main0 + f1_b.main0");
+}
+
+#[test]
+fn the_reason_of_a_tool_error_is_its_message() {
+    let e = r#"applegpu-nt: ToolError { status: 1, stderr: "applegpu-nt: error: Attribute at index 2: the attribute offset (12) + attribute size (4) must be <= the stride of the buffer (8) at buffer index 4294967295.\n" }"#;
+    let r = crate::short_reason(e);
+    assert!(r.starts_with("Attribute at index 2"), "{r}");
+    assert!(!r.contains('\n') && !r.contains("\\n") && r.len() < 300);
+    assert!(r.ends_with("4294967295."), "{r}");
+    assert_eq!(crate::short_reason("boom"), "boom");
+}

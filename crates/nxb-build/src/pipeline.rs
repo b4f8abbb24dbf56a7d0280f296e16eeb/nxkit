@@ -108,6 +108,27 @@ fn run_limits(c: &nxb_archive::Config, load_percent: u8) -> nxb_sched::Limits {
     }
 }
 
+/// The recorded states that were left out of the archive (invalid for the compiler, or refused by it): a list in
+/// `<work>/pso/mac/dropped.tsv` and a note for the summary, empty when none.
+fn dropped_note(b: &Build, dropped: &[nxb_archive::Dropped]) -> String {
+    let file = b.work.join("pso/mac/dropped.tsv");
+    if dropped.is_empty() {
+        let _ = std::fs::remove_file(&file);
+        return String::new();
+    }
+    let text: String = dropped
+        .iter()
+        .map(|d| format!("{}\t{}\n", d.what, d.reason))
+        .collect();
+    let _ = std::fs::write(&file, text);
+    format!(
+        "; {} recorded states left out ({}; the list is {})",
+        dropped.len(),
+        dropped[0].reason,
+        file.display()
+    )
+}
+
 /// What the combined step did.
 pub struct Outcome {
     /// The shader step's summary.
@@ -270,6 +291,7 @@ pub fn shaders_and_archive(
                                 .filter(|_| a.partial)
                                 .map_or(String::new(), |st| format!("; {}", st.note()));
                             let tail = shards.map_or(tail.clone(), |s| format!("; {s}{tail}"));
+                            let tail = format!("{}{tail}", dropped_note(b, &rep.dropped));
                             Some(Ok(format!(
                                 "{bases} pipelines, {} MB, {} batches ({} reused, up to {} compiler runs at once), streamed beside the shader step{tail}",
                                 rep.size >> 20,

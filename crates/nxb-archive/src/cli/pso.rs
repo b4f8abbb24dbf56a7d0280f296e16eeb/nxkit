@@ -94,7 +94,8 @@ fn run(a: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let js = work.join("bases.mtl4-json");
-    let states = crate::seen::usable(&lib_dir, &chain, &crate::seen::read_lists(&lists), zero);
+    let (states, refused) =
+        crate::seen::usable(&lib_dir, &chain, &crate::seen::read_lists(&lists), zero);
     let script = crate::plan::script_text_all(&lib_dir, &p.bases, &states, &computes);
     if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {
         std::fs::write(&js, &script).map_err(|e| e.to_string())?;
@@ -117,9 +118,13 @@ fn run(a: &[String]) -> Result<(), String> {
     );
     if !lists.is_empty() {
         println!(
-            "pso_offline: {} recorded states added as bases",
-            states.len()
+            "pso_offline: {} recorded states added as bases, {} left out as invalid",
+            states.len(),
+            refused.len()
         );
+        for r in refused.iter().take(5) {
+            println!("pso_offline:   {}: {}", r.what, r.reason);
+        }
     }
     if !shaders.is_empty() {
         println!(
@@ -177,6 +182,18 @@ fn run(a: &[String]) -> Result<(), String> {
                 "now"
             }
         );
+        for d in &r.dropped {
+            println!(
+                "pso_offline: {arch}: left out, the compiler refused it: {}: {}",
+                d.what, d.reason
+            );
+        }
+        if !r.dropped.is_empty() {
+            println!(
+                "pso_offline: {arch}: {} recorded states left out",
+                r.dropped.len()
+            );
+        }
     }
     if let Ok(rd) = std::fs::read_dir(&out) {
         for e in rd.flatten() {

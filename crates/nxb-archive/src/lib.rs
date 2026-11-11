@@ -139,7 +139,92 @@ impl Direct {
 }
 
 /// A batch's outcome slot (filled by its task).
-type Slot = Option<Result<(PathBuf, BatchReport), String>>;
+type Slot = Option<Result<Compiled, String>>;
+
+/// A recorded state that the compiler refused and the archive lacks, with the reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dropped {
+    /// The functions of the pipeline.
+    pub what: String,
+    /// The first line of what the tool said.
+    pub reason: String,
+}
+
+/// One compiled piece of a batch: its key, its archive, its report and the bases in it.
+pub(crate) type PieceOf = (ContentKey, PathBuf, BatchReport, Vec<Base>);
+
+/// What [`compile_resilient`] made of a batch: one piece, or several when entries had to be left out.
+pub(crate) struct Compiled {
+    pub(crate) pieces: Vec<PieceOf>,
+    pub(crate) dropped: Vec<Dropped>,
+}
+
+/// The part of a tool error to show: the text after the last `error:` up to the end of the line or the string, else the
+/// whole message cut to one line.
+pub(crate) fn short_reason(e: &str) -> String {
+    let t = e.rfind("error:").map_or(e, |i| &e[i + "error:".len()..]);
+    let t = t.split(['\n', '"']).next().unwrap_or(t);
+    // a debug-printed message carries `\n` as two characters
+    let t = t.split("\\n").next().unwrap_or(t).trim();
+    t.chars().take(300).collect()
+}
+
+/// [`compile`] for a batch that may hold recorded states. When the compile fails and the batch holds states, the plain
+/// bases are compiled alone and the states in groups that are cut in halves until each group compiles, so that only
+/// the states the compiler refuses are left out (reported in `dropped`); the rest of the batch is kept. A batch of
+/// plain bases only, or whose plain bases fail, is an error as before.
+pub(crate) fn compile_resilient(
+    c: &Config,
+    script: &Script,
+    batch: &[Base],
+    store: &Store,
+    reg: &ProcessRegistry,
+    headroom: Option<&nxb_sched::Headroom>,
+) -> Result<Compiled, String> {
+    let one = |b: &[Base]| -> Result<PieceOf, String> {
+        let key = batch_key(c, b);
+        let (p, r) = compile(c, script, b, &key, store, reg, headroom)?;
+        Ok((key, p, r, b.to_vec()))
+    };
+    let first = one(batch);
+    let err = match first {
+        Ok(p) => {
+            return Ok(Compiled {
+                pieces: vec![p],
+                dropped: Vec::new(),
+            });
+        }
+        Err(e) => e,
+    };
+    let (extras, plain): (Vec<Base>, Vec<Base>) =
+        batch.iter().copied().partition(|b| script.is_extra(b));
+    if extras.is_empty() {
+        return Err(err);
+    }
+    let mut out = Compiled {
+        pieces: Vec::new(),
+        dropped: Vec::new(),
+    };
+    if !plain.is_empty() {
+        out.pieces.push(one(&plain)?);
+    }
+    let mut work = vec![extras];
+    while let Some(group) = work.pop() {
+        match one(&group) {
+            Ok(p) => out.pieces.push(p),
+            Err(e) if group.len() == 1 => out.dropped.push(Dropped {
+                what: script.describe(&group[0]),
+                reason: short_reason(&e),
+            }),
+            Err(_) => {
+                let (a, b) = group.split_at(group.len() / 2);
+                work.push(b.to_vec());
+                work.push(a.to_vec());
+            }
+        }
+    }
+    Ok(out)
+}
 
 /// One batch's outcome.
 #[derive(Clone, Debug)]
@@ -173,6 +258,8 @@ pub struct Report {
     pub merged_from_store: bool,
     /// The pieces of a streamed archive with the pipelines in each, in merge order.
     pub shards: Vec<shards::Shard>,
+    /// The recorded states that the compiler refused. They are not in the archive; the rest is.
+    pub dropped: Vec<Dropped>,
 }
 
 fn hash_libraries(
@@ -368,11 +455,11 @@ pub fn build(c: &Config) -> Result<Report, String> {
     let slots = (c.tokens / c.cost.max(1)).max(1) as usize;
     let mut batches = cut_for_slots(script.bases(&digests)?, slots, c.target);
     batches.extend(compute::chunks(script.compute_bases(&digests)?));
-    let keys: Vec<ContentKey> = batches.iter().map(|b| batch_key(c, b)).collect();
     fs::create_dir_all(&c.work).map_err(|e| format!("{}: {e}", c.work.display()))?;
     let store = Arc::new(Store::open(&c.store).map_err(|e| e.to_string())?);
     let t1 = Instant::now();
-    let results: Arc<Mutex<Vec<Slot>>> = Arc::new(Mutex::new(vec![None; batches.len()]));
+    let results: Arc<Mutex<Vec<Slot>>> =
+        Arc::new(Mutex::new((0..batches.len()).map(|_| None).collect()));
     let reg = Arc::new(ProcessRegistry::new());
     let batches = Arc::new(batches);
     let cfg = Arc::new(c.clone());
@@ -380,18 +467,17 @@ pub fn build(c: &Config) -> Result<Report, String> {
     Batches::planned(c, batches.len());
     let tasks: Vec<Task> = (0..batches.len())
         .map(|i| {
-            let (script, store, results, reg, batches, cfg, key) = (
+            let (script, store, results, reg, batches, cfg) = (
                 script.clone(),
                 store.clone(),
                 results.clone(),
                 reg.clone(),
                 batches.clone(),
                 cfg.clone(),
-                keys[i],
             );
             // the largest batches first (they set the wall time)
             Task::new(move |_| {
-                let r = compile(&cfg, &script, &batches[i], &key, &store, &reg, None);
+                let r = compile_resilient(&cfg, &script, &batches[i], &store, &reg, None);
                 Batches::finished(&cfg);
                 if let Ok(mut g) = results.lock() {
                     g[i] = Some(r);
@@ -410,10 +496,15 @@ pub fn build(c: &Config) -> Result<Report, String> {
     };
     let results = std::mem::take(&mut *results.lock().map_err(|_| "lock")?);
     let mut pieces = Vec::new();
+    let mut keys = Vec::new();
     for r in results {
-        let (p, b) = r.ok_or("a batch did not run")??;
-        pieces.push(p);
-        report.batches.push(b);
+        let done = r.ok_or("a batch did not run")??;
+        for (key, path, rep, _) in done.pieces {
+            keys.push(key);
+            pieces.push(path);
+            report.batches.push(rep);
+        }
+        report.dropped.extend(done.dropped);
     }
     let t2 = Instant::now();
     crate::merge(c, &store, &reg, &keys, &pieces, &mut report)?;

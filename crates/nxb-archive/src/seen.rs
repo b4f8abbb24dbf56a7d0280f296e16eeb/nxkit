@@ -271,7 +271,70 @@ pub fn read_lists(paths: &[PathBuf]) -> Vec<StateBase> {
     out
 }
 
+/// The size in bytes of a vertex format of the script (`Float3` 12, `UChar4Normalized` 4, `Half2` 4).
+fn format_size(name: &str) -> Option<u32> {
+    if name.starts_with("Int1010102") || name.starts_with("UInt1010102") {
+        return Some(4);
+    }
+    let base = name.split("Normalized").next()?;
+    let digits = base.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+    let kind = &base[..base.len() - digits.len()];
+    let count: u32 = if digits.is_empty() {
+        1
+    } else {
+        digits.parse().ok()?
+    };
+    let each = match kind {
+        "Char" | "UChar" => 1,
+        "Short" | "UShort" | "Half" => 2,
+        "Int" | "UInt" | "Float" => 4,
+        _ => return None,
+    };
+    (1..=4).contains(&count).then_some(each * count)
+}
+
 impl StateBase {
+    /// Why the compiler would refuse the vertex descriptor of this state, or none. The host's descriptors come from
+    /// the game's vertex state, and a game may declare an attribute beyond the stride of its stream (the host sets it
+    /// as it is and Metal compiles it at run time), but `applegpu-nt` checks the descriptor and fails the whole batch.
+    /// The rules, from Metal's: a buffer index and an attribute index below 31, every attribute's buffer has a layout,
+    /// the attribute lies inside the stride (`offset + size <= stride`), a per vertex or per instance layout has a
+    /// stride. With `used` (the attribute locations that the vertex function reads) only those attributes are checked.
+    pub fn invalid(&self, used: Option<&HashSet<u32>>) -> Option<String> {
+        for (buffer, stride, step, _) in &self.layouts {
+            if *buffer >= 31 {
+                return Some(format!("layout of buffer {buffer}: buffer index over 30"));
+            }
+            if *stride == 0 && step != "Constant" {
+                return Some(format!(
+                    "layout of buffer {buffer}: stride 0 with step {step}"
+                ));
+            }
+        }
+        for (i, format, offset, buffer) in &self.attributes {
+            // the compiler checks the attributes that the vertex function reads; the others pass as they are
+            if used.is_some_and(|u| !u.contains(i)) {
+                continue;
+            }
+            if *i >= 31 {
+                return Some(format!("attribute {i}: index over 30"));
+            }
+            let Some(size) = format_size(format) else {
+                return Some(format!("attribute {i}: unknown format {format}"));
+            };
+            let Some(layout) = self.layouts.iter().find(|l| l.0 == *buffer) else {
+                return Some(format!("attribute {i}: buffer {buffer} has no layout"));
+            };
+            if layout.2 != "Constant" && offset + size > layout.1 {
+                return Some(format!(
+                    "attribute {i} ({format} at {offset}) does not fit the stride {} of buffer {buffer}",
+                    layout.1
+                ));
+            }
+        }
+        None
+    }
+
     /// The shader keys of the pair: the stems without `_b` or `_bp`. None for a stem the build does not make.
     pub fn pair_keys(&self) -> Option<(String, String)> {
         let v = self
@@ -381,11 +444,33 @@ impl StateBase {
     }
 }
 
+/// The attribute locations that the vertex function of the library reads, from its reflection (`vertex_inputs`). None
+/// when the reflection cannot be read.
+fn vertex_inputs(lib_dir: &Path, stem: &str) -> Option<HashSet<u32>> {
+    let text = std::fs::read(lib_dir.join(format!("{stem}.json"))).ok()?;
+    let v = nxb_pyjson::parse(&String::from_utf8_lossy(&text)).ok()?;
+    let list = v.get("vertex_inputs")?.as_list()?;
+    Some(
+        list.iter()
+            .filter_map(|i| match i.get("location") {
+                Some(Value::Int(n)) => u32::try_from(*n).ok(),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
 /// The bases of `states` that the archive can hold: those whose pair the plan accepts under the same rules as a plain
 /// base (reflection of this chain, no mesh stage, no function constants, no layer output, no primitive ID, the
 /// functions in the libraries) and that name the functions the host draws with. The libraries of the pairs must be in
-/// `lib_dir`. A vertex shader with stage inputs is accepted here, which the plain plan leaves out.
-pub fn usable(lib_dir: &Path, chain: &str, states: &[StateBase], zero: bool) -> Vec<StateBase> {
+/// `lib_dir`. A vertex shader with stage inputs is accepted here, which the plain plan leaves out. A state whose vertex
+/// descriptor the compiler would refuse ([`StateBase::invalid`]) is left out and comes back in the second list.
+pub fn usable(
+    lib_dir: &Path,
+    chain: &str,
+    states: &[StateBase],
+    zero: bool,
+) -> (Vec<StateBase>, Vec<crate::Dropped>) {
     let mut pairs = Vec::new();
     let mut known = HashSet::new();
     for s in states {
@@ -399,11 +484,29 @@ pub fn usable(lib_dir: &Path, chain: &str, states: &[StateBase], zero: bool) -> 
         .bases
         .into_iter()
         .collect();
-    states
-        .iter()
-        .filter(|s| s.pair_keys().is_some() && ok.contains(&s.planned()))
-        .cloned()
-        .collect()
+    let (mut kept, mut dropped) = (Vec::new(), Vec::new());
+    let mut inputs: std::collections::HashMap<String, Option<HashSet<u32>>> = Default::default();
+    for s in states {
+        if s.pair_keys().is_none() || !ok.contains(&s.planned()) {
+            continue;
+        }
+        let used = inputs
+            .entry(s.vertex.0.clone())
+            .or_insert_with(|| vertex_inputs(lib_dir, &s.vertex.0));
+        // `NXB_SEEN_NO_CHECK=1` skips the check, to see what the compiler does with a state ([`crate::compile_resilient`])
+        let check = std::env::var_os("NXB_SEEN_NO_CHECK").is_none();
+        match s.invalid(used.as_ref()).filter(|_| check) {
+            None => kept.push(s.clone()),
+            Some(reason) => dropped.push(crate::Dropped {
+                what: format!(
+                    "{}.{} + {}.{}",
+                    s.vertex.0, s.vertex.1, s.fragment.0, s.fragment.1
+                ),
+                reason,
+            }),
+        }
+    }
+    (kept, dropped)
 }
 
 #[cfg(test)]

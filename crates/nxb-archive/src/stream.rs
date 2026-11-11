@@ -274,6 +274,7 @@ impl Stream {
         let reg = ProcessRegistry::new();
         let seen: Mutex<HashSet<PlannedBase>> = Mutex::new(HashSet::new());
         let pieces: Mutex<Vec<Piece>> = Mutex::new(Vec::new());
+        let dropped: Mutex<Vec<crate::Dropped>> = Mutex::new(Vec::new());
         let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let groups = &self.groups;
         let headroom = Headroom::new(inp.limits);
@@ -282,7 +283,15 @@ impl Stream {
                 let grp = &groups.lock().unwrap_or_else(PoisonError::into_inner)[g];
                 (grp.pairs.clone(), grp.computes.clone())
             };
-            match group(c, inp, (&pairs, &computes), &seen, &store, &reg, &headroom) {
+            match group(
+                c,
+                inp,
+                (&pairs, &computes),
+                (&seen, &dropped),
+                &store,
+                &reg,
+                &headroom,
+            ) {
                 Ok(mut p) => pieces
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -320,6 +329,7 @@ impl Stream {
         let keys: Vec<ContentKey> = pieces.iter().map(|p| p.0).collect();
         let paths: Vec<PathBuf> = pieces.iter().map(|p| p.1.clone()).collect();
         report.batches = pieces.into_iter().map(|p| p.2).collect();
+        report.dropped = dropped.into_inner().unwrap_or_else(PoisonError::into_inner);
         report.shards = shards;
         if c.merge {
             crate::merge(c, &store, &reg, &keys, &paths, &mut report)?;
@@ -343,7 +353,7 @@ fn group(
     c: &Config,
     inp: &StreamInputs,
     (pairs, computes): (&[(String, String)], &[String]),
-    seen: &Mutex<HashSet<PlannedBase>>,
+    (seen, dropped): (&Mutex<HashSet<PlannedBase>>, &Mutex<Vec<crate::Dropped>>),
     store: &Store,
     reg: &ProcessRegistry,
     headroom: &Headroom,
@@ -377,7 +387,11 @@ fn group(
         })
         .cloned()
         .collect();
-    let states = crate::seen::usable(&inp.lib_dir, &inp.chain, &mine, inp.zero);
+    let (states, refused) = crate::seen::usable(&inp.lib_dir, &inp.chain, &mine, inp.zero);
+    dropped
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .extend(refused);
     if bases.is_empty() && pipes.is_empty() && states.is_empty() {
         crate::Batches::replanned(c, 1, 0);
         return Ok(Vec::new());
@@ -398,10 +412,15 @@ fn group(
     batches.extend(crate::compute::chunks(script.compute_bases(&digests)?));
     crate::Batches::replanned(c, 1, batches.len());
     for batch in batches {
-        let key = crate::batch_key(c, &batch);
-        let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg, Some(headroom))?;
+        let done = crate::compile_resilient(c, &script, &batch, store, reg, Some(headroom))?;
         crate::Batches::finished(c);
-        out.push((key, piece, rep, crate::shards::idents(&script, &batch)?));
+        for (key, piece, rep, kept) in done.pieces {
+            out.push((key, piece, rep, crate::shards::idents(&script, &kept)?));
+        }
+        dropped
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(done.dropped);
     }
     Ok(out)
 }

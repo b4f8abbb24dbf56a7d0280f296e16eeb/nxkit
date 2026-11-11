@@ -154,6 +154,49 @@ impl Script {
         Ok(out)
     }
 
+    /// Whether the base is a recorded state ([`crate::seen`]): a render pipeline with a member besides the two functions
+    /// and the colour attachments, which a plain base never has.
+    pub fn is_extra(&self, b: &Base) -> bool {
+        if b.compute {
+            return false;
+        }
+        match self.pipelines.get(b.index) {
+            Some(Value::Object(m)) => m.iter().any(|(k, _)| {
+                !matches!(
+                    k.as_str(),
+                    "vertex_function_descriptor"
+                        | "fragment_function_descriptor"
+                        | "color_attachments"
+                )
+            }),
+            _ => false,
+        }
+    }
+
+    /// The functions of a base for a message: `<vertex lib>.<entry> + <fragment lib>.<entry>`.
+    pub fn describe(&self, b: &Base) -> String {
+        let p = if b.compute {
+            self.computes.get(b.index)
+        } else {
+            self.pipelines.get(b.index)
+        };
+        let f = |k: &str| {
+            p.and_then(|p| p.get(k))
+                .and_then(Value::as_str)
+                .map_or("?", |s| s.trim_start_matches("fnd:"))
+                .to_string()
+        };
+        if b.compute {
+            f("compute_function_descriptor")
+        } else {
+            format!(
+                "{} + {}",
+                f("vertex_function_descriptor"),
+                f("fragment_function_descriptor")
+            )
+        }
+    }
+
     /// The script of one batch, in `pso_offline.py`'s layout (libraries and functions in first-use order).
     pub fn batch_text(&self, batch: &[Base]) -> Result<String, String> {
         let fns: HashMap<&str, &Value> = self
