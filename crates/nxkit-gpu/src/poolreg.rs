@@ -63,6 +63,56 @@ impl<V: Copy> Registry<V> {
     }
 }
 
+impl<V: Copy> Registry<V> {
+    /// Removes every registration `(start, end, value)` that `gone` names; returns how many went.
+    pub(crate) fn remove_where(&mut self, mut gone: impl FnMut(u64, u64, V) -> bool) -> usize {
+        let mut n = 0;
+        self.by_start.retain(|s, es| {
+            let before = es.len();
+            es.retain(|e| !gone(*s, e.end, e.value));
+            n += before - es.len();
+            !es.is_empty()
+        });
+        n
+    }
+
+    /// True when a registration that `pred` accepts overlaps `[start, end)`.
+    pub(crate) fn any_overlap(
+        &self,
+        start: u64,
+        end: u64,
+        mut pred: impl FnMut(V) -> bool,
+    ) -> bool {
+        self.by_start
+            .range(..end)
+            .flat_map(|(_, es)| es.iter())
+            .any(|e| e.end > start && pred(e.value))
+    }
+
+    /// True when every byte of `[start, end)` lies in a registration that `pred` accepts.
+    pub(crate) fn covered_by(&self, start: u64, end: u64, mut pred: impl FnMut(V) -> bool) -> bool {
+        let mut spans: Vec<(u64, u64)> = self
+            .by_start
+            .range(..end)
+            .flat_map(|(s, es)| es.iter().map(move |e| (*s, e)))
+            .filter(|(_, e)| e.end > start && pred(e.value))
+            .map(|(s, e)| (s, e.end))
+            .collect();
+        spans.sort_unstable();
+        let mut at = start;
+        for (s, e) in spans {
+            if s > at {
+                return false;
+            }
+            at = at.max(e);
+            if at >= end {
+                return true;
+            }
+        }
+        at >= end
+    }
+}
+
 impl<V> Registry<V> {
     /// Removes the oldest registration with this start, the one whose removal arrives. Returns whether there was one.
     pub(crate) fn remove(&mut self, start: u64) -> bool {

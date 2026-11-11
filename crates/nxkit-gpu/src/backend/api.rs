@@ -38,6 +38,22 @@ impl Backend for GpuBackend {
         }
     }
 
+    fn map_pool_window(&self, window: PoolInfo) {
+        if let Ok(gpu_addr) = self
+            .guest
+            .address_map()
+            .gpu_address(window.host, window.len)
+        {
+            locked(&self.gpu).map_pool_window(gpu_addr, window.len, window.flags);
+        }
+    }
+
+    fn unmap_pool_window(&self, host: u64, len: u64) {
+        if let Ok(gpu_addr) = self.guest.address_map().gpu_address(host, len) {
+            locked(&self.gpu).unmap_pool_window(gpu_addr, len);
+        }
+    }
+
     fn submit<'a>(
         &'a self,
         queue: u64,

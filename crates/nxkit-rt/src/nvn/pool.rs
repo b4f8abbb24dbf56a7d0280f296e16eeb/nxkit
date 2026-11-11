@@ -20,7 +20,8 @@
 //! A virtual pool (flag 0x200) has no storage of its own. `nvnMemoryPoolMapVirtual` points it at a part of a physical
 //! pool, and only a mapping that keeps the offsets of the physical pool is possible (the virtual pool is then a window
 //! on the physical one). A request that needs a second, different base ends the game with the name of the function.
-//! A sparse pool with holes and a virtual pool without a physical one are not implemented.
+//! The window is also told to the backend (`Backend::map_pool_window`), so that the copy-back judges a texture in it
+//! by the flags of the virtual pool. A sparse pool with holes and a virtual pool without a physical one are not implemented.
 
 use nxkit_abi::guest;
 use nxkit_nvn::backend::PoolInfo;
@@ -146,6 +147,10 @@ pub(crate) extern "C" fn pool_finalize(p: u64) {
                 .backend()
                 .unregister_pool(v.mem);
             pools::gone(v.mem);
+        } else if v.mem != 0 {
+            gpu("nvnMemoryPoolFinalize")
+                .backend()
+                .unmap_pool_window(v.mem, v.size);
         }
         Obj(p).set_u32(0, 0)
     });
@@ -254,6 +259,13 @@ extern "C" fn pool_map_virtual(p: u64, n: i32, requests: u64) -> u32 {
         for i in 0..n.max(0) as u64 {
             let r = read_request(Obj(requests).at(i * REQUEST_SIZE))?;
             if r.phys == 0 {
+                // an unmap: the range of the virtual pool has no physical memory any more
+                let base = o.u64(OFF_MEM)?;
+                if base != 0 && r.voff >= 0 {
+                    gpu("nvnMemoryPoolMapVirtual")
+                        .backend()
+                        .unmap_pool_window(base.wrapping_add(r.voff as u64), r.size);
+                }
                 continue;
             }
             let phys = view(r.phys)?;
@@ -277,7 +289,18 @@ extern "C" fn pool_map_virtual(p: u64, n: i32, requests: u64) -> u32 {
                         "a sparse virtual pool is not implemented: pool {p:#x} maps to {current:#x} and a request wants {wanted:#x}"
                     )));
                 }
-                Mapping::Base(base) => o.set_u64(OFF_MEM, base)?,
+                Mapping::Base(base) => {
+                    o.set_u64(OFF_MEM, base)?;
+                    // The bytes are the physical pool's, at the same addresses, but the game reaches them through
+                    // this pool: its flags (CPU_NO_ACCESS for a render target heap) say what the CPU may read.
+                    gpu("nvnMemoryPoolMapVirtual")
+                        .backend()
+                        .map_pool_window(PoolInfo {
+                            host: phys.mem.wrapping_add(r.poff as u64),
+                            len: r.size,
+                            flags: o.u32(OFF_FLAGS)?,
+                        });
+                }
             }
         }
         Ok(ret_bool(true))

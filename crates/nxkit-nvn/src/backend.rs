@@ -170,6 +170,16 @@ pub trait Backend: Send + Sync {
     /// A memory pool goes away. `host` is the address that [`PoolInfo`] gave.
     fn unregister_pool(&self, host: u64);
 
+    /// A virtual memory pool maps `window` of a physical pool (`nvnMemoryPoolMapVirtual`): `window.host` is the host
+    /// address of the first mapped byte, `window.len` the length and `window.flags` the flags of the virtual pool
+    /// (`VIRTUAL` set). The bytes are the same as the physical pool's, but the game reaches them through the
+    /// virtual pool, so its flags say what the CPU and the GPU may do with them. The default ignores it.
+    fn map_pool_window(&self, _window: PoolInfo) {}
+
+    /// The game unmapped `[host, host + len)` of a virtual pool, or finalised the pool. Every window inside the range
+    /// is dropped. The default ignores it.
+    fn unmap_pool_window(&self, _host: u64, _len: u64) {}
+
     /// A frame ends. `fence` is the number of this flush. The backend encodes `frame` as `plan` says and marks
     /// `fence` done when the GPU has finished. `cx` has the textures and the descriptors the frame refers to.
     fn flush_frame(

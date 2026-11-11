@@ -10,6 +10,23 @@
 //! Render targets in `CPU_NO_ACCESS` pools, which are most of them, are not touched. A candidate is kept at the
 //! native size (not scaled), since the copy-back needs the texels of the guest layout.
 //!
+//! Which pool counts. A game makes a render target heap as a virtual pool (`VIRTUAL | CPU_NO_ACCESS`, usually also
+//! `GPU_CACHED`) and maps it onto a physical pool (`PHYSICAL | COMPRESSIBLE | GPU_NO_ACCESS | CPU_CACHED`, flags 0x18c
+//! in Ocarina of Time) with `nvnMemoryPoolMapVirtual`. Both name the same bytes at the same addresses here, but the
+//! game and the GPU reach them only through the virtual pool: a `GPU_NO_ACCESS` physical pool is memory the GPU does
+//! not touch itself, and the physical pool's `CPU_CACHED` is the mapping of the one that backs it, whose bytes a CPU
+//! read would see in the compressed layout of the render target, not as texels. So the virtual window is registered
+//! (`add_window`, from `Backend::map_pool_window`) with the flags of the virtual pool, and for its addresses it is
+//! newer than the physical pool and wins. The rules of `candidate`:
+//!
+//! 1. A texture in a pool (or window) that holds all of it and has `CPU_NO_ACCESS` is never copied back.
+//! 2. A texture that straddles windows (no single pool holds it) is rejected when the union of the `CPU_NO_ACCESS`
+//!    windows covers it and no CPU-accessible window touches it.
+//! 3. A texture in no window, in a pool without `CPU_NO_ACCESS`, is copied back, also when that pool has
+//!    `GPU_NO_ACCESS` or `COMPRESSIBLE`: nothing says the game does not read it with the CPU, and a wrong guess
+//!    loses data, a copy-back only costs time. `GPU_NO_ACCESS` alone never rejects.
+//! 4. A texture in no known pool is not copied back.
+//!
 //! `NXKIT_COPYBACK=0` turns it off. `NXKIT_COPYBACK_MAX_MB` caps the storage copied back per frame (128 MiB).
 //! `NXKIT_DIAG=copyback` names each texture the first time it is copied back, and prints a summary now and then.
 
@@ -26,6 +43,56 @@ use crate::upload::Dirty;
 
 /// `NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS_BIT`.
 pub(crate) const CPU_NO_ACCESS: u32 = 0x1;
+
+/// `NVN_MEMORY_POOL_FLAGS_VIRTUAL_BIT`: a window of a virtual pool, not a pool with storage of its own.
+pub(crate) const VIRTUAL: u32 = 0x200;
+
+/// Why a GPU-written texture is or is not copied back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Why {
+    /// It is a candidate.
+    Copied,
+    /// `NXKIT_COPYBACK=0`.
+    Off,
+    /// Its contents die with the frame.
+    FrameLocal,
+    /// The game presents it.
+    Presented,
+    /// Depth, stencil or compressed: no copy-back kernel.
+    Format,
+    /// No known pool holds it.
+    NoPool,
+    /// A physical or plain pool that holds it whole has `CPU_NO_ACCESS`.
+    PoolNoCpu,
+    /// A virtual window (or the windows together) that holds it has `CPU_NO_ACCESS`.
+    WindowNoCpu,
+}
+
+impl Why {
+    const ALL: [Why; 8] = [
+        Why::Copied,
+        Why::Off,
+        Why::FrameLocal,
+        Why::Presented,
+        Why::Format,
+        Why::NoPool,
+        Why::PoolNoCpu,
+        Why::WindowNoCpu,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            Why::Copied => "copied",
+            Why::Off => "off",
+            Why::FrameLocal => "frame-local",
+            Why::Presented => "presented",
+            Why::Format => "format",
+            Why::NoPool => "no-pool",
+            Why::PoolNoCpu => "pool-cpu-no-access",
+            Why::WindowNoCpu => "window-cpu-no-access",
+        }
+    }
+}
 
 /// The batches after which a copy-back is surely done on the GPU, even without a wait.
 const RECENT_BATCHES: u64 = 8;
@@ -61,6 +128,8 @@ pub(crate) struct CopyBack {
     recent: Vec<(u64, u64, u64)>,
     /// The textures that the diagnostic named.
     seen: FastSet<TexId>,
+    /// The last decision for each texture (`NXKIT_DIAG=copyback` only). `candidate` takes `&self`.
+    decided: std::sync::Mutex<crate::draws::FastMap<TexId, Why>>,
     /// Frames with a copy-back, textures and bytes copied back, for the diagnostic.
     frames: u64,
     textures: u64,
@@ -77,6 +146,22 @@ impl CopyBack {
     /// newest one counts: it describes what the game mapped last.
     pub(crate) fn pool_of(&self, addr: u64) -> Option<(u64, u64, u32)> {
         self.pools.newest_holding(addr, addr.checked_add(1)?)
+    }
+
+    /// A virtual pool maps `[start, start + len)` of a physical pool, with the flags of the virtual pool. It is the
+    /// newest registration for these addresses. A window already registered for exactly this range is replaced.
+    pub(crate) fn add_window(&mut self, start: u64, len: u64, flags: u32) {
+        let end = start.saturating_add(len);
+        self.pools
+            .remove_where(|s, e, f| f & VIRTUAL != 0 && s == start && e == end);
+        self.pools.add_with(start, len, flags | VIRTUAL);
+    }
+
+    /// Drops every virtual window inside `[start, start + len)`. Physical pools stay.
+    pub(crate) fn remove_windows(&mut self, start: u64, len: u64) {
+        let end = start.saturating_add(len);
+        self.pools
+            .remove_where(|s, e, f| f & VIRTUAL != 0 && s >= start && e <= end);
     }
 
     /// The game finalised the pool at GPU address `start`. The oldest pool with that start goes.
@@ -100,19 +185,96 @@ impl CopyBack {
         }
     }
 
-    /// The pool flags of a texture that is copied back after a frame wrote it, or `None` when it is not copied back:
-    /// a texture of another kind than plain colour, one that lives in a pool the CPU cannot access or in no known
-    /// pool, one whose contents die with the frame, or one that the game presents.
+    /// The pool flags of a texture that is copied back after a frame wrote it, or `None` when it is not copied back
+    /// (see `why` and the rules in the module comment).
     pub(crate) fn candidate(&self, id: TexId, rec: &TextureRecord) -> Option<u32> {
-        if !enabled() || rec.frame_local || self.presented.contains(&id) {
-            return None;
+        let (why, flags) = self.why(id, rec);
+        self.note(id, rec, why, flags);
+        if why == Why::Copied { flags } else { None }
+    }
+
+    /// The decision for a texture, and the flags of the pool it was judged by.
+    pub(crate) fn why(&self, id: TexId, rec: &TextureRecord) -> (Why, Option<u32>) {
+        if !enabled() {
+            return (Why::Off, None);
         }
-        let info = format_info(rec.desc.format).ok()?;
+        if rec.frame_local {
+            return (Why::FrameLocal, None);
+        }
+        if self.presented.contains(&id) {
+            return (Why::Presented, None);
+        }
+        let Ok(info) = format_info(rec.desc.format) else {
+            return (Why::Format, None);
+        };
         if info.aspects != Aspects::Color || info.block_w > 1 || info.block_h > 1 {
-            return None;
+            return (Why::Format, None);
         }
-        let flags = self.pool_flags(rec.address.get(), rec.end())?;
-        (flags & CPU_NO_ACCESS == 0).then_some(flags)
+        let (start, end) = (rec.address.get(), rec.end());
+        let Some(flags) = self.pool_flags(start, end) else {
+            return (Why::NoPool, None);
+        };
+        if flags & CPU_NO_ACCESS != 0 {
+            let why = if flags & VIRTUAL != 0 {
+                Why::WindowNoCpu
+            } else {
+                Why::PoolNoCpu
+            };
+            return (why, Some(flags));
+        }
+        // No single pool that is newer holds the texture whole, so the pool that does is the physical one, or an
+        // older one. It stays hidden from the CPU when windows without CPU access cover it all.
+        let window = |f: u32| f & VIRTUAL != 0;
+        if !self
+            .pools
+            .any_overlap(start, end, |f| window(f) && f & CPU_NO_ACCESS == 0)
+            && self
+                .pools
+                .covered_by(start, end, |f| window(f) && f & CPU_NO_ACCESS != 0)
+        {
+            return (Why::WindowNoCpu, Some(flags));
+        }
+        (Why::Copied, Some(flags))
+    }
+
+    /// Counts and names a decision (`NXKIT_DIAG=copyback`): the first one of each texture and each change.
+    fn note(&self, id: TexId, rec: &TextureRecord, why: Why, flags: Option<u32>) {
+        if !crate::diag("copyback") {
+            return;
+        }
+        let mut decided = self.decided.lock().unwrap_or_else(|e| e.into_inner());
+        if decided.get(&id) == Some(&why) || decided.len() >= 4 * LOG_TEXTURES {
+            return;
+        }
+        decided.insert(id, why);
+        {
+            eprintln!(
+                "DIAG copyback decision {id:?} fmt {:#x} {}x{} at {:#x} size {:#x}: {} (pool flags {})",
+                rec.desc.format,
+                rec.desc.width,
+                rec.desc.height,
+                rec.address.get(),
+                rec.layout.size,
+                why.name(),
+                flags.map_or("none".to_owned(), |f| format!("{f:#x}")),
+            );
+        }
+    }
+
+    /// The textures decided so far by reason, for the summary.
+    fn reasons(&self) -> String {
+        let decided = self.decided.lock().unwrap_or_else(|e| e.into_inner());
+        Why::ALL
+            .iter()
+            .map(|w| {
+                format!(
+                    "{} {}",
+                    w.name(),
+                    decided.values().filter(|v| *v == w).count()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// True when an upload of `rec` reads guest memory that a copy-back of a recent batch writes, so the upload has
@@ -180,6 +342,7 @@ impl CopyBack {
         static LOSSES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let loss = (refused != 0 || over_budget != 0) && crate::diag::first(&LOSSES, 100);
         if crate::diag("copyback") && (n <= 20 || n.is_multiple_of(300) || loss) {
+            eprintln!("DIAG copyback decisions: {}", self.reasons());
             eprintln!(
                 "DIAG copyback frame {n}: {textures} textures {} KiB, refused {refused}, over budget {over_budget}; total {} textures {} MiB",
                 bytes >> 10,
@@ -287,6 +450,123 @@ mod tests {
         c.submitted(20, &[(rec.address.get(), rec.end())]);
         c.idle();
         assert!(!c.upload_waits(&rec));
+    }
+
+    /// A 64x64 RGBA8 texture at `addr`: 0x4000 bytes of storage in a pitch or block layout.
+    fn texture(addr: u64) -> (TexId, TextureRecord) {
+        use nxkit_nvn::layout::{Target, TextureDesc};
+        use nxkit_nvn::resource::ResourceTable;
+        use nxkit_nvn::space::GpuAddr;
+        let desc = TextureDesc {
+            target: Target::D2,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 64,
+            height: 64,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
+        };
+        let mut t = ResourceTable::new();
+        let id = t.create(desc, GpuAddr::new(addr).unwrap()).unwrap();
+        (id, *t.get(id).unwrap())
+    }
+
+    const PHYS_FLAGS: u32 = 0x18c;
+
+    #[test]
+    fn a_window_with_cpu_no_access_hides_a_texture_of_a_cpu_visible_physical_pool() {
+        let (id, rec) = texture(0x10_0000);
+        let mut c = CopyBack::default();
+        c.add_pool(0x10_0000, 0x10_0000, PHYS_FLAGS);
+        assert_eq!(c.why(id, &rec), (Why::Copied, Some(PHYS_FLAGS)));
+        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
+        c.add_window(0x10_0000, 0x10_0000, CPU_NO_ACCESS);
+        assert_eq!(
+            c.why(id, &rec),
+            (Why::WindowNoCpu, Some(CPU_NO_ACCESS | VIRTUAL))
+        );
+        assert_eq!(c.candidate(id, &rec), None);
+        c.remove_windows(0x10_0000, 0x10_0000);
+        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
+    }
+
+    #[test]
+    fn an_unmap_drops_only_the_windows_inside_it_and_never_a_physical_pool() {
+        let (id, rec) = texture(0x10_0000);
+        let mut c = CopyBack::default();
+        c.add_pool(0x10_0000, 0x10_0000, PHYS_FLAGS);
+        c.add_window(0x10_0000, 0x4000, CPU_NO_ACCESS);
+        c.add_window(0x20_0000 - 0x4000, 0x4000, CPU_NO_ACCESS);
+        // a partial unmap leaves the window
+        c.remove_windows(0x10_0000, 0x2000);
+        assert_eq!(c.candidate(id, &rec), None);
+        c.remove_windows(0x10_0000, 0x4000);
+        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
+        assert_eq!(
+            c.pool_of(0x10_0000),
+            Some((0x10_0000, 0x20_0000, PHYS_FLAGS))
+        );
+        // the same range mapped twice is one window
+        c.add_window(0x10_0000, 0x4000, CPU_NO_ACCESS);
+        c.add_window(0x10_0000, 0x4000, CPU_NO_ACCESS);
+        c.remove_windows(0x10_0000, 0x4000);
+        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
+    }
+
+    #[test]
+    fn a_texture_over_two_hidden_windows_is_hidden_and_over_a_visible_one_is_not() {
+        let (id, rec) = texture(0x10_0000);
+        let mut c = CopyBack::default();
+        c.add_pool(0x10_0000, 0x10_0000, PHYS_FLAGS);
+        c.add_window(0x10_0000, 0x2000, CPU_NO_ACCESS);
+        // half covered: the physical pool decides
+        assert_eq!(c.why(id, &rec).0, Why::Copied);
+        c.add_window(0x10_2000, 0x2000, CPU_NO_ACCESS);
+        assert_eq!(c.why(id, &rec).0, Why::WindowNoCpu);
+        // a window the CPU may read, over part of it
+        c.add_window(0x10_3000, 0x1000, 0);
+        assert_eq!(c.why(id, &rec).0, Why::Copied);
+    }
+
+    #[test]
+    fn gpu_no_access_of_the_physical_pool_alone_does_not_reject() {
+        let (id, rec) = texture(0x10_0000);
+        let mut c = CopyBack::default();
+        c.add_pool(0x10_0000, 0x10_0000, 0x8 | 0x4);
+        assert_eq!(c.why(id, &rec).0, Why::Copied);
+        c.add_pool(0x10_0000, 0x10_0000, 0x8 | CPU_NO_ACCESS);
+        assert_eq!(c.why(id, &rec).0, Why::PoolNoCpu);
+    }
+
+    #[test]
+    fn a_texture_in_no_pool_or_with_another_reason_says_so() {
+        let (id, rec) = texture(0x10_0000);
+        let mut c = CopyBack::default();
+        assert_eq!(c.why(id, &rec), (Why::NoPool, None));
+        c.add_pool(0x10_0000, 0x10_0000, 0);
+        c.presented.insert(id);
+        assert_eq!(c.why(id, &rec).0, Why::Presented);
+        let mut frame_local = rec;
+        frame_local.frame_local = true;
+        assert_eq!(c.why(id, &frame_local).0, Why::FrameLocal);
+    }
+
+    #[test]
+    fn the_registry_tells_overlap_and_coverage() {
+        let mut r: Registry<u32> = Registry::default();
+        r.add_with(0x1000, 0x1000, 1);
+        r.add_with(0x2000, 0x1000, 1);
+        r.add_with(0x3000, 0x1000, 2);
+        assert!(r.covered_by(0x1000, 0x3000, |v| v == 1));
+        assert!(!r.covered_by(0x1000, 0x3001, |v| v == 1));
+        assert!(!r.covered_by(0x0fff, 0x2000, |v| v == 1));
+        assert!(r.any_overlap(0x2fff, 0x3001, |v| v == 2));
+        assert!(!r.any_overlap(0x1000, 0x3000, |v| v == 2));
+        assert_eq!(r.remove_where(|_, _, v| v == 1), 2);
+        assert_eq!(r.len(), 1);
     }
 
     #[test]

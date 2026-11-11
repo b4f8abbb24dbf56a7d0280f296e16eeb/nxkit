@@ -166,6 +166,22 @@ A scaled upload counts as `uploads` and `scaled_uploads` (`upload.scaled` in the
 
 The store also keeps a texture at the native size when the CPU writes it much more often than the GPU renders into it (`Heat` in `textures.rs`). For each texture it counts the frames with a newer guest copy (`writes`) and the frames with an attachment use (`renders`) while the scale is not 1. When `writes >= 8` and `writes / 4 >= renders`, the texture is native for good, until the game creates it again. Then it takes the plain upload and no scale. This is a heuristic, not a fact about the game: the numbers are a first guess, and `textures_kept_native` counts the decisions. A texture that is written and rendered in about every frame stays scaled.
 
+### Copy-back of render targets (`copyback.rs`)
+
+A texture that a frame writes is copied back into guest memory at the end of the frame only when the CPU may read it: its storage lies in a memory pool without `NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS` (0x1). The encoder keeps the pools with their flags (`Backend::register_pool`) and, since `nvnMemoryPoolMapVirtual`, the virtual windows (`Backend::map_pool_window`, `unmap_pool_window`).
+
+A game builds its render target heap as a virtual pool (`VIRTUAL | CPU_NO_ACCESS`) mapped onto a physical pool (in Ocarina of Time flags 0x18c: `PHYSICAL | COMPRESSIBLE | GPU_NO_ACCESS | CPU_CACHED`). Both name the same bytes at the same addresses here. Textures are created through the virtual pool, so its flags are what the game may do with them. Before the window was registered only the physical pool was known, its flags lack `CPU_NO_ACCESS`, and about 18 textures (53 MB, about 2 ms of GPU time) were copied back each frame that nothing reads. A window is registered with the flags of its virtual pool for exactly the mapped range (`phys + poff`, `size`) and is newer than the physical pool, so it wins for those addresses. It is dropped when the range is unmapped (a request without a physical pool) or the virtual pool is finalised; a physical pool is never touched by that.
+
+Decision for a GPU-written texture (`CopyBack::why`, in this order):
+
+1. `NXKIT_COPYBACK=0`, a frame-local texture, a texture the game presents, and every format that is not plain colour (depth, stencil, block compressed) are not copied back (`off`, `frame-local`, `presented`, `format`).
+2. No pool holds the whole storage: not copied back (`no-pool`).
+3. The newest pool that holds all of it has `CPU_NO_ACCESS`: not copied back (`window-cpu-no-access` for a virtual window, `pool-cpu-no-access` otherwise).
+4. Else, if the storage straddles several windows, none holds it whole, the windows without CPU access together cover every byte and no window the CPU may read touches it: not copied back (`window-cpu-no-access`).
+5. Else it is copied back (`copied`), also when the pool it lies in has `GPU_NO_ACCESS` or `COMPRESSIBLE`. `GPU_NO_ACCESS` says that the GPU does not use that pool itself, not that the CPU cannot read it, and the CPU can read a physical pool through its `CPU_CACHED` mapping: a copy-back that is not needed costs GPU time, one that is missing loses what the game reads.
+
+`NXKIT_DIAG=copyback` prints `DIAG copyback decision <TexId> fmt .. WxH at .. size ..: <reason> (pool flags ..)` for the first decision of each texture and for each change of it (at most 1200 textures), and `DIAG copyback decisions: copied N, ..` with the textures counted by their latest reason before each summary line.
+
 ## Storage images and raw global memory
 
 ### `img`

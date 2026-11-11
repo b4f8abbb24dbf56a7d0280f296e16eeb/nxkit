@@ -228,6 +228,18 @@ impl Gpu {
         self.gmem.remove_pool(gpu_addr);
     }
 
+    /// A virtual pool maps `[gpu_addr, gpu_addr + len)` of a physical pool. Only the copy-back hears of it: the
+    /// window has the flags of the virtual pool, and for these addresses it is newer than the physical pool, so a
+    /// texture there is judged by what the game may do through the virtual pool (see `copyback`).
+    pub fn map_pool_window(&mut self, gpu_addr: u64, len: u64, flags: u32) {
+        self.copyback.add_window(gpu_addr, len, flags);
+    }
+
+    /// The game unmapped part of a virtual pool, or finalised it: the windows inside the range are dropped.
+    pub fn unmap_pool_window(&mut self, gpu_addr: u64, len: u64) {
+        self.copyback.remove_windows(gpu_addr, len);
+    }
+
     /// The pools that shaders wrote through raw global memory pointers, as the write logs of finished batches showed
     /// (guest GPU address ranges, a whole pool each). The host does not mark textures from it: a pool is far larger
     /// than any texture in it, and the logs do not say where in the pool the stores landed.

@@ -156,7 +156,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `life` | gpu | Metal textures made and dropped, for textures that pass the filter | first 300 | low |
 | `contain` | gpu | a new texture whose storage lies inside another one, or holds another one | first 300 | medium |
 | `split` | gpu | a new texture at the address of another one with a different description | first 300 | low |
-| `copyback` | gpu | the first copy-back of each texture, refused copy-backs, pins at the native size and a summary | first 300 textures, 100 refusals, summary every 300 frames | low |
+| `copyback` | gpu | the first copy-back of each texture, refused copy-backs, pins at the native size, the decision for each texture and why (`decision`: copied, off, frame-local, presented, format, no-pool, pool-cpu-no-access, window-cpu-no-access, with the pool flags) and a summary with the textures counted by reason | first 300 textures, 100 refusals, summary every 300 frames | low |
 | `fit` | gpu | views made for the texture type that a shader declares | first 300 | low |
 | `hnd` | gpu | each distinct handle with its backing texture and view | 2000 distinct | medium |
 | `bc` | gpu | the first bytes of each compressed texture in guest memory | 200 distinct | low |
