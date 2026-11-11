@@ -26,13 +26,14 @@ fn msl() -> String {
     )
     .expect("job")
     .remove(0);
-    // Two loads, the second 4 bytes on, each kept by a store to shared memory
+    // Two loads, the second 4 KiB on (too far for one group, see raw_group_tests), each kept by a store to shared
+    // memory
     let ops = [
         s2r_tid(9),
         s2r_tid(5),
         LDG,
         STORE,
-        (LDG.0 | 4 << 40, LDG.1),
+        (LDG.0 | 4096 << 40, LDG.1),
         STORE,
     ];
     let mut code = Vec::new();

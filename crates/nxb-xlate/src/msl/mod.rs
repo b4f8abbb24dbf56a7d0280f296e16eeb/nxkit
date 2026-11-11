@@ -11,7 +11,7 @@
 /// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
 /// A change that alters the output only of the shaders that use one feature of [`revision::FEATURES`] bumps that
 /// feature's revision instead, so the other shaders keep their translations (`docs/early-cutoff.md`).
-pub const TRANSLATOR_ID: &str = "msl-2.20";
+pub const TRANSLATOR_ID: &str = "msl-2.21";
 
 pub mod abi;
 #[cfg(test)]
@@ -65,6 +65,7 @@ pub mod pool;
 mod pool_tests;
 pub mod prelude;
 #[cfg(test)]
+mod raw_group_tests;
 mod raw_last_tests;
 pub mod refl;
 pub mod revision;

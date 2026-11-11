@@ -66,7 +66,7 @@ A panic and a job that the step cannot read are `translation failed`. The step c
 A key that the translator does not do is a `ShaderError` of that key. The build continues.
 
 The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.20`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.21`) and `NXB_TEST_XLATE_SALT`.
 No Rust source goes into V. A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 A feature revision (`nxb_xlate::msl::revision`) translates again only the shaders whose code uses that feature.
 
