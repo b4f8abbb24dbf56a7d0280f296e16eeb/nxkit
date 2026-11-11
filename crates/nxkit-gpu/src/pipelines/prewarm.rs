@@ -140,8 +140,14 @@ impl Work {
             set.insert(r.vertex_key);
         }
         Some(
-            build_render(&self.cache, &self.fallbacks, r.key, r.vertex_key, &mut desc)
-                .map_or(Outcome::Failed, |(_, s)| s.into()),
+            build_render(&self.cache, &self.fallbacks, r.key, r.vertex_key, &mut desc).map_or(
+                Outcome::Failed,
+                |(_, s)| {
+                    // `NXKIT_DIAG=stats` or `pipe`: a compile says why the archive missed
+                    crate::coverage::record(&self.cache, s, Some(&desc), "prewarm");
+                    s.into()
+                },
+            ),
         )
     }
 
@@ -338,5 +344,70 @@ impl Pipelines {
                 eprintln!("{}", w.line("continues in the background"));
             }
         }
+    }
+}
+
+/// A check against a real app, run by hand: `NXKIT_LOOKUP_APP=<run folder of the app> [NXKIT_LOOKUP_N=40]
+/// NXKIT_DIAG=stats cargo test -p nxkit-gpu --lib lookup_of_a_real_app -- --ignored --nocapture`. It makes the first N
+/// render pipelines of the app's list (`pipecache/seen-*.list`) from the app's shards and shaders, and prints what the
+/// archive lookup did for each: the source, and for a compile the reason (`coverage.rs`). `NXKIT_LOOKUP_ARCHIVE=<file>`
+/// uses one archive file instead of the shards, `NXKIT_LOOKUP_LIST=<file>` another list, `NXKIT_LOOKUP_SHADERS=<folder>`
+/// another shader folder.
+#[cfg(test)]
+mod lookup {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs NXKIT_LOOKUP_APP, the run folder of a built app"]
+    fn lookup_of_a_real_app() {
+        let Ok(app) = std::env::var("NXKIT_LOOKUP_APP") else {
+            eprintln!("NXKIT_LOOKUP_APP is not set: nothing checked");
+            return;
+        };
+        let app = PathBuf::from(app);
+        let n: usize = std::env::var("NXKIT_LOOKUP_N")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(40);
+        let list = std::env::var("NXKIT_LOOKUP_LIST")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::fs::read_dir(app.join("pipecache"))
+                    .unwrap()
+                    .flatten()
+                    .map(|e| e.path())
+                    .find(|p| {
+                        p.file_name()
+                            .is_some_and(|n| n.to_string_lossy().starts_with("seen-"))
+                    })
+                    .expect("a seen-*.list in pipecache")
+            });
+        let text = std::fs::read_to_string(list).unwrap();
+        let mut keep = format!("{}\n", super::super::record::HEADER);
+        let mut k = 0;
+        for l in text.lines().filter(|l| l.starts_with("R\t")) {
+            if k < n {
+                keep.push_str(l);
+                keep.push('\n');
+                k += 1;
+            }
+        }
+        let seen = Seen::parse(&keep).unwrap();
+        let ctx = Context::system_default().unwrap();
+        let archive = match std::env::var("NXKIT_LOOKUP_ARCHIVE") {
+            Ok(f) => nxkit_metal::ArchiveConfig {
+                load: Some(PathBuf::from(f)),
+                ..Default::default()
+            },
+            Err(_) => nxkit_metal::ArchiveConfig {
+                shards: Some(app.join("pipelines")),
+                ..Default::default()
+            },
+        };
+        let shaders = std::env::var("NXKIT_LOOKUP_SHADERS")
+            .map_or_else(|_| app.join("shaders"), PathBuf::from);
+        let p = Pipelines::new(&ctx, &archive).unwrap();
+        p.prewarm(&seen, &shaders, None);
+        eprintln!("{}", crate::coverage::describe());
     }
 }

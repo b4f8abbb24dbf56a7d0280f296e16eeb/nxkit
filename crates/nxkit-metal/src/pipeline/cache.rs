@@ -95,6 +95,14 @@ pub struct MissWhy {
     /// `samples`, `alpha-to-coverage`, `vertex-layout`, `color-formats`, `blend`, `write-mask` and `icb`. Only
     /// groups the pipeline really sets are asked.
     pub rejected: Vec<&'static str>,
+    /// The state is not the plain one (a vertex layout, samples, alpha to coverage, ICB support or a class with a
+    /// layout), so the archive was asked for the base of that state with unspecialized colours.
+    pub state_checked: bool,
+    /// That base is in the archive (the lookup of the host hits, and it is not a miss of the archive).
+    pub state_archived: bool,
+    /// When it is not: the state groups that make the lookup hit when reset to the plain value alone, so the archive
+    /// holds the state with that group different.
+    pub state_differs: Vec<&'static str>,
 }
 
 /// A compiler with the serializer that is bound to it when the compiler is made.

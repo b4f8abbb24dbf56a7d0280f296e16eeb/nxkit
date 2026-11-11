@@ -82,7 +82,7 @@ pub struct BaseStats {
 /// Whether the state of `desc` other than its colour attachments is the state the build archived, so the archived
 /// pipeline of its pair can be specialized to it. The primitive class is left out: the archived pipeline has none,
 /// which draws every class (it is what the point size fallback of the host uses).
-fn archivable(desc: &RenderPipelineDesc<'_>) -> bool {
+pub(super) fn archivable(desc: &RenderPipelineDesc<'_>) -> bool {
     desc.vertex_layout.attributes.is_empty()
         && desc.vertex_layout.layouts.is_empty()
         && desc.sample_count == 1

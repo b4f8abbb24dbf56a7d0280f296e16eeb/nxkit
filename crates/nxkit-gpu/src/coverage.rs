@@ -49,6 +49,16 @@ pub(crate) fn record(
         None => "mesh (not in the build's archive)".to_string(),
         Some(_) if !cache.has_archive() => "no archive".to_string(),
         Some(d) => match cache.explain_miss(d) {
+            Ok(w) if w.state_checked && w.state_archived => {
+                "state base archived, the lookup or the specialization failed".to_string()
+            }
+            Ok(w) if w.state_checked && !w.state_differs.is_empty() => format!(
+                "state base not archived, the archive holds the pair with another {}",
+                w.state_differs.join("+")
+            ),
+            Ok(w) if w.state_checked && !w.pair_archived => {
+                "state base not archived, no base of the pair in any state".to_string()
+            }
             Ok(w) if !w.pair_archived => "pair not archived".to_string(),
             Ok(w) if w.rejected.is_empty() => {
                 "pair archived, only the whole state misses".to_string()

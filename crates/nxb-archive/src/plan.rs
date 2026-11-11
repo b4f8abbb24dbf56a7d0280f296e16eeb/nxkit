@@ -156,8 +156,8 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
     plan_with(lib_dir, chain, pairs, zero, false)
 }
 
-/// [`plan`], and with `with_inputs` a vertex shader with stage inputs and no `pull` field is accepted as well (its
-/// base is the `_b` library and the `entry`). The bases of recorded states with a vertex layout ([`crate::seen`]) are
+/// [`plan`], and with `with_inputs` the pair is planned as the host draws it with stage inputs: the `_b` library and the
+/// `entry` of the reflection, also for a vertex shader with a `pull` field. The bases of recorded states with a vertex layout ([`crate::seen`]) are
 /// checked this way: the checks are the same as for a plain base, only the missing vertex layout is not held against
 /// the pair.
 pub fn plan_with(
@@ -211,7 +211,9 @@ pub fn plan_with(
             Some(Value::Bool(b)) => *b,
             _ => false,
         };
-        let pull = pull_entry(&vj);
+        // The states of `with_inputs` are the ones the host draws with stage inputs, from the `_b` library, which it does
+        // unless pulling is on (`NXKIT_PULL=1`); a pull shader's `_bp` base has no vertex layout and is a plain base.
+        let pull = if with_inputs { None } else { pull_entry(&vj) };
         if has_inputs && pull.is_none() && !with_inputs {
             out.left[2] += 1;
             continue;

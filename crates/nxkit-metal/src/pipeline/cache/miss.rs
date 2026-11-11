@@ -28,9 +28,6 @@ impl PipelineCache {
             Ok(a.newRenderPipelineStateWithDescriptor_error(&d).is_ok())
         };
         why.pair_archived = ask(None)?;
-        if !why.pair_archived {
-            return Ok(why);
-        }
         let set = |g: &str| match g {
             "topology" => desc.topology != TopologyClass::Unspecified,
             "samples" => desc.sample_count != 1,
@@ -39,12 +36,58 @@ impl PipelineCache {
             "icb" => desc.support_icb,
             _ => desc.colors.iter().any(Option::is_some),
         };
+        // A state the plain base does not have is looked up as its own base (colours unspecialized, see
+        // `specialize::archived_state_base`). When that misses, each group of the state is reset to the plain value
+        // alone: a group that makes the lookup hit is one the archive holds differently.
+        if !super::specialize::archivable(desc) {
+            let ask_state = |reset: Option<&str>| -> Result<bool> {
+                let d = self.render_descriptor(desc)?;
+                unspecialize_colors(&d);
+                if let Some(g) = reset {
+                    reset_group(&d, g);
+                }
+                Ok(a.newRenderPipelineStateWithDescriptor_error(&d).is_ok())
+            };
+            why.state_checked = true;
+            why.state_archived = ask_state(None)?;
+            if !why.state_archived {
+                for g in STATE_GROUPS {
+                    if set(g) && ask_state(Some(g))? {
+                        why.state_differs.push(g);
+                    }
+                }
+            }
+        }
+        if !why.pair_archived {
+            return Ok(why);
+        }
         for g in GROUPS {
             if set(g) && !ask(Some(g))? {
                 why.rejected.push(g);
             }
         }
         Ok(why)
+    }
+}
+
+/// The state groups of a base that the plain base lacks.
+const STATE_GROUPS: [&str; 5] = [
+    "vertex-layout",
+    "topology",
+    "samples",
+    "alpha-to-coverage",
+    "icb",
+];
+
+/// Puts one state group of `d` back to the plain base's value.
+fn reset_group(d: &MTL4RenderPipelineDescriptor, group: &str) {
+    match group {
+        "vertex-layout" => d.setVertexDescriptor(None),
+        "topology" => d.setInputPrimitiveTopology(MTLPrimitiveTopologyClass::Unspecified),
+        // SAFETY: 1 is a supported sample count.
+        "samples" => unsafe { d.setRasterSampleCount(1) },
+        "alpha-to-coverage" => d.setAlphaToCoverageState(MTL4AlphaToCoverageState::Disabled),
+        _ => d.setSupportIndirectCommandBuffers(MTL4IndirectCommandBufferSupportState::Disabled),
     }
 }
 

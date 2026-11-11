@@ -465,6 +465,15 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 new_save.display()
             ));
         }
+        // the lists of the recorded pipelines go with the save: the new app starts with them
+        let carried = pipelist::carry(
+            &b.pipeline_lists,
+            &out.join("Contents/Resources/nxkit"),
+            &run_dir,
+        );
+        if carried > 0 {
+            p.say(&format!("pipeline lists: {carried} kept in the new app"));
+        }
         let _ = std::fs::remove_dir_all(&out);
         std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
         Ok(((), out.display().to_string()))

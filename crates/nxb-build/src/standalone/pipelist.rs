@@ -65,6 +65,28 @@ pub(crate) fn find(
         .collect()
 }
 
+/// Copies the lists into the cache folder of the new app, so the app that replaces the old one starts with them: a list
+/// under the old app's `pipecache` keeps its place, any other (`--pipeline-list`, the user's cache folder) goes to
+/// `id-carried-<n>/pipelines.seen`, which the host reads like the list of an old identity folder. Returns how many
+/// were copied. A list that cannot be copied is skipped.
+pub(crate) fn carry(lists: &[PathBuf], old_run: &Path, new_run: &Path) -> usize {
+    let old = old_run.join("pipecache");
+    let dest = new_run.join("pipecache");
+    let mut n = 0;
+    for (i, l) in lists.iter().enumerate() {
+        let to = match l.strip_prefix(&old) {
+            Ok(rel) => dest.join(rel),
+            Err(_) => dest.join(format!("id-carried-{i}")).join("pipelines.seen"),
+        };
+        let done = to
+            .parent()
+            .is_some_and(|p| std::fs::create_dir_all(p).is_ok())
+            && std::fs::copy(l, &to).is_ok();
+        n += usize::from(done);
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +144,27 @@ mod tests {
         put(&out.join("Contents/Resources/nxkit/pipecache/seen-3.list"));
         let file = d.join("mine.list");
         assert_eq!(find(Some(&file), &out, "T", None, None), vec![file]);
+    }
+
+    #[test]
+    fn the_lists_go_into_the_new_app() {
+        let d = tmp("carry");
+        let (old, new) = (d.join("old"), d.join("new"));
+        put(&old.join("pipecache/seen-1.list"));
+        put(&old.join("pipecache/id-0123/pipelines.seen"));
+        put(&d.join("elsewhere/mine.list"));
+        let lists = vec![
+            old.join("pipecache/seen-1.list"),
+            old.join("pipecache/id-0123/pipelines.seen"),
+            d.join("elsewhere/mine.list"),
+            d.join("missing.list"),
+        ];
+        assert_eq!(carry(&lists, &old, &new), 3);
+        assert!(new.join("pipecache/seen-1.list").is_file());
+        assert!(new.join("pipecache/id-0123/pipelines.seen").is_file());
+        assert!(new.join("pipecache/id-carried-2/pipelines.seen").is_file());
+        // the new app finds them where the host looks
+        assert_eq!(lists_in(&new).len(), 3);
     }
 
     #[test]

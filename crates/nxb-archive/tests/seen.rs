@@ -148,3 +148,57 @@ fn a_state_the_libraries_cannot_serve_is_left_out() {
     let none = read_list(&state_list("v1_b", "f1_b").replace("\tmain0\t0", "\tother\t0"));
     assert!(usable(&d, "abc", &none, false).is_empty());
 }
+
+/// By hand, against the files of a real build: `NXKIT_SEEN_WORK=<work folder> NXKIT_SEEN_LIST=<list> cargo test -p
+/// nxb-archive --test seen real_build -- --ignored --nocapture`.
+#[test]
+#[ignore = "needs a build's work folder and a list"]
+fn real_build() {
+    let (Ok(work), Ok(list)) = (
+        std::env::var("NXKIT_SEEN_WORK"),
+        std::env::var("NXKIT_SEEN_LIST"),
+    ) else {
+        return;
+    };
+    let lib = fs::read_dir(PathBuf::from(&work).join("shader/cache"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("b-"))
+        })
+        .unwrap();
+    let chain = lib
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .trim_start_matches("b-")
+        .to_string();
+    let states = nxb_archive::seen::read_lists(&[PathBuf::from(list)]);
+    let ok = usable(&lib, &chain, &states, false);
+    eprintln!("states {} usable {}", states.len(), ok.len());
+}
+
+#[test]
+fn a_pull_shader_gets_its_stage_input_base_from_the_b_library() {
+    let d = dir("seen_pull");
+    // the host draws this shader through `_b` with a vertex layout unless pulling is on; `_bp` is the plain base
+    library(
+        &d,
+        "v1_b",
+        r#"{"chain": "abc", "entry": "main0", "vertex_inputs": [{"slot": 0}], "pull": {"slot": 16, "entry": "main0"}}"#,
+        Some(&[("main0", false)]),
+    );
+    library(&d, "v1_bp", "{}", Some(&[("main0", false)]));
+    library(
+        &d,
+        "f1_b",
+        r#"{"chain": "abc", "entry": "main0"}"#,
+        Some(&[("main0", false)]),
+    );
+    let pairs = vec![("v1".to_string(), "f1".to_string())];
+    assert_eq!(plan(&d, "abc", &pairs, false).bases[0].0, "v1_bp");
+    let states = read_list(&state_list("v1_b", "f1_b"));
+    assert_eq!(usable(&d, "abc", &states, false), states);
+}
