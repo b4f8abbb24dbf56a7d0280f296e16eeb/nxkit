@@ -556,13 +556,27 @@ program counter moves by 4. The page stays without access and the thread does no
 | `ldp`, `stp`, `ldpsw` | `LDP`/`STP` of `w` or `x`, `LDPSW`, `LDNP`/`STNP`, signed offset, pre and post index |
 | `simd ldr`, `simd str`, `simd ldp`, `simd stp` | the same for `b`, `h`, `s`, `d`, `q` registers |
 | `ldar`, `stlr` | `LDAR`, `LDARB`, `LDARH`, `STLR`, `STLRB`, `STLRH`, `LDAPR` (as an acquire load) |
+| `atomic` | `LDADD`, `LDCLR`, `LDEOR`, `LDSET`, `LDSMAX`, `LDSMIN`, `LDUMAX`, `LDUMIN`, `SWP` (also the store forms `STADD` and the others), all sizes, with the acquire and release variants: the same operation as a Rust atomic on the alias, the old value to the result register |
+| `cas` | `CAS`, `CASB`, `CASH` and `CASP` (pairs of `w` or `x`; the `x` pair through `CASPAL`), the old value to the compare register(s) |
+| `ldxr`, `stxr` | `LDXR`, `LDAXR`, `LDXP`, `LDAXP` and `STXR`, `STLXR`, `STXP`, `STLXP`, all sizes |
+| `ld1`, `st1` | `LD1`/`ST1` of one to four registers (8 or 16 bytes each), also with an immediate or register post index |
+
+**Exclusives.** An emulated load-exclusive is a load that remembers (address, bytes, value) in a slot of the thread; the
+matching store-exclusive is a compare-exchange of the remembered value, status 0 on success and 1 on failure, and clears the slot.
+A store-exclusive without a load-exclusive of the same address and size in the slot fails. `CLREX` does not fault, so it does not clear the slot; a stale slot is harmless, because every store-exclusive clears it and checks address, size and value. The
+weakening is ABA: if another thread changes the location and changes it back between the two, the store succeeds where the
+hardware monitor would have failed it; the value is the same, so a counter or a lock word behaves, but a lock-free structure that
+needs the change itself will not. If the page opens between the load and the store (the frame completed), the store runs on the
+hardware, finds no monitor and fails, and the loop of the guest goes round once more.
+An atomic or exclusive on an address that is not aligned to its size (the hardware would fault) is not emulated and takes the
+ordinary path. `LD2` to `LD4`, `ST2` to `ST4`, the single-lane and replicating forms of `LD1` are not emulated.
 
 An aligned access of 1 to 8 bytes is one atomic access (relaxed; acquire for a load-acquire, release for a store-release), a
 16-byte access is two 8-byte accesses, a misaligned access copies bytes. The access is not atomic as a whole against a GPU write,
 which the stale mask makes irrelevant: the GPU never writes the bytes touched.
 
 Everything else takes the path of step 3 (wait for the writer, copy the stale blocks, open the page) and is counted by class:
-`exclusive` (`LDXR`, `STXR` and the others), `atomic` (`LDADD`, `SWP`, `CAS`), `ld1/st1` (structure loads and stores), `dc zva`,
+`exclusive` and `atomic` (forms not listed above), `ld1/st1` (the other structure loads and stores), `dc zva`,
 `prefetch`, `other` (literal loads, unprivileged accesses, tagged and authenticated loads, anything else), `touches written bytes`
 (the access reaches a stale block) and `page border or address mismatch` (the access crosses the page, or the signal's address is not
 inside it).

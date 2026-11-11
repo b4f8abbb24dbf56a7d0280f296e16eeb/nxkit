@@ -658,7 +658,7 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
     let t0 = now_ns();
     // SAFETY: a fault at `pc` means the instruction there was fetched, so its word is readable.
     let insn = unsafe { (pc as *const u32).read() };
-    let op = match a64::decode(insn) {
+    let op = match a64::decode_op(insn) {
         Ok(op) => op,
         Err(why) => {
             count_fallback(why, pc);
@@ -670,7 +670,7 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
         return false;
     };
     // SAFETY: `regs` points into the saved state of this thread.
-    let plan = unsafe { a64::plan(&op, &regs) };
+    let plan = unsafe { a64::plan_op(&op, &regs) };
     let (base, p) = (SHARED.base.load(Ordering::Relaxed), page());
     let (first, last) = (plan.ea, plan.ea.wrapping_add(plan.len - 1));
     let in_page = |a: u64| a >= base && ((a - base) / p) as usize == pg;
@@ -687,10 +687,14 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
     // SAFETY: the alias maps the same pages as guest memory with read and write access, and `plan` lies inside the
     // page `pg`, which lies inside guest memory. The registers are the thread's own.
     unsafe {
-        a64::perform(&op, &regs, &plan, (alias + (first - base)) as *mut u8);
+        if !a64::perform_op(&op, &regs, &plan, (alias + (first - base)) as *mut u8) {
+            // An atomic on an address that is not aligned: the hardware would fault; the ordinary path decides.
+            count_fallback(Reason::Mismatch, pc);
+            return false;
+        }
         pc_at.write(pc + 4);
     }
-    if !op.load && info.emu.fetch_or(1, Ordering::AcqRel) & 1 == 0 {
+    if op.writes() && info.emu.fetch_or(1, Ordering::AcqRel) & 1 == 0 {
         // The first store since the flush took the page: the next flush stages it, and it counts as a first write by the phase
         // of the newest frame, as a write that dirties a page does.
         log_dirty(pg);
@@ -705,7 +709,7 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
             count_pc_in(3, pc);
         }
     }
-    SHARED.emu[op.form as usize].fetch_add(1, Ordering::Relaxed);
+    SHARED.emu[op.form() as usize].fetch_add(1, Ordering::Relaxed);
     SHARED.emu_ns.fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
     true
 }
@@ -3247,19 +3251,17 @@ mod tests {
         let s0 = pg.stats();
         let base = m.addr(1) as usize + 1024;
         let reader = std::thread::spawn(move || {
-            let v: u64;
-            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread; an exclusive load of an
-            // aligned word.
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread; LD2 is not emulated.
             unsafe {
-                std::arch::asm!("ldxr {v}, [{p}]", "clrex", p = in(reg) base, v = out(reg) v, options(nostack));
+                std::arch::asm!("ld2 {{v0.16b, v1.16b}}, [{p}]", p = in(reg) base, out("v0") _, out("v1") _, options(nostack));
             }
-            v
+            0u64
         });
         std::thread::sleep(std::time::Duration::from_millis(40));
         pg.complete(9);
         let _ = reader.join().unwrap();
         let s1 = pg.stats();
-        assert_eq!(s1.fallbacks[Reason::Exclusive as usize] - s0.fallbacks[Reason::Exclusive as usize], 1);
+        assert_eq!(s1.fallbacks[Reason::Structure as usize] - s0.fallbacks[Reason::Structure as usize], 1);
         assert_eq!(s1.writer_waits - s0.writer_waits, 1, "it waited for the writer");
         assert_eq!(s1.emulated, s0.emulated);
         pg.set_mirror(0);
@@ -3286,6 +3288,111 @@ mod tests {
         assert_eq!(s1.writer_waits - s0.writer_waits, 1);
         assert_eq!(s1.emulated, s0.emulated);
         pg.set_emulation(true);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn atomics_exclusives_and_ld1_outside_the_written_bytes_are_done_by_the_handler_and_sum_correctly() {
+        use std::arch::asm;
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = emulating(4);
+        let mut st = Collect::default();
+        // The frame may write bytes 0 to 255; everything below is outside.
+        let _ = pg.flush_mirrored(1, &[], &[(m.addr(1), 256)], None, &mut st);
+        let s0 = pg.stats();
+        let base = m.addr(1) as usize;
+        const N: u64 = 300;
+        // The sources of the LD1 copies, written through the alias (the page has no access).
+        let a0 = pg.alias_page(1).unwrap().as_ptr().cast_mut();
+        for k in 0..4 * 64 {
+            // SAFETY: inside the alias page, which is writable.
+            unsafe { a0.add(1024 + 128 + k).write(k as u8 ^ 0x3c) };
+        }
+        let handles: Vec<_> = (0..4u64)
+            .map(|t| {
+                std::thread::spawn(move || {
+                    let p = base + 1024;
+                    for i in 0..N {
+                        // SAFETY: the counters lie inside page 1 of the test mapping, which outlives the joined threads;
+                        // the offsets are aligned for their accesses.
+                        unsafe {
+                            // LDADD (add one), through the acquire-release form.
+                            asm!(".arch_extension lse", "ldaddal {one}, {old}, [{p}]",
+                                p = in(reg) p, one = in(reg) 1u64, old = out(reg) _, options(nostack));
+                            // STADD of a word (no result).
+                            asm!(".arch_extension lse", "stadd {one:w}, [{p}]",
+                                p = in(reg) p + 8, one = in(reg) 1u32, options(nostack));
+                            // LDXR/STXR increment loop.
+                            asm!("2:", "ldaxr {t}, [{p}]", "add {t}, {t}, #1", "stlxr {s:w}, {t}, [{p}]", "cbnz {s:w}, 2b",
+                                p = in(reg) p + 16, t = out(reg) _, s = out(reg) _, options(nostack));
+                            // CAS increment loop.
+                            asm!(".arch_extension lse", "ldr {t}, [{p}]", "2:", "add {n}, {t}, #1", "mov {e}, {t}",
+                                "casal {e}, {n}, [{p}]", "cmp {e}, {t}", "mov {t}, {e}", "b.ne 2b",
+                                p = in(reg) p + 24, t = out(reg) _, n = out(reg) _, e = out(reg) _, options(nostack));
+                            // LDUMAX of a value that grows with the thread and the round.
+                            asm!(".arch_extension lse", "ldumax {v}, {old}, [{p}]",
+                                p = in(reg) p + 32, v = in(reg) t * 1000 + i, old = out(reg) _, options(nostack));
+                            // LDSMIN of a negative value, LDSET of a bit per thread, LDEOR twice (back to zero).
+                            asm!(".arch_extension lse", "ldsmin {v}, {old}, [{p}]",
+                                p = in(reg) p + 40, v = in(reg) (-(t as i64) - 1) as u64, old = out(reg) _, options(nostack));
+                            asm!(".arch_extension lse", "ldset {v}, {old}, [{p}]",
+                                p = in(reg) p + 48, v = in(reg) 1u64 << t, old = out(reg) _, options(nostack));
+                            asm!(".arch_extension lse", "ldeor {v}, {old}, [{p}]", "ldeor {v}, {old}, [{p}]",
+                                p = in(reg) p + 56, v = in(reg) 0xffu64 << (8 * t), old = out(reg) _, options(nostack));
+                            // SWP of the thread number.
+                            asm!(".arch_extension lse", "swp {v}, {old}, [{p}]",
+                                p = in(reg) p + 64, v = in(reg) t, old = out(reg) _, options(nostack));
+                            // CASP increment loop on a pair of x registers (16-byte aligned).
+                            asm!(".arch_extension lse", "ldp x8, x9, [{p}]", "2:", "add x12, x8, #1", "add x13, x9, #2",
+                                "mov x10, x8", "mov x11, x9", "caspal x10, x11, x12, x13, [{p}]",
+                                "cmp x10, x8", "ccmp x11, x9, #0, eq", "mov x8, x10", "mov x9, x11", "b.ne 2b",
+                                p = in(reg) p + 80, out("x8") _, out("x9") _, out("x10") _, out("x11") _,
+                                out("x12") _, out("x13") _, options(nostack));
+                            // LDXP/STXP increment loop.
+                            asm!("2:", "ldaxp x8, x9, [{p}]", "add x8, x8, #1", "add x9, x9, #3",
+                                "stlxp {s:w}, x8, x9, [{p}]", "cbnz {s:w}, 2b",
+                                p = in(reg) p + 96, s = out(reg) _, out("x8") _, out("x9") _, options(nostack));
+                            // LD1/ST1 of two registers, with a post index on the store.
+                            let src = p + 128 + 64 * t as usize;
+                            asm!("ld1 {{v0.16b, v1.16b}}, [{s}]", "st1 {{v0.16b, v1.16b}}, [{d}], #32",
+                                s = in(reg) src, d = inout(reg) src + 32 => _, out("v0") _, out("v1") _, options(nostack));
+                        }
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let alias = pg.alias_page(1).unwrap();
+        let w = |off: usize| u64::from_le_bytes(alias[1024 + off..1024 + off + 8].try_into().unwrap());
+        assert_eq!(w(0), 4 * N, "ldadd");
+        assert_eq!(w(8) & 0xffff_ffff, 4 * N, "stadd");
+        for t in 0..4usize {
+            for k in 0..32 {
+                let src = 1024 + 128 + 64 * t + k;
+                assert_eq!(alias[src + 32], alias[src], "ld1/st1 copy, thread {t} byte {k}");
+            }
+        }
+        assert_eq!(w(16), 4 * N, "ldxr/stxr");
+        assert_eq!(w(24), 4 * N, "cas");
+        assert_eq!(w(32), 3 * 1000 + N - 1, "ldumax");
+        assert_eq!(w(40), (-4i64) as u64, "ldsmin");
+        assert_eq!(w(48), 0b1111, "ldset");
+        assert_eq!(w(56), 0, "ldeor twice");
+        assert!(w(64) < 4, "swp");
+        assert_eq!((w(80), w(88)), (4 * N, 8 * N), "casp");
+        assert_eq!((w(96), w(104)), (4 * N, 12 * N), "ldxp/stxp");
+        let s1 = pg.stats();
+        let n = |s: &PageStats, f: Form| s.emulated[f as usize];
+        assert_eq!(n(&s1, Form::Rmw) - n(&s0, Form::Rmw), 4 * N * 8);
+        assert!(n(&s1, Form::Cas) - n(&s0, Form::Cas) >= 4 * N * 2);
+        assert!(n(&s1, Form::Ldxr) - n(&s0, Form::Ldxr) >= 4 * N * 2);
+        assert_eq!(n(&s1, Form::Ld1) - n(&s0, Form::Ld1), 4 * N);
+        assert_eq!(n(&s1, Form::St1) - n(&s0, Form::St1), 4 * N);
+        assert_eq!(s1.fallbacks, s0.fallbacks, "none fell back");
+        assert_eq!(s1.writer_waits, s0.writer_waits);
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(1)");
         pg.set_mirror(0);
     }
 }

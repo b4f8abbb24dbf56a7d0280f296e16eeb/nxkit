@@ -17,7 +17,8 @@
 //! | `VLdr`, `VStr`, `VLdp`, `VStp` | the same for `b`, `h`, `s`, `d`, `q` registers |
 //! | `Ldar`, `Stlr` | `LDAR`, `LDARB`, `LDARH`, `STLR`, `STLRB`, `STLRH`, and `LDAPR` (as an acquire load) |
 //!
-//! Anything else gets a [`Reason`] (exclusives, atomics of the large system extensions, `LD1`/`ST1`, `DC ZVA`,
+//! [`decode_op`] adds the atomics of the large system extensions, `CAS`/`CASP`, the exclusives and `LD1`/`ST1` of one to
+//! four registers. Anything else gets a [`Reason`] (the other structure loads, `DC ZVA`,
 //! prefetches, literal loads, unprivileged accesses) and the caller falls back to the wait.
 //!
 //! The executor works on a [`Regs`] of raw pointers, so the handler passes the saved thread state and the tests pass a
@@ -53,11 +54,23 @@ pub enum Form {
     VStr = 10,
     /// `STP`, `STNP` of SIMD registers.
     VStp = 11,
+    /// `LDADD`, `LDCLR`, `LDEOR`, `LDSET`, `LDSMAX`, `LDSMIN`, `LDUMAX`, `LDUMIN` and `SWP`.
+    Rmw = 12,
+    /// `CAS`, `CASP`.
+    Cas = 13,
+    /// `LDXR`, `LDAXR`, `LDXP`, `LDAXP`.
+    Ldxr = 14,
+    /// `STXR`, `STLXR`, `STXP`, `STLXP`.
+    Stxr = 15,
+    /// `LD1` of one to four registers.
+    Ld1 = 16,
+    /// `ST1` of one to four registers.
+    St1 = 17,
 }
 
 impl Form {
     /// The number of forms.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 18;
 
     /// The forms in the order of their numbers.
     pub const ALL: [Form; Form::COUNT] = [
@@ -73,6 +86,12 @@ impl Form {
         Form::Stlr,
         Form::VStr,
         Form::VStp,
+        Form::Rmw,
+        Form::Cas,
+        Form::Ldxr,
+        Form::Stxr,
+        Form::Ld1,
+        Form::St1,
     ];
 
     /// The name for reports.
@@ -90,12 +109,18 @@ impl Form {
             Form::Stlr => "stlr",
             Form::VStr => "simd str",
             Form::VStp => "simd stp",
+            Form::Rmw => "atomic",
+            Form::Cas => "cas",
+            Form::Ldxr => "ldxr",
+            Form::Stxr => "stxr",
+            Form::Ld1 => "ld1",
+            Form::St1 => "st1",
         }
     }
 
     /// True for the loads.
     pub fn is_load(self) -> bool {
-        (self as usize) < Form::Str as usize
+        (self as usize) < Form::Str as usize || matches!(self, Form::Ldxr | Form::Ld1)
     }
 }
 
@@ -608,6 +633,481 @@ pub(crate) unsafe fn perform(op: &Mem, r: &Regs, plan: &Plan, p: *mut u8) {
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Atomics, exclusives and LD1/ST1.
+
+/// The operation of an atomic memory instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RmwOp {
+    /// `LDADD`.
+    Add,
+    /// `LDCLR`: and with the complement.
+    Clr,
+    /// `LDEOR`.
+    Eor,
+    /// `LDSET`: or.
+    Set,
+    /// `LDSMAX`.
+    Smax,
+    /// `LDSMIN`.
+    Smin,
+    /// `LDUMAX`.
+    Umax,
+    /// `LDUMIN`.
+    Umin,
+    /// `SWP`.
+    Swp,
+}
+
+/// An instruction of the large system extensions, an exclusive, or `LD1`/`ST1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Op {
+    /// A plain load or store.
+    Mem(Mem),
+    /// `LDADD` and the others: `Rt` gets the old value, the register `rs` is the operand.
+    Rmw {
+        /// The operation.
+        op: RmwOp,
+        /// Bytes: 1, 2, 4 or 8.
+        size: u8,
+        /// The operand register.
+        rs: u8,
+        /// The result register (31 discards).
+        rt: u8,
+        /// The base register.
+        rn: u8,
+        /// Acquire and release bits.
+        acq: bool,
+        /// Release.
+        rel: bool,
+    },
+    /// `CAS` and `CASP`: compare `rs` (and `rs + 1`) with memory, store `rt` (and `rt + 1`), `rs` gets the old value.
+    Cas {
+        /// Bytes per register: 1, 2, 4 or 8.
+        size: u8,
+        /// A pair.
+        pair: bool,
+        /// The compare register.
+        rs: u8,
+        /// The new value register.
+        rt: u8,
+        /// The base register.
+        rn: u8,
+        /// Acquire.
+        acq: bool,
+        /// Release.
+        rel: bool,
+    },
+    /// `LDXR`, `LDXP`, `STXR`, `STXP`.
+    Excl {
+        /// A load.
+        load: bool,
+        /// A pair.
+        pair: bool,
+        /// Bytes per register: 4 or 8 for a pair, 1 to 8 else.
+        size: u8,
+        /// The status register of a store.
+        rs: u8,
+        /// The (first) data register.
+        rt: u8,
+        /// The second data register.
+        rt2: u8,
+        /// The base register.
+        rn: u8,
+        /// Acquire (loads) or release (stores).
+        ord: bool,
+    },
+    /// `LD1`/`ST1` of `regs` registers of 8 or 16 bytes, optionally with a post index (a register, 31 for the size).
+    Ld1 {
+        /// A load.
+        load: bool,
+        /// 16 bytes per register, else 8.
+        q: bool,
+        /// One to four registers.
+        regs: u8,
+        /// The first register.
+        rt: u8,
+        /// The base register.
+        rn: u8,
+        /// The post-index register: None for no writeback, 31 for the immediate.
+        post: Option<u8>,
+    },
+}
+
+impl Op {
+    /// The form, for the counters.
+    pub(crate) fn form(&self) -> Form {
+        match self {
+            Op::Mem(m) => m.form,
+            Op::Rmw { .. } => Form::Rmw,
+            Op::Cas { .. } => Form::Cas,
+            Op::Excl { load: true, .. } => Form::Ldxr,
+            Op::Excl { .. } => Form::Stxr,
+            Op::Ld1 { load: true, .. } => Form::Ld1,
+            Op::Ld1 { .. } => Form::St1,
+        }
+    }
+
+    /// True when the instruction may write memory.
+    pub(crate) fn writes(&self) -> bool {
+        !self.form().is_load()
+    }
+}
+
+/// Decodes the instruction word `i` into any operation the emulator knows.
+pub(crate) fn decode_op(i: u32) -> Result<Op, Reason> {
+    match decode(i) {
+        Ok(m) => Ok(Op::Mem(m)),
+        Err(r @ (Reason::Atomic | Reason::Exclusive | Reason::Structure)) => decode_special(i).ok_or(r),
+        Err(r) => Err(r),
+    }
+}
+
+fn decode_special(i: u32) -> Option<Op> {
+    let rt = (i & 31) as u8;
+    let rn = ((i >> 5) & 31) as u8;
+    let rs = ((i >> 16) & 31) as u8;
+    let size = ((i >> 30) & 3) as u8;
+    // Atomic memory operations: `size 111 0 00 A R 1 Rs o3 opc 00 Rn Rt`.
+    if i & 0x3f20_0c00 == 0x3820_0000 {
+        let (acq, rel) = (i >> 23 & 1 == 1, i >> 22 & 1 == 1);
+        let o3 = i >> 15 & 1;
+        let op = match (o3, (i >> 12) & 7) {
+            (0, 0) => RmwOp::Add,
+            (0, 1) => RmwOp::Clr,
+            (0, 2) => RmwOp::Eor,
+            (0, 3) => RmwOp::Set,
+            (0, 4) => RmwOp::Smax,
+            (0, 5) => RmwOp::Smin,
+            (0, 6) => RmwOp::Umax,
+            (0, 7) => RmwOp::Umin,
+            (1, 0) => RmwOp::Swp,
+            _ => return None,
+        };
+        return Some(Op::Rmw { op, size: 1 << size, rs, rt, rn, acq, rel });
+    }
+    // `CAS`: `size 001000 1 L 1 Rs o0 11111 Rn Rt`.
+    if i & 0x3fa0_7c00 == 0x08a0_7c00 {
+        return Some(Op::Cas { size: 1 << size, pair: false, rs, rt, rn, acq: i >> 22 & 1 == 1, rel: i >> 15 & 1 == 1 });
+    }
+    // `CASP`: `0 sz 001000 0 L 1 Rs o0 11111 Rn Rt`.
+    if i & 0xbfa0_7c00 == 0x0820_7c00 {
+        // Even registers only.
+        if !rs.is_multiple_of(2) || !rt.is_multiple_of(2) {
+            return None;
+        }
+        return Some(Op::Cas { size: 4 << size, pair: true, rs, rt, rn, acq: i >> 22 & 1 == 1, rel: i >> 15 & 1 == 1 });
+    }
+    // `LDXR`, `STXR`: `size 001000 0 L 0 Rs o0 Rt2 Rn Rt`.
+    if i & 0x3fa0_0000 == 0x0800_0000 {
+        let load = i >> 22 & 1 == 1;
+        if load && (rs != 31 || (i >> 10) & 31 != 31) {
+            return None;
+        }
+        return Some(Op::Excl { load, pair: false, size: 1 << size, rs, rt, rt2: 31, rn, ord: i >> 15 & 1 == 1 });
+    }
+    // `LDXP`, `STXP`: sizes `10` and `11`.
+    if i & 0x3fa0_0000 == 0x0820_0000 && size >= 2 {
+        let load = i >> 22 & 1 == 1;
+        return Some(Op::Excl {
+            load,
+            pair: true,
+            size: 1 << size,
+            rs,
+            rt,
+            rt2: ((i >> 10) & 31) as u8,
+            rn,
+            ord: i >> 15 & 1 == 1,
+        });
+    }
+    // `LD1`, `ST1` (multiple structures, one to four registers): `0 Q 0011000 L 000000 opcode size Rn Rt`, or with a post
+    // index `0 Q 0011001 L 0 Rm opcode size Rn Rt`.
+    let plain = i & 0xbfbf_0000 == 0x0c00_0000;
+    let postx = i & 0xbfa0_0000 == 0x0c80_0000;
+    if plain || postx {
+        let regs = match (i >> 12) & 15 {
+            0b0111 => 1,
+            0b1010 => 2,
+            0b0110 => 3,
+            0b0010 => 4,
+            _ => return None,
+        };
+        return Some(Op::Ld1 {
+            load: i >> 22 & 1 == 1,
+            q: i >> 30 & 1 == 1,
+            regs,
+            rt,
+            rn,
+            post: postx.then_some(rs),
+        });
+    }
+    None
+}
+
+/// The address of `op`, with what it writes back.
+///
+/// # Safety
+/// `r` must be a valid register file.
+pub(crate) unsafe fn plan_op(op: &Op, r: &Regs) -> Plan {
+    // SAFETY: the caller guarantees the register file.
+    unsafe {
+        match op {
+            Op::Mem(m) => plan(m, r),
+            Op::Rmw { size, rn, .. } => Plan { ea: r.base(*rn), len: u64::from(*size), writeback: None },
+            Op::Cas { size, pair, rn, .. } => {
+                Plan { ea: r.base(*rn), len: u64::from(*size) * if *pair { 2 } else { 1 }, writeback: None }
+            }
+            Op::Excl { size, pair, rn, .. } => {
+                Plan { ea: r.base(*rn), len: u64::from(*size) * if *pair { 2 } else { 1 }, writeback: None }
+            }
+            Op::Ld1 { q, regs, rn, post, .. } => {
+                let len = u64::from(*regs) * if *q { 16 } else { 8 };
+                let ea = r.base(*rn);
+                let writeback = post.map(|m| ea.wrapping_add(if m == 31 { len } else { r.gpr(m) }));
+                Plan { ea, len, writeback }
+            }
+        }
+    }
+}
+
+fn ords(acq: bool, rel: bool) -> Ordering {
+    match (acq, rel) {
+        (true, true) => Ordering::AcqRel,
+        (true, false) => Ordering::Acquire,
+        (false, true) => Ordering::Release,
+        _ => Ordering::Relaxed,
+    }
+}
+
+fn fail_ord(o: Ordering) -> Ordering {
+    if matches!(o, Ordering::Acquire | Ordering::AcqRel) { Ordering::Acquire } else { Ordering::Relaxed }
+}
+
+/// Does `op` on the aligned memory at `p` and returns the old value.
+///
+/// # Safety
+/// `p` must be valid for `size` bytes and aligned to them.
+unsafe fn rmw(p: *mut u8, size: u8, op: RmwOp, v: u64, o: Ordering) -> u64 {
+    macro_rules! go {
+        ($a:ty, $s:ty, $u:ty, $i:ty) => {{
+            // SAFETY: per the caller.
+            let (a, sa) = unsafe { (<$a>::from_ptr(p.cast()), <$s>::from_ptr(p.cast())) };
+            let v = v as $u;
+            (match op {
+                RmwOp::Add => a.fetch_add(v, o),
+                RmwOp::Clr => a.fetch_and(!v, o),
+                RmwOp::Eor => a.fetch_xor(v, o),
+                RmwOp::Set => a.fetch_or(v, o),
+                RmwOp::Umax => a.fetch_max(v, o),
+                RmwOp::Umin => a.fetch_min(v, o),
+                RmwOp::Swp => a.swap(v, o),
+                RmwOp::Smax => sa.fetch_max(v as $i, o) as $u,
+                RmwOp::Smin => sa.fetch_min(v as $i, o) as $u,
+            }) as u64
+        }};
+    }
+    use std::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64};
+    match size {
+        1 => go!(AtomicU8, AtomicI8, u8, i8),
+        2 => go!(AtomicU16, AtomicI16, u16, i16),
+        4 => go!(AtomicU32, AtomicI32, u32, i32),
+        _ => go!(AtomicU64, AtomicI64, u64, i64),
+    }
+}
+
+/// Compare-exchange of `size` bytes (1 to 8) at the aligned `p`; returns the old value.
+///
+/// # Safety
+/// `p` must be valid for `size` bytes and aligned to them.
+unsafe fn cas(p: *mut u8, size: u8, old: u64, new: u64, o: Ordering) -> u64 {
+    macro_rules! go {
+        ($a:ty, $u:ty) => {{
+            // SAFETY: per the caller.
+            let a = unsafe { <$a>::from_ptr(p.cast()) };
+            match a.compare_exchange(old as $u, new as $u, o, fail_ord(o)) {
+                Ok(v) | Err(v) => v as u64,
+            }
+        }};
+    }
+    match size {
+        1 => go!(AtomicU8, u8),
+        2 => go!(AtomicU16, u16),
+        4 => go!(AtomicU32, u32),
+        _ => go!(AtomicU64, u64),
+    }
+}
+
+/// A 16-byte compare-exchange (`CASPAL`); returns the old value as (low, high).
+///
+/// # Safety
+/// `p` must be valid for 16 bytes and 16-byte aligned.
+unsafe fn cas16(p: *mut u8, old: (u64, u64), new: (u64, u64)) -> (u64, u64) {
+    let (mut o0, mut o1) = old;
+    // SAFETY: per the caller; the registers are the even pairs the instruction wants.
+    unsafe {
+        std::arch::asm!(
+            ".arch_extension lse",
+            "caspal x2, x3, x4, x5, [{p}]",
+            p = in(reg) p,
+            inout("x2") o0,
+            inout("x3") o1,
+            in("x4") new.0,
+            in("x5") new.1,
+            options(nostack),
+        );
+    }
+    (o0, o1)
+}
+
+/// What the last emulated load-exclusive of a thread read: address, bytes in all, value (low, high).
+type Slot = (u64, u64, u64, u64);
+
+thread_local! {
+    /// The monitor of the thread: set by an emulated `LDXR`/`LDXP`, checked and cleared by an emulated `STXR`/`STXP`.
+    static MONITOR: std::cell::Cell<Slot> = const { std::cell::Cell::new((0, 0, 0, 0)) };
+}
+
+/// Does `op` at `p` (the alias of `plan.ea`). Returns false, with nothing changed, when the access is not aligned the way
+/// an atomic needs; the caller takes the ordinary path.
+///
+/// # Safety
+/// `r` must be a valid register file, and `p` readable and writable for `plan.len` bytes.
+pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> bool {
+    let set = |n: u8, v: u64| {
+        if n < 31 {
+            // SAFETY: the register file is valid per the caller.
+            unsafe { r.x.add(usize::from(n)).write(v) };
+        }
+    };
+    let mask = |size: u8, v: u64| if size >= 8 { v } else { v & ((1u64 << (u32::from(size) * 8)) - 1) };
+    match op {
+        Op::Mem(m) => {
+            // SAFETY: per the caller.
+            unsafe { perform(m, r, plan, p) };
+            true
+        }
+        Op::Rmw { op, size, rs, rt, acq, rel, .. } => {
+            if !(p as usize).is_multiple_of(usize::from(*size)) {
+                return false;
+            }
+            // SAFETY: per the caller.
+            unsafe {
+                let v = mask(*size, r.gpr(*rs));
+                let old = rmw(p, *size, *op, v, ords(*acq, *rel));
+                set(*rt, old);
+            }
+            true
+        }
+        Op::Cas { size, pair, rs, rt, acq, rel, .. } => {
+            let total = usize::from(*size) * if *pair { 2 } else { 1 };
+            if !(p as usize).is_multiple_of(total) {
+                return false;
+            }
+            let o = ords(*acq, *rel);
+            // SAFETY: per the caller.
+            unsafe {
+                if !*pair {
+                    let old = cas(p, *size, mask(*size, r.gpr(*rs)), mask(*size, r.gpr(*rt)), o);
+                    set(*rs, old);
+                } else if *size == 4 {
+                    let e = mask(4, r.gpr(*rs)) | mask(4, r.gpr(*rs + 1)) << 32;
+                    let n = mask(4, r.gpr(*rt)) | mask(4, r.gpr(*rt + 1)) << 32;
+                    let old = cas(p, 8, e, n, o);
+                    set(*rs, old & 0xffff_ffff);
+                    set(*rs + 1, old >> 32);
+                } else {
+                    let old = cas16(p, (r.gpr(*rs), r.gpr(*rs + 1)), (r.gpr(*rt), r.gpr(*rt + 1)));
+                    set(*rs, old.0);
+                    set(*rs + 1, old.1);
+                }
+            }
+            true
+        }
+        Op::Excl { load, pair, size, rs, rt, rt2, ord, .. } => {
+            let total = u64::from(*size) * if *pair { 2 } else { 1 };
+            if !(p as usize).is_multiple_of(total as usize) {
+                return false;
+            }
+            let ea = plan.ea;
+            if *load {
+                // SAFETY: per the caller.
+                let (lo, hi) = unsafe {
+                    let o = if *ord { Ordering::Acquire } else { Ordering::Relaxed };
+                    if *pair && *size == 8 {
+                        // Two words: read them as one 16-byte unit (a compare-exchange with itself would write; two
+                        // atomic reads are enough for the value the store compares against).
+                        (read(p, 8, o) as u64, read(p.add(8), 8, o) as u64)
+                    } else if *pair {
+                        let v = read(p, 8, o) as u64;
+                        (v & 0xffff_ffff, v >> 32)
+                    } else {
+                        (read(p, usize::from(*size), o) as u64, 0)
+                    }
+                };
+                set(*rt, lo);
+                if *pair {
+                    set(*rt2, hi);
+                }
+                MONITOR.with(|m| m.set((ea, total, lo, hi)));
+            } else {
+                let (mon_ea, mon_len, lo, hi) = MONITOR.with(|m| m.replace((0, 0, 0, 0)));
+                let o = if *ord { Ordering::Release } else { Ordering::Relaxed };
+                let ok = mon_ea == ea && mon_len == total && {
+                    // SAFETY: per the caller.
+                    unsafe {
+                        if *pair && *size == 8 {
+                            cas16(p, (lo, hi), (r.gpr(*rt), r.gpr(*rt2))) == (lo, hi)
+                        } else if *pair {
+                            let e = mask(4, lo) | mask(4, hi) << 32;
+                            let n = mask(4, r.gpr(*rt)) | mask(4, r.gpr(*rt2)) << 32;
+                            cas(p, 8, e, n, o) == e
+                        } else {
+                            let n = mask(*size, r.gpr(*rt));
+                            cas(p, *size, lo, n, o) == lo
+                        }
+                    }
+                };
+                set(*rs, u64::from(!ok));
+            }
+            true
+        }
+        Op::Ld1 { load, q, regs, rt, .. } => {
+            let n = if *q { 16 } else { 8 };
+            for k in 0..usize::from(*regs) {
+                let reg = (usize::from(*rt) + k) % 32;
+                // SAFETY: per the caller.
+                unsafe {
+                    let at = p.add(k * n);
+                    if *load {
+                        let mut b = [0u8; 16];
+                        for (j, d) in b.iter_mut().take(n).enumerate() {
+                            *d = at.add(j).read_volatile();
+                        }
+                        r.v.add(reg).write_unaligned(u128::from_le_bytes(b));
+                    } else {
+                        let b = r.v.add(reg).read_unaligned().to_le_bytes();
+                        for (j, s) in b.iter().take(n).enumerate() {
+                            at.add(j).write_volatile(*s);
+                        }
+                    }
+                }
+            }
+            if let Some(w) = plan.writeback {
+                // SAFETY: per the caller.
+                unsafe {
+                    match op {
+                        Op::Ld1 { rn, .. } if *rn >= 31 => r.sp.write(w),
+                        Op::Ld1 { rn, .. } => r.x.add(usize::from(*rn)).write(w),
+                        _ => {}
+                    }
+                }
+            }
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1072,5 +1572,233 @@ mod tests {
         assert_eq!(r.word(16, 4), 0xdead_beef);
         r.run(0xf8bf_c041, 24); // ldapr x1, [x2]
         assert_eq!(r.x[1], r.word(24, 8));
+    }
+
+    fn op(i: u32) -> Op {
+        decode_op(i).unwrap_or_else(|e| panic!("{i:#010x} not decoded: {e:?}"))
+    }
+
+    #[test]
+    fn atomic_memory_operations_decode_by_operation_size_and_order() {
+        let rmw_of = |i: u32| match op(i) {
+            Op::Rmw { op, size, rs, rt, rn, acq, rel } => (op, size, rs, rt, rn, acq, rel),
+            o => panic!("{i:#010x}: {o:?}"),
+        };
+        assert_eq!(rmw_of(0xf821_0062), (RmwOp::Add, 8, 1, 2, 3, false, false));
+        assert_eq!(rmw_of(0xb8a1_0062), (RmwOp::Add, 4, 1, 2, 3, true, false));
+        assert_eq!(rmw_of(0xf8e1_0062), (RmwOp::Add, 8, 1, 2, 3, true, true));
+        assert_eq!(rmw_of(0x3861_0062), (RmwOp::Add, 1, 1, 2, 3, false, true));
+        assert_eq!(rmw_of(0x7821_0062), (RmwOp::Add, 2, 1, 2, 3, false, false));
+        assert_eq!(rmw_of(0xf821_1062).0, RmwOp::Clr);
+        assert_eq!(rmw_of(0xf821_2062).0, RmwOp::Eor);
+        assert_eq!(rmw_of(0xf821_3062).0, RmwOp::Set);
+        assert_eq!(rmw_of(0xf821_4062).0, RmwOp::Smax);
+        assert_eq!(rmw_of(0xb821_5062).0, RmwOp::Smin);
+        assert_eq!(rmw_of(0xf821_6062).0, RmwOp::Umax);
+        assert_eq!(rmw_of(0xf821_7062).0, RmwOp::Umin);
+        assert_eq!(rmw_of(0xf821_8062).0, RmwOp::Swp);
+        assert_eq!(rmw_of(0xb8e1_8062), (RmwOp::Swp, 4, 1, 2, 3, true, true));
+        assert_eq!(rmw_of(0xf821_007f).3, 31, "STADD discards the result");
+    }
+
+    #[test]
+    fn compare_and_swap_exclusives_and_ld1_decode() {
+        assert_eq!(
+            op(0xc8a1_7c62),
+            Op::Cas { size: 8, pair: false, rs: 1, rt: 2, rn: 3, acq: false, rel: false }
+        );
+        assert_eq!(
+            op(0x88e1_fc62),
+            Op::Cas { size: 4, pair: false, rs: 1, rt: 2, rn: 3, acq: true, rel: true }
+        );
+        assert_eq!(op(0x08a1_7c62), Op::Cas { size: 1, pair: false, rs: 1, rt: 2, rn: 3, acq: false, rel: false });
+        assert_eq!(op(0x4822_7cc4), Op::Cas { size: 8, pair: true, rs: 2, rt: 4, rn: 6, acq: false, rel: false });
+        assert_eq!(op(0x0862_fcc4), Op::Cas { size: 4, pair: true, rs: 2, rt: 4, rn: 6, acq: true, rel: true });
+        let ex = |i| match op(i) {
+            Op::Excl { load, pair, size, rs, rt, rt2, rn, ord } => (load, pair, size, rs, rt, rt2, rn, ord),
+            o => panic!("{i:#010x}: {o:?}"),
+        };
+        assert_eq!(ex(0xc85f_7c41), (true, false, 8, 31, 1, 31, 2, false));
+        assert_eq!(ex(0x885f_fc41), (true, false, 4, 31, 1, 31, 2, true));
+        assert_eq!(ex(0x085f_7c41), (true, false, 1, 31, 1, 31, 2, false));
+        assert_eq!(ex(0xc803_7c41), (false, false, 8, 3, 1, 31, 2, false));
+        assert_eq!(ex(0x8803_fc41), (false, false, 4, 3, 1, 31, 2, true));
+        assert_eq!(ex(0x4803_7c41), (false, false, 2, 3, 1, 31, 2, false));
+        assert_eq!(ex(0xc87f_0861), (true, true, 8, 31, 1, 2, 3, false));
+        assert_eq!(ex(0x887f_8861), (true, true, 4, 31, 1, 2, 3, true));
+        assert_eq!(ex(0xc824_0861), (false, true, 8, 4, 1, 2, 3, false));
+        assert_eq!(ex(0x8824_8861), (false, true, 4, 4, 1, 2, 3, true));
+        let ld1 = |i| match op(i) {
+            Op::Ld1 { load, q, regs, rt, rn, post } => (load, q, regs, rt, rn, post),
+            o => panic!("{i:#010x}: {o:?}"),
+        };
+        assert_eq!(ld1(0x4c40_7020), (true, true, 1, 0, 1, None));
+        assert_eq!(ld1(0x0c40_7020), (true, false, 1, 0, 1, None));
+        assert_eq!(ld1(0x4c40_a820), (true, true, 2, 0, 1, None));
+        assert_eq!(ld1(0x4c40_6c20), (true, true, 3, 0, 1, None));
+        assert_eq!(ld1(0x4c40_203e), (true, true, 4, 30, 1, None));
+        assert_eq!(ld1(0x4c00_7020), (false, true, 1, 0, 1, None));
+        assert_eq!(ld1(0x0c9f_a020), (false, false, 2, 0, 1, Some(31)));
+        assert_eq!(ld1(0x4c82_7020), (false, true, 1, 0, 1, Some(2)));
+        assert_eq!(ld1(0x4cdf_a020), (true, true, 2, 0, 1, Some(31)));
+        // What stays out: LD2, the lane forms.
+        assert_eq!(decode_op(0x4c40_8820).err(), Some(Reason::Structure));
+        assert_eq!(decode_op(0x0d40_9020).err(), Some(Reason::Structure));
+    }
+
+    impl Rig {
+        fn run_op(&mut self, i: u32, at: usize) -> bool {
+            let o = op(i);
+            let rn = match o {
+                Op::Rmw { rn, .. } | Op::Cas { rn, .. } | Op::Excl { rn, .. } | Op::Ld1 { rn, .. } => rn,
+                Op::Mem(m) => m.rn,
+            };
+            let base = self.mem.as_mut_ptr() as u64 + at as u64;
+            if rn == 31 {
+                self.sp = base;
+            } else {
+                self.x[usize::from(rn)] = base;
+            }
+            let r = self.regs();
+            // SAFETY: the rig's own register file and buffer.
+            unsafe {
+                let p = plan_op(&o, &r);
+                let off = p.ea.wrapping_sub(self.mem.as_ptr() as u64) as usize;
+                perform_op(&o, &r, &p, self.mem.as_mut_ptr().add(off))
+            }
+        }
+    }
+
+    #[test]
+    fn atomic_operations_give_the_old_value_and_store_the_result() {
+        let mut r = Rig::new();
+        // Aligned positions: the rig buffer has no alignment promise, so find one.
+        let a = (8 - (r.mem.as_ptr() as usize) % 8) % 8 + 16;
+        let put = |r: &mut Rig, v: u64| r.mem[a..a + 8].copy_from_slice(&v.to_le_bytes());
+        let get = |r: &Rig| u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap());
+        for (i, f, start, operand) in [
+            (0xf821_0062u32, (|m: u64, v: u64| m.wrapping_add(v)) as fn(u64, u64) -> u64, 5u64, 7u64),
+            (0xf821_1062, |m, v| m & !v, 0xff, 0x0f),
+            (0xf821_2062, |m, v| m ^ v, 0xf0, 0xff),
+            (0xf821_3062, |m, v| m | v, 0xf0, 0x0f),
+            (0xf821_4062, |m, v| (m as i64).max(v as i64) as u64, (-5i64) as u64, 3),
+            (0xf821_5062, |m, v| (m as i64).min(v as i64) as u64, (-5i64) as u64, 3),
+            (0xf821_6062, |m, v| m.max(v), (-5i64) as u64, 3),
+            (0xf821_7062, |m, v| m.min(v), (-5i64) as u64, 3),
+            (0xf821_8062, |_, v| v, 9, 3),
+        ] {
+            put(&mut r, start);
+            r.x[1] = operand;
+            assert!(r.run_op(i, a));
+            assert_eq!(r.x[2], start, "{i:#010x} old value");
+            assert_eq!(get(&r), f(start, operand), "{i:#010x} result");
+        }
+        // A word add wraps at 32 bits and leaves the next bytes alone.
+        r.mem[a..a + 8].copy_from_slice(&[0xff, 0xff, 0xff, 0xff, 7, 7, 7, 7]);
+        r.x[1] = 2;
+        assert!(r.run_op(0xb821_0062, a)); // ldadd w1, w2, [x3]
+        assert_eq!(&r.mem[a..a + 8], &[1, 0, 0, 0, 7, 7, 7, 7]);
+        assert_eq!(r.x[2], 0xffff_ffff);
+        // A misaligned atomic is refused and changes nothing.
+        let before = r.mem;
+        assert!(!r.run_op(0xf821_0062, a + 1));
+        assert_eq!(before, r.mem);
+    }
+
+    #[test]
+    fn compare_and_swap_and_pairs() {
+        let mut r = Rig::new();
+        let a = (16 - (r.mem.as_ptr() as usize) % 16) % 16 + 16;
+        r.mem[a..a + 8].copy_from_slice(&5u64.to_le_bytes());
+        r.x[1] = 5; // expected
+        r.x[2] = 9; // new
+        assert!(r.run_op(0xc8a1_7c62, a)); // cas x1, x2, [x3]
+        assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 9);
+        assert_eq!(r.x[1], 5);
+        r.x[1] = 5;
+        r.x[2] = 11;
+        assert!(r.run_op(0xc8a1_7c62, a)); // fails now: memory holds 9
+        assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 9);
+        assert_eq!(r.x[1], 9, "the old value comes back");
+        // CASP of two x registers: compare x2, x3 with the 16 bytes, store x4, x5.
+        r.mem[a..a + 8].copy_from_slice(&1u64.to_le_bytes());
+        r.mem[a + 8..a + 16].copy_from_slice(&2u64.to_le_bytes());
+        (r.x[2], r.x[3], r.x[4], r.x[5]) = (1, 2, 30, 40);
+        assert!(r.run_op(0x4822_7cc4, a)); // casp x2, x3, x4, x5, [x6]
+        assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 30);
+        assert_eq!(u64::from_le_bytes(r.mem[a + 8..a + 16].try_into().unwrap()), 40);
+        // CASP of two w registers.
+        r.mem[a..a + 4].copy_from_slice(&7u32.to_le_bytes());
+        r.mem[a + 4..a + 8].copy_from_slice(&8u32.to_le_bytes());
+        (r.x[2], r.x[3], r.x[4], r.x[5]) = (7, 8, 70, 80);
+        assert!(r.run_op(0x0862_fcc4, a)); // caspal w2, w3, w4, w5, [x6]
+        assert_eq!(&r.mem[a..a + 8], &[70, 0, 0, 0, 80, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_store_exclusive_succeeds_only_after_its_load_exclusive_of_the_same_address() {
+        let mut r = Rig::new();
+        let a = (16 - (r.mem.as_ptr() as usize) % 16) % 16 + 16;
+        r.mem[a..a + 8].copy_from_slice(&5u64.to_le_bytes());
+        // stxr without a load: fails.
+        r.x[1] = 99;
+        assert!(r.run_op(0xc803_7c41, a)); // stxr w3, x1, [x2]
+        assert_eq!(r.x[3], 1);
+        assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 5);
+        // ldxr then stxr: succeeds.
+        assert!(r.run_op(0xc85f_7c41, a)); // ldxr x1, [x2]
+        assert_eq!(r.x[1], 5);
+        r.x[1] = 6;
+        assert!(r.run_op(0xc803_7c41, a));
+        assert_eq!(r.x[3], 0);
+        assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 6);
+        // The monitor is gone after the store: a second store fails.
+        assert!(r.run_op(0xc803_7c41, a));
+        assert_eq!(r.x[3], 1);
+        // Memory changed in between: the store fails.
+        assert!(r.run_op(0xc85f_7c41, a));
+        r.mem[a] = 77;
+        r.x[1] = 1;
+        assert!(r.run_op(0xc803_7c41, a));
+        assert_eq!(r.x[3], 1);
+        // A load of another address does not satisfy a store to this one.
+        assert!(r.run_op(0xc85f_7c41, a + 8));
+        assert!(r.run_op(0xc803_7c41, a));
+        assert_eq!(r.x[3], 1);
+        // Pairs.
+        r.mem[a..a + 8].copy_from_slice(&1u64.to_le_bytes());
+        r.mem[a + 8..a + 16].copy_from_slice(&2u64.to_le_bytes());
+        assert!(r.run_op(0xc87f_0861, a)); // ldxp x1, x2, [x3]
+        assert_eq!((r.x[1], r.x[2]), (1, 2));
+        (r.x[1], r.x[2]) = (10, 20);
+        assert!(r.run_op(0xc824_0861, a)); // stxp w4, x1, x2, [x3]
+        assert_eq!(r.x[4], 0);
+        assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 10);
+        assert_eq!(u64::from_le_bytes(r.mem[a + 8..a + 16].try_into().unwrap()), 20);
+    }
+
+    #[test]
+    fn ld1_and_st1_move_whole_registers_in_a_row() {
+        let mut r = Rig::new();
+        assert!(r.run_op(0x4c40_a820, 0)); // ld1 {v0.4s, v1.4s}, [x1]
+        assert_eq!(r.v[0], u128::from_le_bytes(r.mem[0..16].try_into().unwrap()));
+        assert_eq!(r.v[1], u128::from_le_bytes(r.mem[16..32].try_into().unwrap()));
+        assert!(r.run_op(0x0c40_7020, 40)); // ld1 {v0.8b}, [x1]: the upper half clears
+        assert_eq!(r.v[0], u128::from(r.word(40, 8)));
+        // ld1 of four registers wrapping from v30 to v1.
+        assert!(r.run_op(0x4c40_203e, 0));
+        assert_eq!(r.v[30], u128::from_le_bytes(r.mem[0..16].try_into().unwrap()));
+        assert_eq!(r.v[1], u128::from_le_bytes(r.mem[48..64].try_into().unwrap()));
+        // st1 with an immediate post index writes the base back.
+        r.v[0] = 0x0f0e_0d0c_0b0a_0908_0706_0504_0302_0100;
+        r.v[1] = 0x1f1e_1d1c_1b1a_1918_1716_1514_1312_1110;
+        assert!(r.run_op(0x0c9f_a020, 64)); // st1 {v0.8b, v1.8b}, [x1], #16
+        assert_eq!(r.word(64, 8), 0x0706_0504_0302_0100);
+        assert_eq!(r.word(72, 8), 0x1716_1514_1312_1110);
+        assert_eq!(r.x[1], r.mem.as_ptr() as u64 + 64 + 16);
+        // A register post index.
+        r.x[2] = 24;
+        assert!(r.run_op(0x4c82_7020, 80)); // st1 {v0.16b}, [x1], x2
+        assert_eq!(r.x[1], r.mem.as_ptr() as u64 + 80 + 24);
     }
 }
