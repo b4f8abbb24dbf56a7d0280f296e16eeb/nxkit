@@ -736,6 +736,70 @@ group was committed and 490 ms before the batch completes, while the third comma
 `pages.rs` a reader goes on at `release_early` while a second page waits for the completion, and the learned set grows and
 decays.
 
+## Private GPU memory, step 7: results one frame late (`NXKIT_PRIVATE=1`)
+
+Step 6 let a reader of a GPU result wait for the pass that writes it. The wait is still there, and it costs more than its
+milliseconds: the CPU waits for a result of the frame it just submitted, so the GPU idles for part of every frame, and on Apple
+GPUs the clock governor raises the clock only above about 90 % utilization. Measured in Ocarina of Time: P8 at 30 fps for a few
+seconds, then P1 and 15 fps. The game reads such results every frame (visibility and exposure sums, spherical harmonics).
+
+**The decision.** The CPU sees the GPU's results one frame late. A game thread's access to bytes that a frame in flight writes is
+served from guest memory without a wait, and guest memory holds the bytes of the last completed frame there. This is not exact:
+the game reads frame N - 1's sum while frame N runs, and a CPU write to such bytes wins over the frame's copy-back (below). Every
+other access stays exact: pages no frame in flight writes, the bytes of a page outside the stale blocks, internal threads, system
+calls (`settle` still waits), and the accesses that cannot be emulated (`LD2` to `LD4`, `DC ZVA`, an access across the page border).
+`NXKIT_PRIVATE_LATE=0` turns it off (a CPU access to the bytes waits for the writer, as in step 6); it needs the second mapping
+(step 4, knob `privnoemu` off). `NXKIT_PRIVATE_AHEAD` (default 1) stays the bound of the run-ahead: with the waits for writers gone
+the CPU runs one frame ahead and the GPU stays busy.
+
+**Which page, which bytes.** A page qualifies after a game thread waited for it once (as in step 6) and while game threads keep
+reading it (the epoch of the copy-back, refreshed by each late read): `PageInfo::snap` is then the frame whose completion the
+stale blocks of the guest page hold, 0 when the guest bytes are not known to be a completed frame's. The mirror is shared across
+frames, so it cannot serve as the snapshot (the frame in flight may be writing it); guest memory is. `snap` is set by a copy of the
+stale blocks into a page whose writer is done (a fault that waited, the copy-back thread, the flush), and these keep it valid:
+
+- The completion of frame f (`Pages::complete`, under the control mutex) copies, for every page of f's runs that a newer frame
+  already tags, the blocks that f wrote (`Ctrl::masks`, the per-frame blocks of the flush) from the mirror into guest memory
+  through the alias, and sets `snap = f` (`late_copy_back`). A page that f still tags is left to the copy-back thread (step 5) or
+  to the next flush: `flush_mirrored` copies a page that a complete frame still tags before it tags it again (`late_flush_copies`),
+  so that a flush after a completion and before the copy-back thread never leaves stale blocks behind a valid `snap`. A page whose
+  blocks are not known, that a thread has open or is copying, or that nobody read lately gets `snap = 0` and waits again until a
+  fault copies it. The poison knob (`privpoison`) sets `snap = 0`, because the pattern replaces the snapshot.
+- The copy at the completion races with the next frame, which may already write the same mirror blocks: a block can be a mix of
+  frame f and f + 1 bytes, and a reader that runs during the 64-byte copy can see half of it. The age of the data is 1 frame in the
+  normal case, 2 when the CPU runs ahead and frame f - 1 has not completed.
+
+**Reads.** `try_emulate` allowed an access only outside the stale blocks. Now an access that overlaps them goes on when `snap != 0`
+and late results are on: the load runs through the alias on guest memory, the page keeps no access, no wait, no `mprotect`.
+`late reads` counts it with the age (frame in flight minus `snap`, an upper bound for a page that frames write rarely).
+
+**Writes and atomics.** The same path does a store, an atomic (`LDADD`, `SWP`, `CAS`, exclusives) and the SIMD forms on guest
+memory. Before the store the blocks it touches that are stale are marked CPU-owned in `PageInfo::own`, with the newest flushed frame
+(`own_frame`). Atomics operate on the last completed value and the result is a write: the CPU wins over the frame's bytes in those
+blocks (an atomic add on a counter the GPU also increments loses the GPU's increments of the frame in flight). Granularity is the
+block of 64 bytes, not the word: the other bytes of an owned block are the last completed frame's too, and they reach the mirror
+with the staged block. Two rules keep the CPU's bytes:
+
+1. Every copy from the mirror leaves the blocks of `own`, and the blocks of `hold` for frames not newer than `hold_frame`
+   (`PageInfo::keep`): the copy-back at a completion, the thread that copies the page, the flush.
+2. The next flush stages them (`stage_emulated`, the dirty pages, the writable pages all take the mask from `PageInfo::take_skip`):
+   the skip mask is the stale blocks minus the owned ones, so the CPU's blocks go into the mirror and the frame's other blocks do
+   not. The owned blocks move to `hold` with the frame that was flushed when they were written, so the completion of that frame (the
+   one in flight at the write) does not overwrite them, while the next frame's completion does (it ran after the staging); a `hold`
+   no frame needs is dropped at the next staging.
+
+**Counters** (`NXKIT_DIAG=private`, `DIAG private late results, per frame`): late reads and writes, the blocks late writes took from
+the frame (`owned`) and the blocks that copies left alone for them, the age of the data served (mean, longest, histogram of 1, 2,
+3, 4 or more frames), the pages and blocks copied at completions and by the flush, and the waits for a writer per frame, which
+should be about 0 (the first read of each result still waits once, to teach the page). The line is printed while late results are
+on. `DIAG private CPU waits for a writer` keeps the waits that remain.
+
+**Tests** (`pages.rs`, real faults): a reader during frame N gets frame N - 1's bytes at once and N's after the completion; the
+completion of frame N copies for the reader of N + 1 when the CPU runs ahead; a page nobody waited for still waits; a CPU write
+during N survives the copy-back at N's completion (the other block of the page is copied) and is staged at the next flush; a write
+staged while N runs skips only the frame's blocks, survives N's completion and is not staged twice; an atomic add during N operates
+on N - 1's value, lands on guest memory, is staged and wins over N's 99; with `NXKIT_PRIVATE_LATE=0` an access waits.
+
 ## Memory
 
 `NXKIT_MEM_REPORT` (see `docs/diagnostics.md`) says where the memory goes. What the GPU layer does about it:

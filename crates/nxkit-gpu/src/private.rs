@@ -386,6 +386,13 @@ pub(crate) fn run_ahead() -> u64 {
     })
 }
 
+/// True when the CPU sees the GPU's results one frame late (`NXKIT_PRIVATE_LATE`, default on; 0 turns it off and a CPU access
+/// to bytes a frame in flight writes waits for the frame again).
+pub(crate) fn late_results() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| !std::env::var("NXKIT_PRIVATE_LATE").is_ok_and(|v| v.trim() == "0"))
+}
+
 /// A fence wait was answered at the flush.
 pub(crate) fn note_early() {
     WAITS.early.fetch_add(1, Ordering::Relaxed);
@@ -439,6 +446,14 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                     Ok(()) => {
                         let off = crate::knob("privnoemu");
                         pages.set_emulation(!off);
+                        if !off && late_results() {
+                            pages.set_late(true);
+                            eprintln!(
+                                "nxkit-gpu: NXKIT_PRIVATE=1: the CPU sees the GPU's results one frame late: a game thread's access to a \
+                                 page that a frame in flight writes is served from guest memory, which holds the last completed frame's \
+                                 bytes, without a wait (NXKIT_PRIVATE_LATE=0 turns it off)"
+                            );
+                        }
                         eprintln!(
                             "nxkit-gpu: NXKIT_PRIVATE=1: accesses of the CPU to a page that a frame writes, outside the bytes it \
                              writes, are done by the fault handler through a second mapping of guest memory{}",
@@ -2278,6 +2293,31 @@ fn print_report(frame: u64) {
             waits(0),
             waits(1),
         );
+        if pages.late() {
+            let g = |f: fn(&PageStats) -> u64| f(&now) - f(&base);
+            let (reads, writes) = (g(|s| s.late_reads), g(|s| s.late_writes));
+            let hist = |i: usize| now.late_age[i] - base.late_age[i];
+            eprintln!(
+                "DIAG private late results, per frame: late reads {:.2}, late writes {:.2} ({:.2} blocks taken from the frame, \
+                 {:.2} blocks of copies left alone for them); age of the bytes served: mean {:.2} frames, longest {} (1 frame {}, \
+                 2 {}, 3 {}, 4 or more {}); copied at completions {:.2} pages ({:.1} blocks), by the flush {:.2} pages; waits \
+                 for a writer {:.2} per frame (should be about 0)",
+                reads as f64 / n,
+                writes as f64 / n,
+                g(|s| s.late_owned) as f64 / n,
+                g(|s| s.late_kept) as f64 / n,
+                g(|s| s.late_age_sum) as f64 / (reads + writes).max(1) as f64,
+                pages.take_late_age_max(),
+                hist(0),
+                hist(1),
+                hist(2),
+                hist(3),
+                g(|s| s.late_copied) as f64 / n,
+                g(|s| s.late_copied_blocks) as f64 / n,
+                g(|s| s.late_flush_copies) as f64 / n,
+                g(|s| s.writer_waits) as f64 / n,
+            );
+        }
         let by_end = |k: usize| {
             format!(
                 "{:.2} ({:.2} ms)",
@@ -2523,6 +2563,8 @@ mod tests {
         FORCE.with(|f| f.set(Some(Mode::Mirror)));
         FAILED.store(false, Ordering::Relaxed);
         attach(&ctx, mem.host_base(), mem.len(), VA);
+        // These tests are about the waits for a writer; the late results are tested in `nxkit-metal`.
+        Pages::global().set_late(false);
         Some(Guest { mem, map, ctx })
     }
 

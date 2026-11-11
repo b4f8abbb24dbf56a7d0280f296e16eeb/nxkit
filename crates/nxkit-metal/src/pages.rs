@@ -123,6 +123,19 @@ struct PageInfo {
     ready: AtomicU32,
     /// The frame (28 bits) of the newest wait of a game thread for this page's writer, 0 for never (step 6).
     waited: AtomicU32,
+    /// Results one frame late: the frame (28 bits) whose completion the stale blocks of guest memory hold, 0 when guest
+    /// memory is not known to hold a completed frame's bytes there. A game thread may read (and write) the stale blocks of
+    /// a page in flight through the alias while it is not zero.
+    snap: AtomicU32,
+    /// Results one frame late: the blocks the CPU wrote while a frame in flight wrote them, not staged yet. The copy from
+    /// the mirror leaves them alone and the next flush stages them.
+    own: [AtomicU64; 4],
+    /// The newest frame that was flushed when the CPU wrote a block of `own`.
+    own_frame: AtomicU32,
+    /// The blocks of `own` that a flush staged: the copy-back of a frame up to `hold_frame` leaves them alone, because the
+    /// CPU wrote them after that frame was flushed.
+    hold: [AtomicU64; 4],
+    hold_frame: AtomicU32,
 }
 
 impl PageInfo {
@@ -152,7 +165,62 @@ impl PageInfo {
         self.eager.store(0, Ordering::Release);
         self.ready.store(0, Ordering::Release);
         self.waited.store(0, Ordering::Release);
+        self.snap.store(0, Ordering::Release);
+        self.hold_frame.store(0, Ordering::Release);
+        self.own_frame.store(0, Ordering::Release);
+        for a in self.own.iter().chain(&self.hold) {
+            a.store(0, Ordering::Release);
+        }
     }
+
+    fn load_mask(a: &[AtomicU64; 4]) -> Mask {
+        [
+            a[0].load(Ordering::Acquire),
+            a[1].load(Ordering::Acquire),
+            a[2].load(Ordering::Acquire),
+            a[3].load(Ordering::Acquire),
+        ]
+    }
+
+    /// The blocks that a copy from the mirror for frame `frame` must leave alone: the ones the CPU wrote and no flush
+    /// staged yet, and the ones a flush staged for a write after a frame that is not older than `frame`.
+    fn keep(&self, frame: u32) -> Mask {
+        let own = Self::load_mask(&self.own);
+        if frame > self.hold_frame.load(Ordering::Acquire) {
+            return own;
+        }
+        let hold = Self::load_mask(&self.hold);
+        std::array::from_fn(|i| own[i] | hold[i])
+    }
+
+    /// The mask for [`Stager::stage_masked`]: the stale blocks that the CPU did not write. The blocks the CPU wrote move to
+    /// `hold` (they go into the mirror with this staging) and protect the copy-back of the frames flushed before the write. A
+    /// `hold` that no frame in flight needs any more is dropped first.
+    fn take_skip(&self) -> Mask {
+        let stale = self.stale();
+        if self.own.iter().all(|a| a.load(Ordering::Relaxed) == 0) {
+            return stale;
+        }
+        let hf = self.hold_frame.load(Ordering::Acquire);
+        if u64::from(hf) <= SHARED.completed.load(Ordering::Acquire) & FRAME_MASK {
+            for a in &self.hold {
+                a.store(0, Ordering::Release);
+            }
+        }
+        let mut skip = stale;
+        for (i, a) in self.own.iter().enumerate() {
+            let taken = a.swap(0, Ordering::AcqRel);
+            self.hold[i].fetch_or(taken, Ordering::AcqRel);
+            skip[i] &= !taken;
+        }
+        self.hold_frame.fetch_max(self.own_frame.load(Ordering::Acquire), Ordering::AcqRel);
+        skip
+    }
+}
+
+/// The mask for the staging of page `pg`.
+fn stage_skip(pg: usize) -> Mask {
+    info(pg).map_or([0; 4], PageInfo::take_skip)
 }
 
 /// What kind of fault, for the counters and the program counter tables.
@@ -377,6 +445,23 @@ struct Shared {
     early_calls: AtomicU64,
     early_pages: AtomicU64,
     early_syncs: AtomicU64,
+    /// Results one frame late: the handler serves the CPU's accesses to the blocks a frame in flight writes from guest
+    /// memory, which holds the last completed frame's bytes, without waiting.
+    late: AtomicBool,
+    /// Late reads and writes, the age of the bytes they met (frames: the frame in flight minus the frame the bytes are
+    /// from) as a sum, a histogram (1, 2, 3, 4 or more) and the largest since the last [`Pages::take_late_age_max`], the
+    /// blocks the CPU took from the frame (written while it ran), the blocks a copy from the mirror left alone for that
+    /// reason, the pages and blocks the completion of a frame copied for the next ones, and the pages the flush copied.
+    late_reads: AtomicU64,
+    late_writes: AtomicU64,
+    late_age_sum: AtomicU64,
+    late_age: [AtomicU64; 4],
+    late_age_max: AtomicU64,
+    late_owned: AtomicU64,
+    late_kept: AtomicU64,
+    late_copied: AtomicU64,
+    late_copied_blocks: AtomicU64,
+    late_flush_copies: AtomicU64,
 }
 
 struct OldAction {
@@ -464,6 +549,17 @@ static SHARED: Shared = Shared {
     early_calls: AtomicU64::new(0),
     early_pages: AtomicU64::new(0),
     early_syncs: AtomicU64::new(0),
+    late: AtomicBool::new(false),
+    late_reads: AtomicU64::new(0),
+    late_writes: AtomicU64::new(0),
+    late_age_sum: AtomicU64::new(0),
+    late_age: [const { AtomicU64::new(0) }; 4],
+    late_age_max: AtomicU64::new(0),
+    late_owned: AtomicU64::new(0),
+    late_kept: AtomicU64::new(0),
+    late_copied: AtomicU64::new(0),
+    late_copied_blocks: AtomicU64::new(0),
+    late_flush_copies: AtomicU64::new(0),
 };
 
 /// Flushes per epoch of the eager copy: a page that game threads stop faulting on loses its place after two epochs.
@@ -477,6 +573,8 @@ const HOT_QUIET: u8 = 8;
 struct Ctrl {
     /// The runs of pages (first, end) that each frame in flight protected, oldest first.
     frames: VecDeque<(u64, Vec<(u32, u32)>)>,
+    /// The blocks each of those frames may write, by run and page (results one frame late, mirrored mode).
+    masks: VecDeque<FrameMasks>,
     /// The member bitmap at a generation, for [`Pages::member_snapshot`].
     snap: Option<(u64, std::sync::Arc<Vec<u64>>)>,
     /// Step 5: for each page, in how many flushes in a row the CPU dirtied it (capped), and the pages dirtied in the last
@@ -508,6 +606,7 @@ struct Hot {
 
 static CTRL: Mutex<Ctrl> = Mutex::new(Ctrl {
     frames: VecDeque::new(),
+    masks: VecDeque::new(),
     snap: None,
     streak: Vec::new(),
     prev_dirty: Vec::new(),
@@ -766,9 +865,34 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
     }
     let stale = info.stale();
     let (lo, hi) = (((first - base) % p) / BLOCK, ((last - base) % p) / BLOCK);
-    if (lo..=hi).any(|b| stale[(b / 64) as usize] >> (b % 64) & 1 != 0) {
-        count_fallback(Reason::Overlap, pc);
-        return false;
+    let is_stale = |b: u64| stale[(b / 64) as usize] >> (b % 64) & 1 != 0;
+    // Results one frame late: guest memory holds the bytes of the last completed frame in the stale blocks, and the access
+    // goes on through the alias without a wait. A store marks the blocks as the CPU's before it is done, so the copy of
+    // the frame's bytes that may run at the same time leaves them alone, and the next flush stages them.
+    let mut late = false;
+    if (lo..=hi).any(is_stale) {
+        let snap = info.snap.load(Ordering::Acquire);
+        if snap == 0 || !SHARED.late.load(Ordering::Relaxed) {
+            count_fallback(Reason::Overlap, pc);
+            return false;
+        }
+        late = true;
+        if op.writes() {
+            let mut owned = 0u64;
+            for b in (lo..=hi).filter(|&b| is_stale(b)) {
+                info.own[(b / 64) as usize].fetch_or(1 << (b % 64), Ordering::AcqRel);
+                owned += 1;
+            }
+            info.own_frame
+                .fetch_max((SHARED.flushed.load(Ordering::Acquire) & FRAME_MASK) as u32, Ordering::AcqRel);
+            SHARED.late_owned.fetch_add(owned, Ordering::Relaxed);
+        }
+        let age = (cur >> FRAME_SHIFT).saturating_sub(snap).max(1);
+        SHARED.late_age_sum.fetch_add(u64::from(age), Ordering::Relaxed);
+        SHARED.late_age[(age as usize - 1).min(3)].fetch_add(1, Ordering::Relaxed);
+        SHARED.late_age_max.fetch_max(u64::from(age), Ordering::Relaxed);
+        // The page is a CPU-read GPU result: the completion of the frames keeps copying it.
+        info.eager.store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
     }
     // SAFETY: the alias maps the same pages as guest memory with read and write access, and `plan` lies inside the
     // page `pg`, which lies inside guest memory. The registers are the thread's own.
@@ -794,6 +918,10 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
             }
             count_pc_in(3, pc);
         }
+    }
+    if late {
+        let c = if op.writes() { &SHARED.late_writes } else { &SHARED.late_reads };
+        c.fetch_add(1, Ordering::Relaxed);
     }
     SHARED.emu[op.form() as usize].fetch_add(1, Ordering::Relaxed);
     SHARED.emu_ns.fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
@@ -921,26 +1049,39 @@ fn wait_complete(pg: usize, frame: u32, write: bool) -> bool {
 }
 
 /// Copies the stale blocks of the mirror page `pg` into guest memory: the blocks that a frame may have written. The
-/// other blocks of the guest page hold the CPU's bytes (the handler stores to them without waiting) and stay. The guest
-/// page must be writable.
-fn copy_from_mirror(pg: usize, mirror: u64) {
-    copy_stale(pg, mirror, SHARED.base.load(Ordering::Acquire), true);
+/// other blocks of the guest page hold the CPU's bytes (the handler stores to them without waiting) and stay, and so do
+/// the blocks that the CPU wrote while a frame wrote them (results one frame late). The guest page must be writable.
+/// `frame` is the frame whose bytes these are.
+fn copy_from_mirror(pg: usize, mirror: u64, frame: u32) {
+    copy_stale(pg, mirror, SHARED.base.load(Ordering::Acquire), true, frame);
 }
 
 /// [`copy_from_mirror`] into the page at `dst_base + pg * page` (the guest range itself, or its alias), counted as a copy
 /// of the handler when `count` says so.
-fn copy_stale(pg: usize, mirror: u64, dst_base: u64, count: bool) {
+fn copy_stale(pg: usize, mirror: u64, dst_base: u64, count: bool, frame: u32) {
+    let (stale, keep) = info(pg).map_or(([u64::MAX; 4], [0; 4]), |i| (i.stale(), i.keep(frame)));
+    copy_mask(pg, mirror, dst_base, &std::array::from_fn(|i| stale[i] & !keep[i]));
+    let kept: u32 = stale.iter().zip(&keep).map(|(s, k)| (s & k).count_ones()).sum();
+    if kept > 0 {
+        SHARED.late_kept.fetch_add(u64::from(kept), Ordering::Relaxed);
+    }
+    if count {
+        SHARED.synced.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Copies the blocks of `mask` of the mirror page `pg` into the page at `dst_base + pg * page`.
+fn copy_mask(pg: usize, mirror: u64, dst_base: u64, mask: &Mask) {
     let p = page();
-    let stale = info(pg).map_or([u64::MAX; 4], PageInfo::stale);
     let blocks = (p / BLOCK) as usize;
     let mut b = 0;
     while b < blocks {
-        if stale[b / 64] >> (b % 64) & 1 == 0 {
+        if mask[b / 64] >> (b % 64) & 1 == 0 {
             b += 1;
             continue;
         }
         let first = b;
-        while b < blocks && stale[b / 64] >> (b % 64) & 1 != 0 {
+        while b < blocks && mask[b / 64] >> (b % 64) & 1 != 0 {
             b += 1;
         }
         let off = pg as u64 * p + first as u64 * BLOCK;
@@ -955,9 +1096,6 @@ fn copy_stale(pg: usize, mirror: u64, dst_base: u64, count: bool) {
                 (b - first) * BLOCK as usize,
             );
         }
-    }
-    if count {
-        SHARED.synced.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -1025,7 +1163,7 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                 let fresh = cur & FRESH != 0;
                 protect_pages(p, p + 1, PROT_RW, false);
                 if !(flying && fresh) {
-                    copy_from_mirror(pg, mirror);
+                    copy_from_mirror(pg, mirror, frame);
                     if !flying && !internal && let Some(i) = info(pg) {
                         // A game thread waited for this copy: the completion of the next frame that writes the page copies
                         // it on its own (step 5).
@@ -1037,6 +1175,8 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                         for a in &i.stale {
                             a.store(0, Ordering::Release);
                         }
+                        // Guest memory holds the frame's bytes: the next frame's readers may go on without a wait.
+                        i.snap.store(frame.max(1), Ordering::Release);
                     }
                 }
                 if flying {
@@ -1427,6 +1567,26 @@ pub struct PageStats {
     pub readers: u64,
     /// Changes of that set.
     pub reader_changes: u64,
+    /// Results one frame late: accesses served from guest memory without a wait to blocks a frame in flight writes, loads
+    /// and stores (a store of an atomic counts as a store).
+    pub late_reads: u64,
+    /// Late stores.
+    pub late_writes: u64,
+    /// The age of the bytes late accesses met, in frames, summed, and as a histogram of 1, 2, 3 and 4 or more frames.
+    pub late_age_sum: u64,
+    /// The histogram.
+    pub late_age: [u64; 4],
+    /// Blocks that late stores took from the frame in flight (the CPU's bytes win over its copy-back).
+    pub late_owned: u64,
+    /// Blocks a copy from the mirror left alone because the CPU wrote them.
+    pub late_kept: u64,
+    /// Pages and blocks the completion of a frame copied into guest memory for the next frame's readers, and the pages the
+    /// flush copied itself.
+    pub late_copied: u64,
+    /// Blocks of those copies.
+    pub late_copied_blocks: u64,
+    /// Pages the flush copied.
+    pub late_flush_copies: u64,
 }
 
 /// What one flush did.
@@ -1620,6 +1780,63 @@ fn close_opened(frame: u64, runs: &[(u32, u32)]) {
     }
 }
 
+/// True while game threads read the page `i` as a CPU-read GPU result: they faulted on it for a copy, or read it late, in
+/// the last epochs.
+fn late_active(i: &PageInfo) -> bool {
+    let e = i.eager.load(Ordering::Relaxed);
+    e != 0 && SHARED.epoch.load(Ordering::Relaxed) <= e
+}
+
+/// Results one frame late, at the completion of `frame` (the caller holds the control mutex): the pages of the frame's
+/// `runs` that a newer frame already tags, and whose guest bytes are the last completed frame's, get the blocks that
+/// `frame` wrote copied from the mirror into guest memory through the alias, so that guest memory is the bytes of
+/// `frame` while the newer frame runs. The CPU's own blocks stay. A page that no game thread read lately loses its place.
+/// A page that `frame` still tags is left to the copy-back or to the next flush.
+fn late_copy_back(frame: u64, runs: &[(u32, u32)], masks: Option<&[Vec<Mask>]>, mirror: u64, alias: u64) {
+    let (mut pages, mut blocks) = (0u64, 0u64);
+    for (ri, &(first, end)) in runs.iter().enumerate() {
+        for pg in first..end {
+            let Some(w) = word(pg as usize) else { continue };
+            let cur = w.load(Ordering::Acquire);
+            let state = cur & STATE_MASK;
+            let Some(i) = info(pg as usize) else { continue };
+            if matches!(state, SYNC | OPEN) {
+                // A thread copies or reads the page right now: its bytes are no longer the last completed frame's.
+                i.snap.store(0, Ordering::Release);
+                continue;
+            }
+            if state != GPU || u64::from(cur >> FRAME_SHIFT) <= frame & FRAME_MASK {
+                continue;
+            }
+            if i.snap.load(Ordering::Acquire) == 0 {
+                continue;
+            }
+            let m = masks.and_then(|m| m.get(ri)).and_then(|r| r.get((pg - first) as usize));
+            let Some(m) = m.filter(|_| late_active(i)) else {
+                // The blocks of the frame are not known, or nobody reads the page: guest memory is not kept up to date.
+                i.snap.store(0, Ordering::Release);
+                continue;
+            };
+            let f = (frame & FRAME_MASK) as u32;
+            let keep = i.keep(f);
+            let copy: Mask = std::array::from_fn(|k| m[k] & !keep[k]);
+            let kept: u32 = m.iter().zip(&keep).map(|(a, b)| (a & b).count_ones()).sum();
+            copy_mask(pg as usize, mirror, alias, &copy);
+            i.snap.store(f.max(1), Ordering::Release);
+            pages += 1;
+            blocks += u64::from(copy.iter().map(|c| c.count_ones()).sum::<u32>());
+            if kept > 0 {
+                SHARED.late_kept.fetch_add(u64::from(kept), Ordering::Relaxed);
+            }
+        }
+    }
+    SHARED.late_copied.fetch_add(pages, Ordering::Relaxed);
+    SHARED.late_copied_blocks.fetch_add(blocks, Ordering::Relaxed);
+}
+
+/// The blocks a frame may write, by run and page.
+type FrameMasks = (u64, Vec<Vec<Mask>>);
+
 /// A completed frame and the page runs it protected.
 type FrameRuns = (u64, Vec<(u32, u32)>);
 
@@ -1718,10 +1935,11 @@ fn eager_copy(frame: u64, runs: &[(u32, u32)]) {
                     return None;
                 }
                 w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire).ok()?;
-                copy_stale(pg as usize, mirror, alias, false);
+                copy_stale(pg as usize, mirror, alias, false, frame as u32);
                 for a in &i.stale {
                     a.store(0, Ordering::Release);
                 }
+                i.snap.store((frame as u32).max(1), Ordering::Release);
                 Some(())
             })()
             .is_some();
@@ -1829,6 +2047,7 @@ impl Pages {
         {
             let mut c = ctrl();
             c.frames.clear();
+            c.masks.clear();
             c.snap = None;
             c.streak = vec![0; n];
             c.prev_dirty.clear();
@@ -1922,6 +2141,24 @@ impl Pages {
     pub fn set_adaptive(&self, eager: bool, hot: bool) {
         SHARED.eager_on.store(eager, Ordering::Release);
         SHARED.hot_on.store(hot, Ordering::Release);
+    }
+
+    /// Results one frame late (needs the alias and the emulation): a game thread's access to the blocks that a frame in
+    /// flight writes is served from guest memory, which holds the last completed frame's bytes there, without a wait.
+    /// A page qualifies after a game thread has waited for it once. A store goes to guest memory too and wins over the
+    /// copy-back of the frame in flight; the next flush stages it into the mirror.
+    pub fn set_late(&self, on: bool) {
+        SHARED.late.store(on, Ordering::Release);
+    }
+
+    /// True when results come one frame late ([`set_late`](Self::set_late)).
+    pub fn late(&self) -> bool {
+        SHARED.late.load(Ordering::Acquire)
+    }
+
+    /// The largest age in frames of the bytes served late since the last call.
+    pub fn take_late_age_max(&self) -> u64 {
+        SHARED.late_age_max.swap(0, Ordering::Relaxed)
     }
 
     /// Stops tracking every page and gives them all read and write access again: for a host that lets the range go, and for
@@ -2205,7 +2442,7 @@ impl Pages {
         if SHARED.mirror.load(Ordering::Acquire) != 0 {
             // With a mirror the pages stay tagged: the guest bytes are stale until a CPU access copies them. Pages that
             // a host thread opened for reading while the frame ran lose their access again.
-            let due: Vec<(u64, Vec<(u32, u32)>)> = {
+            let (due, mut due_masks): (Vec<FrameRuns>, Vec<FrameMasks>) = {
                 let mut c = ctrl();
                 let mut due = Vec::new();
                 while c.frames.front().is_some_and(|(f, _)| *f <= frame) {
@@ -2213,12 +2450,28 @@ impl Pages {
                         due.push(x);
                     }
                 }
-                due
+                let mut masks = Vec::new();
+                while c.masks.front().is_some_and(|(f, _)| *f <= frame) {
+                    if let Some(x) = c.masks.pop_front() {
+                        masks.push(x);
+                    }
+                }
+                (due, masks)
             };
             let eager = SHARED.eager.load(Ordering::Acquire);
             let mirror = SHARED.mirror.load(Ordering::Acquire);
             let copy_back = SHARED.eager_on.load(Ordering::Acquire) && SHARED.alias.load(Ordering::Acquire) != 0;
             let mut later: Vec<FrameRuns> = Vec::new();
+            let alias = SHARED.alias.load(Ordering::Acquire);
+            if SHARED.late.load(Ordering::Acquire) && alias != 0 {
+                // Under the control mutex, so that a flush that tags a page again is either before it (the page is
+                // copied here) or after it (the flush copies a page of a complete frame itself).
+                let _c = ctrl();
+                for (f, runs) in &due {
+                    let m = due_masks.iter().position(|(g, _)| g == f).map(|pos| due_masks.swap_remove(pos).1);
+                    late_copy_back(*f, runs, m.as_deref(), mirror, alias);
+                }
+            }
             for (f, runs) in due {
                 close_opened(f, &runs);
                 if copy_back {
@@ -2305,7 +2558,7 @@ impl Pages {
                 let bytes = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
-                stager.stage_masked(pg, bytes, info(pg as usize).map_or([0; 4], PageInfo::stale));
+                stager.stage_masked(pg, bytes, stage_skip(pg as usize));
             }
         }
         if self.stage_emulated(&emu, &back, stager) > 0 {
@@ -2331,7 +2584,7 @@ impl Pages {
                 continue;
             }
             let Some(bytes) = self.alias_page(pg) else { continue };
-            stager.stage_masked(pg, bytes, i.stale());
+            stager.stage_masked(pg, bytes, i.take_skip());
             n += 1;
         }
         SHARED.emu_staged.fetch_add(u64::from(n), Ordering::Relaxed);
@@ -2536,7 +2789,7 @@ impl Pages {
                 let bytes = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
-                stager.stage_masked(pg, bytes, info(pg as usize).map_or([0; 4], PageInfo::stale));
+                stager.stage_masked(pg, bytes, stage_skip(pg as usize));
             }
         };
         for (s, e) in runs_of(&back) {
@@ -2579,7 +2832,7 @@ impl Pages {
                 h.quiet = 0;
                 h.shadow.resize(p as usize, 0);
                 h.shadow.copy_from_slice(live);
-                stager.stage_masked(pg, &h.shadow, info(pg as usize).map_or([0; 4], PageInfo::stale));
+                stager.stage_masked(pg, &h.shadow, stage_skip(pg as usize));
                 st.hot_staged += 1;
             }
             for pg in &gone {
@@ -2608,7 +2861,7 @@ impl Pages {
                 // SAFETY: as above; the page is read only now, so nothing changes under the compare.
                 let live = unsafe { std::slice::from_raw_parts((base + u64::from(*pg) * p) as *const u8, p as usize) };
                 if shadow[..] != *live {
-                    stager.stage_masked(*pg, live, info(*pg as usize).map_or([0; 4], PageInfo::stale));
+                    stager.stage_masked(*pg, live, stage_skip(*pg as usize));
                     st.hot_staged += 1;
                 }
             }
@@ -2619,9 +2872,33 @@ impl Pages {
         st.hot_ns = tick();
         // 3. The pages of the frame.
         let masks = range_masks(&runs_w, written);
+        let late_on = SHARED.late.load(Ordering::Acquire);
+        let alias = SHARED.alias.load(Ordering::Acquire);
         for (ri, &(s, e)) in runs_w.iter().enumerate() {
             for pg in s..e {
                 let Some(w) = word(pg as usize) else { continue };
+                if late_on && alias != 0 {
+                    // A page that a complete frame still tags and that game threads read late: its guest bytes are the
+                    // last completed frame's only after the copy, which the copy-back thread may not have done yet.
+                    let cur = w.load(Ordering::Acquire);
+                    if cur & STATE_MASK == GPU
+                        && !in_flight(cur >> FRAME_SHIFT)
+                        && let Some(i) = info(pg as usize)
+                        && i.snap.load(Ordering::Acquire) != 0
+                    {
+                        if late_active(i) {
+                            let f = cur >> FRAME_SHIFT;
+                            copy_stale(pg as usize, mirror, alias, false, f);
+                            for a in &i.stale {
+                                a.store(0, Ordering::Release);
+                            }
+                            i.snap.store(f.max(1), Ordering::Release);
+                            SHARED.late_flush_copies.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            i.snap.store(0, Ordering::Release);
+                        }
+                    }
+                }
                 let mut fresh = back.binary_search(&pg).is_ok();
                 let mut tries = 0;
                 loop {
@@ -2662,6 +2939,10 @@ impl Pages {
             protect_pages(s, e, PROT_NONE, true);
             if let Some(pattern) = poison {
                 for pg in s..e {
+                    // The pattern replaces the bytes of the last completed frame: late readers must wait here.
+                    if let Some(i) = info(pg as usize) {
+                        i.snap.store(0, Ordering::Release);
+                    }
                     let stale = info(pg as usize).map_or([u64::MAX; 4], PageInfo::stale);
                     protect_pages(pg, pg + 1, PROT_RW, true);
                     for b in 0..(p / BLOCK) {
@@ -2684,10 +2965,16 @@ impl Pages {
         }
         st.written_runs = runs_w.len() as u32;
         if !runs_w.is_empty() {
+            if late_on {
+                cc.masks.push_back((frame, masks));
+            }
             cc.frames.push_back((frame, runs_w));
         }
         while cc.frames.len() > MAX_FRAMES {
             cc.frames.pop_front();
+        }
+        while cc.masks.len() > MAX_FRAMES {
+            cc.masks.pop_front();
         }
         st.tag_ns = tick();
         st.mprotect_ns = SHARED.mprotect_ns.load(Ordering::Relaxed).saturating_sub(prot0);
@@ -2837,6 +3124,15 @@ impl Pages {
             early_syncs: g(&SHARED.early_syncs),
             readers: learned.0,
             reader_changes: learned.1,
+            late_reads: g(&SHARED.late_reads),
+            late_writes: g(&SHARED.late_writes),
+            late_age_sum: g(&SHARED.late_age_sum),
+            late_age: std::array::from_fn(|i| g(&SHARED.late_age[i])),
+            late_owned: g(&SHARED.late_owned),
+            late_kept: g(&SHARED.late_kept),
+            late_copied: g(&SHARED.late_copied),
+            late_copied_blocks: g(&SHARED.late_copied_blocks),
+            late_flush_copies: g(&SHARED.late_flush_copies),
         }
     }
 
@@ -3991,5 +4287,237 @@ mod tests {
         assert_eq!(s1.writer_waits, s0.writer_waits);
         assert_eq!(pg.state_of(m.addr(1)), "gpu(1)");
         pg.set_mirror(0);
+    }
+
+    /// A page in step 1 of the late-results tests: frame 1 wrote the bytes `[64, 192)` of page 1, the GPU's result of it is
+    /// `a1` at byte 70 and `a2` at byte 130, the frame completed, and a read copied the page (so the page is a CPU-read GPU
+    /// result and guest memory holds frame 1).
+    fn late_page(a1: u8, a2: u8) -> (Map, Map, &'static Pages) {
+        let (m, mir, pg) = emulating(4);
+        pg.set_late(true);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(1, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, a1);
+        mir.store(1, 130, a2);
+        pg.complete(1);
+        assert_eq!(m.load(1, 70), a1, "the first read of a result waits for nothing (the frame is done) and copies the page");
+        assert_eq!(m.load(1, 130), a2);
+        (m, mir, pg)
+    }
+
+    fn done(pg: &Pages) {
+        pg.set_late(false);
+        pg.set_adaptive(false, false);
+        pg.set_mirror(0);
+    }
+
+    #[test]
+    fn a_reader_during_a_frame_gets_the_last_completed_frames_bytes_at_once_and_the_frames_after_it_completes() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        // The frame in flight writes the mirror.
+        mir.store(1, 70, 0xB1);
+        mir.store(1, 130, 0xB2);
+        let s0 = pg.stats();
+        let t0 = now_ns();
+        assert_eq!(m.load(1, 70), 0xA1, "frame 1's byte, not frame 2's");
+        assert_eq!(m.load(1, 130), 0xA2);
+        assert!(now_ns() - t0 < 500_000_000, "no wait");
+        let s1 = pg.stats();
+        assert_eq!(s1.late_reads - s0.late_reads, 2);
+        assert_eq!(s1.late_age[0] - s0.late_age[0], 2, "the bytes are one frame old");
+        assert_eq!(s1.writer_waits, s0.writer_waits);
+        assert_eq!(s1.fallbacks[Reason::Overlap as usize], s0.fallbacks[Reason::Overlap as usize]);
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(2)", "the page keeps its tag and has no access");
+        pg.complete(2);
+        assert_eq!(m.load(1, 70), 0xB1, "after the completion the reader gets frame 2's bytes");
+        assert_eq!(m.load(1, 130), 0xB2);
+        done(pg);
+    }
+
+    #[test]
+    fn the_completion_of_a_frame_copies_its_bytes_for_the_readers_of_the_frame_that_runs_ahead() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        // The CPU runs ahead: frame 3 is flushed while frame 2 runs, and tags the page.
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        assert_eq!(m.load(1, 70), 0xA1, "frame 3 and 2 run: the bytes are frame 1's");
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_copied - s0.late_copied, 1, "the completion copied the page");
+        assert_eq!(m.load(1, 70), 0xB1, "frame 3 runs: the bytes are frame 2's now");
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(3)");
+        assert_eq!(pg.stats().writer_waits, s0.writer_waits, "nobody waited");
+        mir.store(1, 70, 0xC1);
+        pg.complete(3);
+        assert_eq!(m.load(1, 70), 0xC1);
+        done(pg);
+    }
+
+    #[test]
+    fn a_page_that_nobody_waited_for_still_waits() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = emulating(4);
+        pg.set_late(true);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(1, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 5);
+        let s0 = pg.stats();
+        let base = m.addr(1) as usize;
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread.
+            unsafe { ((base + 70) as *const u8).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(!reader.is_finished(), "the guest bytes are not known to be a completed frame's: it waits");
+        pg.complete(1);
+        assert_eq!(reader.join().unwrap(), 5);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_reads, s0.late_reads);
+        assert_eq!(s1.writer_waits - s0.writer_waits, 1);
+        done(pg);
+    }
+
+    /// Waits until the copy-back of the completed frame has opened the page.
+    fn wait_clean(pg: &Pages, m: &Map) {
+        for _ in 0..400 {
+            if pg.state_of(m.addr(1)) == "clean" {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the copy-back did not run: {}", pg.state_of(m.addr(1)));
+    }
+
+    #[test]
+    fn a_cpu_write_during_a_frame_survives_the_copy_back_of_the_frame_and_is_staged_at_the_next_flush() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        pg.set_adaptive(true, false);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        mir.store(1, 130, 0xB2);
+        let s0 = pg.stats();
+        m.store(1, 70, 0x55);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_writes - s0.late_writes, 1);
+        assert_eq!(s1.late_owned - s0.late_owned, 1, "one 64-byte block");
+        assert_eq!(s1.writer_waits, s0.writer_waits);
+        assert_eq!(m.load(1, 70), 0x55, "the CPU reads what it wrote");
+        pg.complete(2);
+        wait_clean(pg, &m);
+        assert_eq!(m.load(1, 70), 0x55, "the copy-back of frame 2 left the block the CPU wrote");
+        assert_eq!(m.load(1, 130), 0xB2, "and copied the other block");
+        assert!(pg.stats().late_kept > s1.late_kept);
+        // The next flush stages the page with the CPU's byte.
+        let mut st3 = Collect::default();
+        let f = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
+        assert_eq!(f.staged, 1);
+        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        assert_eq!(st3.pages[i].1[70], 0x55);
+        assert_eq!(st3.skips[i].1, [0; 4], "the page is current in guest memory: nothing is skipped");
+        pg.complete(3);
+        pg.set_adaptive(false, false);
+        done(pg);
+    }
+
+    #[test]
+    fn a_write_staged_while_its_frame_runs_skips_the_blocks_only_the_frame_wrote_and_survives_the_frames_completion() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        mir.store(1, 130, 0xB2);
+        m.store(1, 70, 0x55);
+        // The CPU runs ahead: the flush of frame 3 stages the page while frame 2 runs.
+        let mut st3 = Collect::default();
+        let f = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
+        assert_eq!(f.emu_staged, 1);
+        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        assert_eq!(st3.pages[i].1[70], 0x55);
+        // Block 1 (bytes 64 to 127) is the CPU's and goes along; block 2 (128 to 191) is the frame's and is skipped.
+        assert_eq!(st3.skips[i].1[0], 0b100, "only the block of the frame is skipped");
+        // The frame completes while the page is tagged by frame 3: its copy-back keeps the staged block.
+        pg.complete(2);
+        assert_eq!(m.load(1, 70), 0x55, "the copy-back of frame 2 does not take back what the CPU wrote before frame 3");
+        assert_eq!(m.load(1, 130), 0xB2, "the other block is frame 2's");
+        // The staged block is not staged again at the next flush: a frame may have written it since.
+        let mut st4 = Collect::default();
+        let _ = pg.flush_mirrored(4, &[], &[(m.addr(1) + 64, 128)], None, &mut st4);
+        assert!(st4.pages.iter().all(|p| p.0 != 1), "nothing new to stage");
+        pg.complete(3);
+        pg.complete(4);
+        done(pg);
+    }
+
+    #[test]
+    fn an_atomic_add_during_a_frame_lands_on_guest_memory_and_is_staged() {
+        use std::arch::asm;
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = emulating(4);
+        pg.set_late(true);
+        let mut st = Collect::default();
+        // Frame 1's result: a counter of 10 at byte 64.
+        let _ = pg.flush_mirrored(1, &[], &[(m.addr(1) + 64, 64)], None, &mut st);
+        for (k, b) in 10u32.to_le_bytes().iter().enumerate() {
+            mir.store(1, 64 + k as u64, *b);
+        }
+        pg.complete(1);
+        assert_eq!(m.load(1, 64), 10);
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 64)], None, &mut st);
+        for (k, b) in 99u32.to_le_bytes().iter().enumerate() {
+            mir.store(1, 64 + k as u64, *b);
+        }
+        let s0 = pg.stats();
+        let p = m.addr(1) as usize + 64;
+        let old: u32;
+        // SAFETY: inside page 1 of the test mapping, aligned for a word.
+        unsafe {
+            asm!(".arch_extension lse", "ldaddal {one:w}, {old:w}, [{p}]",
+                p = in(reg) p, one = in(reg) 5u32, old = out(reg) old, options(nostack));
+        }
+        assert_eq!(old, 10, "the atomic operates on the last completed frame's value");
+        let s1 = pg.stats();
+        assert_eq!(s1.late_writes - s0.late_writes, 1);
+        assert_eq!(s1.writer_waits, s0.writer_waits);
+        let mut st3 = Collect::default();
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 64)], None, &mut st3);
+        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        assert_eq!(u32::from_le_bytes(st3.pages[i].1[64..68].try_into().unwrap()), 15, "the sum is staged");
+        assert_eq!(st3.skips[i].1[0] & 0b10, 0, "the block is not skipped");
+        pg.complete(2);
+        assert_eq!(u32::from_le_bytes([m.load(1, 64), m.load(1, 65), m.load(1, 66), m.load(1, 67)]), 15, "the CPU wins over frame 2's 99");
+        pg.complete(3);
+        done(pg);
+    }
+
+    #[test]
+    fn with_late_results_off_an_access_to_written_bytes_waits() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        pg.set_late(false);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        let s0 = pg.stats();
+        let base = m.addr(1) as usize;
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread.
+            unsafe { ((base + 70) as *const u8).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(!reader.is_finished());
+        pg.complete(2);
+        assert_eq!(reader.join().unwrap(), 0xB1);
+        assert_eq!(pg.stats().late_reads, s0.late_reads);
+        done(pg);
     }
 }
