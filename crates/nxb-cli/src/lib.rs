@@ -8,7 +8,7 @@
 //! | `build` | `nxb_build::main` |
 //! | `extract` | `nxb_extract::cli::main` |
 //! | `split` | `nxb_extract::split_cli::main` |
-//! | `shaders guards|own-verdicts|build` | this crate (the shader-step command line) |
+//! | `shaders guards\|own-verdicts\|build` | this crate (the shader-step command line) |
 //! | `sign` | `nxb_pack::cli::sign::main` |
 //! | `pso` | `nxb_archive::cli::pso::main` |
 //! | `archive` | `nxb_archive::cli::archive::main` |

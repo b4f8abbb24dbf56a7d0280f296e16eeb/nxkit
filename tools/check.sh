@@ -14,7 +14,9 @@ step "rustfmt"
 cargo fmt --check
 
 step "clippy (deny warnings)"
-cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+# needless_range_loop: Rust 1.100 also flags loops whose index names a slot of several arrays (pixels, pads, fingers,
+# output slots); an iterator does not make those clearer.
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings -A clippy::needless_range_loop
 
 step "tests"
 cargo test --workspace --locked --offline --no-fail-fast
