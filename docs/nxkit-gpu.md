@@ -758,11 +758,12 @@ stale blocks of the guest page hold, 0 when the guest bytes are not known to be 
 frames, so it cannot serve as the snapshot (the frame in flight may be writing it); guest memory is. `snap` is set by a copy of the
 stale blocks into a page whose writer is done (a fault that waited, the copy-back thread, the flush), and these keep it valid:
 
-- The completion of frame f (`Pages::complete`, under the control mutex) copies, for every page of f's runs that a newer frame
-  already tags, the blocks that f wrote (`Ctrl::masks`, the per-frame blocks of the flush) from the mirror into guest memory
-  through the alias, and sets `snap = f` (`late_copy_back`). A page that f still tags is left to the copy-back thread (step 5) or
-  to the next flush: `flush_mirrored` copies a page that a complete frame still tags before it tags it again (`late_flush_copies`),
-  so that a flush after a completion and before the copy-back thread never leaves stale blocks behind a valid `snap`. A page whose
+- The completion of frame f (`Pages::complete`, under the control mutex) copies, for every page of f's runs, the blocks that f
+  wrote (`Ctrl::masks`, the per-frame blocks of the flush) from the mirror into guest memory through the alias, and sets
+  `snap = f` (`late_copy_back`). This holds for a page that a newer frame already tags and, since step 8, for a page that f
+  still tags (with `NXKIT_PRIVATE_AHEAD=1` frame f completes before f + 1 is flushed, so this is the common case; the page
+  is claimed while it is copied). `flush_mirrored` still copies a page that a complete frame still tags before it tags it again
+  (`late_flush_copies`), so that a flush after a completion never leaves stale blocks behind a valid `snap`. A page whose
   blocks are not known, that a thread has open or is copying, or that nobody read lately gets `snap = 0` and waits again until a
   fault copies it. The poison knob (`privpoison`) sets `snap = 0`, because the pattern replaces the snapshot.
 - The copy at the completion races with the next frame, which may already write the same mirror blocks: a block can be a mix of
@@ -799,6 +800,69 @@ completion of frame N copies for the reader of N + 1 when the CPU runs ahead; a 
 during N survives the copy-back at N's completion (the other block of the page is copied) and is staged at the next flush; a write
 staged while N runs skips only the frame's blocks, survives N's completion and is not staged twice; an atomic add during N operates
 on N - 1's value, lands on guest memory, is staged and wins over N's 99; with `NXKIT_PRIVATE_LATE=0` an access waits.
+
+## Private GPU memory, step 8: reads without a trap, and every late read served (`NXKIT_PRIVATE=1`)
+
+With step 7 the waits for a writer were small (0.5 per frame) but the game threads still trapped on every access to a page in
+flight: Ocarina of Time loaded about 16 700 times per frame from pages that a frame writes in a few blocks, each load a
+fault, the decode of the instruction in the handler and the return (a bare fault round trip is 2.6 us on this Mac: 43 ms per
+frame summed over the game threads, and `sample` showed `_sigtramp` in 10 to 13 % of the samples of the recording workers and the
+main thread). Four changes remove the traps and the last waits.
+
+**Why the snapshot is lost** (`DIAG private snapshots`). `PageInfo::snap_reset(why)` is the only way `snap` goes to zero, and
+it counts the reason (`SnapWhy`): never set (the first read of a result waits once and teaches the page), released, busy at the
+completion (a thread copied or had the page open), blocks unknown, nobody read the page lately (at the completion or at the
+flush), poison. A late access that finds no snapshot names the reason the page lost it last (`snap_misses`). In the benchmark
+the sum of the drops is 0.3 pages per frame and the misses are about 0.00 per frame.
+
+**Reads need no trap** (`Pages::set_read_open`, `NXKIT_PRIVATE_READOPEN=0` turns it off). While the guest bytes of a page are a
+completed frame's (`snap != 0`) and the completions keep them current, a read of the page at any time returns exactly what the
+handler returned after the trap: the last completed frame's bytes in the stale blocks, the CPU's bytes elsewhere. The flush
+therefore protects such a page `PROT_READ` instead of `PROT_NONE` (`read_open` counts the pages: about 205 per frame in the
+benchmark); a page without a snapshot stays `PROT_NONE` until a copy teaches it. Only stores fault, and the handler marks
+the blocks as the CPU's as before. A completion that takes the snapshot away (nobody read the page lately, or the blocks of the
+frame are unknown) also takes the read access away (`revoke_read`: the page is claimed, `PROT_NONE`, restored), so a reader never
+sees bytes older than the last completed frame; `read_revoked` counts these. Measured: emulated loads per frame 16 700 to 0.3
+(the loads that remain are stores' neighbours), handler time per frame for emulated accesses 0.70 ms to 0.07 ms before the stores.
+
+**System calls** (`late_host_read`). A host read of guest memory (a system call that reads a word, `ACCESS_READ`) used to wait
+for the writer of every page in flight, also when it read bytes outside the blocks the frame writes (a futex word that shares a
+page with a result: 0.4 waits per frame, each for the rest of the frame). A read of a page that has a snapshot, outside its
+stale blocks, goes on without a wait; `open` then makes the page readable, which the snapshot allows. `DIAG private snapshots`
+counts these reads and the system call accesses that still wait (0).
+
+**Lane stores and stores across the page border** (`a64.rs`, `try_emulate`). `ST1 {Vt.<T>}[i]` and `LD1 {Vt.<T>}[i]` (one lane,
+with or without post index) are emulated, and so is an access that crosses the border of two pages (the pair `STP` of the SDK's
+copy loop): both pages are looked at, a tracked neighbour is marked for staging when the access stores to it, and the stale blocks
+of both are handled as for one page. Without them a store the page read access did not protect against waited for the whole frame
+(0.5 per frame, 10 to 47 ms each), and with the reads gone these were the last waits.
+
+**EndRecording without the front lock: opt-in** (`Gpu::recorded_deferred`, `NXKIT_REC_LOCK=0`). The end of a recording only
+drops the cache summaries of recordings in its memory spans. With `NXKIT_REC_LOCK=0` the spans go into a list and the next
+`Gpu::lock` applies them before anything else uses the front end, as it does for `nvnMemoryPoolFlushMappedRange`, so the
+recording workers (six threads, 1700 recordings per frame) no longer wait for the front lock while the present holds it. It is
+not the default: in Ocarina of Time (private mode, two alternating pairs) the frame took 46.4 and 47.8 ms without the lock
+against 39.9 and 40.2 ms with it, all of it in the game's own time ("rest" 27 against 20 ms), and the GPU clock stayed lower.
+The waits on the lock pace the recording workers; without them they compete with the game threads.
+
+**Not done: the present without the front lock.** The encode of the frame needs the texture table (mutable: it applies what the GPU
+wrote) and the descriptors for its whole duration, so the lock cannot be given up before it without a snapshot of both. The
+encoder thread (`NXKIT_ENC_THREAD=1` or `enc_thread`) is that snapshot: with it the frame holds the lock for 2.9 ms (page
+flush 1.9, snapshot and job 0.7) instead of 12. With the recordings taking no lock (`NXKIT_REC_LOCK=0`), nothing else takes it during the present (the
+submit is the present's own thread), and the measurement showed no gain: 45.6 ms per frame with the thread, against 40 to 50
+without; the time moved from the present to the rest of the frame.
+
+**Counters** (`NXKIT_DIAG=private`): `DIAG private snapshots, per frame`: snapshots dropped by reason, late accesses that waited
+by reason, pages left readable by the flush, readable pages that lost it at a completion, system call reads without a wait and
+system call accesses that waited; `top program counters, not emulated` prints the instruction word of each program counter.
+
+**Tests** (`pages.rs`, real faults): the completion of the newest frame copies its bytes before the next flush and the reader
+of the next frame gets them without a wait; a snapshot dropped for no recent reader is counted with its reason and the next
+access names it; a page with a snapshot is read without a trap (no emulated access is counted) while a store is done by
+the handler; a readable page nobody reads lately loses its access at the completion and its reader waits; a system call read
+outside the written bytes does not wait; a store across the page border and an `ST1` lane store are done without a wait and the
+neighbour page is staged. In `a64.rs`: the decode of lane forms and their execution. In `nxkit-rt`: the end of a recording
+returns while the lock is held and the next lock applies the spans.
 
 ## Memory
 

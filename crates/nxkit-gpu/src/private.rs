@@ -57,9 +57,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use nxkit_metal::{
-    AccessForm, AddressMap, ArgumentTable, CommandBuffer, ComputeCommand, Context, DataBuffer, Dependency, FaultKind,
-    FallbackReason, FaultOrigin, GuestMemory, Mirror, PageStats, Pages, Scope, Scratch, Stager, Stages, SubmittedBatch,
-    Visibility,
+    AccessForm, AddressMap, ArgumentTable, CommandBuffer, ComputeCommand, Context, DataBuffer, Dependency,
+    FallbackReason, FaultKind, FaultOrigin, GuestMemory, Mirror, PageStats, Pages, Scope, Scratch, SnapWhy, Stager,
+    Stages, SubmittedBatch, Visibility,
 };
 
 use crate::detail::{CopyKind, DrawArgs, FrameDetail, Stage, StreamDetail};
@@ -448,6 +448,13 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                         pages.set_emulation(!off);
                         if !off && late_results() {
                             pages.set_late(true);
+                            if !std::env::var("NXKIT_PRIVATE_READOPEN").is_ok_and(|v| v.trim() == "0") {
+                                pages.set_read_open(true);
+                                eprintln!(
+                                    "nxkit-gpu: NXKIT_PRIVATE=1: a page whose guest bytes are a completed frame's stays readable while a \
+                                     frame writes it, so a read takes no trap (NXKIT_PRIVATE_READOPEN=0 turns it off)"
+                                );
+                            }
                             eprintln!(
                                 "nxkit-gpu: NXKIT_PRIVATE=1: the CPU sees the GPU's results one frame late: a game thread's access to a \
                                  page that a frame in flight writes is served from guest memory, which holds the last completed frame's \
@@ -2318,6 +2325,28 @@ fn print_report(frame: u64) {
                 g(|s| s.writer_waits) as f64 / n,
             );
         }
+        if pages.late() {
+            let list = |f: fn(&PageStats) -> [u64; SnapWhy::COUNT]| {
+                let (a, b) = (f(&now), f(&base));
+                let v: Vec<String> = SnapWhy::ALL
+                    .iter()
+                    .filter(|w| a[**w as usize] > b[**w as usize])
+                    .map(|w| format!("{} {:.2}", w.name(), (a[*w as usize] - b[*w as usize]) as f64 / n))
+                    .collect();
+                if v.is_empty() { "none".to_string() } else { v.join(", ") }
+            };
+            eprintln!(
+                "DIAG private snapshots, per frame: dropped: {}; late accesses that found none and waited, by the last reason: \
+                 {}; pages left readable by the flush {:.1}, readable pages that lost it at a completion {:.2}; system call reads \
+                 that went on without a wait {:.2}, system call accesses that waited {:.2}",
+                list(|s| s.snap_resets),
+                list(|s| s.snap_misses),
+                (now.read_open - base.read_open) as f64 / n,
+                (now.read_revoked - base.read_revoked) as f64 / n,
+                (now.settle_late - base.settle_late) as f64 / n,
+                (now.settle_waits - base.settle_waits) as f64 / n,
+            );
+        }
         let by_end = |k: usize| {
             format!(
                 "{:.2} ({:.2} ms)",
@@ -2385,7 +2414,9 @@ fn print_report(frame: u64) {
             if !tops.is_empty() {
                 let line: Vec<String> = tops
                     .iter()
-                    .map(|&(pc, c)| format!("{} {:.1}", nxkit_metal::name_pc(pc), c as f64 / n))
+                    .map(|&(pc, c)| {
+                        format!("{} {:.1} (insn {:#010x})", nxkit_metal::name_pc(pc), c as f64 / n, pages.insn_at(pc))
+                    })
                     .collect();
                 eprintln!("DIAG private top program counters, not emulated (per frame): {}", line.join(", "));
             }
@@ -3069,7 +3100,9 @@ mod tests {
 
     #[test]
     fn the_stage_pool_gives_a_buffer_back_when_its_frame_is_complete() {
-        let Ok(ctx) = Context::system_default() else { return };
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
         let mut pool = StagePool::default();
         let a = pool.take(&ctx, 10).unwrap();
         assert!(a.len() >= 10 * PAGE);
@@ -3089,7 +3122,9 @@ mod tests {
 
     #[test]
     fn the_sink_grows_when_more_pages_come_than_it_was_told() {
-        let Ok(ctx) = Context::system_default() else { return };
+        let Ok(ctx) = Context::system_default() else {
+            return;
+        };
         let mut pool = StagePool::default();
         let mut sink = Sink::new(&ctx, &mut pool);
         sink.begin(1);

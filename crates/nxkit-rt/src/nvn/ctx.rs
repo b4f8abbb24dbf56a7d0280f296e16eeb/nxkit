@@ -191,7 +191,11 @@ pub(crate) struct Gpu {
     release_flush: order::ReleaseFlush,
     /// The ranges of `nvnMemoryPoolFlushMappedRange` that [`Gpu::lock`] has not yet told the front end.
     pending_writes: Mutex<Vec<(u64, u64)>>,
-    /// True when `pending_writes` may hold a range. Keeps the common case of [`Gpu::lock`] to one atomic load.
+    /// The memory spans of recordings that ended since the last [`Gpu::lock`] (`nvnCommandBufferEndRecording`): the front
+    /// end drops the summaries it kept of recordings in them.
+    pending_recorded: Mutex<Vec<std::ops::Range<u64>>>,
+    /// True when `pending_writes` or `pending_recorded` may hold a range. Keeps the common case of [`Gpu::lock`] to one
+    /// atomic load.
     writes_dirty: AtomicBool,
     /// The guest address of an initialised `NVNtexture` to its id in the resource table. The texture group maintains it.
     pub(crate) textures: Registry<TexId>,
@@ -223,6 +227,7 @@ impl Gpu {
             gate: Mutex::new(gate::Gate::new(order::ordering_on())),
             release_flush: order::release_flush_config(),
             pending_writes: Mutex::new(Vec::new()),
+            pending_recorded: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),
             textures: Registry::new(),
             programs: Registry::new(),
@@ -253,16 +258,16 @@ impl Gpu {
     ///
     /// The ranges that [`Gpu::guest_wrote_deferred`] queued so far are handed to [`Front::guest_wrote`] before the
     /// guard returns, so every user of the front end sees every flush that completed before its call. An error of
-    /// `guest_wrote` is logged once and does not fail the caller.
+    /// `guest_wrote` is logged once and does not fail the caller. The same holds for the spans of the recordings that
+    /// ended ([`Gpu::recorded_deferred`]): [`Front::recorded`] runs for them before anything else uses the front end.
     pub(crate) fn lock(&self) -> MutexGuard<'_, Front> {
         let mut front = self.front.lock().unwrap_or_else(PoisonError::into_inner);
         if self.writes_dirty.swap(false, Ordering::Acquire) {
-            let ranges = std::mem::take(
-                &mut *self
-                    .pending_writes
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner),
-            );
+            let spans = std::mem::take(&mut *self.pending_recorded.lock().unwrap_or_else(PoisonError::into_inner));
+            if !spans.is_empty() {
+                front.recorded(&spans);
+            }
+            let ranges = std::mem::take(&mut *self.pending_writes.lock().unwrap_or_else(PoisonError::into_inner));
             for (start, len) in ranges {
                 if let Err(e) = front.guest_wrote(start, len) {
                     log_once(
@@ -279,8 +284,18 @@ impl Gpu {
     /// recordings there. It takes no lock of the front end. Every write that the front end learns about goes through
     /// here, and so does the end of a recording ([`Front::recorded`]).
     pub(crate) fn invalidated(&self, start: u64, len: u64) {
-        self.backend
-            .recording_invalidated(start, start.saturating_add(len));
+        self.backend.recording_invalidated(start, start.saturating_add(len));
+    }
+
+    /// Tells the front end that a recording ended in `spans` of host memory, without taking its lock: the summaries it
+    /// kept of recordings there are dropped by the next [`Gpu::lock`], before anything decodes. (A thread that ends a
+    /// recording while the present holds the lock, 16 ms, no longer waits for it.)
+    pub(crate) fn recorded_deferred(&self, spans: &[std::ops::Range<u64>]) {
+        if spans.is_empty() {
+            return;
+        }
+        self.pending_recorded.lock().unwrap_or_else(PoisonError::into_inner).extend_from_slice(spans);
+        self.writes_dirty.store(true, Ordering::Release);
     }
 
     /// Tells the front end that the guest wrote `len` bytes at the host address `start`, without taking its lock. The
@@ -590,6 +605,20 @@ mod tests {
         let g = gpu_with(spy.clone());
         assert_eq!(g.wait(Fence(0), 7).expect("wait"), WaitResult::Done);
         assert_eq!(spy.waits.lock().expect("lock").as_slice(), &[(Fence(0), 7)]);
+    }
+
+    #[test]
+    fn the_end_of_a_recording_takes_no_lock_and_the_next_lock_applies_it() {
+        let g = gpu_with(Arc::new(Spy::default()));
+        let held = g.lock();
+        // Another thread ends a recording while the present holds the lock: it returns at once.
+        std::thread::scope(|s| {
+            s.spawn(|| g.recorded_deferred(&[0x1000..0x2000, 0x8000..0x9000])).join().expect("thread");
+        });
+        assert_eq!(g.pending_recorded.lock().expect("lock").len(), 2);
+        drop(held);
+        drop(g.lock());
+        assert!(g.pending_recorded.lock().expect("lock").is_empty(), "the lock applied the spans");
     }
 
     #[test]

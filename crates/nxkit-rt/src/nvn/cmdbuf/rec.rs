@@ -268,6 +268,13 @@ fn add_overflow(cb: u64, need: u32) -> AbiResult<()> {
     })
 }
 
+/// True when the end of a recording leaves the cache invalidation to the next lock of the front end (`NXKIT_REC_LOCK=0`).
+/// By default the end of each recording takes the lock: in Ocarina of Time the frame took 47 ms without it against 40 ms.
+fn defer_recorded() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NXKIT_REC_LOCK").is_ok_and(|v| v.trim() == "0"))
+}
+
 /// `EndRecording`. Gives the handle.
 pub(super) fn end(name: &'static str, cb: u64) -> u64 {
     guard(name, || {
@@ -283,7 +290,11 @@ pub(super) fn end(name: &'static str, cb: u64) -> u64 {
         for span in &rec.spans {
             g.invalidated(span.start, span.end - span.start);
         }
-        g.lock().recorded(&rec.spans);
+        if defer_recorded() {
+            g.recorded_deferred(&rec.spans);
+        } else {
+            g.lock().recorded(&rec.spans);
+        }
         Ok(rec.handle.0)
     })
 }

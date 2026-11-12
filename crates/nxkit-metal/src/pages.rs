@@ -127,6 +127,8 @@ struct PageInfo {
     /// memory is not known to hold a completed frame's bytes there. A game thread may read (and write) the stale blocks of
     /// a page in flight through the alias while it is not zero.
     snap: AtomicU32,
+    /// Why `snap` was last set to zero ([`SnapWhy`] as a number), 0 for never set.
+    snap_why: AtomicU32,
     /// Results one frame late: the blocks the CPU wrote while a frame in flight wrote them, not staged yet. The copy from
     /// the mirror leaves them alone and the next flush stages them.
     own: [AtomicU64; 4],
@@ -138,7 +140,65 @@ struct PageInfo {
     hold_frame: AtomicU32,
 }
 
+/// Why the guest bytes of a page stopped being a completed frame's (`PageInfo::snap` went to zero), and with it the
+/// right of game threads to read the page late. The last reason is kept per page, so a late access that found no snapshot
+/// names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum SnapWhy {
+    /// No copy has set a snapshot yet (the first read of the page waits and teaches it).
+    Never = 0,
+    /// The page was released or the tracker attached again.
+    Released,
+    /// A thread copied or had the page open at the completion of a frame.
+    Busy,
+    /// The blocks the frame wrote were not known at its completion.
+    Unknown,
+    /// No game thread read the page lately: the completion left it alone.
+    Idle,
+    /// The flush found a page nobody read lately.
+    FlushIdle,
+    /// The poison pattern replaced the bytes.
+    Poison,
+}
+
+impl SnapWhy {
+    /// The number of reasons.
+    pub const COUNT: usize = 7;
+    /// All reasons, in order.
+    pub const ALL: [SnapWhy; Self::COUNT] = [
+        SnapWhy::Never,
+        SnapWhy::Released,
+        SnapWhy::Busy,
+        SnapWhy::Unknown,
+        SnapWhy::Idle,
+        SnapWhy::FlushIdle,
+        SnapWhy::Poison,
+    ];
+
+    /// A short name for the diagnostics.
+    pub fn name(self) -> &'static str {
+        match self {
+            SnapWhy::Never => "never set",
+            SnapWhy::Released => "released",
+            SnapWhy::Busy => "busy at the completion",
+            SnapWhy::Unknown => "blocks unknown",
+            SnapWhy::Idle => "nobody read it lately (completion)",
+            SnapWhy::FlushIdle => "nobody read it lately (flush)",
+            SnapWhy::Poison => "poison",
+        }
+    }
+}
+
 impl PageInfo {
+    /// Drops the snapshot of the page for `why` and counts the reason. A page that had none is left alone.
+    fn snap_reset(&self, why: SnapWhy) {
+        if self.snap.swap(0, Ordering::AcqRel) != 0 {
+            self.snap_why.store(why as u32, Ordering::Relaxed);
+            SHARED.snap_resets[why as usize].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     fn stale(&self) -> Mask {
         [
             self.stale[0].load(Ordering::Acquire),
@@ -166,6 +226,7 @@ impl PageInfo {
         self.ready.store(0, Ordering::Release);
         self.waited.store(0, Ordering::Release);
         self.snap.store(0, Ordering::Release);
+        self.snap_why.store(SnapWhy::Released as u32, Ordering::Relaxed);
         self.hold_frame.store(0, Ordering::Release);
         self.own_frame.store(0, Ordering::Release);
         for a in self.own.iter().chain(&self.hold) {
@@ -448,6 +509,8 @@ struct Shared {
     /// Results one frame late: the handler serves the CPU's accesses to the blocks a frame in flight writes from guest
     /// memory, which holds the last completed frame's bytes, without waiting.
     late: AtomicBool,
+    /// Results one frame late: the flush leaves a page readable when its guest bytes are a completed frame's.
+    read_open_on: AtomicBool,
     /// Late reads and writes, the age of the bytes they met (frames: the frame in flight minus the frame the bytes are
     /// from) as a sum, a histogram (1, 2, 3, 4 or more) and the largest since the last [`Pages::take_late_age_max`], the
     /// blocks the CPU took from the frame (written while it ran), the blocks a copy from the mirror left alone for that
@@ -462,6 +525,16 @@ struct Shared {
     late_copied: AtomicU64,
     late_copied_blocks: AtomicU64,
     late_flush_copies: AtomicU64,
+    /// Snapshots dropped, by [`SnapWhy`], and late accesses that found no snapshot, by the reason the page lost it last.
+    snap_resets: [AtomicU64; SnapWhy::COUNT],
+    snap_misses: [AtomicU64; SnapWhy::COUNT],
+    /// Pages that the flush left readable while a frame in flight writes them (results one frame late: guest memory holds
+    /// the last completed frame's bytes there), and the pages that lost this at a completion.
+    read_open: AtomicU64,
+    read_revoked: AtomicU64,
+    /// System calls that read a page in flight outside its stale blocks without a wait, and the ones that waited for a writer.
+    settle_late: AtomicU64,
+    settle_waits: AtomicU64,
 }
 
 struct OldAction {
@@ -550,6 +623,7 @@ static SHARED: Shared = Shared {
     early_pages: AtomicU64::new(0),
     early_syncs: AtomicU64::new(0),
     late: AtomicBool::new(false),
+    read_open_on: AtomicBool::new(false),
     late_reads: AtomicU64::new(0),
     late_writes: AtomicU64::new(0),
     late_age_sum: AtomicU64::new(0),
@@ -560,6 +634,12 @@ static SHARED: Shared = Shared {
     late_copied: AtomicU64::new(0),
     late_copied_blocks: AtomicU64::new(0),
     late_flush_copies: AtomicU64::new(0),
+    snap_resets: [const { AtomicU64::new(0) }; SnapWhy::COUNT],
+    snap_misses: [const { AtomicU64::new(0) }; SnapWhy::COUNT],
+    read_open: AtomicU64::new(0),
+    read_revoked: AtomicU64::new(0),
+    settle_late: AtomicU64::new(0),
+    settle_waits: AtomicU64::new(0),
 };
 
 /// Flushes per epoch of the eager copy: a page that game threads stop faulting on loses its place after two epochs.
@@ -858,21 +938,62 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
     let plan = unsafe { a64::plan_op(&op, &regs) };
     let (base, p) = (SHARED.base.load(Ordering::Relaxed), page());
     let (first, last) = (plan.ea, plan.ea.wrapping_add(plan.len - 1));
-    let in_page = |a: u64| a >= base && ((a - base) / p) as usize == pg;
-    if !in_page(first) || !in_page(last) || far < first || far > last {
+    // The access may cross into the next page (or come from the one before): both pages are looked at, the faulting one
+    // `pg` (in flight, known) and its neighbour, whose protection did not matter for the fault.
+    let page_of = |a: u64| (a >= base).then(|| ((a - base) / p) as usize);
+    let (Some(pa), Some(pb)) = (page_of(first), page_of(last)) else {
+        count_fallback(Reason::Mismatch, pc);
+        return false;
+    };
+    if far < first || far > last || pg < pa || pg > pb || pb > pa + 1 {
         count_fallback(Reason::Mismatch, pc);
         return false;
     }
-    let stale = info.stale();
-    let (lo, hi) = (((first - base) % p) / BLOCK, ((last - base) % p) / BLOCK);
-    let is_stale = |b: u64| stale[(b / 64) as usize] >> (b % 64) & 1 != 0;
     // Results one frame late: guest memory holds the bytes of the last completed frame in the stale blocks, and the access
     // goes on through the alias without a wait. A store marks the blocks as the CPU's before it is done, so the copy of
     // the frame's bytes that may run at the same time leaves them alone, and the next flush stages them.
     let mut late = false;
-    if (lo..=hi).any(is_stale) {
-        let snap = info.snap.load(Ordering::Acquire);
-        if snap == 0 || !SHARED.late.load(Ordering::Relaxed) {
+    for q in pa..=pb {
+        let (qlo, qhi) = (
+            if q == pa { first } else { base + q as u64 * p },
+            if q == pb { last } else { base + (q as u64 + 1) * p - 1 },
+        );
+        let (info_q, cur_q) = if q == pg {
+            (info, cur)
+        } else {
+            let Some(wq) = word(q) else {
+                count_fallback(Reason::Mismatch, pc);
+                return false;
+            };
+            let cur_q = wq.load(Ordering::Acquire);
+            match cur_q & STATE_MASK {
+                // Not tracked: nothing to look at.
+                FREE => continue,
+                CLEAN | DIRTY | GPU | OPEN => {}
+                _ => {
+                    count_fallback(Reason::Mismatch, pc);
+                    return false;
+                }
+            }
+            let Some(iq) = self::info(q) else {
+                count_fallback(Reason::Mismatch, pc);
+                return false;
+            };
+            (iq, cur_q)
+        };
+        let stale = info_q.stale();
+        let (lo, hi) = (((qlo - base) % p) / BLOCK, ((qhi - base) % p) / BLOCK);
+        let is_stale = |b: u64| stale[(b / 64) as usize] >> (b % 64) & 1 != 0;
+        if !(lo..=hi).any(is_stale) {
+            continue;
+        }
+        let snap = info_q.snap.load(Ordering::Acquire);
+        let flying = q == pg || (matches!(cur_q & STATE_MASK, GPU | OPEN) && page_flying(q, cur_q >> FRAME_SHIFT));
+        if snap == 0 || !SHARED.late.load(Ordering::Relaxed) || !flying {
+            if snap == 0 && flying {
+                let why = info_q.snap_why.load(Ordering::Relaxed) as usize;
+                SHARED.snap_misses[why.min(SnapWhy::COUNT - 1)].fetch_add(1, Ordering::Relaxed);
+            }
             count_fallback(Reason::Overlap, pc);
             return false;
         }
@@ -880,22 +1001,21 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
         if op.writes() {
             let mut owned = 0u64;
             for b in (lo..=hi).filter(|&b| is_stale(b)) {
-                info.own[(b / 64) as usize].fetch_or(1 << (b % 64), Ordering::AcqRel);
+                info_q.own[(b / 64) as usize].fetch_or(1 << (b % 64), Ordering::AcqRel);
                 owned += 1;
             }
-            info.own_frame
-                .fetch_max((SHARED.flushed.load(Ordering::Acquire) & FRAME_MASK) as u32, Ordering::AcqRel);
+            info_q.own_frame.fetch_max((SHARED.flushed.load(Ordering::Acquire) & FRAME_MASK) as u32, Ordering::AcqRel);
             SHARED.late_owned.fetch_add(owned, Ordering::Relaxed);
         }
-        let age = (cur >> FRAME_SHIFT).saturating_sub(snap).max(1);
+        let age = (cur_q >> FRAME_SHIFT).saturating_sub(snap).max(1);
         SHARED.late_age_sum.fetch_add(u64::from(age), Ordering::Relaxed);
         SHARED.late_age[(age as usize - 1).min(3)].fetch_add(1, Ordering::Relaxed);
         SHARED.late_age_max.fetch_max(u64::from(age), Ordering::Relaxed);
         // The page is a CPU-read GPU result: the completion of the frames keeps copying it.
-        info.eager.store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+        info_q.eager.store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
     }
     // SAFETY: the alias maps the same pages as guest memory with read and write access, and `plan` lies inside the
-    // page `pg`, which lies inside guest memory. The registers are the thread's own.
+    // pages `pa` and `pb`, which lie inside guest memory. The registers are the thread's own.
     unsafe {
         if !a64::perform_op(&op, &regs, &plan, (alias + (first - base)) as *mut u8) {
             // An atomic on an address that is not aligned: the hardware would fault; the ordinary path decides.
@@ -904,19 +1024,36 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
         }
         pc_at.write(pc + 4);
     }
-    if op.writes() && info.emu.fetch_or(1, Ordering::AcqRel) & 1 == 0 {
-        // The first store since the flush took the page: the next flush stages it, and it counts as a first write by the phase
-        // of the newest frame, as a write that dirties a page does.
-        log_dirty(pg);
-        let (ph, newest) = phase_now();
-        SHARED.phase_writes[ph].fetch_add(1, Ordering::Relaxed);
-        if ph == 1 {
-            let r = newest as usize % P1_RING;
-            let n = SHARED.p1_n[r].fetch_add(1, Ordering::AcqRel) as usize;
-            if n < P1_CAP {
-                SHARED.p1_log[r][n].store(first.wrapping_sub(base) + 1, Ordering::Release);
+    if op.writes() {
+        for q in pa..=pb {
+            let at = if q == pa { first } else { base + q as u64 * p };
+            let Some(info_q) = (if q == pg { Some(info) } else { self::info(q) }) else {
+                continue;
+            };
+            // A dirty page is staged by the flush anyway; a page that is not tracked is not staged at all.
+            let state = if q == pg {
+                cur & STATE_MASK
+            } else {
+                word(q).map_or(FREE, |w| w.load(Ordering::Acquire) & STATE_MASK)
+            };
+            if matches!(state, FREE | DIRTY) {
+                continue;
             }
-            count_pc_in(3, pc);
+            if info_q.emu.fetch_or(1, Ordering::AcqRel) & 1 == 0 {
+                // The first store since the flush took the page: the next flush stages it, and it counts as a first write
+                // by the phase of the newest frame, as a write that dirties a page does.
+                log_dirty(q);
+                let (ph, newest) = phase_now();
+                SHARED.phase_writes[ph].fetch_add(1, Ordering::Relaxed);
+                if ph == 1 {
+                    let r = newest as usize % P1_RING;
+                    let n = SHARED.p1_n[r].fetch_add(1, Ordering::AcqRel) as usize;
+                    if n < P1_CAP {
+                        SHARED.p1_log[r][n].store(at.wrapping_sub(base) + 1, Ordering::Release);
+                    }
+                    count_pc_in(3, pc);
+                }
+            }
         }
     }
     if late {
@@ -1587,6 +1724,18 @@ pub struct PageStats {
     pub late_copied_blocks: u64,
     /// Pages the flush copied.
     pub late_flush_copies: u64,
+    /// Snapshots dropped, by [`SnapWhy`].
+    pub snap_resets: [u64; SnapWhy::COUNT],
+    /// Late accesses that found no snapshot (they waited), by the reason the page lost it last.
+    pub snap_misses: [u64; SnapWhy::COUNT],
+    /// Pages the flush left readable while a frame in flight writes them, and the ones that lost it at a completion.
+    pub read_open: u64,
+    /// Pages that lost the read access at a completion.
+    pub read_revoked: u64,
+    /// Pages of system call reads (outside the stale blocks, of a page with a snapshot) that went on without a wait.
+    pub settle_late: u64,
+    /// Pages of system calls that waited for a writer.
+    pub settle_waits: u64,
 }
 
 /// What one flush did.
@@ -1780,6 +1929,32 @@ fn close_opened(frame: u64, runs: &[(u32, u32)]) {
     }
 }
 
+/// True when a system call may read `[addr, addr + len)` of the page `pg` (tagged `GPU` with `w`) without waiting for the
+/// writer: results are late, a frame in flight writes the page, its guest bytes are a completed frame's (`snap`, kept
+/// current by the completions) and the read touches none of the blocks that frame writes.
+fn late_host_read(pg: usize, w: &AtomicU32, addr: u64, len: u64) -> bool {
+    if !SHARED.late.load(Ordering::Relaxed) || SHARED.alias.load(Ordering::Acquire) == 0 {
+        return false;
+    }
+    let cur = w.load(Ordering::Acquire);
+    if cur & STATE_MASK != GPU || !page_flying(pg, cur >> FRAME_SHIFT) {
+        return false;
+    }
+    let Some(i) = info(pg) else { return false };
+    if i.snap.load(Ordering::Acquire) == 0 {
+        return false;
+    }
+    let (base, p) = (SHARED.base.load(Ordering::Relaxed), page());
+    let page_lo = base + pg as u64 * p;
+    let lo = addr.max(page_lo) - page_lo;
+    let hi = addr.saturating_add(len.max(1)).min(page_lo + p) - page_lo;
+    if lo >= hi {
+        return false;
+    }
+    let stale = i.stale();
+    !(lo / BLOCK..=(hi - 1) / BLOCK).any(|b| stale[(b / 64) as usize] >> (b % 64) & 1 != 0)
+}
+
 /// True while game threads read the page `i` as a CPU-read GPU result: they faulted on it for a copy, or read it late, in
 /// the last epochs.
 fn late_active(i: &PageInfo) -> bool {
@@ -1787,11 +1962,24 @@ fn late_active(i: &PageInfo) -> bool {
     e != 0 && SHARED.epoch.load(Ordering::Relaxed) <= e
 }
 
+/// Takes the access to the page `pg` away again (`PROT_NONE`) when it is tagged GPU with the word `cur`: the page was left
+/// readable for late readers and its guest bytes stop being a completed frame's. The claim keeps a thread that opens the
+/// page at the same time from meeting the change halfway.
+fn revoke_read(pg: usize, w: &AtomicU32, cur: u32) {
+    if w.compare_exchange(cur, pack(SYNC, u64::from(cur >> FRAME_SHIFT)), Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        protect_pages(pg as u32, pg as u32 + 1, PROT_NONE, false);
+        w.store(cur, Ordering::Release);
+        wake_all();
+        SHARED.read_revoked.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// Results one frame late, at the completion of `frame` (the caller holds the control mutex): the pages of the frame's
-/// `runs` that a newer frame already tags, and whose guest bytes are the last completed frame's, get the blocks that
-/// `frame` wrote copied from the mirror into guest memory through the alias, so that guest memory is the bytes of
-/// `frame` while the newer frame runs. The CPU's own blocks stay. A page that no game thread read lately loses its place.
-/// A page that `frame` still tags is left to the copy-back or to the next flush.
+/// `runs` whose guest bytes are the last completed frame's get the blocks that `frame` wrote copied from the mirror into
+/// guest memory through the alias, so that guest memory is the bytes of `frame` for the readers of the frame that runs now
+/// (a newer frame already tags the page) or of the next one (`frame` is the newest tag: the flush of the next frame comes
+/// after this completion when the CPU runs one frame ahead, and the copy-back thread is not there yet). The CPU's own
+/// blocks stay. A page that no game thread read lately loses its place, and with it the read access that the flush gave it.
 fn late_copy_back(frame: u64, runs: &[(u32, u32)], masks: Option<&[Vec<Mask>]>, mirror: u64, alias: u64) {
     let (mut pages, mut blocks) = (0u64, 0u64);
     for (ri, &(first, end)) in runs.iter().enumerate() {
@@ -1802,27 +1990,41 @@ fn late_copy_back(frame: u64, runs: &[(u32, u32)], masks: Option<&[Vec<Mask>]>, 
             let Some(i) = info(pg as usize) else { continue };
             if matches!(state, SYNC | OPEN) {
                 // A thread copies or reads the page right now: its bytes are no longer the last completed frame's.
-                i.snap.store(0, Ordering::Release);
+                i.snap_reset(SnapWhy::Busy);
                 continue;
             }
-            if state != GPU || u64::from(cur >> FRAME_SHIFT) <= frame & FRAME_MASK {
+            let tag = u64::from(cur >> FRAME_SHIFT);
+            if state != GPU || tag < frame & FRAME_MASK {
                 continue;
             }
+            // The newest tag is `frame` itself: no newer frame writes the page.
+            let newest = tag == frame & FRAME_MASK;
             if i.snap.load(Ordering::Acquire) == 0 {
                 continue;
             }
             let m = masks.and_then(|m| m.get(ri)).and_then(|r| r.get((pg - first) as usize));
             let Some(m) = m.filter(|_| late_active(i)) else {
                 // The blocks of the frame are not known, or nobody reads the page: guest memory is not kept up to date.
-                i.snap.store(0, Ordering::Release);
+                let why = if m.is_none() { SnapWhy::Unknown } else { SnapWhy::Idle };
+                i.snap_reset(why);
+                revoke_read(pg as usize, w, cur);
                 continue;
             };
             let f = (frame & FRAME_MASK) as u32;
+            // For the newest tag the page is claimed while it is copied: a thread that faults on it meanwhile (it is
+            // complete, so the thread copies it itself and may write) waits for the claim instead of racing the copy.
+            if newest && w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire).is_err() {
+                continue;
+            }
             let keep = i.keep(f);
             let copy: Mask = std::array::from_fn(|k| m[k] & !keep[k]);
             let kept: u32 = m.iter().zip(&keep).map(|(a, b)| (a & b).count_ones()).sum();
             copy_mask(pg as usize, mirror, alias, &copy);
             i.snap.store(f.max(1), Ordering::Release);
+            if newest {
+                w.store(cur, Ordering::Release);
+                wake_all();
+            }
             pages += 1;
             blocks += u64::from(copy.iter().map(|c| c.count_ones()).sum::<u32>());
             if kept > 0 {
@@ -2149,6 +2351,12 @@ impl Pages {
     /// copy-back of the frame in flight; the next flush stages it into the mirror.
     pub fn set_late(&self, on: bool) {
         SHARED.late.store(on, Ordering::Release);
+    }
+
+    /// Whether the flush leaves the pages with a snapshot readable while a frame in flight writes them (needs
+    /// [`set_late`](Self::set_late)): a read of such a page takes no trap and gets the last completed frame's bytes.
+    pub fn set_read_open(&self, on: bool) {
+        SHARED.read_open_on.store(on, Ordering::Release);
     }
 
     /// True when results come one frame late ([`set_late`](Self::set_late)).
@@ -2583,7 +2791,9 @@ impl Pages {
             if word(pg as usize).is_none_or(|w| w.load(Ordering::Acquire) & STATE_MASK == FREE) {
                 continue;
             }
-            let Some(bytes) = self.alias_page(pg) else { continue };
+            let Some(bytes) = self.alias_page(pg) else {
+                continue;
+            };
             stager.stage_masked(pg, bytes, i.take_skip());
             n += 1;
         }
@@ -2606,9 +2816,17 @@ impl Pages {
                 let state = w.load(Ordering::Acquire) & STATE_MASK;
                 match state {
                     GPU => {
+                        if !write && !internal && late_host_read(p as usize, w, addr, len) {
+                            // A read outside the bytes the frame writes, of a page whose guest bytes are a completed
+                            // frame's: the read needs no wait (the caller opens the page for reading next).
+                            SHARED.settle_late.fetch_add(1, Ordering::Relaxed);
+                            break;
+                        }
                         let k = serve_mirrored(p as usize, w, write, internal, mirror, addr);
-                        SHARED.faults[k as usize][FaultOrigin::Host as usize]
-                            .fetch_add(1, Ordering::Relaxed);
+                        if matches!(k, FaultKind::ReadInFlight | FaultKind::WriteInFlight) {
+                            SHARED.settle_waits.fetch_add(1, Ordering::Relaxed);
+                        }
+                        SHARED.faults[k as usize][FaultOrigin::Host as usize].fetch_add(1, Ordering::Relaxed);
                     }
                     OPEN if write => {
                         let k = serve_mirrored(p as usize, w, write, internal, mirror, addr);
@@ -2895,7 +3113,7 @@ impl Pages {
                             i.snap.store(f.max(1), Ordering::Release);
                             SHARED.late_flush_copies.fetch_add(1, Ordering::Relaxed);
                         } else {
-                            i.snap.store(0, Ordering::Release);
+                            i.snap_reset(SnapWhy::FlushIdle);
                         }
                     }
                 }
@@ -2936,12 +3154,33 @@ impl Pages {
             // The pages lose all access first: from here a thread that touches a page faults, finds it tagged and
             // waits for the frame and copies the mirror. Only then is the pattern written, one page at a time, so a page
             // is open and holds the pattern for a few microseconds, not for the time of the whole run.
-            protect_pages(s, e, PROT_NONE, true);
+            //
+            // Results one frame late: a page whose guest bytes are a completed frame's (`snap`) and that the completions
+            // keep current stays readable. A read of it needs no trap: it gets the last completed frame's bytes, which is
+            // what the handler served after the trap. Only stores fault (the handler marks the blocks as the CPU's).
+            if late_on && alias != 0 && poison.is_none() && SHARED.read_open_on.load(Ordering::Acquire) {
+                let readable = |pg: u32| info(pg as usize).is_some_and(|i| i.snap.load(Ordering::Acquire) != 0);
+                let mut run_start = s;
+                while run_start < e {
+                    let open = readable(run_start);
+                    let mut run_end = run_start + 1;
+                    while run_end < e && readable(run_end) == open {
+                        run_end += 1;
+                    }
+                    protect_pages(run_start, run_end, if open { PROT_READ } else { PROT_NONE }, true);
+                    if open {
+                        SHARED.read_open.fetch_add(u64::from(run_end - run_start), Ordering::Relaxed);
+                    }
+                    run_start = run_end;
+                }
+            } else {
+                protect_pages(s, e, PROT_NONE, true);
+            }
             if let Some(pattern) = poison {
                 for pg in s..e {
                     // The pattern replaces the bytes of the last completed frame: late readers must wait here.
                     if let Some(i) = info(pg as usize) {
-                        i.snap.store(0, Ordering::Release);
+                        i.snap_reset(SnapWhy::Poison);
                     }
                     let stale = info(pg as usize).map_or([u64::MAX; 4], PageInfo::stale);
                     protect_pages(pg, pg + 1, PROT_RW, true);
@@ -3133,7 +3372,23 @@ impl Pages {
             late_copied: g(&SHARED.late_copied),
             late_copied_blocks: g(&SHARED.late_copied_blocks),
             late_flush_copies: g(&SHARED.late_flush_copies),
+            snap_resets: std::array::from_fn(|i| g(&SHARED.snap_resets[i])),
+            snap_misses: std::array::from_fn(|i| g(&SHARED.snap_misses[i])),
+            read_open: g(&SHARED.read_open),
+            read_revoked: g(&SHARED.read_revoked),
+            settle_late: g(&SHARED.settle_late),
+            settle_waits: g(&SHARED.settle_waits),
         }
+    }
+
+    /// The instruction word at `pc`, a program counter of an access the tables counted, for the reports.
+    pub fn insn_at(&self, pc: u64) -> u32 {
+        if pc & 3 != 0 || pc == 0 {
+            return 0;
+        }
+        // SAFETY: the program counter of a fault names an instruction that was fetched, so the word is readable (the
+        // code of the game stays mapped while it runs).
+        unsafe { (pc as *const u32).read() }
     }
 
     /// The longest wait for a writer since the last call, by access (0 read, 1 write), in ns.
@@ -4185,6 +4440,41 @@ mod tests {
     }
 
     #[test]
+    fn a_store_across_the_page_border_and_a_lane_store_are_done_by_the_handler_without_a_wait() {
+        use std::arch::asm;
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = emulating(4);
+        let mut st = Collect::default();
+        // Page 1 is in flight (bytes 0 to 255 are the frame's), page 2 is clean and tracked.
+        let _ = pg.flush_mirrored(1, &[(m.addr(2), P)], &[(m.addr(1), 256)], None, &mut st);
+        let s0 = pg.stats();
+        let border = (m.addr(1) + P) as usize;
+        // SAFETY: the pair lies on the border of pages 1 and 2 of the test mapping; the handler does the store.
+        unsafe {
+            asm!("stp {a}, {b}, [{p}]", p = in(reg) border - 8, a = in(reg) 0x1122_3344_5566_7788u64,
+                b = in(reg) 0x99aa_bbcc_ddee_ff00u64, options(nostack));
+            // `st1 {v0.s}[1], [x]` in the page in flight, outside the frame's bytes.
+            asm!("movi v0.4s, #7", "st1 {{v0.s}}[1], [{p}]", p = in(reg) m.addr(1) as usize + 1024, out("v0") _,
+                options(nostack));
+        }
+        let s1 = pg.stats();
+        assert_eq!(s1.writer_waits, s0.writer_waits, "no wait");
+        assert_eq!(s1.fallbacks[Reason::Mismatch as usize], s0.fallbacks[Reason::Mismatch as usize]);
+        assert_eq!(s1.emulated[Form::St1 as usize] - s0.emulated[Form::St1 as usize], 1);
+        let a1 = pg.alias_page(1).unwrap();
+        let a2 = pg.alias_page(2).unwrap();
+        assert_eq!(&a1[(P - 8) as usize..], &0x1122_3344_5566_7788u64.to_le_bytes());
+        assert_eq!(&a2[..8], &0x99aa_bbcc_ddee_ff00u64.to_le_bytes());
+        assert_eq!(&a1[1024..1028], &7u32.to_le_bytes());
+        // The flush stages the clean page that the handler stored to.
+        let mut st2 = Collect::default();
+        let f = pg.flush_mirrored(2, &[], &[], None, &mut st2);
+        assert!(f.emu_staged >= 2, "pages 1 and 2 were stored to: {f:?}");
+        pg.complete(1);
+        pg.complete(2);
+    }
+
+    #[test]
     fn atomics_exclusives_and_ld1_outside_the_written_bytes_are_done_by_the_handler_and_sum_correctly() {
         use std::arch::asm;
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
@@ -4357,6 +4647,123 @@ mod tests {
         mir.store(1, 70, 0xC1);
         pg.complete(3);
         assert_eq!(m.load(1, 70), 0xC1);
+        done(pg);
+    }
+
+    #[test]
+    fn the_completion_of_the_newest_frame_copies_its_bytes_before_the_next_frame_is_flushed() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        // The CPU runs one frame ahead at most: frame 2 completes before frame 3 is flushed, and nothing tags the page.
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_copied - s0.late_copied, 1, "the completion copied the page of the newest tag");
+        assert_eq!(pg.state_of(m.addr(1)), "gpu(2)");
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        assert_eq!(m.load(1, 70), 0xB1, "frame 3 runs: the reader gets frame 2's bytes without a wait");
+        assert_eq!(pg.stats().writer_waits, s0.writer_waits, "nobody waited");
+        pg.complete(3);
+        done(pg);
+    }
+
+    #[test]
+    fn a_snapshot_dropped_at_a_completion_is_counted_with_its_reason_and_the_next_access_names_it() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        // Frame 600 is in another epoch than the read of the page (epoch 0): nobody read the page lately.
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let _ = pg.flush_mirrored(600, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.snap_resets[SnapWhy::Idle as usize] - s0.snap_resets[SnapWhy::Idle as usize], 1);
+        mir.store(1, 70, 0xB1);
+        let base = m.addr(1) as usize;
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread.
+            unsafe { ((base + 70) as *const u8).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(!reader.is_finished(), "no snapshot: the reader waits for the writer");
+        pg.complete(600);
+        assert_eq!(reader.join().unwrap(), 0xB1);
+        let s2 = pg.stats();
+        assert_eq!(s2.snap_misses[SnapWhy::Idle as usize] - s1.snap_misses[SnapWhy::Idle as usize], 1);
+        done(pg);
+    }
+
+    #[test]
+    fn a_page_with_a_snapshot_stays_readable_while_a_frame_writes_it_and_only_stores_fault() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        pg.set_read_open(true);
+        let mut st = Collect::default();
+        let s0 = pg.stats();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        let s1 = pg.stats();
+        assert_eq!(s1.read_open - s0.read_open, 1, "the flush left the page readable");
+        // Reads of the stale blocks and of the other bytes take no trap: nothing is counted by the handler.
+        let (emu0, handler0) = (s1.emulated.iter().sum::<u64>(), s1.late_reads);
+        assert_eq!(m.load(1, 70), 0xA1, "frame 1's bytes while frame 2 runs");
+        assert_eq!(m.load(1, 300), 0);
+        let s2 = pg.stats();
+        assert_eq!(s2.emulated.iter().sum::<u64>(), emu0, "no emulated access: no fault");
+        assert_eq!(s2.late_reads, handler0);
+        // A store faults and is done by the handler: the blocks become the CPU's.
+        m.store(1, 70, 0xC7);
+        let s3 = pg.stats();
+        assert_eq!(s3.late_writes - s2.late_writes, 1);
+        assert_eq!(s3.writer_waits, s0.writer_waits, "nobody waited");
+        pg.complete(2);
+        done(pg);
+        pg.set_read_open(false);
+    }
+
+    #[test]
+    fn a_readable_page_nobody_reads_lately_loses_its_access_at_the_completion() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = late_page(0xA1, 0xA2);
+        pg.set_read_open(true);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        // Frame 600 is in another epoch: when frame 2 completes, the page is not kept current any more.
+        let _ = pg.flush_mirrored(600, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.read_revoked - s0.read_revoked, 1);
+        let base = m.addr(1) as usize;
+        let reader = std::thread::spawn(move || {
+            // SAFETY: inside page 1 of the test mapping, which outlives the joined thread.
+            unsafe { ((base + 70) as *const u8).read_volatile() }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(!reader.is_finished(), "the page lost its read access: the reader waits");
+        pg.complete(600);
+        reader.join().unwrap();
+        done(pg);
+        pg.set_read_open(false);
+    }
+
+    #[test]
+    fn a_system_call_read_outside_the_written_bytes_of_a_page_with_a_snapshot_does_not_wait() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, _mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let s0 = pg.stats();
+        hook(m.addr(1) + 300, 8, nxkit_abi::guest::ACCESS_READ);
+        let s1 = pg.stats();
+        assert_eq!(s1.settle_late - s0.settle_late, 1);
+        assert_eq!(s1.settle_waits, s0.settle_waits);
+        assert_eq!(m.load(1, 300), 0, "the page is readable for the system call");
+        pg.complete(2);
         done(pg);
     }
 

@@ -633,7 +633,6 @@ pub(crate) unsafe fn perform(op: &Mem, r: &Regs, plan: &Plan, p: *mut u8) {
     }
 }
 
-
 // ---------------------------------------------------------------------------------------------------------------------
 // Atomics, exclusives and LD1/ST1.
 
@@ -733,6 +732,21 @@ pub(crate) enum Op {
         /// The post-index register: None for no writeback, 31 for the immediate.
         post: Option<u8>,
     },
+    /// `LD1`/`ST1` of one lane of a register (single structure), optionally with a post index.
+    Lane {
+        /// A load.
+        load: bool,
+        /// Bytes of the lane: 1, 2, 4 or 8.
+        size: u8,
+        /// The lane number.
+        index: u8,
+        /// The register.
+        rt: u8,
+        /// The base register.
+        rn: u8,
+        /// The post-index register: None for no writeback, 31 for the immediate (the size of the lane).
+        post: Option<u8>,
+    },
 }
 
 impl Op {
@@ -744,8 +758,8 @@ impl Op {
             Op::Cas { .. } => Form::Cas,
             Op::Excl { load: true, .. } => Form::Ldxr,
             Op::Excl { .. } => Form::Stxr,
-            Op::Ld1 { load: true, .. } => Form::Ld1,
-            Op::Ld1 { .. } => Form::St1,
+            Op::Ld1 { load: true, .. } | Op::Lane { load: true, .. } => Form::Ld1,
+            Op::Ld1 { .. } | Op::Lane { .. } => Form::St1,
         }
     }
 
@@ -833,13 +847,28 @@ fn decode_special(i: u32) -> Option<Op> {
             0b0010 => 4,
             _ => return None,
         };
-        return Some(Op::Ld1 {
+        return Some(Op::Ld1 { load: i >> 22 & 1 == 1, q: i >> 30 & 1 == 1, regs, rt, rn, post: postx.then_some(rs) });
+    }
+    // `LD1`, `ST1` (one lane): `0 Q 0011010 L 0 00000 opcode S size Rn Rt`, or with a post index
+    // `0 Q 0011011 L 0 Rm opcode S size Rn Rt`.
+    let lane_plain = i & 0xbfbf_0000 == 0x0d00_0000;
+    let lane_post = i & 0xbfa0_0000 == 0x0d80_0000;
+    if lane_plain || lane_post {
+        let (q, s_bit, sz) = (i >> 30 & 1, i >> 12 & 1, i >> 10 & 3);
+        let (size, index) = match (i >> 13) & 7 {
+            0b000 => (1, q << 3 | s_bit << 2 | sz),
+            0b010 if sz & 1 == 0 => (2, q << 2 | s_bit << 1 | sz >> 1),
+            0b100 if sz == 0 => (4, q << 1 | s_bit),
+            0b100 if sz == 1 && s_bit == 0 => (8, q),
+            _ => return None,
+        };
+        return Some(Op::Lane {
             load: i >> 22 & 1 == 1,
-            q: i >> 30 & 1 == 1,
-            regs,
+            size,
+            index: index as u8,
             rt,
             rn,
-            post: postx.then_some(rs),
+            post: lane_post.then_some(rs),
         });
     }
     None
@@ -863,6 +892,12 @@ pub(crate) unsafe fn plan_op(op: &Op, r: &Regs) -> Plan {
             }
             Op::Ld1 { q, regs, rn, post, .. } => {
                 let len = u64::from(*regs) * if *q { 16 } else { 8 };
+                let ea = r.base(*rn);
+                let writeback = post.map(|m| ea.wrapping_add(if m == 31 { len } else { r.gpr(m) }));
+                Plan { ea, len, writeback }
+            }
+            Op::Lane { size, rn, post, .. } => {
+                let len = u64::from(*size);
                 let ea = r.base(*rn);
                 let writeback = post.map(|m| ea.wrapping_add(if m == 31 { len } else { r.gpr(m) }));
                 Plan { ea, len, writeback }
@@ -1069,6 +1104,33 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
                     }
                 };
                 set(*rs, u64::from(!ok));
+            }
+            true
+        }
+        Op::Lane { load, size, index, rt, rn, post } => {
+            let n = usize::from(*size);
+            let at = usize::from(*index) * n;
+            let reg = usize::from(*rt);
+            // SAFETY: per the caller.
+            unsafe {
+                let mut b = r.v.add(reg).read_unaligned().to_le_bytes();
+                if *load {
+                    for (j, d) in b[at..at + n].iter_mut().enumerate() {
+                        *d = p.add(j).read_volatile();
+                    }
+                    r.v.add(reg).write_unaligned(u128::from_le_bytes(b));
+                } else {
+                    for (j, sv) in b[at..at + n].iter().enumerate() {
+                        p.add(j).write_volatile(*sv);
+                    }
+                }
+                if let (Some(w), Some(_)) = (plan.writeback, post) {
+                    if *rn >= 31 {
+                        r.sp.write(w);
+                    } else {
+                        r.x.add(usize::from(*rn)).write(w);
+                    }
+                }
             }
             true
         }
@@ -1641,16 +1703,33 @@ mod tests {
         assert_eq!(ld1(0x0c9f_a020), (false, false, 2, 0, 1, Some(31)));
         assert_eq!(ld1(0x4c82_7020), (false, true, 1, 0, 1, Some(2)));
         assert_eq!(ld1(0x4cdf_a020), (true, true, 2, 0, 1, Some(31)));
-        // What stays out: LD2, the lane forms.
+        // What stays out: LD2, LD1R, the lane forms of two registers.
         assert_eq!(decode_op(0x4c40_8820).err(), Some(Reason::Structure));
-        assert_eq!(decode_op(0x0d40_9020).err(), Some(Reason::Structure));
+        assert_eq!(decode_op(0x0d40_c820).err(), Some(Reason::Structure));
+        assert_eq!(decode_op(0x0d60_9020).err(), Some(Reason::Structure));
+        // One lane: `ST1 {v0.s}[1], [x22]`, `ST1 {v0.s}[2], [x8]`, `LD1 {v0.s}[1], [x1]`, `LD1 {v3.b}[15], [x2], #1`,
+        // `ST1 {v1.d}[1], [x2], x3`, `ST1 {v1.h}[5], [x2]`.
+        let lane = |i| match op(i) {
+            Op::Lane { load, size, index, rt, rn, post } => (load, size, index, rt, rn, post),
+            o => panic!("{i:#010x}: {o:?}"),
+        };
+        assert_eq!(lane(0x0d00_92c0), (false, 4, 1, 0, 22, None));
+        assert_eq!(lane(0x4d00_8100), (false, 4, 2, 0, 8, None));
+        assert_eq!(lane(0x0d40_9020), (true, 4, 1, 0, 1, None));
+        assert_eq!(lane(0x4ddf_1c43), (true, 1, 15, 3, 2, Some(31)));
+        assert_eq!(lane(0x4d83_8441), (false, 8, 1, 1, 2, Some(3)));
+        assert_eq!(lane(0x4d00_4841), (false, 2, 5, 1, 2, None));
     }
 
     impl Rig {
         fn run_op(&mut self, i: u32, at: usize) -> bool {
             let o = op(i);
             let rn = match o {
-                Op::Rmw { rn, .. } | Op::Cas { rn, .. } | Op::Excl { rn, .. } | Op::Ld1 { rn, .. } => rn,
+                Op::Rmw { rn, .. }
+                | Op::Cas { rn, .. }
+                | Op::Excl { rn, .. }
+                | Op::Ld1 { rn, .. }
+                | Op::Lane { rn, .. } => rn,
                 Op::Mem(m) => m.rn,
             };
             let base = self.mem.as_mut_ptr() as u64 + at as u64;
@@ -1703,6 +1782,21 @@ mod tests {
         let before = r.mem;
         assert!(!r.run_op(0xf821_0062, a + 1));
         assert_eq!(before, r.mem);
+    }
+
+    #[test]
+    fn one_lane_stores_and_loads_touch_only_that_lane_and_write_back() {
+        let mut r = Rig::new();
+        r.v[0] = 0x1111_1111_2222_2222_3333_3333_4444_4444;
+        // `ST1 {v0.s}[1], [x22]` stores the second word.
+        let next = r.mem[12];
+        assert!(r.run_op(0x0d00_92c0, 8));
+        assert_eq!(&r.mem[8..12], &[0x33, 0x33, 0x33, 0x33]);
+        assert_eq!(r.mem[12], next, "only four bytes");
+        // `LD1 {v0.s}[2], [x1]` (0x4d40_8020) replaces the third word and keeps the others.
+        r.mem[20..24].copy_from_slice(&[9, 8, 7, 6]);
+        assert!(r.run_op(0x4d40_8020, 20));
+        assert_eq!(r.v[0], 0x1111_1111_0607_0809_3333_3333_4444_4444u128, "lane 2 is the word at bits 64 to 96");
     }
 
     #[test]
