@@ -92,11 +92,17 @@ fn a_game_at_60_hz_gets_an_event_on_every_second_tick_of_120_hz() {
     }
     until("ten events", || kernel.signals.load(Ordering::SeqCst) >= 10);
     thread::sleep(Duration::from_millis(30));
-    let n = kernel.signals.load(Ordering::SeqCst);
-    assert!((10..=11).contains(&n), "{n} events for 20 ticks");
     let Ok(s) = snapshot() else {
         return;
     };
+    // A slow machine can leave four vsync periods without a tick (before the first tick or after the last), and the
+    // timer then signals on its own. Those events are counted apart; the ticks gave the others.
+    let n = s.signalled - s.self_clocked;
+    assert!(
+        (10..=11).contains(&n),
+        "{n} events from 20 ticks ({} from the timer)",
+        s.self_clocked
+    );
     assert_eq!(s.ticks, 20);
     assert_eq!(s.ticks_per_vsync, 2);
     assert_eq!(s.events, 1);
