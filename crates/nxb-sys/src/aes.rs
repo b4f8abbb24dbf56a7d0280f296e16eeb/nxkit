@@ -24,6 +24,7 @@ pub fn ctr_blocks(rk: &[[u8; 16]; 11], upper: [u8; 8], block: u64, data: &mut [u
     unsafe { ctr_blocks_hw(rk, upper, block, data) }
 }
 
+/// Off AArch64 [`available`] is false, so callers take the table cipher and never reach this.
 #[cfg(not(target_arch = "aarch64"))]
 pub fn ctr_blocks(_rk: &[[u8; 16]; 11], _upper: [u8; 8], _block: u64, _data: &mut [u8]) {}
 

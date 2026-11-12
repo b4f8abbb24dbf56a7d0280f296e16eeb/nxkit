@@ -21,6 +21,7 @@ pub mod cache;
 pub mod cli;
 pub mod error;
 pub mod facts;
+pub mod fileext;
 pub mod html;
 pub mod image;
 pub use nxb_split::inflate;

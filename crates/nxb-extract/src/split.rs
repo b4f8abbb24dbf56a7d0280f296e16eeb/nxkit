@@ -3,9 +3,9 @@
 //! version first, scans the files with `threads` workers, and keeps the results in the Python's order, so the outputs
 //! (`nxb_split::records`) are byte-identical.
 
+use crate::fileext::FileExt;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};

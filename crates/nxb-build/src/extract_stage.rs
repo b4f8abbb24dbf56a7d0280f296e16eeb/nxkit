@@ -56,13 +56,15 @@ fn dlc_key(b: &Build) -> String {
         .iter()
         .map(|(t, v, path)| {
             let m = std::fs::metadata(path);
-            use std::os::unix::fs::MetadataExt;
             format!(
                 "{t:016x} {v} {} {} {}",
                 path.display(),
                 m.as_ref().map_or(0, |m| m.len()),
                 m.as_ref()
-                    .map_or(0, |m| m.mtime_nsec() + m.mtime() * 1_000_000_000)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos() as i64)
             )
         })
         .collect();

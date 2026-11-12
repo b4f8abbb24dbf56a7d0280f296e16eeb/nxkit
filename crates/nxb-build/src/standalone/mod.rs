@@ -57,9 +57,19 @@ fn stage<T>(
 }
 
 fn identity(p: &Path) -> String {
-    use std::os::unix::fs::MetadataExt;
     std::fs::metadata(p)
-        .map(|m| format!("{}:{}:{}", p.display(), m.len(), m.mtime()))
+        .map(|m| {
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            format!(
+                "{}:{}:{}",
+                p.display(),
+                m.len(),
+                t.map_or(0, |d| d.as_secs())
+            )
+        })
         .unwrap_or_default()
 }
 

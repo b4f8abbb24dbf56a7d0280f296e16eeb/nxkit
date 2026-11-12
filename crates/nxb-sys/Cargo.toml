@@ -13,6 +13,10 @@ in_v = false
 
 [dependencies]
 
+# Windows has no system zlib: build it from source and link it statically.
+[target.'cfg(windows)'.dependencies]
+libz-sys = { version = "1", default-features = false, features = ["static"] }
+
 # Not `workspace = true`: this is the one crate allowed to use `unsafe` (workspace-layout rule 5).
 [lints.rust]
 missing_docs = "deny"

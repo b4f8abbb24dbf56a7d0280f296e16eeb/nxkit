@@ -7,7 +7,7 @@
 //! so nothing is hashed twice. A raw file can not be used in place: APFS clones whole files only (`clonefile`), and
 //! a container file is a range of the `.nup`, so its bytes are written once.
 
-use std::os::unix::fs::FileExt;
+use crate::fileext::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};

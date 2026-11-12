@@ -14,9 +14,9 @@
 //! behind it, so every other byte of the image stays as the extract stage wrote it.
 
 use std::collections::BTreeMap;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
+use nxb_extract::fileext::FileExt;
 use nxb_model::{Digest, FileDigest};
 use nxb_romfs::image::{Header, Index};
 use nxtitle::{Edit, ResourcePatch};
