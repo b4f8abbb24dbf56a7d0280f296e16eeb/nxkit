@@ -15,6 +15,7 @@
 mod api;
 mod encpace;
 mod gputs;
+mod poolops;
 #[cfg(test)]
 mod tests;
 mod tick;
@@ -71,7 +72,10 @@ pub struct GpuBackend {
     /// The NVN memory pools. It has a lock of its own, so a registration never waits for an encode. `flush_frame`
     /// takes the snapshot of a frame from it.
     pools: GuestPoolSet,
+    /// The encoder state. Take it with [`GpuBackend::lock_gpu`], which applies the queued pool ops first.
     gpu: Mutex<Gpu>,
+    /// The pool calls that found `gpu` taken (`poolops`). A pool call never waits for an encode.
+    pool_ops: poolops::PoolOps,
     /// The texture ids that shaders read through the pool table, and the samplers the table holds. The encoder writes
     /// it, `flush_frame` reads it without the lock of `gpu`.
     pool_hint: Arc<crate::bindless::marks::PoolHint>,
@@ -168,6 +172,7 @@ impl GpuBackend {
                 guest: space,
                 pools,
                 gpu: Mutex::new(gpu),
+                pool_ops: poolops::PoolOps::default(),
                 pool_hint,
                 walker: Mutex::new(walker),
                 invalidations,
@@ -200,6 +205,12 @@ impl GpuBackend {
         }))
     }
 
+    /// Locks the encoder state. The pool ops that were queued while someone else held it are applied first, in order, so
+    /// the state never lacks a pool that the game registered before it flushed a frame.
+    fn lock_gpu(&self) -> MutexGuard<'_, Gpu> {
+        self.pool_ops.lock(&self.gpu)
+    }
+
     /// Sets the pacer that learns about each presented frame. It is set once.
     pub fn set_pacer(&self, pacer: Arc<Pacer>) {
         let _ = self.pacer.set(pacer);
@@ -210,7 +221,7 @@ impl GpuBackend {
     /// for a copy-back) passes `None` and writes nothing back, because the CPU may already have reset a word of the next
     /// frame.
     fn drain(&self, waited: Option<u64>) -> bool {
-        let mut gpu = locked(&self.gpu);
+        let mut gpu = self.lock_gpu();
         let upto = self.encoded.load(Ordering::Acquire);
         let result = gpu.wait();
         drop(gpu);
@@ -290,7 +301,7 @@ impl GpuBackend {
                 Reply::Done
             }
             Msg::Retire(id) => {
-                locked(&self.gpu).texture_destroyed(id);
+                self.lock_gpu().texture_destroyed(id);
                 Reply::Done
             }
         }
@@ -301,7 +312,7 @@ impl GpuBackend {
     fn encode_job(&self, job: &Job) -> Result<TableUpdate, String> {
         self.pools.drain_graveyard();
         let (result, submitted) = {
-            let mut gpu = locked(&self.gpu);
+            let mut gpu = self.lock_gpu();
             let r = gpu.encode_frame(
                 &job.frame,
                 &job.plan,
@@ -373,7 +384,7 @@ impl GpuBackend {
         };
         self.pools.drain_graveyard();
         let (result, submitted) = {
-            let mut gpu = locked(&self.gpu);
+            let mut gpu = self.lock_gpu();
             let r = gpu.encode_frame(frame, plan, &view, pools, detail, self.scale);
             (r, gpu.last_submitted())
         };
@@ -443,6 +454,10 @@ impl GpuBackend {
                 self.ctx.resident_count()
             );
         }
+        if crate::diag("pools") && n.is_multiple_of(300) {
+            let (direct, deferred) = self.pool_ops.counts();
+            eprintln!("DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}");
+        }
         let diag = stats_diag();
         if crate::diag("pixelall") && n.is_multiple_of(10) {
             let st = &report.stats;
@@ -484,7 +499,7 @@ impl GpuBackend {
     fn present_now(&self, present: Present) -> BackendResult<()> {
         // The number goes first, so that a present without a texture still counts as one of the game's presents.
         let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
-        let texture = locked(&self.gpu)
+        let texture = self.lock_gpu()
             .texture(present.texture)
             .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
         encpace::ready(number);
@@ -512,7 +527,7 @@ impl GpuBackend {
     fn retire(&self, id: TexId) {
         match &self.enc {
             Some(enc) if enc.send(Msg::Retire(id)) => {}
-            _ => locked(&self.gpu).texture_destroyed(id),
+            _ => self.lock_gpu().texture_destroyed(id),
         }
     }
 }

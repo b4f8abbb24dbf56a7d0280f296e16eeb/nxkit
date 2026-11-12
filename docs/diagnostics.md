@@ -144,6 +144,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `pixelall` | gpu | a counters line per frame and the lit pixels of each present, to match frames while bisecting with `nobar` | every 10th frame or present | medium |
 | `present` | gpu | the counters of the present path (ticks, asked, found, blitted) and the presented texture | every 120th tick or present | low |
 | `memory` | gpu | the Metal memory of the process (with the guest buffer, textures and buffers apart), the live libraries and pipelines and the number of resident allocations | every 120 frames | low |
+| `pools` | gpu | `DIAG pools frame <n>`: the memory pool calls of the game (register, finalize, map and unmap a window) that changed the encoder state at once and those that found the encoder busy and were queued for its next lock, since the start | every 300 frames | low |
 | `depth` | gpu | distinct depth and stencil states, and the depth attachments of the passes | 40 distinct, 20 of every 500 passes | low |
 | `clear` | gpu | depth and stencil clears | 20 of every 1000 | low |
 | `copy` | gpu | copies that the encoder refused, and the buffer copies and fills (kind, addresses, bytes, value, and whether they ran or why not) | first 400 | low |

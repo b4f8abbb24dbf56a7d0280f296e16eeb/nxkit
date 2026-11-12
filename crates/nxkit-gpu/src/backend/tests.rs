@@ -101,3 +101,58 @@ fn with_the_mirror_a_fence_wait_returns_at_the_flush_and_the_gpu_is_not_asked() 
     );
     crate::private::test_mode(None);
 }
+
+#[test]
+fn a_pool_call_with_the_encoder_lock_free_reaches_the_encoder_at_once() {
+    let Some((guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    let host = guest.host_base() + 0x4000;
+    backend.register_pool(PoolInfo { host, len: 0x8000, flags: 0 }).unwrap();
+    // Read without draining the queue: the op was applied by the call itself.
+    assert_eq!(locked(&backend.gpu).pools(), [(GUEST_VA_BASE + 0x4000, 0x8000)]);
+    backend.unregister_pool(host);
+    assert!(locked(&backend.gpu).pools().is_empty());
+    assert_eq!(backend.pool_ops.counts(), (2, 0));
+}
+
+#[test]
+fn pool_calls_during_an_encode_are_applied_in_order_at_the_next_lock() {
+    let Some((guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    let host = guest.host_base() + 0x4000;
+    let pool = PoolInfo { host, len: 0x8000, flags: 0 };
+    {
+        // An encode holds the lock: the calls return without it.
+        let held = locked(&backend.gpu);
+        backend.register_pool(pool).unwrap();
+        backend.unregister_pool(host);
+        backend.register_pool(pool).unwrap();
+        assert!(held.pools().is_empty());
+        // The snapshot of the next flush has the pool at once.
+        assert!(backend.pools.current().resolve(GUEST_VA_BASE + 0x4000, 4).is_ok());
+    }
+    assert_eq!(backend.pool_ops.counts(), (0, 3));
+    // Register, unregister, register: one pool is left, not none.
+    assert_eq!(backend.lock_gpu().pools(), [(GUEST_VA_BASE + 0x4000, 0x8000)]);
+}
+
+#[test]
+fn a_pool_outside_guest_memory_fails_at_the_call_even_while_an_encode_runs() {
+    let Some((guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    let bad = PoolInfo {
+        host: guest.host_base() + guest.len() - 0x1000,
+        len: 0x8000,
+        flags: 0,
+    };
+    {
+        let _held = locked(&backend.gpu);
+        assert!(backend.register_pool(bad).is_err());
+    }
+    assert!(backend.register_pool(bad).is_err());
+    assert_eq!(backend.pool_ops.counts(), (0, 0));
+    assert!(backend.lock_gpu().pools().is_empty());
+}

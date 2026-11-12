@@ -16,6 +16,7 @@ A frame goes through these steps:
 
 The blit is a second command buffer on the queue. Its first command is `WaitForEarlierPasses`, which orders it after the passes of the frame.
 
+Memory pool calls (`Backend::register_pool`, `unregister_pool`, `map_pool_window`, `unmap_pool_window`) do not wait for an encode. The snapshot set of the pools (`GuestPoolSet`) has a lock of its own and changes at once; the pool bookkeeping of `Gpu` (copy-back pools and windows, raw global memory pools) lives under the lock of `Gpu`, which an encode holds for about 10 ms. A call that finds that lock taken puts its op into a queue (`backend/poolops.rs`) and returns; every lock of `Gpu` in the backend (`GpuBackend::lock_gpu`) applies the queue first, in order, and a call that gets the lock applies the queue before its own op. So the ops of a thread reach `Gpu` in the order of the calls, and an op that returned before a flush is applied before that frame is encoded. The range check that can fail runs before the op is made, so `register_pool` still returns its error at the call. Ocarina of Time makes and finalizes about 10 pools per frame; its render thread spent about 16 % of its time waiting in `nvnMemoryPoolInitialize` for an encode. `NXKIT_DIAG=pools` counts the ops applied at once and the ops queued (one run: 3 % queued).
 
 ```rust
 let mut gpu = Gpu::with_config(&ctx, guest_memory, GpuConfig { shader_dir, threads, archive, gob_order })?;

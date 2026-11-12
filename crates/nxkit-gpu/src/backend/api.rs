@@ -1,6 +1,7 @@
 //! The `Backend` trait of [`GpuBackend`]: what the front end calls for queues, fences, memory and presents.
 
 use super::*;
+use super::poolops::PoolOp;
 
 impl Backend for GpuBackend {
     fn gpu_base(&self) -> u64 {
@@ -12,29 +13,32 @@ impl Backend for GpuBackend {
     }
 
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()> {
-        let gpu_addr = self
-            .guest
-            .address_map()
-            .gpu_address(pool.host, pool.len)
-            .map_err(fail)?;
+        let map = self.guest.address_map();
+        let gpu_addr = map.gpu_address(pool.host, pool.len).map_err(fail)?;
+        // The check of `Gpu::register_pool`, made here so the error comes back now and the queued op cannot fail.
+        map.host_address(gpu_addr, pool.len).map_err(fail)?;
         // A pool of no bytes holds no address. The encoder still hears of it, as before.
-        let id = (pool.len > 0)
-            .then(|| self.pools.register(gpu_addr, pool.len, pool.flags))
-            .transpose()
-            .map_err(|e| fail(format_args!("bad pool range {:#x}+{:#x}", e.start, e.len)))?;
-        let r = locked(&self.gpu)
-            .register_memory_pool(gpu_addr, pool.len, pool.flags)
-            .map_err(fail);
-        if let (Err(_), Some(id)) = (&r, id) {
-            self.pools.unregister_id(id);
+        if pool.len > 0 {
+            self.pools
+                .register(gpu_addr, pool.len, pool.flags)
+                .map_err(|e| fail(format_args!("bad pool range {:#x}+{:#x}", e.start, e.len)))?;
         }
-        r
+        self.pool_ops.run(
+            &self.gpu,
+            PoolOp::Register {
+                addr: gpu_addr,
+                len: pool.len,
+                flags: pool.flags,
+            },
+        );
+        Ok(())
     }
 
     fn unregister_pool(&self, host: u64) {
         if let Ok(gpu_addr) = self.guest.address_map().gpu_address(host, 1) {
             self.pools.unregister(gpu_addr);
-            locked(&self.gpu).unregister_memory_pool(gpu_addr);
+            self.pool_ops
+                .run(&self.gpu, PoolOp::Unregister { addr: gpu_addr });
         }
     }
 
@@ -44,13 +48,20 @@ impl Backend for GpuBackend {
             .address_map()
             .gpu_address(window.host, window.len)
         {
-            locked(&self.gpu).map_pool_window(gpu_addr, window.len, window.flags);
+            self.pool_ops.run(
+                &self.gpu,
+                PoolOp::Map {
+                    addr: gpu_addr,
+                    len: window.len,
+                    flags: window.flags,
+                },
+            );
         }
     }
 
     fn unmap_pool_window(&self, host: u64, len: u64) {
         if let Ok(gpu_addr) = self.guest.address_map().gpu_address(host, len) {
-            locked(&self.gpu).unmap_pool_window(gpu_addr, len);
+            self.pool_ops.run(&self.gpu, PoolOp::Unmap { addr: gpu_addr, len });
         }
     }
 
@@ -233,7 +244,7 @@ impl Backend for GpuBackend {
             let older = fence.0 - 1;
             self.rename.count_wait(fence.0, true);
             if older > self.done.load(Ordering::Acquire) {
-                let result = locked(&self.gpu).wait_older();
+                let result = self.lock_gpu().wait_older();
                 match result {
                     Ok(Some(stats)) => {
                         nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);

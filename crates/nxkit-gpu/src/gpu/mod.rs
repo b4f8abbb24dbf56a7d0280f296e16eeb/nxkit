@@ -130,6 +130,7 @@ pub struct Gpu {
     last: Option<SubmittedBatch>,
     /// The batch before `last`, while it may still run: the frame that `wait_older` waits for.
     older: Option<SubmittedBatch>,
+    /// The registered pools, one entry per registration that was not finalized yet.
     pools: Vec<(u64, u64)>,
     copyback: CopyBack,
     native: crate::native::Native,
@@ -203,12 +204,11 @@ impl Gpu {
     }
 
     /// Tells the encoder about a texture or sampler pool that the game made. The pool memory is part of the guest
-    /// memory, so nothing is copied. The call checks that the range is inside it.
+    /// memory, so nothing is copied. The call checks that the range is inside it. Each call adds one entry to
+    /// [`Gpu::pools`]; [`Gpu::unregister_memory_pool`] takes the oldest entry with its address out again.
     pub fn register_pool(&mut self, gpu_addr: u64, len: u64) -> Result<()> {
         self.guest.address_map().host_address(gpu_addr, len)?;
-        if !self.pools.contains(&(gpu_addr, len)) {
-            self.pools.push((gpu_addr, len));
-        }
+        self.pools.push((gpu_addr, len));
         Ok(())
     }
 
@@ -222,8 +222,13 @@ impl Gpu {
         Ok(())
     }
 
-    /// The game finalised the memory pool at `gpu_addr`. Its textures are no longer copied back.
+    /// The game finalised the memory pool at `gpu_addr`. Its textures are no longer copied back, and the oldest entry
+    /// of [`Gpu::pools`] with that address goes (a game that makes and finalizes pools every frame made the list grow
+    /// without end).
     pub fn unregister_memory_pool(&mut self, gpu_addr: u64) {
+        if let Some(i) = self.pools.iter().position(|&(a, _)| a == gpu_addr) {
+            self.pools.remove(i);
+        }
         self.copyback.remove_pool(gpu_addr);
         self.gmem.remove_pool(gpu_addr);
     }
@@ -247,7 +252,7 @@ impl Gpu {
         self.gmem.learned()
     }
 
-    /// The pools that were registered, as (GPU address, length).
+    /// The pools that are registered, as (GPU address, length), oldest first.
     pub fn pools(&self) -> &[(u64, u64)] {
         &self.pools
     }
