@@ -18,6 +18,9 @@ use crate::version::{
 };
 use crate::write::{ImageJob, ImageResult, write_images};
 
+mod code_only;
+pub use code_only::extract_code_only_update;
+
 /// Bytes of image file data written so far and in all, for a caller's progress display. `total` is set once the
 /// images are planned, `done` grows as each file is written.
 #[derive(Debug, Default)]
@@ -291,7 +294,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
         let fs = open_romfs_with(
             &ks,
             base_shared.clone(),
-            Some(up),
+            up.sections[up.data_section()].is_some().then_some(up),
             &cache,
             req.allow_damaged,
         )?;

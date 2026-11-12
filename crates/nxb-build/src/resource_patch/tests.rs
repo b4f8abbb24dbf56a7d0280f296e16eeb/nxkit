@@ -119,3 +119,35 @@ fn other_digests_are_skipped_with_a_warning() {
     let (files, warnings) = edited(&none, &[(patch(sha(&raw), sha(&member)), 0.5)]);
     assert!(files.is_empty() && warnings.len() == 1, "{warnings:?}");
 }
+
+#[test]
+fn explicit_options_never_apply_defaults_and_reject_unknown_names() {
+    let p = ResourcePatch {
+        default: Some(0.75),
+        ..patch(Digest([0; 32]), Digest([0; 32]))
+    };
+    let other = ResourcePatch {
+        option: "other",
+        ..p
+    };
+    assert!(choose_explicit(&[p, other], &[]).unwrap().is_empty());
+    let options = vec![("resolution-scale".into(), "0.5".into())];
+    let chosen = choose_explicit(&[p, other], &options).unwrap();
+    assert_eq!(chosen.len(), 1);
+    assert_eq!(chosen[0].0.option, "resolution-scale");
+    assert_eq!(chosen[0].1, 0.5);
+    for value in ["stock", "1"] {
+        let unknown = vec![("unknown".into(), value.into())];
+        assert!(choose_explicit(&[p], &unknown).is_err());
+        assert!(choose_explicit(&[], &unknown).is_err());
+    }
+    let stock = vec![("resolution-scale".into(), "stock".into())];
+    assert!(choose_explicit(&[p], &stock).unwrap().is_empty());
+    let mut duplicate = options;
+    duplicate.extend(stock);
+    assert!(choose_explicit(&[p], &duplicate).unwrap().is_empty());
+    for value in ["1.5", "x", "NaN"] {
+        let invalid = vec![("resolution-scale".into(), value.into())];
+        assert!(choose_explicit(&[p], &invalid).is_err());
+    }
+}

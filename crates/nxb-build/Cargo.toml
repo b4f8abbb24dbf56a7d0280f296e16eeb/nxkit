@@ -28,6 +28,7 @@ nxb-shader.workspace = true
 nxb-rewrite.workspace = true
 nxb-romfs.workspace = true
 nxb-split.workspace = true
+nxb-xlate.workspace = true
 nxtitle.workspace = true
 nxtitles.workspace = true
 
