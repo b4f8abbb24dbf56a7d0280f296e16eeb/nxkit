@@ -190,8 +190,9 @@ pub(super) fn fixed_function(st: &State, d: &mut DrawDetail) {
     d.write_masks = st.masks;
     d.depth_stencil = objects::depth_stencil(&st.depth_stencil, &st.stencil);
     d.raster = st.raster.detail();
+    d.raster.front_face = super::super::origin::front_face(st.raster.front_face, st.origins[1]);
     d.dynamic = DynamicDetail {
-        viewport: st.viewport,
+        viewport: super::super::origin::viewport(st.viewport, st.origins[0], st.viewport_swizzle),
         depth_range: st.depth_range,
         scissor: st.scissor,
         blend_color: st.blend_color,

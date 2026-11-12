@@ -20,6 +20,7 @@
 mod cache;
 mod ext;
 mod objects;
+mod origin;
 mod prof;
 mod programs;
 
@@ -76,6 +77,9 @@ pub(super) struct State {
     stencil: StencilValues,
     raster: Raster,
     viewport: [f32; 4],
+    viewport_swizzle: [u32; 4],
+    /// The device origin at submit and the queue origin captured at queue creation.
+    origins: [bool; 2],
     depth_range: [f32; 2],
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
@@ -103,6 +107,8 @@ impl Default for State {
             stencil: StencilValues::default(),
             raster: Raster::default(),
             viewport: [0.0; 4],
+            viewport_swizzle: origin::IDENTITY,
+            origins: [true; 2],
             depth_range: [0.0, 1.0],
             scissor: None,
             blend_color: [0.0; 4],
@@ -152,6 +158,8 @@ pub(crate) struct Walker {
     counters: WalkCounters,
     programs: Programs,
     queues: FastMap<u64, State>,
+    /// The current device origin. Draws capture it when their submit is walked.
+    origin_lower_left: bool,
     out: FrameDetail,
     map: AddressMap,
     /// The GPU ranges that `UpdateUniformBuffer` wrote. A draw that binds an overlapping range gets a snapshot.
@@ -192,6 +200,7 @@ impl Walker {
             counters: WalkCounters::default(),
             programs: Programs::new(shader_dir),
             queues: FastMap::default(),
+            origin_lower_left: true,
             out: FrameDetail::default(),
             map,
             updated: Vec::new(),
@@ -237,6 +246,21 @@ impl Walker {
         self.programs.release(program);
     }
 
+    /// Sets the current device origin without changing the origin captured by a queue.
+    pub(crate) fn device_origin(&mut self, lower_left: bool) {
+        self.origin_lower_left = lower_left;
+    }
+
+    /// The device origin that a present captures before it goes to the encoder thread.
+    pub(crate) fn current_origin(&self) -> bool {
+        self.origin_lower_left
+    }
+
+    /// Sets the origin captured when this queue was initialized.
+    pub(crate) fn queue_origin(&mut self, queue: u64, lower_left: bool) {
+        self.queues.entry(queue).or_default().origins[1] = lower_left;
+    }
+
     /// Walks `handles` on `queue`.
     pub(crate) fn submit<M: GuestMem>(
         &mut self,
@@ -252,6 +276,7 @@ impl Walker {
         // CPU writes between submits do not have UpdateUniform records to invalidate cached snapshots.
         self.snaps.get_mut().clear();
         let mut st = self.queues.remove(&queue).unwrap_or_default();
+        st.origins[0] = self.origin_lower_left;
         for h in handles {
             // The copy strides belong to one command buffer and start again at zero in each recording.
             st.copy_strides = [0; 2];
