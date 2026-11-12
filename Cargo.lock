@@ -519,6 +519,7 @@ name = "nxgame-acnh"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
+ "nxb-rewrite",
  "nxtitle",
 ]
 
@@ -536,6 +537,7 @@ name = "nxgame-mtf"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
+ "nxb-rewrite",
  "nxtitle",
 ]
 

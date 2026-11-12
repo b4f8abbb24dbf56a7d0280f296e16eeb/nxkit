@@ -16,6 +16,7 @@ nxtitle.workspace = true
 
 [dev-dependencies]
 nxb-profile.workspace = true
+nxb-rewrite.workspace = true
 
 [lints]
 workspace = true
