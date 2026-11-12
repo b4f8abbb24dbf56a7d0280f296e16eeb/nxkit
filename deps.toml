@@ -212,3 +212,12 @@ version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-coreml and nxkit-metal wrap them in a safe API"
 owner = "project team"
 used_by = ["nxkit-coreml", "nxkit-metal"]
+
+[libz-sys]
+reason = "zlib for nxb-sys on Windows, which has no system zlib. The crate builds zlib from source and links it statically (feature static). On Unix nxb-sys links the system libz as before"
+source = "crates.io"
+licence = "MIT OR Apache-2.0 (zlib itself: Zlib)"
+version = "1.1.33"
+unsafe = "the FFI declarations of zlib only. nxb-sys wraps the calls"
+owner = "project team"
+used_by = ["nxb-sys (Windows only)"]
