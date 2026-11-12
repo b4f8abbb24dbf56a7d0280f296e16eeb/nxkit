@@ -1,0 +1,72 @@
+# nxb rewrite rules of Super Mario Bros. Wonder (Switch). Private data: instruction words of SDK code.
+#
+# The build row of update 1.2.1 (v327680) and the engine's two SDK-wide rules for the `sdk` module. The game has no
+# code patch of its own: the engine tree has no patches.py for it, and its README says "No game-specific executable
+# cuts". The README says that the SDK-wide rules cut the game's sdk builds (3053b229 v0, e4bd58ca 1.2.1): the node area
+# and the 2 MB alignment of large regions. Its 5 GB guest layout (a 2.875 GB alias region for 1.75 GB of virtual
+# address memory) was measured with them. Without them the AddressRegionManager keeps a 1 GB node area at the start of
+# the alias region and a region of 1 GB or more is aligned to 1 GB.
+#
+# The rules are those of `MATCH_CUTS['sdk']` in sdk_patches.py, the implementation of SDK 15.3.2 to 18.3.5 (`node`
+# 240 bytes, `align` 388 bytes), with the fingerprints the engine lists. Both match sdk build
+# e4bd58cac28cf13a08fb417aa013cdcb once (checked 2026-11-12 with nxb-rewrite on the extracted v327680: node at
+# sdk+0x134778 and +0x13480c, align at sdk+0x134964, +0x13496c and +0x134970).
+
+scope = "010015100B514000"
+
+[[build]]
+row = ["build", "v327680", "1.2.1", "main=ff773e90972d544eb79406eaa65396d5", "sdk=e4bd58cac28cf13a08fb417aa013cdcb"]
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py and dm/games/010015100B514000/README.md at b91cb749, read 2026-11-12"
+
+[[rule.function]]
+size = 240
+fingerprints = ["cd7fb0efd387e5676d349376acf368b706116e089c30485f2d33970d9fb23145", "d16909674e7f982f2fe1c765f7cd366341c2aaa9eb56a28c52a48d3c1057a126", "3549234b3e27a013791bbd834b5ff7dd501a5826c4216c80961bd996eef556ea"]
+
+[[rule.function.cut]]
+delta = 16
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 164
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py and dm/games/010015100B514000/README.md at b91cb749, read 2026-11-12"
+
+[[rule.function]]
+size = 388
+fingerprints = ["bb9debe722dc0807c947365b7acfb1aa84f82af125e981f31b1d02b44d8032c8", "58845d068f4e828c39e03f66fbe03487387404183b0bcc14068eb45b571d2c02"]
+
+[[rule.function.cut]]
+delta = 100
+old = "0b40a052"
+new = "0b04a052"
+why = "AllocateAddressRegion: alignment of regions from 32 MB to 1 GB mov w11,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 108
+old = "0a00a852"
+new = "0a04a052"
+why = "AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 112
+old = "0808a052"
+new = "0804a052"
+why = "AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)"

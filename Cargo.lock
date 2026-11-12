@@ -550,6 +550,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-smbw"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxkit-abi"
 version = "0.10.0"
 
@@ -760,6 +768,7 @@ dependencies = [
  "nxgame-botw",
  "nxgame-mtf",
  "nxgame-oot",
+ "nxgame-smbw",
  "nxtitle",
 ]
 

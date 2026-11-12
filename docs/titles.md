@@ -112,3 +112,24 @@ The Nintendo Switch game on NVN, update 1.9.0 (v1114112), family `agl`. The reco
 - The settings are recorded values. R19 sets the target to 120 fps through the same frame step stubs, so `fps_target 60` is a record and not a cap. R10 and R17 replace `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys. The host reader reads no `settings` object yet.
 - `Settings` names no engine. An engine with a texture pool or a frame rate variable uses `texture_pool_mb` and `fps_cvar`. Two earlier games use these values. No Unreal family exists in nxkit yet, so those two games are not taken along.
 - The game is the pilot for the nxkit runtime.
+
+## Super Mario Bros. Wonder (`010015100B514000`)
+
+The Nintendo Switch game on NVN, update 1.2.1 (v327680), SDK 16.2.12, family `agl`. The records are the game notes in
+the engine tree at `b91cb749`, read 2026-11-12.
+
+- The game builds with `nxb build "<folder with the base and the v327680 NSP>"`. The title module gives the modules
+  `main` and `sdk` with their build IDs, the shader groups of `game.tsv` (`SecredUber`, `agl`, `effect`, `layout`), the
+  marker `System/HeapSize/Product.Nin_NX_NVN.HeapDef.byml.zs` (in v0 and in v327680) and the run settings of
+  `game.tsv`: the 5 GB guest layout (2.875 GB alias region, 1.625 GB heap region) and the defaults of `game.py` for
+  every other key. The display version is 1.2.1.
+- The NVN function list is not a hand list: the build takes the `nvn…` names in the read-only data of the modules. The
+  README counts 534 names the loader fetches and 236 the game calls.
+- `rules/010015100B514000.toml` has the build row and the engine's two SDK-wide rules for `sdk`: the node area of the
+  AddressRegionManager 62 MB in place of 1 GB, and regions of 4 MB and more aligned to 2 MB. Both match sdk build
+  `e4bd58ca…` once. The game maps 1.75 GB of virtual address memory into the alias region, and its layout was measured
+  with them. The game has no code patch of its own.
+- The title states no needs. `game.tsv` sets no `render_cond`, `tex_*`, `pad_layout` or pacing key. `main` imports
+  `ScalableFontEngineHelper::Decode`, so the shared font is the BFTTF form (`shared_font_decode`).
+- The engine played the game with a shader table of v0 and v327680 together (`shader_versions v0 v327680`). The build
+  splits only the shaders of v327680.

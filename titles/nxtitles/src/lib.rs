@@ -1,7 +1,8 @@
 //! The one list of families and title modules.
 //!
-//! Each module is behind its own cargo feature (`agl`, `oot`, `botw`, `acnh`, `mtf`), so a build can leave any of them out. This is the
-//! only crate that depends on family and title crates. The core depends on this crate and on `nxtitle`.
+//! Each module is behind its own cargo feature (`agl`, `oot`, `botw`, `acnh`, `mtf`, `smbw`), so a build can leave any
+//! of them out. This is the only crate that depends on family and title crates. The core depends on this crate and on
+//! `nxtitle`.
 
 use nxtitle::{Catalog, Family, Title};
 
@@ -20,6 +21,8 @@ pub fn catalog() -> Result<Catalog, String> {
         &nxgame_acnh::ACNH,
         #[cfg(feature = "mtf")]
         &nxgame_mtf::MTF,
+        #[cfg(feature = "smbw")]
+        &nxgame_smbw::SMBW,
     ];
     Catalog::new(families, titles)
 }
@@ -39,13 +42,15 @@ mod tests {
             usize::from(cfg!(feature = "oot"))
                 + usize::from(cfg!(feature = "botw"))
                 + usize::from(cfg!(feature = "acnh"))
+                + usize::from(cfg!(feature = "smbw"))
         );
         #[cfg(not(any(
             feature = "agl",
             feature = "oot",
             feature = "botw",
             feature = "acnh",
-            feature = "mtf"
+            feature = "mtf",
+            feature = "smbw"
         )))]
         assert!(c.titles().is_empty() && c.families().is_empty());
     }
@@ -78,5 +83,19 @@ mod tests {
         assert_eq!(keys.len(), 5);
         assert_eq!(r.nxkit_services(), nxtitle::Service::ALL);
         assert!(r.standalone().is_some());
+    }
+
+    #[cfg(all(feature = "agl", feature = "smbw"))]
+    #[test]
+    fn smbw_resolves_to_agl_and_builds_standalone() {
+        use nxtitle::{FamilyFrom, TitleFacts, TitleId};
+        let c = catalog().unwrap();
+        let r = c.resolve(&TitleFacts::new(TitleId(0x0100_1510_0B51_4000)));
+        assert_eq!(r.title.map(|t| t.name()), Some("Super Mario Bros. Wonder"));
+        assert_eq!(r.family.map(|f| f.id()), Some("agl"));
+        assert_eq!(r.family_from, FamilyFrom::Declared);
+        assert!(r.needs().is_empty());
+        assert_eq!(r.nxkit_services(), nxtitle::Service::ALL);
+        assert!(r.standalone().is_some() && r.title_rules().is_some());
     }
 }
