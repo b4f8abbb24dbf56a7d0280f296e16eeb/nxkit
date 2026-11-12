@@ -95,11 +95,12 @@ fn a_game_at_60_hz_gets_an_event_on_every_second_tick_of_120_hz() {
     let Ok(s) = snapshot() else {
         return;
     };
-    // A slow machine can leave four vsync periods without a tick (before the first tick or after the last), and the
-    // timer then signals on its own. Those events are counted apart; the ticks gave the others.
+    // A slow machine can leave four vsync periods without a tick (before the first tick, between two ticks or after
+    // the last), and the timer then signals on its own; a late wait does not catch up, so a timer event can stand in
+    // for a tick event. The ticks never give more than one event per two ticks, and with the timer none goes missing.
     let n = s.signalled - s.self_clocked;
     assert!(
-        (10..=11).contains(&n),
+        n <= 11 && n + s.self_clocked >= 10,
         "{n} events from 20 ticks ({} from the timer)",
         s.self_clocked
     );

@@ -392,12 +392,17 @@ fn a_player_that_sends_on_the_event_never_stalls() {
             rec.events.extend(fx.event);
             rec.filled.extend(fx.filled);
         }
+        // Frames that are ready at the same poll are shown in the order of their time stamps, as a player does: the
+        // slot of a frame says nothing about its order.
+        let mut ready = Vec::new();
         for i in 0..8 {
             if let Ok((_, _, ts, _)) = r.properties(i) {
-                got.push(ts);
+                ready.push(ts);
                 r.call(|d, fx| d.release(i, fx));
             }
         }
+        ready.sort_unstable();
+        got.extend(ready);
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(got, (0..40).collect::<Vec<i64>>());
