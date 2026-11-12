@@ -19,7 +19,13 @@ default = [
     "bastion", "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr",
     "kirbyfl", "mt2", "octo0", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
     "hollowknight", "srwy", "deadcells", "mrkb", "unicorn", "blasphemous", "smt5v", "ssbu", "zla", "dq11s", "mlbs",
-    "mps", "aisni", "d2r", "astral", "xc3", "bayo", "rdr", "bayo2", "peach", "portal", "kirbysa",
+    "mps", "aisni", "d2r", "astral", "xc3", "bayo", "rdr", "bayo2", "peach", "portal", "kirbysa", "ballxpit", "ais",
+    "swheist2", "steinsgate", "seaofstars", "zeow", "sentinelsasia", "rpop", "pkshield", "oriwotw", "pkviolet",
+    "sonicss", "tsr", "swdig", "dread", "smpj", "davediver", "isaac", "toad", "dkcrhd", "hades2", "octo2", "pmok",
+    "pkscarlet", "cuphead", "feengage", "mcd2", "absolum", "dq7r", "portal2", "pksword", "batmanak", "hwde", "mhrise",
+    "pikmin4", "ffresasia", "nierasia", "mvdk", "cvbc", "smrpg", "ffx", "catherine", "dkctf", "rotk8", "fc27", "swdig2",
+    "tristrat", "ffcc", "silverpines", "dq12hd", "rhgroove", "tunic", "lm3", "parabox", "stardew", "xc2", "sor4",
+    "pmttyd", "rotk14", "totk", "pkza", "bmta", "xcde",
 ]
 agl = ["dep:nxfamily-agl"]
 oot = ["dep:nxgame-oot"]
@@ -102,6 +108,69 @@ bayo2 = ["dep:nxgame-bayo2"]
 peach = ["dep:nxgame-peach"]
 portal = ["dep:nxgame-portal"]
 kirbysa = ["dep:nxgame-kirbysa"]
+ballxpit = ["dep:nxgame-ballxpit"]
+ais = ["dep:nxgame-ais"]
+swheist2 = ["dep:nxgame-swheist2"]
+steinsgate = ["dep:nxgame-steinsgate"]
+seaofstars = ["dep:nxgame-seaofstars"]
+zeow = ["dep:nxgame-zeow"]
+sentinelsasia = ["dep:nxgame-sentinelsasia"]
+rpop = ["dep:nxgame-rpop"]
+pkshield = ["dep:nxgame-pkshield"]
+oriwotw = ["dep:nxgame-oriwotw"]
+pkviolet = ["dep:nxgame-pkviolet"]
+sonicss = ["dep:nxgame-sonicss"]
+tsr = ["dep:nxgame-tsr"]
+swdig = ["dep:nxgame-swdig"]
+dread = ["dep:nxgame-dread"]
+smpj = ["dep:nxgame-smpj"]
+davediver = ["dep:nxgame-davediver"]
+isaac = ["dep:nxgame-isaac"]
+toad = ["dep:nxgame-toad"]
+dkcrhd = ["dep:nxgame-dkcrhd"]
+hades2 = ["dep:nxgame-hades2"]
+octo2 = ["dep:nxgame-octo2"]
+pmok = ["dep:nxgame-pmok"]
+pkscarlet = ["dep:nxgame-pkscarlet"]
+cuphead = ["dep:nxgame-cuphead"]
+feengage = ["dep:nxgame-feengage"]
+mcd2 = ["dep:nxgame-mcd2"]
+absolum = ["dep:nxgame-absolum"]
+dq7r = ["dep:nxgame-dq7r"]
+portal2 = ["dep:nxgame-portal2"]
+pksword = ["dep:nxgame-pksword"]
+batmanak = ["dep:nxgame-batmanak"]
+hwde = ["dep:nxgame-hwde"]
+mhrise = ["dep:nxgame-mhrise"]
+pikmin4 = ["dep:nxgame-pikmin4"]
+ffresasia = ["dep:nxgame-ffresasia"]
+nierasia = ["dep:nxgame-nierasia"]
+mvdk = ["dep:nxgame-mvdk"]
+cvbc = ["dep:nxgame-cvbc"]
+smrpg = ["dep:nxgame-smrpg"]
+ffx = ["dep:nxgame-ffx"]
+catherine = ["dep:nxgame-catherine"]
+dkctf = ["dep:nxgame-dkctf"]
+rotk8 = ["dep:nxgame-rotk8"]
+fc27 = ["dep:nxgame-fc27"]
+swdig2 = ["dep:nxgame-swdig2"]
+tristrat = ["dep:nxgame-tristrat"]
+ffcc = ["dep:nxgame-ffcc"]
+silverpines = ["dep:nxgame-silverpines"]
+dq12hd = ["dep:nxgame-dq12hd"]
+rhgroove = ["dep:nxgame-rhgroove"]
+tunic = ["dep:nxgame-tunic"]
+lm3 = ["dep:nxgame-lm3"]
+parabox = ["dep:nxgame-parabox"]
+stardew = ["dep:nxgame-stardew"]
+xc2 = ["dep:nxgame-xc2"]
+sor4 = ["dep:nxgame-sor4"]
+pmttyd = ["dep:nxgame-pmttyd"]
+rotk14 = ["dep:nxgame-rotk14"]
+totk = ["dep:nxgame-totk"]
+pkza = ["dep:nxgame-pkza"]
+bmta = ["dep:nxgame-bmta"]
+xcde = ["dep:nxgame-xcde"]
 
 [dependencies]
 nxtitle.workspace = true
@@ -186,6 +255,69 @@ nxgame-bayo2 = { workspace = true, optional = true }
 nxgame-peach = { workspace = true, optional = true }
 nxgame-portal = { workspace = true, optional = true }
 nxgame-kirbysa = { workspace = true, optional = true }
+nxgame-ballxpit = { workspace = true, optional = true }
+nxgame-ais = { workspace = true, optional = true }
+nxgame-swheist2 = { workspace = true, optional = true }
+nxgame-steinsgate = { workspace = true, optional = true }
+nxgame-seaofstars = { workspace = true, optional = true }
+nxgame-zeow = { workspace = true, optional = true }
+nxgame-sentinelsasia = { workspace = true, optional = true }
+nxgame-rpop = { workspace = true, optional = true }
+nxgame-pkshield = { workspace = true, optional = true }
+nxgame-oriwotw = { workspace = true, optional = true }
+nxgame-pkviolet = { workspace = true, optional = true }
+nxgame-sonicss = { workspace = true, optional = true }
+nxgame-tsr = { workspace = true, optional = true }
+nxgame-swdig = { workspace = true, optional = true }
+nxgame-dread = { workspace = true, optional = true }
+nxgame-smpj = { workspace = true, optional = true }
+nxgame-davediver = { workspace = true, optional = true }
+nxgame-isaac = { workspace = true, optional = true }
+nxgame-toad = { workspace = true, optional = true }
+nxgame-dkcrhd = { workspace = true, optional = true }
+nxgame-hades2 = { workspace = true, optional = true }
+nxgame-octo2 = { workspace = true, optional = true }
+nxgame-pmok = { workspace = true, optional = true }
+nxgame-pkscarlet = { workspace = true, optional = true }
+nxgame-cuphead = { workspace = true, optional = true }
+nxgame-feengage = { workspace = true, optional = true }
+nxgame-mcd2 = { workspace = true, optional = true }
+nxgame-absolum = { workspace = true, optional = true }
+nxgame-dq7r = { workspace = true, optional = true }
+nxgame-portal2 = { workspace = true, optional = true }
+nxgame-pksword = { workspace = true, optional = true }
+nxgame-batmanak = { workspace = true, optional = true }
+nxgame-hwde = { workspace = true, optional = true }
+nxgame-mhrise = { workspace = true, optional = true }
+nxgame-pikmin4 = { workspace = true, optional = true }
+nxgame-ffresasia = { workspace = true, optional = true }
+nxgame-nierasia = { workspace = true, optional = true }
+nxgame-mvdk = { workspace = true, optional = true }
+nxgame-cvbc = { workspace = true, optional = true }
+nxgame-smrpg = { workspace = true, optional = true }
+nxgame-ffx = { workspace = true, optional = true }
+nxgame-catherine = { workspace = true, optional = true }
+nxgame-dkctf = { workspace = true, optional = true }
+nxgame-rotk8 = { workspace = true, optional = true }
+nxgame-fc27 = { workspace = true, optional = true }
+nxgame-swdig2 = { workspace = true, optional = true }
+nxgame-tristrat = { workspace = true, optional = true }
+nxgame-ffcc = { workspace = true, optional = true }
+nxgame-silverpines = { workspace = true, optional = true }
+nxgame-dq12hd = { workspace = true, optional = true }
+nxgame-rhgroove = { workspace = true, optional = true }
+nxgame-tunic = { workspace = true, optional = true }
+nxgame-lm3 = { workspace = true, optional = true }
+nxgame-parabox = { workspace = true, optional = true }
+nxgame-stardew = { workspace = true, optional = true }
+nxgame-xc2 = { workspace = true, optional = true }
+nxgame-sor4 = { workspace = true, optional = true }
+nxgame-pmttyd = { workspace = true, optional = true }
+nxgame-rotk14 = { workspace = true, optional = true }
+nxgame-totk = { workspace = true, optional = true }
+nxgame-pkza = { workspace = true, optional = true }
+nxgame-bmta = { workspace = true, optional = true }
+nxgame-xcde = { workspace = true, optional = true }
 
 [lints]
 workspace = true

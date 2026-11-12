@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-pmok"
+description = "The title module of Paper Mario: The Origami King for Nintendo Switch (0100A3900C3E2000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

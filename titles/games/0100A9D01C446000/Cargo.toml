@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-dq7r"
+description = "The title module of DRAGON QUEST VII Reimagined for Nintendo Switch (0100A9D01C446000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

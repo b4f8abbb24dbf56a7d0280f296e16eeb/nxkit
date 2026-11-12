@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-stardew"
+description = "The title module of Stardew Valley for Nintendo Switch (0100E65002BB8000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

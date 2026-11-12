@@ -173,6 +173,132 @@ pub fn catalog() -> Result<Catalog, String> {
         &nxgame_portal::PORTAL,
         #[cfg(feature = "kirbysa")]
         &nxgame_kirbysa::KIRBYSA,
+        #[cfg(feature = "ballxpit")]
+        &nxgame_ballxpit::BALLXPIT,
+        #[cfg(feature = "ais")]
+        &nxgame_ais::AIS,
+        #[cfg(feature = "swheist2")]
+        &nxgame_swheist2::SWHEIST2,
+        #[cfg(feature = "steinsgate")]
+        &nxgame_steinsgate::STEINSGATE,
+        #[cfg(feature = "seaofstars")]
+        &nxgame_seaofstars::SEAOFSTARS,
+        #[cfg(feature = "zeow")]
+        &nxgame_zeow::ZEOW,
+        #[cfg(feature = "sentinelsasia")]
+        &nxgame_sentinelsasia::SENTINELSASIA,
+        #[cfg(feature = "rpop")]
+        &nxgame_rpop::RPOP,
+        #[cfg(feature = "pkshield")]
+        &nxgame_pkshield::PKSHIELD,
+        #[cfg(feature = "oriwotw")]
+        &nxgame_oriwotw::ORIWOTW,
+        #[cfg(feature = "pkviolet")]
+        &nxgame_pkviolet::PKVIOLET,
+        #[cfg(feature = "sonicss")]
+        &nxgame_sonicss::SONICSS,
+        #[cfg(feature = "tsr")]
+        &nxgame_tsr::TSR,
+        #[cfg(feature = "swdig")]
+        &nxgame_swdig::SWDIG,
+        #[cfg(feature = "dread")]
+        &nxgame_dread::DREAD,
+        #[cfg(feature = "smpj")]
+        &nxgame_smpj::SMPJ,
+        #[cfg(feature = "davediver")]
+        &nxgame_davediver::DAVEDIVER,
+        #[cfg(feature = "isaac")]
+        &nxgame_isaac::ISAAC,
+        #[cfg(feature = "toad")]
+        &nxgame_toad::TOAD,
+        #[cfg(feature = "dkcrhd")]
+        &nxgame_dkcrhd::DKCRHD,
+        #[cfg(feature = "hades2")]
+        &nxgame_hades2::HADES2,
+        #[cfg(feature = "octo2")]
+        &nxgame_octo2::OCTO2,
+        #[cfg(feature = "pmok")]
+        &nxgame_pmok::PMOK,
+        #[cfg(feature = "pkscarlet")]
+        &nxgame_pkscarlet::PKSCARLET,
+        #[cfg(feature = "cuphead")]
+        &nxgame_cuphead::CUPHEAD,
+        #[cfg(feature = "feengage")]
+        &nxgame_feengage::FEENGAGE,
+        #[cfg(feature = "mcd2")]
+        &nxgame_mcd2::MCD2,
+        #[cfg(feature = "absolum")]
+        &nxgame_absolum::ABSOLUM,
+        #[cfg(feature = "dq7r")]
+        &nxgame_dq7r::DQ7R,
+        #[cfg(feature = "portal2")]
+        &nxgame_portal2::PORTAL2,
+        #[cfg(feature = "pksword")]
+        &nxgame_pksword::PKSWORD,
+        #[cfg(feature = "batmanak")]
+        &nxgame_batmanak::BATMANAK,
+        #[cfg(feature = "hwde")]
+        &nxgame_hwde::HWDE,
+        #[cfg(feature = "mhrise")]
+        &nxgame_mhrise::MHRISE,
+        #[cfg(feature = "pikmin4")]
+        &nxgame_pikmin4::PIKMIN4,
+        #[cfg(feature = "ffresasia")]
+        &nxgame_ffresasia::FFRESASIA,
+        #[cfg(feature = "nierasia")]
+        &nxgame_nierasia::NIERASIA,
+        #[cfg(feature = "mvdk")]
+        &nxgame_mvdk::MVDK,
+        #[cfg(feature = "cvbc")]
+        &nxgame_cvbc::CVBC,
+        #[cfg(feature = "smrpg")]
+        &nxgame_smrpg::SMRPG,
+        #[cfg(feature = "ffx")]
+        &nxgame_ffx::FFX,
+        #[cfg(feature = "catherine")]
+        &nxgame_catherine::CATHERINE,
+        #[cfg(feature = "dkctf")]
+        &nxgame_dkctf::DKCTF,
+        #[cfg(feature = "rotk8")]
+        &nxgame_rotk8::ROTK8,
+        #[cfg(feature = "fc27")]
+        &nxgame_fc27::FC27,
+        #[cfg(feature = "swdig2")]
+        &nxgame_swdig2::SWDIG2,
+        #[cfg(feature = "tristrat")]
+        &nxgame_tristrat::TRISTRAT,
+        #[cfg(feature = "ffcc")]
+        &nxgame_ffcc::FFCC,
+        #[cfg(feature = "silverpines")]
+        &nxgame_silverpines::SILVERPINES,
+        #[cfg(feature = "dq12hd")]
+        &nxgame_dq12hd::DQ12HD,
+        #[cfg(feature = "rhgroove")]
+        &nxgame_rhgroove::RHGROOVE,
+        #[cfg(feature = "tunic")]
+        &nxgame_tunic::TUNIC,
+        #[cfg(feature = "lm3")]
+        &nxgame_lm3::LM3,
+        #[cfg(feature = "parabox")]
+        &nxgame_parabox::PARABOX,
+        #[cfg(feature = "stardew")]
+        &nxgame_stardew::STARDEW,
+        #[cfg(feature = "xc2")]
+        &nxgame_xc2::XC2,
+        #[cfg(feature = "sor4")]
+        &nxgame_sor4::SOR4,
+        #[cfg(feature = "pmttyd")]
+        &nxgame_pmttyd::PMTTYD,
+        #[cfg(feature = "rotk14")]
+        &nxgame_rotk14::ROTK14,
+        #[cfg(feature = "totk")]
+        &nxgame_totk::TOTK,
+        #[cfg(feature = "pkza")]
+        &nxgame_pkza::PKZA,
+        #[cfg(feature = "bmta")]
+        &nxgame_bmta::BMTA,
+        #[cfg(feature = "xcde")]
+        &nxgame_xcde::XCDE,
     ];
     Catalog::new(families, titles)
 }

@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-totk"
+description = "The title module of The Legend of Zelda: Tears of the Kingdom for Nintendo Switch (0100F2C0115B6000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

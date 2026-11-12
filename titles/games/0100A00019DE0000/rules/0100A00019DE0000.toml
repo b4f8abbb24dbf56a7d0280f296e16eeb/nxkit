@@ -1,0 +1,329 @@
+# nxb rewrite rules of Hades II (Switch). Private data: instruction words of game and SDK code.
+#
+# Made from the engine tree at 034e91a8 (read 2026-11-12): the build row of v0 and the engine's SDK-wide rules for the
+# `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large regions).
+#
+# The SDK-wide rules are the engine's `MATCH_CUTS['sdk']`: each rule has one implementation per reviewed SDK, and a rule
+# cuts only when exactly one implementation matches. The engine gives them to every game's sdk build that has no byte
+# cuts of its own, and the engine measured the memory layout of the game with them. Which implementation matches this
+# game's sdk build was not checked here. The rewriter logs a rule it skips.
+#
+# Left out: the function-matched frame step stub of `main` (`MATCH_FRAME_STEP`): a stub is a list of steps, not a byte
+# cut, and no rule of this module describes it.
+
+scope = "0100A00019DE0000"
+
+[[build]]
+row = ["build", "v0", "0.0.126424", "main=5219053e5eb156be80fbb2f303779531", "sdk=d83a56a5558798414c78ec722867a7da"]
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 276
+fingerprints = ["5c81bb821d119d00ffcda6c3a4f1b827fc08c084fa53995e3a6262b5bf37cded"]
+
+[[rule.function.cut]]
+delta = 16
+old = "e9230b32"
+new = "097ca052"
+why = "AddressRegionManager constructor: node area limit orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 176
+old = "e9230b32"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 272
+fingerprints = ["6fe2b1b95eced45e081611b786a8ff80b656bdcad6bd58082ee3264f5163ec44"]
+
+[[rule.function.cut]]
+delta = 16
+old = "e8230b32"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit orr w8,wzr,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 172
+old = "e9230b32"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 272
+fingerprints = ["3ab9bc1471da6658c861c809d8aa43b3be34fd78a65f7136cb346e442a52968b", "14660c33f9b064a429405d34d1ab0d1b8fd3867d5b335e2831afb59c2a399746"]
+
+[[rule.function.cut]]
+delta = 16
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 172
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 240
+fingerprints = ["cd7fb0efd387e5676d349376acf368b706116e089c30485f2d33970d9fb23145", "d16909674e7f982f2fe1c765f7cd366341c2aaa9eb56a28c52a48d3c1057a126", "3549234b3e27a013791bbd834b5ff7dd501a5826c4216c80961bd996eef556ea"]
+
+[[rule.function.cut]]
+delta = 16
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 164
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 244
+fingerprints = ["b02f0514e2cc25a65261ec23cefa9a1fe7b244b3db741f183deb334935541eee"]
+
+[[rule.function.cut]]
+delta = 16
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 124
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 276
+fingerprints = ["8960fe237061c387226a3775daf750a646dd0ee12eccf3d1340248683a6a7d78"]
+
+[[rule.function.cut]]
+delta = 16
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 124
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 328
+fingerprints = ["5f2f7a70fa5c25aeb7020f75dc785fd6ffe6c2f5c72d8fcb30e0ea9a0bb4bbc5"]
+
+[[rule.function.cut]]
+delta = 24
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 164
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 300
+fingerprints = ["224e86858a769644c9ebfe39c77e214c7ac5f853c156118dd3136eba25ed64bf"]
+
+[[rule.function.cut]]
+delta = 24
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 164
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 352
+fingerprints = ["006abd214d94c93386735550cee4fe7708bc1f0d1812663123cfa3b9611f1533", "42167e4d3c710e11937e45a9e420fdd0ed9a410386c17da4d1d896b847d3b0d6"]
+
+[[rule.function.cut]]
+delta = 100
+old = "eb030732"
+new = "0b04a052"
+why = "AllocateAddressRegion: alignment of regions from 32 MB to 1 GB orr w11,wzr,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 108
+old = "ea030232"
+new = "0a04a052"
+why = "AllocateAddressRegion: alignment of regions of 1 GB and more orr w10,wzr,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 112
+old = "e8030a32"
+new = "0804a052"
+why = "AllocateAddressRegion: alignment of regions from 4 MB to 32 MB orr w8,wzr,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 360
+fingerprints = ["b8c0853dcad6b42ca2d504945c9944dd913a991297499e700a97a85bcf5a77c2"]
+
+[[rule.function.cut]]
+delta = 100
+old = "0b40a052"
+new = "0b04a052"
+why = "AllocateAddressRegion: alignment of regions from 32 MB to 1 GB mov w11,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 108
+old = "0a00a852"
+new = "0a04a052"
+why = "AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 112
+old = "0808a052"
+new = "0804a052"
+why = "AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 352
+fingerprints = ["4bec18d9a1f8c73408e95b54d971b2ae87ccb5451b185e3378c05801ad03fa39", "57ad718ebd4e8ebf49a3199c62e1ba2002867df5d124cfee6b4d30aeffee0b8d"]
+
+[[rule.function.cut]]
+delta = 100
+old = "0b40a052"
+new = "0b04a052"
+why = "AllocateAddressRegion: alignment of regions from 32 MB to 1 GB mov w11,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 108
+old = "0a00a852"
+new = "0a04a052"
+why = "AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 112
+old = "0808a052"
+new = "0804a052"
+why = "AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20"
+multi = false
+evidence = "engine tree dm/tools/sdk_patches.py at 034e91a8, read 2026-11-12"
+
+[[rule.function]]
+size = 388
+fingerprints = ["bb9debe722dc0807c947365b7acfb1aa84f82af125e981f31b1d02b44d8032c8", "58845d068f4e828c39e03f66fbe03487387404183b0bcc14068eb45b571d2c02"]
+
+[[rule.function.cut]]
+delta = 100
+old = "0b40a052"
+new = "0b04a052"
+why = "AllocateAddressRegion: alignment of regions from 32 MB to 1 GB mov w11,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 108
+old = "0a00a852"
+new = "0a04a052"
+why = "AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)"
+
+[[rule.function.cut]]
+delta = 112
+old = "0808a052"
+new = "0804a052"
+why = "AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)"
