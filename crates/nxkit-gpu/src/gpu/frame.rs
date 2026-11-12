@@ -2,94 +2,14 @@
 
 use super::*;
 
-/// The weight of each pass of the plan for the cut into chunks: its commands and one.
-fn weights_of(plan: &PassPlan) -> Vec<u32> {
-    plan.passes
-        .iter()
-        .map(|p| p.cmds.len() as u32 + 1)
-        .collect()
-}
+mod chunks;
+mod passdiag;
+mod steps;
+#[cfg(test)]
+mod tests;
 
-/// Whether the encode streams its command buffers (`NXKIT_STREAM_COMMIT`, on unless `0`): the first command buffers of
-/// a frame are committed as soon as they are encoded, while the others are encoded.
-fn stream_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| !matches!(std::env::var("NXKIT_STREAM_COMMIT").as_deref(), Ok("0")))
-}
-
-/// The share of the weight of a frame that its lead chunk takes at least: one in this many.
-const LEAD_SHARE: u64 = 8;
-
-/// The frames with fewer passes than this are not streamed: their encode is short.
-const STREAM_MIN_PASSES: usize = 8;
-
-/// Puts a lead chunk in front of `ends` (the end of each chunk): the first passes up to about one in [`LEAD_SHARE`] of
-/// the weight. Returns true when the lead was added, which needs at least [`STREAM_MIN_PASSES`] passes, a first chunk
-/// that is larger than the lead, one chunk more after it (the last command buffer is never in the streamed group), and
-/// room for `1 + ends.len() + 1` command buffers within `max_buffers`.
-fn lead_chunk(weights: &[u32], ends: &mut Vec<usize>, max_buffers: usize) -> bool {
-    if weights.len() < STREAM_MIN_PASSES || ends.len() < 2 || 2 + ends.len() > max_buffers {
-        return false;
-    }
-    let total: u64 = weights.iter().map(|w| u64::from(*w)).sum();
-    let want = total.div_ceil(LEAD_SHARE).max(1);
-    let (mut acc, mut lead) = (0u64, 0usize);
-    for (i, w) in weights.iter().enumerate() {
-        acc += u64::from(*w);
-        lead = i + 1;
-        if acc >= want {
-            break;
-        }
-    }
-    if lead >= ends[0] {
-        return false;
-    }
-    ends.insert(0, lead);
-    true
-}
-
-pub(super) fn run_chunk(
-    sh: &Shared<'_>,
-    cb: &mut CommandBuffer,
-    scratch: &Scratch,
-    keep: &Arc<Keep>,
-    range: Range<usize>,
-) -> (EncodeStats, Vec<TexId>) {
-    nxkit_metal::autorelease_pool(|| run_chunk_inner(sh, cb, scratch, keep, range))
-}
-
-pub(super) fn run_chunk_inner(
-    sh: &Shared<'_>,
-    cb: &mut CommandBuffer,
-    scratch: &Scratch,
-    keep: &Arc<Keep>,
-    range: Range<usize>,
-) -> (EncodeStats, Vec<TexId>) {
-    let mut stats = EncodeStats::default();
-    let mut copied = Vec::new();
-    cb.retain(keep.clone());
-    let Ok(tables) = Tables::new(sh.ctx) else {
-        stats.skipped[Skip::Encode as usize] += 1;
-        return (stats, copied);
-    };
-    if let Some(p) = sh.prof {
-        p.chunk_start(range.start);
-    }
-    for index in range {
-        let Some(pass) = sh.plan.passes.get(index) else {
-            continue;
-        };
-        match pass.kind {
-            PassKind::Render => render_pass(sh, cb, &tables, scratch, index, pass, &mut stats),
-            PassKind::Compute | PassKind::Copy => {
-                compute_pass(sh, cb, &tables, scratch, index, pass, &mut stats)
-            }
-            PassKind::CpuRead => copied.extend(cpu_read(sh, cb, scratch, index, pass, &mut stats)),
-            PassKind::Sync | PassKind::Present => {}
-        }
-    }
-    (stats, copied)
-}
+use chunks::{lead_chunk, run_chunk, stream_enabled, weights_of};
+use passdiag::describe_pass;
 
 impl Gpu {
     /// Encodes a held frame and submits it.
@@ -185,30 +105,7 @@ impl Gpu {
         crate::private::note_learned(self.gmem.learned());
         // The storage ranges that this frame reads from a copy of its own (the overlap, `rename`). The slot's earlier
         // frame is written back first.
-        let (rename_map, rename_buf, merges) = if crate::overlap::on() {
-            self.rename.note_rw(detail, &self.programs);
-            let b = self
-                .rename
-                .begin_slot(region, detail.rename.as_ref(), self.gmem.learned());
-            // The merge ranges: where the guest range really is. The copy of each is filled and merged back on the GPU.
-            let runs: Vec<crate::rename::MergeRun> = b
-                .merges
-                .into_iter()
-                .filter_map(|(cap, idx, addr, size, slot, copy2)| {
-                    let guest = pools.resolve(addr, u64::from(size)).ok()?.real;
-                    Some(crate::rename::MergeRun {
-                        cap,
-                        idx,
-                        guest,
-                        slot,
-                        copy2,
-                    })
-                })
-                .collect();
-            (b.map, b.buf, runs)
-        } else {
-            (crate::rename::RenameMap::new(), None, Vec::new())
-        };
+        let (rename_map, rename_buf, merges) = self.rename_begin(detail, pools, region);
         let merge_table = if merges.is_empty() {
             None
         } else {
@@ -232,44 +129,7 @@ impl Gpu {
         self.copyback.note_presented(frame);
         // A render target that is copied back stays at the native size: the copy-back needs the guest layout. The
         // other attachments of its passes stay at the native size too, since a pass renders at one scale.
-        if crate::copyback::enabled() {
-            let mut pin: FastSet<TexId> = uses
-                .iter()
-                .filter(|(id, u)| {
-                    u.attachment
-                        && view
-                            .record(**id)
-                            .is_ok_and(|rec| self.copyback.candidate(**id, rec).is_some())
-                })
-                .map(|(id, _)| *id)
-                .collect();
-            if !pin.is_empty() {
-                let mut co = Vec::new();
-                for p in plan.passes.iter().filter(|p| p.kind == PassKind::Render) {
-                    let atts = plan.attachments_of(p);
-                    if atts.iter().any(|a| pin.contains(&a.tex)) {
-                        co.extend(atts.iter().map(|a| a.tex).filter(|t| !pin.contains(t)));
-                    }
-                }
-                for t in co {
-                    static SHOWN: std::sync::atomic::AtomicU32 =
-                        std::sync::atomic::AtomicU32::new(0);
-                    if pin.insert(t)
-                        && crate::diag("copyback")
-                        && SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 50
-                    {
-                        eprintln!(
-                            "DIAG copyback pins {t:?} at the native size, it shares a pass with a copied-back texture"
-                        );
-                    }
-                }
-                for id in pin {
-                    if let Some(u) = uses.get_mut(&id) {
-                        u.cpu_read = true;
-                    }
-                }
-            }
-        }
+        self.pin_copyback_targets(plan, view, &mut uses);
         for (id, u) in &uses {
             self.store.note(*id, *u);
         }
@@ -334,53 +194,8 @@ impl Gpu {
         if let Some(p) = &native {
             crate::native::book_writes(p, frame, plan, &ords, &mut pass_images);
         }
-        let mut first_write: FastMap<TexId, usize> = FastMap::default();
-        let mut gpu_wrote: Vec<TexId> = Vec::new();
-        // The levels and layers that the frame wrote, and the last pass that wrote them, for the copy-back.
-        let mut dirty: FastMap<TexId, (Dirty, usize)> = FastMap::default();
-        for (i, p) in plan.passes.iter().enumerate() {
-            if !matches!(
-                p.kind,
-                PassKind::Render | PassKind::Compute | PassKind::Copy
-            ) {
-                continue;
-            }
-            let extra = pass_images.get(i).map_or(&[][..], |x| x.writes.as_slice());
-            for id in touch(frame, plan, p)
-                .writes
-                .into_iter()
-                .chain(extra.iter().copied())
-            {
-                let memoryless = textures
-                    .get(&id)
-                    .is_none_or(|r| r.desc.storage == nxkit_metal::Storage::Memoryless);
-                if !memoryless && first_write.insert(id, i).is_none() {
-                    gpu_wrote.push(id);
-                }
-                if !memoryless && crate::copyback::enabled() {
-                    let e = dirty.entry(id).or_default();
-                    e.1 = i;
-                    if p.kind != PassKind::Render {
-                        e.0 = Dirty::All;
-                    }
-                }
-            }
-            if p.kind == PassKind::Render {
-                for a in plan.attachments_of(p) {
-                    let Some((d, _)) = dirty.get_mut(&a.tex) else {
-                        continue;
-                    };
-                    let three_d = textures
-                        .get(&a.tex)
-                        .is_some_and(|r| r.desc.kind == nxkit_metal::TextureKind::D3);
-                    if three_d {
-                        *d = Dirty::All;
-                    } else if a.store == nxkit_nvn::passes::StoreAction::Store {
-                        d.add(a.view.level(), a.view.layer());
-                    }
-                }
-            }
-        }
+        let (first_write, gpu_wrote, dirty) =
+            Self::track_writes(frame, plan, &textures, &pass_images);
 
         for id in &gpu_wrote {
             self.store.mark_written(*id);
@@ -402,32 +217,7 @@ impl Gpu {
         // buffer writes them, whichever pass the planner named).
         let mut ahead = None;
         if !early.cuts.is_empty() {
-            let mut excluded: Vec<(u64, u64)> = Vec::new();
-            let ids = dirty
-                .keys()
-                .copied()
-                .chain(frame.cmds.iter().filter_map(|c| match c {
-                    Cmd::CpuRead(id) => Some(*id),
-                    _ => None,
-                }));
-            for id in ids {
-                if let Ok(rec) = view.record(id) {
-                    excluded.push((rec.address.get(), rec.end()));
-                }
-            }
-            crate::private::early_exclude(&mut early.cuts, &excluded, &self.guest.address_map());
-            let mut registered = Vec::new();
-            for cut in std::mem::take(&mut early.cuts) {
-                let end = cut.after_pass + 1;
-                let count = ends.iter().position(|e| *e == end).map_or(0, |i| i + 2);
-                if batch.on_prefix_complete(
-                    count,
-                    crate::private::early_release(fence, cut.pages.clone()),
-                ) {
-                    registered.push(cut);
-                }
-            }
-            early.cuts = registered;
+            self.register_early_cuts(&mut early, &ends, &mut batch, fence, &dirty, frame, view);
             // The first part can go to the GPU while the rest is encoded, unless the first command buffer still gets the pages
             // of a late stage.
             if let Some(o) = pools.overlay()
@@ -444,7 +234,6 @@ impl Gpu {
             ahead = batch.stream_prefix(2);
         }
 
-        let mut deswizzled = Vec::new();
         let (first, rest) = batch
             .buffers()
             .split_first_mut()
@@ -452,41 +241,11 @@ impl Gpu {
         first.retain(keep.clone());
         // `NXKIT_PRIVATE=1`: the pages that the CPU wrote since the frame before go into the mirror before anything of this
         // frame reads or writes it (the texture uploads below may read member pages).
-        if let Some(o) = pools.overlay() {
-            let (jobs, lost) = crate::private::copy_in_jobs(o);
-            if !jobs.is_empty() || lost > 0 {
-                let done = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
-                    .ok()
-                    .and_then(|t| {
-                        crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs)
-                            .ok()
-                    });
-                match done {
-                    Some(n) => crate::private::note_copy_in(n, lost),
-                    None => {
-                        stats.skip(Skip::Encode);
-                        crate::private::note_copy_in(0, lost + jobs.len() as u32);
-                    }
-                }
-            }
-        }
+        self.copy_in_pages(pools, first, &scratch, &mut stats);
         // Results one frame late: the GPU copies the late pages as the frame starts with them (after the copy-in) and,
         // below, as it ends, so that its completion hands the readers the frame's own bytes and knows which blocks it
         // changed.
-        let mut late_copies = pools
-            .overlay()
-            .and_then(|o| crate::private::late_copy_jobs(o));
-        if let Some((start, ..)) = &late_copies {
-            let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
-                .ok()
-                .and_then(|t| {
-                    crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, start).ok()
-                });
-            if ok.is_none() {
-                stats.skip(Skip::Encode);
-                late_copies = None;
-            }
-        }
+        let late_copies = self.late_copies_start(pools, first, &scratch, &mut stats);
         let mesh = crate::meshvis::plan(
             diag_frame,
             frame,
@@ -501,106 +260,7 @@ impl Gpu {
         if let Some(b) = queries.as_ref().and_then(|q| q.buffer()) {
             first.retain(b.clone());
         }
-        self.transfer.begin_frame();
-        let mut zeroer = freshzero::Zeroer::new(crate::knob("freshzero"));
-        let mut scaled_queued = Vec::new();
-        for (id, res) in &textures {
-            let Ok(rec) = view.record(*id) else { continue };
-            if TextureStore::needs_scaled_upload(res, rec) {
-                // The guest layout has the native size: a staging texture takes it and a kernel scales it.
-                let wait = self.copyback.upload_waits(rec);
-                let t_up = Instant::now();
-                let r = self
-                    .transfer
-                    .upload_scaled(first, &scratch, pools, rec, res, wait);
-                stats.upload_ns += nanos(t_up, Instant::now());
-                match r {
-                    Ok(()) => scaled_queued.push((*id, res.barrier_id)),
-                    Err(why) => {
-                        stats.scaled_upload_lost += 1;
-                        stats.skip(why);
-                    }
-                }
-                continue;
-            }
-            if crate::diag("stale")
-                && crate::diag::tex_match(
-                    res.desc.format,
-                    res.desc.width,
-                    res.desc.height,
-                    res.desc.array_layers,
-                )
-            {
-                self.stale_diag(*id, rec, res);
-            }
-            if res.in_place.is_some() {
-                // The texture is the guest bytes: a CPU write needs no upload, and the record is in sync.
-                if rec.residency == nxkit_nvn::resource::Residency::GuestNewer {
-                    deswizzled.push(*id);
-                }
-                continue;
-            }
-            if !TextureStore::needs_upload(res, rec) {
-                if zeroer.zero(&self.ctx, first, res) {
-                    self.barriers.seed(res.barrier_id, Stages::FRAGMENT);
-                }
-                continue;
-            }
-            let wait = self.copyback.upload_waits(rec);
-            let t_up = Instant::now();
-            let r = self.transfer.upload(first, &scratch, pools, rec, res, wait);
-            stats.upload_ns += nanos(t_up, Instant::now());
-            static UPLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            if crate::diag("upload")
-                && crate::diag::tex_filtered()
-                && crate::diag::tex_match(
-                    res.desc.format,
-                    res.desc.width,
-                    res.desc.height,
-                    res.desc.array_layers,
-                )
-                && crate::diag::first(&UPLOADS, 200)
-            {
-                eprintln!(
-                    "DIAG upload {id:?} {:?} {}x{} residency {:?} scaled {} linear {}: {:?}",
-                    res.desc.format,
-                    res.desc.width,
-                    res.desc.height,
-                    rec.residency,
-                    res.scaled,
-                    rec.layout.linear,
-                    r.as_ref().err()
-                );
-            }
-            match r {
-                Ok(()) => {
-                    stats.uploads += 1;
-                    stats.compute_passes += 1;
-                    deswizzled.push(*id);
-                    self.barriers
-                        .seed(res.barrier_id, Stages::DISPATCH | Stages::BLIT);
-                }
-                Err(why) => stats.skip(why),
-            }
-        }
-
-        zeroer.report();
-        if !scaled_queued.is_empty() {
-            let (scaled, lost) = self.transfer.flush_scaled(first);
-            stats.scaled_uploads += scaled;
-            stats.uploads += scaled;
-            stats.scaled_upload_lost += lost;
-            stats.compute_passes += 1;
-            // The scaling writes the texture with compute stages, like the plain upload. A texture that lost part of
-            // its write still changed, so every queued texture gets the seed.
-            for (id, barrier_id) in scaled_queued {
-                if lost == 0 {
-                    deswizzled.push(id);
-                }
-                self.barriers
-                    .seed(barrier_id, Stages::DISPATCH | Stages::BLIT);
-            }
-        }
+        let deswizzled = self.upload_textures(view, first, &scratch, pools, &textures, &mut stats);
 
         let aliases = textures
             .iter()
@@ -813,35 +473,7 @@ impl Gpu {
 
         // `privlatestage`: the pages the CPU wrote since the flush are copied into the mirror again, at the end of the first
         // command buffer, which runs before the others.
-        if let Some(o) = pools.overlay() {
-            let jobs = crate::private::late_stage(o);
-            if !jobs.is_empty() {
-                let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
-                    .ok()
-                    .and_then(|t| {
-                        crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs)
-                            .ok()
-                    });
-                if ok.is_none() {
-                    stats.skip(Skip::Encode);
-                }
-            }
-        }
-        if let (Some((_, end, start_at, end_at)), Some(o)) = (&late_copies, pools.overlay()) {
-            let cb = match rest.last_mut() {
-                Some(cb) => cb,
-                None => &mut *first,
-            };
-            let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
-                .ok()
-                .and_then(|t| {
-                    crate::private::encode_copy_in(&self.pipelines, cb, &t, &scratch, end).ok()
-                });
-            match ok {
-                Some(_) => crate::private::late_copies_encoded(o.frame(), *start_at, *end_at),
-                None => stats.skip(Skip::Encode),
-            }
-        }
+        self.late_stage_end(pools, first, rest, &scratch, &late_copies, &mut stats);
         // ICBs and argument buffers made during the encode join the residency set before the commit.
         let t_commit = Instant::now();
         self.ctx.commit_residency();
@@ -886,225 +518,5 @@ impl Gpu {
             stats,
             queries,
         })
-    }
-}
-
-impl Gpu {
-    /// `NXKIT_DIAG=tiny` at the end of a sampled frame, after the GPU finished: the guest bytes of the tiny textures
-    /// that were copied back, and the ranges of `NXKIT_DIAG_WATCH`.
-    fn tiny_frame_end(
-        &self,
-        view: &dyn EncodeView,
-        textures: &FastMap<TexId, Res>,
-        mirrored: &[TexId],
-    ) {
-        let base = self.guest.address_map().gpu_base();
-        let read = |addr: u64, len: usize| {
-            let mut buf = vec![0u8; len];
-            self.guest
-                .read(addr.wrapping_sub(base), &mut buf)
-                .ok()
-                .map(|()| buf)
-        };
-        for id in mirrored {
-            let (Some(res), Ok(rec)) = (textures.get(id), view.record(*id)) else {
-                continue;
-            };
-            if rec.layout.size == 0
-                || rec.layout.size > crate::diag::TINY_MAX
-                || !crate::diag::tiny_line()
-            {
-                continue;
-            }
-            if let Some(buf) = read(rec.address.get(), rec.layout.size as usize) {
-                eprintln!(
-                    "DIAG tiny copyback {id:?} {:?} {}x{} at 0x{:x} {}",
-                    res.desc.format,
-                    res.desc.width,
-                    res.desc.height,
-                    rec.address.get(),
-                    crate::diag::tiny_words(&buf)
-                );
-            }
-        }
-        for &(addr, len) in crate::diag::watch_ranges() {
-            if let Some(buf) = read(addr, len) {
-                eprintln!(
-                    "DIAG tiny watch 0x{addr:x} {}",
-                    crate::diag::tiny_words(&buf)
-                );
-            }
-        }
-    }
-}
-
-/// `NXKIT_DIAG=passprof`: what a pass is, for the report.
-fn describe_pass(
-    frame: &Frame,
-    plan: &PassPlan,
-    detail: &FrameDetail,
-    ords: &[crate::draws::Ordinal],
-    textures: &FastMap<TexId, Res>,
-    i: usize,
-) -> String {
-    use crate::detail::CopyKind;
-    let p = &plan.passes[i];
-    let n = p.cmds.len();
-    let cmds = || {
-        p.cmds
-            .clone()
-            .filter_map(|c| Some((frame.cmds.get(c as usize)?, ords.get(c as usize).copied()?)))
-    };
-    match p.kind {
-        PassKind::Render => {
-            let what = plan
-                .attachments_of(p)
-                .first()
-                .and_then(|a| textures.get(&a.tex))
-                .map_or_else(String::new, |r| {
-                    format!(" {}x{} {:?}", r.desc.width, r.desc.height, r.desc.format)
-                });
-            let draws = cmds().filter(|(c, _)| matches!(c, Cmd::Draw { .. }));
-            let count = draws.clone().count();
-            let fs = draws
-                .clone()
-                .next()
-                .and_then(|(_, o)| detail.draws.get(o.draw as usize))
-                .map_or_else(
-                    || "none".to_string(),
-                    |d| {
-                        d.program
-                            .fragment
-                            .as_deref()
-                            .map_or_else(|| "depth-only".to_string(), str::to_string)
-                    },
-                );
-            format!("render cmds {n} draws {count} fs {fs}{what}")
-        }
-        PassKind::Compute => {
-            let ds: Vec<String> = cmds()
-                .filter(|(c, _)| matches!(c, Cmd::Dispatch { .. }))
-                .map(|(_, o)| {
-                    detail.dispatches.get(o.dispatch as usize).map_or_else(
-                        || "?".to_string(),
-                        |d| {
-                            let [x, y, z] = d.groups;
-                            match d.indirect {
-                                Some(a) => format!("{} indirect@{a:#x}", d.program),
-                                None => format!("{} {x}x{y}x{z}", d.program),
-                            }
-                        },
-                    )
-                })
-                .collect();
-            let more = ds.len().saturating_sub(3);
-            let mut s = format!(
-                "compute cmds {n} [{}]",
-                ds.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
-            );
-            if more > 0 {
-                s.push_str(&format!(" +{more}"));
-            }
-            s
-        }
-        PassKind::Copy => {
-            let items: Vec<String> = cmds()
-                .map(|(c, o)| {
-                    let d = detail.copies.get(o.copy as usize);
-                    let [w, h, dp] = d.map_or([0; 3], |d| d.size);
-                    match (c, d.map(|d| d.kind)) {
-                        (Cmd::Copy { src, dst }, k) => format!(
-                            "{} {w}x{h}x{dp} {src:?}->{dst:?}",
-                            match k {
-                                Some(CopyKind::TextureToTexture) => "tex-copy",
-                                Some(CopyKind::BufferToTexture) => "buf-to-tex",
-                                Some(CopyKind::TextureToBuffer) => "tex-to-buf",
-                                Some(CopyKind::Clear) => "clear",
-                                _ => "copy",
-                            }
-                        ),
-                        (Cmd::BufferCopy, _) => d.map_or_else(
-                            || "buffer".to_string(),
-                            |d| match d.kind {
-                                CopyKind::BufferFill => {
-                                    format!("fill {} bytes @{:#x}", d.bytes, d.dst_addr)
-                                }
-                                _ => format!(
-                                    "buffer-copy {} bytes {:#x}->{:#x}",
-                                    d.bytes, d.src_addr, d.dst_addr
-                                ),
-                            },
-                        ),
-                        (Cmd::Downsample { src, dst }, _) => {
-                            format!("downsample {w}x{h} {src:?}->{dst:?}")
-                        }
-                        _ => "other".to_string(),
-                    }
-                })
-                .collect();
-            let more = items.len().saturating_sub(3);
-            let mut s = format!(
-                "copy cmds {n} [{}]",
-                items.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
-            );
-            if more > 0 {
-                s.push_str(&format!(" +{more}"));
-            }
-            s
-        }
-        PassKind::CpuRead => {
-            let items: Vec<String> = cmds()
-                .filter_map(|(c, _)| match c {
-                    Cmd::CpuRead(id) => Some(match textures.get(id) {
-                        Some(r) => format!(
-                            "{id:?} {}x{} {:?}",
-                            r.desc.width, r.desc.height, r.desc.format
-                        ),
-                        None => format!("{id:?}"),
-                    }),
-                    _ => None,
-                })
-                .collect();
-            format!("cpuread [{}]", items.join("; "))
-        }
-        _ => format!("other cmds {n}"),
-    }
-}
-
-#[cfg(test)]
-mod lead_tests {
-    use super::*;
-
-    #[test]
-    fn a_lead_chunk_takes_the_first_eighth_of_the_weight_and_the_chunks_keep_their_ends() {
-        let weights = vec![10u32; 40];
-        let mut ends = jobs::split(&weights, 4);
-        assert_eq!(ends, vec![10, 20, 30, 40]);
-        assert!(lead_chunk(&weights, &mut ends, 8));
-        assert_eq!(ends, vec![5, 10, 20, 30, 40]);
-    }
-
-    #[test]
-    fn no_lead_chunk_for_a_short_frame_one_chunk_a_full_ring_or_a_big_first_pass() {
-        let weights = vec![10u32; 40];
-        let mut one = vec![40];
-        assert!(!lead_chunk(&weights, &mut one, 8));
-        assert_eq!(one, vec![40]);
-        let mut ends = jobs::split(&weights, 4);
-        assert!(
-            !lead_chunk(&weights, &mut ends, 5),
-            "1 + 5 command buffers do not fit 5"
-        );
-        assert_eq!(ends.len(), 4);
-        let short = vec![10u32; 4];
-        let mut e = jobs::split(&short, 2);
-        assert!(!lead_chunk(&short, &mut e, 8));
-        let heavy = [1000u32, 1, 1, 1, 1, 1, 1, 1, 1, 1];
-        let mut e = vec![1, 6, 10];
-        assert!(
-            !lead_chunk(&heavy, &mut e, 8),
-            "the first chunk is the lead already"
-        );
-        assert_eq!(e, vec![1, 6, 10]);
     }
 }
