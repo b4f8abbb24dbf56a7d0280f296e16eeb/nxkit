@@ -30,8 +30,9 @@ const GAME_TSV: Evidence = Evidence::Recorded {
     read: "2026-11-12",
 };
 
-/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The display
-/// version is the one of the build row of v65536.
+/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The build row
+/// of v65536 has `?` for the display version (the engine packed the game from a dump folder, which has no control
+/// data), so the module gives none and the app shows the version number.
 const SETTINGS: Fact<Settings> = Fact::new(
     Settings {
         memory: Memory {
@@ -41,7 +42,6 @@ const SETTINGS: Fact<Settings> = Fact::new(
             app_pool: 0x2_4000_0000,
             ..Settings::DEFAULT.memory
         },
-        display_versions: &[("3941550a42845731651bcd05edbb4703", "?")],
         upscaler_keys: &[
             "0253bd17deceee79",
             "085c6fddc9443e70",
@@ -162,7 +162,7 @@ mod tests {
         assert!(s.nvn_functions.value.is_empty());
         assert!(s.romfs_marker.is_empty() || s.romfs_marker.starts_with('/'));
         assert!(s.settings.evidence.is_checked());
-        assert_eq!(s.settings.value.display_versions[0].0, s.modules[0].1);
+        assert!(s.settings.value.display_versions.is_empty());
     }
 
     #[test]
