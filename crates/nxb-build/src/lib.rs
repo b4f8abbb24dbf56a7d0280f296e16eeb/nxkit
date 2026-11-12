@@ -15,6 +15,8 @@ pub mod pipeline;
 mod resource_patch;
 mod standalone;
 
+pub use standalone::ios;
+
 /// The exit code a failing stage asks for (the first one wins). Stage closures return `Result<String, String>`, so the
 /// class of an error (damaged data 3, not supported yet 4, bad arguments 2, missing key 6) travels beside the text.
 pub(crate) mod exit {
@@ -75,6 +77,9 @@ fn wants_json(argv: &[String]) -> bool {
 /// the process's descriptor 1 is moved to standard error and the events go to the original standard output, so the
 /// lines the extract and split steps print (and any other library or child output) never mix into the events.
 pub fn main(argv: &[String]) -> i32 {
+    if ios::requested(argv) {
+        return ios::main(argv);
+    }
     let json = wants_json(argv);
     let mut sink: Box<dyn std::io::Write + Send> = Box::new(std::io::stdout());
     if json && let Ok(f) = nxb_sys::stdio::stdout_to_stderr() {

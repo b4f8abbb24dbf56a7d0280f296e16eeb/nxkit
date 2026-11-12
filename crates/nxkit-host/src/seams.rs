@@ -16,7 +16,7 @@ use nxkit_svc_pacing::{LoadConfig, StepMode};
 use crate::error::{HostError, Result};
 use crate::manifest::Game;
 use crate::settings::Settings;
-use crate::sys::appkit::{MouseEvent, MouseMode};
+use crate::input::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
 
 fn has(mask: u64, service: Service) -> bool {

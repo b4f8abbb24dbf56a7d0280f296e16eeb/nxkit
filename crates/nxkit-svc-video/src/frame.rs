@@ -20,13 +20,13 @@ pub struct Nv12 {
 
 pub(crate) enum Pixels {
     Memory(Nv12),
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     Buffer(crate::sys::vt::PixelBuffer),
 }
 
 /// A decoded picture, 8-bit 4:2:0 in the NV12 layout.
 ///
-/// On macOS a picture from the decoder stays in the `CVPixelBuffer` that VideoToolbox filled, in memory that Metal can
+/// On Apple platforms a picture from the decoder stays in the `CVPixelBuffer` that VideoToolbox filled, in memory that Metal can
 /// use. [`crate::texture::TextureCache`] turns it into textures without a copy (R20), and [`Frame::copy_nv12`] reads
 /// it for a game that wants the bytes.
 pub struct Frame {
@@ -50,7 +50,7 @@ impl Frame {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn from_buffer(
         width: u32,
         height: u32,
@@ -90,6 +90,7 @@ impl Frame {
     /// Writes the picture into `dst` in the layout the SDK reports: the luma plane with `stride` bytes a row and
     /// `slice` rows, then the chroma plane with the same stride. `dst` must hold `stride * slice * 3 / 2` bytes.
     /// A picture that is smaller than `stride` by `slice` leaves the rest of the rows as they were.
+    #[cfg(not(target_os = "ios"))]
     pub fn copy_nv12(&self, dst: &mut [u8], stride: usize, slice: usize) -> Result<(), String> {
         let need = stride * slice * 3 / 2;
         if dst.len() < need {
@@ -116,7 +117,7 @@ impl Frame {
                 copy(&m.y, m.y_stride, &m.uv, m.uv_stride);
                 Ok(())
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Pixels::Buffer(b) => b.with_planes(copy),
         }
     }
@@ -129,12 +130,13 @@ impl Frame {
     ) -> Result<R, String> {
         match &self.pixels {
             Pixels::Memory(m) => Ok(f(&m.y, m.y_stride, &m.uv, m.uv_stride)),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Pixels::Buffer(b) => b.with_planes(f),
         }
     }
 
     /// The picture as bytes in memory, tightly packed (`width` bytes a row).
+    #[cfg(not(target_os = "ios"))]
     pub fn to_nv12(&self) -> Result<Nv12, String> {
         let (w, h) = (self.width as usize, self.height as usize);
         let stride = w.div_ceil(2) * 2;
@@ -152,6 +154,7 @@ impl Frame {
 
     /// The picture as RGBA bytes, `width * 4` bytes a row and `height` rows, by the colour space of the picture. A
     /// picture smaller than `width` by `height` is padded with opaque black, a larger one is cropped.
+    #[cfg(not(target_os = "ios"))]
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Vec<u8>, String> {
         let planes = self.to_nv12()?;
         let (w, h) = (width as usize, height as usize);
@@ -170,6 +173,7 @@ impl Frame {
 }
 
 /// Copies `rows` rows of `len` bytes from `src` to `dst`. A source that is too short for a row ends the copy.
+#[cfg(not(target_os = "ios"))]
 fn copy_rows(
     src: &[u8],
     src_stride: usize,
@@ -245,5 +249,134 @@ mod tests {
         let n = f.to_nv12().unwrap_or_else(|_| unreachable!());
         assert_eq!((n.y.len(), n.uv.len()), (24, 12));
         assert_eq!(n.y[..6], [0, 1, 2, 3, 4, 5]);
+    }
+}
+
+// iOS keeps checked allocation and copy failures at the application boundary.
+// Storage, identity, pixel-buffer ownership and plane access are shared above.
+#[cfg(target_os = "ios")]
+impl Frame {
+    /// Copies the picture to the SDK stride and slice layout with checked sizes.
+    pub fn copy_nv12(&self, dst: &mut [u8], stride: usize, slice: usize) -> Result<(), String> {
+        let luma = stride.checked_mul(slice).ok_or("NV12 size overflow")?;
+        let chroma = stride.checked_mul(slice / 2).ok_or("NV12 size overflow")?;
+        let length = luma.checked_add(chroma).ok_or("NV12 size overflow")?;
+        let target = dst
+            .get_mut(..length)
+            .ok_or("NV12 destination is too small")?;
+        let width = self.width() as usize;
+        let height = self.height() as usize;
+        self.with_planes(|y, ys, uv, uvs| {
+            let (dy, duv) = target.split_at_mut(luma);
+            rows(y, ys, dy, stride, width.min(stride), height.min(slice))?;
+            rows(
+                uv,
+                uvs,
+                duv,
+                stride,
+                (width.div_ceil(2) * 2).min(stride),
+                height.div_ceil(2).min(slice / 2),
+            )
+        })?
+    }
+    /// Copies the picture into tightly packed, even-sized NV12 planes.
+    pub fn to_nv12(&self) -> Result<Nv12, String> {
+        let stride = (self.width() as usize).div_ceil(2) * 2;
+        let slice = (self.height() as usize).div_ceil(2) * 2;
+        let luma = stride.checked_mul(slice).ok_or("NV12 size overflow")?;
+        let length = luma.checked_add(luma / 2).ok_or("NV12 size overflow")?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(length)
+            .map_err(|e| format!("NV12 allocation failed: {e}"))?;
+        data.resize(length, 0);
+        self.copy_nv12(&mut data, stride, slice)?;
+        let uv = data.split_off(luma);
+        Ok(Nv12 {
+            y: data,
+            y_stride: stride,
+            uv,
+            uv_stride: stride,
+        })
+    }
+    /// Converts the picture to RGBA, padding or cropping to the requested size.
+    pub fn to_rgba(&self, width: u32, height: u32) -> Result<Vec<u8>, String> {
+        let planes = self.to_nv12()?;
+        let length = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or("RGBA size overflow")?;
+        let mut rgba = Vec::new();
+        rgba.try_reserve_exact(length)
+            .map_err(|e| format!("RGBA allocation failed: {e}"))?;
+        rgba.resize(length, 0);
+        crate::yuv::nv12_to_rgba(
+            &planes,
+            self.width() as usize,
+            self.height() as usize,
+            self.colorspace,
+            &mut rgba,
+            width as usize,
+            height as usize,
+        );
+        Ok(rgba)
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn rows(
+    src: &[u8],
+    ss: usize,
+    dst: &mut [u8],
+    ds: usize,
+    width: usize,
+    count: usize,
+) -> Result<(), String> {
+    for row in 0..count {
+        let start = row.checked_mul(ss).ok_or("NV12 row overflow")?;
+        let end = start
+            .checked_add(width.min(ss))
+            .ok_or("NV12 row overflow")?;
+        let input = src
+            .get(start..end)
+            .ok_or("NV12 source plane is truncated")?;
+        let start = row.checked_mul(ds).ok_or("NV12 row overflow")?;
+        let end = start.checked_add(input.len()).ok_or("NV12 row overflow")?;
+        dst.get_mut(start..end)
+            .ok_or("NV12 destination plane is truncated")?
+            .copy_from_slice(input);
+    }
+    Ok(())
+}
+#[cfg(all(test, target_os = "ios"))]
+mod checked_tests {
+    use super::*;
+    fn frame() -> Frame {
+        Frame::from_nv12(
+            2,
+            2,
+            3,
+            Nv12 {
+                y: vec![1, 2, 3, 4],
+                y_stride: 2,
+                uv: vec![5, 6],
+                uv_stride: 2,
+            },
+        )
+    }
+    #[test]
+    fn stride_and_padding() {
+        let mut output = [99; 12];
+        frame().copy_nv12(&mut output, 4, 2).unwrap();
+        assert_eq!(output, [1, 2, 99, 99, 3, 4, 99, 99, 5, 6, 99, 99]);
+    }
+    #[test]
+    fn invalid_sizes_are_errors() {
+        assert!(frame().copy_nv12(&mut [], usize::MAX, 4).is_err());
+        assert!(frame().copy_nv12(&mut [0; 5], 2, 2).is_err());
+    }
+    #[test]
+    fn planes_round_trip() {
+        assert_eq!(frame().to_nv12().unwrap().uv, vec![5, 6]);
+        assert_ne!(frame().id(), frame().id());
     }
 }

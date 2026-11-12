@@ -3,7 +3,13 @@
 
 #![allow(unsafe_code, unreachable_pub)]
 
+#[cfg(not(target_os = "ios"))]
 pub(crate) mod au;
+#[cfg(target_os = "ios")]
+#[path = "remoteio.rs"]
+pub(crate) mod au;
+#[cfg(all(test, not(target_os = "ios")))]
+mod remoteio;
 pub(crate) mod call;
 pub(crate) mod mem;
 pub(crate) mod ring;

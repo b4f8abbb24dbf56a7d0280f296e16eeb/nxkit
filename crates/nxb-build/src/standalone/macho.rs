@@ -148,6 +148,84 @@ pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// Applies the iOS platform version and executable header marker to the shared dylib.
+pub(super) fn ios_dylib(b: &mut [u8]) -> Result<(), String> {
+    fn word(b: &[u8], at: usize) -> Result<u32, String> {
+        Ok(u32::from_le_bytes(
+            b.get(at..at + 4)
+                .ok_or("truncated Mach-O")?
+                .try_into()
+                .map_err(|_| "invalid integer width")?,
+        ))
+    }
+    if word(b, 0)? != 0xfeedfacf || word(b, 4)? != 0x0100000c {
+        return Err("expected arm64 Mach-O".into());
+    }
+    let end = 32 + word(b, 20)? as usize;
+    if end > b.len() || end > 0x4000 {
+        return Err("invalid Mach-O commands".into());
+    }
+    let mut at = 32;
+    let mut found = false;
+    let mut text_command = None;
+    for _ in 0..word(b, 16)? {
+        let cmd = word(b, at)?;
+        let size = word(b, at + 4)? as usize;
+        if size < 8 || !size.is_multiple_of(8) || at + size > end {
+            return Err("invalid Mach-O command".into());
+        }
+        if cmd == 0x19
+            && size >= 72
+            && b.get(at + 8..at + 24) == Some(b"__TEXT\0\0\0\0\0\0\0\0\0\0")
+        {
+            if size != 72 || word(b, at + 64)? != 0 {
+                return Err("unexpected header segment".into());
+            }
+            text_command = Some(at);
+        }
+        if cmd == 0x32 {
+            if size != 24 || found {
+                return Err("unexpected build-version command".into());
+            }
+            for (off, value) in [(8, 2u32), (12, 26 << 16), (16, 26 << 16)] {
+                b[at + off..at + off + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            found = true;
+        }
+        at += size;
+    }
+    if at != end || !found {
+        return Err("missing build-version command".into());
+    }
+    // A standard __TEXT,__text section describes the reserved header space. The writer
+    // reserves a 16 KiB header segment, so add one section inside that padding.
+    let text = text_command.ok_or("missing header segment")?;
+    const MARKER: usize = 0x3ffc;
+    if b.len() < 0x4000 || end + 80 + 16 > MARKER || b[end..0x4000].iter().any(|v| *v != 0) {
+        return Err("no room for header marker".into());
+    }
+    let vmaddr = u64::from_le_bytes(
+        b[text + 24..text + 32]
+            .try_into()
+            .map_err(|_| "invalid vmaddr")?,
+    );
+    let section = text + 72;
+    b.copy_within(section..end, section + 80);
+    b[section..section + 80].fill(0);
+    b[section..section + 6].copy_from_slice(b"__text");
+    b[section + 16..section + 22].copy_from_slice(b"__TEXT");
+    b[section + 32..section + 40].copy_from_slice(&(vmaddr + MARKER as u64).to_le_bytes());
+    b[section + 40..section + 48].copy_from_slice(&4u64.to_le_bytes());
+    b[section + 48..section + 52].copy_from_slice(&(MARKER as u32).to_le_bytes());
+    b[section + 52..section + 56].copy_from_slice(&2u32.to_le_bytes());
+    b[section + 64..section + 68].copy_from_slice(&0x80000400u32.to_le_bytes());
+    b[text + 4..text + 8].copy_from_slice(&152u32.to_le_bytes());
+    b[text + 64..text + 68].copy_from_slice(&1u32.to_le_bytes());
+    b[20..24].copy_from_slice(&((end - 32 + 80) as u32).to_le_bytes());
+    b[MARKER..MARKER + 4].copy_from_slice(&0xd65f03c0u32.to_le_bytes()); // arm64 RET
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +259,43 @@ mod tests {
         assert_eq!(&f[PAGE as usize..PAGE as usize + 8], &code);
         assert_eq!(&f[2 * PAGE as usize..2 * PAGE as usize + 5], b"hello");
         assert_eq!(f.len() as u64, 3 * PAGE + 8);
+    }
+
+    #[test]
+    fn ios_keeps_the_shared_segments_and_changes_only_the_header() {
+        let code = [0xc0, 0x03, 0x5f, 0xd6];
+        let segs = [Seg {
+            name: "__NX_A_TEXT",
+            addr: 0x100_0001_0000,
+            data: &code,
+            mem_size: PAGE,
+            exec: true,
+        }];
+        let mac = write(&segs, [7; 16]).unwrap();
+        let mut ios = mac.clone();
+        ios_dylib(&mut ios).unwrap();
+        assert_eq!(ios.len(), mac.len());
+        assert_eq!(&ios[PAGE as usize..], &mac[PAGE as usize..]);
+        assert_eq!(u32at(&ios, 16), u32at(&mac, 16));
+        assert_eq!(u32at(&ios, 20), u32at(&mac, 20) + 80);
+        assert_eq!(u32at(&ios, 0x3ffc), 0xd65f03c0);
+        assert_eq!(u32at(&mac, 0x3ffc), 0);
+        assert_eq!(&ios[104..110], b"__text");
+        for (image, platform, version) in [(&mac, 1, 14 << 16), (&ios, 2, 26 << 16)] {
+            let mut at = HEADER_SIZE;
+            let mut found = false;
+            for _ in 0..u32at(image, 16) {
+                if u32at(image, at) == 0x32 {
+                    assert_eq!(u32at(image, at + 8), platform);
+                    assert_eq!(u32at(image, at + 12), version);
+                    assert_eq!(u32at(image, at + 16), version);
+                    found = true;
+                }
+                at += u32at(image, at + 4) as usize;
+            }
+            assert!(found);
+        }
+        assert_eq!(write(&segs, [7; 16]).unwrap(), mac);
     }
 
     #[test]

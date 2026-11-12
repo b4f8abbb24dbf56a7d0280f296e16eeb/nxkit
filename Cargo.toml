@@ -80,6 +80,7 @@ nxb-xlatedev = { path = "crates/nxb-xlatedev" }
 nxb-xlate = { path = "crates/nxb-xlate" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
 objc2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-avf-audio = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-audio-toolbox = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-core-audio = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-core-audio-types = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }

@@ -9,6 +9,7 @@
 //! game. [`movie_playing`] tells the pacing service that a movie is on screen.
 
 mod av1;
+#[cfg_attr(target_os = "ios", path = "backend_ios.rs")]
 mod backend;
 mod codec;
 mod codec_exports;
@@ -22,9 +23,9 @@ mod planar;
 mod vp9;
 mod yuv;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod sys;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod texture;
 
 use std::sync::{Arc, RwLock};

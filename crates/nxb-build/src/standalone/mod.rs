@@ -7,17 +7,22 @@
 
 mod bundle;
 mod elf;
+mod extract;
 mod files;
+mod guest_tail;
 mod image;
-mod layout;
-mod link;
+pub mod ios;
+mod ipa;
+pub(crate) mod layout;
+pub(crate) mod link;
 mod macho;
-mod manifest;
-mod modules;
-mod npdm;
-mod nvn;
+pub(crate) mod manifest;
+pub(crate) mod modules;
+pub(crate) mod npdm;
+pub(crate) mod nvn;
 mod romfs;
 mod shaders;
+mod shaders_ios;
 
 use crate::Args;
 use crate::events::{Progress, Update};

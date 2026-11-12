@@ -40,6 +40,8 @@ pub use config::Config;
 pub use look::LookConfig;
 pub use seam::{SystemEventHooks, set_system_event_hooks};
 pub use touch::Touch;
+#[cfg(target_os = "ios")]
+pub use sys::virtual_pad::set_virtual_pad;
 
 use state::Input;
 
@@ -58,6 +60,8 @@ pub(crate) fn with<R>(f: impl FnOnce(&mut Input) -> R) -> R {
 /// Sets up the service with the settings of the host. The host calls it before the game starts. A service that is
 /// not set up uses [`Config::default`].
 pub fn init(config: &Config) {
+    #[cfg(target_os = "ios")]
+    sys::virtual_pad::set_active(false);
     with(|input| *input = Input::new(config));
     pointer::reset(config.look);
     MOUSE_CAPTURE.store(config.keyboard && config.mouse_capture, Ordering::Relaxed);
@@ -88,6 +92,8 @@ static FOCUSED: AtomicBool = AtomicBool::new(true);
 /// Tells the service that the window gained or lost the key focus. A window without focus reports no key and no mouse
 /// button, so a key that was held at the loss is released.
 pub fn set_focus(focused: bool) {
+    #[cfg(target_os = "ios")]
+    sys::virtual_pad::set_active(focused);
     FOCUSED.store(focused, Ordering::Relaxed);
     if !focused {
         mouse_release();
@@ -103,6 +109,18 @@ static CONTROLLER: AtomicBool = AtomicBool::new(false);
 /// True when a game controller is connected, as of the last lookup. The window frees the mouse while one is.
 pub fn controller_connected() -> bool {
     CONTROLLER.load(Ordering::Relaxed)
+}
+
+/// Refresh physical devices even while the presenter is paused. Virtual input
+/// never claims a hardware slot. Upstream bounds discovery to once per 100 ms.
+pub fn has_controller() -> bool {
+    with(|input| input.refresh());
+    controller_connected()
+}
+
+/// Whether the guest input service is configured for handheld touch input.
+pub fn is_handheld() -> bool {
+    with(|input| input.config.handheld)
 }
 
 pub(crate) fn set_controller_connected(connected: bool) {

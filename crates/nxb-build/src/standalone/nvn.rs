@@ -28,7 +28,7 @@ fn names_in(data: &[u8], out: &mut std::collections::BTreeSet<String>) {
 }
 
 /// The names in the read-only data of the modules, sorted, once each.
-pub(super) fn names(mods: &[(super::modules::Built, u64)]) -> Vec<String> {
+pub(crate) fn names(mods: &[(super::modules::Built, u64)]) -> Vec<String> {
     let mut out = std::collections::BTreeSet::new();
     for (m, _) in mods {
         let (off, size) = m.parts[1];

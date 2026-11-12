@@ -12,7 +12,7 @@ struct Timespec {
     nsec: c_long,
 }
 
-/// `struct tm` of macOS and glibc.
+/// `struct tm` of Darwin (macOS and iOS) and glibc.
 #[repr(C)]
 struct RawTm {
     sec: c_int,
@@ -28,10 +28,37 @@ struct RawTm {
     zone: *const c_char,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 const CLOCK_MONOTONIC: c_int = 6;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 const CLOCK_MONOTONIC: c_int = 1;
+
+// The shared Darwin declarations must match the iPhone libc ABI. Check the
+// complete layout during every iOS build, not only when tests run on a device.
+#[cfg(target_os = "ios")]
+const _: () = {
+    use std::mem::{align_of, offset_of, size_of};
+    assert!(size_of::<i64>() == size_of::<libc::time_t>());
+    assert!(size_of::<Timespec>() == size_of::<libc::timespec>());
+    assert!(align_of::<Timespec>() == align_of::<libc::timespec>());
+    assert!(offset_of!(Timespec, sec) == offset_of!(libc::timespec, tv_sec));
+    assert!(offset_of!(Timespec, nsec) == offset_of!(libc::timespec, tv_nsec));
+    assert!(size_of::<RawTm>() == size_of::<libc::tm>());
+    assert!(align_of::<RawTm>() == align_of::<libc::tm>());
+    assert!(offset_of!(RawTm, sec) == offset_of!(libc::tm, tm_sec));
+    assert!(offset_of!(RawTm, min) == offset_of!(libc::tm, tm_min));
+    assert!(offset_of!(RawTm, hour) == offset_of!(libc::tm, tm_hour));
+    assert!(offset_of!(RawTm, mday) == offset_of!(libc::tm, tm_mday));
+    assert!(offset_of!(RawTm, mon) == offset_of!(libc::tm, tm_mon));
+    assert!(offset_of!(RawTm, year) == offset_of!(libc::tm, tm_year));
+    assert!(offset_of!(RawTm, wday) == offset_of!(libc::tm, tm_wday));
+    assert!(offset_of!(RawTm, yday) == offset_of!(libc::tm, tm_yday));
+    assert!(offset_of!(RawTm, isdst) == offset_of!(libc::tm, tm_isdst));
+    assert!(offset_of!(RawTm, gmtoff) == offset_of!(libc::tm, tm_gmtoff));
+    assert!(offset_of!(RawTm, zone) == offset_of!(libc::tm, tm_zone));
+    // Darwin libc exposes clockid_t as u32; compare both 32-bit values losslessly.
+    assert!(CLOCK_MONOTONIC as i64 == libc::CLOCK_MONOTONIC as i64);
+};
 
 unsafe extern "C" {
     fn clock_gettime(clock: c_int, ts: *mut Timespec) -> c_int;
@@ -110,10 +137,12 @@ fn zone_name(p: *const c_char) -> [u8; 8] {
     out
 }
 
+#[cfg(not(target_os = "ios"))]
 fn field(v: c_int) -> u32 {
     u32::try_from(v).unwrap_or(0)
 }
 
+#[cfg(not(target_os = "ios"))]
 fn convert(raw: &RawTm) -> Option<Tm> {
     Some(Tm {
         year: raw.year.checked_add(1900)?,
@@ -126,6 +155,24 @@ fn convert(raw: &RawTm) -> Option<Tm> {
         yday: field(raw.yday),
         dst: raw.isdst > 0,
         offset: i32::try_from(raw.gmtoff).unwrap_or(0),
+        zone: zone_name(raw.zone),
+    })
+}
+
+// Retain the native app boundary's checked conversion of libc fields.
+#[cfg(target_os = "ios")]
+fn convert(raw: &RawTm) -> Option<Tm> {
+    Some(Tm {
+        year: raw.year.checked_add(1900)?,
+        month: (raw.mon + 1).try_into().ok()?,
+        day: raw.mday.try_into().ok()?,
+        hour: raw.hour.try_into().ok()?,
+        minute: raw.min.try_into().ok()?,
+        second: raw.sec.try_into().ok()?,
+        wday: raw.wday.try_into().ok()?,
+        yday: raw.yday.try_into().ok()?,
+        dst: raw.isdst > 0,
+        offset: raw.gmtoff.try_into().ok()?,
         zone: zone_name(raw.zone),
     })
 }
@@ -202,6 +249,7 @@ pub(crate) fn mktime_fields(f: [i32; 9]) -> Option<i64> {
 /// The address comes from the `guest_sym` seam, which resolves a symbol of the game. A function with fewer
 /// arguments ignores the rest, and a function that returns nothing leaves a value that the caller ignores. The call
 /// must run on a guest thread when the function needs the guest runtime.
+#[cfg(not(target_os = "ios"))]
 pub(crate) fn call_guest(addr: u64, args: [u64; 6]) -> u64 {
     type Guest = extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64;
     let Ok(addr) = usize::try_from(addr) else {
@@ -211,6 +259,11 @@ pub(crate) fn call_guest(addr: u64, args: [u64; 6]) -> u64 {
     // code of this process, and its calling convention is the C one.
     let f: Guest = unsafe { std::mem::transmute::<usize, Guest>(addr) };
     f(args[0], args[1], args[2], args[3], args[4], args[5])
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn call_guest(addr: u64, args: [u64; 6]) -> u64 {
+    call_guest8(addr, args, [0; 2])
 }
 
 /// Calls the guest function at `addr` with seven integer arguments.
@@ -224,6 +277,10 @@ pub(crate) fn call_guest8(addr: u64, args: [u64; 6], more: [u64; 2]) -> u64 {
     let Ok(addr) = usize::try_from(addr) else {
         return 0;
     };
+    #[cfg(target_os = "ios")]
+    if addr == 0 {
+        return 0;
+    }
     // SAFETY: as in `call_guest`. The two extra arguments fill the seventh and eighth register.
     let f: Guest = unsafe { std::mem::transmute::<usize, Guest>(addr) };
     f(
@@ -234,6 +291,14 @@ pub(crate) fn call_guest8(addr: u64, args: [u64; 6], more: [u64; 2]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "ios")]
+    #[test]
+    fn null_guest_is_not_callable() {
+        assert_eq!(call_guest(0, [0; 6]), 0);
+        assert_eq!(call_guest7(0, [0; 6], 0), 0);
+        assert_eq!(call_guest8(0, [0; 6], [0; 2]), 0);
+    }
 
     #[test]
     fn the_monotonic_clock_does_not_go_back() {

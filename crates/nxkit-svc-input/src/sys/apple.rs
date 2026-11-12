@@ -174,6 +174,13 @@ impl Platform {
 
     /// The buttons and sticks of the controller in `slot`, mapped to the Switch.
     pub(crate) fn read_pad(&self, slot: usize) -> Option<RawPad> {
+        let physical = self.read_physical_pad(slot);
+        #[cfg(target_os = "ios")]
+        let physical = super::virtual_pad::merge_player(slot, physical, super::virtual_pad::snapshot());
+        physical
+    }
+
+    fn read_physical_pad(&self, slot: usize) -> Option<RawPad> {
         let pad = self.pads.get(slot)?.as_ref()?;
         let g = &pad.gamepad;
         // SAFETY: property reads on a live `GCExtendedGamepad` and the elements it returns.

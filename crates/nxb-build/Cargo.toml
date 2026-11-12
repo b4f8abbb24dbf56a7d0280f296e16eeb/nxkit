@@ -25,6 +25,8 @@ nxb-archive.workspace = true
 nxkit-abi.workspace = true
 nxb-stages.workspace = true
 nxb-shader.workspace = true
+nxb-xlate.workspace = true
+air-front = { path = "../air-front" }
 nxb-rewrite.workspace = true
 nxb-romfs.workspace = true
 nxb-split.workspace = true

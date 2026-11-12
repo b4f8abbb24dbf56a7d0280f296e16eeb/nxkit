@@ -57,6 +57,13 @@ pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
     macho::write(&segs, uuid(mods))
 }
 
+/// The shared dylib with the iOS platform version and executable header marker.
+pub(crate) fn ios_dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
+    let mut image = dylib(mods)?;
+    macho::ios_dylib(&mut image)?;
+    Ok(image)
+}
+
 fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }

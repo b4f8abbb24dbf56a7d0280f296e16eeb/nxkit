@@ -12,7 +12,7 @@ source = "path crates/air-front (a workspace member, not on crates.io; brings ms
 licence = "GPL-3.0-only (same workspace)"
 unsafe = "0 (forbid(unsafe_code))"
 owner = "project team"
-used_by = ["nxb-tool (cargo feature air-front, on by default through nxb-cli)"]
+used_by = ["nxb-tool (cargo feature air-front, on by default through nxb-cli)", "nxb-build (native iOS shader compiler)"]
 
 [airc]
 reason = "the command line of the own front end as a library (`airc::main`), called by `nxb airc`"
@@ -212,3 +212,12 @@ version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-coreml and nxkit-metal wrap them in a safe API"
 owner = "project team"
 used_by = ["nxkit-coreml", "nxkit-metal"]
+
+[native-ios-host]
+reason = "the isolated native iOS host and UIKit virtual controls"
+source = "tools/ios/Cargo.lock; THIRD_PARTY.md"
+version = "objc2 pin as above; nxnative ab41d6a177819559c76d8e4381791550ababa097"
+licence = "objc2 licences as above; MIT for the adapted nxnative overlay"
+unsafe = "iOS platform adapters contain FFI outside the root workspace"
+owner = "project team"
+used_by = ["tools/ios"]

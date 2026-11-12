@@ -108,6 +108,15 @@ explains the frame pacing, and [docs/diagnostics.md](docs/diagnostics.md) lists 
 The crates are in layers, and dependencies point down only. Only a few modules hold `unsafe` code, all named in
 [docs/architecture.md](docs/architecture.md).
 
+## Experimental native iOS build
+
+[tools/ios](tools/ios/README.md) builds the native iOS host with Cargo and Xcode.
+The native `nxb build --platform ios` path packages one game in an unsigned IPA.
+It does not use WebAssembly, a browser, npm or zsign. Existing macOS builds and
+title modules remain separate. No Mac CI job is added.
+Unsigned packaging does not establish device installation or gameplay. See the
+iOS guide for build steps, input limits and validation status.
+
 ## Contributing and security
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. To report a security problem, read [SECURITY.md](SECURITY.md).
