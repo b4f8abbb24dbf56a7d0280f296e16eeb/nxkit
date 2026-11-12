@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-ryza"
+description = "The title module of Atelier Ryza: Ever Darkness & the Secret Hideout DX for Nintendo Switch (0100199023B2E000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

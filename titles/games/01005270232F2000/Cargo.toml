@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-octo0"
+description = "The title module of Octopath Traveler 0 for Nintendo Switch (01005270232F2000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

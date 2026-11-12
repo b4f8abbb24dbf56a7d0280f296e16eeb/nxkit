@@ -1,0 +1,22 @@
+[package]
+name = "nxgame-dq11s"
+description = "The title module of DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition for Nintendo Switch (01006C300E9F0000)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[dev-dependencies]
+nxb-profile.workspace = true
+nxb-rewrite.workspace = true
+
+[lints]
+workspace = true

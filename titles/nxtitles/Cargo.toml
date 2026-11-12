@@ -12,13 +12,96 @@ layer = "L1"
 in_v = false
 
 [features]
-default = ["agl", "oot", "botw", "acnh", "mtf", "smbw"]
+default = [
+    "agl", "oot", "botw", "acnh", "mtf", "smbw", "smo", "pkbd", "aaic", "mpr", "silksong", "snbz", "mk8d", "swheist",
+    "ryza", "mp4", "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick",
+    "hwaoc", "celeste", "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac",
+    "bastion", "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr",
+    "kirbyfl", "mt2", "octo0", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
+    "hollowknight", "srwy", "deadcells", "mrkb", "unicorn", "blasphemous", "smt5v", "ssbu", "zla", "dq11s", "mlbs",
+    "mps", "aisni", "d2r", "astral", "xc3", "bayo", "rdr", "bayo2", "peach", "portal", "kirbysa",
+]
 agl = ["dep:nxfamily-agl"]
 oot = ["dep:nxgame-oot"]
 botw = ["dep:nxgame-botw"]
 acnh = ["dep:nxgame-acnh"]
 mtf = ["dep:nxgame-mtf"]
 smbw = ["dep:nxgame-smbw"]
+smo = ["dep:nxgame-smo"]
+pkbd = ["dep:nxgame-pkbd"]
+aaic = ["dep:nxgame-aaic"]
+mpr = ["dep:nxgame-mpr"]
+silksong = ["dep:nxgame-silksong"]
+snbz = ["dep:nxgame-snbz"]
+mk8d = ["dep:nxgame-mk8d"]
+swheist = ["dep:nxgame-swheist"]
+ryza = ["dep:nxgame-ryza"]
+mp4 = ["dep:nxgame-mp4"]
+diablo3 = ["dep:nxgame-diablo3"]
+pkarceus = ["dep:nxgame-pkarceus"]
+ragingloop = ["dep:nxgame-ragingloop"]
+animalwell = ["dep:nxgame-animalwell"]
+okami = ["dep:nxgame-okami"]
+sm3dwbf = ["dep:nxgame-sm3dwbf"]
+nfshp = ["dep:nxgame-nfshp"]
+ghosttrick = ["dep:nxgame-ghosttrick"]
+hwaoc = ["dep:nxgame-hwaoc"]
+celeste = ["dep:nxgame-celeste"]
+baba = ["dep:nxgame-baba"]
+sshd = ["dep:nxgame-sshd"]
+cotl = ["dep:nxgame-cotl"]
+aw12 = ["dep:nxgame-aw12"]
+mrsoh = ["dep:nxgame-mrsoh"]
+smbbr = ["dep:nxgame-smbbr"]
+obradinn = ["dep:nxgame-obradinn"]
+trvdx = ["dep:nxgame-trvdx"]
+dbspz = ["dep:nxgame-dbspz"]
+tgaac = ["dep:nxgame-tgaac"]
+bastion = ["dep:nxgame-bastion"]
+fftic = ["dep:nxgame-fftic"]
+dq3hd = ["dep:nxgame-dq3hd"]
+sentinels = ["dep:nxgame-sentinels"]
+blasphemous2 = ["dep:nxgame-blasphemous2"]
+dqb2 = ["dep:nxgame-dqb2"]
+subnautica = ["dep:nxgame-subnautica"]
+sentinelsjp = ["dep:nxgame-sentinelsjp"]
+bayo3 = ["dep:nxgame-bayo3"]
+dsr = ["dep:nxgame-dsr"]
+kirbyfl = ["dep:nxgame-kirbyfl"]
+mt2 = ["dep:nxgame-mt2"]
+octo0 = ["dep:nxgame-octo0"]
+unicornasia = ["dep:nxgame-unicornasia"]
+fe3h = ["dep:nxgame-fe3h"]
+nier = ["dep:nxgame-nier"]
+octo = ["dep:nxgame-octo"]
+p5r = ["dep:nxgame-p5r"]
+yoshicw = ["dep:nxgame-yoshicw"]
+ffres = ["dep:nxgame-ffres"]
+oribf = ["dep:nxgame-oribf"]
+bba = ["dep:nxgame-bba"]
+p4g = ["dep:nxgame-p4g"]
+hollowknight = ["dep:nxgame-hollowknight"]
+srwy = ["dep:nxgame-srwy"]
+deadcells = ["dep:nxgame-deadcells"]
+mrkb = ["dep:nxgame-mrkb"]
+unicorn = ["dep:nxgame-unicorn"]
+blasphemous = ["dep:nxgame-blasphemous"]
+smt5v = ["dep:nxgame-smt5v"]
+ssbu = ["dep:nxgame-ssbu"]
+zla = ["dep:nxgame-zla"]
+dq11s = ["dep:nxgame-dq11s"]
+mlbs = ["dep:nxgame-mlbs"]
+mps = ["dep:nxgame-mps"]
+aisni = ["dep:nxgame-aisni"]
+d2r = ["dep:nxgame-d2r"]
+astral = ["dep:nxgame-astral"]
+xc3 = ["dep:nxgame-xc3"]
+bayo = ["dep:nxgame-bayo"]
+rdr = ["dep:nxgame-rdr"]
+bayo2 = ["dep:nxgame-bayo2"]
+peach = ["dep:nxgame-peach"]
+portal = ["dep:nxgame-portal"]
+kirbysa = ["dep:nxgame-kirbysa"]
 
 [dependencies]
 nxtitle.workspace = true
@@ -28,6 +111,81 @@ nxgame-botw = { workspace = true, optional = true }
 nxgame-acnh = { workspace = true, optional = true }
 nxgame-mtf = { workspace = true, optional = true }
 nxgame-smbw = { workspace = true, optional = true }
+nxgame-smo = { workspace = true, optional = true }
+nxgame-pkbd = { workspace = true, optional = true }
+nxgame-aaic = { workspace = true, optional = true }
+nxgame-mpr = { workspace = true, optional = true }
+nxgame-silksong = { workspace = true, optional = true }
+nxgame-snbz = { workspace = true, optional = true }
+nxgame-mk8d = { workspace = true, optional = true }
+nxgame-swheist = { workspace = true, optional = true }
+nxgame-ryza = { workspace = true, optional = true }
+nxgame-mp4 = { workspace = true, optional = true }
+nxgame-diablo3 = { workspace = true, optional = true }
+nxgame-pkarceus = { workspace = true, optional = true }
+nxgame-ragingloop = { workspace = true, optional = true }
+nxgame-animalwell = { workspace = true, optional = true }
+nxgame-okami = { workspace = true, optional = true }
+nxgame-sm3dwbf = { workspace = true, optional = true }
+nxgame-nfshp = { workspace = true, optional = true }
+nxgame-ghosttrick = { workspace = true, optional = true }
+nxgame-hwaoc = { workspace = true, optional = true }
+nxgame-celeste = { workspace = true, optional = true }
+nxgame-baba = { workspace = true, optional = true }
+nxgame-sshd = { workspace = true, optional = true }
+nxgame-cotl = { workspace = true, optional = true }
+nxgame-aw12 = { workspace = true, optional = true }
+nxgame-mrsoh = { workspace = true, optional = true }
+nxgame-smbbr = { workspace = true, optional = true }
+nxgame-obradinn = { workspace = true, optional = true }
+nxgame-trvdx = { workspace = true, optional = true }
+nxgame-dbspz = { workspace = true, optional = true }
+nxgame-tgaac = { workspace = true, optional = true }
+nxgame-bastion = { workspace = true, optional = true }
+nxgame-fftic = { workspace = true, optional = true }
+nxgame-dq3hd = { workspace = true, optional = true }
+nxgame-sentinels = { workspace = true, optional = true }
+nxgame-blasphemous2 = { workspace = true, optional = true }
+nxgame-dqb2 = { workspace = true, optional = true }
+nxgame-subnautica = { workspace = true, optional = true }
+nxgame-sentinelsjp = { workspace = true, optional = true }
+nxgame-bayo3 = { workspace = true, optional = true }
+nxgame-dsr = { workspace = true, optional = true }
+nxgame-kirbyfl = { workspace = true, optional = true }
+nxgame-mt2 = { workspace = true, optional = true }
+nxgame-octo0 = { workspace = true, optional = true }
+nxgame-unicornasia = { workspace = true, optional = true }
+nxgame-fe3h = { workspace = true, optional = true }
+nxgame-nier = { workspace = true, optional = true }
+nxgame-octo = { workspace = true, optional = true }
+nxgame-p5r = { workspace = true, optional = true }
+nxgame-yoshicw = { workspace = true, optional = true }
+nxgame-ffres = { workspace = true, optional = true }
+nxgame-oribf = { workspace = true, optional = true }
+nxgame-bba = { workspace = true, optional = true }
+nxgame-p4g = { workspace = true, optional = true }
+nxgame-hollowknight = { workspace = true, optional = true }
+nxgame-srwy = { workspace = true, optional = true }
+nxgame-deadcells = { workspace = true, optional = true }
+nxgame-mrkb = { workspace = true, optional = true }
+nxgame-unicorn = { workspace = true, optional = true }
+nxgame-blasphemous = { workspace = true, optional = true }
+nxgame-smt5v = { workspace = true, optional = true }
+nxgame-ssbu = { workspace = true, optional = true }
+nxgame-zla = { workspace = true, optional = true }
+nxgame-dq11s = { workspace = true, optional = true }
+nxgame-mlbs = { workspace = true, optional = true }
+nxgame-mps = { workspace = true, optional = true }
+nxgame-aisni = { workspace = true, optional = true }
+nxgame-d2r = { workspace = true, optional = true }
+nxgame-astral = { workspace = true, optional = true }
+nxgame-xc3 = { workspace = true, optional = true }
+nxgame-bayo = { workspace = true, optional = true }
+nxgame-rdr = { workspace = true, optional = true }
+nxgame-bayo2 = { workspace = true, optional = true }
+nxgame-peach = { workspace = true, optional = true }
+nxgame-portal = { workspace = true, optional = true }
+nxgame-kirbysa = { workspace = true, optional = true }
 
 [lints]
 workspace = true

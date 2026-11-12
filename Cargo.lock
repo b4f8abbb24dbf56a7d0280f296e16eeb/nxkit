@@ -515,7 +515,124 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-aaic"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-acnh"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-aisni"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-animalwell"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-astral"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-aw12"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-baba"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-bastion"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-bayo"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-bayo2"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-bayo3"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-bba"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-blasphemous"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-blasphemous2"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -533,7 +650,295 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-celeste"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-cotl"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-d2r"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-dbspz"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-deadcells"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-diablo3"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-dq11s"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-dq3hd"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-dqb2"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-dsr"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-fe3h"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-ffres"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-fftic"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-ghosttrick"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-hollowknight"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-hwaoc"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-kirbyfl"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-kirbysa"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mk8d"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mlbs"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mp4"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mpr"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mps"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mrkb"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mrsoh"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mt2"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-mtf"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-nfshp"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-nier"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-obradinn"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-octo"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-octo0"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-okami"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -552,10 +957,280 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-oribf"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-p4g"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-p5r"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-peach"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-pkarceus"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-pkbd"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-portal"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-ragingloop"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-rdr"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-ryza"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-sentinels"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-sentinelsjp"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-silksong"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-sm3dwbf"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-smbbr"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-smbw"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-smo"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-smt5v"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-snbz"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-srwy"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-ssbu"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-sshd"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-subnautica"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-swheist"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-tgaac"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-trvdx"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-unicorn"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-unicornasia"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-xc3"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-yoshicw"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-zla"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
  "nxtitle",
 ]
 
@@ -766,11 +1441,86 @@ name = "nxtitles"
 version = "0.10.0"
 dependencies = [
  "nxfamily-agl",
+ "nxgame-aaic",
  "nxgame-acnh",
+ "nxgame-aisni",
+ "nxgame-animalwell",
+ "nxgame-astral",
+ "nxgame-aw12",
+ "nxgame-baba",
+ "nxgame-bastion",
+ "nxgame-bayo",
+ "nxgame-bayo2",
+ "nxgame-bayo3",
+ "nxgame-bba",
+ "nxgame-blasphemous",
+ "nxgame-blasphemous2",
  "nxgame-botw",
+ "nxgame-celeste",
+ "nxgame-cotl",
+ "nxgame-d2r",
+ "nxgame-dbspz",
+ "nxgame-deadcells",
+ "nxgame-diablo3",
+ "nxgame-dq11s",
+ "nxgame-dq3hd",
+ "nxgame-dqb2",
+ "nxgame-dsr",
+ "nxgame-fe3h",
+ "nxgame-ffres",
+ "nxgame-fftic",
+ "nxgame-ghosttrick",
+ "nxgame-hollowknight",
+ "nxgame-hwaoc",
+ "nxgame-kirbyfl",
+ "nxgame-kirbysa",
+ "nxgame-mk8d",
+ "nxgame-mlbs",
+ "nxgame-mp4",
+ "nxgame-mpr",
+ "nxgame-mps",
+ "nxgame-mrkb",
+ "nxgame-mrsoh",
+ "nxgame-mt2",
  "nxgame-mtf",
+ "nxgame-nfshp",
+ "nxgame-nier",
+ "nxgame-obradinn",
+ "nxgame-octo",
+ "nxgame-octo0",
+ "nxgame-okami",
  "nxgame-oot",
+ "nxgame-oribf",
+ "nxgame-p4g",
+ "nxgame-p5r",
+ "nxgame-peach",
+ "nxgame-pkarceus",
+ "nxgame-pkbd",
+ "nxgame-portal",
+ "nxgame-ragingloop",
+ "nxgame-rdr",
+ "nxgame-ryza",
+ "nxgame-sentinels",
+ "nxgame-sentinelsjp",
+ "nxgame-silksong",
+ "nxgame-sm3dwbf",
+ "nxgame-smbbr",
  "nxgame-smbw",
+ "nxgame-smo",
+ "nxgame-smt5v",
+ "nxgame-snbz",
+ "nxgame-srwy",
+ "nxgame-ssbu",
+ "nxgame-sshd",
+ "nxgame-subnautica",
+ "nxgame-swheist",
+ "nxgame-tgaac",
+ "nxgame-trvdx",
+ "nxgame-unicorn",
+ "nxgame-unicornasia",
+ "nxgame-xc3",
+ "nxgame-yoshicw",
+ "nxgame-zla",
  "nxtitle",
 ]
 
