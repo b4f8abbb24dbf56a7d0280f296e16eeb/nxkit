@@ -766,9 +766,10 @@ stale blocks into a page whose writer is done (a fault that waited, the copy-bac
   (`late_flush_copies`), so that a flush after a completion never leaves stale blocks behind a valid `snap`. A page whose
   blocks are not known, that a thread has open or is copying, or that nobody read lately gets `snap = 0` and waits again until a
   fault copies it. The poison knob (`privpoison`) sets `snap = 0`, because the pattern replaces the snapshot.
-- The copy at the completion races with the next frame, which may already write the same mirror blocks: a block can be a mix of
-  frame f and f + 1 bytes, and a reader that runs during the 64-byte copy can see half of it. The age of the data is 1 frame in the
-  normal case, 2 when the CPU runs ahead and frame f - 1 has not completed.
+- The copy at the completion raced with the next frame, which may already have copied the CPU's staged bytes into the same
+  mirror blocks and written its own: step 9 copies from the GPU's copy of the frame's end instead. A reader that runs during the
+  64-byte copy can see half of a block. The age of the data is 1 frame in the normal case, 2 when the CPU runs ahead and frame
+  f - 1 has not completed.
 
 **Reads.** `try_emulate` allowed an access only outside the stale blocks. Now an access that overlaps them goes on when `snap != 0`
 and late results are on: the load runs through the alias on guest memory, the page keeps no access, no wait, no `mprotect`.
@@ -863,6 +864,67 @@ the handler; a readable page nobody reads lately loses its access at the complet
 outside the written bytes does not wait; a store across the page border and an `ST1` lane store are done without a wait and the
 neighbour page is staged. In `a64.rs`: the decode of lane forms and their execution. In `nxkit-rt`: the end of a recording
 returns while the lock is held and the next lock applies the spans.
+
+## Private GPU memory, step 9: the frame's own bytes for late results (`NXKIT_PRIVATE=1`)
+
+With steps 7 and 8 the picture of Ocarina of Time in the Kokiri forest was covered by a white haze, all the time, while
+`NXKIT_PRIVATE_LATE=0` and the honest mode were right. Making late stores wait (late reads still served) gave the right picture,
+so the defect was in what late stores and the completions did with the bytes the frame writes.
+
+**What the game does.** A GPU pass adds up a float sum in a buffer of 4160 bytes. Each frame the game reads it (`main+0x3371c4`,
+`ldr s0, [x21, x8]`), turns it into a factor of the lighting (`1 + k / 256 * (sum - 256)`) and resets it (`main+0x3371f4`,
+`str wzr, [x21, x8]`) for the next frame. With late results the read happens while the frame that adds the next sum runs, and
+the reset is a late store into a block that frame writes. Two things then gave the CPU its own reset instead of a sum:
+
+1. The store made the block the CPU's (`own`, then `hold`), and the completion of the frame in flight left it alone. The next read
+   found the 0 the CPU wrote, every frame.
+2. The completion copied the frame's bytes from the mirror. With the CPU one frame ahead the next frame was already flushed and on
+   the GPU when the completion handler ran, and its first pass, the copy-in, had put the CPU's staged reset into the mirror. Even
+   without rule 1 the copy brought back 0 (or the next frame's partial sum).
+
+Measured before the fix: 1240 to 2570 late stores per frame, and 95 blocks per frame that the completion kept for the CPU while
+the mirror held other bytes.
+
+**The frame's own bytes.** The flush lists the pages of the frame that game threads read late (`snap != 0` and read lately,
+`Pages::late_copy_pages`). `flush_mirror` takes a shared buffer of twice their size from the staging pool and hands it to the
+encoder in the overlay (`Overlay::late`). The encoder copies each page from the mirror into it twice with the copy-in kernel:
+right after the copy-in of the frame (the bytes the frame starts with) and in the last command buffer after every pass (the
+bytes it ends with), and registers the two copies (`Pages::set_late_copies`) before the commit. A staging or copy buffer goes
+back to the pool when the completion of its frame has finished its copies (`Pages::settled`).
+
+The completion (`late_copy_back`) takes the frame's blocks from the copy of its end, not from the mirror. A page without such a
+copy (it became a read result after its flush, or the encode failed) uses the mirror only while no newer frame tags it, and
+otherwise loses its snapshot (`SnapWhy::NoCopy`), so its next reader waits once. The page is claimed while it is copied, also
+when a newer frame tags it, so a store that faults meanwhile waits for the claim.
+
+**The CPU's blocks.** A block the CPU wrote while the frame ran (`own` or `hold`) stays the CPU's when the frame did not change it
+(its bytes at the start and at the end are the same). When the frame changed it, the frame's bytes win in guest memory: the next
+read gets the frame's result, which is what one frame late means for a result the CPU reads and resets. The CPU's bytes still
+reach the GPU: a block a flush staged already is in the mirror (`hold`); for a block no flush staged yet (`own`) the completion
+keeps the CPU's bytes and the frame's bytes that replaced them aside (`Carry`), clears the block from `own` and marks the page
+for the next flush. Every staging path of the flush (`stage_carry`) puts the CPU's bytes back into a kept-aside block whose
+bytes are still the frame's (a newer CPU store wins) and lets the copy-in write it. A kept-aside block of a page no flush
+staged is dropped and counted.
+
+**Later copies.** A page the completion copied this way keeps its tag until the next flush, and its guest bytes are current
+(`snap` is the tagging frame): the copy-back thread, the flush and a fault no longer copy it from the mirror again
+(`late_current`), which would bring back the CPU's reset that the next frame copied in.
+
+**Measured** (Ocarina of Time, Kokiri forest, `NXKIT_PRIVATE=1`, `bench.sh`, two runs): 39.3 and 39.7 ms per frame (25.5 and
+25.3 fps), GPU at P3 (69 and 71 %); before the fix 40 ms with the haze. The picture matches `NXKIT_PRIVATE_LATE=0`. Per frame: 204
+to 207 pages copied at completions, all from the frame's own copy; 43 to 61 blocks of CPU stores that the frame changed, 18 to 33
+of them kept aside for the next flush, none lost; waits for a writer 0.01. The two copies are about 6.5 MiB per frame on the GPU.
+
+**Counters** (`DIAG private late results`): the pages copied from the frame's own copy, the blocks of CPU writes the frame changed,
+the ones kept aside and the ones lost; `DIAG private snapshots` has the reason `no copy of the frame's bytes`.
+
+**Tests** (`pages.rs`, real faults): the completion of frame 2 hands the reader of frame 3 frame 2's bytes from the copy although
+frame 3 wrote the mirror before it; without the copy such a page loses its snapshot; a sum the CPU reads and resets while the frame
+runs is read as the frame's sum next time, the reset reaches the next flush, and a block the frame did not change keeps the CPU's
+byte; a reset staged before the completion still lets the reader get the frame's sum; a CPU write the frame did not change
+survives; an atomic add on a counter the frame changed is staged and the reader gets the frame's value. `nxkit-gpu` (real Metal):
+the copy kernel copies the page at the start and the end of the frame, and the completion hands the reader the bytes of the end
+although the mirror changed after it.
 
 ## Memory
 

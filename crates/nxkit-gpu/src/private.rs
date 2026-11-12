@@ -64,7 +64,7 @@ use nxkit_metal::{
 
 use crate::detail::{CopyKind, DrawArgs, FrameDetail, Stage, StreamDetail};
 use crate::draws::FastMap;
-use crate::overlay::{Overlay, PAGE, Run, Staged};
+use crate::overlay::{LateCopies, Overlay, PAGE, Run, Staged};
 use crate::pipelines::Pipelines;
 use crate::programs::{BindKind, Programs};
 use crate::stats::Skip;
@@ -1493,7 +1493,8 @@ fn flush_mirror(
         guard = locked(&st.mirror);
     }
     let ms = guard.as_mut()?;
-    ms.pool.reclaim(pages.completed());
+    // A buffer is free again once the completion of its frame has finished its copies (it reads the late copies).
+    ms.pool.reclaim(pages.settled());
     let poison = poison_on().then_some(POISON);
     let mut sink = Sink::new(&ms.ctx, &mut ms.pool);
     let f = pages.flush_mirrored(fence, &member_ranges, &written, poison, &mut sink);
@@ -1515,6 +1516,19 @@ fn flush_mirror(
             None
         }
         None => None,
+    };
+    // Results one frame late: a buffer for the GPU's copies of the late pages at the start and the end of the frame.
+    let late_pages = if pages.late() { pages.late_copy_pages(fence) } else { Vec::new() };
+    let late_copies = if late_pages.is_empty() {
+        None
+    } else {
+        match ms.pool.take(&ms.ctx, 2 * late_pages.len()) {
+            Ok(b) => {
+                ms.pool.busy.push((fence, b.clone()));
+                Some(LateCopies { buf: b, pages: late_pages })
+            }
+            Err(_) => None,
+        }
     };
     let mut diag_sets: Option<DiagSets> = None;
     if crate::diag("private") {
@@ -1573,7 +1587,8 @@ fn flush_mirror(
     pages.set_eager_sync(off != 0);
     let overlay = Overlay::new(ms.va_base, bits, runs, Some(ms.mirror.view()), staged, generation)
         .with_off(off)
-        .with_frame(fence, late);
+        .with_frame(fence, late)
+        .with_late(late_copies);
     drop(guard);
     let n = st.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let report = {
@@ -1744,6 +1759,33 @@ pub(crate) fn encode_copy_in(
     )?;
     cp.end();
     Ok(jobs.len() as u32)
+}
+
+/// Results one frame late: the copies of the frame's late pages from the mirror into the buffer of [`LateCopies`], at
+/// the start of the frame (after the copy-in) and at its end (after the last pass), and the host addresses of the two
+/// copies. None when the frame has none, or when a page has no place in the mirror (the completion then drops the
+/// snapshots that need the copies).
+pub(crate) fn late_copy_jobs(o: &GuestOverlay) -> Option<(Vec<CopyJob>, Vec<CopyJob>, u64, u64)> {
+    let l = o.late()?;
+    let n = l.pages.len() as u64;
+    let (gpu, host) = (l.buf.gpu_address(), l.buf.host_address());
+    let mut start = Vec::with_capacity(l.pages.len());
+    let mut end = Vec::with_capacity(l.pages.len());
+    for (i, &page) in l.pages.iter().enumerate() {
+        let (_, real, room) = o.locate(o.va_base() + u64::from(page) * PAGE)?;
+        if room < PAGE {
+            return None;
+        }
+        start.push((gpu + i as u64 * PAGE, real, [0; 4]));
+        end.push((gpu + (n + i as u64) * PAGE, real, [0; 4]));
+    }
+    Some((start, end, host, host + n * PAGE))
+}
+
+/// The copies of [`late_copy_jobs`] are encoded into the frame `frame`: the completion of the frame takes the frame's
+/// bytes from them. Call it before the commit.
+pub(crate) fn late_copies_encoded(frame: u64, start: u64, end: u64) {
+    Pages::global().set_late_copies(frame, start, end);
 }
 
 /// Counts what the copy-in of a frame did, for the report.
@@ -2307,8 +2349,10 @@ fn print_report(frame: u64) {
             eprintln!(
                 "DIAG private late results, per frame: late reads {:.2}, late writes {:.2} ({:.2} blocks taken from the frame, \
                  {:.2} blocks of copies left alone for them); age of the bytes served: mean {:.2} frames, longest {} (1 frame {}, \
-                 2 {}, 3 {}, 4 or more {}); copied at completions {:.2} pages ({:.1} blocks), by the flush {:.2} pages; waits \
-                 for a writer {:.2} per frame (should be about 0)",
+                 2 {}, 3 {}, 4 or more {}); copied at completions {:.2} pages ({:.1} blocks; {:.2} pages from \
+                 the GPU's copy of the frame's end), by the flush {:.2} pages; blocks of CPU writes the frame changed \
+                 (its bytes win) {:.2}, of them kept aside for the next flush {:.2}, lost {:.2}; waits for a writer \
+                 {:.2} per frame (should be about 0)",
                 reads as f64 / n,
                 writes as f64 / n,
                 g(|s| s.late_owned) as f64 / n,
@@ -2321,7 +2365,11 @@ fn print_report(frame: u64) {
                 hist(3),
                 g(|s| s.late_copied) as f64 / n,
                 g(|s| s.late_copied_blocks) as f64 / n,
+                g(|s| s.late_exact) as f64 / n,
                 g(|s| s.late_flush_copies) as f64 / n,
+                g(|s| s.late_frame_won) as f64 / n,
+                g(|s| s.late_carried) as f64 / n,
+                g(|s| s.late_carry_lost) as f64 / n,
                 g(|s| s.writer_waits) as f64 / n,
             );
         }
@@ -2730,6 +2778,65 @@ mod tests {
         assert_eq!(&m[..8], &[5; 8], "the GPU's bytes are kept");
         assert_eq!(&m[8..], &[6; 8], "and the CPU's landed");
         encoded(2, None);
+        FORCE.with(|f| f.set(None));
+    }
+
+    #[test]
+    fn the_gpu_copies_late_pages_as_the_frame_starts_and_ends_and_the_completion_hands_the_reader_the_frames_bytes() {
+        let _t = locked(&TURN);
+        let Some(g) = guest(64 << 20) else { return };
+        let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
+            return;
+        };
+        if !Pages::global().emulating() {
+            eprintln!("skipped: no second mapping of guest memory here");
+            return;
+        }
+        let page = PAGE;
+        let addr = VA + 70 * page;
+        let detail = dispatch(addr, 0x100);
+        let peek = || {
+            let mut b = [0u8; 8];
+            g.mem.read(70 * page, &mut b).unwrap();
+            b
+        };
+        // Frame 1: the GPU writes 5s; the CPU reads them after the completion, which makes the page a CPU-read result.
+        let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
+        let loc = pools_of(&g, o1.clone()).resolve(addr, 0x100).unwrap();
+        o1.runs()[loc.run as usize].mem.write(loc.offset, &[5; 8]).unwrap();
+        encoded(1, None);
+        assert_eq!(peek(), [5; 8]);
+        Pages::global().set_late(true);
+        // Frame 2: the copies at its start and end, around the GPU's write of 7s.
+        let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
+        let (start, end, start_at, end_at) = late_copy_jobs(&o2).expect("the page is read late");
+        assert_eq!((start.len(), end.len()), (1, 1));
+        let scratch = Scratch::new(&g.ctx, 1 << 16).unwrap();
+        let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
+        let mut ring = nxkit_metal::FrameRing::new(&g.ctx).unwrap();
+        let mut f = ring.begin().unwrap();
+        assert_eq!(encode_copy_in(&pipelines, f.commands(), &table, &scratch, &start).unwrap(), 1);
+        g.ctx.commit_residency();
+        f.submit().unwrap().wait().unwrap();
+        let loc2 = pools_of(&g, o2.clone()).resolve(addr, 0x100).unwrap();
+        let mem2 = &o2.runs()[loc2.run as usize].mem;
+        mem2.write(loc2.offset, &[7; 8]).unwrap();
+        let mut f = ring.begin().unwrap();
+        assert_eq!(encode_copy_in(&pipelines, f.commands(), &table, &scratch, &end).unwrap(), 1);
+        f.submit().unwrap().wait().unwrap();
+        late_copies_encoded(2, start_at, end_at);
+        let l = o2.late().expect("copies");
+        let mut b = [0u8; 8];
+        l.buf.read(0, &mut b).unwrap();
+        assert_eq!(b, [5; 8], "the copy at the start");
+        l.buf.read(page, &mut b).unwrap();
+        assert_eq!(b, [7; 8], "the copy at the end");
+        // The next frame changes the mirror before the completion of frame 2 is reported.
+        mem2.write(loc2.offset, &[8; 8]).unwrap();
+        encoded(2, None);
+        // The read finds the page of a complete frame whose completion copied its bytes: no copy from the mirror again.
+        assert_eq!(peek(), [7; 8], "frame 2's bytes, from the copy at its end, not the newer bytes of the mirror");
+        Pages::global().set_late(false);
         FORCE.with(|f| f.set(None));
     }
 

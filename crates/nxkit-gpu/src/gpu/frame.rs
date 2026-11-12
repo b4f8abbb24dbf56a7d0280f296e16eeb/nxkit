@@ -461,6 +461,19 @@ impl Gpu {
                 }
             }
         }
+        // Results one frame late: the GPU copies the late pages as the frame starts with them (after the copy-in) and,
+        // below, as it ends, so that its completion hands the readers the frame's own bytes and knows which blocks it
+        // changed.
+        let mut late_copies = pools.overlay().and_then(|o| crate::private::late_copy_jobs(o));
+        if let Some((start, ..)) = &late_copies {
+            let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
+                .ok()
+                .and_then(|t| crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, start).ok());
+            if ok.is_none() {
+                stats.skip(Skip::Encode);
+                late_copies = None;
+            }
+        }
         let mesh = crate::meshvis::plan(
             diag_frame,
             frame,
@@ -789,6 +802,19 @@ impl Gpu {
                 if ok.is_none() {
                     stats.skip(Skip::Encode);
                 }
+            }
+        }
+        if let (Some((_, end, start_at, end_at)), Some(o)) = (&late_copies, pools.overlay()) {
+            let cb = match rest.last_mut() {
+                Some(cb) => cb,
+                None => &mut *first,
+            };
+            let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
+                .ok()
+                .and_then(|t| crate::private::encode_copy_in(&self.pipelines, cb, &t, &scratch, end).ok());
+            match ok {
+                Some(_) => crate::private::late_copies_encoded(o.frame(), *start_at, *end_at),
+                None => stats.skip(Skip::Encode),
             }
         }
         // ICBs and argument buffers made during the encode join the residency set before the commit.

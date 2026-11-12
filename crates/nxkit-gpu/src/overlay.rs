@@ -126,6 +126,16 @@ pub struct Staged {
     pub skips: Vec<(u32, [u64; 4])>,
 }
 
+/// Results one frame late: the buffer that the GPU copies the late pages of the frame into, at its start (after the
+/// copy-in, pages `0..n`) and at its end (pages `n..2n`), and the pages, sorted (see
+/// `nxkit_metal::Pages::late_copy_pages`).
+pub struct LateCopies {
+    /// The buffer of `2 * pages.len()` pages.
+    pub buf: Arc<DataBuffer>,
+    /// The pages.
+    pub pages: Vec<u32>,
+}
+
 /// The bytes per block of a skip mask.
 pub(crate) const BLOCK: u64 = 64;
 
@@ -153,6 +163,7 @@ pub struct Overlay<B: Backing> {
     /// The mirror: the mirror byte of the guest address `va` is at the offset `va - va_base`.
     mirror: Option<nxkit_metal::MirrorView>,
     staged: Option<Staged>,
+    late: Option<LateCopies>,
     /// Changes when the members or the runs do.
     generation: u64,
     /// The resolve classes that use guest memory in this frame (the `privno*` knobs).
@@ -178,6 +189,7 @@ impl<B: Backing> Overlay<B> {
             runs,
             mirror,
             staged,
+            late: None,
             generation,
             off: 0,
             frame: 0,
@@ -192,6 +204,18 @@ impl<B: Backing> Overlay<B> {
         self.frame = frame;
         self.forced = forced;
         self
+    }
+
+    /// The same view with the copies of the frame's late pages.
+    #[must_use]
+    pub fn with_late(mut self, late: Option<LateCopies>) -> Self {
+        self.late = late;
+        self
+    }
+
+    /// The copies of the frame's late pages, if any.
+    pub fn late(&self) -> Option<&LateCopies> {
+        self.late.as_ref()
     }
 
     /// The fence of the flush this view belongs to.

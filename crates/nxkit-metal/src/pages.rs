@@ -160,11 +160,14 @@ pub enum SnapWhy {
     FlushIdle,
     /// The poison pattern replaced the bytes.
     Poison,
+    /// A newer frame already tagged the page at the completion and the GPU made no copy of the completed frame's bytes
+    /// (the page became a CPU-read result after its flush): the mirror may hold the newer frame's bytes.
+    NoCopy,
 }
 
 impl SnapWhy {
     /// The number of reasons.
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
     /// All reasons, in order.
     pub const ALL: [SnapWhy; Self::COUNT] = [
         SnapWhy::Never,
@@ -174,6 +177,7 @@ impl SnapWhy {
         SnapWhy::Idle,
         SnapWhy::FlushIdle,
         SnapWhy::Poison,
+        SnapWhy::NoCopy,
     ];
 
     /// A short name for the diagnostics.
@@ -186,6 +190,7 @@ impl SnapWhy {
             SnapWhy::Idle => "nobody read it lately (completion)",
             SnapWhy::FlushIdle => "nobody read it lately (flush)",
             SnapWhy::Poison => "poison",
+            SnapWhy::NoCopy => "no copy of the frame's bytes",
         }
     }
 }
@@ -525,6 +530,16 @@ struct Shared {
     late_copied: AtomicU64,
     late_copied_blocks: AtomicU64,
     late_flush_copies: AtomicU64,
+    /// Exact copies: pages the completion copied from the GPU's copy of the frame's end, blocks of CPU writes the frame
+    /// changed on the GPU (the frame's bytes win there), the CPU's bytes of those blocks carried to the next flush, and
+    /// carried blocks that no flush staged (the page was released or stayed writable).
+    late_exact: AtomicU64,
+    late_frame_won: AtomicU64,
+    late_carried: AtomicU64,
+    late_carry_lost: AtomicU64,
+    /// The newest frame whose completion finished its copies (staging buffers and the GPU's copies of a frame can be
+    /// used again from then on).
+    settled: AtomicU64,
     /// Snapshots dropped, by [`SnapWhy`], and late accesses that found no snapshot, by the reason the page lost it last.
     snap_resets: [AtomicU64; SnapWhy::COUNT],
     snap_misses: [AtomicU64; SnapWhy::COUNT],
@@ -634,6 +649,11 @@ static SHARED: Shared = Shared {
     late_copied: AtomicU64::new(0),
     late_copied_blocks: AtomicU64::new(0),
     late_flush_copies: AtomicU64::new(0),
+    late_exact: AtomicU64::new(0),
+    late_frame_won: AtomicU64::new(0),
+    late_carried: AtomicU64::new(0),
+    late_carry_lost: AtomicU64::new(0),
+    settled: AtomicU64::new(0),
     snap_resets: [const { AtomicU64::new(0) }; SnapWhy::COUNT],
     snap_misses: [const { AtomicU64::new(0) }; SnapWhy::COUNT],
     read_open: AtomicU64::new(0),
@@ -663,6 +683,43 @@ struct Ctrl {
     prev_dirty: Vec<u32>,
     /// The pages that stay writable.
     hot: BTreeMap<u32, Hot>,
+    /// Results one frame late: the pages of each frame in flight that the GPU copies at the frame's start and end,
+    /// oldest first.
+    late_copies: VecDeque<LateCopy>,
+    /// Results one frame late: CPU blocks that a completion replaced in guest memory with the frame's bytes before a
+    /// flush staged them, by page. The next flush stages them.
+    carry: BTreeMap<u32, Carry>,
+}
+
+/// Results one frame late, exact: the pages of a frame whose bytes game threads read late. The GPU copies them from the
+/// mirror after the copy-in at the frame's start and after its last pass, so the completion gets the frame's own bytes
+/// (the mirror itself may already hold the next frame's copy-in and writes) and sees which blocks the frame changed.
+struct LateCopy {
+    frame: u64,
+    /// The pages, sorted. Page `pages[i]` is at `i * page` in each copy.
+    pages: Vec<u32>,
+    /// The host addresses of the copy at the start and at the end; 0 until the encoder registered them.
+    start: u64,
+    end: u64,
+}
+
+impl LateCopy {
+    /// The host addresses of page `pg` in the copies at the start and at the end.
+    fn of(&self, pg: u32) -> Option<(u64, u64)> {
+        if self.start == 0 || self.end == 0 {
+            return None;
+        }
+        let i = self.pages.binary_search(&pg).ok()? as u64 * page();
+        Some((self.start + i, self.end + i))
+    }
+}
+
+/// CPU blocks of a page that a completion replaced with the frame's bytes before a flush staged them: the CPU's bytes
+/// and the frame's bytes that replaced them, at their offsets in the page.
+struct Carry {
+    mask: Mask,
+    cpu: Vec<u8>,
+    frame: Vec<u8>,
 }
 
 /// The pages that game threads waited for lately: CPU-read GPU results (step 6). Its own lock: the encoder takes it, not the
@@ -691,6 +748,8 @@ static CTRL: Mutex<Ctrl> = Mutex::new(Ctrl {
     streak: Vec::new(),
     prev_dirty: Vec::new(),
     hot: BTreeMap::new(),
+    late_copies: VecDeque::new(),
+    carry: BTreeMap::new(),
 });
 static INSTALL: Once = Once::new();
 
@@ -1209,6 +1268,17 @@ fn copy_stale(pg: usize, mirror: u64, dst_base: u64, count: bool, frame: u32) {
 
 /// Copies the blocks of `mask` of the mirror page `pg` into the page at `dst_base + pg * page`.
 fn copy_mask(pg: usize, mirror: u64, dst_base: u64, mask: &Mask) {
+    let off = pg as u64 * page();
+    copy_blocks(mirror + off, dst_base + off, mask);
+}
+
+/// True when block `b` is set in `m`.
+fn has(m: &Mask, b: usize) -> bool {
+    m[b / 64] >> (b % 64) & 1 != 0
+}
+
+/// Copies the blocks of `mask` of the page at `src` into the page at `dst` (both host addresses of a whole page).
+fn copy_blocks(src: u64, dst: u64, mask: &Mask) {
     let p = page();
     let blocks = (p / BLOCK) as usize;
     let mut b = 0;
@@ -1221,17 +1291,13 @@ fn copy_mask(pg: usize, mirror: u64, dst_base: u64, mask: &Mask) {
         while b < blocks && mask[b / 64] >> (b % 64) & 1 != 0 {
             b += 1;
         }
-        let off = pg as u64 * p + first as u64 * BLOCK;
-        // SAFETY: the blocks lie in the guest page, a whole host page inside the range that `attach` named; the caller
-        // made the destination writable (the page itself, or its alias, which is always writable); the mirror blocks at
-        // the same offset lie in the reservation of the mirror, which is readable while the page is a member. The two
-        // regions are different mappings.
+        let off = first as u64 * BLOCK;
+        // SAFETY: the callers pass whole pages: a guest page inside the range that `attach` named, made writable (the
+        // page itself, or its alias, which is always writable), and the page of the mirror (readable while the page is
+        // a member) or of a copy the GPU made of it. The two are different mappings.
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                (mirror + off) as *const u8,
-                (dst_base + off) as *mut u8,
-                (b - first) * BLOCK as usize,
-            );
+            let n = (b - first) * BLOCK as usize;
+            std::ptr::copy_nonoverlapping((src + off) as *const u8, (dst + off) as *mut u8, n);
         }
     }
 }
@@ -1300,7 +1366,9 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                 let fresh = cur & FRESH != 0;
                 protect_pages(p, p + 1, PROT_RW, false);
                 if !(flying && fresh) {
-                    copy_from_mirror(pg, mirror, frame);
+                    if flying || !info(pg).is_some_and(|i| late_current(i, frame)) {
+                        copy_from_mirror(pg, mirror, frame);
+                    }
                     if !flying && !internal && let Some(i) = info(pg) {
                         // A game thread waited for this copy: the completion of the next frame that writes the page copies
                         // it on its own (step 5).
@@ -1724,6 +1792,15 @@ pub struct PageStats {
     pub late_copied_blocks: u64,
     /// Pages the flush copied.
     pub late_flush_copies: u64,
+    /// Pages the completion copied from the GPU's copy of the frame's end (exact), not from the live mirror.
+    pub late_exact: u64,
+    /// Blocks the CPU wrote while the frame ran that the frame changed on the GPU: the frame's bytes replaced the CPU's
+    /// in guest memory.
+    pub late_frame_won: u64,
+    /// Of those, blocks whose CPU bytes no flush had staged yet: they were kept aside for the next flush.
+    pub late_carried: u64,
+    /// Kept-aside blocks that no flush staged.
+    pub late_carry_lost: u64,
     /// Snapshots dropped, by [`SnapWhy`].
     pub snap_resets: [u64; SnapWhy::COUNT],
     /// Late accesses that found no snapshot (they waited), by the reason the page lost it last.
@@ -1962,6 +2039,14 @@ fn late_active(i: &PageInfo) -> bool {
     e != 0 && SHARED.epoch.load(Ordering::Relaxed) <= e
 }
 
+/// True when the completion of `frame` (28 bits), the frame that still tags the page, copied its bytes into guest
+/// memory already (results one frame late): a later copy from the mirror is not needed, and would be wrong, because the
+/// mirror may hold the CPU's bytes that the next frame copied in where the completion gave the reader the frame's
+/// bytes.
+fn late_current(i: &PageInfo, frame: u32) -> bool {
+    SHARED.late.load(Ordering::Relaxed) && i.snap.load(Ordering::Acquire) == frame.max(1)
+}
+
 /// Takes the access to the page `pg` away again (`PROT_NONE`) when it is tagged GPU with the word `cur`: the page was left
 /// readable for late readers and its guest bytes stop being a completed frame's. The claim keeps a thread that opens the
 /// page at the same time from meeting the change halfway.
@@ -1975,13 +2060,33 @@ fn revoke_read(pg: usize, w: &AtomicU32, cur: u32) {
 }
 
 /// Results one frame late, at the completion of `frame` (the caller holds the control mutex): the pages of the frame's
-/// `runs` whose guest bytes are the last completed frame's get the blocks that `frame` wrote copied from the mirror into
-/// guest memory through the alias, so that guest memory is the bytes of `frame` for the readers of the frame that runs now
-/// (a newer frame already tags the page) or of the next one (`frame` is the newest tag: the flush of the next frame comes
-/// after this completion when the CPU runs one frame ahead, and the copy-back thread is not there yet). The CPU's own
-/// blocks stay. A page that no game thread read lately loses its place, and with it the read access that the flush gave it.
-fn late_copy_back(frame: u64, runs: &[(u32, u32)], masks: Option<&[Vec<Mask>]>, mirror: u64, alias: u64) {
-    let (mut pages, mut blocks) = (0u64, 0u64);
+/// `runs` whose guest bytes are the last completed frame's get the blocks that `frame` wrote copied into guest memory
+/// through the alias, so that guest memory is the bytes of `frame` for the readers of the frame that runs now (a newer
+/// frame already tags the page) or of the next one (`frame` is the newest tag). A page nobody read lately loses its
+/// place, and with it the read access that the flush gave it.
+///
+/// The bytes come from the GPU's copy of the page at the end of the frame (`copies`, made after its last pass), not
+/// from the mirror: by the time the completion runs, the next frame may have copied the CPU's staged bytes into the
+/// mirror and written its own results there (a sum the CPU resets every frame would read back as the reset value). A
+/// page without that copy uses the mirror only when no newer frame tags it, and otherwise loses its snapshot
+/// (`SnapWhy::NoCopy`).
+///
+/// The CPU's own blocks (`PageInfo::keep`) stay, unless the frame changed them on the GPU (the copy at its start and at
+/// its end differ): then the frame's bytes win in guest memory, as for any result read late. The CPU's bytes of such a
+/// block reach the mirror all the same: a flush staged them already (`hold`), or they are kept aside in `carry` and the
+/// next flush stages them (`own`).
+fn late_copy_back(
+    frame: u64,
+    runs: &[(u32, u32)],
+    masks: Option<&[Vec<Mask>]>,
+    copies: Option<&LateCopy>,
+    carry: &mut BTreeMap<u32, Carry>,
+    mirror: u64,
+    alias: u64,
+) {
+    let p = page();
+    let blocks = (p / BLOCK) as usize;
+    let (mut pages, mut nblocks, mut exact, mut won_n, mut carried_n) = (0u64, 0u64, 0u64, 0u64, 0u64);
     for (ri, &(first, end)) in runs.iter().enumerate() {
         for pg in first..end {
             let Some(w) = word(pg as usize) else { continue };
@@ -2010,30 +2115,105 @@ fn late_copy_back(frame: u64, runs: &[(u32, u32)], masks: Option<&[Vec<Mask>]>, 
                 revoke_read(pg as usize, w, cur);
                 continue;
             };
+            let at = copies.and_then(|c| c.of(pg));
+            if at.is_none() && !newest {
+                i.snap_reset(SnapWhy::NoCopy);
+                revoke_read(pg as usize, w, cur);
+                continue;
+            }
             let f = (frame & FRAME_MASK) as u32;
-            // For the newest tag the page is claimed while it is copied: a thread that faults on it meanwhile (it is
-            // complete, so the thread copies it itself and may write) waits for the claim instead of racing the copy.
-            if newest && w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire).is_err() {
+            // The page is claimed while it is copied: a thread that faults on it meanwhile (a store, or any access to a
+            // page of a complete frame) waits for the claim instead of racing the copy.
+            if w.compare_exchange(cur, pack(SYNC, tag), Ordering::AcqRel, Ordering::Acquire).is_err() {
+                i.snap_reset(SnapWhy::Busy);
                 continue;
             }
             let keep = i.keep(f);
-            let copy: Mask = std::array::from_fn(|k| m[k] & !keep[k]);
-            let kept: u32 = m.iter().zip(&keep).map(|(a, b)| (a & b).count_ones()).sum();
-            copy_mask(pg as usize, mirror, alias, &copy);
+            let guest = alias + u64::from(pg) * p;
+            let mut copy: Mask = std::array::from_fn(|k| m[k] & !keep[k]);
+            let src = match at {
+                Some((start, end_at)) => {
+                    let mut won: Mask = [0; 4];
+                    for b in (0..blocks).filter(|&b| has(m, b) && has(&keep, b)) {
+                        let o = b as u64 * BLOCK;
+                        // SAFETY: both copies hold a whole page for `pg`; the GPU finished them before the completion.
+                        let (x, y) = unsafe {
+                            (
+                                std::slice::from_raw_parts((start + o) as *const u8, BLOCK as usize),
+                                std::slice::from_raw_parts((end_at + o) as *const u8, BLOCK as usize),
+                            )
+                        };
+                        if x != y {
+                            won[b / 64] |= 1 << (b % 64);
+                        }
+                    }
+                    let own = PageInfo::load_mask(&i.own);
+                    let lift: Mask = std::array::from_fn(|k| won[k] & own[k]);
+                    if lift.iter().any(|x| *x != 0) {
+                        let c = carry.entry(pg).or_insert_with(|| Carry {
+                            mask: [0; 4],
+                            cpu: vec![0; p as usize],
+                            frame: vec![0; p as usize],
+                        });
+                        copy_blocks(guest, c.cpu.as_mut_ptr() as u64, &lift);
+                        copy_blocks(end_at, c.frame.as_mut_ptr() as u64, &lift);
+                        for (k, l) in lift.iter().enumerate() {
+                            c.mask[k] |= l;
+                            i.own[k].fetch_and(!l, Ordering::AcqRel);
+                        }
+                        // The next flush stages the page, and the carried blocks go into the mirror with it.
+                        if i.emu.fetch_or(1, Ordering::AcqRel) & 1 == 0 {
+                            log_dirty(pg as usize);
+                        }
+                        carried_n += u64::from(lift.iter().map(|x| x.count_ones()).sum::<u32>());
+                    }
+                    for k in 0..4 {
+                        copy[k] |= won[k];
+                    }
+                    won_n += u64::from(won.iter().map(|x| x.count_ones()).sum::<u32>());
+                    exact += 1;
+                    end_at
+                }
+                None => mirror + u64::from(pg) * p,
+            };
+            let kept: u32 = (0..4).map(|k| (m[k] & keep[k] & !copy[k]).count_ones()).sum();
+            copy_blocks(src, guest, &copy);
             i.snap.store(f.max(1), Ordering::Release);
-            if newest {
-                w.store(cur, Ordering::Release);
-                wake_all();
-            }
+            w.store(cur, Ordering::Release);
+            wake_all();
             pages += 1;
-            blocks += u64::from(copy.iter().map(|c| c.count_ones()).sum::<u32>());
+            nblocks += u64::from(copy.iter().map(|c| c.count_ones()).sum::<u32>());
             if kept > 0 {
                 SHARED.late_kept.fetch_add(u64::from(kept), Ordering::Relaxed);
             }
         }
     }
     SHARED.late_copied.fetch_add(pages, Ordering::Relaxed);
-    SHARED.late_copied_blocks.fetch_add(blocks, Ordering::Relaxed);
+    SHARED.late_copied_blocks.fetch_add(nblocks, Ordering::Relaxed);
+    SHARED.late_exact.fetch_add(exact, Ordering::Relaxed);
+    SHARED.late_frame_won.fetch_add(won_n, Ordering::Relaxed);
+    SHARED.late_carried.fetch_add(carried_n, Ordering::Relaxed);
+}
+
+/// Stages page `pg` (`bytes`, `skip`) with the CPU blocks a completion kept aside for it (`carry`, see
+/// [`late_copy_back`]): a kept-aside block whose bytes here are still the frame's bytes that replaced the CPU's (no CPU
+/// store since) is staged with the CPU's bytes and copied into the mirror.
+fn stage_carry(stager: &mut dyn Stager, carry: &mut BTreeMap<u32, Carry>, pg: u32, bytes: &[u8], skip: Mask) {
+    let Some(c) = carry.remove(&pg) else {
+        stager.stage_masked(pg, bytes, skip);
+        return;
+    };
+    let mut skip = skip;
+    let mut img: Option<Vec<u8>> = None;
+    let n = (bytes.len() as u64 / BLOCK) as usize;
+    for b in (0..n).filter(|&b| has(&c.mask, b)) {
+        let r = b * BLOCK as usize..(b + 1) * BLOCK as usize;
+        if bytes[r.clone()] == c.frame[r.clone()] {
+            img.get_or_insert_with(|| bytes.to_vec())[r.clone()].copy_from_slice(&c.cpu[r]);
+            skip[b / 64] &= !(1 << (b % 64));
+        }
+    }
+    stager.stage_masked(pg, img.as_deref().unwrap_or(bytes), skip);
 }
 
 /// The blocks a frame may write, by run and page.
@@ -2137,7 +2317,9 @@ fn eager_copy(frame: u64, runs: &[(u32, u32)]) {
                     return None;
                 }
                 w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire).ok()?;
-                copy_stale(pg as usize, mirror, alias, false, frame as u32);
+                if !late_current(i, frame as u32) {
+                    copy_stale(pg as usize, mirror, alias, false, frame as u32);
+                }
                 for a in &i.stale {
                     a.store(0, Ordering::Release);
                 }
@@ -2250,6 +2432,8 @@ impl Pages {
             let mut c = ctrl();
             c.frames.clear();
             c.masks.clear();
+            c.late_copies.clear();
+            c.carry.clear();
             c.snap = None;
             c.streak = vec![0; n];
             c.prev_dirty.clear();
@@ -2351,6 +2535,33 @@ impl Pages {
     /// copy-back of the frame in flight; the next flush stages it into the mirror.
     pub fn set_late(&self, on: bool) {
         SHARED.late.store(on, Ordering::Release);
+    }
+
+    /// Results one frame late: the pages of the flushed frame `frame` that game threads read late, sorted. The encoder
+    /// has the GPU copy each of them from the mirror twice, into consecutive pages of a buffer: after the copy-in at
+    /// the start of the frame and after its last pass, and registers the two copies with
+    /// [`set_late_copies`](Self::set_late_copies). Empty when there are none.
+    pub fn late_copy_pages(&self, frame: u64) -> Vec<u32> {
+        let c = ctrl();
+        c.late_copies.iter().rev().find(|l| l.frame == frame).map(|l| l.pages.clone()).unwrap_or_default()
+    }
+
+    /// The copies of [`late_copy_pages`](Self::late_copy_pages) of frame `frame` are encoded: page `i` of the list is
+    /// at `start + i * page` and `end + i * page` (host addresses of shared memory that stays valid until
+    /// [`settled`](Self::settled) reaches `frame`). Call it before the frame is committed. Without it, the completion
+    /// of the frame copies from the mirror where that is exact and drops the snapshot of the other pages.
+    pub fn set_late_copies(&self, frame: u64, start: u64, end: u64) {
+        let mut c = ctrl();
+        if let Some(l) = c.late_copies.iter_mut().rev().find(|l| l.frame == frame) {
+            l.start = start;
+            l.end = end;
+        }
+    }
+
+    /// The newest frame whose completion has finished with its copies (the staging buffers and the GPU's copies of the
+    /// frames up to it may be used again).
+    pub fn settled(&self) -> u64 {
+        SHARED.settled.load(Ordering::Acquire)
     }
 
     /// Whether the flush leaves the pages with a snapshot readable while a frame in flight writes them (needs
@@ -2650,7 +2861,7 @@ impl Pages {
         if SHARED.mirror.load(Ordering::Acquire) != 0 {
             // With a mirror the pages stay tagged: the guest bytes are stale until a CPU access copies them. Pages that
             // a host thread opened for reading while the frame ran lose their access again.
-            let (due, mut due_masks): (Vec<FrameRuns>, Vec<FrameMasks>) = {
+            let (due, mut due_masks, mut due_copies): (Vec<FrameRuns>, Vec<FrameMasks>, Vec<LateCopy>) = {
                 let mut c = ctrl();
                 let mut due = Vec::new();
                 while c.frames.front().is_some_and(|(f, _)| *f <= frame) {
@@ -2664,7 +2875,13 @@ impl Pages {
                         masks.push(x);
                     }
                 }
-                (due, masks)
+                let mut copies = Vec::new();
+                while c.late_copies.front().is_some_and(|l| l.frame <= frame) {
+                    if let Some(x) = c.late_copies.pop_front() {
+                        copies.push(x);
+                    }
+                }
+                (due, masks, copies)
             };
             let eager = SHARED.eager.load(Ordering::Acquire);
             let mirror = SHARED.mirror.load(Ordering::Acquire);
@@ -2674,10 +2891,11 @@ impl Pages {
             if SHARED.late.load(Ordering::Acquire) && alias != 0 {
                 // Under the control mutex, so that a flush that tags a page again is either before it (the page is
                 // copied here) or after it (the flush copies a page of a complete frame itself).
-                let _c = ctrl();
+                let mut c = ctrl();
                 for (f, runs) in &due {
                     let m = due_masks.iter().position(|(g, _)| g == f).map(|pos| due_masks.swap_remove(pos).1);
-                    late_copy_back(*f, runs, m.as_deref(), mirror, alias);
+                    let copies = due_copies.iter().position(|l| l.frame == *f).map(|pos| due_copies.swap_remove(pos));
+                    late_copy_back(*f, runs, m.as_deref(), copies.as_ref(), &mut c.carry, mirror, alias);
                 }
             }
             for (f, runs) in due {
@@ -2698,6 +2916,7 @@ impl Pages {
                 }
             }
             wake_all();
+            SHARED.settled.fetch_max(frame, Ordering::AcqRel);
             if !later.is_empty() {
                 eager_submit(later);
             }
@@ -2716,6 +2935,7 @@ impl Pages {
         for (f, runs) in due {
             release_runs(f, &runs);
         }
+        SHARED.settled.fetch_max(frame, Ordering::AcqRel);
     }
 
     /// The late staging of `NXKIT_PRIVATE=1` with the knob `privlatestage`: the pages that the CPU wrote since the flush of
@@ -2724,7 +2944,8 @@ impl Pages {
         if !self.attached() || SHARED.mirror.load(Ordering::Acquire) == 0 {
             return Vec::new();
         }
-        let _c = ctrl();
+        let mut c = ctrl();
+        let carry = &mut c.carry;
         let p = page();
         let base = SHARED.base.load(Ordering::Acquire);
         let n = SHARED.log_n.swap(0, Ordering::AcqRel).min(LOG_CAP);
@@ -2766,10 +2987,10 @@ impl Pages {
                 let bytes = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
-                stager.stage_masked(pg, bytes, stage_skip(pg as usize));
+                stage_carry(stager, carry, pg, bytes, stage_skip(pg as usize));
             }
         }
-        if self.stage_emulated(&emu, &back, stager) > 0 {
+        if self.stage_emulated(&emu, &back, stager, carry) > 0 {
             let extra: Vec<u32> = emu.iter().copied().filter(|pg| back.binary_search(pg).is_err()).collect();
             back.extend(extra);
             back.sort_unstable();
@@ -2781,7 +3002,13 @@ impl Pages {
     /// which were staged whole. The bytes come through the alias, because a page of a frame in flight has no access; the
     /// stale blocks go along with a mask and are not copied into the mirror. The flag is taken first: a store after it
     /// sets it again and logs the page for the next flush. Returns the pages staged.
-    fn stage_emulated(&self, emu: &[u32], done: &[u32], stager: &mut dyn Stager) -> u32 {
+    fn stage_emulated(
+        &self,
+        emu: &[u32],
+        done: &[u32],
+        stager: &mut dyn Stager,
+        carry: &mut BTreeMap<u32, Carry>,
+    ) -> u32 {
         let mut n = 0;
         for &pg in emu {
             let Some(i) = info(pg as usize) else { continue };
@@ -2794,7 +3021,7 @@ impl Pages {
             let Some(bytes) = self.alias_page(pg) else {
                 continue;
             };
-            stager.stage_masked(pg, bytes, i.take_skip());
+            stage_carry(stager, carry, pg, bytes, i.take_skip());
             n += 1;
         }
         SHARED.emu_staged.fetch_add(u64::from(n), Ordering::Relaxed);
@@ -3001,21 +3228,21 @@ impl Pages {
             }
         }
         st.dirtied = back.len() as u32;
-        let stage_run = |stager: &mut dyn Stager, s: u32, e: u32| {
+        let stage_run = |stager: &mut dyn Stager, carry: &mut BTreeMap<u32, Carry>, s: u32, e: u32| {
             for pg in s..e {
                 // SAFETY: the page lies in guest memory and is readable (read only or open) since the protection above.
                 let bytes = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
-                stager.stage_masked(pg, bytes, stage_skip(pg as usize));
+                stage_carry(stager, carry, pg, bytes, stage_skip(pg as usize));
             }
         };
         for (s, e) in runs_of(&back) {
             protect_pages(s, e, PROT_READ, true);
-            stage_run(stager, s, e);
+            stage_run(stager, &mut cc.carry, s, e);
         }
         st.staged = back.len() as u32;
-        st.emu_staged = self.stage_emulated(&emu, &back, stager);
+        st.emu_staged = self.stage_emulated(&emu, &back, stager, &mut cc.carry);
         st.staged += st.emu_staged;
         st.stage_ns = tick();
         // The writable pages: each is compared with the bytes staged for it last, and staged when it differs. A page that
@@ -3039,7 +3266,7 @@ impl Pages {
                 // to it at the same time, which the staging accepts: the shadow is what is staged, so a later store is
                 // found at the next flush.
                 let live = unsafe { std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize) };
-                if h.shadow.len() == p as usize && h.shadow[..] == *live {
+                if h.shadow.len() == p as usize && h.shadow[..] == *live && !cc.carry.contains_key(&pg) {
                     st.hot_same += 1;
                     h.quiet += 1;
                     if h.quiet >= HOT_QUIET {
@@ -3050,7 +3277,7 @@ impl Pages {
                 h.quiet = 0;
                 h.shadow.resize(p as usize, 0);
                 h.shadow.copy_from_slice(live);
-                stager.stage_masked(pg, &h.shadow, stage_skip(pg as usize));
+                stage_carry(stager, &mut cc.carry, pg, &h.shadow, stage_skip(pg as usize));
                 st.hot_staged += 1;
             }
             for pg in &gone {
@@ -3078,8 +3305,8 @@ impl Pages {
             for (pg, shadow) in &demote {
                 // SAFETY: as above; the page is read only now, so nothing changes under the compare.
                 let live = unsafe { std::slice::from_raw_parts((base + u64::from(*pg) * p) as *const u8, p as usize) };
-                if shadow[..] != *live {
-                    stager.stage_masked(*pg, live, stage_skip(*pg as usize));
+                if shadow[..] != *live || cc.carry.contains_key(pg) {
+                    stage_carry(stager, &mut cc.carry, *pg, live, stage_skip(*pg as usize));
                     st.hot_staged += 1;
                 }
             }
@@ -3092,6 +3319,7 @@ impl Pages {
         let masks = range_masks(&runs_w, written);
         let late_on = SHARED.late.load(Ordering::Acquire);
         let alias = SHARED.alias.load(Ordering::Acquire);
+        let mut late_pages: Vec<u32> = Vec::new();
         for (ri, &(s, e)) in runs_w.iter().enumerate() {
             for pg in s..e {
                 let Some(w) = word(pg as usize) else { continue };
@@ -3106,12 +3334,14 @@ impl Pages {
                     {
                         if late_active(i) {
                             let f = cur >> FRAME_SHIFT;
-                            copy_stale(pg as usize, mirror, alias, false, f);
+                            if !late_current(i, f) {
+                                copy_stale(pg as usize, mirror, alias, false, f);
+                                SHARED.late_flush_copies.fetch_add(1, Ordering::Relaxed);
+                            }
                             for a in &i.stale {
                                 a.store(0, Ordering::Release);
                             }
                             i.snap.store(f.max(1), Ordering::Release);
-                            SHARED.late_flush_copies.fetch_add(1, Ordering::Relaxed);
                         } else {
                             i.snap_reset(SnapWhy::FlushIdle);
                         }
@@ -3126,7 +3356,7 @@ impl Pages {
                             // Written after step 2: take it back to clean and stage it again.
                             if w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok() {
                                 protect_pages(pg, pg + 1, PROT_READ, true);
-                                stage_run(stager, pg, pg + 1);
+                                stage_run(stager, &mut cc.carry, pg, pg + 1);
                                 fresh = true;
                                 st.raced += 1;
                                 st.staged += 1;
@@ -3149,6 +3379,9 @@ impl Pages {
                 // mirror (the tag came first: a thread that copies the page waits for the frame, which is not done).
                 if let Some(i) = info(pg as usize) {
                     i.or_stale(&masks[ri][(pg - s) as usize]);
+                    if late_on && alias != 0 && i.snap.load(Ordering::Acquire) != 0 && late_active(i) {
+                        late_pages.push(pg);
+                    }
                 }
             }
             // The pages lose all access first: from here a thread that touches a page faults, finds it tagged and
@@ -3208,6 +3441,22 @@ impl Pages {
                 cc.masks.push_back((frame, masks));
             }
             cc.frames.push_back((frame, runs_w));
+        }
+        if !late_pages.is_empty() {
+            // `runs_w` is sorted and its runs are disjoint, so the pages are sorted.
+            cc.late_copies.push_back(LateCopy {
+                frame,
+                pages: late_pages,
+                start: 0,
+                end: 0,
+            });
+        }
+        // Blocks kept aside for pages no path above staged (released, or kept writable without a change).
+        let lost: u32 = cc.carry.values().map(|c| c.mask.iter().map(|x| x.count_ones()).sum::<u32>()).sum();
+        SHARED.late_carry_lost.fetch_add(u64::from(lost), Ordering::Relaxed);
+        cc.carry.clear();
+        while cc.late_copies.len() > MAX_FRAMES {
+            cc.late_copies.pop_front();
         }
         while cc.frames.len() > MAX_FRAMES {
             cc.frames.pop_front();
@@ -3372,6 +3621,10 @@ impl Pages {
             late_copied: g(&SHARED.late_copied),
             late_copied_blocks: g(&SHARED.late_copied_blocks),
             late_flush_copies: g(&SHARED.late_flush_copies),
+            late_exact: g(&SHARED.late_exact),
+            late_frame_won: g(&SHARED.late_frame_won),
+            late_carried: g(&SHARED.late_carried),
+            late_carry_lost: g(&SHARED.late_carry_lost),
             snap_resets: std::array::from_fn(|i| g(&SHARED.snap_resets[i])),
             snap_misses: std::array::from_fn(|i| g(&SHARED.snap_misses[i])),
             read_open: g(&SHARED.read_open),
@@ -4595,6 +4848,37 @@ mod tests {
         (m, mir, pg)
     }
 
+    /// What the encoder and the GPU do for the late pages of a frame (`Pages::late_copy_pages`): a buffer with a copy
+    /// of each page from the mirror as the frame starts ([`late_start`]) and as it ends ([`late_end`]).
+    struct Copies {
+        buf: Vec<u8>,
+        pages: Vec<u32>,
+    }
+
+    fn late_start(pg: &Pages, mir: &Map, f: u64) -> Copies {
+        let pages = pg.late_copy_pages(f);
+        assert!(!pages.is_empty(), "frame {f} has late pages");
+        let n = pages.len();
+        let mut buf = vec![0u8; 2 * n * P as usize];
+        for (i, &p) in pages.iter().enumerate() {
+            for o in 0..P {
+                buf[i * P as usize + o as usize] = mir.load(u64::from(p), o);
+            }
+        }
+        let base = buf.as_ptr() as u64;
+        pg.set_late_copies(f, base, base + n as u64 * P);
+        Copies { buf, pages }
+    }
+
+    fn late_end(c: &mut Copies, mir: &Map) {
+        let n = c.pages.len();
+        for (i, &p) in c.pages.iter().enumerate() {
+            for o in 0..P {
+                c.buf[(n + i) * P as usize + o as usize] = mir.load(u64::from(p), o);
+            }
+        }
+    }
+
     fn done(pg: &Pages) {
         pg.set_late(false);
         pg.set_adaptive(false, false);
@@ -4633,20 +4917,110 @@ mod tests {
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         let mut st = Collect::default();
         let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let mut c2 = late_start(pg, &mir, 2);
         mir.store(1, 70, 0xB1);
+        late_end(&mut c2, &mir);
         // The CPU runs ahead: frame 3 is flushed while frame 2 runs, and tags the page.
         let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let mut c3 = late_start(pg, &mir, 3);
         assert_eq!(m.load(1, 70), 0xA1, "frame 3 and 2 run: the bytes are frame 1's");
+        // Frame 3 runs on the GPU and writes the mirror before the completion of frame 2 is reported.
+        mir.store(1, 70, 0xC0);
         let s0 = pg.stats();
         pg.complete(2);
         let s1 = pg.stats();
         assert_eq!(s1.late_copied - s0.late_copied, 1, "the completion copied the page");
-        assert_eq!(m.load(1, 70), 0xB1, "frame 3 runs: the bytes are frame 2's now");
+        assert_eq!(s1.late_exact - s0.late_exact, 1, "from the GPU's copy of the frame's end");
+        assert_eq!(m.load(1, 70), 0xB1, "frame 3 runs: the bytes are frame 2's, not frame 3's from the mirror");
         assert_eq!(pg.state_of(m.addr(1)), "gpu(3)");
         assert_eq!(pg.stats().writer_waits, s0.writer_waits, "nobody waited");
         mir.store(1, 70, 0xC1);
+        late_end(&mut c3, &mir);
         pg.complete(3);
         assert_eq!(m.load(1, 70), 0xC1);
+        done(pg);
+    }
+
+    #[test]
+    fn without_the_gpus_copy_a_page_a_newer_frame_tags_loses_its_snapshot_at_the_completion() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xB1);
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        mir.store(1, 70, 0xC0);
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_copied, s0.late_copied, "the mirror may hold frame 3's bytes: no copy");
+        assert_eq!(s1.snap_resets[SnapWhy::NoCopy as usize] - s0.snap_resets[SnapWhy::NoCopy as usize], 1);
+        mir.store(1, 70, 0xC1);
+        pg.complete(3);
+        assert_eq!(m.load(1, 70), 0xC1, "the read waits for nothing (frame 3 is done) and copies the page");
+        done(pg);
+    }
+
+    #[test]
+    fn a_sum_the_cpu_reads_and_resets_while_the_frame_runs_is_read_next_time_and_the_reset_reaches_the_next_frame() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let mut c2 = late_start(pg, &mir, 2);
+        // Frame 2 adds up its sum in the block of byte 70; byte 130 (another block it may write) stays.
+        mir.store(1, 70, 0x10);
+        // The CPU reads the sum of the last completed frame and resets it for the next frame; it also writes a block
+        // the frame does not change.
+        assert_eq!(m.load(1, 70), 0xA1);
+        m.store(1, 70, 0);
+        m.store(1, 130, 0x77);
+        late_end(&mut c2, &mir);
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_frame_won - s0.late_frame_won, 1, "the frame changed the sum: its bytes win");
+        assert_eq!(s1.late_carried - s0.late_carried, 1, "the reset is kept aside for the next flush");
+        assert_eq!(m.load(1, 70), 0x10, "the next read of the sum gets frame 2's, not the CPU's reset");
+        assert_eq!(m.load(1, 130), 0x77, "the block the frame did not change keeps the CPU's byte");
+        let mut st3 = Collect::default();
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
+        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        assert_eq!(st3.pages[i].1[70], 0, "the reset goes into the mirror for frame 3");
+        assert_eq!(st3.pages[i].1[130], 0x77);
+        assert_eq!(st3.skips[i].1[0] & 0b110, 0, "neither block is skipped by the copy-in");
+        assert_eq!(pg.stats().late_carry_lost, s1.late_carry_lost);
+        pg.complete(3);
+        done(pg);
+    }
+
+    #[test]
+    fn a_reset_staged_before_the_completion_still_lets_the_reader_get_the_frames_sum() {
+        let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        let (m, mir, pg) = late_page(0xA1, 0xA2);
+        let mut st = Collect::default();
+        let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
+        let mut c2 = late_start(pg, &mir, 2);
+        mir.store(1, 70, 0x10);
+        m.store(1, 70, 0);
+        // The flush of frame 3 comes before the completion of frame 2 and stages the reset.
+        let mut st3 = Collect::default();
+        let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
+        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        assert_eq!(st3.pages[i].1[70], 0);
+        let mut c3 = late_start(pg, &mir, 3);
+        late_end(&mut c2, &mir);
+        let s0 = pg.stats();
+        pg.complete(2);
+        let s1 = pg.stats();
+        assert_eq!(s1.late_frame_won - s0.late_frame_won, 1);
+        assert_eq!(s1.late_carried, s0.late_carried, "the reset is in the mirror already");
+        assert_eq!(m.load(1, 70), 0x10, "frame 3 runs: the reader gets frame 2's sum");
+        // Frame 3 starts from the reset and adds up its own sum.
+        mir.store(1, 70, 0x20);
+        late_end(&mut c3, &mir);
+        pg.complete(3);
+        assert_eq!(m.load(1, 70), 0x20);
         done(pg);
     }
 
@@ -4841,12 +5215,15 @@ mod tests {
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         let mut st = Collect::default();
         let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
-        mir.store(1, 70, 0xB1);
+        let mut c2 = late_start(pg, &mir, 2);
+        // Frame 2 writes block 2 only; the CPU writes block 1.
         mir.store(1, 130, 0xB2);
         m.store(1, 70, 0x55);
         // The CPU runs ahead: the flush of frame 3 stages the page while frame 2 runs.
         let mut st3 = Collect::default();
         let f = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
+        let mut c3 = late_start(pg, &mir, 3);
+        late_end(&mut c2, &mir);
         assert_eq!(f.emu_staged, 1);
         let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
         assert_eq!(st3.pages[i].1[70], 0x55);
@@ -4860,6 +5237,7 @@ mod tests {
         let mut st4 = Collect::default();
         let _ = pg.flush_mirrored(4, &[], &[(m.addr(1) + 64, 128)], None, &mut st4);
         assert!(st4.pages.iter().all(|p| p.0 != 1), "nothing new to stage");
+        late_end(&mut c3, &mir);
         pg.complete(3);
         pg.complete(4);
         done(pg);
@@ -4880,6 +5258,7 @@ mod tests {
         pg.complete(1);
         assert_eq!(m.load(1, 64), 10);
         let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 64)], None, &mut st);
+        let mut c2 = late_start(pg, &mir, 2);
         for (k, b) in 99u32.to_le_bytes().iter().enumerate() {
             mir.store(1, 64 + k as u64, *b);
         }
@@ -4900,8 +5279,12 @@ mod tests {
         let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
         assert_eq!(u32::from_le_bytes(st3.pages[i].1[64..68].try_into().unwrap()), 15, "the sum is staged");
         assert_eq!(st3.skips[i].1[0] & 0b10, 0, "the block is not skipped");
+        late_end(&mut c2, &mir);
         pg.complete(2);
-        assert_eq!(u32::from_le_bytes([m.load(1, 64), m.load(1, 65), m.load(1, 66), m.load(1, 67)]), 15, "the CPU wins over frame 2's 99");
+        // Frame 2 changed the counter: its value is the result the reader gets one frame late, and the CPU's sum is in
+        // the mirror for frame 3.
+        let read = u32::from_le_bytes([m.load(1, 64), m.load(1, 65), m.load(1, 66), m.load(1, 67)]);
+        assert_eq!(read, 99, "the frame's 99 wins for the reader");
         pg.complete(3);
         done(pg);
     }

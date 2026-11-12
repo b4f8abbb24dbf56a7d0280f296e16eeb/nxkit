@@ -79,6 +79,11 @@ impl DataBuffer {
         self.raw.gpuAddress()
     }
 
+    /// The host address of the first byte (the buffer is shared memory and stays mapped while it lives).
+    pub fn host_address(&self) -> u64 {
+        self.raw.contents() as u64
+    }
+
     /// Copies `data` to `offset`.
     pub fn write(&self, offset: u64, data: &[u8]) -> Result<()> {
         let end = offset
