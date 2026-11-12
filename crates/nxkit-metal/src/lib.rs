@@ -141,7 +141,7 @@ pub use stats::{
     interval_bucket,
 };
 pub use table::ArgumentTable;
-pub use texture::{Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc};
+pub use texture::{InPlaceRefusal, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc};
 pub use timestamp::TimestampHeap;
 pub use upscale::{SpatialUpscaler, UpscaleDesc};
 pub use vmregion::{VmRegion, vm_region};

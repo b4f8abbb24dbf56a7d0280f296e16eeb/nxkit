@@ -37,7 +37,8 @@ impl Zeroer {
     /// Clears `res` when it is a new texture without an upload. True when it was cleared: its next reader needs a
     /// barrier from the fragment stage.
     pub(super) fn zero(&mut self, ctx: &Context, cb: &mut CommandBuffer, res: &Res) -> bool {
-        if !self.on || !res.fresh {
+        // A texture over guest memory holds the game's bytes: clearing it would clear guest memory.
+        if !self.on || !res.fresh || res.in_place.is_some() {
             return false;
         }
         let d = res.desc;

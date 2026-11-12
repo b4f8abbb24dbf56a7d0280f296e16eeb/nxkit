@@ -272,6 +272,7 @@ impl Gpu {
         for (id, u) in &uses {
             self.store.note(*id, *u);
         }
+        self.store.set_pools(pools);
         let mut textures: FastMap<TexId, Res> = FastMap::default();
         for (id, u) in &uses {
             match view.record(*id) {
@@ -519,6 +520,13 @@ impl Gpu {
                 )
             {
                 self.stale_diag(*id, rec, res);
+            }
+            if res.in_place.is_some() {
+                // The texture is the guest bytes: a CPU write needs no upload, and the record is in sync.
+                if rec.residency == nxkit_nvn::resource::Residency::GuestNewer {
+                    deswizzled.push(*id);
+                }
+                continue;
             }
             if !TextureStore::needs_upload(res, rec) {
                 if zeroer.zero(&self.ctx, first, res) {

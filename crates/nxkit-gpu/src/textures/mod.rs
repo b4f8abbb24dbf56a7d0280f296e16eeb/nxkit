@@ -58,6 +58,20 @@ pub(crate) struct Res {
     pub(crate) guest_size: u64,
     /// The scale of the size when it was made: 1 for an unscaled texture.
     pub(crate) scale: f32,
+    /// The Metal texture lies over the guest bytes (`over_guest`): the CPU's writes reach it without an upload.
+    pub(crate) in_place: Option<InPlace>,
+    /// A pitch-linear texture that is not in place: the CPU may write its pool at any time without telling (no
+    /// `nvnMemoryPoolFlushMappedRange`, no `nvnTextureWriteTexels`), so it is uploaded in every frame that uses it,
+    /// unless the GPU wrote it last.
+    pub(crate) reupload: bool,
+}
+
+/// Where a texture over guest memory lies: the real GPU address of its first byte (it changes when the pool gets
+/// another buffer) and its row stride.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InPlace {
+    pub(crate) real: u64,
+    pub(crate) stride: u64,
 }
 
 /// How a texture is used in this frame.
@@ -128,6 +142,12 @@ pub(crate) struct TextureStore {
     inventory: bool,
     /// The textures dropped because another texture overwrote their memory (`supersede.rs`).
     sup: supersede::State,
+    /// The pools of the frame being encoded, which give a pitch-linear texture its guest bytes (`over_guest`). `None`
+    /// outside an encode, in tests that do not set them, and with `NXKIT_PRIVATE=1`, where member pages of a frame
+    /// live in a mirror that changes per frame.
+    pools: Option<std::sync::Arc<crate::guestpools::GuestPools>>,
+    /// The ids for which Metal refused a texture over guest memory although the layout fit. They keep the copy.
+    no_place: FastSet<TexId>,
 }
 
 fn kind_of(t: Target) -> Option<TextureKind> {
@@ -249,7 +269,47 @@ impl TextureStore {
             evicted_ids: FastSet::default(),
             inventory: inventory::wanted(),
             sup: supersede::State::from_env(),
+            pools: None,
+            no_place: FastSet::default(),
         }
+    }
+
+    /// Gives the store the pools of the frame that is encoded now. Pitch-linear textures are made over their guest
+    /// bytes unless the pools have a mirror (`NXKIT_PRIVATE=1`) or `NXKIT_TEX_INPLACE=0` is set.
+    pub(crate) fn set_pools(&mut self, pools: &std::sync::Arc<crate::guestpools::GuestPools>) {
+        self.pools = (pools.overlay().is_none() && in_place_enabled()).then(|| pools.clone());
+    }
+
+    /// Where a texture of `rec` described by `desc` lies in guest memory, when it can be a texture over those bytes:
+    /// a pitch-linear 2D texture of one level, unscaled, not widened, not an attachment and without atomics, whose
+    /// first byte and stride Metal can take, in a pool with a buffer.
+    fn place_of(
+        &self,
+        rec: &TextureRecord,
+        desc: &TextureDesc,
+        scaled: bool,
+        widened: bool,
+        u: Use,
+    ) -> Option<(std::sync::Arc<nxkit_metal::GuestMemory>, u64, InPlace)> {
+        if !rec.layout.linear
+            || scaled
+            || widened
+            || u.attachment
+            || u.atomic
+            || desc.storage == Storage::Memoryless
+            || self.no_place.contains(&rec.id)
+        {
+            return None;
+        }
+        let pools = self.pools.as_ref()?;
+        let stride = rec.layout.size / u64::from(desc.height.max(1));
+        let (mem, offset) = crate::upload::locate(pools.as_ref(), rec.address.get(), rec.layout.size).ok()?;
+        let mut d = *desc;
+        d.storage = Storage::Shared;
+        let align = Texture::linear_alignment(&self.ctx, d.format);
+        Texture::in_place_fit(&d, offset, stride, mem.len(), align).ok()?;
+        let real = mem.real_base() + offset;
+        Some((mem.clone(), offset, InPlace { real, stride }))
     }
 
     /// The texture of an id, if the store made one.
@@ -302,9 +362,16 @@ impl TextureStore {
         let compressed =
             texture_format(rec.desc.format).is_some_and(|m| m.format().is_compressed());
         let scaled = !compressed && self.is_scaled(id, scale);
-        let (desc, widened) = describe(rec, if scaled { scale } else { 1.0 }, u)?;
+        let (mut desc, widened) = describe(rec, if scaled { scale } else { 1.0 }, u)?;
+        let place = self.place_of(rec, &desc, scaled, widened, u);
+        if place.is_some() {
+            desc.storage = Storage::Shared;
+        }
+        let in_place = place.as_ref().map(|p| p.2);
+        let reupload = rec.layout.linear && in_place.is_none() && !u.attachment;
         if let Some(r) = self.entries.get_mut(&id) {
-            if r.desc == desc {
+            if r.desc == desc && r.in_place == in_place {
+                r.reupload = reupload;
                 r.fresh = false;
                 let r = r.clone();
                 self.used(r.generation, rec.residency == Residency::GpuNewer);
@@ -315,9 +382,10 @@ impl TextureStore {
             }
         }
         let key = (rec.address.get(), desc);
-        let r = if let Some(alias) = self.aliases.get(&key) {
+        let r = if let Some(alias) = self.aliases.get(&key).filter(|a| a.in_place == in_place) {
             Res {
                 fresh: false,
+                reupload,
                 ..alias.clone()
             }
         } else {
@@ -392,7 +460,33 @@ impl TextureStore {
                 );
             }
             let t_create = std::time::Instant::now();
-            let made = Texture::new(&self.ctx, desc);
+            let made = match &place {
+                Some((mem, offset, at)) => {
+                    Texture::over_guest(&self.ctx, mem, *offset, at.stride, desc).map_err(|why| {
+                        // The layout fit, so Metal refused for a reason of its own: the texture keeps the copy from
+                        // now on and is made again in the next frame.
+                        self.no_place.insert(id);
+                        let what = format_args!("in place {id:?} {desc:?}: {why:?}");
+                        nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::TextureCreate, what);
+                        nxkit_metal::MetalError::Invalid("texture over guest memory refused")
+                    })
+                }
+                None => Texture::new(&self.ctx, desc),
+            };
+            if place.is_some() && made.is_ok() {
+                static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
+                    eprintln!(
+                        "DIAG upload in place {id:?} {:?} {}x{} at {:#x} stride {}",
+                        desc.format,
+                        desc.width,
+                        desc.height,
+                        rec.address.get(),
+                        in_place.map_or(0, |p| p.stride)
+                    );
+                }
+                stats.textures_in_place += 1;
+            }
             stats.texture_create_ns += u64::try_from(t_create.elapsed().as_nanos()).unwrap_or(0);
             let tex = made.map_err(|e| {
                 let what = format_args!("new {id:?} {desc:?}: {e:?}");
@@ -412,6 +506,8 @@ impl TextureStore {
                 guest_address: rec.address.get(),
                 guest_size: rec.layout.size,
                 scale: if scaled { scale } else { 1.0 },
+                in_place,
+                reupload,
             };
             self.aliases.insert(key, r.clone());
             stats.textures_created += 1;
@@ -465,20 +561,32 @@ impl TextureStore {
     /// True when the guest bytes of a scaled texture have to go into it through a staging texture of the native size
     /// and a GPU scale. Only a CPU write counts. A texture that became scaled this frame is new and empty either way.
     pub(crate) fn needs_scaled_upload(res: &Res, rec: &TextureRecord) -> bool {
-        res.scaled
+        res.in_place.is_none()
+            && res.scaled
             && !res.widened
             && res.desc.storage != Storage::Memoryless
             && rec.residency == Residency::GuestNewer
     }
 
-    /// True when the guest bytes have to go into the Metal texture before the frame uses it.
+    /// True when the guest bytes have to go into the Metal texture before the frame uses it. A texture over guest
+    /// memory never needs it. A pitch-linear texture with a copy needs it in every frame, unless the GPU wrote it last
+    /// (`Res::reupload`).
     pub(crate) fn needs_upload(res: &Res, rec: &TextureRecord) -> bool {
-        !res.scaled
+        res.in_place.is_none()
+            && !res.scaled
             && !res.widened
             && res.desc.storage != Storage::Memoryless
             && (rec.residency == Residency::GuestNewer
-                || (res.fresh && rec.residency == Residency::InSync))
+                || (res.fresh && rec.residency == Residency::InSync)
+                || (res.reupload && rec.residency == Residency::InSync))
     }
+}
+
+/// `NXKIT_TEX_INPLACE=0` turns textures over guest memory off: pitch-linear textures get a copy, which is uploaded in
+/// every frame that uses it.
+fn in_place_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NXKIT_TEX_INPLACE").map_or(true, |v| v != "0"))
 }
 
 fn format_key(f: Format) -> u32 {

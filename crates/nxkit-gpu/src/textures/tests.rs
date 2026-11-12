@@ -348,3 +348,127 @@ fn a_texture_that_is_only_used_as_gpu_newer_supersedes_nothing() {
     assert!(store.get(first).is_some() && store.get(second).is_some());
     assert_eq!(store.sup.dropped.count, 0);
 }
+
+/// A pitch-linear RGBA8 texture of 16 x 8 texels with rows `stride` bytes apart.
+fn linear_rgba8(stride: u32) -> nxkit_nvn::layout::TextureDesc {
+    nxkit_nvn::layout::TextureDesc {
+        target: Target::D2,
+        format: 0x25,
+        flags: nxkit_nvn::layout::FLAG_LINEAR,
+        samples: 0,
+        width: 16,
+        height: 8,
+        depth: 1,
+        levels: 1,
+        stride,
+        packaged_block: None,
+    }
+}
+
+/// A store, guest memory of 1 MiB and the pools of the whole mode over it, set as the pools of the frame.
+fn store_over_guest(ctx: &Context) -> (TextureStore, std::sync::Arc<nxkit_metal::GuestMemory>) {
+    let guest = std::sync::Arc::new(nxkit_metal::GuestMemory::allocate(ctx, 1024 * 1024).unwrap());
+    let pools = std::sync::Arc::new(crate::guestpools::GuestPools::whole(
+        nxkit_metal::GUEST_VA_BASE,
+        guest.len(),
+        guest.clone(),
+    ));
+    let mut store = TextureStore::new(ctx);
+    store.set_pools(&pools);
+    (store, guest)
+}
+
+#[test]
+fn a_linear_texture_reads_the_bytes_the_cpu_writes_later_without_an_upload() {
+    // Super Mario Bros. Wonder rasterizes glyphs on the CPU into a linear R8 atlas in a CPU-visible pool and never
+    // flushes the pool: with an upload only at the first use, glyphs drawn later stayed empty.
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let (mut store, guest) = store_over_guest(&ctx);
+    let mut table = ResourceTable::new();
+    let id = table
+        .create(linear_rgba8(64), GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap())
+        .unwrap();
+    let mut stats = EncodeStats::default();
+    let res = store
+        .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
+    assert_eq!(res.in_place, Some(InPlace { real: guest.real_base() + 0x1000, stride: 64 }));
+    assert_eq!(stats.textures_in_place, 1);
+    assert!(!TextureStore::needs_upload(&res, table.get(id).unwrap()));
+    // The CPU writes texel (3, 2) after the texture was made; the record stays `GuestNewer` or `InSync` as it was.
+    guest.write(0x1000 + 2 * 64 + 3 * 4, &[1, 2, 3, 4]).unwrap();
+    let got = res.tex.debug_read_raw(&ctx, &[[3, 2]]).unwrap();
+    assert_eq!(got[0], [1, 2, 3, 4]);
+    guest.write(0x1000 + 2 * 64 + 3 * 4, &[9, 8, 7, 6]).unwrap();
+    let got = res.tex.debug_read_raw(&ctx, &[[3, 2]]).unwrap();
+    assert_eq!(got[0], [9, 8, 7, 6]);
+    // The next frame keeps the same texture.
+    table.synced(id).unwrap();
+    let again = store
+        .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
+    assert_eq!(again.generation, res.generation);
+    assert!(!TextureStore::needs_upload(&again, table.get(id).unwrap()));
+}
+
+#[test]
+fn a_linear_texture_with_a_copy_is_uploaded_in_every_frame_until_the_gpu_writes_it() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    // A stride Metal cannot take for a linear texture (not a multiple of 16), and a store without pools.
+    let (mut misaligned, _guest) = store_over_guest(&ctx);
+    let mut plain = TextureStore::new(&ctx);
+    for (store, stride) in [(&mut misaligned, 72), (&mut plain, 64)] {
+        let mut table = ResourceTable::new();
+        let id = table
+            .create(linear_rgba8(stride), GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap())
+            .unwrap();
+        let mut stats = EncodeStats::default();
+        let res = store
+            .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+            .unwrap();
+        assert_eq!((res.in_place, res.reupload, stats.textures_in_place), (None, true, 0), "stride {stride}");
+        table.synced(id).unwrap();
+        let res = store
+            .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+            .unwrap();
+        assert!(!res.fresh);
+        assert!(TextureStore::needs_upload(&res, table.get(id).unwrap()), "stride {stride}");
+        table.gpu_wrote(id).unwrap();
+        assert!(!TextureStore::needs_upload(&res, table.get(id).unwrap()), "stride {stride}");
+    }
+    // A block-linear texture in the same state keeps its copy until the CPU tells.
+    let mut table = ResourceTable::new();
+    let id = table
+        .create(
+            nxkit_nvn::layout::TextureDesc { flags: 0, stride: 0, ..linear_rgba8(0) },
+            GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap(),
+        )
+        .unwrap();
+    let mut stats = EncodeStats::default();
+    plain.ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats).unwrap();
+    table.synced(id).unwrap();
+    let res = plain.ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats).unwrap();
+    assert!(!res.reupload && !TextureStore::needs_upload(&res, table.get(id).unwrap()));
+}
+
+#[test]
+fn a_linear_attachment_keeps_its_copy() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let (mut store, _guest) = store_over_guest(&ctx);
+    let mut table = ResourceTable::new();
+    let id = table
+        .create(linear_rgba8(64), GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap())
+        .unwrap();
+    let u = Use { attachment: true, ..Use::default() };
+    store.note(id, u);
+    let res = store
+        .ensure(table.get(id).unwrap(), 1.0, u, &mut EncodeStats::default())
+        .unwrap();
+    assert_eq!((res.in_place, res.reupload), (None, false));
+}

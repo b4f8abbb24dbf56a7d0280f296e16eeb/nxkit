@@ -255,6 +255,8 @@ pub struct EncodeStats {
     pub scaled_uploads: u32,
     /// Textures that stay at the native size because the CPU writes them often and the GPU renders them rarely.
     pub textures_kept_native: u32,
+    /// Pitch-linear textures made over their guest bytes (`Texture::over_guest`), which take no upload.
+    pub textures_in_place: u32,
     /// Nanoseconds of CPU time that the encode took, from the start of `encode_frame` to the submit.
     pub encode_ns: u64,
     /// Nanoseconds that `resolve_handles` took.
@@ -320,6 +322,7 @@ impl EncodeStats {
         self.scaled_upload_lost += o.scaled_upload_lost;
         self.scaled_uploads += o.scaled_uploads;
         self.textures_kept_native += o.textures_kept_native;
+        self.textures_in_place += o.textures_in_place;
         self.encode_ns += o.encode_ns;
         self.resolve_ns += o.resolve_ns;
         self.fit_ns += o.fit_ns;

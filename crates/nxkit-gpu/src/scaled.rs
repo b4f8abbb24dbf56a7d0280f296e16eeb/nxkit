@@ -110,6 +110,8 @@ impl ScaledUploads {
             guest_address: 0,
             guest_size: 0,
             scale: 1.0,
+            in_place: None,
+            reupload: false,
         })
     }
 

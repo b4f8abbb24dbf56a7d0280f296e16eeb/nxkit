@@ -342,12 +342,13 @@ impl Gpu {
             && crate::diag::first(&SHOWN, 200)
         {
             eprintln!(
-                "DIAG stale {id:?} {:?} {}x{} addr {key:#x} changed, residency {:?} needs upload {}",
+                "DIAG stale {id:?} {:?} {}x{} addr {key:#x} changed, residency {:?} needs upload {} in place {}",
                 res.desc.format,
                 res.desc.width,
                 res.desc.height,
                 rec.residency,
-                TextureStore::needs_upload(res, rec)
+                TextureStore::needs_upload(res, rec),
+                res.in_place.is_some()
             );
         }
     }
@@ -474,6 +475,7 @@ impl Gpu {
         let mut items = Vec::new();
         let mut ranges: Vec<(u64, u64)> = Vec::new();
         let mut backings: FastSet<TexId> = FastSet::default();
+        let mut in_place: Vec<(TexId, (u64, u64))> = Vec::new();
         let (mut planned, mut over_budget) = (0u64, 0u32);
         for (_, id) in order {
             let (Some(res), Ok(rec)) = (textures.get(&id), view.record(id)) else {
@@ -502,9 +504,15 @@ impl Gpu {
                 );
                 continue;
             }
-            planned += rec.layout.size;
             backings.insert(res.barrier_id);
             ranges.push((start, end));
+            if res.in_place.is_some() {
+                // The GPU wrote the guest bytes themselves: nothing to copy, and the CPU may read them once the frame
+                // is done, as after a copy-back.
+                in_place.push((id, (start, end)));
+                continue;
+            }
+            planned += rec.layout.size;
             items.push((id, rec, res, &dirty[&id].0, flags));
         }
         let args: Vec<_> = items
@@ -564,6 +572,10 @@ impl Gpu {
         }
         if !items.is_empty() {
             stats.compute_passes += 1;
+        }
+        for (id, range) in in_place {
+            done.push(id);
+            done_ranges.push(range);
         }
         self.copyback
             .log_frame(done.len() as u32, bytes, refused, over_budget);
