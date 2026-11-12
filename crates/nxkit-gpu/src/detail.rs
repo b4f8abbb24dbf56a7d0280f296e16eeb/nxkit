@@ -458,6 +458,14 @@ pub struct FrameDetail {
 /// The [`CounterReport::kind`] of `nvnCommandBufferReportValue`: the counter is [`CounterReport::value`].
 pub const REPORT_VALUE: u32 = u32::MAX;
 
+/// The [`CounterReport::kind`] of an `nvnCommandBufferSignalEvent` that writes [`CounterReport::value`] into the
+/// counter of the event. Its [`CounterReport::addr`] is the host address of the 32-bit counter word, not a GPU address.
+pub const REPORT_EVENT_WRITE: u32 = u32::MAX - 1;
+
+/// The [`CounterReport::kind`] of an `nvnCommandBufferSignalEvent` that adds [`CounterReport::value`] to the counter of
+/// the event (`NVN_EVENT_SIGNAL_MODE_ADD`). Its [`CounterReport::addr`] is the host address of the counter word.
+pub const REPORT_EVENT_ADD: u32 = u32::MAX - 2;
+
 /// A counter report that the GPU writes when it reaches the command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CounterReport {
@@ -466,6 +474,15 @@ pub struct CounterReport {
     pub kind: u32,
     /// The counter of a [`REPORT_VALUE`], 0 for the others.
     pub value: u32,
-    /// The GPU address of the 16-byte `NVNcounterData`: the counter value, then the timestamp in GPU ticks.
+    /// The GPU address of the 16-byte `NVNcounterData`: the counter value, then the timestamp in GPU ticks. For an
+    /// event signal the host address of the counter word.
     pub addr: u64,
+}
+
+impl CounterReport {
+    /// True for an event signal ([`REPORT_EVENT_WRITE`], [`REPORT_EVENT_ADD`]): the backend writes it into the counter
+    /// of the event when the GPU finished the frame (`backend::events`), not as a counter report.
+    pub fn is_event(&self) -> bool {
+        matches!(self.kind, REPORT_EVENT_WRITE | REPORT_EVENT_ADD)
+    }
 }

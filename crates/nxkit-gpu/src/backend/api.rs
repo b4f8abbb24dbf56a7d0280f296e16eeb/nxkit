@@ -102,7 +102,12 @@ impl Backend for GpuBackend {
             eprintln!(
                 "nxkit-gpu: the walked detail does not match the frame, its draws are skipped"
             );
-            detail = FrameDetail::default();
+            // The event signals stay: a game that polls a counter would wait for ever without them.
+            let reports = std::mem::take(&mut detail.reports);
+            detail = FrameDetail {
+                reports: reports.into_iter().filter(|r| r.is_event()).collect(),
+                ..FrameDetail::default()
+            };
         }
         // The overlap: the ranges that this frame reads from a copy of its own take their bytes now, before the CPU
         // writes the next frame.
@@ -180,6 +185,7 @@ impl Backend for GpuBackend {
     }
 
     fn cpu_event_signalled(&self, word: u64) {
+        self.events.cpu_signalled(word);
         let mut pending = locked(&self.forced_pending);
         if pending.is_empty() {
             return;
@@ -216,6 +222,99 @@ impl Backend for GpuBackend {
     }
 
     fn wait_fence(&self, fence: Fence, _timeout_ns: u64) -> WaitResult {
+        let r = self.wait_fence_now(fence);
+        // A wait may return before the GPU finished the frame (`NXKIT_PRIVATE=1`, the overlap): a CPU signal after it
+        // is newer than the GPU's signals of the frame (`events`).
+        if matches!(r, WaitResult::Done | WaitResult::AlreadyDone) {
+            self.events.waited(fence.0);
+        }
+        r
+    }
+
+    fn wait_idle(&self) {
+        crate::private::note_full(crate::private::FullWait::Idle);
+        if let Some(enc) = &self.enc {
+            enc.wait_idle();
+        }
+        self.drain(Some(self.encoded.load(Ordering::Acquire)));
+    }
+
+    fn program_set(&self, program: u64, stages: &[StageKey]) {
+        locked(&self.walker).program_set(program, stages);
+    }
+
+    fn program_released(&self, program: u64) {
+        locked(&self.walker).program_released(program);
+    }
+
+    fn recording_invalidated(&self, start: u64, end: u64) {
+        self.invalidations.push(start, end);
+        if overlap_diag()
+            && let Ok(gpu) = self
+                .guest
+                .address_map()
+                .gpu_address(start, end.saturating_sub(start).max(1))
+        {
+            self.overlap.flushed(
+                gpu,
+                end.saturating_sub(start),
+                self.done.load(Ordering::Acquire),
+            );
+        }
+    }
+
+    fn acquire(&self, _window: u64, _index: u32) {
+        let mut pending = locked(&self.pending);
+        if self.enc.is_some() {
+            // With the encoder thread a frame reaches the queue only after its encode, so the queue does not see the
+            // frames that wait for the encoder. Counted from the game's presents, at most MAX_PENDING frames are on
+            // their way to the screen; otherwise the game ran frames ahead, each showed 80 ms after it, and the
+            // textures it wrote for later frames reached the encodes of earlier ones.
+            let in_flight = |_: &Vec<Pending>| {
+                self.asked
+                    .load(Ordering::Acquire)
+                    .saturating_sub(self.shown_upto.load(Ordering::Acquire))
+            };
+            while in_flight(&pending) >= MAX_PENDING as u64 {
+                let (guard, timeout) = self
+                    .freed
+                    .wait_timeout(pending, ACQUIRE_WAIT)
+                    .unwrap_or_else(PoisonError::into_inner);
+                pending = guard;
+                if timeout.timed_out() {
+                    break;
+                }
+            }
+            return;
+        }
+        while pending.len() >= MAX_PENDING {
+            let (guard, timeout) = self
+                .freed
+                .wait_timeout(pending, ACQUIRE_WAIT)
+                .unwrap_or_else(PoisonError::into_inner);
+            pending = guard;
+            if timeout.timed_out() {
+                pending.remove(0);
+            }
+        }
+    }
+
+    fn texture_created(&self, record: &TextureRecord) {
+        self.retire(record.id);
+    }
+
+    fn texture_finalized(&self, id: TexId) {
+        self.retire(id);
+    }
+
+    fn sampler_registered(&self, _id: u32, _sampler: &Tsc) {}
+
+    fn sampler_released(&self, _id: u32) {}
+}
+
+impl GpuBackend {
+    /// The wait of [`Backend::wait_fence`].
+    fn wait_fence_now(&self, fence: Fence) -> WaitResult {
         if fence.0 != 0 && crate::overlap::on() {
             self.rename.note_wait();
             self.rename.before_wait(fence.0);
@@ -308,88 +407,6 @@ impl Backend for GpuBackend {
         }
     }
 
-    fn wait_idle(&self) {
-        crate::private::note_full(crate::private::FullWait::Idle);
-        if let Some(enc) = &self.enc {
-            enc.wait_idle();
-        }
-        self.drain(Some(self.encoded.load(Ordering::Acquire)));
-    }
-
-    fn program_set(&self, program: u64, stages: &[StageKey]) {
-        locked(&self.walker).program_set(program, stages);
-    }
-
-    fn program_released(&self, program: u64) {
-        locked(&self.walker).program_released(program);
-    }
-
-    fn recording_invalidated(&self, start: u64, end: u64) {
-        self.invalidations.push(start, end);
-        if overlap_diag()
-            && let Ok(gpu) = self
-                .guest
-                .address_map()
-                .gpu_address(start, end.saturating_sub(start).max(1))
-        {
-            self.overlap.flushed(
-                gpu,
-                end.saturating_sub(start),
-                self.done.load(Ordering::Acquire),
-            );
-        }
-    }
-
-    fn acquire(&self, _window: u64, _index: u32) {
-        let mut pending = locked(&self.pending);
-        if self.enc.is_some() {
-            // With the encoder thread a frame reaches the queue only after its encode, so the queue does not see the
-            // frames that wait for the encoder. Counted from the game's presents, at most MAX_PENDING frames are on
-            // their way to the screen; otherwise the game ran frames ahead, each showed 80 ms after it, and the
-            // textures it wrote for later frames reached the encodes of earlier ones.
-            let in_flight = |_: &Vec<Pending>| {
-                self.asked
-                    .load(Ordering::Acquire)
-                    .saturating_sub(self.shown_upto.load(Ordering::Acquire))
-            };
-            while in_flight(&pending) >= MAX_PENDING as u64 {
-                let (guard, timeout) = self
-                    .freed
-                    .wait_timeout(pending, ACQUIRE_WAIT)
-                    .unwrap_or_else(PoisonError::into_inner);
-                pending = guard;
-                if timeout.timed_out() {
-                    break;
-                }
-            }
-            return;
-        }
-        while pending.len() >= MAX_PENDING {
-            let (guard, timeout) = self
-                .freed
-                .wait_timeout(pending, ACQUIRE_WAIT)
-                .unwrap_or_else(PoisonError::into_inner);
-            pending = guard;
-            if timeout.timed_out() {
-                pending.remove(0);
-            }
-        }
-    }
-
-    fn texture_created(&self, record: &TextureRecord) {
-        self.retire(record.id);
-    }
-
-    fn texture_finalized(&self, id: TexId) {
-        self.retire(id);
-    }
-
-    fn sampler_registered(&self, _id: u32, _sampler: &Tsc) {}
-
-    fn sampler_released(&self, _id: u32) {}
-}
-
-impl GpuBackend {
     /// The wait of `NXKIT_PRIVATE=1` that returns when the flush of `fence` has run: its inputs are in the staging buffer
     /// and its outputs are guarded, so the GPU's work on the frame has no effect on what the CPU does next. Returns None
     /// when the wait must be a full one: the knob `privhonest`, a frame that copies back to CPU memory (the copy-back is

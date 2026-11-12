@@ -14,6 +14,7 @@
 
 mod api;
 mod encpace;
+mod events;
 mod gputs;
 mod poolops;
 #[cfg(test)]
@@ -128,6 +129,8 @@ pub struct GpuBackend {
     forced: Mutex<Vec<nxkit_nvn::backend::ForcedWait>>,
     /// The waits of the frames in the capture that stays open for CPU signals, with the fence of their frame.
     forced_pending: Mutex<Vec<(u64, nxkit_nvn::backend::ForcedWait)>>,
+    /// The GPU event signals of the frames that the GPU has not finished (`events`).
+    events: Arc<events::EventSignals>,
 }
 
 impl GpuBackend {
@@ -140,6 +143,7 @@ impl GpuBackend {
         nxkit_metal::set_done_hook(nxkit_nvn::diag::batch_done);
         nxkit_metal::set_commit_hook(nxkit_nvn::diag::batch_committed);
         let space = GuestSpace::over(&guest)?;
+        let events = events::EventSignals::new(space.clone());
         let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
         let pool_hint = gpu.pool_hint();
         let rename = gpu.renamer();
@@ -201,6 +205,7 @@ impl GpuBackend {
                 captured: AtomicU64::new(0),
                 forced: Mutex::new(Vec::new()),
                 forced_pending: Mutex::new(Vec::new()),
+                events,
             }
         }))
     }
@@ -254,15 +259,22 @@ impl GpuBackend {
         );
     }
 
-    /// Keeps the timestamp reports and the GPU counters of a frame until the GPU is seen to finish it.
+    /// Keeps the timestamp reports and the GPU counters of a frame until the GPU is seen to finish it. The event
+    /// signals among the reports went to [`events::EventSignals::hold`].
     fn hold_counters<E>(
         &self,
         fence: Fence,
         detail: &FrameDetail,
         result: &Result<EncodeReport, E>,
     ) {
-        if !detail.reports.is_empty() {
-            locked(&self.counters).extend(detail.reports.iter().map(|r| (fence.0, *r)));
+        if detail.reports.iter().any(|r| !r.is_event()) {
+            locked(&self.counters).extend(
+                detail
+                    .reports
+                    .iter()
+                    .filter(|r| !r.is_event())
+                    .map(|r| (fence.0, *r)),
+            );
         }
         if let Some(q) = result.as_ref().ok().and_then(|r| r.queries.clone()) {
             locked(&self.queries).push((fence.0, q));
@@ -324,6 +336,7 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         crate::private::encoded(job.fence.0, submitted.as_ref());
+        self.events.hold(job.fence.0, &job.detail.reports, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(job.fence.0, b);
         }
@@ -389,6 +402,7 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         crate::private::encoded(fence.0, submitted.as_ref());
+        self.events.hold(fence.0, &detail.reports, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(fence.0, b);
         }

@@ -1,7 +1,11 @@
 //! The event group: `nvnEvent*` and the event builder.
 //!
-//! An event is a 32-bit counter in a memory pool that both the CPU and the GPU can write. The host runs the commands
-//! of the game on the CPU timeline, so `nvnEventSignal` and the GPU signal commands write the word in guest memory directly.
+//! An event is a 32-bit counter in a memory pool that both the CPU and the GPU can write. `nvnEventSignal` writes the
+//! word in guest memory at once. A GPU signal (`nvnCommandBufferSignalEvent`) reaches the word when the GPU finished
+//! the work before it, as on the console (the backend writes it at the completion of the frame, `nxkit-gpu`
+//! `backend::events`), so `nvnEventGetValue` reads guest memory and a game that polls the counter sees the GPU's value
+//! once the results are ready. The queue gate keeps the counters that the GPU signals leave for the order of the
+//! queues (`ctx::gate`).
 //!
 //! The `NVNevent` is 0x40 bytes in guest memory. The host uses the first 0x20 bytes as plain data and writes no more:
 //!

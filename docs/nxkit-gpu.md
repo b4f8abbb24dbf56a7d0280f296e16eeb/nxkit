@@ -111,6 +111,39 @@ NVN has no query objects. A game resets a counter of a queue (`nvnCommandBufferR
 
 The counter type numbers (`SAMPLES_PASSED` 1, the statistics 2 to 0xf, `TIMESTAMP_TOP` 0x10) follow the order of `NVNcounterType`; the per-type counts of `NXKIT_DIAG=rendercond` show which ones a game reports.
 
+### GPU event signals (`backend/events.rs`)
+
+On the console the GPU writes the counter of an event (`nvnCommandBufferSignalEvent`) when it reaches the signal, after the
+work before it is done, and a game polls the counter (`nvnEventGetValue`) to know that the results of that work are ready.
+Before, a GPU signal reached only the queue gate of the runtime (`Gate::ran`), never the word in guest memory, so a poll saw
+only the CPU's signals.
+
+- The walk turns each signal into an event report among the reports of the frame (`REPORT_EVENT_WRITE`, `REPORT_EVENT_ADD`)
+  with the host address of the counter word, read from the `NVNevent` when the walk reads the command (the console binds the
+  address when the command is recorded). Templates of reused recordings carry them like the other reports.
+- The work of a held submit goes into the frame, and to the walk, only when the gate runs it, so a signal in held work is
+  written only after that work ran and the GPU finished it.
+- `EventSignals::hold` keeps the signals of a frame and hooks the completion of its batch (`SubmittedBatch::on_complete`),
+  after the completion of the private GPU memory; a frame without a batch is written at once. The completion of a frame writes
+  its signals and those of every older frame, in the order of the frames and of the commands, before a wait for the batch
+  returns. ADD adds with an atomic compare-and-swap, every other mode writes the value with one. The thread is marked internal,
+  as the writer of the counter reports, so under `NXKIT_PRIVATE` the page tracker serves the write without a wait.
+- The order with CPU signals: the completion is the time the CPU sees the GPU reach the signal, so a CPU signal before it is
+  older and the GPU value wins, as on the console when the GPU executes the signal after the CPU wrote. Only a wait that
+  returned before the frame was done (the early wait of `NXKIT_PRIVATE=1`, the overlap) tells the CPU that the GPU passed the
+  signal when it did not. A CPU signal after such a wait marks its word with the newest fence a wait returned for, and a GPU
+  write from a frame up to that fence is dropped; a GPU add is still added (both adds count in either order). The mark costs
+  two loads when no wait returned early.
+- The gate keeps its own counters (`Gate::events`): it orders the queues on the CPU timeline, when the work goes into the
+  frame, which is before the GPU ran it.
+- A frame without event signals costs a scan of its reports. `NXKIT_DIAG=events` counts the writes, adds, dropped writes and
+  words outside guest memory per completion.
+- Limits: a signal with the location `TOP` is written at the end of the frame too (later than on the console, never earlier).
+  A CPU `ADD` signal made after an early wait on a word that the frame then `WRITE`s loses the GPU's value.
+  `nvnEventSignal` reads and writes the word without an atomic, so a CPU signal in the same instant as the completion's
+  write can overwrite it. A game that polls an
+  event without a present or a CPU wait never gets the frame flushed (`nvnQueueFlush` does not flush).
+
 ## Barriers only where data flows (R19)
 
 `barriers.rs` tracks, for each texture, the stages that wrote it and the stages that read it. Before a pass it emits one `Dependency` only when the pass reads something that an earlier pass wrote, or writes something that an earlier pass wrote or read. The `after` stages are the stages of the earlier writers and the `before` stage is the first stage that needs the data (fragment for a render pass that samples in the fragment stage). A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.

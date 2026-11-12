@@ -100,7 +100,8 @@ impl GateStats {
 pub(crate) struct Gate {
     pub(crate) held: VecDeque<Held>,
     /// The counter of each event (by the address of its word) after the GPU signals that ran. Guest memory has the
-    /// counter when it is not here.
+    /// counter when it is not here. The backend writes the signals into guest memory only when the GPU finished their
+    /// work, which is later: the gate orders the queues on the CPU timeline, before the GPU ran anything.
     events: HashMap<u64, u32>,
     pub(crate) stats: GateStats,
     /// Whether waits hold work (`NXKIT_QUEUE_ORDER` is not `0`).

@@ -49,6 +49,9 @@ fn clear_value(kind: u16, bits: u32) -> f32 {
 /// Bytes of a push constant block (the translator's `PUSH_SIZE`).
 const PUSH_BYTES: usize = 0x100;
 
+/// The offset of the host address of the counter word in an `NVNevent` (the event group of the runtime).
+const EVENT_COUNTER: u64 = 8;
+
 mod copy;
 mod draw;
 mod records;

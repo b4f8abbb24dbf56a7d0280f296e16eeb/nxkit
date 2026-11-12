@@ -32,6 +32,27 @@ impl Walker {
                     addr: x.word64(1),
                 });
             }
+            // The GPU writes the counter of the event when the work before the signal is done. The counter's address is
+            // taken now, as the console takes it when the command is recorded.
+            ExtCode::SignalEvent => {
+                let mut b = [0u8; 8];
+                let event = x.word64(0);
+                let word = mem
+                    .read(event.wrapping_add(EVENT_COUNTER), &mut b)
+                    .map_or(0, |()| u64::from_le_bytes(b));
+                if word != 0 {
+                    let add = x.word(2) == nxkit_nvn::marks::EVENT_SIGNAL_ADD;
+                    self.out.reports.push(crate::detail::CounterReport {
+                        kind: if add {
+                            crate::detail::REPORT_EVENT_ADD
+                        } else {
+                            crate::detail::REPORT_EVENT_WRITE
+                        },
+                        value: x.word(5),
+                        addr: word,
+                    });
+                }
+            }
             ExtCode::Program => {
                 let (program, bits) = (x.word64(0), x.word(2));
                 for (s, p) in st.program.iter_mut().enumerate() {

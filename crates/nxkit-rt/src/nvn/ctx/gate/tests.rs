@@ -75,6 +75,23 @@ fn a_gpu_signal_that_ran_satisfies_a_later_wait_without_touching_memory() {
 }
 
 #[test]
+fn a_signal_in_held_work_counts_only_when_the_work_ran() {
+    let (mut g, mem) = (Gate::new(true), Mem::default().event(E, 0));
+    let held = vec![wait(7), signal(1)];
+    g.push(QB, submit());
+    g.held[0].marks = Some(held.clone());
+    assert_eq!(g.blocker(QB, &held, &mem), Some(wait(7)));
+    // Held, its signal is not in the counter (and the backend never saw its work), but a wait of another queue knows
+    // that held work signals the event.
+    assert_eq!(g.event_value(E, &mem), Some(0));
+    assert!(g.signalled_by_held(E + 0x100, QA, &mem));
+    let _ = g.held.pop_front();
+    g.ran(&held, &mem);
+    assert_eq!(g.event_value(E, &mem), Some(1));
+    assert_eq!(mem.u32(E + 0x100), Some(0), "guest memory gets it when the GPU finished the work");
+}
+
+#[test]
 fn a_signal_earlier_in_the_same_work_counts_and_an_add_adds() {
     let (g, mem) = (Gate::new(true), Mem::default().event(E, 3));
     let add = MarkOp::SignalEvent {

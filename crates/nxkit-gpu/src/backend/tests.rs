@@ -156,3 +156,44 @@ fn a_pool_outside_guest_memory_fails_at_the_call_even_while_an_encode_runs() {
     assert_eq!(backend.pool_ops.counts(), (0, 0));
     assert!(backend.lock_gpu().pools().is_empty());
 }
+
+#[test]
+fn the_event_signals_of_a_frame_reach_the_counter_word_and_not_the_counter_reports() {
+    use crate::detail::{CounterReport, REPORT_EVENT_ADD, REPORT_EVENT_WRITE};
+    let Some((guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    let word = guest.host_base() + 0x40;
+    let counter = |off: u64| {
+        let mut b = [0u8; 4];
+        guest.read(off, &mut b).unwrap();
+        u32::from_le_bytes(b)
+    };
+    let detail = FrameDetail {
+        reports: vec![
+            CounterReport {
+                kind: REPORT_EVENT_WRITE,
+                value: 5,
+                addr: word,
+            },
+            CounterReport {
+                kind: REPORT_EVENT_ADD,
+                value: 3,
+                addr: word,
+            },
+            CounterReport {
+                kind: crate::detail::REPORT_VALUE,
+                value: 1,
+                addr: GUEST_VA_BASE + 0x100,
+            },
+        ],
+        ..FrameDetail::default()
+    };
+    // A frame without a batch is complete at once.
+    backend.events.hold(1, &detail.reports, None);
+    backend.hold_counters(Fence(1), &detail, &Ok::<EncodeReport, ()>(EncodeReport::default()));
+    assert_eq!(counter(0x40), 8);
+    let held = locked(&backend.counters).clone();
+    assert_eq!(held.len(), 1, "only the value report waits for the GPU");
+    assert_eq!(held[0].1.kind, crate::detail::REPORT_VALUE);
+}
