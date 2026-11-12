@@ -1,7 +1,7 @@
 //! The `Backend` trait of [`GpuBackend`]: what the front end calls for queues, fences, memory and presents.
 
-use super::*;
 use super::poolops::PoolOp;
+use super::*;
 
 impl Backend for GpuBackend {
     fn gpu_base(&self) -> u64 {
@@ -61,7 +61,13 @@ impl Backend for GpuBackend {
 
     fn unmap_pool_window(&self, host: u64, len: u64) {
         if let Ok(gpu_addr) = self.guest.address_map().gpu_address(host, len) {
-            self.pool_ops.run(&self.gpu, PoolOp::Unmap { addr: gpu_addr, len });
+            self.pool_ops.run(
+                &self.gpu,
+                PoolOp::Unmap {
+                    addr: gpu_addr,
+                    len,
+                },
+            );
         }
     }
 
@@ -321,7 +327,10 @@ impl GpuBackend {
         }
         if fence.0 == 0 || fence.0 <= self.done.load(Ordering::Acquire) {
             if fence.0 != 0 {
-                self.renamed_wait(fence.0, format_args!("wait done already for fence {}", fence.0));
+                self.renamed_wait(
+                    fence.0,
+                    format_args!("wait done already for fence {}", fence.0),
+                );
             }
             return WaitResult::AlreadyDone;
         }
@@ -355,7 +364,10 @@ impl GpuBackend {
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
                 if ok {
-                    self.renamed_wait(older, format_args!("wait older={older} for fence {}", fence.0));
+                    self.renamed_wait(
+                        older,
+                        format_args!("wait older={older} for fence {}", fence.0),
+                    );
                 }
             }
             return WaitResult::Done;
@@ -387,7 +399,10 @@ impl GpuBackend {
                 }
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
-                self.renamed_wait(older, format_args!("wait older={older} for fence {}", fence.0));
+                self.renamed_wait(
+                    older,
+                    format_args!("wait older={older} for fence {}", fence.0),
+                );
             }
             return WaitResult::Done;
         }

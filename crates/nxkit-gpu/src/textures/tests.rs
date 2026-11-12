@@ -388,13 +388,22 @@ fn a_linear_texture_reads_the_bytes_the_cpu_writes_later_without_an_upload() {
     let (mut store, guest) = store_over_guest(&ctx);
     let mut table = ResourceTable::new();
     let id = table
-        .create(linear_rgba8(64), GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap())
+        .create(
+            linear_rgba8(64),
+            GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap(),
+        )
         .unwrap();
     let mut stats = EncodeStats::default();
     let res = store
         .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
         .unwrap();
-    assert_eq!(res.in_place, Some(InPlace { real: guest.real_base() + 0x1000, stride: 64 }));
+    assert_eq!(
+        res.in_place,
+        Some(InPlace {
+            real: guest.real_base() + 0x1000,
+            stride: 64
+        })
+    );
     assert_eq!(stats.textures_in_place, 1);
     assert!(!TextureStore::needs_upload(&res, table.get(id).unwrap()));
     // The CPU writes texel (3, 2) after the texture was made; the record stays `GuestNewer` or `InSync` as it was.
@@ -424,34 +433,55 @@ fn a_linear_texture_with_a_copy_is_uploaded_in_every_frame_until_the_gpu_writes_
     for (store, stride) in [(&mut misaligned, 72), (&mut plain, 64)] {
         let mut table = ResourceTable::new();
         let id = table
-            .create(linear_rgba8(stride), GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap())
+            .create(
+                linear_rgba8(stride),
+                GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap(),
+            )
             .unwrap();
         let mut stats = EncodeStats::default();
         let res = store
             .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
             .unwrap();
-        assert_eq!((res.in_place, res.reupload, stats.textures_in_place), (None, true, 0), "stride {stride}");
+        assert_eq!(
+            (res.in_place, res.reupload, stats.textures_in_place),
+            (None, true, 0),
+            "stride {stride}"
+        );
         table.synced(id).unwrap();
         let res = store
             .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
             .unwrap();
         assert!(!res.fresh);
-        assert!(TextureStore::needs_upload(&res, table.get(id).unwrap()), "stride {stride}");
+        assert!(
+            TextureStore::needs_upload(&res, table.get(id).unwrap()),
+            "stride {stride}"
+        );
         table.gpu_wrote(id).unwrap();
-        assert!(!TextureStore::needs_upload(&res, table.get(id).unwrap()), "stride {stride}");
+        assert!(
+            !TextureStore::needs_upload(&res, table.get(id).unwrap()),
+            "stride {stride}"
+        );
     }
     // A block-linear texture in the same state keeps its copy until the CPU tells.
     let mut table = ResourceTable::new();
     let id = table
         .create(
-            nxkit_nvn::layout::TextureDesc { flags: 0, stride: 0, ..linear_rgba8(0) },
+            nxkit_nvn::layout::TextureDesc {
+                flags: 0,
+                stride: 0,
+                ..linear_rgba8(0)
+            },
             GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap(),
         )
         .unwrap();
     let mut stats = EncodeStats::default();
-    plain.ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats).unwrap();
+    plain
+        .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
     table.synced(id).unwrap();
-    let res = plain.ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats).unwrap();
+    let res = plain
+        .ensure(table.get(id).unwrap(), 1.0, Use::default(), &mut stats)
+        .unwrap();
     assert!(!res.reupload && !TextureStore::needs_upload(&res, table.get(id).unwrap()));
 }
 
@@ -463,9 +493,15 @@ fn a_linear_attachment_keeps_its_copy() {
     let (mut store, _guest) = store_over_guest(&ctx);
     let mut table = ResourceTable::new();
     let id = table
-        .create(linear_rgba8(64), GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap())
+        .create(
+            linear_rgba8(64),
+            GpuAddr::new(nxkit_metal::GUEST_VA_BASE + 0x1000).unwrap(),
+        )
         .unwrap();
-    let u = Use { attachment: true, ..Use::default() };
+    let u = Use {
+        attachment: true,
+        ..Use::default()
+    };
     store.note(id, u);
     let res = store
         .ensure(table.get(id).unwrap(), 1.0, u, &mut EncodeStats::default())

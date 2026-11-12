@@ -167,8 +167,14 @@ pub(super) fn encode(
     let what = || {
         format!(
             "{:?} {}x{} {:?} -> {:?} {}x{} {:?}",
-            sd.format, src_box.size[0], src_box.size[1], src_box.origin,
-            dd.format, dst_box.size[0], dst_box.size[1], dst_box.origin
+            sd.format,
+            src_box.size[0],
+            src_box.size[1],
+            src_box.origin,
+            dd.format,
+            dst_box.size[0],
+            dst_box.size[1],
+            dst_box.origin
         )
     };
     if let Some(why) = refuse(&sd, &dd) {

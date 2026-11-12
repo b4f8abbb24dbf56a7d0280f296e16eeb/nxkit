@@ -34,7 +34,7 @@ use crate::table::Keep;
 /// seconds of the host clock. For the diagnostics of the host; set once.
 static DONE_HOOK: std::sync::OnceLock<fn(u64, usize, f64, f64)> = std::sync::OnceLock::new();
 
-/// Sets the hook of [`DONE_HOOK`]. The first call wins.
+/// Sets the hook of `DONE_HOOK`. The first call wins.
 pub fn set_done_hook(f: fn(u64, usize, f64, f64)) {
     let _ = DONE_HOOK.set(f);
 }
@@ -44,7 +44,7 @@ pub fn set_done_hook(f: fn(u64, usize, f64, f64)) {
 /// set once.
 static COMMIT_HOOK: std::sync::OnceLock<fn(u64, u64)> = std::sync::OnceLock::new();
 
-/// Sets the hook of [`COMMIT_HOOK`]. The first call wins.
+/// Sets the hook of `COMMIT_HOOK`. The first call wins.
 pub fn set_commit_hook(f: fn(u64, u64)) {
     let _ = COMMIT_HOOK.set(f);
 }
@@ -539,7 +539,7 @@ impl Batch {
     }
 
     /// For a batch with a prefix: the handle that commits the first group while the rest of the batch is encoded. Every
-    /// command buffer of the group must be handed to [`Ahead::finish`] by the thread that encoded it (the first one,
+    /// command buffer of the group must be handed to `Ahead::finish` by the thread that encoded it (the first one,
     /// `buffers()[0]`, included), and nothing may be encoded into them afterwards. [`submit`](Self::submit) then commits
     /// only the other groups. None when the batch has no prefix.
     pub fn commit_ahead(&mut self) -> Option<Arc<Ahead>> {
@@ -568,10 +568,10 @@ impl Batch {
     }
 
     /// Streams the batch: the first `count` command buffers are committed as soon as each one is ended (by
-    /// [`Ahead::finish`], on the thread that encoded it) while the other command buffers are still being encoded, so
+    /// `Ahead::finish`, on the thread that encoded it) while the other command buffers are still being encoded, so
     /// the GPU starts after that prefix and not after the whole batch. The order of the command buffers stays the order of
     /// the slice. Returns None when `count` is 0 or not smaller than the number of command buffers, or when the groups are
-    /// fixed already. Every command buffer of the prefix must be handed to [`Ahead::finish`], and nothing may be encoded
+    /// fixed already. Every command buffer of the prefix must be handed to `Ahead::finish`, and nothing may be encoded
     /// into them afterwards; [`submit`](Self::submit) then commits only the rest. The commit costs the GPU a short pause at
     /// the boundary (about 0.2 ms).
     pub fn stream_prefix(&mut self, count: usize) -> Option<Arc<Ahead>> {

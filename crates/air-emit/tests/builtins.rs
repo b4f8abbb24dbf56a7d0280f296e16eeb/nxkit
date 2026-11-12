@@ -47,10 +47,7 @@ fn simd_shuffle_freezes_the_data_and_votes_are_convergent() {
         "!\"air.thread_index_in_simdgroup\", !\"air.arg_type_name\", !\"uint\"",
     );
     for (ty, f) in [
-        (
-            "float",
-            "nsz arcp afn float @air.simd_shuffle.f32(float",
-        ),
+        ("float", "nsz arcp afn float @air.simd_shuffle.f32(float"),
         ("i32", "i32 @air.simd_shuffle.s.i32(i32"),
         ("i32", "i32 @air.simd_shuffle.u.i32(i32"),
         (

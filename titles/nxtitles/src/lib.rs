@@ -333,9 +333,20 @@ mod tests {
     fn the_catalog_builds() {
         let c = catalog().unwrap();
         // every title names the family `agl` or none
-        assert!(c.titles().iter().all(|t| t.family().is_none_or(|f| f == "agl")));
-        let agl = c.titles().iter().filter(|t| t.family() == Some("agl")).count();
-        assert_eq!(c.missing_families().len(), if cfg!(feature = "agl") { 0 } else { agl });
+        assert!(
+            c.titles()
+                .iter()
+                .all(|t| t.family().is_none_or(|f| f == "agl"))
+        );
+        let agl = c
+            .titles()
+            .iter()
+            .filter(|t| t.family() == Some("agl"))
+            .count();
+        assert_eq!(
+            c.missing_families().len(),
+            if cfg!(feature = "agl") { 0 } else { agl }
+        );
     }
 
     #[test]
@@ -346,7 +357,11 @@ mod tests {
             let r = c.resolve(&TitleFacts::new(t.id()));
             let st = r.standalone();
             assert!(st.is_some() && r.title_rules().is_some(), "{}", t.name());
-            assert!(r.nxkit_services().contains(&nxtitle::Service::Kernel), "{}", t.name());
+            assert!(
+                r.nxkit_services().contains(&nxtitle::Service::Kernel),
+                "{}",
+                t.name()
+            );
             assert!(t.profile().is_some(), "{}", t.name());
         }
     }

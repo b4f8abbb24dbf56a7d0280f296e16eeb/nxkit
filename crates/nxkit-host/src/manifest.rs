@@ -194,7 +194,7 @@ impl Memory {
         })
     }
 
-    /// The profile with `NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` (sizes as [`parse_size`] reads them) in place of
+    /// The profile with `NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` (sizes as `parse_size` reads them) in place of
     /// the title's numbers, to try a smaller split before the title module gets it. The GPU buffer covers the heap,
     /// stack and alias regions and the driver wires all of it, so each GiB less is a GiB of RAM; a region smaller than
     /// the game's peak makes its `SetHeapSize` or `MapPhysicalMemory` fail (the host prints the peaks at the end of a

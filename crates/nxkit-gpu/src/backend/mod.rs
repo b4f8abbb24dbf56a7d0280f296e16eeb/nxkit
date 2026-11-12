@@ -154,7 +154,12 @@ impl GpuBackend {
             crate::overlap::set_on();
         }
         // `NXKIT_PRIVATE`: the page tracker and, for `1`, the mirror. With the mirror the overlap and the renamer are off.
-        crate::private::attach(ctx, guest.host_base(), guest.len(), space.address_map().gpu_base());
+        crate::private::attach(
+            ctx,
+            guest.host_base(),
+            guest.len(),
+            space.address_map().gpu_base(),
+        );
         let threaded =
             settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {
@@ -336,7 +341,8 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         crate::private::encoded(job.fence.0, submitted.as_ref());
-        self.events.hold(job.fence.0, &job.detail.reports, submitted.as_ref());
+        self.events
+            .hold(job.fence.0, &job.detail.reports, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(job.fence.0, b);
         }
@@ -402,7 +408,8 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         crate::private::encoded(fence.0, submitted.as_ref());
-        self.events.hold(fence.0, &detail.reports, submitted.as_ref());
+        self.events
+            .hold(fence.0, &detail.reports, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(fence.0, b);
         }
@@ -470,7 +477,9 @@ impl GpuBackend {
         }
         if crate::diag("pools") && n.is_multiple_of(300) {
             let (direct, deferred) = self.pool_ops.counts();
-            eprintln!("DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}");
+            eprintln!(
+                "DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}"
+            );
         }
         let diag = stats_diag();
         if crate::diag("pixelall") && n.is_multiple_of(10) {
@@ -513,7 +522,8 @@ impl GpuBackend {
     fn present_now(&self, present: Present) -> BackendResult<()> {
         // The number goes first, so that a present without a texture still counts as one of the game's presents.
         let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
-        let texture = self.lock_gpu()
+        let texture = self
+            .lock_gpu()
             .texture(present.texture)
             .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
         encpace::ready(number);

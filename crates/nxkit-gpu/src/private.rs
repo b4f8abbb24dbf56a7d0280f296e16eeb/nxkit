@@ -57,9 +57,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use nxkit_metal::{
-    AccessForm, AddressMap, ArgumentTable, CommandBuffer, ComputeCommand, Context, DataBuffer, Dependency,
-    FallbackReason, FaultKind, FaultOrigin, GuestMemory, Mirror, PageStats, Pages, Scope, Scratch, SnapWhy, Stager,
-    Stages, SubmittedBatch, Visibility,
+    AccessForm, AddressMap, ArgumentTable, CommandBuffer, ComputeCommand, Context, DataBuffer,
+    Dependency, FallbackReason, FaultKind, FaultOrigin, GuestMemory, Mirror, PageStats, Pages,
+    Scope, Scratch, SnapWhy, Stager, Stages, SubmittedBatch, Visibility,
 };
 
 use crate::detail::{CopyKind, DrawArgs, FrameDetail, Stage, StreamDetail};
@@ -401,7 +401,9 @@ pub(crate) fn note_early() {
 /// A fence wait that was answered at the flush also waited `d` for the frame [`nxkit_metal::BATCHES_IN_FLIGHT`] before.
 pub(crate) fn note_bounded(d: std::time::Duration) {
     let ns = d.as_nanos() as u64;
-    WAITS.bounded.fetch_add(u64::from(ns > 50_000), Ordering::Relaxed);
+    WAITS
+        .bounded
+        .fetch_add(u64::from(ns > 50_000), Ordering::Relaxed);
     WAITS.bounded_ns.fetch_add(ns, Ordering::Relaxed);
     WAITS.bounded_max_ns.fetch_max(ns, Ordering::Relaxed);
 }
@@ -448,7 +450,9 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                         pages.set_emulation(!off);
                         if !off && late_results() {
                             pages.set_late(true);
-                            if !std::env::var("NXKIT_PRIVATE_READOPEN").is_ok_and(|v| v.trim() == "0") {
+                            if !std::env::var("NXKIT_PRIVATE_READOPEN")
+                                .is_ok_and(|v| v.trim() == "0")
+                            {
                                 pages.set_read_open(true);
                                 eprintln!(
                                     "nxkit-gpu: NXKIT_PRIVATE=1: a page whose guest bytes are a completed frame's stays readable while a \
@@ -464,7 +468,11 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                         eprintln!(
                             "nxkit-gpu: NXKIT_PRIVATE=1: accesses of the CPU to a page that a frame writes, outside the bytes it \
                              writes, are done by the fault handler through a second mapping of guest memory{}",
-                            if off { " (off: the knob privnoemu)" } else { "" }
+                            if off {
+                                " (off: the knob privnoemu)"
+                            } else {
+                                ""
+                            }
                         );
                     }
                     Err(e) => eprintln!(
@@ -488,7 +496,9 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
             }
             Err(e) => {
                 FAILED.store(true, Ordering::Relaxed);
-                eprintln!("nxkit-gpu: NXKIT_PRIVATE=1: no mirror ({e}); the run goes on without it");
+                eprintln!(
+                    "nxkit-gpu: NXKIT_PRIVATE=1: no mirror ({e}); the run goes on without it"
+                );
             }
         }
         return;
@@ -566,7 +576,14 @@ pub(crate) fn note_rw(detail: &FrameDetail, programs: &Programs) {
         let h = hash_str(&d.program);
         for s in &d.sbufs {
             if s.stage == Stage::Compute {
-                learn(rw, h, &d.program, false, s.slot, s.slot | (s.stage as u32) << 24);
+                learn(
+                    rw,
+                    h,
+                    &d.program,
+                    false,
+                    s.slot,
+                    s.slot | (s.stage as u32) << 24,
+                );
             }
         }
     }
@@ -772,11 +789,14 @@ pub(crate) fn plan_cuts(
         span(runs, &mut |k| last[k] = Some(i));
     }
     span(blocked, &mut |k| stop[k] = true);
-    let mut by_pass: std::collections::BTreeMap<usize, Vec<u32>> = std::collections::BTreeMap::new();
+    let mut by_pass: std::collections::BTreeMap<usize, Vec<u32>> =
+        std::collections::BTreeMap::new();
     let mut unserved = 0;
     for (k, &page) in readers.iter().enumerate() {
         match last[k] {
-            Some(i) if !stop[k] && i + 1 < pass_runs.len() => by_pass.entry(i).or_default().push(page),
+            Some(i) if !stop[k] && i + 1 < pass_runs.len() => {
+                by_pass.entry(i).or_default().push(page)
+            }
             _ => unserved += 1,
         }
     }
@@ -832,11 +852,17 @@ pub(crate) fn early_cuts(
     let mut attributed: Vec<(u32, u32)> = Vec::new();
     let mut pass_runs: Vec<Vec<(u32, u32)>> = Vec::with_capacity(plan.passes.len());
     for pass in &plan.passes {
-        if !matches!(pass.kind, PassKind::Render | PassKind::Compute | PassKind::Copy) {
+        if !matches!(
+            pass.kind,
+            PassKind::Render | PassKind::Compute | PassKind::Copy
+        ) {
             pass_runs.push(Vec::new());
             continue;
         }
-        let (Some(lo), Some(hi)) = (ords.get(pass.cmds.start as usize), ords.get(pass.cmds.end as usize)) else {
+        let (Some(lo), Some(hi)) = (
+            ords.get(pass.cmds.start as usize),
+            ords.get(pass.cmds.end as usize),
+        ) else {
             // A pass that names commands outside the frame: nothing can be said about it.
             return EarlyPlan {
                 readers: readers.len(),
@@ -869,7 +895,12 @@ pub(crate) fn early_cuts(
         &mut seen,
     );
     drop(rw);
-    let mut blocked = runs_of_ranges(&learned.iter().map(|&(lo, hi)| (lo, hi.saturating_sub(lo))).collect::<Vec<_>>());
+    let mut blocked = runs_of_ranges(
+        &learned
+            .iter()
+            .map(|&(lo, hi)| (lo, hi.saturating_sub(lo)))
+            .collect::<Vec<_>>(),
+    );
     attributed.sort_unstable();
     let known = |p: u32| {
         let i = attributed.partition_point(|&(_, e)| e <= p);
@@ -1136,7 +1167,9 @@ fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64, u8)> {
                 ..
             } => add(address, u64::from(count) << index_type.min(2), BIND_INDEX),
             DrawArgs::ArraysIndirect { indirect } => add(indirect, 16, BIND_INDIRECT),
-            DrawArgs::IndexedIndirect { address, indirect, .. } => {
+            DrawArgs::IndexedIndirect {
+                address, indirect, ..
+            } => {
                 add(address, UNKNOWN_BYTES, BIND_INDEX);
                 add(indirect, 20, BIND_INDIRECT);
             }
@@ -1150,7 +1183,11 @@ fn read_ranges(detail: &FrameDetail) -> Vec<(u64, u64, u8)> {
                 if let Some((_, a)) = index {
                     add(a, UNKNOWN_BYTES, BIND_INDEX);
                 }
-                add(indirect, (u64::from(max) * stride.max(20)).min(RANGE_MAX_BYTES), BIND_INDIRECT);
+                add(
+                    indirect,
+                    (u64::from(max) * stride.max(20)).min(RANGE_MAX_BYTES),
+                    BIND_INDIRECT,
+                );
                 add(count, 4, BIND_INDIRECT);
             }
             DrawArgs::MeshTasksIndirect { indirect } => add(indirect, 8, BIND_INDIRECT),
@@ -1185,7 +1222,14 @@ const BIND_STREAM: u8 = 2;
 const BIND_INDEX: u8 = 3;
 const BIND_INDIRECT: u8 = 4;
 const BIND_COPY: u8 = 5;
-const BIND_NAMES: [&str; 6] = ["uniform", "storage", "vertex", "index", "indirect", "copy source"];
+const BIND_NAMES: [&str; 6] = [
+    "uniform",
+    "storage",
+    "vertex",
+    "index",
+    "indirect",
+    "copy source",
+];
 
 /// The host address of the GPU range `[a, a + len)` and its length cut to the end of guest memory.
 fn clamped_host(map: &AddressMap, a: u64, len: u64) -> Option<(u64, u64)> {
@@ -1283,7 +1327,11 @@ impl StagePool {
     }
 
     /// A buffer for `pages` pages.
-    fn take(&mut self, ctx: &Context, pages: usize) -> Result<Arc<DataBuffer>, nxkit_metal::MetalError> {
+    fn take(
+        &mut self,
+        ctx: &Context,
+        pages: usize,
+    ) -> Result<Arc<DataBuffer>, nxkit_metal::MetalError> {
         let need = pages.max(1) as u64 * PAGE;
         if let Some(i) = self.free.iter().position(|b| b.len() >= need) {
             return Ok(self.free.swap_remove(i));
@@ -1324,10 +1372,22 @@ impl<'a> Sink<'a> {
 
     /// What the sink took: the buffer, the slots, the masks sorted by page, and whether it failed.
     #[allow(clippy::type_complexity)]
-    fn finish(&mut self) -> (Option<Arc<DataBuffer>>, Vec<(u32, u32)>, Vec<(u32, [u64; 4])>, bool) {
+    fn finish(
+        &mut self,
+    ) -> (
+        Option<Arc<DataBuffer>>,
+        Vec<(u32, u32)>,
+        Vec<(u32, [u64; 4])>,
+        bool,
+    ) {
         let mut skips: Vec<(u32, [u64; 4])> = self.skips.drain().collect();
         skips.sort_unstable_by_key(|s| s.0);
-        (self.buf.take(), std::mem::take(&mut self.slots), skips, self.failed)
+        (
+            self.buf.take(),
+            std::mem::take(&mut self.slots),
+            skips,
+            self.failed,
+        )
     }
 
     fn grow(&mut self) {
@@ -1474,7 +1534,10 @@ fn flush_mirror(
     // flight: wait for those frames once, before the page is copied.
     let enters_learned = members.added.0.iter().any(|&(s, e)| {
         (s..e).any(|p| {
-            let wasn_t = members.bits.get(p as usize / 64).is_none_or(|w| w >> (p % 64) & 1 == 0);
+            let wasn_t = members
+                .bits
+                .get(p as usize / 64)
+                .is_none_or(|w| w >> (p % 64) & 1 == 0);
             wasn_t
                 && learned.iter().any(|&(lo, hi)| {
                     map.host_address(lo, hi - lo)
@@ -1509,7 +1572,11 @@ fn flush_mirror(
             ms.pool.busy.push((fence, b.clone()));
             let mut slots = slots;
             slots.sort_unstable();
-            Some(Staged { buf: b, slots, skips })
+            Some(Staged {
+                buf: b,
+                slots,
+                skips,
+            })
         }
         Some(b) => {
             ms.pool.free.push(b);
@@ -1518,14 +1585,21 @@ fn flush_mirror(
         None => None,
     };
     // Results one frame late: a buffer for the GPU's copies of the late pages at the start and the end of the frame.
-    let late_pages = if pages.late() { pages.late_copy_pages(fence) } else { Vec::new() };
+    let late_pages = if pages.late() {
+        pages.late_copy_pages(fence)
+    } else {
+        Vec::new()
+    };
     let late_copies = if late_pages.is_empty() {
         None
     } else {
         match ms.pool.take(&ms.ctx, 2 * late_pages.len()) {
             Ok(b) => {
                 ms.pool.busy.push((fence, b.clone()));
-                Some(LateCopies { buf: b, pages: late_pages })
+                Some(LateCopies {
+                    buf: b,
+                    pages: late_pages,
+                })
             }
             Err(_) => None,
         }
@@ -1555,7 +1629,11 @@ fn flush_mirror(
             let h = map.host_address(lo, hi - lo).ok()?;
             Some((h, h + (hi - lo), 1))
         }));
-        diag_sets = Some((r, written.iter().map(|&(h, l)| (h, h + l)).collect(), sources));
+        diag_sets = Some((
+            r,
+            written.iter().map(|&(h, l)| (h, h + l)).collect(),
+            sources,
+        ));
     }
     let (bits, member_gen) = pages.member_snapshot();
     let runs: Vec<Run<Arc<GuestMemory>>> = ms
@@ -1585,10 +1663,17 @@ fn flush_mirror(
     // With a class bound to guest memory, guest memory must be current: every page a frame wrote is copied back when the
     // frame completes.
     pages.set_eager_sync(off != 0);
-    let overlay = Overlay::new(ms.va_base, bits, runs, Some(ms.mirror.view()), staged, generation)
-        .with_off(off)
-        .with_frame(fence, late)
-        .with_late(late_copies);
+    let overlay = Overlay::new(
+        ms.va_base,
+        bits,
+        runs,
+        Some(ms.mirror.view()),
+        staged,
+        generation,
+    )
+    .with_off(off)
+    .with_frame(fence, late)
+    .with_late(late_copies);
     drop(guard);
     let n = st.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let report = {
@@ -1614,7 +1699,8 @@ fn flush_mirror(
         w.t_pages += f.ns;
         let total = t_all.elapsed().as_nanos() as u64;
         w.t_total += total;
-        w.t_rest += total.saturating_sub(t_written_ns + t_reads_ns + t_closure_ns + t_ensure_ns + f.ns);
+        w.t_rest +=
+            total.saturating_sub(t_written_ns + t_reads_ns + t_closure_ns + t_ensure_ns + f.ns);
         w.t_new += f.new_ns;
         w.t_log += f.log_ns;
         w.t_stage += f.stage_ns;
@@ -1688,7 +1774,11 @@ pub(crate) fn copy_in_jobs(o: &GuestOverlay) -> (Vec<CopyJob>, u32) {
         .filter_map(|&(page, slot)| {
             let va = o.va_base() + u64::from(page) * PAGE;
             match o.locate(va) {
-                Some((_, real, _)) => Some((real, base + u64::from(slot) * PAGE, st.skip_of(page).unwrap_or([0; 4]))),
+                Some((_, real, _)) => Some((
+                    real,
+                    base + u64::from(slot) * PAGE,
+                    st.skip_of(page).unwrap_or([0; 4]),
+                )),
                 None => {
                     lost += 1;
                     None
@@ -1723,7 +1813,9 @@ pub(crate) fn encode_copy_in(
     let job = scratch.push(&bytes).map_err(|_| Skip::Buffer)?;
     let pipeline = pipelines.host_compute("nxkit-private", COPY_IN_MSL, "nxkit_private_in")?;
     let mut cp = cb.begin_compute_pass(table).map_err(|_| Skip::Encode)?;
-    let enc = |cp: &mut nxkit_metal::ComputePass<'_>, c: ComputeCommand| cp.encode(&c).map_err(|_| Skip::Encode);
+    let enc = |cp: &mut nxkit_metal::ComputePass<'_>, c: ComputeCommand| {
+        cp.encode(&c).map_err(|_| Skip::Encode)
+    };
     enc(
         &mut cp,
         ComputeCommand::Depend(Dependency {
@@ -1833,7 +1925,10 @@ fn note_between(fence: u64) {
     drain_in_flight();
     let pages = Pages::global();
     let (writes, total) = pages.take_between(fence);
-    let sets = locked(&state().sets).iter().find(|f| f.fence == fence).cloned();
+    let sets = locked(&state().sets)
+        .iter()
+        .find(|f| f.fence == fence)
+        .cloned();
     let mut w = locked(&state().window);
     w.between_frames += 1;
     w.between_pages += u64::from(total);
@@ -1852,7 +1947,11 @@ fn note_between(fence: u64) {
             reads_forced += 1;
             if w.between_samples < 12 {
                 w.between_samples += 1;
-                let (s, e, _) = *sets.reads.iter().find(|&&(s, e, _)| s <= a && a < e).unwrap_or(&(0, 0, 0));
+                let (s, e, _) = *sets
+                    .reads
+                    .iter()
+                    .find(|&&(s, e, _)| s <= a && a < e)
+                    .unwrap_or(&(0, 0, 0));
                 eprintln!(
                     "DIAG private between sample: fence {fence} write at {a:#x} (offset {:#x} in its page) inside a {} binding \
                      {s:#x}..{e:#x} ({} bytes)",
@@ -1861,8 +1960,14 @@ fn note_between(fence: u64) {
                     e - s,
                 );
             }
-        } else if sets.written.iter().any(|&(s, e)| page_of(s) <= page_of(a) && page_of(a) <= page_of(e - 1))
-            || sets.reads.iter().any(|&(s, e, _)| page_of(s) <= page_of(a) && page_of(a) <= page_of(e - 1))
+        } else if sets
+            .written
+            .iter()
+            .any(|&(s, e)| page_of(s) <= page_of(a) && page_of(a) <= page_of(e - 1))
+            || sets
+                .reads
+                .iter()
+                .any(|&(s, e, _)| page_of(s) <= page_of(a) && page_of(a) <= page_of(e - 1))
         {
             w.between_same_page += 1;
         } else {
@@ -1887,7 +1992,10 @@ fn note_between(fence: u64) {
                 w.uncompared += 1;
                 continue;
             }
-            if !sets.view.read(sets.view.va_base() + (lo - pages.host_base()), &mut seen) {
+            if !sets
+                .view
+                .read(sets.view.va_base() + (lo - pages.host_base()), &mut seen)
+            {
                 w.uncompared += 1;
                 continue;
             }
@@ -1917,15 +2025,34 @@ fn drain_in_flight() {
     let mut w = locked(&state().window);
     for &(frame, a, write) in &log {
         let pa = a - (a - pages.host_base()) % psize;
-        let set = sets.iter().find(|f| (f.fence & 0x0fff_ffff) as u32 == frame);
+        let set = sets
+            .iter()
+            .find(|f| (f.fence & 0x0fff_ffff) as u32 == frame);
         let exact = set.and_then(|f| f.sources.iter().find(|&&(s, e, _)| s <= a && a < e));
         let (class, what) = match (set, exact) {
-            (_, Some(&(s, e, 0))) => (0usize, format!("inside a binding or copy {s:#x}..{e:#x} ({} bytes)", e - s)),
-            (_, Some(&(s, e, _))) => (1, format!("inside a raw-store pool {s:#x}..{e:#x} ({} MiB)", (e - s) >> 20)),
+            (_, Some(&(s, e, 0))) => (
+                0usize,
+                format!("inside a binding or copy {s:#x}..{e:#x} ({} bytes)", e - s),
+            ),
+            (_, Some(&(s, e, _))) => (
+                1,
+                format!(
+                    "inside a raw-store pool {s:#x}..{e:#x} ({} MiB)",
+                    (e - s) >> 20
+                ),
+            ),
             (Some(f), None) => {
-                let near = f.sources.iter().find(|&&(s, e, _)| s < pa + psize && pa < e);
+                let near = f
+                    .sources
+                    .iter()
+                    .find(|&&(s, e, _)| s < pa + psize && pa < e);
                 match near {
-                    Some(&(s, e, _)) => (2, format!("outside the bytes of the range {s:#x}..{e:#x} that shares the page")),
+                    Some(&(s, e, _)) => (
+                        2,
+                        format!(
+                            "outside the bytes of the range {s:#x}..{e:#x} that shares the page"
+                        ),
+                    ),
                     None => (2, "in no source of its frame".to_string()),
                 }
             }
@@ -1946,12 +2073,18 @@ fn report_in_flight(w: &mut Window) {
     if (0..4).all(|c| t(c) == 0) {
         return;
     }
-    w.flight_pages.sort_unstable_by_key(|e| std::cmp::Reverse(e.1));
+    w.flight_pages
+        .sort_unstable_by_key(|e| std::cmp::Reverse(e.1));
     let top: Vec<String> = w
         .flight_pages
         .iter()
         .take(6)
-        .map(|(a, c, write, what)| format!("{a:#x} {c} first {} ({what})", if *write { "writes" } else { "reads" }))
+        .map(|(a, c, write, what)| {
+            format!(
+                "{a:#x} {c} first {} ({what})",
+                if *write { "writes" } else { "reads" }
+            )
+        })
         .collect();
     eprintln!(
         "DIAG private in flight (first accesses of game threads to a page of a frame in flight, in the window; read/write): \
@@ -2088,7 +2221,10 @@ pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<CopyJob> {
                 late_capture(fence, fr);
                 break;
             }
-            v = LATE_CV.wait_timeout(v, left).unwrap_or_else(PoisonError::into_inner).0;
+            v = LATE_CV
+                .wait_timeout(v, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
         let fr = late_entry(&mut v, fence);
         if let Some(s) = fr.staged.take() {
@@ -2154,7 +2290,9 @@ fn print_report(frame: u64) {
     let mib = |p: f64| p * page / (1024.0 * 1024.0);
     let d = |k: FaultKind| kind_sum(&now, k) - kind_sum(&base, k);
     let by_origin = |k: FaultKind| {
-        let g = |o: FaultOrigin| now.faults[k as usize][o as usize] - base.faults[k as usize][o as usize];
+        let g = |o: FaultOrigin| {
+            now.faults[k as usize][o as usize] - base.faults[k as usize][o as usize]
+        };
         format!(
             "guest {:.1} host {:.1} internal {:.1}",
             g(FaultOrigin::Guest) as f64 / n,
@@ -2188,7 +2326,11 @@ fn print_report(frame: u64) {
         by_origin(FaultKind::WriteInFlight),
         d(FaultKind::ReadInFlight) as f64 / n,
         by_origin(FaultKind::ReadInFlight),
-        if mirrored() { " and pages copied from the mirror" } else { "" },
+        if mirrored() {
+            " and pages copied from the mirror"
+        } else {
+            ""
+        },
         (d(FaultKind::Other) + d(FaultKind::Sync)) as f64 / n,
         (now.handler_ns - base.handler_ns) as f64 / n / 1e6,
     );
@@ -2210,19 +2352,29 @@ fn print_report(frame: u64) {
         now.mprotect_failed - base.mprotect_failed,
         now.log_overflows - base.log_overflows,
         if now.pc_overflow > base.pc_overflow {
-            format!(", program counters over the table {}", now.pc_overflow - base.pc_overflow)
+            format!(
+                ", program counters over the table {}",
+                now.pc_overflow - base.pc_overflow
+            )
         } else {
             String::new()
         },
     );
     if mirrored() {
-        let (usable, runs, retired) = locked(&st.mirror)
-            .as_ref()
-            .map_or((0, 0, 0), |m| (m.mirror.usable_bytes(), m.mirror.runs().len(), m.mirror.retired()));
+        let (usable, runs, retired) = locked(&st.mirror).as_ref().map_or((0, 0, 0), |m| {
+            (
+                m.mirror.usable_bytes(),
+                m.mirror.runs().len(),
+                m.mirror.retired(),
+            )
+        });
         let partial_now = crate::overlay::partial_table();
-        let partial: u64 = partial_now.iter().flatten().sum::<u64>() - w.partial_base.iter().flatten().sum::<u64>();
-        let sync = |o: FaultOrigin| now.faults[FaultKind::Sync as usize][o as usize]
-            - base.faults[FaultKind::Sync as usize][o as usize];
+        let partial: u64 = partial_now.iter().flatten().sum::<u64>()
+            - w.partial_base.iter().flatten().sum::<u64>();
+        let sync = |o: FaultOrigin| {
+            now.faults[FaultKind::Sync as usize][o as usize]
+                - base.faults[FaultKind::Sync as usize][o as usize]
+        };
         eprintln!(
             "DIAG private mirror frame {frame}: mirror {:.1} MiB usable in {runs} runs ({retired} buffers retired), \
              members {} pages; per frame: staged {:.1} pages ({:.2} MiB, {:.2} written again), copy-in {:.1} pages \
@@ -2267,7 +2419,11 @@ fn print_report(frame: u64) {
         eprintln!(
             "DIAG private partial resolves per frame: {} ({} ranges learned for the closure, {} partial resolves of a \
              learned range in the window: a limit of the closure kept it split)",
-            if parts.is_empty() { "none".to_string() } else { parts.join(", ") },
+            if parts.is_empty() {
+                "none".to_string()
+            } else {
+                parts.join(", ")
+            },
             crate::overlay::partial_range_count(),
             crate::overlay::partial_repeats() - w.repeats_base
         );
@@ -2320,7 +2476,10 @@ fn print_report(frame: u64) {
             )
         };
         let full = |i: usize| WAITS.full[i].swap(0, Ordering::Relaxed);
-        let (early, bounded) = (WAITS.early.swap(0, Ordering::Relaxed), WAITS.bounded.swap(0, Ordering::Relaxed));
+        let (early, bounded) = (
+            WAITS.early.swap(0, Ordering::Relaxed),
+            WAITS.bounded.swap(0, Ordering::Relaxed),
+        );
         let (bounded_ns, bounded_max) = (
             WAITS.bounded_ns.swap(0, Ordering::Relaxed),
             WAITS.bounded_max_ns.swap(0, Ordering::Relaxed),
@@ -2379,9 +2538,19 @@ fn print_report(frame: u64) {
                 let v: Vec<String> = SnapWhy::ALL
                     .iter()
                     .filter(|w| a[**w as usize] > b[**w as usize])
-                    .map(|w| format!("{} {:.2}", w.name(), (a[*w as usize] - b[*w as usize]) as f64 / n))
+                    .map(|w| {
+                        format!(
+                            "{} {:.2}",
+                            w.name(),
+                            (a[*w as usize] - b[*w as usize]) as f64 / n
+                        )
+                    })
                     .collect();
-                if v.is_empty() { "none".to_string() } else { v.join(", ") }
+                if v.is_empty() {
+                    "none".to_string()
+                } else {
+                    v.join(", ")
+                }
             };
             eprintln!(
                 "DIAG private snapshots, per frame: dropped: {}; late accesses that found none and waited, by the last reason: \
@@ -2430,11 +2599,19 @@ fn print_report(frame: u64) {
                     .filter(|f| f.is_load() == loads && per(**f) > 0)
                     .map(|f| format!("{} {:.2}", f.name(), per(*f) as f64 / n))
                     .collect();
-                let sum: u64 = AccessForm::ALL.iter().filter(|f| f.is_load() == loads).map(|f| per(*f)).sum();
+                let sum: u64 = AccessForm::ALL
+                    .iter()
+                    .filter(|f| f.is_load() == loads)
+                    .map(|f| per(*f))
+                    .sum();
                 format!(
                     "{:.2} ({})",
                     sum as f64 / n,
-                    if list.is_empty() { "none".to_string() } else { list.join(", ") }
+                    if list.is_empty() {
+                        "none".to_string()
+                    } else {
+                        list.join(", ")
+                    }
                 )
             };
             let missed: Vec<String> = FallbackReason::ALL
@@ -2456,17 +2633,29 @@ fn print_report(frame: u64) {
                 part(false),
                 (now.emulated_ns - base.emulated_ns) as f64 / n / 1e6,
                 (now.emu_staged - base.emu_staged) as f64 / n,
-                if missed.is_empty() { "none".to_string() } else { missed.join(", ") },
+                if missed.is_empty() {
+                    "none".to_string()
+                } else {
+                    missed.join(", ")
+                },
             );
             let tops = pages.take_top_fallback_pcs(TOP);
             if !tops.is_empty() {
                 let line: Vec<String> = tops
                     .iter()
                     .map(|&(pc, c)| {
-                        format!("{} {:.1} (insn {:#010x})", nxkit_metal::name_pc(pc), c as f64 / n, pages.insn_at(pc))
+                        format!(
+                            "{} {:.1} (insn {:#010x})",
+                            nxkit_metal::name_pc(pc),
+                            c as f64 / n,
+                            pages.insn_at(pc)
+                        )
                     })
                     .collect();
-                eprintln!("DIAG private top program counters, not emulated (per frame): {}", line.join(", "));
+                eprintln!(
+                    "DIAG private top program counters, not emulated (per frame): {}",
+                    line.join(", ")
+                );
             }
         }
         eprintln!(
@@ -2487,7 +2676,11 @@ fn print_report(frame: u64) {
                 w.late_wait_ns as f64 / w.late_frames.max(1) as f64 / 1e6,
                 w.late_timeouts,
                 LATE_WAIT.as_millis(),
-                if late_enabled() { "" } else { "; the capture no longer waits for them (signals missed)" },
+                if late_enabled() {
+                    ""
+                } else {
+                    "; the capture no longer waits for them (signals missed)"
+                },
             );
         }
         report_in_flight(&mut w);
@@ -2508,7 +2701,11 @@ fn print_report(frame: u64) {
             "DIAG private between flush and commit, exact: bound read ranges per frame whose bytes in a page the CPU wrote \
              since the flush differ at the commit from what the frame sees: {} ({} bytes in all; {} ranges could not be \
              compared)",
-            if changed.is_empty() { "none".to_string() } else { changed.join(", ") },
+            if changed.is_empty() {
+                "none".to_string()
+            } else {
+                changed.join(", ")
+            },
             w.changed_bytes,
             w.uncompared,
         );
@@ -2520,7 +2717,11 @@ fn print_report(frame: u64) {
             w.between_pages as f64 / n_between,
             w.between_written as f64 / n_between,
             reads_total as f64 / n_between,
-            if by_kind.is_empty() { "none".to_string() } else { by_kind.join(", ") },
+            if by_kind.is_empty() {
+                "none".to_string()
+            } else {
+                by_kind.join(", ")
+            },
             w.between_same_page as f64 / n_between,
             w.between_other as f64 / n_between,
             w.forced_frames,
@@ -2533,7 +2734,10 @@ fn print_report(frame: u64) {
                 .iter()
                 .map(|&(pc, c)| format!("{} {:.1}", nxkit_metal::name_pc(pc), c as f64 / n))
                 .collect();
-            eprintln!("DIAG private top program counters, write between flush and commit (per frame): {}", line.join(", "));
+            eprintln!(
+                "DIAG private top program counters, write between flush and commit (per frame): {}",
+                line.join(", ")
+            );
         }
     }
     for (kind, label) in [
@@ -2549,7 +2753,10 @@ fn print_report(frame: u64) {
             .iter()
             .map(|&(pc, c)| format!("{} {:.1}", nxkit_metal::name_pc(pc), c as f64 / n))
             .collect();
-        eprintln!("DIAG private top program counters, {label} (per frame): {}", line.join(", "));
+        eprintln!(
+            "DIAG private top program counters, {label} (per frame): {}",
+            line.join(", ")
+        );
     }
     *w = Window {
         base: now,
@@ -2618,9 +2825,15 @@ mod tests {
             .insert((hash_str("cs"), 1 | (Stage::Compute as u32) << 24), false);
         let r = written_ranges(&detail, &[(0x5000, 0x6000)], &rw);
         assert!(r.contains(&(0x1000, 64)), "unknown slot counts as writing");
-        assert!(!r.iter().any(|x| x.0 == 0x2000), "read only slot is left out");
+        assert!(
+            !r.iter().any(|x| x.0 == 0x2000),
+            "read only slot is left out"
+        );
         assert!(r.contains(&(0x3000, 32)));
-        assert!(!r.iter().any(|x| x.0 == 0x9000), "a texture copy writes no buffer");
+        assert!(
+            !r.iter().any(|x| x.0 == 0x9000),
+            "a texture copy writes no buffer"
+        );
         assert!(r.contains(&(0x5000, 0x1000)), "a learned pool is whole");
     }
 
@@ -2686,22 +2899,39 @@ mod tests {
         let o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         let pools = pools_of(&g, o.clone());
         let loc = pools.resolve(addr, 0x400).unwrap();
-        assert_ne!(loc.run, crate::pools::NO_RUN, "the written range lies in the mirror");
+        assert_ne!(
+            loc.run,
+            crate::pools::NO_RUN,
+            "the written range lies in the mirror"
+        );
         let loc_ubo = pools.resolve_start(addr + 0x8000).unwrap();
-        assert_eq!(loc_ubo.run, crate::pools::NO_RUN, "an untouched uniform stays in guest memory");
+        assert_eq!(
+            loc_ubo.run,
+            crate::pools::NO_RUN,
+            "an untouched uniform stays in guest memory"
+        );
         // The mirror run holds the guest bytes as they were at the flush.
         let run = &o.runs()[loc.run as usize];
         let mut b = [0u8; 16];
         run.mem.read(loc.offset, &mut b).unwrap();
         assert_eq!(b, [7; 16]);
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 10 * page), "gpu(1)");
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 10 * page),
+            "gpu(1)"
+        );
         // The GPU writes the mirror and the frame completes; the CPU's read copies the page.
         run.mem.write(loc.offset, &[9; 16]).unwrap();
         encoded(1, None);
         let mut seen = [0u8; 16];
         g.mem.read(10 * page + 0x100, &mut seen).unwrap();
-        assert_eq!(seen, [9; 16], "the read of the stale page found the GPU's bytes");
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 10 * page), "clean");
+        assert_eq!(
+            seen, [9; 16],
+            "the read of the stale page found the GPU's bytes"
+        );
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 10 * page),
+            "clean"
+        );
         FORCE.with(|f| f.set(None));
     }
 
@@ -2715,7 +2945,10 @@ mod tests {
         detail.dispatches[0].ubos[0].address = VA + 20 * page - 0x100;
         detail.dispatches[0].ubos[0].size = 0x200;
         let o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
-        assert!(o.member(VA + 19 * page + 0x3f00), "the part before the member is a member");
+        assert!(
+            o.member(VA + 19 * page + 0x3f00),
+            "the part before the member is a member"
+        );
         assert!(o.all_members(VA + 20 * page - 0x100, 0x200));
         let pools = pools_of(&g, o);
         let loc = pools.resolve(VA + 20 * page - 0x100, 0x200).unwrap();
@@ -2747,12 +2980,18 @@ mod tests {
         g.mem.read(30 * page, &mut b).unwrap();
         assert_eq!(b, [5; 8]);
         g.mem.write(30 * page + 8, &[6; 8]).unwrap();
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 30 * page), "dirty");
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 30 * page),
+            "dirty"
+        );
         // Frame 2 stages the page whole, and the first command buffer of the frame copies it into the mirror.
         let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
         let staged = o2.staged().expect("a staged page");
         assert_eq!(staged.slots.len(), 1);
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 30 * page), "gpu(2, fresh)");
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 30 * page),
+            "gpu(2, fresh)"
+        );
         // The mirror still holds the state before the CPU's write.
         let pools2 = pools_of(&g, o2.clone());
         let loc2 = pools2.resolve(addr, 0x100).unwrap();
@@ -2771,7 +3010,10 @@ mod tests {
         let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
         let mut ring = nxkit_metal::FrameRing::new(&g.ctx).unwrap();
         let mut frame = ring.begin().unwrap();
-        assert_eq!(encode_copy_in(&pipelines, frame.commands(), &table, &scratch, &jobs).unwrap(), 1);
+        assert_eq!(
+            encode_copy_in(&pipelines, frame.commands(), &table, &scratch, &jobs).unwrap(),
+            1
+        );
         g.ctx.commit_residency();
         frame.submit().unwrap().wait().unwrap();
         run2.mem.read(loc2.offset, &mut m).unwrap();
@@ -2782,7 +3024,8 @@ mod tests {
     }
 
     #[test]
-    fn the_gpu_copies_late_pages_as_the_frame_starts_and_ends_and_the_completion_hands_the_reader_the_frames_bytes() {
+    fn the_gpu_copies_late_pages_as_the_frame_starts_and_ends_and_the_completion_hands_the_reader_the_frames_bytes()
+     {
         let _t = locked(&TURN);
         let Some(g) = guest(64 << 20) else { return };
         let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
@@ -2803,7 +3046,10 @@ mod tests {
         // Frame 1: the GPU writes 5s; the CPU reads them after the completion, which makes the page a CPU-read result.
         let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         let loc = pools_of(&g, o1.clone()).resolve(addr, 0x100).unwrap();
-        o1.runs()[loc.run as usize].mem.write(loc.offset, &[5; 8]).unwrap();
+        o1.runs()[loc.run as usize]
+            .mem
+            .write(loc.offset, &[5; 8])
+            .unwrap();
         encoded(1, None);
         assert_eq!(peek(), [5; 8]);
         Pages::global().set_late(true);
@@ -2815,14 +3061,20 @@ mod tests {
         let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
         let mut ring = nxkit_metal::FrameRing::new(&g.ctx).unwrap();
         let mut f = ring.begin().unwrap();
-        assert_eq!(encode_copy_in(&pipelines, f.commands(), &table, &scratch, &start).unwrap(), 1);
+        assert_eq!(
+            encode_copy_in(&pipelines, f.commands(), &table, &scratch, &start).unwrap(),
+            1
+        );
         g.ctx.commit_residency();
         f.submit().unwrap().wait().unwrap();
         let loc2 = pools_of(&g, o2.clone()).resolve(addr, 0x100).unwrap();
         let mem2 = &o2.runs()[loc2.run as usize].mem;
         mem2.write(loc2.offset, &[7; 8]).unwrap();
         let mut f = ring.begin().unwrap();
-        assert_eq!(encode_copy_in(&pipelines, f.commands(), &table, &scratch, &end).unwrap(), 1);
+        assert_eq!(
+            encode_copy_in(&pipelines, f.commands(), &table, &scratch, &end).unwrap(),
+            1
+        );
         f.submit().unwrap().wait().unwrap();
         late_copies_encoded(2, start_at, end_at);
         let l = o2.late().expect("copies");
@@ -2835,13 +3087,18 @@ mod tests {
         mem2.write(loc2.offset, &[8; 8]).unwrap();
         encoded(2, None);
         // The read finds the page of a complete frame whose completion copied its bytes: no copy from the mirror again.
-        assert_eq!(peek(), [7; 8], "frame 2's bytes, from the copy at its end, not the newer bytes of the mirror");
+        assert_eq!(
+            peek(),
+            [7; 8],
+            "frame 2's bytes, from the copy at its end, not the newer bytes of the mirror"
+        );
         Pages::global().set_late(false);
         FORCE.with(|f| f.set(None));
     }
 
     #[test]
-    fn a_cpu_store_outside_the_bytes_a_frame_writes_needs_no_wait_and_reaches_the_next_frame_beside_the_gpus_bytes() {
+    fn a_cpu_store_outside_the_bytes_a_frame_writes_needs_no_wait_and_reaches_the_next_frame_beside_the_gpus_bytes()
+     {
         let _t = locked(&TURN);
         let Some(g) = guest(64 << 20) else { return };
         let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
@@ -2858,7 +3115,10 @@ mod tests {
         let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
         let pools = pools_of(&g, o1.clone());
         let loc = pools.resolve(addr, 0x100).unwrap();
-        o1.runs()[loc.run as usize].mem.write(loc.offset, &[5; 8]).unwrap();
+        o1.runs()[loc.run as usize]
+            .mem
+            .write(loc.offset, &[5; 8])
+            .unwrap();
         // The frame is in flight. The CPU stores and loads elsewhere in the page and does not wait.
         let s0 = Pages::global().stats();
         let t0 = Instant::now();
@@ -2867,10 +3127,16 @@ mod tests {
         g.mem.read(50 * page + 0x3000, &mut b).unwrap();
         g.mem.read(50 * page + 0x2000, &mut b).unwrap();
         assert_eq!(b, [9; 8], "a load sees the store");
-        assert!(t0.elapsed() < std::time::Duration::from_millis(500), "no wait for the frame");
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(500),
+            "no wait for the frame"
+        );
         let s1 = Pages::global().stats();
         assert_eq!(s1.writer_waits, s0.writer_waits);
-        assert!(s1.emulated.iter().sum::<u64>() > s0.emulated.iter().sum::<u64>(), "the handler did them");
+        assert!(
+            s1.emulated.iter().sum::<u64>() > s0.emulated.iter().sum::<u64>(),
+            "the handler did them"
+        );
         // Frame 2 stages the page without the blocks that frame 1 writes.
         let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
         let staged = o2.staged().expect("a staged page");
@@ -2889,7 +3155,10 @@ mod tests {
         let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
         let mut ring = nxkit_metal::FrameRing::new(&g.ctx).unwrap();
         let mut frame = ring.begin().unwrap();
-        assert_eq!(encode_copy_in(&pipelines, frame.commands(), &table, &scratch, &jobs).unwrap(), 1);
+        assert_eq!(
+            encode_copy_in(&pipelines, frame.commands(), &table, &scratch, &jobs).unwrap(),
+            1
+        );
         g.ctx.commit_residency();
         frame.submit().unwrap().wait().unwrap();
         let pools2 = pools_of(&g, o2.clone());
@@ -2897,9 +3166,15 @@ mod tests {
         let run2 = &o2.runs()[loc2.run as usize];
         let mut m = [0u8; 8];
         run2.mem.read(loc2.offset, &mut m).unwrap();
-        assert_eq!(m, [5; 8], "the GPU's bytes were not overwritten by the stale guest bytes");
+        assert_eq!(
+            m, [5; 8],
+            "the GPU's bytes were not overwritten by the stale guest bytes"
+        );
         let loc3 = pools2.resolve(addr + 0x2000, 8).unwrap();
-        o2.runs()[loc3.run as usize].mem.read(loc3.offset, &mut m).unwrap();
+        o2.runs()[loc3.run as usize]
+            .mem
+            .read(loc3.offset, &mut m)
+            .unwrap();
         assert_eq!(m, [9; 8], "the CPU's store landed in the mirror");
         encoded(1, None);
         // After frame 1 the CPU reads its bytes: the GPU's arrive, the store stays.
@@ -2939,7 +3214,11 @@ mod tests {
         .join()
         .unwrap();
         nxkit_abi::guest::set_range(0, 0);
-        assert_eq!(seen, [0x00, 0x00, 0xc0, 0x7f, 0x00, 0x00, 0xc0, 0x7f], "the pattern, not the CPU's bytes");
+        assert_eq!(
+            seen,
+            [0x00, 0x00, 0xc0, 0x7f, 0x00, 0x00, 0xc0, 0x7f],
+            "the pattern, not the CPU's bytes"
+        );
         encoded(2, None);
         FORCE_POISON.with(|f| f.set(false));
         FORCE.with(|f| f.set(None));
@@ -2961,7 +3240,10 @@ mod tests {
         let pools = pools_of(&g, o.clone());
         let loc = pools.resolve(addr, 0x100).unwrap();
         let mut m = [0u8; 16];
-        o.runs()[loc.run as usize].mem.read(loc.offset + 8 - 8, &mut m).unwrap();
+        o.runs()[loc.run as usize]
+            .mem
+            .read(loc.offset + 8 - 8, &mut m)
+            .unwrap();
         assert_eq!(&m[8..], &[0x21; 8]);
         FORCE.with(|f| f.set(None));
     }
@@ -3010,38 +3292,88 @@ mod tests {
         let Some(g) = guest(64 << 20) else { return };
         let page = PAGE;
         // Page 90 is a member that frame 40 wrote and finished; frame 41 writes page 80 only.
-        let _o40 = at_flush(&dispatch(VA + 90 * page, 0x100), 40, &g.map, 0, false, &|| {}).expect("overlay");
+        let _o40 = at_flush(
+            &dispatch(VA + 90 * page, 0x100),
+            40,
+            &g.map,
+            0,
+            false,
+            &|| {},
+        )
+        .expect("overlay");
         encoded(40, None);
         late_expect(41, 1);
-        let o = at_flush(&dispatch(VA + 80 * page, 0x100), 41, &g.map, 1, true, &|| {}).expect("overlay");
+        let o = at_flush(
+            &dispatch(VA + 80 * page, 0x100),
+            41,
+            &g.map,
+            1,
+            true,
+            &|| {},
+        )
+        .expect("overlay");
         assert!(o.forced() && o.frame() == 41);
         // The CPU writes page 90 after the flush and before the signal that the forced submit waits for.
         g.mem.write(90 * page + 16, &[5; 8]).unwrap();
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 90 * page), "dirty");
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 90 * page),
+            "dirty"
+        );
         late_signal(41);
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 90 * page), "clean", "the capture took the page");
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 90 * page),
+            "clean",
+            "the capture took the page"
+        );
         let t0 = Instant::now();
         let jobs = late_stage(&o);
-        assert!(t0.elapsed() < std::time::Duration::from_millis(10), "the signal came, no wait");
-        assert_eq!(jobs.len(), 1, "one page goes into the mirror before the commit");
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(10),
+            "the signal came, no wait"
+        );
+        assert_eq!(
+            jobs.len(),
+            1,
+            "one page goes into the mirror before the commit"
+        );
         // A write after the signal is the next frame's: it stays dirty for the next flush.
         g.mem.write(90 * page + 32, &[6; 8]).unwrap();
-        assert_eq!(Pages::global().state_of(g.mem.host_base() + 90 * page), "dirty");
+        assert_eq!(
+            Pages::global().state_of(g.mem.host_base() + 90 * page),
+            "dirty"
+        );
         encoded(41, None);
         FORCE.with(|f| f.set(None));
     }
 
     #[test]
-    fn a_signal_that_comes_before_the_flush_counted_it_closes_the_capture_and_one_that_never_comes_times_out() {
+    fn a_signal_that_comes_before_the_flush_counted_it_closes_the_capture_and_one_that_never_comes_times_out()
+     {
         let _t = locked(&TURN);
         let Some(g) = guest(64 << 20) else { return };
         let page = PAGE;
-        let _o = at_flush(&dispatch(VA + 100 * page, 0x100), 50, &g.map, 0, false, &|| {}).expect("overlay");
+        let _o = at_flush(
+            &dispatch(VA + 100 * page, 0x100),
+            50,
+            &g.map,
+            0,
+            false,
+            &|| {},
+        )
+        .expect("overlay");
         encoded(50, None);
         // The signal first, the count second.
         late_signal(51);
         late_expect(51, 1);
-        let o = at_flush(&dispatch(VA + 110 * page, 0x100), 51, &g.map, 1, true, &|| {}).expect("overlay");
+        let o = at_flush(
+            &dispatch(VA + 110 * page, 0x100),
+            51,
+            &g.map,
+            1,
+            true,
+            &|| {},
+        )
+        .expect("overlay");
         let t0 = Instant::now();
         assert!(late_stage(&o).is_empty());
         assert!(t0.elapsed() < std::time::Duration::from_millis(10));
@@ -3049,10 +3381,21 @@ mod tests {
         // No signal: the encode waits for the limit, then goes on, and the miss is counted.
         let missed = LATE_MISSED.load(Ordering::Relaxed);
         late_expect(52, 1);
-        let o = at_flush(&dispatch(VA + 120 * page, 0x100), 52, &g.map, 1, true, &|| {}).expect("overlay");
+        let o = at_flush(
+            &dispatch(VA + 120 * page, 0x100),
+            52,
+            &g.map,
+            1,
+            true,
+            &|| {},
+        )
+        .expect("overlay");
         let t0 = Instant::now();
         assert!(late_stage(&o).is_empty());
-        assert!(t0.elapsed() >= std::time::Duration::from_millis(10), "waited for the signal");
+        assert!(
+            t0.elapsed() >= std::time::Duration::from_millis(10),
+            "waited for the signal"
+        );
         assert_eq!(LATE_MISSED.load(Ordering::Relaxed), missed + 1);
         LATE_MISSED.store(0, Ordering::Relaxed);
         encoded(52, None);
@@ -3076,16 +3419,27 @@ mod tests {
         let _ = pools.resolve_c(src, len, crate::overlay::UPLOAD);
         let after = crate::overlay::partial_table();
         let upload = 4usize;
-        assert_eq!(after[upload][1] - before[upload][1], 1, "counted as starting out and reaching in");
+        assert_eq!(
+            after[upload][1] - before[upload][1],
+            1,
+            "counted as starting out and reaching in"
+        );
         encoded(1, None);
         // The next flush has the range from the encoder and makes it whole.
         let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
-        assert!(o2.all_members(src, len), "the range is whole on members now");
+        assert!(
+            o2.all_members(src, len),
+            "the range is whole on members now"
+        );
         let pools = pools_of(&g, o2);
         let before = crate::overlay::partial_table();
         let loc = pools.resolve_c(src, len, crate::overlay::UPLOAD).unwrap();
         assert_ne!(loc.run, crate::pools::NO_RUN);
-        assert_eq!(crate::overlay::partial_table(), before, "no partial resolve any more");
+        assert_eq!(
+            crate::overlay::partial_table(),
+            before,
+            "no partial resolve any more"
+        );
         encoded(2, None);
         FORCE.with(|f| f.set(None));
     }
@@ -3131,7 +3485,11 @@ mod tests {
         let mut fence = 0u64;
         let mut out = Vec::new();
         let mut results: Vec<(bool, bool, u64, u64)> = Vec::new();
-        for (name, eager, hot_on) in [("off", false, false), ("copy-back", true, false), ("copy-back and writable", true, true)] {
+        for (name, eager, hot_on) in [
+            ("off", false, false),
+            ("copy-back", true, false),
+            ("copy-back and writable", true, true),
+        ] {
             pages.set_adaptive(eager, hot_on);
             let (mut cpu_ns, mut flush_ns) = (0u128, 0u128);
             let frames = 80u64;
@@ -3165,7 +3523,11 @@ mod tests {
                 // The GPU writes the first byte of every written page.
                 for &w in &written_pages {
                     let va = VA + w * page;
-                    let run = o.runs().iter().find(|r| r.va_start <= va && va < r.va_end).expect("run");
+                    let run = o
+                        .runs()
+                        .iter()
+                        .find(|r| r.va_start <= va && va < r.va_end)
+                        .expect("run");
                     run.mem.write(va - run.va_start, &[v]).unwrap();
                 }
                 encoded(fence, None);
@@ -3196,9 +3558,18 @@ mod tests {
         // to the block again before the next `attach`).
         pages.release_all();
         assert_eq!(results[0].3, 0, "nothing copies back with the setting off");
-        assert!(results[1].3 > 0, "the completion copies back the pages game threads waited for");
-        assert!(results[1].2 < results[0].2, "fewer faults with the copy-back");
-        assert!(results[2].2 < results[1].2, "fewer faults with writable pages");
+        assert!(
+            results[1].3 > 0,
+            "the completion copies back the pages game threads waited for"
+        );
+        assert!(
+            results[1].2 < results[0].2,
+            "fewer faults with the copy-back"
+        );
+        assert!(
+            results[2].2 < results[1].2,
+            "fewer faults with writable pages"
+        );
         for l in out {
             eprintln!("adaptive test {l}");
         }
@@ -3247,7 +3618,10 @@ mod tests {
         buf.read(u64::from(sink.index[&2]) * PAGE, &mut b).unwrap();
         assert_eq!(b, [2; 4]);
         buf.read(u64::from(sink.index[&1]) * PAGE, &mut b).unwrap();
-        assert_eq!(b, [0xee; 4], "a page that is staged again keeps the later bytes");
+        assert_eq!(
+            b, [0xee; 4],
+            "a page that is staged again keeps the later bytes"
+        );
     }
 
     #[test]
@@ -3267,7 +3641,11 @@ mod tests {
         };
         assert_eq!(stream_extent(&s(32, 0, 1 << 30), &arrays), 32 * 12);
         assert_eq!(stream_extent(&s(32, 2, 1 << 30), &arrays), 32 * 2);
-        assert_eq!(stream_extent(&s(32, 0, 100), &arrays), 100, "never past the buffer");
+        assert_eq!(
+            stream_extent(&s(32, 0, 100), &arrays),
+            100,
+            "never past the buffer"
+        );
         let indexed = DrawArgs::Indexed {
             index_type: 1,
             address: 0,
@@ -3312,12 +3690,21 @@ mod tests {
         // With two cuts at most the earliest stays and the last takes the rest.
         let (cuts, _) = plan_cuts(&readers, &pass_runs, &[], 2);
         assert_eq!(cuts.len(), 2);
-        assert_eq!((cuts[0].after_pass, cuts[0].pages.clone()), (1, runs(&[10, 20])));
-        assert_eq!((cuts[1].after_pass, cuts[1].pages.clone()), (4, runs(&[30, 40, 50])));
+        assert_eq!(
+            (cuts[0].after_pass, cuts[0].pages.clone()),
+            (1, runs(&[10, 20]))
+        );
+        assert_eq!(
+            (cuts[1].after_pass, cuts[1].pages.clone()),
+            (4, runs(&[30, 40, 50]))
+        );
         // A page that some pass writes through a pool of raw stores has no cut.
         let (cuts, unserved) = plan_cuts(&readers, &pass_runs, &[(20, 21), (30, 31)], 8);
         assert_eq!(unserved, 3);
-        assert_eq!(cuts.iter().map(|c| c.after_pass).collect::<Vec<_>>(), vec![1, 3, 4]);
+        assert_eq!(
+            cuts.iter().map(|c| c.after_pass).collect::<Vec<_>>(),
+            vec![1, 3, 4]
+        );
         assert_eq!(cuts[0].pages, runs(&[10]));
         assert_eq!(cuts[1].pages, runs(&[40]));
         // A page that no pass writes has none either.
@@ -3328,7 +3715,15 @@ mod tests {
 
     /// A frame of three passes (a dispatch, a buffer fill, a dispatch): the first dispatch writes `a`, the fill `z`, the last
     /// dispatch `y`.
-    fn three_passes(a: u64, z: u64, y: u64) -> (nxkit_nvn::frame::Frame, nxkit_nvn::passes::PassPlan, FrameDetail) {
+    fn three_passes(
+        a: u64,
+        z: u64,
+        y: u64,
+    ) -> (
+        nxkit_nvn::frame::Frame,
+        nxkit_nvn::passes::PassPlan,
+        FrameDetail,
+    ) {
         use crate::detail::CopyDetail;
         use nxkit_nvn::frame::{Cmd, Frame, Span};
         let ubo = |address| UboDetail {
@@ -3358,7 +3753,11 @@ mod tests {
         };
         let mut plan = nxkit_nvn::passes::PassPlan::default();
         nxkit_nvn::analyse::Analyser::new()
-            .analyse(&frame, &nxkit_nvn::resource::ResourceTable::new(), &mut plan)
+            .analyse(
+                &frame,
+                &nxkit_nvn::resource::ResourceTable::new(),
+                &mut plan,
+            )
             .unwrap();
         let detail = FrameDetail {
             dispatches: vec![disp(a), disp(y)],
@@ -3388,12 +3787,16 @@ mod tests {
         let _t = locked(&TURN);
         let Some(g) = guest(64 << 20) else { return };
         let (page_a, page_z, page_y) = (80u64, 81u64, 82u64);
-        let (frame, plan, detail) = three_passes(VA + page_a * PAGE, VA + page_z * PAGE, VA + page_y * PAGE);
+        let (frame, plan, detail) =
+            three_passes(VA + page_a * PAGE, VA + page_z * PAGE, VA + page_y * PAGE);
         assert_eq!(plan.passes.len(), 3, "dispatch, fill, dispatch");
         let _ = Pages::global().readers(0);
         // Frame 1: three threads wait for the writers of the three pages.
         let _o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
-        let readers: Vec<_> = [page_a, page_z, page_y].iter().map(|&p| read_on_thread(&g, p)).collect();
+        let readers: Vec<_> = [page_a, page_z, page_y]
+            .iter()
+            .map(|&p| read_on_thread(&g, p))
+            .collect();
         std::thread::sleep(std::time::Duration::from_millis(60));
         assert!(readers.iter().all(|r| !r.is_finished()), "the writers run");
         encoded(1, None);
@@ -3411,8 +3814,14 @@ mod tests {
         assert_eq!(plan2.readers, 3);
         assert_eq!(plan2.blocked, 1, "the last pass writes page y");
         assert_eq!(plan2.cuts.len(), 2);
-        assert_eq!((plan2.cuts[0].after_pass, plan2.cuts[0].pages.clone()), (0, vec![pg(page_a)]));
-        assert_eq!((plan2.cuts[1].after_pass, plan2.cuts[1].pages.clone()), (1, vec![pg(page_z)]));
+        assert_eq!(
+            (plan2.cuts[0].after_pass, plan2.cuts[0].pages.clone()),
+            (0, vec![pg(page_a)])
+        );
+        assert_eq!(
+            (plan2.cuts[1].after_pass, plan2.cuts[1].pages.clone()),
+            (1, vec![pg(page_z)])
+        );
         // The same frame with a pool of raw stores over page a: no cut serves it.
         let learned = [(VA + page_a * PAGE, VA + (page_a + 1) * PAGE)];
         let plan3 = early_cuts(&frame, &plan, &detail, 2, &g.map, &learned);
@@ -3420,7 +3829,11 @@ mod tests {
         assert_eq!(plan3.cuts[0].after_pass, 1);
         // The pages of a texture that is copied back are left out.
         let mut cuts = plan2.cuts.clone();
-        early_exclude(&mut cuts, &[(VA + page_z * PAGE, VA + (page_z + 1) * PAGE)], &g.map);
+        early_exclude(
+            &mut cuts,
+            &[(VA + page_z * PAGE, VA + (page_z + 1) * PAGE)],
+            &g.map,
+        );
         assert_eq!(cuts.len(), 1);
         assert_eq!(cuts[0].after_pass, 0);
         encoded(2, None);
@@ -3446,11 +3859,14 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
         kernel: &str,
         bufs: &[(u32, u64)],
     ) {
-        let pipeline = pipelines.host_compute("nxkit-private-test", WRITE_MSL, kernel).unwrap();
+        let pipeline = pipelines
+            .host_compute("nxkit-private-test", WRITE_MSL, kernel)
+            .unwrap();
         let mut cp = cb.begin_compute_pass(table).unwrap();
         cp.encode(&ComputeCommand::SetPipeline(pipeline)).unwrap();
         for &(index, gpu_addr) in bufs {
-            cp.encode(&ComputeCommand::SetBuffer { index, gpu_addr }).unwrap();
+            cp.encode(&ComputeCommand::SetBuffer { index, gpu_addr })
+                .unwrap();
         }
         cp.encode(&ComputeCommand::DispatchThreads {
             grid: [1, 1, 1],
@@ -3461,14 +3877,16 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
     }
 
     #[test]
-    fn a_reader_of_a_page_written_by_pass_0_goes_on_at_its_signal_while_a_long_pass_1_runs_and_before_the_rest_is_encoded() {
+    fn a_reader_of_a_page_written_by_pass_0_goes_on_at_its_signal_while_a_long_pass_1_runs_and_before_the_rest_is_encoded()
+     {
         let _t = locked(&TURN);
         let Some(g) = guest(64 << 20) else { return };
         let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
             return;
         };
         let (page_a, page_y) = (90u64, 91u64);
-        let (frame, plan, detail) = three_passes(VA + page_a * PAGE, VA + 95 * PAGE, VA + page_y * PAGE);
+        let (frame, plan, detail) =
+            three_passes(VA + page_a * PAGE, VA + 95 * PAGE, VA + page_y * PAGE);
         let _ = Pages::global().readers(0);
         let table = ArgumentTable::new(&g.ctx, 31, 0).unwrap();
         let mut ring = nxkit_metal::BatchRing::new(&g.ctx, 3).unwrap();
@@ -3478,7 +3896,13 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
             let scratch = batch.scratch();
             let out = scratch.push(&[0u8; 64]).unwrap();
             let count = scratch.push(&n.to_le_bytes()).unwrap();
-            kernel_pass(&pipelines, &table, &mut batch.buffers()[0], "nxkit_test_spin", &[(0, out), (1, count)]);
+            kernel_pass(
+                &pipelines,
+                &table,
+                &mut batch.buffers()[0],
+                "nxkit_test_spin",
+                &[(0, out), (1, count)],
+            );
             g.ctx.commit_residency();
             let t0 = Instant::now();
             batch.submit().unwrap().wait().unwrap();
@@ -3489,7 +3913,10 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
         let rounds = (20_000_000f64 * 0.5 / probe.as_secs_f64().max(0.001)).clamp(1e6, 4e9) as u32;
         // Frame 1 teaches the planner: threads wait for the writers of both pages.
         let _o = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
-        let readers: Vec<_> = [page_a, page_y].iter().map(|&p| read_on_thread(&g, p)).collect();
+        let readers: Vec<_> = [page_a, page_y]
+            .iter()
+            .map(|&p| read_on_thread(&g, p))
+            .collect();
         std::thread::sleep(std::time::Duration::from_millis(40));
         encoded(1, None);
         readers.into_iter().for_each(|r| {
@@ -3518,20 +3945,44 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
             let bufs = batch.buffers();
             ahead.finish(0, &mut bufs[0]);
             // Pass 0 writes the page in the mirror.
-            kernel_pass(&pipelines, &table, &mut bufs[1], "nxkit_test_write", &[(0, loc.real)]);
-            assert!(ahead.finish(1, &mut bufs[1]), "the second command buffer completes the group");
+            kernel_pass(
+                &pipelines,
+                &table,
+                &mut bufs[1],
+                "nxkit_test_write",
+                &[(0, loc.real)],
+            );
+            assert!(
+                ahead.finish(1, &mut bufs[1]),
+                "the second command buffer completes the group"
+            );
         }
         // The group is on the GPU. The rest of the frame is not encoded yet: the reader must not wait for that.
         let t_group = Instant::now();
         let first_byte = reader.join().unwrap();
         let waited = t_group.elapsed();
-        assert_eq!(first_byte, 0x0d, "the bytes of pass 0 (low byte of 0x600df00d)");
-        assert!(waited < std::time::Duration::from_millis(1500), "the reader went on before the rest was encoded: {waited:?}");
-        assert!(!other.is_finished(), "the page of the later pass still waits for the frame");
+        assert_eq!(
+            first_byte, 0x0d,
+            "the bytes of pass 0 (low byte of 0x600df00d)"
+        );
+        assert!(
+            waited < std::time::Duration::from_millis(1500),
+            "the reader went on before the rest was encoded: {waited:?}"
+        );
+        assert!(
+            !other.is_finished(),
+            "the page of the later pass still waits for the frame"
+        );
         // Now the long pass is encoded and the rest is committed.
         {
             let bufs = batch.buffers();
-            kernel_pass(&pipelines, &table, &mut bufs[2], "nxkit_test_spin", &[(0, out), (1, count)]);
+            kernel_pass(
+                &pipelines,
+                &table,
+                &mut bufs[2],
+                "nxkit_test_spin",
+                &[(0, out), (1, count)],
+            );
         }
         g.ctx.commit_residency();
         let submitted = batch.submit().unwrap();
@@ -3554,13 +4005,18 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
             std::time::Duration::from_nanos(stats.gpu_ns)
         );
         let s1 = Pages::global().stats();
-        assert_eq!(s1.wait_ends[0] - s0.wait_ends[0], 1, "one wait ended at the signal of a pass");
+        assert_eq!(
+            s1.wait_ends[0] - s0.wait_ends[0],
+            1,
+            "one wait ended at the signal of a pass"
+        );
         assert!(s1.early_pages > s0.early_pages);
         FORCE.with(|f| f.set(None));
     }
 
     #[test]
-    fn a_batch_with_a_prefix_is_committed_in_two_groups_and_the_prefix_reports_before_the_rest_is_done() {
+    fn a_batch_with_a_prefix_is_committed_in_two_groups_and_the_prefix_reports_before_the_rest_is_done()
+     {
         let _t = locked(&TURN);
         let Some(g) = guest(64 << 20) else { return };
         let Ok(pipelines) = Pipelines::new(&g.ctx, &nxkit_metal::ArchiveConfig::default()) else {
@@ -3577,14 +4033,35 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
             if with_prefix {
                 let a = at.clone();
                 assert!(batch.on_prefix_complete(2, move || *locked(&a) = Some(Instant::now())));
-                assert!(!batch.on_prefix_complete(3, || {}), "the whole batch is no prefix");
+                assert!(
+                    !batch.on_prefix_complete(3, || {}),
+                    "the whole batch is no prefix"
+                );
                 assert!(!batch.on_prefix_complete(0, || {}));
             }
             {
                 let bufs = batch.buffers();
-                kernel_pass(&pipelines, &table, &mut bufs[0], "nxkit_test_write", &[(0, out)]);
-                kernel_pass(&pipelines, &table, &mut bufs[1], "nxkit_test_write", &[(0, out)]);
-                kernel_pass(&pipelines, &table, &mut bufs[2], "nxkit_test_spin", &[(0, out), (1, count)]);
+                kernel_pass(
+                    &pipelines,
+                    &table,
+                    &mut bufs[0],
+                    "nxkit_test_write",
+                    &[(0, out)],
+                );
+                kernel_pass(
+                    &pipelines,
+                    &table,
+                    &mut bufs[1],
+                    "nxkit_test_write",
+                    &[(0, out)],
+                );
+                kernel_pass(
+                    &pipelines,
+                    &table,
+                    &mut bufs[2],
+                    "nxkit_test_spin",
+                    &[(0, out), (1, count)],
+                );
             }
             g.ctx.commit_residency();
             let submitted = batch.submit().unwrap();
@@ -3596,7 +4073,10 @@ kernel void nxkit_test_spin(device uint *p [[buffer(0)]], device const uint *n [
             let end = locked(&end).expect("the batch completed");
             if with_prefix {
                 let prefix = locked(&at).expect("the prefix reported");
-                assert!(prefix <= end, "the prefix reports before the batch completes");
+                assert!(
+                    prefix <= end,
+                    "the prefix reports before the batch completes"
+                );
             } else {
                 assert!(locked(&at).is_none());
             }

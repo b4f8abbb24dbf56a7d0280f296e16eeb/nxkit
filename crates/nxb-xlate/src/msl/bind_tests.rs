@@ -274,7 +274,10 @@ fn a_signed_atomic_uses_the_signed_image_and_a_compare_swaps() {
         "{m}"
     );
     assert!(
-        m.contains("while (!") && m.contains(".atomic_compare_exchange_weak(t0c, &t0x, int4(5)) && all(t0x == t0c)) {}"),
+        m.contains("while (!")
+            && m.contains(
+                ".atomic_compare_exchange_weak(t0c, &t0x, int4(5)) && all(t0x == t0c)) {}"
+            ),
         "{m}"
     );
 }

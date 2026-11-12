@@ -148,7 +148,8 @@ impl Gpu {
         // last pass that writes them is done. The frame is cut after those passes: each cut ends a command buffer, and the
         // part before it is committed on its own.
         let fence = pools.overlay().map_or(0, |o| o.frame());
-        let mut early = if fence != 0 && !plan.passes.is_empty() && crate::private::early_enabled() {
+        let mut early = if fence != 0 && !plan.passes.is_empty() && crate::private::early_enabled()
+        {
             crate::private::early_cuts(
                 frame,
                 plan,
@@ -402,10 +403,13 @@ impl Gpu {
         let mut ahead = None;
         if !early.cuts.is_empty() {
             let mut excluded: Vec<(u64, u64)> = Vec::new();
-            let ids = dirty.keys().copied().chain(frame.cmds.iter().filter_map(|c| match c {
-                Cmd::CpuRead(id) => Some(*id),
-                _ => None,
-            }));
+            let ids = dirty
+                .keys()
+                .copied()
+                .chain(frame.cmds.iter().filter_map(|c| match c {
+                    Cmd::CpuRead(id) => Some(*id),
+                    _ => None,
+                }));
             for id in ids {
                 if let Ok(rec) = view.record(id) {
                     excluded.push((rec.address.get(), rec.end()));
@@ -416,7 +420,10 @@ impl Gpu {
             for cut in std::mem::take(&mut early.cuts) {
                 let end = cut.after_pass + 1;
                 let count = ends.iter().position(|e| *e == end).map_or(0, |i| i + 2);
-                if batch.on_prefix_complete(count, crate::private::early_release(fence, cut.pages.clone())) {
+                if batch.on_prefix_complete(
+                    count,
+                    crate::private::early_release(fence, cut.pages.clone()),
+                ) {
                     registered.push(cut);
                 }
             }
@@ -451,7 +458,8 @@ impl Gpu {
                 let done = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
                     .ok()
                     .and_then(|t| {
-                        crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs).ok()
+                        crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs)
+                            .ok()
                     });
                 match done {
                     Some(n) => crate::private::note_copy_in(n, lost),
@@ -465,11 +473,15 @@ impl Gpu {
         // Results one frame late: the GPU copies the late pages as the frame starts with them (after the copy-in) and,
         // below, as it ends, so that its completion hands the readers the frame's own bytes and knows which blocks it
         // changed.
-        let mut late_copies = pools.overlay().and_then(|o| crate::private::late_copy_jobs(o));
+        let mut late_copies = pools
+            .overlay()
+            .and_then(|o| crate::private::late_copy_jobs(o));
         if let Some((start, ..)) = &late_copies {
             let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
                 .ok()
-                .and_then(|t| crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, start).ok());
+                .and_then(|t| {
+                    crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, start).ok()
+                });
             if ok.is_none() {
                 stats.skip(Skip::Encode);
                 late_copies = None;
@@ -804,9 +816,12 @@ impl Gpu {
         if let Some(o) = pools.overlay() {
             let jobs = crate::private::late_stage(o);
             if !jobs.is_empty() {
-                let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0).ok().and_then(|t| {
-                    crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs).ok()
-                });
+                let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
+                    .ok()
+                    .and_then(|t| {
+                        crate::private::encode_copy_in(&self.pipelines, first, &t, &scratch, &jobs)
+                            .ok()
+                    });
                 if ok.is_none() {
                     stats.skip(Skip::Encode);
                 }
@@ -819,7 +834,9 @@ impl Gpu {
             };
             let ok = nxkit_metal::ArgumentTable::new(&self.ctx, 31, 0)
                 .ok()
-                .and_then(|t| crate::private::encode_copy_in(&self.pipelines, cb, &t, &scratch, end).ok());
+                .and_then(|t| {
+                    crate::private::encode_copy_in(&self.pipelines, cb, &t, &scratch, end).ok()
+                });
             match ok {
                 Some(_) => crate::private::late_copies_encoded(o.frame(), *start_at, *end_at),
                 None => stats.skip(Skip::Encode),
@@ -981,7 +998,10 @@ fn describe_pass(
                 })
                 .collect();
             let more = ds.len().saturating_sub(3);
-            let mut s = format!("compute cmds {n} [{}]", ds.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
+            let mut s = format!(
+                "compute cmds {n} [{}]",
+                ds.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
+            );
             if more > 0 {
                 s.push_str(&format!(" +{more}"));
             }
@@ -1023,7 +1043,10 @@ fn describe_pass(
                 })
                 .collect();
             let more = items.len().saturating_sub(3);
-            let mut s = format!("copy cmds {n} [{}]", items.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
+            let mut s = format!(
+                "copy cmds {n} [{}]",
+                items.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
+            );
             if more > 0 {
                 s.push_str(&format!(" +{more}"));
             }
@@ -1068,14 +1091,20 @@ mod lead_tests {
         assert!(!lead_chunk(&weights, &mut one, 8));
         assert_eq!(one, vec![40]);
         let mut ends = jobs::split(&weights, 4);
-        assert!(!lead_chunk(&weights, &mut ends, 5), "1 + 5 command buffers do not fit 5");
+        assert!(
+            !lead_chunk(&weights, &mut ends, 5),
+            "1 + 5 command buffers do not fit 5"
+        );
         assert_eq!(ends.len(), 4);
         let short = vec![10u32; 4];
         let mut e = jobs::split(&short, 2);
         assert!(!lead_chunk(&short, &mut e, 8));
         let heavy = [1000u32, 1, 1, 1, 1, 1, 1, 1, 1, 1];
         let mut e = vec![1, 6, 10];
-        assert!(!lead_chunk(&heavy, &mut e, 8), "the first chunk is the lead already");
+        assert!(
+            !lead_chunk(&heavy, &mut e, 8),
+            "the first chunk is the lead already"
+        );
         assert_eq!(e, vec![1, 6, 10]);
     }
 }

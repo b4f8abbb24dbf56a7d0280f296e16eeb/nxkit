@@ -231,7 +231,10 @@ fn sbuf_word<B: Backing>(
     }
     match &s.snapshot {
         Some(bytes) if !rw => put(bytes),
-        _ => Ok(locate(pools, s.address, s.size, crate::overlay::SBUF).map_or(zero, |(real, _)| real)),
+        _ => {
+            Ok(locate(pools, s.address, s.size, crate::overlay::SBUF)
+                .map_or(zero, |(real, _)| real))
+        }
     }
 }
 

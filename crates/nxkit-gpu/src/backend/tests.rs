@@ -108,9 +108,18 @@ fn a_pool_call_with_the_encoder_lock_free_reaches_the_encoder_at_once() {
         return;
     };
     let host = guest.host_base() + 0x4000;
-    backend.register_pool(PoolInfo { host, len: 0x8000, flags: 0 }).unwrap();
+    backend
+        .register_pool(PoolInfo {
+            host,
+            len: 0x8000,
+            flags: 0,
+        })
+        .unwrap();
     // Read without draining the queue: the op was applied by the call itself.
-    assert_eq!(locked(&backend.gpu).pools(), [(GUEST_VA_BASE + 0x4000, 0x8000)]);
+    assert_eq!(
+        locked(&backend.gpu).pools(),
+        [(GUEST_VA_BASE + 0x4000, 0x8000)]
+    );
     backend.unregister_pool(host);
     assert!(locked(&backend.gpu).pools().is_empty());
     assert_eq!(backend.pool_ops.counts(), (2, 0));
@@ -122,7 +131,11 @@ fn pool_calls_during_an_encode_are_applied_in_order_at_the_next_lock() {
         return;
     };
     let host = guest.host_base() + 0x4000;
-    let pool = PoolInfo { host, len: 0x8000, flags: 0 };
+    let pool = PoolInfo {
+        host,
+        len: 0x8000,
+        flags: 0,
+    };
     {
         // An encode holds the lock: the calls return without it.
         let held = locked(&backend.gpu);
@@ -131,11 +144,20 @@ fn pool_calls_during_an_encode_are_applied_in_order_at_the_next_lock() {
         backend.register_pool(pool).unwrap();
         assert!(held.pools().is_empty());
         // The snapshot of the next flush has the pool at once.
-        assert!(backend.pools.current().resolve(GUEST_VA_BASE + 0x4000, 4).is_ok());
+        assert!(
+            backend
+                .pools
+                .current()
+                .resolve(GUEST_VA_BASE + 0x4000, 4)
+                .is_ok()
+        );
     }
     assert_eq!(backend.pool_ops.counts(), (0, 3));
     // Register, unregister, register: one pool is left, not none.
-    assert_eq!(backend.lock_gpu().pools(), [(GUEST_VA_BASE + 0x4000, 0x8000)]);
+    assert_eq!(
+        backend.lock_gpu().pools(),
+        [(GUEST_VA_BASE + 0x4000, 0x8000)]
+    );
 }
 
 #[test]
@@ -191,7 +213,11 @@ fn the_event_signals_of_a_frame_reach_the_counter_word_and_not_the_counter_repor
     };
     // A frame without a batch is complete at once.
     backend.events.hold(1, &detail.reports, None);
-    backend.hold_counters(Fence(1), &detail, &Ok::<EncodeReport, ()>(EncodeReport::default()));
+    backend.hold_counters(
+        Fence(1),
+        &detail,
+        &Ok::<EncodeReport, ()>(EncodeReport::default()),
+    );
     assert_eq!(counter(0x40), 8);
     let held = locked(&backend.counters).clone();
     assert_eq!(held.len(), 1, "only the value report waits for the GPU");

@@ -33,15 +33,17 @@ pub(crate) fn stream_loc<B: Backing>(
     pools: &PoolSnapshot<B>,
     s: &StreamDetail,
 ) -> Result<Loc, Skip> {
-    pools.resolve_start_c(s.address, crate::overlay::STREAM).map_err(|m| {
-        crate::buf_skip(format_args!(
-            "stream {} addr {:#x} size {:#x}: {}",
-            s.index,
-            s.address,
-            s.size,
-            why(m)
-        ))
-    })
+    pools
+        .resolve_start_c(s.address, crate::overlay::STREAM)
+        .map_err(|m| {
+            crate::buf_skip(format_args!(
+                "stream {} addr {:#x} size {:#x}: {}",
+                s.index,
+                s.address,
+                s.size,
+                why(m)
+            ))
+        })
 }
 
 /// Where `count` indices of `width` bytes at `addr` lie. All of them must lie in one pool.
@@ -51,12 +53,14 @@ pub(crate) fn index_loc<B: Backing>(
     count: u32,
     width: u64,
 ) -> Result<Loc, Skip> {
-    pools.resolve_c(addr, u64::from(count) * width, crate::overlay::STREAM).map_err(|m| {
-        crate::buf_skip(format_args!(
-            "index addr {addr:#x} count {count}: {}",
-            why(m)
-        ))
-    })
+    pools
+        .resolve_c(addr, u64::from(count) * width, crate::overlay::STREAM)
+        .map_err(|m| {
+            crate::buf_skip(format_args!(
+                "index addr {addr:#x} count {count}: {}",
+                why(m)
+            ))
+        })
 }
 
 /// Where `bytes` at `addr` lie when the GPU reads them as words: a 4 byte aligned guest address and real address in
@@ -69,7 +73,9 @@ pub(crate) fn word_loc<B: Backing>(
     if !addr.is_multiple_of(4) {
         return Err("not 4 byte aligned".into());
     }
-    let loc = pools.resolve_c(addr, bytes, crate::overlay::STREAM).map_err(why)?;
+    let loc = pools
+        .resolve_c(addr, bytes, crate::overlay::STREAM)
+        .map_err(why)?;
     if !loc.real.is_multiple_of(4) {
         return Err(format!("real address {:#x} not 4 byte aligned", loc.real));
     }

@@ -297,7 +297,12 @@ pub(crate) fn prepare(
         }
     }
     if vs.pull {
-        let block = crate::pull::layout(d, |a| sh.pools.resolve_start_c(a, crate::overlay::STREAM).ok().map(|l| l.real));
+        let block = crate::pull::layout(d, |a| {
+            sh.pools
+                .resolve_start_c(a, crate::overlay::STREAM)
+                .ok()
+                .map(|l| l.real)
+        });
         if crate::diag("pull") {
             let inputs: Vec<u32> = vs.inputs.iter().map(|(l, _)| *l).collect();
             crate::pull::diag_draw(sh, d, &inputs);

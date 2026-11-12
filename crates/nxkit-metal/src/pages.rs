@@ -231,7 +231,8 @@ impl PageInfo {
         self.ready.store(0, Ordering::Release);
         self.waited.store(0, Ordering::Release);
         self.snap.store(0, Ordering::Release);
-        self.snap_why.store(SnapWhy::Released as u32, Ordering::Relaxed);
+        self.snap_why
+            .store(SnapWhy::Released as u32, Ordering::Relaxed);
         self.hold_frame.store(0, Ordering::Release);
         self.own_frame.store(0, Ordering::Release);
         for a in self.own.iter().chain(&self.hold) {
@@ -279,7 +280,8 @@ impl PageInfo {
             self.hold[i].fetch_or(taken, Ordering::AcqRel);
             skip[i] &= !taken;
         }
-        self.hold_frame.fetch_max(self.own_frame.load(Ordering::Acquire), Ordering::AcqRel);
+        self.hold_frame
+            .fetch_max(self.own_frame.load(Ordering::Acquire), Ordering::AcqRel);
         skip
     }
 }
@@ -361,8 +363,21 @@ unsafe extern "C" {
         max_protection: *mut c_int,
         inheritance: c_int,
     ) -> c_int;
-    fn mach_vm_protect(task: u32, address: u64, size: u64, set_maximum: c_int, prot: c_int) -> c_int;
-    fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void;
+    fn mach_vm_protect(
+        task: u32,
+        address: u64,
+        size: u64,
+        set_maximum: c_int,
+        prot: c_int,
+    ) -> c_int;
+    fn mmap(
+        addr: *mut c_void,
+        len: usize,
+        prot: c_int,
+        flags: c_int,
+        fd: c_int,
+        off: i64,
+    ) -> *mut c_void;
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
     fn getpagesize() -> c_int;
@@ -806,11 +821,7 @@ fn protect_pages(first: u32, end: u32, prot: c_int, timed: bool) -> bool {
     let base = SHARED.base.load(Ordering::Acquire);
     let p = page();
     let t0 = timed.then(now_ns);
-    let ok = set_prot_raw(
-        base + u64::from(first) * p,
-        base + u64::from(end) * p,
-        prot,
-    );
+    let ok = set_prot_raw(base + u64::from(first) * p, base + u64::from(end) * p, prot);
     if let Some(t0) = t0 {
         SHARED
             .mprotect_ns
@@ -825,7 +836,9 @@ fn page_span(addr: u64, len: u64) -> Option<(u32, u32)> {
     let total = SHARED.len.load(Ordering::Acquire);
     let p = page();
     let lo = addr.max(base);
-    let hi = addr.saturating_add(len.max(1)).min(base.saturating_add(total));
+    let hi = addr
+        .saturating_add(len.max(1))
+        .min(base.saturating_add(total));
     if lo >= hi {
         return None;
     }
@@ -1015,7 +1028,11 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
     for q in pa..=pb {
         let (qlo, qhi) = (
             if q == pa { first } else { base + q as u64 * p },
-            if q == pb { last } else { base + (q as u64 + 1) * p - 1 },
+            if q == pb {
+                last
+            } else {
+                base + (q as u64 + 1) * p - 1
+            },
         );
         let (info_q, cur_q) = if q == pg {
             (info, cur)
@@ -1047,7 +1064,8 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
             continue;
         }
         let snap = info_q.snap.load(Ordering::Acquire);
-        let flying = q == pg || (matches!(cur_q & STATE_MASK, GPU | OPEN) && page_flying(q, cur_q >> FRAME_SHIFT));
+        let flying = q == pg
+            || (matches!(cur_q & STATE_MASK, GPU | OPEN) && page_flying(q, cur_q >> FRAME_SHIFT));
         if snap == 0 || !SHARED.late.load(Ordering::Relaxed) || !flying {
             if snap == 0 && flying {
                 let why = info_q.snap_why.load(Ordering::Relaxed) as usize;
@@ -1063,15 +1081,24 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
                 info_q.own[(b / 64) as usize].fetch_or(1 << (b % 64), Ordering::AcqRel);
                 owned += 1;
             }
-            info_q.own_frame.fetch_max((SHARED.flushed.load(Ordering::Acquire) & FRAME_MASK) as u32, Ordering::AcqRel);
+            info_q.own_frame.fetch_max(
+                (SHARED.flushed.load(Ordering::Acquire) & FRAME_MASK) as u32,
+                Ordering::AcqRel,
+            );
             SHARED.late_owned.fetch_add(owned, Ordering::Relaxed);
         }
         let age = (cur_q >> FRAME_SHIFT).saturating_sub(snap).max(1);
-        SHARED.late_age_sum.fetch_add(u64::from(age), Ordering::Relaxed);
+        SHARED
+            .late_age_sum
+            .fetch_add(u64::from(age), Ordering::Relaxed);
         SHARED.late_age[(age as usize - 1).min(3)].fetch_add(1, Ordering::Relaxed);
-        SHARED.late_age_max.fetch_max(u64::from(age), Ordering::Relaxed);
+        SHARED
+            .late_age_max
+            .fetch_max(u64::from(age), Ordering::Relaxed);
         // The page is a CPU-read GPU result: the completion of the frames keeps copying it.
-        info_q.eager.store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+        info_q
+            .eager
+            .store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
     }
     // SAFETY: the alias maps the same pages as guest memory with read and write access, and `plan` lies inside the
     // pages `pa` and `pb`, which lie inside guest memory. The registers are the thread's own.
@@ -1116,11 +1143,17 @@ fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -
         }
     }
     if late {
-        let c = if op.writes() { &SHARED.late_writes } else { &SHARED.late_reads };
+        let c = if op.writes() {
+            &SHARED.late_writes
+        } else {
+            &SHARED.late_reads
+        };
         c.fetch_add(1, Ordering::Relaxed);
     }
     SHARED.emu[op.form() as usize].fetch_add(1, Ordering::Relaxed);
-    SHARED.emu_ns.fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
+    SHARED
+        .emu_ns
+        .fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
     true
 }
 
@@ -1256,10 +1289,21 @@ fn copy_from_mirror(pg: usize, mirror: u64, frame: u32) {
 /// of the handler when `count` says so.
 fn copy_stale(pg: usize, mirror: u64, dst_base: u64, count: bool, frame: u32) {
     let (stale, keep) = info(pg).map_or(([u64::MAX; 4], [0; 4]), |i| (i.stale(), i.keep(frame)));
-    copy_mask(pg, mirror, dst_base, &std::array::from_fn(|i| stale[i] & !keep[i]));
-    let kept: u32 = stale.iter().zip(&keep).map(|(s, k)| (s & k).count_ones()).sum();
+    copy_mask(
+        pg,
+        mirror,
+        dst_base,
+        &std::array::from_fn(|i| stale[i] & !keep[i]),
+    );
+    let kept: u32 = stale
+        .iter()
+        .zip(&keep)
+        .map(|(s, k)| (s & k).count_ones())
+        .sum();
     if kept > 0 {
-        SHARED.late_kept.fetch_add(u64::from(kept), Ordering::Relaxed);
+        SHARED
+            .late_kept
+            .fetch_add(u64::from(kept), Ordering::Relaxed);
     }
     if count {
         SHARED.synced.fetch_add(1, Ordering::Relaxed);
@@ -1305,7 +1349,14 @@ fn copy_blocks(src: u64, dst: u64, mask: &Mask) {
 /// Serves a fault on the tracked page `pg` when there is a mirror. A page tagged with a frame holds stale bytes: the
 /// thread waits for the frame to complete (an internal thread does not wait), copies the page from the mirror and opens
 /// it. Atomics, `mprotect`, `memcpy` and the wake word; no lock, no allocation.
-fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror: u64, at: u64) -> FaultKind {
+fn serve_mirrored(
+    pg: usize,
+    w: &AtomicU32,
+    write: bool,
+    internal: bool,
+    mirror: u64,
+    at: u64,
+) -> FaultKind {
     let p = pg as u32;
     let mut kind: Option<FaultKind> = None;
     let mut gave_up = false;
@@ -1334,7 +1385,8 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                     learn_reader(pg, frame);
                     let n = SHARED.flight_n.fetch_add(1, Ordering::AcqRel) as usize;
                     if n < FLIGHT_CAP {
-                        let off = at.wrapping_sub(SHARED.base.load(Ordering::Relaxed)) & ((1 << 35) - 2);
+                        let off =
+                            at.wrapping_sub(SHARED.base.load(Ordering::Relaxed)) & ((1 << 35) - 2);
                         let v = u64::from(frame) << 36 | u64::from(write) << 35 | (off + 1);
                         SHARED.flight_log[n].store(v, Ordering::Release);
                     }
@@ -1358,8 +1410,13 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                     continue;
                 }
                 // The claim: one thread copies, the others sleep on the wake word and run their access again.
-                if w.compare_exchange(cur, pack(SYNC, u64::from(frame)), Ordering::AcqRel, Ordering::Acquire)
-                    .is_err()
+                if w.compare_exchange(
+                    cur,
+                    pack(SYNC, u64::from(frame)),
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_err()
                 {
                     continue;
                 }
@@ -1369,10 +1426,14 @@ fn serve_mirrored(pg: usize, w: &AtomicU32, write: bool, internal: bool, mirror:
                     if flying || !info(pg).is_some_and(|i| late_current(i, frame)) {
                         copy_from_mirror(pg, mirror, frame);
                     }
-                    if !flying && !internal && let Some(i) = info(pg) {
+                    if !flying
+                        && !internal
+                        && let Some(i) = info(pg)
+                    {
                         // A game thread waited for this copy: the completion of the next frame that writes the page copies
                         // it on its own (step 5).
-                        i.eager.store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+                        i.eager
+                            .store(SHARED.epoch.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
                     }
                     if !flying && let Some(i) = info(pg) {
                         // Guest memory is current here again. (A page read in flight stays stale: the frame may
@@ -1912,7 +1973,11 @@ fn set_blocks(m: &mut Mask, lo: u64, hi: u64) {
             continue;
         }
         let (a, b) = (first.max(from) - from, last.min(to) - from);
-        let bits = if b - a == 63 { u64::MAX } else { ((1u64 << (b - a + 1)) - 1) << a };
+        let bits = if b - a == 63 {
+            u64::MAX
+        } else {
+            ((1u64 << (b - a + 1)) - 1) << a
+        };
         *word |= bits;
     }
 }
@@ -1920,7 +1985,10 @@ fn set_blocks(m: &mut Mask, lo: u64, hi: u64) {
 /// The blocks that the host ranges `(address, length)` touch in each page of `runs` (the runs of the same ranges, as
 /// [`span_runs`] makes them): one mask per page, per run.
 fn range_masks(runs: &[(u32, u32)], ranges: &[(u64, u64)]) -> Vec<Vec<Mask>> {
-    let mut out: Vec<Vec<Mask>> = runs.iter().map(|&(s, e)| vec![[0; 4]; (e - s) as usize]).collect();
+    let mut out: Vec<Vec<Mask>> = runs
+        .iter()
+        .map(|&(s, e)| vec![[0; 4]; (e - s) as usize])
+        .collect();
     let base = SHARED.base.load(Ordering::Acquire);
     let total = SHARED.len.load(Ordering::Acquire);
     let npages = SHARED.npages.load(Ordering::Acquire) as u64;
@@ -1939,7 +2007,11 @@ fn range_masks(runs: &[(u32, u32)], ranges: &[(u64, u64)]) -> Vec<Vec<Mask>> {
                 continue;
             }
             let from = if pg == first { (lo - base) % p } else { 0 };
-            let to = if pg == last { (hi - 1 - base) % p + 1 } else { p };
+            let to = if pg == last {
+                (hi - 1 - base) % p + 1
+            } else {
+                p
+            };
             set_blocks(&mut out[i][(pg - u64::from(s)) as usize], from, to);
         }
     }
@@ -1981,14 +2053,20 @@ fn close_opened(frame: u64, runs: &[(u32, u32)]) {
     for &(first, end) in runs {
         let mut start: Option<u32> = None;
         for p in first..end {
-            let done = word(p as usize).is_some_and(|w| loop {
-                let cur = w.load(Ordering::Acquire);
-                if cur & STATE_MASK != OPEN || u64::from(cur >> FRAME_SHIFT) != frame & FRAME_MASK {
-                    break false;
-                }
-                let back = pack(GPU, frame) | (cur & FRESH);
-                if w.compare_exchange(cur, back, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-                    break true;
+            let done = word(p as usize).is_some_and(|w| {
+                loop {
+                    let cur = w.load(Ordering::Acquire);
+                    if cur & STATE_MASK != OPEN
+                        || u64::from(cur >> FRAME_SHIFT) != frame & FRAME_MASK
+                    {
+                        break false;
+                    }
+                    let back = pack(GPU, frame) | (cur & FRESH);
+                    if w.compare_exchange(cur, back, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                    {
+                        break true;
+                    }
                 }
             });
             match (done, start) {
@@ -2051,7 +2129,14 @@ fn late_current(i: &PageInfo, frame: u32) -> bool {
 /// readable for late readers and its guest bytes stop being a completed frame's. The claim keeps a thread that opens the
 /// page at the same time from meeting the change halfway.
 fn revoke_read(pg: usize, w: &AtomicU32, cur: u32) {
-    if w.compare_exchange(cur, pack(SYNC, u64::from(cur >> FRAME_SHIFT)), Ordering::AcqRel, Ordering::Acquire).is_ok() {
+    if w.compare_exchange(
+        cur,
+        pack(SYNC, u64::from(cur >> FRAME_SHIFT)),
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    )
+    .is_ok()
+    {
         protect_pages(pg as u32, pg as u32 + 1, PROT_NONE, false);
         w.store(cur, Ordering::Release);
         wake_all();
@@ -2086,7 +2171,8 @@ fn late_copy_back(
 ) {
     let p = page();
     let blocks = (p / BLOCK) as usize;
-    let (mut pages, mut nblocks, mut exact, mut won_n, mut carried_n) = (0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut pages, mut nblocks, mut exact, mut won_n, mut carried_n) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
     for (ri, &(first, end)) in runs.iter().enumerate() {
         for pg in first..end {
             let Some(w) = word(pg as usize) else { continue };
@@ -2107,10 +2193,16 @@ fn late_copy_back(
             if i.snap.load(Ordering::Acquire) == 0 {
                 continue;
             }
-            let m = masks.and_then(|m| m.get(ri)).and_then(|r| r.get((pg - first) as usize));
+            let m = masks
+                .and_then(|m| m.get(ri))
+                .and_then(|r| r.get((pg - first) as usize));
             let Some(m) = m.filter(|_| late_active(i)) else {
                 // The blocks of the frame are not known, or nobody reads the page: guest memory is not kept up to date.
-                let why = if m.is_none() { SnapWhy::Unknown } else { SnapWhy::Idle };
+                let why = if m.is_none() {
+                    SnapWhy::Unknown
+                } else {
+                    SnapWhy::Idle
+                };
                 i.snap_reset(why);
                 revoke_read(pg as usize, w, cur);
                 continue;
@@ -2124,7 +2216,9 @@ fn late_copy_back(
             let f = (frame & FRAME_MASK) as u32;
             // The page is claimed while it is copied: a thread that faults on it meanwhile (a store, or any access to a
             // page of a complete frame) waits for the claim instead of racing the copy.
-            if w.compare_exchange(cur, pack(SYNC, tag), Ordering::AcqRel, Ordering::Acquire).is_err() {
+            if w.compare_exchange(cur, pack(SYNC, tag), Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
                 i.snap_reset(SnapWhy::Busy);
                 continue;
             }
@@ -2139,8 +2233,14 @@ fn late_copy_back(
                         // SAFETY: both copies hold a whole page for `pg`; the GPU finished them before the completion.
                         let (x, y) = unsafe {
                             (
-                                std::slice::from_raw_parts((start + o) as *const u8, BLOCK as usize),
-                                std::slice::from_raw_parts((end_at + o) as *const u8, BLOCK as usize),
+                                std::slice::from_raw_parts(
+                                    (start + o) as *const u8,
+                                    BLOCK as usize,
+                                ),
+                                std::slice::from_raw_parts(
+                                    (end_at + o) as *const u8,
+                                    BLOCK as usize,
+                                ),
                             )
                         };
                         if x != y {
@@ -2176,7 +2276,9 @@ fn late_copy_back(
                 }
                 None => mirror + u64::from(pg) * p,
             };
-            let kept: u32 = (0..4).map(|k| (m[k] & keep[k] & !copy[k]).count_ones()).sum();
+            let kept: u32 = (0..4)
+                .map(|k| (m[k] & keep[k] & !copy[k]).count_ones())
+                .sum();
             copy_blocks(src, guest, &copy);
             i.snap.store(f.max(1), Ordering::Release);
             w.store(cur, Ordering::Release);
@@ -2184,12 +2286,16 @@ fn late_copy_back(
             pages += 1;
             nblocks += u64::from(copy.iter().map(|c| c.count_ones()).sum::<u32>());
             if kept > 0 {
-                SHARED.late_kept.fetch_add(u64::from(kept), Ordering::Relaxed);
+                SHARED
+                    .late_kept
+                    .fetch_add(u64::from(kept), Ordering::Relaxed);
             }
         }
     }
     SHARED.late_copied.fetch_add(pages, Ordering::Relaxed);
-    SHARED.late_copied_blocks.fetch_add(nblocks, Ordering::Relaxed);
+    SHARED
+        .late_copied_blocks
+        .fetch_add(nblocks, Ordering::Relaxed);
     SHARED.late_exact.fetch_add(exact, Ordering::Relaxed);
     SHARED.late_frame_won.fetch_add(won_n, Ordering::Relaxed);
     SHARED.late_carried.fetch_add(carried_n, Ordering::Relaxed);
@@ -2198,7 +2304,13 @@ fn late_copy_back(
 /// Stages page `pg` (`bytes`, `skip`) with the CPU blocks a completion kept aside for it (`carry`, see
 /// [`late_copy_back`]): a kept-aside block whose bytes here are still the frame's bytes that replaced the CPU's (no CPU
 /// store since) is staged with the CPU's bytes and copied into the mirror.
-fn stage_carry(stager: &mut dyn Stager, carry: &mut BTreeMap<u32, Carry>, pg: u32, bytes: &[u8], skip: Mask) {
+fn stage_carry(
+    stager: &mut dyn Stager,
+    carry: &mut BTreeMap<u32, Carry>,
+    pg: u32,
+    bytes: &[u8],
+    skip: Mask,
+) {
     let Some(c) = carry.remove(&pg) else {
         stager.stage_masked(pg, bytes, skip);
         return;
@@ -2239,7 +2351,11 @@ static EAGER_BUSY: AtomicBool = AtomicBool::new(false);
 /// Drops the queued jobs and waits for the one in progress: a new `attach` replaces the tables and the host may unmap the
 /// guest range the job writes through the alias.
 fn eager_quiesce() {
-    EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner).clear();
+    EAGER
+        .jobs
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
     while EAGER_BUSY.load(Ordering::Acquire) {
         std::thread::yield_now();
     }
@@ -2249,25 +2365,27 @@ const EAGER_QUEUE_MAX: usize = 16;
 
 fn eager_submit(jobs: Vec<FrameRuns>) {
     EAGER_THREAD.call_once(|| {
-        let _ = std::thread::Builder::new().name("nxkit-pages-copyback".into()).spawn(|| {
-            loop {
-                let job = {
-                    let mut q = EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-                    while q.is_empty() {
-                        q = EAGER.wake.wait(q).unwrap_or_else(PoisonError::into_inner);
+        let _ = std::thread::Builder::new()
+            .name("nxkit-pages-copyback".into())
+            .spawn(|| {
+                loop {
+                    let job = {
+                        let mut q = EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+                        while q.is_empty() {
+                            q = EAGER.wake.wait(q).unwrap_or_else(PoisonError::into_inner);
+                        }
+                        let job = q.pop_front();
+                        if job.is_some() {
+                            EAGER_BUSY.store(true, Ordering::Release);
+                        }
+                        job
+                    };
+                    if let Some((f, runs)) = job {
+                        eager_copy(f, &runs);
+                        EAGER_BUSY.store(false, Ordering::Release);
                     }
-                    let job = q.pop_front();
-                    if job.is_some() {
-                        EAGER_BUSY.store(true, Ordering::Release);
-                    }
-                    job
-                };
-                if let Some((f, runs)) = job {
-                    eager_copy(f, &runs);
-                    EAGER_BUSY.store(false, Ordering::Release);
                 }
-            }
-        });
+            });
     });
     let mut q = EAGER.jobs.lock().unwrap_or_else(PoisonError::into_inner);
     q.extend(jobs);
@@ -2316,7 +2434,8 @@ fn eager_copy(frame: u64, runs: &[(u32, u32)]) {
                 if cur & STATE_MASK != GPU || u64::from(cur >> FRAME_SHIFT) != frame & FRAME_MASK {
                     return None;
                 }
-                w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire).ok()?;
+                w.compare_exchange(cur, pack(SYNC, frame), Ordering::AcqRel, Ordering::Acquire)
+                    .ok()?;
                 if !late_current(i, frame as u32) {
                     copy_stale(pg as usize, mirror, alias, false, frame as u32);
                 }
@@ -2344,7 +2463,9 @@ fn eager_copy(frame: u64, runs: &[(u32, u32)]) {
     }
     SHARED.eager_pages.fetch_add(pages, Ordering::Relaxed);
     SHARED.eager_runs.fetch_add(calls, Ordering::Relaxed);
-    SHARED.eager_ns.fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
+    SHARED
+        .eager_ns
+        .fetch_add(now_ns().saturating_sub(t0), Ordering::Relaxed);
 }
 
 /// Receives the guest pages that the CPU wrote, to carry them into the mirror on the GPU.
@@ -2454,7 +2575,10 @@ impl Pages {
         if page() > 4 * 64 * BLOCK {
             return Err("the host page has more blocks than the mask holds".to_string());
         }
-        let (base, len) = (SHARED.base.load(Ordering::Acquire), SHARED.len.load(Ordering::Acquire));
+        let (base, len) = (
+            SHARED.base.load(Ordering::Acquire),
+            SHARED.len.load(Ordering::Acquire),
+        );
         let alias = build_alias(base, len)?;
         SHARED.alias.store(alias, Ordering::Release);
         Ok(())
@@ -2479,7 +2603,9 @@ impl Pages {
         let p = page();
         // SAFETY: the alias maps the whole guest range with read access and `pg` is a page inside the table; the bytes
         // may change under a reader (the CPU stores through it), which the staging accepts.
-        Some(unsafe { std::slice::from_raw_parts((alias + u64::from(pg) * p) as *const u8, p as usize) })
+        Some(unsafe {
+            std::slice::from_raw_parts((alias + u64::from(pg) * p) as *const u8, p as usize)
+        })
     }
 
     /// Whether [`attach`](Self::attach) ran.
@@ -2543,7 +2669,12 @@ impl Pages {
     /// [`set_late_copies`](Self::set_late_copies). Empty when there are none.
     pub fn late_copy_pages(&self, frame: u64) -> Vec<u32> {
         let c = ctrl();
-        c.late_copies.iter().rev().find(|l| l.frame == frame).map(|l| l.pages.clone()).unwrap_or_default()
+        c.late_copies
+            .iter()
+            .rev()
+            .find(|l| l.frame == frame)
+            .map(|l| l.pages.clone())
+            .unwrap_or_default()
     }
 
     /// The copies of [`late_copy_pages`](Self::late_copy_pages) of frame `frame` are encoded: page `i` of the list is
@@ -2584,7 +2715,10 @@ impl Pages {
     /// tests whose guest memory goes back to the allocator.
     pub fn release_all(&self) {
         if self.attached() {
-            self.forget(SHARED.base.load(Ordering::Acquire), SHARED.len.load(Ordering::Acquire));
+            self.forget(
+                SHARED.base.load(Ordering::Acquire),
+                SHARED.len.load(Ordering::Acquire),
+            );
         }
     }
 
@@ -2606,14 +2740,18 @@ impl Pages {
     pub fn peek(&self, addr: u64, buf: &mut [u8]) -> bool {
         let base = SHARED.base.load(Ordering::Acquire);
         let total = SHARED.len.load(Ordering::Acquire);
-        if buf.is_empty() || addr < base || addr.saturating_add(buf.len() as u64) > base.saturating_add(total) {
+        if buf.is_empty()
+            || addr < base
+            || addr.saturating_add(buf.len() as u64) > base.saturating_add(total)
+        {
             return false;
         }
         let Some((first, end)) = page_span(addr, buf.len() as u64) else {
             return false;
         };
         let readable = (first..end).all(|p| {
-            word(p as usize).is_some_and(|w| matches!(w.load(Ordering::Acquire) & STATE_MASK, CLEAN | DIRTY))
+            word(p as usize)
+                .is_some_and(|w| matches!(w.load(Ordering::Acquire) & STATE_MASK, CLEAN | DIRTY))
         });
         if !readable {
             return false;
@@ -2635,13 +2773,19 @@ impl Pages {
             .iter()
             .map(|s| s.load(Ordering::Acquire))
             .filter(|&v| v != 0)
-            .map(|v| ((v >> 36) as u32, base + (v & ((1 << 35) - 1)) - 1, v >> 35 & 1 != 0))
+            .map(|v| {
+                (
+                    (v >> 36) as u32,
+                    base + (v & ((1 << 35) - 1)) - 1,
+                    v >> 35 & 1 != 0,
+                )
+            })
             .collect();
         (out, n)
     }
 
     /// The host addresses of the first writes of the CPU to member pages after the flush of `frame` and before its commit,
-    /// as logged (at most [`P1_CAP`]; the second number is how many there were). The log of the frame is emptied.
+    /// as logged (at most `P1_CAP`; the second number is how many there were). The log of the frame is emptied.
     pub fn take_between(&self, frame: u64) -> (Vec<u64>, u32) {
         let base = SHARED.base.load(Ordering::Acquire);
         let r = frame as usize % P1_RING;
@@ -2682,7 +2826,9 @@ impl Pages {
             Vec::new()
         } else {
             // SAFETY: the bitmap has `n` words that are never freed.
-            (0..n).map(|i| unsafe { &*p.add(i) }.load(Ordering::Acquire)).collect()
+            (0..n)
+                .map(|i| unsafe { &*p.add(i) }.load(Ordering::Acquire))
+                .collect()
         };
         let a = std::sync::Arc::new(v);
         c.snap = Some((gen_, a.clone()));
@@ -2707,7 +2853,9 @@ impl Pages {
             return false;
         };
         (first..end).any(|p| {
-            word(p as usize).is_some_and(|w| matches!(w.load(Ordering::Acquire) & STATE_MASK, GPU | OPEN | SYNC))
+            word(p as usize).is_some_and(|w| {
+                matches!(w.load(Ordering::Acquire) & STATE_MASK, GPU | OPEN | SYNC)
+            })
         })
     }
 
@@ -2802,7 +2950,7 @@ impl Pages {
         st
     }
 
-    /// The pages that game threads waited for as the writer of a frame lately (within [`LEARN_FRAMES`] frames of `now`), sorted:
+    /// The pages that game threads waited for as the writer of a frame lately (within `LEARN_FRAMES` frames of `now`), sorted:
     /// CPU-read GPU results. The encoder of a frame cuts the frame after the last pass that writes such a page and calls
     /// [`release_early`](Self::release_early) when that part is done (step 6).
     pub fn readers(&self, now: u64) -> Vec<u32> {
@@ -2861,7 +3009,11 @@ impl Pages {
         if SHARED.mirror.load(Ordering::Acquire) != 0 {
             // With a mirror the pages stay tagged: the guest bytes are stale until a CPU access copies them. Pages that
             // a host thread opened for reading while the frame ran lose their access again.
-            let (due, mut due_masks, mut due_copies): (Vec<FrameRuns>, Vec<FrameMasks>, Vec<LateCopy>) = {
+            let (due, mut due_masks, mut due_copies): (
+                Vec<FrameRuns>,
+                Vec<FrameMasks>,
+                Vec<LateCopy>,
+            ) = {
                 let mut c = ctrl();
                 let mut due = Vec::new();
                 while c.frames.front().is_some_and(|(f, _)| *f <= frame) {
@@ -2885,7 +3037,8 @@ impl Pages {
             };
             let eager = SHARED.eager.load(Ordering::Acquire);
             let mirror = SHARED.mirror.load(Ordering::Acquire);
-            let copy_back = SHARED.eager_on.load(Ordering::Acquire) && SHARED.alias.load(Ordering::Acquire) != 0;
+            let copy_back = SHARED.eager_on.load(Ordering::Acquire)
+                && SHARED.alias.load(Ordering::Acquire) != 0;
             let mut later: Vec<FrameRuns> = Vec::new();
             let alias = SHARED.alias.load(Ordering::Acquire);
             if SHARED.late.load(Ordering::Acquire) && alias != 0 {
@@ -2893,9 +3046,23 @@ impl Pages {
                 // copied here) or after it (the flush copies a page of a complete frame itself).
                 let mut c = ctrl();
                 for (f, runs) in &due {
-                    let m = due_masks.iter().position(|(g, _)| g == f).map(|pos| due_masks.swap_remove(pos).1);
-                    let copies = due_copies.iter().position(|l| l.frame == *f).map(|pos| due_copies.swap_remove(pos));
-                    late_copy_back(*f, runs, m.as_deref(), copies.as_ref(), &mut c.carry, mirror, alias);
+                    let m = due_masks
+                        .iter()
+                        .position(|(g, _)| g == f)
+                        .map(|pos| due_masks.swap_remove(pos).1);
+                    let copies = due_copies
+                        .iter()
+                        .position(|l| l.frame == *f)
+                        .map(|pos| due_copies.swap_remove(pos));
+                    late_copy_back(
+                        *f,
+                        runs,
+                        m.as_deref(),
+                        copies.as_ref(),
+                        &mut c.carry,
+                        mirror,
+                        alias,
+                    );
                 }
             }
             for (f, runs) in due {
@@ -2908,7 +3075,9 @@ impl Pages {
                         for pg in first..end {
                             let Some(w) = word(pg as usize) else { continue };
                             let cur = w.load(Ordering::Acquire);
-                            if cur & STATE_MASK == GPU && u64::from(cur >> FRAME_SHIFT) == f & FRAME_MASK {
+                            if cur & STATE_MASK == GPU
+                                && u64::from(cur >> FRAME_SHIFT) == f & FRAME_MASK
+                            {
                                 serve_mirrored(pg as usize, w, false, true, mirror, 0);
                             }
                         }
@@ -2973,9 +3142,10 @@ impl Pages {
             .collect();
         let mut back: Vec<u32> = Vec::new();
         for pg in dirty {
-            if word(pg as usize)
-                .is_some_and(|w| w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok())
-            {
+            if word(pg as usize).is_some_and(|w| {
+                w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            }) {
                 back.push(pg);
             }
         }
@@ -2991,7 +3161,11 @@ impl Pages {
             }
         }
         if self.stage_emulated(&emu, &back, stager, carry) > 0 {
-            let extra: Vec<u32> = emu.iter().copied().filter(|pg| back.binary_search(pg).is_err()).collect();
+            let extra: Vec<u32> = emu
+                .iter()
+                .copied()
+                .filter(|pg| back.binary_search(pg).is_err())
+                .collect();
             back.extend(extra);
             back.sort_unstable();
         }
@@ -3053,7 +3227,8 @@ impl Pages {
                         if matches!(k, FaultKind::ReadInFlight | FaultKind::WriteInFlight) {
                             SHARED.settle_waits.fetch_add(1, Ordering::Relaxed);
                         }
-                        SHARED.faults[k as usize][FaultOrigin::Host as usize].fetch_add(1, Ordering::Relaxed);
+                        SHARED.faults[k as usize][FaultOrigin::Host as usize]
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     OPEN if write => {
                         let k = serve_mirrored(p as usize, w, write, internal, mirror, addr);
@@ -3106,7 +3281,9 @@ impl Pages {
         let prot0 = SHARED.mprotect_ns.load(Ordering::Relaxed);
         let mut c = ctrl();
         let cc = &mut *c;
-        SHARED.epoch.store((frame / EPOCH_FRAMES) as u32, Ordering::Relaxed);
+        SHARED
+            .epoch
+            .store((frame / EPOCH_FRAMES) as u32, Ordering::Relaxed);
         let p = page();
         let base = SHARED.base.load(Ordering::Acquire);
         // From here until the commit of the frame, first writes of the CPU are counted and logged for it.
@@ -3143,7 +3320,9 @@ impl Pages {
                 );
             }
         }
-        SHARED.members.fetch_add(newly.len() as u64, Ordering::AcqRel);
+        SHARED
+            .members
+            .fetch_add(newly.len() as u64, Ordering::AcqRel);
         st.new_members = newly.len() as u32;
         st.new_ns = tick();
         // 2. The dirty pages.
@@ -3228,7 +3407,10 @@ impl Pages {
             }
         }
         st.dirtied = back.len() as u32;
-        let stage_run = |stager: &mut dyn Stager, carry: &mut BTreeMap<u32, Carry>, s: u32, e: u32| {
+        let stage_run = |stager: &mut dyn Stager,
+                         carry: &mut BTreeMap<u32, Carry>,
+                         s: u32,
+                         e: u32| {
             for pg in s..e {
                 // SAFETY: the page lies in guest memory and is readable (read only or open) since the protection above.
                 let bytes = unsafe {
@@ -3250,13 +3432,20 @@ impl Pages {
         // that came in between.
         st.promoted = to_hot.len() as u32;
         for pg in to_hot {
-            cc.hot.insert(pg, Hot { shadow: Vec::new(), quiet: 0 });
+            cc.hot.insert(
+                pg,
+                Hot {
+                    shadow: Vec::new(),
+                    quiet: 0,
+                },
+            );
         }
         if !cc.hot.is_empty() {
             let mut gone: Vec<u32> = Vec::new();
             let mut quiet: Vec<u32> = Vec::new();
             for (&pg, h) in cc.hot.iter_mut() {
-                let still = word(pg as usize).is_some_and(|w| w.load(Ordering::Acquire) & STATE_MASK == DIRTY);
+                let still = word(pg as usize)
+                    .is_some_and(|w| w.load(Ordering::Acquire) & STATE_MASK == DIRTY);
                 if !still || in_runs(&runs_w, pg) {
                     // A frame writes it (step 3 stages it and tags it) or it is not tracked any more.
                     gone.push(pg);
@@ -3265,8 +3454,13 @@ impl Pages {
                 // SAFETY: the page lies in guest memory and is readable and writable (it is dirty); the CPU may store
                 // to it at the same time, which the staging accepts: the shadow is what is staged, so a later store is
                 // found at the next flush.
-                let live = unsafe { std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize) };
-                if h.shadow.len() == p as usize && h.shadow[..] == *live && !cc.carry.contains_key(&pg) {
+                let live = unsafe {
+                    std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
+                };
+                if h.shadow.len() == p as usize
+                    && h.shadow[..] == *live
+                    && !cc.carry.contains_key(&pg)
+                {
                     st.hot_same += 1;
                     h.quiet += 1;
                     if h.quiet >= HOT_QUIET {
@@ -3277,7 +3471,13 @@ impl Pages {
                 h.quiet = 0;
                 h.shadow.resize(p as usize, 0);
                 h.shadow.copy_from_slice(live);
-                stage_carry(stager, &mut cc.carry, pg, &h.shadow, stage_skip(pg as usize));
+                stage_carry(
+                    stager,
+                    &mut cc.carry,
+                    pg,
+                    &h.shadow,
+                    stage_skip(pg as usize),
+                );
                 st.hot_staged += 1;
             }
             for pg in &gone {
@@ -3289,8 +3489,10 @@ impl Pages {
             let mut demote: Vec<(u32, Vec<u8>)> = Vec::new();
             for pg in quiet {
                 if let Some(h) = cc.hot.remove(&pg)
-                    && word(pg as usize)
-                        .is_some_and(|w| w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok())
+                    && word(pg as usize).is_some_and(|w| {
+                        w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire)
+                            .is_ok()
+                    })
                 {
                     demote.push((pg, h.shadow));
                 }
@@ -3304,7 +3506,9 @@ impl Pages {
             }
             for (pg, shadow) in &demote {
                 // SAFETY: as above; the page is read only now, so nothing changes under the compare.
-                let live = unsafe { std::slice::from_raw_parts((base + u64::from(*pg) * p) as *const u8, p as usize) };
+                let live = unsafe {
+                    std::slice::from_raw_parts((base + u64::from(*pg) * p) as *const u8, p as usize)
+                };
                 if shadow[..] != *live || cc.carry.contains_key(pg) {
                     stage_carry(stager, &mut cc.carry, *pg, live, stage_skip(*pg as usize));
                     st.hot_staged += 1;
@@ -3354,7 +3558,9 @@ impl Pages {
                     match cur & STATE_MASK {
                         DIRTY => {
                             // Written after step 2: take it back to clean and stage it again.
-                            if w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                            if w.compare_exchange(DIRTY, CLEAN, Ordering::AcqRel, Ordering::Acquire)
+                                .is_ok()
+                            {
                                 protect_pages(pg, pg + 1, PROT_READ, true);
                                 stage_run(stager, &mut cc.carry, pg, pg + 1);
                                 fresh = true;
@@ -3369,7 +3575,9 @@ impl Pages {
                         }
                         _ => {
                             let tag = pack(GPU, frame) | if fresh { FRESH } else { 0 };
-                            if w.compare_exchange(cur, tag, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                            if w.compare_exchange(cur, tag, Ordering::AcqRel, Ordering::Acquire)
+                                .is_ok()
+                            {
                                 break;
                             }
                         }
@@ -3379,7 +3587,11 @@ impl Pages {
                 // mirror (the tag came first: a thread that copies the page waits for the frame, which is not done).
                 if let Some(i) = info(pg as usize) {
                     i.or_stale(&masks[ri][(pg - s) as usize]);
-                    if late_on && alias != 0 && i.snap.load(Ordering::Acquire) != 0 && late_active(i) {
+                    if late_on
+                        && alias != 0
+                        && i.snap.load(Ordering::Acquire) != 0
+                        && late_active(i)
+                    {
                         late_pages.push(pg);
                     }
                 }
@@ -3391,8 +3603,14 @@ impl Pages {
             // Results one frame late: a page whose guest bytes are a completed frame's (`snap`) and that the completions
             // keep current stays readable. A read of it needs no trap: it gets the last completed frame's bytes, which is
             // what the handler served after the trap. Only stores fault (the handler marks the blocks as the CPU's).
-            if late_on && alias != 0 && poison.is_none() && SHARED.read_open_on.load(Ordering::Acquire) {
-                let readable = |pg: u32| info(pg as usize).is_some_and(|i| i.snap.load(Ordering::Acquire) != 0);
+            if late_on
+                && alias != 0
+                && poison.is_none()
+                && SHARED.read_open_on.load(Ordering::Acquire)
+            {
+                let readable = |pg: u32| {
+                    info(pg as usize).is_some_and(|i| i.snap.load(Ordering::Acquire) != 0)
+                };
                 let mut run_start = s;
                 while run_start < e {
                     let open = readable(run_start);
@@ -3400,9 +3618,16 @@ impl Pages {
                     while run_end < e && readable(run_end) == open {
                         run_end += 1;
                     }
-                    protect_pages(run_start, run_end, if open { PROT_READ } else { PROT_NONE }, true);
+                    protect_pages(
+                        run_start,
+                        run_end,
+                        if open { PROT_READ } else { PROT_NONE },
+                        true,
+                    );
                     if open {
-                        SHARED.read_open.fetch_add(u64::from(run_end - run_start), Ordering::Relaxed);
+                        SHARED
+                            .read_open
+                            .fetch_add(u64::from(run_end - run_start), Ordering::Relaxed);
                     }
                     run_start = run_end;
                 }
@@ -3452,8 +3677,14 @@ impl Pages {
             });
         }
         // Blocks kept aside for pages no path above staged (released, or kept writable without a change).
-        let lost: u32 = cc.carry.values().map(|c| c.mask.iter().map(|x| x.count_ones()).sum::<u32>()).sum();
-        SHARED.late_carry_lost.fetch_add(u64::from(lost), Ordering::Relaxed);
+        let lost: u32 = cc
+            .carry
+            .values()
+            .map(|c| c.mask.iter().map(|x| x.count_ones()).sum::<u32>())
+            .sum();
+        SHARED
+            .late_carry_lost
+            .fetch_add(u64::from(lost), Ordering::Relaxed);
         cc.carry.clear();
         while cc.late_copies.len() > MAX_FRAMES {
             cc.late_copies.pop_front();
@@ -3465,7 +3696,10 @@ impl Pages {
             cc.masks.pop_front();
         }
         st.tag_ns = tick();
-        st.mprotect_ns = SHARED.mprotect_ns.load(Ordering::Relaxed).saturating_sub(prot0);
+        st.mprotect_ns = SHARED
+            .mprotect_ns
+            .load(Ordering::Relaxed)
+            .saturating_sub(prot0);
         st.mprotects = (SHARED.mprotects.load(Ordering::Relaxed) - calls0) as u32;
         st.ns = now_ns().saturating_sub(t0);
         st
@@ -3527,8 +3761,8 @@ impl Pages {
         };
         let mut start: Option<u32> = None;
         for p in first..end {
-            let member = word(p as usize)
-                .is_some_and(|w| w.load(Ordering::Acquire) & STATE_MASK != FREE);
+            let member =
+                word(p as usize).is_some_and(|w| w.load(Ordering::Acquire) & STATE_MASK != FREE);
             match (member, start) {
                 (true, None) => start = Some(p),
                 (false, Some(s)) => {
@@ -3597,7 +3831,10 @@ impl Pages {
             ],
             waits: [g(&SHARED.wait_n[0]), g(&SHARED.wait_n[1])],
             wait_ns: [g(&SHARED.wait_ns[0]), g(&SHARED.wait_ns[1])],
-            wait_uncommitted: [g(&SHARED.wait_uncommitted[0]), g(&SHARED.wait_uncommitted[1])],
+            wait_uncommitted: [
+                g(&SHARED.wait_uncommitted[0]),
+                g(&SHARED.wait_uncommitted[1]),
+            ],
             emulated: std::array::from_fn(|i| g(&SHARED.emu[i])),
             emulated_ns: g(&SHARED.emu_ns),
             fallbacks: std::array::from_fn(|i| g(&SHARED.fallback[i])),
@@ -3749,9 +3986,7 @@ mod tests {
         fn store(&self, page: u64, off: u64, v: u8) {
             // SAFETY: inside the allocation.
             unsafe {
-                self.base
-                    .add((page * P + off) as usize)
-                    .write_volatile(v);
+                self.base.add((page * P + off) as usize).write_volatile(v);
             }
         }
 
@@ -3796,8 +4031,12 @@ mod tests {
         m.store(2, 8, 1);
         let s1 = pg.stats();
         assert_eq!(
-            s1.faults[FaultKind::CleanWrite as usize].iter().sum::<u64>()
-                - s0.faults[FaultKind::CleanWrite as usize].iter().sum::<u64>(),
+            s1.faults[FaultKind::CleanWrite as usize]
+                .iter()
+                .sum::<u64>()
+                - s0.faults[FaultKind::CleanWrite as usize]
+                    .iter()
+                    .sum::<u64>(),
             1
         );
         // The flush takes it back to clean; the next store faults again.
@@ -3859,8 +4098,12 @@ mod tests {
         m.store(1, 0, 1);
         let s1 = pg.stats();
         assert_eq!(
-            s1.faults[FaultKind::CleanWrite as usize].iter().sum::<u64>()
-                - s0.faults[FaultKind::CleanWrite as usize].iter().sum::<u64>(),
+            s1.faults[FaultKind::CleanWrite as usize]
+                .iter()
+                .sum::<u64>()
+                - s0.faults[FaultKind::CleanWrite as usize]
+                    .iter()
+                    .sum::<u64>(),
             1
         );
     }
@@ -3921,7 +4164,11 @@ mod tests {
             .map(|i| {
                 std::thread::spawn(move || {
                     // SAFETY: inside the allocation of the test, which outlives the joined threads.
-                    unsafe { (base as *mut u8).add(i as usize).write_volatile(i as u8 + 1) };
+                    unsafe {
+                        (base as *mut u8)
+                            .add(i as usize)
+                            .write_volatile(i as u8 + 1)
+                    };
                 })
             })
             .collect();
@@ -3969,9 +4216,7 @@ mod tests {
         // The page allows no access: the system call would fail with EFAULT without the hook of the slice.
         m.store(1, 5, 0);
         let _ = pg.flush(2, &[(m.addr(1), P)]);
-        let r = nxkit_abi::guest::with_slice_mut(m.addr(1), 64, |b| {
-            f.read(b).map(|n| (n, b[0]))
-        });
+        let r = nxkit_abi::guest::with_slice_mut(m.addr(1), 64, |b| f.read(b).map(|n| (n, b[0])));
         assert_eq!(r.unwrap().unwrap(), (64, 0));
         assert_eq!(pg.state_of(m.addr(1)), "dirty");
         // A read through a system call (a write to a file) opens the page for reading too.
@@ -4032,21 +4277,31 @@ mod tests {
         mir.store(2, 6, 78);
         // The frame completes; a read copies the page.
         pg.complete(1);
-        assert_eq!(pg.state_of(m.addr(2)), "gpu(1)", "the completion leaves the page tagged");
+        assert_eq!(
+            pg.state_of(m.addr(2)),
+            "gpu(1)",
+            "the completion leaves the page tagged"
+        );
         let s0 = pg.stats();
         assert_eq!(m.load(2, 5), 77);
         assert_eq!(m.load(2, 6), 78);
         assert_eq!(pg.state_of(m.addr(2)), "clean");
         let s1 = pg.stats();
         assert_eq!(s1.synced - s0.synced, 1);
-        assert_eq!(s1.writer_waits, s0.writer_waits, "no wait: the writer was complete");
+        assert_eq!(
+            s1.writer_waits, s0.writer_waits,
+            "no wait: the writer was complete"
+        );
         // A write now dirties it; the flush stages the whole page and tags it fresh when a frame writes it.
         m.store(2, 7, 9);
         assert_eq!(pg.state_of(m.addr(2)), "dirty");
         let f = pg.flush_mirrored(2, &[], &[(m.addr(2), 8)], None, &mut st);
         assert_eq!((f.staged, f.written), (1, 1));
         assert_eq!(st.pages.len(), 1);
-        assert_eq!(st.pages[0].1[5], 77, "the page holds the GPU's bytes and the CPU's");
+        assert_eq!(
+            st.pages[0].1[5], 77,
+            "the page holds the GPU's bytes and the CPU's"
+        );
         assert_eq!(st.pages[0].1[7], 9);
         assert_eq!(pg.state_of(m.addr(2)), "gpu(2, fresh)");
         pg.complete(2);
@@ -4071,7 +4326,10 @@ mod tests {
             v
         });
         std::thread::sleep(std::time::Duration::from_millis(80));
-        assert!(!done.load(Ordering::Acquire), "the reader waits for the writer");
+        assert!(
+            !done.load(Ordering::Acquire),
+            "the reader waits for the writer"
+        );
         // The GPU finishes: it wrote the mirror before the completion.
         mir.store(1, 0, 12);
         pg.complete(5);
@@ -4083,7 +4341,8 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_goes_on_at_the_pass_signal_of_its_page_while_the_frame_runs_and_the_other_page_waits_for_the_frame() {
+    fn a_reader_goes_on_at_the_pass_signal_of_its_page_while_the_frame_runs_and_the_other_page_waits_for_the_frame()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = mirrored(6);
         let mut st = Collect::default();
@@ -4100,7 +4359,10 @@ mod tests {
         };
         let (r1, r2) = (read(1), read(2));
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert!(!r1.is_finished() && !r2.is_finished(), "both wait for their writers");
+        assert!(
+            !r1.is_finished() && !r2.is_finished(),
+            "both wait for their writers"
+        );
         // The pass that writes page 1 is done; the frame is not.
         pg.release_early(31, &[(1, 2)]);
         assert_eq!(r1.join().unwrap(), 11, "the bytes of the pass");
@@ -4112,8 +4374,16 @@ mod tests {
         pg.complete(31);
         assert_eq!(r2.join().unwrap(), 22);
         let s1 = pg.stats();
-        assert_eq!(s1.wait_ends[0] - s0.wait_ends[0], 1, "one wait ended at a pass signal");
-        assert_eq!(s1.wait_ends[1] - s0.wait_ends[1], 1, "one at the completion");
+        assert_eq!(
+            s1.wait_ends[0] - s0.wait_ends[0],
+            1,
+            "one wait ended at a pass signal"
+        );
+        assert_eq!(
+            s1.wait_ends[1] - s0.wait_ends[1],
+            1,
+            "one at the completion"
+        );
         assert_eq!(s1.early_pages - s0.early_pages, 1);
         assert_eq!(s1.early_calls - s0.early_calls, 1);
         pg.set_mirror(0);
@@ -4146,7 +4416,8 @@ mod tests {
     }
 
     #[test]
-    fn waits_for_a_writer_are_counted_by_access_with_their_time_and_whether_the_frame_was_committed() {
+    fn waits_for_a_writer_are_counted_by_access_with_their_time_and_whether_the_frame_was_committed()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = mirrored(4);
         let mut st = Collect::default();
@@ -4172,19 +4443,32 @@ mod tests {
         assert_eq!(reader.join().unwrap(), 9);
         writer.join().unwrap();
         let s1 = pg.stats();
-        assert_eq!((s1.waits[0] - s0.waits[0], s1.waits[1] - s0.waits[1]), (1, 1), "one read wait, one write wait");
         assert_eq!(
-            (s1.wait_uncommitted[0] - s0.wait_uncommitted[0], s1.wait_uncommitted[1] - s0.wait_uncommitted[1]),
+            (s1.waits[0] - s0.waits[0], s1.waits[1] - s0.waits[1]),
+            (1, 1),
+            "one read wait, one write wait"
+        );
+        assert_eq!(
+            (
+                s1.wait_uncommitted[0] - s0.wait_uncommitted[0],
+                s1.wait_uncommitted[1] - s0.wait_uncommitted[1]
+            ),
             (1, 0),
             "the read began before the commit, the write after it"
         );
-        assert!(s1.wait_ns[0] - s0.wait_ns[0] >= 60_000_000, "the read waited for both sleeps");
+        assert!(
+            s1.wait_ns[0] - s0.wait_ns[0] >= 60_000_000,
+            "the read waited for both sleeps"
+        );
         assert!(s1.wait_ns[1] - s0.wait_ns[1] >= 30_000_000);
         let longest = pg.take_wait_max();
         assert!(longest[0] >= longest[1] && longest[1] >= 30_000_000);
         let (log, total) = pg.take_in_flight();
         assert_eq!(total, 2);
-        assert!(log.contains(&(21, m.addr(1), false)) && log.contains(&(21, m.addr(2), true)), "{log:?}");
+        assert!(
+            log.contains(&(21, m.addr(1), false)) && log.contains(&(21, m.addr(2), true)),
+            "{log:?}"
+        );
         pg.set_mirror(0);
     }
 
@@ -4200,7 +4484,11 @@ mod tests {
         pg.note_committed(31);
         m.store(3, 0, 1);
         let (log, total) = pg.take_between(31);
-        assert_eq!((log, total), (vec![m.addr(1) + 40], 1), "only the write before the commit, at its address");
+        assert_eq!(
+            (log, total),
+            (vec![m.addr(1) + 40], 1),
+            "only the write before the commit, at its address"
+        );
         assert_eq!(pg.take_between(31).1, 0, "the log is emptied");
         pg.set_mirror(0);
     }
@@ -4312,7 +4600,11 @@ mod tests {
         m.store(2, 0, 4);
         let s1 = pg.stats();
         assert_eq!(s1.phase_writes[1] - s0.phase_writes[1], 1);
-        assert_eq!(pg.take_between(1), (vec![m.addr(2)], 1), "the write is logged for the frame");
+        assert_eq!(
+            pg.take_between(1),
+            (vec![m.addr(2)], 1),
+            "the write is logged for the frame"
+        );
         // The late staging takes the page again.
         let late = pg.flush_late(&mut st);
         assert_eq!(late, vec![2]);
@@ -4320,7 +4612,11 @@ mod tests {
         pg.set_eager_sync(true);
         mir.store(1, 0, 9);
         pg.complete(1);
-        assert_eq!(pg.state_of(m.addr(1)), "clean", "copied back without a CPU access");
+        assert_eq!(
+            pg.state_of(m.addr(1)),
+            "clean",
+            "copied back without a CPU access"
+        );
         assert_eq!(m.load(1, 0), 9);
         pg.set_eager_sync(false);
         pg.note_committed(1);
@@ -4329,7 +4625,17 @@ mod tests {
 
     #[test]
     fn set_blocks_sets_the_blocks_a_byte_range_touches() {
-        for (lo, hi) in [(0u64, 1u64), (0, 64), (1, 65), (63, 64), (100, 16384), (4000, 4096), (0, 16384), (4032, 4160), (8191, 8193)] {
+        for (lo, hi) in [
+            (0u64, 1u64),
+            (0, 64),
+            (1, 65),
+            (63, 64),
+            (100, 16384),
+            (4000, 4096),
+            (0, 16384),
+            (4032, 4160),
+            (8191, 8193),
+        ] {
             let mut got: Mask = [0; 4];
             set_blocks(&mut got, lo, hi);
             let mut want: Mask = [0; 4];
@@ -4342,7 +4648,10 @@ mod tests {
 
     #[test]
     fn runs_merge_and_the_lookup_finds_them() {
-        assert_eq!(runs_of(&[1, 2, 3, 7, 8, 12]), vec![(1, 4), (7, 9), (12, 13)]);
+        assert_eq!(
+            runs_of(&[1, 2, 3, 7, 8, 12]),
+            vec![(1, 4), (7, 9), (12, 13)]
+        );
         let r = vec![(1, 4), (7, 9)];
         assert!(in_runs(&r, 1) && in_runs(&r, 3) && in_runs(&r, 8));
         assert!(!in_runs(&r, 0) && !in_runs(&r, 4) && !in_runs(&r, 9));
@@ -4358,9 +4667,21 @@ mod tests {
         fn new(pages: u64) -> Self {
             let len = (pages * P) as usize;
             // SAFETY: an anonymous private mapping; the kernel picks the address.
-            let base = unsafe { mmap(std::ptr::null_mut(), len, PROT_RW, MAP_PRIVATE | MAP_ANON, -1, 0) };
+            let base = unsafe {
+                mmap(
+                    std::ptr::null_mut(),
+                    len,
+                    PROT_RW,
+                    MAP_PRIVATE | MAP_ANON,
+                    -1,
+                    0,
+                )
+            };
             assert!(base as isize != -1);
-            Self { base: base.cast(), len }
+            Self {
+                base: base.cast(),
+                len,
+            }
         }
 
         fn addr(&self, page: u64) -> u64 {
@@ -4410,14 +4731,21 @@ mod tests {
         let (m, _mir, pg) = emulating(4);
         m.store(1, 9, 77);
         let alias = pg.alias_page(1).expect("alias");
-        assert_eq!(alias[9], 77, "a store through the guest mapping shows in the alias");
+        assert_eq!(
+            alias[9], 77,
+            "a store through the guest mapping shows in the alias"
+        );
         // The guest page loses all access; the alias still reads and writes it.
         protect_pages(1, 2, PROT_NONE, false);
         let alias_w = alias.as_ptr().cast_mut();
         // SAFETY: inside the alias page, which is writable.
         unsafe { alias_w.add(10).write_volatile(78) };
         protect_pages(1, 2, PROT_RW, false);
-        assert_eq!(m.load(1, 10), 78, "a store through the alias shows in guest memory");
+        assert_eq!(
+            m.load(1, 10),
+            78,
+            "a store through the alias shows in guest memory"
+        );
         pg.set_mirror(0);
     }
 
@@ -4426,20 +4754,25 @@ mod tests {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, _mir, pg) = emulating(8);
         let ranges = [
-            (m.addr(1) + 100, 8),               // block 1
-            (m.addr(1) + 127, 2),               // blocks 1 and 2
-            (m.addr(2) + 16, 3 * P),            // from block 0 of page 2 to block 0 of page 5, partly
-            (m.addr(6), 1),                     // block 0 of page 6
+            (m.addr(1) + 100, 8),    // block 1
+            (m.addr(1) + 127, 2),    // blocks 1 and 2
+            (m.addr(2) + 16, 3 * P), // from block 0 of page 2 to block 0 of page 5, partly
+            (m.addr(6), 1),          // block 0 of page 6
         ];
         let runs = span_runs(&ranges);
         let masks = range_masks(&runs, &ranges);
-        assert_eq!(runs, vec![(1, 6), (6, 7)].into_iter().fold(Vec::new(), |mut v: Vec<(u32, u32)>, r| {
-            match v.last_mut() {
-                Some(l) if l.1 == r.0 => l.1 = r.1,
-                _ => v.push(r),
-            }
-            v
-        }));
+        assert_eq!(
+            runs,
+            vec![(1, 6), (6, 7)]
+                .into_iter()
+                .fold(Vec::new(), |mut v: Vec<(u32, u32)>, r| {
+                    match v.last_mut() {
+                        Some(l) if l.1 == r.0 => l.1 = r.1,
+                        _ => v.push(r),
+                    }
+                    v
+                })
+        );
         let at = |pg: u32| masks[0][(pg - 1) as usize];
         assert_eq!(at(1), [0b110, 0, 0, 0]);
         assert_eq!(at(2), [u64::MAX; 4]);
@@ -4458,7 +4791,18 @@ mod tests {
     #[allow(clippy::type_complexity)]
     unsafe fn exercise(r: *mut u8) -> (u64, u64, u64, i64, u64, u64, u64, u64, u64, u64) {
         use std::arch::asm;
-        let (x0, x1, x2, sw, b, qlo, qhi, d, pre, post): (u64, u64, u64, i64, u64, u64, u64, u64, u64, u64);
+        let (x0, x1, x2, sw, b, qlo, qhi, d, pre, post): (
+            u64,
+            u64,
+            u64,
+            i64,
+            u64,
+            u64,
+            u64,
+            u64,
+            u64,
+            u64,
+        );
         let (mut p1, mut p2) = (r, r);
         // SAFETY: per the caller, the accesses lie inside the region; the registers are declared.
         unsafe {
@@ -4483,8 +4827,16 @@ mod tests {
                 options(nostack),
             );
         }
-        assert_eq!(p1 as usize, r as usize + 56, "the pre-index wrote the base back");
-        assert_eq!(p2 as usize, r as usize + 8, "the post-index wrote the base back");
+        assert_eq!(
+            p1 as usize,
+            r as usize + 56,
+            "the pre-index wrote the base back"
+        );
+        assert_eq!(
+            p2 as usize,
+            r as usize + 8,
+            "the post-index wrote the base back"
+        );
         // Stores into the second half of the region.
         let (s0, s1, s2) = (0x1122_3344_5566_7788u64, 0x99aa_bbcc_ddee_ff00u64, 0xa5u64);
         // SAFETY: as above.
@@ -4514,7 +4866,8 @@ mod tests {
     }
 
     #[test]
-    fn accesses_outside_the_written_bytes_are_done_by_the_handler_on_several_threads_without_a_wait() {
+    fn accesses_outside_the_written_bytes_are_done_by_the_handler_on_several_threads_without_a_wait()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = emulating(4);
         for i in 0..P {
@@ -4551,7 +4904,11 @@ mod tests {
             assert_eq!((qlo, qhi), (le(g, 32, 8), le(g, 40, 8)));
             assert_eq!(d, le(g, 48, 8));
             assert_eq!(pre, le(g, 56, 8));
-            assert_eq!(post, le(g, 0, 8), "the post-index load reads before the base moves");
+            assert_eq!(
+                post,
+                le(g, 0, 8),
+                "the post-index load reads before the base moves"
+            );
             // The stores landed in guest memory (through the alias).
             let alias = pg.alias_page(1).unwrap();
             let at = |i: u64| alias[(off + i) as usize];
@@ -4570,11 +4927,21 @@ mod tests {
         }
         let s1 = pg.stats();
         let total = |s: &PageStats| s.emulated.iter().sum::<u64>();
-        assert_eq!(total(&s1) - total(&s0), 4 * 50 * 16, "every access was done by the handler");
+        assert_eq!(
+            total(&s1) - total(&s0),
+            4 * 50 * 16,
+            "every access was done by the handler"
+        );
         assert_eq!(s1.fallbacks, s0.fallbacks, "none fell back");
-        assert_eq!(s1.writer_waits, s0.writer_waits, "no wait for the writer happened");
+        assert_eq!(
+            s1.writer_waits, s0.writer_waits,
+            "no wait for the writer happened"
+        );
         assert_eq!(s1.waits, s0.waits);
-        assert_eq!(s1.faults, s0.faults, "the faults were not served by the ordinary path");
+        assert_eq!(
+            s1.faults, s0.faults,
+            "the faults were not served by the ordinary path"
+        );
         assert_eq!(pg.state_of(m.addr(1)), "gpu(1)", "the page stayed closed");
         // The GPU wrote the first 200 bytes of the mirror meanwhile.
         for i in 0..200 {
@@ -4585,7 +4952,11 @@ mod tests {
         let f2 = pg.flush_mirrored(2, &[], &[], None, &mut st2);
         assert_eq!((f2.staged, f2.emu_staged), (1, 1));
         assert_eq!(st2.skips, vec![(1, [0b1111, 0, 0, 0])]);
-        assert_eq!(st2.pages[0].1[(1024 + 128) as usize], 0x88, "the staged bytes hold the CPU's stores");
+        assert_eq!(
+            st2.pages[0].1[(1024 + 128) as usize],
+            0x88,
+            "the staged bytes hold the CPU's stores"
+        );
         assert_eq!(pg.stats().emu_staged - s1.emu_staged, 1);
         // Nothing new was stored: the page is not staged again.
         let mut st3 = Collect::default();
@@ -4596,12 +4967,24 @@ mod tests {
         let sync0 = pg.stats().synced;
         assert_eq!(m.load(1, 5), 0xee, "the GPU's byte is copied back");
         assert_eq!(m.load(1, 199), 0xee);
-        assert_eq!(m.load(1, 200), pat(200), "a byte outside the blocks is not touched");
+        assert_eq!(
+            m.load(1, 200),
+            pat(200),
+            "a byte outside the blocks is not touched"
+        );
         for t in 0..4u64 {
             let off = 1024 + 1024 * t;
-            assert_eq!(m.load(1, off + 128), 0x88, "the store survives the copy back");
+            assert_eq!(
+                m.load(1, off + 128),
+                0x88,
+                "the store survives the copy back"
+            );
             assert_eq!(m.load(1, off + 232), 0xa5);
-            assert_eq!(m.load(1, off + 8), pat(off + 8), "so do the bytes that were only read");
+            assert_eq!(
+                m.load(1, off + 8),
+                pat(off + 8),
+                "so do the bytes that were only read"
+            );
         }
         assert_eq!(pg.stats().synced - sync0, 1);
         assert_eq!(pg.state_of(m.addr(1)), "clean");
@@ -4630,13 +5013,19 @@ mod tests {
             v
         });
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert!(!done.load(Ordering::Acquire), "an access that touches written bytes waits for the frame");
+        assert!(
+            !done.load(Ordering::Acquire),
+            "an access that touches written bytes waits for the frame"
+        );
         mir.store(1, 66, 0x42);
         pg.complete(7);
         let v = reader.join().unwrap();
         assert_eq!((v >> 48) & 0xff, 0x42, "the load saw the GPU's byte");
         let s1 = pg.stats();
-        assert_eq!(s1.fallbacks[Reason::Overlap as usize] - s0.fallbacks[Reason::Overlap as usize], 1);
+        assert_eq!(
+            s1.fallbacks[Reason::Overlap as usize] - s0.fallbacks[Reason::Overlap as usize],
+            1
+        );
         assert_eq!(s1.writer_waits - s0.writer_waits, 1);
         assert_eq!(s1.emulated, s0.emulated);
         pg.set_mirror(0);
@@ -4662,8 +5051,15 @@ mod tests {
         pg.complete(9);
         let _ = reader.join().unwrap();
         let s1 = pg.stats();
-        assert_eq!(s1.fallbacks[Reason::Structure as usize] - s0.fallbacks[Reason::Structure as usize], 1);
-        assert_eq!(s1.writer_waits - s0.writer_waits, 1, "it waited for the writer");
+        assert_eq!(
+            s1.fallbacks[Reason::Structure as usize] - s0.fallbacks[Reason::Structure as usize],
+            1
+        );
+        assert_eq!(
+            s1.writer_waits - s0.writer_waits,
+            1,
+            "it waited for the writer"
+        );
         assert_eq!(s1.emulated, s0.emulated);
         pg.set_mirror(0);
     }
@@ -4712,11 +5108,20 @@ mod tests {
         }
         let s1 = pg.stats();
         assert_eq!(s1.writer_waits, s0.writer_waits, "no wait");
-        assert_eq!(s1.fallbacks[Reason::Mismatch as usize], s0.fallbacks[Reason::Mismatch as usize]);
-        assert_eq!(s1.emulated[Form::St1 as usize] - s0.emulated[Form::St1 as usize], 1);
+        assert_eq!(
+            s1.fallbacks[Reason::Mismatch as usize],
+            s0.fallbacks[Reason::Mismatch as usize]
+        );
+        assert_eq!(
+            s1.emulated[Form::St1 as usize] - s0.emulated[Form::St1 as usize],
+            1
+        );
         let a1 = pg.alias_page(1).unwrap();
         let a2 = pg.alias_page(2).unwrap();
-        assert_eq!(&a1[(P - 8) as usize..], &0x1122_3344_5566_7788u64.to_le_bytes());
+        assert_eq!(
+            &a1[(P - 8) as usize..],
+            &0x1122_3344_5566_7788u64.to_le_bytes()
+        );
         assert_eq!(&a2[..8], &0x99aa_bbcc_ddee_ff00u64.to_le_bytes());
         assert_eq!(&a1[1024..1028], &7u32.to_le_bytes());
         // The flush stages the clean page that the handler stored to.
@@ -4728,7 +5133,8 @@ mod tests {
     }
 
     #[test]
-    fn atomics_exclusives_and_ld1_outside_the_written_bytes_are_done_by_the_handler_and_sum_correctly() {
+    fn atomics_exclusives_and_ld1_outside_the_written_bytes_are_done_by_the_handler_and_sum_correctly()
+     {
         use std::arch::asm;
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, _mir, pg) = emulating(4);
@@ -4801,13 +5207,18 @@ mod tests {
             h.join().unwrap();
         }
         let alias = pg.alias_page(1).unwrap();
-        let w = |off: usize| u64::from_le_bytes(alias[1024 + off..1024 + off + 8].try_into().unwrap());
+        let w =
+            |off: usize| u64::from_le_bytes(alias[1024 + off..1024 + off + 8].try_into().unwrap());
         assert_eq!(w(0), 4 * N, "ldadd");
         assert_eq!(w(8) & 0xffff_ffff, 4 * N, "stadd");
         for t in 0..4usize {
             for k in 0..32 {
                 let src = 1024 + 128 + 64 * t + k;
-                assert_eq!(alias[src + 32], alias[src], "ld1/st1 copy, thread {t} byte {k}");
+                assert_eq!(
+                    alias[src + 32],
+                    alias[src],
+                    "ld1/st1 copy, thread {t} byte {k}"
+                );
             }
         }
         assert_eq!(w(16), 4 * N, "ldxr/stxr");
@@ -4843,7 +5254,11 @@ mod tests {
         mir.store(1, 70, a1);
         mir.store(1, 130, a2);
         pg.complete(1);
-        assert_eq!(m.load(1, 70), a1, "the first read of a result waits for nothing (the frame is done) and copies the page");
+        assert_eq!(
+            m.load(1, 70),
+            a1,
+            "the first read of a result waits for nothing (the frame is done) and copies the page"
+        );
         assert_eq!(m.load(1, 130), a2);
         (m, mir, pg)
     }
@@ -4886,7 +5301,8 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_during_a_frame_gets_the_last_completed_frames_bytes_at_once_and_the_frames_after_it_completes() {
+    fn a_reader_during_a_frame_gets_the_last_completed_frames_bytes_at_once_and_the_frames_after_it_completes()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         let mut st = Collect::default();
@@ -4901,12 +5317,27 @@ mod tests {
         assert!(now_ns() - t0 < 500_000_000, "no wait");
         let s1 = pg.stats();
         assert_eq!(s1.late_reads - s0.late_reads, 2);
-        assert_eq!(s1.late_age[0] - s0.late_age[0], 2, "the bytes are one frame old");
+        assert_eq!(
+            s1.late_age[0] - s0.late_age[0],
+            2,
+            "the bytes are one frame old"
+        );
         assert_eq!(s1.writer_waits, s0.writer_waits);
-        assert_eq!(s1.fallbacks[Reason::Overlap as usize], s0.fallbacks[Reason::Overlap as usize]);
-        assert_eq!(pg.state_of(m.addr(1)), "gpu(2)", "the page keeps its tag and has no access");
+        assert_eq!(
+            s1.fallbacks[Reason::Overlap as usize],
+            s0.fallbacks[Reason::Overlap as usize]
+        );
+        assert_eq!(
+            pg.state_of(m.addr(1)),
+            "gpu(2)",
+            "the page keeps its tag and has no access"
+        );
         pg.complete(2);
-        assert_eq!(m.load(1, 70), 0xB1, "after the completion the reader gets frame 2's bytes");
+        assert_eq!(
+            m.load(1, 70),
+            0xB1,
+            "after the completion the reader gets frame 2's bytes"
+        );
         assert_eq!(m.load(1, 130), 0xB2);
         done(pg);
     }
@@ -4923,15 +5354,31 @@ mod tests {
         // The CPU runs ahead: frame 3 is flushed while frame 2 runs, and tags the page.
         let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
         let mut c3 = late_start(pg, &mir, 3);
-        assert_eq!(m.load(1, 70), 0xA1, "frame 3 and 2 run: the bytes are frame 1's");
+        assert_eq!(
+            m.load(1, 70),
+            0xA1,
+            "frame 3 and 2 run: the bytes are frame 1's"
+        );
         // Frame 3 runs on the GPU and writes the mirror before the completion of frame 2 is reported.
         mir.store(1, 70, 0xC0);
         let s0 = pg.stats();
         pg.complete(2);
         let s1 = pg.stats();
-        assert_eq!(s1.late_copied - s0.late_copied, 1, "the completion copied the page");
-        assert_eq!(s1.late_exact - s0.late_exact, 1, "from the GPU's copy of the frame's end");
-        assert_eq!(m.load(1, 70), 0xB1, "frame 3 runs: the bytes are frame 2's, not frame 3's from the mirror");
+        assert_eq!(
+            s1.late_copied - s0.late_copied,
+            1,
+            "the completion copied the page"
+        );
+        assert_eq!(
+            s1.late_exact - s0.late_exact,
+            1,
+            "from the GPU's copy of the frame's end"
+        );
+        assert_eq!(
+            m.load(1, 70),
+            0xB1,
+            "frame 3 runs: the bytes are frame 2's, not frame 3's from the mirror"
+        );
         assert_eq!(pg.state_of(m.addr(1)), "gpu(3)");
         assert_eq!(pg.stats().writer_waits, s0.writer_waits, "nobody waited");
         mir.store(1, 70, 0xC1);
@@ -4953,16 +5400,27 @@ mod tests {
         let s0 = pg.stats();
         pg.complete(2);
         let s1 = pg.stats();
-        assert_eq!(s1.late_copied, s0.late_copied, "the mirror may hold frame 3's bytes: no copy");
-        assert_eq!(s1.snap_resets[SnapWhy::NoCopy as usize] - s0.snap_resets[SnapWhy::NoCopy as usize], 1);
+        assert_eq!(
+            s1.late_copied, s0.late_copied,
+            "the mirror may hold frame 3's bytes: no copy"
+        );
+        assert_eq!(
+            s1.snap_resets[SnapWhy::NoCopy as usize] - s0.snap_resets[SnapWhy::NoCopy as usize],
+            1
+        );
         mir.store(1, 70, 0xC1);
         pg.complete(3);
-        assert_eq!(m.load(1, 70), 0xC1, "the read waits for nothing (frame 3 is done) and copies the page");
+        assert_eq!(
+            m.load(1, 70),
+            0xC1,
+            "the read waits for nothing (frame 3 is done) and copies the page"
+        );
         done(pg);
     }
 
     #[test]
-    fn a_sum_the_cpu_reads_and_resets_while_the_frame_runs_is_read_next_time_and_the_reset_reaches_the_next_frame() {
+    fn a_sum_the_cpu_reads_and_resets_while_the_frame_runs_is_read_next_time_and_the_reset_reaches_the_next_frame()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         let mut st = Collect::default();
@@ -4979,16 +5437,43 @@ mod tests {
         let s0 = pg.stats();
         pg.complete(2);
         let s1 = pg.stats();
-        assert_eq!(s1.late_frame_won - s0.late_frame_won, 1, "the frame changed the sum: its bytes win");
-        assert_eq!(s1.late_carried - s0.late_carried, 1, "the reset is kept aside for the next flush");
-        assert_eq!(m.load(1, 70), 0x10, "the next read of the sum gets frame 2's, not the CPU's reset");
-        assert_eq!(m.load(1, 130), 0x77, "the block the frame did not change keeps the CPU's byte");
+        assert_eq!(
+            s1.late_frame_won - s0.late_frame_won,
+            1,
+            "the frame changed the sum: its bytes win"
+        );
+        assert_eq!(
+            s1.late_carried - s0.late_carried,
+            1,
+            "the reset is kept aside for the next flush"
+        );
+        assert_eq!(
+            m.load(1, 70),
+            0x10,
+            "the next read of the sum gets frame 2's, not the CPU's reset"
+        );
+        assert_eq!(
+            m.load(1, 130),
+            0x77,
+            "the block the frame did not change keeps the CPU's byte"
+        );
         let mut st3 = Collect::default();
         let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
-        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
-        assert_eq!(st3.pages[i].1[70], 0, "the reset goes into the mirror for frame 3");
+        let i = st3
+            .pages
+            .iter()
+            .position(|p| p.0 == 1)
+            .expect("the page is staged");
+        assert_eq!(
+            st3.pages[i].1[70], 0,
+            "the reset goes into the mirror for frame 3"
+        );
         assert_eq!(st3.pages[i].1[130], 0x77);
-        assert_eq!(st3.skips[i].1[0] & 0b110, 0, "neither block is skipped by the copy-in");
+        assert_eq!(
+            st3.skips[i].1[0] & 0b110,
+            0,
+            "neither block is skipped by the copy-in"
+        );
         assert_eq!(pg.stats().late_carry_lost, s1.late_carry_lost);
         pg.complete(3);
         done(pg);
@@ -5006,7 +5491,11 @@ mod tests {
         // The flush of frame 3 comes before the completion of frame 2 and stages the reset.
         let mut st3 = Collect::default();
         let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
-        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        let i = st3
+            .pages
+            .iter()
+            .position(|p| p.0 == 1)
+            .expect("the page is staged");
         assert_eq!(st3.pages[i].1[70], 0);
         let mut c3 = late_start(pg, &mir, 3);
         late_end(&mut c2, &mir);
@@ -5014,8 +5503,15 @@ mod tests {
         pg.complete(2);
         let s1 = pg.stats();
         assert_eq!(s1.late_frame_won - s0.late_frame_won, 1);
-        assert_eq!(s1.late_carried, s0.late_carried, "the reset is in the mirror already");
-        assert_eq!(m.load(1, 70), 0x10, "frame 3 runs: the reader gets frame 2's sum");
+        assert_eq!(
+            s1.late_carried, s0.late_carried,
+            "the reset is in the mirror already"
+        );
+        assert_eq!(
+            m.load(1, 70),
+            0x10,
+            "frame 3 runs: the reader gets frame 2's sum"
+        );
         // Frame 3 starts from the reset and adds up its own sum.
         mir.store(1, 70, 0x20);
         late_end(&mut c3, &mir);
@@ -5035,17 +5531,26 @@ mod tests {
         let s0 = pg.stats();
         pg.complete(2);
         let s1 = pg.stats();
-        assert_eq!(s1.late_copied - s0.late_copied, 1, "the completion copied the page of the newest tag");
+        assert_eq!(
+            s1.late_copied - s0.late_copied,
+            1,
+            "the completion copied the page of the newest tag"
+        );
         assert_eq!(pg.state_of(m.addr(1)), "gpu(2)");
         let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
-        assert_eq!(m.load(1, 70), 0xB1, "frame 3 runs: the reader gets frame 2's bytes without a wait");
+        assert_eq!(
+            m.load(1, 70),
+            0xB1,
+            "frame 3 runs: the reader gets frame 2's bytes without a wait"
+        );
         assert_eq!(pg.stats().writer_waits, s0.writer_waits, "nobody waited");
         pg.complete(3);
         done(pg);
     }
 
     #[test]
-    fn a_snapshot_dropped_at_a_completion_is_counted_with_its_reason_and_the_next_access_names_it() {
+    fn a_snapshot_dropped_at_a_completion_is_counted_with_its_reason_and_the_next_access_names_it()
+    {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         let mut st = Collect::default();
@@ -5055,7 +5560,10 @@ mod tests {
         let s0 = pg.stats();
         pg.complete(2);
         let s1 = pg.stats();
-        assert_eq!(s1.snap_resets[SnapWhy::Idle as usize] - s0.snap_resets[SnapWhy::Idle as usize], 1);
+        assert_eq!(
+            s1.snap_resets[SnapWhy::Idle as usize] - s0.snap_resets[SnapWhy::Idle as usize],
+            1
+        );
         mir.store(1, 70, 0xB1);
         let base = m.addr(1) as usize;
         let reader = std::thread::spawn(move || {
@@ -5063,11 +5571,17 @@ mod tests {
             unsafe { ((base + 70) as *const u8).read_volatile() }
         });
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert!(!reader.is_finished(), "no snapshot: the reader waits for the writer");
+        assert!(
+            !reader.is_finished(),
+            "no snapshot: the reader waits for the writer"
+        );
         pg.complete(600);
         assert_eq!(reader.join().unwrap(), 0xB1);
         let s2 = pg.stats();
-        assert_eq!(s2.snap_misses[SnapWhy::Idle as usize] - s1.snap_misses[SnapWhy::Idle as usize], 1);
+        assert_eq!(
+            s2.snap_misses[SnapWhy::Idle as usize] - s1.snap_misses[SnapWhy::Idle as usize],
+            1
+        );
         done(pg);
     }
 
@@ -5081,13 +5595,21 @@ mod tests {
         let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
         mir.store(1, 70, 0xB1);
         let s1 = pg.stats();
-        assert_eq!(s1.read_open - s0.read_open, 1, "the flush left the page readable");
+        assert_eq!(
+            s1.read_open - s0.read_open,
+            1,
+            "the flush left the page readable"
+        );
         // Reads of the stale blocks and of the other bytes take no trap: nothing is counted by the handler.
         let (emu0, handler0) = (s1.emulated.iter().sum::<u64>(), s1.late_reads);
         assert_eq!(m.load(1, 70), 0xA1, "frame 1's bytes while frame 2 runs");
         assert_eq!(m.load(1, 300), 0);
         let s2 = pg.stats();
-        assert_eq!(s2.emulated.iter().sum::<u64>(), emu0, "no emulated access: no fault");
+        assert_eq!(
+            s2.emulated.iter().sum::<u64>(),
+            emu0,
+            "no emulated access: no fault"
+        );
         assert_eq!(s2.late_reads, handler0);
         // A store faults and is done by the handler: the blocks become the CPU's.
         m.store(1, 70, 0xC7);
@@ -5118,7 +5640,10 @@ mod tests {
             unsafe { ((base + 70) as *const u8).read_volatile() }
         });
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert!(!reader.is_finished(), "the page lost its read access: the reader waits");
+        assert!(
+            !reader.is_finished(),
+            "the page lost its read access: the reader waits"
+        );
         pg.complete(600);
         reader.join().unwrap();
         done(pg);
@@ -5136,7 +5661,11 @@ mod tests {
         let s1 = pg.stats();
         assert_eq!(s1.settle_late - s0.settle_late, 1);
         assert_eq!(s1.settle_waits, s0.settle_waits);
-        assert_eq!(m.load(1, 300), 0, "the page is readable for the system call");
+        assert_eq!(
+            m.load(1, 300),
+            0,
+            "the page is readable for the system call"
+        );
         pg.complete(2);
         done(pg);
     }
@@ -5156,7 +5685,10 @@ mod tests {
             unsafe { ((base + 70) as *const u8).read_volatile() }
         });
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert!(!reader.is_finished(), "the guest bytes are not known to be a completed frame's: it waits");
+        assert!(
+            !reader.is_finished(),
+            "the guest bytes are not known to be a completed frame's: it waits"
+        );
         pg.complete(1);
         assert_eq!(reader.join().unwrap(), 5);
         let s1 = pg.stats();
@@ -5177,7 +5709,8 @@ mod tests {
     }
 
     #[test]
-    fn a_cpu_write_during_a_frame_survives_the_copy_back_of_the_frame_and_is_staged_at_the_next_flush() {
+    fn a_cpu_write_during_a_frame_survives_the_copy_back_of_the_frame_and_is_staged_at_the_next_flush()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         pg.set_adaptive(true, false);
@@ -5194,23 +5727,35 @@ mod tests {
         assert_eq!(m.load(1, 70), 0x55, "the CPU reads what it wrote");
         pg.complete(2);
         wait_clean(pg, &m);
-        assert_eq!(m.load(1, 70), 0x55, "the copy-back of frame 2 left the block the CPU wrote");
+        assert_eq!(
+            m.load(1, 70),
+            0x55,
+            "the copy-back of frame 2 left the block the CPU wrote"
+        );
         assert_eq!(m.load(1, 130), 0xB2, "and copied the other block");
         assert!(pg.stats().late_kept > s1.late_kept);
         // The next flush stages the page with the CPU's byte.
         let mut st3 = Collect::default();
         let f = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 128)], None, &mut st3);
         assert_eq!(f.staged, 1);
-        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        let i = st3
+            .pages
+            .iter()
+            .position(|p| p.0 == 1)
+            .expect("the page is staged");
         assert_eq!(st3.pages[i].1[70], 0x55);
-        assert_eq!(st3.skips[i].1, [0; 4], "the page is current in guest memory: nothing is skipped");
+        assert_eq!(
+            st3.skips[i].1, [0; 4],
+            "the page is current in guest memory: nothing is skipped"
+        );
         pg.complete(3);
         pg.set_adaptive(false, false);
         done(pg);
     }
 
     #[test]
-    fn a_write_staged_while_its_frame_runs_skips_the_blocks_only_the_frame_wrote_and_survives_the_frames_completion() {
+    fn a_write_staged_while_its_frame_runs_skips_the_blocks_only_the_frame_wrote_and_survives_the_frames_completion()
+     {
         let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
         let (m, mir, pg) = late_page(0xA1, 0xA2);
         let mut st = Collect::default();
@@ -5225,13 +5770,24 @@ mod tests {
         let mut c3 = late_start(pg, &mir, 3);
         late_end(&mut c2, &mir);
         assert_eq!(f.emu_staged, 1);
-        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
+        let i = st3
+            .pages
+            .iter()
+            .position(|p| p.0 == 1)
+            .expect("the page is staged");
         assert_eq!(st3.pages[i].1[70], 0x55);
         // Block 1 (bytes 64 to 127) is the CPU's and goes along; block 2 (128 to 191) is the frame's and is skipped.
-        assert_eq!(st3.skips[i].1[0], 0b100, "only the block of the frame is skipped");
+        assert_eq!(
+            st3.skips[i].1[0], 0b100,
+            "only the block of the frame is skipped"
+        );
         // The frame completes while the page is tagged by frame 3: its copy-back keeps the staged block.
         pg.complete(2);
-        assert_eq!(m.load(1, 70), 0x55, "the copy-back of frame 2 does not take back what the CPU wrote before frame 3");
+        assert_eq!(
+            m.load(1, 70),
+            0x55,
+            "the copy-back of frame 2 does not take back what the CPU wrote before frame 3"
+        );
         assert_eq!(m.load(1, 130), 0xB2, "the other block is frame 2's");
         // The staged block is not staged again at the next flush: a frame may have written it since.
         let mut st4 = Collect::default();
@@ -5270,14 +5826,25 @@ mod tests {
             asm!(".arch_extension lse", "ldaddal {one:w}, {old:w}, [{p}]",
                 p = in(reg) p, one = in(reg) 5u32, old = out(reg) old, options(nostack));
         }
-        assert_eq!(old, 10, "the atomic operates on the last completed frame's value");
+        assert_eq!(
+            old, 10,
+            "the atomic operates on the last completed frame's value"
+        );
         let s1 = pg.stats();
         assert_eq!(s1.late_writes - s0.late_writes, 1);
         assert_eq!(s1.writer_waits, s0.writer_waits);
         let mut st3 = Collect::default();
         let _ = pg.flush_mirrored(3, &[], &[(m.addr(1) + 64, 64)], None, &mut st3);
-        let i = st3.pages.iter().position(|p| p.0 == 1).expect("the page is staged");
-        assert_eq!(u32::from_le_bytes(st3.pages[i].1[64..68].try_into().unwrap()), 15, "the sum is staged");
+        let i = st3
+            .pages
+            .iter()
+            .position(|p| p.0 == 1)
+            .expect("the page is staged");
+        assert_eq!(
+            u32::from_le_bytes(st3.pages[i].1[64..68].try_into().unwrap()),
+            15,
+            "the sum is staged"
+        );
         assert_eq!(st3.skips[i].1[0] & 0b10, 0, "the block is not skipped");
         late_end(&mut c2, &mir);
         pg.complete(2);

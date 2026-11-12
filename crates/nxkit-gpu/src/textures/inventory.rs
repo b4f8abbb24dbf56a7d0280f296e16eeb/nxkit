@@ -1,6 +1,6 @@
 //! The texture inventory for the memory report (`NXKIT_MEM_REPORT`, line `nxkit-mem tex`).
 //!
-//! Every [`SCAN_EVERY`](super::evict::SCAN_EVERY) frames, when the report is on, the store makes one pass over its
+//! Every `SCAN_EVERY` frames, when the report is on, the store makes one pass over its
 //! entries and publishes the totals here. The host reads them with [`latest`]. It measures only: nothing in the
 //! encoder looks at it, and nothing runs per draw or per bind.
 //!

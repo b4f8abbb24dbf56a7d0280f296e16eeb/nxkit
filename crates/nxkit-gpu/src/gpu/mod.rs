@@ -179,7 +179,10 @@ impl Gpu {
             transfer,
             icbs: Mutex::new(Icbs::default()),
             barriers: BarrierState::default(),
-            ring: BatchRing::new(ctx, threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS)?,
+            ring: BatchRing::new(
+                ctx,
+                threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS,
+            )?,
             threads,
             last: None,
             older: None,

@@ -633,13 +633,23 @@ fn an_event_signal_becomes_an_event_report_with_the_counter_word() {
     let mut w = Walker::new(Default::default(), map);
     let mut mem = VecMem::new(0x1000, 0x100);
     // The `NVNevent` at 0x1040 names its counter word at 0x10f0.
-    mem.write(0x1040 + EVENT_COUNTER, &0x10f0u64.to_le_bytes()).unwrap();
+    mem.write(0x1040 + EVENT_COUNTER, &0x10f0u64.to_le_bytes())
+        .unwrap();
     let mut st = State::default();
-    let signal = |mode: u32, value: u32| copy_ext(ExtCode::SignalEvent, 0, &[0x1040, 0, mode, 0, 0, value]);
+    let signal =
+        |mode: u32, value: u32| copy_ext(ExtCode::SignalEvent, 0, &[0x1040, 0, mode, 0, 0, value]);
     w.ext(&mut mem, &mut st, &signal(0, 7));
-    w.ext(&mut mem, &mut st, &signal(nxkit_nvn::marks::EVENT_SIGNAL_ADD, 2));
+    w.ext(
+        &mut mem,
+        &mut st,
+        &signal(nxkit_nvn::marks::EVENT_SIGNAL_ADD, 2),
+    );
     // An event without a counter (not initialised) writes nothing.
-    w.ext(&mut mem, &mut st, &copy_ext(ExtCode::SignalEvent, 0, &[0x1080, 0, 0, 0, 0, 1]));
+    w.ext(
+        &mut mem,
+        &mut st,
+        &copy_ext(ExtCode::SignalEvent, 0, &[0x1080, 0, 0, 0, 0, 1]),
+    );
     let reports = w.take().reports;
     assert_eq!(
         reports,

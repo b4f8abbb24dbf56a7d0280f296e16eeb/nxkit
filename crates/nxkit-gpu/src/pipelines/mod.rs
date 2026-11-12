@@ -20,8 +20,8 @@ mod tests;
 
 pub(crate) use keys::KEY_SCHEME;
 pub use runtime::flush_runtime_cache;
-pub use screen::{PrewarmScreen, set_prewarm_screen};
 pub(crate) use runtime::plan as runtime_plan;
+pub use screen::{PrewarmScreen, set_prewarm_screen};
 pub(crate) use stats::frame_done;
 
 use std::cell::RefCell;

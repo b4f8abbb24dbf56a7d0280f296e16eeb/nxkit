@@ -81,8 +81,7 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
     use std::sync::atomic::AtomicU64;
     static BUDGET: AtomicU64 = AtomicU64::new(0);
     type Seen = (u64, Vec<(String, u8, u32)>);
-    static SEEN: std::sync::Mutex<Seen> =
-        std::sync::Mutex::new((0, Vec::new()));
+    static SEEN: std::sync::Mutex<Seen> = std::sync::Mutex::new((0, Vec::new()));
     let all = crate::knob("ubodumpall");
     let fs = d.program.fragment.as_deref();
     let listed = fs.is_some_and(|k| crate::diag::fs_programs().iter().any(|l| l == k));
@@ -140,19 +139,19 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
             continue;
         }
         let count = (s.size as usize / 4).min(4096);
-        let live: Option<Vec<u32>> = sh
-            .guest_offset(s.address, (count * 4) as u64)
-            .and_then(|_| {
-                let mut b = vec![0u8; count * 4];
-                sh.read_guest(s.address, &mut b).then_some(())?;
-                Some(
-                    b.as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|c| u32::from_le_bytes(*c))
-                        .collect(),
-                )
-            });
+        let live: Option<Vec<u32>> =
+            sh.guest_offset(s.address, (count * 4) as u64)
+                .and_then(|_| {
+                    let mut b = vec![0u8; count * 4];
+                    sh.read_guest(s.address, &mut b).then_some(())?;
+                    Some(
+                        b.as_chunks::<4>()
+                            .0
+                            .iter()
+                            .map(|c| u32::from_le_bytes(*c))
+                            .collect(),
+                    )
+                });
         let snap: Option<Vec<u32>> = s.snapshot.as_ref().map(|b| {
             b.as_chunks::<4>()
                 .0
@@ -176,7 +175,9 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
         };
         let bad = |w: &Option<Vec<u32>>| -> usize {
             w.as_ref().map_or(0, |w| {
-                w.iter().filter(|v| !f32::from_bits(**v).is_finite()).count()
+                w.iter()
+                    .filter(|v| !f32::from_bits(**v).is_finite())
+                    .count()
             })
         };
         let (f32s, nonfinite) = if snap.is_some() {

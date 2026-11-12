@@ -77,8 +77,14 @@ impl EventSignals {
 
     /// Keeps the event signals among `reports` of the frame of `fence` and writes them when `batch` is complete; at
     /// once without a batch. A frame without signals costs a scan of its reports.
-    pub(super) fn hold(self: &Arc<Self>, fence: u64, reports: &[CounterReport], batch: Option<&SubmittedBatch>) {
-        let signals: Vec<CounterReport> = reports.iter().filter(|r| r.is_event()).copied().collect();
+    pub(super) fn hold(
+        self: &Arc<Self>,
+        fence: u64,
+        reports: &[CounterReport],
+        batch: Option<&SubmittedBatch>,
+    ) {
+        let signals: Vec<CounterReport> =
+            reports.iter().filter(|r| r.is_event()).copied().collect();
         if signals.is_empty() {
             return;
         }
@@ -122,8 +128,14 @@ impl EventSignals {
                     st.stats.dropped += 1;
                     continue;
                 }
-                let mode = if add { nxkit_nvn::marks::EVENT_SIGNAL_ADD } else { 0 };
-                if self.signal(s.addr, |old| nxkit_nvn::marks::event_signalled(mode, old, s.value)) {
+                let mode = if add {
+                    nxkit_nvn::marks::EVENT_SIGNAL_ADD
+                } else {
+                    0
+                };
+                if self.signal(s.addr, |old| {
+                    nxkit_nvn::marks::event_signalled(mode, old, s.value)
+                }) {
                     if add {
                         st.stats.adds += 1;
                     } else {
@@ -181,10 +193,7 @@ fn note(fence: u64, s: Stats) {
         eprintln!(
             "DIAG events fence {fence}: GPU signals written {} added {} dropped for a newer CPU signal {} \
              outside guest memory {}",
-            s.writes,
-            s.adds,
-            s.dropped,
-            s.refused
+            s.writes, s.adds, s.dropped, s.refused
         );
     }
 }
@@ -314,7 +323,11 @@ mod tests {
         assert_eq!(mem.get(0x40), 5);
         ev.hold(2, &[timestamp], None);
         assert_eq!(ev.pending(), 0);
-        assert_eq!(ev.applied.load(Ordering::Acquire), 1, "a frame without signals is not followed");
+        assert_eq!(
+            ev.applied.load(Ordering::Acquire),
+            1,
+            "a frame without signals is not followed"
+        );
     }
 
     #[test]
@@ -348,13 +361,20 @@ mod tests {
         mem.set(0x80, 100);
         ev.cpu_signalled(v);
         ev.complete(1);
-        assert_eq!(mem.get(0x40), 0, "the CPU's write is newer than the GPU's of frame 1");
+        assert_eq!(
+            mem.get(0x40),
+            0,
+            "the CPU's write is newer than the GPU's of frame 1"
+        );
         assert_eq!(mem.get(0x80), 105, "an add counts in either order");
         assert_eq!(ev.stats().dropped, 1);
         // Frame 2 is after the wait: its write is newer than the CPU's.
         ev.complete(2);
         assert_eq!(mem.get(0x40), 11);
-        assert!(locked(&ev.state).cpu.is_empty(), "the marks of completed frames are dropped");
+        assert!(
+            locked(&ev.state).cpu.is_empty(),
+            "the marks of completed frames are dropped"
+        );
     }
 
     #[test]

@@ -478,41 +478,6 @@ pub(crate) fn skipped_program(key: &str) -> bool {
         .is_some_and(|(_, keys)| keys.iter().any(|k| k == key))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn no_skip_list_means_the_fast_path() {
-        assert!(!skip_list_set(None, false));
-        assert!(!skip_list_set(Some(""), false));
-        assert!(skip_list_set(Some("abc"), false));
-        assert!(skip_list_set(None, true));
-        // Without a list, no key is skipped, whatever the process environment.
-        if !skip_list_on() {
-            assert!(!skipped_program("abc"));
-        }
-    }
-
-    #[test]
-    fn nanload_is_a_knob() {
-        assert_ne!(knob_bit("nanload"), 0);
-    }
-
-    #[test]
-    fn every_knob_has_its_own_bit() {
-        assert!(KNOBS.len() <= 64);
-        for (i, k) in KNOBS.iter().enumerate() {
-            assert_eq!(knob_bit(k), 1 << i);
-        }
-        assert_eq!(knob_bit("unknown"), 0);
-        assert_eq!(
-            parse_knobs("nocull, noeq"),
-            knob_bit("nocull") | knob_bit("noeq")
-        );
-    }
-}
-
 /// The largest texture (in bytes) that `NXKIT_DIAG=tiny` prints.
 pub(crate) const TINY_MAX: u64 = 256;
 
@@ -558,4 +523,39 @@ pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
             })
             .collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_skip_list_means_the_fast_path() {
+        assert!(!skip_list_set(None, false));
+        assert!(!skip_list_set(Some(""), false));
+        assert!(skip_list_set(Some("abc"), false));
+        assert!(skip_list_set(None, true));
+        // Without a list, no key is skipped, whatever the process environment.
+        if !skip_list_on() {
+            assert!(!skipped_program("abc"));
+        }
+    }
+
+    #[test]
+    fn nanload_is_a_knob() {
+        assert_ne!(knob_bit("nanload"), 0);
+    }
+
+    #[test]
+    fn every_knob_has_its_own_bit() {
+        assert!(KNOBS.len() <= 64);
+        for (i, k) in KNOBS.iter().enumerate() {
+            assert_eq!(knob_bit(k), 1 << i);
+        }
+        assert_eq!(knob_bit("unknown"), 0);
+        assert_eq!(
+            parse_knobs("nocull, noeq"),
+            knob_bit("nocull") | knob_bit("noeq")
+        );
+    }
 }

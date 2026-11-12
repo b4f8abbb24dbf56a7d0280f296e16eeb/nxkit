@@ -16,7 +16,8 @@
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
+    Title, TitleId,
 };
 
 /// The title module.
@@ -122,7 +123,10 @@ mod tests {
     #[test]
     fn profile_matches_the_module() {
         let p = Profile::from_toml(SENTINELS.profile().unwrap_or_default()).unwrap();
-        assert_eq!(p.title_id.as_deref(), Some(SENTINELS.id().to_string().as_str()));
+        assert_eq!(
+            p.title_id.as_deref(),
+            Some(SENTINELS.id().to_string().as_str())
+        );
         assert_eq!(p.declared.title.as_deref(), Some(SENTINELS.name()));
         assert_eq!(p.problems(), Vec::<String>::new());
     }
@@ -151,11 +155,19 @@ mod tests {
         }
         assert_eq!(t.cuts.values().map(Vec::len).sum::<usize>(), 0);
         assert_eq!(t.caps.values().map(Vec::len).sum::<usize>(), 0);
-        let rules = |m: &str| t.rules.get("01003FC01670C000").and_then(|r| r.get(m)).map_or(0, Vec::len);
+        let rules = |m: &str| {
+            t.rules
+                .get("01003FC01670C000")
+                .and_then(|r| r.get(m))
+                .map_or(0, Vec::len)
+        };
         assert_eq!(rules("sdk"), 12);
         assert_eq!(rules("main") + rules("subsdk0") + rules("subsdk1"), 0);
         assert!(t.frame.is_empty());
-        assert_eq!(text.matches("evidence = \"engine tree ").count(), text.matches("[[rule]]").count());
+        assert_eq!(
+            text.matches("evidence = \"engine tree ").count(),
+            text.matches("[[rule]]").count()
+        );
     }
 
     #[test]

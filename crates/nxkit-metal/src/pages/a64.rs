@@ -604,7 +604,11 @@ pub(crate) unsafe fn perform(op: &Mem, r: &Regs, plan: &Plan, p: *mut u8) {
                     let bits = (n * 8) as u32;
                     let s = 64 - bits;
                     let ext = (((val as u64) << s) as i64) >> s;
-                    val = u128::from(if op.dest64 { ext as u64 } else { u64::from(ext as u32) });
+                    val = u128::from(if op.dest64 {
+                        ext as u64
+                    } else {
+                        u64::from(ext as u32)
+                    });
                 }
                 if op.simd {
                     r.v.add(usize::from(reg)).write_unaligned(val);
@@ -773,7 +777,9 @@ impl Op {
 pub(crate) fn decode_op(i: u32) -> Result<Op, Reason> {
     match decode(i) {
         Ok(m) => Ok(Op::Mem(m)),
-        Err(r @ (Reason::Atomic | Reason::Exclusive | Reason::Structure)) => decode_special(i).ok_or(r),
+        Err(r @ (Reason::Atomic | Reason::Exclusive | Reason::Structure)) => {
+            decode_special(i).ok_or(r)
+        }
         Err(r) => Err(r),
     }
 }
@@ -799,11 +805,27 @@ fn decode_special(i: u32) -> Option<Op> {
             (1, 0) => RmwOp::Swp,
             _ => return None,
         };
-        return Some(Op::Rmw { op, size: 1 << size, rs, rt, rn, acq, rel });
+        return Some(Op::Rmw {
+            op,
+            size: 1 << size,
+            rs,
+            rt,
+            rn,
+            acq,
+            rel,
+        });
     }
     // `CAS`: `size 001000 1 L 1 Rs o0 11111 Rn Rt`.
     if i & 0x3fa0_7c00 == 0x08a0_7c00 {
-        return Some(Op::Cas { size: 1 << size, pair: false, rs, rt, rn, acq: i >> 22 & 1 == 1, rel: i >> 15 & 1 == 1 });
+        return Some(Op::Cas {
+            size: 1 << size,
+            pair: false,
+            rs,
+            rt,
+            rn,
+            acq: i >> 22 & 1 == 1,
+            rel: i >> 15 & 1 == 1,
+        });
     }
     // `CASP`: `0 sz 001000 0 L 1 Rs o0 11111 Rn Rt`.
     if i & 0xbfa0_7c00 == 0x0820_7c00 {
@@ -811,7 +833,15 @@ fn decode_special(i: u32) -> Option<Op> {
         if !rs.is_multiple_of(2) || !rt.is_multiple_of(2) {
             return None;
         }
-        return Some(Op::Cas { size: 4 << size, pair: true, rs, rt, rn, acq: i >> 22 & 1 == 1, rel: i >> 15 & 1 == 1 });
+        return Some(Op::Cas {
+            size: 4 << size,
+            pair: true,
+            rs,
+            rt,
+            rn,
+            acq: i >> 22 & 1 == 1,
+            rel: i >> 15 & 1 == 1,
+        });
     }
     // `LDXR`, `STXR`: `size 001000 0 L 0 Rs o0 Rt2 Rn Rt`.
     if i & 0x3fa0_0000 == 0x0800_0000 {
@@ -819,7 +849,16 @@ fn decode_special(i: u32) -> Option<Op> {
         if load && (rs != 31 || (i >> 10) & 31 != 31) {
             return None;
         }
-        return Some(Op::Excl { load, pair: false, size: 1 << size, rs, rt, rt2: 31, rn, ord: i >> 15 & 1 == 1 });
+        return Some(Op::Excl {
+            load,
+            pair: false,
+            size: 1 << size,
+            rs,
+            rt,
+            rt2: 31,
+            rn,
+            ord: i >> 15 & 1 == 1,
+        });
     }
     // `LDXP`, `STXP`: sizes `10` and `11`.
     if i & 0x3fa0_0000 == 0x0820_0000 && size >= 2 {
@@ -847,7 +886,14 @@ fn decode_special(i: u32) -> Option<Op> {
             0b0010 => 4,
             _ => return None,
         };
-        return Some(Op::Ld1 { load: i >> 22 & 1 == 1, q: i >> 30 & 1 == 1, regs, rt, rn, post: postx.then_some(rs) });
+        return Some(Op::Ld1 {
+            load: i >> 22 & 1 == 1,
+            q: i >> 30 & 1 == 1,
+            regs,
+            rt,
+            rn,
+            post: postx.then_some(rs),
+        });
     }
     // `LD1`, `ST1` (one lane): `0 Q 0011010 L 0 00000 opcode S size Rn Rt`, or with a post index
     // `0 Q 0011011 L 0 Rm opcode S size Rn Rt`.
@@ -883,14 +929,24 @@ pub(crate) unsafe fn plan_op(op: &Op, r: &Regs) -> Plan {
     unsafe {
         match op {
             Op::Mem(m) => plan(m, r),
-            Op::Rmw { size, rn, .. } => Plan { ea: r.base(*rn), len: u64::from(*size), writeback: None },
-            Op::Cas { size, pair, rn, .. } => {
-                Plan { ea: r.base(*rn), len: u64::from(*size) * if *pair { 2 } else { 1 }, writeback: None }
-            }
-            Op::Excl { size, pair, rn, .. } => {
-                Plan { ea: r.base(*rn), len: u64::from(*size) * if *pair { 2 } else { 1 }, writeback: None }
-            }
-            Op::Ld1 { q, regs, rn, post, .. } => {
+            Op::Rmw { size, rn, .. } => Plan {
+                ea: r.base(*rn),
+                len: u64::from(*size),
+                writeback: None,
+            },
+            Op::Cas { size, pair, rn, .. } => Plan {
+                ea: r.base(*rn),
+                len: u64::from(*size) * if *pair { 2 } else { 1 },
+                writeback: None,
+            },
+            Op::Excl { size, pair, rn, .. } => Plan {
+                ea: r.base(*rn),
+                len: u64::from(*size) * if *pair { 2 } else { 1 },
+                writeback: None,
+            },
+            Op::Ld1 {
+                q, regs, rn, post, ..
+            } => {
                 let len = u64::from(*regs) * if *q { 16 } else { 8 };
                 let ea = r.base(*rn);
                 let writeback = post.map(|m| ea.wrapping_add(if m == 31 { len } else { r.gpr(m) }));
@@ -916,7 +972,11 @@ fn ords(acq: bool, rel: bool) -> Ordering {
 }
 
 fn fail_ord(o: Ordering) -> Ordering {
-    if matches!(o, Ordering::Acquire | Ordering::AcqRel) { Ordering::Acquire } else { Ordering::Relaxed }
+    if matches!(o, Ordering::Acquire | Ordering::AcqRel) {
+        Ordering::Acquire
+    } else {
+        Ordering::Relaxed
+    }
 }
 
 /// Does `op` on the aligned memory at `p` and returns the old value.
@@ -1015,14 +1075,28 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
             unsafe { r.x.add(usize::from(n)).write(v) };
         }
     };
-    let mask = |size: u8, v: u64| if size >= 8 { v } else { v & ((1u64 << (u32::from(size) * 8)) - 1) };
+    let mask = |size: u8, v: u64| {
+        if size >= 8 {
+            v
+        } else {
+            v & ((1u64 << (u32::from(size) * 8)) - 1)
+        }
+    };
     match op {
         Op::Mem(m) => {
             // SAFETY: per the caller.
             unsafe { perform(m, r, plan, p) };
             true
         }
-        Op::Rmw { op, size, rs, rt, acq, rel, .. } => {
+        Op::Rmw {
+            op,
+            size,
+            rs,
+            rt,
+            acq,
+            rel,
+            ..
+        } => {
             if !(p as usize).is_multiple_of(usize::from(*size)) {
                 return false;
             }
@@ -1034,7 +1108,15 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
             }
             true
         }
-        Op::Cas { size, pair, rs, rt, acq, rel, .. } => {
+        Op::Cas {
+            size,
+            pair,
+            rs,
+            rt,
+            acq,
+            rel,
+            ..
+        } => {
             let total = usize::from(*size) * if *pair { 2 } else { 1 };
             if !(p as usize).is_multiple_of(total) {
                 return false;
@@ -1043,7 +1125,13 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
             // SAFETY: per the caller.
             unsafe {
                 if !*pair {
-                    let old = cas(p, *size, mask(*size, r.gpr(*rs)), mask(*size, r.gpr(*rt)), o);
+                    let old = cas(
+                        p,
+                        *size,
+                        mask(*size, r.gpr(*rs)),
+                        mask(*size, r.gpr(*rt)),
+                        o,
+                    );
                     set(*rs, old);
                 } else if *size == 4 {
                     let e = mask(4, r.gpr(*rs)) | mask(4, r.gpr(*rs + 1)) << 32;
@@ -1052,14 +1140,27 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
                     set(*rs, old & 0xffff_ffff);
                     set(*rs + 1, old >> 32);
                 } else {
-                    let old = cas16(p, (r.gpr(*rs), r.gpr(*rs + 1)), (r.gpr(*rt), r.gpr(*rt + 1)));
+                    let old = cas16(
+                        p,
+                        (r.gpr(*rs), r.gpr(*rs + 1)),
+                        (r.gpr(*rt), r.gpr(*rt + 1)),
+                    );
                     set(*rs, old.0);
                     set(*rs + 1, old.1);
                 }
             }
             true
         }
-        Op::Excl { load, pair, size, rs, rt, rt2, ord, .. } => {
+        Op::Excl {
+            load,
+            pair,
+            size,
+            rs,
+            rt,
+            rt2,
+            ord,
+            ..
+        } => {
             let total = u64::from(*size) * if *pair { 2 } else { 1 };
             if !(p as usize).is_multiple_of(total as usize) {
                 return false;
@@ -1068,7 +1169,11 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
             if *load {
                 // SAFETY: per the caller.
                 let (lo, hi) = unsafe {
-                    let o = if *ord { Ordering::Acquire } else { Ordering::Relaxed };
+                    let o = if *ord {
+                        Ordering::Acquire
+                    } else {
+                        Ordering::Relaxed
+                    };
                     if *pair && *size == 8 {
                         // Two words: read them as one 16-byte unit (a compare-exchange with itself would write; two
                         // atomic reads are enough for the value the store compares against).
@@ -1087,7 +1192,11 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
                 MONITOR.with(|m| m.set((ea, total, lo, hi)));
             } else {
                 let (mon_ea, mon_len, lo, hi) = MONITOR.with(|m| m.replace((0, 0, 0, 0)));
-                let o = if *ord { Ordering::Release } else { Ordering::Relaxed };
+                let o = if *ord {
+                    Ordering::Release
+                } else {
+                    Ordering::Relaxed
+                };
                 let ok = mon_ea == ea && mon_len == total && {
                     // SAFETY: per the caller.
                     unsafe {
@@ -1107,7 +1216,14 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
             }
             true
         }
-        Op::Lane { load, size, index, rt, rn, post } => {
+        Op::Lane {
+            load,
+            size,
+            index,
+            rt,
+            rn,
+            post,
+        } => {
             let n = usize::from(*size);
             let at = usize::from(*index) * n;
             let reg = usize::from(*rt);
@@ -1134,7 +1250,9 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
             }
             true
         }
-        Op::Ld1 { load, q, regs, rt, .. } => {
+        Op::Ld1 {
+            load, q, regs, rt, ..
+        } => {
             let n = if *q { 16 } else { 8 };
             for k in 0..usize::from(*regs) {
                 let reg = (usize::from(*rt) + k) % 32;
@@ -1256,22 +1374,246 @@ mod tests {
 
     #[test]
     fn register_offsets() {
-        check(0xf863_6841, Ldr, 8, 1, 0, 2, Reg { rm: 3, option: 3, shift: 0 }, false, false);
-        check(0xf863_7841, Ldr, 8, 1, 0, 2, Reg { rm: 3, option: 3, shift: 3 }, false, false);
-        check(0xb863_5841, Ldr, 4, 1, 0, 2, Reg { rm: 3, option: 2, shift: 2 }, false, false);
-        check(0xb863_c841, Ldr, 4, 1, 0, 2, Reg { rm: 3, option: 6, shift: 0 }, false, false);
-        check(0xf863_d841, Ldr, 8, 1, 0, 2, Reg { rm: 3, option: 6, shift: 3 }, false, false);
-        check(0xf863_f841, Ldr, 8, 1, 0, 2, Reg { rm: 3, option: 7, shift: 3 }, false, false);
-        check(0x3863_6841, Ldr, 1, 1, 0, 2, Reg { rm: 3, option: 3, shift: 0 }, false, false);
-        check(0x3863_4841, Ldr, 1, 1, 0, 2, Reg { rm: 3, option: 2, shift: 0 }, false, false);
-        check(0x7863_7841, Ldr, 2, 1, 0, 2, Reg { rm: 3, option: 3, shift: 1 }, false, false);
-        check(0xb8a3_7841, Ldrs, 4, 1, 0, 2, Reg { rm: 3, option: 3, shift: 2 }, true, true);
-        check(0x38e3_6841, Ldrs, 1, 1, 0, 2, Reg { rm: 3, option: 3, shift: 0 }, true, false);
-        check(0x78a3_7841, Ldrs, 2, 1, 0, 2, Reg { rm: 3, option: 3, shift: 1 }, true, true);
-        check(0xf823_7841, Str, 8, 1, 0, 2, Reg { rm: 3, option: 3, shift: 3 }, false, false);
-        check(0xb823_5841, Str, 4, 1, 0, 2, Reg { rm: 3, option: 2, shift: 2 }, false, false);
-        check(0x3823_6841, Str, 1, 1, 0, 2, Reg { rm: 3, option: 3, shift: 0 }, false, false);
-        check(0x7823_7841, Str, 2, 1, 0, 2, Reg { rm: 3, option: 3, shift: 1 }, false, false);
+        check(
+            0xf863_6841,
+            Ldr,
+            8,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 0,
+            },
+            false,
+            false,
+        );
+        check(
+            0xf863_7841,
+            Ldr,
+            8,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 3,
+            },
+            false,
+            false,
+        );
+        check(
+            0xb863_5841,
+            Ldr,
+            4,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 2,
+                shift: 2,
+            },
+            false,
+            false,
+        );
+        check(
+            0xb863_c841,
+            Ldr,
+            4,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 6,
+                shift: 0,
+            },
+            false,
+            false,
+        );
+        check(
+            0xf863_d841,
+            Ldr,
+            8,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 6,
+                shift: 3,
+            },
+            false,
+            false,
+        );
+        check(
+            0xf863_f841,
+            Ldr,
+            8,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 7,
+                shift: 3,
+            },
+            false,
+            false,
+        );
+        check(
+            0x3863_6841,
+            Ldr,
+            1,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 0,
+            },
+            false,
+            false,
+        );
+        check(
+            0x3863_4841,
+            Ldr,
+            1,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 2,
+                shift: 0,
+            },
+            false,
+            false,
+        );
+        check(
+            0x7863_7841,
+            Ldr,
+            2,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 1,
+            },
+            false,
+            false,
+        );
+        check(
+            0xb8a3_7841,
+            Ldrs,
+            4,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 2,
+            },
+            true,
+            true,
+        );
+        check(
+            0x38e3_6841,
+            Ldrs,
+            1,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 0,
+            },
+            true,
+            false,
+        );
+        check(
+            0x78a3_7841,
+            Ldrs,
+            2,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 1,
+            },
+            true,
+            true,
+        );
+        check(
+            0xf823_7841,
+            Str,
+            8,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 3,
+            },
+            false,
+            false,
+        );
+        check(
+            0xb823_5841,
+            Str,
+            4,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 2,
+                shift: 2,
+            },
+            false,
+            false,
+        );
+        check(
+            0x3823_6841,
+            Str,
+            1,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 0,
+            },
+            false,
+            false,
+        );
+        check(
+            0x7823_7841,
+            Str,
+            2,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 1,
+            },
+            false,
+            false,
+        );
     }
 
     #[test]
@@ -1311,12 +1653,96 @@ mod tests {
         check(0x3cc1_0441, VLdr, 16, 1, 0, 2, Post(16), false, false);
         check(0x3c9f_0c41, VStr, 16, 1, 0, 2, Pre(-16), false, false);
         check(0xfc00_8441, VStr, 8, 1, 0, 2, Post(8), false, false);
-        check(0x3ce3_7841, VLdr, 16, 1, 0, 2, Reg { rm: 3, option: 3, shift: 4 }, false, false);
-        check(0xfc63_7841, VLdr, 8, 1, 0, 2, Reg { rm: 3, option: 3, shift: 3 }, false, false);
-        check(0xbc63_5841, VLdr, 4, 1, 0, 2, Reg { rm: 3, option: 2, shift: 2 }, false, false);
-        check(0x3c63_6841, VLdr, 1, 1, 0, 2, Reg { rm: 3, option: 3, shift: 0 }, false, false);
-        check(0x3ca3_7841, VStr, 16, 1, 0, 2, Reg { rm: 3, option: 3, shift: 4 }, false, false);
-        check(0x7c23_7841, VStr, 2, 1, 0, 2, Reg { rm: 3, option: 3, shift: 1 }, false, false);
+        check(
+            0x3ce3_7841,
+            VLdr,
+            16,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 4,
+            },
+            false,
+            false,
+        );
+        check(
+            0xfc63_7841,
+            VLdr,
+            8,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 3,
+            },
+            false,
+            false,
+        );
+        check(
+            0xbc63_5841,
+            VLdr,
+            4,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 2,
+                shift: 2,
+            },
+            false,
+            false,
+        );
+        check(
+            0x3c63_6841,
+            VLdr,
+            1,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 0,
+            },
+            false,
+            false,
+        );
+        check(
+            0x3ca3_7841,
+            VStr,
+            16,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 4,
+            },
+            false,
+            false,
+        );
+        check(
+            0x7c23_7841,
+            VStr,
+            2,
+            1,
+            0,
+            2,
+            Reg {
+                rm: 3,
+                option: 3,
+                shift: 1,
+            },
+            false,
+            false,
+        );
     }
 
     #[test]
@@ -1566,7 +1992,15 @@ mod tests {
         r.mem[8..12].copy_from_slice(&0x8000_0000u32.to_le_bytes());
         r.run(0x6941_0861, 0); // ldpsw x1, x2, [x3, #8]
         assert_eq!(r.x[1], 0xffff_ffff_8000_0000);
-        assert_eq!(r.x[2], r.word(12, 4) | if r.mem[15] & 0x80 != 0 { 0xffff_ffff_0000_0000 } else { 0 });
+        assert_eq!(
+            r.x[2],
+            r.word(12, 4)
+                | if r.mem[15] & 0x80 != 0 {
+                    0xffff_ffff_0000_0000
+                } else {
+                    0
+                }
+        );
         r.x[1] = 11;
         r.x[2] = 22;
         r.run(0xa901_0861, 0); // stp x1, x2, [x3, #16]
@@ -1606,10 +2040,19 @@ mod tests {
         assert_eq!(&r.mem[0..16], &r.v[1].to_le_bytes());
         assert_eq!(&r.mem[16..32], &r.v[2].to_le_bytes());
         r.run(0xad41_0861, 0); // ldp q1, q2, [x3, #32]
-        assert_eq!(r.v[1], u128::from_le_bytes(r.mem[32..48].try_into().unwrap()));
-        assert_eq!(r.v[2], u128::from_le_bytes(r.mem[48..64].try_into().unwrap()));
+        assert_eq!(
+            r.v[1],
+            u128::from_le_bytes(r.mem[32..48].try_into().unwrap())
+        );
+        assert_eq!(
+            r.v[2],
+            u128::from_le_bytes(r.mem[48..64].try_into().unwrap())
+        );
         r.run(0x6d41_0861, 0); // ldp d1, d2, [x3, #16]
-        assert_eq!((r.v[1], r.v[2]), (u128::from(r.word(16, 8)), u128::from(r.word(24, 8))));
+        assert_eq!(
+            (r.v[1], r.v[2]),
+            (u128::from(r.word(16, 8)), u128::from(r.word(24, 8)))
+        );
     }
 
     #[test]
@@ -1643,7 +2086,15 @@ mod tests {
     #[test]
     fn atomic_memory_operations_decode_by_operation_size_and_order() {
         let rmw_of = |i: u32| match op(i) {
-            Op::Rmw { op, size, rs, rt, rn, acq, rel } => (op, size, rs, rt, rn, acq, rel),
+            Op::Rmw {
+                op,
+                size,
+                rs,
+                rt,
+                rn,
+                acq,
+                rel,
+            } => (op, size, rs, rt, rn, acq, rel),
             o => panic!("{i:#010x}: {o:?}"),
         };
         assert_eq!(rmw_of(0xf821_0062), (RmwOp::Add, 8, 1, 2, 3, false, false));
@@ -1667,17 +2118,75 @@ mod tests {
     fn compare_and_swap_exclusives_and_ld1_decode() {
         assert_eq!(
             op(0xc8a1_7c62),
-            Op::Cas { size: 8, pair: false, rs: 1, rt: 2, rn: 3, acq: false, rel: false }
+            Op::Cas {
+                size: 8,
+                pair: false,
+                rs: 1,
+                rt: 2,
+                rn: 3,
+                acq: false,
+                rel: false
+            }
         );
         assert_eq!(
             op(0x88e1_fc62),
-            Op::Cas { size: 4, pair: false, rs: 1, rt: 2, rn: 3, acq: true, rel: true }
+            Op::Cas {
+                size: 4,
+                pair: false,
+                rs: 1,
+                rt: 2,
+                rn: 3,
+                acq: true,
+                rel: true
+            }
         );
-        assert_eq!(op(0x08a1_7c62), Op::Cas { size: 1, pair: false, rs: 1, rt: 2, rn: 3, acq: false, rel: false });
-        assert_eq!(op(0x4822_7cc4), Op::Cas { size: 8, pair: true, rs: 2, rt: 4, rn: 6, acq: false, rel: false });
-        assert_eq!(op(0x0862_fcc4), Op::Cas { size: 4, pair: true, rs: 2, rt: 4, rn: 6, acq: true, rel: true });
+        assert_eq!(
+            op(0x08a1_7c62),
+            Op::Cas {
+                size: 1,
+                pair: false,
+                rs: 1,
+                rt: 2,
+                rn: 3,
+                acq: false,
+                rel: false
+            }
+        );
+        assert_eq!(
+            op(0x4822_7cc4),
+            Op::Cas {
+                size: 8,
+                pair: true,
+                rs: 2,
+                rt: 4,
+                rn: 6,
+                acq: false,
+                rel: false
+            }
+        );
+        assert_eq!(
+            op(0x0862_fcc4),
+            Op::Cas {
+                size: 4,
+                pair: true,
+                rs: 2,
+                rt: 4,
+                rn: 6,
+                acq: true,
+                rel: true
+            }
+        );
         let ex = |i| match op(i) {
-            Op::Excl { load, pair, size, rs, rt, rt2, rn, ord } => (load, pair, size, rs, rt, rt2, rn, ord),
+            Op::Excl {
+                load,
+                pair,
+                size,
+                rs,
+                rt,
+                rt2,
+                rn,
+                ord,
+            } => (load, pair, size, rs, rt, rt2, rn, ord),
             o => panic!("{i:#010x}: {o:?}"),
         };
         assert_eq!(ex(0xc85f_7c41), (true, false, 8, 31, 1, 31, 2, false));
@@ -1691,7 +2200,14 @@ mod tests {
         assert_eq!(ex(0xc824_0861), (false, true, 8, 4, 1, 2, 3, false));
         assert_eq!(ex(0x8824_8861), (false, true, 4, 4, 1, 2, 3, true));
         let ld1 = |i| match op(i) {
-            Op::Ld1 { load, q, regs, rt, rn, post } => (load, q, regs, rt, rn, post),
+            Op::Ld1 {
+                load,
+                q,
+                regs,
+                rt,
+                rn,
+                post,
+            } => (load, q, regs, rt, rn, post),
             o => panic!("{i:#010x}: {o:?}"),
         };
         assert_eq!(ld1(0x4c40_7020), (true, true, 1, 0, 1, None));
@@ -1710,7 +2226,14 @@ mod tests {
         // One lane: `ST1 {v0.s}[1], [x22]`, `ST1 {v0.s}[2], [x8]`, `LD1 {v0.s}[1], [x1]`, `LD1 {v3.b}[15], [x2], #1`,
         // `ST1 {v1.d}[1], [x2], x3`, `ST1 {v1.h}[5], [x2]`.
         let lane = |i| match op(i) {
-            Op::Lane { load, size, index, rt, rn, post } => (load, size, index, rt, rn, post),
+            Op::Lane {
+                load,
+                size,
+                index,
+                rt,
+                rn,
+                post,
+            } => (load, size, index, rt, rn, post),
             o => panic!("{i:#010x}: {o:?}"),
         };
         assert_eq!(lane(0x0d00_92c0), (false, 4, 1, 0, 22, None));
@@ -1756,12 +2279,27 @@ mod tests {
         let put = |r: &mut Rig, v: u64| r.mem[a..a + 8].copy_from_slice(&v.to_le_bytes());
         let get = |r: &Rig| u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap());
         for (i, f, start, operand) in [
-            (0xf821_0062u32, (|m: u64, v: u64| m.wrapping_add(v)) as fn(u64, u64) -> u64, 5u64, 7u64),
+            (
+                0xf821_0062u32,
+                (|m: u64, v: u64| m.wrapping_add(v)) as fn(u64, u64) -> u64,
+                5u64,
+                7u64,
+            ),
             (0xf821_1062, |m, v| m & !v, 0xff, 0x0f),
             (0xf821_2062, |m, v| m ^ v, 0xf0, 0xff),
             (0xf821_3062, |m, v| m | v, 0xf0, 0x0f),
-            (0xf821_4062, |m, v| (m as i64).max(v as i64) as u64, (-5i64) as u64, 3),
-            (0xf821_5062, |m, v| (m as i64).min(v as i64) as u64, (-5i64) as u64, 3),
+            (
+                0xf821_4062,
+                |m, v| (m as i64).max(v as i64) as u64,
+                (-5i64) as u64,
+                3,
+            ),
+            (
+                0xf821_5062,
+                |m, v| (m as i64).min(v as i64) as u64,
+                (-5i64) as u64,
+                3,
+            ),
             (0xf821_6062, |m, v| m.max(v), (-5i64) as u64, 3),
             (0xf821_7062, |m, v| m.min(v), (-5i64) as u64, 3),
             (0xf821_8062, |_, v| v, 9, 3),
@@ -1796,7 +2334,10 @@ mod tests {
         // `LD1 {v0.s}[2], [x1]` (0x4d40_8020) replaces the third word and keeps the others.
         r.mem[20..24].copy_from_slice(&[9, 8, 7, 6]);
         assert!(r.run_op(0x4d40_8020, 20));
-        assert_eq!(r.v[0], 0x1111_1111_0607_0809_3333_3333_4444_4444u128, "lane 2 is the word at bits 64 to 96");
+        assert_eq!(
+            r.v[0], 0x1111_1111_0607_0809_3333_3333_4444_4444u128,
+            "lane 2 is the word at bits 64 to 96"
+        );
     }
 
     #[test]
@@ -1820,7 +2361,10 @@ mod tests {
         (r.x[2], r.x[3], r.x[4], r.x[5]) = (1, 2, 30, 40);
         assert!(r.run_op(0x4822_7cc4, a)); // casp x2, x3, x4, x5, [x6]
         assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 30);
-        assert_eq!(u64::from_le_bytes(r.mem[a + 8..a + 16].try_into().unwrap()), 40);
+        assert_eq!(
+            u64::from_le_bytes(r.mem[a + 8..a + 16].try_into().unwrap()),
+            40
+        );
         // CASP of two w registers.
         r.mem[a..a + 4].copy_from_slice(&7u32.to_le_bytes());
         r.mem[a + 4..a + 8].copy_from_slice(&8u32.to_le_bytes());
@@ -1868,21 +2412,36 @@ mod tests {
         assert!(r.run_op(0xc824_0861, a)); // stxp w4, x1, x2, [x3]
         assert_eq!(r.x[4], 0);
         assert_eq!(u64::from_le_bytes(r.mem[a..a + 8].try_into().unwrap()), 10);
-        assert_eq!(u64::from_le_bytes(r.mem[a + 8..a + 16].try_into().unwrap()), 20);
+        assert_eq!(
+            u64::from_le_bytes(r.mem[a + 8..a + 16].try_into().unwrap()),
+            20
+        );
     }
 
     #[test]
     fn ld1_and_st1_move_whole_registers_in_a_row() {
         let mut r = Rig::new();
         assert!(r.run_op(0x4c40_a820, 0)); // ld1 {v0.4s, v1.4s}, [x1]
-        assert_eq!(r.v[0], u128::from_le_bytes(r.mem[0..16].try_into().unwrap()));
-        assert_eq!(r.v[1], u128::from_le_bytes(r.mem[16..32].try_into().unwrap()));
+        assert_eq!(
+            r.v[0],
+            u128::from_le_bytes(r.mem[0..16].try_into().unwrap())
+        );
+        assert_eq!(
+            r.v[1],
+            u128::from_le_bytes(r.mem[16..32].try_into().unwrap())
+        );
         assert!(r.run_op(0x0c40_7020, 40)); // ld1 {v0.8b}, [x1]: the upper half clears
         assert_eq!(r.v[0], u128::from(r.word(40, 8)));
         // ld1 of four registers wrapping from v30 to v1.
         assert!(r.run_op(0x4c40_203e, 0));
-        assert_eq!(r.v[30], u128::from_le_bytes(r.mem[0..16].try_into().unwrap()));
-        assert_eq!(r.v[1], u128::from_le_bytes(r.mem[48..64].try_into().unwrap()));
+        assert_eq!(
+            r.v[30],
+            u128::from_le_bytes(r.mem[0..16].try_into().unwrap())
+        );
+        assert_eq!(
+            r.v[1],
+            u128::from_le_bytes(r.mem[48..64].try_into().unwrap())
+        );
         // st1 with an immediate post index writes the base back.
         r.v[0] = 0x0f0e_0d0c_0b0a_0908_0706_0504_0302_0100;
         r.v[1] = 0x1f1e_1d1c_1b1a_1918_1716_1514_1312_1110;

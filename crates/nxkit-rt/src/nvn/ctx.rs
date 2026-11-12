@@ -263,11 +263,21 @@ impl Gpu {
     pub(crate) fn lock(&self) -> MutexGuard<'_, Front> {
         let mut front = self.front.lock().unwrap_or_else(PoisonError::into_inner);
         if self.writes_dirty.swap(false, Ordering::Acquire) {
-            let spans = std::mem::take(&mut *self.pending_recorded.lock().unwrap_or_else(PoisonError::into_inner));
+            let spans = std::mem::take(
+                &mut *self
+                    .pending_recorded
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            );
             if !spans.is_empty() {
                 front.recorded(&spans);
             }
-            let ranges = std::mem::take(&mut *self.pending_writes.lock().unwrap_or_else(PoisonError::into_inner));
+            let ranges = std::mem::take(
+                &mut *self
+                    .pending_writes
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            );
             for (start, len) in ranges {
                 if let Err(e) = front.guest_wrote(start, len) {
                     log_once(
@@ -284,7 +294,8 @@ impl Gpu {
     /// recordings there. It takes no lock of the front end. Every write that the front end learns about goes through
     /// here, and so does the end of a recording ([`Front::recorded`]).
     pub(crate) fn invalidated(&self, start: u64, len: u64) {
-        self.backend.recording_invalidated(start, start.saturating_add(len));
+        self.backend
+            .recording_invalidated(start, start.saturating_add(len));
     }
 
     /// Tells the front end that a recording ended in `spans` of host memory, without taking its lock: the summaries it
@@ -294,7 +305,10 @@ impl Gpu {
         if spans.is_empty() {
             return;
         }
-        self.pending_recorded.lock().unwrap_or_else(PoisonError::into_inner).extend_from_slice(spans);
+        self.pending_recorded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(spans);
         self.writes_dirty.store(true, Ordering::Release);
     }
 
@@ -613,12 +627,17 @@ mod tests {
         let held = g.lock();
         // Another thread ends a recording while the present holds the lock: it returns at once.
         std::thread::scope(|s| {
-            s.spawn(|| g.recorded_deferred(&[0x1000..0x2000, 0x8000..0x9000])).join().expect("thread");
+            s.spawn(|| g.recorded_deferred(&[0x1000..0x2000, 0x8000..0x9000]))
+                .join()
+                .expect("thread");
         });
         assert_eq!(g.pending_recorded.lock().expect("lock").len(), 2);
         drop(held);
         drop(g.lock());
-        assert!(g.pending_recorded.lock().expect("lock").is_empty(), "the lock applied the spans");
+        assert!(
+            g.pending_recorded.lock().expect("lock").is_empty(),
+            "the lock applied the spans"
+        );
     }
 
     #[test]
@@ -652,7 +671,10 @@ mod tests {
     use nxkit_nvn::frame::Cmd;
 
     fn work(g: &Gpu, n: usize) {
-        g.lock().frame_mut().cmds.extend((0..n).map(|_| Cmd::BufferCopy));
+        g.lock()
+            .frame_mut()
+            .cmds
+            .extend((0..n).map(|_| Cmd::BufferCopy));
     }
 
     fn sent(spy: &Spy) -> Vec<(FlushReason, u64, usize)> {
@@ -664,7 +686,10 @@ mod tests {
     fn a_release_that_brought_a_lot_of_work_flushes_the_frame_and_the_fences_follow() {
         let spy = Arc::new(Spy::default());
         let mut g = gpu_with(spy.clone());
-        g.release_flush = order::ReleaseFlush { on: true, min_work: 4 };
+        g.release_flush = order::ReleaseFlush {
+            on: true,
+            min_work: 4,
+        };
         // Two commands were in the frame before the release; five came with it.
         work(&g, 2);
         let from = g.lock().frame().cmds.len();
@@ -677,7 +702,10 @@ mod tests {
         assert_eq!(g.fence_now(), Fence(1));
         work(&g, 1);
         assert_eq!(g.fence_now(), Fence(2));
-        assert_eq!(g.flush(FlushReason::Present).expect("present flush"), Fence(2));
+        assert_eq!(
+            g.flush(FlushReason::Present).expect("present flush"),
+            Fence(2)
+        );
         assert_eq!(
             sent(&spy),
             vec![(FlushReason::Release, 1, 7), (FlushReason::Present, 2, 1)]
@@ -690,7 +718,10 @@ mod tests {
     fn a_release_with_little_work_or_with_the_setting_off_flushes_nothing() {
         let spy = Arc::new(Spy::default());
         let mut g = gpu_with(spy.clone());
-        g.release_flush = order::ReleaseFlush { on: true, min_work: 4 };
+        g.release_flush = order::ReleaseFlush {
+            on: true,
+            min_work: 4,
+        };
         work(&g, 3);
         g.flush_released(&mut g.lock(), 0).expect("flush");
         // The work before the release does not count: only the 2 commands that came with it.
@@ -707,7 +738,10 @@ mod tests {
     fn a_release_flush_leaves_the_held_ops_held() {
         let spy = Arc::new(Spy::default());
         let mut g = gpu_with(spy.clone());
-        g.release_flush = order::ReleaseFlush { on: true, min_work: 1 };
+        g.release_flush = order::ReleaseFlush {
+            on: true,
+            min_work: 1,
+        };
         work(&g, 3);
         g.gate().push(
             0xa,

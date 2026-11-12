@@ -95,7 +95,7 @@ pub struct Loc {
     pub real: u64,
     /// The bytes from the first byte to the end of the pool. For a range in the mirror: to the end of its run.
     pub room: u64,
-    /// The index of the mirror run in [`Overlay::runs`] when the range lies in the mirror ([`NO_RUN`] otherwise); then
+    /// The index of the mirror run in `Overlay::runs` when the range lies in the mirror (`NO_RUN` otherwise); then
     /// `offset` is the offset in the buffer of that run and `real` the address in it.
     pub run: u32,
 }
@@ -362,7 +362,15 @@ impl<B: Backing> PoolSnapshot<B> {
             if whole {
                 return Ok(loc);
             }
-            let split = if self.overlay.as_ref().is_some_and(|o| o.all_members(va, len)) { 2 } else { 0 };
+            let split = if self
+                .overlay
+                .as_ref()
+                .is_some_and(|o| o.all_members(va, len))
+            {
+                2
+            } else {
+                0
+            };
             crate::overlay::note_partial(class, split, va, len);
             return self.resolve_guest(va, len);
         }

@@ -53,8 +53,8 @@ mod guest;
 mod icb;
 mod interpolate;
 mod memstats;
-mod mirror;
 mod metrics;
+mod mirror;
 mod pacing;
 mod pages;
 mod pipeline;
@@ -79,11 +79,11 @@ mod vmregion;
 
 pub use address::{AddressMap, GUEST_VA_BASE, GUEST_VA_MAX, is_guest_va};
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
-pub use batch::{set_commit_hook, set_done_hook};
 pub use batch::{
     BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
     SubmittedBatch,
 };
+pub use batch::{set_commit_hook, set_done_hook};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use compute_icb::{
@@ -104,11 +104,11 @@ pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInp
 pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use mirror::{Ensured, Mirror, MirrorRun, MirrorView, SEGMENT as MIRROR_SEGMENT};
-pub use pages::{
-    FaultKind, FaultOrigin, FlushStats, Form as AccessForm, InternalThread, PageStats, Pages, Reason as FallbackReason,
-    SnapWhy, Stager, mark_internal_thread, name_pc, set_pc_namer,
-};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
+pub use pages::{
+    FaultKind, FaultOrigin, FlushStats, Form as AccessForm, InternalThread, PageStats, Pages,
+    Reason as FallbackReason, SnapWhy, Stager, mark_internal_thread, name_pc, set_pc_namer,
+};
 pub use pipeline::{
     ArchiveConfig, BaseStats, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache,
     RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source,
@@ -141,7 +141,9 @@ pub use stats::{
     interval_bucket,
 };
 pub use table::ArgumentTable;
-pub use texture::{InPlaceRefusal, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc};
+pub use texture::{
+    InPlaceRefusal, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc,
+};
 pub use timestamp::TimestampHeap;
 pub use upscale::{SpatialUpscaler, UpscaleDesc};
 pub use vmregion::{VmRegion, vm_region};

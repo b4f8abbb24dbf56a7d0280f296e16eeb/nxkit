@@ -1535,15 +1535,25 @@ fn a_streamed_prefix_is_committed_before_the_rest_is_encoded_and_the_order_holds
     let mut batch = ring.begin(4).unwrap();
     let number = batch.number();
     assert!(batch.stream_prefix(0).is_none());
-    assert!(batch.stream_prefix(4).is_none(), "the whole batch is no prefix");
+    assert!(
+        batch.stream_prefix(4).is_none(),
+        "the whole batch is no prefix"
+    );
     let ahead = batch.stream_prefix(2).expect("a prefix");
     assert_eq!(ahead.count(), 2);
     assert!(batch.stream_prefix(3).is_none(), "the groups are fixed");
     {
         let bufs = batch.buffers();
         assert!(!ahead.finish(0, &mut bufs[0]), "one of two");
-        assert_eq!(COMMITTED.load(Ordering::SeqCst), 0, "nothing is committed before the group is complete");
-        assert!(ahead.finish(1, &mut bufs[1]), "the second command buffer commits the group");
+        assert_eq!(
+            COMMITTED.load(Ordering::SeqCst),
+            0,
+            "nothing is committed before the group is complete"
+        );
+        assert!(
+            ahead.finish(1, &mut bufs[1]),
+            "the second command buffer commits the group"
+        );
     }
     // The group is on the queue while the batch is not submitted: the other two command buffers are not even ended.
     assert_eq!(COMMITTED.load(Ordering::SeqCst), number);

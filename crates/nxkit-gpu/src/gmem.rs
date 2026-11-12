@@ -662,7 +662,14 @@ mod tests {
             va_end: VA + 16 * PAGE,
             mem: Fake(0x7000_0000_0000),
         }];
-        let snap = snap.with_overlay(std::sync::Arc::new(Overlay::new(VA, std::sync::Arc::new(bits), runs, None, None, 1)));
+        let snap = snap.with_overlay(std::sync::Arc::new(Overlay::new(
+            VA,
+            std::sync::Arc::new(bits),
+            runs,
+            None,
+            None,
+            1,
+        )));
         // One registered pool, from page 9 to page 20.
         let (pieces, unresolved) = resolve_all(&[(VA + 9 * PAGE, VA + 20 * PAGE)], &snap);
         assert_eq!(unresolved, 0);

@@ -303,7 +303,8 @@ impl TextureStore {
         }
         let pools = self.pools.as_ref()?;
         let stride = rec.layout.size / u64::from(desc.height.max(1));
-        let (mem, offset) = crate::upload::locate(pools.as_ref(), rec.address.get(), rec.layout.size).ok()?;
+        let (mem, offset) =
+            crate::upload::locate(pools.as_ref(), rec.address.get(), rec.layout.size).ok()?;
         let mut d = *desc;
         d.storage = Storage::Shared;
         let align = Texture::linear_alignment(&self.ctx, d.format);

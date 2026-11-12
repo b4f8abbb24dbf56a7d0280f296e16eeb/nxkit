@@ -479,7 +479,14 @@ fn overlay_over(snap: &PoolSnapshot<Fake>, members: &[usize], log: &Log) -> Pool
             log: log.clone(),
         },
     }];
-    snap.with_overlay(Arc::new(Overlay::new(VA, Arc::new(bits), runs, None, None, 3)))
+    snap.with_overlay(Arc::new(Overlay::new(
+        VA,
+        Arc::new(bits),
+        runs,
+        None,
+        None,
+        3,
+    )))
 }
 
 #[test]
@@ -528,21 +535,46 @@ fn a_class_that_is_off_resolves_to_guest_memory() {
     set.register(VA, 0x20 * K16, 0).unwrap();
     let base = set.current();
     let snap = overlay_over(&base, &[4, 5, 6], &log);
-    assert_eq!(snap.resolve_c(VA + 5 * K16, 8, crate::overlay::UBO).unwrap().run, 0);
+    assert_eq!(
+        snap.resolve_c(VA + 5 * K16, 8, crate::overlay::UBO)
+            .unwrap()
+            .run,
+        0
+    );
     let off = {
         use crate::overlay::{Overlay, Run};
         let o = snap.overlay().unwrap();
         let runs = vec![Run {
             va_start: o.runs()[0].va_start,
             va_end: o.runs()[0].va_end,
-            mem: Fake { start: 0x7_0000, log: log.clone() },
+            mem: Fake {
+                start: 0x7_0000,
+                log: log.clone(),
+            },
         }];
         let mut bits = vec![0u64; 2];
         bits[0] = 0b111_0000;
-        let o2 = Overlay::new(VA, Arc::new(bits), runs, None, None, 3).with_off(crate::overlay::UBO);
+        let o2 =
+            Overlay::new(VA, Arc::new(bits), runs, None, None, 3).with_off(crate::overlay::UBO);
         base.with_overlay(Arc::new(o2))
     };
-    assert_eq!(off.resolve_c(VA + 5 * K16, 8, crate::overlay::UBO).unwrap().run, NO_RUN);
-    assert_eq!(off.resolve_start_c(VA + 5 * K16, crate::overlay::UBO).unwrap().run, NO_RUN);
-    assert_eq!(off.resolve_c(VA + 5 * K16, 8, crate::overlay::SBUF).unwrap().run, 0, "other classes stay on the mirror");
+    assert_eq!(
+        off.resolve_c(VA + 5 * K16, 8, crate::overlay::UBO)
+            .unwrap()
+            .run,
+        NO_RUN
+    );
+    assert_eq!(
+        off.resolve_start_c(VA + 5 * K16, crate::overlay::UBO)
+            .unwrap()
+            .run,
+        NO_RUN
+    );
+    assert_eq!(
+        off.resolve_c(VA + 5 * K16, 8, crate::overlay::SBUF)
+            .unwrap()
+            .run,
+        0,
+        "other classes stay on the mirror"
+    );
 }

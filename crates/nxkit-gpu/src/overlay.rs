@@ -26,9 +26,12 @@ pub(crate) const PAGE: u64 = nxkit_metal::PAGE_SIZE;
 static PARTIAL: [[AtomicU64; 3]; 7] = [const { [const { AtomicU64::new(0) }; 3] }; 7];
 
 /// The names of the classes of [`PARTIAL`], index 0 first.
-pub(crate) const CLASS_NAMES: [&str; 7] = ["other", "uniform", "storage", "stream", "upload", "gmem", "copy"];
+pub(crate) const CLASS_NAMES: [&str; 7] = [
+    "other", "uniform", "storage", "stream", "upload", "gmem", "copy",
+];
 /// The names of the splits of [`PARTIAL`].
-pub(crate) const SPLIT_NAMES: [&str; 3] = ["starts in, leaves", "starts out, reaches in", "past run"];
+pub(crate) const SPLIT_NAMES: [&str; 3] =
+    ["starts in, leaves", "starts out, reaches in", "past run"];
 
 /// Partial resolves of a range that an earlier one had announced to the flush: the closure did not make it whole (a limit).
 static REPEATS: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +59,12 @@ pub(crate) fn partial_table() -> [[u64; 3]; 7] {
 }
 
 fn class_index(class: u8) -> usize {
-    if class == 0 { 0 } else { class.trailing_zeros() as usize + 1 }.min(6)
+    if class == 0 {
+        0
+    } else {
+        class.trailing_zeros() as usize + 1
+    }
+    .min(6)
 }
 
 /// The ranges `(guest address, length)` that were partial, until the flush takes them: the next flush makes each whole
@@ -390,9 +398,12 @@ impl<B: Backing> Overlay<B> {
                         while x < end && ok {
                             let b = x / BLOCK;
                             let upto = ((b + 1) * BLOCK).min(end);
-                            let piece = &mut out[done + (x - off as u64) as usize..done + (upto - off as u64) as usize];
+                            let piece = &mut out[done + (x - off as u64) as usize
+                                ..done + (upto - off as u64) as usize];
                             ok = if skip[(b / 64) as usize] >> (b % 64) & 1 != 0 {
-                                mirror.read(at - self.va_base + (x - off as u64), piece).is_ok()
+                                mirror
+                                    .read(at - self.va_base + (x - off as u64), piece)
+                                    .is_ok()
                             } else {
                                 s.buf.read(u64::from(k) * PAGE + x, piece).is_ok()
                             };

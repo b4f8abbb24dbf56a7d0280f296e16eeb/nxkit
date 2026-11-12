@@ -151,7 +151,9 @@ fn committed(number: u64, ns: u64) {
 
 fn kept(fence: u64, number: u64) {
     track(|t| {
-        if let (Some((i, begin)), Some(commit)) = (t.fences.remove(&fence), t.commits.remove(&number)) {
+        if let (Some((i, begin)), Some(commit)) =
+            (t.fences.remove(&fence), t.commits.remove(&number))
+        {
             if t.batches.len() > 64 {
                 t.batches.clear();
             }
@@ -194,7 +196,14 @@ mod tests {
             s.describe(),
             "3 (first commit +2.00 ms, GPU start +0.50 ms after it)"
         );
-        assert_eq!(Sums { flushes: 1, ..Sums::default() }.describe(), "1");
+        assert_eq!(
+            Sums {
+                flushes: 1,
+                ..Sums::default()
+            }
+            .describe(),
+            "1"
+        );
     }
 
     #[test]

@@ -79,10 +79,16 @@ fn describe(gate: &Gate, m: &MarkOp) -> Option<String> {
     };
     Some(match *m {
         MarkOp::SignalEvent { event, mode, value } => {
-            format!("signal ev {event:#x} ({}) mode {mode} val {value}", word(event))
+            format!(
+                "signal ev {event:#x} ({}) mode {mode} val {value}",
+                word(event)
+            )
         }
         MarkOp::WaitEvent { event, mode, value } => {
-            format!("wait ev {event:#x} ({}) mode {mode} val {value}", word(event))
+            format!(
+                "wait ev {event:#x} ({}) mode {mode} val {value}",
+                word(event)
+            )
         }
         MarkOp::FenceSync { sync } => format!("fence sync {sync:#x}"),
         MarkOp::WaitSync { sync } => format!("waitsync {sync:#x}"),
@@ -241,7 +247,9 @@ impl Gpu {
         if work == 0 || work < cfg.min_work {
             return Ok(());
         }
-        note(format_args!("RELEASE FLUSH: the released submits brought {work} draws, dispatches and copies"));
+        note(format_args!(
+            "RELEASE FLUSH: the released submits brought {work} draws, dispatches and copies"
+        ));
         self.flush_locked(front, FlushReason::Release).map(|_| ())
     }
 
@@ -292,7 +300,9 @@ impl Gpu {
                     h.queue,
                     op_name(&h.op),
                     h.passed,
-                    blocker.map_or("not blocked".to_string(), |b| why_blocked(gate, h.queue, &b))
+                    blocker.map_or("not blocked".to_string(), |b| why_blocked(
+                        gate, h.queue, &b
+                    ))
                 ));
             }
             if diag() {

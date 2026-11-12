@@ -371,7 +371,8 @@ impl Em<'_> {
             let e = self.tmp;
             self.tmp += 1;
             // a weak exchange may fail with the expected value still in memory: it leaves t{e} as it was, so try again
-            self.pre.push(format!("{t} t{e} = {}; {t} t{e}c = t{e};", cmp.s));
+            self.pre
+                .push(format!("{t} t{e} = {}; {t} t{e}c = t{e};", cmp.s));
             self.pre.push(format!(
                 "while (!atomic_compare_exchange_weak_explicit({ptr}, &t{e}, {}, memory_order_relaxed, memory_order_relaxed) && t{e} == t{e}c) {{}}",
                 new.s
