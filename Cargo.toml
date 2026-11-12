@@ -187,6 +187,17 @@ nxgame-totk = { path = "titles/games/0100F2C0115B6000" }
 nxgame-pkza = { path = "titles/games/0100F43008C44000" }
 nxgame-bmta = { path = "titles/games/0100F5D01DA3A000" }
 nxgame-xcde = { path = "titles/games/0100FF500E34A000" }
+nxgame-yoshimb = { path = "titles/games/0400245021D2C000" }
+nxgame-splatraiders = { path = "titles/games/0400380020056000" }
+nxgame-hwaoi = { path = "titles/games/04003F40232DE000" }
+nxgame-dkbananza = { path = "titles/games/040074A01BF12000" }
+nxgame-kirbyar = { path = "titles/games/040077201BE50000" }
+nxgame-fefw = { path = "titles/games/04007EF01F8AE000" }
+nxgame-nssr = { path = "titles/games/04008E001F098000" }
+nxgame-pkpokopia = { path = "titles/games/0400A3A01EE4C000" }
+nxgame-mkw = { path = "titles/games/0400C3F00006E000" }
+nxgame-pragmata = { path = "titles/games/0400C76024710000" }
+nxgame-starfox = { path = "titles/games/0400E88025B1A000" }
 nxb-error = { path = "crates/nxb-error" }
 nxb-sys = { path = "crates/nxb-sys" }
 nxb-pyjson = { path = "crates/nxb-pyjson" }

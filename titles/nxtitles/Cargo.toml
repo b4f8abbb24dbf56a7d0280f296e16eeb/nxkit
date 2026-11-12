@@ -14,10 +14,10 @@ in_v = false
 [features]
 default = [
     "agl", "oot", "botw", "acnh", "mtf", "smbw", "smo", "pkbd", "aaic", "mpr", "silksong", "snbz", "mk8d", "swheist",
-    "ryza", "mp4", "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick",
-    "hwaoc", "celeste", "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac",
-    "bastion", "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr",
-    "kirbyfl", "mt2", "octo0", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
+    "ryza", "mp4", "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick", "hwaoc",
+    "celeste", "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac", "bastion",
+    "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr", "kirbyfl",
+    "mt2", "octo0", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
     "hollowknight", "srwy", "deadcells", "mrkb", "unicorn", "blasphemous", "smt5v", "ssbu", "zla", "dq11s", "mlbs",
     "mps", "aisni", "d2r", "astral", "xc3", "bayo", "rdr", "bayo2", "peach", "portal", "kirbysa", "ballxpit", "ais",
     "swheist2", "steinsgate", "seaofstars", "zeow", "sentinelsasia", "rpop", "pkshield", "oriwotw", "pkviolet",
@@ -25,7 +25,8 @@ default = [
     "pkscarlet", "cuphead", "feengage", "mcd2", "absolum", "dq7r", "portal2", "pksword", "batmanak", "hwde", "mhrise",
     "pikmin4", "ffresasia", "nierasia", "mvdk", "cvbc", "smrpg", "ffx", "catherine", "dkctf", "rotk8", "fc27", "swdig2",
     "tristrat", "ffcc", "silverpines", "dq12hd", "rhgroove", "tunic", "lm3", "parabox", "stardew", "xc2", "sor4",
-    "pmttyd", "rotk14", "totk", "pkza", "bmta", "xcde",
+    "pmttyd", "rotk14", "totk", "pkza", "bmta", "xcde", "yoshimb", "splatraiders", "hwaoi", "dkbananza", "kirbyar",
+    "fefw", "nssr", "pkpokopia", "mkw", "pragmata", "starfox",
 ]
 agl = ["dep:nxfamily-agl"]
 oot = ["dep:nxgame-oot"]
@@ -171,6 +172,17 @@ totk = ["dep:nxgame-totk"]
 pkza = ["dep:nxgame-pkza"]
 bmta = ["dep:nxgame-bmta"]
 xcde = ["dep:nxgame-xcde"]
+yoshimb = ["dep:nxgame-yoshimb"]
+splatraiders = ["dep:nxgame-splatraiders"]
+hwaoi = ["dep:nxgame-hwaoi"]
+dkbananza = ["dep:nxgame-dkbananza"]
+kirbyar = ["dep:nxgame-kirbyar"]
+fefw = ["dep:nxgame-fefw"]
+nssr = ["dep:nxgame-nssr"]
+pkpokopia = ["dep:nxgame-pkpokopia"]
+mkw = ["dep:nxgame-mkw"]
+pragmata = ["dep:nxgame-pragmata"]
+starfox = ["dep:nxgame-starfox"]
 
 [dependencies]
 nxtitle.workspace = true
@@ -318,6 +330,17 @@ nxgame-totk = { workspace = true, optional = true }
 nxgame-pkza = { workspace = true, optional = true }
 nxgame-bmta = { workspace = true, optional = true }
 nxgame-xcde = { workspace = true, optional = true }
+nxgame-yoshimb = { workspace = true, optional = true }
+nxgame-splatraiders = { workspace = true, optional = true }
+nxgame-hwaoi = { workspace = true, optional = true }
+nxgame-dkbananza = { workspace = true, optional = true }
+nxgame-kirbyar = { workspace = true, optional = true }
+nxgame-fefw = { workspace = true, optional = true }
+nxgame-nssr = { workspace = true, optional = true }
+nxgame-pkpokopia = { workspace = true, optional = true }
+nxgame-mkw = { workspace = true, optional = true }
+nxgame-pragmata = { workspace = true, optional = true }
+nxgame-starfox = { workspace = true, optional = true }
 
 [lints]
 workspace = true

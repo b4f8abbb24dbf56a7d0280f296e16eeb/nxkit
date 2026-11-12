@@ -785,6 +785,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-dkbananza"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-dkcrhd"
 version = "0.10.0"
 dependencies = [
@@ -893,6 +902,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-fefw"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-ffcc"
 version = "0.10.0"
 dependencies = [
@@ -974,6 +992,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-hwaoi"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-hwde"
 version = "0.10.0"
 dependencies = [
@@ -984,6 +1011,15 @@ dependencies = [
 
 [[package]]
 name = "nxgame-isaac"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-kirbyar"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -1038,6 +1074,15 @@ dependencies = [
 
 [[package]]
 name = "nxgame-mk8d"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-mkw"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -1146,6 +1191,15 @@ dependencies = [
 
 [[package]]
 name = "nxgame-nierasia"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-nssr"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -1290,6 +1344,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-pkpokopia"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-pkscarlet"
 version = "0.10.0"
 dependencies = [
@@ -1363,6 +1426,15 @@ dependencies = [
 
 [[package]]
 name = "nxgame-portal2"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-pragmata"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -1577,6 +1649,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-splatraiders"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-srwy"
 version = "0.10.0"
 dependencies = [
@@ -1605,6 +1686,15 @@ dependencies = [
 
 [[package]]
 name = "nxgame-stardew"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-starfox"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -1776,6 +1866,15 @@ dependencies = [
 
 [[package]]
 name = "nxgame-yoshicw"
+version = "0.10.0"
+dependencies = [
+ "nxb-profile",
+ "nxb-rewrite",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-yoshimb"
 version = "0.10.0"
 dependencies = [
  "nxb-profile",
@@ -2038,6 +2137,7 @@ dependencies = [
  "nxgame-dbspz",
  "nxgame-deadcells",
  "nxgame-diablo3",
+ "nxgame-dkbananza",
  "nxgame-dkcrhd",
  "nxgame-dkctf",
  "nxgame-dq11s",
@@ -2050,6 +2150,7 @@ dependencies = [
  "nxgame-fc27",
  "nxgame-fe3h",
  "nxgame-feengage",
+ "nxgame-fefw",
  "nxgame-ffcc",
  "nxgame-ffres",
  "nxgame-ffresasia",
@@ -2059,14 +2160,17 @@ dependencies = [
  "nxgame-hades2",
  "nxgame-hollowknight",
  "nxgame-hwaoc",
+ "nxgame-hwaoi",
  "nxgame-hwde",
  "nxgame-isaac",
+ "nxgame-kirbyar",
  "nxgame-kirbyfl",
  "nxgame-kirbysa",
  "nxgame-lm3",
  "nxgame-mcd2",
  "nxgame-mhrise",
  "nxgame-mk8d",
+ "nxgame-mkw",
  "nxgame-mlbs",
  "nxgame-mp4",
  "nxgame-mpr",
@@ -2079,6 +2183,7 @@ dependencies = [
  "nxgame-nfshp",
  "nxgame-nier",
  "nxgame-nierasia",
+ "nxgame-nssr",
  "nxgame-obradinn",
  "nxgame-octo",
  "nxgame-octo0",
@@ -2094,6 +2199,7 @@ dependencies = [
  "nxgame-pikmin4",
  "nxgame-pkarceus",
  "nxgame-pkbd",
+ "nxgame-pkpokopia",
  "nxgame-pkscarlet",
  "nxgame-pkshield",
  "nxgame-pksword",
@@ -2103,6 +2209,7 @@ dependencies = [
  "nxgame-pmttyd",
  "nxgame-portal",
  "nxgame-portal2",
+ "nxgame-pragmata",
  "nxgame-ragingloop",
  "nxgame-rdr",
  "nxgame-rhgroove",
@@ -2126,10 +2233,12 @@ dependencies = [
  "nxgame-snbz",
  "nxgame-sonicss",
  "nxgame-sor4",
+ "nxgame-splatraiders",
  "nxgame-srwy",
  "nxgame-ssbu",
  "nxgame-sshd",
  "nxgame-stardew",
+ "nxgame-starfox",
  "nxgame-steinsgate",
  "nxgame-subnautica",
  "nxgame-swdig",
@@ -2149,6 +2258,7 @@ dependencies = [
  "nxgame-xc3",
  "nxgame-xcde",
  "nxgame-yoshicw",
+ "nxgame-yoshimb",
  "nxgame-zeow",
  "nxgame-zla",
  "nxtitle",

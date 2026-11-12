@@ -299,6 +299,28 @@ pub fn catalog() -> Result<Catalog, String> {
         &nxgame_bmta::BMTA,
         #[cfg(feature = "xcde")]
         &nxgame_xcde::XCDE,
+        #[cfg(feature = "yoshimb")]
+        &nxgame_yoshimb::YOSHIMB,
+        #[cfg(feature = "splatraiders")]
+        &nxgame_splatraiders::SPLATRAIDERS,
+        #[cfg(feature = "hwaoi")]
+        &nxgame_hwaoi::HWAOI,
+        #[cfg(feature = "dkbananza")]
+        &nxgame_dkbananza::DKBANANZA,
+        #[cfg(feature = "kirbyar")]
+        &nxgame_kirbyar::KIRBYAR,
+        #[cfg(feature = "fefw")]
+        &nxgame_fefw::FEFW,
+        #[cfg(feature = "nssr")]
+        &nxgame_nssr::NSSR,
+        #[cfg(feature = "pkpokopia")]
+        &nxgame_pkpokopia::PKPOKOPIA,
+        #[cfg(feature = "mkw")]
+        &nxgame_mkw::MKW,
+        #[cfg(feature = "pragmata")]
+        &nxgame_pragmata::PRAGMATA,
+        #[cfg(feature = "starfox")]
+        &nxgame_starfox::STARFOX,
     ];
     Catalog::new(families, titles)
 }
