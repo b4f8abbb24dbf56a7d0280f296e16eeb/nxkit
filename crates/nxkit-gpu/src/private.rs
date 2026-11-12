@@ -80,7 +80,6 @@ mod report;
 mod tests;
 mod track;
 
-use copyin::*;
 use fences::*;
 use late::*;
 use members::*;
@@ -88,8 +87,8 @@ use report::*;
 use track::*;
 
 pub(crate) use copyin::{
-    copy_in_jobs, encode_copy_in, gpu_owned, late_copies_encoded, late_copy_jobs, mirror_covers,
-    note_copy_in,
+    CopyJob, copy_in_jobs, encode_copy_in, gpu_owned, late_copies_encoded, late_copy_jobs,
+    mirror_covers, note_copy_in,
 };
 pub(crate) use early::{
     EARLY_CUTS, EarlyPlan, early_cuts, early_enabled, early_exclude, early_release, note_split,
