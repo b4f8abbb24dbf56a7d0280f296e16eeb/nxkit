@@ -71,16 +71,25 @@ fn check_directory(root: &Path, path: &Path) -> Result<()> {
         }
         for entry in fs::read_dir(&dir).map_err(|e| HostError::io(&dir, &e))? {
             let entry = entry.map_err(|e| HostError::io(&dir, &e))?;
-            let resolved = canonical(&entry.path())?;
+            let mut resolved = entry.path();
+            let mut kind = entry
+                .file_type()
+                .map_err(|e| HostError::io(&resolved, &e))?;
+            if kind.is_symlink() {
+                resolved = canonical(&resolved)?;
+                kind = fs::metadata(&resolved)
+                    .map_err(|e| HostError::io(&resolved, &e))?
+                    .file_type();
+            }
             if !resolved.starts_with(root) {
                 return Err(invalid(format!(
                     "directory asset escapes bundle: {}",
                     entry.path().display()
                 )));
             }
-            if resolved.is_dir() {
+            if kind.is_dir() {
                 pending.push(resolved);
-            } else if !resolved.is_file() {
+            } else if !kind.is_file() {
                 return Err(invalid("bundle contains a non-file asset"));
             }
         }
@@ -386,6 +395,18 @@ mod tests {
         fs::create_dir_all(&f.data).unwrap();
         symlink(f.root.join("outside"), f.data.join("empty-romfs")).unwrap();
         assert!(read(&f.bundle, &f.data).is_err());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn internal_links_and_directory_cycles_remain_valid() {
+        use std::os::unix::fs::symlink;
+        let f = Fixture::new("");
+        let romfs = f.bundle.join("nxkit/romfs");
+        fs::create_dir_all(romfs.join("nested")).unwrap();
+        fs::write(romfs.join("nested/file"), b"asset").unwrap();
+        symlink("nested/file", romfs.join("alias")).unwrap();
+        symlink("..", romfs.join("nested/parent")).unwrap();
+        assert!(read(&f.bundle, &f.data).is_ok());
     }
     #[cfg(unix)]
     #[test]
