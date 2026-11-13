@@ -128,7 +128,7 @@ struct State {
     announced: String,
     /// The display ids that a switch was tried for with this rate, so that a failed switch does not repeat.
     tried: Vec<(u32, u32)>,
-    /// The measured rates already reported, rounded to Hz.
+    /// The last measured rate applied, rounded to Hz; zero uses the requested plan.
     reported: u32,
 }
 
@@ -356,7 +356,12 @@ pub fn note_measured(measured_hz: f64) -> Option<f64> {
         return None;
     }
     let rounded = measured_hz.round() as u32;
-    if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz))
+    let applied_hz = if st.reported == 0 {
+        plan.link_hz
+    } else {
+        st.reported
+    };
+    if !refresh::rate_differs(measured_hz, f64::from(applied_hz))
         || rounded == st.reported
         || rounded == 0
     {
@@ -391,6 +396,27 @@ mod tests {
             vrr: true,
             vrr_floor: 60,
         }
+    }
+
+    #[test]
+    fn measured_rate_recovers_after_a_temporary_slowdown() {
+        let saved = {
+            let mut st = state();
+            let saved = (st.plan, st.presentation, st.request, st.reported);
+            st.plan = Some(refresh::plan_ticks(120.0, 60, false, false));
+            st.presentation = Presentation::Grid;
+            st.request = request();
+            st.reported = 0;
+            saved
+        };
+        assert_eq!(note_measured(120.0), None);
+        assert_eq!(note_measured(60.0), Some(60.0));
+        assert_eq!(state().reported, 60);
+        assert_eq!(note_measured(120.0), Some(120.0));
+        assert_eq!(state().reported, 120);
+        assert_eq!(note_measured(120.0), None);
+        let mut st = state();
+        (st.plan, st.presentation, st.request, st.reported) = saved;
     }
 
     #[test]
