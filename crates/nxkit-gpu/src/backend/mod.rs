@@ -17,6 +17,7 @@ mod encpace;
 mod events;
 mod gputs;
 mod poolops;
+mod present;
 #[cfg(test)]
 mod tests;
 mod tick;
@@ -66,6 +67,8 @@ struct Pending {
     texture: Texture,
     /// The part of the texture the game shows (`nvnWindowSetCrop`, or the vi layer crop); zero size is all of it.
     crop: nxkit_nvn::backend::Rect,
+    /// The device origin when this image was presented, not the current mode at the display tick.
+    origin_lower_left: bool,
 }
 
 /// The backend of the front end and the sink of the display ticks.
@@ -295,8 +298,11 @@ impl GpuBackend {
     fn serve(&self, msg: Msg) -> Reply {
         match msg {
             Msg::Job(job) => Reply::Job(self.encode_job(&job)),
-            Msg::Present(present) => {
-                if let Err(e) = self.present_now(present) {
+            Msg::Present {
+                present,
+                origin_lower_left,
+            } => {
+                if let Err(e) = self.present_now(present, origin_lower_left) {
                     eprintln!("nxkit-gpu: the present failed on the encoder thread: {e}");
                 }
                 Reply::Done
@@ -500,35 +506,6 @@ impl GpuBackend {
                 );
             }
         }
-    }
-
-    /// Keeps the Metal texture of the presented frame and tells the pacer. Runs after the encode of that frame.
-    fn present_now(&self, present: Present) -> BackendResult<()> {
-        // The number goes first, so that a present without a texture still counts as one of the game's presents.
-        let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
-        let texture = self
-            .lock_gpu()
-            .texture(present.texture)
-            .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
-        encpace::ready(number);
-        if crate::diag("present") && number % 120 == 1 {
-            eprintln!(
-                "DIAG present id {:?} {}x{} {:?}",
-                present.texture,
-                texture.desc().width,
-                texture.desc().height,
-                texture.desc().format
-            );
-        }
-        locked(&self.pending).push(Pending {
-            number,
-            texture,
-            crop: present.crop,
-        });
-        if let Some(p) = self.pacer.get() {
-            p.game_frame_ready(number);
-        }
-        Ok(())
     }
 
     /// Drops the Metal texture of `id`, in the order of the frames: on the encoder thread when there is one.

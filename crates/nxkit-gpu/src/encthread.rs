@@ -71,8 +71,11 @@ impl TableUpdate {
 pub(crate) enum Msg {
     /// Encode a frame.
     Job(Box<Job>),
-    /// The game presented a texture.
-    Present(Present),
+    /// The game presented a texture. Its device origin stays with this image while it waits.
+    Present {
+        present: Present,
+        origin_lower_left: bool,
+    },
     /// A texture was created or finalised, so its Metal texture is stale.
     Retire(TexId),
 }
@@ -300,6 +303,54 @@ mod tests {
         assert!(enc.settle().update.is_none());
         assert!(enc.wait_for(|| done.load(Ordering::Acquire) >= 3));
         assert!(!enc.wait_for(|| done.load(Ordering::Acquire) >= 4));
+    }
+
+    #[test]
+    fn queued_presents_keep_the_origin_captured_before_a_device_mode_change() {
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+
+        let (release, wait) = channel();
+        let (sent, received) = channel();
+        let enc = Encoder::spawn(move |msg| {
+            if let Msg::Present {
+                present,
+                origin_lower_left,
+            } = msg
+            {
+                wait.recv().unwrap();
+                sent.send((present.texture, origin_lower_left)).unwrap();
+            }
+            Reply::Done
+        })
+        .unwrap();
+        let mode = AtomicBool::new(true);
+        let present = |id| Present {
+            window: 1,
+            texture: TexId(id),
+            interval: 1,
+            crop: nxkit_nvn::backend::Rect::default(),
+        };
+        assert!(enc.send(Msg::Present {
+            present: present(1),
+            origin_lower_left: mode.load(Ordering::Acquire),
+        }));
+        mode.store(false, Ordering::Release);
+        assert!(enc.send(Msg::Present {
+            present: present(2),
+            origin_lower_left: mode.load(Ordering::Acquire),
+        }));
+        // Neither image can reach the display path until after the mode changed.
+        release.send(()).unwrap();
+        release.send(()).unwrap();
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (TexId(1), true)
+        );
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (TexId(2), false)
+        );
     }
 
     #[test]
