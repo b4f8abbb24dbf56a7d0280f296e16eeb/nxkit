@@ -80,6 +80,10 @@ pub(crate) struct Done {
     pub summary: String,
 }
 
+fn has_library(mut paths: impl Iterator<Item = PathBuf>) -> bool {
+    paths.any(|path| path.extension().is_some_and(|ext| ext == "metallib"))
+}
+
 /// Runs the shader step and the archive, then copies the Metal libraries, their `_b.json` reflection and the tables
 /// into `<run>/shaders` and the archive to `<run>/pipelines/` (the shards and their index) or `<run>/pipelines.mtl4archive`
 /// (`NXB_ARCHIVE_LAYOUT`, see `crate::archive_layout`).
@@ -117,7 +121,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
         }
         Ok::<(), String>(())
     })?;
-    if n == 0 {
+    if !has_library(keep.iter().map(|entry| entry.path())) {
         return Err(format!(
             "the shader step left no library in {}",
             o.lib.display()
@@ -162,6 +166,19 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_metadata_does_not_count_as_a_shader_library() {
+        let metadata = ["_b_build.json", "inputs.tsv", "shader_b.json"];
+        assert!(!has_library(metadata.iter().map(PathBuf::from)));
+        assert!(!has_library(std::iter::empty()));
+        assert!(has_library(
+            metadata
+                .into_iter()
+                .chain(["shader_b.metallib"])
+                .map(PathBuf::from)
+        ));
+    }
 
     #[test]
     fn the_profile_has_the_keys_the_split_reads() {
