@@ -95,6 +95,20 @@ impl Walker {
                 st.viewport = [f(x, 0), f(x, 1), f(x, 2), f(x, 3)];
                 self.track.write(cache::scalar_bit(sc::VIEWPORT));
             }
+            ExtCode::ViewportSwizzle if x.arg == 0 => {
+                st.viewport_swizzle = [x.word(0), x.word(1), x.word(2), x.word(3)];
+                self.track.write(cache::scalar_bit(sc::VIEWPORT_SWIZZLE));
+                if !super::super::origin::supported(st.viewport_swizzle) {
+                    static SHOWN: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !SHOWN.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "nxkit-gpu: viewport swizzle {:?} is unsupported, drawing without the swizzle",
+                            st.viewport_swizzle
+                        );
+                    }
+                }
+            }
             ExtCode::DepthRange if x.arg == 0 => {
                 st.depth_range = [f(x, 0), f(x, 1)];
                 self.track.write(cache::scalar_bit(sc::DEPTH_RANGE));
