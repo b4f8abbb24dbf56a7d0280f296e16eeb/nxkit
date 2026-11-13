@@ -71,14 +71,19 @@ impl Backend for GpuBackend {
         }
     }
 
+    fn device_modes(&self, origin_lower_left: bool, _depth_zero_to_one: bool) {
+        locked(&self.walker).device_origin(origin_lower_left);
+    }
+
     fn submit<'a>(
         &'a self,
         queue: u64,
         handles: &'a [CommandHandle],
-        _origin_lower_left: bool,
+        origin_lower_left: bool,
     ) -> Option<Deferred<'a>> {
         Some(Box::new(move || {
             let mut walker = locked(&self.walker);
+            walker.queue_origin(queue, origin_lower_left);
             let mut mem = GuestView(self.guest.clone());
             walker.submit(&mut mem, queue, handles);
         }))
@@ -221,9 +226,17 @@ impl Backend for GpuBackend {
     fn present(&self, present: Present) -> BackendResult<()> {
         encpace::asked();
         self.asked.fetch_add(1, Ordering::AcqRel);
+        let origin_lower_left = locked(&self.walker).current_origin();
         match &self.enc {
-            Some(enc) if enc.send(Msg::Present(present)) => Ok(()),
-            _ => self.present_now(present),
+            Some(enc)
+                if enc.send(Msg::Present {
+                    present,
+                    origin_lower_left,
+                }) =>
+            {
+                Ok(())
+            }
+            _ => self.present_now(present, origin_lower_left),
         }
     }
 

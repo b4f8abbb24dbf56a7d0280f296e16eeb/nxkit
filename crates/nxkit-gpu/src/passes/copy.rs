@@ -1,7 +1,7 @@
 //! Texture copies, clears and buffer copies of the copy passes, with the region helpers they share.
 //!
 //! A texture copy whose destination box has another size than the source box stretches the source onto it with a
-//! host kernel (`scale`, filter from the copy flags). The other copies are blits.
+//! host kernel (`scale`, filter from the copy flags). Mirrored copies also use that kernel. The other copies are blits.
 
 use nxkit_metal::{ComputeCommand, ComputePass, Scratch, TextureDesc, TextureKind, TextureRegion};
 use nxkit_nvn::frame::Cmd;
@@ -440,10 +440,15 @@ pub(super) fn copy(
     {
         return Ok(());
     }
-    if src_box.size != dst_box.size {
-        if src == dst {
+    if super::scale::needs_kernel(&src_box, &dst_box, flags) {
+        // Different NVN objects can share one texture or overlapping in-place bytes. Parallel reads and writes race.
+        let overlap = super::scale::in_place_overlaps(
+            rs.in_place.map(|p| (p.real, rs.guest_size)),
+            rd.in_place.map(|p| (p.real, rd.guest_size)),
+        );
+        if src == dst || rs.barrier_id == rd.barrier_id || overlap {
             return Err(copy_skip(format_args!(
-                "scaled copy {src:?} {:?} -> itself {:?}",
+                "scaled or mirrored copy {src:?} {:?} -> alias {dst:?} {:?}",
                 src_box.size, dst_box.size
             )));
         }

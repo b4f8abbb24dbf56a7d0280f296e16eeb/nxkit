@@ -5,8 +5,8 @@
 //! to the NVN command decoder) fills a [`FrameDetail`] next to the frame. The vectors are indexed by ordinal:
 //! the n-th `Cmd::Draw` of the frame uses `draws[n]`, the n-th `Cmd::Copy` uses `copies[n]`, and so on.
 //!
-//! Every number is the raw NVN value (`NVNblendFunc`, `NVNdepthFunc`, `NVNface` and others), so the recorder does no
-//! translation. `crate::translate` does it in one place.
+//! Enum values use NVN (`NVNblendFunc`, `NVNdepthFunc`, `NVNface` and others). The walker converts the viewport and
+//! front-face convention for the captured origin modes. `crate::translate` converts the remaining state.
 
 use std::sync::Arc;
 
@@ -97,7 +97,7 @@ pub struct DepthStencilDetail {
 pub struct RasterDetail {
     /// `NVNface`: 0 none, 1 front, 2 back, 3 front and back.
     pub cull: u32,
-    /// `NVNfrontFace`: 0 clockwise, 1 counter-clockwise.
+    /// The Metal front face after queue-origin conversion: 0 clockwise, 1 counter-clockwise.
     pub front_face: u32,
     /// `NVNpolygonMode`: 0 point, 1 line, 2 fill.
     pub polygon_mode: u32,
@@ -262,7 +262,7 @@ pub struct TextureBind {
 /// The state that an ICB does not hold. The encoder sets it outside the ICB.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DynamicDetail {
-    /// The viewport as x, y, width and height in NVN pixels of the render target.
+    /// The viewport as x, y, width and height in unscaled pixels, after origin and swizzle conversion.
     pub viewport: [f32; 4],
     /// The depth range as near and far.
     pub depth_range: [f32; 2],
