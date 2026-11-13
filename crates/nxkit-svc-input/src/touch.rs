@@ -10,7 +10,8 @@
 //! The gesture rules are those of yuzu (`hid_core` `gesture_handler.cpp`), with one difference: a gesture stays put
 //! until a finger moved [`SLOP`] pixels from where it went down, because a fingertip wobbles by a pixel or two.
 
-/// One touch point of the host: a finger id below 16 and its position in 0..1.
+/// One ABI-stable touch point of the host: a finger id below 16 and its position in 0..1.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Touch {
     /// The finger id, 0 to 15. Points with a higher id are dropped.
@@ -477,6 +478,15 @@ impl Touches {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn touch_matches_native_abi() {
+        assert_eq!(std::mem::size_of::<super::Touch>(), 12);
+        assert_eq!(std::mem::align_of::<super::Touch>(), 4);
+        assert_eq!(std::mem::offset_of!(super::Touch, id), 0);
+        assert_eq!(std::mem::offset_of!(super::Touch, x), 4);
+        assert_eq!(std::mem::offset_of!(super::Touch, y), 8);
+    }
+
     use super::*;
 
     fn at(x: f32, y: f32) -> Touch {

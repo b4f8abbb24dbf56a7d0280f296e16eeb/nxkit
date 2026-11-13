@@ -46,15 +46,7 @@ impl GameSession {
     }
     pub(crate) fn touches(&mut self, points: &[Touch]) {
         if !self.stopped {
-            let points: Vec<_> = points
-                .iter()
-                .map(|p| nxkit_svc_input::Touch {
-                    id: p.id,
-                    x: p.x,
-                    y: p.y,
-                })
-                .collect();
-            nxkit_svc_input::set_touches(&points);
+            nxkit_svc_input::set_touches(points);
         }
     }
     pub(crate) fn virtual_pad(&mut self, buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32) {
