@@ -9,17 +9,7 @@ fn err(e: nxb_extract::ExtractError) -> String {
     crate::exit::fail(e.exit_code(), e.to_string())
 }
 
-pub(super) struct Extracted {
-    pub title_id: u64,
-    pub name: String,
-    pub version: u32,
-    pub version_name: String,
-    pub npdm: Vec<u8>,
-    pub modules: Vec<(String, Vec<u8>)>,
-    pub files: Vec<(String, Vec<u8>)>,
-    pub directories: Vec<String>,
-    pub aoc: Vec<manifest::Aoc>,
-}
+pub(super) use super::analysis::Extracted;
 
 fn read(path: &Path, total: &mut u64) -> Result<Vec<u8>, String> {
     let size = std::fs::metadata(path).map_err(|e| io(path, e))?.len();

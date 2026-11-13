@@ -261,7 +261,7 @@ impl FrontEnd for RawFrontEnd {
     }
 
     fn compile(&self, msl: &[u8]) -> Result<FrontEndOutput, FrontEndError> {
-        let t = std::time::Instant::now();
+        let t = cfg!(not(target_family = "wasm")).then(std::time::Instant::now);
         // A panic in the in-process front end must not end the build: the shader goes to the next tier.
         let res = std::panic::catch_unwind(|| air_front::build_raw(msl, &self.target));
         let lib = match res {
@@ -272,7 +272,7 @@ impl FrontEnd for RawFrontEnd {
         };
         validate_library(&lib)
             .map_err(|e| FrontEndError::Reject(format!("raw: invalid library: {e}")))?;
-        let wall = t.elapsed();
+        let wall = t.map_or(std::time::Duration::ZERO, |t| t.elapsed());
         Ok(FrontEndOutput {
             metallib: lib,
             frontend: self.id.clone(),

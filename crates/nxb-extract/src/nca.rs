@@ -354,10 +354,18 @@ pub fn open_package(ks: &mut KeySet, pkg: Arc<dyn Storage>, file: &str) -> Resul
             let raw: Arc<dyn Storage> = Arc::new(SubStorage::new(pkg.clone(), e.offset, e.size)?);
             ncas.push(Nca::open(ks, id, raw)?);
         } else if lower.ends_with(".ncz") {
-            let id = lower.split('.').next().unwrap_or("").to_string();
-            let raw: Arc<dyn Storage> = Arc::new(SubStorage::new(pkg.clone(), e.offset, e.size)?);
-            let ncz: Arc<dyn Storage> = Arc::new(crate::ncz::NczStorage::open(raw, &id)?);
-            ncas.push(Nca::open(ks, id, ncz)?);
+            #[cfg(feature = "host")]
+            {
+                let id = lower.split('.').next().unwrap_or("").to_string();
+                let raw: Arc<dyn Storage> =
+                    Arc::new(SubStorage::new(pkg.clone(), e.offset, e.size)?);
+                let ncz: Arc<dyn Storage> = Arc::new(crate::ncz::NczStorage::open(raw, &id)?);
+                ncas.push(Nca::open(ks, id, ncz)?);
+            }
+            #[cfg(not(feature = "host"))]
+            return Err(ExtractError::Unsupported(
+                "NCZ extraction requires the host feature".into(),
+            ));
         }
     }
     Ok(ncas)

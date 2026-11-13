@@ -21,7 +21,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<()> {
     })?;
     let mut files = stage(p, "analysis", "rewrite and link iOS guest", || {
         Ok((
-            runfolder(&game)?,
+            analysis::ios_runfolder(&game)?,
             "shared analysis and iOS guest image".into(),
         ))
     })?;
@@ -51,30 +51,6 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<()> {
     p.say(&format!("unsigned IPA: {}", out.display()));
     Ok(())
 }
-fn runfolder(game: &extract::Extracted) -> Result<Vec<(String, Vec<u8>)>> {
-    let analyzed = analysis::analyze(game)?;
-    let mut json = parse(&analyzed.manifest(game)).map_err(|e| format!("manifest: {e:?}"))?;
-    let thread = analyzed.thread;
-    let mods = analyzed.modules;
-    json.set("dylib", J::str("Frameworks/nxgame.dylib"));
-    let mut image = link::ios_dylib(&mods)?;
-    guest_tail::install(&mut image, &json, thread.stack_size as u64)?;
-    let mut files = vec![
-        ("game.json".into(), nxb_pyjson::dumps(&json).into_bytes()),
-        ("main.npdm".into(), game.npdm.clone()),
-        ("Frameworks/nxgame.dylib".into(), image),
-    ];
-    link::module_artifacts(
-        &mods,
-        |_, _| {},
-        |name, data| {
-            files.push((name.to_owned(), data.to_vec()));
-            Ok(())
-        },
-    )?;
-    Ok(files)
-}
-
 /// Require a new destination, including dangling symlinks.
 pub(super) fn vacant(path: &std::path::Path) -> Result<()> {
     match std::fs::symlink_metadata(path) {

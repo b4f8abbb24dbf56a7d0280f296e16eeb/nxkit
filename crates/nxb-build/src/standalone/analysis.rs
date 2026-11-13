@@ -1,6 +1,19 @@
 //! Target-independent facts and rewritten modules from the input, without a title catalog.
-use super::{auto_shaders, extract, layout, manifest, modules, npdm, nvn};
+use super::{auto_shaders, guest_tail, layout, link, manifest, modules, npdm, nvn};
+use nxb_pyjson::{Value as J, parse};
 use std::collections::BTreeSet;
+
+pub(crate) struct Extracted {
+    pub title_id: u64,
+    pub name: String,
+    pub version: u32,
+    pub version_name: String,
+    pub npdm: Vec<u8>,
+    pub modules: Vec<(String, Vec<u8>)>,
+    pub files: Vec<(String, Vec<u8>)>,
+    pub directories: Vec<String>,
+    pub aoc: Vec<manifest::Aoc>,
+}
 
 pub(super) struct Analysis {
     pub modules: Vec<(modules::Built, u64)>,
@@ -37,7 +50,7 @@ fn ordered(input: &[(String, Vec<u8>)]) -> Result<Vec<&(String, Vec<u8>)>, Strin
     Ok(selected.into_iter().map(|(_, m)| m).collect())
 }
 
-pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
+pub(super) fn analyze(game: &Extracted) -> Result<Analysis, String> {
     let thread = npdm::main_thread(&game.npdm)?;
     let selected = ordered(&game.modules)?;
     let ids = selected
@@ -94,7 +107,7 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
 }
 
 impl Analysis {
-    pub(super) fn manifest(&self, game: &extract::Extracted) -> String {
+    pub(super) fn manifest(&self, game: &Extracted) -> String {
         manifest::game_json(&manifest::Manifest {
             title_id: game.title_id,
             name: &game.name,
@@ -113,6 +126,31 @@ impl Analysis {
             vertex_stream_null_bind: false,
         })
     }
+}
+
+/// The shared iOS run folder, including the guest tail and signing marker.
+pub(crate) fn ios_runfolder(game: &Extracted) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let analyzed = analyze(game)?;
+    let mut json = parse(&analyzed.manifest(game)).map_err(|e| format!("manifest: {e:?}"))?;
+    let thread = analyzed.thread;
+    let mods = analyzed.modules;
+    json.set("dylib", J::str("Frameworks/nxgame.dylib"));
+    let mut image = link::ios_dylib(&mods)?;
+    guest_tail::install(&mut image, &json, thread.stack_size as u64)?;
+    let mut files = vec![
+        ("game.json".into(), nxb_pyjson::dumps(&json).into_bytes()),
+        ("main.npdm".into(), game.npdm.clone()),
+        ("Frameworks/nxgame.dylib".into(), image),
+    ];
+    link::module_artifacts(
+        &mods,
+        |_, _| {},
+        |name, data| {
+            files.push((name.to_owned(), data.to_vec()));
+            Ok(())
+        },
+    )?;
+    Ok(files)
 }
 
 #[cfg(test)]
@@ -171,7 +209,7 @@ mod tests {
         npdm[0xe] = 44;
         u32b(&mut npdm, 0x1c, 0x100000);
         u32b(&mut npdm, 0x14, 0x200000);
-        let mut game = extract::Extracted {
+        let mut game = Extracted {
             title_id: 0x010000000000abcd,
             name: "Synthetic".into(),
             version: 0,

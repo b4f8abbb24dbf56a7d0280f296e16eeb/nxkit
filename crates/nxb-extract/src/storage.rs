@@ -2,7 +2,9 @@
 //! block cache, and BKTR indirect (relocation) storage. All are `Send + Sync` and read at offsets, so any number of
 //! workers read in parallel.
 
+#[cfg(feature = "host")]
 use crate::fileext::FileExt;
+#[cfg(feature = "host")]
 use std::fs::File;
 use std::sync::Arc;
 
@@ -37,12 +39,14 @@ fn check_range(what: &str, size: u64, offset: u64, len: usize) -> Result<()> {
 }
 
 /// A file read with `pread`.
+#[cfg(feature = "host")]
 pub struct FileStorage {
     file: File,
     size: u64,
     name: String,
 }
 
+#[cfg(feature = "host")]
 impl FileStorage {
     /// Opens a file read-only.
     pub fn open(path: &std::path::Path) -> Result<FileStorage> {
@@ -60,6 +64,7 @@ impl FileStorage {
     }
 }
 
+#[cfg(feature = "host")]
 impl Storage for FileStorage {
     fn size(&self) -> u64 {
         self.size
@@ -72,6 +77,7 @@ impl Storage for FileStorage {
     }
 }
 
+#[cfg(feature = "host")]
 impl FileStorage {
     /// Wraps an open file of `size` bytes (a temporary file that is already unlinked).
     pub fn from_file(file: File, size: u64, name: &str) -> FileStorage {
