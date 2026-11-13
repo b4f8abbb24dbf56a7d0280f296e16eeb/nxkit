@@ -84,8 +84,19 @@ pub(crate) struct Done {
 /// into `<run>/shaders` and the archive to `<run>/pipelines/` (the shards and their index) or `<run>/pipelines.mtl4archive`
 /// (`NXB_ARCHIVE_LAYOUT`, see `crate::archive_layout`).
 pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
+    run_for_target(a, b, p, run, false)
+}
+
+/// Run the existing title shader pipeline for Mac or iOS.
+pub(crate) fn run_for_target(
+    a: &Args,
+    b: &Build,
+    p: &Arc<Progress>,
+    run: &Path,
+    ios: bool,
+) -> Result<Done, String> {
     let layout = crate::archive_layout::Layout::from_env();
-    let o = crate::pipeline::shaders_and_archive(a, b, p, layout)?;
+    let o = crate::pipeline::shaders_and_archive_for_target(a, b, p, layout, ios)?;
     let dst = run.join("shaders");
     let _ = std::fs::remove_dir_all(&dst);
     std::fs::create_dir_all(&dst).map_err(|e| io(&dst, e))?;
@@ -131,7 +142,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
                 ..Default::default()
             });
             if layout.merges() {
-                let src = b.work.join("pso/mac").join(format!("{arch}.mtl4a"));
+                let src = crate::pipeline::archive_dir(b, ios).join(format!("{arch}.mtl4a"));
                 if !src.is_file() {
                     return Err(format!(
                         "the archive step reported no error and left no file at {}",
@@ -141,8 +152,10 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
                 std::fs::copy(&src, run.join("pipelines.mtl4archive")).map_err(|e| io(&src, e))?;
             }
             if layout.shards() {
-                let n =
-                    crate::archive_layout::copy_to_run(&crate::archive_layout::shard_dir(b), run)?;
+                let n = crate::archive_layout::copy_to_run(
+                    &crate::pipeline::archive_dir(b, ios).join(nxkit_abi::shards::SHARD_DIR),
+                    run,
+                )?;
                 summary.push_str(&format!(", {n} archive shards"));
             }
             if let Some(s) = &o.archive {

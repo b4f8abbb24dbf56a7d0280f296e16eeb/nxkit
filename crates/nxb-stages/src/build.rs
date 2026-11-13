@@ -101,7 +101,15 @@ pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
 }
 
 /// Run the build.
-pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
+pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
+    build_for_target(cfg, MAC)
+}
+
+/// Run the same shader pipeline for an explicit compilation target.
+pub fn build_for_target(
+    mut cfg: BuildConfig,
+    conv: nxb_shader::target::TargetConv,
+) -> Result<BuildReport, Fatal> {
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
     let tmp = cfg.scratch.join("tmp");
@@ -162,21 +170,26 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         home: home.clone(),
     };
     let roots =
-        SdkRoots::resolve(&resolver, &[MAC.target], &registry).map_err(|e| fatal("SDK", e))?;
+        SdkRoots::resolve(&resolver, &[conv.target], &registry).map_err(|e| fatal("SDK", e))?;
     let env = roots
-        .apple_env(MAC.target, &tmp, &home)
+        .apple_env(conv.target, &tmp, &home)
         .map_err(|e| fatal("environment", e))?;
     let tools = Arc::new(
-        MetalTools::resolve(&resolver, MAC.target, env, tmp.clone(), registry.clone())
+        MetalTools::resolve(&resolver, conv.target, env, tmp.clone(), registry.clone())
             .map_err(|e| fatal("metal", e))?,
     );
     let (ver, bld) = resolver
-        .sdk_version(MAC.target, &registry)
+        .sdk_version(conv.target, &registry)
         .map_err(|e| fatal("SDK version", e))?;
     let cid = tools
         .compiler_id(&ver, &bld)
         .map_err(|e| fatal("compiler id", e))?;
-    let (own_cfg, own_note) = crate::own_front::resolve(cfg.own_front.as_ref(), &cid);
+    // OwnFront currently emits Mac AIR/raw libraries. Do not use it for iOS.
+    let (own_cfg, own_note) = if conv.target == nxb_model::Target::Mac {
+        crate::own_front::resolve(cfg.own_front.as_ref(), &cid)
+    } else {
+        (None, "Apple front end for iOS".to_string())
+    };
     let own = match &own_cfg {
         Some(o) => Some(
             crate::own_front::OwnFront::open(o, &tools, &resolver)
@@ -185,13 +198,13 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         None => None,
     };
     let mut ident = b"dmsh_mtlcache 2\0".to_vec();
-    ident.extend_from_slice(MAC.record().as_bytes());
+    ident.extend_from_slice(conv.record().as_bytes());
     ident.push(0);
     ident.extend_from_slice(cid.as_bytes());
     let pchp = tools
         .build_pch(
-            &MAC.pch_flags(),
-            MAC.compile_flags,
+            &conv.pch_flags(),
+            conv.compile_flags,
             &pch::header(),
             pch::PROBE,
             &cfg.work.join("pch"),
@@ -202,6 +215,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let xlate = crate::xlate_cache::Xlate::open(&cfg.store, &cfg.chain)
         .map_err(|e| fatal("translation cache", e))?;
     let shared = Arc::new(Shared {
+        conv,
         out: out.clone(),
         chain: cfg.chain.clone(),
         ident: nxb_model::sha256(&ident).to_hex(),

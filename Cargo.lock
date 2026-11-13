@@ -2050,10 +2050,14 @@ dependencies = [
 name = "nxkit-svc-audio"
 version = "0.10.0"
 dependencies = [
+ "block2",
  "nxkit-abi",
+ "objc2",
  "objc2-audio-toolbox",
+ "objc2-avf-audio",
  "objc2-core-audio",
  "objc2-core-audio-types",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -2093,6 +2097,7 @@ dependencies = [
 name = "nxkit-svc-system"
 version = "0.10.0"
 dependencies = [
+ "libc",
  "nxkit-abi",
 ]
 
@@ -2315,6 +2320,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-avf-audio"
+version = "0.3.2"
+source = "git+https://github.com/madsmtm/objc2?rev=8a5abacd90d5403fc0463459a35826f892b9142e#8a5abacd90d5403fc0463459a35826f892b9142e"
+dependencies = [
+ "bitflags",
+ "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-core-audio"
 version = "0.3.2"
 source = "git+https://github.com/madsmtm/objc2?rev=8a5abacd90d5403fc0463459a35826f892b9142e#8a5abacd90d5403fc0463459a35826f892b9142e"
@@ -2432,6 +2447,7 @@ version = "0.3.2"
 source = "git+https://github.com/madsmtm/objc2?rev=8a5abacd90d5403fc0463459a35826f892b9142e#8a5abacd90d5403fc0463459a35826f892b9142e"
 dependencies = [
  "bitflags",
+ "block2",
  "objc2",
  "objc2-core-foundation",
 ]

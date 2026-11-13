@@ -64,6 +64,8 @@ pub struct VmRegion {
     pub size: u64,
     /// The current protection (bit 0 read, 1 write, 2 execute).
     pub protection: u32,
+    /// Whether the VM object is backed by an external pager (including files).
+    pub external_pager: bool,
     /// `SM_*` of `<mach/vm_region.h>`: 1 copy on write, 2 private, 4 shared, 5 true shared, 6 private aliased.
     pub share_mode: u8,
     /// The id of the VM object behind the region.
@@ -120,10 +122,14 @@ pub(crate) fn region_at_or_after(addr: u64) -> Option<VmRegion> {
             depth += 1;
             continue;
         }
+        if cfg!(target_os = "ios") && info.is_submap != 0 {
+            return None;
+        }
         return Some(VmRegion {
             start: at,
             size,
             protection: info.protection as u32,
+            external_pager: info.external_pager != 0,
             share_mode: info.share_mode,
             object: info.object_id_full,
             object_offset: info.offset,

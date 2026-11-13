@@ -20,13 +20,13 @@ pub struct Nv12 {
 
 pub(crate) enum Pixels {
     Memory(Nv12),
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     Buffer(crate::sys::vt::PixelBuffer),
 }
 
 /// A decoded picture, 8-bit 4:2:0 in the NV12 layout.
 ///
-/// On macOS a picture from the decoder stays in the `CVPixelBuffer` that VideoToolbox filled, in memory that Metal can
+/// On Apple platforms a picture from the decoder stays in the `CVPixelBuffer` that VideoToolbox filled, in memory that Metal can
 /// use. [`crate::texture::TextureCache`] turns it into textures without a copy (R20), and [`Frame::copy_nv12`] reads
 /// it for a game that wants the bytes.
 pub struct Frame {
@@ -50,7 +50,7 @@ impl Frame {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn from_buffer(
         width: u32,
         height: u32,
@@ -116,7 +116,7 @@ impl Frame {
                 copy(&m.y, m.y_stride, &m.uv, m.uv_stride);
                 Ok(())
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Pixels::Buffer(b) => b.with_planes(copy),
         }
     }
@@ -129,7 +129,7 @@ impl Frame {
     ) -> Result<R, String> {
         match &self.pixels {
             Pixels::Memory(m) => Ok(f(&m.y, m.y_stride, &m.uv, m.uv_stride)),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Pixels::Buffer(b) => b.with_planes(f),
         }
     }

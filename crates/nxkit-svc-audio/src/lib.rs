@@ -55,6 +55,19 @@ pub fn init(cfg: &Config) {
     engine::mixer().configure(cfg.master_volume, cfg.silent_sink);
 }
 
+/// Set foreground playback intent, including before the mixer opens its output.
+/// A new active request permits playback after an interruption has ended, but
+/// cannot override an interruption that is still in progress.
+#[cfg(target_os = "ios")]
+pub fn set_active(active: bool) -> Result<(), String> {
+    sys::au::set_active(active)
+}
+/// Restart after a route change, preserving focus and interruption state.
+#[cfg(target_os = "ios")]
+pub fn route_changed() -> Result<(), String> {
+    sys::au::route_changed()
+}
+
 /// Both export lists: the ones that run on the guest stack and the ones that need a big stack.
 fn lists() -> (Vec<Export>, Vec<Export>) {
     let mut v = Vec::new();

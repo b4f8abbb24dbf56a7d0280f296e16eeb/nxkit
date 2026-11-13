@@ -12,7 +12,10 @@ mod elf;
 mod extract;
 mod files;
 mod generic;
+mod guest_tail;
 mod image;
+mod ios;
+mod ipa;
 mod layout;
 mod link;
 mod macho;
@@ -184,8 +187,13 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
 /// Builds the app of a title that has a title module.
 pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     if a.auto_analyze {
-        return generic::run(a, p);
+        return if a.platform == "ios" {
+            ios::run(a, p)
+        } else {
+            generic::run(a, p)
+        };
     }
+    let is_ios = a.platform == "ios";
     let src = crate::inputs::discover(a)?;
     let Some(t) = module(&src)? else {
         return Err(crate::exit::fail(
@@ -223,7 +231,13 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ));
     }
     let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
-    let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?;
+    let host = if is_ios {
+        a.host_app
+            .clone()
+            .ok_or("--platform ios requires --host-app")?
+    } else {
+        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?
+    };
     let app_name = a.app_name.clone().unwrap_or_else(|| t.name.to_string());
     let out = a
         .out
@@ -261,15 +275,25 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         print!("{}", describe(&t, &b, &host, &out));
         return Ok(());
     }
-    replaceable(&out)?;
+    if is_ios {
+        ios::vacant(&out)?;
+    } else {
+        replaceable(&out)?;
+    }
     b.profile = shaders::profile(&work, &t.st, t.id, t.name)?;
     let stage_dir = {
         let mut n = out.clone().into_os_string();
         n.push(".partial");
         PathBuf::from(n)
     };
-    let _ = std::fs::remove_dir_all(&stage_dir);
-    let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
+    let run_dir = if is_ios {
+        // Validate the supplied shell before any expensive extraction.
+        ipa::read_host(&host)?;
+        ios::skeleton(&stage_dir)?
+    } else {
+        let _ = std::fs::remove_dir_all(&stage_dir);
+        bundle::skeleton(&stage_dir, &host, &plist(a, &t))?
+    };
     p.plan(7);
     let nup = b.src.source == Source::Nup;
     let what = if nup {
@@ -387,7 +411,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     })?;
     let shapes: Vec<layout::Shape> = built.iter().map(|m| m.shape.clone()).collect();
     let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(layout::bases(&shapes)).collect();
-    stage(p, "manifest", "game.json", || {
+    let stack_size = stage(p, "manifest", "game.json", || {
         if !t.services.contains(&"kernel") {
             return Err(format!(
                 "the title module of {:016X} does not list the kernel service, which the host needs",
@@ -420,7 +444,13 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         let put = |n: &str, d: &[u8]| {
             std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e))
         };
-        put("game.json", manifest::game_json(&m).as_bytes())?;
+        let manifest = manifest::game_json(&m);
+        let manifest = if is_ios {
+            ios::manifest(&manifest)?
+        } else {
+            manifest
+        };
+        put("game.json", manifest.as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         put("main.npdm", &npdm_bytes)?;
         link::module_files(&run_dir, &mods, |done, total| {
@@ -433,7 +463,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             })
         })?;
         Ok((
-            (),
+            main_thread.stack_size,
             format!(
                 "{} modules, {} NVN functions, {} services",
                 mods.len(),
@@ -443,6 +473,10 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ))
     })?;
     stage(p, "link", "nxgame.dylib", || {
+        if is_ios {
+            let n = ios::write_dylib(&run_dir, &mods, stack_size)?;
+            return Ok(((), format!("{}, unsigned iOS image", mib(n))));
+        }
         let n = link::write_dylib(&run_dir, &mods, |done, what| {
             p.set(Update {
                 done: Some(done),
@@ -454,16 +488,37 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         })?;
         Ok(((), format!("{}, signed ad hoc", mib(n))))
     })?;
-    b.gpus = gpus(a, &work, &b.profile.0)?;
+    b.gpus = if is_ios {
+        a.gpu
+            .as_deref()
+            .filter(|g| *g != "none")
+            .map(|g| g.split(',').map(nxb_archive::plan::arch_name).collect())
+            .unwrap_or_default()
+    } else {
+        gpus(a, &work, &b.profile.0)?
+    };
     if !b.gpus.is_empty() {
         for l in &b.pipeline_lists {
             p.say(&format!("pipeline list: {}", l.display()));
         }
     }
     stage(p, "shaders", "shaders and pipeline archive", || {
-        let d = shaders::run(a, &b, p, &run_dir)?;
+        let d = if is_ios {
+            shaders::run_for_target(a, &b, p, &run_dir, true)?
+        } else {
+            shaders::run(a, &b, p, &run_dir)?
+        };
         Ok(((), d.summary))
     })?;
+    if is_ios {
+        stage(p, "bundle", "unsigned IPA", || {
+            ios::finish(&out, &host, &run_dir, t.id, &app_name)?;
+            Ok(((), out.display().to_string()))
+        })?;
+        std::fs::remove_dir_all(&stage_dir).map_err(|e| io(&stage_dir, e))?;
+        p.say(&format!("unsigned IPA: {}", out.display()));
+        return Ok(());
+    }
     stage(p, "bundle", "app", || {
         // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
         // failed move stops the build with the old app and its save in place.

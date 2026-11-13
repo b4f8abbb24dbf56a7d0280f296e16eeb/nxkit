@@ -46,6 +46,20 @@ pub const IOS: TargetConv = TargetConv {
     ],
 };
 
+/// iOS 26 convention for the standalone IPA host.
+pub const IOS26: TargetConv = TargetConv {
+    target: Target::Ios,
+    compile_flags: &[
+        "-c",
+        "-O1",
+        "-mios-version-min=26.0",
+        "-fmetal-math-mode=relaxed",
+        "-fpreserve-invariance",
+        "-fwrapv",
+        BRACKET_DEPTH,
+    ],
+};
+
 impl TargetConv {
     /// The record string, byte-equal to Python's `MAC_RECORD` (`dmsh_build.py`): it is part of the reflection
     /// JSON (`chain_metal`) and of the Metal cache identity. It does not name `BRACKET_DEPTH`.
@@ -100,8 +114,18 @@ mod tests {
     }
 
     #[test]
+    fn standalone_ios_target_is_separate_from_mac_and_legacy_ios() {
+        assert_eq!(IOS26.target, Target::Ios);
+        assert!(IOS26.record().contains("-sdk iphoneos"));
+        assert!(IOS26.record().contains("-mios-version-min=26.0"));
+        assert_ne!(IOS26.record(), MAC.record());
+        assert_ne!(IOS26.record(), IOS.record());
+        assert!(IOS26.pch_flags().contains(&"-mios-version-min=26.0"));
+    }
+
+    #[test]
     fn both_targets_keep_nan_and_inf() {
-        for conv in [&MAC, &IOS] {
+        for conv in [&MAC, &IOS, &IOS26] {
             assert!(conv.compile_flags.contains(&"-fmetal-math-mode=relaxed"));
             assert!(conv.pch_flags().contains(&"-fmetal-math-mode=relaxed"));
         }
@@ -109,7 +133,7 @@ mod tests {
 
     #[test]
     fn both_targets_wrap_signed_overflow() {
-        for conv in [&MAC, &IOS] {
+        for conv in [&MAC, &IOS, &IOS26] {
             assert!(conv.compile_flags.contains(&"-fwrapv"));
             assert!(conv.pch_flags().contains(&"-fwrapv"));
             assert!(conv.record().split([' ', ';']).any(|f| f == "-fwrapv"));

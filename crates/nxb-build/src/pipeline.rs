@@ -64,15 +64,25 @@ fn compute_shaders(b: &Build) -> Vec<String> {
 }
 
 /// The archive's inputs for one architecture over the library folder the shader step writes.
-fn archive_config(b: &Build, lib: &Path, arch: &str) -> Result<nxb_archive::Config, String> {
-    let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
+fn archive_config(
+    b: &Build,
+    lib: &Path,
+    arch: &str,
+    ios: bool,
+) -> Result<nxb_archive::Config, String> {
+    let platform = if ios { "ios" } else { "macos" };
+    let dir = if ios { "ios" } else { "mac" };
+    let (out, work) = (
+        b.work.join("pso").join(dir),
+        b.work.join("pso").join(format!("{dir}-work")),
+    );
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let abs = |p: &Path| std::path::absolute(p).map_err(|e| e.to_string());
     let mut c = nxb_archive::Config::for_tools(
-        "macos",
+        platform,
         arch,
-        &osmin()?,
+        &if ios { "26.0".to_string() } else { osmin()? },
         &work.join("bases.mtl4-json"),
         &abs(&out.join(format!("{arch}.mtl4a")))?,
         &abs(&work)?,
@@ -112,8 +122,8 @@ fn run_limits(c: &nxb_archive::Config, load_percent: u8) -> nxb_sched::Limits {
 
 /// The recorded states that were left out of the archive (invalid for the compiler, or refused by it): a list in
 /// `<work>/pso/mac/dropped.tsv` and a note for the summary, empty when none.
-fn dropped_note(b: &Build, dropped: &[nxb_archive::Dropped]) -> String {
-    let file = b.work.join("pso/mac/dropped.tsv");
+fn dropped_note(b: &Build, ios: bool, dropped: &[nxb_archive::Dropped]) -> String {
+    let file = archive_dir(b, ios).join("dropped.tsv");
     if dropped.is_empty() {
         let _ = std::fs::remove_file(&file);
         return String::new();
@@ -150,7 +160,41 @@ pub fn shaders_and_archive(
     p: &Arc<Progress>,
     layout: Layout,
 ) -> Result<Outcome, String> {
+    shaders_and_archive_for_target(a, b, p, layout, false)
+}
+
+/// Archive directory for the selected host platform.
+pub(crate) fn archive_dir(b: &Build, ios: bool) -> PathBuf {
+    b.work.join(if ios { "pso/ios" } else { "pso/mac" })
+}
+
+/// Shared title-module shader pipeline, with platform-separated outputs.
+pub fn shaders_and_archive_for_target(
+    a: &Args,
+    b: &Build,
+    p: &Arc<Progress>,
+    layout: Layout,
+    ios: bool,
+) -> Result<Outcome, String> {
+    if ios && !a.own_front.is_empty() && a.own_front != "off" {
+        return Err(
+            "--own-front is not supported for the iOS 26 shader target; use --own-front off".into(),
+        );
+    }
     let mut cfg = shader_config(a, b)?;
+    if ios {
+        p.say("iOS 26 shaders: using the Apple front end (the own front end is Mac-only)");
+        let sh = b.work.join("shader/ios");
+        cfg.out = sh.join("cache");
+        cfg.store = sh.join("store");
+        cfg.work = sh.join("work");
+        cfg.scratch = cfg.scratch.join("ios");
+    }
+    let conv = if ios {
+        nxb_shader::target::IOS26
+    } else {
+        nxb_shader::target::MAC
+    };
     let lib = cfg.out.join(format!("b-{}", cfg.chain));
     let arch = b.gpus.first().cloned();
     let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero");
@@ -165,7 +209,7 @@ pub fn shaders_and_archive(
             nice: ARCHIVE_NICE,
             progress: Some(batches.clone()),
             merge: layout.merges(),
-            ..archive_config(b, &lib, arch)?
+            ..archive_config(b, &lib, arch, ios)?
         }),
         None => None,
     };
@@ -227,7 +271,9 @@ pub fn shaders_and_archive(
                 _ => None,
             };
             let r = p
-                .counted(None, "shaders", &count, || nxb_stages::build::build(cfg))
+                .counted(None, "shaders", &count, || {
+                    nxb_stages::build::build_for_target(cfg, conv)
+                })
                 .map_err(|e| e.to_string());
             if let Some(s) = &stream {
                 s.finish();
@@ -284,7 +330,17 @@ pub fn shaders_and_archive(
                             write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
                             let shards = layout
                                 .shards()
-                                .then(|| crate::archive_layout::publish(b, &rep))
+                                .then(|| {
+                                    if ios {
+                                        crate::archive_layout::publish_at(
+                                            &archive_dir(b, true)
+                                                .join(nxkit_abi::shards::SHARD_DIR),
+                                            &rep,
+                                        )
+                                    } else {
+                                        crate::archive_layout::publish(b, &rep)
+                                    }
+                                })
                                 .transpose()?;
                             Ok((rep, bases, shards))
                         });
@@ -294,7 +350,7 @@ pub fn shaders_and_archive(
                                 .filter(|_| a.partial)
                                 .map_or(String::new(), |st| format!("; {}", st.note()));
                             let tail = shards.map_or(tail.clone(), |s| format!("; {s}{tail}"));
-                            let tail = format!("{}{tail}", dropped_note(b, &rep.dropped));
+                            let tail = format!("{}{tail}", dropped_note(b, ios, &rep.dropped));
                             Some(Ok(format!(
                                 "{bases} pipelines, {} MB, {} batches ({} reused, up to {} compiler runs at once), streamed beside the shader step{tail}",
                                 rep.size >> 20,
@@ -377,15 +433,15 @@ pub(crate) fn write_archive_stamps(
             pipes.len()
         ));
     }
-    let out = b.work.join("pso/mac");
-    let js = b.work.join("pso/mac-work/bases.mtl4-json");
+    let out = archive_dir(b, c.platform == "ios");
+    let js = c.work.join("bases.mtl4-json");
     std::fs::write(&js, plan::script_text_with(lib, &p.bases, &pipes))
         .map_err(|e| e.to_string())?;
     std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, text))
         .map_err(|e| e.to_string())?;
     let tsv = plan::archive_tsv(
         &[arch.to_string()],
-        "macos",
+        &c.platform,
         &c.osmin,
         &c.toolchain,
         p.bases.len(),

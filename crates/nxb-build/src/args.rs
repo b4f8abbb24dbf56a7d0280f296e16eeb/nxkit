@@ -17,7 +17,9 @@ pub struct Args {
     pub app_name: Option<String>,
     /// `--bundle-id`.
     pub bundle_id: Option<String>,
-    /// `--platform` (`mac` or `mac-app`: the same app).
+    /// `--host-app`: the SDK-built unsigned iOS app.
+    pub host_app: Option<PathBuf>,
+    /// `--platform` (`mac`, `mac-app`, or `ios`).
     pub platform: String,
     /// `--work-dir`.
     pub work_dir: Option<PathBuf>,
@@ -70,6 +72,7 @@ const VALUE: &[&str] = &[
     "--app-name",
     "--bundle-id",
     "--platform",
+    "--host-app",
     "--work-dir",
     "--gpu",
     "--pipeline-list",
@@ -108,6 +111,27 @@ fn gpu_list(g: &str) -> bool {
 
 /// The checks of option combinations (exit 2).
 fn validate(a: &Args) -> Result<(), (i32, String)> {
+    if a.platform == "ios" {
+        if a.host_app.is_none() {
+            return Err((2, "--platform ios requires --host-app".into()));
+        }
+        if a.out
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|s| s.to_str())
+            != Some("ipa")
+        {
+            return Err((2, "--platform ios requires --out ending in .ipa".into()));
+        }
+        if a.bundle_id.is_some() {
+            return Err((
+                2,
+                "--bundle-id is not supported by the unsigned IPA producer".into(),
+            ));
+        }
+    } else if a.host_app.is_some() {
+        return Err((2, "--host-app requires --platform ios".into()));
+    }
     if a.base_package.is_some() && (!a.auto_analyze || a.update_inputs.is_empty()) {
         return Err((
             2,
@@ -185,6 +209,7 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--app-name" => a.app_name = Some(v),
                 "--bundle-id" => a.bundle_id = Some(v),
                 "--platform" => a.platform = v,
+                "--host-app" => a.host_app = Some(v.into()),
                 "--work-dir" => a.work_dir = Some(v.into()),
                 "--gpu" => a.gpu = Some(v),
                 "--pipeline-list" => a.pipeline_list = Some(v.into()),
@@ -210,11 +235,11 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
         }
         i += 1;
     }
-    if !["mac", "mac-app"].contains(&a.platform.as_str()) {
+    if !["mac", "mac-app", "ios"].contains(&a.platform.as_str()) {
         return Err((
             2,
             format!(
-                "argument --platform: invalid choice: '{}' (choose from mac, mac-app)",
+                "argument --platform: invalid choice: '{}' (choose from mac, mac-app, ios)",
                 a.platform
             ),
         ));
@@ -287,6 +312,73 @@ mod tests {
             vec![PathBuf::from("patch.nsz"), PathBuf::from("updates")]
         );
         assert!(parse(&v(&["dir", "--auto-analyze", "--update"])).is_err());
+    }
+
+    #[test]
+    fn ios_analysis_is_opt_in_and_default_accepts_title_options() {
+        let mut args = v(&[
+            "game.nup",
+            "--platform=ios",
+            "--host-app",
+            "Host.app",
+            "-o",
+            "game.ipa",
+            "--resource-patch",
+            "resolution-scale=0.75",
+            "--gpu",
+            "none",
+        ]);
+        assert!(!parse(&args).unwrap().auto_analyze);
+        args.push("--auto-analyze".into());
+        assert!(parse(&args).unwrap().auto_analyze);
+    }
+
+    #[test]
+    fn ios_uses_shared_inputs_and_requires_an_unsigned_host_and_ipa() {
+        let args = v(&[
+            "game.nup",
+            "--auto-analyze",
+            "--platform=ios",
+            "--host-app",
+            "Host.app",
+            "-o",
+            "game.ipa",
+            "--update",
+            "update.nsz",
+            "--base-package",
+            "base.nsp",
+            "--aoc",
+            "dlc.nsp",
+            "--threads",
+            "4",
+            "--progress=json",
+            "--dry-run",
+        ]);
+        let a = parse(&args).unwrap();
+        assert!(a.auto_analyze && a.dry_run);
+        assert_eq!(a.threads, 4);
+        assert_eq!(a.progress, "json");
+        assert_eq!(a.host_app, Some(PathBuf::from("Host.app")));
+        assert_eq!(a.update_inputs, [PathBuf::from("update.nsz")]);
+        assert_eq!(a.aoc, [PathBuf::from("dlc.nsp")]);
+        for tail in [
+            vec!["--platform=ios", "-o", "game.ipa"],
+            vec!["--platform=ios", "--host-app", "Host.app", "-o", "game.app"],
+            vec!["--host-app", "Host.app"],
+            vec![
+                "--platform=ios",
+                "--host-app",
+                "Host.app",
+                "-o",
+                "game.ipa",
+                "--bundle-id",
+                "x",
+            ],
+        ] {
+            let mut args = v(&["game.nup"]);
+            args.extend(v(&tail));
+            assert!(parse(&args).is_err());
+        }
     }
 
     #[test]

@@ -20,7 +20,7 @@
 //!   from it into guest memory.
 //! - [`Mirror`]: the GPU's private copy of guest memory (`NXKIT_PRIVATE=1`).
 //! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at any whole rate through `FrameHooks::display_tick`.
-//! - [`display`]: the refresh rate of a display mode and a switch to another one for the run.
+//! - `display` (macOS): the refresh rate of a display mode and a switch to another one for the run.
 //! - [`Pacer`], [`TickScheduler`], [`TickSink`]: what each tick shows, by a [`PresentPlan`] from [`choose_present_plan`].
 //! - [`PacingStats`]: present time, missed ticks and the interval histogram (R16).
 //! - [`Presenter`]: a `CAMetalLayer` drawable path, with `Frame::present_at` for a tick.
@@ -30,9 +30,9 @@
 //!
 //! The frame format comes from `nxkit-nvn`. This crate does not depend on it.
 //!
-//! The crate builds on macOS only. On other systems it is empty, so the workspace still builds there.
+//! The crate builds on macOS and iOS. On other systems it is empty, so the workspace still builds there.
 
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "ios"))]
 
 mod address;
 mod barrier;
@@ -44,6 +44,7 @@ mod compute_icb;
 mod databuf;
 mod deswizzle;
 mod device;
+#[cfg(target_os = "macos")]
 pub mod display;
 mod encode;
 mod error;

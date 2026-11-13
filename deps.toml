@@ -221,3 +221,12 @@ version = "1.1.33"
 unsafe = "the FFI declarations of zlib only. nxb-sys wraps the calls"
 owner = "project team"
 used_by = ["nxb-sys (Windows only)"]
+
+[native-ios-host]
+reason = "the native iOS host in the shared workspace and UIKit virtual controls"
+source = "Cargo.lock; THIRD_PARTY.md"
+version = "objc2 pin as above; nxnative ab41d6a177819559c76d8e4381791550ababa097"
+licence = "objc2 licences as above; MIT for the adapted nxnative overlay"
+unsafe = "iOS platform adapters contain FFI in the shared workspace crates"
+owner = "project team"
+used_by = ["nxkit-host", "tools/ios"]

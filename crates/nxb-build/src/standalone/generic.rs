@@ -3,7 +3,7 @@ use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage};
 use crate::Args;
 use std::path::Path;
 
-fn validate(a: &Args) -> Result<(), String> {
+pub(super) fn validate(a: &Args) -> Result<(), String> {
     if !matches!(a.own_front.as_str(), "" | "on") {
         return Err(
             "--auto-analyze requires --own-front on (no verdict-file or Apple compiler fallback)"
@@ -18,6 +18,9 @@ fn validate(a: &Args) -> Result<(), String> {
     {
         return Err("--auto-analyze does not accept damaged data, shader subsets, pipeline lists or GPU archives".into());
     }
+    if a.own_front.is_empty() && std::env::var("NXB_OWN_FRONT").is_ok_and(|v| v == "0") {
+        return Err("--auto-analyze requires the own shader front end. Use --own-front on to override NXB_OWN_FRONT=0".into());
+    }
     Ok(())
 }
 
@@ -31,7 +34,7 @@ fn put(run: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 // symlink_metadata also sees dangling symlinks, which must never be followed for output.
-fn vacant(path: &Path) -> Result<(), String> {
+pub(super) fn vacant(path: &Path) -> Result<(), String> {
     match std::fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(io(path, e)),
@@ -51,12 +54,6 @@ fn publish(partial: &Path, out: &Path) -> Result<(), String> {
 
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     validate(a).map_err(|e| crate::exit::fail(2, e))?;
-    if a.own_front.is_empty() && std::env::var("NXB_OWN_FRONT").is_ok_and(|v| v == "0") {
-        return Err(crate::exit::fail(
-            2,
-            "--auto-analyze requires the own shader front end. Use --own-front on to override NXB_OWN_FRONT=0",
-        ));
-    }
     if a.dry_run {
         p.say("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for Mac. Runtime compatibility is not certified.");
         return Ok(());

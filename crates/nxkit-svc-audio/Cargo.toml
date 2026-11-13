@@ -14,7 +14,7 @@ in_v = false
 [dependencies]
 nxkit-abi = { workspace = true }
 
-[target.'cfg(target_vendor = "apple")'.dependencies]
+[target.'cfg(all(target_vendor = "apple", not(target_os = "ios")))'.dependencies]
 objc2-audio-toolbox = { workspace = true, features = [
     "std",
     "objc2",
@@ -42,3 +42,11 @@ panic = "deny"
 dbg_macro = "deny"
 todo = "deny"
 undocumented_unsafe_blocks = "deny"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-audio-toolbox = { workspace = true, features = ["std", "objc2-core-audio-types", "AudioComponent", "AUComponent", "AudioOutputUnit"] }
+objc2-core-audio-types = { workspace = true, features = ["std", "CoreAudioBaseTypes"] }
+objc2-avf-audio = { workspace = true, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+objc2-foundation = { workspace = true, features = ["std", "NSObject", "NSString", "NSDictionary", "NSNotification", "NSOperation", "block2"] }
+block2 = { workspace = true, features = ["std"] }

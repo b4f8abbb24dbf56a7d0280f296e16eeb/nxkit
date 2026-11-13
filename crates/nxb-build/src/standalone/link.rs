@@ -57,6 +57,13 @@ pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
     macho::write(&segs, uuid(mods))
 }
 
+/// The shared dylib with the iOS platform version and executable header marker.
+pub(crate) fn ios_dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
+    let mut image = dylib(mods)?;
+    macho::ios_dylib(&mut image)?;
+    Ok(image)
+}
+
 fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -65,24 +72,33 @@ fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
 pub(crate) fn module_files(
     run: &Path,
     mods: &[(Built, u64)],
-    mut progress: impl FnMut(u64, u64),
+    progress: impl FnMut(u64, u64),
 ) -> Result<(), String> {
     let dir = run.join("modules");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    module_artifacts(mods, progress, |name, bytes| put(&run.join(name), bytes))
+}
+
+/// Sends each module artifact to a directory writer or an archive producer.
+pub(super) fn module_artifacts(
+    mods: &[(Built, u64)],
+    mut progress: impl FnMut(u64, u64),
+    mut emit: impl FnMut(&str, &[u8]) -> Result<(), String>,
+) -> Result<(), String> {
     for (i, (b, _)) in mods.iter().enumerate() {
         progress(i as u64, mods.len() as u64);
-        let at = |s: &str| dir.join(format!("{}.{s}", b.name));
-        put(&at("bin"), &b.image)?;
-        put(
+        let at = |s: &str| format!("modules/{}.{s}", b.name);
+        emit(&at("bin"), &b.image)?;
+        emit(
             &at("imports.json"),
             manifest::imports_json(&b.symbols.imports).as_bytes(),
         )?;
-        put(
+        emit(
             &at("exports.json"),
             manifest::symbols_json(&b.symbols.exports).as_bytes(),
         )?;
-        put(&at("fixups.tsv"), b.fixups.as_bytes())?;
-        put(&at("gates.tsv"), &b.gates)?;
+        emit(&at("fixups.tsv"), b.fixups.as_bytes())?;
+        emit(&at("gates.tsv"), &b.gates)?;
     }
     Ok(())
 }
