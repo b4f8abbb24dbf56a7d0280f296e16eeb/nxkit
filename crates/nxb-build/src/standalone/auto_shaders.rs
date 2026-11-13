@@ -376,7 +376,10 @@ fn compile_raw(msl: &[u8], ios: bool) -> Result<Vec<u8>> {
 
 #[cfg(not(feature = "air-front"))]
 fn compile_raw(_msl: &[u8], _ios: bool) -> Result<Vec<u8>> {
-    Err("unsupported: generic shader compilation requires the air-front feature".into())
+    Err(crate::exit::fail(
+        4,
+        "unsupported: generic shader compilation requires the air-front feature",
+    ))
 }
 
 #[cfg(test)]

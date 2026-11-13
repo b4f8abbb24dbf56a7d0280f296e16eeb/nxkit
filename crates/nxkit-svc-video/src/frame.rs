@@ -87,40 +87,6 @@ impl Frame {
         self.colorspace
     }
 
-    /// Writes the picture into `dst` in the layout the SDK reports: the luma plane with `stride` bytes a row and
-    /// `slice` rows, then the chroma plane with the same stride. `dst` must hold `stride * slice * 3 / 2` bytes.
-    /// A picture that is smaller than `stride` by `slice` leaves the rest of the rows as they were.
-    pub fn copy_nv12(&self, dst: &mut [u8], stride: usize, slice: usize) -> Result<(), String> {
-        let need = stride * slice * 3 / 2;
-        if dst.len() < need {
-            return Err(format!(
-                "the destination holds {} bytes, a {stride}x{slice} NV12 picture needs {need}",
-                dst.len()
-            ));
-        }
-        let (w, h) = (self.width as usize, self.height as usize);
-        let mut copy = |y: &[u8], ys: usize, uv: &[u8], uvs: usize| {
-            let (dy, duv) = dst.split_at_mut(stride * slice);
-            copy_rows(y, ys, dy, stride, w.min(stride), h.min(slice));
-            copy_rows(
-                uv,
-                uvs,
-                duv,
-                stride,
-                (w.div_ceil(2) * 2).min(stride),
-                h.div_ceil(2).min(slice / 2),
-            );
-        };
-        match &self.pixels {
-            Pixels::Memory(m) => {
-                copy(&m.y, m.y_stride, &m.uv, m.uv_stride);
-                Ok(())
-            }
-            #[cfg(target_os = "macos")]
-            Pixels::Buffer(b) => b.with_planes(copy),
-        }
-    }
-
     /// Calls `f` with the luma plane, its stride, the chroma plane and its stride, without a copy. A plane may be longer
     /// than `stride * rows` bytes or, for a decoder that cuts the last row short, shorter: read it with `get`.
     pub fn with_planes<R>(
@@ -134,59 +100,95 @@ impl Frame {
         }
     }
 
-    /// The picture as bytes in memory, tightly packed (`width` bytes a row).
+    /// Copies the picture to the SDK stride and slice layout with checked sizes.
+    pub fn copy_nv12(&self, dst: &mut [u8], stride: usize, slice: usize) -> Result<(), String> {
+        let luma = stride.checked_mul(slice).ok_or("NV12 size overflow")?;
+        let chroma = stride.checked_mul(slice / 2).ok_or("NV12 size overflow")?;
+        let length = luma.checked_add(chroma).ok_or("NV12 size overflow")?;
+        let target = dst
+            .get_mut(..length)
+            .ok_or("NV12 destination is too small")?;
+        let width = self.width() as usize;
+        let height = self.height() as usize;
+        self.with_planes(|y, ys, uv, uvs| {
+            let (dy, duv) = target.split_at_mut(luma);
+            rows(y, ys, dy, stride, width.min(stride), height.min(slice))?;
+            rows(
+                uv,
+                uvs,
+                duv,
+                stride,
+                (width.div_ceil(2) * 2).min(stride),
+                height.div_ceil(2).min(slice / 2),
+            )
+        })?
+    }
+    /// Copies the picture into tightly packed, even-sized NV12 planes.
     pub fn to_nv12(&self) -> Result<Nv12, String> {
-        let (w, h) = (self.width as usize, self.height as usize);
-        let stride = w.div_ceil(2) * 2;
-        let slice = h.div_ceil(2) * 2;
-        let mut all = vec![0u8; stride * slice * 3 / 2];
-        self.copy_nv12(&mut all, stride, slice)?;
-        let uv = all.split_off(stride * slice);
+        let stride = (self.width() as usize).div_ceil(2) * 2;
+        let slice = (self.height() as usize).div_ceil(2) * 2;
+        let luma = stride.checked_mul(slice).ok_or("NV12 size overflow")?;
+        let length = luma.checked_add(luma / 2).ok_or("NV12 size overflow")?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(length)
+            .map_err(|e| format!("NV12 allocation failed: {e}"))?;
+        data.resize(length, 0);
+        self.copy_nv12(&mut data, stride, slice)?;
+        let uv = data.split_off(luma);
         Ok(Nv12 {
-            y: all,
+            y: data,
             y_stride: stride,
             uv,
             uv_stride: stride,
         })
     }
-
-    /// The picture as RGBA bytes, `width * 4` bytes a row and `height` rows, by the colour space of the picture. A
-    /// picture smaller than `width` by `height` is padded with opaque black, a larger one is cropped.
+    /// Converts the picture to RGBA, padding or cropping to the requested size.
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Vec<u8>, String> {
         let planes = self.to_nv12()?;
-        let (w, h) = (width as usize, height as usize);
-        let mut out = vec![0u8; w * h * 4];
+        let length = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or("RGBA size overflow")?;
+        let mut rgba = Vec::new();
+        rgba.try_reserve_exact(length)
+            .map_err(|e| format!("RGBA allocation failed: {e}"))?;
+        rgba.resize(length, 0);
         crate::yuv::nv12_to_rgba(
             &planes,
-            self.width as usize,
-            self.height as usize,
+            self.width() as usize,
+            self.height() as usize,
             self.colorspace,
-            &mut out,
-            w,
-            h,
+            &mut rgba,
+            width as usize,
+            height as usize,
         );
-        Ok(out)
+        Ok(rgba)
     }
 }
 
-/// Copies `rows` rows of `len` bytes from `src` to `dst`. A source that is too short for a row ends the copy.
-fn copy_rows(
+fn rows(
     src: &[u8],
-    src_stride: usize,
+    ss: usize,
     dst: &mut [u8],
-    dst_stride: usize,
-    len: usize,
-    rows: usize,
-) {
-    for r in 0..rows {
-        let s = r * src_stride;
-        let d = r * dst_stride;
-        let (Some(from), Some(to)) = (src.get(s..s + len.min(src_stride)), dst.get_mut(d..d + len))
-        else {
-            return;
-        };
-        to[..from.len()].copy_from_slice(from);
+    ds: usize,
+    width: usize,
+    count: usize,
+) -> Result<(), String> {
+    for row in 0..count {
+        let start = row.checked_mul(ss).ok_or("NV12 row overflow")?;
+        let end = start
+            .checked_add(width.min(ss))
+            .ok_or("NV12 row overflow")?;
+        let input = src
+            .get(start..end)
+            .ok_or("NV12 source plane is truncated")?;
+        let start = row.checked_mul(ds).ok_or("NV12 row overflow")?;
+        let end = start.checked_add(input.len()).ok_or("NV12 row overflow")?;
+        dst.get_mut(start..end)
+            .ok_or("NV12 destination plane is truncated")?
+            .copy_from_slice(input);
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -245,5 +247,21 @@ mod tests {
         let n = f.to_nv12().unwrap_or_else(|_| unreachable!());
         assert_eq!((n.y.len(), n.uv.len()), (24, 12));
         assert_eq!(n.y[..6], [0, 1, 2, 3, 4, 5]);
+    }
+    #[test]
+    fn overflow_and_truncated_planes_are_errors() {
+        assert!(picture(2, 2).copy_nv12(&mut [], usize::MAX, 4).is_err());
+        let truncated = Frame::from_nv12(
+            2,
+            2,
+            3,
+            Nv12 {
+                y: vec![1],
+                y_stride: 2,
+                uv: vec![1, 2],
+                uv_stride: 2,
+            },
+        );
+        assert!(truncated.to_nv12().is_err());
     }
 }
