@@ -62,7 +62,7 @@ static __weak NxkitGamepad *g_view;
     NSMapTable<UITouch *, NSNumber *> *_owner;     // touch → control (with the key for C_BTN or the stick for C_STICK, << 8)
     UITouch *_stick[2]; CGPoint _stickNow[2];      // the touch holding each stick and where it is now (0 left, 1 right)
     CGPoint _rCentre;                              // the right stick's centre: where its touch landed, dragged along past K_RSTICK_R
-    uint64_t _faceBits, _dpadBits, _btnBits;
+    uint64_t _buttons;
     NSMapTable<UITouch *, NSNumber *> *_faceOf;    // which keys each touch on the diamond currently holds
     CAShapeLayer *_key[B_N]; CATextLayer *_label[B_N];   // one layer per key
     CAShapeLayer *_ring, *_knob;                   // the left stick (the right one is not drawn)
@@ -260,15 +260,16 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         CGFloat m = fmin((d - dz) / (R * K_FULL - dz), 1) / d;   // outside the dead zone: 0 rising to full at the full-tilt radius
         ax[i * 2] = (int32_t)lrint(o.x * m * 32767); ax[i * 2 + 1] = (int32_t)lrint(-o.y * m * 32767);   // host: up is positive; rounded so full tilt is exactly 32767
     }
-    BOOL changed = face != _faceBits || dpad != _dpadBits || btn != _btnBits;
-    uint64_t pressed = (face | dpad | btn) & ~(_faceBits | _dpadBits | _btnBits);
+    uint64_t buttons = face | dpad | btn;
+    BOOL changed = buttons != _buttons;
+    uint64_t pressed = buttons & ~_buttons;
     unsigned gripping = (_stick[0] ? 1u : 0) | (_stick[1] ? 2u : 0);
     if (pressed || (gripping & ~_hapticSticks)) {
         [_touchFeedback impactOccurredWithIntensity:0.6]; [_touchFeedback prepare];
     }
     _hapticSticks = gripping;
-    _faceBits = face; _dpadBits = dpad; _btnBits = btn;
-    nxkit_virtual_pad(face | dpad | btn, ax[0] / 32767.f, ax[1] / 32767.f, ax[2] / 32767.f, ax[3] / 32767.f);
+    _buttons = buttons;
+    nxkit_virtual_pad(buttons, ax[0] / 32767.f, ax[1] / 32767.f, ax[2] / 32767.f, ax[3] / 32767.f);
     BOOL stick = _stick[0] != nil;   // only the left stick is drawn: the right one needs no refresh
     if (changed || stick || _stickShown) [self refresh];   // also refresh on the stick release so the knob returns to the centre
     _stickShown = stick;
@@ -413,7 +414,7 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
 }
 - (void)safeAreaInsetsDidChange { [super safeAreaInsetsDidChange]; [self reset]; [self setNeedsLayout]; }
 - (void)refresh {   // pressed state → fill, sticks → knob position
-    uint64_t all = _faceBits | _dpadBits | _btnBits;
+    uint64_t all = _buttons;
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     for (int b = 0; b < B_N; b++) { BOOL on = (all >> b) & 1;
         _key[b].fillColor = (on ? k_on : k_idle).CGColor; _label[b].foregroundColor = (on ? k_textOn : k_text).CGColor; }
