@@ -85,9 +85,13 @@ pub fn open_romfs_with(
 ) -> Result<VersionFs> {
     match update {
         None => {
-            let (data, fs) = base_data.ok_or_else(|| {
-                ExtractError::Unsupported("program without a data section".into())
-            })?;
+            let Some((data, fs)) = base_data else {
+                return Ok(VersionFs {
+                    fs: Arc::new(IvfcStorage::empty()),
+                    entries: Vec::new(),
+                    indirect: None,
+                });
+            };
             let ivfc = Arc::new(IvfcStorage::open_with(data, &fs, lenient)?);
             let entries = read_tables(ivfc.as_ref())?;
             Ok(VersionFs {

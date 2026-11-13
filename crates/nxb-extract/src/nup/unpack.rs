@@ -316,6 +316,37 @@ fn put(n: &Nup, job: &Job, verify: bool, budget: &Budget) -> Result<(Option<Vec<
     Ok((None, 0))
 }
 
+/// Unpacks one exact DLC record, including from a DLC-only NUP. Checks every file hash.
+/// The output folder is replaced. The caller selects the title's application family.
+pub fn unpack_dlc(path: &Path, title: u64, version: u32, out: &Path, mem_limit: u64) -> Result<()> {
+    let n = Nup::open(path)?;
+    let records = super::addon_records(&n)?;
+    let index = records
+        .get(&(title, version))
+        .ok_or_else(|| bad(path, "selected DLC record is missing"))?;
+    let package = &n.packages[*index];
+    let (dirs, mut files) = walk(&n, package.romfs)?;
+    files.sort_by_key(|(_, i)| n.files[*i].off);
+    make_dirs(out, &dirs, 1)?;
+    let budget = Budget {
+        used: Mutex::new(0),
+        cv: Condvar::new(),
+        cap: mem_limit.max(CHUNK as u64),
+    };
+    for (rel, file) in files {
+        let job = Job {
+            file,
+            path: out.join(&rel),
+            rel,
+            split: false,
+        };
+        let (bytes, held) = put(&n, &job, true, &budget)?;
+        drop(bytes);
+        budget.give(held);
+    }
+    Ok(())
+}
+
 /// Unpacks one version (and every DLC) of a container into folders, with the shader split in the same pass.
 pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     let n = Nup::open(&r.nup)?;
