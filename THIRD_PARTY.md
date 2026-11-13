@@ -95,6 +95,8 @@ These parts of nxkit are ported or derived from nxnative:
 - Input. `nxkit-svc-input` ports logic and data from `dm/host/hle_hid.c`, `hle_touch.c`, `pad_slots.h`, `pad_apple.h`,
   `motion_fusion.h`, `motion_apple.h`, `hle_haptics.c`, `haptics_apple.m` and `front_mac.m`. `touch.rs` also follows the gesture
   rules of yuzu (`hid_core`, `gesture_handler.cpp`). No yuzu code is copied.
+- iOS controls and menu. `tools/ios/shell/overlay/Gamepad.m` and `tools/ios/shell/GameMenu.swift` adapt
+  `dm/ios/Sources/DmGamepad.m` and `GameMenu.swift` from nxnative. Generated apps include this file and the root `LICENSE`.
 - Video. `nxkit-svc-video` ports the protocols of `movie::Decoder` and of the `nn::codec` video decoders from
   `dm/host/hle_movie.c`, `hle_codec_video.c` and `hle_movie_av1.c`: slots, queues, events, error codes, format keys, pools, sync
   points, the `av1C` record and the 8-bit NV12 output. The decoder itself is new code on VideoToolbox and `rav1d`. `av1.rs` was

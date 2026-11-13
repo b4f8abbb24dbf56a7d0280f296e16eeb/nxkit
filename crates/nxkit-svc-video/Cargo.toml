@@ -14,18 +14,20 @@ in_v = false
 [dependencies]
 nxkit-abi = { workspace = true }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = { workspace = true, features = ["std"] }
 objc2-core-foundation = { workspace = true, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString"] }
 objc2-core-media = { workspace = true, features = ["std", "objc2", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime"] }
 objc2-core-video = { workspace = true, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
 # The default features are the Metal headers, as in `nxkit-metal`.
 objc2-metal = { workspace = true, features = ["default"] }
+objc2-video-toolbox = { workspace = true, features = ["std", "objc2-core-media", "objc2-core-video", "VTBase", "VTDecompressionSession", "VTErrors", "VTUtilities"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
 # The software AV1 decoder, a Rust port of dav1d (BSD-2-Clause), for a Mac without an AV1 decoder in hardware. It builds with
 # cargo alone. The feature `asm` stays off: the crate on crates.io leaves out `asm-offsets.h`, so its assembly does not
 # build, and the x86-64 assembly needs `nasm`.
 rav1d = { workspace = true, features = ["bitdepth_8", "bitdepth_16"] }
-objc2-video-toolbox = { workspace = true, features = ["std", "objc2-core-media", "objc2-core-video", "VTBase", "VTDecompressionSession", "VTErrors", "VTUtilities"] }
 
 # Not `workspace = true`: this crate holds the `unsafe` calls into VideoToolbox and into guest functions. Other crates
 # see a safe API.

@@ -61,10 +61,15 @@ pub(crate) fn shard_dir(b: &Build) -> PathBuf {
 
 /// Writes the shard folder of a streamed archive and says what it holds.
 pub(crate) fn publish(b: &Build, rep: &nxb_archive::Report) -> Result<String, String> {
+    publish_at(&shard_dir(b), rep)
+}
+
+/// Publish archives into the selected platform folder.
+pub(crate) fn publish_at(dir: &Path, rep: &nxb_archive::Report) -> Result<String, String> {
     if rep.shards.is_empty() {
         return Err("not enough input files: no batch archive was compiled".into());
     }
-    let w = nxb_archive::shards::write(&shard_dir(b), &rep.shards)?;
+    let w = nxb_archive::shards::write(dir, &rep.shards)?;
     Ok(format!(
         "{} shards, {} MB ({} kept from the last build, {} dropped)",
         w.files,

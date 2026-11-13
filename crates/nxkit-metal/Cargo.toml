@@ -15,7 +15,7 @@ in_v = false
 # The index of the pipeline archive shards (`nxkit_abi::shards`), a file format the build writes and this crate reads.
 nxkit-abi.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 block2 = { workspace = true, features = ["std"] }
 objc2 = { workspace = true, features = ["std", "exception"] }
 objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes", "CFDate"] }

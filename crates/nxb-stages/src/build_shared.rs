@@ -9,7 +9,7 @@ use nxb_model::{ContentKey, FileDigest};
 use nxb_pyjson::{Value, dumps_indent};
 use nxb_sched::SingleFlight;
 use nxb_shader::side;
-use nxb_shader::target::MAC;
+use nxb_shader::target::TargetConv;
 use nxb_store::Store;
 use nxb_tool::{Io, MetalTools};
 use nxb_xlate::msl::StageInputs;
@@ -28,6 +28,7 @@ pub(crate) struct Libs {
 
 /// State shared by every task of a build.
 pub(crate) struct Shared {
+    pub(crate) conv: TargetConv,
     pub(crate) out: PathBuf,
     pub(crate) chain: String,
     pub(crate) ident: String,
@@ -86,7 +87,12 @@ impl Shared {
     }
 
     fn lib_one(&self, src: &str) -> Result<FileDigest, String> {
-        let (conv, cid, tools, pch) = (MAC, &self.compiler_id, &self.tools, self.pch.as_deref());
+        let (conv, cid, tools, pch) = (
+            self.conv,
+            &self.compiler_id,
+            &self.tools,
+            self.pch.as_deref(),
+        );
         let own = self.own.as_ref();
         let mut kb = ContentKey::builder("nxb.metallib.v2")
             .field_str("record", &conv.record())
@@ -177,7 +183,7 @@ impl Shared {
         suffix: &str,
         mut refl: Value,
     ) -> Result<(), String> {
-        refl.set("chain_metal", Value::str(MAC.record()));
+        refl.set("chain_metal", Value::str(self.conv.record()));
         refl.set("chain_compiler", Value::str(self.ident.clone()));
         self.write(
             key,

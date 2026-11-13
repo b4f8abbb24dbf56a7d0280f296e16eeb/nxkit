@@ -11,7 +11,7 @@
 //! - `diag` holds the opt-in diagnostics (`NXKIT_DIAG`, `NXKIT_KNOB`), see `docs/diagnostics.md`. The render health
 //!   report lives in `nxkit_nvn::diag`.
 
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "ios"))]
 
 mod diag;
 pub(crate) use diag::{buf_skip, diag, knob, nobar, nobar_range, refresh_knobs, tex_skip, watched};
@@ -50,12 +50,12 @@ mod native;
 mod native_ndsr;
 mod native_ndve;
 mod overlap;
+mod overlay;
 mod passes;
 mod passprof;
 mod pipelines;
 mod poolreg;
 mod pools;
-mod overlay;
 mod private;
 mod programs;
 mod pull;

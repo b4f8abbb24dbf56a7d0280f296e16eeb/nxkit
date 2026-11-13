@@ -29,3 +29,6 @@ panic = "deny"
 dbg_macro = "deny"
 todo = "deny"
 undocumented_unsafe_blocks = "deny"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+libc = "0.2"

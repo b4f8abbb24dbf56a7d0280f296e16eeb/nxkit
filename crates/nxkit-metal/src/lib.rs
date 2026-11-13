@@ -20,7 +20,7 @@
 //!   from it into guest memory.
 //! - [`Mirror`]: the GPU's private copy of guest memory (`NXKIT_PRIVATE=1`).
 //! - [`DisplayLink`]: `CAMetalDisplayLink` pacing at any whole rate through `FrameHooks::display_tick`.
-//! - [`display`]: the refresh rate of a display mode and a switch to another one for the run.
+//! - `display` (macOS): the refresh rate of a display mode and a switch to another one for the run.
 //! - [`Pacer`], [`TickScheduler`], [`TickSink`]: what each tick shows, by a [`PresentPlan`] from [`choose_present_plan`].
 //! - [`PacingStats`]: present time, missed ticks and the interval histogram (R16).
 //! - [`Presenter`]: a `CAMetalLayer` drawable path, with `Frame::present_at` for a tick.
@@ -30,9 +30,9 @@
 //!
 //! The frame format comes from `nxkit-nvn`. This crate does not depend on it.
 //!
-//! The crate builds on macOS only. On other systems it is empty, so the workspace still builds there.
+//! The crate builds on macOS and iOS. On other systems it is empty, so the workspace still builds there.
 
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "ios"))]
 
 mod address;
 mod barrier;
@@ -44,6 +44,7 @@ mod compute_icb;
 mod databuf;
 mod deswizzle;
 mod device;
+#[cfg(target_os = "macos")]
 pub mod display;
 mod encode;
 mod error;
@@ -53,8 +54,8 @@ mod guest;
 mod icb;
 mod interpolate;
 mod memstats;
-mod mirror;
 mod metrics;
+mod mirror;
 mod pacing;
 mod pages;
 mod pipeline;
@@ -79,11 +80,11 @@ mod vmregion;
 
 pub use address::{AddressMap, GUEST_VA_BASE, GUEST_VA_MAX, is_guest_va};
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
-pub use batch::{set_commit_hook, set_done_hook};
 pub use batch::{
     BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
     SubmittedBatch,
 };
+pub use batch::{set_commit_hook, set_done_hook};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use compute_icb::{
@@ -104,11 +105,11 @@ pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInp
 pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
 pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
 pub use mirror::{Ensured, Mirror, MirrorRun, MirrorView, SEGMENT as MIRROR_SEGMENT};
-pub use pages::{
-    FaultKind, FaultOrigin, FlushStats, Form as AccessForm, InternalThread, PageStats, Pages, Reason as FallbackReason,
-    SnapWhy, Stager, mark_internal_thread, name_pc, set_pc_namer,
-};
 pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
+pub use pages::{
+    FaultKind, FaultOrigin, FlushStats, Form as AccessForm, InternalThread, PageStats, Pages,
+    Reason as FallbackReason, SnapWhy, Stager, mark_internal_thread, name_pc, set_pc_namer,
+};
 pub use pipeline::{
     ArchiveConfig, BaseStats, ComputePipeline, MeshPipelineDesc, MissWhy, PipelineCache,
     RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source,
@@ -141,7 +142,9 @@ pub use stats::{
     interval_bucket,
 };
 pub use table::ArgumentTable;
-pub use texture::{InPlaceRefusal, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc};
+pub use texture::{
+    InPlaceRefusal, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc,
+};
 pub use timestamp::TimestampHeap;
 pub use upscale::{SpatialUpscaler, UpscaleDesc};
 pub use vmregion::{VmRegion, vm_region};
