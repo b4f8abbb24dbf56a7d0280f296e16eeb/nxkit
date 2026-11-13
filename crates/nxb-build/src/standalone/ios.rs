@@ -75,14 +75,7 @@ fn runfolder(game: &extract::Extracted) -> Result<Vec<(String, Vec<u8>)>> {
     Ok(files)
 }
 
-/// Require a new destination, including dangling symlinks.
-pub(super) fn vacant(path: &std::path::Path) -> Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(super::io(path, e)),
-        Ok(_) => Err(format!("{} exists: choose a new output", path.display())),
-    }
-}
+pub(super) use generic::vacant;
 
 pub(super) fn skeleton(path: &std::path::Path) -> Result<std::path::PathBuf> {
     vacant(path)?;
