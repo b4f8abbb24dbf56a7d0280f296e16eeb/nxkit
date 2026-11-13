@@ -1,6 +1,5 @@
 //! iOS codec selection. Unsupported hardware and formats fail explicitly.
 use crate::{decoder::Backend, vp9::KeyFrame};
-#[cfg(target_os = "ios")]
 mod device {
     use crate::{
         av1::{Sequence, find_sequence},
@@ -74,26 +73,9 @@ mod device {
         }
     }
 }
-#[cfg(target_os = "ios")]
 pub(crate) fn open(key: &KeyFrame) -> Result<Box<dyn Backend>, String> {
     Ok(Box::new(device::Vp9::open(key)?))
 }
-#[cfg(target_os = "ios")]
 pub(crate) fn open_av1() -> Result<Box<dyn Backend>, String> {
     Ok(Box::new(device::Av1::open()?))
-}
-#[cfg(not(target_os = "ios"))]
-pub(crate) fn open(_: &KeyFrame) -> Result<Box<dyn Backend>, String> {
-    Err("The iOS VideoToolbox backend requires an iOS device".into())
-}
-#[cfg(not(target_os = "ios"))]
-pub(crate) fn open_av1() -> Result<Box<dyn Backend>, String> {
-    Err("The iOS VideoToolbox backend requires an iOS device".into())
-}
-#[cfg(all(test, not(target_os = "ios")))]
-mod tests {
-    #[test]
-    fn no_fake_host_decoder() {
-        assert!(super::open_av1().is_err());
-    }
 }
