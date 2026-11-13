@@ -74,12 +74,7 @@ pub unsafe extern "C" fn nxkit_start(
 /// Updates foreground input, audio and rendering state.
 #[unsafe(no_mangle)]
 pub extern "C" fn nxkit_set_active(active: bool) {
-    with_session(|s| {
-        if !active {
-            s.touches(&[]);
-        }
-        s.set_active(active);
-    });
+    with_session(|s| s.set_active(active));
 }
 /// Updates the drawable size in pixels.
 #[unsafe(no_mangle)]
@@ -128,10 +123,7 @@ pub extern "C" fn nxkit_picture_aspect() -> f64 {
 pub extern "C" fn nxkit_stop() {
     // Keep the session and all retained resources alive until process exit.
     // This shared kernel cannot safely restart or unload detached guest threads.
-    with_session(|s| {
-        s.touches(&[]);
-        s.stop();
-    });
+    with_session(GameSession::stop);
 }
 
 /// A complete virtual-pad snapshot, never a delta. Sanitized by the input adapter.
