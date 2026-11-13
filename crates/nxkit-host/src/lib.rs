@@ -9,6 +9,8 @@ pub mod frames;
 pub mod gates;
 pub mod input_file;
 pub mod json;
+#[cfg(any(target_os = "macos", test))]
+mod kernel_map;
 pub mod layout;
 pub mod macho;
 pub mod manifest;
