@@ -12,7 +12,6 @@ layer = "L2"
 in_v = false
 
 [lib]
-crate-type = ["rlib", "staticlib"]
 name = "nxkit_host"
 path = "src/lib.rs"
 
