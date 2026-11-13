@@ -222,11 +222,14 @@ fn native_unsigned_single_game_ipa() {
     );
     assert_eq!(nxb_build::main(&args), 1);
     assert_eq!(std::fs::read(&output).unwrap(), bytes); // never overwrite
-    // Save a second complete build to prove deterministic archive bytes.
+    // A new output directory is created, and archive bytes remain deterministic.
     let mut again = args.clone();
-    *again.last_mut().unwrap() = dir.join("again.ipa").display().to_string();
+    *again.last_mut().unwrap() = dir.join("new/output/again.ipa").display().to_string();
     assert_eq!(nxb_build::main(&again), 0);
-    assert_eq!(std::fs::read(dir.join("again.ipa")).unwrap(), bytes);
+    assert_eq!(
+        std::fs::read(dir.join("new/output/again.ipa")).unwrap(),
+        bytes
+    );
     // The common build error path preserves the extractor's missing-key exit code.
     let mut missing_keys = args;
     let key = missing_keys.iter().position(|a| a == "--keys").unwrap() + 1;

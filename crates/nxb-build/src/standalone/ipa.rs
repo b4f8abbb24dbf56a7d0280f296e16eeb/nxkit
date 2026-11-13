@@ -236,6 +236,9 @@ pub(super) fn write_sources(
             p = parent;
         }
     }
+    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).map_err(err)?;
+    }
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
