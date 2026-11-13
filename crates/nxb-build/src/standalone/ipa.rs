@@ -216,7 +216,7 @@ pub(super) fn write_sources(
     }
     for dir in dirs.iter().map(String::as_str).chain(["romfs"]) {
         safe_path(dir)?;
-        if host.keys().any(|p| p == dir) {
+        if host.contains_key(dir) {
             return Err("file conflicts with directory".into());
         }
         host.entry(format!("{dir}/"))
@@ -403,6 +403,23 @@ mod tests {
             .map(|p| (p.to_string(), Vec::<u8>::new()))
             .collect();
         assert!(reject_case_collisions(&files).is_ok());
+    }
+    #[test]
+    fn rejects_file_directory_collision_before_opening_output() {
+        let out =
+            std::env::temp_dir().join(format!("nxb-ipa-collision-{}.ipa", std::process::id()));
+        let host = Files::from([("Info.plist".into(), b"<plist><dict/></plist>".to_vec())]);
+        let error = write(
+            &out,
+            host,
+            vec![("romfs/data".into(), vec![])],
+            &["romfs/data".into()],
+            0,
+            "test",
+        )
+        .unwrap_err();
+        assert_eq!(error, "file conflicts with directory");
+        assert!(!out.exists());
     }
     #[test]
     fn deterministic_zip64_and_crc() {
