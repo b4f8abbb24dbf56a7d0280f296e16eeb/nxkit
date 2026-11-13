@@ -28,6 +28,16 @@ fn rig() -> Rig {
 
 #[allow(clippy::expect_used, reason = "a test helper")]
 fn build(host: Arc<dyn HostSpace>, guest: Arc<dyn GuestMemory>, mem: Arc<FakeMemory>) -> Rig {
+    build_modules(host, guest, mem, Vec::new())
+}
+
+#[allow(clippy::expect_used, reason = "a test helper")]
+fn build_modules(
+    host: Arc<dyn HostSpace>,
+    guest: Arc<dyn GuestMemory>,
+    mem: Arc<FakeMemory>,
+    modules: Vec<nxkit_hos::Module>,
+) -> Rig {
     let config = Config {
         memory: Some(MemoryConfig {
             host,
@@ -44,7 +54,7 @@ fn build(host: Arc<dyn HostSpace>, guest: Arc<dyn GuestMemory>, mem: Arc<FakeMem
             tls: (BASE, 0x1_0000),
             shared: (BASE + 0x2_0000, 0x1_0000),
             main_stack: None,
-            modules: Vec::new(),
+            modules,
         }),
         main_thread: Some(MainThread {
             priority: 28,
@@ -597,3 +607,6 @@ fn unmap_physical_memory_gives_back_all_but_the_pinned_page() {
     assert_eq!(r.svc(0x2C, &[ALIAS, 0x4000])[0], 0);
     assert_eq!(r.mem.load32(ALIAS + 0x1000), Some(0));
 }
+
+#[path = "memory/code_data.rs"]
+mod code_data;

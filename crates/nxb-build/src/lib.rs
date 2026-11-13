@@ -2,7 +2,7 @@
 //! shader split) -> romfs -> rewrite -> manifest -> link -> shaders and pipeline archive -> bundle, with
 //! `nxkit-host` as the program of the app (`standalone`). Console events as `--progress json` NDJSON ([`events`]),
 //! exit codes 0 done, 1 error, 2 bad arguments, 3 damaged data, 4 not supported, 6 missing key, 130 interrupted.
-//! `--dry-run` prints the plan and writes nothing. A game without a title module is refused.
+//! `--dry-run` prints the plan and writes nothing. `--auto-analyze` selects the generic path without a title module.
 
 pub mod archive_layout;
 mod args;
@@ -14,6 +14,13 @@ pub mod inputs;
 pub mod pipeline;
 mod resource_patch;
 mod standalone;
+
+#[cfg(test)]
+#[path = "../../nxb-extract/tests/common/mod.rs"]
+mod extract_fixture;
+#[cfg(test)]
+#[path = "../../nxb-extract/tests/common/nup.rs"]
+mod nup_fixture;
 
 /// The exit code a failing stage asks for (the first one wins). Stage closures return `Result<String, String>`, so the
 /// class of an error (damaged data 3, not supported yet 4, bad arguments 2, missing key 6) travels beside the text.

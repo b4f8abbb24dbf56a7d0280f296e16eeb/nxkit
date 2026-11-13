@@ -74,7 +74,13 @@ fn dlc_key(b: &Build) -> String {
 
 /// DLC packages into `<work>/aoc/<index>.img`. Reused while the packages are as at the last extraction.
 pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, String> {
-    if b.src.dlc.is_empty() || b.src.source != Source::Packages {
+    let dlc: Vec<_> = b
+        .src
+        .dlc
+        .iter()
+        .filter(|(_, _, path)| !nxb_extract::nup::is_nup(path))
+        .collect();
+    if dlc.is_empty() {
         return Ok(None);
     }
     let keys = keys(a)?;
@@ -86,18 +92,17 @@ pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, S
     let key = dlc_key(b);
     let idx = |t: u64| t.wrapping_sub(b.src.app).wrapping_sub(0x1000);
     if std::fs::read_to_string(&kf).is_ok_and(|k| k == key)
-        && b.src
-            .dlc
+        && dlc
             .iter()
             .all(|d| dst.join(format!("{}.img", idx(d.0))).is_file())
     {
-        return Ok(Some(format!("{} DLC reused", b.src.dlc.len())));
+        return Ok(Some(format!("{} DLC reused", dlc.len())));
     }
     let _ = std::fs::remove_file(&kf);
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    let n = b.src.dlc.len() as u64;
-    for (i, (tid, _, pkg)) in b.src.dlc.iter().enumerate() {
+    let n = dlc.len() as u64;
+    for (i, (tid, _, pkg)) in dlc.into_iter().enumerate() {
         p.set(Update {
             step: Some("extracting DLC"),
             done: Some(i as u64),
@@ -122,7 +127,11 @@ pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, S
             ..nxb_extract::Request::default()
         };
         // a merged package or a card image holds more than one title: name the DLC
-        let id = b.src.app_flag.map(|_| *tid);
+        let id = if a.auto_analyze || b.src.source == Source::Nup {
+            Some(*tid)
+        } else {
+            b.src.app_flag.map(|_| *tid)
+        };
         let s = nxb_extract::aoc::aoc(&req, id).map_err(|e| damaged(p, &e))?;
         s.closing.wait();
         std::fs::rename(

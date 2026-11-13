@@ -49,6 +49,11 @@ fn is_free(b: &Block) -> bool {
     b.state == state::FREE
 }
 
+// Horizon FlagCanAlias is set for both modeled data states.
+fn can_alias(state: u32) -> bool {
+    matches!(state, state::NORMAL | state::CODE_DATA)
+}
+
 fn is_plain_normal(b: &Block) -> bool {
     b.state == state::NORMAL && b.attr & attr::LOCKED == 0 && b.perm == perm::RW
 }
@@ -180,7 +185,12 @@ impl Kernel {
             return Err(KResult::INVALID_MEMORY_REGION);
         }
         let mut sp = lock(&vm.space);
-        if !sp.map.all(d0, d1, is_free) || !sp.map.all(s0, s1, is_plain_normal) {
+        let source_state = sp.map.query(s0).state;
+        if !sp.map.all(d0, d1, is_free)
+            || !sp.map.all(s0, s1, |b| {
+                b.state == source_state && can_alias(b.state) && b.attr == 0 && b.perm == perm::RW
+            })
+        {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
@@ -218,8 +228,12 @@ impl Kernel {
         let (s0, s1) = page_range(src, size)?;
         let mut sp = lock(&vm.space);
         let b = sp.map.query(d0);
+        let source_state = sp.map.query(s0).state;
         let locked = |b: &Block| {
-            b.state == state::NORMAL && b.attr & attr::LOCKED != 0 && b.perm == perm::NONE
+            b.state == source_state
+                && can_alias(b.state)
+                && b.attr == attr::LOCKED
+                && b.perm == perm::NONE
         };
         if b.start != d0 || b.end != d1 || b.state != state::STACK || b.src != s0 {
             return Err(KResult::INVALID_CURRENT_MEMORY);

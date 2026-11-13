@@ -6,31 +6,9 @@ use std::path::{Path, PathBuf};
 
 use nxb_extract::nup::{NupRequest, extract_nup};
 
-/// One tree node: a folder with children or a file with content (stored raw, or as a zstd frame when `z`).
-enum Node {
-    Dir(&'static str, Vec<Node>),
-    File(&'static str, Vec<u8>, bool),
-}
-
-struct Pkg {
-    title: u64,
-    kind: u8,
-    version: u32,
-    flags: u8,
-    exefs: Option<Vec<Node>>,
-    romfs: Option<Vec<Node>>,
-    meta: Vec<(u16, Vec<u8>)>,
-}
-
-/// A zstd frame of one raw block (what a packer writes for incompressible data).
-fn zstd_raw(data: &[u8]) -> Vec<u8> {
-    let mut f = vec![0x28, 0xb5, 0x2f, 0xfd, 0xe0];
-    f.extend_from_slice(&(data.len() as u64).to_le_bytes());
-    let h = ((data.len() as u32) << 3) | 1;
-    f.extend_from_slice(&h.to_le_bytes()[..3]);
-    f.extend_from_slice(data);
-    f
-}
+#[path = "common/nup.rs"]
+mod nup;
+use nup::{Node, Pkg, build};
 
 fn npdm(program: u64) -> Vec<u8> {
     let mut d = vec![0u8; 0x200];
@@ -42,170 +20,33 @@ fn npdm(program: u64) -> Vec<u8> {
     d
 }
 
-#[derive(Default)]
-struct Builder {
-    dirs: Vec<(Vec<u8>, Vec<u32>)>,
-    files: Vec<(Vec<u8>, Vec<u8>, bool)>,
-}
-
-impl Builder {
-    /// Adds a folder and returns its index, children are slot values (folders: index, files: dirs + index, fixed later).
-    fn add(&mut self, name: &str, kids: &[Node]) -> u32 {
-        let me = self.dirs.len() as u32;
-        self.dirs.push((name.as_bytes().to_vec(), Vec::new()));
-        let mut slots = Vec::new();
-        for k in kids {
-            match k {
-                Node::Dir(n, c) => slots.push(self.add(n, c)),
-                Node::File(n, d, z) => {
-                    self.files.push((n.as_bytes().to_vec(), d.clone(), *z));
-                    slots.push(0x8000_0000 | (self.files.len() - 1) as u32);
-                }
-            }
-        }
-        self.dirs[me as usize].1 = slots;
-        me
+#[test]
+fn npdm_identity_requires_complete_headers_and_aci0_range() {
+    let valid = npdm(42);
+    let read = |bytes: &[u8]| nxb_extract::nup::program_id(bytes, "fixture/main.npdm");
+    assert_eq!(read(&valid).unwrap(), 42);
+    for length in [0, 4, 0x77, 0x7f, 0x117, 0x13f] {
+        assert!(read(&valid[..length]).is_err(), "length {length}");
     }
-}
-
-fn build(pkgs: &[Pkg], corrupt_toc: bool) -> Vec<u8> {
-    let mut b = Builder::default();
-    let mut recs = Vec::new();
-    for p in pkgs {
-        let ex = p.exefs.as_ref().map(|k| b.add("exefs", k));
-        let ro = p.romfs.as_ref().map(|k| b.add("romfs", k));
-        let root = b.add("root", &[]);
-        let mut slots = Vec::new();
-        slots.extend(ex);
-        slots.extend(ro);
-        b.dirs[root as usize].1 = slots;
-        recs.push((root, ex.unwrap_or(u32::MAX), ro.unwrap_or(u32::MAX)));
+    // The identity fits, but the declared ACI0 section does not.
+    let mut oversized = valid.clone();
+    oversized[0x74..0x78].copy_from_slice(&0x101u32.to_le_bytes());
+    assert!(read(&oversized).is_err());
+    for (offset, size) in [(u32::MAX, 0x40), (0x100, u32::MAX), (0x100, 0x17)] {
+        let mut bad = valid.clone();
+        bad[0x70..0x74].copy_from_slice(&offset.to_le_bytes());
+        bad[0x74..0x78].copy_from_slice(&size.to_le_bytes());
+        assert!(read(&bad).is_err());
     }
-    let nd = b.dirs.len() as u32;
-    let mut pool = Vec::new();
-    let mut name = |n: &[u8]| {
-        let o = pool.len() as u32;
-        pool.extend_from_slice(n);
-        (o, n.len() as u32)
-    };
-    let names_d: Vec<(u32, u32)> = b.dirs.iter().map(|d| name(&d.0)).collect();
-    let names_f: Vec<(u32, u32)> = b.files.iter().map(|f| name(&f.0)).collect();
-    let mut slots = Vec::new();
-    let mut firsts = Vec::new();
-    for d in &b.dirs {
-        firsts.push((slots.len() as u32, d.1.len() as u32));
-        for &s in &d.1 {
-            slots.push(if s & 0x8000_0000 != 0 {
-                nd + (s & 0x7fff_ffff)
-            } else {
-                s
-            });
-        }
+    for offset in [0, 0x100] {
+        let mut bad = valid.clone();
+        bad[offset] = 0;
+        assert!(read(&bad).is_err());
     }
-    let toc_len_fixed =
-        0x30 + pkgs.len() * 0x40 + b.dirs.len() * 0x18 + b.files.len() * 0x50 + slots.len() * 4;
-    let pool_off = toc_len_fixed;
-    let toc_size = pool_off + pool.len();
-    let blob = (0x80 + toc_size).div_ceil(16) * 16;
-    // data region: files, then meta blocks
-    let mut data = Vec::new();
-    let mut extents = Vec::new();
-    for (_, d, z) in &b.files {
-        if d.is_empty() {
-            extents.push((0u64, 0u64, false));
-            continue;
-        }
-        while !(blob + data.len()).is_multiple_of(16) {
-            data.push(0);
-        }
-        let stored = if *z { zstd_raw(d) } else { d.clone() };
-        extents.push(((blob + data.len()) as u64, stored.len() as u64, *z));
-        data.extend_from_slice(&stored);
-    }
-    let mut metas = Vec::new();
-    for p in pkgs {
-        let mut m = Vec::new();
-        for (t, v) in &p.meta {
-            m.extend_from_slice(&t.to_le_bytes());
-            m.extend_from_slice(&0u16.to_le_bytes());
-            m.extend_from_slice(&(v.len() as u32).to_le_bytes());
-            m.extend_from_slice(v);
-        }
-        metas.push(if m.is_empty() {
-            (0u64, 0u32)
-        } else {
-            ((blob + data.len()) as u64, m.len() as u32)
-        });
-        data.extend_from_slice(&m);
-    }
-    let mut toc = Vec::new();
-    toc.extend_from_slice(b"TOC\x01");
-    toc.extend_from_slice(&(pkgs.len() as u32).to_le_bytes());
-    for v in [
-        b.dirs.len() as u64,
-        b.files.len() as u64,
-        pool_off as u64,
-        pool.len() as u64,
-        0,
-    ] {
-        toc.extend_from_slice(&v.to_le_bytes());
-    }
-    for (i, p) in pkgs.iter().enumerate() {
-        let (root, ex, ro) = recs[i];
-        toc.extend_from_slice(&p.title.to_le_bytes());
-        for v in [root, ex, ro, p.version] {
-            toc.extend_from_slice(&v.to_le_bytes());
-        }
-        toc.extend_from_slice(&[p.kind, p.flags, 0, 0, 0, 0, 0, 0]);
-        toc.extend_from_slice(&metas[i].0.to_le_bytes());
-        toc.extend_from_slice(&metas[i].1.to_le_bytes());
-        toc.extend_from_slice(&[0u8; 20]);
-    }
-    for (i, _) in b.dirs.iter().enumerate() {
-        let (o, n) = names_d[i];
-        for v in [o, n, firsts[i].0, firsts[i].1] {
-            toc.extend_from_slice(&v.to_le_bytes());
-        }
-        toc.extend_from_slice(&0u64.to_le_bytes());
-    }
-    for (i, (_, d, _)) in b.files.iter().enumerate() {
-        let (o, n) = names_f[i];
-        toc.extend_from_slice(&o.to_le_bytes());
-        toc.extend_from_slice(&n.to_le_bytes());
-        let (off, stored, z) = extents[i];
-        for v in [d.len() as u64, off, stored] {
-            toc.extend_from_slice(&v.to_le_bytes());
-        }
-        toc.extend_from_slice(&nxb_model::sha256(d).0);
-        toc.extend_from_slice(&[u8::from(z), 0, 0, 0]);
-        toc.extend_from_slice(&[0u8; 12]);
-    }
-    for s in &slots {
-        toc.extend_from_slice(&s.to_le_bytes());
-    }
-    toc.extend_from_slice(&pool);
-    assert_eq!(toc.len(), toc_size);
-    let mut sha = nxb_model::sha256(&toc).0;
-    if corrupt_toc {
-        sha[0] ^= 1;
-    }
-    let total = blob + data.len();
-    let mut out = Vec::new();
-    out.extend_from_slice(b"NUP\x01");
-    out.extend_from_slice(&0x80u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&0x80u64.to_le_bytes());
-    out.extend_from_slice(&(toc_size as u64).to_le_bytes());
-    out.extend_from_slice(&sha);
-    out.extend_from_slice(&(blob as u64).to_le_bytes());
-    out.extend_from_slice(&(total as u64).to_le_bytes());
-    out.extend_from_slice(&(pkgs.len() as u32).to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes());
-    out.extend_from_slice(&[0u8; 48]);
-    out.extend_from_slice(&toc);
-    out.resize(blob, 0);
-    out.extend_from_slice(&data);
-    out
+    // A minimally sized ACI0 section still holds a complete identity.
+    let mut minimal = valid[..0x118].to_vec();
+    minimal[0x74..0x78].copy_from_slice(&0x18u32.to_le_bytes());
+    assert_eq!(read(&minimal).unwrap(), 42);
 }
 
 const APP: u64 = 0x0400_4860_24DE_C000;
@@ -478,4 +319,191 @@ fn damaged_and_hostile_containers_are_refused() {
     // not a NUP
     std::fs::write(&nup, b"NSP0 something else").unwrap();
     assert!(extract_nup(&req(&nup, &d)).is_err());
+}
+
+#[test]
+fn selected_dlc_checks_identity_uniqueness_and_file_hashes() {
+    use nxb_extract::nup::unpack_dlc;
+    let d = tmp("selected-dlc");
+    let path = d.join("dlc.nup");
+    let out = d.join("out");
+    let title = APP + 0x1001;
+    let package = |version| Pkg {
+        title,
+        kind: 2,
+        version,
+        flags: 0,
+        exefs: None,
+        romfs: Some(vec![Node::File("extra", vec![version as u8; 16], false)]),
+        meta: vec![],
+    };
+    std::fs::write(&path, build(&[package(1), package(2)], false)).unwrap();
+    unpack_dlc(&path, title, 2, &out, 64 << 20).unwrap();
+    assert_eq!(std::fs::read(out.join("extra")).unwrap(), vec![2; 16]);
+    for (id, version) in [(title + 1, 2), (title, 3)] {
+        let e = unpack_dlc(&path, id, version, &out, 64 << 20).unwrap_err();
+        assert!(e.to_string().contains("missing"), "{e}");
+    }
+    std::fs::write(&path, build(&[package(2), package(2)], false)).unwrap();
+    let e = unpack_dlc(&path, title, 2, &out, 64 << 20).unwrap_err();
+    assert!(e.to_string().contains("duplicated"), "{e}");
+    let update = Pkg {
+        kind: 3,
+        ..package(3)
+    };
+    std::fs::write(&path, build(&[package(2), update], false)).unwrap();
+    let e = unpack_dlc(&path, title, 2, &out, 64 << 20).unwrap_err();
+    assert!(e.to_string().contains("addon_update"), "{e}");
+    let absent = Pkg {
+        romfs: None,
+        ..package(2)
+    };
+    std::fs::write(&path, build(&[absent], false)).unwrap();
+    let e = unpack_dlc(&path, title, 2, &out, 64 << 20).unwrap_err();
+    assert!(e.to_string().contains("no RomFS"), "{e}");
+    let mut damaged = build(&[package(2)], false);
+    *damaged.last_mut().unwrap() ^= 1;
+    std::fs::write(&path, damaged).unwrap();
+    let e = unpack_dlc(&path, title, 2, &out, 64 << 20).unwrap_err();
+    assert!(e.to_string().contains("SHA-256"), "{e}");
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+fn loose_request(path: &Path, work: &Path) -> nxb_extract::nup::UnpackRequest {
+    nxb_extract::nup::UnpackRequest {
+        nup: path.to_path_buf(),
+        version: None,
+        out: work.join("loose"),
+        romfs: work.join("loose/romfs"),
+        aoc: work.join("loose/aoc"),
+        threads: 2,
+        mem_limit: 64 << 20,
+        verify: true,
+        split: None,
+        progress: None,
+    }
+}
+
+fn addon_fixture(version: u32) -> Pkg {
+    Pkg {
+        title: APP + 0x1001,
+        kind: 2,
+        version,
+        flags: 0,
+        exefs: None,
+        romfs: Some(vec![
+            Node::File("value", vec![version as u8], false),
+            Node::File(if version == 1 { "old" } else { "empty" }, vec![], false),
+        ]),
+        meta: vec![],
+    }
+}
+
+fn addon_base() -> Pkg {
+    Pkg {
+        title: APP,
+        kind: 0,
+        version: 0,
+        flags: 0,
+        exefs: Some(code(b"main")),
+        romfs: Some(romfs(1)),
+        meta: vec![],
+    }
+}
+
+#[test]
+fn complete_addon_versions_replace_the_tree_in_either_record_order() {
+    use nxb_extract::nup::{Nup, scan, unpack_dlc, unpack_nup};
+    let d = tmp("addon-versions");
+    let mut reference = None;
+    for versions in [[1, 2], [2, 1]] {
+        let work = d.join(versions[0].to_string());
+        std::fs::create_dir_all(&work).unwrap();
+        let path = work.join("game.nup");
+        std::fs::write(
+            &path,
+            build(
+                &[
+                    addon_base(),
+                    addon_fixture(versions[0]),
+                    addon_fixture(versions[1]),
+                ],
+                false,
+            ),
+        )
+        .unwrap();
+        let n = Nup::open(&path).unwrap();
+        let selected = scan(&n).unwrap().dlc[&(APP + 0x1001)];
+        assert_eq!(n.packages[selected].version, 2);
+        extract_nup(&req(&path, &work)).unwrap();
+        let image = std::fs::read(work.join("aoc/1.img")).unwrap();
+        let entries = read_image(&image);
+        assert!(!entries.iter().any(|e| e.0 == "old"));
+        assert!(entries.iter().any(|e| e.0 == "empty" && e.3 == 0));
+        let value = entries.iter().find(|e| e.0 == "value").unwrap();
+        assert_eq!(&image[value.2 as usize..(value.2 + value.3) as usize], &[2]);
+        if let Some(previous) = &reference {
+            assert_eq!(&image, previous);
+        }
+        reference = Some(image);
+        unpack_nup(&loose_request(&path, &work)).unwrap();
+        let out = work.join("loose/aoc/1");
+        assert_eq!(std::fs::read(out.join("value")).unwrap(), [2]);
+        assert_eq!(std::fs::metadata(out.join("empty")).unwrap().len(), 0);
+        assert!(!out.join("old").exists());
+        // Exact selection can still retrieve the older complete tree, replacing the output.
+        unpack_dlc(&path, APP + 0x1001, 1, &out, 64 << 20).unwrap();
+        assert_eq!(std::fs::read(out.join("value")).unwrap(), [1]);
+        assert!(out.join("old").is_file());
+        assert!(!out.join("empty").exists());
+        unpack_dlc(&path, APP + 0x1001, 2, &out, 64 << 20).unwrap();
+        assert!(!out.join("old").exists());
+        assert_eq!(std::fs::metadata(out.join("empty")).unwrap().len(), 0);
+    }
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+#[test]
+fn invalid_addon_records_are_rejected_by_each_consumer() {
+    use nxb_extract::nup::{Nup, scan, unpack_dlc, unpack_nup};
+    let d = tmp("addon-invalid");
+    for case in [
+        "duplicate",
+        "invalid-id",
+        "missing-romfs",
+        "wrong-family",
+        "reserved-kind",
+    ] {
+        let mut addon = addon_fixture(1);
+        match case {
+            "invalid-id" => addon.title = APP + 0x1000,
+            "missing-romfs" => addon.romfs = None,
+            "wrong-family" => addon.title += 0x2000,
+            "reserved-kind" => addon.kind = 3,
+            _ => {}
+        }
+        let mut packages = vec![addon_base(), addon];
+        if case == "duplicate" || case == "reserved-kind" {
+            packages.push(addon_fixture(1));
+        }
+        let path = d.join(format!("{case}.nup"));
+        std::fs::write(&path, build(&packages, false)).unwrap();
+        assert!(
+            scan(&Nup::open(&path).unwrap()).is_err(),
+            "scan accepted {case}"
+        );
+        assert!(
+            extract_nup(&req(&path, &d)).is_err(),
+            "image extraction accepted {case}"
+        );
+        assert!(
+            unpack_nup(&loose_request(&path, &d)).is_err(),
+            "loose extraction accepted {case}"
+        );
+        assert!(
+            unpack_dlc(&path, APP + 0x1001, 1, &d.join("selected"), 64 << 20).is_err(),
+            "exact selection accepted {case}"
+        );
+    }
+    std::fs::remove_dir_all(d).unwrap();
 }
