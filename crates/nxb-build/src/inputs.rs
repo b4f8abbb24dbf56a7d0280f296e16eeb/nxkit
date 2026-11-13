@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 
 use crate::Args;
 
+mod generic;
+pub(crate) use generic::discover_generic;
+
 /// The kind of input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -25,9 +28,12 @@ pub struct Inputs {
     pub app: u64,
     /// The base game's package or the NUP file.
     pub base: PathBuf,
+    /// Base package version from metadata in generic mode. Zero in title-specific mode.
+    pub base_version: u32,
     /// The updates by version (the package, the NUP file or `updates/<version>`).
     pub updates: Vec<(u32, PathBuf)>,
-    /// DLC packages: (title ID, version, path).
+    /// DLC packages: (title ID, version, path). For a NUP source, its own path marks
+    /// embedded DLC. Other paths name external packages.
     pub dlc: Vec<(u64, u32, PathBuf)>,
     /// The application to read from the packages (`nx_extract --app`): set for merged packages, cartridge images, a
     /// game picked with `--title-id`.
@@ -368,6 +374,7 @@ fn scan_packages(
         source: Source::Packages,
         app,
         base,
+        base_version: 0,
         updates,
         dlc: best.into_iter().map(|(t, (v, p))| (t, v, p)).collect(),
         app_flag: (merged_any || card_any || want.is_some()).then_some(app),
@@ -392,6 +399,7 @@ fn scan_nup(path: &Path, want: Option<u64>) -> Result<Inputs, String> {
         source: Source::Nup,
         app: s.app,
         base: path.to_path_buf(),
+        base_version: 0,
         updates: s.updates.keys().map(|v| (*v, path.to_path_buf())).collect(),
         dlc: s.dlc.keys().map(|t| (*t, 0, path.to_path_buf())).collect(),
         app_flag: None,

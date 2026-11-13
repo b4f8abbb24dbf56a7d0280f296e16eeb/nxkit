@@ -55,6 +55,21 @@ fn check_level(level: &[u8], bs: usize, expected: &[u8], tail: Tail) -> bool {
 }
 
 impl IvfcStorage {
+    /// An empty checked view for a Program that has no data section, not for an invalid IVFC tree.
+    pub(crate) fn empty() -> Self {
+        Self {
+            data: Arc::new(crate::storage::MemStorage(Vec::new())),
+            data_offset: 0,
+            size: 0,
+            bs: 1,
+            hashes: Vec::new(),
+            tail: Tail::Padded,
+            checked: Vec::new(),
+            lenient: false,
+            bad: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+        }
+    }
+
     /// Opens the IVFC levels described by `fs` over the decrypted section `section`.
     pub fn open(section: Arc<dyn Storage>, fs: &FsHeader) -> Result<IvfcStorage> {
         Self::open_with(section, fs, false)
@@ -257,4 +272,20 @@ pub fn read_sha256_section(section: &dyn Storage, fs: &FsHeader) -> Result<Vec<u
         }
     }
     Ok(data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absent_section_has_no_readable_data() {
+        let empty = IvfcStorage::empty();
+        assert_eq!(empty.size(), 0);
+        assert_eq!(empty.scan().ok(), Some(0));
+        assert_eq!(empty.checked_blocks(), 0);
+        assert!(empty.read_at(0, &mut []).is_ok());
+        assert!(empty.read_at(0, &mut [0]).is_err());
+        assert!(empty.read_at(1, &mut []).is_err());
+    }
 }

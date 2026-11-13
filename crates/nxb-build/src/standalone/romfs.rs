@@ -40,6 +40,7 @@ pub(crate) fn unpack(
     if dest.exists() {
         std::fs::remove_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     }
+    std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     let mut done = 0u64;
     for e in &files {
         let path = target(dest, e)?;

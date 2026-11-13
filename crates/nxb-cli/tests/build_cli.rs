@@ -110,3 +110,29 @@ fn exit_codes_by_class() {
     with_keys.extend(["-k", "/nonexistent-prod.keys"]);
     assert_eq!(build(&with_keys).0, Some(6));
 }
+
+#[test]
+fn generic_build_reports_missing_keys_with_the_key_exit_code() {
+    let d = tmp("generic-keys");
+    let input = d.join("game.nsp");
+    let keys = d.join("prod.keys");
+    std::fs::write(&input, []).unwrap();
+    for contents in [None, Some(&b""[..]), Some(&b"\xff"[..])] {
+        if let Some(contents) = contents {
+            std::fs::write(&keys, contents).unwrap();
+        }
+        let (code, out, _) = build(&[
+            input.to_str().unwrap(),
+            "--auto-analyze",
+            "--own-front",
+            "on",
+            "-k",
+            keys.to_str().unwrap(),
+            "--progress",
+            "json",
+        ]);
+        assert_eq!(code, Some(6), "{out}");
+        assert_ndjson(&out);
+    }
+    std::fs::remove_dir_all(d).unwrap();
+}

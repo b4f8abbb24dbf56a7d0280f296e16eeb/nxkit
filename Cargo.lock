@@ -264,6 +264,7 @@ dependencies = [
  "nxb-stages",
  "nxb-sys",
  "nxb-tool",
+ "nxb-xlate",
  "nxkit-abi",
  "nxtitle",
  "nxtitles",
