@@ -148,18 +148,6 @@ impl Presenter {
         self.layer.setDisplaySyncEnabled(on);
     }
 
-    /// Validates display-sync requests. iOS does not expose disabling display sync.
-    #[cfg(target_os = "ios")]
-    pub fn set_display_sync(&self, on: bool) -> Result<()> {
-        if on {
-            Ok(())
-        } else {
-            Err(MetalError::Invalid(
-                "iOS cannot disable display synchronization",
-            ))
-        }
-    }
-
     /// The next drawable. It blocks while all drawables are in use.
     pub fn acquire(&self) -> Result<Drawable> {
         let raw = self
