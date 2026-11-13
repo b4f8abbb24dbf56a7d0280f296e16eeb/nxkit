@@ -56,6 +56,7 @@ pub fn kernel_init(
     layout: &Layout,
     game: &Game,
 ) -> Result<()> {
+    let game = &crate::kernel_map::configuration(game)?;
     let program_id =
         u64::from_str_radix(game.title_id.trim_start_matches("0x"), 16).map_err(|_| {
             HostError::Manifest(format!("title_id {:?} is not a hex number", game.title_id))
