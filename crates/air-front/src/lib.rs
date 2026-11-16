@@ -280,6 +280,24 @@ mod tests {
     }
 
     #[test]
+    fn raw_library_for_macos_26() {
+        // macOS 26 refuses Metal 4.1: the library says macOS 26.0, AIR 2.8 and Metal 4.0 (issue 21)
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\nfragment float4 f(constant float4* c [[buffer(0)]], float4 p [[position]]) { return p * c[0]; }\n";
+        let lib = build_raw(msl, &Target::macos_for(26)).expect("raw library");
+        let parsed = air_lib::parse(&lib).expect("metallib");
+        assert_eq!(
+            (parsed.header.os, parsed.header.os_version),
+            (0x81, (26, 0))
+        );
+        let m = build_raw(msl, &Target::macos_for(27)).expect("raw library");
+        assert_eq!(
+            air_lib::parse(&m).expect("metallib").header.os_version,
+            (27, 2)
+        );
+        assert_ne!(lib, m);
+    }
+
+    #[test]
     fn rejects_garbage() {
         assert!(compile(b"this is not msl {", &Target::macos()).is_err());
     }
