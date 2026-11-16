@@ -9,7 +9,7 @@
 [air-front]
 reason = "the optional own shader front end (design-v2 16): MSL to AIR bitcode in process"
 source = "path crates/air-front (a workspace member, not on crates.io; brings msl-lex, air-emit, air-bc, air-lib)"
-licence = "GPL-3.0-only (same workspace)"
+licence = "MIT (same workspace)"
 unsafe = "0 (forbid(unsafe_code))"
 owner = "project team"
 used_by = ["nxb-tool (cargo feature air-front, on by default through nxb-cli)"]
@@ -17,7 +17,7 @@ used_by = ["nxb-tool (cargo feature air-front, on by default through nxb-cli)"]
 [airc]
 reason = "the command line of the own front end as a library (`airc::main`), called by `nxb airc`"
 source = "path crates/airc (a workspace member, not on crates.io; the same crates as air-front)"
-licence = "GPL-3.0-only (same workspace)"
+licence = "MIT (same workspace)"
 unsafe = "0 (forbid(unsafe_code))"
 owner = "project team"
 used_by = ["nxb-cli (cargo feature air-front, on by default)"]

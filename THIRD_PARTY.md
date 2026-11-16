@@ -155,35 +155,10 @@ The header of that file also names digitalhivehub and MacNativeGames for the pac
 |---|---|---|
 | Apple tools (`metal`, `metallib`, `air-opt`, `air-as`, `codesign`, `metal-tt`, `metal-pack`, `xcrun`) | Apple licence | started from your own Xcode. Not redistributed |
 
-## Code first published under MIT
+## Licence history
 
-nxkit was published under the MIT licence up to version 0.9.2. Those releases stay under MIT. Later versions are under
-GPL-3.0-only, see `LICENSE`. The code from that time, including the contributions of Samuel Reed and thehobbit85, keeps this
-notice:
-
-```
-MIT License
-
-Copyright (c) 2026 v0lumehi
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+nxkit is under the MIT licence, see `LICENSE`. Releases up to 0.9.2 were published under MIT, releases 0.9.3 to 0.10.0
+under GPL-3.0-only, and from 0.10.1 on it is MIT again.
 
 ## If more code is ported
 
