@@ -11,11 +11,15 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 ## Status
 
-Version 0.10.0 is not released yet. It is early software. Mac on Apple silicon only.
+The current release is [0.10.0](https://github.com/v0lumehi/nxkit/releases/tag/v0.10.0) (2026-11-16). It is early
+software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
+macOS 26 build the app on macOS 26. `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 
-A game runs on the runtime only when it has a title module in `titles/games/`. A title module holds what is specific
-to one game: its memory layout, thread roles, settings and code rules. Everything else is general. Refer to
-[docs/titles.md](docs/titles.md). The [CHANGELOG](CHANGELOG.md) lists every change.
+A game runs on the runtime when it has a title module in `titles/games/`. There are 154, one for each game of the engine
+tree. A title module holds what is specific to one game: its memory layout, thread roles, settings and code rules.
+Everything else is general. Refer to [docs/titles.md](docs/titles.md). For a game without a title module,
+`nxb build --auto-analyze` reads the module order, build IDs and settings from the game files (experimental).
+The [CHANGELOG](CHANGELOG.md) lists every change.
 
 ## How it works
 
@@ -62,7 +66,9 @@ You need Rust 1.99 or newer and Xcode with its command line tools.
 cargo build --release -p nxb-cli -p nxkit-host
 ```
 
-The programs are `target/release/nxb` and `target/release/nxkit-host`. `nxb` finds `nxkit-host` in its own folder.
+The programs are `target/release/nxb` and `target/release/nxkit-host`. `nxb` finds `nxkit-host` in its own folder, or
+in `NXB_NXKIT_HOST`. The ZIP of a release holds `nxb` only, so to build an app with it, build `nxkit-host` from source
+and put it beside `nxb`. The release binary is built with `cargo build --profile dist` (fat LTO).
 `tools/check.sh` runs the formatter, the lints, the tests, the documentation and the layer and size checks.
 
 ## Build a game
@@ -74,8 +80,9 @@ nxb build "<folder with the game files>" -k <prod.keys> --platform mac \
 
 - `--dry-run` prints the plan and writes nothing. Check it first.
 - A Switch 2 package needs `--nup <file>` and no keys.
-- `nxb` builds only nxkit apps: a game that has a title module, into an app with `nxkit-host` as its program. There is no
-  iOS build, no `--engine` and no Python.
+- `nxb` builds only nxkit apps, with `nxkit-host` as their program. A game without a title module needs
+  `--auto-analyze`. There is no iOS build, no `--engine` and no Python.
+- Ocarina of Time can keep a fixed render scale: `--resource-patch resolution-scale=<0..1>`.
 - The work folder takes many GB. A second build with the same files reuses the finished stages. After a change of the
   translator, only the shaders whose MSL changed compile again (refer to [docs/early-cutoff.md](docs/early-cutoff.md)).
 - `--progress bar` shows one live line with the stage, a bar and the time left.
