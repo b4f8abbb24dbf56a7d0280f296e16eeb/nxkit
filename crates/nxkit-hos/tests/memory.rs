@@ -31,44 +31,6 @@ fn build(host: Arc<dyn HostSpace>, guest: Arc<dyn GuestMemory>, mem: Arc<FakeMem
     build_modules(host, guest, mem, Vec::new())
 }
 
-#[allow(clippy::expect_used, reason = "a test helper")]
-fn build_modules(
-    host: Arc<dyn HostSpace>,
-    guest: Arc<dyn GuestMemory>,
-    mem: Arc<FakeMemory>,
-    modules: Vec<nxkit_hos::Module>,
-) -> Rig {
-    let config = Config {
-        memory: Some(MemoryConfig {
-            host,
-            base: BASE,
-            size: SIZE,
-            front_size: 0x10_0000,
-            stack_size: 0x10_0000,
-            alias_size: 0x10_0000,
-            app_pool: 0x40_0000,
-            used_memory: 0x10_0000,
-            system_resource: 0x20_0000,
-            map_limit: false,
-            program_id: 0x0100_7EF0_0011_E000,
-            tls: (BASE, 0x1_0000),
-            shared: (BASE + 0x2_0000, 0x1_0000),
-            main_stack: None,
-            modules,
-        }),
-        main_thread: Some(MainThread {
-            priority: 28,
-            core: 1,
-            stack_size: 0x10_0000,
-        }),
-        log: |_| {},
-        ..Config::default()
-    };
-    let kernel = Kernel::try_new(config, guest).expect("the layout fits");
-    let main = kernel.attach_main_thread("main").expect("attach");
-    Rig { kernel, mem, main }
-}
-
 impl Rig {
     fn svc(&self, number: u32, args: &[u64]) -> [u64; 8] {
         let mut regs = [0u64; 8];
@@ -610,3 +572,4 @@ fn unmap_physical_memory_gives_back_all_but_the_pinned_page() {
 
 #[path = "memory/code_data.rs"]
 mod code_data;
+use code_data::build_modules;

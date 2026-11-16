@@ -196,9 +196,19 @@ fn generic_base_version_comes_from_selected_metadata() {
         None,
     )
     .unwrap();
-    assert_eq!(inputs.base, PathBuf::from("a-base [v0].nsp"));
-    assert_eq!(inputs.base_version, 65536);
+    // The highest Application version is the base, whatever the path order.
+    assert_eq!(inputs.base, PathBuf::from("z-base [v999].nsp"));
+    assert_eq!(inputs.base_version, 131072);
     assert!(inputs.updates.is_empty());
+    let copy = |path: &str| package(path, GenericRole::Input, &[("Application", APP, 65536)]);
+    for packages in [
+        vec![copy("b.nsp"), copy("a.nsz")],
+        vec![copy("a.nsz"), copy("b.nsp")],
+    ] {
+        let inputs = select_generic(packages, None).unwrap();
+        assert_eq!(inputs.base, PathBuf::from("a.nsz"));
+        assert_eq!(inputs.base_version, 65536);
+    }
 }
 
 #[test]

@@ -134,8 +134,9 @@ fn select_generic(packages: Vec<GenericPackage>, want: Option<u64>) -> Result<In
             }
             let family = families.entry(app).or_default();
             match kind.as_str() {
-                "Application" => {
-                    if family.base.is_none() && role == GenericRole::Input {
+                // The highest version wins; packages are sorted by path, so the first path wins a tie.
+                "Application" if role == GenericRole::Input => {
+                    if family.base.is_none() || base_versions.get(&app) < Some(&version) {
                         family.base = Some(path.clone());
                         base_versions.insert(app, version);
                     }
@@ -341,8 +342,8 @@ fn generic_nup(
     standalone_update: bool,
 ) -> Result<Inputs, String> {
     let n = nxb_extract::nup::Nup::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let s =
-        nxb_extract::nup::scan(&n).map_err(|e| crate::exit::fail(e.exit_code(), e.to_string()))?;
+    let s = nxb_extract::nup::scan_with(&n, true)
+        .map_err(|e| crate::exit::fail(e.exit_code(), e.to_string()))?;
     // NUP records use the application ID in reference dumps. Also accept the
     // patch ID used by other producers. The shared scan verifies NPDM identity.
     if s.base.is_some_and(|i| n.packages[i].title_id != s.app)

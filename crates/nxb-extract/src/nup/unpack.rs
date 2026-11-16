@@ -18,7 +18,7 @@ use nxb_split::SplitError;
 use nxb_split::src::Src;
 
 use super::extract::{control, exefs, pick};
-use super::{Nup, bad, scan};
+use super::{Nup, bad, scan_with};
 use crate::error::{ExtractError, Result};
 use crate::post::PostFile;
 use crate::split::{SplitOutputs, Templates, VersionIn};
@@ -52,6 +52,8 @@ pub struct UnpackRequest {
     pub split: Option<(PathBuf, SplitOutputs)>,
     /// Counts the file bytes written.
     pub progress: Option<Arc<crate::run::Counter>>,
+    /// The generic path: DLC records as [`super::scan_with`] reads them with `newest_dlc`.
+    pub newest_dlc: bool,
 }
 
 /// What the shader split did in the pass: the counters of the stage output.
@@ -350,7 +352,7 @@ pub fn unpack_dlc(path: &Path, title: u64, version: u32, out: &Path, mem_limit: 
 /// Unpacks one version (and every DLC) of a container into folders, with the shader split in the same pass.
 pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     let n = Nup::open(&r.nup)?;
-    let s = scan(&n)?;
+    let s = scan_with(&n, r.newest_dlc)?;
     let (ver, k, d, mut notes) = pick(&n, &s, r.version)?;
     std::fs::create_dir_all(&r.out)
         .map_err(|e| ExtractError::io(format!("create {}", r.out.display()), e))?;

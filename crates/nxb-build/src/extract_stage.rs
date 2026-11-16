@@ -199,6 +199,7 @@ pub(crate) fn packages(
         manifest: false,
         split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
         progress: Some(counter.clone()),
+        empty_romfs: false,
     };
     p.say("extract and shader split in one pass (nxb-extract)");
     let s = with_bytes(p, "extracting", &counter, || nxb_extract::extract(&req))
@@ -228,6 +229,7 @@ pub(crate) fn nup_loose(
         verify: true,
         split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
         progress: Some(counter.clone()),
+        newest_dlc: false,
     };
     p.say("unpack and shader split in one pass (nxb-extract, RomFS as a folder)");
     let u = with_bytes(p, "unpacking", &counter, || {

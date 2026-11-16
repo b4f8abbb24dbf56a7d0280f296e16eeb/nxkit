@@ -190,6 +190,7 @@ pub fn main(args: &[String]) -> i32 {
         allow_damaged,
         manifest,
         progress: None,
+        empty_romfs: false,
     };
     match crate::extract(&req) {
         Ok(mut s) => {

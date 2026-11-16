@@ -80,6 +80,7 @@ fn reference_extract_and_split_match_python() {
         allow_damaged: false,
         manifest: false,
         progress: None,
+        empty_romfs: false,
     };
     assert!(nxb_extract::extract(&req).is_ok());
     let mut checked = 0;

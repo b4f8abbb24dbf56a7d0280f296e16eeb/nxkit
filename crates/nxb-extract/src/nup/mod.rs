@@ -495,8 +495,14 @@ pub fn addon_records(n: &Nup) -> Result<BTreeMap<(u64, u32), usize>> {
     Ok(records)
 }
 
-/// Validates the application and selects the newest complete DLC tree for each title.
+/// The engine's `scan`: the same checks and the same error texts.
 pub fn scan(n: &Nup) -> Result<Scan> {
+    scan_with(n, false)
+}
+
+/// [`scan`]; with `newest_dlc` (the generic path) the DLC records are read by [`addon_records`], so several complete
+/// versions of one DLC title may be present and the newest is selected.
+pub fn scan_with(n: &Nup, newest_dlc: bool) -> Result<Scan> {
     let p = &n.path;
     let bases: Vec<&Package> = n.packages.iter().filter(|k| k.kind == BASE).collect();
     if bases.len() > 1 {
@@ -547,14 +553,20 @@ pub fn scan(n: &Nup) -> Result<Scan> {
             format!("base program ID {app:016X} is not a base title ID"),
         ));
     }
-    let mut dlc = BTreeMap::new();
-    // Ordered title/version keys make the newest complete tree win for each title.
-    for ((title, _), index) in addon_records(n)? {
+    let family = |title: u64| {
         let d = title.wrapping_sub(app).wrapping_sub(0x1000);
         if !(1..=2000).contains(&d) || title < app.saturating_add(0x1000) {
             return Err(bad(p, format!("{title:016X} is not a DLC of {app:016X}")));
         }
-        dlc.insert(title, index);
+        Ok(())
+    };
+    let mut dlc = BTreeMap::new();
+    if newest_dlc {
+        // Ordered title/version keys make the newest complete tree win for each title.
+        for ((title, _), index) in addon_records(n)? {
+            family(title)?;
+            dlc.insert(title, index);
+        }
     }
     let mut vers = BTreeMap::new();
     for k in &n.packages {
@@ -566,6 +578,14 @@ pub fn scan(n: &Nup) -> Result<Scan> {
                 return Err(bad(p, "an update of version 0"));
             }
             vers.insert(k.version, k.index);
+        } else if k.kind == ADDON && !newest_dlc {
+            family(k.title_id)?;
+            if k.romfs == NO_DIR {
+                return Err(bad(p, format!("DLC {:016X} has no romfs/", k.title_id)));
+            }
+            if dlc.insert(k.title_id, k.index).is_some() {
+                return Err(bad(p, format!("DLC {:016X} more than once", k.title_id)));
+            }
         }
     }
     Ok(Scan {

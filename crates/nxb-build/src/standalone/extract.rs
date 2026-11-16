@@ -118,6 +118,7 @@ pub(super) fn extract(a: &Args, p: &Progress) -> Result<Extracted, String> {
             verify: true,
             split: None,
             progress: None,
+            newest_dlc: true,
         })
         .map_err(err)?;
         for note in result.notes {
@@ -157,6 +158,7 @@ pub(super) fn extract(a: &Args, p: &Progress) -> Result<Extracted, String> {
             app: Some(b.src.app),
             threads: a.threads,
             mem_limit: LIMIT,
+            empty_romfs: true,
             ..Default::default()
         })
         .map_err(|e| crate::extract_stage::damaged(p, &e))?;
