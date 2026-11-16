@@ -68,6 +68,15 @@ fn absent_program_data_is_empty_for_nsp_nsz_and_code_only_updates() {
             assert!(game.files.iter().any(|(p, _)| p == "icon.jpg"));
             assert!(game.aoc.is_empty());
         }
+        // The title path keeps refusing a Program without a data section.
+        let e = nxb_extract::extract(&nxb_extract::Request {
+            keys: keys.clone(),
+            base: args.nsp_dir.clone(),
+            out_base: dir.join("title"),
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(e.to_string().contains("without a data section"), "{e}");
     }
     common::cleanup(&dir);
 }

@@ -338,8 +338,11 @@ fn selected_dlc_checks_identity_uniqueness_and_file_hashes() {
         meta: vec![],
     };
     std::fs::write(&path, build(&[package(1), package(2)], false)).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::write(out.join("stale"), b"earlier run").unwrap();
     unpack_dlc(&path, title, 2, &out, 64 << 20).unwrap();
     assert_eq!(std::fs::read(out.join("extra")).unwrap(), vec![2; 16]);
+    assert!(!out.join("stale").exists(), "the output folder is replaced");
     for (id, version) in [(title + 1, 2), (title, 3)] {
         let e = unpack_dlc(&path, id, version, &out, 64 << 20).unwrap_err();
         assert!(e.to_string().contains("missing"), "{e}");
@@ -381,6 +384,7 @@ fn loose_request(path: &Path, work: &Path) -> nxb_extract::nup::UnpackRequest {
         verify: true,
         split: None,
         progress: None,
+        newest_dlc: false,
     }
 }
 
@@ -413,9 +417,8 @@ fn addon_base() -> Pkg {
 
 #[test]
 fn complete_addon_versions_replace_the_tree_in_either_record_order() {
-    use nxb_extract::nup::{Nup, scan, unpack_dlc, unpack_nup};
+    use nxb_extract::nup::{Nup, UnpackRequest, scan, scan_with, unpack_dlc, unpack_nup};
     let d = tmp("addon-versions");
-    let mut reference = None;
     for versions in [[1, 2], [2, 1]] {
         let work = d.join(versions[0].to_string());
         std::fs::create_dir_all(&work).unwrap();
@@ -433,20 +436,20 @@ fn complete_addon_versions_replace_the_tree_in_either_record_order() {
         )
         .unwrap();
         let n = Nup::open(&path).unwrap();
-        let selected = scan(&n).unwrap().dlc[&(APP + 0x1001)];
+        let selected = scan_with(&n, true).unwrap().dlc[&(APP + 0x1001)];
         assert_eq!(n.packages[selected].version, 2);
-        extract_nup(&req(&path, &work)).unwrap();
-        let image = std::fs::read(work.join("aoc/1.img")).unwrap();
-        let entries = read_image(&image);
-        assert!(!entries.iter().any(|e| e.0 == "old"));
-        assert!(entries.iter().any(|e| e.0 == "empty" && e.3 == 0));
-        let value = entries.iter().find(|e| e.0 == "value").unwrap();
-        assert_eq!(&image[value.2 as usize..(value.2 + value.3) as usize], &[2]);
-        if let Some(previous) = &reference {
-            assert_eq!(&image, previous);
-        }
-        reference = Some(image);
-        unpack_nup(&loose_request(&path, &work)).unwrap();
+        // The title path keeps one record per DLC title.
+        let Err(e) = scan(&n) else {
+            panic!("the title scan accepted two records of one DLC")
+        };
+        assert!(e.to_string().contains("more than once"), "{e}");
+        assert!(extract_nup(&req(&path, &work)).is_err());
+        assert!(unpack_nup(&loose_request(&path, &work)).is_err());
+        unpack_nup(&UnpackRequest {
+            newest_dlc: true,
+            ..loose_request(&path, &work)
+        })
+        .unwrap();
         let out = work.join("loose/aoc/1");
         assert_eq!(std::fs::read(out.join("value")).unwrap(), [2]);
         assert_eq!(std::fs::metadata(out.join("empty")).unwrap().len(), 0);
@@ -465,7 +468,7 @@ fn complete_addon_versions_replace_the_tree_in_either_record_order() {
 
 #[test]
 fn invalid_addon_records_are_rejected_by_each_consumer() {
-    use nxb_extract::nup::{Nup, scan, unpack_dlc, unpack_nup};
+    use nxb_extract::nup::{Nup, UnpackRequest, scan, scan_with, unpack_dlc, unpack_nup};
     let d = tmp("addon-invalid");
     for case in [
         "duplicate",
@@ -488,16 +491,22 @@ fn invalid_addon_records_are_rejected_by_each_consumer() {
         }
         let path = d.join(format!("{case}.nup"));
         std::fs::write(&path, build(&packages, false)).unwrap();
-        assert!(
-            scan(&Nup::open(&path).unwrap()).is_err(),
-            "scan accepted {case}"
+        let n = Nup::open(&path).unwrap();
+        assert!(scan_with(&n, true).is_err(), "scan accepted {case}");
+        // The title path ignores the reserved kind and rejects the rest, as before.
+        let title_ok = case == "reserved-kind";
+        assert_eq!(scan(&n).is_ok(), title_ok, "title scan: {case}");
+        assert_eq!(
+            extract_nup(&req(&path, &d)).is_ok(),
+            title_ok,
+            "image extraction: {case}"
         );
+        let generic = UnpackRequest {
+            newest_dlc: true,
+            ..loose_request(&path, &d)
+        };
         assert!(
-            extract_nup(&req(&path, &d)).is_err(),
-            "image extraction accepted {case}"
-        );
-        assert!(
-            unpack_nup(&loose_request(&path, &d)).is_err(),
+            unpack_nup(&generic).is_err(),
             "loose extraction accepted {case}"
         );
         assert!(

@@ -5,6 +5,45 @@ const MODULE: u64 = BASE + 0x4_0000;
 const DATA: u64 = MODULE + 0x2000;
 const BSS: u64 = DATA + 0x1000;
 
+/// A rig whose memory model holds `modules`; [`build`] is this with none.
+#[allow(clippy::expect_used, reason = "a test helper")]
+pub(super) fn build_modules(
+    host: Arc<dyn HostSpace>,
+    guest: Arc<dyn GuestMemory>,
+    mem: Arc<FakeMemory>,
+    modules: Vec<nxkit_hos::Module>,
+) -> Rig {
+    let config = Config {
+        memory: Some(MemoryConfig {
+            host,
+            base: BASE,
+            size: SIZE,
+            front_size: 0x10_0000,
+            stack_size: 0x10_0000,
+            alias_size: 0x10_0000,
+            app_pool: 0x40_0000,
+            used_memory: 0x10_0000,
+            system_resource: 0x20_0000,
+            map_limit: false,
+            program_id: 0x0100_7EF0_0011_E000,
+            tls: (BASE, 0x1_0000),
+            shared: (BASE + 0x2_0000, 0x1_0000),
+            main_stack: None,
+            modules,
+        }),
+        main_thread: Some(MainThread {
+            priority: 28,
+            core: 1,
+            stack_size: 0x10_0000,
+        }),
+        log: |_| {},
+        ..Config::default()
+    };
+    let kernel = Kernel::try_new(config, guest).expect("the layout fits");
+    let main = kernel.attach_main_thread("main").expect("attach");
+    Rig { kernel, mem, main }
+}
+
 fn module_rig() -> Rig {
     let mem = Arc::new(FakeMemory::new(BASE, (SIZE / 4) as usize));
     module_build(mem.clone(), mem)
