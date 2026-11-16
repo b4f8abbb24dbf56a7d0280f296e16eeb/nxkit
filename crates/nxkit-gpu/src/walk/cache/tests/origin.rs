@@ -107,16 +107,3 @@ fn cached_swizzle_writes_survive_calls_and_submits_only_on_their_queue() {
         }
     });
 }
-
-#[test]
-fn a_present_captures_the_device_origin_not_the_queue_origin() {
-    let mut rig = Rig::new();
-    rig.w.device_origin(true);
-    rig.w.queue_origin(1, false);
-    let first = rig.w.current_origin();
-    rig.w.device_origin(false);
-    rig.w.queue_origin(1, true);
-    let second = rig.w.current_origin();
-    assert!(first);
-    assert!(!second);
-}

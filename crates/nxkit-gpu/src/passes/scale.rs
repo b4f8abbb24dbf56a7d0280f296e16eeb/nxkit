@@ -49,6 +49,18 @@ pub(super) fn in_place_overlaps(src: Option<(u64, u64)>, dst: Option<(u64, u64)>
     sn != 0 && dn != 0 && if s <= d { d - s < sn } else { s - d < dn }
 }
 
+/// True when the source and the destination of a copy within one backing texture touch the same texels: the same
+/// level, overlapping slice ranges of `count` layers and boxes that intersect. A copy between two levels (a mip
+/// chain downsample) or two disjoint boxes does not race.
+pub(super) fn regions_meet(src: &TextureRegion, dst: &TextureRegion, count: u32) -> bool {
+    let meet = |a: u32, an: u32, b: u32, bn: u32| {
+        a < b.saturating_add(bn) && b < a.saturating_add(an) && an != 0 && bn != 0
+    };
+    src.level == dst.level
+        && meet(src.slice, count, dst.slice, count)
+        && (0..3).all(|i| meet(src.origin[i], src.size[i], dst.origin[i], dst.size[i]))
+}
+
 /// The kernels, one for each sample type. The arithmetic is the one of [`nearest`] and [`taps`].
 const MSL: &str = r#"
 #include <metal_stdlib>
@@ -181,6 +193,16 @@ fn refuse(s: &TextureDesc, d: &TextureDesc) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Why a copy that needs the kernel runs as a plain blit that loses the mirror instead: the kernel refuses the pair
+/// and the boxes have one size. `None` when it takes the kernel (a refused stretch is refused by [`encode`]).
+pub(super) fn mirror_lost(
+    (src, dst): (&TextureRegion, &TextureRegion),
+    s: &TextureDesc,
+    d: &TextureDesc,
+) -> Option<&'static str> {
+    refuse(s, d).filter(|_| src.size == dst.size)
 }
 
 /// Encodes the stretch of `src_box` of `src` onto `dst_box` of `dst` for `count` layers into the copy pass `cp`. The

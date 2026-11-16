@@ -113,6 +113,9 @@ pub struct GpuBackend {
     /// The last time written into a report (`gputs`). Its lock also orders the waits that write reports.
     ts: Mutex<gputs::Clock>,
     blit_failed: AtomicBool,
+    /// The current device origin (`device_modes`). A submit and a present capture it when the game makes them, since
+    /// their walk or display runs later.
+    device_lower_left: AtomicBool,
     /// The encoder thread, when `enc_thread` is on.
     enc: Option<Encoder>,
     /// The newest fence that was flushed.
@@ -205,6 +208,7 @@ impl GpuBackend {
                 queries: Mutex::new(Vec::new()),
                 ts: Mutex::new(gputs::Clock::default()),
                 blit_failed: AtomicBool::new(false),
+                device_lower_left: AtomicBool::new(true),
                 enc,
                 flushed: AtomicU64::new(0),
                 asked: AtomicU64::new(0),

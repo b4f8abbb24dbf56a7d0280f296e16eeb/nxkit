@@ -143,8 +143,10 @@ fn the_parameters_keep_the_mirror_axes_separate_from_the_filter() {
 fn copy_reference(src: TextureRegion, dst: TextureRegion, flags: u32, linear: bool) -> Vec<f32> {
     let b = params(&src, &dst, linear, flags);
     let w: Vec<u32> = b
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
     let source: Vec<f32> = (0..20).map(|v| v as f32).collect();
     let mut out = vec![-1.0; 10 * 7];
@@ -236,4 +238,63 @@ fn mirrored_nearest_maps_the_centre_before_selecting_a_texel() {
         .collect();
     assert_eq!(at, [3, 1]);
     assert_eq!(sample_at(0, 1, true), 0);
+}
+
+#[test]
+fn a_mirrored_copy_the_kernel_refuses_falls_back_to_a_blit_of_an_equal_size() {
+    use nxkit_metal::Format;
+    let colour = TextureDesc::compute_2d(8, 8, Format::Rgba8Unorm);
+    let depth = TextureDesc::compute_2d(8, 8, Format::Depth32Float);
+    let target = TextureDesc::render_target_2d(8, 8, Format::Rgba8Unorm);
+    let same = TextureRegion::whole(0, 0, [8, 8, 1]);
+    let half = TextureRegion::whole(0, 0, [4, 4, 1]);
+    assert_eq!(mirror_lost((&same, &same), &colour, &colour), None);
+    assert!(mirror_lost((&same, &same), &depth, &depth).is_some());
+    // A render target without shader write cannot take the kernel's write.
+    assert!(mirror_lost((&same, &same), &colour, &target).is_some());
+    // A stretch has no blit to fall back on: the kernel refuses it with a reason.
+    assert_eq!(mirror_lost((&same, &half), &depth, &depth), None);
+}
+
+#[test]
+fn copies_within_one_backing_meet_only_on_shared_texels() {
+    let at = |level, slice, origin: [u32; 2], size: [u32; 2]| TextureRegion {
+        level,
+        slice,
+        origin: [origin[0], origin[1], 0],
+        size: [size[0], size[1], 1],
+    };
+    // A mip chain downsample, level N to N + 1, reads and writes other texels.
+    assert!(!regions_meet(
+        &at(0, 0, [0, 0], [64, 64]),
+        &at(1, 0, [0, 0], [32, 32]),
+        1
+    ));
+    // Other slices, or disjoint boxes of one slice.
+    assert!(!regions_meet(
+        &at(0, 0, [0, 0], [8, 8]),
+        &at(0, 2, [0, 0], [8, 8]),
+        2
+    ));
+    assert!(!regions_meet(
+        &at(0, 0, [0, 0], [8, 8]),
+        &at(0, 0, [8, 0], [8, 8]),
+        1
+    ));
+    assert!(!regions_meet(
+        &at(0, 0, [0, 0], [8, 8]),
+        &at(0, 0, [0, 8], [4, 4]),
+        1
+    ));
+    // The same slice range and intersecting boxes race, and so does a copy onto itself.
+    assert!(regions_meet(
+        &at(0, 0, [0, 0], [8, 8]),
+        &at(0, 1, [4, 4], [8, 8]),
+        2
+    ));
+    assert!(regions_meet(
+        &at(2, 3, [1, 1], [4, 4]),
+        &at(2, 3, [1, 1], [4, 4]),
+        1
+    ));
 }
