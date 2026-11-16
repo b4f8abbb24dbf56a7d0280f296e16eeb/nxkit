@@ -37,9 +37,9 @@ impl Header {
         let mut it = ver.split('.').map(|x| x.parse::<u16>().ok());
         let maj = it.next()??;
         let min = it.next().flatten().unwrap_or(0);
-        // file version: AIR 2.9 -> 2.9, AIR 2.7 -> 2.8, AIR 2.5 -> 2.7
+        // file version: AIR 2.9 and 2.8 -> 2.9, AIR 2.7 -> 2.8, AIR 2.5 -> 2.7
         let minor = match air {
-            29 => 9,
+            29 | 28 => 9,
             27 => 8,
             25 => 7,
             _ => return None,
@@ -288,6 +288,8 @@ mod tests {
             (m.platform, m.version, m.os, m.os_version),
             (0x8001, (2, 9), 0x81, (27, 2))
         );
+        let m26 = Header::from_triple("air64_v28-apple-macosx26.0.0").expect("mac 26");
+        assert_eq!((m26.version, m26.os_version), ((2, 9), (26, 0)));
         let i = Header::from_triple("air64_v27-apple-ios18.0.0").expect("ios");
         assert_eq!(
             (i.platform, i.version, i.os, i.os_version),

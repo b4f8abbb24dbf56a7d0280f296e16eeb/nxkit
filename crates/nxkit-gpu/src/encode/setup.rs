@@ -85,23 +85,16 @@ pub(super) fn first_draw_covers(
             }
         )
     );
-    let [x, y, w, h] = d.dynamic.viewport.map(|v| v * scale);
-    let holds = |x0: f32, y0: f32, w0: f32, h0: f32| {
-        x0 <= 0.5 && y0 <= 0.5 && x0 + w0 >= size[0] as f32 - 0.5 && y0 + h0 >= size[1] as f32 - 0.5
-    };
-    let scissor_ok = d.dynamic.scissor.is_none_or(|[sx, sy, sw, shh]| {
-        holds(
-            sx as f32 * scale,
-            sy as f32 * scale,
-            sw as f32 * scale,
-            shh as f32 * scale,
-        )
-    });
+    let holds = |r: [f32; 4]| holds_target(r, size);
+    let scissor_ok = d
+        .dynamic
+        .scissor
+        .is_none_or(|r| holds(r.map(|v| v as f32 * scale)));
     let i = usize::from(slot).min(7);
     vertices_ok
         && d.attributes.is_empty()
         && d.streams.is_empty()
-        && holds(x, y, w, h)
+        && holds(d.dynamic.viewport.map(|v| v * scale))
         && scissor_ok
         && d.write_masks[i] & 0xf == 0xf
         && !d.blend[i].enable
@@ -109,6 +102,13 @@ pub(super) fn first_draw_covers(
         && !d.depth_stencil.stencil_test
         && !d.raster.alpha_to_coverage
         && d.raster.polygon_mode == 2
+}
+
+/// True when the rectangle `[x, y, w, h]` holds a target of `size`. A viewport flipped for a lower-left origin has a
+/// negative height and starts at its bottom row, so it is made upright first.
+pub(super) fn holds_target([x, y, w, h]: [f32; 4], size: [u32; 2]) -> bool {
+    let (y, h) = if h < 0.0 { (y + h, -h) } else { (y, h) };
+    x <= 0.5 && y <= 0.5 && x + w >= size[0] as f32 - 0.5 && y + h >= size[1] as f32 - 0.5
 }
 
 pub(super) fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {

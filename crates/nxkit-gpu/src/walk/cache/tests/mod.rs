@@ -1,6 +1,7 @@
 //! The tests of the template cache.
 
 mod keys;
+mod origin;
 mod walks;
 
 use super::*;

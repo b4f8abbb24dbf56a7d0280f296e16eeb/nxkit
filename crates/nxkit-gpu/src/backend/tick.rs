@@ -39,7 +39,7 @@ impl TickSink for GpuBackend {
             let mut pending = locked(&self.pending);
             let found = pending.iter().position(|p| p.number == number).map(|i| {
                 let p = pending.remove(i);
-                (p.texture, p.crop)
+                (p.texture, p.crop, p.origin_lower_left)
             });
             for p in pending.iter().filter(|p| p.number < number) {
                 nxkit_nvn::screen::shown(p.number, -1.0);
@@ -49,7 +49,7 @@ impl TickSink for GpuBackend {
             self.freed.notify_all();
             found
         };
-        let Some((texture, crop)) = texture else {
+        let Some((texture, crop, origin_lower_left)) = texture else {
             return;
         };
         present_diag(2);
@@ -100,6 +100,7 @@ impl TickSink for GpuBackend {
         let r = b.present(
             &texture,
             crop,
+            origin_lower_left,
             tick.drawable,
             // A tick of the immediate mode has no target: the frame shows as soon as it is drawn.
             (!tick.immediate).then_some(tick.target_presentation_timestamp),

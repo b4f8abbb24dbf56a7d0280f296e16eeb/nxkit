@@ -59,6 +59,8 @@ pub(super) struct Scalars {
     stencil: StencilValues,
     raster: Raster,
     viewport: [f32; 4],
+    viewport_swizzle: [u32; 4],
+    origins: [bool; 2],
     depth_range: [f32; 2],
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
@@ -88,6 +90,8 @@ impl Scalars {
             stencil: st.stencil,
             raster: st.raster,
             viewport: st.viewport,
+            viewport_swizzle: st.viewport_swizzle,
+            origins: st.origins,
             depth_range: st.depth_range,
             scissor: st.scissor,
             blend_color: st.blend_color,
@@ -115,6 +119,8 @@ impl Scalars {
             && (!has(sc::OFFSET) || bits3(r.offset) == bits3(o.offset))
             && (!has(sc::CLAMP) || r.clamp == o.clamp)
             && (!has(sc::VIEWPORT) || bits4(st.viewport) == bits4(self.viewport))
+            && (!has(sc::VIEWPORT_SWIZZLE) || st.viewport_swizzle == self.viewport_swizzle)
+            && (!has(sc::ORIGINS) || st.origins == self.origins)
             && (!has(sc::DEPTH_RANGE) || bits2(st.depth_range) == bits2(self.depth_range))
             && (!has(sc::SCISSOR) || st.scissor == self.scissor)
             && (!has(sc::BLEND_COLOR) || bits4(st.blend_color) == bits4(self.blend_color))
@@ -160,6 +166,12 @@ impl Scalars {
         }
         if has(sc::VIEWPORT) {
             st.viewport = self.viewport;
+        }
+        if has(sc::VIEWPORT_SWIZZLE) {
+            st.viewport_swizzle = self.viewport_swizzle;
+        }
+        if has(sc::ORIGINS) {
+            st.origins = self.origins;
         }
         if has(sc::DEPTH_RANGE) {
             st.depth_range = self.depth_range;

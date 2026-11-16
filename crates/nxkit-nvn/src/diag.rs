@@ -200,6 +200,10 @@ reasons! {
     /// The stretched copies among them that filtered linearly (`NVN_COPY_FLAGS_LINEAR_FILTER_BIT`). A count, not a
     /// loss.
     CopyScaledLinear => "copy.scaled-linear",
+    /// Texture copies with `MIRROR_X` or `MIRROR_Y` that the mirroring kernel cannot take (depth, stencil, compressed
+    /// or 3D textures, or textures a shader cannot read or write). A copy of an equal size runs as a blit without the
+    /// mirror. The example names the textures and the reason.
+    CopyMirrorLost => "copy.mirror-lost",
     /// Overlap: ranges of storage buffers that the GPU read and wrote from a copy of their own in this frame's batch
     /// slot (`nxkit-gpu` `rename`), counted per range and frame. A count, not a loss.
     OverlapRenamed => "overlap.renamed",
