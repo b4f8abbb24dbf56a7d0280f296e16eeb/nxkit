@@ -33,7 +33,7 @@ They never use a default path. See the README for an example.
 3. If the change alters output, show the byte comparison.
 4. Use the pull request template.
 
-A contribution is licensed under GPL-3.0-only, the licence of the repository.
+A contribution is licensed under MIT, the licence of the repository.
 
 ## Architecture
 
