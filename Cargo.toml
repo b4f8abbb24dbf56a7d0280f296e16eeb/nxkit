@@ -259,3 +259,9 @@ opt-level = 3
 
 [profile.release]
 debug = "line-tables-only"
+
+# The published binary (release.yml): fat LTO makes nxb about a fifth smaller (14.7 to 11.6 MB) but links for about
+# two minutes, so day-to-day release builds keep the plain release profile.
+[profile.dist]
+inherits = "release"
+lto = "fat"

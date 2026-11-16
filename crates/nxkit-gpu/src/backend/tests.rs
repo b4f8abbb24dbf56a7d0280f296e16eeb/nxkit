@@ -223,3 +223,21 @@ fn the_event_signals_of_a_frame_reach_the_counter_word_and_not_the_counter_repor
     assert_eq!(held.len(), 1, "only the value report waits for the GPU");
     assert_eq!(held[0].1.kind, crate::detail::REPORT_VALUE);
 }
+
+#[test]
+fn a_deferred_submit_walks_with_the_device_origin_captured_before_a_device_mode_change() {
+    let Some((_guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    backend.device_modes(true, false);
+    let first = backend.submit(1, &[], false).unwrap();
+    backend.device_modes(false, false);
+    let second = backend.submit(2, &[], true).unwrap();
+    backend.device_modes(true, false);
+    // Neither walk runs until after the mode changed, as with a held submit or the helper thread.
+    second();
+    first();
+    let walker = locked(&backend.walker);
+    assert_eq!(walker.origins(1), Some([true, false]));
+    assert_eq!(walker.origins(2), Some([false, true]));
+}
