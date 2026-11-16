@@ -83,9 +83,44 @@ impl Verdicts {
     }
 }
 
-/// `air_front::id()`: the front end's identity (crate version and output format generation).
+/// `air_front::id()`: the front end's identity (crate version and output format generation). It names the folders of
+/// the verdicts and allow lists, which hold for every macOS target.
 pub fn front_id() -> String {
     air_front::id()
+}
+
+/// The cache-key id of the own front end: [`front_id`], plus `+macosx26` when this Mac takes the macOS 26 target, so
+/// its libraries never share a key with Metal 4.1 ones.
+pub fn key_id() -> String {
+    format!("{}{}", front_id(), mac_tag())
+}
+
+/// The macOS target of this Mac: [`air_front::Target::macos_for`] its major version, as Apple's `metal` targets
+/// the host by default (macOS 26 refuses the Metal 4.1 libraries of the macOS 27 target).
+pub fn mac_target() -> air_front::Target {
+    air_front::Target::macos_for(host_major())
+}
+
+fn mac_tag() -> &'static str {
+    if host_major() < 27 { "+macosx26" } else { "" }
+}
+
+/// The major version of this Mac (`sw_vers -productVersion`), read once; 27 when it can't be read.
+fn host_major() -> u32 {
+    static MAJOR: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MAJOR.get_or_init(|| {
+        std::process::Command::new("/usr/bin/sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|o| parse_major(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or(27)
+    })
+}
+
+/// The major version of a `sw_vers -productVersion` line (`26.6.2` -> 26).
+fn parse_major(version: &str) -> Option<u32> {
+    version.trim().split('.').next()?.parse().ok()
 }
 
 /// `air_front` in process plus Apple's back half.
@@ -108,9 +143,9 @@ impl AirFrontEnd {
             target: if ios {
                 air_front::Target::ios()
             } else {
-                air_front::Target::macos()
+                mac_target()
             },
-            id: air_front::id(),
+            id: key_id(),
             text_ir: AtomicU64::new(0),
         }
     }
@@ -149,9 +184,9 @@ impl FrontEnd for AirFrontEnd {
     }
 }
 
-/// The identity of the raw container tier: `own-raw@` + [`front_id`]. It is the cache-key field of raw libraries.
+/// The identity of the raw container tier: `own-raw@` + [`key_id`]. It is the cache-key field of raw libraries.
 pub fn raw_id() -> String {
-    format!("own-raw@{}", air_front::id())
+    format!("own-raw@{}", key_id())
 }
 
 /// The allow list of the raw tier: SHA-256 of the MSL of every shader whose raw library passed the GPU differential
@@ -248,7 +283,7 @@ impl RawFrontEnd {
             target: if ios {
                 air_front::Target::ios()
             } else {
-                air_front::Target::macos()
+                mac_target()
             },
             id: raw_id(),
         }
@@ -319,6 +354,14 @@ mod tests {
             fe.compile(b"this is not metal {"),
             Err(FrontEndError::Reject(_))
         ));
+    }
+
+    #[test]
+    fn host_major_of_sw_vers() {
+        assert_eq!(parse_major("26.6.2\n"), Some(26));
+        assert_eq!(parse_major("27.2"), Some(27));
+        assert_eq!(parse_major(""), None);
+        assert!(key_id().starts_with(&front_id()));
     }
 
     #[test]
