@@ -35,6 +35,7 @@ fn request(keys: &std::path::Path, base: &std::path::Path, out: &std::path::Path
         allow_damaged: false,
         manifest: false,
         progress: None,
+        empty_romfs: false,
     }
 }
 

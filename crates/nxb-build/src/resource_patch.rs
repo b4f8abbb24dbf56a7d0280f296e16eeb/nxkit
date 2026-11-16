@@ -40,16 +40,37 @@ fn choices(
     title: &str,
     options: &[(String, String)],
 ) -> Result<(Vec<Chosen>, Vec<String>), String> {
+    choose(&patches_for(title)?, options)
+}
+
+fn patches_for(title: &str) -> Result<Vec<ResourcePatch>, String> {
     let patches = match u64::from_str_radix(title, 16) {
         Ok(id) => nxtitles::catalog()?
             .resolve(&nxtitle::TitleFacts::new(nxtitle::TitleId(id)))
             .resource_patches(),
         Err(_) => Vec::new(),
     };
-    choose(
-        &patches.iter().map(|f| f.value).collect::<Vec<_>>(),
-        options,
-    )
+    Ok(patches.iter().map(|f| f.value).collect())
+}
+
+/// Generic builds apply only named patches, and reject options this title does not provide.
+fn choose_explicit(
+    patches: &[ResourcePatch],
+    options: &[(String, String)],
+) -> Result<Vec<Chosen>, String> {
+    for (name, _) in options {
+        if !patches.iter().any(|p| p.option == *name) {
+            return Err(format!(
+                "--resource-patch {name}: this title has no such patch"
+            ));
+        }
+    }
+    let requested: Vec<_> = patches
+        .iter()
+        .filter(|p| options.iter().any(|(name, _)| name == p.option))
+        .copied()
+        .collect();
+    choose(&requested, options).map(|(chosen, _)| chosen)
 }
 
 fn choose(
@@ -112,6 +133,31 @@ pub(crate) fn overlay(
     for w in &warnings {
         say(w);
     }
+    write_overlay(b, say, ex, loose, &chosen)
+}
+
+/// Like [`overlay`], but applies only explicitly requested patches and rejects unknown options.
+pub(crate) fn overlay_explicit(
+    a: &Args,
+    b: &Build,
+    say: &dyn Fn(&str),
+    ex: &Path,
+    loose: &Path,
+) -> Result<Option<PathBuf>, String> {
+    if a.resource_patches.is_empty() {
+        return Ok(None);
+    }
+    let chosen = choose_explicit(&patches_for(&b.title)?, &a.resource_patches)?;
+    write_overlay(b, say, ex, loose, &chosen)
+}
+
+fn write_overlay(
+    b: &Build,
+    say: &dyn Fn(&str),
+    ex: &Path,
+    loose: &Path,
+    chosen: &[Chosen],
+) -> Result<Option<PathBuf>, String> {
     let work = ex.parent().and_then(Path::parent).unwrap_or(&b.work);
     let res = work.join("resources");
     let name = ex
@@ -141,11 +187,11 @@ pub(crate) fn overlay(
         ));
         return none();
     };
-    let stamp = stamp_of(&romfs, &chosen)?;
+    let stamp = stamp_of(&romfs, chosen)?;
     if std::fs::read_to_string(out.join(STAMP)).is_ok_and(|s| s == stamp) {
         return Ok(Some(out));
     }
-    let (files, warnings) = edited(&|path| romfs.read(path), &chosen);
+    let (files, warnings) = edited(&|path| romfs.read(path), chosen);
     for w in &warnings {
         say(w);
     }
