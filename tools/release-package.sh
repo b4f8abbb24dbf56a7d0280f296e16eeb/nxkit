@@ -1,6 +1,7 @@
 #!/bin/sh
 # Packs the release: signs the one binary, makes the ZIP file, the checksum file and the release notes.
 # Usage: tools/release-package.sh TAG            (for example v0.1.0, run after cargo build --release)
+# PROFILE=dist takes the binary of cargo build --profile dist (the release workflow does).
 # Environment: TARGET_DIR (default target).
 # The archive holds the one binary nxb, LICENSE and THIRD_PARTY.md.
 # There are no other program names and no links: every stage is a command of nxb.
@@ -8,7 +9,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 tag=${1:?usage: release-package.sh TAG}
-target=${TARGET_DIR:-${CARGO_TARGET_DIR:-target}}/release
+target=${TARGET_DIR:-${CARGO_TARGET_DIR:-target}}/${PROFILE:-release}
 version=${tag#v}
 name="nxb-${tag}-macos-arm64"
 
