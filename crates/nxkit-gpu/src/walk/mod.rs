@@ -158,7 +158,7 @@ pub(crate) struct Walker {
     counters: WalkCounters,
     programs: Programs,
     queues: FastMap<u64, State>,
-    /// The current device origin. Draws capture it when their submit is walked.
+    /// The device origin that the submit being walked captured when the game made it. Its draws take it.
     origin_lower_left: bool,
     out: FrameDetail,
     map: AddressMap,
@@ -246,14 +246,16 @@ impl Walker {
         self.programs.release(program);
     }
 
-    /// Sets the current device origin without changing the origin captured by a queue.
+    /// Sets the device origin for the next walks without changing the origin captured by a queue. The backend sets
+    /// the one its submit captured.
     pub(crate) fn device_origin(&mut self, lower_left: bool) {
         self.origin_lower_left = lower_left;
     }
 
-    /// The device origin that a present captures before it goes to the encoder thread.
-    pub(crate) fn current_origin(&self) -> bool {
-        self.origin_lower_left
+    /// The device and queue origins that the last walk of `queue` used.
+    #[cfg(test)]
+    pub(crate) fn origins(&self, queue: u64) -> Option<[bool; 2]> {
+        self.queues.get(&queue).map(|st| st.origins)
     }
 
     /// Sets the origin captured when this queue was initialized.

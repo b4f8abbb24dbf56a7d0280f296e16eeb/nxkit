@@ -95,6 +95,7 @@ impl Walker {
                 st.viewport = [f(x, 0), f(x, 1), f(x, 2), f(x, 3)];
                 self.track.write(cache::scalar_bit(sc::VIEWPORT));
             }
+            // Only viewport 0 is kept, as with the viewport, depth range and scissor: the draws use one viewport.
             ExtCode::ViewportSwizzle if x.arg == 0 => {
                 st.viewport_swizzle = [x.word(0), x.word(1), x.word(2), x.word(3)];
                 self.track.write(cache::scalar_bit(sc::VIEWPORT_SWIZZLE));

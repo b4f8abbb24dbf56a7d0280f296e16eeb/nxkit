@@ -72,7 +72,8 @@ impl Backend for GpuBackend {
     }
 
     fn device_modes(&self, origin_lower_left: bool, _depth_zero_to_one: bool) {
-        locked(&self.walker).device_origin(origin_lower_left);
+        self.device_lower_left
+            .store(origin_lower_left, Ordering::Release);
     }
 
     fn submit<'a>(
@@ -81,8 +82,12 @@ impl Backend for GpuBackend {
         handles: &'a [CommandHandle],
         origin_lower_left: bool,
     ) -> Option<Deferred<'a>> {
+        // The walk may run later (the helper thread, or a held submit from the gate pump): the draws take the device
+        // origin of the moment the game submitted, not that of a later `device_modes`.
+        let device = self.device_lower_left.load(Ordering::Acquire);
         Some(Box::new(move || {
             let mut walker = locked(&self.walker);
+            walker.device_origin(device);
             walker.queue_origin(queue, origin_lower_left);
             let mut mem = GuestView(self.guest.clone());
             walker.submit(&mut mem, queue, handles);
@@ -226,7 +231,7 @@ impl Backend for GpuBackend {
     fn present(&self, present: Present) -> BackendResult<()> {
         encpace::asked();
         self.asked.fetch_add(1, Ordering::AcqRel);
-        let origin_lower_left = locked(&self.walker).current_origin();
+        let origin_lower_left = self.device_lower_left.load(Ordering::Acquire);
         match &self.enc {
             Some(enc)
                 if enc.send(Msg::Present {
