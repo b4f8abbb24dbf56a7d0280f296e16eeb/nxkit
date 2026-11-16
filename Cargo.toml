@@ -6,7 +6,7 @@ members = ["crates/*", "titles/nxtitle", "titles/nxtitles", "titles/families/*",
 version = "0.10.0"
 edition = "2024"
 rust-version = "1.99"
-license = "GPL-3.0-only"
+license = "MIT"
 publish = false
 
 [workspace.lints.rust]
