@@ -75,6 +75,29 @@ pub fn open_romfs(
     open_romfs_with(ks, base_data, update, cache, false)
 }
 
+/// A version's RomFS for an extract request: [`open_romfs_with`], or with [`crate::Request::empty_romfs`] (the
+/// generic path) an update without a data section reads the base's RomFS and a base without one is an empty RomFS.
+pub fn open_romfs_or_empty(
+    ks: &KeySet,
+    base_data: Option<(Arc<dyn Storage>, crate::nca::FsHeader)>,
+    update: Option<&Nca>,
+    cache: &Arc<BlockCache>,
+    req: &crate::Request,
+) -> Result<VersionFs> {
+    if !req.empty_romfs {
+        return open_romfs_with(ks, base_data, update, cache, req.allow_damaged);
+    }
+    let update = update.filter(|u| u.sections[u.data_section()].is_some());
+    if update.is_none() && base_data.is_none() {
+        return Ok(VersionFs {
+            fs: Arc::new(IvfcStorage::empty()),
+            entries: Vec::new(),
+            indirect: None,
+        });
+    }
+    open_romfs_with(ks, base_data, update, cache, req.allow_damaged)
+}
+
 /// [`open_romfs`]; with `lenient` (`--allow-damaged`) data blocks that fail their hash are read as they are.
 pub fn open_romfs_with(
     ks: &KeySet,

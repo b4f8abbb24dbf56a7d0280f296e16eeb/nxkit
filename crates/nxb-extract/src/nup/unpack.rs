@@ -18,7 +18,7 @@ use nxb_split::SplitError;
 use nxb_split::src::Src;
 
 use super::extract::{control, exefs, pick};
-use super::{Nup, bad, scan};
+use super::{Nup, bad, scan_with};
 use crate::error::{ExtractError, Result};
 use crate::post::PostFile;
 use crate::split::{SplitOutputs, Templates, VersionIn};
@@ -52,6 +52,8 @@ pub struct UnpackRequest {
     pub split: Option<(PathBuf, SplitOutputs)>,
     /// Counts the file bytes written.
     pub progress: Option<Arc<crate::run::Counter>>,
+    /// The generic path: DLC records as [`super::scan_with`] reads them with `newest_dlc`.
+    pub newest_dlc: bool,
 }
 
 /// What the shader split did in the pass: the counters of the stage output.
@@ -316,10 +318,41 @@ fn put(n: &Nup, job: &Job, verify: bool, budget: &Budget) -> Result<(Option<Vec<
     Ok((None, 0))
 }
 
+/// Unpacks one exact DLC record, including from a DLC-only NUP. Checks every file hash.
+/// The output folder is replaced. The caller selects the title's application family.
+pub fn unpack_dlc(path: &Path, title: u64, version: u32, out: &Path, mem_limit: u64) -> Result<()> {
+    let n = Nup::open(path)?;
+    let records = super::addon_records(&n)?;
+    let index = records
+        .get(&(title, version))
+        .ok_or_else(|| bad(path, "selected DLC record is missing"))?;
+    let package = &n.packages[*index];
+    let (dirs, mut files) = walk(&n, package.romfs)?;
+    files.sort_by_key(|(_, i)| n.files[*i].off);
+    make_dirs(out, &dirs, 1)?;
+    let budget = Budget {
+        used: Mutex::new(0),
+        cv: Condvar::new(),
+        cap: mem_limit.max(CHUNK as u64),
+    };
+    for (rel, file) in files {
+        let job = Job {
+            file,
+            path: out.join(&rel),
+            rel,
+            split: false,
+        };
+        let (bytes, held) = put(&n, &job, true, &budget)?;
+        drop(bytes);
+        budget.give(held);
+    }
+    Ok(())
+}
+
 /// Unpacks one version (and every DLC) of a container into folders, with the shader split in the same pass.
 pub fn unpack_nup(r: &UnpackRequest) -> Result<Unpacked> {
     let n = Nup::open(&r.nup)?;
-    let s = scan(&n)?;
+    let s = scan_with(&n, r.newest_dlc)?;
     let (ver, k, d, mut notes) = pick(&n, &s, r.version)?;
     std::fs::create_dir_all(&r.out)
         .map_err(|e| ExtractError::io(format!("create {}", r.out.display()), e))?;

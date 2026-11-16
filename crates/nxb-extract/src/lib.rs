@@ -47,4 +47,4 @@ pub mod version;
 pub mod write;
 
 pub use error::{ExtractError, Result};
-pub use run::{Counter, Request, Summary, extract};
+pub use run::{Counter, Request, Summary, extract, extract_code_only_update};

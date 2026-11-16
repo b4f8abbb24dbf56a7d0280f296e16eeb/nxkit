@@ -14,9 +14,13 @@ use crate::keys::KeySet;
 use crate::nca::{Nca, open_package};
 use crate::storage::{FileStorage, Storage};
 use crate::version::{
-    base_data, display_version, open_romfs_with, pick_program, read_control, read_exefs, title_name,
+    base_data, display_version, open_romfs_or_empty, pick_program, read_control, read_exefs,
+    title_name,
 };
 use crate::write::{ImageJob, ImageResult, write_images};
+
+mod code_only;
+pub use code_only::extract_code_only_update;
 
 /// Bytes of image file data written so far and in all, for a caller's progress display. `total` is set once the
 /// images are planned, `done` grows as each file is written.
@@ -70,6 +74,8 @@ pub struct Request {
     pub manifest: bool,
     /// Where to count the bytes written, for a progress display.
     pub progress: Option<Arc<Counter>>,
+    /// The generic path (`--auto-analyze`): a Program without a data section is an empty RomFS, not an error.
+    pub empty_romfs: bool,
 }
 
 impl Default for Request {
@@ -92,6 +98,7 @@ impl Default for Request {
             allow_damaged: false,
             manifest: false,
             progress: None,
+            empty_romfs: false,
         }
     }
 }
@@ -264,7 +271,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 )?;
                 log.push_str(&h);
             }
-            let fs = open_romfs_with(&ks, shared.clone(), None, &cache, req.allow_damaged)?;
+            let fs = open_romfs_or_empty(&ks, shared.clone(), None, &cache, req)?;
             logs.push(log);
             jobs.push((req.out_base.clone(), fs));
         }
@@ -288,13 +295,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 &cache,
             )?);
         }
-        let fs = open_romfs_with(
-            &ks,
-            base_shared.clone(),
-            Some(up),
-            &cache,
-            req.allow_damaged,
-        )?;
+        let fs = open_romfs_or_empty(&ks, base_shared.clone(), Some(up), &cache, req)?;
         logs.push(log);
         jobs.push((out.clone(), fs));
     }

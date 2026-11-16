@@ -42,16 +42,37 @@ pub(crate) fn rewrite_all(
     st: &Standalone,
     profile: &str,
     rules: &str,
+    say: impl FnMut(&str),
+    progress: impl FnMut(u64, u64, &str),
+) -> Result<Vec<Built>, String> {
+    rewrite_with_loader(
+        st.modules,
+        profile,
+        rules,
+        |name| {
+            let path = exefs.join(name);
+            std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+        },
+        say,
+        progress,
+    )
+}
+
+/// Rewrites ordered modules loaded by the caller.
+pub(crate) fn rewrite_with_loader(
+    modules: &[(&str, &str)],
+    profile: &str,
+    rules: &str,
+    mut load: impl FnMut(&str) -> Result<Vec<u8>, String>,
     mut say: impl FnMut(&str),
     mut progress: impl FnMut(u64, u64, &str),
 ) -> Result<Vec<Built>, String> {
     let table = PatchTable::from_toml(&[(format!("{profile}.toml"), rules.to_string())])
         .map_err(|e| err("rules", e))?;
     let mut out = Vec::new();
-    for (index, (name, want_id)) in st.modules.iter().enumerate() {
-        progress(index as u64, st.modules.len() as u64, name);
-        let path = exefs.join(name);
-        let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    for (index, (name, want_id)) in modules.iter().enumerate() {
+        progress(index as u64, modules.len() as u64, name);
+        let data = load(name)?;
         let m = nso::load(&data, name).map_err(|e| err(name, e))?;
         let id = nxb_model::to_hex(&m.build_id[..16]);
         if id != *want_id {
