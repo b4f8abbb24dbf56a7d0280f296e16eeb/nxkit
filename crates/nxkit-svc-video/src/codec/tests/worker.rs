@@ -237,13 +237,17 @@ fn pictures_keep_their_order_and_timestamps() {
         if sent < 60 && r.submit(1000 + sent, false).is_ok() {
             sent += 1;
         }
-        // Take the filled buffers in the order of their release, and release them again.
+        // Take the filled buffers and release them again. The buffers ready at one poll count in the order of their
+        // time stamps, not their slots: the slots wrap, so 1040 can sit in slot 0 next to 1038 and 1039 in slots 6, 7.
+        let mut ready = Vec::new();
         for i in 0..8 {
             if let Ok((_, _, ts, _)) = r.properties(i) {
-                seen.push(ts);
+                ready.push(ts);
                 r.call(|d, fx| d.release(i, fx));
             }
         }
+        ready.sort_unstable();
+        seen.extend(ready);
         std::thread::sleep(Duration::from_millis(1));
     }
     let want: Vec<i64> = (1000..1060).collect();
