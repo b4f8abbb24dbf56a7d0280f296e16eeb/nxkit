@@ -111,6 +111,8 @@ pub(in crate::walk) mod sc {
     pub(in crate::walk) const BLEND_COLOR: usize = 16;
     pub(in crate::walk) const STRIDE_ROW: usize = 17;
     pub(in crate::walk) const STRIDE_IMAGE: usize = 18;
+    pub(in crate::walk) const VIEWPORT_SWIZZLE: usize = 19;
+    pub(in crate::walk) const ORIGINS: usize = 20;
 }
 
 /// The bit of the program slot `stage`.
@@ -179,6 +181,8 @@ pub(in crate::walk) const DRAW_READS: Bits = Bits::range(BLEND, 8)
         sc::OFFSET,
         sc::CLAMP,
         sc::VIEWPORT,
+        sc::VIEWPORT_SWIZZLE,
+        sc::ORIGINS,
         sc::DEPTH_RANGE,
         sc::SCISSOR,
         sc::BLEND_COLOR,

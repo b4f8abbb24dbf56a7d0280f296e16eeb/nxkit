@@ -3,6 +3,9 @@
 //! One full-screen triangle reads the game texture and writes the drawable. The layer is `Bgra8Unorm`, so a game
 //! texture in an sRGB format gets its encode here. A size that differs from the drawable is read by nearest pixel. Only
 //! the window's crop is shown when the game set one (a 1080p picture in the top left of a 1440p window texture).
+//! The device origin captured with each image selects its row direction within that crop.
+
+mod params;
 
 use nxkit_metal::{
     ArchiveConfig, ArgumentTable, ColorAttachment, Context, Drawable, Format, FrameRing,
@@ -21,22 +24,17 @@ vertex V blit_vs(uint id [[vertex_id]]) {
     v.uv = float2(p.x, 1.0 - p.y);
     return v;
 }
-// crop: x, y, width, height of the part of the texture to show; a zero size shows all of it.
-static float4 fetch(texture2d<float, access::read> t, float2 uv, constant int4& crop) {
-    float2 size = float2(t.get_width(), t.get_height());
-    float2 org = float2(0.0);
-    if (crop.z > 0 && crop.w > 0) {
-        org = float2(crop.xy);
-        size = min(float2(crop.zw), float2(t.get_width(), t.get_height()) - org);
-    }
-    uint2 p = uint2(org + clamp(uv * size, float2(0.0), size - 1.0));
+// rect: source origin and signed extent. bounds: the first and last source texels of the crop.
+struct Params { float4 rect; float4 bounds; };
+static float4 fetch(texture2d<float, access::read> t, float2 uv, constant Params& params) {
+    uint2 p = uint2(clamp(params.rect.xy + uv * params.rect.zw, params.bounds.xy, params.bounds.zw));
     return t.read(p);
 }
-fragment float4 blit_plain(V in [[stage_in]], texture2d<float, access::read> t [[texture(0)]], constant int4& crop [[buffer(0)]]) {
-    return fetch(t, in.uv, crop);
+fragment float4 blit_plain(V in [[stage_in]], texture2d<float, access::read> t [[texture(0)]], constant Params& params [[buffer(0)]]) {
+    return fetch(t, in.uv, params);
 }
-fragment float4 blit_srgb(V in [[stage_in]], texture2d<float, access::read> t [[texture(0)]], constant int4& crop [[buffer(0)]]) {
-    float4 c = fetch(t, in.uv, crop);
+fragment float4 blit_srgb(V in [[stage_in]], texture2d<float, access::read> t [[texture(0)]], constant Params& params [[buffer(0)]]) {
+    float4 c = fetch(t, in.uv, params);
     float3 lo = c.rgb * 12.92;
     float3 hi = 1.055 * pow(max(c.rgb, 0.0), float3(1.0 / 2.4)) - 0.055;
     return float4(select(hi, lo, c.rgb <= 0.0031308), c.a);
@@ -74,15 +72,21 @@ impl Blit {
         &mut self,
         src: &Texture,
         crop: nxkit_nvn::backend::Rect,
+        origin_lower_left: bool,
         drawable: Drawable,
         at: Option<f64>,
     ) -> Result<()> {
         let mut frame = self.ring.begin()?;
-        let words: Vec<u8> = [crop.x, crop.y, crop.width, crop.height]
-            .iter()
-            .flat_map(|v| v.to_le_bytes())
-            .collect();
-        let crop_addr = frame.scratch().push(&words)?;
+        let desc = src.desc();
+        let words: Vec<u8> = params::source(
+            [desc.width, desc.height],
+            [crop.x, crop.y, crop.width, crop.height],
+            origin_lower_left,
+        )
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+        let params_addr = frame.scratch().push(&words)?;
         let target = drawable.texture().clone();
         let pipeline = match src.desc().format {
             Format::Rgba8UnormSrgb | Format::Bgra8UnormSrgb => self.srgb.clone(),
@@ -113,7 +117,7 @@ impl Blit {
             })?;
             pass.encode(&RenderCommand::SetBuffer {
                 index: 0,
-                gpu_addr: crop_addr,
+                gpu_addr: params_addr,
             })?;
             pass.encode(&RenderCommand::Draw {
                 primitive: Primitive::Triangle,

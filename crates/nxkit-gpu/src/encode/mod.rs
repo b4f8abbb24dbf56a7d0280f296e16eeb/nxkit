@@ -6,8 +6,8 @@
 //! changed.
 //!
 //! The viewport and the scissor rectangle of NVN are in the size of the game. When the attachments are scaled (R19)
-//! the pass multiplies them by the scale of the frame. The NVN y origin of the viewport is passed on unchanged.
-//! Whether it needs a flip is unverified. The check is a frame with a viewport that does not cover the target.
+//! the pass multiplies them by the scale of the frame. The walker converts the viewport direction for the device
+//! origin and the supported viewport swizzle. Scissor coordinates still name the same memory rows.
 
 use std::sync::PoisonError;
 
