@@ -89,6 +89,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     private func applyActive() {
         guard let game else { return }
         let active = foreground && !interrupted
+        UIApplication.shared.isIdleTimerDisabled = active
         if !active { nxkit_set_active(false) }
         do {
             try AVAudioSession.sharedInstance().setActive(active, options: active ? [] : .notifyOthersOnDeactivation)
