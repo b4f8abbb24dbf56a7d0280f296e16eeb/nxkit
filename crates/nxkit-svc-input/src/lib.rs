@@ -92,6 +92,8 @@ pub fn set_focus(focused: bool) {
     FOCUSED.store(focused, Ordering::Relaxed);
     if !focused {
         mouse_release();
+        #[cfg(target_os = "ios")]
+        with(|input| input.virtual_pad = npad::RawPad::default());
     }
 }
 
@@ -215,4 +217,25 @@ mod tests {
         }]);
         set_touches(&[]);
     }
+}
+
+/// Replace the complete UIKit player-one controller snapshot.
+#[cfg(target_os = "ios")]
+pub fn set_virtual_pad(buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32) {
+    with(|input| {
+        input.virtual_pad = if focused() {
+            npad::RawPad {
+                buttons: buttons & 0xffff,
+                axes: [lx, ly, rx, ry].map(|v| {
+                    if v.is_finite() {
+                        v.clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    }
+                }),
+            }
+        } else {
+            npad::RawPad::default()
+        };
+    });
 }
