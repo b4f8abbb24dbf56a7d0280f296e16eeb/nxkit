@@ -23,7 +23,9 @@
 //! A library that does not match `game.json` is an error and never a reason to copy (R15). The reason for a fall back
 //! is written to the log.
 
+#[cfg(target_os = "macos")]
 use std::fs::File;
+#[cfg(target_os = "macos")]
 use std::os::unix::fs::FileExt;
 
 use crate::error::{HostError, Result};
@@ -31,8 +33,11 @@ use crate::layout::{self, Layout};
 use crate::macho::{self, Segment as MachSegment};
 use crate::manifest::Game;
 use crate::memory::{self, GuestMemory};
+#[cfg(target_os = "macos")]
 use crate::module::Prot;
-use crate::sys::{self, Dylib, PROT_RW, Reservation};
+#[cfg(target_os = "macos")]
+use crate::sys::PROT_RW;
+use crate::sys::{self, Dylib, Reservation};
 
 /// How the modules came to their addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +81,7 @@ fn read_images(game: &Game) -> Result<Vec<Vec<u8>>> {
 
 /// Maps read and write anonymous memory over every part of `[from, to)` that no segment of the library covers. A failure
 /// gives back what it mapped.
+#[cfg(target_os = "macos")]
 fn fill_gaps(
     res: &Reservation,
     segs: &[MachSegment],
@@ -134,44 +140,76 @@ fn attempt(game: &Game, dylib: &Dylib) -> Result<std::result::Result<Mapped, Str
         macho::verify(m, &segs)?;
     }
     let moved = game.moved(image.slide)?;
-    let floor = segs
-        .iter()
-        .map(|s| {
-            s.vmaddr
-                .wrapping_add_signed(image.slide)
-                .wrapping_add(s.vmsize)
-        })
-        .max()
-        .unwrap_or(0);
-    let layout = layout::plan(&moved, floor)?;
-    if !layout.fits_address_space() {
-        return Ok(Err(format!(
-            "the library at slide {:#x} would end at {:#x}, behind the {:#x} limit of the guest address space",
-            image.slide,
-            layout.all.end(),
-            layout::SPACE_END
-        )));
+    #[cfg(target_os = "ios")]
+    {
+        let tail = segs
+            .iter()
+            .find(|s| s.name == "__NX_HEAP")
+            .ok_or_else(|| HostError::Memory("missing iOS guest reservation".into()))?;
+        let floor = tail
+            .vmaddr
+            .checked_add_signed(image.slide)
+            .ok_or_else(|| HostError::Memory("guest slide overflow".into()))?;
+        let end = floor
+            .checked_add(tail.vmsize)
+            .ok_or_else(|| HostError::Memory("guest tail overflow".into()))?;
+        let layout = layout::plan(&moved, floor)?;
+        if tail.filesize != 0
+            || tail.initprot != 3
+            || !layout.fits_address_space()
+            || layout.all.end() > end
+            || layout.tls.start != floor
+        {
+            return Err(HostError::Memory("invalid iOS guest reservation".into()));
+        }
+        let res = sys::adopt_dyld_tail(layout.all.start, floor, layout.all.end())?;
+        Ok(Ok(Mapped {
+            game: moved,
+            layout,
+            res,
+        }))
     }
-    let tail_len = layout.all.end().saturating_sub(floor);
-    let res = match sys::reserve_tail(layout.all.start, floor, layout.all.end()) {
-        Ok(r) => r,
-        Err(e) => return Ok(Err(e.to_string())),
-    };
-    if let Err(e) = fill_gaps(&res, &segs, image.slide, layout.all.start, floor) {
-        let _ = res.unmap(floor, tail_len);
-        return Ok(Err(e.to_string()));
+    #[cfg(target_os = "macos")]
+    {
+        let floor = segs
+            .iter()
+            .map(|s| {
+                s.vmaddr
+                    .wrapping_add_signed(image.slide)
+                    .wrapping_add(s.vmsize)
+            })
+            .max()
+            .unwrap_or(0);
+        let layout = layout::plan(&moved, floor)?;
+        if !layout.fits_address_space() {
+            return Ok(Err(format!(
+                "the library at slide {:#x} would end at {:#x}, behind the {:#x} limit of the guest address space",
+                image.slide,
+                layout.all.end(),
+                layout::SPACE_END
+            )));
+        }
+        let tail_len = layout.all.end().saturating_sub(floor);
+        let res = match sys::reserve_tail(layout.all.start, floor, layout.all.end()) {
+            Ok(r) => r,
+            Err(e) => return Ok(Err(e.to_string())),
+        };
+        if let Err(e) = fill_gaps(&res, &segs, image.slide, layout.all.start, floor) {
+            let _ = res.unmap(floor, tail_len);
+            return Ok(Err(e.to_string()));
+        }
+        if image.slide != 0 {
+            eprintln!(
+                "nxkit-host: dyld moved the library by {:#x}, the loader relocates the modules",
+                image.slide
+            );
+        }
+        Ok(Ok(Mapped {
+            game: moved,
+            layout,
+            res,
+        }))
     }
-    if image.slide != 0 {
-        eprintln!(
-            "nxkit-host: dyld moved the library by {:#x}, the loader relocates the modules",
-            image.slide
-        );
-    }
-    Ok(Ok(Mapped {
-        game: moved,
-        layout,
-        res,
-    }))
 }
 
 fn via_dylib(game: &Game) -> Result<std::result::Result<(Mapped, Dylib), String>> {
@@ -195,6 +233,7 @@ fn via_dylib(game: &Game) -> Result<std::result::Result<(Mapped, Dylib), String>
 /// Reserves the whole guest range below `SPACE_END` and returns the game moved to where the system gave it, with its
 /// layout. The preferred address is tried first, if its range fits. Then the address that the system gives below the
 /// limit is tried. The slide is a multiple of `REGION_ALIGN`, so the regions keep the alignment that the layout needs.
+#[cfg(target_os = "macos")]
 pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
     let wanted = layout::plan(game, 0)?;
     let (start, len) = (wanted.all.start, wanted.all.len);
@@ -246,6 +285,7 @@ pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
 }
 
 /// The library file, its segments and where its code signature is.
+#[cfg(target_os = "macos")]
 struct CodeFile {
     file: File,
     segs: Vec<MachSegment>,
@@ -254,6 +294,7 @@ struct CodeFile {
 
 /// Opens the library, reads its load commands and checks every segment of every module against `game.json`. A
 /// library that is missing, not signed or different from `game.json` is an error (R15).
+#[cfg(target_os = "macos")]
 fn open_code_file(game: &Game) -> Result<CodeFile> {
     let path = game.path(&game.dylib);
     let missing = |e: std::io::Error| {
@@ -284,6 +325,7 @@ fn open_code_file(game: &Game) -> Result<CodeFile> {
     })
 }
 
+#[cfg(target_os = "macos")]
 fn via_file_map(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
     let code = open_code_file(game)?;
     sys::add_file_signature(&code.file, code.sig.0, code.sig.1).map_err(|e| {
@@ -342,18 +384,25 @@ pub fn place(game: &Game) -> Result<Placed> {
         }
         Err(reason) => reason,
     };
-    eprintln!(
-        "nxkit-host: not using {} ({reason}), copying the data segments and mapping the code from {} instead",
-        game.dylib.display(),
-        game.dylib.display()
-    );
-    let m = via_file_map(game, &images)?;
-    let mem = memory::init(m.layout, m.res)?;
-    Ok(Placed {
-        game: m.game,
-        placement: Placement::FileMap,
-        dylib: None,
-        mem,
-        images,
-    })
+    #[cfg(target_os = "ios")]
+    {
+        Err(HostError::Load(reason))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        eprintln!(
+            "nxkit-host: not using {} ({reason}), copying the data segments and mapping the code from {} instead",
+            game.dylib.display(),
+            game.dylib.display()
+        );
+        let m = via_file_map(game, &images)?;
+        let mem = memory::init(m.layout, m.res)?;
+        Ok(Placed {
+            game: m.game,
+            placement: Placement::FileMap,
+            dylib: None,
+            mem,
+            images,
+        })
+    }
 }

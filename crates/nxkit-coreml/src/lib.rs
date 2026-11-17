@@ -12,9 +12,9 @@
 //! - [`Model::predict_async`]: one prediction with several inputs and several outputs. The outputs are
 //!   `outputBackings`, so Core ML writes into the shared tensors. A completion callback tells when they are filled.
 //!
-//! The crate builds on macOS only. On other systems it is empty, so the workspace still builds there.
+//! The crate builds on macOS and iOS. On other systems it is empty, so the workspace still builds there.
 
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "ios"))]
 
 mod cache;
 mod error;

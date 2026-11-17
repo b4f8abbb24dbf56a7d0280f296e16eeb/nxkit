@@ -16,13 +16,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use nxkit_metal::Context;
-
-use crate::boot::Boot;
-use crate::error::{HostError, Result};
+use crate::error::Result;
 use crate::manifest::Game;
 use crate::sys::appkit::{self, AppEvents, MouseEvent, MouseMode, WindowConfig};
-use crate::{guestsym, loader, place, seams, stop, sys, thread};
+use crate::{seams, startup, stop, sys, thread};
 
 /// What the command line asks for.
 #[derive(Debug, Clone)]
@@ -53,60 +50,19 @@ impl AppEvents for Events {
     }
 }
 
-fn check_kernel_service(mask: u64) -> Result<()> {
-    if mask & nxkit_rt::Service::Kernel.bit() == 0 {
-        return Err(HostError::Manifest(
-            "\"services\" must include \"kernel\", because every svc of the game goes through it"
-                .into(),
-        ));
-    }
-    Ok(())
-}
-
 /// Runs the game. It returns when the window or the game has stopped.
 pub fn run(opts: &Options) -> Result<()> {
     sys::crashsig::install();
     let game = Game::read(&opts.root)?;
-    let mask = loader::service_mask(&game.services)?;
-    check_kernel_service(mask)?;
-    let placed = place::place(&game)?;
-    let mem = placed.mem;
-    let (layout, settings) = (mem.layout, placed.game.settings.clone());
-
-    // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
-    let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
-    let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
-    mem.keep_gpu_pages();
-    mem.seal()?;
-    crate::memreport::start(&ctx, &layout);
-
-    nxkit_rt::nxkit_init(mask);
-    sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
-    seams::register_kernel()?;
-    seams::register_server(mask)?;
-    seams::init_services(&placed.game, mask)?;
-
-    let mut loaded = loader::load(placed, mask)?;
-    eprintln!(
-        "nxkit-host: {} modules loaded ({:?}), {} exports",
-        loaded.game.modules.len(),
-        loaded.placement,
-        loaded.exports.len()
-    );
-    sys::crashsig::set_modules(
-        loaded
-            .game
-            .modules
-            .iter()
-            .map(|m| {
-                let start = m.base.wrapping_add_signed(m.low);
-                (m.name.clone(), start, start + m.span)
-            })
-            .collect(),
-    );
-    nxkit_metal::set_pc_namer(sys::crashsig::guest_place);
-    guestsym::set(std::mem::take(&mut loaded.exports));
-    let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
+    let mask = startup::service_mask(&game)?;
+    let startup::Prepared {
+        loaded,
+        memory: gpu_memory,
+        context: ctx,
+        layout,
+        boot,
+    } = startup::prepare(&game, mask, &game.root)?;
+    let settings = loaded.game.settings.clone();
 
     crate::refresh::configure(crate::refresh::Request::from_settings(&settings));
     let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
