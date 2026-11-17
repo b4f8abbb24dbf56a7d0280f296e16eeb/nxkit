@@ -64,16 +64,6 @@ struct Mapped {
     res: Reservation,
 }
 
-fn read_images(game: &Game) -> Result<Vec<Vec<u8>>> {
-    game.modules
-        .iter()
-        .map(|m| {
-            let path = game.path(&m.image);
-            std::fs::read(&path).map_err(|e| HostError::io(&path, &e))
-        })
-        .collect()
-}
-
 /// Maps read and write anonymous memory over every part of `[from, to)` that no segment of the library covers. A failure
 /// gives back what it mapped.
 fn fill_gaps(
@@ -328,7 +318,7 @@ fn via_file_map(game: &Game, images: &[Vec<u8>]) -> Result<Mapped> {
 ///
 /// `game` has the preferred addresses of `game.json`. The result has the real ones.
 pub fn place(game: &Game) -> Result<Placed> {
-    let images = read_images(game)?;
+    let images = game.read_images()?;
     let reason = match via_dylib(game)? {
         Ok((m, dylib)) => {
             let mem = memory::init(m.layout, m.res)?;

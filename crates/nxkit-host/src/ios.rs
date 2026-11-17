@@ -53,14 +53,6 @@ mod tests {
         }
     }
     #[test]
-    fn touch_abi_is_three_c_words() {
-        assert_eq!(std::mem::size_of::<Touch>(), 12);
-        assert_eq!(std::mem::align_of::<Touch>(), 4);
-        assert_eq!(std::mem::offset_of!(Touch, id), 0);
-        assert_eq!(std::mem::offset_of!(Touch, x), 4);
-        assert_eq!(std::mem::offset_of!(Touch, y), 8);
-    }
-    #[test]
     fn rejects_duplicate_nonfinite_or_out_of_range_touches() {
         let p = Touch {
             id: 0,

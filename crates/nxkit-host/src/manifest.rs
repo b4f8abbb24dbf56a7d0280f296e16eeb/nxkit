@@ -238,6 +238,17 @@ fn main_thread(v: &Value) -> Result<MainThread> {
 }
 
 impl Game {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    pub(crate) fn read_images(&self) -> Result<Vec<Vec<u8>>> {
+        self.modules
+            .iter()
+            .map(|module| {
+                let path = self.path(&module.image);
+                std::fs::read(&path).map_err(|e| HostError::io(&path, &e))
+            })
+            .collect()
+    }
+
     /// Reads `<root>/game.json`.
     pub fn read(root: &Path) -> Result<Game> {
         let path = root.join("game.json");

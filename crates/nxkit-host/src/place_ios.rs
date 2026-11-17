@@ -56,14 +56,7 @@ pub fn place(game: &Game) -> Result<Placed> {
             "Guest span cannot fit the 39-bit address space".into(),
         ));
     }
-    let images = game
-        .modules
-        .iter()
-        .map(|m| {
-            let p = game.path(&m.image);
-            std::fs::read(&p).map_err(|e| HostError::io(&p, &e))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let images = game.read_images()?;
     let dylib = Dylib::open(&game.path(&game.dylib))?;
     let (game, layout, res) = match sys::ios::map(game, &dylib) {
         Ok(v) => v,
