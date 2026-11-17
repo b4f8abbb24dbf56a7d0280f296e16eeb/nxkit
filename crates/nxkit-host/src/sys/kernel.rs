@@ -60,17 +60,7 @@ pub fn kernel_init(
         u64::from_str_radix(game.title_id.trim_start_matches("0x"), 16).map_err(|_| {
             HostError::Manifest(format!("title_id {:?} is not a hex number", game.title_id))
         })?;
-    let modules: Vec<nxkit_rt::NxkitModule> = game
-        .modules
-        .iter()
-        .map(|m| nxkit_rt::NxkitModule {
-            base: m.base.saturating_add(m.text.offset),
-            text: m.text.size,
-            rodata: m.rodata.size,
-            data: m.data.size,
-            bss: m.bss_size,
-        })
-        .collect();
+    let modules: Vec<nxkit_rt::NxkitModule> = game.modules.iter().map(kernel_module).collect();
     let mem = &game.memory;
     let memory = nxkit_rt::NxkitMemoryConfig {
         base: layout.all.start,
@@ -111,5 +101,54 @@ pub fn kernel_init(
     match unsafe { nxkit_rt::nxkit_kernel_init(&config) } {
         0 => Ok(()),
         r => Err(HostError::App(format!("nxkit_kernel_init returned {r}"))),
+    }
+}
+
+fn kernel_module(m: &crate::module::Module) -> nxkit_rt::NxkitModule {
+    nxkit_rt::NxkitModule {
+        base: m.base,
+        text_offset: m.text.offset,
+        text: m.text.size,
+        rodata_offset: m.rodata.offset,
+        // DATA is widened down to a host page boundary by the build.
+        rodata: if m.data.size > 0 || m.bss_size > 0 {
+            m.rodata
+                .size
+                .min(m.data.offset.saturating_sub(m.rodata.offset))
+        } else {
+            m.rodata.size
+        },
+        data_offset: m.data.offset,
+        data: m.data.size,
+        bss: m.bss_size,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kernel_module_clips_read_only_overlap_with_widened_data() {
+        let game = Game::parse(
+            std::path::Path::new("/test"),
+            &crate::manifest::sample("", crate::module::samples::NEAR),
+        )
+        .unwrap();
+        let mut module = game.modules[0].clone();
+        module.rodata.offset = 0x4000;
+        module.rodata.size = 0x7000;
+        module.data.offset = 0x8000;
+        module.data.size = 0x4000;
+        module.bss_size = 0x800;
+        let mapped = kernel_module(&module);
+        assert_eq!((mapped.rodata_offset, mapped.rodata), (0x4000, 0x4000));
+        assert_eq!(
+            (mapped.data_offset, mapped.data, mapped.bss),
+            (0x8000, 0x4000, 0x800)
+        );
+        module.data.size = 0;
+        module.bss_size = 0;
+        assert_eq!(kernel_module(&module).rodata, 0x7000);
     }
 }

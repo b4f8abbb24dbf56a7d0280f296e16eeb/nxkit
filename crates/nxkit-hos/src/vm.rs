@@ -26,16 +26,22 @@ pub(crate) const TLR_THREAD_ID: u64 = 0x110;
 /// Where the thread-local region holds the address of the thread object.
 pub(crate) const TLR_THREAD_OBJECT: u64 = 0x1F8;
 
-/// One module in the front region. Its segments follow each other: text, rodata, data, then bss. Sizes round up to
-/// whole 4 KiB pages.
+/// One module in the front region. Section offsets preserve gaps in the NSO layout.
+/// Text, read-only data and combined data and bss round up to whole 4 KiB pages.
 #[derive(Clone, Copy, Debug)]
 pub struct Module {
-    /// The address of the text segment.
+    /// The module base address.
     pub base: u64,
+    /// The text offset from the module base.
+    pub text_offset: u64,
     /// The size of the text segment, which is executable.
     pub text: u64,
+    /// The read-only data offset from the module base.
+    pub rodata_offset: u64,
     /// The size of the read-only data segment.
     pub rodata: u64,
+    /// The writable data offset from the module base.
+    pub data_offset: u64,
     /// The size of the data segment.
     pub data: u64,
     /// The size of the bss segment.
@@ -189,19 +195,39 @@ impl Vm {
 
         let mut map = MemoryMap::new();
         for m in &cfg.modules {
-            let text = m.base + align_up(m.text, PAGE_SIZE);
-            let ro = text + align_up(m.rodata, PAGE_SIZE);
-            let data = ro + align_up(m.data, PAGE_SIZE);
-            let bss = data + align_up(m.bss, PAGE_SIZE);
-            if !m.base.is_multiple_of(PAGE_SIZE) || !front.contains(&m.base) || bss > front.end {
-                return Err(format!(
-                    "module {:#x} is not inside the front region",
-                    m.base
-                ));
+            let bad = || format!("module {:#x} has an invalid section layout", m.base);
+            let section = |offset: u64, size: u64| -> Result<(u64, u64), String> {
+                let start = m.base.checked_add(offset).ok_or_else(bad)?;
+                let end = start.checked_add(size).ok_or_else(bad)?;
+                let end = end.checked_add(PAGE_SIZE - 1).ok_or_else(bad)? & !(PAGE_SIZE - 1);
+                if !start.is_multiple_of(PAGE_SIZE) || start < m.base || end > front.end {
+                    return Err(bad());
+                }
+                Ok((start, end))
+            };
+            let text = section(m.text_offset, m.text)?;
+            let ro = section(m.rodata_offset, m.rodata)?;
+            let data = section(m.data_offset, m.data.checked_add(m.bss).ok_or_else(bad)?)?;
+            if !m.base.is_multiple_of(PAGE_SIZE)
+                || !front.contains(&m.base)
+                || (m.text > 0 && m.rodata > 0 && text.1 > ro.0)
+                || (m.text > 0 && data.0 < data.1 && text.1 > data.0)
+                || (m.rodata > 0 && data.0 < data.1 && ro.1 > data.0)
+            {
+                return Err(bad());
             }
-            map.set(m.base, text, state::CODE, perm::RX, 0, 0);
-            map.set(text, ro, state::CODE, perm::R, 0, 0);
-            map.set(ro, bss, state::CODE_DATA, perm::RW, 0, 0);
+            // Process code starts inaccessible. The loader grants access only to sections.
+            map.set(
+                m.base,
+                text.1.max(ro.1).max(data.1),
+                state::CODE,
+                perm::NONE,
+                0,
+                0,
+            );
+            map.set(text.0, text.1, state::CODE, perm::RX, 0, 0);
+            map.set(ro.0, ro.1, state::CODE, perm::R, 0, 0);
+            map.set(data.0, data.1, state::CODE_DATA, perm::RW, 0, 0);
         }
         map.set(
             cfg.tls.0,

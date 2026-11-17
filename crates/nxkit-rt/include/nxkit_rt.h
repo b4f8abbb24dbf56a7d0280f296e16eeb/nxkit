@@ -68,9 +68,12 @@ typedef struct nxkit_role_rule {
 } nxkit_role_rule;
 
 typedef struct nxkit_module {
-    uint64_t base;   /* address of the text segment */
+    uint64_t base;   /* module base, section offsets are relative to it */
+    uint64_t text_offset;
     uint64_t text;
+    uint64_t rodata_offset;
     uint64_t rodata;
+    uint64_t data_offset;
     uint64_t data;
     uint64_t bss;
 } nxkit_module;

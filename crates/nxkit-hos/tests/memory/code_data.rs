@@ -56,8 +56,11 @@ fn module_build(host: Arc<dyn HostSpace>, mem: Arc<FakeMemory>) -> Rig {
         mem,
         vec![nxkit_hos::Module {
             base: MODULE,
+            text_offset: 0,
             text: 0x1000,
+            rodata_offset: 0x1000,
             rodata: 0x1000,
+            data_offset: 0x2000,
             data: 0x1000,
             bss: 0x8000,
         }],
@@ -152,8 +155,11 @@ fn mixed_code_data_and_normal_source_is_rejected() {
         mem,
         vec![nxkit_hos::Module {
             base: HEAP - 0x1000,
+            text_offset: 0,
             text: 0,
+            rodata_offset: 0,
             rodata: 0,
+            data_offset: 0,
             data: 0x1000,
             bss: 0,
         }],
@@ -164,4 +170,39 @@ fn mixed_code_data_and_normal_source_is_rejected() {
         code(KResult::INVALID_CURRENT_MEMORY)
     );
     assert_eq!(r.query(STACK).2, 0);
+}
+
+#[test]
+fn sparse_module_sections_keep_offsets_and_inaccessible_code_gaps() {
+    let mem = Arc::new(FakeMemory::new(BASE, (SIZE / 4) as usize));
+    let r = build_modules(
+        mem.clone(),
+        mem.clone(),
+        mem,
+        vec![nxkit_hos::Module {
+            base: MODULE,
+            text_offset: 0,
+            text: 0x1800,
+            rodata_offset: 0x4000,
+            rodata: 0x1800,
+            data_offset: 0x8000,
+            data: 0x1800,
+            bss: 0x800,
+        }],
+    );
+    for (offset, size, state, permission) in [
+        (0, 0x2000, 3, 5),
+        (0x2000, 0x2000, 3, 0),
+        (0x4000, 0x2000, 3, 1),
+        (0x6000, 0x2000, 3, 0),
+        (0x8000, 0x2000, 4, 3),
+    ] {
+        assert_eq!(
+            r.query(MODULE + offset),
+            (MODULE + offset, size, state, 0, permission)
+        );
+    }
+    // DATA and BSS share a page. Separate rounding would claim the next page too.
+    assert_eq!(r.query(MODULE + 0xa000).2, 0x10);
+    assert_eq!(r.svc(0x02, &[MODULE + 0x8000, 0x2000, 1])[0], 0);
 }

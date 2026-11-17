@@ -71,12 +71,18 @@ pub struct NxkitKernelConfig {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct NxkitModule {
-    /// The address of the text segment.
+    /// The module base address.
     pub base: u64,
+    /// The text offset from the module base.
+    pub text_offset: u64,
     /// The size of the text segment.
     pub text: u64,
+    /// The read-only data offset from the module base.
+    pub rodata_offset: u64,
     /// The size of the read-only data segment.
     pub rodata: u64,
+    /// The writable data offset from the module base.
+    pub data_offset: u64,
     /// The size of the data segment.
     pub data: u64,
     /// The size of the bss segment.
@@ -331,8 +337,11 @@ unsafe fn read_memory(memory: *const NxkitMemoryConfig) -> Result<Option<MemoryC
             .iter()
             .map(|x| Module {
                 base: x.base,
+                text_offset: x.text_offset,
                 text: x.text,
+                rodata_offset: x.rodata_offset,
                 rodata: x.rodata,
+                data_offset: x.data_offset,
                 data: x.data,
                 bss: x.bss,
             })
