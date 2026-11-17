@@ -59,7 +59,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ));
     }
     if a.dry_run {
-        p.say("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for the selected platform. Runtime compatibility is not certified.");
+        p.say(&format!("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for {}. Runtime compatibility is not certified.", if ios { "iOS" } else { "Mac" }));
         return Ok(());
     }
     if let Some(out) = &a.out {
@@ -114,28 +114,33 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
-    let shaders = stage(
-        p,
-        "shaders",
-        "discover and translate shaders for the selected platform",
-        || {
-            let files = auto_shaders::discover(&game.modules, &game.files, ios)?;
-            let count = files
-                .iter()
-                .filter(|(n, _)| n.ends_with(".metallib"))
-                .count();
-            Ok((
-                files,
-                format!("{count} Metal libraries (zero does not prove no shaders are needed)"),
-            ))
-        },
-    )?;
+    let shader_step = if ios {
+        "discover and translate shaders for iOS"
+    } else {
+        "discover and translate shaders for macOS"
+    };
+    let shaders = stage(p, "shaders", shader_step, || {
+        let files = auto_shaders::discover(&game.modules, &game.files, ios)?;
+        let count = files
+            .iter()
+            .filter(|(n, _)| n.ends_with(".metallib"))
+            .count();
+        Ok((
+            files,
+            format!("{count} Metal libraries (zero does not prove no shaders are needed)"),
+        ))
+    })?;
     // Claim the staging folder instead of reusing a folder or following a symlink.
     if let Some(parent) = partial.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
     }
     std::fs::create_dir(&partial).map_err(|e| io(&partial, e))?;
-    stage(p, "link", "make app and guest dylib", || {
+    let link_step = if ios {
+        "make iOS app and guest dylib"
+    } else {
+        "make Mac app and sign guest dylib"
+    };
+    stage(p, "link", link_step, || {
         let run = if ios {
             ipa::skeleton(&partial, &host, name, &id)?
         } else {
@@ -166,9 +171,22 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         } else {
             link::write_dylib(&run, &analyzed.modules, |_, _| {})?;
         }
-        Ok(((), "host and guest linked".into()))
+        Ok((
+            (),
+            if ios {
+                "host and guest linked"
+            } else {
+                "Mac host and guest linked"
+            }
+            .into(),
+        ))
     })?;
-    stage(p, "bundle", "publish new app", || {
+    let bundle_step = if ios {
+        "publish unsigned IPA"
+    } else {
+        "sign and publish new app"
+    };
+    stage(p, "bundle", bundle_step, || {
         if ios {
             ipa::finish(&partial, &out, false)?;
         } else {

@@ -422,16 +422,16 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         layout::bases(&shapes)
     };
     let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(bases).collect();
-    let npdm_bytes =
-        std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
-    let main_thread = npdm::main_thread(&npdm_bytes)?;
-    stage(p, "manifest", "game.json", || {
+    let main_thread = stage(p, "manifest", "game.json", || {
         if !t.services.contains(&"kernel") {
             return Err(format!(
                 "the title module of {:016X} does not list the kernel service, which the host needs",
                 t.id
             ));
         }
+        let npdm_bytes =
+            std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
+        let main_thread = npdm::main_thread(&npdm_bytes)?;
         let m = manifest::Manifest {
             title_id: t.id,
             name: t.name,
@@ -468,7 +468,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             })
         })?;
         Ok((
-            (),
+            main_thread,
             format!(
                 "{} modules, {} NVN functions, {} services",
                 mods.len(),

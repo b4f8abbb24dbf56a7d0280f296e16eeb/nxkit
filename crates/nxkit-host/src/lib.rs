@@ -68,12 +68,15 @@ pub use error::{HostError, Result};
 pub use manifest::Game;
 
 /// Native application paths and the touch/session interface of the UIKit shell.
+#[cfg(any(target_os = "ios", test))]
 pub mod api;
+#[cfg(any(target_os = "ios", test))]
 pub mod image;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod input;
 #[cfg(target_os = "ios")]
 pub mod session;
+#[cfg(any(target_os = "ios", test))]
 pub mod tail;
 
 /// The C ABI used by the native iOS application shell.
