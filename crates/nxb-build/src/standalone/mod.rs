@@ -315,6 +315,9 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), extract(a, &b, p, version, t.st.romfs_marker)?))
     })?;
     let ver_dir = work.join("extract").join(format!("v{version}"));
+    if let Some(shell) = &shell {
+        shell.icon(&run_dir, &ver_dir.join("icon.jpg"))?;
+    }
     let exefs = ver_dir.join("ExeFS");
     let img = ver_dir.join("RomFS.img");
     let aoc = stage(p, "romfs", "RomFS", || {
