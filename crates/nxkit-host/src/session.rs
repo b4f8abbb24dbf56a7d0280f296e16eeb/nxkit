@@ -1,10 +1,9 @@
 //! One process-lifetime game, connected to UIKit and the real nxkit kernel/GPU.
 use crate::api::{Paths, Touch};
 use crate::{
-    Game, HostError, Result, boot::Boot, guestsym, loader, pipecache, place, refresh, seams, stop,
-    sys, thread,
+    Game, HostError, Result, loader, pipecache, refresh, seams, startup, stop, sys, thread,
 };
-use nxkit_metal::{Context, DisplayLink, Presenter};
+use nxkit_metal::{DisplayLink, Presenter};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_quartz_core::CAMetalLayer;
 use std::sync::{
@@ -87,12 +86,8 @@ fn start_checked(
 ) -> Result<GameSession> {
     let mtm = MainThreadMarker::new()
         .ok_or_else(|| HostError::App("Game session requires UIKit's main thread".into()))?;
-    eprintln!("nxkit-launch: reading game manifest");
     let game = Game::read(&paths.bundle)?;
-    let mask = loader::service_mask(&game.services)?;
-    if mask & nxkit_rt::Service::Kernel.bit() == 0 {
-        return Err(HostError::Manifest("services must include kernel".into()));
-    }
+    let mask = startup::service_mask(&game)?;
     if STARTED.swap(true, Ordering::AcqRel) {
         return Err(HostError::App(
             "A game already initialized this process; relaunch to restart".into(),
@@ -101,41 +96,19 @@ fn start_checked(
     pipecache::configure(&paths.cache.join(&game.title_id))?;
     // Establish foreground=false before guest audio can open an output.
     nxkit_svc_audio::set_active(false).map_err(HostError::App)?;
-    eprintln!("nxkit-launch: placing guest memory");
-    let placed = place::place(&game)?;
-    let mem = placed.mem;
-    let layout = mem.layout;
-    let settings = placed.game.settings.clone();
-    eprintln!("nxkit-launch: creating Metal context");
-    let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
-    eprintln!(
-        "nxkit: guest GPU span {} bytes; device buffer limit {} bytes",
-        mem.gpu_range().len,
-        ctx.max_buffer_length()
-    );
-    eprintln!("nxkit-launch: mapping guest GPU memory");
-    let memory = Arc::new(mem.gpu_memory(&ctx)?);
-    mem.keep_gpu_pages();
-    mem.seal()?;
-    nxkit_rt::nxkit_init(mask);
-    eprintln!("nxkit-launch: initializing kernel");
-    sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
-    seams::register_kernel()?;
-    seams::register_server(mask)?;
-    eprintln!("nxkit-launch: initializing services");
-    seams::init_services_with_data(&placed.game, mask, &paths.data)?;
-    eprintln!("nxkit-launch: loading game modules");
-    let mut loaded = loader::load(placed, mask)?;
-    guestsym::set(std::mem::take(&mut loaded.exports));
-    eprintln!("nxkit-launch: resolving guest boot");
-    let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
+    let startup::Prepared {
+        loaded,
+        memory,
+        context: ctx,
+        layout,
+        boot,
+    } = startup::prepare(&game, mask, &paths.data)?;
+    let settings = loaded.game.settings.clone();
     refresh::configure(refresh::Request::from_settings(&settings));
     let rate = refresh::apply(maximum_fps);
-    eprintln!("nxkit-launch: creating frame hooks");
     let hooks = seams::frame_hooks(&ctx, &memory, &paths.bundle, &settings)?;
     let presenter = sys::ios::presenter(&ctx, &layer)
         .map_err(|e| HostError::App(format!("Metal presentation: {e}")))?;
-    eprintln!("nxkit-launch: creating display link");
     let link = DisplayLink::new(mtm, &presenter, rate, hooks);
     link.set_paused(true);
     let session = GameSession {
@@ -145,7 +118,6 @@ fn start_checked(
         link,
         stopped: false,
     };
-    eprintln!("nxkit-launch: starting guest main thread");
     thread::start_main(boot, layout.main_stack.end())?;
     Ok(session)
 }

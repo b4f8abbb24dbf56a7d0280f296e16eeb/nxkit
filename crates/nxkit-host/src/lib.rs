@@ -53,6 +53,8 @@ pub mod run;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod seams;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
+mod startup;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(unsafe_code)]
 pub mod sys;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
