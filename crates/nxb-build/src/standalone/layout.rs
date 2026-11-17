@@ -269,12 +269,8 @@ impl Shape {
     }
 }
 
-/// The bases of the modules in load order, in a row from [`GUEST_BASE`] with a gap between them.
-pub(crate) fn bases(shapes: &[Shape]) -> Vec<u64> {
-    bases_from(shapes, GUEST_BASE)
-}
-
-pub(crate) fn bases_from(shapes: &[Shape], first: u64) -> Vec<u64> {
+/// The bases of the modules in load order, in a row from `first` with a gap between them.
+pub(crate) fn bases(shapes: &[Shape], first: u64) -> Vec<u64> {
     let mut cursor = first;
     let mut out = Vec::with_capacity(shapes.len());
     for s in shapes {
@@ -364,7 +360,7 @@ mod tests {
     fn bases_do_not_overlap() {
         let a = shape("main", 0, 0x32000, &far()).unwrap();
         let b = shape("sdk", 1, 0x70000, &near()).unwrap();
-        let bs = bases(&[a.clone(), b.clone()]);
+        let bs = bases(&[a.clone(), b.clone()], GUEST_BASE);
         assert!(bs[0] as i64 + a.extent().0 >= GUEST_BASE as i64);
         assert!(bs[1] as i64 + b.extent().0 >= (bs[0] + a.extent().1) as i64);
         assert_eq!(bs[0] % MODULE_ALIGN, 0);

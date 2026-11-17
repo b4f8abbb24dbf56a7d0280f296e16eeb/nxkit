@@ -58,12 +58,7 @@ fn padded(s: &[u8], to: usize) -> Vec<u8> {
 }
 
 /// Writes the dylib. `segs` must be in ascending address order without overlap. `uuid` is the image's identity.
-pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
-    write_for(segs, uuid, None)
-}
-
-/// Device images reserve anonymous memory within the signed dyld image.
-pub(crate) fn write_for(
+pub(crate) fn write(
     segs: &[Seg],
     uuid: [u8; 16],
     ios_tail: Option<u64>,
@@ -196,13 +191,13 @@ mod tests {
                 exec: false,
             },
         ];
-        let f = write(&segs, [7; 16]).unwrap();
+        let f = write(&segs, [7; 16], None).unwrap();
         assert_eq!(u32at(&f, 0), 0xfeed_facf);
         assert_eq!(u32at(&f, 16), 9);
         assert_eq!(&f[PAGE as usize..PAGE as usize + 8], &code);
         assert_eq!(&f[2 * PAGE as usize..2 * PAGE as usize + 5], b"hello");
         assert_eq!(f.len() as u64, 3 * PAGE + 8);
-        let device = write_for(&segs, [7; 16], Some(4 << 30)).unwrap();
+        let device = write(&segs, [7; 16], Some(4 << 30)).unwrap();
         let parsed = nxb_pack::macho::MachO::parse(&device).unwrap();
         assert_eq!((parsed.platform, parsed.minos), (Some(2), Some(26 << 16)));
         assert_eq!(device.len(), f.len());
@@ -229,9 +224,9 @@ mod tests {
             mem_size: PAGE,
             exec: false,
         };
-        assert!(write(&[], [0; 16]).is_err());
-        assert!(write(&[s("__THIS_NAME_IS_TOO_LONG", 0x1_0000)], [0; 16]).is_err());
-        assert!(write(&[s("__A", 0x1_0001)], [0; 16]).is_err());
-        assert!(write(&[s("__A", 0x2_0000), s("__B", 0x2_0000)], [0; 16]).is_err());
+        assert!(write(&[], [0; 16], None).is_err());
+        assert!(write(&[s("__THIS_NAME_IS_TOO_LONG", 0x1_0000)], [0; 16], None).is_err());
+        assert!(write(&[s("__A", 0x1_0001)], [0; 16], None).is_err());
+        assert!(write(&[s("__A", 0x2_0000), s("__B", 0x2_0000)], [0; 16], None).is_err());
     }
 }

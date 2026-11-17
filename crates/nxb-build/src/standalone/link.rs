@@ -21,11 +21,7 @@ pub(crate) fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
 }
 
 /// The text of `nxgame.dylib`: every segment of every module, by address.
-pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
-    dylib_for(mods, None)
-}
-
-fn dylib_for(mods: &[(Built, u64)], ios_tail: Option<u64>) -> Result<Vec<u8>, String> {
+fn dylib(mods: &[(Built, u64)], ios_tail: Option<u64>) -> Result<Vec<u8>, String> {
     let mut segs: Vec<Seg> = Vec::new();
     for (b, base) in mods {
         for g in &b.shape.segments {
@@ -58,10 +54,7 @@ fn dylib_for(mods: &[(Built, u64)], ios_tail: Option<u64>) -> Result<Vec<u8>, St
         }
     }
     segs.sort_by_key(|s| s.addr);
-    match ios_tail {
-        None => macho::write(&segs, uuid(mods)),
-        Some(size) => macho::write_for(&segs, uuid(mods), Some(size)),
-    }
+    macho::write(&segs, uuid(mods), ios_tail)
 }
 
 fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -101,7 +94,7 @@ pub(crate) fn write_dylib(
     mut progress: impl FnMut(u64, &str),
 ) -> Result<u64, String> {
     progress(0, "linking");
-    let bytes = dylib(mods)?;
+    let bytes = dylib(mods, None)?;
     let path = run.join("nxgame.dylib");
     progress(1, "writing");
     put(&path, &bytes)?;
@@ -124,7 +117,7 @@ pub(crate) fn write_ios(
         .and_then(|n| n.checked_add(0x40_0000 + 0x3fff))
         .map(|n| n & !0x3fff)
         .ok_or("iOS reservation overflow")?;
-    let bytes = dylib_for(mods, Some(tail))?;
+    let bytes = dylib(mods, Some(tail))?;
     put(&run.join("nxgame.dylib"), &bytes)?;
     Ok(bytes.len() as u64)
 }

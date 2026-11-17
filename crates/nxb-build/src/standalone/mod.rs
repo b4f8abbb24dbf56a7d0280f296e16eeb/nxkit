@@ -225,6 +225,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     }
     let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
     let ios = a.platform == "ios";
+    let base = if ios { ios::BASE } else { layout::GUEST_BASE };
     let shell = if ios && !a.dry_run {
         Some(ios::Shell::build()?)
     } else {
@@ -417,11 +418,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let shapes: Vec<layout::Shape> = built.iter().map(|m| m.shape.clone()).collect();
     let mods: Vec<(modules::Built, u64)> = built
         .into_iter()
-        .zip(if ios {
-            layout::bases_from(&shapes, ios::BASE)
-        } else {
-            layout::bases(&shapes)
-        })
+        .zip(layout::bases(&shapes, base))
         .collect();
     let main_thread = stage(p, "manifest", "game.json", || {
         if !t.services.contains(&"kernel") {

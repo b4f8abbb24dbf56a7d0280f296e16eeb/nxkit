@@ -37,11 +37,7 @@ fn ordered(input: &[(String, Vec<u8>)]) -> Result<Vec<&(String, Vec<u8>)>, Strin
     Ok(selected.into_iter().map(|(_, m)| m).collect())
 }
 
-pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
-    analyze_at(game, layout::GUEST_BASE)
-}
-
-pub(super) fn analyze_at(game: &extract::Extracted, first: u64) -> Result<Analysis, String> {
+pub(super) fn analyze(game: &extract::Extracted, first: u64) -> Result<Analysis, String> {
     let thread = npdm::main_thread(&game.npdm)?;
     let selected = ordered(&game.modules)?;
     let ids = selected
@@ -73,7 +69,7 @@ pub(super) fn analyze_at(game: &extract::Extracted, first: u64) -> Result<Analys
         |_| {},
         |_, _, _| {},
     )?;
-    let bases = layout::bases_from(
+    let bases = layout::bases(
         &built.iter().map(|m| m.shape.clone()).collect::<Vec<_>>(),
         first,
     );
@@ -193,20 +189,20 @@ mod tests {
             directories: vec![],
             aoc: vec![],
         };
-        let result = analyze(&game).unwrap();
+        let result = analyze(&game, layout::GUEST_BASE).unwrap();
         assert_eq!(result.modules[0].0.build_id, "01".repeat(16));
         assert_eq!(result.thread.stack_size, 0x100000);
         assert_eq!(result.settings.memory.system_resource, 0x200000);
         let json = result.manifest(&game);
         assert!(!json.contains("patches.toml"));
         assert!(json.contains("Synthetic"));
-        let device = analyze_at(&game, super::super::ios::BASE).unwrap();
+        let device = analyze(&game, super::super::ios::BASE).unwrap();
         assert!(device.modules[0].1 < result.modules[0].1);
         assert_eq!(device.modules[0].0.image, result.modules[0].0.image);
         assert_eq!(device.thread.stack_size, result.thread.stack_size);
         assert_eq!(device.reserve(), result.reserve());
         game.modules[0].1.truncate(0x4f);
-        assert!(analyze(&game).is_err());
+        assert!(analyze(&game, layout::GUEST_BASE).is_err());
     }
     #[test]
     fn load_order_is_not_container_order() {
