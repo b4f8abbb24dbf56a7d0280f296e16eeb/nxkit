@@ -15,7 +15,7 @@ use std::time::UNIX_EPOCH;
 use crate::json;
 
 #[cfg(target_os = "ios")]
-pub use sandbox::{configure, folder};
+pub(crate) use sandbox::{configure, folder};
 
 #[cfg(any(target_os = "ios", test))]
 mod sandbox {
@@ -28,7 +28,7 @@ mod sandbox {
     static FOLDER: OnceLock<PathBuf> = OnceLock::new();
 
     /// Records the writable sandbox cache without probing signed assets.
-    pub fn configure(folder: &Path) -> Result<()> {
+    pub(crate) fn configure(folder: &Path) -> Result<()> {
         std::fs::create_dir_all(folder).map_err(|e| HostError::io(folder, &e))?;
         FOLDER
             .set(folder.to_owned())
@@ -36,7 +36,7 @@ mod sandbox {
     }
 
     /// Returns the configured sandbox cache. The bundle remains read-only.
-    pub fn folder(_root: &Path) -> Option<PathBuf> {
+    pub(crate) fn folder(_root: &Path) -> Option<PathBuf> {
         FOLDER.get().cloned()
     }
 

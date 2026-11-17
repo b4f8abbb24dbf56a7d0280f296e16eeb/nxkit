@@ -65,6 +65,9 @@ impl Paths {
     }
 }
 
+/// ABI-stable normalized finger, owned by the caller for the duration of a call.
+pub use nxkit_svc_input::Touch;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +126,3 @@ mod tests {
         }
     }
 }
-
-/// ABI-stable normalized finger, owned by the caller for the duration of a call.
-pub use nxkit_svc_input::Touch;
