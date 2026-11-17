@@ -480,25 +480,29 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ))
     })?;
     stage(p, "link", "nxgame.dylib", || {
-        if ios {
-            let size = link::write_ios(
-                &run_dir,
-                &mods,
+        let n = link::write_dylib(
+            &run_dir,
+            &mods,
+            ios.then_some((
                 t.st.settings.value.memory.reserve,
                 u64::from(main_thread.stack_size),
-            )?;
-            return Ok(((), format!("{}, unsigned iOS library", mib(size))));
-        }
-        let n = link::write_dylib(&run_dir, &mods, |done, what| {
-            p.set(Update {
-                done: Some(done),
-                total: Some(3),
-                unit: Some("steps"),
-                note: Some(what),
-                ..Default::default()
-            })
-        })?;
-        Ok(((), format!("{}, signed ad hoc", mib(n))))
+            )),
+            |done, what| {
+                p.set(Update {
+                    done: Some(done),
+                    total: Some(if ios { 2 } else { 3 }),
+                    unit: Some("steps"),
+                    note: Some(what),
+                    ..Default::default()
+                })
+            },
+        )?;
+        let signing = if ios {
+            "unsigned iOS library"
+        } else {
+            "signed ad hoc"
+        };
+        Ok(((), format!("{}, {signing}", mib(n))))
     })?;
     b.gpus = if ios {
         Vec::new()

@@ -55,7 +55,6 @@ fn start(
         boot,
     } = startup::prepare(&game, mask, &data)?;
     let settings = &loaded.game.settings;
-    refresh::configure(refresh::Request::from_settings(settings));
     let plan = refresh::apply(&refresh::ScreenFacts {
         name: "UIKit".into(),
         display: None,

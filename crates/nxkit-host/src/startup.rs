@@ -1,7 +1,7 @@
 //! Shared guest initialization before AppKit or UIKit takes over presentation.
 use crate::{
-    Game, HostError, Result, boot::Boot, guestsym, layout::Layout, loader, place, seams, sys,
-    thread,
+    Game, HostError, Result, boot::Boot, guestsym, layout::Layout, loader, place, refresh, seams,
+    sys, thread,
 };
 use nxkit_metal::Context;
 use std::{path::Path, sync::Arc};
@@ -67,6 +67,7 @@ pub(crate) fn prepare(game: &Game, mask: u64, data: &Path) -> Result<Prepared> {
     }
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
+    refresh::configure(refresh::Request::from_settings(&loaded.game.settings));
     Ok(Prepared {
         loaded,
         memory,
