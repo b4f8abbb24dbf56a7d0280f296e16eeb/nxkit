@@ -22,6 +22,10 @@ pub(crate) fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
 
 /// The text of `nxgame.dylib`: every segment of every module, by address.
 pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
+    dylib_for(mods, None)
+}
+
+fn dylib_for(mods: &[(Built, u64)], ios_tail: Option<u64>) -> Result<Vec<u8>, String> {
     let mut segs: Vec<Seg> = Vec::new();
     for (b, base) in mods {
         for g in &b.shape.segments {
@@ -54,7 +58,10 @@ pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
         }
     }
     segs.sort_by_key(|s| s.addr);
-    macho::write(&segs, uuid(mods))
+    match ios_tail {
+        None => macho::write(&segs, uuid(mods)),
+        Some(size) => macho::write_for(&segs, uuid(mods), Some(size)),
+    }
 }
 
 fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -100,5 +107,24 @@ pub(crate) fn write_dylib(
     put(&path, &bytes)?;
     progress(2, "signing");
     bundle::sign(&path)?;
+    Ok(bytes.len() as u64)
+}
+
+/// The identity signer signs this device dylib together with the final app.
+pub(crate) fn write_ios(
+    run: &Path,
+    mods: &[(Built, u64)],
+    reserve: u64,
+    stack: u64,
+) -> Result<u64, String> {
+    // reserve already contains the kernel front allowance. Add the main stack
+    // and room for both runtime region alignments before rounding to host pages.
+    let tail = reserve
+        .checked_add(stack)
+        .and_then(|n| n.checked_add(0x40_0000 + 0x3fff))
+        .map(|n| n & !0x3fff)
+        .ok_or("iOS reservation overflow")?;
+    let bytes = dylib_for(mods, Some(tail))?;
+    put(&run.join("nxgame.dylib"), &bytes)?;
     Ok(bytes.len() as u64)
 }
