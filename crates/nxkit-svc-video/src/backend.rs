@@ -9,7 +9,7 @@
 use crate::decoder::Backend;
 use crate::vp9::KeyFrame;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
     use std::sync::Arc;
 
@@ -287,30 +287,30 @@ mod apple {
 }
 
 /// Opens a VP9 decoder for a stream that starts with `key`.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn open(key: &KeyFrame) -> Result<Box<dyn Backend>, String> {
     Ok(Box::new(apple::VideoToolbox::open(key)?))
 }
 
 /// Opens an AV1 decoder. It waits for the sequence header of the stream, which tells it what to open.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn open_av1() -> Result<Box<dyn Backend>, String> {
     Ok(Box::new(apple::Av1::new()))
 }
 
 /// Opens a VP9 decoder for a stream that starts with `key`.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) fn open(_key: &KeyFrame) -> Result<Box<dyn Backend>, String> {
-    Err("VP9 decoding uses VideoToolbox and is only available on macOS".to_string())
+    Err("VP9 decoding uses VideoToolbox and is only available on macOS and iOS".to_string())
 }
 
 /// Opens an AV1 decoder.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) fn open_av1() -> Result<Box<dyn Backend>, String> {
-    Err("AV1 decoding is only available on macOS".to_string())
+    Err("AV1 decoding is only available on macOS and iOS".to_string())
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "ios")))]
 mod tests {
     use super::apple::Av1;
     use crate::decoder::Backend;

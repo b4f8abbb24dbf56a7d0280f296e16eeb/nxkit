@@ -20,7 +20,7 @@ pub struct Nv12 {
 
 pub(crate) enum Pixels {
     Memory(Nv12),
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     Buffer(crate::sys::vt::PixelBuffer),
 }
 
@@ -50,7 +50,7 @@ impl Frame {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn from_buffer(
         width: u32,
         height: u32,
@@ -116,7 +116,7 @@ impl Frame {
                 copy(&m.y, m.y_stride, &m.uv, m.uv_stride);
                 Ok(())
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Pixels::Buffer(b) => b.with_planes(copy),
         }
     }
@@ -129,7 +129,7 @@ impl Frame {
     ) -> Result<R, String> {
         match &self.pixels {
             Pixels::Memory(m) => Ok(f(&m.y, m.y_stride, &m.uv, m.uv_stride)),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Pixels::Buffer(b) => b.with_planes(f),
         }
     }
