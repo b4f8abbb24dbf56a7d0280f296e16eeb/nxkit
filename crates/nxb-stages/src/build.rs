@@ -10,7 +10,7 @@ use nxb_pyjson::{Value, dumps};
 use nxb_sched::{Budget, Executor, Report, SingleFlight, Task};
 use nxb_shader::{
     pch,
-    target::{IOS, MAC, TargetConv},
+    target::{MAC, TargetConv},
 };
 use nxb_store::{Durability, Store};
 use nxb_tool::{Io, MetalTools, ProcessRegistry, Resolver, SdkRoots};
@@ -108,14 +108,12 @@ pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     build_for(cfg, MAC)
 }
 
-/// Use the iOS SDK, retaining the shared translation and cache pipeline.
-pub fn build_ios(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
-    // The verdict frontend emits Mac libraries. iOS title builds use Apple tools.
-    cfg.own_front = None;
-    build_for(cfg, IOS)
-}
-
-fn build_for(mut cfg: BuildConfig, target: TargetConv) -> Result<BuildReport, Fatal> {
+/// Run the shared pipeline with the compiler conventions for `target`.
+pub fn build_for(mut cfg: BuildConfig, target: TargetConv) -> Result<BuildReport, Fatal> {
+    // The verdict frontend emits Mac libraries. Device builds use Apple tools.
+    if target.target == nxb_model::Target::Ios {
+        cfg.own_front = None;
+    }
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
     let tmp = cfg.scratch.join("tmp");
