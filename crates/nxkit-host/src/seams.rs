@@ -14,9 +14,9 @@ use nxkit_rt::Service;
 use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
+use crate::input::{MouseEvent, MouseMode};
 use crate::manifest::Game;
 use crate::settings::Settings;
-use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
 
 fn has(mask: u64, service: Service) -> bool {
@@ -203,6 +203,11 @@ fn console_language() -> String {
 /// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
 /// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
 pub fn init_services(game: &Game, mask: u64) -> Result<()> {
+    init_services_with_data(game, mask, &game.root)
+}
+
+/// Starts services with separate writable data, while assets stay in the run folder.
+pub(crate) fn init_services_with_data(game: &Game, mask: u64, data: &Path) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
     wire::set_handheld(handheld);
@@ -214,8 +219,8 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
     .map_err(HostError::App)?;
 
     if has(mask, Service::Fs) {
-        let save = game.root.join("save").join(&game.title_id);
-        let temp = game.root.join("temp");
+        let save = data.join("save").join(&game.title_id);
+        let temp = data.join("temp");
         for dir in [&save, &temp] {
             std::fs::create_dir_all(dir).map_err(|e| HostError::io(dir, &e))?;
         }

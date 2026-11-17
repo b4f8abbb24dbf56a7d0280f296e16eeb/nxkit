@@ -4,12 +4,17 @@
 //! touches memory.
 
 pub mod allocspy;
+#[cfg(target_os = "macos")]
 pub mod appkit;
 pub mod crashsig;
 mod dylib;
 pub mod exitflush;
+#[cfg(target_os = "ios")]
+pub(crate) mod ios;
 mod kernel;
+#[cfg(target_os = "macos")]
 pub mod loading;
+#[cfg(target_os = "macos")]
 mod mouse;
 pub mod paging;
 pub mod vm;
@@ -542,4 +547,35 @@ mod aligned_tests {
     fn an_aligned_reservation_refuses_a_range_above_the_limit() {
         assert!(reserve_aligned(0x70_0000_0000, 0x400_0000, 0x20_0000, 0, 0x1000).is_err());
     }
+}
+
+#[cfg(target_os = "ios")]
+/// Adopts the anonymous tail that dyld already reserved inside the signed image.
+/// This does not map, replace, unmap, or change the protection of any page.
+///
+/// # Safety
+/// The caller has verified the image's __NX_HEAP contract and module ranges and
+/// must retain its Dylib until process exit once this view is registered.
+pub(crate) unsafe fn adopt_dyld_tail(
+    view_start: u64,
+    tail_start: u64,
+    end: u64,
+) -> Result<Reservation> {
+    if view_start > tail_start
+        || tail_start >= end
+        || !view_start.is_multiple_of(crate::layout::PAGE)
+    {
+        return Err(HostError::Memory("invalid dyld guest reservation".into()));
+    }
+    crate::tail::inspect(
+        crate::layout::Range {
+            start: tail_start,
+            len: end - tail_start,
+        },
+        |at| nxkit_metal::vm_region(at).map(|r| (r.start, r.size, r.protection, r.external_pager)),
+    )?;
+    Ok(Reservation {
+        base: view_start,
+        len: end - view_start,
+    })
 }
