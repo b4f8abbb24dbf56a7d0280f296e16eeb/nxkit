@@ -2,10 +2,18 @@
 use nxb_tool::{Invocation, ProcessRegistry, run_process};
 use std::path::{Path, PathBuf};
 
-pub(super) fn shell() -> Result<PathBuf, String> {
-    let path = std::env::var_os("NXB_IOS_SHELL")
-        .map(PathBuf::from)
-        .ok_or("set NXB_IOS_SHELL to the prebuilt iOS shell .app")?;
+pub(super) fn shell(dry_run: bool) -> Result<(PathBuf, Option<crate::host::TempDir>), String> {
+    let (path, assembly) = match std::env::var_os("NXB_IOS_SHELL") {
+        Some(path) => (PathBuf::from(path), None),
+        None if dry_run => (PathBuf::from("<iOS shell built from source>"), None),
+        None => {
+            let (path, assembly) = super::shell::build()?;
+            (path, Some(assembly))
+        }
+    };
+    if dry_run {
+        return Ok((path, assembly));
+    }
     if !path.join("nxkit").is_file() || !path.join("Info.plist").is_file() {
         return Err(format!(
             "{}: expected the iOS shell with nxkit and Info.plist",
@@ -13,7 +21,7 @@ pub(super) fn shell() -> Result<PathBuf, String> {
         ));
     }
     validate_shell(&path)?;
-    Ok(path)
+    Ok((path, assembly))
 }
 
 fn validate_shell(path: &Path) -> Result<(), String> {
@@ -118,6 +126,11 @@ pub(super) fn finish(stage: &Path, out: &Path, replace: bool) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dry_run_does_not_need_an_apple_toolchain_or_shell() {
+        assert!(shell(true).is_ok());
+    }
+
     #[test]
     fn packages_shell_and_title_without_provisioning_identity() {
         let root = std::env::temp_dir().join(format!("nxb-ipa-test-{}", std::process::id()));

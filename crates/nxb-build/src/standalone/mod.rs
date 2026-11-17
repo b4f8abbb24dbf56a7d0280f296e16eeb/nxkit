@@ -24,6 +24,7 @@ mod nvn;
 mod pipelist;
 mod romfs;
 mod shaders;
+mod shell;
 
 use crate::Args;
 use crate::events::{Progress, Update};
@@ -225,10 +226,13 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     }
     let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
     let ios = a.platform == "ios";
-    let host = if ios {
-        ipa::shell()?
+    let (host, _shell_assembly) = if ios {
+        ipa::shell(a.dry_run)?
     } else {
-        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?
+        (
+            bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?,
+            None,
+        )
     };
     let app_name = a.app_name.clone().unwrap_or_else(|| t.name.to_string());
     let out = a.out.clone().unwrap_or_else(|| {

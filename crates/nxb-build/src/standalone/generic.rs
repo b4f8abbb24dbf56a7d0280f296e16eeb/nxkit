@@ -86,10 +86,13 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let partial = std::path::PathBuf::from(partial);
     vacant(&partial)?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let host = if ios {
-        ipa::shell()?
+    let (host, _shell_assembly) = if ios {
+        ipa::shell(a.dry_run)?
     } else {
-        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?
+        (
+            bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?,
+            None,
+        )
     };
     let id = a
         .bundle_id
