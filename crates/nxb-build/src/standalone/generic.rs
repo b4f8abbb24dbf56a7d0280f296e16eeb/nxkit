@@ -39,23 +39,12 @@ fn vacant(path: &Path) -> Result<(), String> {
     }
 }
 
-fn publish(partial: &Path, out: &Path) -> Result<(), String> {
-    // Reserve an empty destination atomically. A concurrent build cannot replace another app.
-    std::fs::create_dir(out).map_err(|e| io(out, e))?;
-    if let Err(e) = std::fs::rename(partial, out) {
-        let _ = std::fs::remove_dir(out);
-        return Err(io(out, e));
-    }
-    Ok(())
-}
-
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let ios = a.platform == "ios";
-    let platform = if ios { "iOS" } else { "macOS" };
-    let base = if ios {
-        ios::BASE
+    let (platform, base, extension) = if ios {
+        ("iOS", ios::BASE, "ipa")
     } else {
-        super::layout::GUEST_BASE
+        ("macOS", super::layout::GUEST_BASE, "app")
     };
     validate(a).map_err(|e| crate::exit::fail(2, e))?;
     if a.own_front.is_empty() && std::env::var("NXB_OWN_FRONT").is_ok_and(|v| v == "0") {
@@ -78,29 +67,24 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok((game, note))
     })?;
     let name = a.app_name.as_deref().unwrap_or(&game.name);
-    let out = a.out.clone().unwrap_or_else(|| {
-        super::home(a).join(format!(
-            "{}.{}",
-            bundle::file_name(name),
-            if ios { "ipa" } else { "app" }
-        ))
-    });
+    let out = a
+        .out
+        .clone()
+        .unwrap_or_else(|| super::home(a).join(format!("{}.{extension}", bundle::file_name(name))));
     // Never replace an app or its saves in the experimental generic path.
     vacant(&out)?;
     let mut partial = out.clone().into_os_string();
     partial.push(".partial");
     let partial = std::path::PathBuf::from(partial);
     vacant(&partial)?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let shell = if ios {
-        Some(ios::Shell::build()?)
+    let (shell, host) = if ios {
+        (Some(ios::Shell::build()?), std::path::PathBuf::new())
     } else {
-        None
-    };
-    let host = if ios {
-        std::path::PathBuf::new()
-    } else {
-        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        (
+            None,
+            bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?,
+        )
     };
     let id = a
         .bundle_id
@@ -186,12 +170,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             "sign and publish new app"
         },
         || {
-            if ios {
-                ios::publish(&partial, &out, false)?;
-            } else {
-                bundle::sign(&partial)?;
-                publish(&partial, &out)?;
-            }
+            bundle::publish(&partial, &out, ios, false)?;
             Ok(((), out.display().to_string()))
         },
     )?;
@@ -221,10 +200,10 @@ mod tests {
         assert_eq!(std::fs::read(partial.join("nested/file")).unwrap(), b"data");
         assert!(put(&partial, "../escape", b"data").is_err());
         std::fs::create_dir(&out).unwrap();
-        assert!(publish(&partial, &out).is_err());
+        assert!(bundle::publish_app(&partial, &out, false).is_err());
         assert!(partial.join("nested/file").is_file());
         std::fs::remove_dir(&out).unwrap();
-        publish(&partial, &out).unwrap();
+        bundle::publish_app(&partial, &out, false).unwrap();
         assert!(out.join("nested/file").is_file());
         assert!(!partial.exists());
         std::fs::remove_dir_all(root).unwrap();
