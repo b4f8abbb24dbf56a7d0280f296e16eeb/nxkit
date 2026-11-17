@@ -22,8 +22,6 @@ void nxkit_virtual_pad(uint64_t buttons, float lx, float ly, float rx, float ry)
 bool nxkit_has_controller(void);
 // Current nxkit mode, used to offer guest touchscreen controls only in handheld.
 bool nxkit_is_handheld(void);
-// Zero means the presenter fills its drawable, not an assumed 16:9 picture.
-double nxkit_picture_aspect(void);
 // Pauses then requests process shutdown. Does not unload live guest code/memory.
 void nxkit_stop(void);
 #endif

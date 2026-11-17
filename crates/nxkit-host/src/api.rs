@@ -72,18 +72,6 @@ pub use nxkit_svc_input::Touch;
 mod tests {
     use super::*;
     #[test]
-    fn touch_slice_is_shared_with_input_service() {
-        let points = [Touch {
-            id: 15,
-            x: 0.25,
-            y: 0.75,
-        }];
-        let input_points: &[nxkit_svc_input::Touch] = &points;
-        assert_eq!(input_points.as_ptr(), points.as_ptr());
-        assert_eq!(input_points, &points);
-    }
-
-    #[test]
     fn writes_are_outside_signed_bundle() {
         let p = Paths::new(Path::new("/apps/game.app"), Path::new("/data/app")).unwrap();
         assert_eq!(

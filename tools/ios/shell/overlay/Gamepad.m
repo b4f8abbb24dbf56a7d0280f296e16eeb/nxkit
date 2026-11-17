@@ -128,7 +128,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         [self addSubview:_menu];
         NSNumber *saved = [NSUserDefaults.standardUserDefaults objectForKey:k_layout_key];
         int l = saved ? (int)saved.integerValue : 0;
-        if (l == 2 && !nxkit_is_handheld()) l = 0;   // Tap only in handheld mode (env.txt's DM_OPMODE may have changed it)
+        if (l == 2 && !nxkit_is_handheld()) l = 0;   // Tap only in handheld mode
         _full = l == 1; _tap = l == 2;
         [self applyLayout];
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;

@@ -112,12 +112,6 @@ pub unsafe extern "C" fn nxkit_touches(points: *const Touch, count: usize) {
         })
     });
 }
-/// Returns the requested picture aspect, or zero when filling the drawable.
-#[unsafe(no_mangle)]
-pub extern "C" fn nxkit_picture_aspect() -> f64 {
-    // Keep the existing ABI. The shared presenter fills the drawable.
-    0.0
-}
 /// Requests game shutdown.
 #[unsafe(no_mangle)]
 pub extern "C" fn nxkit_stop() {
