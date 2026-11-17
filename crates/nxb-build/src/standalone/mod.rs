@@ -13,6 +13,7 @@ mod extract;
 mod files;
 mod generic;
 mod image;
+mod ipa;
 mod layout;
 mod link;
 mod macho;
@@ -223,12 +224,20 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ));
     }
     let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
-    let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?;
+    let ios = a.platform == "ios";
+    let host = if ios {
+        ipa::shell()?
+    } else {
+        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?
+    };
     let app_name = a.app_name.clone().unwrap_or_else(|| t.name.to_string());
-    let out = a
-        .out
-        .clone()
-        .unwrap_or_else(|| home(a).join(format!("{}.app", bundle::file_name(&app_name))));
+    let out = a.out.clone().unwrap_or_else(|| {
+        home(a).join(format!(
+            "{}.{}",
+            bundle::file_name(&app_name),
+            if ios { "ipa" } else { "app" }
+        ))
+    });
     let work = a
         .work_dir
         .clone()
@@ -261,7 +270,13 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         print!("{}", describe(&t, &b, &host, &out));
         return Ok(());
     }
-    replaceable(&out)?;
+    if ios {
+        if out.exists() && (!out.is_file() || out.extension().is_none_or(|e| e != "ipa")) {
+            return Err("iOS output must be an IPA file".into());
+        }
+    } else {
+        replaceable(&out)?;
+    }
     b.profile = shaders::profile(&work, &t.st, t.id, t.name)?;
     let stage_dir = {
         let mut n = out.clone().into_os_string();
@@ -269,7 +284,18 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         PathBuf::from(n)
     };
     let _ = std::fs::remove_dir_all(&stage_dir);
-    let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
+    let run_dir = if ios {
+        ipa::skeleton(
+            &stage_dir,
+            &host,
+            &app_name,
+            &a.bundle_id
+                .clone()
+                .unwrap_or_else(|| bundle::default_bundle_id(t.id)),
+        )?
+    } else {
+        bundle::skeleton(&stage_dir, &host, &plist(a, &t))?
+    };
     p.plan(7);
     let nup = b.src.source == Source::Nup;
     let what = if nup {
@@ -386,7 +412,15 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok((built, note))
     })?;
     let shapes: Vec<layout::Shape> = built.iter().map(|m| m.shape.clone()).collect();
-    let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(layout::bases(&shapes)).collect();
+    let bases = if ios {
+        layout::bases_from(&shapes, 0x1_0000_0000)
+    } else {
+        layout::bases(&shapes)
+    };
+    let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(bases).collect();
+    let npdm_bytes =
+        std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
+    let main_thread = npdm::main_thread(&npdm_bytes)?;
     stage(p, "manifest", "game.json", || {
         if !t.services.contains(&"kernel") {
             return Err(format!(
@@ -394,9 +428,6 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 t.id
             ));
         }
-        let npdm_bytes =
-            std::fs::read(exefs.join("main.npdm")).map_err(|e| io(&exefs.join("main.npdm"), e))?;
-        let main_thread = npdm::main_thread(&npdm_bytes)?;
         let m = manifest::Manifest {
             title_id: t.id,
             name: t.name,
@@ -443,6 +474,15 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ))
     })?;
     stage(p, "link", "nxgame.dylib", || {
+        if ios {
+            let n = link::write_ios(
+                &run_dir,
+                &mods,
+                t.st.settings.value.memory.reserve,
+                u64::from(main_thread.stack_size),
+            )?;
+            return Ok(((), format!("{}, unsigned iOS library", mib(n))));
+        }
         let n = link::write_dylib(&run_dir, &mods, |done, what| {
             p.set(Update {
                 done: Some(done),
@@ -454,7 +494,11 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         })?;
         Ok(((), format!("{}, signed ad hoc", mib(n))))
     })?;
-    b.gpus = gpus(a, &work, &b.profile.0)?;
+    b.gpus = if ios {
+        Vec::new()
+    } else {
+        gpus(a, &work, &b.profile.0)?
+    };
     if !b.gpus.is_empty() {
         for l in &b.pipeline_lists {
             p.say(&format!("pipeline list: {}", l.display()));
@@ -465,6 +509,10 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {
+        if ios {
+            ipa::finish(&stage_dir, &out, true)?;
+            return Ok(((), format!("{} (unsigned)", out.display())));
+        }
         // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
         // failed move stops the build with the old app and its save in place.
         let old_save = out.join("Contents/Resources/nxkit/save");

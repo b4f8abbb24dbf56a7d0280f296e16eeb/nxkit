@@ -59,6 +59,15 @@ fn padded(s: &[u8], to: usize) -> Vec<u8> {
 
 /// Writes the dylib. `segs` must be in ascending address order without overlap. `uuid` is the image's identity.
 pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
+    write_target(segs, uuid, None)
+}
+
+/// iOS adds an anonymous guest reservation before the signed link data.
+pub(crate) fn write_target(
+    segs: &[Seg],
+    uuid: [u8; 16],
+    tail: Option<u64>,
+) -> Result<Vec<u8>, String> {
     let first = segs.first().ok_or("macho: no segments")?;
     let mut end = 0u64;
     for s in segs {
@@ -105,6 +114,15 @@ pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
         body.resize(body.len() + (file as usize - s.data.len()), 0);
         off += file;
     }
+    if let Some(size) = tail {
+        if size == 0 || !size.is_multiple_of(PAGE) {
+            return Err("macho: guest reservation must be nonzero and 16K aligned".into());
+        }
+        cmds.push(segment_cmd("__NX_HEAP", end, size, off, 0, 3));
+        end = end
+            .checked_add(size)
+            .ok_or("macho: guest reservation overflow")?;
+    }
     cmds.push(segment_cmd("__LINKEDIT", end, PAGE, off, 8, 1));
     let id = padded(b"@rpath/nxgame.dylib", 24);
     let mut c = words(&[0xd, 24 + id.len() as u32, 24, 2, 0x10000, 0x10000]);
@@ -113,7 +131,12 @@ pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     let mut c = words(&[0x1b, 24]);
     c.extend_from_slice(&uuid);
     cmds.push(c);
-    cmds.push(words(&[0x32, 24, 1, 0xe0000, 0xe0000, 0]));
+    let (platform, minimum) = if tail.is_some() {
+        (2, 26 << 16)
+    } else {
+        (1, 0xe0000)
+    };
+    cmds.push(words(&[0x32, 24, platform, minimum, minimum, 0]));
     let lib = padded(b"/usr/lib/libSystem.B.dylib", 32);
     let mut c = words(&[0xc, 24 + lib.len() as u32, 24, 2, 0x10000, 0x10000]);
     c.extend_from_slice(&lib);
@@ -181,6 +204,46 @@ mod tests {
         assert_eq!(&f[PAGE as usize..PAGE as usize + 8], &code);
         assert_eq!(&f[2 * PAGE as usize..2 * PAGE as usize + 5], b"hello");
         assert_eq!(f.len() as u64, 3 * PAGE + 8);
+    }
+
+    #[test]
+    fn ios_reserves_anonymous_tail_without_growing_the_file() {
+        let segs = [Seg {
+            name: "__NX_A_TEXT",
+            addr: 0x1_0001_0000,
+            data: &[0xc0, 0x03, 0x5f, 0xd6],
+            mem_size: PAGE,
+            exec: true,
+        }];
+        let mac = write(&segs, [7; 16]).unwrap();
+        let tail_size = 0x1_0000_0000;
+        let ios = write_target(&segs, [7; 16], Some(tail_size)).unwrap();
+        assert_eq!(ios.len(), mac.len()); // No disk space for the anonymous tail.
+        let u64at = |p| u64::from_le_bytes(ios[p..p + 8].try_into().unwrap());
+        let mut at = HEADER_SIZE;
+        let mut heap = None;
+        let mut link = None;
+        let mut platform = None;
+        for _ in 0..u32at(&ios, 16) {
+            match u32at(&ios, at) {
+                0x19 if &ios[at + 8..at + 17] == b"__NX_HEAP" => {
+                    assert_eq!(u64at(at + 48), 0);
+                    assert_eq!(u32at(&ios, at + 56), 3);
+                    assert_eq!(u32at(&ios, at + 60), 3);
+                    heap = Some((u64at(at + 24), u64at(at + 32), u64at(at + 40)));
+                }
+                0x19 if &ios[at + 8..at + 18] == b"__LINKEDIT" => {
+                    link = Some((u64at(at + 24), u64at(at + 40)));
+                }
+                0x32 => platform = Some((u32at(&ios, at + 8), u32at(&ios, at + 12))),
+                _ => {}
+            }
+            at += u32at(&ios, at + 4) as usize;
+        }
+        let (start, size, offset) = heap.unwrap();
+        assert_eq!(size, tail_size);
+        assert_eq!(link, Some((start + size, offset)));
+        assert_eq!(platform, Some((2, 26 << 16)));
     }
 
     #[test]

@@ -271,7 +271,12 @@ impl Shape {
 
 /// The bases of the modules in load order, in a row from [`GUEST_BASE`] with a gap between them.
 pub(crate) fn bases(shapes: &[Shape]) -> Vec<u64> {
-    let mut cursor = GUEST_BASE;
+    bases_from(shapes, GUEST_BASE)
+}
+
+/// Place iOS images below the 39-bit guest address-space limit before dyld slides them.
+pub(crate) fn bases_from(shapes: &[Shape], first: u64) -> Vec<u64> {
+    let mut cursor = first;
     let mut out = Vec::with_capacity(shapes.len());
     for s in shapes {
         let (lo, hi) = s.extent();

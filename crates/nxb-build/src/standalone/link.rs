@@ -22,6 +22,10 @@ pub(crate) fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
 
 /// The text of `nxgame.dylib`: every segment of every module, by address.
 pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
+    dylib_for(mods, None)
+}
+
+fn dylib_for(mods: &[(Built, u64)], tail: Option<u64>) -> Result<Vec<u8>, String> {
     let mut segs: Vec<Seg> = Vec::new();
     for (b, base) in mods {
         for g in &b.shape.segments {
@@ -54,7 +58,10 @@ pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
         }
     }
     segs.sort_by_key(|s| s.addr);
-    macho::write(&segs, uuid(mods))
+    match tail {
+        None => macho::write(&segs, uuid(mods)),
+        Some(size) => macho::write_target(&segs, uuid(mods), Some(size)),
+    }
 }
 
 fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -100,5 +107,26 @@ pub(crate) fn write_dylib(
     put(&path, &bytes)?;
     progress(2, "signing");
     bundle::sign(&path)?;
+    Ok(bytes.len() as u64)
+}
+
+/// Write an unsigned iOS dylib. The final IPA signer signs it with the app identity.
+pub(crate) fn write_ios(
+    run: &Path,
+    mods: &[(Built, u64)],
+    reserve: u64,
+    main_stack: u64,
+) -> Result<u64, String> {
+    // reserve includes heap, stack, alias and 256 MiB of front space. Keep that
+    // allowance plus the main stack and two region-alignment paddings. The host
+    // uses only its planned portion of this anonymous reservation.
+    let size = reserve
+        .checked_add(main_stack)
+        .and_then(|v| v.checked_add(0x40_0000))
+        .and_then(|v| v.checked_add(0x3fff))
+        .map(|v| v & !0x3fff)
+        .ok_or("iOS guest reservation overflows")?;
+    let bytes = dylib_for(mods, Some(size))?;
+    put(&run.join("nxgame.dylib"), &bytes)?;
     Ok(bytes.len() as u64)
 }

@@ -94,6 +94,26 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
 }
 
 impl Analysis {
+    /// Change only the preferred module addresses, retaining the shared rewrite and metadata.
+    pub(super) fn place_at(&mut self, first: u64) {
+        let shapes = self
+            .modules
+            .iter()
+            .map(|(m, _)| m.shape.clone())
+            .collect::<Vec<_>>();
+        for ((_, base), address) in self
+            .modules
+            .iter_mut()
+            .zip(layout::bases_from(&shapes, first))
+        {
+            *base = address;
+        }
+    }
+
+    pub(super) fn reserve(&self) -> u64 {
+        self.settings.memory.reserve
+    }
+
     pub(super) fn manifest(&self, game: &extract::Extracted) -> String {
         manifest::game_json(&manifest::Manifest {
             title_id: game.title_id,
@@ -182,13 +202,35 @@ mod tests {
             directories: vec![],
             aoc: vec![],
         };
-        let result = analyze(&game).unwrap();
+        let mut result = analyze(&game).unwrap();
         assert_eq!(result.modules[0].0.build_id, "01".repeat(16));
         assert_eq!(result.thread.stack_size, 0x100000);
         assert_eq!(result.settings.memory.system_resource, 0x200000);
         let json = result.manifest(&game);
         assert!(!json.contains("patches.toml"));
         assert!(json.contains("Synthetic"));
+        let old_base = result.modules[0].1;
+        let image = result.modules[0].0.image.clone();
+        result.place_at(0x1_0000_0000);
+        assert!(result.modules[0].1 < old_base);
+        assert_eq!(result.modules[0].0.image, image);
+        assert_eq!(result.reserve(), 4 << 30);
+        assert_ne!(result.manifest(&game), json);
+        let run = std::env::temp_dir().join(format!("nxb-generic-ios-{}", std::process::id()));
+        std::fs::create_dir_all(&run).unwrap();
+        super::super::link::write_ios(
+            &run,
+            &result.modules,
+            result.reserve(),
+            u64::from(result.thread.stack_size),
+        )
+        .unwrap();
+        let bytes = std::fs::read(run.join("nxgame.dylib")).unwrap();
+        let macho = nxb_pack::macho::MachO::parse(&bytes).unwrap();
+        assert_eq!(macho.platform, Some(2));
+        assert_eq!(macho.minos, Some(26 << 16));
+        assert!(macho.code_signature.is_none());
+        std::fs::remove_dir_all(run).unwrap();
         game.modules[0].1.truncate(0x4f);
         assert!(analyze(&game).is_err());
     }

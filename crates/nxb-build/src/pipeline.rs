@@ -19,19 +19,24 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
     let chain = nxb_shader::chain::standalone_version();
     let inputs = nxb_shader::chain::inputs(&b.profile.0)?;
     let sh = b.work.join("shader");
+    let compiled = if a.platform == "ios" {
+        sh.join("ios")
+    } else {
+        sh.clone()
+    };
     let manifest = match &a.manifest {
         Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),
         None => Vec::new(),
     };
     Ok(BuildConfig {
         pkg: sh.join("pkg"),
-        out: sh.join("cache"),
+        out: compiled.join("cache"),
         profile: b.profile.0.clone(),
         chain,
         game: b.title.clone(),
         inputs,
         store: sh.join("store"),
-        work: sh.join("work"),
+        work: compiled.join("work"),
         scratch: std::env::temp_dir().join(format!("nxb-build-{}", std::process::id())),
         jobs: a.threads.max(1) as u32,
         batch: 128,
@@ -227,7 +232,13 @@ pub fn shaders_and_archive(
                 _ => None,
             };
             let r = p
-                .counted(None, "shaders", &count, || nxb_stages::build::build(cfg))
+                .counted(None, "shaders", &count, || {
+                    if a.platform == "ios" {
+                        nxb_stages::build::build_ios(cfg)
+                    } else {
+                        nxb_stages::build::build(cfg)
+                    }
+                })
                 .map_err(|e| e.to_string());
             if let Some(s) = &stream {
                 s.finish();
