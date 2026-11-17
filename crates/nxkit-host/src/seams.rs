@@ -293,11 +293,12 @@ pub(crate) fn init_services_with_data(game: &Game, mask: u64, data: &Path) -> Re
 
 /// The window gained or lost the key focus. The input service releases held keys on a loss. The game keeps its focus:
 /// on the console a focus loss means the HOME menu, and games pause for it, but on a Mac clicking another window is no
-/// reason to stop the game. `NXKIT_PAUSE_UNFOCUSED=1` reports the loss to the game as before.
+/// reason to stop the game. iOS always reports the loss; Mac does so with `NXKIT_PAUSE_UNFOCUSED=1`.
 pub fn focus_changed(focused: bool) {
     static PAUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let pause =
-        *PAUSE.get_or_init(|| std::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"));
+    let pause = *PAUSE.get_or_init(|| {
+        cfg!(target_os = "ios") || std::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1")
+    });
     if pause || focused {
         let focus = if focused {
             nxkit_svc_system::Focus::InFocus

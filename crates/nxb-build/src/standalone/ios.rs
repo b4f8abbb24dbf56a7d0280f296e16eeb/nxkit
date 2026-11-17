@@ -89,11 +89,6 @@ impl Shell {
         }
         args.extend(["-o".into(), shell.0.path().join("nxkit").into_os_string()]);
         runner.run("xcrun", args, None)?;
-        std::fs::copy(
-            root.join("tools/ios/Info.plist"),
-            shell.0.path().join("Info.plist"),
-        )
-        .map_err(|e| e.to_string())?;
         Ok(shell)
     }
 
@@ -103,8 +98,8 @@ impl Shell {
             .join(format!("{}.app", super::bundle::file_name(name)));
         std::fs::create_dir_all(&app).map_err(|e| e.to_string())?;
         std::fs::copy(self.0.path().join("nxkit"), app.join("nxkit")).map_err(|e| e.to_string())?;
-        let bytes = std::fs::read(self.0.path().join("Info.plist")).map_err(|e| e.to_string())?;
-        let mut plist = nxb_pack::plist::parse(&bytes).map_err(|e| e.to_string())?;
+        let mut plist = nxb_pack::plist::parse(include_bytes!("../../../../tools/ios/Info.plist"))
+            .map_err(|e| e.to_string())?;
         let nxb_pack::plist::Value::Dict(ref mut entries) = plist else {
             return Err("shell plist is not a dictionary".into());
         };
@@ -148,7 +143,6 @@ pub(super) fn publish(stage: &Path, output: &Path, replace: bool) -> Result<(), 
     } else {
         // The generic producer must not replace an output that appeared during its build.
         std::fs::hard_link(&archive, output).map_err(|e| e.to_string())?;
-        std::fs::remove_file(&archive).map_err(|e| e.to_string())?;
     }
     std::fs::remove_dir_all(stage).map_err(|e| e.to_string())
 }
@@ -161,11 +155,6 @@ mod tests {
         let temp = TempDir::new_in(&std::env::temp_dir()).unwrap();
         let shell = Shell(TempDir::new_in(temp.path()).unwrap());
         std::fs::write(shell.0.path().join("nxkit"), b"host").unwrap();
-        std::fs::write(
-            shell.0.path().join("Info.plist"),
-            b"<plist><dict><key>UIApplicationSceneManifest</key><dict/></dict></plist>",
-        )
-        .unwrap();
         let stage = temp.path().join("stage");
         let app = shell.bundle(&stage, "A & B", "app.game").unwrap();
         std::fs::write(app.join("game.json"), b"{}").unwrap();

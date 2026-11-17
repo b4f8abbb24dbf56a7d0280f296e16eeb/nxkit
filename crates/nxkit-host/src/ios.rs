@@ -15,7 +15,6 @@ struct Session {
     // Guest threads and global kernel state live until process exit.
     _loaded: loader::Loaded,
     _memory: Arc<nxkit_metal::GuestMemory>,
-    presenter: Presenter,
     link: DisplayLink,
 }
 thread_local! {
@@ -77,7 +76,6 @@ fn start(
     let session = Session {
         _loaded: loaded,
         _memory: memory,
-        presenter,
         link,
     };
     thread::start_main(boot, layout.main_stack.end())?;
@@ -136,25 +134,14 @@ extern "C" fn nxkit_set_active(active: bool) {
     with_session(|s| {
         let active = active && !stop::requested();
         s.link.set_paused(!active);
-        nxkit_svc_input::set_focus(active);
+        seams::focus_changed(active);
         if !active {
             nxkit_svc_input::set_touches(&[]);
         }
-        nxkit_svc_system::set_focus(if active {
-            nxkit_svc_system::Focus::InFocus
-        } else {
-            nxkit_svc_system::Focus::OutOfFocus
-        });
         if let Err(error) = nxkit_svc_audio::set_active(active) {
             eprintln!("nxkit audio: {error}");
         }
     });
-}
-#[unsafe(no_mangle)]
-extern "C" fn nxkit_resize(width: u32, height: u32) {
-    if width > 0 && height > 0 {
-        with_session(|s| s.presenter.resize(width, height));
-    }
 }
 #[unsafe(no_mangle)]
 extern "C" fn nxkit_virtual_pad(buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32) {
