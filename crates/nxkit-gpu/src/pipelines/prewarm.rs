@@ -1,4 +1,4 @@
-//! The pipelines of the list, made before the first frame.
+//! Prewarm recorded pipelines; iOS leaves this work on the existing workers.
 //!
 //! The list (`record.rs`) says which pipelines the earlier runs needed. This module makes each one under the key that
 //! the encoder will ask for, so the cache holds it when the first draw comes. A pipeline is made through the same
@@ -9,7 +9,8 @@
 //! is written when the last worker is done, before `prewarm.done` and before the line that reports the start, so the
 //! next start loads it. A mesh pipeline is always a compile (an archive cannot be asked for one).
 //!
-//! The start waits for the work, up to `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20), unless the list is one this app
+//! On iOS the caller returns after starting workers. On macOS the start waits for the work, up to
+//! `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20), unless the list is one this app
 //! build has not made yet (the identity folder has no `prewarm.done`, see `carry.rs`): then it waits for all of it,
 //! however long, because a pipeline that is neither in the shipped archive nor in a runtime archive is compiled here,
 //! once, and a draw that meets it later waits a frame or more for a background compile and is skipped meanwhile. The
@@ -307,7 +308,7 @@ impl Pipelines {
             ctx: self.ctx.clone(),
             dir: shader_dir.to_path_buf(),
             start: Instant::now(),
-            detached: AtomicBool::new(false),
+            detached: AtomicBool::new(cfg!(target_os = "ios")),
             over: (Mutex::new(()), Condvar::new()),
             marker: all.clone(),
             after: Mutex::new(after),
@@ -315,7 +316,9 @@ impl Pipelines {
         eprintln!(
             "nxkit-gpu: compiling shaders: making {} pipelines on {n} threads{}",
             seen.len(),
-            if all.is_some() {
+            if cfg!(target_os = "ios") {
+                ", in the background"
+            } else if all.is_some() {
                 ", waiting for all of them (the list is from an earlier build, one time)"
             } else {
                 ""
@@ -332,6 +335,11 @@ impl Pipelines {
         // a thread that did not start leaves its share to the others; none at all: the first draws build as before
         if started < n {
             w.alive.fetch_sub(n - started, Ordering::AcqRel);
+        }
+        // UIKit starts the host on its main thread. Never block scene activation
+        // on pipeline compilation; the existing workers finish asynchronously.
+        if cfg!(target_os = "ios") {
+            return;
         }
         let budget =
             Duration::from_secs(super::runtime::env_num("NXKIT_PIPELINE_PREWARM_WAIT", 20));

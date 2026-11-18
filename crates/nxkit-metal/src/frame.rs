@@ -138,6 +138,14 @@ impl FrameRing {
         self.metrics.clone()
     }
 
+    /// Waits for every submitted frame of this ring. Stop submitting frames before calling this.
+    pub fn wait_idle(&self) -> Result<()> {
+        for slot in &self.slots {
+            slot.done.wait()?;
+        }
+        Ok(())
+    }
+
     /// Starts the next frame. It blocks while the GPU still works on the frame that used this slot.
     pub fn begin(&mut self) -> Result<Frame> {
         let number = self.next + 1;
