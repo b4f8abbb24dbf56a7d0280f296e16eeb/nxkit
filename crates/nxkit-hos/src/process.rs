@@ -11,7 +11,7 @@ use crate::result::{KResult, KResultOr};
 use crate::sys;
 
 /// The exit code of a `Break` that is not a notification (the code of the engine).
-const BREAK_EXIT_CODE: u32 = 42;
+pub(crate) const BREAK_EXIT_CODE: u32 = 42;
 /// The bit of a `Break` reason that says the guest goes on after the call.
 const NOTIFICATION_ONLY: u64 = 0x8000_0000;
 /// The most bytes of one `OutputDebugString` that the kernel logs.

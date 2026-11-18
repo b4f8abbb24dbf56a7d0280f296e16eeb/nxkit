@@ -11,10 +11,16 @@
 
 use crate::kernel::Kernel;
 use crate::memory::{HostSpace, PAGE_SIZE};
+use crate::process::BREAK_EXIT_CODE;
 use crate::result::{KResult, KResultOr};
 use crate::space::{Block, MemoryMap, attr, perm, state};
 use crate::thread::lock;
 use crate::vm::View;
+
+/// `SetHeapSize` takes multiples of 2 MiB.
+const HEAP_ALIGN: u64 = 0x20_0000;
+/// The attribute bits that `SetMemoryAttribute` may change.
+const CHANGEABLE_ATTR: u32 = attr::UNCACHED | attr::PERMISSION_LOCKED;
 
 /// Project a guest permission change onto host pages without downgrading neighbours.
 fn permission_ranges(
@@ -51,11 +57,6 @@ fn permission_ranges(
     }
     ranges
 }
-
-/// `SetHeapSize` takes multiples of 2 MiB.
-const HEAP_ALIGN: u64 = 0x20_0000;
-/// The attribute bits that `SetMemoryAttribute` may change.
-const CHANGEABLE_ATTR: u32 = attr::UNCACHED | attr::PERMISSION_LOCKED;
 
 /// Checks that `addr` and `size` name whole pages and do not wrap. Returns the range.
 pub(crate) fn page_range(addr: u64, size: u64) -> KResultOr<(u64, u64)> {
@@ -147,6 +148,7 @@ impl Kernel {
 
     /// `SetMemoryPermission`: the range must be normal or code-data memory that is not locked and has no permission
     /// lock. The new permission is none, read or read and write.
+    /// Host pages receive the union of their guest permissions to preserve access for neighbouring guest pages.
     pub(crate) fn set_memory_permission(&self, addr: u64, size: u64, new: u32) -> KResultOr<()> {
         let vm = self.vm()?;
         let (start, end) = page_range(addr, size)?;
@@ -164,7 +166,10 @@ impl Kernel {
         let page = vm.cfg.host.page_size();
         let ranges = permission_ranges(&sp.map, start, end, new, page);
         // A shared host page cannot safely represent writable and executable subpages.
-        if ranges.iter().any(|&(_, _, access)| access & 6 == 6) {
+        if ranges
+            .iter()
+            .any(|&(_, _, access)| access & (perm::W | perm::X) == (perm::W | perm::X))
+        {
             return Err(KResult::INVALID_NEW_MEMORY_PERMISSION);
         }
         for &(from, to, access) in &ranges {
@@ -178,7 +183,9 @@ impl Kernel {
                         .blocks(at, at + page)
                         .iter()
                         .fold(0, |p, b| p | b.perm);
-                    if old & 6 == 6 || !vm.cfg.host.protect(at, page, old) {
+                    if old & (perm::W | perm::X) == (perm::W | perm::X)
+                        || !vm.cfg.host.protect(at, page, old)
+                    {
                         self.host_failed("SetMemoryPermission rollback");
                         restored = false;
                     }
@@ -190,7 +197,7 @@ impl Kernel {
                     // Release the lock before invoking the host's process-exit callback.
                     drop(sp);
                     (self.config.log)("SetMemoryPermission rollback failed: ending the process");
-                    (self.config.process_exit)(42);
+                    (self.config.process_exit)(BREAK_EXIT_CODE);
                 }
                 return Err(result);
             }

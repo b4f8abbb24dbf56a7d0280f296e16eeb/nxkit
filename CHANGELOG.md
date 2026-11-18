@@ -4,6 +4,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- `SetMemoryPermission` preserves neighbouring guest permissions on larger host pages, rejects writable-executable projections, and restores host permissions after failure. An incomplete rollback requests process termination.
+
 ### Changed
 
 - nxkit is licensed under MIT again (`LICENSE`, `license` in `Cargo.toml`). Releases 0.9.3 to 0.10.0 stay under GPL-3.0-only.

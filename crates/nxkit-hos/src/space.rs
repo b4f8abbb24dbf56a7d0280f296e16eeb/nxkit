@@ -26,8 +26,10 @@ pub(crate) mod state {
 pub(crate) mod perm {
     pub(crate) const NONE: u32 = 0;
     pub(crate) const R: u32 = 1;
-    pub(crate) const RW: u32 = 3;
-    pub(crate) const RX: u32 = 5;
+    pub(crate) const W: u32 = 2;
+    pub(crate) const X: u32 = 4;
+    pub(crate) const RW: u32 = R | W;
+    pub(crate) const RX: u32 = R | X;
 }
 
 /// Memory attributes.
