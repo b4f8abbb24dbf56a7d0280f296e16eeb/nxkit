@@ -11,6 +11,7 @@ use nxkit_nvn::tic::Tsc;
 struct Spy {
     waits: Mutex<Vec<(Fence, u64)>>,
     idle: AtomicU64,
+    drain: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
     /// The flushes that reached the backend: reason, fence and commands of the frame.
     flushes: Mutex<Vec<(FlushReason, Fence, usize)>>,
 }
@@ -47,6 +48,12 @@ impl Backend for Spy {
     }
     fn wait_idle(&self) {
         self.idle.fetch_add(1, Ordering::Relaxed);
+        if let Some((started, release)) = self.drain.lock().unwrap().take() {
+            started.send(()).unwrap();
+            release
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+        }
     }
     fn texture_created(&self, _: &TextureRecord) {}
     fn texture_finalized(&self, _: TexId) {}
@@ -210,4 +217,52 @@ fn a_release_flush_leaves_the_held_ops_held() {
     assert_eq!(g.gate().held.len(), 1, "the op that waits stays held");
     // Held work is work of the next flush: its fence is the next number.
     assert_eq!(g.fence_now(), Fence(2));
+}
+
+#[test]
+fn suspension_drains_before_returning_and_parks_flushes_without_losing_the_open_frame() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let spy = Arc::new(Spy::default());
+    let (draining, drain_started) = channel();
+    let (release, drain_release) = channel();
+    *spy.drain.lock().unwrap() = Some((draining, drain_release));
+    let g = Arc::new(gpu_with(spy.clone()));
+    work(&g, 2);
+    let paused_gpu = g.clone();
+    let (paused, pause_done) = channel();
+    let pause = std::thread::spawn(move || {
+        paused_gpu.set_active(false);
+        paused.send(()).unwrap();
+    });
+    drain_started.recv_timeout(Duration::from_secs(2)).unwrap();
+    let returns_before_drain = pause_done.try_recv().is_ok();
+    let guest_gpu = g.clone();
+    let (flushed, flush_done) = channel();
+    let guest = std::thread::spawn(move || {
+        flushed.send(guest_gpu.flush(FlushReason::CpuWait)).unwrap();
+    });
+    // Recording completion needs no front lock, even while the backend drains.
+    g.recorded_deferred(std::slice::from_ref(&(0x1000..0x2000)));
+    let flushes_while_draining = sent(&spy);
+    release.send(()).unwrap();
+    pause.join().unwrap();
+    let flushed_while_paused = flush_done.recv_timeout(Duration::from_millis(20)).ok();
+    g.set_active(false); // Repeated inactive notifications neither flush nor drain again.
+    let open_commands = g.front.lock().unwrap().frame().cmds.len();
+    let drains = spy.idle.load(Ordering::Relaxed);
+    g.set_active(true);
+    g.set_active(true);
+    guest.join().unwrap();
+    let stayed_paused = flushed_while_paused.is_none();
+    let result = flushed_while_paused
+        .unwrap_or_else(|| flush_done.recv_timeout(Duration::from_secs(2)).unwrap());
+    assert!(!returns_before_drain);
+    assert!(flushes_while_draining.is_empty());
+    assert!(stayed_paused);
+    assert_eq!((open_commands, drains), (2, 1));
+    assert_eq!(result.unwrap(), Fence(1));
+    assert_eq!(sent(&spy), [(FlushReason::CpuWait, 1, 2)]);
+    assert!(g.pending_recorded.lock().unwrap().is_empty());
 }

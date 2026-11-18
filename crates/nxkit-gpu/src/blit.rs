@@ -66,6 +66,10 @@ impl Blit {
         })
     }
 
+    pub(crate) fn wait_idle(&self) -> Result<()> {
+        self.ring.wait_idle()
+    }
+
     /// Draws `src` into `drawable` and presents it at `at` (seconds on the `CACurrentMediaTime` clock), or as soon as the
     /// GPU is done when `at` is `None`.
     pub(crate) fn present(

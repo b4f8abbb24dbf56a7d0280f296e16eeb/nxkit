@@ -72,6 +72,7 @@ fn start(
         hooks,
     );
     link.set_paused(true);
+    nxkit_rt::nvn::set_active(false);
     let session = Session {
         _loaded: loaded,
         _memory: memory,
@@ -132,13 +133,19 @@ unsafe extern "C" fn nxkit_start(
 extern "C" fn nxkit_set_active(active: bool) {
     with_session(|s| {
         let active = active && !stop::requested();
-        s.link.set_paused(!active);
+        if !active {
+            s.link.set_paused(true);
+        }
         seams::focus_changed(active);
         if !active {
             nxkit_svc_input::set_touches(&[]);
         }
         if let Err(error) = nxkit_svc_audio::set_active(active) {
             eprintln!("nxkit audio: {error}");
+        }
+        nxkit_rt::nvn::set_active(active);
+        if active {
+            s.link.set_paused(false);
         }
     });
 }

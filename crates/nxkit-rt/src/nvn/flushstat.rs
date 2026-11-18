@@ -26,15 +26,8 @@ fn index(reason: FlushReason) -> usize {
     }
 }
 
-unsafe extern "C" {
-    fn clock_gettime_nsec_np(clock_id: u32) -> u64;
-}
-
-/// The host clock in ns: `CLOCK_UPTIME_RAW`, the clock of the GPU times of Metal.
-pub(crate) fn now_ns() -> u64 {
-    // SAFETY: `clock_gettime_nsec_np` has no preconditions.
-    unsafe { clock_gettime_nsec_np(8) }
-}
+// The shared host clock uses mach_absolute_time on Apple, the same uptime base as Metal.
+pub(crate) use nxkit_hos::sys::monotonic_ns as now_ns;
 
 /// Whether a category that uses the counters is on. The first call also sets the hooks for the batches of the GPU.
 pub(crate) fn on() -> bool {
