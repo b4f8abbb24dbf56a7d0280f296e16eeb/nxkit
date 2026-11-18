@@ -233,11 +233,12 @@ pub fn shaders_and_archive(
             };
             let r = p
                 .counted(None, "shaders", &count, || {
-                    if a.platform == "ios" {
-                        nxb_stages::build::build_ios(cfg)
+                    let target = if a.platform == "ios" {
+                        nxb_shader::target::IOS
                     } else {
-                        nxb_stages::build::build(cfg)
-                    }
+                        nxb_shader::target::MAC
+                    };
+                    nxb_stages::build::build_for(cfg, target)
                 })
                 .map_err(|e| e.to_string());
             if let Some(s) = &stream {
