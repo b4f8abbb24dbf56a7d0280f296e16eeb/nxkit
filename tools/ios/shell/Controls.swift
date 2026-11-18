@@ -25,7 +25,56 @@ final class Controls: UIView {
         let target: Int
         var point: CGPoint
     }
+    private final class Surface: UIView {
+        let label: UILabel?
+        let knob: UIView?
+
+        init(title: String?, radius: CGFloat, font: UIFont) {
+            label = title.map { title in
+                let label = UILabel()
+                label.text = title
+                label.font = font
+                label.textAlignment = .center
+                label.textColor = UIColor.white.withAlphaComponent(0.7)
+                label.highlightedTextColor = .white
+                label.isAccessibilityElement = false
+                return label
+            }
+            knob = title == nil ? UIView(frame: CGRect(x: radius * 0.6, y: radius * 0.6,
+                                                       width: radius * 0.8, height: radius * 0.8)) : nil
+            super.init(frame: .zero)
+            isOpaque = false
+            backgroundColor = .clear
+            if let label { addSubview(label) }
+            if let knob {
+                knob.isOpaque = false
+                knob.backgroundColor = .clear
+                addSubview(knob)
+            }
+            setHeld(false)
+        }
+        required init?(coder: NSCoder) { fatalError("Programmatic view") }
+
+        func setHeld(_ held: Bool) {
+            label?.isHighlighted = held
+            // Only the outlines and legend brighten. The game stays visible through
+            // every control background, including while a button or stick is held.
+            layer.borderColor = UIColor.white.withAlphaComponent(held ? 1 : 0.35).cgColor
+            layer.borderWidth = held ? 2 : 1
+            knob?.layer.borderColor = UIColor.white.withAlphaComponent(held ? 1 : 0.55).cgColor
+            knob?.layer.borderWidth = held ? 2 : 1.5
+        }
+        func moveKnob(to point: CGPoint) { knob?.center = point }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layer.cornerRadius = min(bounds.width, bounds.height) / 2
+            label?.frame = bounds
+            if let knob { knob.layer.cornerRadius = knob.bounds.width / 2 }
+        }
+    }
     private var targets: [Target] = []
+    private var surfaces: [Surface] = []
+    private var heldSurfaces: Set<Int> = []
     private var contacts: [UITouch: Contact] = [:]
     private var fingers: [UITouch: UInt32] = [:]
     private var layoutArea = CGRect.null
@@ -46,10 +95,23 @@ final class Controls: UIView {
         reset()
         layoutArea = area
         scale = max(0, min(1, area.width / 400, area.height / 280))
+        surfaces.forEach { $0.removeFromSuperview() }
+        surfaces.removeAll()
         targets.removeAll()
         guard scale > 0 else { return }
+        let font = UIFont.systemFont(ofSize: 14 * scale, weight: .semibold)
         func add(_ kind: Kind, _ x: CGFloat, _ y: CGFloat, _ radius: CGFloat = 22) {
-            targets.append(Target(kind: kind, center: CGPoint(x: x, y: y), radius: radius * scale))
+            let radius = radius * scale
+            targets.append(Target(kind: kind, center: CGPoint(x: x, y: y), radius: radius))
+            let title: String?
+            if case let .button(_, text) = kind { title = text } else { title = nil }
+            let surface = Surface(title: title, radius: radius, font: font)
+            surface.frame = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+            // Controls owns every touch, including simultaneous button, stick and game-screen touches.
+            surface.isUserInteractionEnabled = false
+            surface.isAccessibilityElement = false
+            addSubview(surface)
+            surfaces.append(surface)
         }
         let l = area.minX, r = area.maxX, t = area.minY, b = area.maxY, s = scale
         // Edge-anchored clusters leave the middle of the game unobstructed.
@@ -91,14 +153,14 @@ final class Controls: UIView {
                               y: Float(min(max(p.y / max(bounds.height, 1), 0), 1)))
         }
         points.withUnsafeBufferPointer { nxkit_touches($0.baseAddress, $0.count) }
-        setNeedsDisplay()
+        updateAppearance()
     }
     func reset() {
         contacts.removeAll()
         fingers.removeAll()
         nxkit_virtual_pad(0, 0, 0, 0, 0)
         nxkit_touches(nil, 0)
-        setNeedsDisplay()
+        updateAppearance()
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
@@ -130,36 +192,35 @@ final class Controls: UIView {
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { touchesEnded(touches, with: event) }
 
-    override func draw(_ rect: CGRect) {
-        let text: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 14 * scale, weight: .semibold), .foregroundColor: UIColor.white
-        ]
-        func circle(_ center: CGPoint, _ radius: CGFloat) -> UIBezierPath {
-            UIBezierPath(ovalIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-        }
+    private func updateAppearance() {
         for (index, target) in targets.enumerated() {
             let contact = contacts.values.first { $0.target == index }
-            let c = target.center, r = target.radius
-            // Lightweight glass-like tint and touch feedback, not the system Liquid Glass material.
-            UIColor.black.withAlphaComponent(0.2).setFill()
-            circle(c, r).fill()
-            UIColor.white.withAlphaComponent(contact == nil ? 0.08 : 0.3).setFill()
-            circle(c, r).fill()
-            UIColor.white.withAlphaComponent(contact == nil ? 0.45 : 0.95).setStroke()
-            let rim = circle(c, r)
-            rim.lineWidth = (contact == nil ? 1 : 2) * scale
-            rim.stroke()
-            UIColor.white.withAlphaComponent(contact == nil ? 0.25 : 0.7).setStroke()
-            UIBezierPath(arcCenter: c, radius: r - 3 * scale, startAngle: .pi * 1.15,
-                         endAngle: .pi * 1.85, clockwise: true).stroke()
+            let held = contact != nil
+            if held != heldSurfaces.contains(index) {
+                if held { heldSurfaces.insert(index) } else { heldSurfaces.remove(index) }
+                let surface = surfaces[index]
+                surface.setHeld(held)
+                // The overlay owns touches, so child controls never receive UIKit touch tracking.
+                // Drive feedback from the same owners as input, including multi-finger holds.
+                let transform = held ? CGAffineTransform(scaleX: 1.08, y: 1.08) : .identity
+                if UIAccessibility.isReduceMotionEnabled {
+                    surface.transform = transform
+                } else {
+                    UIView.animate(withDuration: held ? 0.14 : 0.22, delay: 0,
+                                   usingSpringWithDamping: 0.72, initialSpringVelocity: 0,
+                                   options: [.allowUserInteraction, .beginFromCurrentState]) {
+                        surface.transform = transform
+                    }
+                }
+            }
             switch target.kind {
-            case let .button(_, title):
-                let label = title as NSString, size = label.size(withAttributes: text)
-                label.draw(at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2), withAttributes: text)
+            case .button:
+                break
             case .stick:
                 let axis = contact.map { target.axis(at: $0.point) } ?? .zero
-                UIColor.white.withAlphaComponent(0.45).setFill()
-                circle(CGPoint(x: c.x + axis.x * r * 0.6, y: c.y - axis.y * r * 0.6), r * 0.4).fill()
+                let r = target.radius
+                surfaces[index].moveKnob(to:
+                    CGPoint(x: r + axis.x * r * 0.6, y: r - axis.y * r * 0.6))
             }
         }
     }
