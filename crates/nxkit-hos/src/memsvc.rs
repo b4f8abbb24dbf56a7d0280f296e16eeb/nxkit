@@ -171,6 +171,7 @@ impl Kernel {
             if !vm.cfg.host.protect(from, to - from, access) {
                 // Restore the old projection, including a possibly partially changed failing span.
                 let mut at = ranges[0].0;
+                let mut restored = true;
                 while at < to {
                     let old = sp
                         .map
@@ -179,10 +180,19 @@ impl Kernel {
                         .fold(0, |p, b| p | b.perm);
                     if old & 6 == 6 || !vm.cfg.host.protect(at, page, old) {
                         self.host_failed("SetMemoryPermission rollback");
+                        restored = false;
                     }
                     at += page;
                 }
-                return Err(self.host_failed("SetMemoryPermission"));
+                let result = self.host_failed("SetMemoryPermission");
+                if !restored {
+                    // Ask the host to end a guest whose host permissions no longer match its map.
+                    // Release the lock before invoking the host's process-exit callback.
+                    drop(sp);
+                    (self.config.log)("SetMemoryPermission rollback failed: ending the process");
+                    (self.config.process_exit)(42);
+                }
+                return Err(result);
             }
         }
         sp.map.rewrite(start, end, |b| Block { perm: new, ..*b });
