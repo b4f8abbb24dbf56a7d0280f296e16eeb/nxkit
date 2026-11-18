@@ -14,7 +14,7 @@ in_v = false
 [dependencies]
 nxkit-abi = { workspace = true }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = { workspace = true, features = ["std"] }
 objc2-core-foundation = { workspace = true, features = ["std"] }
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSSet", "NSString"] }

@@ -1,4 +1,4 @@
-//! The output unit (AUHAL) on the default output device.
+//! The output unit: AUHAL on macOS, RemoteIO on iOS.
 //!
 //! The unit calls one closure on the device's real-time thread. The first call joins that thread to the `os_workgroup` of
 //! the device, so the scheduler treats it as part of the device's deadline (R20).
@@ -16,6 +16,7 @@ mod imp {
         AudioComponentInstanceNew, AudioOutputUnitStart, AudioUnitGetProperty, AudioUnitInitialize,
         AudioUnitSetProperty,
     };
+    #[cfg(target_os = "macos")]
     use objc2_core_audio::{AudioObjectGetPropertyData, AudioObjectPropertyAddress};
     use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription};
     use std::ffi::c_void;
@@ -26,16 +27,21 @@ mod imp {
     const SCOPE_INPUT: u32 = 1;
     const PROP_STREAM_FORMAT: u32 = 8;
     const PROP_SET_RENDER_CALLBACK: u32 = 23;
+    #[cfg(target_os = "macos")]
     const PROP_CURRENT_DEVICE: u32 = 2000;
     const PROP_OS_WORKGROUP: u32 = 2015;
     const FORMAT_LINEAR_PCM: u32 = 0x6c70_636d;
     const FLAGS_FLOAT_PACKED: u32 = 1 | 8;
+    #[cfg(target_os = "macos")]
     const SYSTEM_OBJECT: u32 = 1;
+    #[cfg(target_os = "macos")]
     const SELECTOR_DEFAULT_OUTPUT: u32 = 0x644f_7574;
+    #[cfg(target_os = "macos")]
     const SCOPE_HAL_GLOBAL: u32 = 0x676c_6f62;
 
     unsafe extern "C" {
         fn os_workgroup_join(wg: *mut c_void, token: *mut u64) -> i32;
+        #[cfg(target_os = "macos")]
         fn AudioObjectAddPropertyListener(
             object: u32,
             address: *const AudioObjectPropertyAddress,
@@ -47,6 +53,7 @@ mod imp {
             ) -> i32,
             data: *mut c_void,
         ) -> i32;
+        #[cfg(target_os = "macos")]
         fn AudioObjectSetPropertyData(
             object: u32,
             address: *const AudioObjectPropertyAddress,
@@ -58,16 +65,21 @@ mod imp {
     }
 
     /// `kAudioDevicePropertyBufferFrameSize`.
+    #[cfg(target_os = "macos")]
     const SELECTOR_BUFFER_FRAMES: u32 = 0x6673_697a;
     /// `kAudioDevicePropertyTransportType`.
+    #[cfg(target_os = "macos")]
     const SELECTOR_TRANSPORT: u32 = 0x7472_616e;
     /// `kAudioDeviceProcessorOverload`.
+    #[cfg(target_os = "macos")]
     const SELECTOR_OVERLOAD: u32 = 0x6f76_6572;
 
+    #[cfg(target_os = "macos")]
     static OVERLOADS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     /// Counts the times the device's IO thread missed its deadline. The listener runs on a notification thread of
     /// Core Audio, not on the IO thread. Each overload is an audible gap, whatever the samples were.
+    #[cfg(target_os = "macos")]
     unsafe extern "C" fn overload(
         _object: u32,
         _n: u32,
@@ -82,6 +94,7 @@ mod imp {
         0
     }
 
+    #[cfg(target_os = "macos")]
     fn device_u32(device: u32, selector: u32) -> Option<u32> {
         let addr = AudioObjectPropertyAddress {
             mSelector: selector,
@@ -105,6 +118,7 @@ mod imp {
 
     /// Logs the transport and the IO buffer of the device, sets the buffer from `NXKIT_AUDIO_DEVICE_FRAMES`, and listens
     /// for overloads of the device.
+    #[cfg(target_os = "macos")]
     fn watch_device(device: u32) {
         if let Some(frames) = std::env::var("NXKIT_AUDIO_DEVICE_FRAMES")
             .ok()
@@ -227,6 +241,7 @@ mod imp {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn default_device() -> Result<u32, String> {
         let addr = AudioObjectPropertyAddress {
             mSelector: SELECTOR_DEFAULT_OUTPUT,
@@ -256,11 +271,17 @@ mod imp {
     impl Output {
         /// Opens the default output device at 48 kHz stereo `f32`, joins its workgroup and starts it.
         pub fn start(fill: Fill) -> Result<Output, String> {
+            #[cfg(target_os = "macos")]
             let device = default_device()?;
+            #[cfg(target_os = "macos")]
             watch_device(device);
             let desc = AudioComponentDescription {
                 componentType: 0x6175_6f75,
-                componentSubType: 0x6168_616c,
+                componentSubType: if cfg!(target_os = "ios") {
+                    0x7269_6f63
+                } else {
+                    0x6168_616c
+                },
                 componentManufacturer: 0x6170_706c,
                 componentFlags: 0,
                 componentFlagsMask: 0,
@@ -268,7 +289,7 @@ mod imp {
             // SAFETY: a null start component and a valid description.
             let comp = unsafe { AudioComponentFindNext(std::ptr::null_mut(), &desc) };
             if comp.is_null() {
-                return Err("no HAL output component".to_string());
+                return Err("no audio output component".to_string());
             }
             let mut unit: AudioComponentInstance = std::ptr::null_mut();
             // SAFETY: `comp` is a live component and `unit` receives the instance.
@@ -277,6 +298,7 @@ mod imp {
             })?;
 
             // SAFETY: `device` is 4 bytes, as `CurrentDevice` needs.
+            #[cfg(target_os = "macos")]
             check("set the output device", unsafe {
                 AudioUnitSetProperty(
                     unit,
@@ -360,9 +382,23 @@ mod imp {
                 );
             }
             // SAFETY: the unit is initialized.
+            #[cfg(target_os = "macos")]
             check("start the output unit", unsafe {
                 AudioOutputUnitStart(unit)
             })?;
+            #[cfg(target_os = "ios")]
+            {
+                let mut state = OUTPUT
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if state.0 {
+                    // SAFETY: the unit is initialized and this lock serializes start/stop.
+                    check("start the output unit", unsafe {
+                        AudioOutputUnitStart(unit)
+                    })?;
+                }
+                state.1 = unit as usize;
+            }
             Ok(Output {
                 ctx: std::ptr::from_ref(ctx),
             })
@@ -374,6 +410,33 @@ mod imp {
             let v = unsafe { (*self.ctx).join_status.load(Ordering::Acquire) };
             if v == i32::MIN { None } else { Some(v) }
         }
+    }
+
+    // The mixer owns one output for the process lifetime, as on macOS.
+    // Swift owns AVAudioSession and sends effective foreground/interruption state.
+    #[cfg(target_os = "ios")]
+    static OUTPUT: std::sync::Mutex<(bool, usize)> = std::sync::Mutex::new((false, 0));
+
+    /// Start or stop the process-lifetime RemoteIO unit.
+    #[cfg(target_os = "ios")]
+    pub fn set_active(active: bool) -> Result<(), String> {
+        let mut state = OUTPUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.0 = active;
+        if state.1 == 0 {
+            return Ok(());
+        }
+        let unit = state.1 as AudioComponentInstance;
+        // SAFETY: the process-lifetime unit is initialized; the lock serializes state changes.
+        let status = unsafe {
+            if active {
+                AudioOutputUnitStart(unit)
+            } else {
+                objc2_audio_toolbox::AudioOutputUnitStop(unit)
+            }
+        };
+        check("change output activity", status)
     }
 
     /// The layout of `AURenderCallbackStruct`.
@@ -405,3 +468,6 @@ mod imp {
 }
 
 pub use imp::Output;
+
+#[cfg(target_os = "ios")]
+pub use imp::set_active;

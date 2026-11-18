@@ -28,9 +28,9 @@ struct RawTm {
     zone: *const c_char,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 const CLOCK_MONOTONIC: c_int = 6;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(target_vendor = "apple"))]
 const CLOCK_MONOTONIC: c_int = 1;
 
 unsafe extern "C" {
