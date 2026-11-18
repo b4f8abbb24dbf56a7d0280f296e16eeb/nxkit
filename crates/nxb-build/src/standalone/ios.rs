@@ -229,7 +229,12 @@ mod tests {
         let app = shell.bundle(&stage, "A & B", "app.game").unwrap();
         std::fs::write(app.join("game.json"), b"{}").unwrap();
         // Exercise Apple's asset compiler where available, using a generated one-pixel RGB image.
-        if cfg!(target_os = "macos") {
+        if cfg!(target_os = "macos")
+            && std::process::Command::new("xcrun")
+                .args(["--sdk", "iphoneos", "--find", "actool"])
+                .output()
+                .is_ok_and(|out| out.status.success())
+        {
             let image = temp.path().join("icon.png");
             std::fs::write(
                 &image,
