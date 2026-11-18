@@ -158,12 +158,6 @@ extern "C" fn nxkit_virtual_pad(buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32
     });
 }
 #[unsafe(no_mangle)]
-extern "C" fn nxkit_stop() {
-    nxkit_set_active(false);
-    with_session(|_| stop::request("the UIKit scene closed"));
-}
-
-#[unsafe(no_mangle)]
 unsafe extern "C" fn nxkit_touches(points: *const nxkit_svc_input::Touch, count: usize) {
     if count > 16 || (points.is_null() && count != 0) {
         return;
