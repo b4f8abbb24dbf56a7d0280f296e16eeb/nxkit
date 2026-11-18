@@ -519,41 +519,39 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {
-        if !ios {
-            // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
-            // failed move stops the build with the old app and its save in place.
-            let old_save = out.join("Contents/Resources/nxkit/save");
-            if old_save.is_dir() {
-                let new_save = run_dir.join("save");
-                if new_save.exists() {
-                    return Err(format!(
-                        "{}: the new app already has a save folder",
-                        new_save.display()
-                    ));
-                }
-                std::fs::rename(&old_save, &new_save).map_err(|e| io(&new_save, e))?;
-                p.say(&format!(
-                    "save: kept from the old app ({})",
+        if ios {
+            ios::publish(&stage_dir, &out)?;
+            return Ok(((), format!("{} (unsigned)", out.display())));
+        }
+        // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
+        // failed move stops the build with the old app and its save in place.
+        let old_save = out.join("Contents/Resources/nxkit/save");
+        if old_save.is_dir() {
+            let new_save = run_dir.join("save");
+            if new_save.exists() {
+                return Err(format!(
+                    "{}: the new app already has a save folder",
                     new_save.display()
                 ));
             }
-            // the lists of the recorded pipelines go with the save: the new app starts with them
-            let carried = pipelist::carry(
-                &b.pipeline_lists,
-                &out.join("Contents/Resources/nxkit"),
-                &run_dir,
-            );
-            if carried > 0 {
-                p.say(&format!("pipeline lists: {carried} kept in the new app"));
-            }
+            std::fs::rename(&old_save, &new_save).map_err(|e| io(&new_save, e))?;
+            p.say(&format!(
+                "save: kept from the old app ({})",
+                new_save.display()
+            ));
         }
-        bundle::publish(&stage_dir, &out, ios, true)?;
-        let note = if ios {
-            format!("{} (unsigned)", out.display())
-        } else {
-            out.display().to_string()
-        };
-        Ok(((), note))
+        // the lists of the recorded pipelines go with the save: the new app starts with them
+        let carried = pipelist::carry(
+            &b.pipeline_lists,
+            &out.join("Contents/Resources/nxkit"),
+            &run_dir,
+        );
+        if carried > 0 {
+            p.say(&format!("pipeline lists: {carried} kept in the new app"));
+        }
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
+        Ok(((), out.display().to_string()))
     })?;
     p.say(&format!("app: {}", out.display()));
     Ok(())

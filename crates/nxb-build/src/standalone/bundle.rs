@@ -4,34 +4,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Publish a completed app, preserving each producer's signing and replacement policy.
-pub(super) fn publish(stage: &Path, out: &Path, ios: bool, replace: bool) -> Result<(), String> {
-    if ios {
-        return super::ios::publish(stage, out);
-    }
-    // The generic producer signs the whole app; title builds retain their existing signatures.
-    if !replace {
-        sign(stage)?;
-    }
-    publish_app(stage, out, replace)
-}
-
-pub(super) fn publish_app(stage: &Path, out: &Path, replace: bool) -> Result<(), String> {
-    if replace {
-        let _ = std::fs::remove_dir_all(out);
-    } else {
-        // Reserve the destination atomically, without replacing another app or its saves.
-        std::fs::create_dir(out).map_err(|e| super::io(out, e))?;
-    }
-    if let Err(e) = std::fs::rename(stage, out) {
-        if !replace {
-            let _ = std::fs::remove_dir(out);
-        }
-        return Err(super::io(out, e));
-    }
-    Ok(())
-}
-
 // symlink_metadata also sees dangling symlinks, which must never be followed for output.
 pub(super) fn vacant(path: &Path) -> Result<(), String> {
     match std::fs::symlink_metadata(path) {

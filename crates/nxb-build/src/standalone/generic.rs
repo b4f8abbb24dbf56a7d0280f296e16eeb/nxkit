@@ -30,6 +30,16 @@ fn put(run: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| io(&path, e))
 }
 
+fn publish(partial: &Path, out: &Path) -> Result<(), String> {
+    // Reserve an empty destination atomically. A concurrent build cannot replace another app.
+    std::fs::create_dir(out).map_err(|e| io(out, e))?;
+    if let Err(e) = std::fs::rename(partial, out) {
+        let _ = std::fs::remove_dir(out);
+        return Err(io(out, e));
+    }
+    Ok(())
+}
+
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let ios = a.platform == "ios";
     let (platform, base, extension) = if ios {
@@ -154,7 +164,12 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             "sign and publish new app"
         },
         || {
-            bundle::publish(&partial, &out, ios, false)?;
+            if ios {
+                ios::publish(&partial, &out)?;
+            } else {
+                bundle::sign(&partial)?;
+                publish(&partial, &out)?;
+            }
             Ok(((), out.display().to_string()))
         },
     )?;
@@ -184,10 +199,10 @@ mod tests {
         assert_eq!(std::fs::read(partial.join("nested/file")).unwrap(), b"data");
         assert!(put(&partial, "../escape", b"data").is_err());
         std::fs::create_dir(&out).unwrap();
-        assert!(bundle::publish_app(&partial, &out, false).is_err());
+        assert!(publish(&partial, &out).is_err());
         assert!(partial.join("nested/file").is_file());
         std::fs::remove_dir(&out).unwrap();
-        bundle::publish_app(&partial, &out, false).unwrap();
+        publish(&partial, &out).unwrap();
         assert!(out.join("nested/file").is_file());
         assert!(!partial.exists());
         std::fs::remove_dir_all(root).unwrap();
