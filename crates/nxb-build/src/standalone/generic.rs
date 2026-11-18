@@ -147,6 +147,9 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             for (name, bytes) in game.files.iter().chain(&shaders) {
                 put(&run, name, bytes)?;
             }
+            if let Some(shell) = &shell {
+                shell.icon(&run, &run.join("icon.jpg"))?;
+            }
             link::module_files(&run, &analyzed.modules, |_, _| {})?;
             link::write_dylib(
                 &run,
