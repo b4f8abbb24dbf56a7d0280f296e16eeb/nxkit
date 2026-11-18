@@ -92,6 +92,7 @@ These parts of nxkit are ported or derived from nxnative:
   `dm/host/hle_guestthread.c`: the lock handoff, the condition variable key rules, the address arbitration arithmetic, the
   `GetInfo` values, the memory profile numbers and the SDK take-overs. The global lock is not copied. The result codes were
   checked against Atmosphere (GPL-2.0-or-later, not copied).
+- iOS controls. `tools/ios/shell/Controls.swift` follows the Nintendo button mapping, diamond layout and stick dead zone of `dm/ios/Sources/DmGamepad.m`.
 - Input. `nxkit-svc-input` ports logic and data from `dm/host/hle_hid.c`, `hle_touch.c`, `pad_slots.h`, `pad_apple.h`,
   `motion_fusion.h`, `motion_apple.h`, `hle_haptics.c`, `haptics_apple.m` and `front_mac.m`. `touch.rs` also follows the gesture
   rules of yuzu (`hid_core`, `gesture_handler.cpp`). No yuzu code is copied.
