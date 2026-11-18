@@ -87,37 +87,33 @@ pub(crate) fn module_files(
     Ok(())
 }
 
-/// Writes and signs `nxgame.dylib`. Returns its size. `progress` gets the steps done (of 3) and what comes next.
+/// Writes `nxgame.dylib`, signing ad hoc on Mac; device signing happens with the final app.
+/// `progress` reports linking, writing, and (on Mac) signing.
 pub(crate) fn write_dylib(
     run: &Path,
     mods: &[(Built, u64)],
+    ios_memory: Option<(u64, u64)>,
     mut progress: impl FnMut(u64, &str),
 ) -> Result<u64, String> {
+    let tail = ios_memory
+        .map(|(reserve, stack)| {
+            // reserve includes the kernel front. Add the main stack and room for
+            // runtime region alignments, then round to host pages.
+            reserve
+                .checked_add(stack)
+                .and_then(|n| n.checked_add(0x40_0000 + 0x3fff))
+                .map(|n| n & !0x3fff)
+                .ok_or("iOS reservation overflow")
+        })
+        .transpose()?;
     progress(0, "linking");
-    let bytes = dylib(mods, None)?;
+    let bytes = dylib(mods, tail)?;
     let path = run.join("nxgame.dylib");
     progress(1, "writing");
     put(&path, &bytes)?;
-    progress(2, "signing");
-    bundle::sign(&path)?;
-    Ok(bytes.len() as u64)
-}
-
-/// The identity signer signs this device dylib together with the final app.
-pub(crate) fn write_ios(
-    run: &Path,
-    mods: &[(Built, u64)],
-    reserve: u64,
-    stack: u64,
-) -> Result<u64, String> {
-    // reserve already contains the kernel front allowance. Add the main stack
-    // and room for both runtime region alignments before rounding to host pages.
-    let tail = reserve
-        .checked_add(stack)
-        .and_then(|n| n.checked_add(0x40_0000 + 0x3fff))
-        .map(|n| n & !0x3fff)
-        .ok_or("iOS reservation overflow")?;
-    let bytes = dylib(mods, Some(tail))?;
-    put(&run.join("nxgame.dylib"), &bytes)?;
+    if tail.is_none() {
+        progress(2, "signing");
+        bundle::sign(&path)?;
+    }
     Ok(bytes.len() as u64)
 }

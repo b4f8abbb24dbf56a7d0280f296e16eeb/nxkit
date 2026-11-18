@@ -148,16 +148,12 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 put(&run, name, bytes)?;
             }
             link::module_files(&run, &analyzed.modules, |_, _| {})?;
-            if ios {
-                link::write_ios(
-                    &run,
-                    &analyzed.modules,
-                    analyzed.reserve(),
-                    u64::from(analyzed.thread.stack_size),
-                )?;
-            } else {
-                link::write_dylib(&run, &analyzed.modules, |_, _| {})?;
-            }
+            link::write_dylib(
+                &run,
+                &analyzed.modules,
+                ios.then_some((analyzed.reserve(), u64::from(analyzed.thread.stack_size))),
+                |_, _| {},
+            )?;
             Ok(((), format!("{platform} host and guest linked")))
         },
     )?;
