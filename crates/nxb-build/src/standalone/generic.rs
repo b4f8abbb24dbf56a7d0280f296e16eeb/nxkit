@@ -30,15 +30,6 @@ fn put(run: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| io(&path, e))
 }
 
-// symlink_metadata also sees dangling symlinks, which must never be followed for output.
-fn vacant(path: &Path) -> Result<(), String> {
-    match std::fs::symlink_metadata(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io(path, e)),
-        Ok(_) => Err(format!("{} exists: choose a new output", path.display())),
-    }
-}
-
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let ios = a.platform == "ios";
     let (platform, base, extension) = if ios {
@@ -58,7 +49,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         return Ok(());
     }
     if let Some(out) = &a.out {
-        vacant(out)?;
+        bundle::vacant(out)?;
     }
     p.plan(5);
     let game = stage(p, "extract", "validate application metadata", || {
@@ -72,11 +63,18 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         .clone()
         .unwrap_or_else(|| super::home(a).join(format!("{}.{extension}", bundle::file_name(name))));
     // Never replace an app or its saves in the experimental generic path.
-    vacant(&out)?;
-    let mut partial = out.clone().into_os_string();
-    partial.push(".partial");
-    let partial = std::path::PathBuf::from(partial);
-    vacant(&partial)?;
+    bundle::vacant(&out)?;
+    let ios_stage;
+    let partial = if ios {
+        ios_stage = ios::staging(&out)?;
+        ios_stage.path().to_path_buf()
+    } else {
+        let mut name = out.clone().into_os_string();
+        name.push(".partial");
+        let path = std::path::PathBuf::from(name);
+        bundle::vacant(&path)?;
+        path
+    };
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe, ios)?;
     let id = a
@@ -113,10 +111,12 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         },
     )?;
     // Claim the staging folder instead of reusing a folder or following a symlink.
-    if let Some(parent) = partial.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
+    if !ios {
+        if let Some(parent) = partial.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
+        }
+        std::fs::create_dir(&partial).map_err(|e| io(&partial, e))?;
     }
-    std::fs::create_dir(&partial).map_err(|e| io(&partial, e))?;
     stage(
         p,
         "link",
@@ -181,11 +181,11 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let out = root.join("Game.app");
         let partial = root.join("Game.app.partial");
-        assert!(vacant(&out).is_ok());
+        assert!(bundle::vacant(&out).is_ok());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(root.join("missing"), &out).unwrap();
-            assert!(vacant(&out).is_err());
+            assert!(bundle::vacant(&out).is_err());
             std::fs::remove_file(&out).unwrap();
         }
         std::fs::create_dir(&partial).unwrap();

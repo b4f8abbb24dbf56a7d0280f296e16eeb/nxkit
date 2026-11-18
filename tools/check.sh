@@ -21,6 +21,16 @@ cargo clippy --workspace --all-targets --locked --offline -- -D warnings -A clip
 step "tests"
 cargo test --workspace --locked --offline --no-fail-fast
 
+if [ "$(uname -s)" = Darwin ]; then
+    step "iOS shell lifecycle"
+    (
+        lifecycle_tmp=$(mktemp -d)
+        trap 'rm -rf "$lifecycle_tmp"' EXIT
+        xcrun --sdk macosx swiftc tools/ios/shell/Lifecycle.swift tools/ios/tests/main.swift -o "$lifecycle_tmp/test"
+        "$lifecycle_tmp/test"
+    )
+fi
+
 step "docs (deny warnings)"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --offline --quiet
 

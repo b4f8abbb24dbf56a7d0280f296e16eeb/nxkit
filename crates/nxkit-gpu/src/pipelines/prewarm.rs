@@ -1,4 +1,4 @@
-//! The pipelines of the list, made before the first frame.
+//! Prewarming the pipelines recorded by earlier runs.
 //!
 //! The list (`record.rs`) says which pipelines the earlier runs needed. This module makes each one under the key that
 //! the encoder will ask for, so the cache holds it when the first draw comes. A pipeline is made through the same
@@ -9,7 +9,8 @@
 //! is written when the last worker is done, before `prewarm.done` and before the line that reports the start, so the
 //! next start loads it. A mesh pipeline is always a compile (an archive cannot be asked for one).
 //!
-//! The start waits for the work, up to `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20), unless the list is one this app
+//! On iOS prewarming returns after starting the workers, including for a list from an earlier build.
+//! On macOS the start waits for the work, up to `NXKIT_PIPELINE_PREWARM_WAIT` seconds (20), unless the list is one this app
 //! build has not made yet (the identity folder has no `prewarm.done`, see `carry.rs`): then it waits for all of it,
 //! however long, because a pipeline that is neither in the shipped archive nor in a runtime archive is compiled here,
 //! once, and a draw that meets it later waits a frame or more for a background compile and is skipped meanwhile. The
@@ -34,6 +35,8 @@ use std::time::{Duration, Instant};
 
 use super::record::{Entry, MeshRec, RenderRec, Seen};
 use super::*;
+
+mod finish;
 
 /// What became of one entry.
 #[derive(Clone, Copy)]
@@ -73,7 +76,6 @@ struct Work {
     entries: Vec<Entry>,
     next: AtomicUsize,
     finished: AtomicUsize,
-    alive: AtomicUsize,
     counts: [AtomicUsize; 7],
     libs: Mutex<HashMap<String, Option<ShaderLibrary>>>,
     cache: Arc<PipelineCache>,
@@ -83,12 +85,12 @@ struct Work {
     start: Instant,
     /// The start stopped waiting: the last worker prints the line.
     detached: AtomicBool,
-    over: (Mutex<()>, Condvar),
+    over: (Mutex<bool>, Condvar),
     /// Written when every pipeline is made (`carry::DONE_FILE`).
     marker: Option<PathBuf>,
     /// Runs once when the last worker is done, before the marker is written and the start is told: the runtime
     /// archive and the list are written there, so that what the start had to compile is on disk when it reports done.
-    after: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    after: Mutex<Option<Box<dyn FnOnce() -> bool + Send>>>,
 }
 
 impl Work {
@@ -230,45 +232,50 @@ fn worker(w: &Work) {
     nxkit_metal::thread::set_user_initiated();
     loop {
         let i = w.next.fetch_add(1, Ordering::Relaxed);
-        let Some(e) = w.entries.get(i) else { break };
+        let Some(e) = w.entries.get(i) else { return };
         // a panic in one entry must not end the thread: the rest of the list still needs it
         let o = catch_unwind(AssertUnwindSafe(|| w.make(e))).unwrap_or(Outcome::Failed);
         w.counts[o as usize].fetch_add(1, Ordering::Relaxed);
-        w.finished.fetch_add(1, Ordering::Relaxed);
+        if w.finished.fetch_add(1, Ordering::AcqRel) + 1 == w.entries.len() {
+            break;
+        }
     }
-    if w.alive.fetch_sub(1, Ordering::AcqRel) == 1 {
+    finish::complete(&w.over, w.marker.as_deref(), || {
         w.libs
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
-        if w.detached.load(Ordering::Acquire) {
-            eprintln!("{}", w.line("finished in the background"));
-        }
-        // the shards of the build archive sit idle in malloc memory from here on (see the module)
+        // Close build archive shards that would otherwise sit idle in malloc memory.
         if super::runtime::env_on("NXKIT_SHARD_TRIM") {
             let closed = w.cache.close_shards();
             if closed > 0 {
                 eprintln!("nxkit-gpu: prewarm over, {closed} archive shards closed");
             }
         }
-        if let Some(f) = w
-            .after
+        w.after
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
-        {
-            f();
-        }
-        if let Some(m) = &w.marker {
-            let _ = std::fs::write(m, b"");
-        }
-        let _g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
-        w.over.1.notify_all();
+            .is_none_or(|flush| flush())
+    });
+    if w.detached.load(Ordering::Acquire) {
+        eprintln!("{}", w.line("finished in the background"));
     }
 }
 
 /// The time the start waits before it shows the loading screen: a quick start shows none.
 const SCREEN_AFTER: Duration = Duration::from_secs(1);
+
+/// A zero wait leaves the work to the workers; `None` waits for the full list.
+fn startup_wait(ios: bool, carried: bool, budget: Duration) -> Option<Duration> {
+    if ios {
+        Some(Duration::ZERO)
+    } else if carried {
+        None
+    } else {
+        Some(budget)
+    }
+}
 
 fn threads() -> usize {
     std::env::var("NXKIT_PIPELINE_THREADS")
@@ -282,24 +289,28 @@ fn threads() -> usize {
 
 impl Pipelines {
     /// Makes the pipelines of `seen` from the libraries in `shader_dir`. Waits for them up to the budget (see the
-    /// module); what is left goes on in the background. `all` is the marker file to write when every pipeline is
-    /// made, and says that the start waits for all of them without a budget.
+    /// module); what is left goes on in the background. The worker writes `marker` after the archive flush.
     pub(super) fn prewarm(
         &self,
         seen: &Seen,
         shader_dir: &Path,
-        all: Option<PathBuf>,
-        after: Option<Box<dyn FnOnce() + Send>>,
+        marker: Option<PathBuf>,
+        after: Option<Box<dyn FnOnce() -> bool + Send>>,
     ) {
         if seen.is_empty() {
             return;
         }
         let n = threads().min(seen.len());
+        let wait = startup_wait(
+            cfg!(target_os = "ios"),
+            marker.is_some(),
+            Duration::from_secs(super::runtime::env_num("NXKIT_PIPELINE_PREWARM_WAIT", 20)),
+        );
+        let background = wait == Some(Duration::ZERO);
         let w = Arc::new(Work {
             entries: seen.entries().to_vec(),
             next: AtomicUsize::new(0),
             finished: AtomicUsize::new(0),
-            alive: AtomicUsize::new(n),
             counts: Default::default(),
             libs: Mutex::new(HashMap::new()),
             cache: self.cache.clone(),
@@ -307,15 +318,17 @@ impl Pipelines {
             ctx: self.ctx.clone(),
             dir: shader_dir.to_path_buf(),
             start: Instant::now(),
-            detached: AtomicBool::new(false),
-            over: (Mutex::new(()), Condvar::new()),
-            marker: all.clone(),
+            detached: AtomicBool::new(background),
+            over: (Mutex::new(false), Condvar::new()),
+            marker,
             after: Mutex::new(after),
         });
         eprintln!(
             "nxkit-gpu: compiling shaders: making {} pipelines on {n} threads{}",
             seen.len(),
-            if all.is_some() {
+            if background {
+                ", in the background"
+            } else if wait.is_none() {
                 ", waiting for all of them (the list is from an earlier build, one time)"
             } else {
                 ""
@@ -330,21 +343,23 @@ impl Pipelines {
             started += usize::from(spawned.is_ok());
         }
         // a thread that did not start leaves its share to the others; none at all: the first draws build as before
-        if started < n {
-            w.alive.fetch_sub(n - started, Ordering::AcqRel);
+        if started == 0 {
+            eprintln!("nxkit-gpu: could not start any prewarm workers");
+            return;
         }
-        let budget =
-            Duration::from_secs(super::runtime::env_num("NXKIT_PIPELINE_PREWARM_WAIT", 20));
-        let every = Duration::from_secs(if all.is_some() { 1 } else { 2 });
+        if background {
+            return;
+        }
+        let every = Duration::from_secs(if wait.is_none() { 1 } else { 2 });
         let screen = super::screen::current();
         let mut screened = false;
         let mut shown = Instant::now();
-        let mut g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
-        while w.alive.load(Ordering::Acquire) > 0 && (all.is_some() || w.start.elapsed() < budget) {
-            g = w
+        let mut done = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
+        while !*done && wait.is_none_or(|budget| w.start.elapsed() < budget) {
+            done = w
                 .over
                 .1
-                .wait_timeout(g, Duration::from_millis(100))
+                .wait_timeout(done, Duration::from_millis(100))
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
             if w.start.elapsed() >= SCREEN_AFTER
@@ -358,21 +373,34 @@ impl Pipelines {
                 eprintln!("{}", w.line("progress"));
             }
         }
-        drop(g);
+        let finished = *done;
+        if !finished {
+            w.detached.store(true, Ordering::Release);
+        }
+        drop(done);
         if screened && let Some(s) = &screen {
             s.finish();
         }
-        if w.alive.load(Ordering::Acquire) == 0 {
+        if finished {
             eprintln!("{}", w.line("done"));
         } else {
-            w.detached.store(true, Ordering::Release);
-            // the last worker may have ended between the check and the flag
-            if w.alive.load(Ordering::Acquire) == 0 {
-                eprintln!("{}", w.line("done"));
-            } else {
-                eprintln!("{}", w.line("continues in the background"));
-            }
+            eprintln!("{}", w.line("continues in the background"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ios_starts_without_waiting_even_for_a_carried_pipeline_list() {
+        let budget = Duration::from_secs(20);
+        for carried in [false, true] {
+            assert_eq!(startup_wait(true, carried, budget), Some(Duration::ZERO));
+        }
+        assert_eq!(startup_wait(false, false, budget), Some(budget));
+        assert_eq!(startup_wait(false, true, budget), None);
     }
 }
 

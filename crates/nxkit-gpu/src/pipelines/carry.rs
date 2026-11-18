@@ -5,7 +5,7 @@
 //! app has the same descriptions for the same game, as long as the key scheme (`KEY_SCHEME`, `keys.rs`) is the same.
 //! The archives do depend on the binaries, so they stay in the folder of the identity (`runtime.rs`) and go with it,
 //! but the list is kept in `<root>/pipecache/seen-<scheme>.list`, outside the identity folders. A rebuild then starts
-//! with the list of the earlier builds, and the start makes the pipelines of it before the first frame.
+//! with the list of the earlier builds.
 //!
 //! Lists written by earlier host builds are in the identity folders as `pipelines.seen`. They are read as well and
 //! merged into the new list (they have no scheme in them: they are taken to have the current one), and they are not
@@ -15,7 +15,7 @@
 //! One more file belongs to the identity folder: `prewarm.done`, which the start writes when it made every pipeline of
 //! the list. Without it the list is from an older build or the start did not finish, and the pipelines of the list
 //! are neither in the shipped archive nor in an `rt-` archive of this identity, as far as the host knows. The start
-//! then waits for all of them (see `prewarm.rs`).
+//! then prewarms the full list. On macOS the start waits for it; on iOS the workers finish in the background.
 
 use std::path::{Path, PathBuf};
 
@@ -80,8 +80,7 @@ pub(super) fn text(seen: &Seen, scheme: u32) -> String {
     }
 }
 
-/// Whether the start has to wait for every pipeline of the list: the list is not empty and the identity folder `dir`
-/// has no `prewarm.done`.
+/// Whether this identity still needs its completion marker for a nonempty list.
 pub(super) fn needs_full_start(dir: &Path, seen: &Seen) -> bool {
     !seen.is_empty() && !dir.join(DONE_FILE).is_file()
 }

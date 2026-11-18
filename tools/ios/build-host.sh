@@ -20,7 +20,7 @@ native=$(sed -n 's/.*native-static-libs: *//p' "$work/rustc.log" | head -n 1)
 test -n "$native" || { echo 'rustc did not report native static libraries' >&2; exit 1; }
 set -- --sdk iphoneos swiftc -target arm64-apple-ios26.0 -sdk "$sdk" -O \
     -parse-as-library -import-objc-header tools/ios/shell/Nxkit.h \
-    tools/ios/shell/App.swift tools/ios/shell/Controls.swift \
+    tools/ios/shell/App.swift tools/ios/shell/Controls.swift tools/ios/shell/Lifecycle.swift \
     "$target/aarch64-apple-ios/release/libnxkit_host.a"
 # rustc's flags are words, not shell code. Keep its native dependency order.
 set -f

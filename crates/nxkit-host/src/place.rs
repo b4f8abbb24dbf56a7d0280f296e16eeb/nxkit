@@ -30,7 +30,9 @@ use std::os::unix::fs::FileExt;
 
 use crate::error::{HostError, Result};
 use crate::layout::{self, Layout};
-use crate::macho::{self, Segment as MachSegment};
+use crate::macho;
+#[cfg(target_os = "macos")]
+use crate::macho::Segment as MachSegment;
 use crate::manifest::Game;
 use crate::memory::{self, GuestMemory};
 #[cfg(target_os = "macos")]

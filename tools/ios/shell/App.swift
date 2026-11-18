@@ -5,6 +5,29 @@ import AVFAudio
 @main
 @MainActor
 final class AppDelegate: UIResponder, UIApplicationDelegate {
+    // The display link belongs to this layer for the lifetime of the guest.
+    // UIKit can discard a background scene and reconnect it in the same process.
+    var runningGame: GameView?
+    weak var gameScene: SceneDelegate?
+    var lifecycle = GameLifecycle()
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        NotificationCenter.default.addObserver(self, selector: #selector(audioInterrupted(_:)),
+                                               name: AVAudioSession.interruptionNotification,
+                                               object: AVAudioSession.sharedInstance())
+        return true
+    }
+
+    @objc private func audioInterrupted(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        // AVAudioSession posts on the main thread. Record the event in order
+        // with scene callbacks, even when the game has no attached scene.
+        lifecycle.interruption(began: type == .began)
+        gameScene?.applyActive()
+    }
+
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         let configuration = UISceneConfiguration(name: "Game", sessionRole: session.role)
@@ -17,19 +40,42 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var game: GameView?
-    private var foreground = false
-    private var interrupted = false
-    private var interruptionObserver: NSObjectProtocol?
+    private weak var app: AppDelegate?
+    private var audioAvailable = false
+    private var audioRetry: Task<Void, Never>?
+    private var retryDelay = 1
+    private var updatingActivity = false
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
-        guard let scene = scene as? UIWindowScene else { return }
+        guard session.role == .windowApplication, let scene = scene as? UIWindowScene,
+              let app = UIApplication.shared.delegate as? AppDelegate else { return }
         let window = UIWindow(windowScene: scene)
         let controller = UIViewController()
-        let view = GameView(frame: window.bounds)
+        let view = app.runningGame ?? GameView(frame: window.bounds)
         controller.view = view
         window.rootViewController = controller
         self.window = window
         window.makeKeyAndVisible()
+        let maximumFPS = UInt32(scene.screen.maximumFramesPerSecond)
+        if app.runningGame == nil {
+            if let failure = start(view, maximumFPS: maximumFPS) {
+                let label = UILabel(frame: view.bounds.insetBy(dx: 24, dy: 24))
+                label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                label.numberOfLines = 0
+                label.textColor = .white
+                label.text = failure
+                view.addSubview(label)
+                return
+            }
+            app.runningGame = view
+            view.addSubview(view.controls)
+        } else {
+            nxkit_set_display_rate(maximumFPS)
+        }
+        game = view
+        self.app = app
+        app.gameScene = self
+        view.setNeedsLayout()
         do {
             let audio = AVAudioSession.sharedInstance()
             try audio.setCategory(.playback)
@@ -37,68 +83,93 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         } catch {
             NSLog("nxkit audio session: %@", error.localizedDescription)
         }
-        interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
-        ) { [weak self] notification in
-            let began = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.interrupted = began
-                self.applyActive()
-            }
-        }
+        setActive(scene.activationState == .foregroundActive)
+    }
+
+    private func start(_ view: GameView, maximumFPS: UInt32) -> String? {
         var error = [CChar](repeating: 0, count: 4096)
         let started = Bundle.main.bundlePath.withCString { bundle in
             NSHomeDirectory().withCString { home in
                 error.withUnsafeMutableBufferPointer { buffer in
                     nxkit_start(Unmanaged.passUnretained(view.metalLayer).toOpaque(), bundle, home,
-                                UInt32(scene.screen.maximumFramesPerSecond), buffer.baseAddress, buffer.count)
+                                maximumFPS, buffer.baseAddress, buffer.count)
                 }
             }
         }
-        if started {
-            game = view
-            view.addSubview(view.controls)
-            view.setNeedsLayout()
-            setActive(scene.activationState == .foregroundActive)
-        } else {
-            let label = UILabel(frame: view.bounds.insetBy(dx: 24, dy: 24))
-            label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            label.numberOfLines = 0
-            label.textColor = .white
-            label.text = error.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
-            view.addSubview(label)
-        }
+        return started ? nil : error.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
     }
     func sceneDidBecomeActive(_ scene: UIScene) {
-        interrupted = false
         setActive(true)
     }
     func sceneWillResignActive(_ scene: UIScene) { setActive(false) }
+    func sceneDidEnterBackground(_ scene: UIScene) { enterBackground() }
     func sceneDidDisconnect(_ scene: UIScene) {
-        setActive(false)
-        if game != nil { nxkit_stop() }
+        enterBackground()
+        if app?.gameScene === self { app?.gameScene = nil }
+        // Release the scene's ownership. The next scene attaches the same view
+        // and Metal layer to its new window, with the guest and its saves intact.
+        window?.rootViewController = nil
+        window = nil
         game = nil
-        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
-        interruptionObserver = nil
     }
     private func setActive(_ active: Bool) {
-        foreground = active
+        guard let app, app.gameScene === self else { return }
+        app.lifecycle.setForeground(active)
         applyActive()
     }
-    private func applyActive() {
-        guard let game else { return }
-        let active = foreground && !interrupted
-        UIApplication.shared.isIdleTimerDisabled = active
-        if !active { nxkit_set_active(false) }
-        do {
-            try AVAudioSession.sharedInstance().setActive(active, options: active ? [] : .notifyOthersOnDeactivation)
-        } catch {
-            NSLog("nxkit audio activation: %@", error.localizedDescription)
+    private func enterBackground() {
+        guard let app, app.gameScene === self else { return }
+        app.lifecycle.enterBackground()
+        applyActive()
+    }
+    fileprivate func applyActive() {
+        guard let game, let app, app.gameScene === self else { return }
+        // A session call can deliver an interruption before it returns. Finish
+        // the current native transition before applying the new state.
+        if updatingActivity {
+            DispatchQueue.main.async { [weak self] in self?.applyActive() }
+            return
         }
-        game.controls.reset()
+        updatingActivity = true
+        defer { updatingActivity = false }
+        let audio = AVAudioSession.sharedInstance()
+        if !app.lifecycle.canRequestAudio {
+            UIApplication.shared.isIdleTimerDisabled = false
+            game.controls.isUserInteractionEnabled = false
+            game.controls.reset()
+            audioRetry?.cancel()
+            audioRetry = nil
+            retryDelay = 1
+            nxkit_set_activity(false, false)
+            if audioAvailable {
+                audioAvailable = false
+                do { try audio.setActive(false, options: .notifyOthersOnDeactivation) }
+                catch { NSLog("nxkit audio deactivation: %@", error.localizedDescription) }
+            }
+            return
+        }
+        if !audioAvailable && audioRetry == nil {
+            do {
+                try audio.setActive(true)
+                audioAvailable = true
+                app.lifecycle.audioActivated()
+                retryDelay = 1
+            } catch {
+                let delay = retryDelay
+                if delay == 1 { NSLog("nxkit audio activation: %@", error.localizedDescription) }
+                retryDelay = min(delay * 2, 30)
+                audioRetry = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    guard let self, !Task.isCancelled else { return }
+                    self.audioRetry = nil
+                    self.applyActive()
+                }
+            }
+        }
+        let active = app.lifecycle.gameActive
+        UIApplication.shared.isIdleTimerDisabled = active
         game.controls.isUserInteractionEnabled = active
-        if active { nxkit_set_active(true) }
+        nxkit_set_activity(active, audioAvailable)
     }
 }
 

@@ -388,10 +388,8 @@ pub fn note_measured(measured_hz: f64) -> Option<f64> {
 fn measured_rate(measured_hz: f64, planned_hz: u32, reported: u32) -> Option<u32> {
     let previous = if reported == 0 { planned_hz } else { reported };
     let rounded = measured_hz.round() as u32;
-    (rounded != 0
-        && rounded != reported
-        && refresh::rate_differs(measured_hz, f64::from(previous)))
-    .then_some(rounded)
+    (rounded != 0 && rounded != reported && refresh::rate_differs(measured_hz, f64::from(previous)))
+        .then_some(rounded)
 }
 
 #[cfg(test)]
@@ -487,4 +485,3 @@ mod tests {
         assert_eq!(none.target_fps, 60);
     }
 }
-

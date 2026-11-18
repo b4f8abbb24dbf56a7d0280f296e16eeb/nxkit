@@ -13,12 +13,13 @@ mod imp {
     use super::Fill;
     use objc2_audio_toolbox::{
         AudioComponentDescription, AudioComponentFindNext, AudioComponentInstance,
-        AudioComponentInstanceNew, AudioOutputUnitStart, AudioUnitGetProperty, AudioUnitInitialize,
-        AudioUnitSetProperty,
+        AudioComponentInstanceDispose, AudioComponentInstanceNew, AudioOutputUnitStart,
+        AudioUnitGetProperty, AudioUnitInitialize, AudioUnitSetProperty,
     };
     #[cfg(target_os = "macos")]
     use objc2_core_audio::{AudioObjectGetPropertyData, AudioObjectPropertyAddress};
     use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription};
+    use std::cell::UnsafeCell;
     use std::ffi::c_void;
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
@@ -174,24 +175,44 @@ mod imp {
         }
     }
 
-    /// The callback context. It is boxed and never freed, because the unit runs until the process ends.
-    struct Ctx {
+    struct RenderState {
         fill: Fill,
-        workgroup: AtomicPtr<c_void>,
-        join_status: AtomicI32,
         joined: bool,
         token: [u64; 8],
     }
 
-    /// The running output unit.
-    pub struct Output {
-        ctx: *const Ctx,
+    struct Ctx {
+        // Only the serialized render callback accesses these fields, even across stops and starts.
+        render: UnsafeCell<RenderState>,
+        workgroup: AtomicPtr<c_void>,
+        join_status: AtomicI32,
     }
 
-    // SAFETY: the context is only read through atomics from other threads, and the audio thread owns the rest.
+    /// A configured output unit. The mixer keeps it for the process lifetime.
+    pub struct Output {
+        unit: AudioComponentInstance,
+        ctx: *mut Ctx,
+    }
+
+    // SAFETY: the mixer serializes unit lifecycle calls, the callback owns its render state,
+    // and other threads only read the atomic join status.
     unsafe impl Send for Output {}
     // SAFETY: see above.
     unsafe impl Sync for Output {}
+
+    impl Drop for Output {
+        fn drop(&mut self) {
+            // SAFETY: this is the instance from AudioComponentInstanceNew. Disposal tears down
+            // its callback before we release the refcon, including on a partial setup failure.
+            let status = unsafe { AudioComponentInstanceDispose(self.unit) };
+            if status == 0 {
+                // SAFETY: this is the original Box allocation and no callback may now use it.
+                drop(unsafe { Box::from_raw(self.ctx) });
+            } else {
+                eprintln!("nxkit-audio: could not dispose the output unit (status {status})");
+            }
+        }
+    }
 
     unsafe extern "C-unwind" fn render(
         refcon: NonNull<c_void>,
@@ -204,16 +225,18 @@ mod imp {
         if data.is_null() {
             return 0;
         }
-        // SAFETY: `refcon` is the leaked `Ctx` that `start` made. Only this thread touches the non-atomic fields.
-        let ctx = unsafe { &mut *refcon.as_ptr().cast::<Ctx>() };
-        if !ctx.joined {
-            ctx.joined = true;
+        // SAFETY: Output owns refcon while this callback is registered.
+        let ctx = unsafe { &*refcon.as_ptr().cast::<Ctx>() };
+        // SAFETY: render calls on one output unit are serialized. The notifier only reads join_status.
+        let render = unsafe { &mut *ctx.render.get() };
+        if !render.joined {
+            render.joined = true;
             let wg = ctx.workgroup.load(Ordering::Acquire);
             let status = if wg.is_null() {
                 -1
             } else {
                 // SAFETY: `wg` is the live workgroup of the device and `token` has the room the call needs.
-                unsafe { os_workgroup_join(wg, ctx.token.as_mut_ptr()) }
+                unsafe { os_workgroup_join(wg, render.token.as_mut_ptr()) }
             };
             ctx.join_status.store(status, Ordering::Release);
         }
@@ -229,7 +252,7 @@ mod imp {
         }
         // SAFETY: `mData` points at `mDataByteSize` bytes of `f32` that this call owns until it returns.
         let out = unsafe { std::slice::from_raw_parts_mut(buf.mData.cast::<f32>(), len) };
-        (ctx.fill)(out);
+        (render.fill)(out);
         0
     }
 
@@ -269,7 +292,7 @@ mod imp {
     }
 
     impl Output {
-        /// Opens the default output device at 48 kHz stereo `f32`, joins its workgroup and starts it.
+        /// Opens the default device at 48 kHz stereo. UIKit starts RemoteIO after session activation.
         pub fn start(fill: Fill) -> Result<Output, String> {
             #[cfg(target_os = "macos")]
             let device = default_device()?;
@@ -296,6 +319,16 @@ mod imp {
             check("create the output unit", unsafe {
                 AudioComponentInstanceNew(comp, &mut unit)
             })?;
+            let ctx = Box::into_raw(Box::new(Ctx {
+                render: UnsafeCell::new(RenderState {
+                    fill,
+                    joined: false,
+                    token: [0; 8],
+                }),
+                workgroup: AtomicPtr::new(std::ptr::null_mut()),
+                join_status: AtomicI32::new(i32::MIN),
+            }));
+            let output = Output { unit, ctx };
 
             // SAFETY: `device` is 4 bytes, as `CurrentDevice` needs.
             #[cfg(target_os = "macos")]
@@ -334,16 +367,9 @@ mod imp {
                 )
             })?;
 
-            let ctx: &'static mut Ctx = Box::leak(Box::new(Ctx {
-                fill,
-                workgroup: AtomicPtr::new(std::ptr::null_mut()),
-                join_status: AtomicI32::new(i32::MIN),
-                joined: false,
-                token: [0; 8],
-            }));
             let cb = CallbackStruct {
                 proc_: render as *const c_void,
-                refcon: std::ptr::from_mut(ctx).cast::<c_void>(),
+                refcon: ctx.cast::<c_void>(),
             };
             // SAFETY: `cb` has the layout of `AURenderCallbackStruct` and `render` has the callback signature.
             check("set the render callback", unsafe {
@@ -375,7 +401,8 @@ mod imp {
                 )
             };
             if st == 0 {
-                ctx.workgroup.store(wg, Ordering::Release);
+                // SAFETY: output owns the context, and the callback only reads this atomic.
+                unsafe { (*ctx).workgroup.store(wg, Ordering::Release) };
             } else {
                 eprintln!(
                     "nxkit-audio: the output unit has no os_workgroup (status {st}), the audio thread stays outside it"
@@ -386,57 +413,29 @@ mod imp {
             check("start the output unit", unsafe {
                 AudioOutputUnitStart(unit)
             })?;
-            #[cfg(target_os = "ios")]
-            {
-                let mut state = OUTPUT
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if state.0 {
-                    // SAFETY: the unit is initialized and this lock serializes start/stop.
-                    check("start the output unit", unsafe {
-                        AudioOutputUnitStart(unit)
-                    })?;
+            Ok(output)
+        }
+
+        /// Starts or stops this configured RemoteIO instance.
+        #[cfg(target_os = "ios")]
+        pub fn set_running(&mut self, running: bool) -> Result<(), String> {
+            // SAFETY: the mixer serializes start and stop for this initialized unit.
+            let status = unsafe {
+                if running {
+                    AudioOutputUnitStart(self.unit)
+                } else {
+                    objc2_audio_toolbox::AudioOutputUnitStop(self.unit)
                 }
-                state.1 = unit as usize;
-            }
-            Ok(Output {
-                ctx: std::ptr::from_ref(ctx),
-            })
+            };
+            check("change output activity", status)
         }
 
         /// The result of `os_workgroup_join` once the first callback ran, or `None` before that.
         pub fn join_status(&self) -> Option<i32> {
-            // SAFETY: `ctx` is leaked and lives until the process ends. Only the atomic is read.
+            // SAFETY: the output owns the context and only the atomic is read.
             let v = unsafe { (*self.ctx).join_status.load(Ordering::Acquire) };
             if v == i32::MIN { None } else { Some(v) }
         }
-    }
-
-    // The mixer owns one output for the process lifetime, as on macOS.
-    // Swift owns AVAudioSession and sends effective foreground/interruption state.
-    #[cfg(target_os = "ios")]
-    static OUTPUT: std::sync::Mutex<(bool, usize)> = std::sync::Mutex::new((false, 0));
-
-    /// Start or stop the process-lifetime RemoteIO unit.
-    #[cfg(target_os = "ios")]
-    pub fn set_active(active: bool) -> Result<(), String> {
-        let mut state = OUTPUT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.0 = active;
-        if state.1 == 0 {
-            return Ok(());
-        }
-        let unit = state.1 as AudioComponentInstance;
-        // SAFETY: the process-lifetime unit is initialized; the lock serializes state changes.
-        let status = unsafe {
-            if active {
-                AudioOutputUnitStart(unit)
-            } else {
-                objc2_audio_toolbox::AudioOutputUnitStop(unit)
-            }
-        };
-        check("change output activity", status)
     }
 
     /// The layout of `AURenderCallbackStruct`.
@@ -468,6 +467,3 @@ mod imp {
 }
 
 pub use imp::Output;
-
-#[cfg(target_os = "ios")]
-pub use imp::set_active;

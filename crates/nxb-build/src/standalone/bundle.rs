@@ -7,7 +7,7 @@ use std::process::Command;
 /// Publish a completed app, preserving each producer's signing and replacement policy.
 pub(super) fn publish(stage: &Path, out: &Path, ios: bool, replace: bool) -> Result<(), String> {
     if ios {
-        return super::ios::publish(stage, out, replace);
+        return super::ios::publish(stage, out);
     }
     // The generic producer signs the whole app; title builds retain their existing signatures.
     if !replace {
@@ -32,6 +32,15 @@ pub(super) fn publish_app(stage: &Path, out: &Path, replace: bool) -> Result<(),
     Ok(())
 }
 
+// symlink_metadata also sees dangling symlinks, which must never be followed for output.
+pub(super) fn vacant(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(super::io(path, e)),
+        Ok(_) => Err(format!("{} exists: choose a new output", path.display())),
+    }
+}
+
 const HOST: &str = "nxkit-host";
 
 /// The local host: `NXB_NXKIT_HOST` or the platform's program beside `nxb`.
@@ -47,6 +56,14 @@ pub(crate) fn host(env: Option<&str>, exe: &Path, ios: bool) -> Result<PathBuf, 
         None => exe.parent().unwrap_or(Path::new(".")).join(name),
     };
     if path.is_file() {
+        if ios {
+            super::ios::validate_host(&path).map_err(|e| {
+                format!(
+                    "{}: {e}. Build the device host with `{build}`",
+                    path.display()
+                )
+            })?;
+        }
         return Ok(path);
     }
     Err(format!(

@@ -90,8 +90,8 @@ pub fn services() -> Vec<Named> {
     ]
 }
 
-/// Start or pause the iOS output after the shell updates AVAudioSession.
+/// Updates game activity and whether UIKit successfully activated the audio session.
 #[cfg(target_os = "ios")]
-pub fn set_active(active: bool) -> Result<(), String> {
-    sys::au::set_active(active)
+pub fn set_activity(game_active: bool, audio_available: bool) -> Result<(), String> {
+    engine::mixer().set_activity(game_active, audio_available)
 }

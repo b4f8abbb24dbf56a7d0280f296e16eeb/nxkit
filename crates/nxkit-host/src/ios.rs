@@ -16,6 +16,7 @@ struct Session {
     _loaded: loader::Loaded,
     _memory: Arc<nxkit_metal::GuestMemory>,
     link: DisplayLink,
+    active: Option<bool>,
 }
 thread_local! {
     static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
@@ -29,6 +30,15 @@ fn with_session(f: impl FnOnce(&mut Session)) {
             }
         });
     }
+}
+fn screen_interval(maximum_fps: u32) -> FrameInterval {
+    let plan = refresh::apply(&refresh::ScreenFacts {
+        name: "UIKit".into(),
+        display: None,
+        max_fps: maximum_fps.max(1),
+        adaptive: false,
+    });
+    FrameInterval::from_hz(plan.link_hz)
 }
 fn start(
     layer: Retained<CAMetalLayer>,
@@ -46,7 +56,7 @@ fn start(
         ));
     }
     let data = home.join("Library/Application Support/nxkit");
-    nxkit_svc_audio::set_active(false).map_err(HostError::App)?;
+    nxkit_svc_audio::set_activity(false, false).map_err(HostError::App)?;
     let startup::Prepared {
         loaded,
         memory,
@@ -55,28 +65,19 @@ fn start(
         boot,
     } = startup::prepare(&game, mask, &data)?;
     let settings = &loaded.game.settings;
-    let plan = refresh::apply(&refresh::ScreenFacts {
-        name: "UIKit".into(),
-        display: None,
-        max_fps: maximum_fps.max(1),
-        adaptive: false,
-    });
+    let interval = screen_interval(maximum_fps);
     let hooks = seams::frame_hooks(&context, &memory, bundle, settings)?;
     // SAFETY: UIKit supplied a live CAMetalLayer, retained above and by Presenter.
     let presenter = unsafe { Presenter::from_raw_layer(&context, NonNull::from(&*layer).cast()) }
         .map_err(|e| HostError::App(format!("Metal: {e}")))?;
-    let link = DisplayLink::new(
-        mtm,
-        &presenter,
-        LinkRate::Fixed(FrameInterval::from_hz(plan.link_hz)),
-        hooks,
-    );
+    let link = DisplayLink::new(mtm, &presenter, LinkRate::Fixed(interval), hooks);
     link.set_paused(true);
     nxkit_rt::nvn::set_active(false);
     let session = Session {
         _loaded: loaded,
         _memory: memory,
         link,
+        active: None,
     };
     thread::start_main(boot, layout.main_stack.end())?;
     Ok(session)
@@ -131,21 +132,34 @@ unsafe extern "C" fn nxkit_start(
 }
 #[unsafe(no_mangle)]
 extern "C" fn nxkit_set_active(active: bool) {
+    nxkit_set_activity(active, active);
+}
+#[unsafe(no_mangle)]
+extern "C" fn nxkit_set_display_rate(maximum_fps: u32) {
+    with_session(|s| s.link.set_interval(screen_interval(maximum_fps)));
+}
+#[unsafe(no_mangle)]
+extern "C" fn nxkit_set_activity(active: bool, audio_available: bool) {
     with_session(|s| {
         let active = active && !stop::requested();
-        if !active {
-            s.link.set_paused(true);
+        let game_changed = s.active.replace(active) != Some(active);
+        if game_changed {
+            if !active {
+                s.link.set_paused(true);
+            }
+            seams::focus_changed(active);
+            if !active {
+                nxkit_svc_input::set_touches(&[]);
+            }
         }
-        seams::focus_changed(active);
-        if !active {
-            nxkit_svc_input::set_touches(&[]);
-        }
-        if let Err(error) = nxkit_svc_audio::set_active(active) {
+        if let Err(error) = nxkit_svc_audio::set_activity(active, active && audio_available) {
             eprintln!("nxkit audio: {error}");
         }
-        nxkit_rt::nvn::set_active(active);
-        if active {
-            s.link.set_paused(false);
+        if game_changed {
+            nxkit_rt::nvn::set_active(active);
+            if active {
+                s.link.set_paused(false);
+            }
         }
     });
 }

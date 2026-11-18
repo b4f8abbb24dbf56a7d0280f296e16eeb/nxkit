@@ -134,8 +134,16 @@ fn the_after_hook_runs_before_the_marker() {
         Some(Box::new(move || {
             // the marker is not there yet
             f.store(if m.exists() { 2 } else { 1 }, Ordering::SeqCst);
+            true
         })),
     );
+    // On iOS the caller can return while the worker is still compiling or flushing the archive.
+    if cfg!(target_os = "ios") {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     assert_eq!(flag.load(Ordering::SeqCst), 1);
     assert!(marker.is_file());
     std::fs::remove_dir_all(&d).unwrap();

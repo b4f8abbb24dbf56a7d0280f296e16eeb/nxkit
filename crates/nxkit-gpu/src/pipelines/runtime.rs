@@ -6,14 +6,15 @@
 //! pipeline data set serializer (a specialization is not: the capture of 59 specializations and one compile was 43 KB,
 //! of 60 compiles 3.6 MB) and written to `rt-*.mtl4archive` files in a writable folder of the title, together with
 //! `pipelines.seen` (see `record.rs`), the list of the descriptions. At the next start the archives are lookup
-//! archives of the cache, and `prewarm.rs` makes each pipeline of the list from them before the first frame: archive
+//! archives of the cache, and `prewarm.rs` makes each pipeline of the list from them: archive
 //! lookups, no compiles. A pipeline that no archive has is compiled by that start (not specialized, so that it is
 //! captured), and the archive is written when the start's last worker is done, before the start reports and before
 //! `prewarm.done`, so the run after loads it.
 //!
 //! The archives are in `<root>/pipecache/id-<identity>/`; the list is not: it is kept in
 //! `<root>/pipecache/seen-<scheme>.list` across builds (`carry.rs`), so a rebuilt app starts with the list of the
-//! earlier builds and makes its pipelines before the first frame. The identity is a hash of the app build (`GpuConfig::build_id`), the
+//! earlier builds. macOS waits for that list before the first frame; iOS prewarms it in the background.
+//! The identity is a hash of the app build (`GpuConfig::build_id`), the
 //! key scheme ([`KEY_SCHEME`], see `keys.rs`), the macOS build and the GPU: the binaries are only good for that app
 //! build, macOS and GPU, and the keys of the list only for that scheme, so the folder of any other identity is removed
 //! at the start. The host executable is not part of it: a new host build with the same key scheme keeps the cache. `NXKIT_PIPELINE_CACHE=0` turns the whole cache off.
@@ -239,8 +240,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 impl Session {
     /// Writes the list and, when it is time or `force` or `full`, the archive. `full`: the serializer has captured as
     /// many pipelines as a rotation allows, so it is handed over now whatever the gap.
-    fn flush(&self, force: bool, full: bool) {
+    fn flush(&self, force: bool, full: bool) -> bool {
         let mut io = self.io.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut written = true;
         if let Some(mut mine) = record::take_dirty() {
             let path = &self.list;
             // another run of the same title may have written entries since the start
@@ -253,14 +255,15 @@ impl Session {
             if let Err(e) = write_atomic(path, carry::text(&mine, KEY_SCHEME).as_bytes()) {
                 record::mark_dirty();
                 eprintln!("nxkit-gpu: {}: {e}", path.display());
+                written = false;
             }
         }
         if !force && !full && io.last_archive.elapsed() < io.gap {
-            return;
+            return written;
         }
         let fresh = record::take_fresh();
         if fresh == 0 && !full {
-            return;
+            return written;
         }
         match self.write_archive() {
             // a rotation with nothing captured has no file to write
@@ -274,8 +277,10 @@ impl Session {
             Err(e) => {
                 record::restore_fresh(fresh);
                 eprintln!("nxkit-gpu: runtime pipeline archive: {e}");
+                written = false;
             }
         }
+        written
     }
 
     fn write_archive(&self) -> Result<(), String> {

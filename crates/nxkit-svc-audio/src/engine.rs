@@ -4,16 +4,23 @@
 //! in two lock-free queues per output: the buffers to play and the buffers that were played. A third thread, the notifier,
 //! signals the release events, because the callback must not call into the kernel.
 
+#[cfg(any(target_os = "ios", test))]
+mod ios_output;
+
 use crate::host;
-use crate::sys::au;
+#[cfg(not(target_os = "ios"))]
+mod output;
 use crate::sys::mem;
 use crate::sys::ring::Ring;
 use crate::sys::sem::Sem;
 use crate::sys::vdsp;
+#[cfg(target_os = "ios")]
+use ios_output::OutState;
 use nxkit_abi::{guest, kernel};
+#[cfg(not(target_os = "ios"))]
+use output::OutState;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 /// Open outputs at the same time.
 pub(crate) const SLOTS: usize = 8;
@@ -144,12 +151,6 @@ impl Slot {
     }
 }
 
-enum OutState {
-    Unstarted,
-    Device(au::Output),
-    Silent,
-}
-
 /// The mixer. There is one per process.
 pub(crate) struct Mixer {
     slots: Vec<Slot>,
@@ -173,7 +174,7 @@ pub(crate) fn mixer() -> &'static Arc<Mixer> {
             master: AtomicU32::new(1.0f32.to_bits()),
             faults: AtomicU64::new(0),
             alloc: Mutex::new(()),
-            out: Mutex::new(OutState::Unstarted),
+            out: Mutex::new(OutState::default()),
             force_silent: AtomicBool::new(false),
             notifier: Mutex::new(false),
         })
@@ -465,57 +466,6 @@ impl Mixer {
         }
     }
 
-    fn ensure_output(&self) {
-        let Ok(mut out) = self.out.lock() else { return };
-        if !matches!(*out, OutState::Unstarted) {
-            return;
-        }
-        if self.force_silent.load(Ordering::Relaxed) {
-            eprintln!(
-                "nxkit-audio: the device is off by configuration, a silent sink paces the outputs"
-            );
-            self.spawn_silent();
-            *out = OutState::Silent;
-            return;
-        }
-        let m = Arc::clone(mixer());
-        match au::Output::start(Box::new(move |buf| m.render(buf))) {
-            Ok(o) => {
-                eprintln!("nxkit-audio: the output unit runs at 48000 Hz stereo");
-                *out = OutState::Device(o);
-            }
-            Err(e) => {
-                eprintln!(
-                    "nxkit-audio: warning: the output unit did not start ({e}), a silent sink paces the outputs"
-                );
-                self.spawn_silent();
-                *out = OutState::Silent;
-            }
-        }
-    }
-
-    fn spawn_silent(&self) {
-        let m = Arc::clone(mixer());
-        let r = std::thread::Builder::new()
-            .name("nxkit-audio-silent".into())
-            .spawn::<_, ()>(move || {
-                let mut buf = vec![0.0f32; 480 * 2];
-                let step = Duration::from_millis(10);
-                let mut next = Instant::now() + step;
-                loop {
-                    m.render(&mut buf);
-                    let now = Instant::now();
-                    if next > now {
-                        std::thread::sleep(next - now);
-                    }
-                    next += step;
-                }
-            });
-        if let Err(e) = r {
-            host::fatal(&format!("the silent sink thread did not start: {e}"));
-        }
-    }
-
     fn ensure_notifier(&self) {
         let Ok(mut started) = self.notifier.lock() else {
             return;
@@ -539,6 +489,8 @@ impl Mixer {
         let mut faults_seen = 0u64;
         loop {
             self.sem.wait_ms(20);
+            #[cfg(target_os = "ios")]
+            self.poll_output();
             for (i, s) in self.slots.iter().enumerate() {
                 if s.rel_flag.swap(false, Ordering::AcqRel) {
                     let n = s.notify.lock().map_or(Notify::None, |g| *g);
@@ -570,8 +522,7 @@ impl Mixer {
             }
             if !join_logged
                 && let Ok(out) = self.out.lock()
-                && let OutState::Device(o) = &*out
-                && let Some(st) = o.join_status()
+                && let Some(st) = out.join_status()
             {
                 join_logged = true;
                 if st == 0 {

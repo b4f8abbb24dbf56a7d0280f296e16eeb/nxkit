@@ -11,6 +11,9 @@ typedef struct { uint32_t id; float x; float y; } NxkitTouch;
 // Current unclaimed fingers, normalized to the drawable. Borrowed for this call.
 void nxkit_touches(const NxkitTouch *points, size_t count);
 void nxkit_set_active(bool active);
+// The game may run while another app has exclusive use of audio.
+void nxkit_set_activity(bool active, bool audio_available);
+void nxkit_set_display_rate(uint32_t maximum_fps);
 // Complete Npad snapshot: bits A B X Y L3 R3 L R ZL ZR + - Left Up Right Down.
 // Sticks use x-right/y-up normalized coordinates in [-1, 1].
 void nxkit_virtual_pad(uint64_t buttons, float lx, float ly, float rx, float ry);
