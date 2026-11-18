@@ -19,9 +19,9 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 ```mermaid
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
-  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-profile, nxkit-gpu (macOS only, the frame encoder of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS only, the main program of the nxkit host)"]
+  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-profile, nxkit-gpu (macOS and iOS, the frame encoder of the nxkit host), nxkit-host (unsafe only in its modules sys, gate and bigstack, macOS and iOS, the main program of the nxkit host)"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles, nxkit-nvn, nxkit-ndve, nxkit-ndsr, nxkit-rt (unsafe code, the C ABI of the host)"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-coreml, nxkit-native-plan, nxkit-metal (unsafe code, macOS only, the Metal 4 backend of the nxkit host)"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code), nxkit-hos (unsafe only in its module sys), nxkit-abi (unsafe only in its module guest), nxkit-ipc (no unsafe code), nxkit-svc-fs (unsafe only in its module sys), nxkit-svc-offline (unsafe only in its module sys), nxkit-svc-system (unsafe only in its module sys), nxkit-svc-input (unsafe only in its module sys), nxkit-svc-video (unsafe code), nxkit-svc-audio (unsafe only in its module sys), nxkit-svc-pacing, nxkit-coreml, nxkit-native-plan, nxkit-metal (unsafe code, macOS and iOS, the Metal 4 backend of the nxkit host)"]
   LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
@@ -99,7 +99,7 @@ The rules:
 | nxkit-ndve | L1 | no | impl | the movie network of `nn::ndve` run natively: file reader, weight packing, the plan and Metal kernels, and the `ane` module that writes the Core ML model for the Neural Engine. Refer to [plans/ndve-native.md](plans/ndve-native.md) |
 | nxkit-ndsr | L1 | no | impl | the agl upscaler NDSR run natively: network table and fingerprint of the packs `vr` and `vr_light`, pack reader, CPU reference, kernels and plan. Refer to [plans/ndsr-native.md](plans/ndsr-native.md) |
 | nxkit-coreml | L0 | no | impl | Core ML on the Neural Engine over IOSurface tensors (`objc2-core-ml`). It knows nothing about the network. Refer to [plans/ndve-ane.md](plans/ndve-ane.md) |
-| nxkit-host | L2 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
+| nxkit-host | L2 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). AppKit and UIKit use the shared startup and runtime. |
 | nxkit-svc-system | L0 | no | impl | the system services as `Service` objects: `set`, `set:sys`, `apm`, `time:*`, `acc:*`, `appletOE`, `appletAE`, `pctl*`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u` (R37), and the SDK exports of the take-overs (R38a). The module `sys` holds the clock, time zone and guest call functions |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
 | nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. the title modules use it for their `profile.toml` |
@@ -114,7 +114,7 @@ The rules:
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host` |
 | nxkit-nvn | L1 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal yet. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
-| nxkit-gpu | L2 | no | impl | the frame encoder of the nxkit host, macOS only: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
+| nxkit-gpu | L2 | no | impl | the frame encoder of the nxkit host on macOS and iOS: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
 | nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |
 | nxtitles | L1 | no | impl | the registry: one cargo feature per family and title module |
 | nxfamily-agl | T | no | impl | the family of Nintendo EPD games on sead, agl and gsys |
@@ -142,6 +142,18 @@ flowchart LR
   PLAN --> SEAL["seal and sign from known digests"]
   SEAL --> APP["Mac app"]
 ```
+
+## iOS composition
+
+The iOS target reuses the Apple services, Metal backend and guest startup of `nxkit-host`. UIKit owns
+presentation, touch controls and the audio session. Its C ABI lives under `nxkit-host::sys::ios`, so
+this port adds no unsafe-code exception or crate dependency edge. The guest lives for the process,
+not for one scene connection (R65).
+
+`nxb-build` keeps the shared analysis, rewrite and shader pipeline. Its iOS producer packages a
+separately built host into an unsigned IPA for subsequent device signing. The shared loader adopts
+the guest library's dyld-owned reservation and has no executable-copy fallback on iOS (R66).
+The existing Mac app path and its signed-file mapping fallback remain separate platform choices.
 
 ## The host at run time: the parts that are not a straight translation
 
