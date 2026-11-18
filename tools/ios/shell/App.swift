@@ -97,7 +97,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         game.controls.reset()
         game.controls.isUserInteractionEnabled = active
-        nxkit_set_active(active)
+        if active { nxkit_set_active(true) }
     }
 }
 
@@ -113,9 +113,6 @@ final class GameView: UIView {
         let scale = window?.screen.scale ?? 1
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-        if bounds.width > 0 && bounds.height > 0 {
-            nxkit_resize(UInt32(metalLayer.drawableSize.width), UInt32(metalLayer.drawableSize.height))
-        }
         controls.frame = bounds
     }
 }
