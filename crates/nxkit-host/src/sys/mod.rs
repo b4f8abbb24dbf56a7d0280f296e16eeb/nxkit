@@ -4,12 +4,17 @@
 //! touches memory.
 
 pub mod allocspy;
+#[cfg(target_os = "macos")]
 pub mod appkit;
 pub mod crashsig;
 mod dylib;
 pub mod exitflush;
+#[cfg(target_os = "ios")]
+pub(crate) mod ios;
 mod kernel;
+#[cfg(target_os = "macos")]
 pub mod loading;
+#[cfg(target_os = "macos")]
 mod mouse;
 pub mod paging;
 pub mod vm;
@@ -542,4 +547,34 @@ mod aligned_tests {
     fn an_aligned_reservation_refuses_a_range_above_the_limit() {
         assert!(reserve_aligned(0x70_0000_0000, 0x400_0000, 0x20_0000, 0, 0x1000).is_err());
     }
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn adopt_dyld_tail(start: u64, tail: u64, end: u64) -> Result<Reservation> {
+    if start > tail
+        || tail >= end
+        || !tail.is_multiple_of(crate::layout::PAGE)
+        || !end.is_multiple_of(crate::layout::PAGE)
+    {
+        return Err(HostError::Memory("invalid dyld guest reservation".into()));
+    }
+    let mut at = tail;
+    while at < end {
+        let r = nxkit_metal::vm_region(at)
+            .ok_or_else(|| HostError::Memory("missing guest memory".into()))?;
+        let stop = r
+            .start
+            .checked_add(r.size)
+            .ok_or_else(|| HostError::Memory("guest region overflow".into()))?;
+        if r.start > at || stop <= at || r.protection != 3 || r.external_pager {
+            return Err(HostError::Memory(
+                "guest tail is not anonymous read/write memory".into(),
+            ));
+        }
+        at = stop.min(end);
+    }
+    Ok(Reservation {
+        base: start,
+        len: end - start,
+    })
 }
