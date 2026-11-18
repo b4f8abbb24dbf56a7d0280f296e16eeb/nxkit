@@ -549,8 +549,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         if carried > 0 {
             p.say(&format!("pipeline lists: {carried} kept in the new app"));
         }
-        let _ = std::fs::remove_dir_all(&out);
-        std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
+        bundle::publish_app(&stage_dir, &out, true)?;
         Ok(((), out.display().to_string()))
     })?;
     p.say(&format!("app: {}", out.display()));
