@@ -215,7 +215,7 @@ fn refresh_of(facts: &ScreenFacts) -> (f64, &'static str) {
         if facts.adaptive {
             "adaptive, highest rate"
         } else {
-            "NSScreen"
+            "screen maximum"
         },
     )
 }

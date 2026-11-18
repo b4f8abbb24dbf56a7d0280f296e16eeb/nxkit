@@ -223,27 +223,31 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             "the title module is made for v{version}: the other updates in the input are not used"
         ));
     }
-    let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
     let ios = a.platform == "ios";
-    let base = if ios { ios::BASE } else { layout::GUEST_BASE };
-    let shell = if ios && !a.dry_run {
-        Some(ios::Shell::build()?)
+    let (base, extension) = if ios {
+        (ios::BASE, "ipa")
     } else {
-        None
+        (layout::GUEST_BASE, "app")
     };
-    let host = if ios {
-        PathBuf::from("UIKit shell")
+    let (shell, host) = if ios {
+        let shell = if a.dry_run {
+            None
+        } else {
+            Some(ios::Shell::build()?)
+        };
+        (shell, PathBuf::from("UIKit shell"))
     } else {
-        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?
+        let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
+        (
+            None,
+            bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?,
+        )
     };
     let app_name = a.app_name.clone().unwrap_or_else(|| t.name.to_string());
-    let out = a.out.clone().unwrap_or_else(|| {
-        home(a).join(format!(
-            "{}.{}",
-            bundle::file_name(&app_name),
-            if ios { "ipa" } else { "app" }
-        ))
-    });
+    let out = a
+        .out
+        .clone()
+        .unwrap_or_else(|| home(a).join(format!("{}.{extension}", bundle::file_name(&app_name))));
     let work = a
         .work_dir
         .clone()
@@ -511,39 +515,41 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {
-        if ios {
-            ios::publish(&stage_dir, &out, true)?;
-            return Ok(((), format!("{} (unsigned)", out.display())));
-        }
-        // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
-        // failed move stops the build with the old app and its save in place.
-        let old_save = out.join("Contents/Resources/nxkit/save");
-        if old_save.is_dir() {
-            let new_save = run_dir.join("save");
-            if new_save.exists() {
-                return Err(format!(
-                    "{}: the new app already has a save folder",
+        if !ios {
+            // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
+            // failed move stops the build with the old app and its save in place.
+            let old_save = out.join("Contents/Resources/nxkit/save");
+            if old_save.is_dir() {
+                let new_save = run_dir.join("save");
+                if new_save.exists() {
+                    return Err(format!(
+                        "{}: the new app already has a save folder",
+                        new_save.display()
+                    ));
+                }
+                std::fs::rename(&old_save, &new_save).map_err(|e| io(&new_save, e))?;
+                p.say(&format!(
+                    "save: kept from the old app ({})",
                     new_save.display()
                 ));
             }
-            std::fs::rename(&old_save, &new_save).map_err(|e| io(&new_save, e))?;
-            p.say(&format!(
-                "save: kept from the old app ({})",
-                new_save.display()
-            ));
+            // the lists of the recorded pipelines go with the save: the new app starts with them
+            let carried = pipelist::carry(
+                &b.pipeline_lists,
+                &out.join("Contents/Resources/nxkit"),
+                &run_dir,
+            );
+            if carried > 0 {
+                p.say(&format!("pipeline lists: {carried} kept in the new app"));
+            }
         }
-        // the lists of the recorded pipelines go with the save: the new app starts with them
-        let carried = pipelist::carry(
-            &b.pipeline_lists,
-            &out.join("Contents/Resources/nxkit"),
-            &run_dir,
-        );
-        if carried > 0 {
-            p.say(&format!("pipeline lists: {carried} kept in the new app"));
-        }
-        let _ = std::fs::remove_dir_all(&out);
-        std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
-        Ok(((), out.display().to_string()))
+        bundle::publish(&stage_dir, &out, ios, true)?;
+        let note = if ios {
+            format!("{} (unsigned)", out.display())
+        } else {
+            out.display().to_string()
+        };
+        Ok(((), note))
     })?;
     p.say(&format!("app: {}", out.display()));
     Ok(())
