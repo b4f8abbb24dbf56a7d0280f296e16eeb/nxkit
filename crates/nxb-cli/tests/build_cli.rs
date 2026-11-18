@@ -75,7 +75,7 @@ fn exit_codes_by_class() {
     let p = d.to_str().unwrap();
     // bad arguments 2, a folder with no package 1
     assert_eq!(build(&[p, "--platform", "tv"]).0, Some(2));
-    assert_eq!(build(&[p, "--platform", "ios"]).0, Some(2));
+    assert_eq!(build(&[p, "--platform", "ios"]).0, Some(1));
     assert_eq!(build(&[p, "--threads"]).0, Some(2));
     assert_eq!(build(&[p, "--platform", "mac"]).0, Some(1));
     // the options of the engine path are gone
