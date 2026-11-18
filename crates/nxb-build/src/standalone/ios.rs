@@ -187,7 +187,7 @@ mod tests {
         assert!(plist.contains("A &amp; B") && plist.contains("UIApplicationSceneManifest"));
         let output = temp.path().join("game.ipa");
         std::fs::write(&output, b"keep").unwrap();
-        assert!(super::super::bundle::publish(&stage, &output, true, true).is_err());
+        assert!(publish(&stage, &output).is_err());
         assert_eq!(std::fs::read(&output).unwrap(), b"keep");
         std::fs::remove_file(&output).unwrap();
         publish(&stage, &output).unwrap();
