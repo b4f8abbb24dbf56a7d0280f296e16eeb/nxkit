@@ -128,7 +128,7 @@ struct State {
     announced: String,
     /// The display ids that a switch was tried for with this rate, so that a failed switch does not repeat.
     tried: Vec<(u32, u32)>,
-    /// The measured rates already reported, rounded to Hz.
+    /// The last measured rate sent to the service, rounded to Hz, or 0 before the first correction.
     reported: u32,
 }
 
@@ -345,7 +345,7 @@ fn vrr_text(vrr: Option<RateRange>) -> String {
     })
 }
 
-/// The link ticked at `measured_hz` over the last second while the plan asked for `plan.link_hz`. When they differ by
+/// The link ticked at `measured_hz` over the last second. When it differs from the last rate sent to the service by
 /// more than 4%, the service gets the measured rate, so that a hold counts the ticks that really come. Returns the rate
 /// when it changed the service.
 pub fn note_measured(measured_hz: f64) -> Option<f64> {
@@ -355,13 +355,7 @@ pub fn note_measured(measured_hz: f64) -> Option<f64> {
     if matches!(st.presentation, Presentation::Vrr(_)) {
         return None;
     }
-    let rounded = measured_hz.round() as u32;
-    if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz))
-        || rounded == st.reported
-        || rounded == 0
-    {
-        return None;
-    }
+    let rounded = measured_rate(measured_hz, plan.link_hz, st.reported)?;
     st.reported = rounded;
     let req = st.request;
     let vsync = if plan.fps == req.target_fps {
@@ -371,11 +365,18 @@ pub fn note_measured(measured_hz: f64) -> Option<f64> {
     };
     let _ = nxkit_svc_pacing::set_rates(rounded as f32, vsync);
     eprintln!(
-        "nxkit-host: the display link ticks at {measured_hz:.1} Hz, not the {} Hz that was asked for, so a frame holds {:.1} ticks per vsync now",
+        "nxkit-host: the display link ticks at {measured_hz:.1} Hz (requested {} Hz), so a frame holds {:.1} ticks per vsync now",
         plan.link_hz,
         measured_hz / f64::from(vsync)
     );
     Some(measured_hz)
+}
+
+fn measured_rate(measured_hz: f64, planned_hz: u32, reported: u32) -> Option<u32> {
+    let previous = if reported == 0 { planned_hz } else { reported };
+    let rounded = measured_hz.round() as u32;
+    (rounded != 0 && rounded != reported && refresh::rate_differs(measured_hz, f64::from(previous)))
+        .then_some(rounded)
 }
 
 #[cfg(test)]
@@ -391,6 +392,19 @@ mod tests {
             vrr: true,
             vrr_floor: 60,
         }
+    }
+
+    #[test]
+    fn measured_rate_recovers_after_the_display_link_slows_down() {
+        let planned = 120;
+        let mut reported = 0;
+        assert_eq!(measured_rate(120.0, planned, reported), None);
+        reported = measured_rate(60.0, planned, reported).unwrap();
+        assert_eq!(reported, 60);
+        assert_eq!(measured_rate(61.0, planned, reported), None);
+        reported = measured_rate(120.0, planned, reported).unwrap();
+        assert_eq!(reported, 120);
+        assert_eq!(measured_rate(120.0, planned, reported), None);
     }
 
     #[test]
