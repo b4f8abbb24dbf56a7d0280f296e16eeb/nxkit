@@ -80,10 +80,8 @@ nxb build "<folder with the game files>" -k <prod.keys> --platform mac \
 
 - `--dry-run` prints the plan and writes nothing. Check it first.
 - A Switch 2 package needs `--nup <file>` and no keys.
-- For an iPhone or iPad, install the `aarch64-apple-ios` Rust target and run `sh tools/ios/build-host.sh` on the Mac.
-  Use `--platform ios -o Game.ipa` with a new output path. If you set `NXB_NXKIT_HOST`, point it at the device host
-  from that script. Sign the game dylib and the app before installation.
-- Both platforms use title rules by default. A game without a title module needs `--auto-analyze`.
+- `nxb` builds only nxkit apps, with `nxkit-host` as their program. A game without a title module needs
+  `--auto-analyze`. There is no iOS build, no `--engine` and no Python.
 - Ocarina of Time can keep a fixed render scale: `--resource-patch resolution-scale=<0..1>`.
 - The work folder takes many GB. A second build with the same files reuses the finished stages. After a change of the
   translator, only the shaders whose MSL changed compile again (refer to [docs/early-cutoff.md](docs/early-cutoff.md)).

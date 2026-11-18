@@ -15,7 +15,7 @@ These stages are in `nxb`:
 - pipeline archive
 - the ad-hoc signer (`nxb sign`)
 
-For the timings, refer to [benchmarks.md](benchmarks.md). Not in scope: a replacement of `metal-tt`, `metal-pack` or `clang`, a change of the host file formats
+For the timings, refer to [benchmarks.md](benchmarks.md). Not in scope: a replacement of `metal-tt`, `metal-pack` or `clang`, an iOS app (nxkit has no iOS host yet), a game without a title module, a change of the host file formats
 (`DMROMFS1`, package records, `romfs.id`, `prebuilt.tsv`), and network access.
 
 ## One hash for each byte
@@ -177,9 +177,9 @@ The tests in `tests/oracle.rs` compare the output with `codesign` for many Mach-
 ## `nxb build`: inputs, options and exit codes
 
 `nxb build` is the one command for the full build. The first argument is a folder of packages or a `.nup` file.
-`nxb help build` shows the usage. The default build uses the title module. For a game without one, use `--auto-analyze`.
-`--platform mac` (the default) and `--platform mac-app` build the same Mac app.
-`--platform ios` packages the device host and game in an unsigned IPA. See [Build a game](../README.md#build-a-game).
+`nxb help build` shows the usage. Only a game that has a title module is built, and the result is an app with `nxkit-host` as its program.
+A game without a title module stops with exit code 4. `--platform` takes `mac` or `mac-app` (the same app, `mac` is the default).
+`--platform ios` is not supported: nxkit has no iOS host yet.
 
 | input | how to give it | test condition |
 |---|---|---|
