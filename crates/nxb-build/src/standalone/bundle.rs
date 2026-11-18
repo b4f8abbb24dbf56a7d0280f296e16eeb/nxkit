@@ -7,7 +7,7 @@ use std::process::Command;
 /// Publish a completed app, preserving each producer's signing and replacement policy.
 pub(super) fn publish(stage: &Path, out: &Path, ios: bool, replace: bool) -> Result<(), String> {
     if ios {
-        return super::ios::publish(stage, out, replace);
+        return super::ios::publish(stage, out);
     }
     // The generic producer signs the whole app; title builds retain their existing signatures.
     if !replace {
@@ -30,6 +30,15 @@ pub(super) fn publish_app(stage: &Path, out: &Path, replace: bool) -> Result<(),
         return Err(super::io(out, e));
     }
     Ok(())
+}
+
+// symlink_metadata also sees dangling symlinks, which must never be followed for output.
+pub(super) fn vacant(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(super::io(path, e)),
+        Ok(_) => Err(format!("{} exists: choose a new output", path.display())),
+    }
 }
 
 const HOST: &str = "nxkit-host";
