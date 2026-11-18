@@ -8,6 +8,7 @@ struct State {
     calls: Vec<(u64, u64, u32)>,
     pages: BTreeMap<u64, u32>,
     failures: Vec<usize>,
+    partial: Vec<usize>,
 }
 
 struct Pages {
@@ -24,7 +25,7 @@ impl HostSpace for Pages {
         state.calls.push((a, n, p));
         let fail = state.failures.contains(&state.calls.len());
         // A failed host call may have changed a prefix of a multi-page span.
-        let changed = if fail && state.calls.len() == 2 {
+        let changed = if fail && state.partial.contains(&state.calls.len()) {
             n.min(0x4000)
         } else if fail {
             0
@@ -76,7 +77,11 @@ fn eight_kib_relro_preserves_writable_neighbour_on_sixteen_kib_host() {
 #[test]
 fn partial_failure_restores_entire_failing_span_and_keeps_guest_permissions() {
     let (r, host) = pages(Config::default());
-    host.state.lock().unwrap().failures = vec![2];
+    {
+        let mut state = host.state.lock().unwrap();
+        state.failures = vec![2];
+        state.partial = vec![2];
+    }
     assert_ne!(r.svc(0x02, &[HEAP + 0x1000, 0x10000, 1])[0], 0);
     for offset in (0..0x14000).step_by(0x1000) {
         assert_eq!(r.query(HEAP + offset).4, 3);
@@ -105,10 +110,30 @@ fn failed_rollback_attempts_remaining_pages_and_requests_process_exit() {
         process_exit: |code| EXIT.store(code, std::sync::atomic::Ordering::Relaxed),
         ..Config::default()
     });
-    host.state.lock().unwrap().failures = vec![2, 4];
+    {
+        let mut state = host.state.lock().unwrap();
+        state.failures = vec![2, 4];
+        state.partial = vec![2];
+    }
     assert_ne!(r.svc(0x02, &[HEAP + 0x1000, 0x10000, 1])[0], 0);
     assert_eq!(EXIT.load(std::sync::atomic::Ordering::Relaxed), 42);
     assert_eq!(host.state.lock().unwrap().calls.len(), 6);
     assert_eq!(host.state.lock().unwrap().pages[&(HEAP + 0x4000)], 1);
     assert_eq!(r.query(HEAP + 0x5000).4, 3);
+}
+
+#[test]
+fn partial_failure_on_the_first_call_restores_the_changed_prefix() {
+    let (r, host) = pages(Config::default());
+    {
+        let mut state = host.state.lock().unwrap();
+        state.failures = vec![1];
+        state.partial = vec![1];
+    }
+    assert_ne!(r.svc(0x02, &[HEAP, 0x8000, 1])[0], 0);
+    assert_eq!(r.query(HEAP).4, 3);
+    let state = host.state.lock().unwrap();
+    assert_eq!(state.calls.len(), 3);
+    assert_eq!(state.pages[&HEAP], 3);
+    assert_eq!(state.pages[&(HEAP + 0x4000)], 3);
 }
