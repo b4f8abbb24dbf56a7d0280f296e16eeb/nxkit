@@ -12,45 +12,9 @@
 use crate::kernel::Kernel;
 use crate::memory::{HostSpace, PAGE_SIZE};
 use crate::result::{KResult, KResultOr};
-use crate::space::{Block, MemoryMap, attr, perm, state};
+use crate::space::{Block, attr, perm, state};
 use crate::thread::lock;
 use crate::vm::View;
-
-/// Project a guest permission change onto host pages without downgrading neighbours.
-fn permission_ranges(
-    map: &MemoryMap,
-    start: u64,
-    end: u64,
-    new: u32,
-    page: u64,
-) -> Vec<(u64, u64, u32)> {
-    let first = start & !(page - 1);
-    let last = (end - 1) & !(page - 1);
-    let mut ranges: Vec<(u64, u64, u32)> = Vec::new();
-    let mut at = first;
-    while at <= last {
-        let boundary = at == first || at == last;
-        let next = if boundary { at + page } else { last };
-        let mut access = new;
-        if boundary {
-            for block in map.blocks(at, next) {
-                if block.start.max(at) < start || block.end.min(next) > end {
-                    access |= block.perm;
-                }
-            }
-        }
-        if let Some(previous) = ranges.last_mut()
-            && previous.1 == at
-            && previous.2 == access
-        {
-            previous.1 = next;
-        } else {
-            ranges.push((at, next, access));
-        }
-        at = next;
-    }
-    ranges
-}
 
 /// `SetHeapSize` takes multiples of 2 MiB.
 const HEAP_ALIGN: u64 = 0x20_0000;
@@ -161,29 +125,8 @@ impl Kernel {
         if !sp.map.all(start, end, ok) {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
-        let page = vm.cfg.host.page_size();
-        let ranges = permission_ranges(&sp.map, start, end, new, page);
-        // A shared host page cannot safely represent writable and executable subpages.
-        if ranges.iter().any(|&(_, _, access)| access & 6 == 6) {
-            return Err(KResult::INVALID_NEW_MEMORY_PERMISSION);
-        }
-        for &(from, to, access) in &ranges {
-            if !vm.cfg.host.protect(from, to - from, access) {
-                // Restore the old projection, including a possibly partially changed failing span.
-                let mut at = ranges[0].0;
-                while at < to {
-                    let old = sp
-                        .map
-                        .blocks(at, at + page)
-                        .iter()
-                        .fold(0, |p, b| p | b.perm);
-                    if old & 6 == 6 || !vm.cfg.host.protect(at, page, old) {
-                        self.host_failed("SetMemoryPermission rollback");
-                    }
-                    at += page;
-                }
-                return Err(self.host_failed("SetMemoryPermission"));
-            }
+        if !vm.cfg.host.protect(start, size, new) {
+            return Err(self.host_failed("SetMemoryPermission"));
         }
         sp.map.rewrite(start, end, |b| Block { perm: new, ..*b });
         Ok(())
@@ -436,51 +379,5 @@ impl Kernel {
         sp.physical_used = sp.physical_used.saturating_sub(freed);
         crate::usage::physical(sp.physical_used);
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn permissions_preserve_neighbours_until_the_whole_host_page_changes() {
-        for page in [0x1000, 0x4000] {
-            let mut map = MemoryMap::new();
-            map.set(0x4000, 0xc000, state::CODE_DATA, perm::RW, 0, 0);
-            // A 12 KiB RELRO prefix must not seal the adjacent 4 KiB writable data.
-            assert_eq!(
-                permission_ranges(&map, 0x4000, 0x7000, perm::R, page),
-                if page == 0x4000 {
-                    vec![(0x4000, 0x8000, perm::RW)]
-                } else {
-                    vec![(0x4000, 0x7000, perm::R)]
-                }
-            );
-            for start in (0x4000..0x8000).step_by(0x1000) {
-                let ranges = permission_ranges(&map, start, start + 0x1000, perm::R, page);
-                let expected = if page == 0x4000 && start < 0x7000 {
-                    perm::RW
-                } else {
-                    perm::R
-                };
-                assert_eq!(
-                    ranges,
-                    vec![(start & !(page - 1), (start & !(page - 1)) + page, expected)]
-                );
-                map.rewrite(start, start + 0x1000, |b| Block {
-                    perm: perm::R,
-                    ..*b
-                });
-            }
-            assert_eq!(
-                permission_ranges(&map, 0x5000, 0x9000, perm::NONE, page),
-                if page == 0x4000 {
-                    vec![(0x4000, 0x8000, perm::R), (0x8000, 0xc000, perm::RW)]
-                } else {
-                    vec![(0x5000, 0x9000, perm::NONE)]
-                }
-            );
-        }
     }
 }

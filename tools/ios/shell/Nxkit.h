@@ -14,4 +14,3 @@ void nxkit_set_active(bool active);
 // Complete Npad snapshot: bits A B X Y L3 R3 L R ZL ZR + - Left Up Right Down.
 // Sticks use x-right/y-up normalized coordinates in [-1, 1].
 void nxkit_virtual_pad(uint64_t buttons, float lx, float ly, float rx, float ry);
-void nxkit_stop(void);
