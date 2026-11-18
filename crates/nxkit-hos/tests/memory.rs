@@ -573,3 +573,6 @@ fn unmap_physical_memory_gives_back_all_but_the_pinned_page() {
 #[path = "memory/code_data.rs"]
 mod code_data;
 use code_data::build_modules;
+
+#[path = "memory/permissions.rs"]
+mod permissions;

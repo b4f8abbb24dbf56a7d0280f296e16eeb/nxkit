@@ -6,12 +6,22 @@ const DATA: u64 = MODULE + 0x2000;
 const BSS: u64 = DATA + 0x1000;
 
 /// A rig whose memory model holds `modules`; [`build`] is this with none.
-#[allow(clippy::expect_used, reason = "a test helper")]
 pub(super) fn build_modules(
     host: Arc<dyn HostSpace>,
     guest: Arc<dyn GuestMemory>,
     mem: Arc<FakeMemory>,
     modules: Vec<nxkit_hos::Module>,
+) -> Rig {
+    build_config(host, guest, mem, modules, Config::default())
+}
+
+#[allow(clippy::expect_used, reason = "a test helper")]
+pub(super) fn build_config(
+    host: Arc<dyn HostSpace>,
+    guest: Arc<dyn GuestMemory>,
+    mem: Arc<FakeMemory>,
+    modules: Vec<nxkit_hos::Module>,
+    config: Config,
 ) -> Rig {
     let config = Config {
         memory: Some(MemoryConfig {
@@ -37,7 +47,7 @@ pub(super) fn build_modules(
             stack_size: 0x10_0000,
         }),
         log: |_| {},
-        ..Config::default()
+        ..config
     };
     let kernel = Kernel::try_new(config, guest).expect("the layout fits");
     let main = kernel.attach_main_thread("main").expect("attach");
