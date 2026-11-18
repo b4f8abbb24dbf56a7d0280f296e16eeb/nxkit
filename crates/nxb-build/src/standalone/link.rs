@@ -21,7 +21,7 @@ pub(crate) fn uuid(mods: &[(Built, u64)]) -> [u8; 16] {
 }
 
 /// The text of `nxgame.dylib`: every segment of every module, by address.
-pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
+fn dylib(mods: &[(Built, u64)], ios_tail: Option<u64>) -> Result<Vec<u8>, String> {
     let mut segs: Vec<Seg> = Vec::new();
     for (b, base) in mods {
         for g in &b.shape.segments {
@@ -54,7 +54,7 @@ pub(crate) fn dylib(mods: &[(Built, u64)]) -> Result<Vec<u8>, String> {
         }
     }
     segs.sort_by_key(|s| s.addr);
-    macho::write(&segs, uuid(mods))
+    macho::write(&segs, uuid(mods), ios_tail)
 }
 
 fn put(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -87,18 +87,33 @@ pub(crate) fn module_files(
     Ok(())
 }
 
-/// Writes and signs `nxgame.dylib`. Returns its size. `progress` gets the steps done (of 3) and what comes next.
+/// Writes `nxgame.dylib`, signing ad hoc on Mac; device signing happens with the final app.
+/// `progress` reports linking, writing, and (on Mac) signing.
 pub(crate) fn write_dylib(
     run: &Path,
     mods: &[(Built, u64)],
+    ios_memory: Option<(u64, u64)>,
     mut progress: impl FnMut(u64, &str),
 ) -> Result<u64, String> {
+    let tail = ios_memory
+        .map(|(reserve, stack)| {
+            // reserve includes the kernel front. Add the main stack and room for
+            // runtime region alignments, then round to host pages.
+            reserve
+                .checked_add(stack)
+                .and_then(|n| n.checked_add(0x40_0000 + 0x3fff))
+                .map(|n| n & !0x3fff)
+                .ok_or("iOS reservation overflow")
+        })
+        .transpose()?;
     progress(0, "linking");
-    let bytes = dylib(mods)?;
+    let bytes = dylib(mods, tail)?;
     let path = run.join("nxgame.dylib");
     progress(1, "writing");
     put(&path, &bytes)?;
-    progress(2, "signing");
-    bundle::sign(&path)?;
+    if tail.is_none() {
+        progress(2, "signing");
+        bundle::sign(&path)?;
+    }
     Ok(bytes.len() as u64)
 }

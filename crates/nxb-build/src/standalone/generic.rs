@@ -1,5 +1,5 @@
-//! Opt-in Mac producer built on the same title-independent analysis used by other targets.
-use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage};
+//! Opt-in Apple producer built on the same title-independent analysis used by other targets.
+use super::{Say, analysis, auto_shaders, bundle, extract, io, ios, link, stage};
 use crate::Args;
 use std::path::Path;
 
@@ -30,26 +30,13 @@ fn put(run: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| io(&path, e))
 }
 
-// symlink_metadata also sees dangling symlinks, which must never be followed for output.
-fn vacant(path: &Path) -> Result<(), String> {
-    match std::fs::symlink_metadata(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io(path, e)),
-        Ok(_) => Err(format!("{} exists: choose a new output", path.display())),
-    }
-}
-
-fn publish(partial: &Path, out: &Path) -> Result<(), String> {
-    // Reserve an empty destination atomically. A concurrent build cannot replace another app.
-    std::fs::create_dir(out).map_err(|e| io(out, e))?;
-    if let Err(e) = std::fs::rename(partial, out) {
-        let _ = std::fs::remove_dir(out);
-        return Err(io(out, e));
-    }
-    Ok(())
-}
-
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
+    let ios = a.platform == "ios";
+    let (platform, base, extension) = if ios {
+        ("iOS", ios::BASE, "ipa")
+    } else {
+        ("macOS", super::layout::GUEST_BASE, "app")
+    };
     validate(a).map_err(|e| crate::exit::fail(2, e))?;
     if a.own_front.is_empty() && std::env::var("NXB_OWN_FRONT").is_ok_and(|v| v == "0") {
         return Err(crate::exit::fail(
@@ -58,11 +45,11 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ));
     }
     if a.dry_run {
-        p.say("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for Mac. Runtime compatibility is not certified.");
+        p.say(&format!("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for {platform}. Runtime compatibility is not certified."));
         return Ok(());
     }
     if let Some(out) = &a.out {
-        vacant(out)?;
+        bundle::vacant(out)?;
     }
     p.plan(5);
     let game = stage(p, "extract", "validate application metadata", || {
@@ -74,15 +61,15 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let out = a
         .out
         .clone()
-        .unwrap_or_else(|| super::home(a).join(format!("{}.app", bundle::file_name(name))));
+        .unwrap_or_else(|| super::home(a).join(format!("{}.{extension}", bundle::file_name(name))));
     // Never replace an app or its saves in the experimental generic path.
-    vacant(&out)?;
+    bundle::vacant(&out)?;
     let mut partial = out.clone().into_os_string();
     partial.push(".partial");
     let partial = std::path::PathBuf::from(partial);
-    vacant(&partial)?;
+    bundle::vacant(&partial)?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?;
+    let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe, ios)?;
     let id = a
         .bundle_id
         .clone()
@@ -92,7 +79,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         "analysis",
         "derive and rewrite modules without executable title patches",
         || {
-            let analyzed = analysis::analyze(&game)?;
+            let analyzed = analysis::analyze(&game, base)?;
             let note = format!(
                 "{} modules, NPDM main thread, NVN name candidates",
                 analyzed.modules.len()
@@ -103,9 +90,9 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let shaders = stage(
         p,
         "shaders",
-        "discover and translate shaders for macOS",
+        &format!("discover and translate shaders for {platform}"),
         || {
-            let files = auto_shaders::discover(&game.modules, &game.files, false)?;
+            let files = auto_shaders::discover(&game.modules, &game.files, ios)?;
             let count = files
                 .iter()
                 .filter(|(n, _)| n.ends_with(".metallib"))
@@ -121,31 +108,61 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
     }
     std::fs::create_dir(&partial).map_err(|e| io(&partial, e))?;
-    stage(p, "link", "make Mac app and sign guest dylib", || {
-        let run = bundle::skeleton(
-            &partial,
-            &host,
-            &bundle::info_plist(&bundle::file_name(name), &id, &game.version.to_string()),
-        )?;
-        put(&run, "game.json", analyzed.manifest(&game).as_bytes())?;
-        put(&run, "main.npdm", &game.npdm)?;
-        for dir in &game.directories {
-            let rel =
-                nxb_extract::safe_path::rel("run folder", dir, false).map_err(|e| e.to_string())?;
-            std::fs::create_dir_all(run.join(&rel)).map_err(|e| io(&run.join(&rel), e))?;
-        }
-        for (name, bytes) in game.files.iter().chain(&shaders) {
-            put(&run, name, bytes)?;
-        }
-        link::module_files(&run, &analyzed.modules, |_, _| {})?;
-        link::write_dylib(&run, &analyzed.modules, |_, _| {})?;
-        Ok(((), "Mac host and guest linked".into()))
-    })?;
-    stage(p, "bundle", "sign and publish new app", || {
-        bundle::sign(&partial)?;
-        publish(&partial, &out)?;
-        Ok(((), out.display().to_string()))
-    })?;
+    stage(
+        p,
+        "link",
+        &format!("make {platform} app and guest dylib"),
+        || {
+            let run = if ios {
+                ios::bundle(&partial, &host, name, &id)?
+            } else {
+                bundle::skeleton(
+                    &partial,
+                    &host,
+                    &bundle::info_plist(&bundle::file_name(name), &id, &game.version.to_string()),
+                )?
+            };
+            put(&run, "game.json", analyzed.manifest(&game).as_bytes())?;
+            put(&run, "main.npdm", &game.npdm)?;
+            for dir in &game.directories {
+                let rel = nxb_extract::safe_path::rel("run folder", dir, false)
+                    .map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(run.join(&rel)).map_err(|e| io(&run.join(&rel), e))?;
+            }
+            for (name, bytes) in game.files.iter().chain(&shaders) {
+                put(&run, name, bytes)?;
+            }
+            if ios {
+                ios::icon(&run, &run.join("icon.jpg"))?;
+            }
+            link::module_files(&run, &analyzed.modules, |_, _| {})?;
+            link::write_dylib(
+                &run,
+                &analyzed.modules,
+                ios.then_some((analyzed.reserve(), u64::from(analyzed.thread.stack_size))),
+                |_, _| {},
+            )?;
+            Ok(((), format!("{platform} host and guest linked")))
+        },
+    )?;
+    stage(
+        p,
+        "bundle",
+        if ios {
+            "publish unsigned IPA"
+        } else {
+            "sign and publish new app"
+        },
+        || {
+            if ios {
+                ios::publish(&partial, &out)?;
+            } else {
+                bundle::sign(&partial)?;
+                bundle::publish_app(&partial, &out, false)?;
+            }
+            Ok(((), out.display().to_string()))
+        },
+    )?;
     p.say("Built without executable title patches. Launch and game compatibility are not verified by this build.");
     Ok(())
 }
@@ -160,11 +177,11 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let out = root.join("Game.app");
         let partial = root.join("Game.app.partial");
-        assert!(vacant(&out).is_ok());
+        assert!(bundle::vacant(&out).is_ok());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(root.join("missing"), &out).unwrap();
-            assert!(vacant(&out).is_err());
+            assert!(bundle::vacant(&out).is_err());
             std::fs::remove_file(&out).unwrap();
         }
         std::fs::create_dir(&partial).unwrap();
@@ -172,12 +189,16 @@ mod tests {
         assert_eq!(std::fs::read(partial.join("nested/file")).unwrap(), b"data");
         assert!(put(&partial, "../escape", b"data").is_err());
         std::fs::create_dir(&out).unwrap();
-        assert!(publish(&partial, &out).is_err());
+        assert!(bundle::publish_app(&partial, &out, false).is_err());
         assert!(partial.join("nested/file").is_file());
         std::fs::remove_dir(&out).unwrap();
-        publish(&partial, &out).unwrap();
+        bundle::publish_app(&partial, &out, false).unwrap();
         assert!(out.join("nested/file").is_file());
         assert!(!partial.exists());
+        std::fs::create_dir(&partial).unwrap();
+        put(&partial, "/nested/file", b"replacement").unwrap();
+        bundle::publish_app(&partial, &out, true).unwrap();
+        assert_eq!(std::fs::read(out.join("nested/file")).unwrap(), b"replacement");
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -13,6 +13,7 @@ mod extract;
 mod files;
 mod generic;
 mod image;
+mod ios;
 mod layout;
 mod link;
 mod macho;
@@ -222,13 +223,23 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             "the title module is made for v{version}: the other updates in the input are not used"
         ));
     }
-    let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
-    let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?;
+    let ios = a.platform == "ios";
+    let (base, extension) = if ios {
+        (ios::BASE, "ipa")
+    } else {
+        (layout::GUEST_BASE, "app")
+    };
+    let host = if ios && a.dry_run {
+        PathBuf::from("nxkit-host-ios")
+    } else {
+        let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
+        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe, ios)?
+    };
     let app_name = a.app_name.clone().unwrap_or_else(|| t.name.to_string());
     let out = a
         .out
         .clone()
-        .unwrap_or_else(|| home(a).join(format!("{}.app", bundle::file_name(&app_name))));
+        .unwrap_or_else(|| home(a).join(format!("{}.{extension}", bundle::file_name(&app_name))));
     let work = a
         .work_dir
         .clone()
@@ -261,15 +272,35 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         print!("{}", describe(&t, &b, &host, &out));
         return Ok(());
     }
-    replaceable(&out)?;
+    if ios {
+        bundle::vacant(&out)?;
+    } else {
+        replaceable(&out)?;
+    }
     b.profile = shaders::profile(&work, &t.st, t.id, t.name)?;
-    let stage_dir = {
+    let ios_stage;
+    let stage_dir = if ios {
+        ios_stage = crate::host::TempDir::new_in(out.parent().unwrap_or(Path::new(".")))?;
+        ios_stage.path().to_path_buf()
+    } else {
         let mut n = out.clone().into_os_string();
         n.push(".partial");
-        PathBuf::from(n)
+        let path = PathBuf::from(n);
+        let _ = std::fs::remove_dir_all(&path);
+        path
     };
-    let _ = std::fs::remove_dir_all(&stage_dir);
-    let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
+    let run_dir = if ios {
+        ios::bundle(
+            &stage_dir,
+            &host,
+            &app_name,
+            &a.bundle_id
+                .clone()
+                .unwrap_or_else(|| bundle::default_bundle_id(t.id)),
+        )?
+    } else {
+        bundle::skeleton(&stage_dir, &host, &plist(a, &t))?
+    };
     p.plan(7);
     let nup = b.src.source == Source::Nup;
     let what = if nup {
@@ -281,6 +312,9 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), extract(a, &b, p, version, t.st.romfs_marker)?))
     })?;
     let ver_dir = work.join("extract").join(format!("v{version}"));
+    if ios {
+        ios::icon(&run_dir, &ver_dir.join("icon.jpg"))?;
+    }
     let exefs = ver_dir.join("ExeFS");
     let img = ver_dir.join("RomFS.img");
     let aoc = stage(p, "romfs", "RomFS", || {
@@ -386,8 +420,11 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok((built, note))
     })?;
     let shapes: Vec<layout::Shape> = built.iter().map(|m| m.shape.clone()).collect();
-    let mods: Vec<(modules::Built, u64)> = built.into_iter().zip(layout::bases(&shapes)).collect();
-    stage(p, "manifest", "game.json", || {
+    let mods: Vec<(modules::Built, u64)> = built
+        .into_iter()
+        .zip(layout::bases(&shapes, base))
+        .collect();
+    let main_thread = stage(p, "manifest", "game.json", || {
         if !t.services.contains(&"kernel") {
             return Err(format!(
                 "the title module of {:016X} does not list the kernel service, which the host needs",
@@ -433,7 +470,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             })
         })?;
         Ok((
-            (),
+            main_thread,
             format!(
                 "{} modules, {} NVN functions, {} services",
                 mods.len(),
@@ -443,18 +480,35 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ))
     })?;
     stage(p, "link", "nxgame.dylib", || {
-        let n = link::write_dylib(&run_dir, &mods, |done, what| {
-            p.set(Update {
-                done: Some(done),
-                total: Some(3),
-                unit: Some("steps"),
-                note: Some(what),
-                ..Default::default()
-            })
-        })?;
-        Ok(((), format!("{}, signed ad hoc", mib(n))))
+        let n = link::write_dylib(
+            &run_dir,
+            &mods,
+            ios.then_some((
+                t.st.settings.value.memory.reserve,
+                u64::from(main_thread.stack_size),
+            )),
+            |done, what| {
+                p.set(Update {
+                    done: Some(done),
+                    total: Some(if ios { 2 } else { 3 }),
+                    unit: Some("steps"),
+                    note: Some(what),
+                    ..Default::default()
+                })
+            },
+        )?;
+        let signing = if ios {
+            "unsigned iOS library"
+        } else {
+            "signed ad hoc"
+        };
+        Ok(((), format!("{}, {signing}", mib(n))))
     })?;
-    b.gpus = gpus(a, &work, &b.profile.0)?;
+    b.gpus = if ios {
+        Vec::new()
+    } else {
+        gpus(a, &work, &b.profile.0)?
+    };
     if !b.gpus.is_empty() {
         for l in &b.pipeline_lists {
             p.say(&format!("pipeline list: {}", l.display()));
@@ -465,6 +519,10 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {
+        if ios {
+            ios::publish(&stage_dir, &out)?;
+            return Ok(((), format!("{} (unsigned)", out.display())));
+        }
         // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
         // failed move stops the build with the old app and its save in place.
         let old_save = out.join("Contents/Resources/nxkit/save");
@@ -491,8 +549,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         if carried > 0 {
             p.say(&format!("pipeline lists: {carried} kept in the new app"));
         }
-        let _ = std::fs::remove_dir_all(&out);
-        std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
+        bundle::publish_app(&stage_dir, &out, true)?;
         Ok(((), out.display().to_string()))
     })?;
     p.say(&format!("app: {}", out.display()));

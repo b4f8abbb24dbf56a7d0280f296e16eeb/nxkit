@@ -17,7 +17,7 @@ pub struct Args {
     pub app_name: Option<String>,
     /// `--bundle-id`.
     pub bundle_id: Option<String>,
-    /// `--platform` (`mac` or `mac-app`: the same app).
+    /// `--platform` (`mac`, `mac-app` or `ios`).
     pub platform: String,
     /// `--work-dir`.
     pub work_dir: Option<PathBuf>,
@@ -108,6 +108,12 @@ fn gpu_list(g: &str) -> bool {
 
 /// The checks of option combinations (exit 2).
 fn validate(a: &Args) -> Result<(), (i32, String)> {
+    if a.platform == "ios" && a.gpu.as_deref().is_some_and(|gpu| gpu != "none") {
+        return Err((
+            2,
+            "iOS builds compile pipelines at runtime; use --gpu none".into(),
+        ));
+    }
     if a.base_package.is_some() && (!a.auto_analyze || a.update_inputs.is_empty()) {
         return Err((
             2,
@@ -210,11 +216,11 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
         }
         i += 1;
     }
-    if !["mac", "mac-app"].contains(&a.platform.as_str()) {
+    if !["mac", "mac-app", "ios"].contains(&a.platform.as_str()) {
         return Err((
             2,
             format!(
-                "argument --platform: invalid choice: '{}' (choose from mac, mac-app)",
+                "argument --platform: invalid choice: '{}' (choose from mac, mac-app, ios)",
                 a.platform
             ),
         ));
@@ -323,7 +329,12 @@ mod tests {
         assert_eq!(code(&["dir", "--gpu", "m2"]), Some(2));
         assert!(parse(&v(&["dir", "--gpu", "g14s,applegpu_g18p"])).is_ok());
         assert_eq!(code(&["dir", "--platform", "tv"]), Some(2));
-        assert_eq!(code(&["dir", "--platform", "ios"]), Some(2));
+        assert!(parse(&v(&["dir", "--platform", "ios"])).is_ok());
+        assert!(parse(&v(&["dir", "--platform", "ios", "--auto-analyze"])).is_ok());
+        assert_eq!(
+            code(&["dir", "--platform", "ios", "--gpu", "g18p"]),
+            Some(2)
+        );
         // the options of the engine path are unknown now
         for gone in ["--engine", "--shaders", "--program", "--dump", "--romfs"] {
             assert_eq!(code(&["dir", gone, "x"]), Some(2), "{gone}");

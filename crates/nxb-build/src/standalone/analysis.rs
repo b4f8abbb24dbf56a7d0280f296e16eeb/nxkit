@@ -37,7 +37,7 @@ fn ordered(input: &[(String, Vec<u8>)]) -> Result<Vec<&(String, Vec<u8>)>, Strin
     Ok(selected.into_iter().map(|(_, m)| m).collect())
 }
 
-pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
+pub(super) fn analyze(game: &extract::Extracted, first: u64) -> Result<Analysis, String> {
     let thread = npdm::main_thread(&game.npdm)?;
     let selected = ordered(&game.modules)?;
     let ids = selected
@@ -69,7 +69,10 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
         |_| {},
         |_, _, _| {},
     )?;
-    let bases = layout::bases(&built.iter().map(|m| m.shape.clone()).collect::<Vec<_>>());
+    let bases = layout::bases(
+        &built.iter().map(|m| m.shape.clone()).collect::<Vec<_>>(),
+        first,
+    );
     let mut settings = nxtitle::Settings::DEFAULT;
     let resource = game.npdm.get(0x14..0x18).ok_or("truncated NPDM")?;
     // These are host defaults, not game-specific requirements inferred from the binary.
@@ -94,6 +97,10 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
 }
 
 impl Analysis {
+    pub(super) fn reserve(&self) -> u64 {
+        self.settings.memory.reserve
+    }
+
     pub(super) fn manifest(&self, game: &extract::Extracted) -> String {
         manifest::game_json(&manifest::Manifest {
             title_id: game.title_id,
@@ -182,15 +189,20 @@ mod tests {
             directories: vec![],
             aoc: vec![],
         };
-        let result = analyze(&game).unwrap();
+        let result = analyze(&game, layout::GUEST_BASE).unwrap();
         assert_eq!(result.modules[0].0.build_id, "01".repeat(16));
         assert_eq!(result.thread.stack_size, 0x100000);
         assert_eq!(result.settings.memory.system_resource, 0x200000);
         let json = result.manifest(&game);
         assert!(!json.contains("patches.toml"));
         assert!(json.contains("Synthetic"));
+        let device = analyze(&game, super::super::ios::BASE).unwrap();
+        assert!(device.modules[0].1 < result.modules[0].1);
+        assert_eq!(device.modules[0].0.image, result.modules[0].0.image);
+        assert_eq!(device.thread.stack_size, result.thread.stack_size);
+        assert_eq!(device.reserve(), result.reserve());
         game.modules[0].1.truncate(0x4f);
-        assert!(analyze(&game).is_err());
+        assert!(analyze(&game, layout::GUEST_BASE).is_err());
     }
     #[test]
     fn load_order_is_not_container_order() {
