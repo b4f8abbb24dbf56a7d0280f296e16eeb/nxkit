@@ -1,4 +1,3 @@
-// Copyright (c) 2026 seedds. MIT; see root THIRD_PARTY.md for the earlier implementation.
 // Physical button positions: Nintendo's public Pro Controller diagram (support article 27538).
 import UIKit
 
