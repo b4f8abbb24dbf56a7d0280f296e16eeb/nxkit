@@ -77,15 +77,8 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     partial.push(".partial");
     let partial = std::path::PathBuf::from(partial);
     vacant(&partial)?;
-    let (shell, host) = if ios {
-        (Some(ios::Shell::build()?), std::path::PathBuf::new())
-    } else {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        (
-            None,
-            bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?,
-        )
-    };
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let host = bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe, ios)?;
     let id = a
         .bundle_id
         .clone()
@@ -129,13 +122,14 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         "link",
         &format!("make {platform} app and guest dylib"),
         || {
-            let run = match &shell {
-                Some(shell) => shell.bundle(&partial, name, &id)?,
-                None => bundle::skeleton(
+            let run = if ios {
+                ios::bundle(&partial, &host, name, &id)?
+            } else {
+                bundle::skeleton(
                     &partial,
                     &host,
                     &bundle::info_plist(&bundle::file_name(name), &id, &game.version.to_string()),
-                )?,
+                )?
             };
             put(&run, "game.json", analyzed.manifest(&game).as_bytes())?;
             put(&run, "main.npdm", &game.npdm)?;
@@ -147,8 +141,8 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             for (name, bytes) in game.files.iter().chain(&shaders) {
                 put(&run, name, bytes)?;
             }
-            if let Some(shell) = &shell {
-                shell.icon(&run, &run.join("icon.jpg"))?;
+            if ios {
+                ios::icon(&run, &run.join("icon.jpg"))?;
             }
             link::module_files(&run, &analyzed.modules, |_, _| {})?;
             link::write_dylib(

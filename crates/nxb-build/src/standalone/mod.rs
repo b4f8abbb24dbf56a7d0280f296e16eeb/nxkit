@@ -229,19 +229,11 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     } else {
         (layout::GUEST_BASE, "app")
     };
-    let (shell, host) = if ios {
-        let shell = if a.dry_run {
-            None
-        } else {
-            Some(ios::Shell::build()?)
-        };
-        (shell, PathBuf::from("UIKit shell"))
+    let host = if ios && a.dry_run {
+        PathBuf::from("nxkit-host-ios")
     } else {
         let exe = std::env::current_exe().map_err(|e| format!("the path of nxb: {e}"))?;
-        (
-            None,
-            bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe)?,
-        )
+        bundle::host(std::env::var("NXB_NXKIT_HOST").ok().as_deref(), &exe, ios)?
     };
     let app_name = a.app_name.clone().unwrap_or_else(|| t.name.to_string());
     let out = a
@@ -294,15 +286,17 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         PathBuf::from(n)
     };
     let _ = std::fs::remove_dir_all(&stage_dir);
-    let run_dir = match &shell {
-        Some(shell) => shell.bundle(
+    let run_dir = if ios {
+        ios::bundle(
             &stage_dir,
+            &host,
             &app_name,
             &a.bundle_id
                 .clone()
                 .unwrap_or_else(|| bundle::default_bundle_id(t.id)),
-        )?,
-        None => bundle::skeleton(&stage_dir, &host, &plist(a, &t))?,
+        )?
+    } else {
+        bundle::skeleton(&stage_dir, &host, &plist(a, &t))?
     };
     p.plan(7);
     let nup = b.src.source == Source::Nup;
@@ -315,8 +309,8 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), extract(a, &b, p, version, t.st.romfs_marker)?))
     })?;
     let ver_dir = work.join("extract").join(format!("v{version}"));
-    if let Some(shell) = &shell {
-        shell.icon(&run_dir, &ver_dir.join("icon.jpg"))?;
+    if ios {
+        ios::icon(&run_dir, &ver_dir.join("icon.jpg"))?;
     }
     let exefs = ver_dir.join("ExeFS");
     let img = ver_dir.join("RomFS.img");

@@ -1,193 +1,106 @@
-//! Build the UIKit host and package the shared producer's output for a device.
+//! Package a locally built UIKit host with the shared producer's output for a device.
 use crate::host::{Runner, TempDir};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub(super) const BASE: u64 = 0x1_0000_0000;
-const TARGET: &str = "aarch64-apple-ios";
 
-pub(super) struct Shell(TempDir);
-impl Shell {
-    pub(super) fn build() -> Result<Self, String> {
-        if !cfg!(target_os = "macos") {
-            return Err("building an iOS app requires macOS and Xcode".into());
-        }
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .map_err(|e| format!("nxkit source checkout: {e}"))?;
-        let source = root.join("tools/ios/shell");
-        let cache = root.join("target/ios-shell");
-        let shell = Self(TempDir::new_in(&cache)?);
-        let mut runner = Runner::from_parent()?;
-        for name in ["CARGO_HOME", "RUSTUP_HOME"] {
-            if let Some(value) = std::env::var_os(name) {
-                runner = runner.with_var(name, value)?;
-            }
-        }
-        let sdk = runner.stdout("xcrun", ["--sdk", "iphoneos", "--show-sdk-path"], None)?;
-        let built = runner.run(
-            "cargo",
-            [
-                OsString::from("rustc"),
-                "-p".into(),
-                "nxkit-host".into(),
-                "--lib".into(),
-                "--release".into(),
-                "--locked".into(),
-                "--target".into(),
-                TARGET.into(),
-                "--target-dir".into(),
-                cache.join("rust").into_os_string(),
-                "--crate-type".into(),
-                "staticlib".into(),
-                "--".into(),
-                "--print=native-static-libs".into(),
-            ],
-            Some(&root),
-        )?;
-        let stderr = String::from_utf8_lossy(&built.stderr);
-        let native = stderr
-            .lines()
-            .find_map(|line| {
-                line.split_once("native-static-libs:")
-                    .map(|(_, flags)| flags)
-            })
-            .ok_or("rustc did not report native static libraries")?;
-        let mut args: Vec<OsString> = [
-            "--sdk",
-            "iphoneos",
-            "swiftc",
-            "-target",
-            "arm64-apple-ios26.0",
-            "-sdk",
-            sdk.trim(),
-            "-O",
-            "-parse-as-library",
-            "-import-objc-header",
-        ]
-        .into_iter()
-        .map(Into::into)
-        .collect();
-        args.push(source.join("Nxkit.h").into_os_string());
-        for file in ["App.swift", "Controls.swift"] {
-            args.push(source.join(file).into_os_string());
-        }
-        args.push(
-            cache
-                .join("rust")
-                .join(TARGET)
-                .join("release/libnxkit_host.a")
-                .into_os_string(),
-        );
-        // Preserve rustc's native dependency order instead of duplicating the runtime's frameworks.
-        for flag in native.split_whitespace() {
-            args.extend(["-Xlinker".into(), flag.into()]);
-        }
-        for framework in ["UIKit", "AVFAudio", "QuartzCore"] {
-            args.extend(["-framework".into(), framework.into()]);
-        }
-        args.extend(["-o".into(), shell.0.path().join("nxkit").into_os_string()]);
-        runner.run("xcrun", args, None)?;
-        Ok(shell)
+/// Use the control icon already extracted by either producer. Homebrew may omit it.
+pub(super) fn icon(app: &Path, image: &Path) -> Result<(), String> {
+    if !image.is_file() {
+        return Ok(());
     }
-
-    /// Use the control icon already extracted by either producer. Homebrew may omit it.
-    pub(super) fn icon(&self, app: &Path, image: &Path) -> Result<(), String> {
-        if !image.is_file() {
-            return Ok(());
-        }
-        let catalog = self.0.path().join("Assets.xcassets");
-        let icons = catalog.join("AppIcon.appiconset");
-        std::fs::create_dir_all(&icons).map_err(|e| e.to_string())?;
-        std::fs::write(icons.join("Contents.json"), br#"{"images":[{"filename":"Icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}"#)
-            .map_err(|e| e.to_string())?;
-        let runner = Runner::from_parent()?;
-        runner.run(
-            "/usr/bin/sips",
-            [
-                OsString::from("-s"),
-                "format".into(),
-                "png".into(),
-                "-z".into(),
-                "1024".into(),
-                "1024".into(),
-                image.into(),
-                "--out".into(),
-                icons.join("Icon.png").into_os_string(),
-            ],
-            None,
-        )?;
-        let partial = self.0.path().join("icon.plist");
-        runner.run(
-            "xcrun",
-            [
-                OsString::from("actool"),
-                "--compile".into(),
-                app.into(),
-                "--platform".into(),
-                "iphoneos".into(),
-                "--minimum-deployment-target".into(),
-                "26.0".into(),
-                "--target-device".into(),
-                "iphone".into(),
-                "--target-device".into(),
-                "ipad".into(),
-                "--app-icon".into(),
-                "AppIcon".into(),
-                "--output-partial-info-plist".into(),
-                partial.clone().into_os_string(),
-                catalog.into_os_string(),
-            ],
-            None,
-        )?;
-        let path = app.join("Info.plist");
-        let mut plist = nxb_pack::plist::parse(&std::fs::read(&path).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-        let icon = nxb_pack::plist::parse(&std::fs::read(partial).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-        let (nxb_pack::plist::Value::Dict(entries), nxb_pack::plist::Value::Dict(icon)) =
-            (&mut plist, icon)
-        else {
-            return Err("app icon plist is not a dictionary".into());
-        };
-        for (key, value) in icon {
-            entries.retain(|(k, _)| k != &key);
-            entries.push((key, value));
-        }
-        std::fs::write(
-            path,
-            nxb_pack::plist::to_cf_xml(&plist).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())
-    }
-
-    pub(super) fn bundle(&self, stage: &Path, name: &str, id: &str) -> Result<PathBuf, String> {
-        let app = stage
-            .join("Payload")
-            .join(format!("{}.app", super::bundle::file_name(name)));
-        std::fs::create_dir_all(&app).map_err(|e| e.to_string())?;
-        std::fs::copy(self.0.path().join("nxkit"), app.join("nxkit")).map_err(|e| e.to_string())?;
-        let mut plist = nxb_pack::plist::parse(include_bytes!("../../../../tools/ios/Info.plist"))
-            .map_err(|e| e.to_string())?;
-        let nxb_pack::plist::Value::Dict(ref mut entries) = plist else {
-            return Err("shell plist is not a dictionary".into());
-        };
-        for (key, value) in [
-            ("CFBundleIdentifier", id),
-            ("CFBundleName", name),
-            ("CFBundleDisplayName", name),
-        ] {
-            entries.retain(|(k, _)| k != key);
-            entries.push((key.into(), nxb_pack::plist::Value::String(value.into())));
-        }
-        std::fs::write(
-            app.join("Info.plist"),
-            nxb_pack::plist::to_cf_xml(&plist).map_err(|e| e.to_string())?,
-        )
+    let temp = TempDir::new_in(&std::env::temp_dir())?;
+    let catalog = temp.path().join("Assets.xcassets");
+    let icons = catalog.join("AppIcon.appiconset");
+    std::fs::create_dir_all(&icons).map_err(|e| e.to_string())?;
+    std::fs::write(icons.join("Contents.json"), br#"{"images":[{"filename":"Icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}"#)
         .map_err(|e| e.to_string())?;
-        Ok(app)
+    let runner = Runner::from_parent()?;
+    runner.run(
+        "/usr/bin/sips",
+        [
+            OsString::from("-s"),
+            "format".into(),
+            "png".into(),
+            "-z".into(),
+            "1024".into(),
+            "1024".into(),
+            image.into(),
+            "--out".into(),
+            icons.join("Icon.png").into_os_string(),
+        ],
+        None,
+    )?;
+    let partial = temp.path().join("icon.plist");
+    runner.run(
+        "xcrun",
+        [
+            OsString::from("actool"),
+            "--compile".into(),
+            app.into(),
+            "--platform".into(),
+            "iphoneos".into(),
+            "--minimum-deployment-target".into(),
+            "26.0".into(),
+            "--target-device".into(),
+            "iphone".into(),
+            "--target-device".into(),
+            "ipad".into(),
+            "--app-icon".into(),
+            "AppIcon".into(),
+            "--output-partial-info-plist".into(),
+            partial.clone().into_os_string(),
+            catalog.into_os_string(),
+        ],
+        None,
+    )?;
+    let path = app.join("Info.plist");
+    let mut plist = nxb_pack::plist::parse(&std::fs::read(&path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let icon = nxb_pack::plist::parse(&std::fs::read(partial).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let (nxb_pack::plist::Value::Dict(entries), nxb_pack::plist::Value::Dict(icon)) =
+        (&mut plist, icon)
+    else {
+        return Err("app icon plist is not a dictionary".into());
+    };
+    for (key, value) in icon {
+        entries.retain(|(k, _)| k != &key);
+        entries.push((key, value));
     }
+    std::fs::write(
+        path,
+        nxb_pack::plist::to_cf_xml(&plist).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub(super) fn bundle(stage: &Path, host: &Path, name: &str, id: &str) -> Result<PathBuf, String> {
+    let app = stage
+        .join("Payload")
+        .join(format!("{}.app", super::bundle::file_name(name)));
+    std::fs::create_dir_all(&app).map_err(|e| e.to_string())?;
+    std::fs::copy(host, app.join("nxkit")).map_err(|e| e.to_string())?;
+    let mut plist = nxb_pack::plist::parse(include_bytes!("../../../../tools/ios/Info.plist"))
+        .map_err(|e| e.to_string())?;
+    let nxb_pack::plist::Value::Dict(ref mut entries) = plist else {
+        return Err("shell plist is not a dictionary".into());
+    };
+    for (key, value) in [
+        ("CFBundleIdentifier", id),
+        ("CFBundleName", name),
+        ("CFBundleDisplayName", name),
+    ] {
+        entries.retain(|(k, _)| k != key);
+        entries.push((key.into(), nxb_pack::plist::Value::String(value.into())));
+    }
+    std::fs::write(
+        app.join("Info.plist"),
+        nxb_pack::plist::to_cf_xml(&plist).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(app)
 }
 
 pub(super) fn publish(stage: &Path, output: &Path, replace: bool) -> Result<(), String> {
@@ -223,10 +136,23 @@ mod tests {
     #[test]
     fn packages_shell_and_game_without_replacing_an_existing_output() {
         let temp = TempDir::new_in(&std::env::temp_dir()).unwrap();
-        let shell = Shell(TempDir::new_in(temp.path()).unwrap());
-        std::fs::write(shell.0.path().join("nxkit"), b"host").unwrap();
+        let source = temp.path().join("nxkit-host-ios");
+        std::fs::write(&source, b"host").unwrap();
+        let exe = temp.path().join("nxb");
+        let host = super::super::bundle::host(None, &exe, true).unwrap();
+        assert_eq!(host, source);
+        assert_eq!(
+            super::super::bundle::host(Some(""), &exe, true).unwrap(),
+            source
+        );
+        assert_eq!(
+            super::super::bundle::host(source.to_str(), &exe, true).unwrap(),
+            source
+        );
+        // An iOS host must not serve as the default Mac host.
+        assert!(super::super::bundle::host(None, &exe, false).is_err());
         let stage = temp.path().join("stage");
-        let app = shell.bundle(&stage, "A & B", "app.game").unwrap();
+        let app = bundle(&stage, &host, "A & B", "app.game").unwrap();
         std::fs::write(app.join("game.json"), b"{}").unwrap();
         // Exercise Apple's asset compiler where available, using a generated one-pixel RGB image.
         if cfg!(target_os = "macos")
@@ -246,11 +172,21 @@ mod tests {
                 ],
             )
             .unwrap();
-            shell.icon(&app, &image).unwrap();
+            icon(&app, &image).unwrap();
             assert!(app.join("Assets.car").is_file());
             let info = std::fs::read_to_string(app.join("Info.plist")).unwrap();
             assert!(info.contains("CFBundleIcons") && info.contains("AppIcon"));
         }
+        // A second game reuses the same host and has its own bundle identity.
+        let second = bundle(&temp.path().join("second"), &host, "Second", "app.second").unwrap();
+        assert_eq!(std::fs::read(second.join("nxkit")).unwrap(), b"host");
+        assert_eq!(std::fs::read(app.join("nxkit")).unwrap(), b"host");
+        assert!(
+            std::fs::read_to_string(second.join("Info.plist"))
+                .unwrap()
+                .contains("app.second")
+        );
+        assert_eq!(std::fs::read(&host).unwrap(), b"host");
         let plist = std::fs::read_to_string(app.join("Info.plist")).unwrap();
         assert!(plist.contains("A &amp; B") && plist.contains("UIApplicationSceneManifest"));
         let output = temp.path().join("game.ipa");

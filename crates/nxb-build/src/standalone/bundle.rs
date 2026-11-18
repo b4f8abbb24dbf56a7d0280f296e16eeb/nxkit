@@ -34,18 +34,23 @@ pub(super) fn publish_app(stage: &Path, out: &Path, replace: bool) -> Result<(),
 
 const HOST: &str = "nxkit-host";
 
-/// The `nxkit-host` program: `NXB_NXKIT_HOST` or the file beside `exe` (`cargo build -p nxkit-host` puts it next to
-/// `nxb` in `target/<profile>/`).
-pub(crate) fn host(env: Option<&str>, exe: &Path) -> Result<PathBuf, String> {
+/// The local host: `NXB_NXKIT_HOST` or the platform's program beside `nxb`.
+/// Rebuild it after source or toolchain changes, as with `cargo build -p nxkit-host` on Mac.
+pub(crate) fn host(env: Option<&str>, exe: &Path, ios: bool) -> Result<PathBuf, String> {
+    let (name, build) = if ios {
+        ("nxkit-host-ios", "sh tools/ios/build-host.sh")
+    } else {
+        (HOST, "cargo build -p nxkit-host")
+    };
     let path = match env.filter(|e| !e.is_empty()) {
         Some(e) => PathBuf::from(e),
-        None => exe.parent().unwrap_or(Path::new(".")).join(HOST),
+        None => exe.parent().unwrap_or(Path::new(".")).join(name),
     };
     if path.is_file() {
         return Ok(path);
     }
     Err(format!(
-        "{}: the app needs the nxkit-host program and it is missing (build it with `cargo build -p nxkit-host`, or set NXB_NXKIT_HOST)",
+        "{}: the app needs the {name} program and it is missing (build it with `{build}`, or set NXB_NXKIT_HOST)",
         path.display()
     ))
 }
@@ -151,8 +156,10 @@ mod tests {
 
     #[test]
     fn a_missing_host_is_named() {
-        let e = host(None, Path::new("/nonexistent/nxb")).unwrap_err();
+        let e = host(None, Path::new("/nonexistent/nxb"), false).unwrap_err();
         assert!(e.contains("NXB_NXKIT_HOST"));
-        assert!(host(Some("/nonexistent/h"), Path::new("/x/nxb")).is_err());
+        let e = host(None, Path::new("/nonexistent/nxb"), true).unwrap_err();
+        assert!(e.contains("nxkit-host-ios") && e.contains("sh tools/ios/build-host.sh"));
+        assert!(host(Some("/nonexistent/h"), Path::new("/x/nxb"), false).is_err());
     }
 }
