@@ -8,7 +8,10 @@ use crate::inputs::ShaderInputs;
 use nxb_error::Fatal;
 use nxb_pyjson::{Value, dumps};
 use nxb_sched::{Budget, Executor, Report, SingleFlight, Task};
-use nxb_shader::{pch, target::MAC};
+use nxb_shader::{
+    pch,
+    target::{MAC, TargetConv},
+};
 use nxb_store::{Durability, Store};
 use nxb_tool::{Io, MetalTools, ProcessRegistry, Resolver, SdkRoots};
 use std::collections::{BTreeMap, BTreeSet};
@@ -101,7 +104,16 @@ pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
 }
 
 /// Run the build.
-pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
+pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
+    build_for(cfg, MAC)
+}
+
+/// Run the shared pipeline with the compiler conventions for `target`.
+pub fn build_for(mut cfg: BuildConfig, target: TargetConv) -> Result<BuildReport, Fatal> {
+    // The verdict frontend emits Mac libraries. Device builds use Apple tools.
+    if target.target == nxb_model::Target::Ios {
+        cfg.own_front = None;
+    }
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
     let tmp = cfg.scratch.join("tmp");
@@ -162,16 +174,16 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         home: home.clone(),
     };
     let roots =
-        SdkRoots::resolve(&resolver, &[MAC.target], &registry).map_err(|e| fatal("SDK", e))?;
+        SdkRoots::resolve(&resolver, &[target.target], &registry).map_err(|e| fatal("SDK", e))?;
     let env = roots
-        .apple_env(MAC.target, &tmp, &home)
+        .apple_env(target.target, &tmp, &home)
         .map_err(|e| fatal("environment", e))?;
     let tools = Arc::new(
-        MetalTools::resolve(&resolver, MAC.target, env, tmp.clone(), registry.clone())
+        MetalTools::resolve(&resolver, target.target, env, tmp.clone(), registry.clone())
             .map_err(|e| fatal("metal", e))?,
     );
     let (ver, bld) = resolver
-        .sdk_version(MAC.target, &registry)
+        .sdk_version(target.target, &registry)
         .map_err(|e| fatal("SDK version", e))?;
     let cid = tools
         .compiler_id(&ver, &bld)
@@ -185,13 +197,13 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         None => None,
     };
     let mut ident = b"dmsh_mtlcache 2\0".to_vec();
-    ident.extend_from_slice(MAC.record().as_bytes());
+    ident.extend_from_slice(target.record().as_bytes());
     ident.push(0);
     ident.extend_from_slice(cid.as_bytes());
     let pchp = tools
         .build_pch(
-            &MAC.pch_flags(),
-            MAC.compile_flags,
+            &target.pch_flags(),
+            target.compile_flags,
             &pch::header(),
             pch::PROBE,
             &cfg.work.join("pch"),
@@ -202,6 +214,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let xlate = crate::xlate_cache::Xlate::open(&cfg.store, &cfg.chain)
         .map_err(|e| fatal("translation cache", e))?;
     let shared = Arc::new(Shared {
+        target,
         out: out.clone(),
         chain: cfg.chain.clone(),
         ident: nxb_model::sha256(&ident).to_hex(),
