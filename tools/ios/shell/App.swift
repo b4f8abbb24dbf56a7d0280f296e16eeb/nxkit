@@ -41,13 +41,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
         ) { [weak self] notification in
             let began = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
-            let options = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.interrupted = began
-                if began || AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) {
-                    self.applyActive()
-                }
+                self.applyActive()
             }
         }
         var error = [CChar](repeating: 0, count: 4096)
@@ -73,7 +70,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             view.addSubview(label)
         }
     }
-    func sceneDidBecomeActive(_ scene: UIScene) { setActive(true) }
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        interrupted = false
+        setActive(true)
+    }
     func sceneWillResignActive(_ scene: UIScene) { setActive(false) }
     func sceneDidDisconnect(_ scene: UIScene) {
         setActive(false)
