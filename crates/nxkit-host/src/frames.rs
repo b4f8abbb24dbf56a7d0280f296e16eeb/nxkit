@@ -178,8 +178,10 @@ pub fn install(
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
     // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
+    #[cfg(target_os = "macos")]
     nxkit_gpu::set_prewarm_screen(Some(Arc::new(crate::sys::loading::LoadingScreen)));
     let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings));
+    #[cfg(target_os = "macos")]
     nxkit_gpu::set_prewarm_screen(None);
     let backend = backend.map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
     nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))

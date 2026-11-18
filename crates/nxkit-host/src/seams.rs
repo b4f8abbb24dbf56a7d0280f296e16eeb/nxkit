@@ -16,6 +16,7 @@ use nxkit_svc_pacing::{LoadConfig, StepMode};
 use crate::error::{HostError, Result};
 use crate::manifest::Game;
 use crate::settings::Settings;
+#[cfg(target_os = "macos")]
 use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
 
@@ -203,6 +204,11 @@ fn console_language() -> String {
 /// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
 /// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
 pub fn init_services(game: &Game, mask: u64) -> Result<()> {
+    init_services_with_data(game, mask, &game.root)
+}
+
+/// Starts services with separate writable data, while assets stay in the run folder.
+pub(crate) fn init_services_with_data(game: &Game, mask: u64, data: &Path) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
     wire::set_handheld(handheld);
@@ -214,8 +220,8 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
     .map_err(HostError::App)?;
 
     if has(mask, Service::Fs) {
-        let save = game.root.join("save").join(&game.title_id);
-        let temp = game.root.join("temp");
+        let save = data.join("save").join(&game.title_id);
+        let temp = data.join("temp");
         for dir in [&save, &temp] {
             std::fs::create_dir_all(dir).map_err(|e| HostError::io(dir, &e))?;
         }
@@ -287,11 +293,12 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
 
 /// The window gained or lost the key focus. The input service releases held keys on a loss. The game keeps its focus:
 /// on the console a focus loss means the HOME menu, and games pause for it, but on a Mac clicking another window is no
-/// reason to stop the game. `NXKIT_PAUSE_UNFOCUSED=1` reports the loss to the game as before.
+/// reason to stop the game. iOS always reports the loss; Mac does so with `NXKIT_PAUSE_UNFOCUSED=1`.
 pub fn focus_changed(focused: bool) {
     static PAUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let pause =
-        *PAUSE.get_or_init(|| std::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"));
+    let pause = *PAUSE.get_or_init(|| {
+        cfg!(target_os = "ios") || std::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1")
+    });
     if pause || focused {
         let focus = if focused {
             nxkit_svc_system::Focus::InFocus
@@ -304,6 +311,7 @@ pub fn focus_changed(focused: bool) {
 }
 
 /// The held mouse did something. The input service turns it into the camera stick and the mouse bindings.
+#[cfg(target_os = "macos")]
 pub fn mouse(event: MouseEvent) {
     match event {
         MouseEvent::Moved { dx, dy } => nxkit_svc_input::mouse_moved(dx, dy),
@@ -315,6 +323,7 @@ pub fn mouse(event: MouseEvent) {
 
 /// When the window holds the mouse: never when the input files turn the mouse off, on a click while a controller is
 /// connected, else whenever the window has the focus (R63).
+#[cfg(target_os = "macos")]
 pub fn mouse_mode() -> MouseMode {
     if !nxkit_svc_input::mouse_capture() {
         MouseMode::Off
