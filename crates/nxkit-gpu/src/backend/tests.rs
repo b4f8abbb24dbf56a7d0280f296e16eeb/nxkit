@@ -17,6 +17,21 @@ fn backend(len: u64) -> Option<(Arc<GuestMemory>, Arc<GpuBackend>)> {
 }
 
 #[test]
+fn suspension_does_not_report_a_guest_cpu_wait() {
+    let Some((_guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    // This checks callback wiring without requiring overlap or a learned renamed range.
+    Backend::suspend(&*backend);
+    Backend::suspend(&*backend);
+    assert_eq!(backend.renamed_wait_calls.load(Ordering::Relaxed), 0);
+    Backend::wait_idle(&*backend);
+    assert_eq!(backend.renamed_wait_calls.load(Ordering::Relaxed), 1);
+    Backend::suspend(&*backend);
+    assert_eq!(backend.renamed_wait_calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
 fn the_gpu_base_is_the_virtual_base() {
     let Some((guest, backend)) = backend(1 << 20) else {
         return;

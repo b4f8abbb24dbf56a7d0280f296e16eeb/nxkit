@@ -269,7 +269,11 @@ impl Backend for GpuBackend {
         if let Some(pacer) = self.pacer.get() {
             pacer.discard_parked_tick();
         }
-        self.wait_idle();
+        if let Some(enc) = &self.enc {
+            enc.wait_idle();
+        }
+        // Suspension is not a guest CPU wait. Do not write renamed storage into the next frame.
+        self.drain(None);
         if let Some(blit) = locked(&self.blit).as_ref()
             && let Err(error) = blit.wait_idle()
         {
