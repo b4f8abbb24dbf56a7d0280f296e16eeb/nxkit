@@ -51,6 +51,7 @@ fn publish(partial: &Path, out: &Path) -> Result<(), String> {
 
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let ios = a.platform == "ios";
+    let platform = if ios { "iOS" } else { "macOS" };
     let base = if ios {
         ios::BASE
     } else {
@@ -64,7 +65,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ));
     }
     if a.dry_run {
-        p.say(&format!("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for {}. Runtime compatibility is not certified.", if ios { "iOS" } else { "Mac" }));
+        p.say(&format!("auto-analysis: discover and extract packages or NUP, analyze modules/NPDM/NVN, rewrite without title patches, translate shaders, link and bundle for {platform}. Runtime compatibility is not certified."));
         return Ok(());
     }
     if let Some(out) = &a.out {
@@ -121,11 +122,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let shaders = stage(
         p,
         "shaders",
-        if ios {
-            "discover and translate shaders for iOS"
-        } else {
-            "discover and translate shaders for macOS"
-        },
+        &format!("discover and translate shaders for {platform}"),
         || {
             let files = auto_shaders::discover(&game.modules, &game.files, ios)?;
             let count = files
@@ -146,11 +143,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     stage(
         p,
         "link",
-        if ios {
-            "make iOS app and guest dylib"
-        } else {
-            "make Mac app and sign guest dylib"
-        },
+        &format!("make {platform} app and guest dylib"),
         || {
             let run = match &shell {
                 Some(shell) => shell.bundle(&partial, name, &id)?,
@@ -181,15 +174,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             } else {
                 link::write_dylib(&run, &analyzed.modules, |_, _| {})?;
             }
-            Ok((
-                (),
-                if ios {
-                    "iOS host and guest linked"
-                } else {
-                    "Mac host and guest linked"
-                }
-                .into(),
-            ))
+            Ok(((), format!("{platform} host and guest linked")))
         },
     )?;
     stage(
