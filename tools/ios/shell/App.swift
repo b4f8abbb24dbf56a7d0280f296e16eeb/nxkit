@@ -47,7 +47,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
         ) { [weak self] notification in
-            let began = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
+            guard let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
+            let began = type == .began
             Task { @MainActor [weak self] in
                 guard let self, self.app?.gameScene === self else { return }
                 self.interrupted = began
@@ -101,14 +103,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     private func applyActive() {
         guard let game else { return }
-        let active = foreground && !interrupted
-        UIApplication.shared.isIdleTimerDisabled = active
+        var active = foreground && !interrupted
         if !active { nxkit_set_active(false) }
         do {
             try AVAudioSession.sharedInstance().setActive(active, options: active ? [] : .notifyOthersOnDeactivation)
         } catch {
             NSLog("nxkit audio activation: %@", error.localizedDescription)
+            // Do not resume RemoteIO or rendering without an active audio session.
+            // A later foreground/interruption-end event can retry activation.
+            active = false
+            nxkit_set_active(false)
         }
+        UIApplication.shared.isIdleTimerDisabled = active
         game.controls.reset()
         game.controls.isUserInteractionEnabled = active
         if active { nxkit_set_active(true) }
