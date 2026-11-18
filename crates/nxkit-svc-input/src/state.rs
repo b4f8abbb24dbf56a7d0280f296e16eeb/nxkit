@@ -62,6 +62,8 @@ pub(crate) fn six_axis_bytes(d: &SixAxisData, sampling: i64) -> [u8; SIX_AXIS_ST
 /// Everything the service knows.
 pub(crate) struct Input {
     pub(crate) config: Config,
+    #[cfg(target_os = "ios")]
+    pub(crate) virtual_pad: RawPad,
     bindings: Bindings,
     map: MotionMap,
     platform: Platform,
@@ -97,6 +99,8 @@ impl Input {
     pub(crate) fn new(config: &Config) -> Input {
         Input {
             config: config.clone(),
+            #[cfg(target_os = "ios")]
+            virtual_pad: RawPad::default(),
             bindings: config.bindings(),
             map: config.motion_map(),
             platform: Platform::new(config),
@@ -183,6 +187,12 @@ impl Input {
     /// The reading of a player's controllers. A game with one player gets every controller as player 1.
     fn raw_pad(&self, player: usize, one_player: bool) -> RawPad {
         let own = self.platform.read_pad(player).unwrap_or_default();
+        #[cfg(target_os = "ios")]
+        let own = if player == 0 && crate::focused() {
+            merge(&[own, self.virtual_pad])
+        } else {
+            own
+        };
         if player != 0 || !one_player {
             return own;
         }

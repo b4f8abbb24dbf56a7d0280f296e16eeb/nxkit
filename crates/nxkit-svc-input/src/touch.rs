@@ -12,6 +12,7 @@
 
 /// One touch point of the host: a finger id below 16 and its position in 0..1.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
 pub struct Touch {
     /// The finger id, 0 to 15. Points with a higher id are dropped.
     pub id: u32,
@@ -478,6 +479,15 @@ impl Touches {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_touch_layout() {
+        assert_eq!(std::mem::size_of::<Touch>(), 12);
+        assert_eq!(std::mem::align_of::<Touch>(), 4);
+        assert_eq!(std::mem::offset_of!(Touch, id), 0);
+        assert_eq!(std::mem::offset_of!(Touch, x), 4);
+        assert_eq!(std::mem::offset_of!(Touch, y), 8);
+    }
 
     fn at(x: f32, y: f32) -> Touch {
         Touch { id: 0, x, y }
