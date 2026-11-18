@@ -78,7 +78,6 @@ final class Controls: UIView {
     private var contacts: [UITouch: Contact] = [:]
     private var fingers: [UITouch: UInt32] = [:]
     private var layoutArea = CGRect.null
-    private var scale: CGFloat = 1
 
     init() {
         super.init(frame: .zero)
@@ -94,7 +93,7 @@ final class Controls: UIView {
         guard area != layoutArea else { return }
         reset()
         layoutArea = area
-        scale = max(0, min(1, area.width / 400, area.height / 280))
+        let scale = max(0, min(1, area.width / 400, area.height / 280))
         surfaces.forEach { $0.removeFromSuperview() }
         surfaces.removeAll()
         targets.removeAll()
