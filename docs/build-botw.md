@@ -89,7 +89,7 @@ The work folder holds the extracted files. You can delete it after the build. A 
 ## What does not work yet
 
 - The build was written without a run on the game files. The first real build can stop at a stage with a named error.
-- `--platform ios` is not supported: nxkit has no iOS host yet. The options of the former engine path (for example `--engine`, `--shaders`, `--companion-app` and `--dump`) do not exist any more and give exit code 2.
+- For iOS host and IPA build instructions, see [Build a game](../README.md#build-a-game). The former engine options (for example `--engine`, `--shaders`, `--companion-app` and `--dump`) give exit code 2.
 - A missing pipeline archive is a `[RED]` warning. The game then compiles its pipelines while it runs.
 - The bundle is not sealed. Whether macOS starts it without a seal is not tested.
 - The rules of the title module are the 168 frame-step steps. The screen shape, layout and FOV stubs are not in them. Without them the game keeps its own aspect and field of view.

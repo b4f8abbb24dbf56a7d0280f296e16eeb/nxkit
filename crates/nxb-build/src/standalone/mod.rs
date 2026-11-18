@@ -273,19 +273,22 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         return Ok(());
     }
     if ios {
-        if out.exists() && (!out.is_file() || out.extension().is_none_or(|s| s != "ipa")) {
-            return Err("iOS output must be an IPA file".into());
-        }
+        bundle::vacant(&out)?;
     } else {
         replaceable(&out)?;
     }
     b.profile = shaders::profile(&work, &t.st, t.id, t.name)?;
-    let stage_dir = {
+    let ios_stage;
+    let stage_dir = if ios {
+        ios_stage = crate::host::TempDir::new_in(out.parent().unwrap_or(Path::new(".")))?;
+        ios_stage.path().to_path_buf()
+    } else {
         let mut n = out.clone().into_os_string();
         n.push(".partial");
-        PathBuf::from(n)
+        let path = PathBuf::from(n);
+        let _ = std::fs::remove_dir_all(&path);
+        path
     };
-    let _ = std::fs::remove_dir_all(&stage_dir);
     let run_dir = if ios {
         ios::bundle(
             &stage_dir,

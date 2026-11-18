@@ -103,7 +103,7 @@ pub(super) fn bundle(stage: &Path, host: &Path, name: &str, id: &str) -> Result<
     Ok(app)
 }
 
-pub(super) fn publish(stage: &Path, output: &Path, replace: bool) -> Result<(), String> {
+pub(super) fn publish(stage: &Path, output: &Path) -> Result<(), String> {
     let archive = std::path::absolute(stage)
         .map_err(|e| e.to_string())?
         .join("archive.ipa");
@@ -121,12 +121,8 @@ pub(super) fn publish(stage: &Path, output: &Path, replace: bool) -> Result<(), 
         ],
         Some(stage),
     )?;
-    if replace {
-        std::fs::rename(&archive, output).map_err(|e| e.to_string())?;
-    } else {
-        // The generic producer must not replace an output that appeared during its build.
-        std::fs::hard_link(&archive, output).map_err(|e| e.to_string())?;
-    }
+    // Neither producer may replace an output that appeared during its build.
+    std::fs::hard_link(&archive, output).map_err(|e| e.to_string())?;
     std::fs::remove_dir_all(stage).map_err(|e| e.to_string())
 }
 
@@ -191,10 +187,10 @@ mod tests {
         assert!(plist.contains("A &amp; B") && plist.contains("UIApplicationSceneManifest"));
         let output = temp.path().join("game.ipa");
         std::fs::write(&output, b"keep").unwrap();
-        assert!(publish(&stage, &output, false).is_err());
+        assert!(super::super::bundle::publish(&stage, &output, true, true).is_err());
         assert_eq!(std::fs::read(&output).unwrap(), b"keep");
         std::fs::remove_file(&output).unwrap();
-        publish(&stage, &output, false).unwrap();
+        publish(&stage, &output).unwrap();
         let listing = Runner::from_parent()
             .unwrap()
             .stdout(

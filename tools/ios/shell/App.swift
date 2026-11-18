@@ -5,6 +5,10 @@ import AVFAudio
 @main
 @MainActor
 final class AppDelegate: UIResponder, UIApplicationDelegate {
+    // The guest and its Metal layer live for the process, not one scene connection.
+    var runningGame: GameView?
+    weak var gameScene: SceneDelegate?
+
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         let configuration = UISceneConfiguration(name: "Game", sessionRole: session.role)
@@ -17,15 +21,18 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var game: GameView?
+    private weak var app: AppDelegate?
     private var foreground = false
     private var interrupted = false
     private var interruptionObserver: NSObjectProtocol?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
-        guard let scene = scene as? UIWindowScene else { return }
+        guard session.role == .windowApplication, let scene = scene as? UIWindowScene,
+              let app = UIApplication.shared.delegate as? AppDelegate else { return }
+        self.app = app
         let window = UIWindow(windowScene: scene)
         let controller = UIViewController()
-        let view = GameView(frame: window.bounds)
+        let view = app.runningGame ?? GameView(frame: window.bounds)
         controller.view = view
         window.rootViewController = controller
         self.window = window
@@ -42,13 +49,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         ) { [weak self] notification in
             let began = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.app?.gameScene === self else { return }
                 self.interrupted = began
                 self.applyActive()
             }
         }
         var error = [CChar](repeating: 0, count: 4096)
-        let started = Bundle.main.bundlePath.withCString { bundle in
+        let started = app.runningGame != nil || Bundle.main.bundlePath.withCString { bundle in
             NSHomeDirectory().withCString { home in
                 error.withUnsafeMutableBufferPointer { buffer in
                     nxkit_start(Unmanaged.passUnretained(view.metalLayer).toOpaque(), bundle, home,
@@ -57,6 +64,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
         if started {
+            app.runningGame = view
+            app.gameScene = self
             game = view
             view.addSubview(view.controls)
             view.setNeedsLayout()
@@ -77,12 +86,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneWillResignActive(_ scene: UIScene) { setActive(false) }
     func sceneDidDisconnect(_ scene: UIScene) {
         setActive(false)
-        if game != nil { nxkit_stop() }
+        if app?.gameScene === self { app?.gameScene = nil }
+        // Disconnect is not process exit: a new scene must reuse the running guest.
+        window?.rootViewController = nil
+        window = nil
         game = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
         interruptionObserver = nil
     }
     private func setActive(_ active: Bool) {
+        guard app?.gameScene === self else { return }
         foreground = active
         applyActive()
     }
