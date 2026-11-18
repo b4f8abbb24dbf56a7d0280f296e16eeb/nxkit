@@ -14,9 +14,10 @@ use nxkit_rt::Service;
 use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
-use crate::input::{MouseEvent, MouseMode};
 use crate::manifest::Game;
 use crate::settings::Settings;
+#[cfg(target_os = "macos")]
+use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
 
 fn has(mask: u64, service: Service) -> bool {
@@ -309,6 +310,7 @@ pub fn focus_changed(focused: bool) {
 }
 
 /// The held mouse did something. The input service turns it into the camera stick and the mouse bindings.
+#[cfg(target_os = "macos")]
 pub fn mouse(event: MouseEvent) {
     match event {
         MouseEvent::Moved { dx, dy } => nxkit_svc_input::mouse_moved(dx, dy),
@@ -320,6 +322,7 @@ pub fn mouse(event: MouseEvent) {
 
 /// When the window holds the mouse: never when the input files turn the mouse off, on a click while a controller is
 /// connected, else whenever the window has the focus (R63).
+#[cfg(target_os = "macos")]
 pub fn mouse_mode() -> MouseMode {
     if !nxkit_svc_input::mouse_capture() {
         MouseMode::Off

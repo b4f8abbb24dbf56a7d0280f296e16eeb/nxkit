@@ -47,7 +47,6 @@ fn start(
         ));
     }
     let data = home.join("Library/Application Support/nxkit");
-    std::fs::create_dir_all(&data).map_err(|e| HostError::io(&data, &e))?;
     nxkit_svc_audio::set_active(false).map_err(HostError::App)?;
     let startup::Prepared {
         loaded,

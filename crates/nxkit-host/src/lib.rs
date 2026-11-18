@@ -35,7 +35,7 @@ pub mod guestsym;
 pub mod loader;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod memory;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub mod memreport;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod place;
@@ -63,8 +63,6 @@ pub mod wire;
 pub use error::{HostError, Result};
 pub use manifest::Game;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub mod input;
 #[cfg(target_os = "ios")]
 #[allow(unsafe_code)]
 mod ios;

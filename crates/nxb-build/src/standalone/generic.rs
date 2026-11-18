@@ -51,6 +51,11 @@ fn publish(partial: &Path, out: &Path) -> Result<(), String> {
 
 pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let ios = a.platform == "ios";
+    let base = if ios {
+        ios::BASE
+    } else {
+        super::layout::GUEST_BASE
+    };
     validate(a).map_err(|e| crate::exit::fail(2, e))?;
     if a.own_front.is_empty() && std::env::var("NXB_OWN_FRONT").is_ok_and(|v| v == "0") {
         return Err(crate::exit::fail(
@@ -105,11 +110,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         "analysis",
         "derive and rewrite modules without executable title patches",
         || {
-            let analyzed = if ios {
-                analysis::analyze_at(&game, ios::BASE)?
-            } else {
-                analysis::analyze(&game)?
-            };
+            let analyzed = analysis::analyze(&game, base)?;
             let note = format!(
                 "{} modules, NPDM main thread, NVN name candidates",
                 analyzed.modules.len()
