@@ -59,6 +59,15 @@ fn padded(s: &[u8], to: usize) -> Vec<u8> {
 
 /// Writes the dylib. `segs` must be in ascending address order without overlap. `uuid` is the image's identity.
 pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
+    write_for(segs, uuid, None)
+}
+
+/// Device images reserve anonymous memory within the signed dyld image.
+pub(crate) fn write_for(
+    segs: &[Seg],
+    uuid: [u8; 16],
+    ios_tail: Option<u64>,
+) -> Result<Vec<u8>, String> {
     let first = segs.first().ok_or("macho: no segments")?;
     let mut end = 0u64;
     for s in segs {
@@ -105,6 +114,13 @@ pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
         body.resize(body.len() + (file as usize - s.data.len()), 0);
         off += file;
     }
+    if let Some(size) = ios_tail {
+        if size == 0 || !size.is_multiple_of(PAGE) {
+            return Err("invalid iOS reservation size".into());
+        }
+        cmds.push(segment_cmd("__NX_HEAP", end, size, off, 0, 3));
+        end = end.checked_add(size).ok_or("iOS reservation overflow")?;
+    }
     cmds.push(segment_cmd("__LINKEDIT", end, PAGE, off, 8, 1));
     let id = padded(b"@rpath/nxgame.dylib", 24);
     let mut c = words(&[0xd, 24 + id.len() as u32, 24, 2, 0x10000, 0x10000]);
@@ -113,7 +129,12 @@ pub(crate) fn write(segs: &[Seg], uuid: [u8; 16]) -> Result<Vec<u8>, String> {
     let mut c = words(&[0x1b, 24]);
     c.extend_from_slice(&uuid);
     cmds.push(c);
-    cmds.push(words(&[0x32, 24, 1, 0xe0000, 0xe0000, 0]));
+    let (platform, minimum) = if ios_tail.is_some() {
+        (2, 26 << 16)
+    } else {
+        (1, 0xe0000)
+    };
+    cmds.push(words(&[0x32, 24, platform, minimum, minimum, 0]));
     let lib = padded(b"/usr/lib/libSystem.B.dylib", 32);
     let mut c = words(&[0xc, 24 + lib.len() as u32, 24, 2, 0x10000, 0x10000]);
     c.extend_from_slice(&lib);
@@ -181,6 +202,22 @@ mod tests {
         assert_eq!(&f[PAGE as usize..PAGE as usize + 8], &code);
         assert_eq!(&f[2 * PAGE as usize..2 * PAGE as usize + 5], b"hello");
         assert_eq!(f.len() as u64, 3 * PAGE + 8);
+        let device = write_for(&segs, [7; 16], Some(4 << 30)).unwrap();
+        let parsed = nxb_pack::macho::MachO::parse(&device).unwrap();
+        assert_eq!((parsed.platform, parsed.minos), (Some(2), Some(26 << 16)));
+        assert_eq!(device.len(), f.len());
+        let heap = HEADER_SIZE + 3 * SEGMENT_CMD;
+        assert_eq!(&device[heap + 8..heap + 17], b"__NX_HEAP");
+        let word = |off| u64::from_le_bytes(device[heap + off..heap + off + 8].try_into().unwrap());
+        assert_eq!((word(32), word(48)), (4 << 30, 0));
+        assert_eq!(u32at(&device, heap + 60), 3);
+        let link_address = u64::from_le_bytes(
+            device[parsed.linkedit.cmd_offset + 24..parsed.linkedit.cmd_offset + 32]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(link_address, word(24) + word(32));
+        assert_eq!(parsed.linkedit.fileoff, word(40));
     }
 
     #[test]
