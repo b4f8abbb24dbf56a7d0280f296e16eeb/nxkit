@@ -513,7 +513,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
             .enumerate()
             .filter(|(_, local)| local.threadgroup)
         {
-            let name = threadgroup_name(fid, lid);
+            let name = threadgroup_name(&cx.types, f, fid, lid);
             let ty = llty(&cx.types, &local.ty, true);
             let align = cx.types.layout(&local.ty).align;
             let _ = writeln!(
@@ -932,8 +932,11 @@ fn emit_deferred(
     }
 }
 
-fn threadgroup_name(fid: usize, lid: usize) -> String {
-    format!("@__nxkit.tg.{fid}.{lid}")
+fn threadgroup_name(types: &Types, f: &msl_sema::hir::Func, fid: usize, lid: usize) -> String {
+    mangle::threadgroup_local(f, types, &f.locals[lid].name).map_or_else(
+        || format!("@__nxkit.tg.{fid}.{lid}"),
+        |name| format!("@{name}"),
+    )
 }
 
 /// Emits one function definition.

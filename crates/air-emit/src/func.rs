@@ -161,7 +161,7 @@ impl<'a> FnGen<'a> {
         }
         for (lid, l) in f.locals.iter().enumerate() {
             let p = if l.threadgroup {
-                crate::threadgroup_name(g.cx.cur_fid, lid)
+                crate::threadgroup_name(&g.cx.types, f, g.cx.cur_fid, lid)
             } else {
                 g.alloca(&l.ty.clone())
             };
@@ -904,8 +904,15 @@ impl<'a> FnGen<'a> {
                 let at = self.mt(&b.ty);
                 let r = self.tmp();
                 let sp = space_suffix(b.space);
+                // A dynamic index of static threadgroup storage is not marked inbounds under -fwrapv.
+                let flags =
+                    if b.space == space_num(Space::Threadgroup) && i64v.parse::<i64>().is_err() {
+                        ""
+                    } else {
+                        " inbounds"
+                    };
                 self.emit(format!(
-                    "{r} = getelementptr inbounds {at}, {at}{sp}* {}, i64 0, i64 {i64v}",
+                    "{r} = getelementptr{flags} {at}, {at}{sp}* {}, i64 0, i64 {i64v}",
                     b.ptr
                 ));
                 let es = self.cx.types.layout(&p.ty).size;
@@ -1827,8 +1834,14 @@ impl<'a> FnGen<'a> {
                 let et = self.mt(inner);
                 let ss = space_suffix(space_num(*sp));
                 let r = self.tmp();
+                // Device pointer arithmetic follows the wrapping convention used by the Apple reference.
+                let flags = if *sp == Space::Device {
+                    ""
+                } else {
+                    " inbounds"
+                };
                 self.emit(format!(
-                    "{r} = getelementptr inbounds {et}, {et}{ss}* {}, i64 {i}",
+                    "{r} = getelementptr{flags} {et}, {et}{ss}* {}, i64 {i}",
                     pv.r
                 ));
                 Ok(V { r, ty })

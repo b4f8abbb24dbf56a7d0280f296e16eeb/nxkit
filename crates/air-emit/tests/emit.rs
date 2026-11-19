@@ -39,6 +39,24 @@ fn fragment_with_function_constant_gate_and_contraction() {
 }
 
 #[test]
+fn device_offsets_use_wrapping_pointer_arithmetic() {
+    let ir = emit(
+        "kernel void k(device uint* out [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+        out[1] = out[i];
+    }",
+    );
+    assert_eq!(
+        ir.matches("getelementptr i32, i32 addrspace(1)*").count(),
+        2,
+        "{ir}"
+    );
+    assert!(
+        !ir.contains("getelementptr inbounds i32, i32 addrspace(1)*"),
+        "{ir}"
+    );
+}
+
+#[test]
 fn thread_array_reference_parameter_indexes_the_callers_storage() {
     let ir = emit(
         "static void write(thread uint (&values)[4], uint i, uint v) { values[i] = v; }\n\

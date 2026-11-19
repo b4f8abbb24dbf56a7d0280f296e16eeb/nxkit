@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 11;
+pub const FORMAT: u32 = 12;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -312,7 +312,16 @@ mod tests {
                 .count(),
             2
         );
-        assert!(ir.contains("[4 x i32] addrspace(3)*"), "{ir}");
+        for name in ["exchange", "separate"] {
+            assert!(
+                ir.contains(&format!("@_ZZ8{name}PU9MTLdevicejjE6values = ")),
+                "{ir}"
+            );
+        }
+        assert!(
+            ir.contains("getelementptr [4 x i32], [4 x i32] addrspace(3)*"),
+            "{ir}"
+        );
         assert!(
             ir.contains("call void @air.wg.barrier(i32 2, i32 5, i32 1)"),
             "{ir}"
