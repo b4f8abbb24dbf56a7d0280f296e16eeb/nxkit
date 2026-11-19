@@ -196,6 +196,44 @@ fn threadgroup_barrier_checks_the_reaching_entry_stage() {
 }
 
 #[test]
+fn threadgroup_index_has_kernel_unsigned_scalar_abi() {
+    for ty in ["uint", "ushort"] {
+        let ir = emit(&format!(
+            "kernel void k({ty} lane [[thread_index_in_threadgroup]]) {{}}"
+        ));
+        has(&ir, "air.thread_index_in_threadgroup");
+    }
+    for decl in [
+        "kernel void k(float lane [[thread_index_in_threadgroup]]) {}",
+        "struct O { float4 p [[position]]; }; vertex O v(uint lane [[thread_index_in_threadgroup]]) { O o; o.p = float4(float(lane)); return o; }",
+    ] {
+        let e = compile_source(&format!("{PRE}{decl}"), &Target::macos(), "t").unwrap_err();
+        has(&e.key(), "threadgroup-index-parameter");
+    }
+}
+
+#[test]
+fn threadgroup_atomic_cannot_relabel_a_device_pointer() {
+    for (expr, reason) in [
+        (
+            "static_cast<threadgroup atomic_uint*>(out)",
+            "threadgroup-atomic-cast",
+        ),
+        (
+            "reinterpret_cast<threadgroup atomic_uint*>(static_cast<threadgroup uint*>(out))",
+            "pointer-cast-address-space",
+        ),
+    ] {
+        let source = format!(
+            "{PRE}kernel void k(device uint* out [[buffer(0)]]) {{ \
+             threadgroup atomic_uint* w = {expr}; out[0] = atomic_fetch_add_explicit(w, 1u, memory_order_relaxed); }}"
+        );
+        let e = compile_source(&source, &Target::macos(), "t").unwrap_err();
+        has(&e.key(), reason);
+    }
+}
+
+#[test]
 fn ballot_and_threadgroup_atomics_reject_invalid_forms() {
     for body in [
         "out[0] = uint(ulong(simd_ballot(uint2(1u))));",

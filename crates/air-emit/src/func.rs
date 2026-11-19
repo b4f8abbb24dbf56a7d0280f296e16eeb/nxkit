@@ -1618,6 +1618,9 @@ impl<'a> FnGen<'a> {
             }
             ExprKind::PtrCast(x) | ExprKind::TexCast(x) => {
                 let v = self.expr(x)?;
+                if matches!((&v.ty, &ty), (Type::Ptr(from, _), Type::Ptr(to, _)) if from != to) {
+                    return Err(Error::unsupported("pointer-cast-address-space"));
+                }
                 let r = self.tmp();
                 let op = if matches!(v.ty, Type::Scalar(_)) {
                     "inttoptr"

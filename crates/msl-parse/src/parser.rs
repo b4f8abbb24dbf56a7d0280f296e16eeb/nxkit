@@ -840,6 +840,9 @@ impl<'a> Parser<'a> {
                 let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none(), false))?;
                 let is_const = self.last_const;
                 if array_ref.is_some() {
+                    if is_const {
+                        return reject("const-array-reference");
+                    }
                     self.expect("(")?;
                     self.expect("&")?;
                 }
@@ -860,6 +863,15 @@ impl<'a> Parser<'a> {
                 for a in &pattrs {
                     if !PARAM_ATTRS.contains(&a.name.as_str()) {
                         return reject(format!("param-attr:{}", a.name));
+                    }
+                    if a.name == "thread_index_in_threadgroup"
+                        && (entry != Some(Stage::Kernel)
+                            || !matches!(
+                                &pty,
+                                Ty::Scalar(ScalarName::Known(Scalar::Uint | Scalar::Ushort))
+                            ))
+                    {
+                        return reject("threadgroup-index-parameter");
                     }
                     if a.name == "function_constant" {
                         match a.args.first() {
@@ -2186,6 +2198,11 @@ impl<'a> Parser<'a> {
                     CastKind::AsType
                 }
                 "static_cast" => {
+                    if f != to
+                        && (f == Ty::ThreadgroupAtomicUintPtr || to == Ty::ThreadgroupAtomicUintPtr)
+                    {
+                        return reject("threadgroup-atomic-cast");
+                    }
                     self.stat("call:static_cast")?;
                     CastKind::Static
                 }

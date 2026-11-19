@@ -76,6 +76,16 @@ fn private_array_cannot_bind_to_threadgroup_reference() {
 }
 
 #[test]
+fn const_array_reference_falls_back_instead_of_losing_the_qualifier() {
+    for space in ["thread", "threadgroup"] {
+        let source =
+            format!("{PRE}static uint read(const {space} uint (&a)[2]) {{ return a[0]; }}");
+        let error = compile_source(&source, &Target::macos(), "t").unwrap_err();
+        assert!(error.key().contains("const-array-reference"), "{error:?}");
+    }
+}
+
+#[test]
 fn array_reference_overload_follows_argument_address_space() {
     let private = "static uint read_slot(thread uint (&a)[2]) { return a[0]; }";
     let shared = "static uint read_slot(threadgroup uint (&a)[2]) { return a[1]; }";
