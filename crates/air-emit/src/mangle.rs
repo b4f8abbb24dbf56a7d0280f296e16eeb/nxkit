@@ -122,8 +122,7 @@ impl M<'_> {
     }
 }
 
-/// clang's name of an internal (static) helper, or None for a parameter type this mangler does not know.
-pub fn helper_name(f: &Func, types: &Types) -> Option<String> {
+fn function_encoding(f: &Func, types: &Types) -> Option<String> {
     let mut m = M {
         types,
         subs: Vec::new(),
@@ -155,7 +154,21 @@ pub fn helper_name(f: &Func, types: &Types) -> Option<String> {
     if params.is_empty() {
         params.push('v');
     }
-    Some(format!("_ZL{}{}{params}", f.name.len(), f.name))
+    Some(format!("{}{}{params}", f.name.len(), f.name))
+}
+
+/// clang's name of an internal (static) helper, or None for a parameter type this mangler does not know.
+pub fn helper_name(f: &Func, types: &Types) -> Option<String> {
+    Some(format!("_ZL{}", function_encoding(f, types)?))
+}
+
+/// Itanium local entity name for a named static threadgroup allocation.
+pub fn threadgroup_local(f: &Func, types: &Types, name: &str) -> Option<String> {
+    Some(format!(
+        "_ZZ{}E{}{name}",
+        function_encoding(f, types)?,
+        name.len()
+    ))
 }
 
 /// clang's name of an engine template instantiation whose spelling this mangler knows:

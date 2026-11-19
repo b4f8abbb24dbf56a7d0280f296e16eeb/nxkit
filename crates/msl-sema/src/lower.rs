@@ -1,6 +1,6 @@
 //! Syntax tree to [`hir`]: scopes, places, conversions, overloads, helper expansion.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use msl_parse::ast::{self, Callee, CastKind, ExprKind as A, Init, Item, SwitchEntry, VarScope};
@@ -40,7 +40,9 @@ struct Cx {
     preludes: Vec<&'static str>,
     /// A file-scope `#pragma clang fp contract(off)` came before the current item.
     contract_off: bool,
+    barrier_funcs: HashSet<usize>,
     // per function
+    uses_threadgroup_barrier: bool,
     locals: Vec<Local>,
     scopes: Vec<HashMap<Rc<str>, LocalId>>,
     /// Parameters passed by reference: local -> (space, value type).
@@ -96,6 +98,9 @@ impl Cx {
                 Some(id) => Type::Struct(*id),
                 None => return Err(Error::invalid(format!("unknown struct {name}"))),
             },
+            Ty::ThreadgroupAtomicUintPtr => {
+                Type::Ptr(Space::Threadgroup, Rc::new(Type::Scalar(Scalar::Uint)))
+            }
             Ty::Ptr(sp, inner) => Type::Ptr(*sp, Rc::new(self.ty(inner)?)),
             Ty::Ref(_, inner) => self.ty(inner)?,
             Ty::Array { metal: true, .. } => return Err(Error::unsupported("metal-array")),
@@ -228,6 +233,7 @@ impl Cx {
     }
 
     fn function(&mut self, f: &ast::Function) -> R<()> {
+        self.uses_threadgroup_barrier = false;
         self.locals.clear();
         self.ref_locals.clear();
         self.scopes = vec![HashMap::new()];
@@ -262,6 +268,12 @@ impl Cx {
             return Err(Error::unsupported("fp-contract-body"));
         }
         let body = self.block(&f.body.stmts)?;
+        if self.uses_threadgroup_barrier {
+            if sig.entry == Some(ast::Stage::Vertex) {
+                return Err(Error::unsupported("threadgroup-barrier:vertex"));
+            }
+            self.barrier_funcs.insert(self.out.funcs.len());
+        }
         let func = Func {
             name: sig.name.clone(),
             entry: sig.entry,
@@ -286,7 +298,11 @@ impl Cx {
     }
 
     fn new_local(&mut self, name: Rc<str>, ty: Type) -> LocalId {
-        self.locals.push(Local { name, ty });
+        self.locals.push(Local {
+            name,
+            ty,
+            threadgroup: false,
+        });
         self.locals.len() - 1
     }
 
@@ -440,7 +456,10 @@ impl Cx {
                 }
             };
             let id = self.new_local(v.name.clone(), t.clone());
-            out.push(Stmt::Decl(id));
+            self.locals[id].threadgroup = d.threadgroup;
+            if !d.threadgroup {
+                out.push(Stmt::Decl(id));
+            }
             self.scopes
                 .last_mut()
                 .expect("scope")
@@ -505,11 +524,15 @@ impl Cx {
                             space: sp,
                         });
                     }
-                    let ty = self.locals[id].ty.clone();
+                    let local = &self.locals[id];
                     Ok(Place {
                         kind: PlaceKind::Local(id),
-                        ty,
-                        space: Space::Thread,
+                        ty: local.ty.clone(),
+                        space: if local.threadgroup {
+                            Space::Threadgroup
+                        } else {
+                            Space::Thread
+                        },
                     })
                 }
                 VarScope::Global => {
@@ -900,6 +923,7 @@ impl Cx {
                     .find(|(s, _)| Rc::ptr_eq(s, sig))
                     .map(|(_, id)| *id)
                     .ok_or_else(|| Error::invalid(format!("call of undefined {}", sig.name)))?;
+                self.uses_threadgroup_barrier |= self.barrier_funcs.contains(&fid);
                 let mut out = Vec::with_capacity(args.len());
                 let params: Vec<(Option<Space>, Type)> = self.out.funcs[fid]
                     .params
@@ -909,6 +933,13 @@ impl Cx {
                 for (a, (by_ref, pt)) in args.iter().zip(params.iter()) {
                     if by_ref.is_some() {
                         let p = self.place(a)?;
+                        if (*by_ref == Some(Space::Threadgroup) || p.space == Space::Threadgroup)
+                            && (*by_ref != Some(p.space) || !self.is_place(a))
+                        {
+                            return Err(Error::invalid(
+                                "threadgroup reference address space mismatch",
+                            ));
+                        }
                         out.push(Arg::Ref(p));
                     } else {
                         let v = self.expr(a)?;
@@ -945,6 +976,7 @@ impl Cx {
             Callee::Prelude("dm_pool_mark") => self.pool_mark(args),
             Callee::Prelude(p) => Err(Error::unsupported(format!("prelude-call:{p}"))),
             Callee::Builtin(name) => {
+                self.uses_threadgroup_barrier |= name.as_ref() == "threadgroup_barrier";
                 let mut vals = Vec::with_capacity(args.len());
                 for a in args {
                     vals.push(self.expr(a)?);

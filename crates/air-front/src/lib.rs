@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 10;
+pub const FORMAT: u32 = 11;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -277,6 +277,68 @@ mod tests {
         let lib = build_raw(msl, &Target::macos()).expect("raw library");
         let parsed = air_lib::parse(&lib).expect("metallib");
         assert_eq!(parsed.functions[0].name(), b"f");
+    }
+
+    #[test]
+    fn raw_library_with_thread_array_reference() {
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\n\
+                    static float read(thread float (&values)[4], uint i) { return values[i]; }\n\
+                    fragment float4 f(float4 p [[position]]) {\n\
+                        float values[4]; values[1] = p.x; return float4(read(values, 1u));\n\
+                    }\n";
+        let lib = build_raw(msl, &Target::macos_for(26)).expect("raw library");
+        let parsed = air_lib::parse(&lib).expect("metallib");
+        assert_eq!(parsed.functions[0].name(), b"f");
+    }
+
+    #[test]
+    fn raw_library_with_static_threadgroup_storage_and_barrier() {
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\n\
+            static uint read_slot(threadgroup uint (&values)[4], uint index) { return values[index]; }\n\
+            kernel void exchange(device uint* out [[buffer(0)]], uint lane [[thread_index_in_threadgroup]]) {\n\
+                threadgroup uint values[4];\n\
+                values[lane] = lane + 10u;\n\
+                threadgroup_barrier(mem_flags::mem_threadgroup);\n\
+                out[lane] = read_slot(values, (lane + 1u) & 3u);\n\
+            }\n\
+            kernel void separate(device uint* out [[buffer(0)]], uint lane [[thread_index_in_threadgroup]]) {\n\
+                threadgroup uint values[4]; values[lane] = lane; out[lane] = values[lane];\n\
+            }\n";
+        let target = Target::macos_for(26);
+        let ir =
+            air_emit::compile_source(std::str::from_utf8(msl).unwrap(), &target, "-").expect("AIR");
+        assert_eq!(
+            ir.matches("internal addrspace(3) global [4 x i32] undef, align 4")
+                .count(),
+            2
+        );
+        for name in ["exchange", "separate"] {
+            assert!(
+                ir.contains(&format!("@_ZZ8{name}PU9MTLdevicejjE6values = ")),
+                "{ir}"
+            );
+        }
+        assert!(
+            ir.contains("getelementptr [4 x i32], [4 x i32] addrspace(3)*"),
+            "{ir}"
+        );
+        assert!(
+            ir.contains("call void @air.wg.barrier(i32 2, i32 5, i32 1)"),
+            "{ir}"
+        );
+        let module = air_bc::parse::parse(&ir).expect("AIR module");
+        let split = air_bc::split::split(&module).expect("entry split");
+        assert_eq!(split.len(), 2);
+        for entry in &split {
+            assert_eq!(
+                entry.module.globals.iter().filter(|g| g.space == 3).count(),
+                1
+            );
+        }
+        let lib = build_raw(msl, &target).expect("raw library");
+        let parsed = air_lib::parse(&lib).expect("metallib");
+        assert_eq!(parsed.functions[0].name(), b"exchange");
+        assert_eq!(parsed.functions[1].name(), b"separate");
     }
 
     #[test]

@@ -134,7 +134,7 @@ const FIELD_ATTRS: [&str; 16] = [
     "clip_distance",
     "front_facing",
 ];
-const PARAM_ATTRS: [&str; 15] = [
+const PARAM_ATTRS: [&str; 16] = [
     "stage_in",
     "buffer",
     "position",
@@ -150,6 +150,7 @@ const PARAM_ATTRS: [&str; 15] = [
     "point_coord",
     "sample_id",
     "thread_index_in_simdgroup",
+    "thread_index_in_threadgroup",
 ];
 const ASSIGN_OPS: [&str; 11] = [
     "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
@@ -836,15 +837,41 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         if !self.accept(")")? {
             loop {
-                let pty = self.type_()?;
+                let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none(), false))?;
                 let is_const = self.last_const;
+                if array_ref.is_some() {
+                    if is_const {
+                        return reject("const-array-reference");
+                    }
+                    self.expect("(")?;
+                    self.expect("&")?;
+                }
                 let pname = self.ident()?;
                 let pname = self.intern(pname);
+                if array_ref.is_some() {
+                    self.expect(")")?;
+                    if self.peek()? != "[" {
+                        return reject("array-reference-dimension");
+                    }
+                }
                 let pty = self.array_suffix(pty)?;
+                let pty = match array_ref {
+                    Some(space) => Ty::Ref(space, Rc::new(pty)),
+                    None => pty,
+                };
                 let pattrs = self.attrs()?;
                 for a in &pattrs {
                     if !PARAM_ATTRS.contains(&a.name.as_str()) {
                         return reject(format!("param-attr:{}", a.name));
+                    }
+                    if a.name == "thread_index_in_threadgroup"
+                        && (entry != Some(Stage::Kernel)
+                            || !matches!(
+                                &pty,
+                                Ty::Scalar(ScalarName::Known(Scalar::Uint | Scalar::Ushort))
+                            ))
+                    {
+                        return reject("threadgroup-index-parameter");
                     }
                     if a.name == "function_constant" {
                         match a.args.first() {
@@ -1009,10 +1036,14 @@ impl<'a> Parser<'a> {
     }
 
     fn type_(&mut self) -> PResult<Ty> {
-        self.frame(|p| p.type_body())
+        self.frame(|p| p.type_body(false, false).map(|(ty, _)| ty))
     }
 
-    fn type_body(&mut self) -> PResult<Ty> {
+    fn type_body(
+        &mut self,
+        helper_param: bool,
+        kernel_local: bool,
+    ) -> PResult<(Ty, Option<Space>)> {
         let mut space: Option<Space> = None;
         self.last_const = false;
         loop {
@@ -1031,6 +1062,10 @@ impl<'a> Parser<'a> {
         if v == "const" {
             self.last_const = true;
             v = self.ident()?;
+        }
+        if v == "atomic_uint" && space == Some(Space::Threadgroup) && !self.last_const {
+            self.expect("*")?;
+            return Ok((Ty::ThreadgroupAtomicUintPtr, None));
         }
         let mut t = if let Some((packed, base, w)) = vec_name(v) {
             if packed {
@@ -1136,11 +1171,25 @@ impl<'a> Parser<'a> {
             }
         }
         if let Some(sp) = space {
-            if !matches!(t, Ty::Ptr(..) | Ty::Ref(..)) && sp != Space::Constant {
-                return reject(format!("addrspace-value:{}", sp.name()));
+            if !matches!(t, Ty::Ptr(..) | Ty::Ref(..)) {
+                // The translator passes arrays to helpers by reference.
+                // The address-space qualifier applies to the whole array.
+                if helper_param
+                    && matches!(sp, Space::Thread | Space::Threadgroup)
+                    && self.peek()? == "("
+                    && self.peek_at(1)? == "&"
+                {
+                    return Ok((t, Some(sp)));
+                }
+                if kernel_local && sp == Space::Threadgroup {
+                    return Ok((t, Some(sp)));
+                }
+                if sp != Space::Constant {
+                    return reject(format!("addrspace-value:{}", sp.name()));
+                }
             }
         }
-        Ok(t)
+        Ok((t, None))
     }
 
     // ------------------------------------------------------------ statements
@@ -1379,7 +1428,12 @@ impl<'a> Parser<'a> {
 
     fn decl(&mut self) -> PResult<Decl> {
         self.frame(|p| {
-            let ty = p.type_()?;
+            let kernel_local = p.scopes.len() == 2
+                && p.cur
+                    .as_ref()
+                    .is_some_and(|sig| sig.entry == Some(Stage::Kernel));
+            let (ty, storage) = p.type_body(false, kernel_local)?;
+            let threadgroup = storage == Some(Space::Threadgroup);
             let mut vars = Vec::new();
             loop {
                 let name = p.ident()?;
@@ -1387,6 +1441,9 @@ impl<'a> Parser<'a> {
                 let vty = p.array_suffix(ty.clone())?;
                 let mut init = Init::None;
                 if p.accept("=")? {
+                    if threadgroup {
+                        return reject("threadgroup-initializer");
+                    }
                     if p.peek()? == "{" {
                         p.next()?;
                         if !p.accept("}")? {
@@ -1419,7 +1476,12 @@ impl<'a> Parser<'a> {
                     p.stat("decl:local-array")?;
                 }
                 if let Some(s) = p.scopes.last_mut() {
-                    s.insert(name.clone(), (vty.clone(), true));
+                    let scope_ty = if threadgroup {
+                        Ty::Ref(Space::Threadgroup, Rc::new(vty.clone()))
+                    } else {
+                        vty.clone()
+                    };
+                    s.insert(name.clone(), (scope_ty, true));
                 } else {
                     return crash(PyExc::IndexError);
                 }
@@ -1433,7 +1495,11 @@ impl<'a> Parser<'a> {
                 }
             }
             p.expect(";")?;
-            Ok(Decl { ty, vars })
+            Ok(Decl {
+                ty,
+                vars,
+                threadgroup,
+            })
         })
     }
 
@@ -2132,13 +2198,23 @@ impl<'a> Parser<'a> {
                     CastKind::AsType
                 }
                 "static_cast" => {
+                    if f != to
+                        && (f == Ty::ThreadgroupAtomicUintPtr || to == Ty::ThreadgroupAtomicUintPtr)
+                    {
+                        return reject("threadgroup-atomic-cast");
+                    }
                     self.stat("call:static_cast")?;
                     CastKind::Static
                 }
                 _ => {
                     let from_ok =
                         matches!(f, Ty::Ptr(..)) || f == s(Scalar::Ulong) || f == s(Scalar::Long);
-                    if !matches!(to, Ty::Ptr(..)) || !from_ok {
+                    let ok = if to == Ty::ThreadgroupAtomicUintPtr {
+                        matches!(&f, Ty::Ptr(Space::Threadgroup, inner) if **inner == UINT)
+                    } else {
+                        matches!(to, Ty::Ptr(..)) && from_ok
+                    };
+                    if !ok {
                         return reject("reinterpret_cast");
                     }
                     self.stat("call:reinterpret_cast")?;
@@ -2266,6 +2342,29 @@ impl<'a> Parser<'a> {
             if mat_name(name).is_some() {
                 return reject("matrix-ctor");
             }
+            // The vote object has an explicit conversion to the unsigned 64-bit mask.
+            if name == "ulong"
+                && p.peek_at(1)? == "simd_ballot"
+                && p.peek_at(2)? == "("
+                && !p.funcs.contains_key("simd_ballot")
+            {
+                p.expect("(")?;
+                p.expect("simd_ballot")?;
+                let args = p.args()?;
+                p.expect(")")?;
+                if args.len() != 1 || args[0].ty.strip() != BOOL {
+                    return reject("simd-ballot-form");
+                }
+                p.stat("call:simd_ballot")?;
+                return bx(Expr {
+                    kind: ExprKind::Call {
+                        callee: Callee::Builtin("simd_ballot".into()),
+                        args,
+                    },
+                    ty: s(Scalar::Ulong),
+                    span: p.span_from(start),
+                });
+            }
             let (_, b, w) = vec_name(name).expect("constructor name is a vector or scalar type");
             let w = w.unwrap_or(1);
             let args = p.args()?;
@@ -2325,6 +2424,46 @@ impl<'a> Parser<'a> {
             ty,
             span: p.span_from(start),
         };
+        if matches!(
+            name,
+            "atomic_fetch_add_explicit" | "atomic_fetch_min_explicit" | "atomic_fetch_max_explicit"
+        ) && !self.funcs.contains_key(name)
+        {
+            self.expect("(")?;
+            let ptr = self.expr_assign()?;
+            self.expect(",")?;
+            let val = self.expr_assign()?;
+            self.expect(",")?;
+            if ptr.ty.strip() != Ty::ThreadgroupAtomicUintPtr {
+                self.expr_assign()?;
+                self.expect(")")?;
+                return reject(format!("call:{name}"));
+            }
+            self.expect("memory_order_relaxed")?;
+            self.expect(")")?;
+            if val.ty.strip() != UINT {
+                return reject("threadgroup-atomic-form");
+            }
+            return bx(mk(
+                self,
+                Callee::Builtin(name.into()),
+                vec![*ptr, *val],
+                UINT,
+            ));
+        }
+        if name == "threadgroup_barrier" && !self.funcs.contains_key(name) {
+            self.expect("(")?;
+            self.expect("mem_flags")?;
+            self.expect("::")?;
+            self.expect("mem_threadgroup")?;
+            self.expect(")")?;
+            return bx(mk(
+                self,
+                Callee::Builtin("threadgroup_barrier".into()),
+                vec![],
+                Ty::Void,
+            ));
+        }
         if let Some(cands) = self.funcs.get(name).cloned() {
             let args = self.args()?;
             self.stat("call:user-fn")?;
@@ -2552,10 +2691,13 @@ impl<'a> Parser<'a> {
     /// `passes(x, p)`: may an argument of type `x` bind to a parameter of type `p`?
     fn passes(&mut self, x: &Ty, p: &Ty) -> PResult<bool> {
         self.frame(|_| {
-            let x = x.strip();
-            if let Ty::Ref(_, inner) = p {
-                return Ok(x == **inner);
+            if let Ty::Ref(space, inner) = p {
+                if matches!(inner.as_ref(), Ty::Array { .. }) {
+                    return Ok(matches!(x, Ty::Ref(src, ty) if src == space && ty == inner));
+                }
+                return Ok(x.strip() == **inner);
             }
+            let x = x.strip();
             if x == *p {
                 return Ok(true);
             }
