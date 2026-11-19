@@ -25,13 +25,33 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "26.0"
         run: cargo build --profile dist --locked -p nxb-cli -p nxkit-host
 
-      - name: Pack, sign and write the notes
+      - name: Pack and write the notes
         run: PROFILE=dist tools/release-package.sh "${GITHUB_REF_NAME}"
+
+      - name: Install the signing tool
+        # The version is pinned in tools/requirements-release.txt.
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/sign-venv"
+          "${RUNNER_TEMP}/sign-venv/bin/python" -m pip install --quiet -r tools/requirements-release.txt
+
+      - name: Check the signing key
+        # Fails when the secret is missing or is not the key of release-signing.pub. An unsigned release must not go out.
+        env:
+          NXKIT_SIGNING_KEY: ${{ secrets.NXKIT_SIGNING_KEY }}
+        run: '"${RUNNER_TEMP}/sign-venv/bin/python" -I tools/release-sign.py check-key --pub release-signing.pub'
+
+      - name: Sign SHA256SUMS
+        env:
+          NXKIT_SIGNING_KEY: ${{ secrets.NXKIT_SIGNING_KEY }}
+        run: '"${RUNNER_TEMP}/sign-venv/bin/python" -I tools/release-sign.py sign dist/SHA256SUMS'
+
+      - name: Verify the signature
+        run: '"${RUNNER_TEMP}/sign-venv/bin/python" -I tools/release-sign.py verify dist/SHA256SUMS --pub release-signing.pub'
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "${GITHUB_REF_NAME}"
-          "dist/nxb-${GITHUB_REF_NAME}-macos-arm64.zip" dist/SHA256SUMS
+          "dist/nxb-${GITHUB_REF_NAME}-macos-arm64.zip" dist/SHA256SUMS dist/SHA256SUMS.sig
           --title "nxkit ${GITHUB_REF_NAME}" --notes-file dist/notes.md
