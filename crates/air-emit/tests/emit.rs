@@ -57,6 +57,27 @@ fn device_offsets_use_wrapping_pointer_arithmetic() {
 }
 
 #[test]
+fn dynamic_array_index_is_not_inbounds_in_any_space() {
+    let ir = emit(
+        "kernel void k(device uint* out [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+        uint loc[4]; loc[0] = out[2]; loc[1] = out[3]; loc[2] = out[4]; loc[3] = out[5];
+        out[1] = loc[i & 3u];
+    }",
+    );
+    assert_eq!(
+        ir.matches("getelementptr inbounds [4 x i32], [4 x i32]*")
+            .count(),
+        4,
+        "{ir}"
+    );
+    assert_eq!(
+        ir.matches("getelementptr [4 x i32], [4 x i32]*").count(),
+        1,
+        "{ir}"
+    );
+}
+
+#[test]
 fn thread_array_reference_parameter_indexes_the_callers_storage() {
     let ir = emit(
         "static void write(thread uint (&values)[4], uint i, uint v) { values[i] = v; }\n\
