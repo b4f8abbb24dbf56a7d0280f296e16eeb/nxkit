@@ -13,7 +13,7 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 The current release is [0.10.1](https://github.com/v0lumehi/nxkit/releases/tag/v0.10.1) (2026-11-18). It is early
 software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
-macOS 26 build the app on macOS 26. `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
+macOS 26 build the app on macOS 26. The release ZIP holds `nxb` and `nxkit-host` for macOS 26 and newer (see "Install a release"). `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 
 A game runs on the runtime when it has a title module in `titles/games/`. There are 154, one for each game of the engine
 tree. A title module holds what is specific to one game: its memory layout, thread roles, settings and code rules.
@@ -67,9 +67,28 @@ cargo build --release -p nxb-cli -p nxkit-host
 ```
 
 The programs are `target/release/nxb` and `target/release/nxkit-host`. `nxb` finds `nxkit-host` in its own folder, or
-in `NXB_NXKIT_HOST`. The ZIP of a release holds `nxb` only, so to build an app with it, build `nxkit-host` from source
-and put it beside `nxb`. The release binary is built with `cargo build --profile dist` (fat LTO).
+in `NXB_NXKIT_HOST`. The release programs are built with `cargo build --profile dist` (fat LTO).
 `tools/check.sh` runs the formatter, the lints, the tests, the documentation and the layer and size checks.
+
+## Install a release
+
+The ZIP of a release, `nxb-vX.Y.Z-macos-arm64.zip`, holds both programs, so you need no Rust to build a game. Check it
+against `SHA256SUMS` of the release, then unpack it:
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing
+unzip nxb-vX.Y.Z-macos-arm64.zip
+```
+
+The folder `nxb-vX.Y.Z-macos-arm64` holds `nxb`, `nxkit-host` (keep them in one folder), `MANIFEST.json`, `LICENSE` and
+`THIRD_PARTY.md`. `MANIFEST.json` names the version, the platform, `macos_min` and the SHA-256 of the two programs.
+`SHA256SUMS` lists the ZIP and each file in it. The programs have an ad-hoc signature. A file that you download in a
+browser carries the quarantine flag, so run `xattr -dr com.apple.quarantine <folder>` once.
+
+The release is for Macs with Apple silicon and macOS 26 or newer (`macos_min` is 26.0), because the host uses Metal 4.
+The programs are built with that deployment target, so an older macOS refuses to start them. There is one build for all
+supported versions. The shaders and the pipeline archives come from the Metal tools of your own Xcode when `nxb build`
+runs, so you still need Xcode on the Mac that builds the app.
 
 ## Build a game
 

@@ -4,6 +4,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Changed
+
+- The ZIP of a release holds `nxkit-host` beside `nxb`, built with the same `dist` profile, and a `MANIFEST.json` (version, platform, `macos_min` and the SHA-256 of the two programs). `SHA256SUMS` lists the ZIP and each file in it. A front end can download one ZIP, check it and build games without Rust (LNPANDY/NX2Apple#1460). The release is built with `MACOSX_DEPLOYMENT_TARGET=26.0` (the host needs Metal 4), and `tools/release-package.sh` checks the value in both programs.
+
 ## 0.10.1 - 2026-11-18
 
 ### Changed
