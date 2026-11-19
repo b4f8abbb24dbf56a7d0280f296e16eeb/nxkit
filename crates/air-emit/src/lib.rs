@@ -422,7 +422,21 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
                 format!("bitcast ({st} addrspace(2)* {name} to {at} addrspace(2)*)");
         } else {
             // Larger zero tails use the packed form above. Only pad a short tail here.
-            vals.resize(extent, ir::CVal::Zero);
+            if vals.len() < extent {
+                let zero = match el.as_ref() {
+                    Type::Vector(scalar, lanes) => {
+                        // Use the same lane spelling as an explicit zero vector.
+                        let lane = if msl_sema::types::is_float(*scalar) {
+                            ir::CVal::Float(0.0)
+                        } else {
+                            ir::CVal::Int(0)
+                        };
+                        ir::CVal::Vec(vec![lane; usize::from(*lanes)])
+                    }
+                    _ => ir::CVal::Zero,
+                };
+                vals.resize(extent, zero);
+            }
             let items: Vec<String> = vals.iter().map(item).collect();
             let _ = writeln!(
                 const_globals,

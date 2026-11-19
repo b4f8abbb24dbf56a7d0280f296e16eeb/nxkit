@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 13;
+pub const FORMAT: u32 = 14;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_scalar_arrays_match_explicit_zeroes() {
+    fn partial_constant_arrays_match_explicit_zeroes() {
         let target = Target::macos_for(27);
         for (ty, len, prefix, zero) in [
             ("uint", 4, &["9u", "0u"][..], "0u"),
@@ -350,6 +350,10 @@ mod tests {
             ("bool", 3, &["true"][..], "false"),
             ("uint", 11, &["5u", "0u"][..], "0u"),
             ("float", 3, &[][..], "0.0"),
+            ("uint2", 3, &["uint2(2u, 7u)"][..], "uint2(0u)"),
+            ("float3", 3, &["float3(-0.0, 0.0, 0.0)"][..], "float3(0.0)"),
+            ("float3", 10, &["float3(2.0)"][..], "float3(0.0)"),
+            ("uint4", 3, &[][..], "uint4(0u)"),
         ] {
             let shader = |values: &[&str]| {
                 format!(
@@ -390,8 +394,16 @@ mod tests {
                 "const-array:excess-init",
             ),
             (
-                "constant uint2 values[2] = {uint2(1u)};",
-                "const-array:partial-non-scalar",
+                "constant uint values[2][2] = {};",
+                "const-array:partial-element-type",
+            ),
+            (
+                "struct Value { uint x; }; constant Value values[2] = {};",
+                "const-array:partial-element-type",
+            ),
+            (
+                "constant float3 values[1048577] = {};",
+                "const-array:partial-size",
             ),
             (
                 "constant ulong values[4294967295] = {};",

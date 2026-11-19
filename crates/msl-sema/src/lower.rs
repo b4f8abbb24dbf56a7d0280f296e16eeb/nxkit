@@ -215,8 +215,8 @@ impl Cx {
                     return Err(Error::invalid("const-array:excess-init"));
                 }
                 if init.len() < *n as usize {
-                    if !matches!(el.as_ref(), Type::Scalar(_)) {
-                        return Err(Error::unsupported("const-array:partial-non-scalar"));
+                    if !matches!(el.as_ref(), Type::Scalar(_) | Type::Vector(_, _)) {
+                        return Err(Error::unsupported("const-array:partial-element-type"));
                     }
                     // A short declaration must not create an arbitrarily large GPU object.
                     const MAX_PARTIAL_BYTES: u32 = 16 * 1024 * 1024;

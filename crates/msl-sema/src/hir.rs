@@ -44,7 +44,7 @@ pub struct ConstArray {
     /// The array type.
     pub ty: Type,
     /// Explicit element values converted to the element type.
-    /// The scalar elements after this prefix are zero-initialised.
+    /// Elements after this prefix are implicitly zero-initialised.
     pub init: Vec<Expr>,
 }
 
