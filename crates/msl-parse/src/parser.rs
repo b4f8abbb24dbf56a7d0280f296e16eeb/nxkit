@@ -836,11 +836,25 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         if !self.accept(")")? {
             loop {
-                let pty = self.type_()?;
+                let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none()))?;
                 let is_const = self.last_const;
+                if array_ref.is_some() {
+                    self.expect("(")?;
+                    self.expect("&")?;
+                }
                 let pname = self.ident()?;
                 let pname = self.intern(pname);
+                if array_ref.is_some() {
+                    self.expect(")")?;
+                    if self.peek()? != "[" {
+                        return reject("array-reference-dimension");
+                    }
+                }
                 let pty = self.array_suffix(pty)?;
+                let pty = match array_ref {
+                    Some(space) => Ty::Ref(space, Rc::new(pty)),
+                    None => pty,
+                };
                 let pattrs = self.attrs()?;
                 for a in &pattrs {
                     if !PARAM_ATTRS.contains(&a.name.as_str()) {
@@ -1009,10 +1023,10 @@ impl<'a> Parser<'a> {
     }
 
     fn type_(&mut self) -> PResult<Ty> {
-        self.frame(|p| p.type_body())
+        self.frame(|p| p.type_body(false).map(|(ty, _)| ty))
     }
 
-    fn type_body(&mut self) -> PResult<Ty> {
+    fn type_body(&mut self, helper_param: bool) -> PResult<(Ty, Option<Space>)> {
         let mut space: Option<Space> = None;
         self.last_const = false;
         loop {
@@ -1136,11 +1150,22 @@ impl<'a> Parser<'a> {
             }
         }
         if let Some(sp) = space {
-            if !matches!(t, Ty::Ptr(..) | Ty::Ref(..)) && sp != Space::Constant {
-                return reject(format!("addrspace-value:{}", sp.name()));
+            if !matches!(t, Ty::Ptr(..) | Ty::Ref(..)) {
+                // The translator passes private arrays to helpers as
+                // `thread T (&name)[N]`, with the reference around the array.
+                if helper_param
+                    && sp == Space::Thread
+                    && self.peek()? == "("
+                    && self.peek_at(1)? == "&"
+                {
+                    return Ok((t, Some(sp)));
+                }
+                if sp != Space::Constant {
+                    return reject(format!("addrspace-value:{}", sp.name()));
+                }
             }
         }
-        Ok(t)
+        Ok((t, None))
     }
 
     // ------------------------------------------------------------ statements

@@ -39,6 +39,28 @@ fn fragment_with_function_constant_gate_and_contraction() {
 }
 
 #[test]
+fn thread_array_reference_parameter_indexes_the_callers_storage() {
+    let ir = emit(
+        "static void write(thread uint (&values)[4], uint i, uint v) { values[i] = v; }\n\
+         kernel void main0(device uint* out [[buffer(0)]]) {\n\
+             uint values[4]; write(values, 1u, out[0]); out[1] = values[1];\n\
+         }\n",
+    );
+    assert!(ir.contains("[4 x i32]*"), "{ir}");
+    assert!(ir.contains("getelementptr inbounds [4 x i32]"), "{ir}");
+    assert!(ir.contains("call void"), "{ir}");
+}
+
+#[test]
+fn address_space_value_without_array_reference_is_still_rejected() {
+    for parameter in ["thread uint value", "threadgroup uint (&value)[4]"] {
+        let src = format!("{PRE}static void write({parameter}) {{}}");
+        let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
+        assert!(error.key().starts_with("unsupported:rejected:addrspace-value:"), "{error:?}");
+    }
+}
+
+#[test]
 fn unsupported_constructs_are_reported() {
     let e = compile_source(
         &format!("{PRE}kernel void k(device float* p [[buffer(0)]]) {{ p[0] = tan(p[1]); }}\n"),

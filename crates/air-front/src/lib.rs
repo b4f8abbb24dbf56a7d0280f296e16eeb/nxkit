@@ -280,6 +280,18 @@ mod tests {
     }
 
     #[test]
+    fn raw_library_with_thread_array_reference() {
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\n\
+                    static float read(thread float (&values)[4], uint i) { return values[i]; }\n\
+                    fragment float4 f(float4 p [[position]]) {\n\
+                        float values[4]; values[1] = p.x; return float4(read(values, 1u));\n\
+                    }\n";
+        let lib = build_raw(msl, &Target::macos_for(26)).expect("raw library");
+        let parsed = air_lib::parse(&lib).expect("metallib");
+        assert_eq!(parsed.functions[0].name(), b"f");
+    }
+
+    #[test]
     fn raw_library_for_macos_26() {
         // macOS 26 refuses Metal 4.1: the library says macOS 26.0, AIR 2.8 and Metal 4.0 (issue 21)
         let msl = b"#include <metal_stdlib>\nusing namespace metal;\nfragment float4 f(constant float4* c [[buffer(0)]], float4 p [[position]]) { return p * c[0]; }\n";
