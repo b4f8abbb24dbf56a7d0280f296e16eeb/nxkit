@@ -20,7 +20,10 @@ jobs:
         run: tools/no-game-data.sh
 
       - name: Build
-        run: cargo build --profile dist --locked -p nxb-cli
+        # nxkit-host uses Metal 4, so the release asks for macOS 26. tools/release-package.sh checks the value in both binaries.
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "26.0"
+        run: cargo build --profile dist --locked -p nxb-cli -p nxkit-host
 
       - name: Pack, sign and write the notes
         run: PROFILE=dist tools/release-package.sh "${GITHUB_REF_NAME}"
