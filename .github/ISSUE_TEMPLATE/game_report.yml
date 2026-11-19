@@ -1,0 +1,80 @@
+name: Game report
+description: Report how a game builds and runs with nxkit.
+title: "[Game] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use nxkit only with games you own. Never attach game data, keys or shaders to this report.
+  - type: input
+    id: title_id
+    attributes:
+      label: Title ID
+      placeholder: 0100F2C0115B6000
+    validations:
+      required: true
+  - type: input
+    id: game_version
+    attributes:
+      label: Game version
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Problems
+        - Does not start
+    validations:
+      required: true
+  - type: input
+    id: nxkit_version
+    attributes:
+      label: nxkit version
+      placeholder: 0.10.2
+    validations:
+      required: true
+  - type: input
+    id: engine_build
+    attributes:
+      label: Engine build
+      description: The SHA-256 of nxkit-host from MANIFEST.json.
+    validations:
+      required: false
+  - type: input
+    id: exit_code
+    attributes:
+      label: Exit code of nxb build
+    validations:
+      required: false
+  - type: input
+    id: mac_model
+    attributes:
+      label: Mac model
+      placeholder: Mac15,8 or MacBook Pro (M3 Max)
+    validations:
+      required: true
+  - type: input
+    id: macos_version
+    attributes:
+      label: macOS version
+      placeholder: "26.1"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What works, what is wrong, and the steps to see it.
+    validations:
+      required: false
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The end of the build log or the game log.
+      render: text
+    validations:
+      required: false
