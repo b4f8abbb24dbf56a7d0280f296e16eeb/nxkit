@@ -159,8 +159,12 @@ impl<'a> FnGen<'a> {
             let r = f.ret.clone();
             g.ret_slot = Some(g.alloca(&r));
         }
-        for l in &f.locals {
-            let p = g.alloca(&l.ty.clone());
+        for (lid, l) in f.locals.iter().enumerate() {
+            let p = if l.threadgroup {
+                crate::threadgroup_name(g.cx.cur_fid, lid)
+            } else {
+                g.alloca(&l.ty.clone())
+            };
             g.locals.push(p);
         }
         g
@@ -831,7 +835,7 @@ impl<'a> FnGen<'a> {
             PlaceKind::Local(id) => Addr {
                 ptr: self.locals[*id].clone(),
                 ty: p.ty.clone(),
-                space: 0,
+                space: space_num(p.space),
             },
             PlaceKind::Const(id) => Addr {
                 ptr: self.cx.const_names[*id].clone(),

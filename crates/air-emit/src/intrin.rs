@@ -63,6 +63,16 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
     if fl && s != Some(Scalar::Float) && !matches!(name, "isnan" | "select" | "all" | "any") {
         return Err(Error::unsupported(format!("builtin:{name}:half")));
     }
+    if name == "threadgroup_barrier" {
+        // Apple AIR for threadgroup_barrier(mem_flags::mem_threadgroup).
+        let ops = [
+            ("i32".into(), "2".into()),
+            ("i32".into(), "5".into()),
+            ("i32".into(), "1".into()),
+        ];
+        let r = call(g, "air.wg.barrier", &ops, "void", Attrs::Convergent, false);
+        return Ok(V { r, ty: ret.clone() });
+    }
     let simple = |n: &str| Some(n.to_string());
     let intrinsic: Option<String> = match name {
         "sqrt" | "rsqrt" | "exp2" | "log2" | "floor" | "ceil" | "trunc" | "rint" | "sin"

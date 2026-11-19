@@ -68,6 +68,7 @@ const TABLE: &[(&str, Shape)] = &[
     ("reverse_bits", Shape::Same),
     ("mulhi", Shape::Same),
     ("simd_shuffle", Shape::Lane),
+    ("threadgroup_barrier", Shape::Keep),
     ("simd_any", Shape::Keep),
     ("simd_all", Shape::Keep),
     ("isnan", Shape::Keep),

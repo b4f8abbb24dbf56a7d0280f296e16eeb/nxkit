@@ -134,7 +134,7 @@ const FIELD_ATTRS: [&str; 16] = [
     "clip_distance",
     "front_facing",
 ];
-const PARAM_ATTRS: [&str; 15] = [
+const PARAM_ATTRS: [&str; 16] = [
     "stage_in",
     "buffer",
     "position",
@@ -150,6 +150,7 @@ const PARAM_ATTRS: [&str; 15] = [
     "point_coord",
     "sample_id",
     "thread_index_in_simdgroup",
+    "thread_index_in_threadgroup",
 ];
 const ASSIGN_OPS: [&str; 11] = [
     "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
@@ -836,7 +837,7 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         if !self.accept(")")? {
             loop {
-                let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none()))?;
+                let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none(), false))?;
                 let is_const = self.last_const;
                 if array_ref.is_some() {
                     self.expect("(")?;
@@ -1023,10 +1024,10 @@ impl<'a> Parser<'a> {
     }
 
     fn type_(&mut self) -> PResult<Ty> {
-        self.frame(|p| p.type_body(false).map(|(ty, _)| ty))
+        self.frame(|p| p.type_body(false, false).map(|(ty, _)| ty))
     }
 
-    fn type_body(&mut self, helper_param: bool) -> PResult<(Ty, Option<Space>)> {
+    fn type_body(&mut self, helper_param: bool, kernel_local: bool) -> PResult<(Ty, Option<Space>)> {
         let mut space: Option<Space> = None;
         self.last_const = false;
         loop {
@@ -1151,13 +1152,16 @@ impl<'a> Parser<'a> {
         }
         if let Some(sp) = space {
             if !matches!(t, Ty::Ptr(..) | Ty::Ref(..)) {
-                // The translator passes private arrays to helpers as
-                // `thread T (&name)[N]`, with the reference around the array.
+                // The translator passes arrays to helpers by reference.
+                // The address-space qualifier applies to the whole array.
                 if helper_param
-                    && sp == Space::Thread
+                    && matches!(sp, Space::Thread | Space::Threadgroup)
                     && self.peek()? == "("
                     && self.peek_at(1)? == "&"
                 {
+                    return Ok((t, Some(sp)));
+                }
+                if kernel_local && sp == Space::Threadgroup {
                     return Ok((t, Some(sp)));
                 }
                 if sp != Space::Constant {
@@ -1404,7 +1408,12 @@ impl<'a> Parser<'a> {
 
     fn decl(&mut self) -> PResult<Decl> {
         self.frame(|p| {
-            let ty = p.type_()?;
+            let kernel_local = p.scopes.len() == 2
+                && p.cur
+                    .as_ref()
+                    .is_some_and(|sig| sig.entry == Some(Stage::Kernel));
+            let (ty, storage) = p.type_body(false, kernel_local)?;
+            let threadgroup = storage == Some(Space::Threadgroup);
             let mut vars = Vec::new();
             loop {
                 let name = p.ident()?;
@@ -1412,6 +1421,9 @@ impl<'a> Parser<'a> {
                 let vty = p.array_suffix(ty.clone())?;
                 let mut init = Init::None;
                 if p.accept("=")? {
+                    if threadgroup {
+                        return reject("threadgroup-initializer");
+                    }
                     if p.peek()? == "{" {
                         p.next()?;
                         if !p.accept("}")? {
@@ -1444,7 +1456,12 @@ impl<'a> Parser<'a> {
                     p.stat("decl:local-array")?;
                 }
                 if let Some(s) = p.scopes.last_mut() {
-                    s.insert(name.clone(), (vty.clone(), true));
+                    let scope_ty = if threadgroup {
+                        Ty::Ref(Space::Threadgroup, Rc::new(vty.clone()))
+                    } else {
+                        vty.clone()
+                    };
+                    s.insert(name.clone(), (scope_ty, true));
                 } else {
                     return crash(PyExc::IndexError);
                 }
@@ -1458,7 +1475,7 @@ impl<'a> Parser<'a> {
                 }
             }
             p.expect(";")?;
-            Ok(Decl { ty, vars })
+            Ok(Decl { ty, vars, threadgroup })
         })
     }
 
@@ -2350,6 +2367,19 @@ impl<'a> Parser<'a> {
             ty,
             span: p.span_from(start),
         };
+        if name == "threadgroup_barrier" && !self.funcs.contains_key(name) {
+            self.expect("(")?;
+            self.expect("mem_flags")?;
+            self.expect("::")?;
+            self.expect("mem_threadgroup")?;
+            self.expect(")")?;
+            return bx(mk(
+                self,
+                Callee::Builtin("threadgroup_barrier".into()),
+                vec![],
+                Ty::Void,
+            ));
+        }
         if let Some(cands) = self.funcs.get(name).cloned() {
             let args = self.args()?;
             self.stat("call:user-fn")?;

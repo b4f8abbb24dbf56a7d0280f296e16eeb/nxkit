@@ -286,7 +286,11 @@ impl Cx {
     }
 
     fn new_local(&mut self, name: Rc<str>, ty: Type) -> LocalId {
-        self.locals.push(Local { name, ty });
+        self.locals.push(Local {
+            name,
+            ty,
+            threadgroup: false,
+        });
         self.locals.len() - 1
     }
 
@@ -440,7 +444,10 @@ impl Cx {
                 }
             };
             let id = self.new_local(v.name.clone(), t.clone());
-            out.push(Stmt::Decl(id));
+            self.locals[id].threadgroup = d.threadgroup;
+            if !d.threadgroup {
+                out.push(Stmt::Decl(id));
+            }
             self.scopes
                 .last_mut()
                 .expect("scope")
@@ -505,11 +512,15 @@ impl Cx {
                             space: sp,
                         });
                     }
-                    let ty = self.locals[id].ty.clone();
+                    let local = &self.locals[id];
                     Ok(Place {
                         kind: PlaceKind::Local(id),
-                        ty,
-                        space: Space::Thread,
+                        ty: local.ty.clone(),
+                        space: if local.threadgroup {
+                            Space::Threadgroup
+                        } else {
+                            Space::Thread
+                        },
                     })
                 }
                 VarScope::Global => {
@@ -909,6 +920,11 @@ impl Cx {
                 for (a, (by_ref, pt)) in args.iter().zip(params.iter()) {
                     if by_ref.is_some() {
                         let p = self.place(a)?;
+                        if (*by_ref == Some(Space::Threadgroup) || p.space == Space::Threadgroup)
+                            && (*by_ref != Some(p.space) || !self.is_place(a))
+                        {
+                            return Err(Error::invalid("threadgroup reference address space mismatch"));
+                        }
                         out.push(Arg::Ref(p));
                     } else {
                         let v = self.expr(a)?;

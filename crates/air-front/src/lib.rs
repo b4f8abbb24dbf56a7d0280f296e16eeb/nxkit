@@ -292,6 +292,36 @@ mod tests {
     }
 
     #[test]
+    fn raw_library_with_static_threadgroup_storage_and_barrier() {
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\n\
+            static uint read_slot(threadgroup uint (&values)[4], uint index) { return values[index]; }\n\
+            kernel void exchange(device uint* out [[buffer(0)]], uint lane [[thread_index_in_threadgroup]]) {\n\
+                threadgroup uint values[4];\n\
+                values[lane] = lane + 10u;\n\
+                threadgroup_barrier(mem_flags::mem_threadgroup);\n\
+                out[lane] = read_slot(values, (lane + 1u) & 3u);\n\
+            }\n\
+            kernel void separate(device uint* out [[buffer(0)]], uint lane [[thread_index_in_threadgroup]]) {\n\
+                threadgroup uint values[4]; values[lane] = lane; out[lane] = values[lane];\n\
+            }\n";
+        let target = Target::macos_for(26);
+        let ir = air_emit::compile_source(std::str::from_utf8(msl).unwrap(), &target, "-").expect("AIR");
+        assert_eq!(ir.matches("internal addrspace(3) global [4 x i32] undef, align 4").count(), 2);
+        assert!(ir.contains("[4 x i32] addrspace(3)*"), "{ir}");
+        assert!(ir.contains("call void @air.wg.barrier(i32 2, i32 5, i32 1)"), "{ir}");
+        let module = air_bc::parse::parse(&ir).expect("AIR module");
+        let split = air_bc::split::split(&module).expect("entry split");
+        assert_eq!(split.len(), 2);
+        for entry in &split {
+            assert_eq!(entry.module.globals.iter().filter(|g| g.space == 3).count(), 1);
+        }
+        let lib = build_raw(msl, &target).expect("raw library");
+        let parsed = air_lib::parse(&lib).expect("metallib");
+        assert_eq!(parsed.functions[0].name(), b"exchange");
+        assert_eq!(parsed.functions[1].name(), b"separate");
+    }
+
+    #[test]
     fn raw_library_for_macos_26() {
         // macOS 26 refuses Metal 4.1: the library says macOS 26.0, AIR 2.8 and Metal 4.0 (issue 21)
         let msl = b"#include <metal_stdlib>\nusing namespace metal;\nfragment float4 f(constant float4* c [[buffer(0)]], float4 p [[position]]) { return p * c[0]; }\n";

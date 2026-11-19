@@ -53,11 +53,21 @@ fn thread_array_reference_parameter_indexes_the_callers_storage() {
 
 #[test]
 fn address_space_value_without_array_reference_is_still_rejected() {
-    for parameter in ["thread uint value", "threadgroup uint (&value)[4]"] {
+    for parameter in ["thread uint value", "threadgroup uint value"] {
         let src = format!("{PRE}static void write({parameter}) {{}}");
         let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
         assert!(error.key().starts_with("unsupported:rejected:addrspace-value:"), "{error:?}");
     }
+}
+
+#[test]
+fn private_array_cannot_bind_to_threadgroup_reference() {
+    let src = format!(
+        "{PRE}static uint read_slot(threadgroup uint (&values)[4]) {{ return values[0]; }}\n\
+         kernel void main0(device uint* out [[buffer(0)]]) {{ uint values[4]; out[0] = read_slot(values); }}"
+    );
+    let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
+    assert!(error.key().contains("threadgroup reference address space mismatch"), "{error:?}");
 }
 
 #[test]
