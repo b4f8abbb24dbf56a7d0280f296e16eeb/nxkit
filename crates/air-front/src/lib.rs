@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 14;
+pub const FORMAT: u32 = 15;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -408,6 +408,64 @@ mod tests {
             (
                 "constant ulong values[4294967295] = {};",
                 "const-array:partial-size",
+            ),
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
+            let error = air_emit::compile_source(&source, &target, "-").unwrap_err();
+            assert!(error.key().contains(reason), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn inferred_constant_array_bounds_match_explicit_bounds() {
+        let target = Target::macos_for(27);
+        for (ty, len, values) in [
+            ("uint", "3", "7u, 0u, 11u,"),
+            ("bool", "1", "true"),
+            ("float3", "2", "float3(-0.0, 5.0, 0.0), float3(0.0)"),
+        ] {
+            let shader = |bound: &str| {
+                format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{bound}] = {{ {values} }};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n"
+            )
+            };
+            let inferred = shader("");
+            let explicit = shader(len);
+            assert_eq!(
+                air_emit::compile_source(&inferred, &target, "-").expect("inferred AIR"),
+                air_emit::compile_source(&explicit, &target, "-").expect("explicit AIR")
+            );
+            let bc = compile(inferred.as_bytes(), &target).expect("inferred bitcode");
+            assert!(matches!(bc, Ir::Bitcode(_)));
+            assert_eq!(
+                bc,
+                compile(explicit.as_bytes(), &target).expect("explicit bitcode")
+            );
+            assert_eq!(
+                build_raw(inferred.as_bytes(), &target).expect("inferred metallib"),
+                build_raw(explicit.as_bytes(), &target).expect("explicit metallib")
+            );
+        }
+    }
+
+    #[test]
+    fn inferred_constant_arrays_reject_unsupported_forms() {
+        let target = Target::macos_for(27);
+        for (decl, reason) in [
+            ("constant uint values[] = {};", "const-array:unsized-empty"),
+            (
+                "constant uint values[][2] = {};",
+                "const-array:unsized-nested",
+            ),
+            (
+                "struct S { uint x; }; constant S values[] = {};",
+                "const-array:unsized-element-type",
+            ),
+            (
+                "constant uint values[] = {1u 2u};",
+                "const-array:unsized-missing-comma",
             ),
         ] {
             let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");

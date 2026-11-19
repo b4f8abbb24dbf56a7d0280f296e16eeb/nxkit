@@ -763,10 +763,39 @@ impl<'a> Parser<'a> {
         let name = self.ident()?;
         let name = self.intern(name);
         if self.peek()? == "[" {
-            let ty = self.array_suffix(ty)?;
+            let inferred = self.peek_at(1)? == "]";
+            let ty = if inferred {
+                self.expect("[")?;
+                self.expect("]")?;
+                if self.peek()? == "[" {
+                    return reject("const-array:unsized-nested");
+                }
+                if !matches!(ty, Ty::Scalar(_) | Ty::Vec { packed: false, .. }) {
+                    return reject("const-array:unsized-element-type");
+                }
+                ty
+            } else {
+                self.array_suffix(ty)?
+            };
             self.expect("=")?;
-            let init = self.init_list()?;
+            let init = self.init_list(inferred)?;
             self.expect(";")?;
+            let ty = if inferred {
+                if init.is_empty() {
+                    return reject("const-array:unsized-empty");
+                }
+                let Ok(n) = u32::try_from(init.len()) else {
+                    return reject("const-array:unsized-length");
+                };
+                Ty::Array {
+                    elem: Rc::new(ty),
+                    n: Rc::from(n.to_string()),
+                    unsafe_: false,
+                    metal: false,
+                }
+            } else {
+                ty
+            };
             self.globals
                 .insert(name.clone(), Ty::Ref(Space::Constant, Rc::new(ty.clone())));
             self.stat("const-array")?;
@@ -945,14 +974,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `init_list(ty)`: `{ e, e, ... }` with optional commas.
-    fn init_list(&mut self) -> PResult<Vec<Expr>> {
+    /// An initializer list. Inferred arrays require commas between elements.
+    fn init_list(&mut self, require_comma: bool) -> PResult<Vec<Expr>> {
         self.frame(|p| {
             p.expect("{")?;
             let mut out = Vec::new();
             while !p.accept("}")? {
                 out.push(*p.expr_assign()?);
-                p.accept(",")?;
+                if !p.accept(",")? && require_comma && p.peek()? != "}" {
+                    return reject("const-array:unsized-missing-comma");
+                }
             }
             Ok(out)
         })
