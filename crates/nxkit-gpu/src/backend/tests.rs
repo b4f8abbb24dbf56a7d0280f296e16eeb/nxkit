@@ -481,8 +481,15 @@ fn tessellation_replay_walk_and_readback() {
             FlushCx { table, descriptors },
         )
         .unwrap();
-        let command = locked(&gpu.gpu)
-            .last_submitted()
+        if let Some(enc) = &gpu.enc {
+            let settled = enc.settle();
+            assert!(settled.error.is_none(), "encoder failed: {:?}", settled.error);
+            if let Some(update) = settled.update {
+                update.apply(table);
+            }
+        }
+        let command = locked(&gpu.test_submitted)
+            .take()
             .expect("no Metal command buffer");
         let completed = command.wait().expect("Metal command buffer failed");
         assert!(
