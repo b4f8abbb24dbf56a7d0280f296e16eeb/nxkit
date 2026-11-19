@@ -249,7 +249,7 @@ fn a_deferred_submit_walks_with_the_device_origin_captured_before_a_device_mode_
 fn tessellation_replay_walk_and_readback() {
     use nxkit_nvn::{
         backend::{FlushCx, ShaderKey, StageKey},
-        ext::{DrawKind, Ext, ExtCode, Setting},
+        ext::{DrawKind, Ext, ExtCode, Setting, StateKind},
         frame::MAX_COLOR,
         front::{FlushReason, FrontEnd},
         layout::{Target, TextureDesc},
@@ -412,6 +412,9 @@ fn tessellation_replay_walk_and_readback() {
             .f32(64.)
             .f32(64.));
         ext(Ext::new(ExtCode::Scissor, 0).i32(0).i32(0).i32(64).i32(64));
+        // NVN polygon defaults: no cull, counter-clockwise front, and filled triangles.
+        // An unbound polygon state uses mode zero, which the Metal backend draws as lines.
+        ext(Ext::new(ExtCode::State, StateKind::Polygon as u16).u32((1 << 2) | (2 << 3)));
         for (program, mask) in [(1, 1), (2, 2), (3, 16)] {
             ext(Ext::new(ExtCode::Program, 0).u64(program).u32(mask));
         }
