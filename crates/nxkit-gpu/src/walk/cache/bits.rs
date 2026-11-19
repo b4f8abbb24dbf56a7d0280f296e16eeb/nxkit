@@ -113,6 +113,10 @@ pub(in crate::walk) mod sc {
     pub(in crate::walk) const STRIDE_IMAGE: usize = 18;
     pub(in crate::walk) const VIEWPORT_SWIZZLE: usize = 19;
     pub(in crate::walk) const ORIGINS: usize = 20;
+    pub(in crate::walk) const PATCH_SIZE: usize = 21;
+    pub(in crate::walk) const PATCH_INNER: usize = 22;
+    pub(in crate::walk) const PATCH_OUTER: usize = 23;
+    pub(in crate::walk) const PRIMITIVE_RESTART: usize = 24;
 }
 
 /// The bit of the program slot `stage`.
@@ -193,6 +197,17 @@ pub(in crate::walk) const DRAW_READS: Bits = Bits::range(BLEND, 8)
 pub(in crate::walk) const MESH_READS: Bits = Bits::range(UBO + 48, 32)
     .or(Bits::range(SBO + 48, 32))
     .or(Bits::range(TEX + 96, 32));
+
+/// What a patch draw additionally reads: the evaluation bank and explicit patch state.
+pub(in crate::walk) const PATCH_READS: Bits = Bits::range(UBO + 64, 16)
+    .or(Bits::range(SBO + 64, 16))
+    .or(Bits::range(TEX + 96, 32))
+    .or(Bits::scalars(&[
+        sc::PATCH_SIZE,
+        sc::PATCH_INNER,
+        sc::PATCH_OUTER,
+        sc::PRIMITIVE_RESTART,
+    ]));
 
 /// What a dispatch reads of the state, apart from its program.
 pub(in crate::walk) const DISPATCH_READS: Bits = Bits::range(UBO + 32, 16)

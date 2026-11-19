@@ -65,6 +65,7 @@ pub(super) struct Scalars {
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
     copy_strides: [u64; 2],
+    patch: crate::walk::PatchState,
 }
 
 /// The bits of floats, so that a key compares them as a walk sees them: -0.0 differs from 0.0.
@@ -96,6 +97,7 @@ impl Scalars {
             scissor: st.scissor,
             blend_color: st.blend_color,
             copy_strides: st.copy_strides,
+            patch: st.patch,
         }
     }
 
@@ -126,6 +128,10 @@ impl Scalars {
             && (!has(sc::BLEND_COLOR) || bits4(st.blend_color) == bits4(self.blend_color))
             && (!has(sc::STRIDE_ROW) || st.copy_strides[0] == self.copy_strides[0])
             && (!has(sc::STRIDE_IMAGE) || st.copy_strides[1] == self.copy_strides[1])
+            && (!has(sc::PATCH_SIZE) || st.patch.size == self.patch.size)
+            && (!has(sc::PATCH_INNER) || st.patch.inner == self.patch.inner)
+            && (!has(sc::PATCH_OUTER) || st.patch.outer == self.patch.outer)
+            && (!has(sc::PRIMITIVE_RESTART) || st.patch.restart == self.patch.restart)
     }
 
     pub(super) fn apply(&self, st: &mut State) {
@@ -184,6 +190,18 @@ impl Scalars {
         }
         if has(sc::STRIDE_ROW) {
             st.copy_strides[0] = self.copy_strides[0];
+        }
+        if has(sc::PATCH_SIZE) {
+            st.patch.size = self.patch.size;
+        }
+        if has(sc::PATCH_INNER) {
+            st.patch.inner = self.patch.inner;
+        }
+        if has(sc::PATCH_OUTER) {
+            st.patch.outer = self.patch.outer;
+        }
+        if has(sc::PRIMITIVE_RESTART) {
+            st.patch.restart = self.patch.restart;
         }
         if has(sc::STRIDE_IMAGE) {
             st.copy_strides[1] = self.copy_strides[1];
@@ -428,7 +446,7 @@ impl Track {
                 Stage::Vertex => 0,
                 Stage::Fragment => 1,
                 Stage::Compute => 2,
-                Stage::Task | Stage::Mesh => 3,
+                Stage::Task | Stage::Mesh | Stage::TessEvaluation => 3,
             };
             let dep = self
                 .tex_dep

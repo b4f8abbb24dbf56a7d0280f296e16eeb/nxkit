@@ -169,11 +169,15 @@ pub(crate) struct MeshInfo {
 }
 
 /// A shader function with its bindings.
+#[derive(Clone)]
 pub(crate) struct StageProgram {
     /// The library.
     pub(crate) lib: ShaderLibrary,
     /// The entry function.
     pub(crate) entry: String,
+    pub(crate) entry_geometry_capture: Option<String>,
+    pub(crate) domain_replay: bool,
+    pub(crate) domain_replay_indexed: bool,
     /// Bit-preserving unsigned and mixed output variants, when the translator supplied them.
     pub(crate) entry_uint: Option<String>,
     pub(crate) entry_mixed: Option<(String, u8)>,
@@ -204,7 +208,7 @@ pub(crate) struct Programs {
     dir: PathBuf,
     /// One map per reading of the vertex inputs (index 1 for vertex), so that a lookup by `&str` allocates nothing. A
     /// read-write lock: every draw of every encode thread reads it, and a `Mutex` made them wait for each other.
-    cache: RwLock<[ProgramMap; 2]>,
+    cache: RwLock<[ProgramMap; 4]>,
 }
 
 impl Programs {
@@ -212,18 +216,36 @@ impl Programs {
         Self {
             ctx: ctx.clone(),
             dir,
-            cache: RwLock::new([ProgramMap::default(), ProgramMap::default()]),
+            cache: RwLock::new(std::array::from_fn(|_| ProgramMap::default())),
         }
     }
 
     /// The program of `key`. `vertex` selects the reading of the vertex inputs. The result is cached, also a failure.
     pub(crate) fn stage(&self, key: &str, vertex: bool) -> Result<Arc<StageProgram>, Skip> {
-        if let Some(r) =
-            self.cache.read().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)].get(key)
-        {
+        self.stage_with_mode(key, usize::from(vertex))
+    }
+
+    /// Loads the original vertex library, never the pulling variant, for its capture entry.
+    pub(crate) fn capture(&self, key: &str) -> Result<Arc<StageProgram>, Skip> {
+        self.stage_with_mode(key, 2)
+    }
+
+    /// Loads a dedicated bounds-checked indexed capture library.
+    pub(crate) fn capture_indexed(&self, key: &str) -> Result<Arc<StageProgram>, Skip> {
+        self.stage_with_mode(key, 3)
+    }
+
+    fn stage_with_mode(&self, key: &str, mode: usize) -> Result<Arc<StageProgram>, Skip> {
+        let vertex = mode != 0;
+        if let Some(r) = self.cache.read().unwrap_or_else(PoisonError::into_inner)[mode].get(key) {
             return r.clone();
         }
-        let r = self.load(key, vertex).map(Arc::new);
+        let r = if mode == 3 {
+            self.load_indexed_capture(key)
+        } else {
+            self.load(key, vertex, mode == 1)
+        }
+        .map(Arc::new);
         if let Err(e) = &r {
             // Counted once per key: the failure is cached.
             let what = format_args!("{key} vertex={vertex}: {e:?}");
@@ -232,7 +254,7 @@ impl Programs {
                 eprintln!("DIAG prog {what}");
             }
         }
-        self.cache.write().unwrap_or_else(PoisonError::into_inner)[usize::from(vertex)]
+        self.cache.write().unwrap_or_else(PoisonError::into_inner)[mode]
             .insert(key.to_owned(), r.clone());
         r
     }
@@ -249,7 +271,7 @@ impl Programs {
         }
     }
 
-    fn load(&self, key: &str, vertex: bool) -> Result<StageProgram, Skip> {
+    fn load(&self, key: &str, vertex: bool, allow_pull: bool) -> Result<StageProgram, Skip> {
         if key.is_empty() || key.contains(['/', '\\']) || key.contains("..") {
             return Err(Skip::Program);
         }
@@ -264,7 +286,7 @@ impl Programs {
         let json = parse(&text).ok_or_else(|| why("json parse"))?;
         let lib = ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_b.metallib")))
             .map_err(|e| why(&format!("metallib {e:?}")))?;
-        let pull = if vertex && crate::pull::on() {
+        let pull = if allow_pull && crate::pull::on() {
             self.pull_library(key, &json)
         } else {
             None
@@ -286,6 +308,25 @@ impl Programs {
             p.pull = true;
         }
         Ok(p)
+    }
+
+    fn load_indexed_capture(&self, key: &str) -> Result<StageProgram, Skip> {
+        if key.len() != 16 || !key.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return Err(Skip::Program);
+        }
+        let text = std::fs::read_to_string(self.dir.join(format!("{key}_bt.json")))
+            .map_err(|_| Skip::Program)?;
+        let json = parse(&text).ok_or(Skip::Program)?;
+        if !indexed_capture_marker(&json) {
+            return Err(Skip::Program);
+        }
+        let lib = ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_bt.metallib")))
+            .map_err(|_| Skip::Program)?;
+        // Read bindings from the actual variant, never from the ordinary vertex library.
+        let mut program = read_stage(&json, lib, true)?;
+        program.entry_geometry_capture = Some("main0_tess_indexed".to_owned());
+        program.pull = true;
+        Ok(program)
     }
 
     /// The `_bp` library of a vertex shader and its entry, when the JSON has a `pull` field (the step removes the
@@ -319,6 +360,43 @@ pub(crate) fn pull_entry(json: &Json) -> Option<String> {
             .unwrap_or("main0")
             .to_owned(),
     )
+}
+
+fn indexed_capture_marker(json: &Json) -> bool {
+    json.get("stage").and_then(Json::as_str) == Some("vs")
+        && json.get("entry").and_then(Json::as_str) == Some("main0_tess_indexed")
+        && json.get("indexed_capture").is_some_and(|m| {
+            m.get("version").and_then(Json::as_i64) == Some(1)
+                && m.get("entry").and_then(Json::as_str) == Some("main0_tess_indexed")
+        })
+}
+
+#[cfg(test)]
+#[test]
+fn indexed_capture_requires_its_own_vertex_reflection() {
+    let accepted = r#"{"stage":"vs","entry":"main0_tess_indexed","indexed_capture":{"version":1,"entry":"main0_tess_indexed"}}"#;
+    assert!(indexed_capture_marker(&parse(accepted).unwrap()));
+    for bad in [
+        accepted.replace("vs", "ps"),
+        accepted.replace("1", "2"),
+        accepted.replacen("main0_tess_indexed", "main0", 1),
+    ] {
+        assert!(!indexed_capture_marker(&parse(&bad).unwrap()));
+    }
+}
+
+fn strict_tess_register(json: &Json, kind: BindKind) -> bool {
+    (json.get("domain_replay").is_some() || json.get("indexed_capture").is_some())
+        && matches!(
+            kind,
+            BindKind::Cbuf
+                | BindKind::Sbuf
+                | BindKind::UboPtr
+                | BindKind::Tex
+                | BindKind::Samp
+                | BindKind::SampTex
+                | BindKind::Img
+        )
 }
 
 fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProgram, Skip> {
@@ -384,8 +462,11 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .and_then(Json::as_i64)
             .ok_or(Skip::Program)?;
         let arg_id = u32::try_from(arg_id).map_err(|_| Skip::Program)?;
-        let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
-        let reg = u32::try_from(reg).map_err(|_| Skip::Program)?;
+        let reg = b.get("reg").and_then(Json::as_i64);
+        if strict_tess_register(json, kind) && reg.is_none() {
+            return Err(Skip::Binding);
+        }
+        let reg = u32::try_from(reg.unwrap_or(0)).map_err(|_| Skip::Program)?;
         arg_bytes = arg_bytes.max(
             arg_id
                 .checked_add(1)
@@ -488,6 +569,24 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
     Ok(StageProgram {
         lib,
         entry,
+        entry_geometry_capture: json
+            .get("entry_geometry_capture")
+            .and_then(Json::as_str)
+            .map(str::to_owned),
+        domain_replay: json.get("stage").and_then(Json::as_str) == Some("ds")
+            && json.get("domain_replay").is_some_and(|d| {
+                d.get("version").and_then(Json::as_i64) == Some(1)
+                    && d.get("mode").and_then(Json::as_str) == Some("triangles")
+                    && d.get("spacing").and_then(Json::as_str) == Some("fractional_odd")
+                    && d.get("winding").and_then(Json::as_str) == Some("ccw")
+                    && d.get("hull").and_then(Json::as_bool) == Some(false)
+                    && d.get("capture_words").and_then(Json::as_i64) == Some(144)
+            }),
+        domain_replay_indexed: json.get("domain_replay").is_some_and(|m| {
+            m.get("indexed_capture_version").and_then(Json::as_i64) == Some(1)
+                && m.get("indexed_entry").and_then(Json::as_str)
+                    == Some("main0_tess_indexed_domain")
+        }),
         entry_uint: json
             .get("entry_u")
             .and_then(Json::as_str)

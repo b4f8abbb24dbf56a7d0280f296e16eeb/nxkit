@@ -152,6 +152,7 @@ fn draw(attributes: Vec<AttributeDetail>, streams: Vec<StreamDetail>) -> DrawDet
         depth_stencil: Default::default(),
         raster: Default::default(),
         topology: 4,
+        patch: None,
         attributes,
         streams,
         args: DrawArgs::Arrays {
@@ -342,6 +343,9 @@ fragment float4 fs() { return float4(1); }
     let stage = |entry: &str, pull: bool| StageProgram {
         lib: lib.clone(),
         entry: entry.into(),
+        entry_geometry_capture: None,
+        domain_replay: false,
+        domain_replay_indexed: false,
         entry_uint: None,
         entry_mixed: None,
         binds: vec![],

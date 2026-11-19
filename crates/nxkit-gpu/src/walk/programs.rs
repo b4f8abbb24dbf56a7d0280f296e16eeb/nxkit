@@ -21,6 +21,8 @@ pub(super) enum Kind {
     Task,
     /// An NVN2 mesh shader.
     Mesh,
+    TessControl,
+    TessEvaluation,
     Other,
 }
 
@@ -28,12 +30,13 @@ pub(super) enum Kind {
 struct Stage {
     key: Arc<str>,
     kind: Kind,
+    reflected: bool,
 }
 
 /// The stages of each program.
 pub(super) struct Programs {
     dir: PathBuf,
-    kinds: FastMap<String, Kind>,
+    kinds: FastMap<String, Option<Kind>>,
     by_program: FastMap<u64, Vec<Stage>>,
     /// Counts the changes of each program. A template that looked a program up is stale when the count moved.
     generations: FastMap<u64, u64>,
@@ -73,8 +76,12 @@ impl Programs {
             .iter()
             .filter_map(|s| {
                 let key: Arc<str> = s.key?.to_hex().into();
-                let kind = self.kind(&key, s.index);
-                Some(Stage { key, kind })
+                let (kind, reflected) = self.kind(&key, s.index);
+                Some(Stage {
+                    key,
+                    kind,
+                    reflected,
+                })
             })
             .collect::<Vec<Stage>>();
         if self.by_program.get(&program) == Some(&stages) {
@@ -110,24 +117,46 @@ impl Programs {
             .map(|s| &s.key)
     }
 
-    fn kind(&mut self, key: &str, index: u8) -> Kind {
-        if let Some(k) = self.kinds.get(key) {
-            return *k;
-        }
-        let kind = self.read_kind(key).unwrap_or(match index {
+    /// A patch replay needs actual stage metadata, not the index-based draw fallback.
+    pub(super) fn complete_patch_program(&self, program: u64) -> bool {
+        program == 0
+            || self.by_program.get(&program).is_some_and(|stages| {
+                !stages.is_empty()
+                    && stages.iter().all(|s| {
+                        s.reflected
+                            && matches!(
+                                s.kind,
+                                Kind::Vertex
+                                    | Kind::Fragment
+                                    | Kind::TessControl
+                                    | Kind::TessEvaluation
+                            )
+                    })
+            })
+    }
+
+    fn kind(&mut self, key: &str, index: u8) -> (Kind, bool) {
+        let (reflection, first) = if let Some(k) = self.kinds.get(key) {
+            (*k, false)
+        } else {
+            let r = self.read_kind(key);
+            self.kinds.insert(key.to_owned(), r);
+            (r, true)
+        };
+        // The fallback is specific to this program binding, not to the shader key.
+        let kind = reflection.unwrap_or(match index {
             0 => Kind::Vertex,
             1 => Kind::Fragment,
             _ => Kind::Other,
         });
-        if kind == Kind::Other {
-            // A geometry or tessellation stage. The encoder runs the vertex and fragment stages only.
+        if first && kind == Kind::Other {
+            // A stage without encoder support.
             nxkit_nvn::diag::note(
                 nxkit_nvn::diag::Reason::StageIgnored,
                 format_args!("program stage {key} (slot {index})"),
             );
         }
-        self.kinds.insert(key.to_owned(), kind);
-        kind
+        (kind, reflection.is_some())
     }
 
     fn read_kind(&self, key: &str) -> Option<Kind> {
@@ -144,6 +173,8 @@ impl Programs {
             "cs" => Kind::Compute,
             "ts" => Kind::Task,
             "ms" => Kind::Mesh,
+            "hs" => Kind::TessControl,
+            "ds" => Kind::TessEvaluation,
             _ => Kind::Other,
         })
     }

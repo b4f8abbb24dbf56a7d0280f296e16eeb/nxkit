@@ -104,6 +104,10 @@ pub struct GpuBackend {
     blit: Mutex<Option<Blit>>,
     pacer: OnceLock<Arc<Pacer>>,
     reports: AtomicU64,
+    #[cfg(test)]
+    test_encode_stats: Mutex<Option<crate::stats::EncodeStats>>,
+    #[cfg(test)]
+    test_walk_counters: Mutex<Option<crate::walk::WalkCounters>>,
     /// The timestamp reports of encoded frames that the GPU has not been seen to finish, with the fence of their
     /// frame. [`GpuBackend::drain`] writes them.
     counters: Mutex<Vec<(u64, crate::detail::CounterReport)>>,
@@ -204,6 +208,10 @@ impl GpuBackend {
                 blit: Mutex::new(None),
                 pacer: OnceLock::new(),
                 reports: AtomicU64::new(0),
+                #[cfg(test)]
+                test_encode_stats: Mutex::new(None),
+                #[cfg(test)]
+                test_walk_counters: Mutex::new(None),
                 counters: Mutex::new(Vec::new()),
                 queries: Mutex::new(Vec::new()),
                 ts: Mutex::new(gputs::Clock::default()),
@@ -448,6 +456,10 @@ impl GpuBackend {
 
     /// Prints the diagnostics of a finished encode.
     fn note_report(&self, report: &EncodeReport) {
+        #[cfg(test)]
+        {
+            *locked(&self.test_encode_stats) = Some(report.stats.clone());
+        }
         let n = self.reports.fetch_add(1, Ordering::Relaxed);
         crate::pipelines::frame_done(n);
         if crate::diag("memory") && n.is_multiple_of(120) {

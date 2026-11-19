@@ -36,7 +36,27 @@ fn tg_bytes(s: &Structured) -> i64 {
 
 /// Build the base library `_b` and its reflection.
 pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> {
-    build_with(s, ctx, opt, &[])
+    build_with(s, ctx, opt, &[], Mode::Production)
+}
+
+/// Build a diagnostic domain library without enabling it in the production producer.
+pub(super) fn build_domain(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> {
+    build_with(s, ctx, opt, &[], Mode::Domain)
+}
+
+pub(super) fn build_indexed_capture(
+    s: &Structured,
+    ctx: &Context<'_>,
+    opt: &Options,
+) -> R<Translated> {
+    build_with(s, ctx, opt, &[], Mode::IndexedCapture)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Production,
+    Domain,
+    IndexedCapture,
 }
 
 /// What the entries of a library add to its text and to the reflection of `_b`.
@@ -51,16 +71,28 @@ struct Entries {
 }
 
 /// Build with the vertex inputs at `ints` declared `uint`.
-fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) -> R<Translated> {
+fn build_with(
+    s: &Structured,
+    ctx: &Context<'_>,
+    opt: &Options,
+    ints: &[u32],
+    mode: Mode,
+) -> R<Translated> {
+    let domain = mode == Mode::Domain;
+    let indexed_capture = mode == Mode::IndexedCapture;
     let job = &s.job;
     let patched = (!ints.is_empty()).then(|| variant::int_inputs::declare(&s.props, ints));
     let props = patched.as_ref().unwrap_or(&s.props);
     let shader = match job.stage.as_str() {
         "vs" => Shader::Vertex,
+        "ds" if domain => Shader::Vertex,
         "ps" => Shader::Fragment,
         "cs" | "gs" => Shader::Compute,
         other => return Err(format!("unported: {other} stage")),
     };
+    if (props.definitions.stage == Some(crate::attr::Stage::TessellationEvaluation)) != domain {
+        return Err("unported: domain shader outside the diagnostic path".into());
+    }
     // A task or mesh shader is a compute job, and its tables and reflection are those of its own stage.
     let stage_name = job
         .mesh_stage
@@ -80,9 +112,16 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     } else {
         spill::plan(&s.props.properties.shared_memories)
     };
+    if domain && !s.props.properties.shared_memories.is_empty() {
+        return Err("unported: threadgroup memory in a domain shader".into());
+    }
     let usage: Usage = usage::collect(&s.info);
     let res = args::build(props, &s.program, &usage, stage_name, &s.notes, &s.fetch1d)?;
-    let base_instance = shader == Shader::Vertex
+    if domain {
+        super::domain::check_bindings(&res.bindings)?;
+    }
+    let base_instance = !domain
+        && shader == Shader::Vertex
         && res
             .cbs
             .values()
@@ -110,7 +149,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     }
     shared.wide = wide::plan(&s.info, &res, &shared.skip);
     let mut em = Em::new(&s.info, props, &res, opt, &shared, &plan, shader);
-    em.probe = (shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
+    em.probe = (!domain && shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
     let mut bodies = Vec::new();
     for i in 0..s.info.functions.len() {
         bodies.push(em.body(i)?);
@@ -125,7 +164,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         let float = |l: u32| props.definitions.attribute_types.get(l as usize) == Some(&0);
         let found = variant::int_inputs::find(&s.info, &uses, &declared, &float);
         if !found.is_empty() {
-            return build_with(s, ctx, opt, &found);
+            return build_with(s, ctx, opt, &found, mode);
         }
     }
     if opt.visibility_counter && shader == Shader::Vertex {
@@ -140,8 +179,11 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     let mut side = None;
     let mut entries = Entries::default();
     let mut fetch = None;
+    if indexed_capture && (job.tf.is_some() || res.bindings.iter().any(facts::writes)) {
+        return Err("unported: indexed capture with shader writes or transform feedback".into());
+    }
     let vx = match shader {
-        Shader::Vertex => {
+        Shader::Vertex if !domain => {
             let w = res.bindings.iter().any(facts::writes);
             Some(variant::vertex::bodies(&mut em, &plan, w)?)
         }
@@ -152,10 +194,21 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         _ => None,
     };
     let lib = Lib {
-        in_struct: plan.in_struct(),
-        fetch: false,
+        in_struct: if indexed_capture {
+            super::indexed_capture::in_struct(&plan)?
+        } else {
+            plan.in_struct()
+        },
+        fetch: indexed_capture,
     };
     match (&vx, shader) {
+        (Some(vx), _) if indexed_capture => {
+            entries.text = super::indexed_capture::entry(s, &res, &plan, vx)?;
+            entries.extra.push((
+                "indexed_capture".into(),
+                super::indexed_capture::reflection(),
+            ));
+        }
         (Some(vx), _) => {
             let frame = variant::vertex::Frame::default();
             entries.text = variant::vertex::entries(s, &res, &plan, vx, &frame)?;
@@ -168,6 +221,58 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
                 entries.entries.push(variant::tf::entry_field());
                 entries.extra.push(variant::tf::strides_field(tf));
             }
+        }
+        (None, Shader::Vertex) if domain => {
+            entries.text = entry_text(s, &EntryName::new("main0"), shader, &res, &plan, main)?;
+            em.exit = Some(vec!["return out;".into()]);
+            let raw = em.body(0)?;
+            em.exit = None;
+            let name = EntryName {
+                vertex_depth_fix: false,
+                ..EntryName::new("main0_z")
+            };
+            entries
+                .text
+                .push_str(&entry_text(s, &name, shader, &res, &plan, &raw)?);
+            entries
+                .entries
+                .push(("entry_z".into(), Value::Str("main0_z".into())));
+            let validation = [super::domain::indexed_validity()];
+            let guard = super::domain::indexed_guard();
+            for (entry, fix, body) in [
+                (super::domain::INDEXED_ENTRY, true, main.as_str()),
+                (super::domain::INDEXED_ENTRY_Z, false, raw.as_str()),
+            ] {
+                let checked = EntryName {
+                    extra: &validation,
+                    pro: &guard,
+                    vertex_depth_fix: fix,
+                    ..EntryName::new(entry)
+                };
+                entries
+                    .text
+                    .push_str(&entry_text(s, &checked, shader, &res, &plan, body)?);
+            }
+            entries.extra.push((
+                "domain_replay".into(),
+                Value::obj([
+                    ("version", Value::Int(1)),
+                    ("indexed_capture_version", Value::Int(1)),
+                    ("indexed_entry", Value::str(super::domain::INDEXED_ENTRY)),
+                    (
+                        "indexed_entry_z",
+                        Value::str(super::domain::INDEXED_ENTRY_Z),
+                    ),
+                    (
+                        "capture_words",
+                        Value::Int(i64::from(variant::vertex::CAPTURE_WORDS)),
+                    ),
+                    ("mode", Value::Str("triangles".into())),
+                    ("spacing", Value::Str("fractional_odd".into())),
+                    ("winding", Value::Str("ccw".into())),
+                    ("hull", Value::Bool(false)),
+                ]),
+            ));
         }
         (None, Shader::Fragment) => {
             let derived = variant::pixel_derived::derived(&s.info, &plan, opt.dual_source);
@@ -220,12 +325,13 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         &lib,
         &entries.text,
     )?;
+    let suffix = if indexed_capture { "_bt" } else { "_b" };
     libraries.push(Library {
-        suffix: "_b".into(),
+        suffix: suffix.into(),
         msl,
         reflection: None,
     });
-    if let Some(vx) = &vx {
+    if let (Some(vx), false) = (&vx, indexed_capture) {
         for (l, (k, v)) in vertex_libraries(s, &em, &res, &plan, &bodies, vx)? {
             entries.extra.push((k.to_string(), v));
             libraries.push(l);
@@ -246,13 +352,18 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     }
     let reads = facts::drv_reads(&em.drv);
     let mut r = Reflection {
-        key: format!("{}_b", job.key),
+        key: format!("{}{suffix}", job.key),
         chain: ctx.chain.to_string(),
         dm_ctl: job.key.clone(),
         source: ctx.source.clone(),
         pc_paired: ctx.pc_paired.to_string(),
         stage: stage_name.to_string(),
-        entry: "main0".into(),
+        entry: if indexed_capture {
+            super::indexed_capture::ENTRY
+        } else {
+            "main0"
+        }
+        .into(),
         msl_entry_kind: kind(shader).into(),
         threadgroup_size: (shader == Shader::Compute).then(|| local_size(s)),
         c1: facts::hex(&job.c1),
@@ -334,6 +445,9 @@ fn assemble(
     msl.push_str(&res.text);
     msl.push_str(&lib.in_struct);
     msl.push_str(&plan.out_struct());
+    if plan.domain {
+        msl.push_str(&super::domain::declarations());
+    }
     if let Some(vx) = vx {
         msl.push_str(&variant::vertex::decls(plan, vx)?);
     }

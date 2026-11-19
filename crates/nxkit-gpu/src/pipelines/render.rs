@@ -56,7 +56,7 @@ impl Pipelines {
         Ok((pipeline, key))
     }
 
-    fn render_uncached(
+    pub(crate) fn render_uncached(
         &self,
         d: &DrawDetail,
         vs: &StageProgram,
@@ -214,6 +214,42 @@ impl Pipelines {
         .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
         crate::coverage::record(&self.cache, source, Some(&desc), &what());
         Ok((p, key))
+    }
+
+    /// A direct array capture runs the original vertex shader without a fragment or raster output.
+    pub(crate) fn vertex_capture(
+        &self,
+        d: &DrawDetail,
+        vs: &StageProgram,
+        targets: &Targets,
+    ) -> Result<RenderPipeline, Skip> {
+        let entry = vs.entry_geometry_capture.as_deref().ok_or(Skip::Program)?;
+        let mut desc = RenderPipelineDesc::new((&vs.lib, entry), None, &[]);
+        desc.colors = targets
+            .colors
+            .iter()
+            .map(|f| f.map(nxkit_metal::ColorTarget::new))
+            .collect();
+        desc.topology = TopologyClass::Point;
+        desc.sample_count = targets.samples;
+        if !vs.pull {
+            desc.vertex_layout =
+                translate::vertex_descriptor(d, &vs.inputs).map_err(|_| Skip::Format)?;
+        }
+        let mut h = DefaultHasher::new();
+        "nxkit tessellation capture v1".hash(&mut h);
+        d.program.vertex.hash(&mut h);
+        entry.hash(&mut h);
+        targets.hash(&mut h);
+        d.attributes.hash(&mut h);
+        d.streams
+            .iter()
+            .map(|s| (s.index, s.stride, s.divisor))
+            .collect::<Vec<_>>()
+            .hash(&mut h);
+        self.cache
+            .render_capture(h.finish(), &desc)
+            .map_err(|err| pipe_failed(format_args!("vertex capture: {err}")))
     }
 
     /// The mesh pipeline of a task and mesh draw. `ts` is the task shader, when the program has one, and `fs` the pixel

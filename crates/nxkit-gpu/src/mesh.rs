@@ -178,6 +178,7 @@ pub(crate) fn prepare(
         None => None,
     };
     Ok(Prep {
+        capture: None,
         pipeline,
         key: pkey,
         depth_stencil: f.depth_stencil,

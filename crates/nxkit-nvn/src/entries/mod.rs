@@ -178,7 +178,6 @@ pub const RECORDED: &[(&str, Op)] = &[
 /// The functions that the engine answers with an empty body (`g_nops` in `hle_nvn.c`). They are not in
 /// [`NVN_IMPLEMENTED`]. A group of `nxkit-rt` may answer them and list them in [`FFI_GROUPS`].
 pub const NVN_EMPTY: &[&str] = &[
-    "nvnCommandBufferSetPatchSize",
     "nvnCommandBufferSetDepthBounds",
     "nvnCommandBufferWaitSync",
     "nvnCommandBufferSetShaderScratchMemory",
@@ -286,12 +285,19 @@ mod tests {
     #[test]
     fn every_ffi_name_is_implemented_by_reference_and_listed_once() {
         let known: HashSet<&str> = parse_names(NVN_IMPLEMENTED).collect();
+        let independent = [
+            "nvnCommandBufferSetPatchSize",
+            "nvnCommandBufferSetInnerTessellationLevels",
+            "nvnCommandBufferSetOuterTessellationLevels",
+        ];
+        let names: HashSet<&str> = parse_names(NVN_NAMES).collect();
         let mut seen = HashSet::new();
-        for (group, names) in FFI_GROUPS {
-            for name in *names {
+        for (group, row) in FFI_GROUPS {
+            for name in *row {
+                assert!(names.contains(name), "{group}: {name} is not an NVN name");
                 assert!(
-                    known.contains(name) || NVN_EMPTY.contains(name),
-                    "{group}: {name} has no engine reference"
+                    known.contains(name) || NVN_EMPTY.contains(name) || independent.contains(name),
+                    "{group}: {name} has no engine reference or independent implementation"
                 );
                 assert!(seen.insert(*name), "{name} is in two groups or twice");
             }

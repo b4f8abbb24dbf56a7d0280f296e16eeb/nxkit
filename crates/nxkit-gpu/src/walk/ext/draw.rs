@@ -1,6 +1,7 @@
 //! The detail of a draw.
 
 use super::*;
+use crate::detail::{PATCHES, PatchDetail};
 
 impl Walker {
     pub(super) fn draw<M: GuestMem>(&mut self, mem: &M, st: &State, x: &Ext) -> DrawDetail {
@@ -97,6 +98,9 @@ impl Walker {
             .reserve_exact(bound_count(&st.sbuf[0]) + bound_count(&st.sbuf[1]));
         sbufs_into(st, 0, Stage::Vertex, &mut d.sbufs);
         sbufs_into(st, 1, Stage::Fragment, &mut d.sbufs);
+        if topology == PATCHES {
+            self.patch_draw(mem, st, &mut d);
+        }
         // With the overlap on, the storage buffers of a draw get a copy too: the CPU writes some of them for the next
         // frame while the GPU still draws this one (Breath of the Wild's dialog text). The encoder uses the copy only
         // for a binding that the shader does not write. Dispatches keep the buffer itself.
@@ -115,6 +119,43 @@ impl Walker {
             self.track.truncated();
         }
         d
+    }
+
+    /// Captures patch inputs without making the draw eligible for the ordinary render encoder.
+    fn patch_draw<M: GuestMem>(&mut self, mem: &M, st: &State, d: &mut DrawDetail) {
+        const GEOMETRY: usize = 2;
+        const CONTROL: usize = 3;
+        const EVALUATION: usize = 4;
+        for slot in [GEOMETRY, CONTROL, EVALUATION] {
+            self.track.program(slot, st.program[slot]);
+        }
+        self.track.read(&cache::PATCH_READS);
+        let control = self
+            .programs
+            .find(st.program[CONTROL], Kind::TessControl)
+            .cloned();
+        let evaluation = self
+            .programs
+            .find(st.program[EVALUATION], Kind::TessEvaluation)
+            .cloned();
+        if evaluation.is_some() {
+            self.ubos_into(mem, st, EVALUATION, Stage::TessEvaluation, &mut d.ubos);
+            sbufs_into(st, EVALUATION, Stage::TessEvaluation, &mut d.sbufs);
+            textures_into(st, MESH_TEXTURES, Stage::TessEvaluation, &mut d.textures);
+            images_into(st, MESH_TEXTURES, Stage::TessEvaluation, &mut d.images);
+        }
+        d.patch = Some(Box::new(PatchDetail {
+            reflected: st.program[GEOMETRY] == 0
+                && [0, 1, CONTROL, EVALUATION]
+                    .into_iter()
+                    .all(|slot| self.programs.complete_patch_program(st.program[slot])),
+            control,
+            evaluation,
+            size: st.patch.size,
+            inner: st.patch.inner,
+            outer: st.patch.outer,
+            restart: st.patch.restart,
+        }));
     }
 
     /// The detail of a task and mesh draw. The program of the mesh stage gives the task and mesh shaders. A game binds

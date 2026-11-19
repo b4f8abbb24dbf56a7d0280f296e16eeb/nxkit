@@ -18,6 +18,13 @@ pub(super) fn emit(
     x: &Driven<'_>,
     stats: &mut EncodeStats,
 ) -> Result<(), MetalError> {
+    if let Some(c) = &p.capture {
+        // Capture changes the real pipeline and bindings before its fallible draw/barrier.
+        // Invalidate before encoding so an error cannot leave stale ordinary draw state.
+        tr.after_icb();
+        c.encode(rp)?;
+        stats.kinds.metal_draws += 1;
+    }
     if tr.pipeline != Some(p.key) {
         rp.encode(&RenderCommand::SetPipeline(p.pipeline.clone()))?;
         tr.pipeline = Some(p.key);
@@ -320,6 +327,10 @@ pub(super) fn draw(
     let Some(d) = sh.detail.draws.get(n as usize) else {
         return stats.skip(Skip::Detail);
     };
+    if d.patch.is_some() && sh.queries.and_then(|q| q.draw_slot(n)).is_some() {
+        // The preview has no reference test for counting an expanded patch.
+        return stats.skip_draw(Some(&d.args), Skip::Primitive);
+    }
     static DRAW_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     if crate::diag::skip_list_on() && listed_skip(&d.program) {
         return stats.skip_draw(Some(&d.args), Skip::Listed);
@@ -431,6 +442,11 @@ pub(super) fn draw(
         Ok(p) => p,
         Err(why) => return stats.skip_draw(Some(&d.args), why),
     };
+    if d.patch.is_some() && matches!(p.geom, Geom::Arrays { count: 0, .. }) {
+        // An explicitly culled patch has no domain vertices and no capture side effects.
+        stats.draws += 1;
+        return;
+    }
     if let Some(q) = sh.queries.filter(|_| d.args.is_mesh()) {
         q.mesh_note(n, &p);
     }

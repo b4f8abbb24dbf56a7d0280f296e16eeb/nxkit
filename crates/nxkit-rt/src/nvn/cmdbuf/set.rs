@@ -6,7 +6,7 @@
 
 use nxkit_nvn::ext::{ExtCode, Setting};
 
-use super::args::{Words, span};
+use super::args::{Words, load_bytes, span};
 use super::rec::{O_IMAGE_STRIDE, O_ROW_STRIDE, emit};
 use crate::nvn::abi::{AbiResult, Obj, arg_bool, guard, table};
 
@@ -216,6 +216,42 @@ extern "C" fn set_primitive_restart(c: u64, on: u32, index: i32) {
     );
 }
 
+extern "C" fn set_patch_size(c: u64, vertices: i32) {
+    setting(
+        "nvnCommandBufferSetPatchSize",
+        c,
+        Setting::PatchSize,
+        &[vertices as u32],
+    );
+}
+
+fn set_levels<const N: usize>(name: &'static str, c: u64, kind: Setting, address: u64) {
+    guard(name, || {
+        let mut words = [0; N];
+        load_bytes(address, N * 4, &mut words)?;
+        setting(name, c, kind, &words);
+        Ok(())
+    });
+}
+
+extern "C" fn set_inner_levels(c: u64, address: u64) {
+    set_levels::<2>(
+        "nvnCommandBufferSetInnerTessellationLevels",
+        c,
+        Setting::InnerTessellationLevels,
+        address,
+    );
+}
+
+extern "C" fn set_outer_levels(c: u64, address: u64) {
+    set_levels::<4>(
+        "nvnCommandBufferSetOuterTessellationLevels",
+        c,
+        Setting::OuterTessellationLevels,
+        address,
+    );
+}
+
 extern "C" fn set_rasterizer_discard(c: u64, on: u32) {
     flag(
         "nvnCommandBufferSetRasterizerDiscard",
@@ -306,6 +342,9 @@ pub(super) fn procs() -> Vec<(&'static str, usize)> {
         "nvnCommandBufferSetDepthClamp" => set_depth_clamp as extern "C" fn(u64, u32),
         "nvnCommandBufferSetPolygonOffsetClamp" => set_polygon_offset_clamp as extern "C" fn(u64, f32, f32, f32),
         "nvnCommandBufferSetPrimitiveRestart" => set_primitive_restart as extern "C" fn(u64, u32, i32),
+        "nvnCommandBufferSetPatchSize" => set_patch_size as extern "C" fn(u64, i32),
+        "nvnCommandBufferSetInnerTessellationLevels" => set_inner_levels as extern "C" fn(u64, u64),
+        "nvnCommandBufferSetOuterTessellationLevels" => set_outer_levels as extern "C" fn(u64, u64),
         "nvnCommandBufferSetRasterizerDiscard" => set_rasterizer_discard as extern "C" fn(u64, u32),
         "nvnCommandBufferSetSampleMask" => set_sample_mask as extern "C" fn(u64, i32),
         "nvnCommandBufferSetTiledCacheAction" => set_tiled_cache_action as extern "C" fn(u64, i32),

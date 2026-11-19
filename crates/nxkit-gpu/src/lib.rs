@@ -65,6 +65,8 @@ mod scaled;
 mod settings;
 pub mod snapshot;
 pub mod stats;
+mod tess_pattern;
+mod tess_replay;
 mod textures;
 mod translate;
 mod upload;

@@ -106,6 +106,10 @@ impl Backend for GpuBackend {
         let mut detail = {
             let mut walker = locked(&self.walker);
             let counters = walker.take_counters();
+            #[cfg(test)]
+            {
+                *locked(&self.test_walk_counters) = Some(counters);
+            }
             if stats_diag() && self.reports.load(Ordering::Relaxed).is_multiple_of(30) {
                 eprintln!("nxkit-gpu: walk: {counters:?}");
             }

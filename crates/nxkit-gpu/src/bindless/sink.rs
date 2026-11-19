@@ -48,7 +48,7 @@ impl ArgsMemo {
         let m = match inp.stage {
             Stage::Vertex => &mut self.stages[0],
             Stage::Fragment => &mut self.stages[1],
-            Stage::Compute | Stage::Task | Stage::Mesh => return None,
+            Stage::Compute | Stage::Task | Stage::Mesh | Stage::TessEvaluation => return None,
         };
         m.next.clear();
         m.next.push(p as *const StageProgram as u64);
@@ -104,7 +104,7 @@ impl ArgsMemo {
         let m = match stage {
             Stage::Vertex => &mut self.stages[0],
             Stage::Fragment => &mut self.stages[1],
-            Stage::Compute | Stage::Task | Stage::Mesh => return,
+            Stage::Compute | Stage::Task | Stage::Mesh | Stage::TessEvaluation => return,
         };
         m.addr = addr;
         m.valid = true;

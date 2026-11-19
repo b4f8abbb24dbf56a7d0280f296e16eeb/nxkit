@@ -220,6 +220,7 @@ pub(crate) enum Geom {
 
 /// A draw that is ready to encode.
 pub(crate) struct Prep {
+    pub(crate) capture: Option<crate::tess_replay::Capture>,
     pub(crate) pipeline: RenderPipeline,
     pub(crate) key: u64,
     pub(crate) depth_stencil: DepthStencilState,
@@ -268,6 +269,9 @@ pub(crate) fn prepare(
     sink: &mut dyn Sink,
     icb: bool,
 ) -> Result<Prep, Skip> {
+    if d.patch.is_some() && !icb && crate::tess_replay::enabled() {
+        return crate::tess_replay::prepare(sh, pc, d, sink);
+    }
     // An ICB holds direct draws of vertex pipelines only.
     if icb && (d.args.is_mesh() || d.args.is_indirect()) {
         return Err(Skip::Encode);
@@ -340,6 +344,7 @@ pub(crate) fn prepare(
         None => None,
     };
     Ok(Prep {
+        capture: None,
         pipeline,
         key,
         depth_stencil: f.depth_stencil,
