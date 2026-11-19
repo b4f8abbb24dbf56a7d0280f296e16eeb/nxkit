@@ -123,3 +123,42 @@ fn simd_builtins_need_the_right_types() {
     .unwrap_err();
     assert!(e.key().contains("simd-vote-form"), "{}", e.key());
 }
+
+#[test]
+fn ballot_mask_is_a_convergent_64_bit_vote() {
+    let ir = emit("kernel void k(device ulong* out [[buffer(0)]], uint lane [[thread_index_in_simdgroup]]) {
+        out[lane] = ulong(simd_ballot((lane & 1u) != 0u));
+    }");
+    has(&ir, "call i64 @air.simd_ballot.i64(i1 ");
+    has(&ir, "declare i64 @air.simd_ballot.i64(i1) #12");
+    has(&ir, "attributes #12 = { convergent nounwind willreturn }");
+}
+
+#[test]
+fn relaxed_threadgroup_word_operations_use_local_scope() {
+    let ir = emit("kernel void k(device uint* out [[buffer(0)]]) {
+        threadgroup uint words[1];
+        threadgroup atomic_uint* w = reinterpret_cast<threadgroup atomic_uint*>(&words[0]);
+        out[0] = atomic_fetch_add_explicit(w, 2u, memory_order_relaxed);
+        out[1] = atomic_fetch_min_explicit(w, 3u, memory_order_relaxed);
+        out[2] = atomic_fetch_max_explicit(w, 4u, memory_order_relaxed);
+    }");
+    for op in ["add", "min", "max"] {
+        let call = format!("call i32 @air.atomic.local.{op}.u.i32(i32 addrspace(3)* nocapture ");
+        let line = ir.lines().find(|line| line.contains(&call)).expect("atomic call");
+        has(line, ", i32 0, i32 1, i32 0, i1 false)");
+    }
+}
+
+#[test]
+fn ballot_and_threadgroup_atomics_reject_invalid_forms() {
+    for body in [
+        "out[0] = uint(ulong(simd_ballot(uint2(1u))));",
+        "threadgroup atomic_uint* w = reinterpret_cast<threadgroup atomic_uint*>(out);",
+        "threadgroup uint a[1]; threadgroup atomic_uint* w = reinterpret_cast<threadgroup atomic_uint*>(&a[0]); out[0] = *w;",
+        "threadgroup uint a[1]; threadgroup atomic_uint* w = reinterpret_cast<threadgroup atomic_uint*>(&a[0]); atomic_fetch_add_explicit(w, 1u, memory_order_seq_cst);",
+    ] {
+        let source = format!("{PRE}kernel void k(device uint* out [[buffer(0)]]) {{ {body} }}");
+        assert!(compile_source(&source, &Target::macos(), "t").is_err(), "{body}");
+    }
+}

@@ -96,6 +96,7 @@ impl Cx {
                 Some(id) => Type::Struct(*id),
                 None => return Err(Error::invalid(format!("unknown struct {name}"))),
             },
+            Ty::ThreadgroupAtomicUintPtr => Type::Ptr(Space::Threadgroup, Rc::new(Type::Scalar(Scalar::Uint))),
             Ty::Ptr(sp, inner) => Type::Ptr(*sp, Rc::new(self.ty(inner)?)),
             Ty::Ref(_, inner) => self.ty(inner)?,
             Ty::Array { metal: true, .. } => return Err(Error::unsupported("metal-array")),

@@ -168,6 +168,11 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
             );
             Ok(V { r, ty: ret.clone() })
         }
+        "simd_ballot" => {
+            let a = ops(g, &args);
+            let r = call(g, "air.simd_ballot.i64", &a, "i64", Attrs::Convergent, false);
+            Ok(V { r, ty: ret.clone() })
+        }
         "simd_any" | "simd_all" => {
             if args[0].ty != Type::BOOL {
                 return Err(unsupported());

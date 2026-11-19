@@ -1047,6 +1047,10 @@ impl<'a> Parser<'a> {
             self.last_const = true;
             v = self.ident()?;
         }
+        if v == "atomic_uint" && space == Some(Space::Threadgroup) && !self.last_const {
+            self.expect("*")?;
+            return Ok((Ty::ThreadgroupAtomicUintPtr, None));
+        }
         let mut t = if let Some((packed, base, w)) = vec_name(v) {
             if packed {
                 self.stat("packed")?;
@@ -2180,7 +2184,12 @@ impl<'a> Parser<'a> {
                 _ => {
                     let from_ok =
                         matches!(f, Ty::Ptr(..)) || f == s(Scalar::Ulong) || f == s(Scalar::Long);
-                    if !matches!(to, Ty::Ptr(..)) || !from_ok {
+                    let ok = if to == Ty::ThreadgroupAtomicUintPtr {
+                        matches!(&f, Ty::Ptr(Space::Threadgroup, inner) if **inner == UINT)
+                    } else {
+                        matches!(to, Ty::Ptr(..)) && from_ok
+                    };
+                    if !ok {
                         return reject("reinterpret_cast");
                     }
                     self.stat("call:reinterpret_cast")?;
@@ -2308,6 +2317,24 @@ impl<'a> Parser<'a> {
             if mat_name(name).is_some() {
                 return reject("matrix-ctor");
             }
+            // The vote object has an explicit conversion to the unsigned 64-bit mask.
+            if name == "ulong" && p.peek_at(1)? == "simd_ballot"
+                && p.peek_at(2)? == "(" && !p.funcs.contains_key("simd_ballot")
+            {
+                p.expect("(")?;
+                p.expect("simd_ballot")?;
+                let args = p.args()?;
+                p.expect(")")?;
+                if args.len() != 1 || args[0].ty.strip() != BOOL {
+                    return reject("simd-ballot-form");
+                }
+                p.stat("call:simd_ballot")?;
+                return bx(Expr {
+                    kind: ExprKind::Call { callee: Callee::Builtin("simd_ballot".into()), args },
+                    ty: s(Scalar::Ulong),
+                    span: p.span_from(start),
+                });
+            }
             let (_, b, w) = vec_name(name).expect("constructor name is a vector or scalar type");
             let w = w.unwrap_or(1);
             let args = p.args()?;
@@ -2367,6 +2394,26 @@ impl<'a> Parser<'a> {
             ty,
             span: p.span_from(start),
         };
+        if matches!(name, "atomic_fetch_add_explicit" | "atomic_fetch_min_explicit" | "atomic_fetch_max_explicit")
+            && !self.funcs.contains_key(name)
+        {
+            self.expect("(")?;
+            let ptr = self.expr_assign()?;
+            self.expect(",")?;
+            let val = self.expr_assign()?;
+            self.expect(",")?;
+            if ptr.ty.strip() != Ty::ThreadgroupAtomicUintPtr {
+                self.expr_assign()?;
+                self.expect(")")?;
+                return reject(format!("call:{name}"));
+            }
+            self.expect("memory_order_relaxed")?;
+            self.expect(")")?;
+            if val.ty.strip() != UINT {
+                return reject("threadgroup-atomic-form");
+            }
+            return bx(mk(self, Callee::Builtin(name.into()), vec![*ptr, *val], UINT));
+        }
         if name == "threadgroup_barrier" && !self.funcs.contains_key(name) {
             self.expect("(")?;
             self.expect("mem_flags")?;
