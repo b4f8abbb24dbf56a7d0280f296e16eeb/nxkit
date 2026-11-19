@@ -43,7 +43,8 @@ pub struct ConstArray {
     pub name: Rc<str>,
     /// The array type.
     pub ty: Type,
-    /// Element values (scalars or vectors of literals), converted to the element type.
+    /// Explicit element values converted to the element type.
+    /// The scalar elements after this prefix are zero-initialised.
     pub init: Vec<Expr>,
 }
 

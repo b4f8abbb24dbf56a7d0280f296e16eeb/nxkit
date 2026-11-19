@@ -211,8 +211,18 @@ impl Cx {
                 let Type::Array(el, n) = &t else {
                     return Err(Error::invalid("const array type"));
                 };
-                if init.len() as u32 != *n {
-                    return Err(Error::unsupported("const-array:partial-init"));
+                if init.len() > *n as usize {
+                    return Err(Error::invalid("const-array:excess-init"));
+                }
+                if init.len() < *n as usize {
+                    if !matches!(el.as_ref(), Type::Scalar(_)) {
+                        return Err(Error::unsupported("const-array:partial-non-scalar"));
+                    }
+                    // A short declaration must not create an arbitrarily large GPU object.
+                    const MAX_PARTIAL_BYTES: u32 = 16 * 1024 * 1024;
+                    if *n > MAX_PARTIAL_BYTES / self.out.types.layout(el).size {
+                        return Err(Error::unsupported("const-array:partial-size"));
+                    }
                 }
                 let mut vals = Vec::with_capacity(init.len());
                 for e in init {

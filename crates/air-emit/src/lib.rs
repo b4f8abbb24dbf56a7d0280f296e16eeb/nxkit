@@ -401,7 +401,10 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         let at = llty(&cx.types, &c.ty, true);
         let al = cx.types.layout(&c.ty).align;
         let name = cx.const_names[k].clone();
-        let trailing = *n as usize - nonzero;
+        let extent = *n as usize;
+        let trailing = extent
+            .checked_sub(nonzero)
+            .ok_or_else(|| Error::invalid("const-array:excess-init"))?;
         if nonzero == 0 {
             let _ = writeln!(
                 const_globals,
@@ -418,6 +421,8 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
             cx.const_names[k] =
                 format!("bitcast ({st} addrspace(2)* {name} to {at} addrspace(2)*)");
         } else {
+            // Larger zero tails use the packed form above. Only pad a short tail here.
+            vals.resize(extent, ir::CVal::Zero);
             let items: Vec<String> = vals.iter().map(item).collect();
             let _ = writeln!(
                 const_globals,

@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 12;
+pub const FORMAT: u32 = 13;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -339,6 +339,69 @@ mod tests {
         let parsed = air_lib::parse(&lib).expect("metallib");
         assert_eq!(parsed.functions[0].name(), b"exchange");
         assert_eq!(parsed.functions[1].name(), b"separate");
+    }
+
+    #[test]
+    fn partial_scalar_arrays_match_explicit_zeroes() {
+        let target = Target::macos_for(27);
+        for (ty, len, prefix, zero) in [
+            ("uint", 4, &["9u", "0u"][..], "0u"),
+            ("float", 3, &["-0.0", "1.5"][..], "0.0"),
+            ("bool", 3, &["true"][..], "false"),
+            ("uint", 11, &["5u", "0u"][..], "0u"),
+            ("float", 3, &[][..], "0.0"),
+        ] {
+            let shader = |values: &[&str]| {
+                format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{len}] = {{{}}};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n",
+                values.join(", ")
+            )
+            };
+            let partial = shader(prefix);
+            let mut padded = prefix.to_vec();
+            padded.resize(len, zero);
+            let full = shader(&padded);
+            assert_eq!(
+                air_emit::compile_source(&partial, &target, "-").expect("partial AIR"),
+                air_emit::compile_source(&full, &target, "-").expect("explicit AIR"),
+                "{partial}"
+            );
+            let bc = compile(partial.as_bytes(), &target).expect("partial bitcode");
+            assert!(matches!(bc, Ir::Bitcode(_)), "{bc:?}");
+            assert_eq!(
+                bc,
+                compile(full.as_bytes(), &target).expect("explicit bitcode")
+            );
+            assert_eq!(
+                build_raw(partial.as_bytes(), &target).expect("partial metallib"),
+                build_raw(full.as_bytes(), &target).expect("explicit metallib")
+            );
+        }
+    }
+
+    #[test]
+    fn partial_const_array_rejects_unsupported_initializers() {
+        let target = Target::macos_for(27);
+        for (decl, reason) in [
+            (
+                "constant uint values[1] = {1u, 2u};",
+                "const-array:excess-init",
+            ),
+            (
+                "constant uint2 values[2] = {uint2(1u)};",
+                "const-array:partial-non-scalar",
+            ),
+            (
+                "constant ulong values[4294967295] = {};",
+                "const-array:partial-size",
+            ),
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
+            let error = air_emit::compile_source(&source, &target, "-").unwrap_err();
+            assert!(error.key().contains(reason), "{error:?}");
+        }
     }
 
     #[test]
