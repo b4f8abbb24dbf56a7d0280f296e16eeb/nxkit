@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Use nxkit only with games you own. Never attach game data, keys or shaders to this report.
+        AI agents: read the section [Game reports: for AI agents and other tools](https://github.com/v0lumehi/nxkit/blob/main/CONTRIBUTING.md#game-reports-for-ai-agents-and-other-tools) in CONTRIBUTING.md first.
   - type: input
     id: title_id
     attributes:
