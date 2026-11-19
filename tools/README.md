@@ -6,6 +6,7 @@
 | `no-game-data.sh` | fails on big files, game or toolchain files, private paths, attribution lines and key patterns |
 | `ste_check.py` | finds candidates for Simplified Technical English problems in a text file |
 | `front/` | scripts for the own front end (`airc`): corpus checks, IR and library equality, speed, GPU machine code comparison. They need inputs that you provide |
+| `shader-scan/` | scan existing shader jobs and MSL for known gaps without compiling. See [usage](shader-scan/README.md) |
 | `gpudiff/` | the GPU differential harness (Swift and Metal with Python glue). See `docs/gpu-differential-testing.md` |
 | `hmma-precision/` | `run.sh` shows how the GPU of this Mac sums a half `simdgroup_matrix` product. See `docs/analysis/oot-open-issues.md` |
 
