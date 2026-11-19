@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 15;
+pub const FORMAT: u32 = 16;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -471,6 +471,54 @@ mod tests {
             let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
             let error = air_emit::compile_source(&source, &target, "-").unwrap_err();
             assert!(error.key().contains(reason), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn direct_list_constant_arrays_match_copy_list_initializers() {
+        let target = Target::macos_for(27);
+        for (ty, bound, list) in [
+            ("uint", "4", "1u"),
+            ("uint", "", "1u, 2u,"),
+            ("float3", "3", "float3(-0.0, 1.0, 0.0)"),
+        ] {
+            let shader = |equals: &str| {
+                format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{bound}]{equals}{{{list}}};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n"
+            )
+            };
+            let direct = shader("");
+            let copy = shader(" = ");
+            assert_eq!(
+                air_emit::compile_source(&direct, &target, "-").expect("direct AIR"),
+                air_emit::compile_source(&copy, &target, "-").expect("copy AIR")
+            );
+            let bc = compile(direct.as_bytes(), &target).expect("direct bitcode");
+            assert!(matches!(bc, Ir::Bitcode(_)));
+            assert_eq!(bc, compile(copy.as_bytes(), &target).expect("copy bitcode"));
+            assert_eq!(
+                build_raw(direct.as_bytes(), &target).expect("direct metallib"),
+                build_raw(copy.as_bytes(), &target).expect("copy metallib")
+            );
+        }
+    }
+
+    #[test]
+    fn direct_lists_do_not_admit_unrelated_constants_or_invalid_arrays() {
+        let target = Target::macos_for(27);
+        for decl in [
+            "constant uint value{1u};",
+            "constant uint values[2][2]{};",
+            "constant uint values[2]{1u 2u};",
+            "constant uint values[]{ };",
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
+            assert!(
+                air_emit::compile_source(&source, &target, "-").is_err(),
+                "{decl}"
+            );
         }
     }
 

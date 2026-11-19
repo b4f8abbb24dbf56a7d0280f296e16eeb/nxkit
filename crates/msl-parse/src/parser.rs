@@ -777,8 +777,15 @@ impl<'a> Parser<'a> {
             } else {
                 self.array_suffix(ty)?
             };
-            self.expect("=")?;
-            let init = self.init_list(inferred)?;
+            let direct = !self.accept("=")?;
+            if direct
+                && !inferred
+                && !matches!(&ty, Ty::Array { elem, .. }
+                    if matches!(elem.as_ref(), Ty::Scalar(_) | Ty::Vec { packed: false, .. }))
+            {
+                return reject("const-array:direct-element-type");
+            }
+            let init = self.init_list(inferred, direct)?;
             self.expect(";")?;
             let ty = if inferred {
                 if init.is_empty() {
@@ -970,19 +977,33 @@ impl<'a> Parser<'a> {
             let toks = &p.toks[p.i..end];
             let has_init = toks.iter().any(|t| t.text == "[[" || t.text == "=");
             let has_body = (p.i..end).any(|j| p.toks[j].text == "{" && p.toks[j - 1].text == ")");
-            Ok(has_init && !has_body)
+            // A direct-list array has a closing bound immediately before its
+            // first brace, without an intervening function declarator.
+            let direct_array = toks
+                .iter()
+                .position(|t| t.text == "{")
+                .and_then(|i| toks.get(..i))
+                .is_some_and(|head| {
+                    head.last().is_some_and(|t| t.text == "]")
+                        && !head.iter().any(|t| matches!(t.text, "(" | "[["))
+                });
+            Ok((has_init || direct_array) && !has_body)
         })
     }
 
-    /// An initializer list. Inferred arrays require commas between elements.
-    fn init_list(&mut self, require_comma: bool) -> PResult<Vec<Expr>> {
+    /// An initializer list. Inferred and direct-list arrays require commas.
+    fn init_list(&mut self, inferred: bool, direct: bool) -> PResult<Vec<Expr>> {
         self.frame(|p| {
             p.expect("{")?;
             let mut out = Vec::new();
             while !p.accept("}")? {
                 out.push(*p.expr_assign()?);
-                if !p.accept(",")? && require_comma && p.peek()? != "}" {
-                    return reject("const-array:unsized-missing-comma");
+                if !p.accept(",")? && (inferred || direct) && p.peek()? != "}" {
+                    return reject(if inferred {
+                        "const-array:unsized-missing-comma"
+                    } else {
+                        "const-array:direct-missing-comma"
+                    });
                 }
             }
             Ok(out)
