@@ -506,6 +506,22 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
     // globals
     let mut globals = String::new();
     globals.push_str(&const_globals);
+    for (fid, f) in m.funcs.iter().enumerate() {
+        for (lid, local) in f
+            .locals
+            .iter()
+            .enumerate()
+            .filter(|(_, local)| local.threadgroup)
+        {
+            let name = threadgroup_name(&cx.types, f, fid, lid);
+            let ty = llty(&cx.types, &local.ty, true);
+            let align = cx.types.layout(&local.ty).align;
+            let _ = writeln!(
+                globals,
+                "{name} = internal addrspace(3) global {ty} undef, align {align}"
+            );
+        }
+    }
     let mut fc_md = Vec::new();
     for (k, f) in m.fconsts.iter().enumerate() {
         let (shadow, init) = cx.fconst_names[k].clone();
@@ -914,6 +930,13 @@ fn emit_deferred(
         }
         Deferred::Pending => Ok(()),
     }
+}
+
+fn threadgroup_name(types: &Types, f: &msl_sema::hir::Func, fid: usize, lid: usize) -> String {
+    mangle::threadgroup_local(f, types, &f.locals[lid].name).map_or_else(
+        || format!("@__nxkit.tg.{fid}.{lid}"),
+        |name| format!("@{name}"),
+    )
 }
 
 /// Emits one function definition.

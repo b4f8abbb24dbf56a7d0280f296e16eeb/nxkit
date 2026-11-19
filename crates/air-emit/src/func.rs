@@ -159,8 +159,12 @@ impl<'a> FnGen<'a> {
             let r = f.ret.clone();
             g.ret_slot = Some(g.alloca(&r));
         }
-        for l in &f.locals {
-            let p = g.alloca(&l.ty.clone());
+        for (lid, l) in f.locals.iter().enumerate() {
+            let p = if l.threadgroup {
+                crate::threadgroup_name(&g.cx.types, f, g.cx.cur_fid, lid)
+            } else {
+                g.alloca(&l.ty.clone())
+            };
             g.locals.push(p);
         }
         g
@@ -831,7 +835,7 @@ impl<'a> FnGen<'a> {
             PlaceKind::Local(id) => Addr {
                 ptr: self.locals[*id].clone(),
                 ty: p.ty.clone(),
-                space: 0,
+                space: space_num(p.space),
             },
             PlaceKind::Const(id) => Addr {
                 ptr: self.cx.const_names[*id].clone(),
@@ -900,8 +904,15 @@ impl<'a> FnGen<'a> {
                 let at = self.mt(&b.ty);
                 let r = self.tmp();
                 let sp = space_suffix(b.space);
+                // A dynamic index of static threadgroup storage is not marked inbounds under -fwrapv.
+                let flags =
+                    if b.space == space_num(Space::Threadgroup) && i64v.parse::<i64>().is_err() {
+                        ""
+                    } else {
+                        " inbounds"
+                    };
                 self.emit(format!(
-                    "{r} = getelementptr inbounds {at}, {at}{sp}* {}, i64 0, i64 {i64v}",
+                    "{r} = getelementptr{flags} {at}, {at}{sp}* {}, i64 0, i64 {i64v}",
                     b.ptr
                 ));
                 let es = self.cx.types.layout(&p.ty).size;
@@ -1614,6 +1625,9 @@ impl<'a> FnGen<'a> {
             }
             ExprKind::PtrCast(x) | ExprKind::TexCast(x) => {
                 let v = self.expr(x)?;
+                if matches!((&v.ty, &ty), (Type::Ptr(from, _), Type::Ptr(to, _)) if from != to) {
+                    return Err(Error::unsupported("pointer-cast-address-space"));
+                }
                 let r = self.tmp();
                 let op = if matches!(v.ty, Type::Scalar(_)) {
                     "inttoptr"
@@ -1820,8 +1834,14 @@ impl<'a> FnGen<'a> {
                 let et = self.mt(inner);
                 let ss = space_suffix(space_num(*sp));
                 let r = self.tmp();
+                // Device pointer arithmetic follows the wrapping convention used by the Apple reference.
+                let flags = if *sp == Space::Device {
+                    ""
+                } else {
+                    " inbounds"
+                };
                 self.emit(format!(
-                    "{r} = getelementptr inbounds {et}, {et}{ss}* {}, i64 {i}",
+                    "{r} = getelementptr{flags} {et}, {et}{ss}* {}, i64 {i}",
                     pv.r
                 ));
                 Ok(V { r, ty })
