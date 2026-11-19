@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 16;
+pub const FORMAT: u32 = 17;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -518,6 +518,54 @@ mod tests {
             assert!(
                 air_emit::compile_source(&source, &target, "-").is_err(),
                 "{decl}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsigned_binary_masks_match_hex_and_decimal_masks() {
+        let target = Target::macos_for(27);
+        let binary = "#include <metal_stdlib>\nusing namespace metal;\n\
+            constant uint masks[2] = {0B101010U, 0b10000000000000000000000000000000u};\n\
+            kernel void k(device uint* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {\n\
+                out[i] = masks[i & 0b1u] ^ (i & 0B00101u);\n\
+            }\n";
+        let reference = binary
+            .replace("0B101010U", "0x2au")
+            .replace("0b10000000000000000000000000000000u", "0x80000000u")
+            .replace("0b1u", "1u")
+            .replace("0B00101u", "5u");
+        assert_eq!(
+            air_emit::compile_source(binary, &target, "-").expect("binary AIR"),
+            air_emit::compile_source(&reference, &target, "-").expect("reference AIR")
+        );
+        let bc = compile(binary.as_bytes(), &target).expect("binary bitcode");
+        assert!(matches!(bc, Ir::Bitcode(_)));
+        assert_eq!(
+            bc,
+            compile(reference.as_bytes(), &target).expect("reference bitcode")
+        );
+        assert_eq!(
+            build_raw(binary.as_bytes(), &target).expect("binary metallib"),
+            build_raw(reference.as_bytes(), &target).expect("reference metallib")
+        );
+    }
+
+    #[test]
+    fn binary_literals_reject_unsupported_suffix_and_extent() {
+        let target = Target::macos_for(27);
+        for literal in [
+            "0b",
+            "0b102u",
+            "0b1u2u",
+            "0b11",
+            "0b11ul",
+            "0b100000000000000000000000000000000u",
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\nconstant uint a[2] = {{{literal}}};\n");
+            assert!(
+                air_emit::compile_source(&source, &target, "-").is_err(),
+                "{literal}"
             );
         }
     }

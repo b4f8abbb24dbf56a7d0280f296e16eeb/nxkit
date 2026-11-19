@@ -2134,9 +2134,20 @@ impl<'a> Parser<'a> {
         if k == TokKind::Num {
             self.next()?;
             self.stat("lit")?;
-            let ty = self.literal_type(v)?;
+            let (ty, value) =
+                if let Some(binary) = v.strip_prefix("0b").or_else(|| v.strip_prefix("0B")) {
+                    let Some(digits) = binary.strip_suffix(['u', 'U']) else {
+                        return reject("binary-literal:requires-unsigned-suffix");
+                    };
+                    let Ok(value) = u32::from_str_radix(digits, 2) else {
+                        return reject("binary-literal:out-of-range");
+                    };
+                    (UINT, format!("{value}u").into())
+                } else {
+                    (self.literal_type(v)?, v.into())
+                };
             return bx(Expr {
-                kind: ExprKind::Literal(v.into()),
+                kind: ExprKind::Literal(value),
                 ty,
                 span: self.span_from(start),
             });
