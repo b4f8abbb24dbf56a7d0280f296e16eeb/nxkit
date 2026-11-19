@@ -483,7 +483,11 @@ fn tessellation_replay_walk_and_readback() {
         .unwrap();
         if let Some(enc) = &gpu.enc {
             let settled = enc.settle();
-            assert!(settled.error.is_none(), "encoder failed: {:?}", settled.error);
+            assert!(
+                settled.error.is_none(),
+                "encoder failed: {:?}",
+                settled.error
+            );
             if let Some(update) = settled.update {
                 update.apply(table);
             }
@@ -502,6 +506,12 @@ fn tessellation_replay_walk_and_readback() {
             .expect("no encoder report");
         assert_eq!(stats.skipped_total(), 0, "case {number}: {stats:?}");
         assert_eq!(stats.draws, 1, "case {number}: {stats:?}");
+        // The guest draw counter includes an intentionally culled patch. Capture does not.
+        assert_eq!(
+            stats.kinds.metal_draws,
+            u32::from(factor != 0.0),
+            "case {number}: unexpectedly missing or extra capture: {stats:?}"
+        );
         let walk = locked(&gpu.test_walk_counters)
             .take()
             .expect("no walker report");
@@ -519,10 +529,29 @@ fn tessellation_replay_walk_and_readback() {
             .debug_read(&ctx, &[[10, 40], [42, 40], [30, 10]])
             .expect("Metal texture readback failed");
         assert_eq!(got.len(), 3, "missing selected pixels for case {number}");
-        for (pixel, want) in got.iter().zip([left, right, [0; 4]]) {
-            assert!(
-                pixel.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1),
-                "case {number}: pixel {pixel:?}, expected {want:?}"
+        let want = [left, right, [0; 4]];
+        if !got
+            .iter()
+            .zip(want)
+            .all(|(pixel, want)| pixel.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1))
+        {
+            // Sparse coverage separates an empty target from geometry outside the selected pixels.
+            let probes: Vec<_> = (2..64)
+                .step_by(4)
+                .flat_map(|y| (2..64).step_by(4).map(move |x| [x, y]))
+                .collect();
+            let coverage = output.debug_read(&ctx, &probes).map(|pixels| {
+                probes
+                    .iter()
+                    .zip(pixels)
+                    .filter(|(_, pixel)| *pixel != [0; 4])
+                    .map(|(point, pixel)| (*point, pixel))
+                    .collect::<Vec<_>>()
+            });
+            panic!(
+                "case {number}: got {got:?}, expected {want:?}; \
+                 sampled coverage {coverage:?}; attachments {:?}",
+                plan.attachments
             );
         }
         front.begin_frame();
