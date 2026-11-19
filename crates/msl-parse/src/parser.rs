@@ -1027,7 +1027,11 @@ impl<'a> Parser<'a> {
         self.frame(|p| p.type_body(false, false).map(|(ty, _)| ty))
     }
 
-    fn type_body(&mut self, helper_param: bool, kernel_local: bool) -> PResult<(Ty, Option<Space>)> {
+    fn type_body(
+        &mut self,
+        helper_param: bool,
+        kernel_local: bool,
+    ) -> PResult<(Ty, Option<Space>)> {
         let mut space: Option<Space> = None;
         self.last_const = false;
         loop {
@@ -1479,7 +1483,11 @@ impl<'a> Parser<'a> {
                 }
             }
             p.expect(";")?;
-            Ok(Decl { ty, vars, threadgroup })
+            Ok(Decl {
+                ty,
+                vars,
+                threadgroup,
+            })
         })
     }
 
@@ -2318,8 +2326,10 @@ impl<'a> Parser<'a> {
                 return reject("matrix-ctor");
             }
             // The vote object has an explicit conversion to the unsigned 64-bit mask.
-            if name == "ulong" && p.peek_at(1)? == "simd_ballot"
-                && p.peek_at(2)? == "(" && !p.funcs.contains_key("simd_ballot")
+            if name == "ulong"
+                && p.peek_at(1)? == "simd_ballot"
+                && p.peek_at(2)? == "("
+                && !p.funcs.contains_key("simd_ballot")
             {
                 p.expect("(")?;
                 p.expect("simd_ballot")?;
@@ -2330,7 +2340,10 @@ impl<'a> Parser<'a> {
                 }
                 p.stat("call:simd_ballot")?;
                 return bx(Expr {
-                    kind: ExprKind::Call { callee: Callee::Builtin("simd_ballot".into()), args },
+                    kind: ExprKind::Call {
+                        callee: Callee::Builtin("simd_ballot".into()),
+                        args,
+                    },
                     ty: s(Scalar::Ulong),
                     span: p.span_from(start),
                 });
@@ -2394,8 +2407,10 @@ impl<'a> Parser<'a> {
             ty,
             span: p.span_from(start),
         };
-        if matches!(name, "atomic_fetch_add_explicit" | "atomic_fetch_min_explicit" | "atomic_fetch_max_explicit")
-            && !self.funcs.contains_key(name)
+        if matches!(
+            name,
+            "atomic_fetch_add_explicit" | "atomic_fetch_min_explicit" | "atomic_fetch_max_explicit"
+        ) && !self.funcs.contains_key(name)
         {
             self.expect("(")?;
             let ptr = self.expr_assign()?;
@@ -2412,7 +2427,12 @@ impl<'a> Parser<'a> {
             if val.ty.strip() != UINT {
                 return reject("threadgroup-atomic-form");
             }
-            return bx(mk(self, Callee::Builtin(name.into()), vec![*ptr, *val], UINT));
+            return bx(mk(
+                self,
+                Callee::Builtin(name.into()),
+                vec![*ptr, *val],
+                UINT,
+            ));
         }
         if name == "threadgroup_barrier" && !self.funcs.contains_key(name) {
             self.expect("(")?;
@@ -2654,10 +2674,13 @@ impl<'a> Parser<'a> {
     /// `passes(x, p)`: may an argument of type `x` bind to a parameter of type `p`?
     fn passes(&mut self, x: &Ty, p: &Ty) -> PResult<bool> {
         self.frame(|_| {
-            let x = x.strip();
-            if let Ty::Ref(_, inner) = p {
-                return Ok(x == **inner);
+            if let Ty::Ref(space, inner) = p {
+                if matches!(inner.as_ref(), Ty::Array { .. }) {
+                    return Ok(matches!(x, Ty::Ref(src, ty) if src == space && ty == inner));
+                }
+                return Ok(x.strip() == **inner);
             }
+            let x = x.strip();
             if x == *p {
                 return Ok(true);
             }

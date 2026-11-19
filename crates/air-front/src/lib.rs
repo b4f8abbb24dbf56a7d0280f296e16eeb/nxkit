@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 10;
+pub const FORMAT: u32 = 11;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -305,15 +305,26 @@ mod tests {
                 threadgroup uint values[4]; values[lane] = lane; out[lane] = values[lane];\n\
             }\n";
         let target = Target::macos_for(26);
-        let ir = air_emit::compile_source(std::str::from_utf8(msl).unwrap(), &target, "-").expect("AIR");
-        assert_eq!(ir.matches("internal addrspace(3) global [4 x i32] undef, align 4").count(), 2);
+        let ir =
+            air_emit::compile_source(std::str::from_utf8(msl).unwrap(), &target, "-").expect("AIR");
+        assert_eq!(
+            ir.matches("internal addrspace(3) global [4 x i32] undef, align 4")
+                .count(),
+            2
+        );
         assert!(ir.contains("[4 x i32] addrspace(3)*"), "{ir}");
-        assert!(ir.contains("call void @air.wg.barrier(i32 2, i32 5, i32 1)"), "{ir}");
+        assert!(
+            ir.contains("call void @air.wg.barrier(i32 2, i32 5, i32 1)"),
+            "{ir}"
+        );
         let module = air_bc::parse::parse(&ir).expect("AIR module");
         let split = air_bc::split::split(&module).expect("entry split");
         assert_eq!(split.len(), 2);
         for entry in &split {
-            assert_eq!(entry.module.globals.iter().filter(|g| g.space == 3).count(), 1);
+            assert_eq!(
+                entry.module.globals.iter().filter(|g| g.space == 3).count(),
+                1
+            );
         }
         let lib = build_raw(msl, &target).expect("raw library");
         let parsed = air_lib::parse(&lib).expect("metallib");

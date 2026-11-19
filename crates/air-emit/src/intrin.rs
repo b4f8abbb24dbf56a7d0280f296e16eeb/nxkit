@@ -170,7 +170,14 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
         }
         "simd_ballot" => {
             let a = ops(g, &args);
-            let r = call(g, "air.simd_ballot.i64", &a, "i64", Attrs::Convergent, false);
+            let r = call(
+                g,
+                "air.simd_ballot.i64",
+                &a,
+                "i64",
+                Attrs::Convergent,
+                false,
+            );
             Ok(V { r, ty: ret.clone() })
         }
         "simd_any" | "simd_all" => {

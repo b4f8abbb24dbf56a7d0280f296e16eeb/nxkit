@@ -126,28 +126,73 @@ fn simd_builtins_need_the_right_types() {
 
 #[test]
 fn ballot_mask_is_a_convergent_64_bit_vote() {
-    let ir = emit("kernel void k(device ulong* out [[buffer(0)]], uint lane [[thread_index_in_simdgroup]]) {
+    let ir = emit(
+        "kernel void k(device ulong* out [[buffer(0)]], uint lane [[thread_index_in_simdgroup]]) {
         out[lane] = ulong(simd_ballot((lane & 1u) != 0u));
-    }");
+    }",
+    );
     has(&ir, "call i64 @air.simd_ballot.i64(i1 ");
     has(&ir, "declare i64 @air.simd_ballot.i64(i1) #12");
     has(&ir, "attributes #12 = { convergent nounwind willreturn }");
 }
 
 #[test]
+fn ballot_mask_can_be_read_as_two_words() {
+    let ir = emit(
+        "kernel void k(device uint* out [[buffer(0)]], uint lane [[thread_index_in_simdgroup]]) {
+        ulong mask = ulong(simd_ballot(lane == 0u));
+        out[0] = uint(mask & 0xfffffffful);
+        out[1] = uint(mask >> 32u);
+    }",
+    );
+    has(&ir, "call i64 @air.simd_ballot.i64(i1 ");
+    assert_eq!(ir.matches("trunc i64").count(), 2, "{ir}");
+    has(&ir, "lshr i64");
+    has(&ir, "zext i32 32 to i64");
+}
+
+#[test]
 fn relaxed_threadgroup_word_operations_use_local_scope() {
-    let ir = emit("kernel void k(device uint* out [[buffer(0)]]) {
+    let ir = emit(
+        "kernel void k(device uint* out [[buffer(0)]]) {
         threadgroup uint words[1];
+        words[0] = 0x80000000u;
         threadgroup atomic_uint* w = reinterpret_cast<threadgroup atomic_uint*>(&words[0]);
         out[0] = atomic_fetch_add_explicit(w, 2u, memory_order_relaxed);
         out[1] = atomic_fetch_min_explicit(w, 3u, memory_order_relaxed);
-        out[2] = atomic_fetch_max_explicit(w, 4u, memory_order_relaxed);
-    }");
+        out[2] = atomic_fetch_max_explicit(w, 0x80000001u, memory_order_relaxed);
+    }",
+    );
     for op in ["add", "min", "max"] {
         let call = format!("call i32 @air.atomic.local.{op}.u.i32(i32 addrspace(3)* nocapture ");
-        let line = ir.lines().find(|line| line.contains(&call)).expect("atomic call");
+        let line = ir
+            .lines()
+            .find(|line| line.contains(&call))
+            .expect("atomic call");
         has(line, ", i32 0, i32 1, i32 0, i1 false)");
     }
+}
+
+#[test]
+fn threadgroup_barrier_checks_the_reaching_entry_stage() {
+    let barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);";
+    let helpers = format!("static void sync() {{ {barrier} }} static void relay() {{ sync(); }}");
+    let vertex = |call| {
+        format!(
+            "{helpers} struct O {{ float4 p [[position]]; }}; \
+             vertex O v(uint i [[vertex_id]]) {{ {call} O o; o.p = float4(float(i)); return o; }}"
+        )
+    };
+    has(&emit(&vertex("")), "!air.vertex");
+    for call in [barrier, "relay();"] {
+        let source = format!("{PRE}{}", vertex(call));
+        let err = compile_source(&source, &Target::macos(), "t").unwrap_err();
+        has(&err.key(), "threadgroup-barrier:vertex");
+    }
+    let fragment = emit(&format!(
+        "{helpers} fragment float4 f() {{ relay(); return float4(1.0); }}"
+    ));
+    has(&fragment, "call void @air.wg.barrier");
 }
 
 #[test]

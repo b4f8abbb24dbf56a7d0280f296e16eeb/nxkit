@@ -56,7 +56,12 @@ fn address_space_value_without_array_reference_is_still_rejected() {
     for parameter in ["thread uint value", "threadgroup uint value"] {
         let src = format!("{PRE}static void write({parameter}) {{}}");
         let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
-        assert!(error.key().starts_with("unsupported:rejected:addrspace-value:"), "{error:?}");
+        assert!(
+            error
+                .key()
+                .starts_with("unsupported:rejected:addrspace-value:"),
+            "{error:?}"
+        );
     }
 }
 
@@ -67,7 +72,28 @@ fn private_array_cannot_bind_to_threadgroup_reference() {
          kernel void main0(device uint* out [[buffer(0)]]) {{ uint values[4]; out[0] = read_slot(values); }}"
     );
     let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
-    assert!(error.key().contains("threadgroup reference address space mismatch"), "{error:?}");
+    assert!(error.key().contains("overload-resolution"), "{error:?}");
+}
+
+#[test]
+fn array_reference_overload_follows_argument_address_space() {
+    let private = "static uint read_slot(thread uint (&a)[2]) { return a[0]; }";
+    let shared = "static uint read_slot(threadgroup uint (&a)[2]) { return a[1]; }";
+    for helpers in [[private, shared], [shared, private]] {
+        let ir = emit(&format!(
+            "{}\n{}\nkernel void k(device uint* out [[buffer(0)]]) {{ \
+             uint a[2]; threadgroup uint b[2]; a[0] = out[0]; b[1] = out[1]; \
+             out[0] = read_slot(a); out[1] = read_slot(b); }}",
+            helpers[0], helpers[1]
+        ));
+        let calls: Vec<_> = ir
+            .lines()
+            .filter(|l| l.contains("call i32 @") && l.contains("[2 x i32]"))
+            .collect();
+        assert_eq!(calls.len(), 2, "{ir}");
+        assert!(calls[0].contains("[2 x i32]*"), "{ir}");
+        assert!(calls[1].contains("[2 x i32] addrspace(3)*"), "{ir}");
+    }
 }
 
 #[test]
