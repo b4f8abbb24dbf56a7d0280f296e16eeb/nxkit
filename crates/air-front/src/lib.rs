@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 17;
+pub const FORMAT: u32 = 18;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -561,6 +561,51 @@ mod tests {
             "0b11",
             "0b11ul",
             "0b100000000000000000000000000000000u",
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\nconstant uint a[2] = {{{literal}}};\n");
+            assert!(
+                air_emit::compile_source(&source, &target, "-").is_err(),
+                "{literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn binary_digit_separators_match_unseparated_masks() {
+        let target = Target::macos_for(27);
+        let msl = "#include <metal_stdlib>\nusing namespace metal;\n\
+            constant uint masks[]{0B10'10U, 0b1111'1111'1111'1111'1111'1111'1111'1111u};\n\
+            kernel void k(device uint* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {\n\
+                out[i] = masks[i & 1u] ^ (i & 0b1'0'1u);\n\
+            }\n";
+        let reference = msl.replace('\'', "");
+        assert_eq!(
+            air_emit::compile_source(msl, &target, "-").expect("separated AIR"),
+            air_emit::compile_source(&reference, &target, "-").expect("unseparated AIR")
+        );
+        let bc = compile(msl.as_bytes(), &target).expect("separated bitcode");
+        assert!(matches!(bc, Ir::Bitcode(_)));
+        assert_eq!(
+            bc,
+            compile(reference.as_bytes(), &target).expect("unseparated bitcode")
+        );
+        assert_eq!(
+            build_raw(msl.as_bytes(), &target).expect("separated metallib"),
+            build_raw(reference.as_bytes(), &target).expect("unseparated metallib")
+        );
+    }
+
+    #[test]
+    fn binary_digit_separators_require_surrounding_binary_digits() {
+        let target = Target::macos_for(27);
+        for literal in [
+            "0b'1u",
+            "0b1''0u",
+            "0b1'u",
+            "0b1u'0",
+            "0b1'2u",
+            "0b1'0ul",
+            "0b1'00000000000000000000000000000000u",
         ] {
             let source = format!("#include <metal_stdlib>\nusing namespace metal;\nconstant uint a[2] = {{{literal}}};\n");
             assert!(

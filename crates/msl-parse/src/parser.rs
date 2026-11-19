@@ -73,6 +73,33 @@ fn py_int(s: &str) -> PResult<u128> {
     }))
 }
 
+/// Decode unsigned binary digits with optional C++ digit separators.
+fn binary_u32(digits: &str) -> PResult<u32> {
+    let bytes = digits.as_bytes();
+    if bytes.is_empty() {
+        return reject("binary-literal:out-of-range");
+    }
+    let mut value = 0u32;
+    let mut previous_digit = false;
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'0' | b'1' => {
+                let Some(next) = value.checked_mul(2) else {
+                    return reject("binary-literal:out-of-range");
+                };
+                value = next + u32::from(byte - b'0');
+                previous_digit = true;
+            }
+            b'\'' if previous_digit && matches!(bytes.get(i + 1), Some(b'0' | b'1')) => {
+                previous_digit = false;
+            }
+            b'\'' => return reject("binary-literal:separator-position"),
+            _ => return reject("binary-literal:out-of-range"),
+        }
+    }
+    Ok(value)
+}
+
 /// `int(n.rstrip('uU'))` as the canonical decimal text (no leading zeros).
 fn py_int_text(n: &str) -> PResult<Rc<str>> {
     let digits = n.trim_end_matches(['u', 'U']);
@@ -2139,9 +2166,7 @@ impl<'a> Parser<'a> {
                     let Some(digits) = binary.strip_suffix(['u', 'U']) else {
                         return reject("binary-literal:requires-unsigned-suffix");
                     };
-                    let Ok(value) = u32::from_str_radix(digits, 2) else {
-                        return reject("binary-literal:out-of-range");
-                    };
+                    let value = binary_u32(digits)?;
                     (UINT, format!("{value}u").into())
                 } else {
                     (self.literal_type(v)?, v.into())

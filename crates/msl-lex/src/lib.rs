@@ -214,10 +214,10 @@ pub fn lex_number(src: &str, i: usize) -> Option<usize> {
     }
     if byte(b, i) == b'0'
         && matches!(byte(b, i + 1), b'b' | b'B')
-        && matches!(byte(b, i + 2), b'0' | b'1')
+        && matches!(byte(b, i + 2), b'0' | b'1' | b'\'')
     {
         let mut j = i + 2;
-        while byte(b, j).is_ascii_alphanumeric() || matches!(byte(b, j), b'_' | b'.') {
+        while byte(b, j).is_ascii_alphanumeric() || matches!(byte(b, j), b'_' | b'.' | b'\'') {
             j += 1;
         }
         return Some(j);
@@ -575,6 +575,10 @@ mod tests {
         assert_eq!(texts("1.5.x"), ["1.5", ".", "x"]);
         assert_eq!(texts("0x10UL"), ["0x10UL"]);
         assert_eq!(texts("0b101u 0B10U 0b"), ["0b101u", "0B10U", "0", "b"]);
+        assert_eq!(
+            texts("0b10'10u 0B'1U 0b1u'"),
+            ["0b10'10u", "0B'1U", "0b1u'"]
+        );
     }
 
     #[test]
