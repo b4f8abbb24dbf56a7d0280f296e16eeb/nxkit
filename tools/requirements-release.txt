@@ -1,0 +1,2 @@
+# What tools/release-sign.py needs to sign SHA256SUMS (Ed25519). Only the release job and the tool test install it.
+cryptography==46.0.3

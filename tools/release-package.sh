@@ -29,6 +29,7 @@ for p in nxb nxkit-host; do
 done
 cp LICENSE THIRD_PARTY.md "dist/$name/"
 sum_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+# "format" in MANIFEST.json below changes only when the ZIP layout changes, because front ends check it.
 cat > "dist/$name/MANIFEST.json" <<MANIFEST
 {
   "format": 1,

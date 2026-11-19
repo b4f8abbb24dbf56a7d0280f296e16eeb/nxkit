@@ -1,0 +1,4 @@
+# The public half of the key that signs SHA256SUMS of each release (Ed25519, base64 of the 32 raw bytes), one line.
+# The private half is the repository secret NXKIT_SIGNING_KEY. Make both with `python3 -I tools/release-sign.py keygen`.
+# The maintainer fills the key line below. It is empty now, so the release job fails until then.
+

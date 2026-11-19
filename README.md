@@ -90,6 +90,20 @@ The programs are built with that deployment target, so an older macOS refuses to
 supported versions. The shaders and the pipeline archives come from the Metal tools of your own Xcode when `nxb build`
 runs, so you still need Xcode on the Mac that builds the app.
 
+## Verify a release
+
+Each release has `SHA256SUMS.sig`. It is a detached Ed25519 signature of the exact bytes of `SHA256SUMS`, in base64 on one line.
+The public key is in `release-signing.pub`. Download `SHA256SUMS` and `SHA256SUMS.sig` into one folder, then run:
+
+```sh
+python3 -m pip install -r tools/requirements-release.txt
+python3 -I tools/release-sign.py verify SHA256SUMS --pub release-signing.pub
+```
+
+Then check the ZIP against `SHA256SUMS` as shown above. Front ends that update nxkit by themselves do the same two checks.
+
+The `format` field of `MANIFEST.json` changes only when the layout of the ZIP changes, because front ends check it.
+
 ## Build a game
 
 ```sh

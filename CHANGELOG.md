@@ -4,6 +4,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- The release workflow signs `SHA256SUMS` with Ed25519 and uploads the detached signature `SHA256SUMS.sig` (base64 of the 64 raw bytes) with the other assets. The release fails when the repository secret `NXKIT_SIGNING_KEY` is missing or does not belong to the public key in `release-signing.pub`. `tools/release-sign.py` makes keys, signs and verifies. A front end installs a release only when the signature checks against its built-in public key.
+
 ## 0.10.2 - 2026-11-19
 
 ### Changed
