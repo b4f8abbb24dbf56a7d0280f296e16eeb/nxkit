@@ -80,6 +80,15 @@ pub fn run(opts: &Options) -> Result<()> {
     let placed = place::place(&game)?;
     let mem = placed.mem;
     let (layout, settings) = (mem.layout, placed.game.settings.clone());
+    // What the screen showed of the presents: the backend writes it, the NVN present and the refresh use it. The
+    // refresh plans the link for the screen: the pacing seam, the window and the tick hook share it (W26).
+    let screen = Arc::new(nxkit_nvn::screen::Screen::new(Some(
+        crate::frames::shown_to_step,
+    )));
+    let refresh = Arc::new(crate::refresh::Refresh::new(
+        crate::refresh::Request::from_settings(&settings, env),
+        screen.clone(),
+    ));
 
     // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
@@ -92,7 +101,7 @@ pub fn run(opts: &Options) -> Result<()> {
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
     seams::register_kernel()?;
     seams::register_server(mask)?;
-    seams::init_services(&placed.game, mask, env)?;
+    seams::init_services(&placed.game, mask, env, &refresh)?;
 
     let mut loaded = loader::load(placed, mask)?;
     eprintln!(
@@ -116,15 +125,15 @@ pub fn run(opts: &Options) -> Result<()> {
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
-    // What the screen showed of the presents: the backend writes it, the NVN present and the refresh use it (W26).
-    let screen = Arc::new(nxkit_nvn::screen::Screen::new(Some(
-        crate::frames::shown_to_step,
-    )));
-    crate::refresh::configure(
-        crate::refresh::Request::from_settings(&settings, env),
-        screen.clone(),
-    );
-    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings, &run, &screen)?;
+    let hooks = seams::frame_hooks(
+        &ctx,
+        &gpu_memory,
+        &opts.root,
+        &settings,
+        &run,
+        &screen,
+        &refresh,
+    )?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,
@@ -135,6 +144,7 @@ pub fn run(opts: &Options) -> Result<()> {
         &window,
         &ctx,
         hooks,
+        refresh,
         Arc::new(Events),
         stop::flag(),
         move || thread::start_main(boot, stack_top),

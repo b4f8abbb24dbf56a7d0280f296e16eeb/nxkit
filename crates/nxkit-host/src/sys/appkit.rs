@@ -28,7 +28,7 @@ use objc2_quartz_core::{CALayer, CAMetalLayer};
 
 use super::mouse;
 use crate::error::{HostError, Result};
-use crate::refresh::{self, ScreenFacts};
+use crate::refresh::{Refresh, ScreenFacts};
 
 /// What the window reports to the host. The calls come on the main thread.
 pub trait AppEvents: Send + Sync {
@@ -145,16 +145,20 @@ fn screen_facts(s: &NSScreen) -> ScreenFacts {
 /// that `NXKIT_SCREEN` names, else the main one. The link rate is the refresh rate of the current mode of that screen
 /// (`refresh.rs`), not its highest one: the game's own pacing picks the frames it renders, and the link ticks at a rate
 /// that holds each frame an exact number of ticks. On an adaptive screen with a variable frame step it is a range
-/// (variable refresh, `refresh::choose_presentation`).
-fn screen_interval(mtm: MainThreadMarker, window: Option<&NSWindow>) -> LinkRate {
+/// (variable refresh, `crate::refresh::choose_presentation`).
+fn screen_interval(
+    mtm: MainThreadMarker,
+    window: Option<&NSWindow>,
+    refresh: &Refresh,
+) -> LinkRate {
     match window
         .and_then(|w| w.screen())
         .or_else(|| target_screen(mtm))
     {
         Some(s) => {
-            let plan = refresh::apply(&screen_facts(&s));
+            let plan = refresh.apply(&screen_facts(&s));
             // On an adaptive screen with a variable frame step the link gets a range, not one rate.
-            match refresh::vrr_range() {
+            match refresh.vrr_range() {
                 Some(range) => LinkRate::Variable(range),
                 None => LinkRate::Fixed(FrameInterval::from_hz(plan.link_hz)),
             }
@@ -292,6 +296,7 @@ define_class!(
         window: OnceCell<Retained<NSWindow>>,
         view: OnceCell<Retained<NSView>>,
         link: OnceCell<Rc<DisplayLink>>,
+        refresh: OnceCell<Arc<Refresh>>,
     }
 
     // SAFETY: `NSObjectProtocol` has no extra requirements.
@@ -369,10 +374,12 @@ impl AppDelegate {
     /// The window moved to another screen, or the mode of a screen changed: read the refresh rate of the screen the
     /// window is on now, plan again and set the rate of the display link.
     fn replan(&self) {
-        let (Some(window), Some(link)) = (self.window().get(), self.link().get()) else {
+        let (Some(window), Some(link), Some(refresh)) =
+            (self.window().get(), self.link().get(), self.refresh().get())
+        else {
             return;
         };
-        let rate = screen_interval(MainThreadMarker::from(self), Some(window));
+        let rate = screen_interval(MainThreadMarker::from(self), Some(window), refresh);
         if link.rate_range() != rate.range() {
             link.set_rate(rate);
         }
@@ -420,6 +427,7 @@ pub fn run(
     cfg: &WindowConfig,
     ctx: &Context,
     hooks: Arc<dyn FrameHooks>,
+    refresh: Arc<Refresh>,
     events: Arc<dyn AppEvents>,
     stop: Arc<AtomicBool>,
     ready: impl FnOnce() -> Result<()>,
@@ -475,6 +483,7 @@ pub fn run(
         window: OnceCell::from(window.clone()),
         view: OnceCell::from(view.clone()),
         link: OnceCell::new(),
+        refresh: OnceCell::from(refresh.clone()),
     });
     // SAFETY: `init` of `NSObject` on a freshly allocated instance whose ivars are set.
     let delegate: Retained<AppDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -486,7 +495,7 @@ pub fn run(
     let link = Rc::new(DisplayLink::new(
         mtm,
         &presenter,
-        screen_interval(mtm, None),
+        screen_interval(mtm, None, &refresh),
         link_hooks,
     ));
     let _ = delegate.link().set(link);

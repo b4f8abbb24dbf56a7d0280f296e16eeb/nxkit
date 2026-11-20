@@ -1,13 +1,16 @@
 //! The refresh rate of the screen that shows the game, and what the display link does about it.
 //!
-//! `sys/appkit.rs` reads the facts of the screen the window is on and calls [`apply`] at the start, when the window
+//! `sys/appkit.rs` reads the facts of the screen the window is on and calls [`Refresh::apply`] at the start, when the window
 //! moves to another screen and when the display mode changes. `apply` finds the refresh rate of the current mode, plans
 //! the ticks of the link per game frame (`nxkit_svc_pacing::refresh`), tells the pacing service and the judder counters,
-//! and prints one line when anything changed. [`note_measured`] checks the plan against the real tick rate.
+//! and prints one line when anything changed. [`Refresh::note_measured`] checks the plan against the real tick rate.
 //! The design is in `docs/pacing.md`.
 
 use nxkit_svc_pacing::StepMode;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use nxkit_nvn::screen::Screen;
 
 use nxkit_metal::{RateRange, display};
 use nxkit_svc_pacing::refresh::{self, TickPlan};
@@ -118,79 +121,76 @@ struct State {
     tried: Vec<(u32, u32)>,
     /// The measured rates already reported, rounded to Hz.
     reported: u32,
-    /// What the screen showed of the presents: the refresh tells it the rate of the screen (W26).
-    screen: Option<std::sync::Arc<nxkit_nvn::screen::Screen>>,
 }
 
-static STATE: Mutex<State> = Mutex::new(State {
-    request: Request {
-        target_fps: 60,
-        free_rate: false,
-        set_refresh: None,
-        timed: None,
-        vrr: true,
-        vrr_floor: DEFAULT_VRR_FLOOR,
-    },
-    variable_target: None,
-    grid_step: None,
-    stepping_variable: None,
-    presentation: Presentation::Grid,
-    plan: None,
-    announced: String::new(),
-    tried: Vec::new(),
-    reported: 0,
-    screen: None,
-});
-
-/// The number of [`apply`] calls. The tick hook measures anew when it changes.
-static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// The number of plans made so far.
-pub fn generation() -> u64 {
-    GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+/// The refresh planning of one run. The host makes it once before the services start and passes it to the pacing seam,
+/// the window and the tick hook (W26).
+pub struct Refresh {
+    state: Mutex<State>,
+    /// The number of [`Refresh::apply`] calls. The tick hook measures anew when it changes.
+    generation: AtomicU64,
+    /// What the screen showed of the presents: the refresh tells it the rate of the screen.
+    screen: Arc<Screen>,
 }
 
-fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Sets what is asked for. The host calls it once before the window opens.
-pub fn configure(request: Request, screen: std::sync::Arc<nxkit_nvn::screen::Screen>) {
-    let mut st = state();
-    st.request = request;
-    st.screen = Some(screen);
-}
-
-/// Tells the module that the game asks to step by the measured frame time (`StepMode::Variable`) with this target, or
-/// does not. `grid_step` is the step it takes when the frames go on the fixed grid. The variable step only works when
-/// each frame shows as soon as it is ready: on the grid it left the load-driven pacer out, and Ocarina of Time ran at
-/// about 10 fps on a fixed 120 Hz screen (2026-11-09). So [`apply`] switches the pacing service to the variable step
-/// under variable refresh and to `grid_step` otherwise. The pacing seam calls it before the window opens.
-pub fn set_variable_step(target: Option<u32>, grid_step: StepMode) {
-    let mut st = state();
-    st.variable_target = target;
-    st.grid_step = Some(grid_step);
-    st.stepping_variable = None;
-}
-
-/// How frames reach the screen, from the latest [`apply`].
-pub fn presentation() -> Presentation {
-    state().presentation
-}
-
-/// The rate range of the display link under variable refresh, `None` for the fixed grid.
-pub fn vrr_range() -> Option<RateRange> {
-    match presentation() {
-        Presentation::Vrr(r) => Some(r),
-        Presentation::Grid => None,
+impl Refresh {
+    /// Plans for `request` and tells `screen` the rates.
+    pub fn new(request: Request, screen: Arc<Screen>) -> Self {
+        Refresh {
+            state: Mutex::new(State {
+                request,
+                variable_target: None,
+                grid_step: None,
+                stepping_variable: None,
+                presentation: Presentation::Grid,
+                plan: None,
+                announced: String::new(),
+                tried: Vec::new(),
+                reported: 0,
+            }),
+            generation: AtomicU64::new(0),
+            screen,
+        }
     }
-}
 
-/// The plan of the latest [`apply`].
-pub fn plan() -> Option<TickPlan> {
-    state().plan
+    /// The number of plans made so far.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
+    }
+
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Tells the module that the game asks to step by the measured frame time (`StepMode::Variable`) with this target, or
+    /// does not. `grid_step` is the step it takes when the frames go on the fixed grid. The variable step only works when
+    /// each frame shows as soon as it is ready: on the grid it left the load-driven pacer out, and Ocarina of Time ran at
+    /// about 10 fps on a fixed 120 Hz screen (2026-11-09). So [`Refresh::apply`] switches the pacing service to the variable step
+    /// under variable refresh and to `grid_step` otherwise. The pacing seam calls it before the window opens.
+    pub fn set_variable_step(&self, target: Option<u32>, grid_step: StepMode) {
+        let mut st = self.state();
+        st.variable_target = target;
+        st.grid_step = Some(grid_step);
+        st.stepping_variable = None;
+    }
+
+    /// How frames reach the screen, from the latest [`Refresh::apply`].
+    pub fn presentation(&self) -> Presentation {
+        self.state().presentation
+    }
+
+    /// The rate range of the display link under variable refresh, `None` for the fixed grid.
+    pub fn vrr_range(&self) -> Option<RateRange> {
+        match self.presentation() {
+            Presentation::Vrr(r) => Some(r),
+            Presentation::Grid => None,
+        }
+    }
+
+    /// The plan of the latest [`Refresh::apply`].
+    pub fn plan(&self) -> Option<TickPlan> {
+        self.state().plan
+    }
 }
 
 /// The refresh rate of the current mode of the screen, and where it came from.
@@ -208,123 +208,156 @@ fn refresh_of(facts: &ScreenFacts) -> (f64, &'static str) {
     )
 }
 
-/// Plans for `facts`. It switches the display when `NXKIT_SET_REFRESH` asks, tells the pacing service the rates, turns
-/// timed presents on or off and prints one line when the screen, the rate or the plan changed. Returns the plan.
-pub fn apply(facts: &ScreenFacts) -> TickPlan {
-    let mut st = state();
-    let st_screen = st.screen.clone();
-    let req = st.request;
-    let mut note = String::new();
-    if let (Some(want), Some(id)) = (req.set_refresh, facts.display)
-        && !facts.adaptive
-        && !st.tried.contains(&(id, want))
-    {
-        st.tried.push((id, want));
-        match display::switch_refresh(id, f64::from(want)) {
-            Ok(Some(sw)) => {
-                note = format!(
-                    "; switched the display from {:.2} Hz to {:.2} Hz, restored at exit",
-                    sw.from_hz, sw.to_hz
-                );
-                display::keep_active(sw);
+impl Refresh {
+    /// Plans for `facts`. It switches the display when `NXKIT_SET_REFRESH` asks, tells the pacing service the rates, turns
+    /// timed presents on or off and prints one line when the screen, the rate or the plan changed. Returns the plan.
+    pub fn apply(&self, facts: &ScreenFacts) -> TickPlan {
+        let mut st = self.state();
+        let req = st.request;
+        let mut note = String::new();
+        if let (Some(want), Some(id)) = (req.set_refresh, facts.display)
+            && !facts.adaptive
+            && !st.tried.contains(&(id, want))
+        {
+            st.tried.push((id, want));
+            match display::switch_refresh(id, f64::from(want)) {
+                Ok(Some(sw)) => {
+                    note = format!(
+                        "; switched the display from {:.2} Hz to {:.2} Hz, restored at exit",
+                        sw.from_hz, sw.to_hz
+                    );
+                    display::keep_active(sw);
+                }
+                Ok(None) => note = format!("; the display shows {want} Hz already"),
+                Err(e) => eprintln!("nxkit-host: NXKIT_SET_REFRESH={want}: {e}; the refresh stays"),
             }
-            Ok(None) => note = format!("; the display shows {want} Hz already"),
-            Err(e) => eprintln!("nxkit-host: NXKIT_SET_REFRESH={want}: {e}; the refresh stays"),
         }
+        let (hz, source) = refresh_of(facts);
+        let plan = refresh::plan_ticks(hz, req.target_fps, req.free_rate, facts.adaptive);
+        let presentation =
+            choose_presentation(&req, facts.adaptive, st.variable_target, facts.max_fps);
+        let vrr = match presentation {
+            Presentation::Vrr(r) => Some(r),
+            Presentation::Grid => None,
+        };
+        let fps = plan.fps as f32;
+        // The service takes the link rate and the vsync rate of the game, so that a frame step of N vsyncs holds N * ticks.
+        // Under variable refresh the link runs between the floor and the highest rate; the preferred rate stands for it.
+        let link_hz = vrr.map_or(plan.link_hz as f32, |r| r.preferred);
+        let _ = nxkit_svc_pacing::set_rates(
+            link_hz,
+            if plan.fps == req.target_fps {
+                VSYNC_HZ
+            } else {
+                fps
+            },
+        );
+        nxkit_svc_pacing::set_screen_hz(hz.round() as u32);
+        let refresh_hz = if let Some(r) = vrr {
+            f64::from(r.preferred)
+        } else if facts.adaptive {
+            f64::from(plan.link_hz)
+        } else {
+            hz
+        };
+        self.screen.set_refresh_hz(refresh_hz);
+        // The game's time follows the frames the display shows, not the starts of frames.
+        nxkit_svc_pacing::set_step_by_shown(vrr.is_some());
+        if let (Some(target), Some(grid)) = (st.variable_target, st.grid_step)
+            && st.stepping_variable != Some(vrr.is_some())
+        {
+            let mode = if vrr.is_some() {
+                StepMode::Variable(target)
+            } else {
+                grid
+            };
+            match nxkit_svc_pacing::set_step_mode(mode) {
+                Ok(()) => st.stepping_variable = Some(vrr.is_some()),
+                Err(e) => eprintln!("nxkit-host: the frame step stays: {e:?}"),
+            }
+        }
+        // Off unless asked for (NXKIT_TIMED_PRESENT=1): on a ProMotion screen a minimum duration per present let macOS
+        // lower the panel's rate, and a frame of 0.8 vsyncs of work waited about 3.8 vsyncs for the screen (Ocarina of
+        // Time, 2026-11-09). Without it each frame shows on the next tick of the link.
+        // Under variable refresh a frame shows as soon as it is ready, so a minimum duration would only hold it back.
+        let timed = req.timed.unwrap_or(false) && vrr.is_none();
+        nxkit_metal::set_timed_present(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
+        let mut hint = String::new();
+        if !plan.exact {
+            let choices = facts
+                .display
+                .map(display::refresh_choices)
+                .unwrap_or_default();
+            let near = display::even_choice(&choices, req.target_fps, hz);
+            let pick = near.map_or(plan.switch_to.map(f64::from), Some);
+            if let Some(p) = pick {
+                hint = format!(
+                    "; {hz:.0} Hz is not an even multiple of {} fps, so frames alternate between two lengths (judder): set NXKIT_SET_REFRESH={}",
+                    req.target_fps,
+                    p.round()
+                );
+            }
+        }
+        let line = format!(
+            "nxkit-host: screen \"{}\" refresh {hz:.2} Hz ({source}{}), link {} Hz, {} tick{} per {} fps frame{}{}{}{}{note}{hint}",
+            facts.name,
+            if facts.adaptive { ", adaptive" } else { "" },
+            link_text(vrr, plan.link_hz),
+            plan.ticks_per_frame,
+            if plan.ticks_per_frame == 1 { "" } else { "s" },
+            plan.fps,
+            if plan.exact { "" } else { " (uneven)" },
+            if timed { ", timed presents" } else { "" },
+            vrr_text(vrr),
+            if req.free_rate && plan.fps != req.target_fps {
+                ", free frame rate"
+            } else {
+                ""
+            },
+        );
+        if line != st.announced {
+            eprintln!("{line}");
+            st.announced = line;
+        }
+        st.plan = Some(plan);
+        st.presentation = presentation;
+        st.reported = 0;
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        plan
     }
-    let (hz, source) = refresh_of(facts);
-    let plan = refresh::plan_ticks(hz, req.target_fps, req.free_rate, facts.adaptive);
-    let presentation = choose_presentation(&req, facts.adaptive, st.variable_target, facts.max_fps);
-    let vrr = match presentation {
-        Presentation::Vrr(r) => Some(r),
-        Presentation::Grid => None,
-    };
-    let fps = plan.fps as f32;
-    // The service takes the link rate and the vsync rate of the game, so that a frame step of N vsyncs holds N * ticks.
-    // Under variable refresh the link runs between the floor and the highest rate; the preferred rate stands for it.
-    let link_hz = vrr.map_or(plan.link_hz as f32, |r| r.preferred);
-    let _ = nxkit_svc_pacing::set_rates(
-        link_hz,
-        if plan.fps == req.target_fps {
+
+    /// The link ticked at `measured_hz` over the last second while the plan asked for `plan.link_hz`. When they differ by
+    /// more than 4%, the service gets the measured rate, so that a hold counts the ticks that really come. Returns the rate
+    /// when it changed the service.
+    pub fn note_measured(&self, measured_hz: f64) -> Option<f64> {
+        let mut st = self.state();
+        let plan = st.plan?;
+        // Under variable refresh the tick rate follows the frames and is no fixed rate to check the plan against.
+        if matches!(st.presentation, Presentation::Vrr(_)) {
+            return None;
+        }
+        let rounded = measured_hz.round() as u32;
+        if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz))
+            || rounded == st.reported
+            || rounded == 0
+        {
+            return None;
+        }
+        st.reported = rounded;
+        let req = st.request;
+        let vsync = if plan.fps == req.target_fps {
             VSYNC_HZ
         } else {
-            fps
-        },
-    );
-    nxkit_svc_pacing::set_screen_hz(hz.round() as u32);
-    let refresh_hz = if let Some(r) = vrr {
-        f64::from(r.preferred)
-    } else if facts.adaptive {
-        f64::from(plan.link_hz)
-    } else {
-        hz
-    };
-    if let Some(screen) = &st_screen {
-        screen.set_refresh_hz(refresh_hz);
-    }
-    // The game's time follows the frames the display shows, not the starts of frames.
-    nxkit_svc_pacing::set_step_by_shown(vrr.is_some());
-    if let (Some(target), Some(grid)) = (st.variable_target, st.grid_step)
-        && st.stepping_variable != Some(vrr.is_some())
-    {
-        let mode = if vrr.is_some() {
-            StepMode::Variable(target)
-        } else {
-            grid
+            plan.fps as f32
         };
-        match nxkit_svc_pacing::set_step_mode(mode) {
-            Ok(()) => st.stepping_variable = Some(vrr.is_some()),
-            Err(e) => eprintln!("nxkit-host: the frame step stays: {e:?}"),
-        }
+        let _ = nxkit_svc_pacing::set_rates(rounded as f32, vsync);
+        eprintln!(
+            "nxkit-host: the display link ticks at {measured_hz:.1} Hz, not the {} Hz that was asked for, so a frame holds {:.1} ticks per vsync now",
+            plan.link_hz,
+            measured_hz / f64::from(vsync)
+        );
+        Some(measured_hz)
     }
-    // Off unless asked for (NXKIT_TIMED_PRESENT=1): on a ProMotion screen a minimum duration per present let macOS
-    // lower the panel's rate, and a frame of 0.8 vsyncs of work waited about 3.8 vsyncs for the screen (Ocarina of
-    // Time, 2026-11-09). Without it each frame shows on the next tick of the link.
-    // Under variable refresh a frame shows as soon as it is ready, so a minimum duration would only hold it back.
-    let timed = req.timed.unwrap_or(false) && vrr.is_none();
-    nxkit_metal::set_timed_present(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
-    let mut hint = String::new();
-    if !plan.exact {
-        let choices = facts
-            .display
-            .map(display::refresh_choices)
-            .unwrap_or_default();
-        let near = display::even_choice(&choices, req.target_fps, hz);
-        let pick = near.map_or(plan.switch_to.map(f64::from), Some);
-        if let Some(p) = pick {
-            hint = format!(
-                "; {hz:.0} Hz is not an even multiple of {} fps, so frames alternate between two lengths (judder): set NXKIT_SET_REFRESH={}",
-                req.target_fps,
-                p.round()
-            );
-        }
-    }
-    let line = format!(
-        "nxkit-host: screen \"{}\" refresh {hz:.2} Hz ({source}{}), link {} Hz, {} tick{} per {} fps frame{}{}{}{}{note}{hint}",
-        facts.name,
-        if facts.adaptive { ", adaptive" } else { "" },
-        link_text(vrr, plan.link_hz),
-        plan.ticks_per_frame,
-        if plan.ticks_per_frame == 1 { "" } else { "s" },
-        plan.fps,
-        if plan.exact { "" } else { " (uneven)" },
-        if timed { ", timed presents" } else { "" },
-        vrr_text(vrr),
-        if req.free_rate && plan.fps != req.target_fps {
-            ", free frame rate"
-        } else {
-            ""
-        },
-    );
-    if line != st.announced {
-        eprintln!("{line}");
-        st.announced = line;
-    }
-    st.plan = Some(plan);
-    st.presentation = presentation;
-    st.reported = 0;
-    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    plan
 }
 
 /// The link rate of the screen line: one rate on the grid, the range under variable refresh.
@@ -340,39 +373,6 @@ fn vrr_text(vrr: Option<RateRange>) -> String {
             r.min, r.max, r.preferred
         )
     })
-}
-
-/// The link ticked at `measured_hz` over the last second while the plan asked for `plan.link_hz`. When they differ by
-/// more than 4%, the service gets the measured rate, so that a hold counts the ticks that really come. Returns the rate
-/// when it changed the service.
-pub fn note_measured(measured_hz: f64) -> Option<f64> {
-    let mut st = state();
-    let plan = st.plan?;
-    // Under variable refresh the tick rate follows the frames and is no fixed rate to check the plan against.
-    if matches!(st.presentation, Presentation::Vrr(_)) {
-        return None;
-    }
-    let rounded = measured_hz.round() as u32;
-    if !refresh::rate_differs(measured_hz, f64::from(plan.link_hz))
-        || rounded == st.reported
-        || rounded == 0
-    {
-        return None;
-    }
-    st.reported = rounded;
-    let req = st.request;
-    let vsync = if plan.fps == req.target_fps {
-        VSYNC_HZ
-    } else {
-        plan.fps as f32
-    };
-    let _ = nxkit_svc_pacing::set_rates(rounded as f32, vsync);
-    eprintln!(
-        "nxkit-host: the display link ticks at {measured_hz:.1} Hz, not the {} Hz that was asked for, so a frame holds {:.1} ticks per vsync now",
-        plan.link_hz,
-        measured_hz / f64::from(vsync)
-    );
-    Some(measured_hz)
 }
 
 #[cfg(test)]

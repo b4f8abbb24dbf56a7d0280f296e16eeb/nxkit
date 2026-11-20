@@ -120,6 +120,8 @@ fn nvn_settings(settings: &Settings, run: &RunSettings, screen: &Arc<Screen>) ->
 /// pass the tick to the pacer. They also measure the real tick rate from the target times of the ticks.
 struct Ticks {
     pacer: Arc<Pacer>,
+    /// The refresh plan: whether frames show when ready, and the rate the link should tick at.
+    refresh: Arc<crate::refresh::Refresh>,
     /// The hold and the ticks per vsync that the pacer's source was made from.
     applied: Mutex<(u32, u32)>,
     rate: Mutex<RateTracker>,
@@ -132,8 +134,7 @@ impl FrameHooks for Ticks {
     fn display_tick(&self, tick: DisplayTick) {
         // Variable refresh (`refresh.rs`): the pacer shows a frame as soon as it is ready, on the drawable of the newest
         // tick, and ignores the hold below.
-        self.pacer
-            .set_immediate(crate::refresh::vrr_range().is_some());
+        self.pacer.set_immediate(self.refresh.vrr_range().is_some());
         nxkit_svc_input::tick();
         // `Err` means the pacing service is not initialised. The pacer then keeps the source of the plan.
         let _ = nxkit_svc_pacing::on_display_tick();
@@ -156,14 +157,14 @@ impl FrameHooks for Ticks {
         }
         let n = self.ticks.fetch_add(1, Ordering::Relaxed) + 1;
         let mut rate = self.rate.lock().unwrap_or_else(PoisonError::into_inner);
-        let generation = crate::refresh::generation();
+        let generation = self.refresh.generation();
         if self.seen.swap(generation, Ordering::Relaxed) != generation {
             rate.reset();
         }
         rate.tick(tick.target_presentation_timestamp);
         if n.is_multiple_of(60)
             && let Some(hz) = rate.hz()
-            && crate::refresh::note_measured(hz).is_some()
+            && self.refresh.note_measured(hz).is_some()
         {
             rate.reset();
         }
@@ -187,6 +188,7 @@ pub fn install(
     settings: &Settings,
     run: &RunSettings,
     screen: &Arc<Screen>,
+    refresh: &Arc<crate::refresh::Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
     let backend = GpuBackend::new(
@@ -216,6 +218,7 @@ pub fn install(
     backend.set_pacer(pacer.clone());
     Ok(Arc::new(Ticks {
         pacer,
+        refresh: refresh.clone(),
         applied: Mutex::new((0, 0)),
         rate: Mutex::new(RateTracker::new()),
         ticks: AtomicU64::new(0),

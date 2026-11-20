@@ -10,7 +10,7 @@ This page says how the host turns the refresh rate of the screen into the ticks 
 
 ## The refresh rate
 
-`refresh::apply` runs at the start, on `windowDidChangeScreen:` and on `applicationDidChangeScreenParameters:` (a mode change, a screen plugged or moved). It reads the screen the window is on now (`NSWindow.screen`), and before the window is on a screen, the screen of `NXKIT_SCREEN`, else the main one. The refresh rate is, in this order:
+`Refresh::apply` (`crates/nxkit-host/src/refresh.rs`, one object per run that the host owns) runs at the start, on `windowDidChangeScreen:` and on `applicationDidChangeScreenParameters:` (a mode change, a screen plugged or moved). It reads the screen the window is on now (`NSWindow.screen`), and before the window is on a screen, the screen of `NXKIT_SCREEN`, else the main one. The refresh rate is, in this order:
 
 1. The rate of the current CoreGraphics mode (`CGDisplayCopyDisplayMode`), found by the display id of the screen (`NSScreenNumber`).
 2. `maximumFramesPerSecond`, when the mode reports 0 (a screen that adapts its rate).

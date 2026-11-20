@@ -15,6 +15,7 @@ use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
 use crate::manifest::Game;
+use crate::refresh::Refresh;
 use crate::settings::Settings;
 use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
@@ -117,7 +118,7 @@ fn state_page(game: &Game) -> Option<u64> {
     main.base.checked_add(offset)
 }
 
-fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
+fn pacing_config(game: &Game, refresh: &Refresh) -> Result<nxkit_svc_pacing::Config> {
     let s = &game.settings;
     let page = state_page(game);
     let target = s.fps_target;
@@ -135,7 +136,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
             StepMode::Load(load)
         }
         // A target above 60 asks for the variable step, which only works under variable refresh. The game starts on the
-        // load-driven step at 60 and the refresh module switches when the screen allows (`refresh::set_variable_step`).
+        // load-driven step at 60 and the refresh module switches when the screen allows (`Refresh::set_variable_step`).
         (t, true) if t > 60 => {
             let mut load = LoadConfig::new(60).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
@@ -153,7 +154,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
         }
     };
     // Variable refresh needs to know that the game steps by the measured frame time.
-    crate::refresh::set_variable_step(variable, step);
+    refresh.set_variable_step(variable, step);
     Ok(nxkit_svc_pacing::Config {
         bind_system_event: wire::pacing_bind,
         state_page: page,
@@ -200,7 +201,12 @@ fn console_language(vars: &crate::hostenv::HostEnv) -> String {
 /// parameter, the display version, the shared font facts and the DLC folder, input the pad layout, the focus and the
 /// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
 /// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
-pub fn init_services(game: &Game, mask: u64, env: &crate::hostenv::HostEnv) -> Result<()> {
+pub fn init_services(
+    game: &Game,
+    mask: u64,
+    env: &crate::hostenv::HostEnv,
+    refresh: &Refresh,
+) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
     wire::set_handheld(handheld);
@@ -277,7 +283,7 @@ pub fn init_services(game: &Game, mask: u64, env: &crate::hostenv::HostEnv) -> R
         });
     }
     if has(mask, Service::Pacing) {
-        nxkit_svc_pacing::init(&pacing_config(game)?)
+        nxkit_svc_pacing::init(&pacing_config(game, refresh)?)
             .map_err(|e| HostError::Manifest(format!("pacing: {e:?}")))?;
     }
     Ok(())
@@ -333,6 +339,7 @@ pub fn frame_hooks(
     settings: &Settings,
     run: &crate::hostenv::RunSettings,
     screen: &Arc<nxkit_nvn::screen::Screen>,
+    refresh: &Arc<Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
-    crate::frames::install(ctx, memory, root, settings, run, screen)
+    crate::frames::install(ctx, memory, root, settings, run, screen, refresh)
 }
