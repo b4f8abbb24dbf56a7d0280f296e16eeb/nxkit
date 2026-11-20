@@ -71,6 +71,7 @@ const TABLE: &[(&str, Shape)] = &[
     ("atomic_fetch_add_explicit", Shape::Keep),
     ("atomic_fetch_min_explicit", Shape::Keep),
     ("atomic_fetch_max_explicit", Shape::Keep),
+    ("atomic_fetch_or_explicit", Shape::Keep),
     ("threadgroup_barrier", Shape::Keep),
     ("simd_ballot", Shape::Keep),
     ("simd_any", Shape::Keep),

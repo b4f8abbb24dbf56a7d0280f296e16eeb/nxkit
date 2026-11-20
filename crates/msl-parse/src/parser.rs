@@ -742,6 +742,9 @@ impl<'a> Parser<'a> {
         let mut fields: Vec<Field> = Vec::new();
         while !self.accept("}")? {
             let ty = self.type_()?;
+            if ty == Ty::DeviceAtomicUintPtr {
+                return reject("type:atomic_uint");
+            }
             let is_const = self.last_const;
             loop {
                 let fname = self.ident()?;
@@ -894,6 +897,9 @@ impl<'a> Parser<'a> {
             self.next()?;
             Ty::Void
         };
+        if ret == Ty::DeviceAtomicUintPtr {
+            return reject("type:atomic_uint");
+        }
         let name = self.ident()?;
         let name = self.intern(name);
         self.expect("(")?;
@@ -901,6 +907,9 @@ impl<'a> Parser<'a> {
         if !self.accept(")")? {
             loop {
                 let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none(), false))?;
+                if pty == Ty::DeviceAtomicUintPtr {
+                    return reject("type:atomic_uint");
+                }
                 let is_const = self.last_const;
                 if array_ref.is_some() {
                     if is_const {
@@ -1142,9 +1151,14 @@ impl<'a> Parser<'a> {
             self.last_const = true;
             v = self.ident()?;
         }
-        if v == "atomic_uint" && space == Some(Space::Threadgroup) && !self.last_const {
+        if v == "atomic_uint" && !self.last_const {
+            let ty = match space {
+                Some(Space::Threadgroup) => Ty::ThreadgroupAtomicUintPtr,
+                Some(Space::Device) => Ty::DeviceAtomicUintPtr,
+                _ => return reject("type:atomic_uint"),
+            };
             self.expect("*")?;
-            return Ok((Ty::ThreadgroupAtomicUintPtr, None));
+            return Ok((ty, None));
         }
         let mut t = if let Some((packed, base, w)) = vec_name(v) {
             if packed {
@@ -2291,16 +2305,23 @@ impl<'a> Parser<'a> {
                     {
                         return reject("threadgroup-atomic-cast");
                     }
+                    if f != to && (f == Ty::DeviceAtomicUintPtr || to == Ty::DeviceAtomicUintPtr) {
+                        return reject("device-atomic-cast");
+                    }
                     self.stat("call:static_cast")?;
                     CastKind::Static
                 }
                 _ => {
                     let from_ok =
                         matches!(f, Ty::Ptr(..)) || f == s(Scalar::Ulong) || f == s(Scalar::Long);
-                    let ok = if to == Ty::ThreadgroupAtomicUintPtr {
-                        matches!(&f, Ty::Ptr(Space::Threadgroup, inner) if **inner == UINT)
-                    } else {
-                        matches!(to, Ty::Ptr(..)) && from_ok
+                    let ok = match &to {
+                        Ty::ThreadgroupAtomicUintPtr => {
+                            matches!(&f, Ty::Ptr(Space::Threadgroup, inner) if **inner == UINT)
+                        }
+                        Ty::DeviceAtomicUintPtr => {
+                            matches!(&f, Ty::Ptr(Space::Device, inner) if **inner == UINT)
+                        }
+                        _ => matches!(to, Ty::Ptr(..)) && from_ok,
                     };
                     if !ok {
                         return reject("reinterpret_cast");
@@ -2531,6 +2552,24 @@ impl<'a> Parser<'a> {
             self.expect(")")?;
             if val.ty.strip() != UINT {
                 return reject("threadgroup-atomic-form");
+            }
+            return bx(mk(
+                self,
+                Callee::Builtin(name.into()),
+                vec![*ptr, *val],
+                UINT,
+            ));
+        }
+        if name == "atomic_fetch_or_explicit" && !self.funcs.contains_key(name) {
+            self.expect("(")?;
+            let ptr = self.expr_assign()?;
+            self.expect(",")?;
+            let val = self.expr_assign()?;
+            self.expect(",")?;
+            self.expect("memory_order_relaxed")?;
+            self.expect(")")?;
+            if ptr.ty.strip() != Ty::DeviceAtomicUintPtr || val.ty.strip() != UINT {
+                return reject("device-atomic-or-form");
             }
             return bx(mk(
                 self,

@@ -149,6 +149,7 @@ impl Cx {
             Ty::ThreadgroupAtomicUintPtr => {
                 Type::Ptr(Space::Threadgroup, Rc::new(Type::Scalar(Scalar::Uint)))
             }
+            Ty::DeviceAtomicUintPtr => Type::Ptr(Space::Device, Rc::new(Type::UINT)),
             Ty::Ptr(sp, inner) => Type::Ptr(*sp, Rc::new(self.ty(inner)?)),
             Ty::Ref(_, inner) => self.ty(inner)?,
             Ty::Array { metal: true, .. } => return Err(Error::unsupported("metal-array")),
@@ -837,7 +838,7 @@ impl Cx {
                     _ => Err(Error::unsupported(format!("ctor:{ty}"))),
                 }
             }
-            A::Cast { kind, operand, .. } => {
+            A::Cast { kind, to, operand } => {
                 let v = self.expr(operand)?;
                 match kind {
                     CastKind::AsType => {
@@ -852,6 +853,8 @@ impl Cx {
                         }
                         _ => conv(v, &ty),
                     },
+                    // A device atomic Uint word has the same AIR pointer type as a device uint.
+                    CastKind::Reinterpret if *to == Ty::DeviceAtomicUintPtr && v.ty == ty => Ok(v),
                     CastKind::Reinterpret => match (&v.ty, &ty) {
                         (
                             Type::Ptr(..) | Type::Scalar(Scalar::Ulong | Scalar::Long),
