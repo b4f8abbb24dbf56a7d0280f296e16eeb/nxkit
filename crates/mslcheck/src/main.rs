@@ -5,6 +5,7 @@
 //!   -l, --list FILE    read more paths from FILE (one per line)
 //!   -j, --jobs N       worker threads (default: available parallelism)
 //!   --json             one JSON object per line: path, ok, reasons (with counts), detail, sec, max_depth
+//!   --sema             also check semantics after parser acceptance. No AIR or library is emitted
 //!   --stats            with --json: also the construct counters
 //!   --lexdump DIR      write the token dump of the n-th file to DIR/<n>.tok instead of checking
 //!   -q, --quiet        no per-file lines, only the summary on stderr
@@ -33,11 +34,12 @@ struct Options {
     stats: bool,
     quiet: bool,
     lexdump: Option<PathBuf>,
+    sema: bool,
 }
 
 fn usage() -> ! {
     eprintln!(
-        "usage: mslcheck [-l LIST] [-j N] [--json [--stats]] [--lexdump DIR] [-q] [FILE ...]"
+        "usage: mslcheck [-l LIST] [-j N] [--json [--stats]] [--sema | --lexdump DIR] [-q] [FILE ...]"
     );
     std::process::exit(2)
 }
@@ -50,6 +52,7 @@ fn parse_args() -> Options {
         stats: false,
         quiet: false,
         lexdump: None,
+        sema: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -76,12 +79,16 @@ fn parse_args() -> Options {
             }
             "--json" => o.json = true,
             "--stats" => o.stats = true,
+            "--sema" => o.sema = true,
             "-q" | "--quiet" => o.quiet = true,
             "--lexdump" => o.lexdump = Some(PathBuf::from(args.next().unwrap_or_else(|| usage()))),
             "-h" | "--help" => usage(),
             _ if a.starts_with('-') && a.len() > 1 => usage(),
             _ => o.files.push(PathBuf::from(a)),
         }
+    }
+    if o.sema && o.lexdump.is_some() {
+        usage();
     }
     o
 }
@@ -116,10 +123,33 @@ fn json_counts<'a>(it: impl Iterator<Item = (&'a str, u64)>, out: &mut String) {
     out.push('}');
 }
 
+/// The parser verdict and, only after acceptance, the semantic verdict.
+struct Check {
+    parser: Outcome,
+    semantic: Option<Result<(), String>>,
+}
+
+fn check(parser: Outcome, sema: bool) -> Check {
+    let semantic = if sema && parser.accepted() {
+        if let Outcome::Checked(c) = &parser {
+            Some(
+                msl_sema::analyze(&c.module)
+                    .map(|_| ())
+                    .map_err(|e| e.key()),
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Check { parser, semantic }
+}
+
 /// One output line for a file: (line, accepted, read error).
 fn render(
     path: &Path,
-    res: &std::io::Result<Outcome>,
+    res: &std::io::Result<Check>,
     sec: f64,
     o: &Options,
 ) -> (String, bool, bool) {
@@ -133,6 +163,9 @@ fn render(
                 json_str(&p, &mut line);
                 line.push_str(", \"error\": ");
                 json_str(&e.to_string(), &mut line);
+                if o.sema {
+                    line.push_str(", \"phase\": \"read\"");
+                }
                 line.push_str("}\n");
             } else {
                 line = format!("error\t{p}\t{e}\n");
@@ -140,8 +173,15 @@ fn render(
             return (line, false, true);
         }
     };
-    let ok = out.accepted();
-    let reasons = out.reasons();
+    let semantic_error = out.semantic.as_ref().and_then(|r| r.as_ref().err());
+    let phase = if out.semantic.is_some() {
+        "sema"
+    } else {
+        "parse"
+    };
+    let out = &out.parser;
+    let ok = out.accepted() && semantic_error.is_none();
+    let reasons = semantic_error.map_or_else(|| out.reasons(), |e| vec![(e.clone(), 1)]);
     if o.json {
         line.push_str("{\"path\": ");
         json_str(&p, &mut line);
@@ -153,7 +193,14 @@ fn render(
         line.push_str(", \"reasons\": ");
         json_counts(reasons.iter().map(|(k, v)| (k.as_str(), *v)), &mut line);
         line.push_str(", \"detail\": ");
-        json_str(&out.detail(), &mut line);
+        json_str(
+            &semantic_error.cloned().unwrap_or_else(|| out.detail()),
+            &mut line,
+        );
+        if o.sema {
+            line.push_str(", \"phase\": ");
+            json_str(phase, &mut line);
+        }
         if let Outcome::Checked(c) = out {
             if o.stats {
                 line.push_str(", \"stats\": ");
@@ -207,6 +254,9 @@ fn main() {
             std::process::exit(2);
         }
     }
+    if o.sema {
+        eprintln!("mslcheck: parser and semantic checks only. No AIR, Metal compilation, or GPU validation.");
+    }
     let t0 = Instant::now();
     let next = Arc::new(AtomicUsize::new(0));
     let mut workers = Vec::new();
@@ -232,7 +282,7 @@ fn main() {
                         continue;
                     }
                     let t = Instant::now();
-                    let res = msl_parse::check_file(path);
+                    let res = msl_parse::check_file(path).map(|p| check(p, o.sema));
                     let sec = t.elapsed().as_secs_f64();
                     let (line, ok, err) = render(path, &res, sec, &o);
                     done.push((n, line, ok, err));
@@ -279,3 +329,6 @@ fn main() {
     }
     std::process::exit(if errors > 0 { 2 } else { 0 });
 }
+
+#[cfg(test)]
+mod tests;

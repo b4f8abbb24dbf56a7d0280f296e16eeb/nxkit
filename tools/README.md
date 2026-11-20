@@ -23,3 +23,24 @@ They stop with a message when a variable is not set. They never use a private pa
 | `NXB_HARNESS` | the folder of the harness. Default is `tools/gpudiff` |
 
 The prototype, the reference folder and every corpus are not in this repository. You must provide them.
+
+## Source checks without compilation
+
+Use the existing Rust `mslcheck` binary to check retained MSL source files:
+
+```sh
+mslcheck --sema --json -j 2 -l metal-files.txt
+```
+
+Without `--sema`, the command keeps its parser-only behavior and JSON fields.
+With `--sema`, it runs semantic analysis only after the parser accepts a file.
+The JSON `phase` is `read`, `parse`, or `sema`. A semantic rejection reports the
+semantic analyzer's reason key. Acceptance applies only to these two stages.
+It does not prove AIR lowering, Metal compilation, byte identity, or GPU behavior.
+No translator, external compiler, or GPU runs. No library is written.
+
+Supply source paths, not compiled `.metallib` files or game packages.
+The command does not recover source from a library or inspect NVN instructions.
+It reports every file in input order. As before, rejection alone returns 0.
+A read error or bad command line returns 2. Do not treat exit status 0 as acceptance.
+The report can contain local paths. Remove private paths before you share it.
