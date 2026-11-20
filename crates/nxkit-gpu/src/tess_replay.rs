@@ -11,7 +11,7 @@ use nxkit_metal::{
 use crate::bindless::{self, Sink, StageInputs};
 use crate::detail::{DrawArgs, DrawDetail, Stage};
 use crate::draws::{Geom, PassCtx, Prep, Shared, cull_of, fixed};
-use crate::programs::{Bind, BindKind, StageProgram};
+use crate::programs::{Bind, BindKind, StageProgram, tessellation::Link};
 use crate::stats::Skip;
 
 use crate::tess_pattern::{
@@ -286,7 +286,7 @@ pub(crate) fn prepare(
     };
     let domain_key = p.evaluation.as_ref().ok_or(Skip::Program)?;
     let ds = sh.programs.stage(domain_key, false)?;
-    if !ds.domain_replay || !ds.inputs.is_empty() || index.is_some() && !ds.domain_replay_indexed {
+    if !ds.inputs.is_empty() || index.is_some() && !(ds.domain_replay && ds.domain_replay_indexed) {
         return Err(Skip::Primitive);
     }
     admit_bindings(&vs, Stage::Vertex, draw, sh)?;
@@ -297,6 +297,12 @@ pub(crate) fn prepare(
         .as_ref()
         .map(|key| sh.programs.stage(key, false))
         .transpose()?;
+    if index.is_none()
+        && !ds.domain_replay
+        && !Link::direct(vs.tess_link, ds.tess_link, fs.as_ref().map(|f| f.tess_link))
+    {
+        return Err(Skip::Program);
+    }
     let cull = cull_of(draw)?;
     let f = fixed(sh, pc, draw, cull)?;
     // Clone only the small number of patch draws. Use the evaluator as the raster pipeline's vertex key,

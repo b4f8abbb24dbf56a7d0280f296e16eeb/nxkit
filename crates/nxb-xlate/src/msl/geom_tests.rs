@@ -140,13 +140,16 @@ fn a_bad_header_fails_the_translation() {
 }
 
 #[test]
-fn tessellation_is_not_ported() {
-    for stage in ["hs", "ds"] {
+fn tessellation_control_and_unproven_domain_are_not_ported() {
+    for (stage, detail) in [
+        ("hs", "tessellation control shader"),
+        ("ds", "missing domain control metadata"),
+    ] {
         let json = format!(r#"[{{"key": "t", "stage": "{stage}"}}]"#);
         let j = parse_jobs(&json).expect("job").remove(0);
         let e = run(&j, &[0; 64]).expect_err("tessellation");
         assert_eq!(e.reason, "not ported");
-        assert!(e.detail.contains("tessellation"), "{}", e.detail);
+        assert!(e.detail.contains(detail), "{}", e.detail);
     }
 }
 

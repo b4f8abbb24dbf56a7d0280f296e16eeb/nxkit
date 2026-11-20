@@ -7,7 +7,7 @@
 //! inputs from the layout block at buffer 16. Each stage has one argument buffer at `[[buffer(0)]]`.
 //! Member `arg_id` sits at byte `8 * arg_id` and holds a resource ID or a GPU address.
 
-mod tessellation;
+pub(crate) mod tessellation;
 
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -180,6 +180,7 @@ pub(crate) struct StageProgram {
     pub(crate) entry_geometry_capture: Option<String>,
     pub(crate) domain_replay: bool,
     pub(crate) domain_replay_indexed: bool,
+    pub(crate) tess_link: Option<tessellation::Link>,
     /// Bit-preserving unsigned and mixed output variants, when the translator supplied them.
     pub(crate) entry_uint: Option<String>,
     pub(crate) entry_mixed: Option<(String, u8)>,
@@ -516,6 +517,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .map(str::to_owned),
         domain_replay: tessellation::domain_replay(json),
         domain_replay_indexed: tessellation::domain_replay_indexed(json),
+        tess_link: tessellation::Link::parse(json),
         entry_uint: json
             .get("entry_u")
             .and_then(Json::as_str)

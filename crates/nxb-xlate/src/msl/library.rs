@@ -44,9 +44,9 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(super) enum Mode {
     Production,
-    Domain,
+    Domain { diagnostic: bool },
     IndexedCapture,
 }
 
@@ -69,7 +69,7 @@ fn build_with(
     ints: &[u32],
     mode: Mode,
 ) -> R<Translated> {
-    let domain = mode == Mode::Domain;
+    let domain = matches!(mode, Mode::Domain { .. });
     let indexed_capture = mode == Mode::IndexedCapture;
     let job = &s.job;
     let patched = (!ints.is_empty()).then(|| variant::int_inputs::declare(&s.props, ints));
@@ -82,7 +82,7 @@ fn build_with(
         other => return Err(format!("unported: {other} stage")),
     };
     if (props.definitions.stage == Some(crate::attr::Stage::TessellationEvaluation)) != domain {
-        return Err("unported: domain shader outside the diagnostic path".into());
+        return Err("unported: domain shader outside the domain translation path".into());
     }
     // A task or mesh shader is a compute job, and its tables and reflection are those of its own stage.
     let stage_name = job
@@ -228,42 +228,45 @@ fn build_with(
             entries
                 .entries
                 .push(("entry_z".into(), Value::Str("main0_z".into())));
-            let validation = [super::domain::indexed_validity()];
-            let guard = super::domain::indexed_guard();
-            for (entry, fix, body) in [
-                (super::domain::INDEXED_ENTRY, true, main.as_str()),
-                (super::domain::INDEXED_ENTRY_Z, false, raw.as_str()),
-            ] {
-                let checked = EntryName {
-                    extra: &validation,
-                    pro: &guard,
-                    vertex_depth_fix: fix,
-                    ..EntryName::new(entry)
-                };
-                entries
-                    .text
-                    .push_str(&entry_text(s, &checked, shader, &res, &plan, body)?);
+            // Producer entries do not advertise the fixture replay ABI before live linkage is checked.
+            if mode == (Mode::Domain { diagnostic: true }) {
+                let validation = [super::domain::indexed_validity()];
+                let guard = super::domain::indexed_guard();
+                for (entry, fix, body) in [
+                    (super::domain::INDEXED_ENTRY, true, main.as_str()),
+                    (super::domain::INDEXED_ENTRY_Z, false, raw.as_str()),
+                ] {
+                    let checked = EntryName {
+                        extra: &validation,
+                        pro: &guard,
+                        vertex_depth_fix: fix,
+                        ..EntryName::new(entry)
+                    };
+                    entries
+                        .text
+                        .push_str(&entry_text(s, &checked, shader, &res, &plan, body)?);
+                }
+                entries.extra.push((
+                    "domain_replay".into(),
+                    Value::obj([
+                        ("version", Value::Int(1)),
+                        ("indexed_capture_version", Value::Int(1)),
+                        ("indexed_entry", Value::str(super::domain::INDEXED_ENTRY)),
+                        (
+                            "indexed_entry_z",
+                            Value::str(super::domain::INDEXED_ENTRY_Z),
+                        ),
+                        (
+                            "capture_words",
+                            Value::Int(i64::from(variant::vertex::CAPTURE_WORDS)),
+                        ),
+                        ("mode", Value::Str("triangles".into())),
+                        ("spacing", Value::Str("fractional_odd".into())),
+                        ("winding", Value::Str("ccw".into())),
+                        ("hull", Value::Bool(false)),
+                    ]),
+                ));
             }
-            entries.extra.push((
-                "domain_replay".into(),
-                Value::obj([
-                    ("version", Value::Int(1)),
-                    ("indexed_capture_version", Value::Int(1)),
-                    ("indexed_entry", Value::str(super::domain::INDEXED_ENTRY)),
-                    (
-                        "indexed_entry_z",
-                        Value::str(super::domain::INDEXED_ENTRY_Z),
-                    ),
-                    (
-                        "capture_words",
-                        Value::Int(i64::from(variant::vertex::CAPTURE_WORDS)),
-                    ),
-                    ("mode", Value::Str("triangles".into())),
-                    ("spacing", Value::Str("fractional_odd".into())),
-                    ("winding", Value::Str("ccw".into())),
-                    ("hull", Value::Bool(false)),
-                ]),
-            ));
         }
         (None, Shader::Fragment) => {
             let derived = variant::pixel_derived::derived(&s.info, &plan, opt.dual_source);
@@ -370,6 +373,9 @@ fn build_with(
     };
     for (k, v) in entries.extra {
         r.set_extra(&k, v);
+    }
+    if let Some(link) = super::domain::linkage(mode, shader, &plan) {
+        r.set_extra("tess_link", link);
     }
     if let Some(sp) = &spill {
         r.set_extra("tg_spill", Value::Int(sp.total));

@@ -346,6 +346,7 @@ fragment float4 fs() { return float4(1); }
         entry_geometry_capture: None,
         domain_replay: false,
         domain_replay_indexed: false,
+        tess_link: None,
         entry_uint: None,
         entry_mixed: None,
         binds: vec![],

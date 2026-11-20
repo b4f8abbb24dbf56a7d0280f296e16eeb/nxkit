@@ -1,5 +1,4 @@
-//! Diagnostic lowering for a triangular, fractional-odd, counterclockwise domain shader.
-//! Normal shader-package translation remains gated until patch draws support this ABI.
+//! Lowering for a triangular, fractional-odd, counterclockwise domain shader.
 
 use super::emit::{Em, R};
 use super::entry::Param;
@@ -35,15 +34,39 @@ impl TriangleFractionalOddCcw {
                 .and_then(|b| <[u8; 4]>::try_from(b).ok().map(u32::from_le_bytes))
         };
         match (read(0x738), read(0x73c), read(0x744)) {
-            (Some(0x0004), Some(0x8e7b), Some(0x0901)) => Ok(Self(())),
-            (Some(_), Some(_), Some(_)) => Err(failure("unported: domain mode".into())),
+            (Some(primitive), Some(spacing), Some(winding)) => {
+                Self::from_words([primitive, spacing, winding])
+            }
             _ => Err(failure("unported: missing domain control metadata".into())),
+        }
+    }
+
+    fn from_words(words: [u32; 3]) -> Result<Self, Failure> {
+        if words == [0x0004, 0x8e7b, 0x0901] {
+            Ok(Self(()))
+        } else {
+            Err(failure("unported: domain mode".into()))
         }
     }
 }
 
+pub(super) fn translate_native(
+    job: &Job,
+    code: &[u8],
+    ctx: &Context<'_>,
+) -> Result<Translated, Failure> {
+    if job.arch_sm86 {
+        return Err(failure("unported: NVN2 domain shader".into()));
+    }
+    let words = job
+        .nvn_domain_mode
+        .ok_or_else(|| failure("unported: missing domain control metadata".into()))?;
+    let mode = TriangleFractionalOddCcw::from_words(words)?;
+    translate(job, code, ctx, &mode, false)
+}
+
 /// Translate only for an explicit diagnostic capture/expansion harness. This does not
-/// enable domain programs in any producer or claim support for their draw-time resources.
+/// enable replay of producer-generated domain shaders or claim support for their draw-time resources.
 ///
 /// The caller must pair this with the no-hull draw path and supply validated capture and
 /// expansion buffers and the stage's own resource table. The two vertex entries differ
@@ -52,18 +75,78 @@ pub fn translate_diagnostic(
     job: &Job,
     code: &[u8],
     ctx: &Context<'_>,
+    mode: &TriangleFractionalOddCcw,
+) -> Result<Translated, Failure> {
+    translate(job, code, ctx, mode, true)
+}
+
+fn translate(
+    job: &Job,
+    code: &[u8],
+    ctx: &Context<'_>,
     _mode: &TriangleFractionalOddCcw,
+    diagnostic: bool,
 ) -> Result<Translated, Failure> {
     if job.stage != "ds" {
-        return Err(failure("domain diagnostic needs a ds job".into()));
+        return Err(failure("domain translation needs a ds job".into()));
     }
     let structured = structure_job(job, code).map_err(failure)?;
     if structured.props.definitions.stage != Some(crate::attr::Stage::TessellationEvaluation) {
         return Err(failure(
-            "domain diagnostic needs a domain shader header".into(),
+            "domain translation needs a domain shader header".into(),
         ));
     }
-    library::build_domain(&structured, ctx, &options("ds", code, ctx)).map_err(failure)
+    library::build_domain(&structured, ctx, &options("ds", code, ctx), diagnostic).map_err(failure)
+}
+
+/// V1 attests to the actual entries: full logical VS capture, or a declared float4
+/// user interface. Missing or unsupported declarations have no attestation.
+pub(super) fn linkage(
+    mode: library::Mode,
+    shader: super::emit::Shader,
+    plan: &super::io::Plan,
+) -> Option<nxb_pyjson::Value> {
+    use super::emit::Shader;
+    use nxb_pyjson::Value;
+
+    let mask = |locs: &mut dyn Iterator<Item = u32>| {
+        let mut mask = 0;
+        for loc in locs {
+            mask |= 1u32.checked_shl(loc)?;
+        }
+        Some(mask)
+    };
+    let (role, locs) = match (mode, shader) {
+        (library::Mode::Production, Shader::Vertex) => ("capture144", None),
+        (library::Mode::Domain { diagnostic: false }, Shader::Vertex)
+            if plan.out_members.len() == plan.user_locs.len() + 1 =>
+        {
+            ("domain", Some(mask(&mut plan.user_locs.iter().copied())?))
+        }
+        (library::Mode::Production, Shader::Fragment)
+            if plan
+                .varyings
+                .iter()
+                .all(|v| v.msl_type == "float4" && v.interpolation.is_empty())
+                && plan
+                    .in_members
+                    .iter()
+                    .filter(|m| !m.contains("[[position]]"))
+                    .count()
+                    == plan.varyings.len() =>
+        {
+            (
+                "fragment",
+                Some(mask(&mut plan.varyings.iter().map(|v| v.location))?),
+            )
+        }
+        _ => return None,
+    };
+    let mut v = Value::obj([("version", Value::Int(1)), ("role", Value::str(role))]);
+    if let Some(locs) = locs {
+        v.set("float4_locs", Value::Int(i64::from(locs)));
+    }
+    Some(v)
 }
 
 pub(super) fn params() -> [Param; 4] {

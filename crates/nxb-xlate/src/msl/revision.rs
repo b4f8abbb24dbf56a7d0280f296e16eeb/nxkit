@@ -34,6 +34,8 @@ pub struct Feature {
 /// `meshpos` 1: the position of a mesh shader is `invariant` (`msl/mesh.rs`), so two mesh shaders give equal depths.
 ///
 /// `blendz` 1: a pixel shader writes RGB 0 to a float colour whose blend factor is 0 (`msl/variant/pixel.rs`).
+///
+/// `tesslink` 1: ordinary vertex/fragment and eligible domain reflection identify their native direct-replay interfaces.
 pub const FEATURES: &[Feature] = &[
     Feature {
         name: "hmma",
@@ -49,6 +51,11 @@ pub const FEATURES: &[Feature] = &[
         name: "blendz",
         revision: 1,
         uses: uses_blend_word,
+    },
+    Feature {
+        name: "tesslink",
+        revision: 1,
+        uses: |job, _| job.mesh_stage.is_none() && matches!(job.stage.as_str(), "vs" | "ps" | "ds"),
     },
 ];
 
@@ -150,9 +157,15 @@ mod tests {
             j.stage = name.into();
             j
         };
-        assert_eq!(tags(&stage("ps"), &code(&[])), "blendz=1");
-        assert_eq!(tags(&stage("ps"), &code(&[HMMA])), "hmma=1;blendz=1");
-        for other in ["vs", "cs", "gs"] {
+        assert_eq!(tags(&stage("ps"), &code(&[])), "blendz=1;tesslink=1");
+        assert_eq!(
+            tags(&stage("ps"), &code(&[HMMA])),
+            "hmma=1;blendz=1;tesslink=1"
+        );
+        for other in ["vs", "ds"] {
+            assert_eq!(tags(&stage(other), &code(&[])), "tesslink=1", "{other}");
+        }
+        for other in ["cs", "gs", "hs"] {
             assert_eq!(tags(&stage(other), &code(&[])), "", "{other}");
         }
         let mut mesh = stage("cs");

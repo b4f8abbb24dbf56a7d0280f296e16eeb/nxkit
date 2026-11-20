@@ -303,6 +303,17 @@ pub fn job_for(
     if !nvn2 && stage == "ps" && early_fragment_tests(ctl, &code) {
         extra.push(("early_fragment_tests", Value::Bool(true)));
     }
+    // The answer table can augment resources, not replace the original domain control.
+    let domain_stage = stage == "ds";
+    let domain_mode = if domain_stage && !nvn2 {
+        [0x738, 0x73c, 0x744]
+            .into_iter()
+            .map(|at| u32_at(ctl, at).map(|word| Value::Int(i64::from(word))))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::List)
+    } else {
+        None
+    };
     let mesh_job = extra.iter().any(|(k, _)| *k == "mesh_stage");
     let mut j = Value::obj([
         ("key", Value::str(key)),
@@ -325,10 +336,17 @@ pub fn job_for(
         None => j.set("no_facts", Value::Bool(true)),
         Some(Value::Object(m)) => {
             for (k, v) in m {
-                j.set(k, v.clone());
+                if k != "nvn_domain_mode"
+                    && !(domain_stage && matches!(k.as_str(), "stage" | "arch"))
+                {
+                    j.set(k, v.clone());
+                }
             }
         }
         Some(_) => {}
+    }
+    if let Some(mode) = domain_mode {
+        j.set("nvn_domain_mode", mode);
     }
     Ok(Job {
         code,

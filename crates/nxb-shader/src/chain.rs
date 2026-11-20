@@ -20,7 +20,7 @@ const OPTIONS: &str = "debug=True reduced=True";
 
 /// The chain's own revision for a build without an engine folder. Raise it with every change of the shader step outside
 /// `nxb-xlate` that changes its output (the translator has `TRANSLATOR_ID` and its feature revisions).
-const STANDALONE_REVISION: &str = "nxkit-chain-1";
+const STANDALONE_REVISION: &str = "nxkit-chain-2";
 
 /// The crate version at which [`standalone_version`] stopped following the crate version. It is fixed: with the version
 /// in V, a release translated and compiled every shader of every game again (`docs/early-cutoff.md`).
@@ -102,8 +102,8 @@ mod tests {
 
     #[test]
     fn the_standalone_version_does_not_follow_the_crate_version() {
-        // V of the 0.10.0 builds (folder `b-71c2f44e5744`): a release keeps the translations and the folder
-        assert_eq!(standalone_version(), "71c2f44e5744");
+        // V of shader-chain revision 2; unrelated crate releases keep this shader folder.
+        assert_eq!(standalone_version(), "fb268f112d7b");
     }
 
     #[test]

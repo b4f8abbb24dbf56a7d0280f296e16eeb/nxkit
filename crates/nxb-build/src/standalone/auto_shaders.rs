@@ -223,6 +223,14 @@ pub(super) fn discover(
     plain.sort_by_key(|(i, _)| *i);
     results.extend(plain.into_iter().map(|(_, result)| result));
     let output = records::build(&profile, &results).map_err(|e| e.to_string())?;
+    compile_packages(output, notes, ios)
+}
+
+fn compile_packages(
+    output: records::Outputs,
+    mut notes: Vec<String>,
+    ios: bool,
+) -> Result<Vec<(String, Vec<u8>)>> {
     if output.rows.len() > SHADER_LIMIT {
         return Err("too many discovered shaders".into());
     }
@@ -382,6 +390,91 @@ fn compile_raw(_msl: &[u8], _ios: bool) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "air-front")]
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nxb-stages/tests/domain_job/fixture.rs"
+        ));
+    }
+
+    #[cfg(feature = "air-front")]
+    #[test]
+    fn encoded_direct_patch_records_use_normal_standalone_packaging() {
+        let mut output = records::Outputs::default();
+        for (name, stage, key, code) in [
+            (
+                "vs_cloud.bin",
+                "vs",
+                "0101010101010101",
+                fixture::vs_capture(),
+            ),
+            (
+                "ds_cloud.bin",
+                "ds",
+                "0303030303030303",
+                fixture::ds_partial_x(),
+            ),
+            (
+                "ps_cloud.bin",
+                "ps",
+                "0202020202020202",
+                fixture::fs_xyzw(0),
+            ),
+            (
+                "ps_cloud.bin",
+                "ps",
+                "0404040404040404",
+                fixture::fs_xyzw(1),
+            ),
+        ] {
+            let mut record = fixture::record(&code);
+            record[..8].copy_from_slice(b"BTCDBTCD");
+            record[0x28..0x2c].copy_from_slice(&0x748u32.to_le_bytes());
+            record[0x2c..0x30].copy_from_slice(&(0x30 + code.len() as u32).to_le_bytes());
+            output
+                .packages
+                .entry(name.into())
+                .or_default()
+                .extend(record);
+            let previous = usize::from(key == "0404040404040404");
+            output
+                .rows
+                .push((name.into(), previous, stage, key.into(), "synthetic".into()));
+        }
+        // The normal standalone builder consumes the same package bytes and map rows
+        // as after discovery. No supplied MSL, resource facts, or guessed pair table.
+        let export = std::env::var_os("NXKIT_TESS_STANDALONE_EMIT").map(std::path::PathBuf::from);
+        if let Some(dir) = &export {
+            std::fs::create_dir_all(dir.join("pkg")).unwrap();
+            for (name, bytes) in &output.packages {
+                std::fs::write(dir.join("pkg").join(name), bytes).unwrap();
+            }
+        }
+        let files: BTreeMap<_, _> = compile_packages(output, vec![], false)
+            .unwrap()
+            .into_iter()
+            .collect();
+        if let Some(dir) = export {
+            std::fs::create_dir_all(dir.join("shaders")).unwrap();
+            std::fs::write(dir.join("shader_map.tsv"), &files["shaders/shader_map.tsv"]).unwrap();
+            for (name, bytes) in &files {
+                std::fs::write(dir.join(name), bytes).unwrap();
+            }
+        }
+        for key in [
+            "0101010101010101",
+            "0202020202020202",
+            "0303030303030303",
+            "0404040404040404",
+        ] {
+            let base = format!("shaders/{key}_b");
+            assert!(files[&format!("{base}.metallib")].starts_with(b"MTLB"));
+            let json = std::str::from_utf8(&files[&format!("{base}.json")]).unwrap();
+            assert!(parse(json).unwrap().get("tess_link").is_some(), "{base}");
+        }
+    }
+
     #[test]
     fn rejects_unsafe_names_and_oversized_nso() {
         assert!(safe_name("../main").is_err());

@@ -218,16 +218,14 @@ fn options(stage: &str, code: &[u8], ctx: &Context<'_>) -> Options {
 /// Translate one shader from its job and machine code to its libraries.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
     let stage = job.stage.as_str();
-    if matches!(stage, "hs" | "ds") {
-        let kind = if stage == "hs" {
-            "control"
-        } else {
-            "evaluation"
-        };
+    if stage == "ds" {
+        return domain::translate_native(job, code, ctx);
+    }
+    if stage == "hs" {
         return Err(Failure::new(
             "not ported",
             format!(
-                "unported: tessellation {kind} shader ({stage} stage), the front end has no tessellation"
+                "unported: tessellation control shader ({stage} stage), the front end has no tessellation"
             ),
         ));
     }
