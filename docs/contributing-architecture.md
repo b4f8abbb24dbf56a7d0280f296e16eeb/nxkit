@@ -15,7 +15,7 @@ This document gives the architecture rules for a change to the workspace. Read [
 ## Layers and ownership
 
 - A crate uses only crates of a lower layer, plus the sideways edges in [architecture.md](architecture.md). A new edge must have a decision in [decisions.md](decisions.md) first.
-- L1 crates do no I/O. Only `nxb-sys` and `nxkit-rt` have `unsafe` code.
+- L1 crates do no I/O. Only the crates and modules that rule 5 of [architecture.md](architecture.md) names have `unsafe` code.
 - A stage module has a maximum of 400 lines. A file has a maximum of 600 lines.
 - Each stage crate has one owner. A change touches only the files of its own concern.
 - `cargo run -p xtask -- layers` and `cargo run -p xtask -- limits` examine these rules.
@@ -52,7 +52,7 @@ Do `tools/check.sh` before a commit. It runs `cargo fmt --check`, `cargo clippy 
 `tools/no-game-data.sh` examines the tree for game data. `CARGO_BUILD_JOBS` limits the compiler processes.
 `CARGO_TARGET_DIR` moves the build output.
 
-The workspace has no external crates at this time. A new crate is its own commit with an entry in `deps.toml`.
+`deps.toml` lists every external crate with its reason and its users. A new one is its own commit with an entry there.
 A speed claim must have a benchmark before and after the change: the median of 3 runs on the reference machine.
 
 ## Tests

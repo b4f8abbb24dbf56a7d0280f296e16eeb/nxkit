@@ -221,7 +221,7 @@ A change that alters the MSL only of shaders that use one feature of `nxb_xlate:
 ## 64 bit floats
 
 Metal has no `double`. The retry loop of `nxb_xlate::driver::retry` translates a job again with `softfloat64` set when the structured program uses 64 bit floats.
-The passes `opt/double_to_float.rs` and `xform/softfloat.rs` then lower them to 32 bit. The back end never sees a 64 bit float after the retry.
+The passes `opt/double_to_float.rs` and `helper/softfloat.rs` then lower them to 32 bit. The back end never sees a 64 bit float after the retry.
 
 ## Output
 

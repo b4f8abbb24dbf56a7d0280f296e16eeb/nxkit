@@ -1,7 +1,11 @@
 //! The main program of nxkit: guest memory, the loader, the gates of the rewritten code, the game threads and the window.
 //!
-//! The contract with the build stage is in `docs/nxkit-host.md`. Only the modules `sys` and `gate` use `unsafe`
-//! (`docs/architecture.md`, rule 5). The parts that talk to macOS exist on macOS only.
+//! The contract with the build stage is in `docs/nxkit-host.md`. Only the modules `sys`, `gate` and `bigstack` use
+//! `unsafe` (`docs/architecture.md`, rule 5). The parts that talk to macOS exist on macOS only.
+//!
+//! The crate is the composition root of the runtime (layer R4, W26): `run` takes the one snapshot of the `NXKIT_*`
+//! environment (`nxkit_abi::env`, W27), builds the kernel, the services, the NVN front end, the GPU backend and the
+//! window, and passes each part what it needs.
 
 pub mod error;
 mod fields;

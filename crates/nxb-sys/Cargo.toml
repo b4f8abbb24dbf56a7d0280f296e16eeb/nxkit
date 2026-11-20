@@ -1,6 +1,6 @@
 [package]
 name = "nxb-sys"
-description = "Platform services; the only crate with unsafe code"
+description = "Platform services; the build crate with unsafe code"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,7 +17,7 @@ in_v = false
 [target.'cfg(windows)'.dependencies]
 libz-sys = { version = "1", default-features = false, features = ["static"] }
 
-# Not `workspace = true`: this is the one crate allowed to use `unsafe` (docs/architecture.md, rule 5).
+# Not `workspace = true`: the one build crate allowed to use `unsafe` (docs/architecture.md, rule 5).
 [lints.rust]
 missing_docs = "deny"
 unsafe_code = "allow"

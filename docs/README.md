@@ -9,7 +9,7 @@ Two parts do not give the same output as Apple's tools. The MSL of the Rust tran
 | # | document | content |
 |---|---|---|
 | 1 | [glossary.md](glossary.md) | the terms and the number labels |
-| 2 | [architecture.md](architecture.md) | layers, crates, data flow of the stages |
+| 2 | [architecture.md](architecture.md) | the layers of the build world and of the runtime world, the crates, the module layers inside a crate, the composition of the runtime, data flow of the stages |
 | 3 | [titles.md](titles.md) | the title layer: engine families, title modules, hooks and evidence |
 | 4 | [shader-step.md](shader-step.md) | the shader step: versions, execution, store, errors |
 | 5 | [pipeline-stages.md](pipeline-stages.md) | extract, split, rewrite, bundle, sign, events, cache export, pipeline archive |
@@ -19,7 +19,7 @@ Two parts do not give the same output as Apple's tools. The MSL of the Rust tran
 | 9 | [translator.md](translator.md) | the Rust shader translator and its contract with the shader step |
 | 10 | [early-cutoff.md](early-cutoff.md) | the key scheme of each stage and the cost of a chain change |
 | 11 | [benchmarks.md](benchmarks.md) | measured and estimated timings |
-| 12 | [decisions.md](decisions.md) | architecture decisions W1 to W23, design decisions and runtime decisions R1 to R55 |
+| 12 | [decisions.md](decisions.md) | workspace decisions W1 to W32, design decisions and runtime decisions R1 to R64 |
 | 13 | [contributing-architecture.md](contributing-architecture.md) | rules for contributors |
 | 14 | [research/](research/README.md) | short notes on the studies behind the design |
 | 15 | [analysis/oot-open-issues.md](analysis/oot-open-issues.md) | the cause of three defects of one title on Apple GPUs |

@@ -1,6 +1,7 @@
 //! The NVN front end of the nxkit host.
 //!
-//! This crate is pure Rust and uses only `std`. It has no Metal code and no FFI. It does three jobs.
+//! This crate is pure Rust. It uses `std`, `foldhash` and the settings snapshot of `nxkit-abi`. It has no Metal code and
+//! no FFI. It does three jobs.
 //!
 //! - It maps guest memory to GPU addresses ([`space`]). The GPU address that NVN gives the game is the Metal address.
 //! - It models textures: formats, storage layout, block-linear order, the descriptors that the game writes

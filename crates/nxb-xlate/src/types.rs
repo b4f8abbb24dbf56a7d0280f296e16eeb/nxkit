@@ -1,4 +1,5 @@
-//! Enums of the translator that the driver queries and prints.
+//! Enums and values of the translator that the driver queries and prints, and the two dispatch offsets of c0 that the
+//! emitter and the MSL back end share.
 
 /// `SamplerType` flags: the low byte is the dimension, bits 8 to 10 are flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

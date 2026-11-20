@@ -1,4 +1,4 @@
-//! Platform services for every stage (layer L0). The only crate with `unsafe` code.
+//! Platform services for every stage (layer L0). The one build crate with `unsafe` code (rule 5 of `docs/architecture.md`).
 //!
 //! Each concern is one module with a safe API and `cfg(target_os)` implementations. Nothing above L0 names an OS.
 //!

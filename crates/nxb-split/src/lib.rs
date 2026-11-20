@@ -1,9 +1,9 @@
 //! The shader split (replaces `shader_split.py`): container readers, shader keys, pairing and the package record and
 //! TSV writers. Pure: bytes in, bytes out, the walk over the RomFS images lives in the stage (`nxb-extract::split`).
 //!
-//! Status: the readers the reference title needs (zstd frames, SARC, BNSH, agl BAHS with program variations, NSO
-//! images with LZ4 segments). Every other reader of `scan_blob` is an [`SplitError::Unsupported`] error naming the
-//! container, never a silent difference.
+//! The container readers build on the shared primitives of `prim` (magics, a found shader, the checks, the byte search),
+//! and the scan of `shaders` dispatches to them. A container that no reader handles is an [`SplitError::Unsupported`]
+//! error naming the container, never a silent difference. `docs/pipeline-stages.md` lists the supported families.
 
 pub mod aes256;
 pub mod bahs;

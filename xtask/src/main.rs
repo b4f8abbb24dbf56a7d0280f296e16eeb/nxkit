@@ -40,7 +40,6 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxb-rewrite", "nxb-a64"),
     ("nxb-rewrite", "nxb-codec"),
     ("nxb-split", "nxb-codec"),
-    ("nxb-split", "nxb-romfs"),
     ("nxb-cli", "nxb-stages"),
     // ADR W19: stage crates beside the wiring (L3, they do I/O), the orchestrator and the CLI call them
     ("nxb-cli", "nxb-extract"),

@@ -1,4 +1,4 @@
-//! Counters of one encoded frame (R16) and the report that the caller applies to its tables.
+//! Counters of one encoded frame (R16). The report that the caller applies to its tables is `crate::report`.
 
 use crate::detail::DrawArgs;
 use crate::skip::Skip;

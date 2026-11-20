@@ -1,10 +1,9 @@
 # External dependencies of the nxkit workspace (CONTRIBUTING.md "Dependencies").
 # One table per crate: reason, licence, version, unsafe count, owner, which workspace crates may use it.
-# A new entry is its own commit. Besides std, only the objc2 family (macOS Metal and VideoToolbox backends) and rav1d (the
-# software AV1 decoder of nxkit-svc-video) are used.
+# A new entry is its own commit. Besides std, the runtime crates use the objc2 family and block2 (the Apple frameworks),
+# rav1d (the software AV1 decoder of nxkit-svc-video) and foldhash (fast maps), and nxb-sys uses libz-sys.
 #
-# Expected first entries (designs): ruzstd (nxb-codec, O14), fancy-regex and closure (nxb-shader only, 1:1 regex port),
-# memchr, windows-sys (nxb-sys, Windows), libfuzzer-sys (dev only).
+# zstd and LZ4 are own decoders in nxb-split (E8), so no compression crate is listed.
 
 [air-front]
 reason = "the optional own shader front end (design-v2 16): MSL to AIR bitcode in process"
@@ -29,9 +28,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal", "nxkit-svc-input"]
-used_by = ["nxkit-metal", "nxkit-svc-video"]
-used_by = ["nxkit-metal", "nxkit-host", "nxkit-coreml"]
+used_by = ["nxkit-coreml", "nxkit-host", "nxkit-metal", "nxkit-svc-input", "nxkit-svc-video"]
 
 [objc2-foundation]
 reason = "NSString, NSURL, NSArray and NSError, which the Metal API takes and returns, and the notifications of the AppKit window"
@@ -40,8 +37,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal", "nxkit-svc-input"]
-used_by = ["nxkit-metal", "nxkit-host", "nxkit-coreml"]
+used_by = ["nxkit-coreml", "nxkit-host", "nxkit-metal", "nxkit-svc-input"]
 
 [objc2-core-foundation]
 reason = "CGSize and CFTimeInterval, used by Metal and CoreAnimation signatures"
@@ -50,7 +46,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal", "nxkit-svc-input", "nxkit-coreml"]
+used_by = ["nxkit-coreml", "nxkit-host", "nxkit-metal", "nxkit-svc-input", "nxkit-svc-video"]
 
 [objc2-core-haptics]
 reason = "CHHapticEngine and its patterns, the rumble output of nxkit-svc-input (one engine per controller handle)"
@@ -69,7 +65,6 @@ version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-input wraps them in a safe API in its module sys"
 owner = "project team"
 used_by = ["nxkit-svc-input"]
-used_by = ["nxkit-metal", "nxkit-svc-video"]
 
 [objc2-core-media]
 reason = "CMSampleBuffer, CMBlockBuffer, CMVideoFormatDescription and CMTime, which VideoToolbox takes to decode a packet"
@@ -87,7 +82,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-video wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-svc-video", "nxkit-coreml"]
+used_by = ["nxkit-coreml", "nxkit-svc-video"]
 
 [objc2-video-toolbox]
 reason = "VTDecompressionSession, the hardware video decoder of macOS, for the cut scenes of the games"
@@ -97,7 +92,6 @@ version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-svc-video wraps them in a safe API"
 owner = "project team"
 used_by = ["nxkit-svc-video"]
-used_by = ["nxkit-metal", "nxkit-host"]
 
 [objc2-app-kit]
 reason = "NSApplication, NSWindow and NSView, the window and the main loop of nxkit-host"
@@ -124,7 +118,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal", "nxkit-host"]
+used_by = ["nxkit-host", "nxkit-metal"]
 
 [objc2-audio-toolbox]
 reason = "the AUHAL output unit (AudioComponent, AudioUnit properties, the render callback) of the audio service"
@@ -184,7 +178,7 @@ licence = "Zlib OR Apache-2.0 OR MIT"
 version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-metal wraps them in a safe API"
 owner = "project team"
-used_by = ["nxkit-metal", "nxkit-coreml"]
+used_by = ["nxkit-coreml", "nxkit-metal"]
 
 [rav1d]
 reason = "the software AV1 decoder of nxkit-svc-video: VideoToolbox decodes AV1 in hardware only (Apple M3 and A17 Pro on), so an M1 or M2 Mac has no AV1 decoder. Ocarina of Time on Switch 2 plays its movies as AV1. rav1d is the Rust port of dav1d by the Prossimo project (ISRG). It builds with cargo and the clang of Xcode: no system library, no pkg-config, no meson, no nasm on Apple silicon. The choices that were not taken: the `dav1d` and `dav1d-sys` crates need a libdav1d from the system, or meson, ninja and nasm for their `build` feature, and a vendored C source would need a build script that runs a C toolchain with a pinned source download"
@@ -220,4 +214,13 @@ licence = "MIT OR Apache-2.0 (zlib itself: Zlib)"
 version = "1.1.33"
 unsafe = "the FFI declarations of zlib only. nxb-sys wraps the calls"
 owner = "project team"
-used_by = ["nxb-sys (Windows only)"]
+used_by = ["nxb-sys"]
+
+[foldhash]
+reason = "a fast hasher for the maps of the frame encoder and the NVN front end, whose keys are small integers and short keys that need no protection against collisions (`nxkit_gpu::fastmap`)"
+source = "crates.io"
+licence = "Zlib"
+version = "0.2"
+unsafe = "0 in the parts the workspace uses (a hash function)"
+owner = "project team"
+used_by = ["nxkit-gpu", "nxkit-nvn"]

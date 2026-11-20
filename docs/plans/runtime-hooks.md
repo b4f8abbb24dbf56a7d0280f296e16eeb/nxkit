@@ -106,7 +106,7 @@ Open question: where do the names come from? The NSO's module name, its symbol t
 
 - The crate `nxkit-rt` builds `libnxkit_rt.a` for `aarch64-apple-darwin` and `aarch64-apple-ios`.
 - It exports `nxkit_init(services)` and `nxkit_hle_find(name)` with the C ABI.
-- It is the only crate allowed to use `unsafe`. The workspace forbids it everywhere else.
+- It may use `unsafe`. Rule 5 of [architecture.md](../architecture.md) names every crate and module that may.
 - Its functions follow the Switch calling rules above. Arguments under 32 bits are taken as `u32`. No function is variadic. Functions with large stacks switch to a host stack.
 - The nxkit release ships the library next to `nxb`.
 - `crates/nxkit-rt/include/nxkit_rt.h` is the header for the host. A test checks it against the exports and against `Service::ALL`.

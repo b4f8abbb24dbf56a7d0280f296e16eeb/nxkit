@@ -4,6 +4,39 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Changed
+
+- Architecture: the workspace has two worlds of layers. The build crates keep L0 to L3, F, T and dev. The runtime
+  crates have their own layers R0 (contract: `nxkit-abi`, `nxkit-native-plan`) to R4 (the composition root
+  `nxkit-host`), and the 14 sideways edges that the old layers needed are gone (W25). `xtask layers` also checks the
+  macOS-only dependencies (`[target.'cfg(..)'.dependencies]`), which it did not read before.
+- Module cycles inside a crate are measured and may only shrink: `cargo run -p xtask -- modules` against
+  `xtask/module-cycles.txt`, and `cargo run -p xtask -- graph <crate>` shows the edges of a cycle (W24). From 34 cycle
+  groups with 159 modules on 0.10.3 to 21 groups with 70 modules.
+- `nxb-xlate` has module layers and no cycle group (was 10 of 16 modules): the pipeline of a translation is the module
+  `front`, the `EmitterContext` is in `emit`, the helper functions are `helper` (W28). No output changes and
+  `TRANSLATOR_ID` stays.
+- `nxkit-gpu` has module layers and no cycle group (was 38 of 54 modules): `drawctx` holds what the planning of a draw
+  reads, `encode::EncodeCtx` what only the encoder reads, and the encode path reaches the opt-in analyses (`nanscan`,
+  `lum`, `passprof`, `meshvis`) only through the observer interface `probe` (W29).
+- The smaller cycles of `nxb-split`, `nxb-rewrite`, `nxb-build`, `nxkit-hos`, `nxkit-host` and `nxkit-metal` are gone.
+  The shared parts moved into small modules of their own (`prim`, `options`, `sync`, `fields`, `rawcopy`, ...).
+- The runtime reads its `NXKIT_*` settings from one snapshot (`nxkit_abi::env`), taken once at the start of
+  `nxkit-host` and passed to the parts it builds (W27). `xtask settings` fails on a direct read in a runtime crate.
+  `xtask statics` counts the process-wide statics of each runtime crate (443) and lets the number only fall, and the
+  anchor static of each crate says why it is process-wide (W26).
+- `nxkit-gpu` takes the loading screen of the start in `GpuSettings::prewarm_screen` (`set_prewarm_screen` is gone), and
+  `nxkit-rt` takes the NVN command settings in `nvn::Settings::commands` (`set_command_settings` is gone).
+- The thread roles of a title are words of the title API (`nxtitle::threads`). The BotW title no longer depends on the
+  kernel crate.
+- `nxb-profile` is a dev crate (W31). `deps.toml` lists `foldhash` and is valid TOML again.
+
+### Removed
+
+- The skeleton crates `nxb-air`, `nxb-bundle`, `nxb-crypto`, `nxb-hos`, `nxb-plist`, `nxb-pso` and `nxb-zip`, the
+  unused crate `nxb-io`, the empty placeholder modules of `nxb-codec`, `nxb-romfs`, `nxb-shader` and `nxb-stages`, and
+  11 dependencies that no code used (W30).
+
 ## 0.10.3 - 2026-11-19
 
 ### Added

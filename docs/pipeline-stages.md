@@ -81,7 +81,7 @@ Not ported at this time: the `--html` output of some titles. The base game of a 
 ## Split
 
 - The split reads file bytes from the block cache of the extract. It examines a file when the extract decrypts the last block of the file.
-  When the extract output is in the store, the split reads the image with `ParallelReader`. It reads a file only one time.
+  When the extract output is in the store, the split reads the image file by file. It reads a file only one time.
 - Each container family is a module. `sniff` uses magic bytes, not file names. Nested containers recurse with a depth limit.
 - The key of a shader is `sha256(control[:0x880] ‖ code)[:16]`.
 - The output sequence is the contract. Rows record the first occurrence. The split sorts the results in the walk sequence:
@@ -259,7 +259,7 @@ A plain base has no vertex layout, one sample, no alpha to coverage and no ICB s
 - The bases go into the batches like the plain ones (grouped by vertex function, so a state is in the shard of its pair unless a batch of a very large group is cut between them). The streamed archive gives each state to the group of its pair. `nxb pso` takes `--pipeline-list` (repeatable) and has the states in `bases.mtl4-json`.
 - Every `R` line with a fragment stage also gives one **exact** pipeline (`nxb-archive::exact`): the descriptor that the host builds for that draw, all of it set. The colour attachments are the slots of the line (`_` or beyond its length stay at the descriptor's default), each with its pixel format, write mask and, when it blends, `blending_state Enabled` with the six factors and operations; a slot without a blend sets nothing but the format (and the mask when it is not `All`). The vertex descriptor, class, samples, alpha to coverage and ICB support are those of the line, and the class is the one the host drew with, so a pipeline of the point size fallback is archived without a class. The host's lookup of that descriptor in the archive is then an archive load: no compile, no specialization. A format or blend factor that the script has no name for (`Src1Alpha`) leaves the line out. The pair is accepted by the rules of the bases above, but the functions need not be the entries that the plan chose: the integer entry `main0_u` of a fragment shader and the `_bp` library of a pulling vertex shader are archived as the host draws them (an entry with function constants, or one the library lacks, is left out). The same vertex descriptor check applies (`StateBase::invalid` and `ExactState::invalid`), so the states that the compiler refuses (62 of 1 676 in Ocarina of Time) stay at run time, where the host compiles them once and keeps them (see "The runtime pipeline cache" in [shader-step.md](shader-step.md#the-runtime-pipeline-cache)). The same descriptor appears once however many keys (debug flags) it was recorded under.
 - The exact pipelines are compiled in batches of their own, one per stream group (`Stream` `group`, `cut::whole`), and so are shards of their own: a change of the list changes the exact batches of the groups it touches and leaves the plain and state bases, about 37 000 of them for Ocarina of Time, in the store. The index (`nxkit_abi::shards`, version 2: the host reads 1 and 2) has a section of exact entries, one per pair and shard (`Ident::Exact`); a pair whose states were cut by the compiler's refusals into several batches has several. The host opens only the exact shards of a pair for a recorded state, and not its base shard (in the real build: 1 614 pipelines in 0.3 s, where the same list through bases took 70 to 75 s). `nxb pso` writes them into its single archive beside the bases and prints `N of M recorded render pipelines added fully specialized`.
-- The host (`nxkit-metal`, `cache::specialize`) asks the archive for the unspecialized pipeline of such a state first, with the primitive class of the draw and then without one, and specializes it to the colours. When the archive has none, it compiles the base as before.
+- The host (`nxkit-metal`, `pipeline::cache::specialize`) asks the archive for the unspecialized pipeline of such a state first, with the primitive class of the draw and then without one, and specializes it to the colours. When the archive has none, it compiles the base as before.
 - Checked with Ocarina of Time: `nxb pso` on 11 pairs and 14 recorded states, then the host's prewarm over the same list from that archive: 14 of 14 made by specialization, 0 compiled. With exact pipelines, `nxb pso` on the 487 pairs of the real list (1 426 states as bases, 1 614 exact pipelines, 100 compute pipelines; 62 states refused, 139 MB, 77 batches, 47 s on a loaded machine) and the prewarm over its 1 676 render lines from that file: archive 1 614, compiled 62 (the refused states), 0.3 s; with the mesh and compute lines (`NXKIT_LOOKUP_ALL=1`) 1 828 pipelines in 18.6 s, archive 1 714, compiled 114 (the 62 and the 52 mesh pipelines). `NXKIT_DIAG=stats` or `pipe` says why a prewarm compile missed (`state base not archived ...`), and the ignored test `lookup_of_a_real_app` in `nxkit-gpu` (`pipelines/prewarm.rs`) runs the lookup against an app's shards or one archive file.
 - The build keeps the lists in the new app: a list under the old app's `pipecache` keeps its place, any other goes to `pipecache/id-carried-<n>/pipelines.seen`.
 
@@ -273,7 +273,7 @@ The profile's data that holds real states:
 - `shader_seen.tsv` lists shader keys seen in play (7,279 lines for Ocarina). It is a list of shaders and not of pipelines. Only `--seen-shaders` reads it.
 - `shader_facts.tsv` has the answers for translation queries (thread group, shared memory), not pipeline state.
 
-To use the `R` rows the build has to translate their NVN formats, blend states and vertex layouts into Metal descriptor fields. The table for that is in `nxkit-gpu` (`translate.rs`, `format_map.rs`), a macOS-only L2 crate that `nxb-archive` cannot depend on. It needs a shared table first. Not done.
+To use the `R` rows the build has to translate their NVN formats, blend states and vertex layouts into Metal descriptor fields. The table for that is in `nxkit-gpu` (`translate.rs`, `format_map.rs`), a macOS-only runtime crate (R3) that `nxb-archive` cannot depend on (a build crate uses only the runtime contract R0, W25). It needs a shared table first. Not done.
 
 ### Cost of the compile
 
@@ -327,8 +327,8 @@ Without the options, nothing changes. The unit tests check the order and the mar
 
 ## The profile of a game
 
-The crate `nxb-profile` (layer L2) holds the profile of a game as typed data: computed values, declared values with a proof for each override, and rules (engine, frame limit, cuts with a reason).
-It has a reader and a writer for a subset of TOML (the workspace has no external crates). It finds problems such as an override without a proof or a cut without a reason.
+The crate `nxb-profile` (layer dev, W31) holds the profile of a game as typed data: computed values, declared values with a proof for each override, and rules (engine, frame limit, cuts with a reason).
+It has a reader and a writer for a subset of TOML (no TOML crate). It finds problems such as an override without a proof or a cut without a reason.
 The title modules use it for their `profile.toml`. `nxb build` writes a small `game.tsv` into `<work>/profile` from the title module for the shader split; nobody edits that file.
 
 ## Byte identity for each stage

@@ -8,7 +8,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 - The repository is one Cargo workspace. The crates of the build are in `crates/`. The families and title modules are in `titles/` (refer to [titles.md](titles.md)). The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
 - `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `shaders`, `sign`, `pso`, `archive` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
-- The workspace uses the standard library only, with one exception. `nxkit-metal`, `nxkit-svc-input` and `nxkit-host` use the `objc2` family of crates to bind Metal, GameController, Core Haptics and AppKit on macOS. `deps.toml` lists them.
+- The build crates use the standard library, plus `libz-sys` in `nxb-sys`. The runtime crates bind the Apple frameworks (Metal, GameController, Core Haptics, AppKit, Core Audio, VideoToolbox, Core ML) with the `objc2` family and `block2`, decode AV1 in software with `rav1d` and use `foldhash` for fast maps. `deps.toml` lists each external crate with its reason and its users.
 
 ## Layers
 
@@ -57,7 +57,7 @@ The rules:
 2. L1 does no I/O. Its crates are pure functions over bytes and text that return `Result`. L1 can call `nxb-sys` only for pure calculations.
 3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends.
 4. L2 does not make output bytes of the shader step.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-coreml`, `nxkit-svc-video`, the module `sys` of `nxkit-hos`, of `nxkit-svc-fs`, of `nxkit-svc-offline`, of `nxkit-svc-system`, of `nxkit-svc-input` and of `nxkit-svc-audio`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid `unsafe_code` in the lint settings of their `Cargo.toml`.
+5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-coreml`, `nxkit-svc-video`, the module `sys` of `nxkit-hos`, of `nxkit-svc-fs`, of `nxkit-svc-offline`, of `nxkit-svc-system`, of `nxkit-svc-input` and of `nxkit-svc-audio`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid or deny `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `nxb-xlatedev`, `nxb-profile`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
@@ -73,8 +73,8 @@ The rules:
 | nxb-error | nxb-model | the identifiers in the error types |
 | nxb-model | nxb-sys | ARMv8 SHA-256 instructions. The digests do not change (W17). |
 | nxb-shader | nxb-pyjson | the JSON files of the shader step |
-| nxb-rewrite | nxb-a64, nxb-codec | the AArch64 decoder, LZ4 segments of NSO files |
-| nxb-split | nxb-codec, nxb-romfs | decompression, the walk through the image |
+| nxb-rewrite | nxb-a64, nxb-codec | the AArch64 decoder, the ZBIC segments of NSO files |
+| nxb-split | nxb-codec | the ZBIC decoder |
 | nxb-xlate | nxb-pyjson | the job file and the JSON of the reflection |
 | nxb-cli, nxb-build | nxb-extract, nxb-pack, nxb-archive | the L3 stage crates (W19) |
 | nxb-cli | nxb-build | the `nxb build` orchestrator (W19) |
@@ -87,7 +87,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 ## Crates
 
 "V" means that the crate has `in_v = true` in `[package.metadata.nxb]`. The layer check makes sure that such a crate uses only crates with V. The chain version V itself is a hash of the host's shader chain files, plus the options string `debug=True reduced=True`. No Rust source goes into V.
-"impl" means that the crate has a full implementation. "skel" means that the crate compiles, but has stubs with documentation only.
+"impl" means that the crate has a full implementation. The skeleton crates of earlier versions are removed (W30).
 
 | crate | layer | V | state | function |
 |---|---|---|---|---|
@@ -100,8 +100,8 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-xlate | L1 | yes | impl | the Rust translator: decode, control flow, SSA, passes, structured IR and MSL with a typed `Reflection` (`nxb_xlate::msl::translate`). Refer to [translator.md](translator.md) |
 | nxb-a64 | L1 | no | impl | an AArch64 decoder and the encoders for the rewrite step. It follows Capstone 5 for the fields that the rewriter uses |
 | nxb-rewrite | L1 | no | impl | the code rewrite: NSO and NRO load, rules as data, the five tables |
-| nxb-codec | L1 | no | impl | the ZBIC decoder (`nxb_codec::zbic`). The other codec modules are empty. |
-| nxb-romfs | L1 | no | impl | the RomFS reader and writer of the build |
+| nxb-codec | L1 | no | impl | the ZBIC decoder (`nxb_codec::zbic`). The other decoders of the build live in `nxb-split` and `nxb-rewrite` (W30). |
+| nxb-romfs | L1 | no | impl | the index of a `DMROMFS1` image (read, move files) and a SARC member search. The RomFS tables and the layout plan are in `nxb-extract` |
 | nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports many container families (refer to [pipeline-stages.md](pipeline-stages.md)). Formats that are not ported stop with a named `Unsupported` error and exit code 4. |
 | nxkit-hos | R2 | no | impl | the Horizon kernel: objects, handles, events, threads, `WaitSynchronization`, the lock, condition variable and address arbiters, the process memory and its svcs, IPC sessions and the SDK take-overs of the kernel side. Guest memory and the host's pages sit behind traits, so the crate has no `unsafe` code outside `sys`. Refer to [nxkit-hos.md](nxkit-hos.md). It uses `nxkit-abi` and the standard library |
 | nxkit-ipc | R2 | no | impl | the IPC server of the nxkit host: HIPC and CMIF parsing, domains, the service manager `sm:`, per-command counters and the stop on an unknown command. No `unsafe` code, no global lock on the request path |
@@ -131,13 +131,13 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-pack | L3 | no | impl | the ad-hoc signer and the staging of a file set into a bundle (`nxb sign`) |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host` |
-| nxkit-nvn | R2 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal yet. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
+| nxkit-nvn | R2 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
 | nxkit-gpu | R3 | no | impl | the frame encoder of the nxkit host, macOS only: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
 | nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |
 | nxtitles | L1 | no | impl | the registry: one cargo feature per family and title module |
 | nxfamily-agl | T | no | impl | the family of Nintendo EPD games on sead, agl and gsys |
 | nxgame-oot | T | no | impl | The Legend of Zelda: Ocarina of Time for Nintendo Switch 2 (`0400486024DEC000`) |
-| nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the corpus tool of the Rust translator (`xlate-corpus`), the layer and size checks |
+| nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the corpus tool of the Rust translator (`xlate-corpus`), the checks of the workspace (layers, sizes, module cycles, the settings source, the statics of the runtime) |
 | msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck | F | no | impl | the own front end. Refer to [frontend.md](frontend.md). |
 
 ## Module layers inside a crate
@@ -188,7 +188,7 @@ the rest, so a sub-crate would only add a public interface.
 
 `nxkit-host` is the composition root (rule 11). At start it reads `game.json`, the title's settings and the
 `NXKIT_*` environment once, builds the kernel, the IPC server, the services, the NVN front end, the GPU backend and the
-window, and connects them. No other crate reads the process environment or decides which part talks to which.
+window, and connects them. No other runtime crate reads an `NXKIT_*` variable from the process or decides which part talks to which. (Variables of the system such as `HOME` and `TZ` are read where they are used.)
 
 - **Context instead of globals.** A subsystem keeps its state in an object that it owns: the kernel in `Kernel`, a
   service in its `Service` objects, the GPU backend in `Gpu`. A caller gets the object passed in.
@@ -264,7 +264,7 @@ Details: [shader-step.md](shader-step.md), [plans/pipelines-at-build-time.md](pl
 1. **Build.** `nxb-xlate` translates the shader to MSL, the own front end or Apple's tools make the Metal library, and `nxb-archive` plans the pipeline archive: one unspecialized base for each shader pair. A vertex shader with stage inputs has a second library, `_bp`, that reads its streams itself (vertex pulling). The plan archives the `_bp` function, so its base has no vertex layout.
 2. **Keys.** Batches are content keys. A translator change that touches only the shaders of one feature (now `hmma`) raises that feature's revision and not `TRANSLATOR_ID`; the crate version is in no key. A rebuild redoes only what changed.
 3. **Shards.** Each batch is one `.mtl4archive` file under `pipelines/` with an index (`index.nxpi`). `MTL4Archive` read one merged file whole into memory (4.8 GB for one title, measured), so the host opens a shard when its first pipeline is asked for and keeps at most 32 open.
-4. **Host.** For a draw `Pipelines` looks the pipeline up in the shards and the runtime archives. A miss takes the base of the pair and specializes it for the colour state with Metal 4 (`cache/specialize.rs`), on background threads (half the cores, 2 to 8, user-initiated QoS, the jobs of the latest frame first). The draw is left out until its pipeline is ready (`skip.pending`).
+4. **Host.** For a draw `Pipelines` looks the pipeline up in the shards and the runtime archives. A miss takes the base of the pair and specializes it for the colour state with Metal 4 (`nxkit-metal` `pipeline/cache/specialize.rs`), on background threads (half the cores, 2 to 8, user-initiated QoS, the jobs of the latest frame first). The draw is left out until its pipeline is ready (`skip.pending`).
 5. **Runtime cache.** Every pipeline the host makes is captured into `rt-*.mtl4archive` files with a list (`pipelines.seen`) beside the title. At the next start the host makes the pipelines of the list before the first frame (budget 20 s). The user does not rebuild after playing.
 6. **Vertex pulling.** With `_bp` the draw binds a `dm_vlayout` block at buffer 16 and the pipeline has no vertex layout, so one base serves every layout. It is off unless `NXKIT_PULL=1`; otherwise `stage_in` stays.
 
