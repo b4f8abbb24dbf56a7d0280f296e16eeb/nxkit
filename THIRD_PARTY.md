@@ -16,13 +16,13 @@ taken from other implementations.
 | Mach-O code signature (SuperBlob, CodeDirectory, requirements, entitlements, `CodeResources`) | `nxb-pack` | output of Apple `codesign` on test bundles, and public headers |
 | metallib container and AIR conventions | `air-bc`, `air-emit`, `air-lib` | observation of the output of Apple tools. No Apple code is copied |
 | LLVM 14 bitcode | `air-bc` | the public LLVM bitcode documentation |
-| NCA, NSP (PFS0), IVFC, BKTR, RomFS, NSO, NACP, SARC, BNSH, BAHS, Yaz0 | `nxb-extract`, `nxb-split`, `nxb-romfs`, `nxb-hos`, `nxb-rewrite` | public format documentation of the homebrew community. The `prod.keys` text format is the common `name = hex` layout |
+| NCA, NSP (PFS0), IVFC, BKTR, RomFS, NSO, NACP, SARC, BNSH, BAHS, Yaz0 | `nxb-extract`, `nxb-split`, `nxb-romfs`, `nxb-rewrite` | public format documentation of the homebrew community. The `prod.keys` text format is the common `name = hex` layout |
 | zstd decoder | `nxb-split`, `nxb-codec` | RFC 8878 |
 | LZ4 block decoder | `nxb-codec`, `nxb-split` | the public LZ4 block format description |
 | AES-128 (ECB, CTR, XTS with the console tweak) | `nxb-extract`, `nxb-sys` | FIPS 197, NIST SP 800-38A, IEEE 1619. The test vectors are the published ones |
 | SHA-1, SHA-256 | `nxb-model`, `nxb-sys` | FIPS 180-4. The test vectors are the published ones |
 | AArch64 decoding and patching | `nxb-a64`, `nxb-rewrite` | the Arm Architecture Reference Manual |
-| Property lists (XML and binary) | `nxb-plist`, `nxb-pack` | public Apple documentation and observed output |
+| Property lists (XML and binary) | `nxb-pack` | public Apple documentation and observed output |
 | Block-linear texture layout (mip block height, layer stride) | `nxkit-metal` | the layout rules of deko3d (`dk_image.cpp`). The code is written anew and no source is copied |
 | Core ML model package (`Model.proto` / `MIL.proto` messages, `weight.bin` layout) | `nxkit-ndve::ane` | the field numbers and enum values of the coremltools `.proto` files (BSD-3-Clause, Copyright (c) 2020, Apple Inc.) read from the published format, and the output of coremltools on a test model. The `.proto` files are not vendored; the encoder is written by hand |
 

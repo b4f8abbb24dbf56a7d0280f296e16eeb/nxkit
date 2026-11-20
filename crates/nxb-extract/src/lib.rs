@@ -10,7 +10,7 @@
 //!   image and SHA-256 per file come from the bytes as they are written, never from a re-read ([`mod@write`]).
 //!
 //! Layer: L3 for now (it does file I/O and threads). Its pure parts (AES, PFS0/NCA/IVFC/BKTR/RomFS parsing, the image
-//! plan) belong in `nxb-crypto`, `nxb-hos` and `nxb-romfs` once their owner takes them.
+//! plan) can move into L1 crates once their owner takes them (W30).
 //! A sparse base program is read only together with its update NSP, as `nx_extract` does (a named `Unsupported` error
 //! for the base alone, never a silent difference).
 

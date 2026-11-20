@@ -24,7 +24,7 @@ its own world, plus the sideways edges in the table below, plus the shared point
 ```mermaid
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
-  L2["L2 build runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io"]
+  L2["L2 build runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-xlate, nxb-codec, nxb-a64, nxb-romfs, nxb-rewrite, nxb-split, nxtitle, nxtitles"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code)"]
   LT["T families and titles: nxfamily-agl, nxgame-* (only nxtitles uses them)"]
@@ -97,12 +97,11 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-maxwell | L0 | yes | impl | decoders for Maxwell and Ampere (sm_86) machine code of the game GPU |
 | nxb-pyjson | L1 | yes | impl | a JSON writer that gives the same bytes as Python `json.dumps`. Measured: byte-identical on 16,269 JSON files of the reference title. |
 | nxb-shader | L1 | yes | impl | the job writer, the chain version, guards, the header, the target conventions, the side library cut |
-| nxb-air | L1 | yes | skel | the in-process front end (planned, W18) |
 | nxb-xlate | L1 | yes | impl | the Rust translator: decode, control flow, SSA, passes, structured IR and MSL with a typed `Reflection` (`nxb_xlate::msl::translate`). Refer to [translator.md](translator.md) |
 | nxb-a64 | L1 | no | impl | an AArch64 decoder and the encoders for the rewrite step. It follows Capstone 5 for the fields that the rewriter uses |
 | nxb-rewrite | L1 | no | impl | the code rewrite: NSO and NRO load, rules as data, the five tables |
 | nxb-codec | L1 | no | impl | the ZBIC decoder (`nxb_codec::zbic`). The other codec modules are empty. |
-| nxb-crypto, nxb-plist, nxb-hos, nxb-romfs, nxb-bundle, nxb-zip, nxb-pso | L1 | no | skel | pure domain logic. Some of it is in the stage crates at this time. |
+| nxb-romfs | L1 | no | impl | the RomFS reader and writer of the build |
 | nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports many container families (refer to [pipeline-stages.md](pipeline-stages.md)). Formats that are not ported stop with a named `Unsupported` error and exit code 4. |
 | nxkit-hos | R2 | no | impl | the Horizon kernel: objects, handles, events, threads, `WaitSynchronization`, the lock, condition variable and address arbiters, the process memory and its svcs, IPC sessions and the SDK take-overs of the kernel side. Guest memory and the host's pages sit behind traits, so the crate has no `unsafe` code outside `sys`. Refer to [nxkit-hos.md](nxkit-hos.md). It uses `nxkit-abi` and the standard library |
 | nxkit-ipc | R2 | no | impl | the IPC server of the nxkit host: HIPC and CMIF parsing, domains, the service manager `sm:`, per-command counters and the stop on an unknown command. No `unsafe` code, no global lock on the request path |
@@ -122,11 +121,10 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxkit-host | R4 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
 | nxkit-svc-system | R2 | no | impl | the system services as `Service` objects: `set`, `set:sys`, `apm`, `time:*`, `acc:*`, `appletOE`, `appletAE`, `pctl*`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u` (R37), and the SDK exports of the take-overs (R38a). The module `sys` holds the clock, time zone and guest call functions |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
-| nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. the title modules use it for their `profile.toml` |
+| nxb-profile | dev | no | impl | the profile of a game as typed data, with a TOML reader and writer. The tests of the title modules use it to check their `profile.toml` (W31) |
 | nxb-tool | L2 | no | impl | `Tool` trait, `Invocation`, environment allow list, watchdog, circuit breaker, `FrontEnd` trait |
 | nxb-store | L2 | no | impl | content-addressed blobs, keyed entries with manifests, quarantine, cache export and import |
 | nxb-sched | L2 | no | impl | work-stealing executor with token and memory budgets, single-flight |
-| nxb-io | L2 | no | impl | parallel hashing of files and folders (`hash_files`, `hash_tree`) |
 | nxb-stages | L3 | no | impl | the shader step. It calls `nxb-xlate` in the process |
 | nxb-cli | L3 | no | impl | the program `nxb` with all commands |
 | nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ and NUP. The commands are `nxb extract` and `nxb split` |

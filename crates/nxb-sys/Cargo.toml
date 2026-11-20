@@ -17,7 +17,7 @@ in_v = false
 [target.'cfg(windows)'.dependencies]
 libz-sys = { version = "1", default-features = false, features = ["static"] }
 
-# Not `workspace = true`: this is the one crate allowed to use `unsafe` (workspace-layout rule 5).
+# Not `workspace = true`: this is the one crate allowed to use `unsafe` (docs/architecture.md, rule 5).
 [lints.rust]
 missing_docs = "deny"
 unsafe_code = "allow"

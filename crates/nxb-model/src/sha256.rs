@@ -2,7 +2,7 @@
 //!
 //! Two backends with identical output: the ARMv8 SHA2 instructions through `nxb-sys` when the CPU has them, else a
 //! portable scalar implementation. Both are checked against the FIPS 180-2 example vectors and against Python's `hashlib`
-//! on every length from 0 to 299 bytes (see the tests, workspace-layout ADRs W3 and W17).
+//! on every length from 0 to 299 bytes (see the tests, decisions.md W3 and W17).
 
 use crate::digest::Digest;
 

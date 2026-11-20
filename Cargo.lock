@@ -221,17 +221,6 @@ dependencies = [
 [[package]]
 name = "nxb-a64"
 version = "0.10.3"
-dependencies = [
- "nxb-model",
-]
-
-[[package]]
-name = "nxb-air"
-version = "0.10.3"
-dependencies = [
- "nxb-model",
- "nxb-shader",
-]
 
 [[package]]
 name = "nxb-archive"
@@ -271,13 +260,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nxb-bundle"
-version = "0.10.3"
-dependencies = [
- "nxb-model",
-]
-
-[[package]]
 name = "nxb-cli"
 version = "0.10.3"
 dependencies = [
@@ -304,13 +286,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nxb-crypto"
-version = "0.10.3"
-dependencies = [
- "nxb-model",
-]
-
-[[package]]
 name = "nxb-error"
 version = "0.10.3"
 dependencies = [
@@ -326,23 +301,6 @@ dependencies = [
  "nxb-pyjson",
  "nxb-split",
  "nxb-sys",
- "nxb-testkit",
-]
-
-[[package]]
-name = "nxb-hos"
-version = "0.10.3"
-dependencies = [
- "nxb-error",
- "nxb-model",
-]
-
-[[package]]
-name = "nxb-io"
-version = "0.10.3"
-dependencies = [
- "nxb-error",
- "nxb-model",
  "nxb-testkit",
 ]
 
@@ -372,15 +330,7 @@ name = "nxb-pack"
 version = "0.10.3"
 dependencies = [
  "nxb-model",
- "nxb-pyjson",
  "nxb-sys",
-]
-
-[[package]]
-name = "nxb-plist"
-version = "0.10.3"
-dependencies = [
- "nxb-model",
 ]
 
 [[package]]
@@ -388,17 +338,9 @@ name = "nxb-profile"
 version = "0.10.3"
 
 [[package]]
-name = "nxb-pso"
-version = "0.10.3"
-dependencies = [
- "nxb-model",
-]
-
-[[package]]
 name = "nxb-pyjson"
 version = "0.10.3"
 dependencies = [
- "nxb-model",
  "nxb-testkit",
 ]
 
@@ -408,23 +350,17 @@ version = "0.10.3"
 dependencies = [
  "nxb-a64",
  "nxb-codec",
- "nxb-error",
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-romfs"
 version = "0.10.3"
-dependencies = [
- "nxb-model",
-]
 
 [[package]]
 name = "nxb-sched"
 version = "0.10.3"
 dependencies = [
- "nxb-error",
- "nxb-model",
  "nxb-sys",
  "nxb-testkit",
 ]
@@ -442,7 +378,6 @@ name = "nxb-split"
 version = "0.10.3"
 dependencies = [
  "nxb-codec",
- "nxb-error",
  "nxb-model",
 ]
 
@@ -450,11 +385,8 @@ dependencies = [
 name = "nxb-stages"
 version = "0.10.3"
 dependencies = [
- "nxb-air",
  "nxb-error",
- "nxb-io",
  "nxb-model",
- "nxb-obs",
  "nxb-pyjson",
  "nxb-sched",
  "nxb-shader",
@@ -513,13 +445,6 @@ dependencies = [
  "nxb-shader",
  "nxb-stages",
  "nxb-xlate",
-]
-
-[[package]]
-name = "nxb-zip"
-version = "0.10.3"
-dependencies = [
- "nxb-model",
 ]
 
 [[package]]

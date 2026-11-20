@@ -1,4 +1,4 @@
-//! The core budget in P-core equivalents (design-v2 5 and 8.1, workspace-layout ADR W15).
+//! The core budget in P-core equivalents (design-v2 5 and 8.1, decisions.md W15).
 
 /// How many tokens (concurrent units of CPU work, in-process or a child process) the executor hands out, and how many
 /// worker threads it runs. Each running task holds `cost` tokens.

@@ -2,11 +2,7 @@
 //!
 //! A stage module stays under 400 lines.
 //!
-//! Status: `build` (the shader step) is implemented, the other modules are placeholders that fix the crate's shape, see
-//! `docs/workspace-layout.md` for the planned public surface.
-
-/// The shader step (design-v2).
-pub mod shaders {}
+//! The shader step (`build`) is the one stage here. The other stages are their own L3 crates (W19).
 
 pub mod build;
 mod build_finish;
@@ -19,24 +15,3 @@ pub mod inputs;
 pub mod own_front;
 pub mod own_raw;
 mod xlate_cache;
-
-/// The extract stage.
-pub mod extract {}
-
-/// The module rewrite stage.
-pub mod rewrite {}
-
-/// The shader split stage.
-pub mod split {}
-
-/// The Mac app stage.
-pub mod app {}
-
-/// The IPA stage.
-pub mod ipa {}
-
-/// The pipeline archive stage.
-pub mod pso {}
-
-/// The whole-build graph: `build(&BuildConfig)`.
-pub mod pipeline {}

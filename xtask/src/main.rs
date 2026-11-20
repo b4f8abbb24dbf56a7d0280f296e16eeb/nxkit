@@ -1,7 +1,7 @@
 //! Workspace checks that rustc and clippy cannot do.
 //!
 //! - `layers`: every crate declares `[package.metadata.nxb] layer` and `in_v`, dependencies point to a lower layer or
-//!   are listed sideways edges (docs/workspace-layout.md 2 and 2.1), dev crates are never normal dependencies, a crate in
+//!   are listed sideways edges (docs/architecture.md, "Layers"), dev crates are never normal dependencies, a crate in
 //!   the chain version V depends only on crates in V.
 //!   The front-end crates (`msl-*`, `air-*`, `airc`, `mslcheck`) are layer `F` (ADR W20): they depend only on each other and
 //!   on no `nxb-*` crate, and only the entry points `air-front` and `airc` may be used from outside, by `L2` or `L3` crates.
@@ -30,22 +30,12 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxtitles", "nxtitle"),
     ("nxb-error", "nxb-model"),
     ("nxb-model", "nxb-sys"),
-    ("nxb-air", "nxb-shader"),
     ("nxb-shader", "nxb-pyjson"),
     ("nxb-xlate", "nxb-pyjson"),
-    ("nxb-hos", "nxb-romfs"),
-    ("nxb-hos", "nxb-crypto"),
-    ("nxb-hos", "nxb-codec"),
-    ("nxb-romfs", "nxb-crypto"),
     ("nxb-rewrite", "nxb-a64"),
     ("nxb-rewrite", "nxb-codec"),
     ("nxb-split", "nxb-codec"),
     ("nxb-split", "nxb-romfs"),
-    ("nxb-bundle", "nxb-plist"),
-    ("nxb-codesign", "nxb-plist"),
-    ("nxb-codesign", "nxb-crypto"),
-    ("nxb-zip", "nxb-codec"),
-    ("nxb-pso", "nxb-pyjson"),
     ("nxb-cli", "nxb-stages"),
     // ADR W19: stage crates beside the wiring (L3, they do I/O), the orchestrator and the CLI call them
     ("nxb-cli", "nxb-extract"),
