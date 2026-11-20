@@ -5,6 +5,9 @@
 //! A [`CmdStream`] is the record of one NVN command buffer. A queue submit appends it to the frame.
 //! All vectors keep their capacity from frame to frame, so recording does not allocate once the game is warm.
 
+pub mod counters;
+pub mod rendercond;
+
 use std::ops::Range;
 
 use crate::counters::FrameCounters;

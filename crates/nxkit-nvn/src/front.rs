@@ -8,6 +8,7 @@
 //! runs the pass analysis and keeps the frame for the backend. The next [`FrontEnd::begin_frame`] drops the frame
 //! and keeps its memory.
 
+pub mod texlife;
 use std::collections::HashMap;
 
 use crate::analyse::Analyser;
@@ -28,17 +29,7 @@ use crate::space::{GpuAddr, GpuSpace};
 use crate::texlife::{Life, SCAN_EVERY};
 use crate::tic::Tsc;
 
-/// Why a frame ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FlushReason {
-    /// The game presented.
-    Present,
-    /// The CPU waits for the GPU, for a fence, a finish or a read back.
-    CpuWait,
-    /// A CPU event signal released held submits with a lot of work: the frame goes to the GPU before the present, so the
-    /// encode starts earlier (`NXKIT_RELEASE_FLUSH`).
-    Release,
-}
+pub use crate::backend::FlushReason;
 
 /// How often each reason ended a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

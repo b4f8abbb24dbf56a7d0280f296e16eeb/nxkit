@@ -45,18 +45,22 @@ mod databuf;
 mod deswizzle;
 mod device;
 pub mod display;
+mod drawable;
 mod encode;
 mod error;
 mod format;
 mod frame;
 mod guest;
+mod hooks;
 mod icb;
 mod interpolate;
+mod interval;
 mod memstats;
 mod metrics;
 mod mirror;
 mod pacing;
 mod pages;
+mod passdesc;
 mod pipeline;
 mod policy;
 mod present;
@@ -74,6 +78,7 @@ mod stats;
 mod table;
 mod texture;
 pub mod thread;
+mod timed;
 mod timestamp;
 mod upscale;
 mod vmregion;
@@ -103,9 +108,11 @@ pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
 pub use memstats::{MemStats, mem_stats, texture_evicted, texture_reuploaded};
-pub use metrics::{CommandBufferStats, FrameHooks, Metrics, MetricsSnapshot};
+pub use metrics::{CommandBufferStats, Metrics, MetricsSnapshot};
 pub use mirror::{Ensured, Mirror, MirrorRun, MirrorView, SEGMENT as MIRROR_SEGMENT};
-pub use pacing::{DisplayLink, DisplayTick, FrameInterval, LinkRate, Pacer, RateRange, TickSink};
+pub use pacing::{
+    DisplayLink, DisplayTick, FrameHooks, FrameInterval, LinkRate, Pacer, RateRange, TickSink,
+};
 pub use pages::{
     FaultKind, FaultOrigin, FlushStats, Form as AccessForm, InternalThread, PageStats, Pages,
     Reason as FallbackReason, SnapWhy, Stager, mark_internal_thread, name_pc, set_pc_namer,

@@ -7,6 +7,7 @@
 //! A call record plays another recording. The child summary is made with the state that the caller has at that point.
 //! The effects of the child go into the stream of the caller. State that the child sets stays set for the caller.
 
+pub mod cache;
 use std::ops::Range;
 
 use crate::cache::RecCache;

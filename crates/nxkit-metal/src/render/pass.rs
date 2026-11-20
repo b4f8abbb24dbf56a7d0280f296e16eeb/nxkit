@@ -4,9 +4,9 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSRange;
 use objc2_metal::{
-    MTL4CommandBuffer, MTL4CommandEncoder, MTL4RenderCommandEncoder, MTL4RenderPassDescriptor,
-    MTL4VisibilityOptions, MTLClearColor, MTLCullMode, MTLRenderStages, MTLScissorRect, MTLSize,
-    MTLStages, MTLViewport, MTLVisibilityResultMode, MTLVisibilityResultType,
+    MTL4CommandBuffer, MTL4CommandEncoder, MTL4RenderCommandEncoder, MTL4VisibilityOptions,
+    MTLClearColor, MTLCullMode, MTLRenderStages, MTLScissorRect, MTLSize, MTLStages, MTLViewport,
+    MTLVisibilityResultMode, MTLVisibilityResultType,
 };
 
 use super::{CullMode, RenderCommand, RenderPassDesc, check_attachment};
@@ -15,6 +15,7 @@ use crate::compute_icb::check_range_buffer;
 use crate::databuf::DataBuffer;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
+use crate::passdesc::PassDescriptor;
 use crate::table::{ArgumentTable, check_real};
 use crate::texture::Texture;
 
@@ -192,44 +193,6 @@ impl CommandBuffer {
         rp.setRenderTargetWidth(w as usize);
         rp.setRenderTargetHeight(h as usize);
         Ok(())
-    }
-}
-
-/// A render pass descriptor that is filled again for every pass of a command buffer. Metal copies a descriptor when
-/// an encoder starts, so one object serves all passes.
-pub(crate) struct PassDescriptor {
-    raw: Retained<MTL4RenderPassDescriptor>,
-    /// The colour slots below this index may hold a texture.
-    colors: usize,
-    depth: bool,
-    stencil: bool,
-}
-
-impl PassDescriptor {
-    fn new() -> Self {
-        Self {
-            raw: MTL4RenderPassDescriptor::new(),
-            colors: 0,
-            depth: false,
-            stencil: false,
-        }
-    }
-
-    /// Empties the attachments that the previous pass set.
-    fn reset(&mut self) {
-        let slots = self.raw.colorAttachments();
-        for i in 0..self.colors {
-            // SAFETY: the index is a slot that an earlier pass set, so it is inside the attachment limit.
-            let a = unsafe { slots.objectAtIndexedSubscript(i) };
-            a.setTexture(None);
-        }
-        if self.depth {
-            self.raw.depthAttachment().setTexture(None);
-        }
-        if self.stencil {
-            self.raw.stencilAttachment().setTexture(None);
-        }
-        (self.colors, self.depth, self.stencil) = (0, false, false);
     }
 }
 

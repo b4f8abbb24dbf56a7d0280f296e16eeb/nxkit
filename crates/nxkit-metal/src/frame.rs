@@ -21,7 +21,8 @@ use objc2_metal::{
 use crate::device::Context;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
-use crate::metrics::{CommandBufferStats, FrameHooks, Metrics};
+use crate::hooks::FrameHooks;
+use crate::metrics::{CommandBufferStats, Metrics};
 use crate::scratch::Scratch;
 use crate::stats::PacingStats;
 use crate::table::Keep;
@@ -323,7 +324,7 @@ impl Frame {
             // With timed presents on, the display keeps the frame before this one on screen for the minimum time. If
             // Metal refuses that call for a drawable of the display link, timed presents go off for good and the
             // plain present follows.
-            let timed = crate::present::timed_present();
+            let timed = crate::timed::timed_present();
             let mut sent = false;
             if let Some(min) = timed {
                 // The closure only calls `presentAfterMinimumDuration:`, which leaves no Rust state half done when it throws.
@@ -333,7 +334,7 @@ impl Frame {
                 match r {
                     Ok(()) => sent = true,
                     Err(e) => {
-                        crate::present::set_timed_present(None);
+                        crate::timed::set_timed_present(None);
                         eprintln!(
                             "nxkit-metal: timed presents are off: presentAfterMinimumDuration threw {e:?}"
                         );

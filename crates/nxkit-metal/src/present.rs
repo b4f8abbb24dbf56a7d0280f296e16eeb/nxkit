@@ -7,94 +7,19 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
-use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
-use objc2_metal::{MTLDrawable, MTLPixelFormat, MTLTexture};
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_metal::{MTLDrawable, MTLPixelFormat};
+use objc2_quartz_core::CAMetalLayer;
 
 use crate::device::Context;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result};
-use crate::format::Format;
 use crate::frame::{Frame, PendingPresent};
-use crate::texture::{Storage, Texture, TextureDesc};
 
-/// The block that Metal calls when a drawable was presented.
-type PresentedHandler =
-    RcBlock<'static, fn(NonNull<ProtocolObject<dyn MTLDrawable>>), dyn Send + Sync>;
-
-/// The pixel format of the layer.
-pub const PRESENT_FORMAT: Format = Format::Bgra8Unorm;
-
-/// The least time in microseconds that a shown frame stays before the next one may appear. 0 is off.
-static MIN_STAY_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Turns on timed presents: every frame is presented with `presentAfterMinimumDuration:` of `secs`, so the display
-/// keeps the frame before it on screen at least that long. A screen that adapts its refresh rate (ProMotion) then
-/// shows each frame for exactly its period, whatever rate the display runs at in that moment. `None` turns it off.
-/// Metal can refuse the call on a drawable of the display link. The first refusal turns timed presents off again.
-pub fn set_timed_present(secs: Option<f64>) {
-    let us = secs
-        .filter(|s| s.is_finite() && *s > 0.0)
-        .map_or(0, |s| (s * 1e6).round() as u64);
-    MIN_STAY_US.store(us, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// The minimum stay of timed presents in seconds, when they are on.
-pub fn timed_present() -> Option<f64> {
-    match MIN_STAY_US.load(std::sync::atomic::Ordering::Relaxed) {
-        0 => None,
-        us => Some(us as f64 / 1e6),
-    }
-}
-
-/// The time in seconds on the clock of `Drawable::on_presented` and `DisplayTick` (`CACurrentMediaTime`).
-pub fn media_time() -> f64 {
-    // SAFETY: `CACurrentMediaTime` has no preconditions. QuartzCore is linked through `objc2-quartz-core`.
-    unsafe { CACurrentMediaTime() }
-}
-
-unsafe extern "C" {
-    fn CACurrentMediaTime() -> f64;
-}
-
-/// A drawable of the layer. Render into [`Drawable::texture`], then call [`Frame::present`].
-pub struct Drawable {
-    texture: Texture,
-    raw: Retained<ProtocolObject<dyn CAMetalDrawable>>,
-}
-
-impl Drawable {
-    /// Calls `f` with the time in seconds on the host clock at which the display showed the drawable, 0 when it did not
-    /// show it. It must be called before the drawable is presented.
-    pub fn on_presented(&self, f: impl Fn(f64) + Send + Sync + 'static) {
-        let block: PresentedHandler =
-            RcBlock::new(move |d: NonNull<ProtocolObject<dyn MTLDrawable>>| {
-                // SAFETY: Metal passes a valid drawable that lives for the call.
-                f(unsafe { d.as_ref() }.presentedTime());
-            });
-        self.raw.addPresentedHandler(&block);
-    }
-
-    pub(crate) fn wrap(ctx: &Context, raw: Retained<ProtocolObject<dyn CAMetalDrawable>>) -> Self {
-        let tex = raw.texture();
-        let mut desc =
-            TextureDesc::render_target_2d(tex.width() as u32, tex.height() as u32, PRESENT_FORMAT);
-        desc.shader_read = false;
-        desc.storage = Storage::Private;
-        Drawable {
-            texture: Texture::wrap_external(ctx, tex, desc),
-            raw,
-        }
-    }
-
-    /// The texture to render into.
-    pub fn texture(&self) -> &Texture {
-        &self.texture
-    }
-}
+pub use crate::drawable::{Drawable, PRESENT_FORMAT, media_time};
+pub use crate::timed::{set_timed_present, timed_present};
 
 /// The layer and its settings.
 pub struct Presenter {

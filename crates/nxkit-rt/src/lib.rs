@@ -51,6 +51,7 @@ mod audio;
 mod gfx;
 mod guestos;
 mod kernel;
+mod layer;
 pub mod nvn;
 pub mod settings;
 

@@ -273,8 +273,8 @@ fn present_texture_in(_q: u64, w: u64, index: i32) {
                 view.texture
             ))
         })?;
-        let crop = crate::gfx::vi::present_crop(view.crop, g.texture_extent(view.texture));
-        crate::gfx::vi::frame_queued();
+        let crop = crate::layer::present_crop(view.crop, g.texture_extent(view.texture));
+        crate::layer::frame_queued((g.settings().clock_ns)());
         g.present(Present {
             window: w,
             texture,
