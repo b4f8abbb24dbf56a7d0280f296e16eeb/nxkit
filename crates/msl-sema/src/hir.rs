@@ -452,6 +452,8 @@ pub enum PlaceKind {
     Const(ConstId),
     /// What a pointer value points to.
     Deref(Box<Expr>),
+    /// A direct dereference of a const device volatile resource.
+    VolatileDeref(Box<Expr>),
     /// A struct field by index.
     Field(Box<Place>, u32),
     /// An array element.
@@ -462,6 +464,20 @@ pub enum PlaceKind {
     Swizzle(Box<Place>, Vec<u8>),
     /// A temporary holding the value of an rvalue.
     Temp(Box<Expr>),
+}
+
+impl Place {
+    /// A volatile resource dereference, possibly followed by field or element selection.
+    pub fn is_volatile(&self) -> bool {
+        match &self.kind {
+            PlaceKind::VolatileDeref(_) => true,
+            PlaceKind::Field(p, _)
+            | PlaceKind::Index(p, _)
+            | PlaceKind::Element(p, _)
+            | PlaceKind::Swizzle(p, _) => p.is_volatile(),
+            _ => false,
+        }
+    }
 }
 
 impl Expr {
@@ -532,7 +548,7 @@ fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(FuncId)) {
 fn visit_place(p: &Place, f: &mut dyn FnMut(FuncId)) {
     match &p.kind {
         PlaceKind::Local(_) | PlaceKind::Const(_) => {}
-        PlaceKind::Deref(e) | PlaceKind::Temp(e) => visit_expr(e, f),
+        PlaceKind::Deref(e) | PlaceKind::VolatileDeref(e) | PlaceKind::Temp(e) => visit_expr(e, f),
         PlaceKind::Field(b, _) | PlaceKind::Swizzle(b, _) => visit_place(b, f),
         PlaceKind::Index(b, i) | PlaceKind::Element(b, i) => {
             visit_place(b, f);

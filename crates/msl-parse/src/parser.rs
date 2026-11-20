@@ -741,16 +741,34 @@ impl<'a> Parser<'a> {
         self.next()?;
         let mut fields: Vec<Field> = Vec::new();
         while !self.accept("}")? {
-            let ty = self.type_()?;
+            let is_volatile = self.peek()? == "const"
+                && self.peek_at(1)? == "device"
+                && self.peek_at(2)? == "volatile";
+            let ty = if is_volatile {
+                self.expect("const")?;
+                self.expect("device")?;
+                self.expect("volatile")?;
+                let target = self.ident()?;
+                if !self.structs.contains_key(target) {
+                    return reject("volatile-field:pointee");
+                }
+                self.expect("*")?;
+                Ty::Ptr(Space::Device, Rc::new(Ty::Struct(self.intern(target))))
+            } else {
+                self.type_()?
+            };
             if ty == Ty::DeviceAtomicUintPtr {
                 return reject("type:atomic_uint");
             }
-            let is_const = self.last_const;
+            let is_const = is_volatile || self.last_const;
             loop {
                 let fname = self.ident()?;
                 let fname = self.intern(fname);
                 let fty = self.array_suffix(ty.clone())?;
                 let attrs = self.attrs()?;
+                if is_volatile && (fty != ty || attrs.len() != 1 || attrs[0].name != "id") {
+                    return reject("volatile-field:binding");
+                }
                 for a in &attrs {
                     if !FIELD_ATTRS.contains(&a.name.as_str()) {
                         return reject(format!("field-attr:{}", a.name));
@@ -765,6 +783,7 @@ impl<'a> Parser<'a> {
                     ty: fty,
                     attrs,
                     is_const,
+                    is_volatile,
                 });
                 if !self.accept(",")? {
                     break;

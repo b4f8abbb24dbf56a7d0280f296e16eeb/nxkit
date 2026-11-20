@@ -81,6 +81,7 @@ pub fn analyze(m: &ast::Module) -> R<Module> {
 struct Cx {
     out: Module,
     struct_ids: HashMap<Rc<str>, usize>,
+    volatile_structs: HashSet<usize>,
     fconst_ids: HashMap<Rc<str>, usize>,
     const_ids: HashMap<Rc<str>, usize>,
     /// Signatures of the lowered functions, to resolve `Callee::User` by pointer.
@@ -231,6 +232,16 @@ impl Cx {
                 let id = self.out.types.add_struct(s.name.clone(), fields);
                 for k in metal {
                     self.out.types.structs[id].fields[k].metal_array = true;
+                }
+                for (k, field) in s.fields.iter().enumerate() {
+                    self.out.types.structs[id].fields[k].is_volatile = field.is_volatile;
+                }
+                if self.out.types.structs[id]
+                    .fields
+                    .iter()
+                    .any(|f| f.is_volatile || self.has_volatile_field(&f.ty))
+                {
+                    self.volatile_structs.insert(id);
                 }
                 self.struct_ids.insert(s.name.clone(), id);
                 Ok(())
@@ -644,13 +655,10 @@ impl Cx {
                     })
                 }
             },
-            A::Deref(p) => {
-                let ptr = self.expr(p)?;
-                deref(ptr)
-            }
+            A::Deref(p) => self.deref_ast(p),
             A::Member { base, field, arrow } => {
                 let bp = if *arrow {
-                    deref(self.expr(base)?)?
+                    self.deref_ast(base)?
                 } else {
                     self.place(base)?
                 };
@@ -712,6 +720,67 @@ impl Cx {
         }
     }
 
+    fn deref_ast(&mut self, e: &ast::Expr) -> R<Place> {
+        match &e.kind {
+            A::Paren(p) => self.deref_ast(p),
+            A::Member { .. } if self.is_place(e) => {
+                let p = self.place(e)?;
+                if self.is_volatile_field(&p) {
+                    if p.space != Space::Constant {
+                        return Err(Error::unsupported("volatile-field:binding"));
+                    }
+                    let mut target = deref(load(p))?;
+                    let PlaceKind::Deref(ptr) = target.kind else {
+                        return Err(Error::invalid("volatile resource deref"));
+                    };
+                    target.kind = PlaceKind::VolatileDeref(ptr);
+                    Ok(target)
+                } else {
+                    deref(self.read_place(p)?)
+                }
+            }
+            _ => deref(self.expr(e)?),
+        }
+    }
+
+    fn is_volatile_field(&self, p: &Place) -> bool {
+        let PlaceKind::Field(base, index) = &p.kind else {
+            return false;
+        };
+        let Type::Struct(id) = base.ty else {
+            return false;
+        };
+        self.out.types.structs[id].fields[*index as usize].is_volatile
+    }
+
+    fn has_volatile_field(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(id) => self.volatile_structs.contains(id),
+            Type::Array(elem, _) => self.has_volatile_field(elem),
+            _ => false,
+        }
+    }
+
+    fn read_place(&self, p: Place) -> R<Expr> {
+        if self.is_volatile_field(&p) || self.has_volatile_field(&p.ty) {
+            return Err(Error::unsupported("volatile-field:pointer-escape"));
+        }
+        if p.is_volatile()
+            && (!matches!(p.ty, Type::Scalar(_))
+                || matches!(p.kind, PlaceKind::Element(..) | PlaceKind::Swizzle(..)))
+        {
+            return Err(Error::unsupported("volatile-field:non-scalar"));
+        }
+        Ok(load(p))
+    }
+
+    fn check_unqualified_place(&self, p: &Place) -> R<()> {
+        if p.is_volatile() || self.is_volatile_field(p) || self.has_volatile_field(&p.ty) {
+            return Err(Error::unsupported("volatile-field:write-or-escape"));
+        }
+        Ok(())
+    }
+
     fn field(&self, bp: Place, field: &str) -> R<Place> {
         let Type::Struct(id) = bp.ty else {
             return Err(Error::invalid("member of non-struct"));
@@ -765,15 +834,15 @@ impl Cx {
                 if !self.is_place(e) {
                     // member or index of an rvalue
                     let p = self.place_of_rvalue(e)?;
-                    return Ok(load(p));
+                    return self.read_place(p);
                 }
                 let p = self.place(e)?;
-                Ok(load(p))
+                self.read_place(p)
             }
             A::Swizzle { base, comps } => {
                 if self.is_place(e) {
                     let p = self.place(e)?;
-                    return Ok(load(p));
+                    return self.read_place(p);
                 }
                 let b = self.expr(base)?;
                 Ok(Expr::new(ExprKind::Swizzle(Box::new(b), comps.clone()), ty))
@@ -781,6 +850,7 @@ impl Cx {
             A::Paren(x) => self.expr(x),
             A::AddrOf(x) => {
                 let p = self.place(x)?;
+                self.check_unqualified_place(&p)?;
                 Ok(Expr::new(ExprKind::AddrOf(Box::new(p)), ty))
             }
             A::Unary { op, operand } => {
@@ -804,6 +874,7 @@ impl Cx {
             A::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, ty),
             A::Assign { op, lhs, rhs } => {
                 let p = self.place(lhs)?;
+                self.check_unqualified_place(&p)?;
                 let v = self.expr(rhs)?;
                 match op {
                     None => {
@@ -1036,6 +1107,7 @@ impl Cx {
                 for (a, (by_ref, pt)) in args.iter().zip(params.iter()) {
                     if by_ref.is_some() {
                         let p = self.place(a)?;
+                        self.check_unqualified_place(&p)?;
                         if (*by_ref == Some(Space::Threadgroup) || p.space == Space::Threadgroup)
                             && (*by_ref != Some(p.space) || !self.is_place(a))
                         {

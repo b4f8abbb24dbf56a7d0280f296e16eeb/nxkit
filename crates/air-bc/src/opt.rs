@@ -8,7 +8,7 @@ use crate::fx::{HashMap, HashSet};
 fn vals_mut(op: &mut Op) -> Vec<&mut Val> {
     match op {
         Op::Alloca(..) | Op::Br(_) | Op::Unreachable => vec![],
-        Op::Load(_, p, _) => vec![&mut p.1],
+        Op::Load(_, p, _, _) => vec![&mut p.1],
         Op::Store(a, b, _) => vec![&mut a.1, &mut b.1],
         Op::Gep(_, _, p, idx) => std::iter::once(&mut p.1)
             .chain(idx.iter_mut().map(|x| &mut x.1))
@@ -35,7 +35,7 @@ fn vals_mut(op: &mut Op) -> Vec<&mut Val> {
 fn vals(op: &Op) -> Vec<&Val> {
     match op {
         Op::Alloca(..) | Op::Br(_) | Op::Unreachable => vec![],
-        Op::Load(_, p, _) => vec![&p.1],
+        Op::Load(_, p, _, _) => vec![&p.1],
         Op::Store(a, b, _) => vec![&a.1, &b.1],
         Op::Gep(_, _, p, idx) => std::iter::once(&p.1)
             .chain(idx.iter().map(|x| &x.1))
@@ -138,8 +138,8 @@ fn mem2reg(f: &mut Function) {
     for (_, insts) in &f.blocks {
         for i in insts {
             match &i.op {
-                Op::Load(t, (_, Val::Local(p)), _) if allocas.contains_key(p) => {
-                    if &allocas[p] != t {
+                Op::Load(t, (_, Val::Local(p)), _, volatile) if allocas.contains_key(p) => {
+                    if *volatile || &allocas[p] != t {
                         bad.insert(p.clone());
                     }
                 }
@@ -447,7 +447,7 @@ fn classify<'a>(
 ) -> Use<'a> {
     match &i.op {
         Op::Alloca(..) if i.res.as_ref().is_some_and(|r| allocas.contains_key(r)) => Use::Drop,
-        Op::Load(_, (_, Val::Local(p)), _) => match slot.get(p.as_str()) {
+        Op::Load(_, (_, Val::Local(p)), _, false) => match slot.get(p.as_str()) {
             Some(&a) => Use::Load(a),
             None => Use::Keep,
         },
@@ -503,7 +503,8 @@ fn subst_in_place(v: &mut Val, subst: &HashMap<String, Val>) {
 
 fn side_effect(op: &Op) -> bool {
     match op {
-        Op::Store(..)
+        Op::Load(_, _, _, true)
+        | Op::Store(..)
         | Op::Br(_)
         | Op::CondBr(..)
         | Op::Switch(..)
@@ -668,7 +669,7 @@ fn cse(f: &mut Function) {
                     | Op::ExtractVal(..)
                     | Op::InsertVal(..)
                     | Op::FNeg(..)
-                    | Op::Load(_, (Ty::Ptr(_, 2), _), _)
+                    | Op::Load(_, (Ty::Ptr(_, 2), _), _, false)
             );
             if !pure {
                 continue;

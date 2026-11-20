@@ -851,7 +851,7 @@ impl<'a> FnGen<'a> {
                 ty: p.ty.clone(),
                 space: 2,
             },
-            PlaceKind::Deref(e) => {
+            PlaceKind::Deref(e) | PlaceKind::VolatileDeref(e) => {
                 let v = self.expr(e)?;
                 Addr {
                     ptr: v.r,
@@ -1016,6 +1016,10 @@ impl<'a> FnGen<'a> {
 
     /// Loads a value from an address (memory form to value form).
     pub fn load_from(&mut self, a: &Addr) -> V {
+        self.load_from_qualified(a, false)
+    }
+
+    fn load_from_qualified(&mut self, a: &Addr, volatile: bool) -> V {
         if matches!(a.ty, Type::Texture(_) | Type::Sampler) {
             let (p, md) = self.handle_addr(a);
             let ht = self.lt(&a.ty);
@@ -1057,8 +1061,9 @@ impl<'a> FnGen<'a> {
         let mt = self.mt(&a.ty);
         let r = self.tmp();
         let md = self.access_md(a);
+        let qualifier = if volatile { "volatile " } else { "" };
         self.emit(format!(
-            "{r} = load {mt}, {mt}{sp}* {}, align {al}{md}",
+            "{r} = load {qualifier}{mt}, {mt}{sp}* {}, align {al}{md}",
             a.ptr
         ));
         if a.ty.elem() == Some(Scalar::Bool) {
@@ -1242,7 +1247,7 @@ impl<'a> FnGen<'a> {
                 let a = self
                     .addr(p)?
                     .ok_or_else(|| Error::invalid("load of non-addressable"))?;
-                Ok(self.load_from(&a))
+                Ok(self.load_from_qualified(&a, p.is_volatile()))
             }
         }
     }

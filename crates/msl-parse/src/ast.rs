@@ -77,6 +77,8 @@ pub struct Field {
     pub attrs: Vec<Attr>,
     /// The declaration had `const` (for example `device const uchar* base`).
     pub is_const: bool,
+    /// The pointee of this const device argument-buffer pointer is volatile.
+    pub is_volatile: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
