@@ -4,6 +4,17 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.10.3 - 2026-11-19
+
+### Added
+
+- The release workflow signs `SHA256SUMS` with Ed25519 and uploads the detached signature `SHA256SUMS.sig` (base64 of the 64 raw bytes) with the other assets. The release fails when the repository secret `NXKIT_SIGNING_KEY` is missing or does not belong to the public key in `release-signing.pub`. `tools/release-sign.py` makes keys, signs and verifies. A front end installs a release only when the signature checks against its built-in public key.
+- The own MSL front end compiles thread and threadgroup array references as helper parameters (the overload follows the address space of the argument), static `threadgroup` arrays at the top of a kernel body (internal `addrspace(3)` globals with clang's local names), `threadgroup_barrier(mem_flags::mem_threadgroup)` in kernels and fragment shaders (a vertex shader that reaches one is refused), `ulong(simd_ballot(b))`, `thread_index_in_threadgroup` on kernels, and relaxed `atomic_fetch_add_explicit`, `atomic_fetch_min_explicit` and `atomic_fetch_max_explicit` on a `threadgroup atomic_uint*` made from a `threadgroup uint*` (#33). Other forms (a cast between address spaces, a `const` array reference, an initialized threadgroup array, another memory order) are refused, so the build uses Apple's compiler for them.
+
+### Changed
+
+- Like Apple's front end with `-fwrapv`, the own front end writes no `inbounds` on device pointer offsets and on dynamic array indices in any address space. On the test shaders the function bodies after `air-opt -O1` are the same as Apple's. `air_front::FORMAT` is 11, so every shader library is built again.
+
 ## 0.10.2 - 2026-11-19
 
 ### Changed

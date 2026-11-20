@@ -33,3 +33,13 @@ jobs:
             echo "== $f"
             python3 tools/ste_check.py "$f" || true
           done
+
+  release-sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the release signing tool
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/python" -m pip install --quiet -r tools/requirements-release.txt
+          "${RUNNER_TEMP}/venv/bin/python" -I tools/test_release_sign.py

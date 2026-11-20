@@ -11,7 +11,7 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 ## Status
 
-The current release is [0.10.2](https://github.com/v0lumehi/nxkit/releases/tag/v0.10.2) (2026-11-19). It is early
+The current release is [0.10.3](https://github.com/v0lumehi/nxkit/releases/tag/v0.10.3) (2026-11-19). It is early
 software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
 macOS 26 build the app on macOS 26. The release ZIP holds `nxb` and `nxkit-host` for macOS 26 and newer (see "Install a release"). `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 
@@ -89,6 +89,20 @@ The release is for Macs with Apple silicon and macOS 26 or newer (`macos_min` is
 The programs are built with that deployment target, so an older macOS refuses to start them. There is one build for all
 supported versions. The shaders and the pipeline archives come from the Metal tools of your own Xcode when `nxb build`
 runs, so you still need Xcode on the Mac that builds the app.
+
+## Verify a release
+
+Each release has `SHA256SUMS.sig`. It is a detached Ed25519 signature of the exact bytes of `SHA256SUMS`, in base64 on one line.
+The public key is in `release-signing.pub`. Download `SHA256SUMS` and `SHA256SUMS.sig` into one folder, then run:
+
+```sh
+python3 -m pip install -r tools/requirements-release.txt
+python3 -I tools/release-sign.py verify SHA256SUMS --pub release-signing.pub
+```
+
+Then check the ZIP against `SHA256SUMS` as shown above. Front ends that update nxkit by themselves do the same two checks.
+
+The `format` field of `MANIFEST.json` changes only when the layout of the ZIP changes, because front ends check it.
 
 ## Build a game
 

@@ -904,13 +904,12 @@ impl<'a> FnGen<'a> {
                 let at = self.mt(&b.ty);
                 let r = self.tmp();
                 let sp = space_suffix(b.space);
-                // A dynamic index of static threadgroup storage is not marked inbounds under -fwrapv.
-                let flags =
-                    if b.space == space_num(Space::Threadgroup) && i64v.parse::<i64>().is_err() {
-                        ""
-                    } else {
-                        " inbounds"
-                    };
+                // Under -fwrapv clang marks no dynamic array index inbounds, in any address space.
+                let flags = if i64v.parse::<i64>().is_err() {
+                    ""
+                } else {
+                    " inbounds"
+                };
                 self.emit(format!(
                     "{r} = getelementptr{flags} {at}, {at}{sp}* {}, i64 0, i64 {i64v}",
                     b.ptr
