@@ -64,6 +64,9 @@ pub fn params(res: &args::Res, plan: &io::Plan) -> Vec<Param> {
     for b in &plan.builtins {
         v.push(Param::new(format!("{} {}", b.ty, b.name), b.attr, b.name));
     }
+    if plan.domain {
+        v.extend(super::domain::params());
+    }
     v
 }
 
@@ -184,6 +187,11 @@ pub(super) fn shared_params(
     }
     for b in &plan.builtins {
         p.params.push(d(&format!("{} {}", b.ty, b.name), b.name));
+    }
+    if plan.domain {
+        for param in super::domain::params() {
+            p.params.push((param.decl, param.name));
+        }
     }
     for m in &s.props.properties.local_memories {
         let (t, n) = memory(m)?;

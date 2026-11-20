@@ -223,6 +223,14 @@ pub(super) fn discover(
     plain.sort_by_key(|(i, _)| *i);
     results.extend(plain.into_iter().map(|(_, result)| result));
     let output = records::build(&profile, &results).map_err(|e| e.to_string())?;
+    compile_packages(output, notes, ios)
+}
+
+fn compile_packages(
+    output: records::Outputs,
+    mut notes: Vec<String>,
+    ios: bool,
+) -> Result<Vec<(String, Vec<u8>)>> {
     if output.rows.len() > SHADER_LIMIT {
         return Err("too many discovered shaders".into());
     }
@@ -382,6 +390,101 @@ fn compile_raw(_msl: &[u8], _ios: bool) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "air-front")]
+    #[allow(
+        dead_code,
+        reason = "the staged translator test uses the other record cases"
+    )]
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nxb-stages/tests/domain_job/fixture.rs"
+        ));
+    }
+
+    #[cfg(feature = "air-front")]
+    #[test]
+    fn encoded_direct_patch_records_use_normal_standalone_packaging() {
+        const CONTROL_SIZE_FIELD: std::ops::Range<usize> = 0x28..0x2c;
+        const CODE_SIZE_FIELD: std::ops::Range<usize> = 0x2c..0x30;
+        const NVN1_CODE_PREFIX_BYTES: u32 = 0x30;
+        let mut output = records::Outputs::default();
+        for (name, stage, key, code) in [
+            (
+                "vs_cloud.bin",
+                "vs",
+                "0101010101010101",
+                fixture::vs_capture(),
+            ),
+            (
+                "ds_cloud.bin",
+                "ds",
+                "0303030303030303",
+                fixture::ds_partial_x(),
+            ),
+            (
+                "ps_cloud.bin",
+                "ps",
+                "0202020202020202",
+                fixture::fs_xyzw(0),
+            ),
+            (
+                "ps_cloud.bin",
+                "ps",
+                "0404040404040404",
+                fixture::fs_xyzw(1),
+            ),
+        ] {
+            let mut record = fixture::record(&code);
+            record[..8].copy_from_slice(b"BTCDBTCD");
+            record[CONTROL_SIZE_FIELD]
+                .copy_from_slice(&(fixture::CONTROL_LEN as u32).to_le_bytes());
+            record[CODE_SIZE_FIELD]
+                .copy_from_slice(&(NVN1_CODE_PREFIX_BYTES + code.len() as u32).to_le_bytes());
+            output
+                .packages
+                .entry(name.into())
+                .or_default()
+                .extend(record);
+            let previous = usize::from(key == "0404040404040404");
+            output
+                .rows
+                .push((name.into(), previous, stage, key.into(), "synthetic".into()));
+        }
+        // The normal standalone builder consumes the same package bytes and map rows
+        // as after discovery. No supplied MSL, resource facts, or guessed pair table.
+        let files: BTreeMap<_, _> = compile_packages(output, vec![], false)
+            .unwrap()
+            .into_iter()
+            .collect();
+        for key in [
+            "0101010101010101",
+            "0202020202020202",
+            "0303030303030303",
+            "0404040404040404",
+        ] {
+            let base = format!("shaders/{key}_b");
+            assert!(files[&format!("{base}.metallib")].starts_with(b"MTLB"));
+            let json = std::str::from_utf8(&files[&format!("{base}.json")]).unwrap();
+            let reflection = parse(json).unwrap();
+            let stage = match key {
+                "0101010101010101" => "vs",
+                "0303030303030303" => "ds",
+                _ => "ps",
+            };
+            assert_eq!(
+                reflection.get("stage").and_then(J::as_str),
+                Some(stage),
+                "{base}"
+            );
+            assert_eq!(
+                reflection.get("entry").and_then(J::as_str),
+                Some("main0"),
+                "{base}"
+            );
+        }
+    }
+
     #[test]
     fn rejects_unsafe_names_and_oversized_nso() {
         assert!(safe_name("../main").is_err());
