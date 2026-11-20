@@ -8,6 +8,7 @@
 
 mod builds;
 mod carry;
+pub(crate) mod coverage;
 mod keys;
 mod prewarm;
 mod record;

@@ -169,16 +169,20 @@ pipeline that calls them.
 
 | layer | modules | what it holds |
 |---|---|---|
-| 0 support | `fastmap`, `lru`, `json`, `jobs`, `format_map`, `settings`, `guest`, `diag`, `probe` | general helpers, the format tables, the settings, the diagnostic switches (`diag` is a leaf: categories, knobs and filters) and the observer interface of the diagnostics (`probe`) |
-| 1 frame data | `detail`, `snapshot`, `stats`, `poolreg`, `pools`, `overlay`, `guestpools` | what the front end hands over and the counters of a frame |
-| 2 resources | `textures`, `upload`, `scaled`, `copyback`, `clear`, `programs`, `pipelines`, `pull`, `bindless`, `gmem`, `images`, `rename`, `private`, `icbs`, `queries` | the Metal objects of the resource table |
-| 3 planning | `translate`, `geometry`, `draws`, `mesh`, `indirect`, `barriers`, `native`, `native_ndsr`, `native_ndve` | one draw or dispatch in Metal terms, and the native replacements |
-| 4 encode | `encode`, `passes`, `encthread`, `blit` | the Metal 4 command buffers of a frame |
-| 5 frame driver | `gpu`, `backend`, `walk` | the public entry: a held frame in, a shown frame out |
-| side diagnostics | `gatediag`, `health`, `coverage`, `meshvis`, `nanscan`, `lum`, `passprof`, `overlap`, `barr` | the opt-in analyses. They see the frame through `probe` |
+| 0 support | `fastmap`, `ordinal`, `skip`, `lru`, `json`, `jobs`, `format_map`, `settings`, `guest`, `diag` | general helpers, the ordinals of a frame's commands, why a command is skipped, the format tables, the settings and the diagnostic switches (`diag`: categories, knobs, filters and the handle map of the `barr` check) |
+| 1 frame data | `detail`, `stats`, `poolreg`, `pools` (with `pools::overlay`), `guestpools`, `translate` | what the front end hands over, the counters of a frame, the pool map, NVN state values in Metal terms |
+| 2 resources | `snapshot`, `textures`, `upload`, `scaled`, `copyback`, `clear`, `programs`, `pipelines` (with `pipelines::coverage`), `pull`, `bindless`, `gmem`, `images`, `rename`, `private` | the Metal objects of the resource table |
+| 3 planning | `drawctx`, `probe`, `geometry`, `draws`, `mesh`, `indirect`, `barriers`, `native` (with the NDSR and NDVE replacements), `queries`, `icbs` | what the planning of a draw reads (`drawctx::Shared`), one draw or dispatch in Metal terms, the native replacements, the GPU counters, the indirect command buffers, and the observer interface of the analyses (`probe`) |
+| 4 encode | `encode` (with `EncodeCtx`), `passes`, `encthread`, `blit` | the Metal 4 command buffers of a frame |
+| 5 analyses | `gatediag`, `health`, `meshvis`, `nanscan`, `lum`, `passprof`, `overlap` | the opt-in analyses. The encode path reaches them only through `probe` |
+| 6 frame driver | `report`, `gpu`, `backend`, `walk` | the public entry: a held frame in, a shown frame and an `EncodeReport` out |
 
-The core path (layers 1 to 5) knows the diagnostic switches of `diag` and the observer interface of `probe`, and no
-analysis module. `Gpu` builds the analyses that `NXKIT_DIAG` asks for and hands them to the encoder as observers.
+The core path (layers 1 to 4) knows the switches of `diag` and the interface of `probe`, and no analysis module.
+`gpu::PROBES` installs `nanscan` and `lum` as hooks, `passprof` is a `probe::PassClock` and `meshvis` a
+`probe::MeshCounts` in the GPU counters. Each analysis keeps its own `NXKIT_DIAG` switch, so a hook that is off
+returns at once, as the direct calls did. Before W29, 38 of the 54 modules were one cycle group. Now the crate has
+none. No module was split into a sub-crate: after the moves, no group of modules is cohesive and free of edges into
+the rest, so a sub-crate would only add a public interface.
 
 ## The runtime: composition and context
 

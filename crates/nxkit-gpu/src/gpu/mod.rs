@@ -58,6 +58,21 @@ use uses::*;
 
 pub(crate) use crate::textures::collect_uses;
 
+/// The analyses that the encode path reports to (W29): `nanscan` before each pass, `lum` for the stored colour targets
+/// of the focused pass. Each one checks its own `NXKIT_DIAG` switch.
+pub(crate) const PROBES: crate::probe::Probes = crate::probe::Probes {
+    render: |sh, cb, index, pass, draws, desc| {
+        crate::nanscan::before(sh, cb, index, pass, draws, desc)
+            .map(|s| Box::new(s) as Box<dyn crate::probe::PassWatch>)
+    },
+    compute: |sh, cb, index, pass| {
+        crate::nanscan::compute_before(sh, cb, index, pass)
+            .map(|s| Box::new(s) as Box<dyn crate::probe::PassWatch>)
+    },
+    stored_on: crate::lum::active,
+    stored: crate::lum::capture,
+};
+
 /// The chunks of passes that the encoder makes for each thread (see `jobs::run_all`).
 const CHUNKS_PER_THREAD: usize = 1;
 

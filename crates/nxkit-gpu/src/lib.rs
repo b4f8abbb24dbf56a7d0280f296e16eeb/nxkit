@@ -7,9 +7,14 @@
 //! - [`Gpu`] is the entry point. [`Gpu::encode_frame`] encodes and submits one frame.
 //! - [`detail`] holds the side channel that carries what the draws bound (programs, fixed function state, buffers,
 //!   texture handles). The recorder of the front end fills it.
-//! - [`stats`] holds the counters of a frame and the report that the caller applies to its resource table.
-//! - `diag` holds the opt-in diagnostics (`NXKIT_DIAG`, `NXKIT_KNOB`), see `docs/diagnostics.md`. The render health
-//!   report lives in `nxkit_nvn::diag`.
+//! - [`stats`] holds the counters of a frame, [`EncodeReport`] what the caller applies to its resource table.
+//! - `diag` holds the switches of the opt-in diagnostics (`NXKIT_DIAG`, `NXKIT_KNOB`), see `docs/diagnostics.md`. The
+//!   analyses (`nanscan`, `lum`, `passprof`, `meshvis` and others) see the encode path through `probe` only. The render
+//!   health report lives in `nxkit_nvn::diag`.
+//!
+//! The modules form layers (W29, `docs/architecture.md`): support (`fastmap`, `ordinal`, `skip`, `diag`, ...), frame
+//! data (`detail`, `stats`, `pools`, ...), resources (`textures`, `pipelines`, `bindless`, ...), planning (`drawctx`,
+//! `draws`, `probe`, ...), encode (`encode`, `passes`), the analyses, and the frame driver (`gpu`, `backend`, `walk`).
 
 #![cfg(target_os = "macos")]
 
@@ -18,13 +23,11 @@ pub(crate) use diag::{diag, knob, nobar, nobar_range, refresh_knobs, watched};
 pub(crate) use skip::{buf_skip, tex_skip};
 
 mod backend;
-mod barr;
 mod barriers;
 mod bindless;
 mod blit;
 mod clear;
 mod copyback;
-mod coverage;
 pub mod detail;
 mod drawctx;
 mod draws;
@@ -58,6 +61,7 @@ mod pipelines;
 mod poolreg;
 mod pools;
 mod private;
+mod probe;
 mod programs;
 mod pull;
 mod queries;

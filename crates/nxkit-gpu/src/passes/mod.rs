@@ -92,7 +92,7 @@ pub(crate) fn compute_pass(
     stats: &mut EncodeStats,
 ) {
     let nan = if pass.kind == PassKind::Compute {
-        crate::nanscan::compute_before(sh, cb, index, pass)
+        (sh.probes.compute)(sh, cb, index, pass)
     } else {
         None
     };
@@ -166,7 +166,7 @@ pub(crate) fn compute_pass(
                 .iter()
                 .filter(|t| t.handle != 0)
                 .map(|t| {
-                    let id = crate::barr::texture_of(t.handle);
+                    let id = crate::diag::texture_of(t.handle);
                     let shape = id.and_then(|id| sh.textures.get(&id)).map(|r| {
                         let d = r.tex.desc();
                         format!("{}x{}x{} {:?}", d.width, d.height, d.depth, d.format)

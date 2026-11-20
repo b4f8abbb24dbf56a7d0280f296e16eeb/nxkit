@@ -78,7 +78,7 @@ pub(crate) struct FrameQueries {
     encoded: Vec<AtomicU32>,
     cpu: Vec<CpuCount>,
     /// The mesh draws of `NXKIT_DIAG=meshvis`, with offsets after those of the reports.
-    mesh: Option<crate::meshvis::Plan>,
+    mesh: Option<Box<dyn crate::probe::MeshCounts>>,
 }
 
 impl std::fmt::Debug for FrameQueries {
@@ -137,10 +137,10 @@ pub(crate) fn prepare(
     plan: &PassPlan,
     detail: &FrameDetail,
     ords: &[Ordinal],
-    mut mesh: Option<crate::meshvis::Plan>,
+    mut mesh: Option<Box<dyn crate::probe::MeshCounts>>,
 ) -> Option<Arc<FrameQueries>> {
     let c = &frame.counters;
-    let extra = mesh.as_ref().map_or(0, crate::meshvis::Plan::wanted);
+    let extra = mesh.as_ref().map_or(0, |m| m.wanted());
     if c.writes.is_empty() && extra == 0 {
         return None;
     }
@@ -290,7 +290,7 @@ impl FrameQueries {
     pub(crate) fn mesh_print(
         &self,
         guest: &GuestSpace,
-        place: &dyn Fn(u64) -> crate::meshvis::Where,
+        place: &dyn Fn(u64) -> crate::probe::Where,
     ) {
         let Some(m) = &self.mesh else { return };
         let read = |i: u64| {

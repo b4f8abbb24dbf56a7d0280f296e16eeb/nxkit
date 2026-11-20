@@ -501,6 +501,23 @@ pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
     })
 }
 
+/// The texture each handle resolved to, kept for `NXKIT_DIAG=barr` and `nanscan`: they compare the textures that the
+/// draws of a pass bind with the textures that the barrier planner thinks the pass reads.
+static HANDLES: Mutex<Option<std::collections::HashMap<u64, TexId>>> = Mutex::new(None);
+
+/// Remembers which texture a handle resolved to.
+pub(crate) fn note_handle(handle: u64, id: TexId) {
+    if let Ok(mut m) = HANDLES.lock() {
+        m.get_or_insert_with(std::collections::HashMap::new)
+            .insert(handle, id);
+    }
+}
+
+/// The texture that a handle resolved to.
+pub(crate) fn texture_of(handle: u64) -> Option<TexId> {
+    HANDLES.lock().ok()?.as_ref()?.get(&handle).copied()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

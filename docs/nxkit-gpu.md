@@ -45,7 +45,7 @@ let stats = gpu.wait()?;                     // GPU time of the last frame
 
 ### Archive coverage
 
-`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts. The archive is not read whole: `GpuSettings::archive_shards` names the folder of the batch archives and the index, and the cache opens a shard for the first pipeline in it (`NXKIT_SHARD_LRU` open at most). See docs/shader-step.md, "The pipeline archive as shards".
+`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `pipelines/coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts. The archive is not read whole: `GpuSettings::archive_shards` names the folder of the batch archives and the index, and the cache opens a shard for the first pipeline in it (`NXKIT_SHARD_LRU` open at most). See docs/shader-step.md, "The pipeline archive as shards".
 
 ### Specialization, background builds and the runtime cache
 
@@ -400,7 +400,7 @@ above 1 GiB are not made members (counted). A page stays a member until the game
    are copied into a staging buffer (`Sink`, a pool of shared buffers that a buffer returns to when its frame is complete).
 4. The pages of the written ranges are tagged with the frame and lose all access. A page that was staged is tagged fresh
    (guest memory holds the bytes the frame starts from). A page that the CPU wrote between 3 and 4 is staged again.
-5. The pool snapshot of the frame gets an overlay (`overlay.rs`): the member bitmap, the mirror runs, and the staged pages.
+5. The pool snapshot of the frame gets an overlay (`pools/overlay.rs`): the member bitmap, the mirror runs, and the staged pages.
 
 **On the GPU.** The first command buffer of the frame starts with a compute pass (`nxkit_private_in`, `private::encode_copy_in`)
 that copies each staged page from the staging buffer into the mirror, with a barrier from all earlier work (the frame before still reads and writes the
@@ -419,8 +419,8 @@ impossible. The sites:
   `passes/indirect_dispatch.rs`, the multi-draw count and the indirect draws.
 - `passes/buffers.rs` `real` (buffer copy and fill source and destination) and `passes/copy.rs` through `upload::locate` (the
   buffer side of texture and buffer copies).
-- `upload/mod.rs` `locate` for every texture upload source and the scaled uploads: the buffer of the mirror run and the offset.
-- `draws.rs` `pull::layout` (vertex pulling: the stream bases).
+- `pools.rs` `locate` (also as `upload::locate`) for every texture upload source and the scaled uploads: the buffer of the mirror run and the offset.
+- `draws.rs` and `draws/pull_diag.rs` `pull::layout` (vertex pulling: the stream bases).
 - `icbs.rs`: `icb_buffer` gets the buffer of a run (`PoolRefs::take` keeps it alive with the ICB), and the signature of an ICB hashes the
   mirror addresses of its uniform, storage, vertex and index bindings, so an ICB made over a run's buffer is built again when the run
   grew.
@@ -988,7 +988,7 @@ Shader libraries stay loaded on purpose. `Programs` keeps each `StageProgram` wi
 
 A game can run a neural network as a chain of compute dispatches. `native` replaces such a chain by a `Plan` of own kernels (`nxkit-native-plan`, built by `nxkit-ndve` or `nxkit-ndsr`). The module knows no network: a `Replacement` gives the program keys that find the run, the weight buffers that prove the network, and the plan. Each frame `Native::prepare` reads and hashes the weights through the storage bindings, looks the verdict up in the plan cache (4 plans, least recently used out, `NXKIT_NATIVE_CACHE`) and resolves the game's textures, so nothing fails later. The pass loop then skips the run's dispatches and `encode` writes one compute pass with the plan's steps and a barrier between dependent steps. Any mismatch leaves the game's own dispatches: the result is the original picture and never a wrong one, and the health report counts the reason (`ndve.*`, `ndsr.*`).
 
-- NDVE (`native_ndve`): the movie network, key and bindings of `nn::ndve`. NDSR (`native_ndsr`): the agl upscaler; each input and output size has its own plan.
+- NDVE (`native/ndve.rs`): the movie network, key and bindings of `nn::ndve`. NDSR (`native/ndsr.rs`): the agl upscaler; each input and output size has its own plan.
 - `NXKIT_NDVE=0` and `NXKIT_NDSR=0` turn a network off. `NXKIT_<NAME>_COMPARE=1` runs the game's chain and the plan on a sampled frame and prints the largest difference per channel. `NXKIT_DIAG=ndve`, `ndsr` print the capture list once per run. `NXKIT_DIAG=nativeprof` times each step with GPU timestamps (the steps then run one after the other, so the sum is above the plan's time). `NXKIT_SKIP_PROGRAMS` and `NXKIT_SKIP_FILE` leave out steps by kernel name.
 - Status: measured kernel times are in the plans ([ndve-impl.md](plans/ndve-impl.md), [ndsr-native.md](plans/ndsr-native.md)). A plan holds tens of MB of scratch.
 
@@ -1001,6 +1001,12 @@ For NDVE the model can run on the Neural Engine instead (`NXKIT_NDVE_ANE=0` turn
 - The dispatch finds its picture by the address of a read, by the chain of the walk's copy records (each carries the plain GPU address of both sides; up to four hops), or by a luma fingerprint of 256 scattered bytes. The game copies the decoder's planes, so the first way alone fails.
 - A ready result lets the frame run `ndve_ane_quant` and `ndve_ane_epilogue` in place of the plan, with the slot's outputs bound as textures. Without a result the plan runs. Counters: `ndve.ane` and `ndve.ane_fallback(warmup|late|unknown_picture|params|error|no_match)`.
 - Not measured here: the share of pictures that are early enough in a game. Read it from the counters.
+
+## Module layers
+
+The modules form layers: support, frame data, resources, planning, encode, analyses and the frame driver. A module
+uses only its own layer and the ones below. The encode path reaches the analyses only through `probe`. Refer to
+[architecture.md](architecture.md#nxkit-gpu-w29) and W29.
 
 ## Diagnostics
 

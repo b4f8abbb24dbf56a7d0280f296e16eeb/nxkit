@@ -254,7 +254,8 @@ impl Gpu {
             &ords,
             &textures,
             &self.guest,
-        );
+        )
+        .map(|m| Box::new(m) as Box<dyn crate::probe::MeshCounts>);
         let queries =
             crate::queries::prepare(&self.ctx, &self.vis_pool, frame, plan, detail, &ords, mesh);
         if let Some(b) = queries.as_ref().and_then(|q| q.buffer()) {
@@ -371,7 +372,8 @@ impl Gpu {
             icbs: &self.icbs,
             native: native.as_ref(),
             queries: queries.as_deref(),
-            prof: prof.as_ref(),
+            prof: prof.as_ref().map(|p| p as &dyn crate::probe::PassClock),
+            probes: &super::PROBES,
         };
         if !frame.gates.is_empty() && crate::diag("rendercond") && crate::diag::sampled() {
             crate::gatediag::frame(&sh);
@@ -501,7 +503,7 @@ impl Gpu {
         }
         if let Some(q) = queries.as_ref().filter(|q| q.has_mesh()) {
             let _ = self.wait();
-            q.mesh_print(&self.guest, &|a| crate::meshvis::Where {
+            q.mesh_print(&self.guest, &|a| crate::probe::Where {
                 table: self.gmem.range_of(a),
                 written: self.gmem.learned_range_of(a),
             });

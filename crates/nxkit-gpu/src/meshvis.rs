@@ -108,11 +108,7 @@ const MAX_ZERO_LINES: usize = 8;
 /// The most lines for indirect draws with a task shader and workgroups that a frame prints.
 const MAX_OK_LINES: usize = 4;
 
-/// Where a GPU address lies in the raw global memory: the range of the current table and the pool that shaders wrote.
-pub(crate) struct Where {
-    pub(crate) table: Option<(u64, u64)>,
-    pub(crate) written: Option<(u64, u64)>,
-}
+pub(crate) use crate::probe::Where;
 
 /// The text of an optional range.
 fn range_text(r: Option<(u64, u64)>, none: &str) -> String {
@@ -382,5 +378,41 @@ impl Plan {
             })
             .collect();
         text::lines(self.frame, &self.passes, &draws, &self.events, &self.knobs)
+    }
+}
+
+impl crate::probe::MeshCounts for Plan {
+    fn wanted(&self) -> usize {
+        Plan::wanted(self)
+    }
+    fn bind(&mut self, base: usize, room: usize) {
+        Plan::bind(self, base, room);
+    }
+    fn has_pass(&self, index: usize) -> bool {
+        Plan::has_pass(self, index)
+    }
+    fn offset(&self, ord: u32) -> Option<u64> {
+        Plan::offset(self, ord)
+    }
+    fn note(&self, ord: u32, p: &Prep) {
+        Plan::note(self, ord, p);
+    }
+    fn encoded(&self, ord: u32) {
+        Plan::encoded(self, ord);
+    }
+    fn report(
+        &self,
+        shared: &dyn Fn(u32) -> bool,
+        samples: &dyn Fn(u64) -> Option<u64>,
+        record: &dyn Fn(u64) -> Option<u32>,
+    ) -> Vec<String> {
+        Plan::report(self, shared, samples, record)
+    }
+    fn record_lines(
+        &self,
+        words: &dyn Fn(u64) -> Option<[u32; 4]>,
+        place: &dyn Fn(u64) -> Where,
+    ) -> Vec<String> {
+        Plan::record_lines(self, words, place)
     }
 }

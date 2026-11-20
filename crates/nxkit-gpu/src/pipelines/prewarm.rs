@@ -153,7 +153,7 @@ impl Work {
                 Outcome::Failed,
                 |(_, s)| {
                     // `NXKIT_DIAG=stats` or `pipe`: a compile says why the archive missed
-                    crate::coverage::record(&self.cache, s, Some(&desc), "prewarm");
+                    crate::pipelines::coverage::record(&self.cache, s, Some(&desc), "prewarm");
                     s.into()
                 },
             ),
@@ -442,7 +442,7 @@ mod lookup {
             .map_or_else(|_| app.join("shaders"), PathBuf::from);
         let p = Pipelines::new(&ctx, &archive).unwrap();
         p.prewarm(&seen, &shaders, None, None);
-        eprintln!("{}", crate::coverage::describe());
+        eprintln!("{}", crate::pipelines::coverage::describe());
     }
 
     /// The runtime archive of the host keeps what a start had to make: `NXKIT_LOOKUP_APP=<run folder> [NXKIT_LOOKUP_N=60]

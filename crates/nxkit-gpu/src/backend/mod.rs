@@ -496,7 +496,7 @@ impl GpuBackend {
             eprintln!("nxkit-gpu: frame {n}: {:?}", report.stats);
         }
         if diag && n.is_multiple_of(30) {
-            eprintln!("nxkit-gpu: {}", crate::coverage::describe());
+            eprintln!("nxkit-gpu: {}", crate::pipelines::coverage::describe());
         }
         // The mesh and indirect draws: every 30 frames under `stats` or `mesh`, and the first frame that has any.
         let kinds = &report.stats.kinds;

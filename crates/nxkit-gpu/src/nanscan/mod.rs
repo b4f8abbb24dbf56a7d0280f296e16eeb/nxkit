@@ -424,7 +424,7 @@ fn samples(
                 Stage::Vertex => "vs",
                 Stage::Compute => continue,
             };
-            let Some(id) = crate::barr::texture_of(t.handle) else {
+            let Some(id) = crate::diag::texture_of(t.handle) else {
                 continue;
             };
             let Some(res) = sh.textures.get(&id) else {
@@ -538,3 +538,9 @@ pub(crate) fn dump() {
 
 #[cfg(test)]
 mod tests;
+
+impl crate::probe::PassWatch for Scan {
+    fn after(self: Box<Self>, sh: &Shared<'_>, cb: &mut CommandBuffer) {
+        Scan::after(*self, sh, cb);
+    }
+}

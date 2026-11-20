@@ -270,14 +270,14 @@ impl Builds {
                 desc.alpha_to_coverage = r.alpha_to_coverage;
                 build_render(cache, fallbacks, job.key, r.vertex_key, &mut desc).map(
                     |(_, source)| {
-                        crate::coverage::record(cache, source, Some(&desc), &job.what);
+                        crate::pipelines::coverage::record(cache, source, Some(&desc), &job.what);
                         source
                     },
                 )
             }
             JobKind::Mesh(m) => cache.mesh_traced(job.key, &m.desc()).map(|(_, source)| {
                 record::mesh(job.key, &m.desc(), source);
-                crate::coverage::record(cache, source, None, &job.what);
+                crate::pipelines::coverage::record(cache, source, None, &job.what);
                 source
             }),
         };

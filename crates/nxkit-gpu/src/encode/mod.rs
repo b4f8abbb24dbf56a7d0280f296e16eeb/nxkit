@@ -10,7 +10,7 @@
 //! origin and the supported viewport swizzle. Scissor coordinates still name the same memory rows.
 
 /// What the encoding of one frame reads: the planning context [`Shared`] and what only the encoder uses, the indirect
-/// command buffers, the native plan, the GPU counters and the pass profile. It derefs to [`Shared`], so the planning
+/// command buffers, the native plan, the GPU counters, the pass profile and the hooks of the analyses. It derefs to [`Shared`], so the planning
 /// functions take it as it is (W29).
 pub(crate) struct EncodeCtx<'a> {
     pub(crate) sh: crate::drawctx::Shared<'a>,
@@ -20,7 +20,9 @@ pub(crate) struct EncodeCtx<'a> {
     /// The visibility offsets and counted draws of the GPU counters of the frame (`queries`).
     pub(crate) queries: Option<&'a crate::queries::FrameQueries>,
     /// The pass profile of this frame (`NXKIT_DIAG=passprof`).
-    pub(crate) prof: Option<&'a crate::passprof::FrameProf>,
+    pub(crate) prof: Option<&'a dyn crate::probe::PassClock>,
+    /// The hooks of the analyses (`crate::probe`).
+    pub(crate) probes: &'a crate::probe::Probes,
 }
 
 impl<'a> std::ops::Deref for EncodeCtx<'a> {
@@ -188,7 +190,7 @@ pub(crate) fn render_pass(
             if let Some(d) = sh.detail.draws.get(n as usize) {
                 for t in d.textures.iter().filter(|t| t.handle != 0) {
                     bound += 1;
-                    if let Some(id) = crate::barr::texture_of(t.handle)
+                    if let Some(id) = crate::diag::texture_of(t.handle)
                         && !known.contains(&id)
                     {
                         missing.insert(id);
@@ -248,7 +250,7 @@ pub(crate) fn render_pass(
     // The draws of a slot of the GPU counters count their samples (`queries`).
     let vis = sh.queries.and_then(|q| Some((q, q.pass(index)?)));
     let visibility = vis.as_ref().map(|(_, v)| v.buffer);
-    let scan = crate::nanscan::before(sh, cb, index, pass, range.clone(), &s.desc);
+    let scan = (sh.probes.render)(sh, cb, index, pass, range.clone(), &s.desc);
     let Ok(mut rp) =
         cb.begin_render_pass_counted(&s.desc, &tables.vertex, &tables.fragment, visibility)
     else {
@@ -373,7 +375,7 @@ pub(crate) fn render_pass(
     if let Some(scan) = scan {
         scan.after(sh, cb);
     }
-    if crate::lum::active() && FOCUS_PASS.with(std::cell::Cell::get) {
+    if (sh.probes.stored_on)() && FOCUS_PASS.with(std::cell::Cell::get) {
         for a in sh.plan.attachments_of(pass) {
             if matches!(a.slot, Slot::Color(_))
                 && a.store == StoreAction::Store
@@ -382,7 +384,7 @@ pub(crate) fn render_pass(
                 let Some(Some(color)) = s.desc.colors.get(usize::from(slot)) else {
                     continue;
                 };
-                crate::lum::capture(
+                (sh.probes.stored)(
                     sh.ctx,
                     cb,
                     &tables.vertex,

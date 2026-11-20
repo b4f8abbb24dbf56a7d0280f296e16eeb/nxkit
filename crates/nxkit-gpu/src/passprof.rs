@@ -260,6 +260,18 @@ fn account(s: &mut State, done: &[(u32, String)], ts: &[u64]) {
     s.total_ns = 0;
 }
 
+impl crate::probe::PassClock for FrameProf {
+    fn chunk_start(&self, index: usize) {
+        FrameProf::chunk_start(self, index);
+    }
+    fn end_pass_render(&self, rp: &mut RenderPass<'_>, index: usize) {
+        FrameProf::end_pass_render(self, rp, index);
+    }
+    fn end_pass_compute(&self, cp: &mut ComputePass<'_>, index: usize) {
+        FrameProf::end_pass_compute(self, cp, index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::durations;
