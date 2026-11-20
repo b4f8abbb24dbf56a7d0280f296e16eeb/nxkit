@@ -1,6 +1,6 @@
 # Decisions
 
-This document records the architecture decisions and their causes. Part 1 has the workspace decisions W1 to W23.
+This document records the architecture decisions and their causes. Part 1 has the workspace decisions W1 to W24.
 They apply where they are different from the two design proposals. Part 2 has the design decisions of the shader step and of the other stages. Part 3 has the runtime decisions R1 to R55.
 
 ## Principles
@@ -36,6 +36,7 @@ and shared APIs. The designs set the behavior.
 | W21 | Early cutoff: each stage output has a key from the stage version and the content hash of its inputs. Only the translator key contains V. A V change translates all shaders again. It compiles only the shaders with a changed MSL. A V change does not delete data. | A change of one line in the chain must not compile all shaders of all games again. Measured in 0.1.0: a V change alone took 47 s with 0 compiles (refer to [early-cutoff.md](early-cutoff.md)). |
 | W22 | Superseded by D20. The shader step had three ways to translate a key: the Rust translator, the translator host and the process bridge. Since 0.5.1, the Rust translator is off by default. Without it, the step uses the host first, then the process bridge. With it on, the step uses it first. Each fallback is counted by reason. | The Rust translator does not follow the current engine translator (for example the Maxwell denormal flush). Thus its output can differ from the C# output. It also does not cover geometry, tessellation, transform feedback, vertex shaders as compute and some rare cases. The C# ways give the same bytes. This reverses the decision of 0.4.0 to turn it on by default. The decision stays reversed until the changes are ported and compared again. |
 | W23 | There is one program, `nxb`. Each stage is a command. The stages have no separate programs and no dispatch by `argv[0]`. The front end compiler is the command `nxb airc`. `nxb-cli` can use `airc` (a layer F entry point). | One file to sign, ship and update. A caller names the command, not a file. |
+| W24 | The module cycles inside a crate are measured and may only shrink. `cargo run -p xtask -- modules` finds the strongly connected groups of the top-level modules of each crate (an edge is a `crate::` path, a root re-export or a `super::` path that reaches another top-level module, test code left out) and compares them with `xtask/module-cycles.txt`. A new group, or a group that takes in a module, fails. A group that gets smaller fails until the file is shrunk. `xtask graph <crate>` names the edges of a group and where each one is. | The crate graph had a checker (W7) and stayed clean. Inside the large crates nothing stopped cycles, and on 0.10.3 there were 34 groups with 159 modules. A ratchet stops the growth now and records each step down. |
 
 ## Part 2: design decisions
 

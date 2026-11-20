@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Workspace checks: layers and size limits"
+description = "Workspace checks: layers, size limits and module cycles"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

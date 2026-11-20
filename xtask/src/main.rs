@@ -8,9 +8,17 @@
 //!   The title crates are layer `T`: a family or title crate depends only on `nxtitle` and `L0`, and only the registry
 //!   `nxtitles` depends on a `T` crate.
 //! - `limits`: source files at most 600 lines, stage modules of `nxb-stages` at most 400.
+//! - `modules`: the module cycles inside each crate do not grow (ADR W24). The accepted cycle groups are in
+//!   `xtask/module-cycles.txt`; a new or larger group fails, and so does a group that got smaller until the file is
+//!   shrunk. `graph <crate>...` prints the groups of a crate and the edges inside them with their first place.
 //!
-//! Usage: `cargo run -p xtask -- [layers] [limits]` (both when no argument is given). Std only, the TOML reading is a
-//! deliberately small line parser for the fields above.
+//! Usage: `cargo run -p xtask -- [layers] [limits] [modules]` (all three when no argument is given), or
+//! `cargo run -p xtask -- graph <crate>...`. Std only, the TOML reading is a deliberately small line parser for the
+//! fields above, and the module graph comes from a small tokenizer (`lex`).
+
+mod lex;
+mod modgraph;
+mod modules;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -275,6 +283,37 @@ fn check_limits(all: &[Krate]) -> Vec<String> {
     errs
 }
 
+/// The module cycle errors, and the count of groups and of modules in them.
+fn check_modules(root: &Path, all: &[Krate]) -> (Vec<String>, String) {
+    let base = match fs::read_to_string(root.join(modules::BASELINE)) {
+        Ok(t) => modules::parse_baseline(&t),
+        Err(e) => return (vec![format!("{}: {e}", modules::BASELINE)], String::new()),
+    };
+    let now = modules::all_groups(all.iter().map(|k| (k.name.as_str(), k.dir.as_path())));
+    let groups = now.values().map(Vec::len).sum::<usize>();
+    let mods = now.values().flatten().map(|g| g.len()).sum::<usize>();
+    let note = format!(", {groups} cycle groups with {mods} modules");
+    (modules::compare(&now, &base), note)
+}
+
+fn graph(root: &Path, all: &[Krate], names: &[String]) -> ExitCode {
+    let mut failed = false;
+    for n in names {
+        match all.iter().find(|k| &k.name == n) {
+            Some(k) => println!("{}", modules::explain(&k.name, &k.dir, root)),
+            None => {
+                eprintln!("xtask graph: no crate {n:?}");
+                failed = true;
+            }
+        }
+    }
+    if failed || names.is_empty() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn main() -> ExitCode {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -282,7 +321,7 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        args = vec!["layers".into(), "limits".into()];
+        args = vec!["layers".into(), "limits".into(), "modules".into()];
     }
     let all = match crates(&root) {
         Ok(c) => c,
@@ -291,15 +330,22 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if args[0] == "graph" {
+        return graph(&root, &all, &args[1..]);
+    }
     let mut failed = false;
     for a in &args {
-        let errs = match a.as_str() {
-            "layers" => check_layers(&all),
-            "limits" => check_limits(&all),
-            other => vec![format!("unknown check {other:?} (layers, limits)")],
+        let (errs, note) = match a.as_str() {
+            "layers" => (check_layers(&all), String::new()),
+            "limits" => (check_limits(&all), String::new()),
+            "modules" => check_modules(&root, &all),
+            other => (
+                vec![format!("unknown check {other:?} (layers, limits, modules)")],
+                String::new(),
+            ),
         };
         if errs.is_empty() {
-            println!("xtask {a}: ok ({} crates)", all.len());
+            println!("xtask {a}: ok ({} crates{note})", all.len());
         }
         for e in &errs {
             eprintln!("xtask {a}: {e}");
@@ -395,5 +441,6 @@ mod tests {
         assert!(all.len() > 20);
         assert_eq!(check_layers(&all), Vec::<String>::new());
         assert_eq!(check_limits(&all), Vec::<String>::new());
+        assert_eq!(check_modules(&root, &all).0, Vec::<String>::new());
     }
 }
