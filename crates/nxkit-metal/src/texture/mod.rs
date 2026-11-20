@@ -175,8 +175,8 @@ impl Texture {
     /// `None` for compressed formats and formats with a stencil aspect.
     pub fn debug_read_raw(&self, ctx: &Context, points: &[[u32; 2]]) -> Option<Vec<Vec<u8>>> {
         use objc2_metal::{
-            MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
-            MTLResourceOptions,
+            MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus,
+            MTLCommandEncoder, MTLCommandQueue, MTLResourceOptions,
         };
         let f = self.inner.desc.format;
         let bpp = f.bytes_per_pixel() as usize;
@@ -213,6 +213,9 @@ impl Texture {
         enc.endEncoding();
         cb.commit();
         cb.waitUntilCompleted();
+        if cb.status() != MTLCommandBufferStatus::Completed {
+            return None;
+        }
         // SAFETY: the GPU is done with `buf` (waited above) and it holds `bpp * points.len()` shared bytes.
         let bytes =
             unsafe { std::slice::from_raw_parts(buf.contents().cast::<u8>(), bpp * points.len()) };

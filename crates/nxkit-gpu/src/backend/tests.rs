@@ -241,3 +241,321 @@ fn a_deferred_submit_walks_with_the_device_origin_captured_before_a_device_mode_
     assert_eq!(walker.origins(1), Some([true, false]));
     assert_eq!(walker.origins(2), Some([false, true]));
 }
+
+/// Drive the production recorder, decoder, walker, resource store and encoder.
+/// The only fixture dependencies are synthetic shaders and input byte vectors.
+#[test]
+#[ignore = "requires Metal 4 and the precompiled synthetic tessellation fixture"]
+fn tessellation_replay_walk_and_readback() {
+    use nxkit_nvn::{
+        backend::{FlushCx, ShaderKey, StageKey},
+        ext::{DrawKind, Ext, ExtCode, Setting, StateKind},
+        frame::MAX_COLOR,
+        front::{FlushReason, FrontEnd},
+        layout::{Target, TextureDesc},
+        record::Record,
+        space::LinearSpace,
+    };
+    let dir = std::path::PathBuf::from(
+        std::env::var_os("NXKIT_TESS_FIXTURE_DIR")
+            .expect("set NXKIT_TESS_FIXTURE_DIR to the synthetic fixture root"),
+    );
+    let dir = dir
+        .canonicalize()
+        .expect("cannot resolve synthetic fixture root");
+    for key in [
+        "0101010101010101_b",
+        "0101010101010101_bt",
+        "0202020202020202_b",
+        "0303030303030303_b",
+    ] {
+        for extension in ["json", "metallib"] {
+            let path = dir.join("shaders").join(format!("{key}.{extension}"));
+            assert!(
+                path.is_file(),
+                "missing required fixture {}",
+                path.display()
+            );
+        }
+    }
+    let ctx = Context::system_default().unwrap();
+    let guest = Arc::new(GuestMemory::allocate(&ctx, 1 << 20).unwrap());
+    let gpu = GpuBackend::new(
+        &ctx,
+        guest.clone(),
+        &GpuSettings {
+            shader_dir: dir.join("shaders"),
+            scale: 1.0,
+            threads: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // The fixture selects pixels in top-left viewport coordinates.
+    Backend::device_modes(&*gpu, false, false);
+    let h = guest.host_base();
+    let g = Backend::gpu_base(&*gpu);
+    Backend::register_pool(
+        &*gpu,
+        PoolInfo {
+            host: h,
+            len: 1 << 20,
+            flags: 0,
+        },
+    )
+    .unwrap();
+    let mut front = FrontEnd::new(
+        LinearSpace::new(h, g, 1 << 20).unwrap(),
+        GuestView(gpu.guest.clone()),
+    );
+    let vector = |name| std::fs::read(dir.join("vectors").join(name)).unwrap();
+    let vertices = vector("vertices.bin");
+    assert_eq!(vertices.len(), 224);
+    guest.write(0x4000, &vertices).unwrap();
+    guest.write(0x4400, &vertices).unwrap();
+    guest
+        .write(0x5000, &vector("domain_uniform_slot2.bin"))
+        .unwrap();
+    let target = front
+        .create_texture(
+            TextureDesc {
+                target: Target::D2,
+                format: 0x25,
+                flags: 0,
+                samples: 0,
+                width: 64,
+                height: 64,
+                depth: 1,
+                levels: 1,
+                stride: 0,
+                packaged_block: None,
+            },
+            h + 0x8000,
+        )
+        .unwrap();
+    Backend::texture_created(&*gpu, front.resources().get(target).unwrap());
+    for id in 1..=3 {
+        Backend::program_set(
+            &*gpu,
+            u64::from(id),
+            &[StageKey {
+                index: 0,
+                key: Some(ShaderKey([id; 8])),
+                code: 0,
+                code_len: 0,
+            }],
+        );
+    }
+    let mut color = [0; MAX_COLOR];
+    color[0] = front.texture_address(target).unwrap();
+    // The same indexed draw-only recording is evaluated against two GPU writes of different bytes.
+    // The second call must hit the nested walker template but must still consume the live index buffer.
+    let indexed_child = 16;
+    front
+        .add_command_memory(indexed_child, h + 0x30000, 0x1000)
+        .unwrap();
+    front.begin_recording(indexed_child).unwrap();
+    front
+        .write(
+            indexed_child,
+            Record::Ext(
+                Ext::new(ExtCode::Draw, DrawKind::Elements as u16)
+                    .u32(crate::detail::PATCHES)
+                    .u32(1)
+                    .u32(6)
+                    .u64(g + 0x7002)
+                    .i32(-2)
+                    .u32(0)
+                    .u32(1),
+            ),
+        )
+        .unwrap();
+    let indexed_child = front.end_recording(indexed_child).unwrap();
+    let modes = [
+        (None, 1., [255, 0, 80, 255], [0, 255, 112, 255]),
+        (None, 2.5, [255, 0, 104, 255], [0, 255, 135, 255]),
+        (None, 0., [0; 4], [0; 4]),
+        (
+            Some("indexed.bin"),
+            1.,
+            [255, 0, 112, 255],
+            [0, 255, 80, 255],
+        ),
+        (
+            Some("indexed_invalid_right.bin"),
+            1.,
+            [255, 0, 112, 255],
+            [0; 4],
+        ),
+    ];
+    for (number, (file, factor, left, right)) in modes.into_iter().enumerate() {
+        let base = h + 0x20000 + number as u64 * 0x1000;
+        // Distinct command ranges ensure no previous recording supplies stale state.
+        let cb = number;
+        front.add_command_memory(cb, base, 0x1000).unwrap();
+        front.begin_recording(cb).unwrap();
+        front
+            .write(cb, Record::SetTargets { color, depth: 0 })
+            .unwrap();
+        let mut ext = |r| front.write(cb, Record::Ext(r)).unwrap();
+        let set = |s| Ext::new(ExtCode::Setting, s as u16);
+        ext(Ext::new(ExtCode::ClearColor, 0)
+            .u32(15)
+            .u32(0)
+            .u32(0)
+            .u32(0)
+            .u32(0));
+        ext(Ext::new(ExtCode::Viewport, 0)
+            .f32(0.)
+            .f32(0.)
+            .f32(64.)
+            .f32(64.));
+        ext(Ext::new(ExtCode::Scissor, 0).i32(0).i32(0).i32(64).i32(64));
+        // NVN polygon defaults: no cull, counter-clockwise front, and filled triangles.
+        // An unbound polygon state uses mode zero, which the Metal backend draws as lines.
+        ext(Ext::new(ExtCode::State, StateKind::Polygon as u16).u32((1 << 2) | (2 << 3)));
+        for (program, mask) in [(1, 1), (2, 2), (3, 16)] {
+            ext(Ext::new(ExtCode::Program, 0).u64(program).u32(mask));
+        }
+        ext(Ext::new(ExtCode::VertexBuffer, 0).u64(g + 0x4000).u64(224));
+        ext(Ext::new(ExtCode::VertexState, 0)
+            .u32(0)
+            .u32(2)
+            .u32(0x2e)
+            .u32(0x102e));
+        ext(Ext::new(ExtCode::VertexState, 1)
+            .u32(0)
+            .u32(1)
+            .u32(32)
+            .u32(0));
+        ext(Ext::new(ExtCode::UniformBuffer, 0x402)
+            .u64(g + 0x5000)
+            .u64(16));
+        ext(set(Setting::PatchSize).u32(3));
+        ext(set(Setting::InnerTessellationLevels)
+            .f32(factor)
+            .f32(factor));
+        ext(set(Setting::OuterTessellationLevels)
+            .f32(factor)
+            .f32(factor)
+            .f32(factor)
+            .f32(factor));
+        if let Some(file) = file {
+            let mut bytes = vector(file);
+            bytes.resize(16, 0);
+            let source = 0x6000 + number as u64 * 32;
+            guest.write(source, &bytes).unwrap();
+            guest.write(0x7000, &[0xFF; 16]).unwrap();
+            ext(Ext::new(ExtCode::CopyBufferToBuffer, 0)
+                .u64(g + source)
+                .u64(g + 0x7000)
+                .u64(16)
+                .u32(0));
+            front.write(cb, Record::Call(indexed_child.0)).unwrap();
+        } else {
+            if number == 1 {
+                // Empty destination on the CPU; only GPU visibility can restore the correct positions and tints.
+                guest.write(0x4000, &[0; 224]).unwrap();
+                ext(Ext::new(ExtCode::CopyBufferToBuffer, 0)
+                    .u64(g + 0x4400)
+                    .u64(g + 0x4000)
+                    .u64(224)
+                    .u32(0));
+            }
+            ext(Ext::new(ExtCode::Draw, DrawKind::Arrays as u16)
+                .u32(crate::detail::PATCHES)
+                .u32(1)
+                .u32(6));
+        }
+        // Keep the attachment live through the end of the pass.
+        front.write(cb, Record::CpuRead(color[0])).unwrap();
+        let recording = front.end_recording(cb).unwrap();
+        Backend::submit(&*gpu, 0, &[recording], false).unwrap()();
+        front.submit(recording).unwrap();
+        front.end_frame(FlushReason::CpuWait).unwrap();
+        let (frame, plan, table, descriptors) = front.flush_parts();
+        Backend::flush_frame(
+            &*gpu,
+            frame,
+            plan,
+            FlushReason::CpuWait,
+            Fence(number as u64 + 1),
+            FlushCx { table, descriptors },
+        )
+        .unwrap();
+        if let Some(enc) = &gpu.enc {
+            let settled = enc.settle();
+            assert!(
+                settled.error.is_none(),
+                "encoder failed: {:?}",
+                settled.error
+            );
+            if let Some(update) = settled.update {
+                update.apply(table);
+            }
+        }
+        let command = locked(&gpu.test_submitted)
+            .take()
+            .expect("no Metal command buffer");
+        let completed = command.wait().expect("Metal command buffer failed");
+        assert!(
+            !completed.failed,
+            "case {number}: Metal reported failure: {completed:?}"
+        );
+        Backend::wait_idle(&*gpu);
+        let stats = locked(&gpu.test_encode_stats)
+            .take()
+            .expect("no encoder report");
+        assert_eq!(stats.skipped_total(), 0, "case {number}: {stats:?}");
+        assert_eq!(stats.draws, 1, "case {number}: {stats:?}");
+        // The guest draw counter includes an intentionally culled patch. Capture does not.
+        assert_eq!(
+            stats.kinds.metal_draws,
+            u32::from(factor != 0.0),
+            "case {number}: unexpectedly missing or extra capture: {stats:?}"
+        );
+        let walk = locked(&gpu.test_walk_counters)
+            .take()
+            .expect("no walker report");
+        assert_eq!(walk.draws, 1, "case {number}: {walk:?}");
+        assert_eq!(
+            walk.walk_hits,
+            u32::from(number == 4),
+            "case {number}: {walk:?}"
+        );
+        Backend::settle(&*gpu, table);
+        let output = locked(&gpu.gpu)
+            .texture(target)
+            .expect("target was not rendered");
+        let got = output
+            .debug_read(&ctx, &[[10, 40], [42, 40], [30, 10]])
+            .expect("Metal texture readback failed");
+        assert_eq!(got.len(), 3, "missing selected pixels for case {number}");
+        let want = [left, right, [0; 4]];
+        if !got
+            .iter()
+            .zip(want)
+            .all(|(pixel, want)| pixel.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1))
+        {
+            // Sparse coverage separates an empty target from geometry outside the selected pixels.
+            let probes: Vec<_> = (2..64)
+                .step_by(4)
+                .flat_map(|y| (2..64).step_by(4).map(move |x| [x, y]))
+                .collect();
+            let coverage = output.debug_read(&ctx, &probes).map(|pixels| {
+                probes
+                    .iter()
+                    .zip(pixels)
+                    .filter(|(_, pixel)| *pixel != [0; 4])
+                    .map(|(point, pixel)| (*point, pixel))
+                    .collect::<Vec<_>>()
+            });
+            panic!(
+                "case {number}: got {got:?}, expected {want:?}; \
+                 sampled coverage {coverage:?}; attachments {:?}",
+                plan.attachments
+            );
+        }
+        front.begin_frame();
+    }
+}

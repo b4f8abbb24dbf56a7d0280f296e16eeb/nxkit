@@ -252,6 +252,12 @@ impl Gpu {
                         crate::detail::Stage::Mesh,
                         &d.textures,
                     ),
+                    (
+                        d.patch.as_ref().and_then(|p| p.evaluation.as_deref()),
+                        false,
+                        crate::detail::Stage::TessEvaluation,
+                        &d.textures,
+                    ),
                 ]
             })
             .chain(detail.dispatches.iter().map(|d| {

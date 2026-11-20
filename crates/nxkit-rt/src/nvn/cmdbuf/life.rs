@@ -221,7 +221,6 @@ extern "C" fn hint(_c: u64) {}
 
 /// The names of the hint functions and the functions that the engine answers with an empty body.
 const HINTS: &[&str] = &[
-    "nvnCommandBufferSetPatchSize",
     "nvnCommandBufferSetDepthBounds",
     "nvnCommandBufferSetShaderScratchMemory",
     "nvnCommandBufferPushDebugGroupDynamic",

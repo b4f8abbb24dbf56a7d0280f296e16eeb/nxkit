@@ -64,6 +64,9 @@ pub fn params(res: &args::Res, plan: &io::Plan) -> Vec<Param> {
     for b in &plan.builtins {
         v.push(Param::new(format!("{} {}", b.ty, b.name), b.attr, b.name));
     }
+    if plan.domain {
+        v.extend(super::domain::params());
+    }
     v
 }
 
@@ -108,6 +111,10 @@ pub struct EntryName<'a> {
     pub extra: &'a [Param],
     /// Statements before the output is declared.
     pub pro: &'a [String],
+    /// The capture wrapper supplies logical IDs after validation rather than using Metal IDs.
+    pub(super) omit_vertex_ids: bool,
+    /// Apply the usual vertex depth conversion when emitting the fall-through tail.
+    pub(super) vertex_depth_fix: bool,
     /// The device layout of the shared memories of a compute kernel that is over the threadgroup limit.
     pub spill: Option<&'a Spill>,
 }
@@ -123,6 +130,8 @@ impl<'a> EntryName<'a> {
             extra: &[],
             pro: &[],
             spill: None,
+            vertex_depth_fix: true,
+            omit_vertex_ids: false,
         }
     }
 }
@@ -185,6 +194,11 @@ pub(super) fn shared_params(
     for b in &plan.builtins {
         p.params.push(d(&format!("{} {}", b.ty, b.name), b.name));
     }
+    if plan.domain {
+        for param in super::domain::params() {
+            p.params.push((param.decl, param.name));
+        }
+    }
     for m in &s.props.properties.local_memories {
         let (t, n) = memory(m)?;
         let name = format!("lm{}", m.id);
@@ -207,6 +221,14 @@ pub(super) fn shared_params(
 /// The parameters of a function: the standard ones, with the stage input of the entry, then its own.
 pub(super) fn all_params(e: &EntryName<'_>, res: &args::Res, plan: &io::Plan) -> Vec<Param> {
     let mut ps = params(res, plan);
+    if e.omit_vertex_ids {
+        ps.retain(|p| {
+            !matches!(
+                p.attr.as_str(),
+                "vertex_id" | "base_vertex" | "instance_id" | "base_instance"
+            )
+        });
+    }
     match e.stage_in {
         StageIn::Standard => {}
         StageIn::None => ps.retain(|p| p.attr != "stage_in"),
@@ -321,7 +343,7 @@ pub(super) fn entry_text(
         return Ok(t);
     }
     if shader == Shader::Vertex {
-        for l in plan.vertex_epilogue(true) {
+        for l in plan.vertex_epilogue(e.vertex_depth_fix) {
             let _ = writeln!(t, "    {l}");
         }
     }

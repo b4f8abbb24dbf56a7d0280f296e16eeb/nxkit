@@ -205,6 +205,12 @@ pub enum Setting {
     CopyImageStride,
     /// Enable.
     ConservativeRaster,
+    /// Number of vertices in each input patch.
+    PatchSize,
+    /// Two default inner levels as `f32`.
+    InnerTessellationLevels,
+    /// Four default outer levels as `f32`.
+    OuterTessellationLevels,
 }
 
 /// The state objects that a bind carries ([`ExtCode::State`]).

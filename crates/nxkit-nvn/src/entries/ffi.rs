@@ -497,6 +497,8 @@ pub const FFI_GROUPS: &[(&str, &[&str])] = &[
             "nvnCommandBufferSetMemoryCallback",
             "nvnCommandBufferSetMemoryCallbackData",
             "nvnCommandBufferSetPatchSize",
+            "nvnCommandBufferSetInnerTessellationLevels",
+            "nvnCommandBufferSetOuterTessellationLevels",
             "nvnCommandBufferSetPointSize",
             "nvnCommandBufferSetPolygonOffsetClamp",
             "nvnCommandBufferSetPrimitiveRestart",

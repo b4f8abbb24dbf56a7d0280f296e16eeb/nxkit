@@ -23,6 +23,8 @@ pub enum Stage {
     Task,
     /// The mesh stage of NVN2.
     Mesh,
+    /// The domain shader of a patch draw.
+    TessEvaluation,
 }
 
 /// The shaders of a draw, as the keys of the shader step. A key names `<key>_b.metallib` and `<key>_b.json`.
@@ -274,6 +276,28 @@ pub struct DynamicDetail {
     pub stencil_ref: [u32; 2],
 }
 
+/// The NVN patch primitive. It cannot be passed to the ordinary Metal render encoder.
+pub(crate) const PATCHES: u32 = 0xe;
+
+/// Resources and explicit state for a patch draw.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PatchDetail {
+    /// All bound relevant programs have recognized stage metadata.
+    pub reflected: bool,
+    /// The control shader, when bound. No-hull execution must refuse a bound control shader.
+    pub control: Option<Arc<str>>,
+    /// The evaluation shader, when bound.
+    pub evaluation: Option<Arc<str>>,
+    /// The number of control points in an input patch, if set explicitly.
+    pub size: Option<u32>,
+    /// Default inner level float bits captured at the draw.
+    pub inner: Option<[u32; 2]>,
+    /// Default outer level float bits captured at the draw.
+    pub outer: Option<[u32; 4]>,
+    /// Restart is not supported by the indexed replay.
+    pub restart: bool,
+}
+
 /// Everything about one draw.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DrawDetail {
@@ -291,6 +315,8 @@ pub struct DrawDetail {
     pub raster: RasterDetail,
     /// `NVNdrawPrimitive`: 0 points, 1 lines, 3 line strip, 4 triangles, 5 triangle strip.
     pub topology: u32,
+    /// The tessellation state, only for the patch primitive.
+    pub patch: Option<Box<PatchDetail>>,
     /// The vertex attributes.
     pub attributes: Vec<AttributeDetail>,
     /// The vertex streams.

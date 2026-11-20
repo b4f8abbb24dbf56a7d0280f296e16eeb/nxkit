@@ -23,3 +23,25 @@ They stop with a message when a variable is not set. They never use a private pa
 | `NXB_HARNESS` | the folder of the harness. Default is `tools/gpudiff` |
 
 The prototype, the reference folder and every corpus are not in this repository. You must provide them.
+
+## Tessellation replay test
+
+Generate the synthetic shaders, reflection, and input buffers from the
+repository root. This step does not require Metal or game files:
+
+```sh
+tools/gen_tess_fixture.sh target/tess-fixture
+```
+
+Run the ignored regressions on a Mac with Metal 4:
+
+```sh
+NXKIT_TESS_FIXTURE_DIR="$PWD/target/tess-fixture" \
+  cargo test --locked -p nxkit-gpu tessellation_replay_walk_and_readback -- --ignored
+NXKIT_TESS_FIXTURE_DIR="$PWD/target/tess-fixture" \
+  cargo test --locked -p nxkit-gpu gpu_written_indices_replay_in_order -- --ignored
+```
+
+The first test checks offscreen pixels from direct and indexed patch draws.
+The second test isolates capture from GPU-written index data.
+Keep the generated files out of version control.

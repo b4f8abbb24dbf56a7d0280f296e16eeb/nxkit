@@ -304,6 +304,18 @@ impl Walker {
         } else if kind == Setting::CopyImageStride as u16 {
             st.copy_strides[1] = stride(x);
             set(sc::STRIDE_IMAGE);
+        } else if kind == Setting::PatchSize as u16 {
+            st.patch.size = x.words().first().copied();
+            set(sc::PATCH_SIZE);
+        } else if kind == Setting::InnerTessellationLevels as u16 {
+            st.patch.inner = x.words().first_chunk().copied();
+            set(sc::PATCH_INNER);
+        } else if kind == Setting::OuterTessellationLevels as u16 {
+            st.patch.outer = x.words().first_chunk().copied();
+            set(sc::PATCH_OUTER);
+        } else if kind == Setting::PrimitiveRestart as u16 {
+            st.patch.restart = x.word(0) != 0;
+            set(sc::PRIMITIVE_RESTART);
         } else if kind == Setting::DepthClamp as u16 {
             st.raster.clamp = x.word(0) != 0;
             set(sc::CLAMP);
