@@ -12,7 +12,6 @@ layer = "T"
 in_v = false
 
 [dependencies]
-nxkit-hos.workspace = true
 nxtitle.workspace = true
 
 [dev-dependencies]

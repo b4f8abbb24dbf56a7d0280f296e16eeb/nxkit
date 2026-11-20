@@ -705,7 +705,6 @@ name = "nxgame-botw"
 version = "0.10.3"
 dependencies = [
  "nxb-profile",
- "nxkit-hos",
  "nxtitle",
 ]
 
