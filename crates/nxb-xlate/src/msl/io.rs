@@ -67,6 +67,8 @@ pub struct FragOut {
 /// The stage IO of a shader.
 #[derive(Debug, Default)]
 pub struct Plan {
+    /// This program consumes the explicit domain draw ABI, not hardware vertex input.
+    pub(super) domain: bool,
     /// The members of `main0_in`.
     pub in_members: Vec<String>,
     /// The members of `main0_out`.
@@ -277,6 +279,7 @@ pub fn build(
     let d = &props.definitions;
     let mut p = Plan {
         lane_zero,
+        domain: props.definitions.stage == Some(crate::attr::Stage::TessellationEvaluation),
         ..Plan::default()
     };
     let mut seen = BTreeSet::new();
@@ -293,6 +296,15 @@ pub fn build(
     let mut users = Vec::new();
     for io in &info.io_definitions {
         if !seen.insert((io.storage_kind.0, io.io_variable.0, io.location)) {
+            continue;
+        }
+        if p.domain
+            && matches!(
+                io.storage_kind,
+                StorageKind::Input | StorageKind::InputPerPatch
+            )
+        {
+            super::domain::check_input(io.storage_kind, io.io_variable)?;
             continue;
         }
         let out = matches!(io.storage_kind, StorageKind::Output);

@@ -53,14 +53,19 @@ struct Entries {
 /// Build with the vertex inputs at `ints` declared `uint`.
 fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) -> R<Translated> {
     let job = &s.job;
+    let domain = job.stage == "ds";
     let patched = (!ints.is_empty()).then(|| variant::int_inputs::declare(&s.props, ints));
     let props = patched.as_ref().unwrap_or(&s.props);
     let shader = match job.stage.as_str() {
         "vs" => Shader::Vertex,
+        "ds" => Shader::Vertex,
         "ps" => Shader::Fragment,
         "cs" | "gs" => Shader::Compute,
         other => return Err(format!("unported: {other} stage")),
     };
+    if (props.definitions.stage == Some(crate::attr::Stage::TessellationEvaluation)) != domain {
+        return Err("unported: domain shader outside the diagnostic path".into());
+    }
     // A task or mesh shader is a compute job, and its tables and reflection are those of its own stage.
     let stage_name = job
         .mesh_stage
@@ -80,9 +85,16 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     } else {
         spill::plan(&s.props.properties.shared_memories)
     };
+    if domain && !s.props.properties.shared_memories.is_empty() {
+        return Err("unported: threadgroup memory in a domain shader".into());
+    }
     let usage: Usage = usage::collect(&s.info);
     let res = args::build(props, &s.program, &usage, stage_name, &s.notes, &s.fetch1d)?;
-    let base_instance = shader == Shader::Vertex
+    if domain {
+        super::domain::check_bindings(&res.bindings)?;
+    }
+    let base_instance = !domain
+        && shader == Shader::Vertex
         && res
             .cbs
             .values()
@@ -110,7 +122,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     }
     shared.wide = wide::plan(&s.info, &res, &shared.skip);
     let mut em = Em::new(&s.info, props, &res, opt, &shared, &plan, shader);
-    em.probe = (shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
+    em.probe = (!domain && shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
     let mut bodies = Vec::new();
     for i in 0..s.info.functions.len() {
         bodies.push(em.body(i)?);
@@ -141,7 +153,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     let mut entries = Entries::default();
     let mut fetch = None;
     let vx = match shader {
-        Shader::Vertex => {
+        Shader::Vertex if !domain => {
             let w = res.bindings.iter().any(facts::writes);
             Some(variant::vertex::bodies(&mut em, &plan, w)?)
         }
@@ -168,6 +180,9 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
                 entries.entries.push(variant::tf::entry_field());
                 entries.extra.push(variant::tf::strides_field(tf));
             }
+        }
+        (None, Shader::Vertex) if domain => {
+            entries.text = entry_text(s, &EntryName::new("main0"), shader, &res, &plan, main)?;
         }
         (None, Shader::Fragment) => {
             let derived = variant::pixel_derived::derived(&s.info, &plan, opt.dual_source);
@@ -334,6 +349,9 @@ fn assemble(
     msl.push_str(&res.text);
     msl.push_str(&lib.in_struct);
     msl.push_str(&plan.out_struct());
+    if plan.domain {
+        msl.push_str(&super::domain::declarations());
+    }
     if let Some(vx) = vx {
         msl.push_str(&variant::vertex::decls(plan, vx)?);
     }
