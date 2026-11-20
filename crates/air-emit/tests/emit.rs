@@ -343,3 +343,28 @@ fn array_gradient_rejects_scalar_derivatives() {
         "{err:?}"
     );
 }
+
+#[test]
+fn fragment_sample_id_can_be_a_stage_in_member() {
+    let body = "struct I { uint gl_SampleID [[sample_id]]; };
+        struct O { float4 c [[color(0)]]; };
+        fragment O main0(I in [[stage_in]]) {
+            O o;
+            o.c = float4(float(in.gl_SampleID));
+            return o;
+        }";
+    for target in [Target::macos(), Target::ios()] {
+        let ir = compile_source(&format!("{PRE}{body}"), &target, "t.metal").expect("emits");
+        assert!(
+            ir.contains(
+                "i32 0, !\"air.sample_id\", !\"air.arg_type_name\", !\"uint\", !\"air.arg_name\", !\"gl_SampleID\""
+            ),
+            "{ir}"
+        );
+        assert!(ir.contains("@air.convert.f.f32.u.i32(i32 %"), "{ir}");
+
+        let bad = body.replace("uint gl_SampleID", "float gl_SampleID");
+        assert!(compile_source(&format!("{PRE}{bad}"), &target, "t.metal")
+            .is_err_and(|e| e.to_string().contains("sample_id field is not uint")));
+    }
+}

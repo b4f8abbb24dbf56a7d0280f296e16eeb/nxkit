@@ -143,7 +143,7 @@ const TEX_ACCEPTED: [&str; 9] = [
     "depthcube",
     "depthcube_array",
 ];
-const FIELD_ATTRS: [&str; 16] = [
+const FIELD_ATTRS: [&str; 17] = [
     "id",
     "user",
     "attribute",
@@ -160,6 +160,7 @@ const FIELD_ATTRS: [&str; 16] = [
     "sample_mask",
     "clip_distance",
     "front_facing",
+    "sample_id",
 ];
 const PARAM_ATTRS: [&str; 16] = [
     "stage_in",
