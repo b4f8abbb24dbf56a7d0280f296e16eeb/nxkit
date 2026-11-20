@@ -18,7 +18,55 @@ mod pool;
 type R<T> = Result<T, Error>;
 
 /// A dm_bs instantiation: argument types, sampling option per extra argument, function.
-type BsInstance = (Vec<Type>, Vec<Option<&'static str>>, usize);
+type BsInstance = (Vec<Type>, Vec<Option<OptKind>>, usize);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OptKind {
+    Level,
+    Bias,
+    Grad2d,
+}
+
+impl OptKind {
+    fn named(name: &str) -> Option<Self> {
+        match name {
+            "level" => Some(Self::Level),
+            "bias" => Some(Self::Bias),
+            "gradient2d" => Some(Self::Grad2d),
+            _ => None,
+        }
+    }
+
+    fn arity(self) -> usize {
+        match self {
+            Self::Grad2d => 2,
+            _ => 1,
+        }
+    }
+
+    fn lower(self, previous: &SampleOpt, mut value: impl FnMut(usize) -> R<Expr>) -> R<SampleOpt> {
+        if matches!(previous, SampleOpt::Grad2d(..))
+            || (self == Self::Grad2d && !matches!(previous, SampleOpt::None))
+        {
+            return Err(Error::invalid("multiple sample options with gradient2d"));
+        }
+        Ok(match self {
+            Self::Level => SampleOpt::Level(Box::new(value(0)?)),
+            Self::Bias => SampleOpt::Bias(Box::new(value(0)?)),
+            Self::Grad2d => SampleOpt::Grad2d(Box::new(value(0)?), Box::new(value(1)?)),
+        })
+    }
+
+    fn operand(self, value: Expr) -> R<Expr> {
+        match self {
+            Self::Grad2d if value.ty != Type::Vector(Scalar::Float, 2) => {
+                Err(Error::invalid("gradient2d requires float2 derivatives"))
+            }
+            Self::Grad2d => Ok(value),
+            _ => conv(value, &Type::FLOAT),
+        }
+    }
+}
 
 /// Analyses an accepted module.
 pub fn analyze(m: &ast::Module) -> R<Module> {
@@ -1011,17 +1059,19 @@ impl Cx {
             self.expr(&args[3])?,
             self.expr(&args[4])?,
         ];
-        // a sampling option (`level(x)`) is passed as its struct, whose value is the float
-        let mut opts: Vec<Option<&'static str>> = Vec::new();
+        // Flatten the option's fields, but retain its kind in the template specialization.
+        let mut opts = Vec::new();
         for a in &args[5..] {
             if let A::Call {
                 callee: Callee::Builtin(n),
                 args: oa,
             } = &a.kind
             {
-                if matches!(&**n, "level" | "bias") {
-                    vals.push(conv(self.expr(&oa[0])?, &Type::FLOAT)?);
-                    opts.push(Some(if &**n == "level" { "level" } else { "bias" }));
+                if let Some(opt) = OptKind::named(n) {
+                    for operand in oa {
+                        vals.push(opt.operand(self.expr(operand)?)?);
+                    }
+                    opts.push(Some(opt));
                     continue;
                 }
             }
@@ -1053,7 +1103,7 @@ impl Cx {
     fn bs_instantiate(
         &mut self,
         tys: &[Type],
-        opts: &[Option<&'static str>],
+        opts: &[Option<OptKind>],
         tx: Tex,
         ty: &Type,
     ) -> R<usize> {
@@ -1101,10 +1151,16 @@ impl Cx {
             Type::UINT,
         );
         let cond = conv(bit, &Type::BOOL)?;
-        let extra: Vec<SampleArg> = (5..tys.len())
-            .map(|k| match opts[k - 5] {
-                Some(o) => SampleArg::Opt(o, k),
-                None => SampleArg::Local(k),
+        let mut k = 5;
+        let extra: Vec<_> = opts
+            .iter()
+            .map(|opt| {
+                let start = k;
+                k += opt.map_or(1, OptKind::arity);
+                match opt {
+                    Some(o) => SampleArg::Opt(*o, start),
+                    None => SampleArg::Local(start),
+                }
             })
             .collect();
         let sample = self.sample_from(
@@ -1304,12 +1360,9 @@ impl Cx {
         let mut gather = if name == "gather" { Some(0u8) } else { None };
         for a in it {
             if let SampleArg::Opt(o, l) = a {
-                let v = load_local(*l, Type::FLOAT);
-                opt = if *o == "level" {
-                    SampleOpt::Level(Box::new(v))
-                } else {
-                    SampleOpt::Bias(Box::new(v))
-                };
+                opt = o.lower(&opt, |i| {
+                    Ok(load_local(l + i, self.locals[l + i].ty.clone()))
+                })?;
                 continue;
             }
             if let SampleArg::Ast(e) = a {
@@ -1317,20 +1370,11 @@ impl Cx {
                     A::Call {
                         callee: Callee::Builtin(n),
                         args: oargs,
-                    } if matches!(&**n, "level" | "bias") => {
-                        let v = conv(self.expr(&oargs[0])?, &Type::FLOAT)?;
-                        opt = if &**n == "level" {
-                            SampleOpt::Level(Box::new(v))
-                        } else {
-                            SampleOpt::Bias(Box::new(v))
-                        };
-                        continue;
-                    }
-                    A::Call {
-                        callee: Callee::Builtin(n),
-                        ..
                     } => {
-                        return Err(Error::unsupported(format!("sample-option:{n}")));
+                        let o = OptKind::named(n)
+                            .ok_or_else(|| Error::unsupported(format!("sample-option:{n}")))?;
+                        opt = o.lower(&opt, |i| o.operand(self.expr(&oargs[i])?))?;
+                        continue;
                     }
                     A::Component(c) => {
                         let i = match &**c {
@@ -1354,6 +1398,11 @@ impl Cx {
         }
         if name == "gather" && !matches!(opt, SampleOpt::None) {
             return Err(Error::invalid("gather option"));
+        }
+        if matches!(opt, SampleOpt::Grad2d(..))
+            && (name != "sample" || tx.kind != TexKind::T2dArray || tx.elem != Scalar::Float)
+        {
+            return Err(Error::unsupported("sample-option:gradient2d"));
         }
         let ty = if name == "sample_compare" || (tx.kind.is_depth() && name == "sample") {
             Type::FLOAT
@@ -1397,8 +1446,8 @@ enum SampleArg<'a> {
     Ast(&'a ast::Expr),
     Local(LocalId),
     Value(Expr),
-    /// A sampling option whose float value is in a local.
-    Opt(&'static str, LocalId),
+    /// A sampling option whose fields start at this local.
+    Opt(OptKind, LocalId),
 }
 
 fn push_label(arms: &mut Vec<SwitchArm>, v: Option<i64>) {

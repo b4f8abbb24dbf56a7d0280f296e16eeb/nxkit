@@ -267,3 +267,79 @@ fn the_blend_rule_of_a_pixel_shader_emits() {
     assert!(ir.contains("and i32"), "{ir}");
     assert!(ir.contains("1065353216"), "{ir}");
 }
+
+const SAMPLE_GRAD_2D_ARRAY: &str = "air.sample_texture_2d_array_grad.v4f32";
+
+#[test]
+fn array_gradient_preserves_derivatives_and_offset() {
+    let ir = emit(
+        "struct spvDescriptorSetBuffer0 { texture2d_array<float> tex [[id(0)]]; sampler s [[id(1)]]; };\n\
+         fragment float4 main0(constant spvDescriptorSetBuffer0& a [[buffer(0)]]) {\n\
+           return a.tex.sample(a.s, float2(0.25f, 0.5f), 1u,\n\
+                               gradient2d(float2(0.0625f, 0.0f), float2(0.0f, 0.125f)), int2(1, -1));\n\
+         }",
+    );
+    let call = ir
+        .lines()
+        .find(|s| s.contains("call") && s.contains(SAMPLE_GRAD_2D_ARRAY))
+        .unwrap();
+    assert!(call.contains("i32 1,"), "{call}");
+    assert!(
+        call.contains("float 0x0000000000000000, i1 true, <2 x i32>"),
+        "{call}"
+    );
+    assert!(call.contains(", i32 0)"), "{call}");
+    let decl = ir
+        .lines()
+        .find(|s| s.starts_with("declare") && s.contains(SAMPLE_GRAD_2D_ARRAY))
+        .unwrap();
+    assert!(
+        decl.contains("<2 x float>, i32, <2 x float>, <2 x float>, float, i1, <2 x i32>, i32"),
+        "{decl}"
+    );
+    assert!(ir.contains("extractvalue { <4 x float>, i8 }"));
+}
+
+#[test]
+fn array_gradient_passes_both_derivatives_through_border_helper() {
+    let ir = emit(
+        "struct dm_border_t { uint mask; float4 k[2]; };\n\
+         float4 dm_bmix(float4 a, float4 b, float4 k) { return a + b * k; }\n\
+         template<typename V, typename T, typename... A> static inline __attribute__((always_inline))\n\
+         V dm_bs(V r, constant dm_border_t* b, uint i, T t, sampler w, A... a) {\n\
+           if (b->mask >> i & 1u) r = dm_bmix(r, t.sample(w, a...), b->k[i]); return r; }\n\
+         struct spvDescriptorSetBuffer0 { texture2d_array<float> tex [[id(0)]]; sampler s [[id(1)]];\n\
+           constant dm_border_t* border [[id(2)]]; };\n\
+         fragment float4 main0(constant spvDescriptorSetBuffer0& a [[buffer(0)]]) {\n\
+           return dm_bs(float4(0.0f), a.border, 0u, a.tex, a.s, float2(0.5f), 1u,\n\
+                        gradient2d(float2(0.0625f, 0.0f), float2(0.0f, 0.125f))); }",
+    );
+    let call = ir
+        .lines()
+        .find(|s| s.contains("call") && s.contains(SAMPLE_GRAD_2D_ARRAY))
+        .unwrap();
+    assert!(
+        call.contains("float 0x0000000000000000, i1 true, <2 x i32> zeroinitializer, i32 0)"),
+        "{call}"
+    );
+    assert!(
+        ir.lines().any(|s| s.starts_with("define")
+            && s.contains("@dm_bs")
+            && s.matches("<2 x float>").count() == 3),
+        "{ir}"
+    );
+}
+
+#[test]
+fn array_gradient_rejects_scalar_derivatives() {
+    let source = format!(
+        "{PRE}struct spvDescriptorSetBuffer0 {{ texture2d_array<float> tex [[id(0)]]; sampler s [[id(1)]]; }};\n\
+         fragment float4 main0(constant spvDescriptorSetBuffer0& a [[buffer(0)]]) {{\n\
+            return a.tex.sample(a.s, float2(0.5f), 1u, gradient2d(0.0625f, float2(0.0f))); }}"
+    );
+    let err = compile_source(&source, &Target::macos(), "t.metal").unwrap_err();
+    assert!(
+        format!("{err:?}").contains("gradient2d requires float2 derivatives"),
+        "{err:?}"
+    );
+}

@@ -355,6 +355,7 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                 Some(x) => Some(g.expr(x)?),
                 None => None,
             };
+            let mut gradients = None;
             let (is_lvl, lod) = match opt {
                 SampleOpt::None => ("false", "0x0000000000000000".to_string()),
                 // `level(x)`/`bias(x)` are constructed through a struct constructor that clang does
@@ -366,6 +367,10 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                 SampleOpt::Bias(x) => {
                     g.not_mustprogress();
                     ("false", g.expr(x)?.r)
+                }
+                SampleOpt::Grad2d(dx, dy) => {
+                    gradients = Some([g.expr(dx)?, g.expr(dy)?]);
+                    ("false", "0x0000000000000000".to_string())
                 }
             };
             let off = match offset {
@@ -414,26 +419,37 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                     ty: ret.clone(),
                 });
             }
-            if has_offset {
-                a.push(("i1".into(), "true".into()));
-                let (ty, v) = split_typed(&off);
-                a.push((ty, v));
-            } else if offset.is_some() {
-                return Err(Error::unsupported("sample-offset:cube"));
-            }
-            a.push(("i1".into(), is_lvl.into()));
-            a.push(("float".into(), lod));
-            a.push(("float".into(), "0x0000000000000000".into()));
-            a.push(("i32".into(), "0".into()));
             let depth = kind.is_depth();
             let (sfx, vt) = tex_ret(tx, depth)?;
-            let name = if cmp.is_some() {
-                format!("air.sample_compare_{an}.{sfx}")
-            } else {
-                format!("air.sample_{an}.{sfx}")
-            };
             let st = format!("{{ {vt}, i8 }}");
-            let r = call(g, &name, &a, &st, Attrs::SampleConvergent, false);
+            let (name, attrs) = if let Some(gradients) = gradients {
+                for v in gradients {
+                    a.push((lt(g, &v.ty), v.r));
+                }
+                a.push(("float".into(), "0x0000000000000000".into()));
+                a.push(("i1".into(), "true".into()));
+                a.push(split_typed(&off));
+                a.push(("i32".into(), "0".into()));
+                (format!("air.sample_{an}_grad.{sfx}"), Attrs::ReadOnly)
+            } else {
+                if has_offset {
+                    a.push(("i1".into(), "true".into()));
+                    a.push(split_typed(&off));
+                } else if offset.is_some() {
+                    return Err(Error::unsupported("sample-offset:cube"));
+                }
+                a.push(("i1".into(), is_lvl.into()));
+                a.push(("float".into(), lod));
+                a.push(("float".into(), "0x0000000000000000".into()));
+                a.push(("i32".into(), "0".into()));
+                let name = if cmp.is_some() {
+                    format!("air.sample_compare_{an}.{sfx}")
+                } else {
+                    format!("air.sample_{an}.{sfx}")
+                };
+                (name, Attrs::SampleConvergent)
+            };
+            let r = call(g, &name, &a, &st, attrs, false);
             let x = g.tmp();
             g.emit(format!("{x} = extractvalue {st} {r}, 0"));
             Ok(V {

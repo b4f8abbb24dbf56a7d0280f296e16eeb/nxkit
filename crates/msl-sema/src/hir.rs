@@ -265,6 +265,8 @@ pub enum SampleOpt {
     Level(Box<Expr>),
     /// `bias(x)`
     Bias(Box<Expr>),
+    /// Explicit derivatives, in x then y order.
+    Grad2d(Box<Expr>, Box<Expr>),
 }
 
 /// Kind of a texture query.
@@ -594,8 +596,13 @@ fn visit_expr(e: &Expr, f: &mut dyn FnMut(FuncId)) {
                     opt(array, f);
                     opt(compare, f);
                     opt(offset, f);
-                    if let SampleOpt::Level(x) | SampleOpt::Bias(x) = so {
-                        visit_expr(x, f);
+                    match so {
+                        SampleOpt::None => {}
+                        SampleOpt::Level(x) | SampleOpt::Bias(x) => visit_expr(x, f),
+                        SampleOpt::Grad2d(dx, dy) => {
+                            visit_expr(dx, f);
+                            visit_expr(dy, f);
+                        }
                     }
                 }
                 TexOp::Read { coord, array, lod } => {
