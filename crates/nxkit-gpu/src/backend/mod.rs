@@ -168,8 +168,7 @@ impl GpuBackend {
             guest.len(),
             space.address_map().gpu_base(),
         );
-        let threaded =
-            settings.enc_thread || nxkit_abi::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
+        let threaded = settings.enc_thread || crate::settings::env().enc_thread;
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {
             let enc = threaded
                 .then(|| {

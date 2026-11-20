@@ -19,6 +19,7 @@ mod guest_api;
 mod pacing;
 mod picture;
 mod planar;
+pub mod settings;
 mod vp9;
 mod yuv;
 

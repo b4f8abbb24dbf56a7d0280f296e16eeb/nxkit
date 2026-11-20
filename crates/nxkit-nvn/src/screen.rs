@@ -113,10 +113,7 @@ impl PaceSpread {
 static PACE: std::sync::Mutex<PaceSpread> = std::sync::Mutex::new(PaceSpread::new());
 
 fn pace_note(secs: f64) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if secs <= 0.0
-        || !*ON.get_or_init(|| nxkit_abi::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1"))
-    {
+    if secs <= 0.0 || !crate::settings::settings().pace_diag {
         return;
     }
     let line = PACE

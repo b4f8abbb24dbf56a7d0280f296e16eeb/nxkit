@@ -192,13 +192,7 @@ impl ScriptFile {
 
 fn global() -> &'static ScriptFile {
     static FILE: OnceLock<ScriptFile> = OnceLock::new();
-    FILE.get_or_init(|| {
-        ScriptFile::new(
-            nxkit_abi::env::var_os("NXKIT_INPUT_FILE")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from),
-        )
-    })
+    FILE.get_or_init(|| ScriptFile::new(crate::settings::settings().script_file.clone()))
 }
 
 /// True when `NXKIT_INPUT_FILE` is set. Player 1 then has scripted input even without a controller or a keyboard.

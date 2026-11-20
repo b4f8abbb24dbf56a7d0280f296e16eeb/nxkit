@@ -53,14 +53,13 @@ use crate::sys::vm::{self, TaskMemory};
 const MIB: u64 = 1024 * 1024;
 
 /// The seconds between two reports, from `NXKIT_MEM_REPORT`. None when it is unset, 0 or not a number.
-fn interval(env: &nxkit_abi::env::Env) -> Option<Duration> {
-    let v = env.var("NXKIT_MEM_REPORT").ok()?;
-    let s: f64 = v.trim().parse().ok()?;
+fn interval(env: &crate::hostenv::HostEnv) -> Option<Duration> {
+    let s = env.mem_report?;
     (s > 0.0).then(|| Duration::from_secs_f64(s.max(0.5)))
 }
 
 /// Starts the report thread when `NXKIT_MEM_REPORT` asks for it.
-pub fn start(ctx: &Context, layout: &Layout, env: &nxkit_abi::env::Env) {
+pub fn start(ctx: &Context, layout: &Layout, env: &crate::hostenv::HostEnv) {
     let Some(every) = interval(env) else {
         return;
     };

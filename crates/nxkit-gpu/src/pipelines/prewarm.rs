@@ -245,7 +245,7 @@ fn worker(w: &Work) {
             eprintln!("{}", w.line("finished in the background"));
         }
         // the shards of the build archive sit idle in malloc memory from here on (see the module)
-        if super::runtime::env_on("NXKIT_SHARD_TRIM") {
+        if crate::settings::env().shard_trim {
             let closed = w.cache.close_shards();
             if closed > 0 {
                 eprintln!("nxkit-gpu: prewarm over, {closed} archive shards closed");
@@ -271,13 +271,9 @@ fn worker(w: &Work) {
 const SCREEN_AFTER: Duration = Duration::from_secs(1);
 
 fn threads() -> usize {
-    nxkit_abi::env::var("NXKIT_PIPELINE_THREADS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
-        })
+    crate::settings::env().pipeline_threads.unwrap_or_else(|| {
+        std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
+    })
 }
 
 impl Pipelines {
@@ -334,8 +330,7 @@ impl Pipelines {
         if started < n {
             w.alive.fetch_sub(n - started, Ordering::AcqRel);
         }
-        let budget =
-            Duration::from_secs(super::runtime::env_num("NXKIT_PIPELINE_PREWARM_WAIT", 20));
+        let budget = Duration::from_secs(crate::settings::env().pipeline_prewarm_wait);
         let every = Duration::from_secs(if all.is_some() { 1 } else { 2 });
         let mut screened = false;
         let mut shown = Instant::now();
@@ -390,16 +385,16 @@ mod lookup {
     #[test]
     #[ignore = "needs NXKIT_LOOKUP_APP, the run folder of a built app"]
     fn lookup_of_a_real_app() {
-        let Ok(app) = nxkit_abi::env::var("NXKIT_LOOKUP_APP") else {
+        let Ok(app) = std::env::var("NXKIT_LOOKUP_APP") else {
             eprintln!("NXKIT_LOOKUP_APP is not set: nothing checked");
             return;
         };
         let app = PathBuf::from(app);
-        let n: usize = nxkit_abi::env::var("NXKIT_LOOKUP_N")
+        let n: usize = std::env::var("NXKIT_LOOKUP_N")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(40);
-        let list = nxkit_abi::env::var("NXKIT_LOOKUP_LIST")
+        let list = std::env::var("NXKIT_LOOKUP_LIST")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 std::fs::read_dir(app.join("pipecache"))
@@ -416,7 +411,7 @@ mod lookup {
         let mut keep = format!("{}\n", super::super::record::HEADER);
         let mut k = 0;
         // `NXKIT_LOOKUP_ALL=1`: the mesh and compute lines too (`N` counts them all)
-        let all = nxkit_abi::env::var_os("NXKIT_LOOKUP_ALL").is_some();
+        let all = std::env::var_os("NXKIT_LOOKUP_ALL").is_some();
         for l in text.lines().filter(|l| {
             l.starts_with("R\t") || all && (l.starts_with("M\t") || l.starts_with("C\t"))
         }) {
@@ -428,7 +423,7 @@ mod lookup {
         }
         let seen = Seen::parse(&keep).unwrap();
         let ctx = Context::system_default().unwrap();
-        let archive = match nxkit_abi::env::var("NXKIT_LOOKUP_ARCHIVE") {
+        let archive = match std::env::var("NXKIT_LOOKUP_ARCHIVE") {
             Ok(f) => nxkit_metal::ArchiveConfig {
                 load: Some(PathBuf::from(f)),
                 ..Default::default()
@@ -438,7 +433,7 @@ mod lookup {
                 ..Default::default()
             },
         };
-        let shaders = nxkit_abi::env::var("NXKIT_LOOKUP_SHADERS")
+        let shaders = std::env::var("NXKIT_LOOKUP_SHADERS")
             .map_or_else(|_| app.join("shaders"), PathBuf::from);
         let p = Pipelines::new(&ctx, &archive).unwrap();
         p.prewarm(&seen, &shaders, None, None, None);
@@ -453,15 +448,15 @@ mod lookup {
     #[test]
     #[ignore = "needs NXKIT_LOOKUP_APP, the run folder of a built app"]
     fn runtime_archive_keeps_what_the_start_made() {
-        let Ok(app) = nxkit_abi::env::var("NXKIT_LOOKUP_APP") else {
+        let Ok(app) = std::env::var("NXKIT_LOOKUP_APP") else {
             return;
         };
         let app = PathBuf::from(app);
-        let n: usize = nxkit_abi::env::var("NXKIT_LOOKUP_N")
+        let n: usize = std::env::var("NXKIT_LOOKUP_N")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(60);
-        let list = nxkit_abi::env::var("NXKIT_LOOKUP_LIST")
+        let list = std::env::var("NXKIT_LOOKUP_LIST")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 std::fs::read_dir(app.join("pipecache"))
@@ -476,7 +471,7 @@ mod lookup {
             });
         let text = std::fs::read_to_string(list).unwrap();
         let mut keep = format!("{}\n", super::super::record::HEADER);
-        let all = nxkit_abi::env::var_os("NXKIT_LOOKUP_ALL").is_some();
+        let all = std::env::var_os("NXKIT_LOOKUP_ALL").is_some();
         for l in text
             .lines()
             .filter(|l| {
@@ -494,24 +489,23 @@ mod lookup {
         std::fs::create_dir_all(&tmp).unwrap();
         let file = tmp.join("rt-0001.mtl4archive");
         // the build's archive: shards of the app, or one file (`NXKIT_LOOKUP_ARCHIVE`)
-        let build = |runtime: Vec<PathBuf>, collect: bool| match nxkit_abi::env::var(
-            "NXKIT_LOOKUP_ARCHIVE",
-        ) {
-            Ok(f) => nxkit_metal::ArchiveConfig {
-                load: Some(PathBuf::from(f)),
-                runtime,
-                collect,
-                ..Default::default()
-            },
-            Err(_) => nxkit_metal::ArchiveConfig {
-                shards: Some(app.join("pipelines")),
-                runtime,
-                collect,
-                ..Default::default()
-            },
-        };
+        let build =
+            |runtime: Vec<PathBuf>, collect: bool| match std::env::var("NXKIT_LOOKUP_ARCHIVE") {
+                Ok(f) => nxkit_metal::ArchiveConfig {
+                    load: Some(PathBuf::from(f)),
+                    runtime,
+                    collect,
+                    ..Default::default()
+                },
+                Err(_) => nxkit_metal::ArchiveConfig {
+                    shards: Some(app.join("pipelines")),
+                    runtime,
+                    collect,
+                    ..Default::default()
+                },
+            };
         let first = nxkit_metal::ArchiveConfig {
-            exact_only: nxkit_abi::env::var_os("NXKIT_LOOKUP_EXACT_ONLY").is_some(),
+            exact_only: std::env::var_os("NXKIT_LOOKUP_EXACT_ONLY").is_some(),
             ..build(Vec::new(), true)
         };
         let p = Pipelines::new(&ctx, &first).unwrap();

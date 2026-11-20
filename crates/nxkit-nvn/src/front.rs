@@ -518,8 +518,7 @@ fn decode_diag(ns: u64, c: crate::cache::CacheStats, textures: (usize, usize)) {
 /// `NXKIT_VERIFY_CACHE=1`: decodes every submitted recording again with an empty cache and
 /// compares it with the summary that the cache gave. This is slow.
 fn verify_decode() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"))
+    crate::settings::settings().verify_cache
 }
 
 /// Fails when the cached summary differs from a fresh decode under the same inherited state.

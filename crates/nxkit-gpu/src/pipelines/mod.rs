@@ -14,15 +14,14 @@ mod prewarm;
 mod record;
 mod render;
 mod runtime;
-mod screen;
 mod stats;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use crate::prewarm_screen::{PrewarmScreen, ScreenHook};
 pub(crate) use keys::KEY_SCHEME;
 pub use runtime::flush_runtime_cache;
 pub(crate) use runtime::plan as runtime_plan;
-pub use screen::{PrewarmScreen, ScreenHook};
 pub(crate) use stats::frame_done;
 
 use std::cell::RefCell;

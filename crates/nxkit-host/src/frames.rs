@@ -4,6 +4,7 @@
 //! It encodes each flushed frame and queues each presented frame. The [`Pacer`] of `nxkit-metal` picks, on each tick of
 //! the display link, which queued frame to show, and the backend blits it into the drawable.
 
+use crate::hostenv::RunSettings;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -38,7 +39,7 @@ const SHADERS: &str = "shaders";
 
 /// The settings of the GPU backend, from the keys of `game.json` that the encoder uses. `enc_thread` moves the encode
 /// of each frame to a thread of its own. A game of the Switch 2 gets its order inside a GOB.
-pub fn gpu_settings(root: &Path, settings: &Settings, env: &nxkit_abi::env::Env) -> GpuSettings {
+pub fn gpu_settings(root: &Path, settings: &Settings, run: &RunSettings) -> GpuSettings {
     GpuSettings {
         shader_dir: root.join(SHADERS),
         // The archive is loaded whenever the build made one: `pso_mtl4` came from the engine's profiles, and a title
@@ -52,37 +53,23 @@ pub fn gpu_settings(root: &Path, settings: &Settings, env: &nxkit_abi::env::Env)
         // for the first pipeline in it. `NXKIT_ARCHIVE_SHARDS=0` ignores them and loads the single archive, if any.
         archive_shards: {
             let dir = root.join(SHARDS);
-            let on = env
-                .var("NXKIT_ARCHIVE_SHARDS")
-                .is_ok_and(|v| v == "0" || v == "off");
+            let on = run.host.archive_shards_off;
             (!on && dir.join(nxkit_abi::shards::INDEX_FILE).is_file()).then_some(dir)
         },
         // `NXKIT_SHARD_LRU` sets how many shards stay open. Zero is 32.
-        open_shards: env
-            .var("NXKIT_SHARD_LRU")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
+        open_shards: run.host.shard_lru,
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
-        threads: env
-            .var("NXKIT_ENCODE_THREADS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
+        threads: run.host.encode_threads,
         // Scaling is off until every attachment of a pass gets the same scale decision.
-        scale: env
-            .var("NXKIT_SCALE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1.0),
-        compile_bases: nxkit_gpu::pipeline_bases(env),
-        specialize: nxkit_gpu::pipeline_specialize(env),
+        scale: run.host.scale,
+        compile_bases: run.gpu_bases,
+        specialize: run.gpu_specialize,
         // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
         prewarm_screen: nxkit_gpu::ScreenHook(Some(Arc::new(crate::sys::loading::LoadingScreen))),
         enc_thread: settings.enc_thread,
         overlap: settings.overlap,
         // The runtime pipeline cache: what this run compiles is kept for the next start (`crate::pipecache`).
-        runtime_cache: crate::pipecache::folder(root, env),
+        runtime_cache: crate::pipecache::folder(root, &run.host),
         build_id: crate::pipecache::build_id(root),
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
@@ -95,8 +82,11 @@ pub fn gpu_settings(root: &Path, settings: &Settings, env: &nxkit_abi::env::Env)
 /// The settings of the NVN front end, from the keys of `game.json`. A game of the Switch 2 gets the API version of
 /// NVN2: 231 and the minor that the driver in its `sdk` answers, 39 when the `sdk` gives none. Games check it and make
 /// no graphics system on a mismatch. `nvn_api` of `game.json` wins over both.
-fn nvn_settings(settings: &Settings) -> nvn::Settings {
-    let mut s = nvn::Settings::default();
+fn nvn_settings(settings: &Settings, run: &RunSettings) -> nvn::Settings {
+    let mut s = nvn::Settings {
+        env: run.rt,
+        ..nvn::Settings::default()
+    };
     if platform::get() == Platform::Ounce {
         s.api_major = nvn::NVN2_API_MAJOR;
         s.api_minor = nvn::sdk_item(1).unwrap_or(nvn::NVN2_API_MINOR);
@@ -187,13 +177,16 @@ pub fn install(
     memory: &Arc<GuestMemory>,
     root: &Path,
     settings: &Settings,
-    env: &nxkit_abi::env::Env,
+    run: &RunSettings,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
-    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings, env));
+    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings, run));
     let backend = backend.map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
-    nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))
-        .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
+    nvn::install(
+        backend.clone() as Arc<dyn Backend>,
+        nvn_settings(settings, run),
+    )
+    .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
     let plan = choose_present_plan(&PolicyInput {
         title: None,
         frame_step: false,

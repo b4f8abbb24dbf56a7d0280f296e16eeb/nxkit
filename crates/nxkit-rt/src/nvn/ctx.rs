@@ -99,6 +99,8 @@ pub struct Settings {
     pub clock_ns: fn() -> u64,
     /// What the command buffer group does differently for the title.
     pub commands: super::CommandSettings,
+    /// The settings of the procs from the `NXKIT_*` environment.
+    pub env: crate::settings::RtSettings,
 }
 
 impl Default for Settings {
@@ -110,6 +112,7 @@ impl Default for Settings {
             gpu_code: (1, 16),
             clock_ns: nxkit_hos::sys::monotonic_ns,
             commands: super::CommandSettings::default(),
+            env: crate::settings::RtSettings::default(),
         }
     }
 }
@@ -222,14 +225,18 @@ impl fmt::Debug for Gpu {
 impl Gpu {
     /// A context over `space`. [`install`] builds the space from the guest range.
     pub(crate) fn new(space: LinearSpace, backend: Arc<dyn Backend>, settings: Settings) -> Self {
+        let env = settings.env;
         Self {
             front: Mutex::new(FrontEnd::new(space, GuestMemory)),
             space,
             backend,
             settings,
             flushed: AtomicU64::new(0),
-            gate: Mutex::new(gate::Gate::new(order::ordering_on())),
-            release_flush: order::release_flush_config(),
+            gate: Mutex::new(gate::Gate::new(env.queue_order)),
+            release_flush: order::ReleaseFlush {
+                on: env.release_flush,
+                min_work: env.release_flush_min,
+            },
             pending_writes: Mutex::new(Vec::new()),
             pending_recorded: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),

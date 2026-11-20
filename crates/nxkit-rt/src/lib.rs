@@ -52,6 +52,7 @@ mod gfx;
 mod guestos;
 mod kernel;
 pub mod nvn;
+pub mod settings;
 
 pub use audio::{NxkitAudioConfig, NxkitAudioHost, nxkit_audio_init};
 pub use guestos::{

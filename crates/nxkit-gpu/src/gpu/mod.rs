@@ -95,6 +95,33 @@ pub struct GpuConfig {
     pub prewarm_screen: crate::ScreenHook,
 }
 
+impl crate::GpuSettings {
+    pub(crate) fn config(&self) -> GpuConfig {
+        let defaults = GpuConfig::default();
+        GpuConfig {
+            shader_dir: self.shader_dir.clone(),
+            threads: if self.threads > 0 {
+                self.threads
+            } else {
+                defaults.threads
+            },
+            archive: nxkit_metal::ArchiveConfig {
+                load: self.archive.clone(),
+                shards: self.archive_shards.clone(),
+                open_shards: self.open_shards,
+                collect: self.collect_archive,
+                compile_bases: self.compile_bases,
+                exact_only: !self.specialize,
+                runtime: Vec::new(),
+            },
+            gob_order: self.gob_order,
+            runtime_cache: self.runtime_cache.clone(),
+            build_id: self.build_id,
+            prewarm_screen: self.prewarm_screen.clone(),
+        }
+    }
+}
+
 impl Default for GpuConfig {
     fn default() -> Self {
         Self {

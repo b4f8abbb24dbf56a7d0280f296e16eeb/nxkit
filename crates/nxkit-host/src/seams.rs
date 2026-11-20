@@ -181,11 +181,8 @@ fn game_env(settings: &Settings) -> Vec<(String, String)> {
 
 /// The console language: `NXKIT_LANGUAGE` (a tag such as `de` or `en-GB`) when it is set, else the first of the Mac's
 /// preferred languages that the console has, else `en-US`.
-fn console_language(vars: &nxkit_abi::env::Env) -> String {
-    let env = vars
-        .var("NXKIT_LANGUAGE")
-        .ok()
-        .filter(|v| !v.trim().is_empty());
+fn console_language(vars: &crate::hostenv::HostEnv) -> String {
+    let env = vars.language.clone();
     let mac = crate::sys::preferred_languages();
     let tags: Vec<&str> = env
         .as_deref()
@@ -203,7 +200,7 @@ fn console_language(vars: &nxkit_abi::env::Env) -> String {
 /// parameter, the display version, the shared font facts and the DLC folder, input the pad layout, the focus and the
 /// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
 /// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
-pub fn init_services(game: &Game, mask: u64, env: &nxkit_abi::env::Env) -> Result<()> {
+pub fn init_services(game: &Game, mask: u64, env: &crate::hostenv::HostEnv) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
     wire::set_handheld(handheld);
@@ -290,9 +287,7 @@ pub fn init_services(game: &Game, mask: u64, env: &nxkit_abi::env::Env) -> Resul
 /// on the console a focus loss means the HOME menu, and games pause for it, but on a Mac clicking another window is no
 /// reason to stop the game. `NXKIT_PAUSE_UNFOCUSED=1` reports the loss to the game as before.
 pub fn focus_changed(focused: bool) {
-    static PAUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let pause =
-        *PAUSE.get_or_init(|| nxkit_abi::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"));
+    let pause = crate::hostenv::host().pause_unfocused;
     if pause || focused {
         let focus = if focused {
             nxkit_svc_system::Focus::InFocus
@@ -336,7 +331,7 @@ pub fn frame_hooks(
     memory: &Arc<GuestMemory>,
     root: &std::path::Path,
     settings: &Settings,
-    env: &nxkit_abi::env::Env,
+    run: &crate::hostenv::RunSettings,
 ) -> Result<Arc<dyn FrameHooks>> {
-    crate::frames::install(ctx, memory, root, settings, env)
+    crate::frames::install(ctx, memory, root, settings, run)
 }

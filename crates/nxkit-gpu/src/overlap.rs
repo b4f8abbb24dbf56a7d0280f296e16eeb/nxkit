@@ -10,7 +10,7 @@
 //! - the flushes that touch a page that the frame still on the GPU reads, by kind of binding: the writes that race with
 //!   the GPU when `nvnSyncWait` returns early (the `nowait` knob).
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 /// Whether the CPU may run one frame ahead of the GPU (`NXKIT_OVERLAP=1`): `nvnSyncWait` for the newest frame waits for
 /// the frame before it, and every bound uniform buffer reads a copy that the walk takes, so that the CPU's writes for
@@ -20,9 +20,8 @@ pub(crate) fn on() -> bool {
     if crate::private::mirrored() {
         return false;
     }
-    static ON: OnceLock<bool> = OnceLock::new();
     SETTING.load(std::sync::atomic::Ordering::Relaxed)
-        || *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))
+        || crate::settings::env().overlap
         || crate::knob("overlap")
 }
 

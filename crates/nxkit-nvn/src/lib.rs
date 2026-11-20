@@ -41,6 +41,7 @@ pub mod record;
 pub mod rendercond;
 pub mod resource;
 pub mod screen;
+pub mod settings;
 pub mod space;
 pub mod swizzle;
 pub mod texlife;

@@ -12,6 +12,7 @@ mod fields;
 #[cfg(target_os = "macos")]
 pub mod frames;
 pub mod gates;
+pub mod hostenv;
 pub mod input_file;
 pub mod json;
 pub mod layout;

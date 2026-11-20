@@ -44,6 +44,7 @@ pub mod load;
 pub mod mode;
 pub mod notice;
 pub mod refresh;
+pub mod settings;
 pub mod state;
 pub mod vstep;
 pub mod vsync;

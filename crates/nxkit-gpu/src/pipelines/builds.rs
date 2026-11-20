@@ -121,20 +121,16 @@ fn pick(jobs: impl Iterator<Item = (u64, u64, u64)>) -> Option<u64> {
 /// The threads that compile pipelines in the background: `NXKIT_PIPELINE_THREADS`, else half the cores, 2 to 8. A
 /// thread waits on the system's compiler service most of the time, and that service compiles requests side by side.
 fn compile_threads() -> usize {
-    nxkit_abi::env::var("NXKIT_PIPELINE_THREADS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
-        })
+    crate::settings::env().pipeline_threads.unwrap_or_else(|| {
+        std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
+    })
 }
 
 /// Puts a compile thread in its QoS class, which carries over to the compiler service. User-initiated by default: a
 /// pending pipeline leaves draws out of the frame on screen, and at the utility class the service ran on the
 /// efficiency cores. `NXKIT_PIPELINE_QOS=utility` brings back the old class.
 fn set_compile_qos() {
-    if nxkit_abi::env::var("NXKIT_PIPELINE_QOS").is_ok_and(|v| v == "utility") {
+    if crate::settings::env().pipeline_qos_utility {
         nxkit_metal::thread::set_utility();
     } else {
         nxkit_metal::thread::set_user_initiated();
@@ -145,11 +141,8 @@ fn set_compile_qos() {
 /// The draw is left out until it is ready, a frame or two, instead of stalling the encode for the 5 to 30 ms of the
 /// compile.
 pub(super) fn async_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // The unit tests build synchronously, so a call returns its pipeline.
-    *ON.get_or_init(|| {
-        !cfg!(test) && nxkit_abi::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0")
-    })
+    !cfg!(test) && crate::settings::env().pipeline_async
 }
 
 impl Builds {

@@ -65,13 +65,12 @@ impl GuestMemory {
     /// (on unless `0`) pins the range in the kernel (`nxkit_hos::pinned`): there `MapMemory` copies, and giving memory
     /// back zeroes it in place. `NXKIT_GUEST_WIRE=1` also wires the range with `mlock`, so macOS never compresses guest
     /// pages when the driver lets go of them for a while; it takes the whole range in RAM at once.
-    pub fn keep_gpu_pages(&self, env: &nxkit_abi::env::Env) {
+    pub fn keep_gpu_pages(&self, env: &crate::hostenv::HostEnv) {
         let r = self.gpu_range();
-        let on = |name: &str, default: bool| env.var(name).map_or(default, |v| v != "0");
-        if on("NXKIT_GUEST_KEEP", true) {
+        if env.guest_keep {
             nxkit_hos::pinned::set(r.start, r.end());
         }
-        if on("NXKIT_GUEST_WIRE", false) {
+        if env.guest_wire {
             let t0 = std::time::Instant::now();
             match self.res.lock(r.start, r.len) {
                 Ok(()) => eprintln!(

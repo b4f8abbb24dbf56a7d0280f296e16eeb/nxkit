@@ -65,10 +65,9 @@ impl Dav1d {
     /// after about 30 pictures, every rav1d thread idle). So the worker of such a stream never drains before the end
     /// of the stream ([`crate::decoder::Pipeline::waits`]): it sends, and takes the one picture that each send gives.
     pub(crate) fn streaming_delay() -> usize {
-        nxkit_abi::env::var("NXKIT_AV1_FRAMES")
-            .ok()
-            .and_then(|v| v.trim().parse::<usize>().ok())
-            .map_or(STREAM_FRAMES, |n| n.clamp(1, 8))
+        crate::settings::settings()
+            .av1_frames
+            .unwrap_or(STREAM_FRAMES)
     }
 
     /// Opens a decoder for a worker thread: all cores up to 16, [`Dav1d::streaming_delay`] frames at once.

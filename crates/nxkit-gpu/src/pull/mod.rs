@@ -11,7 +11,6 @@
 //! it, see docs/diagnostics.md): `NXKIT_PULL=1` turns it on, otherwise every vertex shader draws with `_b` and the
 //! stage_in vertex layout. `NXKIT_DIAG=pull` checks the reads of pulled draws against guest memory ([`model`]).
 
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::detail::DrawDetail;
@@ -41,13 +40,7 @@ pub(crate) type Block = [u8; BYTES];
 
 /// Whether the host draws vertex shaders through their `_bp` library: only with `NXKIT_PULL=1`. Read once.
 pub(crate) fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| enabled(nxkit_abi::env::var("NXKIT_PULL").ok().as_deref()))
-}
-
-/// The value of `NXKIT_PULL` that turns pulling on: `1`. Unset, `0` or anything else keeps stage_in.
-pub(crate) fn enabled(v: Option<&str>) -> bool {
-    v == Some("1")
+    crate::settings::env().pull
 }
 
 /// The attribute word of `dm_fetch`: the NVN attribute state word, format in bits 0 to 7, offset in 8 to 26, stream

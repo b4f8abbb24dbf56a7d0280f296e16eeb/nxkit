@@ -1,11 +1,13 @@
 //! The checks of the runtime crates (layers `R0` to `R4`).
 //!
-//! - `settings` (W27): no runtime crate reads an `NXKIT_*` variable from the process. A call of `env::var` or
-//!   `env::var_os` (not the ones of `nxkit_abi::env`) or of `getenv` fails when its first argument is a string that
-//!   starts with `NXKIT_` or is not a string at all. Variables of the system (`HOME`, `TZ`) are read where they are
-//!   used. `nxkit_abi::env` itself, and the places in [`SETTINGS_EXEMPT`], are allowed.
+//! - `settings` (W27): an `NXKIT_*` key is read only in the settings module of its crate (a file `settings.rs`, the
+//!   host's `hostenv.rs`), from the snapshot `nxkit_abi::env::Env`. Anywhere else in a runtime crate a call of `var`
+//!   or `var_os` (a function or a method) or of `getenv` with a string that starts with `NXKIT_`, and a format string
+//!   that builds such a name, fail. A read of the process environment (`env::var`, `env::var_os`, `getenv`) with such
+//!   a name or with a name that is not a literal fails everywhere, settings modules included. Variables of the system
+//!   (`HOME`, `TZ`) are read where they are used. The places in [`SETTINGS_EXEMPT`] are allowed.
 //! - `statics` (W26): the process-wide statics (a `static` whose type names `OnceLock`, `OnceCell`, `LazyLock`,
-//!   `Mutex`, `RwLock`, `Condvar` or an `Atomic*`) of each runtime crate are counted and compared with
+//!   `Mutex`, `RwLock`, `Condvar`, `Slot` or an `Atomic*`) of each runtime crate are counted and compared with
 //!   `xtask/statics.txt`. More fails; fewer fails until the file is lowered, so the number only goes down.
 //!
 //! Test code is left out, as in `modules`.
@@ -27,9 +29,39 @@ const SETTINGS_EXEMPT: &[(&str, &str)] = &[
     ),
 ];
 
+/// The settings modules: the one place of a crate that reads `NXKIT_*` keys from the snapshot.
+fn settings_module(rel: &str) -> bool {
+    rel.ends_with("/settings.rs")
+        || rel == "nxkit-host/src/hostenv.rs"
+        || rel == "nxkit-abi/src/env.rs"
+}
+
+/// The places where the tokens of one file read an `NXKIT_*` key by name, from the snapshot or anywhere else: a
+/// `var`/`var_os`/`getenv` call with such a string, or a format string that builds such a name.
+fn key_reads(toks: &[(Tok, usize)]) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    for i in 0..toks.len() {
+        match &toks[i].0 {
+            Tok::Ident(n) if n == "var" || n == "var_os" || n == "getenv" => {
+                if matches!(toks.get(i + 1), Some((Tok::Punct('('), _)))
+                    && let Some((Tok::Str(s), _)) = toks.get(i + 2)
+                    && s.starts_with("NXKIT_")
+                {
+                    out.push((toks[i].1, s.clone()));
+                }
+            }
+            Tok::Str(s) if s.starts_with("NXKIT_") && s.contains('{') => {
+                out.push((toks[i].1, format!("a name built from {s:?}")));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The types that make a static process-wide state.
 const STATE_TYPES: &[&str] = &[
-    "OnceLock", "OnceCell", "LazyLock", "Mutex", "RwLock", "Condvar",
+    "OnceLock", "OnceCell", "LazyLock", "Mutex", "RwLock", "Condvar", "Slot",
 ];
 
 fn ident(t: Option<&(Tok, usize)>) -> Option<&str> {
@@ -109,6 +141,15 @@ pub(crate) fn check_settings<'a>(
                     "crates/{rel_s}:{line}: reads {what} from the process; use the snapshot of `nxkit_abi::env` (W27)"
                 ));
             }
+            if settings_module(&rel_s) {
+                continue;
+            }
+            for (line, what) in key_reads(&toks) {
+                errs.push(format!(
+                    "crates/{rel_s}:{line}: reads the key {what} outside the settings module of the crate; add a typed \
+                     field to its settings (W27)"
+                ));
+            }
         }
     }
     errs
@@ -183,6 +224,21 @@ mod tests {
         assert_eq!(
             reads,
             ["NXKIT_A", "a name that is not a literal", "NXKIT_C"]
+        );
+    }
+
+    #[test]
+    fn a_key_read_outside_the_settings_fails() {
+        let src = "fn f(env: &Env) { env.var(\"NXKIT_A\"); s.var(x); format!(\"NXKIT_{}_B\", n); \
+                   eprintln!(\"set NXKIT_C=1\"); }";
+        let reads: Vec<String> = key_reads(&tokens(src))
+            .into_iter()
+            .map(|(_, w)| w)
+            .collect();
+        assert_eq!(reads, ["NXKIT_A", "a name built from \"NXKIT_{}_B\""]);
+        assert!(
+            settings_module("nxkit-gpu/src/settings.rs")
+                && !settings_module("nxkit-gpu/src/diag.rs")
         );
     }
 

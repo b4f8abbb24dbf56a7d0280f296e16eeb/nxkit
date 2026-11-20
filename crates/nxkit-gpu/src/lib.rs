@@ -60,6 +60,7 @@ mod passprof;
 mod pipelines;
 mod poolreg;
 mod pools;
+mod prewarm_screen;
 mod private;
 mod probe;
 mod programs;
@@ -80,13 +81,16 @@ mod walk;
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use guestpools::GuestPools;
-pub use pipelines::{PrewarmScreen, ScreenHook, flush_runtime_cache};
+pub use pipelines::flush_runtime_cache;
 pub use pools::{
     Backing, BadRange, Drained, Loc, MakeBacking, MetalPoolSet, Miss, PAGE, PagePins, PoolBuffer,
     PoolEntry, PoolSet, PoolSnapshot, PoolStats,
 };
+pub use prewarm_screen::{PrewarmScreen, ScreenHook};
 pub use report::EncodeReport;
-pub use settings::{GpuSettings, pipeline_bases, pipeline_specialize};
+pub use settings::{
+    GpuEnv, GpuSettings, NativeNet, install as install_env, pipeline_bases, pipeline_specialize,
+};
 pub use skip::Skip;
 pub use snapshot::{EncodeView, Live, Snapshot};
 pub use stats::{DrawClass, EncodeStats, KindStats};

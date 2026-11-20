@@ -590,6 +590,5 @@ impl TextureStore {
 /// `NXKIT_TEX_INPLACE=0` turns textures over guest memory off: pitch-linear textures get a copy, which is uploaded in
 /// every frame that uses it.
 fn in_place_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_TEX_INPLACE").map_or(true, |v| v != "0"))
+    crate::settings::env().tex_inplace
 }

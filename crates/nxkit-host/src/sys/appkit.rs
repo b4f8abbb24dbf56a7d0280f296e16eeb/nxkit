@@ -94,7 +94,7 @@ pub struct WindowConfig {
 /// The screen of the window: `NXKIT_SCREEN` names it by its index in the screen list (0 is the built-in one) or by a part
 /// of its name, for example `XB273U`. Without it, or when nothing matches, it is the main screen.
 fn target_screen(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
-    if let Ok(want) = nxkit_abi::env::var("NXKIT_SCREEN") {
+    if let Some(want) = crate::hostenv::host().screen.clone() {
         let screens = NSScreen::screens(mtm);
         let found = match want.parse::<usize>() {
             Ok(i) if i < screens.count() => Some(screens.objectAtIndex(i)),
@@ -492,7 +492,7 @@ pub fn run(
     let _ = delegate.link().set(link);
 
     match target_screen(mtm) {
-        Some(screen) if nxkit_abi::env::var_os("NXKIT_SCREEN").is_some() => {
+        Some(screen) if crate::hostenv::host().screen.is_some() => {
             let (v, f) = (screen.visibleFrame(), window.frame());
             let x = v.origin.x + (v.size.width - f.size.width).max(0.0) / 2.0;
             let y = v.origin.y + (v.size.height - f.size.height).max(0.0) / 2.0;

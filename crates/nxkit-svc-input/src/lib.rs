@@ -25,6 +25,7 @@ mod pointer;
 mod rumble;
 mod script;
 mod seam;
+pub mod settings;
 mod shmem;
 mod slots;
 mod state;

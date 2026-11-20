@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::frame::{Cmd, Frame};
 
@@ -74,8 +74,7 @@ pub fn source(kind: u32) -> Source {
 
 /// Whether the host emulates the GPU counters (`NXKIT_COUNTERS` is not `0`).
 pub fn enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_COUNTERS").map_or(true, |v| v != "0"))
+    crate::settings::settings().counters
 }
 
 /// The place of a report in a frame: the queue and the number of the report among the reports of the queue. A game

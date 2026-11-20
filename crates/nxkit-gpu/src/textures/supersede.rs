@@ -145,9 +145,8 @@ struct ShapeCount {
 impl State {
     /// The state with the setting of `NXKIT_TEX_SUPERSEDE` (on unless it is "0").
     pub(super) fn from_env() -> Self {
-        let off = nxkit_abi::env::var("NXKIT_TEX_SUPERSEDE").is_ok_and(|v| v.trim() == "0");
         Self {
-            enabled: !off,
+            enabled: crate::settings::env().tex_supersede,
             ..Self::default()
         }
     }

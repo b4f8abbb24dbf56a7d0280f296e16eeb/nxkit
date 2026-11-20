@@ -4,17 +4,17 @@
 # Most of them are reached from the guest boundary (a C function of the game has no Rust context), from a signal
 # handler or a Metal completion handler, or are counters and once-guards of the diagnostics.
 
-nxkit-abi: 7
-nxkit-gpu: 146
-nxkit-hos: 18
+nxkit-abi: 6
+nxkit-gpu: 131
+nxkit-hos: 19
 nxkit-host: 17
-nxkit-metal: 21
-nxkit-nvn: 48
-nxkit-rt: 69
+nxkit-metal: 22
+nxkit-nvn: 42
+nxkit-rt: 68
 nxkit-svc-audio: 19
 nxkit-svc-fs: 4
-nxkit-svc-input: 10
+nxkit-svc-input: 11
 nxkit-svc-offline: 1
 nxkit-svc-pacing: 5
-nxkit-svc-system: 53
-nxkit-svc-video: 25
+nxkit-svc-system: 54
+nxkit-svc-video: 24

@@ -253,9 +253,8 @@ pub fn conditional(c: &Cmd) -> bool {
 /// `NXKIT_RENDERCOND=3d` or the switch `ONLY_3D` of `rendercond::force`: a render condition leaves out draws and
 /// clears only.
 fn only_3d() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     crate::rendercond::force::force() & crate::rendercond::force::ONLY_3D != 0
-        || *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_RENDERCOND").is_ok_and(|v| v == "3d"))
+        || crate::settings::settings().rendercond_3d
 }
 
 impl Frame {

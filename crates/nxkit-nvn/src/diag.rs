@@ -14,19 +14,11 @@ use std::sync::{Mutex, OnceLock};
 
 /// Whether `NXKIT_DIAG` names `cat` or `all`.
 pub fn on(cat: &str) -> bool {
-    /// `None` for `all`, else the categories. Parsed once: the call comes once per draw on some paths.
-    static V: OnceLock<Option<Vec<String>>> = OnceLock::new();
-    let v = V.get_or_init(|| {
-        let raw = nxkit_abi::env::var("NXKIT_DIAG").unwrap_or_default();
-        let list: Vec<String> = raw
-            .split(',')
-            .map(str::trim)
-            .filter(|c| !c.is_empty())
-            .map(String::from)
-            .collect();
-        (!list.iter().any(|c| c == "all")).then_some(list)
-    });
-    v.as_ref().is_none_or(|list| list.iter().any(|c| c == cat))
+    // `None` for `all`, else the categories, parsed once by the settings (the call comes once per draw on some paths).
+    crate::settings::settings()
+        .diag
+        .as_ref()
+        .is_none_or(|list| list.iter().any(|c| c == cat))
 }
 
 /// True for the first `max` calls with `counter`: the rate limit of a print that can come once per draw or frame.

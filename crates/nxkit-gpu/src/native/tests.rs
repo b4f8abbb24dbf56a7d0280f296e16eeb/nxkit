@@ -260,9 +260,14 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
 
 #[test]
 fn a_network_is_switched_by_its_own_name() {
-    assert_eq!(util::env_name("ndve", ""), "NXKIT_NDVE");
-    assert_eq!(util::env_name("ndsr", ""), "NXKIT_NDSR");
-    assert_eq!(util::env_name("ndsr", "_COMPARE"), "NXKIT_NDSR_COMPARE");
+    let env = nxkit_abi::env::Env::from_pairs([("NXKIT_NDVE", "0"), ("NXKIT_NDSR_COMPARE", "1")]);
+    let s = crate::settings::GpuEnv::from_env(&env);
+    assert!(!s.native("ndve").enabled && !s.native("ndve").compare);
+    assert!(s.native("ndsr").enabled && s.native("ndsr").compare && s.native("ndsr").ane);
+    assert!(
+        s.native("other").enabled,
+        "a network without switches keeps the defaults"
+    );
 }
 
 /// A network that uses none of the per-run hooks keeps the static interface.

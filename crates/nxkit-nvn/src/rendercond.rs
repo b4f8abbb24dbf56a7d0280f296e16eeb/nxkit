@@ -100,14 +100,11 @@ fn stale_mode() -> u8 {
     if force::force() & force::NOSTALE != 0 {
         return 0;
     }
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(
-        || match nxkit_abi::env::var("NXKIT_RENDERCOND_STALE").as_deref() {
-            Ok("0") => 0,
-            Ok("addr") => 1,
-            _ => 2,
-        },
-    )
+    match crate::settings::settings().rendercond_stale {
+        crate::settings::StaleMode::Off => 0,
+        crate::settings::StaleMode::SameAddress => 1,
+        crate::settings::StaleMode::SamePlace => 2,
+    }
 }
 
 /// The counters of the render conditions since the last [`RenderConds::take_stats`].

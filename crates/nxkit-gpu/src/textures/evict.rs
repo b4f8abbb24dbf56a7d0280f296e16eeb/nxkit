@@ -34,7 +34,7 @@ pub(super) fn parse_frames(text: Option<&str>) -> Option<u64> {
 }
 
 pub(super) fn frames_from_env() -> Option<u64> {
-    parse_frames(nxkit_abi::env::var("NXKIT_TEX_EVICT").ok().as_deref())
+    parse_frames(crate::settings::env().tex_evict.as_deref())
 }
 
 /// What the store knows about the use of one Metal texture.

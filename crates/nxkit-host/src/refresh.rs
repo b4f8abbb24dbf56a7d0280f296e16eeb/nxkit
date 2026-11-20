@@ -67,29 +67,14 @@ pub fn choose_presentation(
 
 impl Request {
     /// The request of `settings` and the environment. `NXKIT_SET_REFRESH` and `NXKIT_TIMED_PRESENT` win over the keys.
-    pub fn from_settings(settings: &Settings, env: &nxkit_abi::env::Env) -> Self {
-        let env_refresh = env
-            .var("NXKIT_SET_REFRESH")
-            .ok()
-            .and_then(|v| v.trim().parse::<u32>().ok());
+    pub fn from_settings(settings: &Settings, env: &crate::hostenv::HostEnv) -> Self {
+        let env_refresh = env.set_refresh;
         let set_refresh = env_refresh
             .or((settings.set_refresh > 0).then_some(settings.set_refresh))
             .filter(|hz| *hz > 0);
-        let timed = env
-            .var("NXKIT_TIMED_PRESENT")
-            .ok()
-            .and_then(|v| match v.trim() {
-                "1" => Some(true),
-                "0" => Some(false),
-                _ => None,
-            });
-        let vrr = env.var("NXKIT_VRR").map_or(true, |v| v.trim() != "0");
-        let vrr_floor = env
-            .var("NXKIT_VRR_MIN")
-            .ok()
-            .and_then(|v| v.trim().parse::<u32>().ok())
-            .filter(|hz| *hz > 0)
-            .unwrap_or(DEFAULT_VRR_FLOOR);
+        let timed = env.timed_present;
+        let vrr = env.vrr;
+        let vrr_floor = env.vrr_min.unwrap_or(DEFAULT_VRR_FLOOR);
         Self {
             target_fps: if settings.fps_target == 0 {
                 60
@@ -451,11 +436,14 @@ mod tests {
             set_refresh: 120,
             ..Settings::default()
         };
-        let env = nxkit_abi::env::Env::default();
+        let env = crate::hostenv::HostEnv::default();
         let r = Request::from_settings(&s, &env);
         assert_eq!((r.target_fps, r.free_rate), (30, true));
         assert_eq!(r.set_refresh, Some(120));
-        let set = nxkit_abi::env::Env::from_pairs([("NXKIT_SET_REFRESH", "60")]);
+        let set = crate::hostenv::HostEnv::from_env(&nxkit_abi::env::Env::from_pairs([(
+            "NXKIT_SET_REFRESH",
+            "60",
+        )]));
         assert_eq!(Request::from_settings(&s, &set).set_refresh, Some(60));
         let none = Request::from_settings(&Settings::default(), &env);
         assert_eq!(none.target_fps, 60);

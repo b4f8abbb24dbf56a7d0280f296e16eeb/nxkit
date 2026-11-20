@@ -81,9 +81,7 @@ impl Native {
             let cache_key = (off.cache_key)(&refs, &nxkit_coreml::os_build_tag());
             let root = cache_root(
                 name,
-                nxkit_abi::env::var(util::env_name(name, "_ANE_CACHE"))
-                    .ok()
-                    .as_deref(),
+                crate::settings::env().native(name).ane_cache.as_deref(),
                 std::env::var("HOME").ok().as_deref(),
             );
             let (outputs, picture) = (off.output_tensors, off.picture);
