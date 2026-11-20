@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.11.0 - 2026-11-20
+
 ### Changed
 
 - Architecture: the workspace has two worlds of layers. The build crates keep L0 to L3, F, T and dev. The runtime
