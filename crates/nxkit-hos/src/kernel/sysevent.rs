@@ -16,7 +16,7 @@ use crate::guestsym::require;
 use crate::handle::KObject;
 use crate::kernel::{Kernel, current_thread};
 use crate::result::{KResult, KResultOr};
-use crate::thread::lock;
+use crate::sync::lock;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

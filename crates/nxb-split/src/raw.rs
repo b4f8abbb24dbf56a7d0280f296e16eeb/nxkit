@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::SplitError;
 use crate::glslc::{layout, stage};
+use crate::prim::{CTL_MAGIC, Found, check, find_all};
 use crate::rd::{u32le, u64le};
-use crate::shaders::{CTL_MAGIC, Found, check, find_all};
 
 type R<T> = Result<T, SplitError>;
 

@@ -2,7 +2,7 @@
 
 use crate::SplitError;
 use crate::glslc::glslc_shaders;
-use crate::shaders::{CTL_MAGIC, Found, check, find_all, sph_stage, u32le};
+use crate::prim::{CTL_MAGIC, Found, check, find_all, sph_stage, u32le};
 
 const GLSLC: [u8; 4] = [0x91, 0x68, 0x86, 0x19];
 const GFX: [u8; 4] = [0x78, 0x56, 0x34, 0x12];
@@ -260,7 +260,7 @@ pub fn mgfx_shaders(d: &[u8], label: &str) -> Result<Vec<Found>, SplitError> {
         out.extend(mgfx_effect(d, at, label)?.unwrap_or_default());
     }
     if is_xnb(label)
-        && crate::shaders::memfind(&d[..d.len().min(0x200)], b"EffectReader").is_some()
+        && crate::prim::memfind(&d[..d.len().min(0x200)], b"EffectReader").is_some()
         && out.is_empty()
     {
         return Err(SplitError::Red(format!(

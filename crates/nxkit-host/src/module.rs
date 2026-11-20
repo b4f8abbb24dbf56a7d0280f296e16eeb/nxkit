@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use crate::error::Result;
+use crate::fields::{bad, field, num, text};
 use crate::json::Value;
-use crate::manifest::{bad, field, num, text};
 
 /// The page size of the guest address space and of every segment of the build.
 const PAGE: u64 = 0x4000;

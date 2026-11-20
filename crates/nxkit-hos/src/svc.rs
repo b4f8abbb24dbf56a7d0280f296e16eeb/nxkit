@@ -60,12 +60,6 @@ const NEEDS_MEMORY: [u32; 18] = [
 /// The registers x0 to x7 of a svc. The call reads its arguments from them and writes its results back.
 pub type SvcRegs = [u64; 8];
 
-/// Makes the host thread body that enters guest code. The host implements it.
-pub trait GuestLauncher: Send + Sync {
-    /// The body of a guest thread that starts at `entry` with `arg` and the stack top `stack_top`.
-    fn body(&self, entry: u64, arg: u64, stack_top: u64) -> Box<dyn FnOnce() + Send>;
-}
-
 fn set(regs: &mut SvcRegs, r: KResultOr<()>) {
     regs[0] = u64::from(r.err().unwrap_or(KResult::SUCCESS).raw());
 }

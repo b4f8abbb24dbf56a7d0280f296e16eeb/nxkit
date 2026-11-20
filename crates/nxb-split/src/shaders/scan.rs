@@ -2,6 +2,7 @@
 
 use super::{BahsVar, Found, NEST, bahs_shaders, bnsh_shaders, u32le};
 use crate::SplitError;
+use crate::prim::{find_all, memfind};
 
 /// `sarc_members`: (name, bytes) of each member.
 pub fn sarc_members<'a>(d: &'a [u8], label: &str) -> Result<Vec<(String, &'a [u8])>, SplitError> {
@@ -47,36 +48,6 @@ pub fn sarc_members<'a>(d: &'a [u8], label: &str) -> Result<Vec<(String, &'a [u8
         out.push((nm, &d[doff + s..doff + en]));
     }
     Ok(out)
-}
-
-pub(crate) fn find_all<'a>(d: &'a [u8], pat: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
-    // non-overlapping left-to-right matches, as re.finditer
-    let mut i = 0usize;
-    std::iter::from_fn(move || {
-        if i + pat.len() > d.len() {
-            return None;
-        }
-        let p = memfind(&d[i..], pat)? + i;
-        i = p + pat.len();
-        Some(p)
-    })
-}
-
-/// Position of `pat` in `d`.
-pub fn memfind(d: &[u8], pat: &[u8]) -> Option<usize> {
-    let first = *pat.first()?;
-    let mut i = 0;
-    while i + pat.len() <= d.len() {
-        let p = d[i..=d.len() - pat.len()]
-            .iter()
-            .position(|&b| b == first)?
-            + i;
-        if &d[p..p + pat.len()] == pat {
-            return Some(p);
-        }
-        i = p + 1;
-    }
-    None
 }
 
 /// `scan_blob` for the containers this port reads (SARC, BAHS, BNSH).`left` is the expansion budget.

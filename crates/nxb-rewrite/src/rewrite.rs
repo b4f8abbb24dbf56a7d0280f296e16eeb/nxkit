@@ -8,26 +8,11 @@ use crate::analyse::{Analysis, analyse};
 use crate::cuts::cuts_for;
 use crate::error::{RewriteError, fail};
 use crate::nso::load;
+pub use crate::options::Options;
+use crate::options::Step;
 use crate::patches::PatchTable;
 use crate::rw::{R, Rw, dis};
 use crate::scan::Kind;
-
-/// Settings of one rewrite.
-#[derive(Clone, Debug, Default)]
-pub struct Options {
-    /// The module name (`main`, `sdk`, `subsdk0`, ...).
-    pub name: String,
-    /// `DM_PATCH_FRONT`: the front patch area size, when set by the caller.
-    pub patch_front: Option<u64>,
-    /// The game profile folder name (`DM_GAME`'s base name), or empty.
-    pub profile: String,
-    /// `(SHA-256, path relative to dm/tools)` of the rewriter and patch files, for `build_src.sha256`.
-    pub source_hashes: Vec<(String, String)>,
-    /// The profile's `snowdrop_pools` words (the large, 512 KB and 64 KB ranges in MB), empty for the default.
-    pub snowdrop_words: Vec<String>,
-    /// Where the pool sizes come from, as the script's log says (`profile`, or `default, ...`), empty is `default, no DM_GAME`.
-    pub snowdrop_from: String,
-}
 
 /// The files a rewrite produces: `(file name, bytes)`.
 pub struct Output {
@@ -215,17 +200,6 @@ fn bad(m: impl Into<String>) -> Step {
     Step::Err(RewriteError::Failed(m.into()))
 }
 
-pub(crate) enum Step {
-    Rerun(u64),
-    Err(RewriteError),
-}
-
-impl From<RewriteError> for Step {
-    fn from(e: RewriteError) -> Self {
-        Step::Err(e)
-    }
-}
-
 fn run_inner(
     nso: &[u8],
     opts: &Options,
@@ -238,8 +212,8 @@ fn run_inner(
     let mut extra: Vec<(String, Vec<u8>)> = Vec::new();
     let mut cuts = cuts_for(&rw, opts, patches, &build_id, &mut log, &mut extra)?;
     for c in &cuts {
-        let ob = crate::matchfn::unhex(&c.old);
-        let nb = crate::matchfn::unhex(&c.new);
+        let ob = crate::branch::unhex(&c.old);
+        let nb = crate::branch::unhex(&c.new);
         let cur = rw.img.get(c.off..c.off + ob.len());
         if ob.len() != nb.len() || cur != Some(&ob[..]) {
             return Err(bad(format!(

@@ -2,7 +2,7 @@
 //! (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`, `ue_region`, `ue_ring`).
 
 use crate::error::RewriteError;
-use crate::rewrite::{Options, Step};
+use crate::options::{Options, Step};
 use crate::rw::Rw;
 
 /// What the engine finders left for the fixups table.
@@ -106,7 +106,7 @@ pub(crate) fn engine_finders(
                 "profile"
             };
             for (off, old, new, why) in crate::snowdrop::snowdrop_cuts(&rw.img, &s, sizes) {
-                let nb = crate::matchfn::unhex(&new);
+                let nb = crate::branch::unhex(&new);
                 rw.img[off..off + 4].copy_from_slice(&nb);
                 cuts.push(crate::patches::Cut { off, old, new, why });
             }

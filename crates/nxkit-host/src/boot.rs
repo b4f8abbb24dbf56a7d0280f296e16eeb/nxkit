@@ -11,8 +11,18 @@
 use std::ffi::{CString, c_char};
 
 use crate::error::{HostError, Result};
-use crate::loader::ModuleInit;
 use crate::{gate, guestsym};
+
+/// The `DT_INIT` function of one module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleInit {
+    /// The name of the module.
+    pub module: String,
+    /// The offset from the module base.
+    pub offset: u64,
+    /// The guest address.
+    pub addr: u64,
+}
 
 const INIT_LIBC0: &str = "_init_libc0";
 const OS_INITIALIZE: &str = "nnosInitialize";

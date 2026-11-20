@@ -22,6 +22,7 @@ pub mod narc;
 pub mod nso;
 pub mod oodle;
 pub mod packs;
+mod prim;
 pub mod raw;
 pub(crate) mod rd;
 pub mod records;

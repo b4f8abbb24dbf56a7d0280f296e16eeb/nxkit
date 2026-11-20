@@ -16,8 +16,9 @@
 //! `close` ends an override that another thread started, and only for a waiter that is still waiting.
 
 use crate::role::Qos;
+use crate::sync::lock;
 use crate::sys;
-use crate::thread::{Thread, lock};
+use crate::thread::Thread;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;

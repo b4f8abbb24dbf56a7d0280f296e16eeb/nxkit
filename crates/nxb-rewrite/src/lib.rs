@@ -4,8 +4,10 @@
 //! `NXB_REWRITE_*`).
 
 mod analyse;
+mod branch;
 mod census;
 mod cuts;
+mod dynsym;
 mod engine;
 mod error;
 mod finders;
@@ -26,6 +28,7 @@ mod matchrule;
 /// NSO and NRO parsing.
 pub mod nso;
 mod obs;
+mod options;
 mod pat;
 /// The registered patches of the engine.
 pub mod patches;

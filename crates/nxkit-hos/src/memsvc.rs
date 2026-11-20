@@ -14,7 +14,7 @@ use crate::memory::{HostSpace, PAGE_SIZE};
 use crate::process::BREAK_EXIT_CODE;
 use crate::result::{KResult, KResultOr};
 use crate::space::{Block, MemoryMap, attr, perm, state};
-use crate::thread::lock;
+use crate::sync::lock;
 use crate::vm::View;
 
 /// `SetHeapSize` takes multiples of 2 MiB.

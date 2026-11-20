@@ -127,7 +127,7 @@ pub(super) fn extract(a: &Args, p: &Progress) -> Result<Extracted, String> {
         if let Some((version, path)) = external_update {
             nxb_extract::extract_code_only_update(
                 &nxb_extract::Request {
-                    keys: crate::extract_stage::keys(a)?,
+                    keys: crate::inputs::keys(a)?,
                     base: path.clone(),
                     out_base: ex.clone(),
                     app: Some(b.src.app),
@@ -140,7 +140,7 @@ pub(super) fn extract(a: &Args, p: &Progress) -> Result<Extracted, String> {
             .map_err(err)?;
         }
     } else {
-        let keys = crate::extract_stage::keys(a)?;
+        let keys = crate::inputs::keys(a)?;
         let result = nxb_extract::extract(&nxb_extract::Request {
             keys,
             base: b.base.clone(),

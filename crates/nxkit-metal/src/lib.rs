@@ -60,6 +60,7 @@ mod pages;
 mod pipeline;
 mod policy;
 mod present;
+mod rawcopy;
 mod render;
 mod resample;
 mod residency;
