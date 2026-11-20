@@ -394,6 +394,25 @@ impl Cx {
     fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) -> R<()> {
         match s {
             ast::Stmt::Empty => {}
+            ast::Stmt::SharedHalfStore { base, index, value } => {
+                let base = self.expr(base)?;
+                if base.ty != Type::Ptr(Space::Threadgroup, Rc::new(Type::UINT)) {
+                    return Err(Error::unsupported("shared-half-store:base"));
+                }
+                let half = Type::Scalar(Scalar::Ushort);
+                let value = self.expr(value)?;
+                let offset = self.index(index)?;
+                if value.ty != half || offset.ty != Type::UINT {
+                    return Err(Error::unsupported("shared-half-store:operands"));
+                }
+                let ptr_ty = Type::Ptr(Space::Threadgroup, Rc::new(half));
+                let base = Expr::new(ExprKind::PtrCast(Box::new(base)), ptr_ty.clone());
+                let place = deref(Expr::new(
+                    ExprKind::PtrOffset(Box::new(base), Box::new(offset)),
+                    ptr_ty,
+                ))?;
+                out.push(Stmt::MayAliasStore { place, value });
+            }
             ast::Stmt::Block(b) => {
                 let stmts = self.block(&b.stmts)?;
                 out.push(if b.contract_off {

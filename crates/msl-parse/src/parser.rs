@@ -1327,6 +1327,46 @@ impl<'a> Parser<'a> {
         self.frame(|p| p.stmt_body())
     }
 
+    /// Match the exact producer alias without adding to the type namespace.
+    fn shared_half_store(&mut self) -> PResult<Option<Stmt>> {
+        const DECLARATION: &[&str] = &[
+            "typedef",
+            "ushort",
+            "__attribute__",
+            "(",
+            "(",
+            "may_alias",
+            ")",
+            ")",
+            "dm_ushort_alias",
+            ";",
+        ];
+        for (i, token) in DECLARATION.iter().enumerate() {
+            if self.peek_at(i)? != *token {
+                return Ok(None);
+            }
+        }
+        for token in DECLARATION.iter().copied().chain([
+            "(",
+            "(",
+            "threadgroup",
+            "dm_ushort_alias",
+            "*",
+            ")",
+        ]) {
+            self.expect(token)?;
+        }
+        let base = self.expr_unary()?;
+        self.expect(")")?;
+        self.expect("[")?;
+        let index = self.expr()?;
+        self.expect("]")?;
+        self.expect("=")?;
+        let value = self.expr()?;
+        self.expect(";")?;
+        Ok(Some(Stmt::SharedHalfStore { base, index, value }))
+    }
+
     fn stmt_body(&mut self) -> PResult<Stmt> {
         let v = self.peek()?;
         self.stat("stmt")?;
@@ -1338,6 +1378,11 @@ impl<'a> Parser<'a> {
             ";" => {
                 self.next()?;
                 return Ok(Stmt::Empty);
+            }
+            "typedef" => {
+                if let Some(store) = self.shared_half_store()? {
+                    return Ok(store);
+                }
             }
             "if" => {
                 self.next()?;

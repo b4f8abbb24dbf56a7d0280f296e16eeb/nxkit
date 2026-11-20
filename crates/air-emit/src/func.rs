@@ -546,6 +546,15 @@ impl<'a> FnGen<'a> {
             Stmt::Expr(e) => {
                 self.expr(e)?;
             }
+            Stmt::MayAliasStore { place, value } => {
+                let value = self.expr(value)?;
+                let addr = self
+                    .addr(place)?
+                    .ok_or_else(|| Error::invalid("alias store to non-addressable"))?;
+                self.no_tbaa += 1;
+                self.store_to(&addr, &value);
+                self.no_tbaa -= 1;
+            }
             Stmt::Block(b) => self.scope(b)?,
             Stmt::NoContract(b) => {
                 let saved = std::mem::replace(&mut self.contract, false);

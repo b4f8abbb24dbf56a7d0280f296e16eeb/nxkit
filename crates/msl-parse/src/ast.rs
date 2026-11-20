@@ -171,6 +171,12 @@ pub enum Stmt {
     DiscardFragment,
     Decl(Decl),
     Expr(Box<Expr>),
+    /// nxkit's threadgroup halfword store using the local may_alias typedef.
+    SharedHalfStore {
+        base: Box<Expr>,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
 }
 
 #[derive(Clone, Debug)]

@@ -128,6 +128,13 @@ pub struct Local {
 pub enum Stmt {
     /// An expression evaluated for its effect.
     Expr(Expr),
+    /// A typed store that may alias objects of a different type.
+    MayAliasStore {
+        /// The destination.
+        place: Place,
+        /// The value stored.
+        value: Expr,
+    },
     /// A nested block.
     Block(Vec<Stmt>),
     /// A nested block that starts with `#pragma clang fp contract(off)`: no `llvm.fmuladd` inside.
@@ -482,6 +489,10 @@ pub fn visit_calls(stmts: &[Stmt], f: &mut dyn FnMut(FuncId)) {
 fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(FuncId)) {
     match s {
         Stmt::Expr(e) => visit_expr(e, f),
+        Stmt::MayAliasStore { place, value } => {
+            visit_place(place, f);
+            visit_expr(value, f);
+        }
         Stmt::Block(b) | Stmt::NoContract(b) => visit_calls(b, f),
         Stmt::If { cond, then, els } => {
             visit_expr(cond, f);

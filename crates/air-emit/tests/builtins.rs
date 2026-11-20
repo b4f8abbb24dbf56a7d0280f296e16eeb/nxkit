@@ -317,3 +317,51 @@ fn conditional_field_lvalue_does_not_admit_unrelated_forms() {
         );
     }
 }
+
+#[test]
+fn shared_halfword_alias_store_is_one_untagged_aligned_write() {
+    let ir = emit(
+        "void half_store(threadgroup uint (&words)[4], uint byte_offset, uint bits)
+         { typedef ushort __attribute__((may_alias)) dm_ushort_alias;
+           ((threadgroup dm_ushort_alias*)&words[0])[byte_offset >> 1u] = ushort(bits); }
+         kernel void k(device uint* dst [[buffer(0)]], uint byte_offset [[thread_index_in_threadgroup]])
+         { threadgroup uint words[4]; words[0] = 0x12345678u;
+           half_store(words, byte_offset, dst[0]); dst[1] = words[0]; }",
+    );
+    let half: Vec<_> = ir
+        .lines()
+        .filter(|line| line.contains("store i16 "))
+        .collect();
+    assert_eq!(half.len(), 1, "{ir}");
+    assert!(
+        half[0].contains("i16 addrspace(3)*") && half[0].ends_with("align 2"),
+        "{ir}"
+    );
+    assert!(!ir.contains("store i8 "), "{ir}");
+    has(&ir, "getelementptr inbounds i16, i16 addrspace(3)*");
+    assert!(
+        ir.lines()
+            .any(|l| l.contains("store i32 305419896, i32 addrspace(3)*") && l.contains("!tbaa")),
+        "{ir}"
+    );
+}
+
+#[test]
+fn shared_halfword_alias_does_not_accept_device_or_plain_aliases() {
+    for replacement in [
+        ("may_alias", "unused"),
+        ("threadgroup dm_ushort_alias*", "device dm_ushort_alias*"),
+        ("[0u] = ushort(1u)", "[0u] = 1u"),
+    ] {
+        let src = format!(
+            "{PRE}kernel void k() {{ threadgroup uint words[4];
+              typedef ushort __attribute__((may_alias)) dm_ushort_alias;
+              ((threadgroup dm_ushort_alias*)&words[0])[0u] = ushort(1u); }}"
+        )
+        .replace(replacement.0, replacement.1);
+        assert!(
+            compile_source(&src, &Target::macos(), "bad.metal").is_err(),
+            "{src}"
+        );
+    }
+}
