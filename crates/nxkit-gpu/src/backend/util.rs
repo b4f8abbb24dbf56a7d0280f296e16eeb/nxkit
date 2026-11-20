@@ -43,18 +43,6 @@ pub(super) fn drop_later<T: Send + 'static>(v: T) {
     }
 }
 
-/// Whether `NXKIT_DIAG` asks for the overlap counters.
-pub(super) fn overlap_diag() -> bool {
-    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DIAG.get_or_init(|| crate::diag("overlap"))
-}
-
-/// Whether `NXKIT_DIAG` asks for the periodic counters.
-pub(super) fn stats_diag() -> bool {
-    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DIAG.get_or_init(|| crate::diag("stats"))
-}
-
 /// True when the detail has one entry for each command that needs one.
 pub(super) fn matches(frame: &Frame, d: &FrameDetail) -> bool {
     let (mut draws, mut clears, mut dispatches) = (0, 0, 0);

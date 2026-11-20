@@ -13,10 +13,10 @@
 //! At most [`MAX_PENDING`] presented frames wait for a tick. `acquire` blocks the game while that many wait.
 
 mod api;
-mod encpace;
 mod events;
 mod gputs;
 mod poolops;
+mod presdiag;
 mod present;
 #[cfg(test)]
 mod tests;
@@ -51,7 +51,7 @@ use crate::report::EncodeReport;
 use crate::settings::GpuSettings;
 use crate::snapshot::{EncodeView, Live, Snapshot};
 use crate::walk::{Invalidations, Walker};
-use util::{drop_later, fail, matches, overlap_diag, report_refused, stats_diag, take_due};
+use util::{drop_later, fail, matches, report_refused, take_due};
 
 /// The presented frames that may wait for a display tick.
 pub const MAX_PENDING: usize = 3;
@@ -90,6 +90,8 @@ pub struct GpuBackend {
     invalidations: Arc<Invalidations>,
     /// The counters of `NXKIT_DIAG=overlap`.
     overlap: crate::overlap::Overlap,
+    /// The diagnostics of the present path.
+    diag: presdiag::PresentDiag,
     /// What the screen showed of the presents, shared with the NVN present (W26).
     screen: Arc<nxkit_nvn::screen::Screen>,
     /// The storage ranges that the overlap renames per frame: learned and captured at the flush, written back in a CPU
@@ -195,6 +197,7 @@ impl GpuBackend {
                 walker: Mutex::new(walker),
                 invalidations,
                 overlap: crate::overlap::Overlap::default(),
+                diag: presdiag::PresentDiag::default(),
                 rename,
                 screen: settings.screen.clone(),
                 scale: settings.scale,
@@ -478,7 +481,7 @@ impl GpuBackend {
                 "DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}"
             );
         }
-        let diag = stats_diag();
+        let diag = self.diag.stats;
         if crate::diag("pixelall") && n.is_multiple_of(10) {
             let st = &report.stats;
             eprintln!(
