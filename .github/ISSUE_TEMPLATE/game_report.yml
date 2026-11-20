@@ -34,7 +34,7 @@ body:
     id: nxkit_version
     attributes:
       label: nxkit version
-      placeholder: 0.10.3
+      placeholder: 0.11.0
     validations:
       required: true
   - type: input
