@@ -51,7 +51,7 @@ use crate::report::EncodeReport;
 use crate::settings::GpuSettings;
 use crate::snapshot::{EncodeView, Live, Snapshot};
 use crate::walk::{Invalidations, Walker};
-use util::{drop_later, fail, matches, report_refused, take_due};
+use util::{fail, matches, report_refused, take_due};
 
 /// The presented frames that may wait for a display tick.
 pub const MAX_PENDING: usize = 3;
@@ -92,6 +92,8 @@ pub struct GpuBackend {
     overlap: crate::overlap::Overlap,
     /// The `overlap` key of `game.json`.
     game_overlap: bool,
+    /// Frees the detail of a frame off the game's render thread.
+    dropper: util::Dropper,
     /// The diagnostics of the present path.
     diag: presdiag::PresentDiag,
     /// What the screen showed of the presents, shared with the NVN present (W26).
@@ -200,6 +202,7 @@ impl GpuBackend {
                 invalidations,
                 overlap: crate::overlap::Overlap::default(),
                 game_overlap: settings.overlap,
+                dropper: util::Dropper::default(),
                 diag: presdiag::PresentDiag::default(),
                 rename,
                 screen: settings.screen.clone(),

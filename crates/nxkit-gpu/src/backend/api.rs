@@ -190,7 +190,7 @@ impl Backend for GpuBackend {
             }
         }
         let r = self.flush_sync(frame, plan, &pools, fence, &detail, cx);
-        drop_later(detail);
+        self.dropper.drop_later(detail);
         r
     }
 

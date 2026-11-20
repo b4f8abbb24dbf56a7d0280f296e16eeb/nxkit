@@ -152,13 +152,15 @@ pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), Inst
     let space = LinearSpace::new(base, backend.gpu_base(), len).map_err(InstallError::Space)?;
     GPU.set(Gpu::new(space, backend, settings))
         .map_err(|_| InstallError::AlreadyInstalled)?;
-    // The video service writes decoded pictures into native images itself; the textures over them load again.
-    nxkit_svc_video::set_guest_write_hook(|addr, len| {
-        if let Some(g) = GPU.get() {
-            g.guest_wrote_deferred(addr, len);
-        }
-    });
     Ok(())
+}
+
+/// A service wrote `[addr, addr + len)` of guest memory itself: the textures over it load again. Nothing happens before
+/// [`install`]. The host gives it to the video service.
+pub fn guest_wrote(addr: u64, len: u64) {
+    if let Some(g) = GPU.get() {
+        g.guest_wrote_deferred(addr, len);
+    }
 }
 
 /// The installed context. A call before [`install`] ends the game with the name of the function.

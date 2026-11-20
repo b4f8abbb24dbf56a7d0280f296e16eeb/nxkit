@@ -280,6 +280,8 @@ pub fn init_services(
         nxkit_svc_video::init(&nxkit_svc_video::Config {
             host: Arc::new(wire::VideoHost),
             sink: None,
+            // The video service writes decoded pictures into native images itself. The textures over them load again.
+            guest_write: Some(nxkit_rt::nvn::guest_wrote),
         });
     }
     if has(mask, Service::Pacing) {
