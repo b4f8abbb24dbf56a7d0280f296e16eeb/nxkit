@@ -85,11 +85,11 @@ mod vmregion;
 
 pub use address::{AddressMap, GUEST_VA_BASE, GUEST_VA_MAX, is_guest_va};
 pub use barrier::{Dependency, Scope, Stages, Use, Visibility};
+pub use batch::BatchHooks;
 pub use batch::{
     BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
     SubmittedBatch,
 };
-pub use batch::{set_commit_hook, set_done_hook};
 pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use compute_icb::{
@@ -122,9 +122,7 @@ pub use pipeline::{
     RenderPipeline, RenderPipelineDesc, ShaderLibrary, Source,
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
-pub use present::{
-    Drawable, PRESENT_FORMAT, Presenter, media_time, set_timed_present, timed_present,
-};
+pub use present::{Drawable, PRESENT_FORMAT, Presenter, TimedPresent, media_time};
 pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
     StencilAttachment, Viewport,

@@ -89,6 +89,7 @@ pub struct FrameRing {
     metrics: Arc<Metrics>,
     hooks: Option<Arc<dyn FrameHooks>>,
     pacing: Option<Arc<PacingStats>>,
+    timed: Option<Arc<crate::timed::TimedPresent>>,
 }
 
 // SAFETY: the Metal objects of a ring are only used through `&mut self`, so one thread at a time touches them. Metal
@@ -121,12 +122,18 @@ impl FrameRing {
             metrics: Arc::new(Metrics::default()),
             hooks: None,
             pacing: None,
+            timed: None,
         })
     }
 
     /// Sets the pacing counters. Each presented drawable then reports when the display showed it.
     pub fn set_pacing_stats(&mut self, stats: Arc<PacingStats>) {
         self.pacing = Some(stats);
+    }
+
+    /// Sets the minimum stay of the presents of this ring (timed presents).
+    pub fn set_timed_present(&mut self, timed: Arc<crate::timed::TimedPresent>) {
+        self.timed = Some(timed);
     }
 
     /// Sets the pacing hooks.
@@ -167,6 +174,7 @@ impl FrameRing {
             metrics: self.metrics.clone(),
             hooks: self.hooks.clone(),
             pacing: self.pacing.clone(),
+            timed: self.timed.clone(),
             t0,
             drawable: None,
         })
@@ -197,6 +205,7 @@ pub struct Frame {
     metrics: Arc<Metrics>,
     hooks: Option<Arc<dyn FrameHooks>>,
     pacing: Option<Arc<PacingStats>>,
+    timed: Option<Arc<crate::timed::TimedPresent>>,
     t0: Instant,
     drawable: Option<PendingPresent>,
 }
@@ -324,7 +333,7 @@ impl Frame {
             // With timed presents on, the display keeps the frame before this one on screen for the minimum time. If
             // Metal refuses that call for a drawable of the display link, timed presents go off for good and the
             // plain present follows.
-            let timed = crate::timed::timed_present();
+            let timed = self.timed.as_ref().and_then(|t| t.get());
             let mut sent = false;
             if let Some(min) = timed {
                 // The closure only calls `presentAfterMinimumDuration:`, which leaves no Rust state half done when it throws.
@@ -334,7 +343,9 @@ impl Frame {
                 match r {
                     Ok(()) => sent = true,
                     Err(e) => {
-                        crate::timed::set_timed_present(None);
+                        if let Some(t) = &self.timed {
+                            t.set(None);
+                        }
                         eprintln!(
                             "nxkit-metal: timed presents are off: presentAfterMinimumDuration threw {e:?}"
                         );

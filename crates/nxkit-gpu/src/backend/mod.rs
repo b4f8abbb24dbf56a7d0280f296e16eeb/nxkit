@@ -90,6 +90,8 @@ pub struct GpuBackend {
     invalidations: Arc<Invalidations>,
     /// The counters of `NXKIT_DIAG=overlap`.
     overlap: crate::overlap::Overlap,
+    /// The `overlap` key of `game.json`.
+    game_overlap: bool,
     /// The diagnostics of the present path.
     diag: presdiag::PresentDiag,
     /// What the screen showed of the presents, shared with the NVN present (W26).
@@ -106,6 +108,8 @@ pub struct GpuBackend {
     pending: Mutex<Vec<Pending>>,
     freed: Condvar,
     blit: Mutex<Option<Blit>>,
+    /// The minimum stay of the presents, which the host's refresh plan sets.
+    timed: Arc<nxkit_metal::TimedPresent>,
     pacer: OnceLock<Arc<Pacer>>,
     reports: AtomicU64,
     /// The timestamp reports of encoded frames that the GPU has not been seen to finish, with the fence of their
@@ -116,6 +120,8 @@ pub struct GpuBackend {
     queries: Mutex<Vec<(u64, Arc<crate::queries::FrameQueries>)>>,
     /// The last time written into a report (`gputs`). Its lock also orders the waits that write reports.
     ts: Mutex<gputs::Clock>,
+    /// The hook of the `frame` and `gateseq` traces for a batch kept for a fence.
+    batch_kept: Option<fn(u64, u64)>,
     blit_failed: AtomicBool,
     /// The current device origin (`device_modes`). A submit and a present capture it when the game makes them, since
     /// their walk or display runs later.
@@ -152,19 +158,15 @@ impl GpuBackend {
         guest: Arc<GuestMemory>,
         settings: &GpuSettings,
     ) -> nxkit_metal::Result<Arc<Self>> {
-        nxkit_metal::set_done_hook(nxkit_nvn::diag::batch_done);
-        nxkit_metal::set_commit_hook(nxkit_nvn::diag::batch_committed);
         let space = GuestSpace::over(&guest)?;
         let events = events::EventSignals::new(space.clone());
         let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
         let pool_hint = gpu.pool_hint();
         let rename = gpu.renamer();
-        let walker = Walker::new(settings.shader_dir.clone(), space.address_map());
+        let mut walker = Walker::new(settings.shader_dir.clone(), space.address_map());
+        walker.set_game_overlap(settings.overlap);
         let invalidations = walker.invalidations();
         let pools = crate::guestpools::whole(&guest);
-        if settings.overlap {
-            crate::overlap::set_on();
-        }
         // `NXKIT_PRIVATE`: the page tracker and, for `1`, the mirror. With the mirror the overlap and the renamer are off.
         crate::private::attach(
             ctx,
@@ -197,6 +199,7 @@ impl GpuBackend {
                 walker: Mutex::new(walker),
                 invalidations,
                 overlap: crate::overlap::Overlap::default(),
+                game_overlap: settings.overlap,
                 diag: presdiag::PresentDiag::default(),
                 rename,
                 screen: settings.screen.clone(),
@@ -207,11 +210,13 @@ impl GpuBackend {
                 pending: Mutex::new(Vec::new()),
                 freed: Condvar::new(),
                 blit: Mutex::new(None),
+                timed: settings.timed_present.clone(),
                 pacer: OnceLock::new(),
                 reports: AtomicU64::new(0),
                 counters: Mutex::new(Vec::new()),
                 queries: Mutex::new(Vec::new()),
                 ts: Mutex::new(gputs::Clock::default()),
+                batch_kept: settings.batch_hooks.map(|h| h.kept),
                 blit_failed: AtomicBool::new(false),
                 device_lower_left: AtomicBool::new(true),
                 enc,
@@ -268,7 +273,7 @@ impl GpuBackend {
     /// The CPU waited for fence `waited` and the GPU is done with it: the renamed ranges of the frames up to it go back
     /// into guest memory, and the ranges that are judged read their bytes after the frame.
     fn renamed_wait(&self, waited: u64, who: std::fmt::Arguments<'_>) {
-        if !crate::overlap::on() {
+        if !crate::overlap::on(self.game_overlap) {
             return;
         }
         self.rename.after_wait(

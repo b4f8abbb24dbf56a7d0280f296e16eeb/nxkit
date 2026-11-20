@@ -58,7 +58,7 @@ impl TickSink for GpuBackend {
         }
         let mut blit = locked(&self.blit);
         if blit.is_none() {
-            *blit = Blit::new(&self.ctx)
+            *blit = Blit::new(&self.ctx, &self.timed)
                 .inspect_err(|e| {
                     if !self.blit_failed.swap(true, Ordering::Relaxed) {
                         eprintln!("nxkit-gpu: the present blit cannot be made: {e}");

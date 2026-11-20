@@ -405,9 +405,9 @@ mod tests {
     }
 }
 
-/// Hooks that the encoder's backend calls for the trace `gateseq` of the host: a batch was kept for a fence, and a batch
-/// completed on the GPU. The host sets them once; without them the calls do nothing.
-#[derive(Clone, Copy)]
+/// Hooks that the encoder's backend calls for the traces `frame` and `gateseq`: a batch was kept for a fence, a batch was
+/// committed and a batch completed on the GPU. The host passes them to the backend when it makes it (W26).
+#[derive(Clone, Copy, Debug)]
 pub struct BatchHooks {
     /// `(fence, batch number)`: the batch of a flush was committed.
     pub kept: fn(u64, u64),
@@ -416,32 +416,4 @@ pub struct BatchHooks {
     pub done: fn(u64, usize, f64, f64),
     /// `(batch number, host clock in ns)`: the first command buffers of a batch were committed (`CLOCK_UPTIME_RAW`).
     pub committed: fn(u64, u64),
-}
-
-static BATCH_HOOKS: OnceLock<BatchHooks> = OnceLock::new();
-
-/// Sets the hooks of the batches. The first call wins.
-pub fn set_batch_hooks(h: BatchHooks) {
-    let _ = BATCH_HOOKS.set(h);
-}
-
-/// A batch was committed for `fence`.
-pub fn batch_kept(fence: u64, number: u64) {
-    if let Some(h) = BATCH_HOOKS.get() {
-        (h.kept)(fence, number);
-    }
-}
-
-/// The first command buffers of a batch were committed.
-pub fn batch_committed(number: u64, ns: u64) {
-    if let Some(h) = BATCH_HOOKS.get() {
-        (h.committed)(number, ns);
-    }
-}
-
-/// A batch completed on the GPU.
-pub fn batch_done(number: u64, cbs: usize, start_s: f64, end_s: f64) {
-    if let Some(h) = BATCH_HOOKS.get() {
-        (h.done)(number, cbs, start_s, end_s);
-    }
 }

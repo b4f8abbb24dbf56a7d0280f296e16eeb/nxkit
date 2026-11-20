@@ -19,7 +19,7 @@ use crate::error::{MetalError, Result};
 use crate::frame::{Frame, PendingPresent};
 
 pub use crate::drawable::{Drawable, PRESENT_FORMAT, media_time};
-pub use crate::timed::{set_timed_present, timed_present};
+pub use crate::timed::TimedPresent;
 
 /// The layer and its settings.
 pub struct Presenter {

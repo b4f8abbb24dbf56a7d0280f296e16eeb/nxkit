@@ -131,6 +131,8 @@ pub struct Refresh {
     generation: AtomicU64,
     /// What the screen showed of the presents: the refresh tells it the rate of the screen.
     screen: Arc<Screen>,
+    /// The minimum stay of the presents: the refresh sets it, the present blit of the GPU backend reads it.
+    timed: Arc<nxkit_metal::TimedPresent>,
 }
 
 impl Refresh {
@@ -150,7 +152,13 @@ impl Refresh {
             }),
             generation: AtomicU64::new(0),
             screen,
+            timed: Arc::default(),
         }
+    }
+
+    /// The minimum stay of the presents, for the GPU backend.
+    pub fn timed_present(&self) -> Arc<nxkit_metal::TimedPresent> {
+        self.timed.clone()
     }
 
     /// The number of plans made so far.
@@ -252,7 +260,7 @@ impl Refresh {
                 fps
             },
         );
-        nxkit_svc_pacing::set_screen_hz(hz.round() as u32);
+        self.screen.set_mode_hz(hz.round() as u32);
         let refresh_hz = if let Some(r) = vrr {
             f64::from(r.preferred)
         } else if facts.adaptive {
@@ -281,7 +289,8 @@ impl Refresh {
         // Time, 2026-11-09). Without it each frame shows on the next tick of the link.
         // Under variable refresh a frame shows as soon as it is ready, so a minimum duration would only hold it back.
         let timed = req.timed.unwrap_or(false) && vrr.is_none();
-        nxkit_metal::set_timed_present(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
+        self.timed
+            .set(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
         let mut hint = String::new();
         if !plan.exact {
             let choices = facts

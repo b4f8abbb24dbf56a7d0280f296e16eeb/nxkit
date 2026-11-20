@@ -36,19 +36,19 @@ pub(crate) fn now_ns() -> u64 {
     unsafe { clock_gettime_nsec_np(8) }
 }
 
-/// Whether a category that uses the counters is on. The first call also sets the hooks for the batches of the GPU.
+/// Whether a category that uses the counters is on.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        let on = super::frametime::on() || super::gateseq::on();
-        if on {
-            nxkit_nvn::diag::set_batch_hooks(nxkit_nvn::diag::BatchHooks {
-                kept,
-                done,
-                committed,
-            });
-        }
-        on
+    *ON.get_or_init(|| super::frametime::on() || super::gateseq::on())
+}
+
+/// The hooks for the batches of the GPU when a category that uses the counters is on. The host passes them to the
+/// encoder's backend (W26).
+pub fn batch_hooks() -> Option<nxkit_nvn::diag::BatchHooks> {
+    on().then_some(nxkit_nvn::diag::BatchHooks {
+        kept,
+        done,
+        committed,
     })
 }
 

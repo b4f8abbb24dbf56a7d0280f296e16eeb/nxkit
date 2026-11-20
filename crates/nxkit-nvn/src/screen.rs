@@ -11,7 +11,7 @@
 //! It also counts how many refreshes each shown frame stayed (`NXKIT_DIAG=judder`): on a screen that shows a frame for
 //! two refreshes every time, every shown frame is a 2x. A frame that stays 3 refreshes now and then is judder.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 /// The presents that the ring remembers. The frame step reads the one 8 presents back.
@@ -38,6 +38,8 @@ pub struct Screen {
     pace: Mutex<PaceSpread>,
     /// The refresh rate the screen shows, as `f64` bits. 0 is not known.
     refresh_hz: AtomicU64,
+    /// The refresh rate of the current mode of the screen, rounded to Hz, for the frame step.
+    mode_hz: AtomicU32,
     /// The time of the frame shown before, as `f64` bits. 0 is none.
     prev_shown: AtomicU64,
     bin: [AtomicU64; BINS],
@@ -75,6 +77,7 @@ impl Screen {
             shown_hook,
             pace: Mutex::new(PaceSpread::new()),
             refresh_hz: AtomicU64::new(0),
+            mode_hz: AtomicU32::new(120),
             prev_shown: AtomicU64::new(0),
             bin: [const { AtomicU64::new(0) }; BINS],
             stay_milli: AtomicU64::new(0),
@@ -160,6 +163,20 @@ impl Screen {
             self.refresh_hz.store(hz.to_bits(), Ordering::Relaxed);
             self.prev_shown.store(0, Ordering::Relaxed);
         }
+    }
+
+    /// Sets the refresh rate of the current mode of the screen. A rate that is not a multiple of the step rate (144 Hz)
+    /// shows a frame on time one refresh longer now and then, which the frame step must not take for lateness. Zero
+    /// keeps the rate before.
+    pub fn set_mode_hz(&self, hz: u32) {
+        if hz > 0 {
+            self.mode_hz.store(hz, Ordering::Relaxed);
+        }
+    }
+
+    /// The refresh rate of the current mode of the screen, 120 until the host sets it.
+    pub fn mode_hz(&self) -> u32 {
+        self.mode_hz.load(Ordering::Relaxed)
     }
 
     fn judder_note(&self, secs: f64) {

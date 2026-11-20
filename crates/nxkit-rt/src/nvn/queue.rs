@@ -212,7 +212,7 @@ fn pace_present(screen: &nxkit_nvn::screen::Screen, now_ns: u64) {
         now_ns,
         gpu_ms: screen.gpu_ms(),
         snap: snap_view(screen, presents),
-        screen_hz: nxkit_svc_pacing::screen_hz(),
+        screen_hz: screen.mode_hz(),
         link_active: true,
         movie: false,
         thermal: 0,

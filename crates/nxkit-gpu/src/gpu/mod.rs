@@ -93,6 +93,10 @@ pub struct GpuConfig {
     pub build_id: u64,
     /// What the start shows while it makes the pipelines of the runtime cache.
     pub prewarm_screen: crate::ScreenHook,
+    /// The hooks of the host's diagnostics for each batch.
+    pub batch_hooks: Option<nxkit_metal::BatchHooks>,
+    /// The CPU runs one frame ahead of the GPU (`game.json` key `overlap`).
+    pub overlap: bool,
 }
 
 impl crate::GpuSettings {
@@ -118,6 +122,11 @@ impl crate::GpuSettings {
             runtime_cache: self.runtime_cache.clone(),
             build_id: self.build_id,
             prewarm_screen: self.prewarm_screen.clone(),
+            overlap: self.overlap,
+            batch_hooks: self.batch_hooks.map(|h| nxkit_metal::BatchHooks {
+                done: h.done,
+                committed: h.committed,
+            }),
         }
     }
 }
@@ -134,6 +143,8 @@ impl Default for GpuConfig {
             runtime_cache: None,
             build_id: 0,
             prewarm_screen: crate::ScreenHook::default(),
+            batch_hooks: None,
+            overlap: false,
         }
     }
 }
@@ -175,6 +186,8 @@ pub struct Gpu {
     barriers: BarrierState,
     ring: BatchRing,
     threads: usize,
+    /// The `overlap` key of `game.json`.
+    game_overlap: bool,
     last: Option<SubmittedBatch>,
     /// The batch before `last`, while it may still run: the frame that `wait_older` waits for.
     older: Option<SubmittedBatch>,
@@ -227,11 +240,16 @@ impl Gpu {
             transfer,
             icbs: Mutex::new(Icbs::default()),
             barriers: BarrierState::default(),
-            ring: BatchRing::new(
-                ctx,
-                threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS,
-            )?,
+            ring: {
+                let mut ring = BatchRing::new(
+                    ctx,
+                    threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS,
+                )?;
+                ring.set_hooks(config.batch_hooks);
+                ring
+            },
             threads,
+            game_overlap: config.overlap,
             last: None,
             older: None,
             pools: Vec::new(),

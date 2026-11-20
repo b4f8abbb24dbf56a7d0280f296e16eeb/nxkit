@@ -12,26 +12,17 @@
 
 use std::sync::Mutex;
 
-/// Whether the CPU may run one frame ahead of the GPU (`NXKIT_OVERLAP=1`): `nvnSyncWait` for the newest frame waits for
-/// the frame before it, and every bound uniform buffer reads a copy that the walk takes, so that the CPU's writes for
-/// the next frame do not reach the frame on the GPU. See `docs/plans/fence-overlap.md`.
-pub(crate) fn on() -> bool {
+/// Whether the CPU may run one frame ahead of the GPU: `game` is the `overlap` key of `game.json`, which the backend,
+/// the GPU and the walker keep from their settings. `NXKIT_OVERLAP=1` and the knob `overlap` turn it on too.
+/// `nvnSyncWait` for the newest frame then waits for the frame before it, and every bound uniform buffer reads a copy
+/// that the walk takes, so that the CPU's writes for the next frame do not reach the frame on the GPU. See
+/// `docs/plans/fence-overlap.md`.
+pub(crate) fn on(game: bool) -> bool {
     // The mirror (`NXKIT_PRIVATE=1`) replaces the learned copies: the overlap and the renamer stay off.
     if crate::private::mirrored() {
         return false;
     }
-    SETTING.load(std::sync::atomic::Ordering::Relaxed)
-        || crate::settings::env().overlap
-        || crate::knob("overlap")
-}
-
-/// The `overlap` key of `game.json`, set once when the backend is made.
-// Process-wide (W26): the walk and the frame steps ask for it deep in code that has no backend to carry it.
-static SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Turns the overlap on for this run (`game.json` key `overlap`).
-pub(crate) fn set_on() {
-    SETTING.store(true, std::sync::atomic::Ordering::Relaxed);
+    game || crate::settings::env().overlap || crate::knob("overlap")
 }
 
 use crate::detail::{DrawArgs, FrameDetail, UboDetail};

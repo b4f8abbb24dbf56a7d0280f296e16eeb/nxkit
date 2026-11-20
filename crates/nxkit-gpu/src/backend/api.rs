@@ -127,7 +127,7 @@ impl Backend for GpuBackend {
         }
         // The overlap: the ranges that this frame reads from a copy of its own take their bytes now, before the CPU
         // writes the next frame.
-        if crate::overlap::on() {
+        if crate::overlap::on(self.game_overlap) {
             let (capture, check) = self.rename.at_flush(&detail, fence.0);
             detail.rename = capture.map(Arc::new);
             detail.rename_check = check;
@@ -339,7 +339,7 @@ impl Backend for GpuBackend {
 impl GpuBackend {
     /// The wait of [`Backend::wait_fence`].
     fn wait_fence_now(&self, fence: Fence) -> WaitResult {
-        if fence.0 != 0 && crate::overlap::on() {
+        if fence.0 != 0 && crate::overlap::on(self.game_overlap) {
             self.rename.note_wait();
             self.rename.before_wait(fence.0);
         }
@@ -361,7 +361,7 @@ impl GpuBackend {
         }
         // One frame of overlap: a wait for the newest frame waits for the one before it. A frame that copied back to
         // CPU memory waited in full when it was encoded, so `done` covers it already.
-        if crate::overlap::on()
+        if crate::overlap::on(self.game_overlap)
             && self.enc.is_none()
             && fence.0 == self.encoded.load(Ordering::Acquire)
             && fence.0 > 1
@@ -393,7 +393,7 @@ impl GpuBackend {
         }
         // The same with the encoder thread: the frame before the newest must be encoded and finished on the GPU. The
         // wait goes to the batch itself, not through the lock that the encoder holds while it encodes the newest frame.
-        if crate::overlap::on()
+        if crate::overlap::on(self.game_overlap)
             && let Some(enc) = &self.enc
             && fence.0 > 2
             && fence.0 == self.flushed.load(Ordering::Acquire)
@@ -426,7 +426,7 @@ impl GpuBackend {
             }
             return WaitResult::Done;
         }
-        if crate::overlap::on() {
+        if crate::overlap::on(self.game_overlap) {
             self.rename.count_wait(fence.0, false);
         }
         if let Some(enc) = &self.enc {

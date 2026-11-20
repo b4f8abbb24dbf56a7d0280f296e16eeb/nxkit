@@ -72,6 +72,8 @@ pub fn gpu_settings(
         specialize: run.gpu_specialize,
         // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
         prewarm_screen: nxkit_gpu::ScreenHook(Some(Arc::new(crate::sys::loading::LoadingScreen))),
+        // The `frame` and `gateseq` traces of `nxkit-rt` time the batches of the encoder.
+        batch_hooks: nxkit_rt::nvn::batch_hooks(),
         screen: screen.clone(),
         enc_thread: settings.enc_thread,
         overlap: settings.overlap,
@@ -194,7 +196,10 @@ pub fn install(
     let backend = GpuBackend::new(
         ctx,
         memory.clone(),
-        &gpu_settings(root, settings, run, screen),
+        &nxkit_gpu::GpuSettings {
+            timed_present: refresh.timed_present(),
+            ..gpu_settings(root, settings, run, screen)
+        },
     );
     let backend = backend.map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
     nvn::install(

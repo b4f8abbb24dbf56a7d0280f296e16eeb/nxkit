@@ -1530,8 +1530,11 @@ fn a_streamed_prefix_is_committed_before_the_rest_is_encoded_and_the_order_holds
     use std::sync::atomic::Ordering;
 
     let Some(ctx) = ctx() else { return };
-    nxkit_metal::set_commit_hook(note_commit);
     let mut ring = nxkit_metal::BatchRing::new(&ctx, 4).unwrap();
+    ring.set_hooks(Some(nxkit_metal::BatchHooks {
+        done: |_, _, _, _| {},
+        committed: note_commit,
+    }));
     let mut batch = ring.begin(4).unwrap();
     let number = batch.number();
     assert!(batch.stream_prefix(0).is_none());

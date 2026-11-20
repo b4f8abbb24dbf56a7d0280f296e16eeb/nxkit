@@ -46,6 +46,10 @@ pub struct GpuSettings {
     pub specialize: bool,
     /// What the start shows while it makes the pipelines of the runtime cache (the host's loading screen).
     pub prewarm_screen: crate::prewarm_screen::ScreenHook,
+    /// The hooks of the `frame` and `gateseq` traces for the batches, when one of them is on.
+    pub batch_hooks: Option<nxkit_nvn::diag::BatchHooks>,
+    /// The minimum stay of the presents that the host's refresh plan sets (timed presents).
+    pub timed_present: std::sync::Arc<nxkit_metal::TimedPresent>,
     /// What the screen showed of the presents. The backend writes it, the NVN present reads it (W26).
     pub screen: std::sync::Arc<nxkit_nvn::screen::Screen>,
 }
@@ -79,6 +83,8 @@ impl Default for GpuSettings {
             compile_bases: pipeline_bases(&Env::default()),
             specialize: pipeline_specialize(&Env::default()),
             prewarm_screen: crate::prewarm_screen::ScreenHook::default(),
+            batch_hooks: None,
+            timed_present: std::sync::Arc::default(),
             screen: std::sync::Arc::default(),
         }
     }
