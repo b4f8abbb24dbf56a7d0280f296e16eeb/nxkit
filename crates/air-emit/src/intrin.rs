@@ -170,6 +170,37 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
             g.emit(format!("{r} = sub i32 32, {leading}"));
             Ok(V { r, ty: ret.clone() })
         }
+        "reverse_bits" if *ret == Type::INT => {
+            let [x] = args.as_slice() else {
+                return Err(unsupported());
+            };
+            // Swap adjacent groups of 1, 2, 4, 8 and 16 bits. Each mask
+            // selects the low group in each pair.
+            const SWAPS: [(u32, u32); 5] = [
+                (1, 0x5555_5555),
+                (2, 0x3333_3333),
+                (4, 0x0f0f_0f0f),
+                (8, 0x00ff_00ff),
+                (16, 0x0000_ffff),
+            ];
+            let mut v = x.r.clone();
+            for (shift, mask) in SWAPS {
+                let hi = g.tmp();
+                g.emit(format!("{hi} = lshr i32 {v}, {shift}"));
+                let lo = g.tmp();
+                g.emit(format!("{lo} = and i32 {v}, {mask}"));
+                let lower = g.tmp();
+                g.emit(format!("{lower} = and i32 {hi}, {mask}"));
+                let upper = g.tmp();
+                g.emit(format!("{upper} = shl i32 {lo}, {shift}"));
+                v = g.tmp();
+                g.emit(format!("{v} = or i32 {lower}, {upper}"));
+            }
+            Ok(V {
+                r: v,
+                ty: ret.clone(),
+            })
+        }
         "simd_shuffle" => {
             let sg = match s {
                 Some(Scalar::Int) => "s.",
