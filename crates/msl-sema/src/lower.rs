@@ -552,6 +552,7 @@ impl Cx {
             A::Member { base, arrow, .. } => *arrow || self.is_place(base),
             A::Index { base, .. } => matches!(base.ty.strip(), Ty::Ptr(..)) || self.is_place(base),
             A::Swizzle { base, .. } => self.is_place(base),
+            A::Cond { .. } => matches!(e.ty, Ty::Ref(Space::Thread, _)),
             _ => false,
         }
     }
@@ -569,6 +570,26 @@ impl Cx {
         }
         match &e.kind {
             A::Paren(x) => self.place(x),
+            A::Cond { cond, then, els } if matches!(e.ty, Ty::Ref(Space::Thread, _)) => {
+                let c = self.cond(cond)?;
+                let yes = self.place(then)?;
+                let no = self.place(els)?;
+                if !matches!(yes.ty, Type::Vector(..))
+                    || yes.ty != no.ty
+                    || yes.space != Space::Thread
+                    || no.space != Space::Thread
+                {
+                    return Err(Error::unsupported("conditional-field-place"));
+                }
+                let ptr_ty = Type::Ptr(Space::Thread, Rc::new(yes.ty.clone()));
+                let yes = Expr::new(ExprKind::AddrOf(Box::new(yes)), ptr_ty.clone());
+                let no = Expr::new(ExprKind::AddrOf(Box::new(no)), ptr_ty.clone());
+                deref(Expr::new(
+                    ExprKind::Cond(Box::new(c), Box::new(yes), Box::new(no)),
+                    ptr_ty,
+                ))
+            }
+
             A::Var { name, scope } => match scope {
                 VarScope::Local => {
                     let id = self
@@ -792,7 +813,9 @@ impl Cx {
                     }
                 }
             }
-            A::Cond { cond, then, els } => {
+            A::Cond {
+                cond, then, els, ..
+            } => {
                 let c = self.cond(cond)?;
                 let a = conv(self.expr(then)?, &ty)?;
                 let b = conv(self.expr(els)?, &ty)?;

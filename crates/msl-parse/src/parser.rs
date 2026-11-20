@@ -1679,6 +1679,21 @@ impl<'a> Parser<'a> {
             if !p.lv {
                 return reject("assign-to-rvalue");
             }
+            // Keep the indexed-output change to simple assignment. A
+            // compound assignment would have to retain the same address
+            // across its read and write rather than recompute the choice.
+            fn conditional_field_lhs(e: &Expr) -> bool {
+                match &e.kind {
+                    ExprKind::Cond { .. } => matches!(e.ty, Ty::Ref(Space::Thread, _)),
+                    ExprKind::Paren(base)
+                    | ExprKind::Swizzle { base, .. }
+                    | ExprKind::Index { base, .. } => conditional_field_lhs(base),
+                    _ => false,
+                }
+            }
+            if op != "=" && conditional_field_lhs(&t) {
+                return reject("conditional-field-compound-assignment");
+            }
             let lhs_name = p.lvname.clone();
             let r = p.expr_assign()?;
             let bop = if op == "=" {
@@ -1729,10 +1744,39 @@ impl<'a> Parser<'a> {
             }
             p.cond(&c.ty)?;
             let a = p.expr_assign()?;
+            let a_lvalue = p.lv;
             p.expect(":")?;
             let b = p.expr_assign()?;
             let (ta, tb) = (a.ty.strip(), b.ty.strip());
-            p.lv = false;
+            // nxkit's indexed outputs select among ordinary local fields,
+            // not pointer dereferences, subscripts, or computed temporaries.
+            fn local_field(expr: &Expr) -> bool {
+                match &expr.kind {
+                    ExprKind::Member {
+                        base, arrow: false, ..
+                    } => matches!(
+                        base.kind,
+                        ExprKind::Var {
+                            scope: VarScope::Local,
+                            ..
+                        }
+                    ),
+                    ExprKind::Paren(inner) => local_field(inner),
+                    ExprKind::Cond { .. } => matches!(expr.ty, Ty::Ref(Space::Thread, _)),
+                    _ => false,
+                }
+            }
+            let field_place = a_lvalue
+                && p.lv
+                && a.ty == b.ty
+                && matches!(a.ty, Ty::Ref(Space::Thread, _))
+                && matches!(ta, Ty::Vec { .. })
+                && local_field(&a)
+                && local_field(&b);
+            p.lv = field_place;
+            if field_place {
+                p.lvname = None;
+            }
             p.stat("op:?")?;
             let ty = if ta == tb {
                 ta
@@ -1757,7 +1801,11 @@ impl<'a> Parser<'a> {
                     then: a,
                     els: b,
                 },
-                ty,
+                ty: if field_place {
+                    Ty::Ref(Space::Thread, Rc::new(ty))
+                } else {
+                    ty
+                },
                 span: p.span_from(start),
             })
         })

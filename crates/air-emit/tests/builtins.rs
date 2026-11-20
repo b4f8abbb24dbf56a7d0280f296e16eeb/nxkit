@@ -264,3 +264,56 @@ fn uint_ctz_lowers_with_existing_clz_and_one_operand_evaluation() {
     has(&ir, "sub i32 0, 1");
     has(&ir, "xor i32 0, -1");
 }
+
+#[test]
+fn conditional_vector_field_store_uses_selected_address_and_one_rhs() {
+    let ir = emit(
+        "struct O { float4 a; float4 b; float4 c; };
+         kernel void k(device float* p [[buffer(0)]], uint i [[thread_index_in_threadgroup]])
+         { O out = {}; (i == 0u ? out.a : i == 1u ? out.b : out.c).w = p[0]; p[1] = out.c.w; }",
+    );
+    assert_eq!(ir.matches("phi <4 x float>*").count(), 2, "{ir}");
+    assert_eq!(
+        ir.matches("load float, float addrspace(1)*").count(),
+        1,
+        "{ir}"
+    );
+    let phi = ir
+        .lines()
+        .rfind(|l| l.contains("phi <4 x float>*"))
+        .unwrap();
+    let addr = phi.trim().split_once(" = ").unwrap().0;
+    assert_eq!(
+        ir.lines()
+            .filter(|l| l.contains("store <4 x float>") && l.contains(addr))
+            .count(),
+        1,
+        "{ir}"
+    );
+}
+
+#[test]
+fn conditional_field_lvalue_does_not_admit_unrelated_forms() {
+    for (statement, key) in [
+        (
+            "(i == 0u ? out.a : float4(0.0f)).w = 1.0f;",
+            "assign-to-rvalue",
+        ),
+        (
+            "(i == 0u ? out.a : out.b).w += 1.0f;",
+            "conditional-field-compound-assignment",
+        ),
+        ("(i == 0u ? (*p).a : (*p).b).w = 1.0f;", "assign-to-rvalue"),
+    ] {
+        let source = format!(
+            "{PRE}struct O {{ float4 a; float4 b; }}; kernel void k(device O* p [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ O out = {{}}; {statement} }}"
+        );
+        assert_eq!(
+            compile_source(&source, &Target::macos(), "t.metal")
+                .unwrap_err()
+                .key(),
+            format!("unsupported:rejected:{key}"),
+            "{statement}"
+        );
+    }
+}
