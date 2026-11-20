@@ -32,8 +32,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   gone, and `xtask settings` fails on any `NXKIT_*` read outside the settings modules (79 reads through the global
   accessor before, 0 now).
 - The frame path is made of objects that the host owns: the present ring `nxkit_nvn::screen::Screen`, the refresh plan
-  `Refresh`, the command buffer seam of `nxkit-rt` and the present diagnostics of the GPU backend. The process-wide
-  statics of the runtime fall to 401 (`xtask/statics.txt` now also counts the settings slots).
+  `Refresh`, the timed presents `nxkit_metal::TimedPresent`, the command buffer seam of `nxkit-rt` and the present
+  diagnostics of the GPU backend. The batch hooks, the overlap key of `game.json` and the guest-write hook of the video
+  service are passed in when the parts are made. `set_done_hook`, `set_commit_hook`, `set_batch_hooks`,
+  `set_timed_present`, `set_screen_hz` and `set_guest_write_hook` are gone. The process-wide statics of the runtime fall
+  to 393 (`xtask/statics.txt` now also counts the settings slots). W33 says what may stay process-wide.
 - More module cycles are gone: the layer crop of `nxkit-rt` is its own module, `nxkit-metal` has small modules for the
   frame interval, the drawable, the hooks, the timed presents and the pass descriptor, and `nxkit-nvn` moved the
   counters, the render conditions, the decode cache, the record extensions and the texture life to their own places.

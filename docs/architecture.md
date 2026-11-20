@@ -200,13 +200,17 @@ window, and connects them. No other runtime crate reads an `NXKIT_*` variable fr
   take-overs, the NVN procs). Such a call carries no Rust context, and neither does a signal handler, a Metal
   completion handler or the AUHAL callback. Their state is a process-wide value that the host installs once at start
   (a `OnceLock` of the crate's context). The anchor of each crate says why at its definition (`// Process-wide
-  (W26): ...`), and `xtask statics` keeps the count of each runtime crate from growing (`xtask/statics.txt`, 401
-  after the second round). Counters and once-guards of the diagnostics are atomics next to the code they count.
+  (W26): ...`), and `xtask statics` keeps the count of each runtime crate from growing (`xtask/statics.txt`, 393
+  after the second round). W33 lists what may stay process-wide. Counters and once-guards of the diagnostics are atomics next to the code they count.
 - **The frame path is objects of the run.** The host makes them in `run` and passes them to the parts that use them.
   `nxkit_nvn::screen::Screen` holds what the screen showed of the presents: the GPU backend writes it, the NVN present
   of `nxkit-rt` and the refresh plan read it. `refresh::Refresh` plans the display link for the screen: the pacing
-  seam, the window delegate and the tick hook share it. The command buffer seam of `nxkit-rt` is a field of its `Gpu`,
-  and the diagnostics of the present path belong to the `GpuBackend`.
+  seam, the window delegate and the tick hook share it. The refresh plan owns the minimum stay of the presents
+  (`nxkit_metal::TimedPresent`), which the frame ring of the present blit reads. The batch hooks of the `frame` and
+  `gateseq` traces come from `nxkit-rt` through `GpuSettings` into the batch ring. The command buffer seam of `nxkit-rt`
+  is a field of its `Gpu`, the overlap key of `game.json` is a field of the backend, the GPU and the walker, and the
+  diagnostics of the present path belong to the `GpuBackend`. The video service gets its guest-write hook in its
+  `Config`.
 - **One source of settings.** `nxkit_abi::env::Env` is a snapshot of the `NXKIT_*` variables. `nxkit-host` takes it
   first thing in `run` (`Env::capture`) and parses it once into the typed settings of every runtime crate
   (`hostenv::RunSettings::from_env`). Each crate has a `settings.rs` with its keys, their defaults, their parsing and
