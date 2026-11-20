@@ -135,3 +135,26 @@ fn encoded_domain_preserves_real_control_points_and_partial_outputs() {
     }
     assert!(msl.contains("out.loc0 = float4(0.0, 0.0, 0.0, 1.0)"));
 }
+
+#[test]
+fn domain_does_not_accept_mesh_or_transform_feedback_metadata() {
+    let record = coordinate_record(SPH_DOMAIN, TRI_ODD_CCW);
+    let tf = Value::List(vec![Value::obj([
+        ("stride", Value::Int(4)),
+        (
+            "outputs",
+            Value::List(vec![Value::List(vec![Value::Int(0), Value::Int(1)])]),
+        ),
+    ])]);
+    for facts in [
+        Value::obj([("mesh_stage", Value::obj([("kind", Value::str("ms"))]))]),
+        Value::obj([("tf", tf)]),
+    ] {
+        let (j, code) = job("ds.bin", &record, Some(&facts));
+        let error = translate(&j, &code, &Context::default()).unwrap_err();
+        assert_eq!(
+            error.detail,
+            "unported: mesh or transform feedback metadata in a domain shader"
+        );
+    }
+}

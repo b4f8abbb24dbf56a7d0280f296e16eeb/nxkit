@@ -43,6 +43,11 @@ pub(super) fn translate_native(
     code: &[u8],
     ctx: &Context<'_>,
 ) -> Result<Translated, Failure> {
+    if job.mesh_stage.is_some() || job.tf.is_some() {
+        return Err(failure(
+            "unported: mesh or transform feedback metadata in a domain shader".into(),
+        ));
+    }
     let structured = structure_job(job, code).map_err(failure)?;
     if structured.props.definitions.stage != Some(crate::attr::Stage::TessellationEvaluation) {
         return Err(failure(
