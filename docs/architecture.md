@@ -200,15 +200,23 @@ window, and connects them. No other runtime crate reads an `NXKIT_*` variable fr
   take-overs, the NVN procs). Such a call carries no Rust context, and neither does a signal handler, a Metal
   completion handler or the AUHAL callback. Their state is a process-wide value that the host installs once at start
   (a `OnceLock` of the crate's context). The anchor of each crate says why at its definition (`// Process-wide
-  (W26): ...`), and `xtask statics` keeps the count of each runtime crate from growing (`xtask/statics.txt`, 443 on
-  0.11). Counters and once-guards of the diagnostics are atomics next to the code they count.
+  (W26): ...`), and `xtask statics` keeps the count of each runtime crate from growing (`xtask/statics.txt`, 401
+  after the second round). Counters and once-guards of the diagnostics are atomics next to the code they count.
+- **The frame path is objects of the run.** The host makes them in `run` and passes them to the parts that use them.
+  `nxkit_nvn::screen::Screen` holds what the screen showed of the presents: the GPU backend writes it, the NVN present
+  of `nxkit-rt` and the refresh plan read it. `refresh::Refresh` plans the display link for the screen: the pacing
+  seam, the window delegate and the tick hook share it. The command buffer seam of `nxkit-rt` is a field of its `Gpu`,
+  and the diagnostics of the present path belong to the `GpuBackend`.
 - **One source of settings.** `nxkit_abi::env::Env` is a snapshot of the `NXKIT_*` variables. `nxkit-host` takes it
-  first thing in `run` (`Env::capture`), installs it, and passes it to what it sets up: the memory profile, the guest
-  pages, the memory report, the refresh plan, the services (the console language), the crash report and
-  `GpuSettings` (archive shards, encode threads, scale, the pipeline bases and specialization). Code with no context
-  to carry it (a guest export, a switch deep in the encoder, an AppKit callback) reads the installed snapshot through
-  `nxkit_abi::env::var`. No runtime crate reads an `NXKIT_*` variable from the process, and `xtask settings` checks
-  this (W27). The one exception is the allocator hook of `nxkit-host` (`NXKIT_MEM_ALLOC`), which runs inside an
+  first thing in `run` (`Env::capture`) and parses it once into the typed settings of every runtime crate
+  (`hostenv::RunSettings::from_env`). Each crate has a `settings.rs` with its keys, their defaults, their parsing and
+  their docs in one place (`NvnSettings`, `RtSettings`, `GpuEnv`, `AudioSettings`, `VideoSettings`, `InputSettings`,
+  `PacingSettings`, the host's own `HostEnv`). The host passes them to what it builds. Code with no context to carry
+  them (a guest export, a switch deep in the encoder, an AppKit callback) reads the crate's settings through one
+  accessor, `settings()`, over a `nxkit_abi::env::Slot`. `RunSettings::install` fills the slots before any part is
+  built, and a slot that is filled twice, or that was read before it was filled, stops the run with an error. A unit
+  test reads the defaults. No code outside the settings modules reads an `NXKIT_*` variable, and `xtask settings`
+  checks this (W27). The one exception is the allocator hook of `nxkit-host` (`NXKIT_MEM_ALLOC`), which runs inside an
   allocation and uses libc `getenv`. [diagnostics.md](diagnostics.md) describes the variables of the diagnostics.
 
 ## Data flow of the stages

@@ -20,7 +20,7 @@ This document gives the architecture rules for a change to the workspace. Read [
 - Each stage crate has one owner. A change touches only the files of its own concern.
 - `cargo run -p xtask -- layers` and `cargo run -p xtask -- limits` examine these rules.
 - `cargo run -p xtask -- modules` makes sure that the module cycles inside a crate do not grow (W24). When you break a cycle, shrink `xtask/module-cycles.txt` as the command tells you. `cargo run -p xtask -- graph <crate>` shows the edges of each cycle.
-- A runtime crate reads its settings from `nxkit_abi::env` and never an `NXKIT_*` variable from the process (W27, `xtask settings`). A new process-wide static in a runtime crate needs a reason at the static and a higher number in `xtask/statics.txt` in the same commit (W26, `xtask statics`).
+- A runtime crate reads its `NXKIT_*` settings only in its `settings.rs`, from the snapshot that the host passes (W27, `xtask settings`). A new key goes there with its default and its doc. The rest of the crate reads the typed field. A new process-wide static in a runtime crate needs a reason at the static and a higher number in `xtask/statics.txt` in the same commit (W26, `xtask statics`).
 
 ## Errors, determinism and safety
 

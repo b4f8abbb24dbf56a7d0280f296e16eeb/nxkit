@@ -271,8 +271,10 @@ The host finds the guest functions in the export lists of the modules. A missing
 ## Startup order
 
 `nxkit-host` is the composition root of the runtime (W26): it builds every part and connects them. Before any step it
-takes the one snapshot of the `NXKIT_*` environment (`nxkit_abi::env`, W27), installs it and passes it to the steps
-below.
+takes the one snapshot of the `NXKIT_*` environment (`nxkit_abi::env`, W27) and parses it into the typed settings of
+every crate (`hostenv::RunSettings`). It installs those that code with no context reads, and an error there stops the
+run. It passes the rest to the steps below. After the placement it makes the objects of the frame path, the present
+ring (`Screen`) and the refresh plan (`Refresh`), and passes them to the services, the GPU backend and the window.
 
 1. Read `game.json`.
 2. Place the modules and call `nxkit_abi::guest::set_range`.

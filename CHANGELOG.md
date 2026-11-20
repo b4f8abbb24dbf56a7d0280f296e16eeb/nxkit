@@ -25,6 +25,19 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `nxkit-host` and passed to the parts it builds (W27). `xtask settings` fails on a direct read in a runtime crate.
   `xtask statics` counts the process-wide statics of each runtime crate (443) and lets the number only fall, and the
   anchor static of each crate says why it is process-wide (W26).
+- Every runtime crate has typed settings in its `settings.rs`: the keys, the defaults, the parsing and the docs in one
+  place. `nxkit-host` parses all of them once from the snapshot (`RunSettings`) and passes them. Code with no context
+  reads its crate's settings through one accessor over `nxkit_abi::env::Slot`. A second install, or a read before the
+  install, stops the run with an error instead of taking a snapshot of its own. The global `nxkit_abi::env::var` is
+  gone, and `xtask settings` fails on any `NXKIT_*` read outside the settings modules (79 reads through the global
+  accessor before, 0 now).
+- The frame path is made of objects that the host owns: the present ring `nxkit_nvn::screen::Screen`, the refresh plan
+  `Refresh`, the command buffer seam of `nxkit-rt` and the present diagnostics of the GPU backend. The process-wide
+  statics of the runtime fall to 401 (`xtask/statics.txt` now also counts the settings slots).
+- More module cycles are gone: the layer crop of `nxkit-rt` is its own module, `nxkit-metal` has small modules for the
+  frame interval, the drawable, the hooks, the timed presents and the pass descriptor, and `nxkit-nvn` moved the
+  counters, the render conditions, the decode cache, the record extensions and the texture life to their own places.
+  From 21 cycle groups with 70 modules to 14 groups with 48 modules.
 - `nxkit-gpu` takes the loading screen of the start in `GpuSettings::prewarm_screen` (`set_prewarm_screen` is gone), and
   `nxkit-rt` takes the NVN command settings in `nvn::Settings::commands` (`set_command_settings` is gone).
 - The thread roles of a title are words of the title API (`nxtitle::threads`). The BotW title no longer depends on the
