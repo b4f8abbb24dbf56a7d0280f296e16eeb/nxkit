@@ -421,6 +421,7 @@ fn samples(
                 Stage::Fragment => "fs",
                 Stage::Mesh => "ms",
                 Stage::Task => "ts",
+                Stage::TessEvaluation => "ds",
                 Stage::Vertex => "vs",
                 Stage::Compute => continue,
             };

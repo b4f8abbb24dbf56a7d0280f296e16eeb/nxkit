@@ -104,6 +104,12 @@ pub struct GpuBackend {
     blit: Mutex<Option<Blit>>,
     pacer: OnceLock<Arc<Pacer>>,
     reports: AtomicU64,
+    #[cfg(test)]
+    test_encode_stats: Mutex<Option<crate::stats::EncodeStats>>,
+    #[cfg(test)]
+    test_submitted: Mutex<Option<nxkit_metal::SubmittedBatch>>,
+    #[cfg(test)]
+    test_walk_counters: Mutex<Option<crate::walk::WalkCounters>>,
     /// The timestamp reports of encoded frames that the GPU has not been seen to finish, with the fence of their
     /// frame. [`GpuBackend::drain`] writes them.
     counters: Mutex<Vec<(u64, crate::detail::CounterReport)>>,
@@ -204,6 +210,12 @@ impl GpuBackend {
                 blit: Mutex::new(None),
                 pacer: OnceLock::new(),
                 reports: AtomicU64::new(0),
+                #[cfg(test)]
+                test_encode_stats: Mutex::new(None),
+                #[cfg(test)]
+                test_submitted: Mutex::new(None),
+                #[cfg(test)]
+                test_walk_counters: Mutex::new(None),
                 counters: Mutex::new(Vec::new()),
                 queries: Mutex::new(Vec::new()),
                 ts: Mutex::new(gputs::Clock::default()),
@@ -334,6 +346,11 @@ impl GpuBackend {
             );
             (r, gpu.last_submitted())
         };
+        // Copy-back can consume Gpu::last before the test observes this submission.
+        #[cfg(test)]
+        {
+            *locked(&self.test_submitted) = submitted.clone();
+        }
         crate::private::encoded(job.fence.0, submitted.as_ref());
         self.events
             .hold(job.fence.0, &job.detail.reports, submitted.as_ref());
@@ -401,6 +418,11 @@ impl GpuBackend {
             let r = gpu.encode_frame(frame, plan, &view, pools, detail, self.scale);
             (r, gpu.last_submitted())
         };
+        // Copy-back can consume Gpu::last before the test observes this submission.
+        #[cfg(test)]
+        {
+            *locked(&self.test_submitted) = submitted.clone();
+        }
         crate::private::encoded(fence.0, submitted.as_ref());
         self.events
             .hold(fence.0, &detail.reports, submitted.as_ref());
@@ -448,6 +470,10 @@ impl GpuBackend {
 
     /// Prints the diagnostics of a finished encode.
     fn note_report(&self, report: &EncodeReport) {
+        #[cfg(test)]
+        {
+            *locked(&self.test_encode_stats) = Some(report.stats);
+        }
         let n = self.reports.fetch_add(1, Ordering::Relaxed);
         crate::pipelines::frame_done(n);
         if crate::diag("memory") && n.is_multiple_of(120) {

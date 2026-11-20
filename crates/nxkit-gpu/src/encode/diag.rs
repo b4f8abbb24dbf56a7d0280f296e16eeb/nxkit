@@ -108,6 +108,7 @@ pub(super) fn ubo_dump_draw(sh: &Shared<'_>, n: u32, d: &crate::detail::DrawDeta
             crate::detail::Stage::Vertex => "vs",
             crate::detail::Stage::Mesh => "ms",
             crate::detail::Stage::Task => "ts",
+            crate::detail::Stage::TessEvaluation => "ds",
             crate::detail::Stage::Compute => "cs",
         };
         {

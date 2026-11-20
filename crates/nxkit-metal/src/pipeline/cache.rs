@@ -324,6 +324,33 @@ impl PipelineCache {
         Ok((p, Source::Compiled(t0.elapsed())))
     }
 
+    /// Compiles a vertex capture pipeline with rasterization disabled. The caller must give
+    /// this pipeline a distinct key from ordinary raster pipelines. It is not read from an archive.
+    pub fn render_capture(
+        &self,
+        key: u64,
+        desc: &RenderPipelineDesc<'_>,
+    ) -> Result<RenderPipeline> {
+        if desc.fragment.is_some() || desc.support_icb {
+            return Err(MetalError::Invalid(
+                "a vertex capture pipeline cannot have a fragment or use an ICB",
+            ));
+        }
+        if let Some(Entry::Render(p)) = self.lookup(key)? {
+            return Ok(p);
+        }
+        let d = self.render_descriptor(desc)?;
+        d.setRasterizationEnabled(false);
+        let raw = self
+            .generation()
+            .compiler
+            .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&d, Some(&self.options))
+            .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
+        let pipeline = RenderPipeline { raw };
+        self.insert(key, Entry::Render(pipeline.clone()))?;
+        Ok(pipeline)
+    }
+
     /// The render pipeline for `key`. The first call compiles it.
     pub fn render(&self, key: u64, desc: &RenderPipelineDesc<'_>) -> Result<RenderPipeline> {
         self.render_traced(key, desc).map(|r| r.0)

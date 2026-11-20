@@ -62,6 +62,15 @@ const MESH: usize = 4;
 /// compute.
 const MESH_TEXTURES: usize = 3;
 
+/// Explicit patch settings. Hold float bits to preserve the input and cache-key equality.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PatchState {
+    size: Option<u32>,
+    inner: Option<[u32; 2]>,
+    outer: Option<[u32; 4]>,
+    restart: bool,
+}
+
 /// The state of one queue between its draws.
 #[derive(Clone, PartialEq)]
 pub(super) struct State {
@@ -88,6 +97,7 @@ pub(super) struct State {
     image: [u64; TEXTURE_SLOTS],
     /// `SetCopyRowStride` and `SetCopyImageStride` of the command buffer. 0 is tightly packed.
     copy_strides: [u64; 2],
+    patch: PatchState,
     /// The push constants of the graphics and the compute stages (bank 24, 0x100 bytes each), shared until changed.
     push: [Option<std::sync::Arc<[u8]>>; 2],
 }
@@ -115,6 +125,7 @@ impl Default for State {
             texture: [NO_HANDLE; TEXTURE_SLOTS],
             image: [NO_HANDLE; TEXTURE_SLOTS],
             copy_strides: [0; 2],
+            patch: PatchState::default(),
             push: [None, None],
         }
     }
@@ -471,6 +482,7 @@ pub(crate) fn empty_draw() -> DrawDetail {
         depth_stencil: Default::default(),
         raster: Default::default(),
         topology: 4,
+        patch: None,
         attributes: Vec::new(),
         streams: Vec::new(),
         args: DrawArgs::Arrays {

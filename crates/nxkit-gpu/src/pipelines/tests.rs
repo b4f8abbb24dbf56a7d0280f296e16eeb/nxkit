@@ -26,6 +26,9 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
     let stage = |entry: &str| StageProgram {
         lib: lib.clone(),
         entry: entry.into(),
+        entry_geometry_capture: None,
+        domain_replay: false,
+        domain_replay_indexed: false,
         entry_uint: None,
         entry_mixed: None,
         binds: vec![],
@@ -52,6 +55,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         depth_stencil: Default::default(),
         raster: Default::default(),
         topology: 4,
+        patch: None,
         attributes: vec![],
         streams: vec![],
         args: DrawArgs::Arrays {
