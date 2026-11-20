@@ -373,7 +373,8 @@ impl GpuBackend {
                 let result = self.lock_gpu().wait_older();
                 match result {
                     Ok(Some(stats)) => {
-                        nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                        self.screen
+                            .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                     }
                     Ok(None) => {}
                     Err(_) => return WaitResult::Failed,
@@ -413,7 +414,8 @@ impl GpuBackend {
                     return WaitResult::Failed;
                 }
                 if let Some((_, stats)) = finished.last() {
-                    nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                    self.screen
+                        .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                 }
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
@@ -500,7 +502,8 @@ impl GpuBackend {
                 return false;
             }
             if let Some((_, stats)) = finished.last() {
-                nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                self.screen
+                    .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
             }
             self.write_counters(older, &finished);
             self.done.fetch_max(older, Ordering::AcqRel);
@@ -511,7 +514,8 @@ impl GpuBackend {
             return false;
         }
         if let Some((_, stats)) = finished.last() {
-            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            self.screen
+                .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         self.write_counters(older, &finished);
         self.done.fetch_max(older, Ordering::AcqRel);
@@ -528,7 +532,8 @@ impl GpuBackend {
         }
         let (finished, ok) = self.finish_batches(upto);
         if let Some((_, stats)) = finished.last() {
-            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            self.screen
+                .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         self.write_counters(upto, &finished);
         if ok {

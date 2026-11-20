@@ -118,6 +118,8 @@ struct State {
     tried: Vec<(u32, u32)>,
     /// The measured rates already reported, rounded to Hz.
     reported: u32,
+    /// What the screen showed of the presents: the refresh tells it the rate of the screen (W26).
+    screen: Option<std::sync::Arc<nxkit_nvn::screen::Screen>>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -137,6 +139,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     announced: String::new(),
     tried: Vec::new(),
     reported: 0,
+    screen: None,
 });
 
 /// The number of [`apply`] calls. The tick hook measures anew when it changes.
@@ -154,8 +157,10 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 }
 
 /// Sets what is asked for. The host calls it once before the window opens.
-pub fn configure(request: Request) {
-    state().request = request;
+pub fn configure(request: Request, screen: std::sync::Arc<nxkit_nvn::screen::Screen>) {
+    let mut st = state();
+    st.request = request;
+    st.screen = Some(screen);
 }
 
 /// Tells the module that the game asks to step by the measured frame time (`StepMode::Variable`) with this target, or
@@ -207,6 +212,7 @@ fn refresh_of(facts: &ScreenFacts) -> (f64, &'static str) {
 /// timed presents on or off and prints one line when the screen, the rate or the plan changed. Returns the plan.
 pub fn apply(facts: &ScreenFacts) -> TickPlan {
     let mut st = state();
+    let st_screen = st.screen.clone();
     let req = st.request;
     let mut note = String::new();
     if let (Some(want), Some(id)) = (req.set_refresh, facts.display)
@@ -246,13 +252,16 @@ pub fn apply(facts: &ScreenFacts) -> TickPlan {
         },
     );
     nxkit_svc_pacing::set_screen_hz(hz.round() as u32);
-    nxkit_nvn::screen::set_refresh_hz(if let Some(r) = vrr {
+    let refresh_hz = if let Some(r) = vrr {
         f64::from(r.preferred)
     } else if facts.adaptive {
         f64::from(plan.link_hz)
     } else {
         hz
-    });
+    };
+    if let Some(screen) = &st_screen {
+        screen.set_refresh_hz(refresh_hz);
+    }
     // The game's time follows the frames the display shows, not the starts of frames.
     nxkit_svc_pacing::set_step_by_shown(vrr.is_some());
     if let (Some(target), Some(grid)) = (st.variable_target, st.grid_step)

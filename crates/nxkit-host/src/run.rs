@@ -116,8 +116,15 @@ pub fn run(opts: &Options) -> Result<()> {
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
-    crate::refresh::configure(crate::refresh::Request::from_settings(&settings, env));
-    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings, &run)?;
+    // What the screen showed of the presents: the backend writes it, the NVN present and the refresh use it (W26).
+    let screen = Arc::new(nxkit_nvn::screen::Screen::new(Some(
+        crate::frames::shown_to_step,
+    )));
+    crate::refresh::configure(
+        crate::refresh::Request::from_settings(&settings, env),
+        screen.clone(),
+    );
+    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings, &run, &screen)?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,

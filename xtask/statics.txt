@@ -9,12 +9,12 @@ nxkit-gpu: 131
 nxkit-hos: 19
 nxkit-host: 17
 nxkit-metal: 22
-nxkit-nvn: 42
-nxkit-rt: 68
+nxkit-nvn: 32
+nxkit-rt: 67
 nxkit-svc-audio: 19
 nxkit-svc-fs: 4
 nxkit-svc-input: 11
 nxkit-svc-offline: 1
-nxkit-svc-pacing: 5
+nxkit-svc-pacing: 4
 nxkit-svc-system: 54
 nxkit-svc-video: 24

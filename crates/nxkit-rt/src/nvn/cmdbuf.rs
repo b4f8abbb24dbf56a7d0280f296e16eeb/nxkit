@@ -27,7 +27,7 @@ mod seam;
 mod set;
 mod xfer;
 
-pub(crate) use seam::{Seam, set_seam};
+pub(crate) use seam::Seam;
 
 /// Whether a recording waited for a sync or an event, or signalled an event: the submits then go through the gate of
 /// the queues (`ctx::gate`).

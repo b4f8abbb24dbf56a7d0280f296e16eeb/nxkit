@@ -90,6 +90,8 @@ pub struct GpuBackend {
     invalidations: Arc<Invalidations>,
     /// The counters of `NXKIT_DIAG=overlap`.
     overlap: crate::overlap::Overlap,
+    /// What the screen showed of the presents, shared with the NVN present (W26).
+    screen: Arc<nxkit_nvn::screen::Screen>,
     /// The storage ranges that the overlap renames per frame: learned and captured at the flush, written back in a CPU
     /// wait (`rename`). The encoder owns the same object.
     rename: Arc<crate::rename::Renamer>,
@@ -194,6 +196,7 @@ impl GpuBackend {
                 invalidations,
                 overlap: crate::overlap::Overlap::default(),
                 rename,
+                screen: settings.screen.clone(),
                 scale: settings.scale,
                 encoded: AtomicU64::new(0),
                 done: AtomicU64::new(0),
@@ -244,7 +247,8 @@ impl GpuBackend {
         let result = gpu.wait();
         drop(gpu);
         if let Ok(Some(stats)) = &result {
-            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            self.screen
+                .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         let (finished, ok) = self.finish_batches(upto);
         self.write_counters(upto, &finished);

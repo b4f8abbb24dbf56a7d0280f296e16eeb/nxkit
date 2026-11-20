@@ -26,6 +26,7 @@ pub(crate) fn on() -> bool {
 }
 
 /// The `overlap` key of `game.json`, set once when the backend is made.
+// Process-wide (W26): the walk and the frame steps ask for it deep in code that has no backend to carry it.
 static SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Turns the overlap on for this run (`game.json` key `overlap`).

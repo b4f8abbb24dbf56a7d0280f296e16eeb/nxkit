@@ -101,6 +101,8 @@ pub struct Settings {
     pub commands: super::CommandSettings,
     /// The settings of the procs from the `NXKIT_*` environment.
     pub env: crate::settings::RtSettings,
+    /// What the screen showed of the presents: the backend writes it, the present reads it (W26).
+    pub screen: std::sync::Arc<nxkit_nvn::screen::Screen>,
 }
 
 impl Default for Settings {
@@ -113,6 +115,7 @@ impl Default for Settings {
             clock_ns: nxkit_hos::sys::monotonic_ns,
             commands: super::CommandSettings::default(),
             env: crate::settings::RtSettings::default(),
+            screen: std::sync::Arc::default(),
         }
     }
 }
@@ -155,7 +158,6 @@ pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), Inst
             g.guest_wrote_deferred(addr, len);
         }
     });
-    super::wire::wire();
     Ok(())
 }
 
@@ -191,6 +193,8 @@ pub(crate) struct Gpu {
     space: LinearSpace,
     backend: Arc<dyn Backend>,
     settings: Settings,
+    /// What the command buffer group needs of the texture and sampler groups (`nvn/wire.rs`).
+    pub(crate) seam: &'static dyn super::cmdbuf::Seam,
     flushed: AtomicU64,
     /// The work that waits for a signal of another queue (`gate`). Taken after the front lock, never before it.
     gate: Mutex<gate::Gate>,
@@ -231,6 +235,7 @@ impl Gpu {
             space,
             backend,
             settings,
+            seam: &super::wire::WIRED,
             flushed: AtomicU64::new(0),
             gate: Mutex::new(gate::Gate::new(env.queue_order)),
             release_flush: order::ReleaseFlush {

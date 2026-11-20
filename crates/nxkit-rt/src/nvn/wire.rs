@@ -4,10 +4,10 @@
 //! the GPU address of a texture from the guest `NVNtexture`, so none of the three answers takes a lock.
 
 use super::abi::AbiResult;
-use super::cmdbuf::{Seam, set_seam};
+use super::cmdbuf::Seam;
 use super::{sampler, texture};
 
-struct Wired;
+pub(super) struct Wired;
 
 impl Seam for Wired {
     fn texture_pool_base(&self, pool: u64) -> AbiResult<u32> {
@@ -27,9 +27,5 @@ impl Seam for Wired {
     }
 }
 
-static WIRED: Wired = Wired;
-
-/// Sets the seam. A second call changes nothing.
-pub(super) fn wire() {
-    set_seam(&WIRED);
-}
+/// The seam of the context: the texture and sampler groups of this crate.
+pub(super) static WIRED: Wired = Wired;

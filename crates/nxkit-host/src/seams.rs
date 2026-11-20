@@ -332,6 +332,7 @@ pub fn frame_hooks(
     root: &std::path::Path,
     settings: &Settings,
     run: &crate::hostenv::RunSettings,
+    screen: &Arc<nxkit_nvn::screen::Screen>,
 ) -> Result<Arc<dyn FrameHooks>> {
-    crate::frames::install(ctx, memory, root, settings, run)
+    crate::frames::install(ctx, memory, root, settings, run, screen)
 }

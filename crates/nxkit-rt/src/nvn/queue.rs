@@ -189,28 +189,29 @@ extern "C" fn queue_finish(_q: u64) {
 /// presents of the game queue up to [`nxkit_gpu`]'s `MAX_PENDING` ahead of the screen, so a frame that runs long is
 /// absorbed, and only the screen says whether the game was late. The interval between presents `n - 1` and `n` shows
 /// frame `n - 1`: it is judged against the larger hold of the two, at least one 60 Hz vsync.
-fn snap_view(presents: u64) -> Option<nxkit_svc_pacing::load::SnapView> {
+fn snap_view(
+    screen: &nxkit_nvn::screen::Screen,
+    presents: u64,
+) -> Option<nxkit_svc_pacing::load::SnapView> {
     let n = presents.checked_sub(8).filter(|n| *n > 1)?;
-    let k = nxkit_nvn::screen::hold(n)
-        .max(nxkit_nvn::screen::hold(n - 1))
-        .max(1);
+    let k = screen.hold(n).max(screen.hold(n - 1)).max(1);
     Some(nxkit_svc_pacing::load::SnapView {
-        presented: nxkit_nvn::screen::shown_at(n),
-        before: nxkit_nvn::screen::shown_at(n - 1),
+        presented: screen.shown_at(n),
+        before: screen.shown_at(n - 1),
         expect_ms: f64::from(k) * 1000.0 / 60.0,
     })
 }
 
 /// Tells the frame step that a frame was presented, and logs what it decided: the hold of the frames on screen and the
 /// step that the game gets, and every 1800 presents the game time against the real time.
-fn pace_present(now_ns: u64) {
+fn pace_present(screen: &nxkit_nvn::screen::Screen, now_ns: u64) {
     static PRESENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let presents = PRESENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let sample = nxkit_svc_pacing::PresentSample {
         presents,
         now_ns,
-        gpu_ms: nxkit_nvn::screen::gpu_ms(),
-        snap: snap_view(presents),
+        gpu_ms: screen.gpu_ms(),
+        snap: snap_view(screen, presents),
         screen_hz: nxkit_svc_pacing::screen_hz(),
         link_active: true,
         movie: false,
@@ -222,7 +223,7 @@ fn pace_present(now_ns: u64) {
         return;
     };
     if let Ok(k) = nxkit_svc_pacing::hold() {
-        nxkit_nvn::screen::set_hold(presents, u32::try_from(k).unwrap_or(0));
+        screen.set_hold(presents, u32::try_from(k).unwrap_or(0));
     }
     for e in done.outcome.iter().flat_map(|o| &o.events) {
         match e {
@@ -281,7 +282,7 @@ fn present_texture_in(_q: u64, w: u64, index: i32) {
             interval: view.interval,
             crop,
         })?;
-        pace_present((g.settings().clock_ns)());
+        pace_present(&g.settings().screen, (g.settings().clock_ns)());
         Ok(())
     });
 }

@@ -46,6 +46,8 @@ pub struct GpuSettings {
     pub specialize: bool,
     /// What the start shows while it makes the pipelines of the runtime cache (the host's loading screen).
     pub prewarm_screen: crate::prewarm_screen::ScreenHook,
+    /// What the screen showed of the presents. The backend writes it, the NVN present reads it (W26).
+    pub screen: std::sync::Arc<nxkit_nvn::screen::Screen>,
 }
 
 /// [`GpuSettings::compile_bases`] from the settings of the host (`NXKIT_PIPELINE_BASES`).
@@ -77,6 +79,7 @@ impl Default for GpuSettings {
             compile_bases: pipeline_bases(&Env::default()),
             specialize: pipeline_specialize(&Env::default()),
             prewarm_screen: crate::prewarm_screen::ScreenHook::default(),
+            screen: std::sync::Arc::default(),
         }
     }
 }

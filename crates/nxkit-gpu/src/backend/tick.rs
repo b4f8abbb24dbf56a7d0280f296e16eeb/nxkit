@@ -42,7 +42,7 @@ impl TickSink for GpuBackend {
                 (p.texture, p.crop, p.origin_lower_left)
             });
             for p in pending.iter().filter(|p| p.number < number) {
-                nxkit_nvn::screen::shown(p.number, -1.0);
+                self.screen.shown(p.number, -1.0);
             }
             pending.retain(|p| p.number > number);
             self.shown_upto.fetch_max(number, Ordering::AcqRel);
@@ -94,8 +94,9 @@ impl TickSink for GpuBackend {
             return;
         };
         if matches!(shown, Shown::Game { .. }) {
+            let screen = self.screen.clone();
             tick.drawable
-                .on_presented(move |secs| nxkit_nvn::screen::shown(number, secs));
+                .on_presented(move |secs| screen.shown(number, secs));
         }
         let r = b.present(
             &texture,
