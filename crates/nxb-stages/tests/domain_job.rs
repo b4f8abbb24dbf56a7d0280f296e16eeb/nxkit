@@ -17,7 +17,7 @@ use fixture::{
     SPH_VERTEX, TRI_ODD_CCW, coordinate_record,
 };
 
-fn job(package: &str, rec: &[u8], facts: Option<&Value>) -> (Job, Vec<u8>) {
+fn job(package: &str, rec: &[u8], facts: Option<&Value>) -> Result<(Job, Vec<u8>), String> {
     let j = job_for(
         "0123456789abcdef",
         package,
@@ -26,18 +26,21 @@ fn job(package: &str, rec: &[u8], facts: Option<&Value>) -> (Job, Vec<u8>) {
         "x.bin",
         JobOptions::default(),
     )
-    .unwrap();
-    let ctl_at = rec.windows(4).position(|w| w == CTL_MAGIC).unwrap();
-    let job = Job::from_value(&j.json).unwrap();
+    .map_err(|error| error.to_string())?;
+    let ctl_at = rec
+        .windows(4)
+        .position(|w| w == CTL_MAGIC)
+        .ok_or("fixture has no control section")?;
+    let job = Job::from_value(&j.json)?;
     if !job.arch_sm86 {
         assert_eq!(j.code, rec[CODE_START..ctl_at]);
     }
-    (job, j.code)
+    Ok((job, j.code))
 }
 
 #[test]
-fn original_domain_uses_the_normal_base_library() {
-    let (j, code) = job("ds.bin", &coordinate_record(SPH_DOMAIN, TRI_ODD_CCW), None);
+fn original_domain_uses_the_normal_base_library() -> Result<(), String> {
+    let (j, code) = job("ds.bin", &coordinate_record(SPH_DOMAIN, TRI_ODD_CCW), None)?;
     assert_eq!(j.nvn_domain_mode, Some(TRI_ODD_CCW));
     let t = translate(
         &j,
@@ -55,10 +58,11 @@ fn original_domain_uses_the_normal_base_library() {
     assert!(lib.msl.contains("dm_points[dm_vertex].coord[0]"));
     assert!(lib.msl.contains("vertex main0_out main0("));
     assert_eq!(lib.reflection.as_ref().unwrap().stage, "ds");
+    Ok(())
 }
 
 #[test]
-fn unsupported_missing_or_spoofed_control_does_not_translate() {
+fn unsupported_missing_or_spoofed_control_does_not_translate() -> Result<(), String> {
     let ctx = Context::default();
     let fake = Value::obj([
         (
@@ -72,7 +76,7 @@ fn unsupported_missing_or_spoofed_control_does_not_translate() {
     for field in 0..TRI_ODD_CCW.len() {
         let mut mode = TRI_ODD_CCW;
         mode[field] ^= 1;
-        let (j, code) = job("ds.bin", &coordinate_record(SPH_DOMAIN, mode), Some(&fake));
+        let (j, code) = job("ds.bin", &coordinate_record(SPH_DOMAIN, mode), Some(&fake))?;
         assert_eq!(j.nvn_domain_mode, Some(mode));
         assert_eq!(j.stage, "ds");
         assert!(!j.arch_sm86);
@@ -86,7 +90,7 @@ fn unsupported_missing_or_spoofed_control_does_not_translate() {
 
     let mut no_mode = coordinate_record(SPH_DOMAIN, TRI_ODD_CCW);
     no_mode.pop();
-    let (j, code) = job("ds.bin", &no_mode, Some(&fake));
+    let (j, code) = job("ds.bin", &no_mode, Some(&fake))?;
     assert_eq!(j.nvn_domain_mode, None);
     assert!(
         translate(&j, &code, &ctx)
@@ -98,7 +102,7 @@ fn unsupported_missing_or_spoofed_control_does_not_translate() {
     let mut nvn2 = coordinate_record(SPH_DOMAIN, TRI_ODD_CCW);
     let at = nvn2.len() - CONTROL_LEN + CTL_VERSION_OFFSET;
     nvn2[at..at + 4].copy_from_slice(&NVN2_CTL_VERSION.to_le_bytes());
-    let (j, code) = job("ds.bin", &nvn2, Some(&fake));
+    let (j, code) = job("ds.bin", &nvn2, Some(&fake))?;
     assert!(
         translate(&j, &code, &ctx)
             .unwrap_err()
@@ -106,7 +110,7 @@ fn unsupported_missing_or_spoofed_control_does_not_translate() {
             .contains("tessellation evaluation shader")
     );
 
-    let (j, code) = job("ds.bin", &coordinate_record(SPH_VERTEX, TRI_ODD_CCW), None);
+    let (j, code) = job("ds.bin", &coordinate_record(SPH_VERTEX, TRI_ODD_CCW), None)?;
     assert!(
         translate(&j, &code, &ctx)
             .unwrap_err()
@@ -114,18 +118,19 @@ fn unsupported_missing_or_spoofed_control_does_not_translate() {
             .contains("domain shader header")
     );
 
-    let (j, code) = job("hs.bin", &coordinate_record(SPH_HULL, TRI_ODD_CCW), None);
+    let (j, code) = job("hs.bin", &coordinate_record(SPH_HULL, TRI_ODD_CCW), None)?;
     assert!(
         translate(&j, &code, &ctx)
             .unwrap_err()
             .detail
             .contains("tessellation control")
     );
+    Ok(())
 }
 
 #[test]
-fn encoded_domain_preserves_real_control_points_and_partial_outputs() {
-    let (j, code) = job("ds.bin", &fixture::record(&fixture::ds_partial_x()), None);
+fn encoded_domain_preserves_real_control_points_and_partial_outputs() -> Result<(), String> {
+    let (j, code) = job("ds.bin", &fixture::record(&fixture::ds_partial_x()), None)?;
     let t = translate(&j, &code, &Context::default()).unwrap();
     let msl = &t.libraries[0].msl;
     for cp in 0..3 {
@@ -134,10 +139,11 @@ fn encoded_domain_preserves_real_control_points_and_partial_outputs() {
         }
     }
     assert!(msl.contains("out.loc0 = float4(0.0, 0.0, 0.0, 1.0)"));
+    Ok(())
 }
 
 #[test]
-fn domain_does_not_accept_mesh_or_transform_feedback_metadata() {
+fn domain_does_not_accept_mesh_or_transform_feedback_metadata() -> Result<(), String> {
     let record = coordinate_record(SPH_DOMAIN, TRI_ODD_CCW);
     let tf = Value::List(vec![Value::obj([
         ("stride", Value::Int(4)),
@@ -150,11 +156,12 @@ fn domain_does_not_accept_mesh_or_transform_feedback_metadata() {
         Value::obj([("mesh_stage", Value::obj([("kind", Value::str("ms"))]))]),
         Value::obj([("tf", tf)]),
     ] {
-        let (j, code) = job("ds.bin", &record, Some(&facts));
+        let (j, code) = job("ds.bin", &record, Some(&facts))?;
         let error = translate(&j, &code, &Context::default()).unwrap_err();
         assert_eq!(
             error.detail,
             "unported: mesh or transform feedback metadata in a domain shader"
         );
     }
+    Ok(())
 }
