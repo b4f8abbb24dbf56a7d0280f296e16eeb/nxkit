@@ -245,3 +245,22 @@ fn ballot_and_threadgroup_atomics_reject_invalid_forms() {
         assert!(compile_source(&source, &Target::macos(), "t").is_err(), "{body}");
     }
 }
+
+#[test]
+fn uint_ctz_lowers_with_existing_clz_and_one_operand_evaluation() {
+    let ir = emit(
+        "kernel void k(device uint* p [[buffer(0)]])
+         { p[0] = min(ctz(uint(p[1])), 15u);
+           p[2] = ctz(0u);
+           p[3] = ctz(1u);
+           p[4] = ctz(0x80000000u);
+           p[5] = ctz(12u); }",
+    );
+    assert_eq!(ir.matches("load i32,").count(), 1, "{ir}");
+    assert_eq!(ir.matches("call i32 @air.clz.i32").count(), 5, "{ir}");
+    assert!(!ir.contains("@air.ctz"), "{ir}");
+    has(&ir, "declare i32 @air.clz.i32(i32, i1)");
+    has(&ir, "sub i32 32,");
+    has(&ir, "sub i32 0, 1");
+    has(&ir, "xor i32 0, -1");
+}

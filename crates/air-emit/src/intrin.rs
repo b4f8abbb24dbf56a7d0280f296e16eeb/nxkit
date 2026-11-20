@@ -146,6 +146,30 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
             );
             Ok(V { r, ty: ret.clone() })
         }
+        "ctz" if *ret == Type::UINT => {
+            let [x] = args.as_slice() else {
+                return Err(unsupported());
+            };
+            // (x - 1) & ~x is a mask of the trailing zero bits. With wrapping
+            // subtraction the zero input yields an all-ones mask and returns 32.
+            let prev = g.tmp();
+            g.emit(format!("{prev} = sub i32 {}, 1", x.r));
+            let inv = g.tmp();
+            g.emit(format!("{inv} = xor i32 {}, -1", x.r));
+            let mask = g.tmp();
+            g.emit(format!("{mask} = and i32 {prev}, {inv}"));
+            let leading = call(
+                g,
+                "air.clz.i32",
+                &[("i32".into(), mask), ("i1".into(), "false".into())],
+                "i32",
+                Attrs::ReadNone,
+                false,
+            );
+            let r = g.tmp();
+            g.emit(format!("{r} = sub i32 32, {leading}"));
+            Ok(V { r, ty: ret.clone() })
+        }
         "simd_shuffle" => {
             let sg = match s {
                 Some(Scalar::Int) => "s.",
