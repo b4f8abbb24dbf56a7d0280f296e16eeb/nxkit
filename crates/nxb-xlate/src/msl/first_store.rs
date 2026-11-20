@@ -11,10 +11,10 @@
 
 use super::args::Res;
 use super::usage::const_of;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, OperandType, StorageKind};
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Ast, BlockType, Kind, OpData};
-use crate::structured::types::AggType;
 use nxb_pyjson::Value;
 use std::collections::{BTreeMap, BTreeSet};
 

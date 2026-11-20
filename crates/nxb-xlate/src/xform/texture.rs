@@ -1,6 +1,6 @@
 //! `TexturePass` (render scale of texel fetches and texture sizes, the other parts are disabled by the host answers).
 use super::XformCtx;
-use super::helper::{HelperName, ScaleUse};
+use crate::helper::{HelperName, ScaleUse};
 use crate::ir::{Block, Inst, Ir, NodeId, StorageKind};
 use crate::opt::Env;
 use crate::opt::tex::{self, BINDLESS, INT_COORDS};

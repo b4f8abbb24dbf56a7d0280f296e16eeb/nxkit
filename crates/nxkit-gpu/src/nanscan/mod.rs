@@ -40,7 +40,7 @@ use nxkit_nvn::passes::{Pass, Slot, StoreAction};
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::Stage;
-use crate::draws::Shared;
+use crate::drawctx::Shared;
 pub(crate) use compute::compute_before;
 use kernel::{ENTRY_2D, ENTRY_3D, ENTRY_ARRAY, LIBRARY, MSL, WORDS};
 use text::{Counts, Subject};
@@ -424,7 +424,7 @@ fn samples(
                 Stage::Vertex => "vs",
                 Stage::Compute => continue,
             };
-            let Some(id) = crate::barr::texture_of(t.handle) else {
+            let Some(id) = crate::diag::texture_of(t.handle) else {
                 continue;
             };
             let Some(res) = sh.textures.get(&id) else {
@@ -538,3 +538,9 @@ pub(crate) fn dump() {
 
 #[cfg(test)]
 mod tests;
+
+impl crate::probe::PassWatch for Scan {
+    fn after(self: Box<Self>, sh: &Shared<'_>, cb: &mut CommandBuffer) {
+        Scan::after(*self, sh, cb);
+    }
+}

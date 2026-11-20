@@ -469,7 +469,7 @@ static FRESH: AtomicU64 = AtomicU64::new(0);
 
 /// Whether `NXKIT_PIPELINE_RECORD` allows the list: on unless it is `0`.
 pub(super) fn record_on() -> bool {
-    std::env::var("NXKIT_PIPELINE_RECORD").map_or(true, |v| v != "0")
+    crate::settings::env().pipeline_record
 }
 
 /// Starts the list from what earlier runs wrote.

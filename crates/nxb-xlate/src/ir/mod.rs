@@ -5,15 +5,8 @@
 pub mod dotnet_set;
 #[rustfmt::skip]
 pub mod inst;
+pub mod agg;
 pub mod block;
-pub mod emitter;
-#[rustfmt::skip]
-pub mod emitter_gen_0;
-#[rustfmt::skip]
-pub mod emitter_gen_1;
-pub mod emitter_geom;
-pub mod emitter_insts;
-pub mod emitter_ret;
 pub mod ops;
 pub mod text;
 

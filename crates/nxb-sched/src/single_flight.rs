@@ -1,4 +1,4 @@
-//! Single-flight by content key: equal work runs once per build (design-v2 8.4, workspace-layout ADR W11).
+//! Single-flight by content key: equal work runs once per build (design-v2 8.4, decisions.md W11).
 //!
 //! Two ways to join a key:
 //! - [`SingleFlight::claim`] (preferred inside the executor): the first caller becomes the leader and gets a

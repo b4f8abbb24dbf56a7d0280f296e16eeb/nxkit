@@ -12,6 +12,8 @@ layer = "L1"
 in_v = false
 
 [dependencies]
+
+[dev-dependencies]
 nxb-model.workspace = true
 
 [lints]

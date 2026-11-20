@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [package.metadata.nxb]
-layer = "L2"
+layer = "R4"
 in_v = false
 
 [lib]
@@ -43,7 +43,7 @@ objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSLocale",
 objc2-quartz-core = { workspace = true, features = ["std", "CALayer", "CAMetalLayer"] }
 
 # Not `workspace = true`: `unsafe` is denied for the crate and allowed in the module `sys` (libc, dyld, Mach and AppKit
-# calls) and in the module `gate` (the assembly of the gates).
+# calls), in the module `gate` (the assembly of the gates) and in the module `bigstack` (the big-stack entry).
 [lints.rust]
 missing_docs = "deny"
 unsafe_code = "deny"

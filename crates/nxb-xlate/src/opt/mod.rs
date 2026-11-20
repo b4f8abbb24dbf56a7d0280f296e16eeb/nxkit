@@ -263,7 +263,7 @@ pub fn run_pass(
     blocks: &mut [Block],
     env: &mut Env,
     ctx: &PassCtx,
-    hfm: &mut crate::xform::helper::Hfm,
+    hfm: &mut crate::helper::Hfm,
 ) -> R<()> {
     for b in blocks.iter_mut() {
         xmad::run_pass(ir, b)?;

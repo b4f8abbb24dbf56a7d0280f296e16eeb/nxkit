@@ -12,8 +12,6 @@ layer = "L2"
 in_v = false
 
 [dependencies]
-nxb-model.workspace = true
-nxb-error.workspace = true
 nxb-sys.workspace = true
 
 [dev-dependencies]

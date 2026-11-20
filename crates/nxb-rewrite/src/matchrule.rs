@@ -1,7 +1,7 @@
 //! The check of a function-matching rule (`nso_match.validate`): a malformed rule is refused, and so is a replacement
 //! whose meaning depends on an address.
 
-use crate::matchfn::{relative, unhex};
+use crate::branch::{relative, unhex};
 use crate::patches::{FnRule, Rule};
 
 /// `_pc_relative`: a branch, `adr`, `adrp` or a literal load.

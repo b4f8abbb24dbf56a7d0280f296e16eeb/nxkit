@@ -38,27 +38,12 @@ fn diag() -> bool {
     *ON.get_or_init(|| nxkit_nvn::diag::on("queues"))
 }
 
-/// Whether waits hold work: on unless `NXKIT_QUEUE_ORDER=0`.
-pub(super) fn ordering_on() -> bool {
-    std::env::var("NXKIT_QUEUE_ORDER").map_or(true, |v| v != "0")
-}
-
-/// The flush after a release: `NXKIT_RELEASE_FLUSH` (on unless `0`) and `NXKIT_RELEASE_FLUSH_MIN`, the least work (draws,
-/// dispatches and copies) that the released submits bring (default 64).
+/// The flush after a release (`RtSettings::release_flush`), and the least work (draws, dispatches and copies) that the
+/// released submits bring (`RtSettings::release_flush_min`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ReleaseFlush {
     pub(super) on: bool,
     pub(super) min_work: usize,
-}
-
-pub(super) fn release_flush_config() -> ReleaseFlush {
-    ReleaseFlush {
-        on: std::env::var("NXKIT_RELEASE_FLUSH").map_or(true, |v| v != "0"),
-        min_work: std::env::var("NXKIT_RELEASE_FLUSH_MIN")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(64),
-    }
 }
 
 fn op_name(op: &Op) -> &'static str {

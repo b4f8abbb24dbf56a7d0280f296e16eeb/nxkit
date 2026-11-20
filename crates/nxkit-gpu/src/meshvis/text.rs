@@ -3,7 +3,7 @@
 use nxkit_nvn::resource::TexId;
 
 use super::timeline::{self, Timed};
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 
 /// The most group lines of a frame.
 pub(crate) const MAX_GROUPS: usize = 200;

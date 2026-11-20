@@ -8,7 +8,7 @@ pub(crate) fn book_writes(
     p: &Prepared,
     frame: &Frame,
     plan: &nxkit_nvn::passes::PassPlan,
-    ords: &[crate::draws::Ordinal],
+    ords: &[crate::ordinal::Ordinal],
     images: &mut [crate::images::PassImages],
 ) {
     let Some(index) = anchor_pass(p, frame, plan, ords) else {
@@ -29,7 +29,7 @@ fn anchor_pass(
     p: &Prepared,
     frame: &Frame,
     plan: &nxkit_nvn::passes::PassPlan,
-    ords: &[crate::draws::Ordinal],
+    ords: &[crate::ordinal::Ordinal],
 ) -> Option<usize> {
     plan.passes.iter().position(|pass| {
         pass.kind == nxkit_nvn::passes::PassKind::Compute

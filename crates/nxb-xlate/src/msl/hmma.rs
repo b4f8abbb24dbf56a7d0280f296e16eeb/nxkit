@@ -30,8 +30,8 @@
 use super::emit::{Em, R};
 use super::types::{msl_type, scalar};
 use crate::ir::StorageKind;
+use crate::ir::agg::AggType;
 use crate::structured::ast::{A, Ast, Kind};
-use crate::structured::types::AggType;
 
 /// The name the front end gives the helper.
 pub const HELPER: &str = "dmsh_hmma16816_f16";

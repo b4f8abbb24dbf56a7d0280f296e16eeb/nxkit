@@ -16,7 +16,7 @@ use crate::kernel::Kernel;
 use crate::memsvc::page_range;
 use crate::result::{KResult, KResultOr};
 use crate::space::{Block, attr, perm, state};
-use crate::thread::lock;
+use crate::sync::lock;
 use std::sync::Arc;
 
 fn valid_view_perm(p: u32) -> bool {

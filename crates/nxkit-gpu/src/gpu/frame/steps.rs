@@ -23,7 +23,7 @@ impl Gpu {
         Option<Arc<DataBuffer>>,
         Vec<crate::rename::MergeRun>,
     ) {
-        if crate::overlap::on() {
+        if crate::overlap::on(self.game_overlap) {
             self.rename.note_rw(detail, &self.programs);
             let b = self
                 .rename

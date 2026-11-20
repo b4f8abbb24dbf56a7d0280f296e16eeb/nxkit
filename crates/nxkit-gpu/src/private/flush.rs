@@ -234,7 +234,7 @@ fn flush_mirror(
     let mut reads = read_ranges(detail);
     // Ranges that the encoder found split between members and non-members in an earlier frame and that no binding of
     // this one announces (texture upload sources, ranges of recordings): they become whole too.
-    let learned_partial = crate::overlay::partial_ranges();
+    let learned_partial = crate::pools::overlay::partial_ranges();
     reads.extend(learned_partial.iter().map(|&(a, l)| (a, l, BIND_COPY)));
     let t_reads_ns = t_r.elapsed().as_nanos() as u64;
     let t_c = Instant::now();
@@ -387,12 +387,12 @@ fn flush_mirror(
     ms.last_fence = fence;
     // The knobs that bind a class of resolves to guest memory, to find which class a defect comes from.
     let off = [
-        ("privnoubo", crate::overlay::UBO),
-        ("privnosbuf", crate::overlay::SBUF),
-        ("privnostream", crate::overlay::STREAM),
-        ("privnoupload", crate::overlay::UPLOAD),
-        ("privnogmem", crate::overlay::GMEM),
-        ("privnocopy", crate::overlay::COPY),
+        ("privnoubo", crate::pools::overlay::UBO),
+        ("privnosbuf", crate::pools::overlay::SBUF),
+        ("privnostream", crate::pools::overlay::STREAM),
+        ("privnoupload", crate::pools::overlay::UPLOAD),
+        ("privnogmem", crate::pools::overlay::GMEM),
+        ("privnocopy", crate::pools::overlay::COPY),
     ]
     .iter()
     .filter(|(k, _)| crate::knob(k))

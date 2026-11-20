@@ -2,25 +2,20 @@
 
 use super::*;
 
-/// The name of the environment variable that belongs to a network: `NXKIT_NDVE` for `ndve`, with `suffix` appended.
-pub(super) fn env_name(net: &str, suffix: &str) -> String {
-    format!("NXKIT_{}{suffix}", net.to_ascii_uppercase())
-}
-
 /// `NXKIT_<NAME>=0` turns a network off.
 pub(super) fn enabled(net: &str) -> bool {
-    std::env::var(env_name(net, "")).map_or(true, |v| v != "0")
+    crate::settings::env().native(net).enabled
 }
 
 /// `NXKIT_<NAME>_COMPARE=1` runs the game's chain next to the plan on a sampled frame.
 pub(super) fn compare_on(net: &str) -> bool {
-    std::env::var(env_name(net, "_COMPARE")).is_ok_and(|v| v == "1")
+    crate::settings::env().native(net).compare
 }
 
 /// Whether a network that can run on the Neural Engine does, with the plan as the fallback. On unless
 /// `NXKIT_<NAME>_ANE=0`; only networks with an offload (NDVE) use it.
 pub(super) fn ane_on(net: &str) -> bool {
-    std::env::var(env_name(net, "_ANE")).map_or(true, |v| v != "0")
+    crate::settings::env().native(net).ane
 }
 
 /// The storage buffer binding of a compute dispatch at `slot`.
@@ -74,4 +69,11 @@ pub(super) fn run_commands(cmds: &[Cmd], run: Run) -> Option<(usize, usize)> {
         return None;
     }
     first.zip(last)
+}
+
+/// The plans the cache keeps. A plan of a network holds tens of MB of scratch, and the game uses one or two at a time
+/// (dynamic resolution makes a new size now and then), so the cache is small and drops the least recently used.
+/// `NXKIT_NATIVE_CACHE=<n>` changes it.
+pub(super) fn cache_max() -> usize {
+    crate::settings::env().native_cache
 }

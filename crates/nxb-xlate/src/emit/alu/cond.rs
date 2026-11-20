@@ -1,8 +1,8 @@
 //! `InstEmitConditionCode.cs`.
 
 use super::helper::get_pred_logical_op;
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper::*;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::{FALSE, Opd, TRUE, regtype};
 use crate::maxwell::enums::Ccc;
 use crate::maxwell::insts::*;

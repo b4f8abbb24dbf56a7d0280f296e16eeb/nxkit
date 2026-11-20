@@ -1,5 +1,6 @@
 //! The setup of a render pass: attachments, load and store actions and the clear values.
 
+use super::EncodeCtx;
 use super::*;
 
 pub(super) struct Setup {
@@ -28,7 +29,7 @@ pub(super) fn store(a: StoreAction, memoryless: bool) -> MStore {
 
 /// The clear values that a pass starts with. The analysis cut the pass at the first full clear of a slot, so the
 /// command is inside the pass.
-pub(super) fn clear_of(sh: &Shared<'_>, pass: &Pass, slot: Slot) -> ClearDetail {
+pub(super) fn clear_of(sh: &EncodeCtx<'_>, pass: &Pass, slot: Slot) -> ClearDetail {
     for i in pass.cmds.clone() {
         let hit = match (sh.frame.cmds.get(i as usize), slot) {
             (
@@ -55,7 +56,7 @@ pub(super) fn clear_of(sh: &Shared<'_>, pass: &Pass, slot: Slot) -> ClearDetail 
 /// Then the old contents are never read and a `Load` is wasted. The shader could still discard a fragment, and the
 /// geometry of a vertex shader without input could still be small, so only the `coverload` knob uses this.
 pub(super) fn first_draw_covers(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     pass: &Pass,
     slot: u8,
     size: [u32; 2],
@@ -111,7 +112,7 @@ pub(super) fn holds_target([x, y, w, h]: [f32; 4], size: [u32; 2]) -> bool {
     x <= 0.5 && y <= 0.5 && x + w >= size[0] as f32 - 0.5 && y + h >= size[1] as f32 - 0.5
 }
 
-pub(super) fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
+pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
     let attachments = sh.plan.attachments_of(pass);
     let color_aliases: Vec<_> = attachments
         .iter()
@@ -133,7 +134,7 @@ pub(super) fn setup(sh: &Shared<'_>, pass: &Pass) -> Result<Setup, Skip> {
         .any(|(i, a)| color_aliases[..i].iter().any(|b| a.1 == b.1));
     let selected = if has_aliases {
         let mut written = 0u8;
-        let mut outputs = crate::draws::FastMap::default();
+        let mut outputs = crate::fastmap::FastMap::default();
         for n in draw_range(sh, pass) {
             let Some(d) = sh.detail.draws.get(n as usize) else {
                 continue;

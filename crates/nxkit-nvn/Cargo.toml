@@ -8,10 +8,11 @@ license.workspace = true
 publish.workspace = true
 
 [package.metadata.nxb]
-layer = "L1"
+layer = "R2"
 in_v = false
 
 [dependencies]
+nxkit-abi.workspace = true
 foldhash = "0.2"
 
 [lints]

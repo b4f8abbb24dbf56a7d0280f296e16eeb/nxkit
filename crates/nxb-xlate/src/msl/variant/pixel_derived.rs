@@ -7,13 +7,13 @@
 //! Which colours hold integer bits is read from the structured program: the kind of the value each store writes.
 
 use super::pixel::Derived;
+use crate::ir::agg::{AggType, dest_var_type};
 use crate::ir::{Inst, IoVariable, OperandType, StorageKind};
 use crate::msl::io::{FragOut, Plan};
 use crate::msl::usage::const_of;
-use crate::msl::walk::for_each_node;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind};
-use crate::structured::types::{AggType, dest_var_type};
+use crate::structured::walk::for_each_node;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The largest bit pattern that counts as an integer constant: a float below the normal range.

@@ -22,17 +22,18 @@
 use nxkit_metal::{ArgumentTable, CommandBuffer, ComputeCommand, Scratch};
 
 use crate::detail::DrawArgs;
-use crate::draws::{FastMap, Shared};
+use crate::drawctx::Shared;
+use crate::fastmap::FastMap;
 use crate::geometry::word_loc;
 use crate::mesh::{INDIRECT_SPLITS, MAX_GRID};
 use crate::pools::{Backing, PoolSnapshot};
-use crate::stats::{EncodeStats, Skip};
+use crate::skip::Skip;
+use crate::stats::EncodeStats;
 
 /// The bytes from one copied record to the next. A record has at most five words and the first workgroup of a mesh
 /// grid is at word 4.
 pub(crate) const RECORD: u64 = 32;
-/// The most draws of one multi-draw that the pre-pass copies. The rest are left out and counted.
-pub(crate) const MAX_MULTI: u32 = 4096;
+pub(crate) use crate::geometry::MAX_MULTI;
 /// The threads of a threadgroup of the kernel.
 const GROUP: usize = 64;
 /// The bytes of one job of the kernel: three addresses and four words.

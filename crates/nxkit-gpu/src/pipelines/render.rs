@@ -212,7 +212,7 @@ impl Pipelines {
             &mut desc,
         )
         .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
-        crate::coverage::record(&self.cache, source, Some(&desc), &what());
+        crate::pipelines::coverage::record(&self.cache, source, Some(&desc), &what());
         Ok((p, key))
     }
 
@@ -291,7 +291,7 @@ impl Pipelines {
             .mesh_traced(key, &job.desc())
             .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
         record::mesh(key, &job.desc(), source);
-        crate::coverage::record(&self.cache, source, None, &what());
+        crate::pipelines::coverage::record(&self.cache, source, None, &what());
         Ok((p, key))
     }
 }

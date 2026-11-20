@@ -15,6 +15,7 @@ use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
 use crate::manifest::Game;
+use crate::refresh::Refresh;
 use crate::settings::Settings;
 use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, wire};
@@ -117,7 +118,7 @@ fn state_page(game: &Game) -> Option<u64> {
     main.base.checked_add(offset)
 }
 
-fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
+fn pacing_config(game: &Game, refresh: &Refresh) -> Result<nxkit_svc_pacing::Config> {
     let s = &game.settings;
     let page = state_page(game);
     let target = s.fps_target;
@@ -135,7 +136,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
             StepMode::Load(load)
         }
         // A target above 60 asks for the variable step, which only works under variable refresh. The game starts on the
-        // load-driven step at 60 and the refresh module switches when the screen allows (`refresh::set_variable_step`).
+        // load-driven step at 60 and the refresh module switches when the screen allows (`Refresh::set_variable_step`).
         (t, true) if t > 60 => {
             let mut load = LoadConfig::new(60).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
@@ -153,7 +154,7 @@ fn pacing_config(game: &Game) -> Result<nxkit_svc_pacing::Config> {
         }
     };
     // Variable refresh needs to know that the game steps by the measured frame time.
-    crate::refresh::set_variable_step(variable, step);
+    refresh.set_variable_step(variable, step);
     Ok(nxkit_svc_pacing::Config {
         bind_system_event: wire::pacing_bind,
         state_page: page,
@@ -181,10 +182,8 @@ fn game_env(settings: &Settings) -> Vec<(String, String)> {
 
 /// The console language: `NXKIT_LANGUAGE` (a tag such as `de` or `en-GB`) when it is set, else the first of the Mac's
 /// preferred languages that the console has, else `en-US`.
-fn console_language() -> String {
-    let env = std::env::var("NXKIT_LANGUAGE")
-        .ok()
-        .filter(|v| !v.trim().is_empty());
+fn console_language(vars: &crate::hostenv::HostEnv) -> String {
+    let env = vars.language.clone();
     let mac = crate::sys::preferred_languages();
     let tags: Vec<&str> = env
         .as_deref()
@@ -202,7 +201,12 @@ fn console_language() -> String {
 /// parameter, the display version, the shared font facts and the DLC folder, input the pad layout, the focus and the
 /// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
 /// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
-pub fn init_services(game: &Game, mask: u64) -> Result<()> {
+pub fn init_services(
+    game: &Game,
+    mask: u64,
+    env: &crate::hostenv::HostEnv,
+    refresh: &Refresh,
+) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
     wire::set_handheld(handheld);
@@ -245,7 +249,7 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
                 .filter(|p| p.is_file()),
             shared_font_decode: s.shared_font_decode,
             sf_services: s.sf_services.clone(),
-            language: console_language(),
+            language: console_language(env),
             ..nxkit_svc_system::Config::default()
         });
         nxkit_svc_system::set_seams(wire::system_seams());
@@ -276,10 +280,12 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
         nxkit_svc_video::init(&nxkit_svc_video::Config {
             host: Arc::new(wire::VideoHost),
             sink: None,
+            // The video service writes decoded pictures into native images itself. The textures over them load again.
+            guest_write: Some(nxkit_rt::nvn::guest_wrote),
         });
     }
     if has(mask, Service::Pacing) {
-        nxkit_svc_pacing::init(&pacing_config(game)?)
+        nxkit_svc_pacing::init(&pacing_config(game, refresh)?)
             .map_err(|e| HostError::Manifest(format!("pacing: {e:?}")))?;
     }
     Ok(())
@@ -289,9 +295,7 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
 /// on the console a focus loss means the HOME menu, and games pause for it, but on a Mac clicking another window is no
 /// reason to stop the game. `NXKIT_PAUSE_UNFOCUSED=1` reports the loss to the game as before.
 pub fn focus_changed(focused: bool) {
-    static PAUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let pause =
-        *PAUSE.get_or_init(|| std::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"));
+    let pause = crate::hostenv::host().pause_unfocused;
     if pause || focused {
         let focus = if focused {
             nxkit_svc_system::Focus::InFocus
@@ -335,6 +339,9 @@ pub fn frame_hooks(
     memory: &Arc<GuestMemory>,
     root: &std::path::Path,
     settings: &Settings,
+    run: &crate::hostenv::RunSettings,
+    screen: &Arc<nxkit_nvn::screen::Screen>,
+    refresh: &Arc<Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
-    crate::frames::install(ctx, memory, root, settings)
+    crate::frames::install(ctx, memory, root, settings, run, screen, refresh)
 }

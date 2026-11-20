@@ -78,6 +78,7 @@ impl Default for Seams {
     }
 }
 
+// Process-wide (W26): the host functions that the guest-called exports call (R38c).
 static SEAMS: OnceLock<Seams> = OnceLock::new();
 
 /// Sets the hooks of the host once, before the game runs. The first call wins. The exports read them without a lock

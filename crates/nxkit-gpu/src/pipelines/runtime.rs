@@ -45,19 +45,6 @@ const MAX_FILES: usize = 64;
 /// The longest gap between two archive files of a run.
 const MAX_GAP: Duration = Duration::from_secs(600);
 
-/// `name` is set and not `0`.
-pub(super) fn env_on(name: &str) -> bool {
-    std::env::var(name).map_or(true, |v| v != "0")
-}
-
-pub(super) fn env_num(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(default)
-}
-
 /// A 64-bit FNV-1a hash of the parts, which are told apart.
 pub(super) fn identity(parts: &[&str]) -> u64 {
     parts.iter().fold(0xcbf2_9ce4_8422_2325, |h, p| {
@@ -141,7 +128,7 @@ pub(crate) fn plan(
     build_id: u64,
     archive: &mut ArchiveConfig,
 ) -> Option<Plan> {
-    let root = root.filter(|_| env_on("NXKIT_PIPELINE_CACHE"))?;
+    let root = root.filter(|_| crate::settings::env().pipeline_cache)?;
     let id = identity(&[
         "nxkit pipecache 2",
         &build_id.to_string(),
@@ -171,7 +158,7 @@ pub(crate) fn plan(
             let _ = std::fs::remove_file(e.path());
         }
     }
-    let cap = env_num("NXKIT_PIPELINE_CACHE_MB", 512) << 20;
+    let cap = crate::settings::env().pipeline_cache_mb << 20;
     let files = archives(&dir);
     for name in prune(&files, cap, MAX_FILES) {
         let _ = std::fs::remove_file(dir.join(name));
@@ -302,7 +289,7 @@ impl Session {
 impl Pipelines {
     /// Starts the runtime cache: makes the pipelines of the list from the archives (see `prewarm.rs`), and starts the
     /// thread that writes the cache every 30 s. Logs one line with the counts.
-    pub(crate) fn runtime_start(&self, plan: Plan, shader_dir: &Path) {
+    pub(crate) fn runtime_start(&self, plan: Plan, shader_dir: &Path, screen: &super::ScreenHook) {
         eprintln!(
             "nxkit-gpu: runtime pipeline cache {}: {} archives ({} MiB), {} pipelines listed{}",
             plan.dir.display(),
@@ -315,14 +302,14 @@ impl Pipelines {
                 ""
             }
         );
-        let flush_s = env_num("NXKIT_PIPELINE_CACHE_FLUSH", 30);
-        let rotate_at = env_num("NXKIT_PIPELINE_CACHE_ROTATE", 1000);
+        let flush_s = crate::settings::env().pipeline_cache_flush;
+        let rotate_at = crate::settings::env().pipeline_cache_rotate;
         let marker = plan.full.then(|| plan.dir.join(carry::DONE_FILE));
         let session = Arc::new(Session {
             dir: plan.dir,
             list: plan.list,
             cache: self.cache.clone(),
-            cap: env_num("NXKIT_PIPELINE_CACHE_MB", 512) << 20,
+            cap: crate::settings::env().pipeline_cache_mb << 20,
             seq: AtomicU32::new(0),
             io: Mutex::new(Io {
                 last_archive: Instant::now(),
@@ -330,7 +317,7 @@ impl Pipelines {
             }),
         });
         *SESSION.lock().unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
-        if env_on("NXKIT_PIPELINE_PREWARM") && !plan.seen.is_empty() {
+        if crate::settings::env().pipeline_prewarm && !plan.seen.is_empty() {
             // The start compiles what no archive holds, and the runtime archive of it is written when the last
             // pipeline of the list is made, before the start reports done and before the marker: a start that is
             // killed right after has what it made on disk.
@@ -340,6 +327,7 @@ impl Pipelines {
                 shader_dir,
                 marker,
                 Some(Box::new(move || s.flush(true, false))),
+                screen.0.clone(),
             );
         }
         let spawned = std::thread::Builder::new()

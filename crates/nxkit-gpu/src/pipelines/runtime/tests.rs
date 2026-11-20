@@ -92,7 +92,13 @@ fn a_missing_or_foreign_list_gives_an_empty_one() {
     };
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&Seen::default(), Path::new("/nonexistent"), None, None);
+    p.prewarm(
+        &Seen::default(),
+        Path::new("/nonexistent"),
+        None,
+        None,
+        None,
+    );
     assert_eq!(p.counts(), before);
 }
 
@@ -107,7 +113,7 @@ fn a_list_of_missing_libraries_is_skipped() {
     assert_eq!(seen.len(), 1);
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&seen, Path::new("/nonexistent"), None, None);
+    p.prewarm(&seen, Path::new("/nonexistent"), None, None, None);
     assert_eq!(p.counts(), before);
 }
 
@@ -135,6 +141,7 @@ fn the_after_hook_runs_before_the_marker() {
             // the marker is not there yet
             f.store(if m.exists() { 2 } else { 1 }, Ordering::SeqCst);
         })),
+        None,
     );
     assert_eq!(flag.load(Ordering::SeqCst), 1);
     assert!(marker.is_file());

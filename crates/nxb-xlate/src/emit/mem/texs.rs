@@ -2,7 +2,7 @@
 
 use super::hlp::REGISTER_ZERO_INDEX;
 use super::tex::*;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::ops::{Opd, regtype, texflags};
 use crate::maxwell::enums::{TexsTarget, TldsTarget};
 use crate::maxwell::insts::*;

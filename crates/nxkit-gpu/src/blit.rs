@@ -49,7 +49,10 @@ pub(crate) struct Blit {
 }
 
 impl Blit {
-    pub(crate) fn new(ctx: &Context) -> Result<Self> {
+    pub(crate) fn new(
+        ctx: &Context,
+        timed: &std::sync::Arc<nxkit_metal::TimedPresent>,
+    ) -> Result<Self> {
         let cache = PipelineCache::new(ctx, &ArchiveConfig::default())?;
         let lib = ShaderLibrary::from_source(ctx, "nxkit_blit", MSL)?;
         let pipe = |key, fs| {
@@ -58,8 +61,10 @@ impl Blit {
                 &RenderPipelineDesc::new((&lib, "blit_vs"), Some((&lib, fs)), &[PRESENT_FORMAT]),
             )
         };
+        let mut ring = FrameRing::new(ctx)?;
+        ring.set_timed_present(timed.clone());
         Ok(Self {
-            ring: FrameRing::new(ctx)?,
+            ring,
             plain: pipe(1, "blit_plain")?,
             srgb: pipe(2, "blit_srgb")?,
             table: ArgumentTable::new(ctx, 1, 1)?,

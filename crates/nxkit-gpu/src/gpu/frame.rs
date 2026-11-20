@@ -254,7 +254,8 @@ impl Gpu {
             &ords,
             &textures,
             &self.guest,
-        );
+        )
+        .map(|m| Box::new(m) as Box<dyn crate::probe::MeshCounts>);
         let queries =
             crate::queries::prepare(&self.ctx, &self.vis_pool, frame, plan, detail, &ords, mesh);
         if let Some(b) = queries.as_ref().and_then(|q| q.buffer()) {
@@ -331,45 +332,48 @@ impl Gpu {
         } else {
             None
         };
-        let sh = Shared {
-            ctx: &self.ctx,
-            frame,
-            plan,
-            detail,
-            table: view,
-            textures: &textures,
-            texture_store: &self.store,
-            programs: &self.programs,
-            pipelines: &self.pipelines,
-            env: Env {
-                handles: &handles.map,
-                fits: &handles.fits,
-                images: &handles.images,
-                gmem: crate::gmem::GmemEnv {
-                    map: gmem_buf.as_ref().map_or(0, |b| b.gpu_address()),
-                    logs: Some((&*gmem_logs, region)),
+        let sh = crate::encode::EncodeCtx {
+            sh: Shared {
+                ctx: &self.ctx,
+                frame,
+                plan,
+                detail,
+                table: view,
+                textures: &textures,
+                texture_store: &self.store,
+                programs: &self.programs,
+                pipelines: &self.pipelines,
+                env: Env {
+                    handles: &handles.map,
+                    fits: &handles.fits,
+                    images: &handles.images,
+                    gmem: crate::gmem::GmemEnv {
+                        map: gmem_buf.as_ref().map_or(0, |b| b.gpu_address()),
+                        logs: Some((&*gmem_logs, region)),
+                    },
+                    pools: self.bindless.pools(region),
+                    rename: &rename_map,
+                    guest_pools: pools,
+                    default_sampler: self.bindless.default_sampler_id(),
+                    statics: self.bindless.statics(),
+                    scale,
                 },
-                pools: self.bindless.pools(region),
-                rename: &rename_map,
-                guest_pools: pools,
-                default_sampler: self.bindless.default_sampler_id(),
-                statics: self.bindless.statics(),
+                guest: &self.guest,
+                pools,
+                ordinals: &ords,
+                run_at: &run_at,
+                barriers: &barrier_plan,
+                transfer: &self.transfer,
+                first_write: &first_write,
                 scale,
+                uploaded: &uploaded,
+                preloaded: &preloaded,
             },
-            guest: &self.guest,
-            pools,
             icbs: &self.icbs,
-            ordinals: &ords,
-            run_at: &run_at,
-            barriers: &barrier_plan,
-            transfer: &self.transfer,
-            first_write: &first_write,
-            scale,
-            uploaded: &uploaded,
-            preloaded: &preloaded,
             native: native.as_ref(),
             queries: queries.as_deref(),
-            prof: prof.as_ref(),
+            prof: prof.as_ref().map(|p| p as &dyn crate::probe::PassClock),
+            probes: &super::PROBES,
         };
         if !frame.gates.is_empty() && crate::diag("rendercond") && crate::diag::sampled() {
             crate::gatediag::frame(&sh);
@@ -499,7 +503,7 @@ impl Gpu {
         }
         if let Some(q) = queries.as_ref().filter(|q| q.has_mesh()) {
             let _ = self.wait();
-            q.mesh_print(&self.guest, &|a| crate::meshvis::Where {
+            q.mesh_print(&self.guest, &|a| crate::probe::Where {
                 table: self.gmem.range_of(a),
                 written: self.gmem.learned_range_of(a),
             });

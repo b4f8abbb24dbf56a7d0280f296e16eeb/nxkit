@@ -457,7 +457,7 @@ fn the_walker_and_the_decoder_count_the_same_entries_with_templates() {
         );
         assert_eq!(n, [7, 3, 3, 12]);
         assert_eq!(c.walk_hits, if round == 0 { 2 } else { 3 });
-        let ords = crate::draws::ordinals(f.frame());
+        let ords = crate::ordinal::ordinals(f.frame());
         assert_eq!(
             ords.last().map(|o| (o.draw, o.copy)),
             Some((n[0] as u32, n[3] as u32 - 1))

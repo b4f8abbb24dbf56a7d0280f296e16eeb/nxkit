@@ -162,8 +162,8 @@ fn metal_builds_the_side_entries() {
 
 use super::tests::F4;
 use crate::attr::Stage;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
-use crate::structured::types::AggType;
 
 /// A pixel shader with `n` float colours and no stores.
 fn colors(n: usize) -> B {

@@ -6,12 +6,14 @@
 //! - [`guest`]: reads and writes guest memory. The game's code runs at fixed addresses in the host process (R18), so a
 //!   guest address is a host address. The host reserves one range for all guest memory and names it once with
 //!   [`guest::set_range`]. Every access outside that range is a [`guest::Fault`].
+//! - [`env`](mod@env): the snapshot of the `NXKIT_*` variables, the one source of the host's settings (W27).
 //! - [`export`]: one function that a service gives the game in place of an SDK function (R14).
 //! - [`ipc`]: the trait of a service that answers Horizon IPC requests, and the request and response types (R14, R15).
 //! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
 //! - [`shards`]: the index of the pipeline archive shards that the build writes and the host reads.
 //! - [`platform`]: the console the game was built for, the Switch or the Switch 2, set once by the host at load.
 
+pub mod env;
 pub mod export;
 pub mod guest;
 pub mod ipc;

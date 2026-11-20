@@ -9,10 +9,10 @@
 //! first member dominates the others, and the buffer is declared `const`, so nothing in the shader writes it.
 
 use super::args::Res;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, OperandType, StorageKind};
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Ast, Kind, OpData};
-use crate::structured::types::AggType;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What the emitter knows of a load that belongs to a run.
@@ -155,7 +155,7 @@ pub fn plan(info: &StructInfo, res: &Res, skip: &BTreeSet<A>) -> BTreeMap<A, Lan
         defs: BTreeMap::new(),
         args: BTreeSet::new(),
     };
-    super::walk::for_each_node(info, &mut |_, k| match k {
+    crate::structured::walk::for_each_node(info, &mut |_, k| match k {
         Kind::Assign { dest, src } => match sc.ast.kind(*dest) {
             Kind::Operand {
                 ty: OperandType::LocalVariable,

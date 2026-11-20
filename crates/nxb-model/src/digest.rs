@@ -104,7 +104,7 @@ impl fmt::Debug for Digest {
 
 /// Length and SHA-256 of a payload, computed once by its producer (design-pipeline-rest section 8).
 ///
-/// SHA-1 joins as an optional field when `nxb-crypto` exists (workspace-layout ADR W3).
+/// SHA-1 may join as an optional field (decisions.md W3).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct FileDigest {
     /// Length in bytes.

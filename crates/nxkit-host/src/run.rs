@@ -13,6 +13,7 @@
 //!
 //! The patches of the title are not applied here. The build applied them to the images (R2).
 
+use crate::hostenv::RunSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -65,26 +66,42 @@ fn check_kernel_service(mask: u64) -> Result<()> {
 
 /// Runs the game. It returns when the window or the game has stopped.
 pub fn run(opts: &Options) -> Result<()> {
-    sys::crashsig::install();
-    let game = Game::read(&opts.root)?;
+    // The one read of the `NXKIT_*` environment (W27): every crate's typed settings come from this snapshot. The
+    // crates that keep them for code with no context get them now, before any part exists; a crate that had them
+    // already or was read before stops the run. The rest is passed in below.
+    let run = RunSettings::from_env(&nxkit_abi::env::Env::capture());
+    run.install()
+        .map_err(|e| HostError::Settings(e.to_string()))?;
+    let env = &run.host;
+    sys::crashsig::install(env);
+    let game = Game::read(&opts.root, env)?;
     let mask = loader::service_mask(&game.services)?;
     check_kernel_service(mask)?;
     let placed = place::place(&game)?;
     let mem = placed.mem;
     let (layout, settings) = (mem.layout, placed.game.settings.clone());
+    // What the screen showed of the presents: the backend writes it, the NVN present and the refresh use it. The
+    // refresh plans the link for the screen: the pacing seam, the window and the tick hook share it (W26).
+    let screen = Arc::new(nxkit_nvn::screen::Screen::new(Some(
+        crate::frames::shown_to_step,
+    )));
+    let refresh = Arc::new(crate::refresh::Refresh::new(
+        crate::refresh::Request::from_settings(&settings, env),
+        screen.clone(),
+    ));
 
     // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
-    mem.keep_gpu_pages();
+    mem.keep_gpu_pages(env);
     mem.seal()?;
-    crate::memreport::start(&ctx, &layout);
+    crate::memreport::start(&ctx, &layout, env);
 
     nxkit_rt::nxkit_init(mask);
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
     seams::register_kernel()?;
     seams::register_server(mask)?;
-    seams::init_services(&placed.game, mask)?;
+    seams::init_services(&placed.game, mask, env, &refresh)?;
 
     let mut loaded = loader::load(placed, mask)?;
     eprintln!(
@@ -108,8 +125,15 @@ pub fn run(opts: &Options) -> Result<()> {
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
-    crate::refresh::configure(crate::refresh::Request::from_settings(&settings));
-    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
+    let hooks = seams::frame_hooks(
+        &ctx,
+        &gpu_memory,
+        &opts.root,
+        &settings,
+        &run,
+        &screen,
+        &refresh,
+    )?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,
@@ -120,6 +144,7 @@ pub fn run(opts: &Options) -> Result<()> {
         &window,
         &ctx,
         hooks,
+        refresh,
         Arc::new(Events),
         stop::flag(),
         move || thread::start_main(boot, stack_top),

@@ -5,9 +5,9 @@ use super::args::SET_NAME;
 use super::buffers;
 use super::emit::{Em, R, Shader, Val};
 use super::types::{msl_type, scalar};
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::structured::ast::{A, Kind, OpData};
-use crate::structured::types::AggType;
 
 /// The address space of a place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

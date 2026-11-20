@@ -1,5 +1,6 @@
 //! `game.json`, the manifest of the run folder (see `docs/nxkit-host.md`), and the list files it names.
 
+use crate::fields::{bad, field, num, text};
 use std::path::{Path, PathBuf};
 
 use crate::error::{HostError, Result};
@@ -107,28 +108,6 @@ pub struct Import {
     pub weak: bool,
 }
 
-pub(crate) fn bad(m: impl Into<String>) -> HostError {
-    HostError::Manifest(m.into())
-}
-
-pub(crate) fn field<'a>(v: &'a Value, key: &str, ctx: &str) -> Result<&'a Value> {
-    v.get(key)
-        .ok_or_else(|| bad(format!("{ctx}: missing \"{key}\"")))
-}
-
-pub(crate) fn num(v: &Value, key: &str, ctx: &str) -> Result<u64> {
-    field(v, key, ctx)?
-        .as_u64()
-        .ok_or_else(|| bad(format!("{ctx}: \"{key}\" is not a number")))
-}
-
-pub(crate) fn text(v: &Value, key: &str, ctx: &str) -> Result<String> {
-    field(v, key, ctx)?
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| bad(format!("{ctx}: \"{key}\" is not a string")))
-}
-
 /// Reads `memory`. Every key is required: the host holds no numbers of any game (R2), so a missing key is an error.
 fn memory(v: &Value) -> Result<Memory> {
     let block = field(v, "memory", "game.json")?;
@@ -199,15 +178,16 @@ impl Memory {
     /// stack and alias regions and the driver wires all of it, so each GiB less is a GiB of RAM; a region smaller than
     /// the game's peak makes its `SetHeapSize` or `MapPhysicalMemory` fail (the host prints the peaks at the end of a
     /// run).
-    pub fn with_env(self) -> Result<Memory> {
-        let size = |name: &str| -> Result<Option<u64>> {
-            std::env::var(name).ok().map_or(Ok(None), |v| {
-                parse_size(&v)
+    pub fn with_env(self, env: &crate::hostenv::HostEnv) -> Result<Memory> {
+        let size = |name: &str, value: &Option<String>| -> Result<Option<u64>> {
+            value.as_deref().map_or(Ok(None), |v| {
+                parse_size(v)
                     .map(Some)
                     .ok_or_else(|| bad(format!("{name}={v} is not a size")))
             })
         };
-        let (reserve, alias) = (size("NXKIT_MEM_RESERVE")?, size("NXKIT_MEM_ALIAS")?);
+        let reserve = size("NXKIT_MEM_RESERVE", &env.mem_reserve)?;
+        let alias = size("NXKIT_MEM_ALIAS", &env.mem_alias)?;
         if reserve.is_none() && alias.is_none() {
             return Ok(self);
         }
@@ -239,11 +219,11 @@ fn main_thread(v: &Value) -> Result<MainThread> {
 
 impl Game {
     /// Reads `<root>/game.json`.
-    pub fn read(root: &Path) -> Result<Game> {
+    pub fn read(root: &Path, env: &crate::hostenv::HostEnv) -> Result<Game> {
         let path = root.join("game.json");
         let src = std::fs::read_to_string(&path).map_err(|e| HostError::io(&path, &e))?;
         let mut game = Game::parse(root, &src)?;
-        game.memory = game.memory.with_env()?;
+        game.memory = game.memory.with_env(env)?;
         Ok(game)
     }
 

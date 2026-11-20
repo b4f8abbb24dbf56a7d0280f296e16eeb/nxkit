@@ -20,39 +20,35 @@ pub(super) fn report_refused(addr: u64) {
     });
 }
 
-/// Drops `v` on a thread of its own. The detail of a frame holds thousands of draws; freeing them took about a millisecond
-/// of the game's render thread at the end of every frame.
-pub(super) fn drop_later<T: Send + 'static>(v: T) {
-    type Sender = std::sync::mpsc::Sender<Box<dyn Send>>;
-    static TX: OnceLock<Option<Mutex<Sender>>> = OnceLock::new();
-    let tx = TX.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<Box<dyn Send>>();
-        let spawned = std::thread::Builder::new()
-            .name("nxkit-drop".into())
-            .spawn(move || rx.into_iter().for_each(drop));
-        spawned.ok().map(|_| Mutex::new(tx))
-    });
-    let v: Box<dyn Send> = Box::new(v);
-    match tx {
-        Some(tx) => {
-            if let Err(e) = locked(tx).send(v) {
-                drop(e.0);
+type Sender = std::sync::mpsc::Sender<Box<dyn Send>>;
+
+/// Drops values on a thread of its own, which starts with the first value. The detail of a frame holds thousands of
+/// draws. Freeing them took about a millisecond of the game's render thread at the end of every frame.
+#[derive(Default)]
+pub(super) struct Dropper {
+    tx: OnceLock<Option<Mutex<Sender>>>,
+}
+
+impl Dropper {
+    /// Drops `v` on the thread, or here when the thread cannot start.
+    pub(super) fn drop_later<T: Send + 'static>(&self, v: T) {
+        let tx = self.tx.get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<Box<dyn Send>>();
+            let spawned = std::thread::Builder::new()
+                .name("nxkit-drop".into())
+                .spawn(move || rx.into_iter().for_each(drop));
+            spawned.ok().map(|_| Mutex::new(tx))
+        });
+        let v: Box<dyn Send> = Box::new(v);
+        match tx {
+            Some(tx) => {
+                if let Err(e) = locked(tx).send(v) {
+                    drop(e.0);
+                }
             }
+            None => drop(v),
         }
-        None => drop(v),
     }
-}
-
-/// Whether `NXKIT_DIAG` asks for the overlap counters.
-pub(super) fn overlap_diag() -> bool {
-    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DIAG.get_or_init(|| crate::diag("overlap"))
-}
-
-/// Whether `NXKIT_DIAG` asks for the periodic counters.
-pub(super) fn stats_diag() -> bool {
-    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DIAG.get_or_init(|| crate::diag("stats"))
 }
 
 /// True when the detail has one entry for each command that needs one.

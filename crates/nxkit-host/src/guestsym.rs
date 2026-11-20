@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+// Process-wide (W26): the game's symbols for the bare `fn` seams that guest-called exports call.
 static SYMBOLS: OnceLock<HashMap<String, u64>> = OnceLock::new();
 
 /// Sets the symbols of the loaded modules. The first call wins.

@@ -26,7 +26,7 @@ use nxkit_nvn::resource::TextureRecord;
 use crate::guestpools::GuestPools;
 use crate::pools::{Backing, PoolSnapshot};
 use crate::scaled::ScaledUploads;
-use crate::stats::Skip;
+use crate::skip::Skip;
 use crate::textures::Res;
 
 /// The two kernels and the order of the guest layout.
@@ -84,30 +84,7 @@ fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLay
     })
 }
 
-/// The backing of the pool that holds `[address, address + len)` and the offset of the range in it. A range that lies
-/// in no pool, in a pool without a buffer or across the end of its pool is a miss: `Skip::Buffer`, never a partial use.
-pub(crate) fn locate<B: Backing>(
-    pools: &PoolSnapshot<B>,
-    address: u64,
-    len: u64,
-) -> Result<(&B, u64), Skip> {
-    let loc = pools
-        .resolve_c(address, len, crate::overlay::UPLOAD)
-        .map_err(|_| Skip::Buffer)?;
-    if loc.run != crate::pools::NO_RUN {
-        // A member range lies in the mirror: the buffer of its run, and the offset in it.
-        let run = pools
-            .overlay()
-            .and_then(|o| o.runs().get(loc.run as usize))
-            .ok_or(Skip::Buffer)?;
-        return Ok((&run.mem, loc.offset));
-    }
-    let mem = pools.entries()[loc.pool as usize]
-        .buf
-        .mem()
-        .ok_or(Skip::Buffer)?;
-    Ok((mem, loc.offset))
-}
+pub(crate) use crate::pools::locate;
 
 /// The pool buffer that holds all bytes of the texture of `rec` and the offset of its first byte in it.
 fn guest_offset<'p, B: Backing>(

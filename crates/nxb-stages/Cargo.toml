@@ -15,14 +15,11 @@ in_v = false
 nxb-model.workspace = true
 nxb-sys.workspace = true
 nxb-error.workspace = true
-nxb-obs.workspace = true
 nxb-tool.workspace = true
 nxb-store.workspace = true
 nxb-sched.workspace = true
-nxb-io.workspace = true
 nxb-pyjson.workspace = true
 nxb-shader.workspace = true
-nxb-air.workspace = true
 nxb-xlate.workspace = true
 
 [features]

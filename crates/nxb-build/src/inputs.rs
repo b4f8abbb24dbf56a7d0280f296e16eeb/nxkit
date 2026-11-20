@@ -465,6 +465,21 @@ fn nup_checked(p: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// The keys file (`-k`): required and present for packages.
+pub(crate) fn keys(a: &Args) -> Result<PathBuf, String> {
+    let k = a
+        .keys
+        .clone()
+        .ok_or_else(|| crate::exit::fail(2, "-k/--keys is required to extract packages"))?;
+    if !k.is_file() {
+        return Err(crate::exit::fail(
+            6,
+            format!("the keys file {} does not exist (-k/--keys)", k.display()),
+        ));
+    }
+    Ok(k)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

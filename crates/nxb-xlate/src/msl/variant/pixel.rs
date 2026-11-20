@@ -4,13 +4,13 @@
 //! `dm_body_main0`, and each entry (`main0`, `main0_u`, `main0_m`, `main0_d`, `<entry>_a`, `<entry>_l`) calls it.
 
 use super::side;
+use crate::front::msl_entry::Structured;
 use crate::msl::Side;
 use crate::msl::abi::BLENDZ_MEMBER;
 use crate::msl::args::{Res, SET_NAME};
 use crate::msl::emit::{R, Shader};
 use crate::msl::entry::{EntryName, Form, Param, early_tests, entry_text, params, params_decl};
 use crate::msl::io::{FragOut, Plan};
-use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
 use std::collections::BTreeSet;
 use std::fmt::Write;

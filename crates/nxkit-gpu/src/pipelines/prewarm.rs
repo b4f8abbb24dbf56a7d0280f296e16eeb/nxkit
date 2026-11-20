@@ -153,7 +153,7 @@ impl Work {
                 Outcome::Failed,
                 |(_, s)| {
                     // `NXKIT_DIAG=stats` or `pipe`: a compile says why the archive missed
-                    crate::coverage::record(&self.cache, s, Some(&desc), "prewarm");
+                    crate::pipelines::coverage::record(&self.cache, s, Some(&desc), "prewarm");
                     s.into()
                 },
             ),
@@ -245,7 +245,7 @@ fn worker(w: &Work) {
             eprintln!("{}", w.line("finished in the background"));
         }
         // the shards of the build archive sit idle in malloc memory from here on (see the module)
-        if super::runtime::env_on("NXKIT_SHARD_TRIM") {
+        if crate::settings::env().shard_trim {
             let closed = w.cache.close_shards();
             if closed > 0 {
                 eprintln!("nxkit-gpu: prewarm over, {closed} archive shards closed");
@@ -271,13 +271,9 @@ fn worker(w: &Work) {
 const SCREEN_AFTER: Duration = Duration::from_secs(1);
 
 fn threads() -> usize {
-    std::env::var("NXKIT_PIPELINE_THREADS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
-        })
+    crate::settings::env().pipeline_threads.unwrap_or_else(|| {
+        std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
+    })
 }
 
 impl Pipelines {
@@ -290,6 +286,7 @@ impl Pipelines {
         shader_dir: &Path,
         all: Option<PathBuf>,
         after: Option<Box<dyn FnOnce() + Send>>,
+        screen: Option<Arc<dyn super::PrewarmScreen>>,
     ) {
         if seen.is_empty() {
             return;
@@ -333,10 +330,8 @@ impl Pipelines {
         if started < n {
             w.alive.fetch_sub(n - started, Ordering::AcqRel);
         }
-        let budget =
-            Duration::from_secs(super::runtime::env_num("NXKIT_PIPELINE_PREWARM_WAIT", 20));
+        let budget = Duration::from_secs(crate::settings::env().pipeline_prewarm_wait);
         let every = Duration::from_secs(if all.is_some() { 1 } else { 2 });
-        let screen = super::screen::current();
         let mut screened = false;
         let mut shown = Instant::now();
         let mut g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -441,8 +436,8 @@ mod lookup {
         let shaders = std::env::var("NXKIT_LOOKUP_SHADERS")
             .map_or_else(|_| app.join("shaders"), PathBuf::from);
         let p = Pipelines::new(&ctx, &archive).unwrap();
-        p.prewarm(&seen, &shaders, None, None);
-        eprintln!("{}", crate::coverage::describe());
+        p.prewarm(&seen, &shaders, None, None, None);
+        eprintln!("{}", crate::pipelines::coverage::describe());
     }
 
     /// The runtime archive of the host keeps what a start had to make: `NXKIT_LOOKUP_APP=<run folder> [NXKIT_LOOKUP_N=60]
@@ -514,7 +509,7 @@ mod lookup {
             ..build(Vec::new(), true)
         };
         let p = Pipelines::new(&ctx, &first).unwrap();
-        p.prewarm(&seen, &shaders, None, None);
+        p.prewarm(&seen, &shaders, None, None, None);
         let t = std::time::Instant::now();
         let written = p.cache.rotate_archive(&file);
         eprintln!(
@@ -526,7 +521,7 @@ mod lookup {
         drop(p);
         let second = build(vec![file], false);
         let p = Pipelines::new(&ctx, &second).unwrap();
-        p.prewarm(&seen, &shaders, None, None);
+        p.prewarm(&seen, &shaders, None, None, None);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

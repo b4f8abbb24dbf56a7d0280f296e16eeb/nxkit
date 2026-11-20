@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::attr::Stage;
-use crate::structured::types::AggType;
+use crate::ir::agg::AggType;
 use crate::types::SamplerType;
 use std::collections::HashMap;
 

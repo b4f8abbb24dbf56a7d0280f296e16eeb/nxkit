@@ -2,9 +2,8 @@
 //! `vertexAsCompute` and `GetDefinitions(vertexAsCompute)`. Only the geometry stage is built: the job driver never asks
 //! for a vertex stage as compute.
 
-use super::context::TranslatorContext;
+use super::context::{TranslatorContext, set_current_memories};
 use super::definitions::Definitions;
-use super::pipeline::set_current_memories;
 use super::props::{
     AggregateType, BufferDefinition, BufferLayout, ShaderStage, StructureField, StructureType,
     TextureDefinition,

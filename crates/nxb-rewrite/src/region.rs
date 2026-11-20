@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nxb_a64::{Insn, Op, decode};
 
-use crate::obs::defined;
+use crate::dynsym::defined;
 use crate::pat::{memop, preg};
 
 const ALLOCATE: &[u8] = b"_ZN2nn2os21AllocateAddressRegionEPmm";

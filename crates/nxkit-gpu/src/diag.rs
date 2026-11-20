@@ -20,8 +20,6 @@ use std::sync::{Mutex, OnceLock};
 use nxkit_metal::Format;
 use nxkit_nvn::resource::TexId;
 
-use crate::stats::Skip;
-
 /// Whether `NXKIT_DIAG` names `cat` or `all`.
 pub(crate) fn diag(cat: &str) -> bool {
     nxkit_nvn::diag::on(cat)
@@ -30,10 +28,7 @@ pub(crate) fn diag(cat: &str) -> bool {
 /// The directory of the diagnostic files: `NXKIT_DIAG_DIR`, `/tmp/fmap` without it. The `nobar` file is read from it,
 /// the `img` pictures are written into it.
 pub(crate) fn diag_dir() -> &'static PathBuf {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        std::env::var_os("NXKIT_DIAG_DIR").map_or_else(|| PathBuf::from("/tmp/fmap"), PathBuf::from)
-    })
+    &crate::settings::env().diag_dir
 }
 
 /// The knobs, by name. Each one changes what the encoder does, for experiments while debugging a game. They are not
@@ -190,10 +185,8 @@ struct Knobs {
 fn knobs() -> &'static Knobs {
     static K: OnceLock<Knobs> = OnceLock::new();
     K.get_or_init(|| Knobs {
-        flags: AtomicU64::new(set_pass_options(parse_knobs(
-            &std::env::var("NXKIT_KNOB").unwrap_or_default(),
-        ))),
-        file: std::env::var_os("NXKIT_KNOB_FILE").map(PathBuf::from),
+        flags: AtomicU64::new(set_pass_options(parse_knobs(&crate::settings::env().knob))),
+        file: crate::settings::env().knob_file.clone(),
     })
 }
 
@@ -264,33 +257,13 @@ pub(crate) fn refresh_knobs() {
 /// The fragment program keys of `NXKIT_PAINT_FS` (comma separated) that the `paint` knobs paint. Empty paints every
 /// draw into one colour target.
 pub(crate) fn paint_programs() -> &'static [String] {
-    static KEYS: OnceLock<Vec<String>> = OnceLock::new();
-    KEYS.get_or_init(|| {
-        std::env::var("NXKIT_PAINT_FS")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_owned())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default()
-    })
+    &crate::settings::env().paint_fs
 }
 
 /// The fragment program keys of `NXKIT_DIAG_FS` (comma separated). With keys, the `draw` line prints every draw of
 /// these programs and `nanscan` looks at the passes that hold one. Empty without the variable.
 pub(crate) fn fs_programs() -> &'static [String] {
-    static KEYS: OnceLock<Vec<String>> = OnceLock::new();
-    KEYS.get_or_init(|| {
-        std::env::var("NXKIT_DIAG_FS")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_owned())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default()
-    })
+    &crate::settings::env().diag_fs
 }
 
 /// The texture filter of `NXKIT_DIAG_TEX`: a format name (as `Debug` prints it), a size `WxH` or `WxHxL` (layers),
@@ -305,7 +278,7 @@ struct TexFilter {
 fn tex_filter() -> Option<&'static TexFilter> {
     static F: OnceLock<Option<TexFilter>> = OnceLock::new();
     F.get_or_init(|| {
-        let v = std::env::var("NXKIT_DIAG_TEX").ok()?;
+        let v = crate::settings::env().diag_tex.as_deref()?;
         let mut f = TexFilter::default();
         for part in v.split('/').map(str::trim).filter(|p| !p.is_empty()) {
             let nums: Vec<u32> = part.split('x').filter_map(|n| n.parse().ok()).collect();
@@ -375,55 +348,21 @@ pub(crate) fn first(counter: &AtomicU32, max: u32) -> bool {
     nxkit_nvn::diag::first(counter, max)
 }
 
-/// Prints a line of category `tex` (at most 300) and gives back `Skip::Texture`. The health report keeps it as an
-/// example of the skip.
-pub(crate) fn tex_skip(what: std::fmt::Arguments<'_>) -> Skip {
-    static SHOWN: AtomicU32 = AtomicU32::new(0);
-    nxkit_nvn::diag::example(nxkit_nvn::diag::Reason::SkipTexture, what);
-    if diag("tex") && first(&SHOWN, 300) {
-        eprintln!("DIAG tex {what}");
-    }
-    Skip::Texture
-}
-
-/// Prints a line of category `buf` (at most 300) and gives back `Skip::Buffer`. The health report keeps it as an
-/// example of the skip.
-pub(crate) fn buf_skip(what: std::fmt::Arguments<'_>) -> Skip {
-    static SHOWN: AtomicU32 = AtomicU32::new(0);
-    nxkit_nvn::diag::example(nxkit_nvn::diag::Reason::SkipBuffer, what);
-    if diag("buf") && first(&SHOWN, 300) {
-        eprintln!("DIAG buf {what}");
-    }
-    Skip::Buffer
-}
-
 /// Whether `NXKIT_WATCH_TEX` (a comma separated list of texture ids) names `id`.
 pub(crate) fn watched(id: TexId) -> bool {
-    static IDS: OnceLock<Vec<u32>> = OnceLock::new();
-    IDS.get_or_init(|| {
-        std::env::var("NXKIT_WATCH_TEX")
-            .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
-            .unwrap_or_default()
-    })
-    .contains(&id.0)
+    crate::settings::env().watch_tex.contains(&id.0)
 }
 
 /// `NXKIT_GPU_LABELS=1`: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
 pub(crate) fn gpu_labels() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_GPU_LABELS").is_ok_and(|v| v == "1"))
+    crate::settings::env().gpu_labels
 }
 
 /// Whether `NXKIT_SKIP_PROGRAMS` names a key or `NXKIT_SKIP_FILE` is set. One load of a cached value, so the check
 /// of every draw costs nothing without a list.
 pub(crate) fn skip_list_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        skip_list_set(
-            std::env::var("NXKIT_SKIP_PROGRAMS").ok().as_deref(),
-            std::env::var_os("NXKIT_SKIP_FILE").is_some(),
-        )
-    })
+    let e = crate::settings::env();
+    skip_list_set(e.skip_programs.as_deref(), e.skip_file.is_some())
 }
 
 /// True when the value of `NXKIT_SKIP_PROGRAMS` holds a key or `NXKIT_SKIP_FILE` is set.
@@ -451,16 +390,16 @@ pub(crate) fn skipped_program(key: &str) -> bool {
     }
     static KEYS: OnceLock<Vec<String>> = OnceLock::new();
     let keys = KEYS.get_or_init(|| {
-        std::env::var("NXKIT_SKIP_PROGRAMS")
-            .map(|v| parse(&v))
+        crate::settings::env()
+            .skip_programs
+            .as_deref()
+            .map(parse)
             .unwrap_or_default()
     });
     if keys.iter().any(|k| k == key) {
         return true;
     }
-    static FILE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
-    let Some(path) = FILE.get_or_init(|| std::env::var_os("NXKIT_SKIP_FILE").map(Into::into))
-    else {
+    let Some(path) = &crate::settings::env().skip_file else {
         return false;
     };
     static READ: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
@@ -507,7 +446,7 @@ pub(crate) fn tiny_words(bytes: &[u8]) -> String {
 pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
     static R: OnceLock<Vec<(u64, usize)>> = OnceLock::new();
     R.get_or_init(|| {
-        let Ok(v) = std::env::var("NXKIT_DIAG_WATCH") else {
+        let Some(v) = crate::settings::env().diag_watch.as_deref() else {
             return Vec::new();
         };
         v.split(',')
@@ -523,6 +462,23 @@ pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
             })
             .collect()
     })
+}
+
+/// The texture each handle resolved to, kept for `NXKIT_DIAG=barr` and `nanscan`: they compare the textures that the
+/// draws of a pass bind with the textures that the barrier planner thinks the pass reads.
+static HANDLES: Mutex<Option<std::collections::HashMap<u64, TexId>>> = Mutex::new(None);
+
+/// Remembers which texture a handle resolved to.
+pub(crate) fn note_handle(handle: u64, id: TexId) {
+    if let Ok(mut m) = HANDLES.lock() {
+        m.get_or_insert_with(std::collections::HashMap::new)
+            .insert(handle, id);
+    }
+}
+
+/// The texture that a handle resolved to.
+pub(crate) fn texture_of(handle: u64) -> Option<TexId> {
+    HANDLES.lock().ok()?.as_ref()?.get(&handle).copied()
 }
 
 #[cfg(test)]

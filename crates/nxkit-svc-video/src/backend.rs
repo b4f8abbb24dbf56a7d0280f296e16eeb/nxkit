@@ -54,7 +54,7 @@ mod apple {
 
     /// Whether the environment asks for the software decoder.
     fn software_requested() -> bool {
-        std::env::var("NXKIT_AV1_SOFTWARE").is_ok_and(|v| !v.is_empty() && v != "0")
+        crate::settings::settings().av1_software
     }
 
     /// The AV1 decoder of one stream. A temporal unit goes in whole, its OBUs in the low-overhead format that WebM and

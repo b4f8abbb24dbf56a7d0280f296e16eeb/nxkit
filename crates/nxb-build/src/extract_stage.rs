@@ -2,7 +2,6 @@
 //! container (RomFS as a folder, the split in the same pass), and the DLC images (`<work>/aoc/<index>.img`,
 //! index = DLC title ID - base title ID - 0x1000, the host mounts them by index).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -19,21 +18,6 @@ fn split_outputs(b: &Build) -> nxb_extract::split::SplitOutputs {
         pairs: b.work.join("shader/shader_pairs.tsv"),
         pso_pairs: b.work.join("shader/pso_pairs.tsv"),
     }
-}
-
-/// The keys file (`-k`): required and present for packages.
-pub(crate) fn keys(a: &Args) -> Result<PathBuf, String> {
-    let k = a
-        .keys
-        .clone()
-        .ok_or_else(|| crate::exit::fail(2, "-k/--keys is required to extract packages"))?;
-    if !k.is_file() {
-        return Err(crate::exit::fail(
-            6,
-            format!("the keys file {} does not exist (-k/--keys)", k.display()),
-        ));
-    }
-    Ok(k)
 }
 
 pub(crate) fn damaged(p: &Progress, e: &nxb_extract::ExtractError) -> String {
@@ -83,7 +67,7 @@ pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, S
     if dlc.is_empty() {
         return Ok(None);
     }
-    let keys = keys(a)?;
+    let keys = crate::inputs::keys(a)?;
     let (dst, tmp, kf) = (
         b.work.join("aoc"),
         b.work.join("aoc.partial"),
@@ -178,7 +162,7 @@ pub(crate) fn packages(
     let out = |v: &str| b.work.join("extract").join(v);
     let counter = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::Request {
-        keys: keys(a)?,
+        keys: crate::inputs::keys(a)?,
         base: b.base.clone(),
         out_base: out("v0"),
         updates: b

@@ -131,9 +131,9 @@ fn a_range_that_resolved_partly_on_members_is_made_whole_by_the_next_flush() {
     let len = 0x2000u64;
     assert!(!o1.all_members(src, len));
     let pools = pools_of(&g, o1);
-    let before = crate::overlay::partial_table();
-    let _ = pools.resolve_c(src, len, crate::overlay::UPLOAD);
-    let after = crate::overlay::partial_table();
+    let before = crate::pools::overlay::partial_table();
+    let _ = pools.resolve_c(src, len, crate::pools::overlay::UPLOAD);
+    let after = crate::pools::overlay::partial_table();
     let upload = 4usize;
     assert_eq!(
         after[upload][1] - before[upload][1],
@@ -148,11 +148,13 @@ fn a_range_that_resolved_partly_on_members_is_made_whole_by_the_next_flush() {
         "the range is whole on members now"
     );
     let pools = pools_of(&g, o2);
-    let before = crate::overlay::partial_table();
-    let loc = pools.resolve_c(src, len, crate::overlay::UPLOAD).unwrap();
+    let before = crate::pools::overlay::partial_table();
+    let loc = pools
+        .resolve_c(src, len, crate::pools::overlay::UPLOAD)
+        .unwrap();
     assert_ne!(loc.run, crate::pools::NO_RUN);
     assert_eq!(
-        crate::overlay::partial_table(),
+        crate::pools::overlay::partial_table(),
         before,
         "no partial resolve any more"
     );

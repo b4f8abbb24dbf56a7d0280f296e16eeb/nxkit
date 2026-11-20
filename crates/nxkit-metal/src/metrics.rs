@@ -4,8 +4,6 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::pacing::DisplayTick;
-
 /// The numbers of one command buffer.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CommandBufferStats {
@@ -94,22 +92,6 @@ impl Metrics {
             max_gpu_ns: self.max_gpu.load(Ordering::Relaxed),
         }
     }
-}
-
-/// Hooks for frame pacing. The backend calls them. It does not pace by itself.
-///
-/// `frame_complete` runs on a Metal thread. Keep it short.
-pub trait FrameHooks: Send + Sync {
-    /// A frame starts encoding, after its slot is free.
-    fn frame_begin(&self, _frame: u64) {}
-    /// A frame is about to be presented.
-    fn before_present(&self, _frame: u64) {}
-    /// The GPU finished a frame.
-    fn frame_complete(&self, _stats: &CommandBufferStats) {}
-    /// The display asks for a frame. It runs on the main thread.
-    ///
-    /// The drawable is the one the layer reserved for this tick. Render into it and present it with `Frame::present`.
-    fn display_tick(&self, _tick: DisplayTick) {}
 }
 
 #[cfg(test)]

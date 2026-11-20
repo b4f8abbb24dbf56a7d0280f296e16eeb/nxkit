@@ -3,8 +3,8 @@
 //! the raw path (address traced to no storage buffer) fails closed.
 use super::gts_fn::{self, Entry};
 use super::{Env, utils};
+use crate::helper::Hfm;
 use crate::ir::{Block, Inst, Ir, NodeId, Opd, OperandType, StorageKind};
-use crate::xform::helper::Hfm;
 use std::collections::HashMap;
 
 mod group;

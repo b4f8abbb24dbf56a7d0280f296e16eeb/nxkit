@@ -208,9 +208,9 @@ mod tests {
 
     use super::super::gaps_tests::msl;
     use super::super::tests::{B, compute};
+    use crate::ir::agg::AggType;
     use crate::ir::{Inst, IoVariable, StorageKind};
     use crate::structured::ast::BlockType;
-    use crate::structured::types::AggType;
 
     /// `local = a + 1` as a statement of `block`.
     fn add_in(b: &mut B, block: A, a: A) -> A {

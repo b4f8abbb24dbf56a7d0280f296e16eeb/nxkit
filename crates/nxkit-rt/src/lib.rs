@@ -1,5 +1,5 @@
-//! The nxkit runtime for the host: a dynamic library (`libnxkit_rt.dylib`) with a C ABI.
-//! The host loads it with `dlopen` when a service is enabled. The crate also builds as a static library for a later iOS path.
+//! The nxkit runtime for the host: the functions with a C ABI that the guest calls. `nxkit-host` links it as a normal
+//! dependency. The crate also builds as a static library for a later iOS path.
 //!
 //! The host calls [`nxkit_init`] once with the services that nxkit runs, then asks [`nxkit_hle_find`] for a function
 //! by its Switch mangled name. A name of a service that is not enabled gives NULL, so the host uses its own function.
@@ -13,12 +13,13 @@
 //! - A function that needs a large stack must switch to a host stack, because a guest stack can be 8 KB.
 //!   The runtime does not switch. A service lists such a function in its `big_stack_exports()`, and the host finds it
 //!   with [`nxkit_hle_find_big`] and runs it on its big stack. [`nxkit_hle_find`] never returns it.
-//!   The audio functions that start and stop Core Audio need this. No other service but `fs` needs it.
+//!   The audio functions that start and stop Core Audio need this. The `fs`, `system` and `audio` services list such exports.
 //!
 //! The `kernel` service forwards svc calls to `nxkit-hos` ([`nxkit_svc`]). The kernel is created by
 //! [`nxkit_kernel_init`] and the host calls it from the gate of every svc.
 //!
-//! This crate may use `unsafe`, with `nxb-sys` and the module `sys` of `nxkit-hos`. The `unsafe` blocks are as small as possible.
+//! This crate may use `unsafe` (rule 5 of `docs/architecture.md`). The `unsafe` blocks are as small as possible. Its
+//! state is process-wide because the game calls it through C functions with no Rust context (W26).
 
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::OnceLock;
@@ -50,7 +51,9 @@ mod audio;
 mod gfx;
 mod guestos;
 mod kernel;
+mod layer;
 pub mod nvn;
+pub mod settings;
 
 pub use audio::{NxkitAudioConfig, NxkitAudioHost, nxkit_audio_init};
 pub use guestos::{
@@ -180,6 +183,7 @@ fn mapped(
 }
 
 /// The mask of enabled services. Zero before init.
+// Process-wide (W26): the service mask that `nxkit_init` (C ABI) sets and the export lookup reads.
 static SERVICES: AtomicU64 = AtomicU64::new(0);
 
 /// Finds `name` in `table`. Only a service in `mask` is found. Functions that need the big stack are not found.

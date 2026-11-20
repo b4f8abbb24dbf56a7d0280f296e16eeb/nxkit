@@ -342,6 +342,7 @@ struct Learned {
     changes: u64,
 }
 
+// Process-wide (W26): the page trap is a SIGSEGV/SIGBUS handler, which has no context.
 static LEARNED: Mutex<Learned> = Mutex::new(Learned {
     pages: std::collections::BTreeSet::new(),
     changes: 0,

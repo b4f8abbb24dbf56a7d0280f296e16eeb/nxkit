@@ -1,7 +1,7 @@
 //! `ShufflePass` and the shuffle helper functions of `HelperFunctionManager` (`Shuffle`, `ShuffleDown`, `ShuffleUp`,
 //! `ShuffleXor`), generated for the host subgroup size.
 use super::XformCtx;
-use super::helper::{B, Function, HelperName, Hfm};
+use crate::helper::{B, Function, HelperName, Hfm};
 use crate::ir::{Block, Inst, IoVariable, Ir, Opd, StorageKind};
 use crate::translation::host;
 

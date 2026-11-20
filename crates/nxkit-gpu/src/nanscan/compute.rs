@@ -57,13 +57,13 @@ pub(crate) fn compute_before(
                 .iter()
                 .filter(|t| t.handle != 0 && t.stage == Stage::Compute)
             {
-                if let Some(id) = crate::barr::texture_of(t.handle) {
+                if let Some(id) = crate::diag::texture_of(t.handle) {
                     sampled.push((dd.program.clone(), t.slot, id));
                 }
             }
         }
         for t in dd.images.iter().filter(|t| t.handle != 0) {
-            let Some(id) = crate::barr::texture_of(t.handle) else {
+            let Some(id) = crate::diag::texture_of(t.handle) else {
                 continue;
             };
             let Some(res) = sh.textures.get(&id) else {
@@ -145,5 +145,11 @@ impl ComputeScan {
             };
             scan_texture(sh, cb, self.pass, b.id, &b.tex, &prog_text(&b.keys), kind);
         }
+    }
+}
+
+impl crate::probe::PassWatch for ComputeScan {
+    fn after(self: Box<Self>, sh: &Shared<'_>, cb: &mut CommandBuffer) {
+        ComputeScan::after(*self, sh, cb);
     }
 }

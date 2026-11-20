@@ -3,8 +3,8 @@
 use super::abi::{self, Kind};
 use super::gaps_tests::{msl, translate};
 use super::tests::{B, compute, fragment};
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
-use crate::structured::types::AggType;
 
 fn fp(i: Inst) -> Inst {
     Inst(i.0 | Inst::FP32)

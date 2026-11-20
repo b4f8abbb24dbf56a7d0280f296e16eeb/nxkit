@@ -5,8 +5,8 @@ use super::geom::{Layout, output_layout};
 use super::library;
 use super::refl::Raster;
 use super::{Context, Library};
+use crate::front::msl_entry::structure_geometry_reader_job;
 use crate::job::Job;
-use crate::translation::msl_entry::structure_geometry_reader_job;
 use nxb_pyjson::Value;
 
 /// The library `_bgv`. It reads its vertex from `vb_input` and writes every output the geometry shader writes.

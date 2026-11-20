@@ -42,7 +42,7 @@ use super::{MAX_CALL_DEPTH, STREAMS, State, TEXTURE_SLOTS, Walker};
 use crate::detail::{
     ClearDetail, CopyDetail, CounterReport, DispatchDetail, DrawDetail, Stage, TextureBind,
 };
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 
 mod bits;
 mod build;

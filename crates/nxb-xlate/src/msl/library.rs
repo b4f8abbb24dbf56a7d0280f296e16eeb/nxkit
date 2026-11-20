@@ -12,7 +12,7 @@ use super::variant::pixel::Built;
 use super::{
     Context, Library, Translated, facts, first_store, io, mesh, prelude, spill, variant, wide,
 };
-use crate::translation::msl_entry::Structured;
+use crate::front::msl_entry::Structured;
 use nxb_pyjson::Value;
 use std::fmt::Write;
 

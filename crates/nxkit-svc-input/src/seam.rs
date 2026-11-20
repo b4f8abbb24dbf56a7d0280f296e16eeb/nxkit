@@ -16,6 +16,7 @@ pub struct SystemEventHooks {
     pub signal: fn(event: u64),
 }
 
+// Process-wide (W26): the system event hooks that guest-called exports signal.
 static HOOKS: OnceLock<SystemEventHooks> = OnceLock::new();
 
 /// Sets the system event hooks. Only the first call counts.

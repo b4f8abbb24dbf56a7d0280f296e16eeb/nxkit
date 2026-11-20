@@ -110,7 +110,7 @@ pub(crate) fn early_cuts(
         return EarlyPlan::default();
     }
     let t0 = Instant::now();
-    let ords = crate::draws::ordinals_with_end(frame);
+    let ords = crate::ordinal::ordinals_with_end(frame);
     let runs_of_ranges = |ranges: &[(u64, u64)]| -> Vec<(u32, u32)> {
         ranges
             .iter()

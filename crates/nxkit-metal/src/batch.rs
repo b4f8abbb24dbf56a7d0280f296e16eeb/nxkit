@@ -32,23 +32,14 @@ use crate::table::Keep;
 
 mod submit;
 
-/// Called when a batch completes on the GPU: `(batch number, command buffers, GPU start, GPU end)`, the times in
-/// seconds of the host clock. For the diagnostics of the host; set once.
-static DONE_HOOK: std::sync::OnceLock<fn(u64, usize, f64, f64)> = std::sync::OnceLock::new();
-
-/// Sets the hook of `DONE_HOOK`. The first call wins.
-pub fn set_done_hook(f: fn(u64, usize, f64, f64)) {
-    let _ = DONE_HOOK.set(f);
-}
-
-/// Called when the first command buffer group of a batch is committed: `(batch number, host clock in ns)`, the clock of
-/// `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)`, which the GPU start and end times use too. For the diagnostics of the host;
-/// set once.
-static COMMIT_HOOK: std::sync::OnceLock<fn(u64, u64)> = std::sync::OnceLock::new();
-
-/// Sets the hook of `COMMIT_HOOK`. The first call wins.
-pub fn set_commit_hook(f: fn(u64, u64)) {
-    let _ = COMMIT_HOOK.set(f);
+/// The hooks of the host's diagnostics for the batches of a ring. The times use the clock of
+/// `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` (ns) or the host clock in seconds.
+#[derive(Clone, Copy, Debug)]
+pub struct BatchHooks {
+    /// A batch completed on the GPU: `(batch number, command buffers, GPU start, GPU end)`, the times in seconds.
+    pub done: fn(u64, usize, f64, f64),
+    /// The first command buffer group of a batch was committed: `(batch number, host clock in ns)`.
+    pub committed: fn(u64, u64),
 }
 
 unsafe extern "C" {
@@ -158,6 +149,7 @@ pub struct BatchRing {
     slots: Vec<Slot>,
     next: u64,
     metrics: Arc<Metrics>,
+    hooks: Option<BatchHooks>,
 }
 
 // SAFETY: the Metal objects of a ring are only used through `&mut self`, so one thread at a time touches them.
@@ -196,7 +188,13 @@ impl BatchRing {
             slots,
             next: 0,
             metrics: Arc::new(Metrics::default()),
+            hooks: None,
         })
+    }
+
+    /// Calls `hooks` for every batch begun from now on.
+    pub fn set_hooks(&mut self, hooks: Option<BatchHooks>) {
+        self.hooks = hooks;
     }
 
     /// The counters of this ring. Every command buffer adds one record.
@@ -243,6 +241,7 @@ impl BatchRing {
             done: slot.done.clone(),
             ctx: self.ctx.clone(),
             metrics: self.metrics.clone(),
+            hooks: self.hooks,
             t0,
             early: Vec::new(),
             split: None,
@@ -262,6 +261,7 @@ pub struct Batch {
     done: Arc<Completion>,
     ctx: Context,
     metrics: Arc<Metrics>,
+    hooks: Option<BatchHooks>,
     t0: Instant,
     /// The prefixes that report early: `(command buffers in the prefix, callback)`.
     early: Vec<(usize, Callback)>,
@@ -287,6 +287,7 @@ struct Split {
     ctx: Context,
     done: Arc<Completion>,
     metrics: Arc<Metrics>,
+    hooks: Option<BatchHooks>,
     /// The end of each group, in command buffers; the last is the whole batch.
     bounds: Vec<usize>,
     /// Groups whose feedback has not come yet.
@@ -365,12 +366,12 @@ impl Split {
                     f();
                 }
                 let last = me.remaining.fetch_sub(1, Ordering::AcqRel) == 1;
-                if last && let Some(h) = DONE_HOOK.get() {
+                if last && let Some(h) = me.hooks {
                     let (a, b) = {
                         let st = me.state.lock().unwrap_or_else(PoisonError::into_inner);
                         (st.start, st.end)
                     };
-                    h(number, total, a, b);
+                    (h.done)(number, total, a, b);
                 }
                 me.done.add(&stats, last);
             });
@@ -378,9 +379,9 @@ impl Split {
         opts.addFeedbackHandler(&handler);
         self.ctx.commit_residency();
         if g == 0
-            && let Some(h) = COMMIT_HOOK.get()
+            && let Some(h) = self.hooks
         {
-            h(number, uptime_ns());
+            (h.committed)(number, uptime_ns());
         }
         // SAFETY: `list` holds ended command buffers that `held` keeps alive until the feedback.
         unsafe {

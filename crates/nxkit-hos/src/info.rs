@@ -13,7 +13,8 @@
 use crate::handle::{CURRENT_PROCESS, KObject};
 use crate::kernel::Kernel;
 use crate::result::{KResult, KResultOr};
-use crate::thread::{ThreadState, lock};
+use crate::sync::lock;
+use crate::thread::ThreadState;
 use crate::vm::Vm;
 
 /// The thread limit of an application.

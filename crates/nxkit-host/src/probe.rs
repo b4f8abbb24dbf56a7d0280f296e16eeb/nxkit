@@ -276,7 +276,9 @@ fn buffer_and_residency(game: &Game) -> Result<()> {
 
 /// Runs the probe for the game in `root` and prints the results.
 pub fn run(root: &Path) -> Result<()> {
-    let game = Game::read(root)?;
+    // The probe is a tool of its own: it reads the environment here, once, for the memory profile.
+    let env = crate::hostenv::HostEnv::from_env(&nxkit_abi::env::Env::capture());
+    let game = Game::read(root, &env)?;
     let layout = layout::plan(&game, 0)?;
     println!("nxkit-host probe for {}", root.display());
     let ranges = named_ranges(&game, &layout);

@@ -1,16 +1,29 @@
 //! Workspace checks that rustc and clippy cannot do.
 //!
 //! - `layers`: every crate declares `[package.metadata.nxb] layer` and `in_v`, dependencies point to a lower layer or
-//!   are listed sideways edges (docs/workspace-layout.md 2 and 2.1), dev crates are never normal dependencies, a crate in
+//!   are listed sideways edges (docs/architecture.md, "Layers"), dev crates are never normal dependencies, a crate in
 //!   the chain version V depends only on crates in V.
 //!   The front-end crates (`msl-*`, `air-*`, `airc`, `mslcheck`) are layer `F` (ADR W20): they depend only on each other and
 //!   on no `nxb-*` crate, and only the entry points `air-front` and `airc` may be used from outside, by `L2` or `L3` crates.
 //!   The title crates are layer `T`: a family or title crate depends only on `nxtitle` and `L0`, and only the registry
 //!   `nxtitles` depends on a `T` crate.
 //! - `limits`: source files at most 600 lines, stage modules of `nxb-stages` at most 400.
+//! - `modules`: the module cycles inside each crate do not grow (ADR W24). The accepted cycle groups are in
+//!   `xtask/module-cycles.txt`; a new or larger group fails, and so does a group that got smaller until the file is
+//!   shrunk. `graph <crate>...` prints the groups of a crate and the edges inside them with their first place.
 //!
-//! Usage: `cargo run -p xtask -- [layers] [limits]` (both when no argument is given). Std only, the TOML reading is a
-//! deliberately small line parser for the fields above.
+//! - `settings`: no runtime crate reads an `NXKIT_*` variable from the process; the snapshot `nxkit_abi::env` is the one
+//!   source (ADR W27).
+//! - `statics`: the process-wide statics of each runtime crate do not grow (ADR W26, `xtask/statics.txt`).
+//!
+//! Usage: `cargo run -p xtask -- [layers] [limits] [modules] [settings] [statics]` (all when no argument is given), or
+//! `cargo run -p xtask -- graph <crate>...`. Std only, the TOML reading is a deliberately small line parser for the
+//! fields above, and the module graph comes from a small tokenizer (`lex`).
+
+mod lex;
+mod modgraph;
+mod modules;
+mod runtime;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,22 +35,11 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxtitles", "nxtitle"),
     ("nxb-error", "nxb-model"),
     ("nxb-model", "nxb-sys"),
-    ("nxb-air", "nxb-shader"),
     ("nxb-shader", "nxb-pyjson"),
     ("nxb-xlate", "nxb-pyjson"),
-    ("nxb-hos", "nxb-romfs"),
-    ("nxb-hos", "nxb-crypto"),
-    ("nxb-hos", "nxb-codec"),
-    ("nxb-romfs", "nxb-crypto"),
     ("nxb-rewrite", "nxb-a64"),
     ("nxb-rewrite", "nxb-codec"),
     ("nxb-split", "nxb-codec"),
-    ("nxb-split", "nxb-romfs"),
-    ("nxb-bundle", "nxb-plist"),
-    ("nxb-codesign", "nxb-plist"),
-    ("nxb-codesign", "nxb-crypto"),
-    ("nxb-zip", "nxb-codec"),
-    ("nxb-pso", "nxb-pyjson"),
     ("nxb-cli", "nxb-stages"),
     // ADR W19: stage crates beside the wiring (L3, they do I/O), the orchestrator and the CLI call them
     ("nxb-cli", "nxb-extract"),
@@ -48,24 +50,6 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxb-build", "nxb-pack"),
     ("nxb-build", "nxb-archive"),
     ("nxb-build", "nxb-stages"),
-    // The nxkit host: the services and the kernel use the guest ABI of `nxkit-abi`, and `nxkit-rt` puts the NVN C
-    // functions over the front end of `nxkit-nvn`.
-    ("nxkit-hos", "nxkit-abi"),
-    ("nxkit-ipc", "nxkit-abi"),
-    ("nxkit-svc-audio", "nxkit-abi"),
-    ("nxkit-svc-fs", "nxkit-abi"),
-    ("nxkit-svc-input", "nxkit-abi"),
-    ("nxkit-svc-offline", "nxkit-abi"),
-    ("nxkit-svc-pacing", "nxkit-abi"),
-    ("nxkit-svc-system", "nxkit-abi"),
-    ("nxkit-svc-video", "nxkit-abi"),
-    ("nxkit-rt", "nxkit-nvn"),
-    // The GPU backend (`nxkit-gpu`) implements the `Backend` of the NVN front end. The host installs it.
-    // the shard index of the pipeline archive, written by the build and read by the Metal backend
-    ("nxkit-metal", "nxkit-abi"),
-    ("nxkit-gpu", "nxkit-nvn"),
-    ("nxkit-host", "nxkit-gpu"),
-    ("nxkit-host", "nxkit-nvn"),
 ];
 
 /// Edges from a crate in V to a crate outside V that are output-neutral by contract (ADR W17: hardware SHA-256 gives
@@ -117,7 +101,10 @@ fn parse_manifest(path: &Path) -> Result<Krate, String> {
             "package" if key == "name" => k.name = value.to_string(),
             "package.metadata.nxb" if key == "layer" => k.layer = value.to_string(),
             "package.metadata.nxb" if key == "in_v" => k.in_v = Some(value == "true"),
-            "dependencies" => {
+            // the normal dependencies, also those of one target (`[target.'cfg(..)'.dependencies]`)
+            sec if sec == "dependencies"
+                || (sec.starts_with("target.") && sec.ends_with(".dependencies")) =>
+            {
                 let dep = key.split('.').next().unwrap_or(key).trim();
                 k.deps.push(dep.to_string());
             }
@@ -136,6 +123,11 @@ fn rank(layer: &str) -> Option<u8> {
         "T" => Some(1),
         "F" => Some(8),
         "dev" => Some(9),
+        "R0" => Some(10),
+        "R1" => Some(11),
+        "R2" => Some(12),
+        "R3" => Some(13),
+        "R4" => Some(14),
         _ => None,
     }
 }
@@ -211,6 +203,23 @@ fn check_layers(all: &[Krate]) -> Vec<String> {
             }
             let Some(dr) = rank(&dk.layer) else { continue };
             let sideways = SIDEWAYS.contains(&(k.name.as_str(), d.as_str()));
+            let (k_rt, d_rt) = (k.layer.starts_with('R'), dk.layer.starts_with('R'));
+            if k_rt || d_rt {
+                // ADR W25: a runtime crate uses a lower runtime layer (or a listed sideways edge) and the build
+                // foundation L0. A build crate uses only the runtime contract R0, from L2 or L3.
+                let ok = if k_rt {
+                    (d_rt && (dr < r || (dr == r && sideways))) || dk.layer == "L0"
+                } else {
+                    dk.layer == "R0" && (k.layer == "L2" || k.layer == "L3")
+                };
+                if !ok {
+                    errs.push(format!(
+                        "{} ({}) -> {d} ({}): runtime layer rule (ADR W25)",
+                        k.name, k.layer, dk.layer
+                    ));
+                }
+                continue;
+            }
             if dk.layer == "dev" {
                 errs.push(format!(
                     "{} -> {d}: dev crates are dev-dependencies only",
@@ -275,6 +284,60 @@ fn check_limits(all: &[Krate]) -> Vec<String> {
     errs
 }
 
+/// The module cycle errors, and the count of groups and of modules in them.
+fn check_modules(root: &Path, all: &[Krate]) -> (Vec<String>, String) {
+    let base = match fs::read_to_string(root.join(modules::BASELINE)) {
+        Ok(t) => modules::parse_baseline(&t),
+        Err(e) => return (vec![format!("{}: {e}", modules::BASELINE)], String::new()),
+    };
+    let now = modules::all_groups(all.iter().map(|k| (k.name.as_str(), k.dir.as_path())));
+    let groups = now.values().map(Vec::len).sum::<usize>();
+    let mods = now.values().flatten().map(|g| g.len()).sum::<usize>();
+    let note = format!(", {groups} cycle groups with {mods} modules");
+    (modules::compare(&now, &base), note)
+}
+
+/// The crates of the runtime world (layers `R0` to `R4`), as (name, folder).
+fn runtime_crates(all: &[Krate]) -> impl Iterator<Item = (&str, &Path)> {
+    all.iter()
+        .filter(|k| k.layer.starts_with('R'))
+        .map(|k| (k.name.as_str(), k.dir.as_path()))
+}
+
+/// The static errors, and the count of process-wide statics of the runtime crates.
+fn check_statics(root: &Path, all: &[Krate]) -> (Vec<String>, String) {
+    let base = match fs::read_to_string(root.join(runtime::STATICS_BASELINE)) {
+        Ok(t) => runtime::parse_statics(&t),
+        Err(e) => {
+            return (
+                vec![format!("{}: {e}", runtime::STATICS_BASELINE)],
+                String::new(),
+            );
+        }
+    };
+    let now = runtime::count_statics(runtime_crates(all));
+    let note = format!(", {} process-wide statics", now.values().sum::<usize>());
+    (runtime::compare_statics(&now, &base), note)
+}
+
+fn graph(root: &Path, all: &[Krate], names: &[String]) -> ExitCode {
+    let mut failed = false;
+    for n in names {
+        match all.iter().find(|k| &k.name == n) {
+            Some(k) => println!("{}", modules::explain(&k.name, &k.dir, root)),
+            None => {
+                eprintln!("xtask graph: no crate {n:?}");
+                failed = true;
+            }
+        }
+    }
+    if failed || names.is_empty() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn main() -> ExitCode {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -282,7 +345,9 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        args = vec!["layers".into(), "limits".into()];
+        args = ["layers", "limits", "modules", "settings", "statics"]
+            .map(String::from)
+            .to_vec();
     }
     let all = match crates(&root) {
         Ok(c) => c,
@@ -291,15 +356,29 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if args[0] == "graph" {
+        return graph(&root, &all, &args[1..]);
+    }
     let mut failed = false;
     for a in &args {
-        let errs = match a.as_str() {
-            "layers" => check_layers(&all),
-            "limits" => check_limits(&all),
-            other => vec![format!("unknown check {other:?} (layers, limits)")],
+        let (errs, note) = match a.as_str() {
+            "layers" => (check_layers(&all), String::new()),
+            "limits" => (check_limits(&all), String::new()),
+            "modules" => check_modules(&root, &all),
+            "settings" => (
+                runtime::check_settings(runtime_crates(&all), &root),
+                String::new(),
+            ),
+            "statics" => check_statics(&root, &all),
+            other => (
+                vec![format!(
+                    "unknown check {other:?} (layers, limits, modules, settings, statics)"
+                )],
+                String::new(),
+            ),
         };
         if errs.is_empty() {
-            println!("xtask {a}: ok ({} crates)", all.len());
+            println!("xtask {a}: ok ({} crates{note})", all.len());
         }
         for e in &errs {
             eprintln!("xtask {a}: {e}");
@@ -383,6 +462,37 @@ mod tests {
             k("nxb-build", "L3", false, &["nxgame-b"]),
         ];
         assert_eq!(check_layers(&bad_titles).len(), 3);
+        let runtime = [
+            k("nxb-model", "L0", true, &[]),
+            k("nxkit-abi", "R0", false, &[]),
+            k("nxkit-metal", "R1", false, &["nxkit-abi"]),
+            k("nxkit-hos", "R2", false, &["nxkit-abi", "nxb-model"]),
+            k("nxkit-host", "R4", false, &["nxkit-hos", "nxkit-metal"]),
+            k("nxb-archive", "L3", false, &["nxkit-abi"]),
+        ];
+        assert!(check_layers(&runtime).is_empty());
+        let bad_runtime = [
+            k("nxb-shader", "L1", true, &[]),
+            k("nxkit-abi", "R0", false, &["nxkit-hos"]),
+            k("nxkit-hos", "R2", false, &["nxb-shader"]),
+            k("nxkit-ipc", "R2", false, &["nxkit-hos"]),
+            k("nxb-store", "L2", false, &["nxkit-hos"]),
+        ];
+        assert_eq!(check_layers(&bad_runtime).len(), 4);
+    }
+
+    #[test]
+    fn target_dependencies_count() {
+        let dir = std::env::temp_dir().join(format!("xtask-manifest-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Cargo.toml");
+        let text = "[package]\nname = \"nxkit-x\"\n[package.metadata.nxb]\nlayer = \"R2\"\nin_v = false\n\
+                    [dependencies]\nnxkit-abi.workspace = true\n\
+                    [target.'cfg(target_os = \"macos\")'.dependencies]\nnxkit-metal = { workspace = true }\n\
+                    [dev-dependencies]\nnxb-testkit.workspace = true\n";
+        fs::write(&path, text).unwrap();
+        let k = parse_manifest(&path).unwrap();
+        assert_eq!(k.deps, ["nxkit-abi", "nxkit-metal"]);
     }
 
     #[test]
@@ -395,5 +505,11 @@ mod tests {
         assert!(all.len() > 20);
         assert_eq!(check_layers(&all), Vec::<String>::new());
         assert_eq!(check_limits(&all), Vec::<String>::new());
+        assert_eq!(check_modules(&root, &all).0, Vec::<String>::new());
+        assert_eq!(
+            runtime::check_settings(runtime_crates(&all), &root),
+            Vec::<String>::new()
+        );
+        assert_eq!(check_statics(&root, &all).0, Vec::<String>::new());
     }
 }

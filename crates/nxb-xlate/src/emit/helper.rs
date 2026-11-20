@@ -1,6 +1,6 @@
 //! `InstEmitHelper.cs`: operand accessors shared by the instruction emitters.
 
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::ops::{Opd, regtype};
 use crate::maxwell::enums::{HalfSwizzle, OFmt};
 

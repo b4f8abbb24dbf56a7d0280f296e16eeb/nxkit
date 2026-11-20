@@ -10,32 +10,23 @@
 //! - the flushes that touch a page that the frame still on the GPU reads, by kind of binding: the writes that race with
 //!   the GPU when `nvnSyncWait` returns early (the `nowait` knob).
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
-/// Whether the CPU may run one frame ahead of the GPU (`NXKIT_OVERLAP=1`): `nvnSyncWait` for the newest frame waits for
-/// the frame before it, and every bound uniform buffer reads a copy that the walk takes, so that the CPU's writes for
-/// the next frame do not reach the frame on the GPU. See `docs/plans/fence-overlap.md`.
-pub(crate) fn on() -> bool {
+/// Whether the CPU may run one frame ahead of the GPU: `game` is the `overlap` key of `game.json`, which the backend,
+/// the GPU and the walker keep from their settings. `NXKIT_OVERLAP=1` and the knob `overlap` turn it on too.
+/// `nvnSyncWait` for the newest frame then waits for the frame before it, and every bound uniform buffer reads a copy
+/// that the walk takes, so that the CPU's writes for the next frame do not reach the frame on the GPU. See
+/// `docs/plans/fence-overlap.md`.
+pub(crate) fn on(game: bool) -> bool {
     // The mirror (`NXKIT_PRIVATE=1`) replaces the learned copies: the overlap and the renamer stay off.
     if crate::private::mirrored() {
         return false;
     }
-    static ON: OnceLock<bool> = OnceLock::new();
-    SETTING.load(std::sync::atomic::Ordering::Relaxed)
-        || *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))
-        || crate::knob("overlap")
-}
-
-/// The `overlap` key of `game.json`, set once when the backend is made.
-static SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Turns the overlap on for this run (`game.json` key `overlap`).
-pub(crate) fn set_on() {
-    SETTING.store(true, std::sync::atomic::Ordering::Relaxed);
+    game || crate::settings::env().overlap || crate::knob("overlap")
 }
 
 use crate::detail::{DrawArgs, FrameDetail, UboDetail};
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 
 const PAGE: u64 = 16 * 1024;
 /// A page stays dynamic for this many frames after a flush named it.

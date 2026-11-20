@@ -2,8 +2,8 @@
 
 use nxb_a64::{Insn, encode};
 
+use crate::branch::unhex;
 use crate::error::fail;
-use crate::matchfn::unhex;
 use crate::patches::{Cut, FsItem, FsOp, Sym};
 use crate::rw::{R, Rw, reach};
 use crate::scan::Kind;

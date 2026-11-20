@@ -4,6 +4,8 @@
 
 use crate::attr::Stage;
 use crate::driver::Program;
+use crate::front::msl_entry::Structured;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::job::parse_jobs;
 use crate::msl::emit::Options;
@@ -11,9 +13,7 @@ use crate::msl::library::build;
 use crate::msl::{Context, StageInputs, Translated, Varying};
 use crate::props::Props;
 use crate::structured::ast::{A, BlockType};
-use crate::structured::types::AggType;
 use crate::structured::{StructFunction, StructInfo};
-use crate::translation::msl_entry::Structured;
 
 pub(super) const ONE: i32 = 0x3f80_0000;
 

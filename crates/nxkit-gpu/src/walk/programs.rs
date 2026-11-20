@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use nxkit_nvn::backend::StageKey;
 
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 use crate::json::{Json, parse};
 
 /// The kind of a shader stage, as the shader step writes it.

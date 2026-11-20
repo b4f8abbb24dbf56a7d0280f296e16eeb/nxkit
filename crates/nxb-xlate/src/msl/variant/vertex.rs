@@ -11,7 +11,7 @@ use super::super::args;
 use super::super::emit::{Em, R};
 use super::super::entry::{EntryName, Form, Param, StageIn, call_text, entry_text};
 use super::super::io::Plan;
-use crate::translation::msl_entry::Structured;
+use crate::front::msl_entry::Structured;
 use nxb_pyjson::Value;
 use std::fmt::Write;
 

@@ -30,13 +30,11 @@
 //! `NXKIT_COPYBACK=0` turns it off. `NXKIT_COPYBACK_MAX_MB` caps the storage copied back per frame (128 MiB).
 //! `NXKIT_DIAG=copyback` names each texture the first time it is copied back, and prints a summary now and then.
 
-use std::sync::OnceLock;
-
 use nxkit_nvn::format::{Aspects, format_info};
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::resource::{TexId, TextureRecord};
 
-use crate::draws::FastSet;
+use crate::fastmap::FastSet;
 use crate::poolreg::Registry;
 use crate::textures::Res;
 use crate::upload::Dirty;
@@ -102,19 +100,12 @@ const LOG_TEXTURES: usize = 300;
 
 /// False when `NXKIT_COPYBACK=0`.
 pub(crate) fn enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_COPYBACK").map_or(true, |v| v.trim() != "0"))
+    crate::settings::env().copyback
 }
 
 /// The storage bytes that one frame may copy back.
 pub(crate) fn budget() -> u64 {
-    static MB: OnceLock<u64> = OnceLock::new();
-    *MB.get_or_init(|| {
-        std::env::var("NXKIT_COPYBACK_MAX_MB")
-            .ok()
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(128)
-    }) << 20
+    crate::settings::env().copyback_max_mb << 20
 }
 
 /// What the encoder knows for the copy-back: the memory pools with their flags, and the copy-backs in flight.
@@ -129,7 +120,7 @@ pub(crate) struct CopyBack {
     /// The textures that the diagnostic named.
     seen: FastSet<TexId>,
     /// The last decision for each texture (`NXKIT_DIAG=copyback` only). `candidate` takes `&self`.
-    decided: std::sync::Mutex<crate::draws::FastMap<TexId, Why>>,
+    decided: std::sync::Mutex<crate::fastmap::FastMap<TexId, Why>>,
     /// Frames with a copy-back, textures and bytes copied back, for the diagnostic.
     frames: u64,
     textures: u64,

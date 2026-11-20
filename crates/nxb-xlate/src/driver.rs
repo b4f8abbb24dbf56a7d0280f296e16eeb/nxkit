@@ -37,7 +37,7 @@ pub struct Program {
     pub images: Vec<TexInfo>,
     pub uses_frag_coord: bool,
     /// The textures and images the render scale changes (see `xform::texture`).
-    pub scaled: Vec<crate::xform::helper::ScaleUse>,
+    pub scaled: Vec<crate::helper::ScaleUse>,
     pub frag_out_map: i64,
     /// `GetResourceReservations().OutputSizePerInvocation` (geometry)
     pub geometry_stride: i64,

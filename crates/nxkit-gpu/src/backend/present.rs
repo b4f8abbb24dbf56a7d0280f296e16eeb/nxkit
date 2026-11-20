@@ -15,7 +15,7 @@ impl GpuBackend {
             .lock_gpu()
             .texture(present.texture)
             .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
-        encpace::ready(number);
+        self.diag.ready(number);
         if crate::diag("present") && number % 120 == 1 {
             eprintln!(
                 "DIAG present id {:?} {}x{} {:?}",

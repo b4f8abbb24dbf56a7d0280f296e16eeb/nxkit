@@ -23,11 +23,38 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use nxkit_metal::GuestMemory;
 
 mod life;
+pub(crate) mod overlay;
 mod set;
+
+/// The backing of the pool that holds `[address, address + len)` and the offset of the range in it. A range that lies
+/// in no pool, in a pool without a buffer or across the end of its pool is a miss: `crate::skip::Skip::Buffer`, never a partial use.
+pub(crate) fn locate<B: Backing>(
+    pools: &PoolSnapshot<B>,
+    address: u64,
+    len: u64,
+) -> Result<(&B, u64), crate::skip::Skip> {
+    let loc = pools
+        .resolve_c(address, len, crate::pools::overlay::UPLOAD)
+        .map_err(|_| crate::skip::Skip::Buffer)?;
+    if loc.run != NO_RUN {
+        // A member range lies in the mirror: the buffer of its run, and the offset in it.
+        let run = pools
+            .overlay()
+            .and_then(|o| o.runs().get(loc.run as usize))
+            .ok_or(crate::skip::Skip::Buffer)?;
+        return Ok((&run.mem, loc.offset));
+    }
+    let mem = pools.entries()[loc.pool as usize]
+        .buf
+        .mem()
+        .ok_or(crate::skip::Skip::Buffer)?;
+    Ok((mem, loc.offset))
+}
+
 #[cfg(test)]
 mod tests;
 
-use crate::overlay::Overlay;
+use crate::pools::overlay::Overlay;
 use life::{Dead, Pinner, Yard};
 pub use set::{MetalPoolSet, PoolSet};
 
@@ -373,7 +400,7 @@ impl<B: Backing> PoolSnapshot<B> {
             } else {
                 0
             };
-            crate::overlay::note_partial(class, split, va, len);
+            crate::pools::overlay::note_partial(class, split, va, len);
             return self.resolve_guest(va, len);
         }
         if len > loc.room {
@@ -385,7 +412,7 @@ impl<B: Backing> PoolSnapshot<B> {
             && o.any_member(va, len)
         {
             // Starts outside the members and reaches into them: guest memory is stale there.
-            crate::overlay::note_partial(class, 1, va, len);
+            crate::pools::overlay::note_partial(class, 1, va, len);
         }
         Ok(loc)
     }
@@ -399,9 +426,9 @@ impl<B: Backing> PoolSnapshot<B> {
         }
         let first = o.member(va);
         if first && !o.all_members(va, len) {
-            crate::overlay::note_partial(class, 0, va, len);
+            crate::pools::overlay::note_partial(class, 0, va, len);
         } else if !first && o.any_member(va, len) {
-            crate::overlay::note_partial(class, 1, va, len);
+            crate::pools::overlay::note_partial(class, 1, va, len);
         }
     }
 

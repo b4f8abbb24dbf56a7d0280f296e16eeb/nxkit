@@ -1,19 +1,19 @@
 //! Guest threads, the parker a blocked thread waits on, and the objects a thread can wait for.
 
-use crate::lend::Lend;
+mod lend;
+
 use crate::result::KResult;
 use crate::role::{Qos, ThreadRole};
 use crate::stats::ThreadStats;
+use crate::sync::lock;
 use crate::sys::{self, WaitStatus};
+use lend::Lend;
+pub(crate) use lend::LendGuard;
 use std::sync::atomic::{
     AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
 };
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
-}
 
 /// How long a call may block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

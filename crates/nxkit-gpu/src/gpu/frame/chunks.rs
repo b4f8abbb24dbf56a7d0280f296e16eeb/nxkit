@@ -1,6 +1,7 @@
 //! The cut of a frame into chunks (`weights_of`, `lead_chunk`) and the encode of one chunk (`run_chunk`).
 
 use super::*;
+use crate::encode::EncodeCtx;
 
 /// The weight of each pass of the plan for the cut into chunks: its commands and one.
 pub(super) fn weights_of(plan: &PassPlan) -> Vec<u32> {
@@ -13,8 +14,7 @@ pub(super) fn weights_of(plan: &PassPlan) -> Vec<u32> {
 /// Whether the encode streams its command buffers (`NXKIT_STREAM_COMMIT`, on unless `0`): the first command buffers of
 /// a frame are committed as soon as they are encoded, while the others are encoded.
 pub(super) fn stream_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| !matches!(std::env::var("NXKIT_STREAM_COMMIT").as_deref(), Ok("0")))
+    crate::settings::env().stream_commit
 }
 
 /// The share of the weight of a frame that its lead chunk takes at least: one in this many.
@@ -49,7 +49,7 @@ pub(super) fn lead_chunk(weights: &[u32], ends: &mut Vec<usize>, max_buffers: us
 }
 
 pub(super) fn run_chunk(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     scratch: &Scratch,
     keep: &Arc<Keep>,
@@ -59,7 +59,7 @@ pub(super) fn run_chunk(
 }
 
 pub(super) fn run_chunk_inner(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     scratch: &Scratch,
     keep: &Arc<Keep>,
