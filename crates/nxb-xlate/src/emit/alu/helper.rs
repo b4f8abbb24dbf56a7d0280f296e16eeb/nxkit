@@ -1,7 +1,7 @@
 //! `InstEmitAluHelper.cs`.
 
+use crate::emit::emitter::{EmitterContext, FP32, FP64};
 use crate::emit::helper::{get_nf, get_zf, sign_extend_to32, zero_extend_to32};
-use crate::ir::emitter::{EmitterContext, FP32, FP64};
 use crate::ir::inst::Inst;
 use crate::ir::ops::Opd;
 use crate::maxwell::enums::{BoolOp, FComp, IDstFmt, ISrcDstFmt, VectorSelect};

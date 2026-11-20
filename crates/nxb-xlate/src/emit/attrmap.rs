@@ -1,7 +1,7 @@
 //! `AttributeMap` (`Instructions/AttributeMap.cs`): attribute offsets to IO variables, and the attribute load/store.
 
 use crate::attr::Stage;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::inst::{IoVariable, StorageKind};
 use crate::ir::ops::Opd;
 use crate::translation::definitions::Definitions;

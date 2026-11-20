@@ -5,8 +5,8 @@ use super::emit::{Em, R, Val};
 use super::inst_tex::{dimensions, result_type, swizzle, vec_of};
 use super::types::{literal, msl_type};
 use crate::ir::Inst;
+use crate::ir::agg::{AggType, format_component_type};
 use crate::structured::ast::{AstTex, OpData};
-use crate::structured::types::{AggType, format_component_type};
 use crate::types::SamplerType;
 
 const ATOMIC_MASK: u32 = 15 << 16;

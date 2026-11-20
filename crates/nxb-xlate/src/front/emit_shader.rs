@@ -1,19 +1,19 @@
 //! `Translator.EmitShader`, `EmitOutputsInitialization` and `EmitOps` (the Maxwell path).
 
-use super::context::TranslatorContext;
-use super::fsi_match::{self, FunctionType};
-use super::host;
-use super::resources::ResourceManager;
 use crate::accessor::Accessor;
 use crate::attr::Stage;
 use crate::emit;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::inst::{IoVariable, StorageKind};
 use crate::ir::{Ir, NodeId, regtype};
 use crate::maxwell::decoder::Block;
 use crate::maxwell::insts::InstConditional;
 use crate::maxwell::names::InstName;
 use crate::maxwell::table::props;
+use crate::translation::context::TranslatorContext;
+use crate::translation::fsi_match::{self, FunctionType};
+use crate::translation::host;
+use crate::translation::resources::ResourceManager;
 
 /// Arena, functions and the emitter errors of a lenient run.
 pub type EmitResult = (Ir, Vec<FunctionCode>, Vec<(String, String)>);

@@ -1,6 +1,6 @@
 //! The soft float64 helpers of `HelperFunctionManager` (`ConvertDoubleToFloat`, `ConvertFloatToDouble`) used by the
 //! `DoubleToFloat` pass when the host has no float64 support.
-use super::helper::{B, Function};
+use super::{B, Function};
 use crate::ir::{Inst, Ir, Opd, StorageKind};
 
 type R<T> = Result<T, String>;

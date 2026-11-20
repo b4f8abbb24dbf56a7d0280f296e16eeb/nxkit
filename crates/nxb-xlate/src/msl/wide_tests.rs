@@ -3,9 +3,9 @@
 use super::gaps_tests::{bare_compute, msl};
 use super::tests::B;
 use crate::driver::BufferInfo;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::{BufferDef, Field};
-use crate::structured::types::AggType;
 
 const WORDS: AggType = AggType(AggType::U32.0 | AggType::ARRAY.0);
 

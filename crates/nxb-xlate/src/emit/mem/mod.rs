@@ -13,7 +13,7 @@ mod tex_entry;
 mod tex_misc;
 mod texs;
 
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::maxwell::names::Emit;
 
 /// `None` when this family does not handle `emit`.

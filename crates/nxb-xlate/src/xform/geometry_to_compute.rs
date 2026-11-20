@@ -2,7 +2,7 @@
 //! output buffer, keeps its output vertex in local memory and writes each emitted vertex and its index to the
 //! geometry output buffers.
 use super::XformCtx;
-use super::helper::B;
+use crate::helper::B;
 use crate::ir::{Block, Inst, IoVariable, Ir, NodeId, Opd, StorageKind};
 use crate::opt::Env;
 use crate::translation::definitions::Definitions;

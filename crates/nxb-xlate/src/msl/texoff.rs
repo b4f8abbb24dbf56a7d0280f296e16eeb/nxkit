@@ -6,8 +6,8 @@
 
 use super::emit::{Em, R};
 use super::inst_tex::vec_of;
+use crate::ir::agg::AggType;
 use crate::structured::ast::OpData;
-use crate::structured::types::AggType;
 
 /// The offset of a texture operation, one part for each dimension.
 pub(super) struct Off {

@@ -144,3 +144,8 @@ pub fn unpack_offsets(handle: i32) -> (i32, i32, HandleType) {
     };
     (handle & 0x3fff, (handle >> 14) & 0x3fff, t)
 }
+
+/// Compute (ABI of the MSL libraries, `msl::abi`): the dispatch's workgroup counts in c0.
+pub const C0_DISPATCH: u32 = 0x200;
+/// NVN2 compute: the workgroup counts in c0.
+pub const C0_DISPATCH_NVN2: u32 = 4;

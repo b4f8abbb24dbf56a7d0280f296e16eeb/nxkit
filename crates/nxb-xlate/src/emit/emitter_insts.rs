@@ -5,9 +5,9 @@
 //! an array and element index.
 
 use super::emitter::{EmitterContext, FP32, FP64};
-use super::inst::{Inst, IoVariable, StorageKind};
-use super::ops::{Opd, texflags};
 use crate::accessor::SetBinding;
+use crate::ir::inst::{Inst, IoVariable, StorageKind};
+use crate::ir::ops::{Opd, texflags};
 use crate::types::SamplerType;
 
 impl EmitterContext<'_, '_> {

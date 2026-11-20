@@ -5,13 +5,13 @@ use super::library::build;
 use super::{Context, Translated};
 use crate::attr::Stage;
 use crate::driver::{BufferInfo, Program, TexInfo};
+use crate::front::msl_entry::Structured;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::job::parse_jobs;
 use crate::props::{BufferDef, Field, MemoryDef, Props, TextureDef};
 use crate::structured::ast::{A, AstTex, BlockType};
-use crate::structured::types::AggType;
 use crate::structured::{StructFunction, StructInfo};
-use crate::translation::msl_entry::Structured;
 use crate::types::SamplerType;
 
 pub(super) const F4: AggType = AggType(AggType::VECTOR4.0 | AggType::FP32.0);

@@ -2,8 +2,8 @@
 #![cfg(test)]
 
 use super::{Context, Failure, Translated, translate};
+use crate::front::emit_test_util::{PRED7, RET};
 use crate::job::{Job, parse_jobs};
-use crate::translation::emit_test_util::{PRED7, RET};
 
 /// `OUT.EMIT_THEN_CUT RZ, RZ, 0` and friends: the type is the two bits at 39.
 fn out_i(ty: u64) -> u64 {

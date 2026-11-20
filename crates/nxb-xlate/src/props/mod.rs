@@ -9,7 +9,7 @@ use crate::attr::Stage;
 use crate::ir::IoVariable;
 
 /// `AggregateType` (a number, as the C# flags enum).
-pub type Agg = crate::structured::types::AggType;
+pub type Agg = crate::ir::agg::AggType;
 
 /// `ShaderDefinitions` as far as the back end reads it.
 #[derive(Clone, Debug, Default)]

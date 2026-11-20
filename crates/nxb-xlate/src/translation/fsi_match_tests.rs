@@ -385,7 +385,7 @@ fn calls_become_interlock_instructions() {
         112,
     );
     let jobs = parse_jobs(r#"[{"key": "t", "stage": "cs", "local": [1, 1, 1]}]"#).expect("jobs");
-    let text = super::pipeline::emit_text(&jobs[0], &code).expect("emit");
+    let text = crate::front::pipeline::emit_text(&jobs[0], &code).expect("emit");
     // op 3e is FSIBegin and op 3f is FSIEnd.
     assert_eq!(text.matches("op 3e ").count(), 1, "{text}");
     assert_eq!(text.matches("op 3f ").count(), 1, "{text}");

@@ -1,4 +1,8 @@
-//! `HelperFunctionManager` (the functions the corpus needs) and `Function`.
+//! `HelperFunctionManager` (the functions the corpus needs) and `Function`, with the soft float helpers it builds.
+//! The optimizer, the transforms and the front end share it, so it sits below them (W28).
+
+pub mod softfloat;
+
 use crate::cfg::Cfg;
 use crate::ir::{Block, Inst, IoVariable, Ir, NodeId, Opd, StorageKind};
 use crate::translation::props::ShaderStage;
@@ -82,8 +86,8 @@ impl Hfm {
         let f = match name {
             HelperName::TexelFetchScale => self.texel_fetch_scale(ir)?,
             HelperName::TextureSizeUnscale => self.texture_size_unscale(ir)?,
-            HelperName::ConvertDoubleToFloat => super::softfloat::convert_double_to_float(ir)?,
-            HelperName::ConvertFloatToDouble => super::softfloat::convert_float_to_double(ir)?,
+            HelperName::ConvertDoubleToFloat => softfloat::convert_double_to_float(ir)?,
+            HelperName::ConvertFloatToDouble => softfloat::convert_float_to_double(ir)?,
             _ => return Err("helper function needs its own parameters".into()),
         };
         let id = self.add_function(f);

@@ -2,8 +2,8 @@
 //! records the branches it cannot nest as gotos for `goto::eliminate`.
 
 use super::ast::*;
-use super::types::AggType;
 use super::{GotoStatement, IoDef, StructFunction, StructInfo, StructResources};
+use crate::ir::agg::AggType;
 use crate::ir::{Block, FALSE, Inst, Ir, NodeId, Opd, OperandType, StorageKind, TRUE};
 use crate::props::Definitions;
 use std::collections::{HashMap, HashSet};

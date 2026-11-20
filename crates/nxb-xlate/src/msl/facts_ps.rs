@@ -4,10 +4,10 @@ use super::emit::Em;
 use super::facts::writes;
 use super::io::Plan;
 use super::refl::{Binding, Raster};
-use super::walk::visit;
 use crate::ir::Inst;
 use crate::structured::StructInfo;
 use crate::structured::ast::Kind;
+use crate::structured::walk::visit;
 
 /// The flag a helper function sets when it discards, so the callers stop at once like the main function does.
 pub const KILL: &str = "dm_kill";

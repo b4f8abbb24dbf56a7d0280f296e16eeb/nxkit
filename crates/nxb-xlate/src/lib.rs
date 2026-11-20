@@ -1,16 +1,26 @@
 #![allow(missing_docs)]
 //! The shader translator: Maxwell and Ampere machine code to Metal Shading Language.
 //!
-//! The front end decodes the machine code (`cfg`, `ir`, `opt`, `xform`, `structured`, `translation`) and answers the
-//! queries of the job through `accessor`. The retry loop of `driver` repeats a translation with the guessed image and
-//! texture types and with 64 bit floats lowered to 32 bit. The back end `msl` turns the structured program into MSL
-//! libraries and their reflection.
+//! The modules form layers (W28, `docs/architecture.md`); a module uses only its own layer and the ones below:
+//!
+//! 1. base: `types`, `job`, `accessor` (the answers to the queries of the job), `corpus`
+//! 2. `ir`: the intermediate representation, with no translation state
+//! 3. `translation`: the state of one translation (header, definitions, host answers, resources)
+//! 4. decode: `cfg` and `emit` (the instruction emitters and their `EmitterContext`)
+//! 5. passes: `helper` (helper functions, soft float), `opt`, `xform`
+//! 6. structure: `structured` and `props` (the back end's view of the definitions)
+//! 7. front end: `driver` (the retry loop with the guessed image and texture types and the 64 bit float lowering) and
+//!    `front` (the pipeline from the machine code to the structured program)
+//! 8. back end: `msl` turns the structured program into MSL libraries and their reflection. Its entry
+//!    `msl::translate` runs the front end first.
 
 pub mod accessor;
 pub mod cfg;
 pub mod corpus;
 pub mod driver;
 pub mod emit;
+pub mod front;
+pub mod helper;
 pub mod ir;
 pub mod job;
 pub mod msl;

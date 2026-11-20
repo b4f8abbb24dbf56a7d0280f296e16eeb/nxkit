@@ -1,16 +1,16 @@
 //! The entry of the MSL back end into the translation: a job and its machine code to the structured program, with the
 //! retry loop of the driver (guessed texture and image types, 64 bit float lowering).
 
-use super::context::TranslatorContext;
 use super::core::structure_context;
 use super::geometry::{structure_geometry_compute, structure_geometry_reader};
 use super::pipeline::options_of;
 use crate::accessor::Accessor;
 use crate::driver::{Program, retry};
 use crate::job::Job;
-use crate::msl::walk::uses_float64;
 use crate::props::Props;
 use crate::structured::StructInfo;
+use crate::structured::walk::uses_float64;
+use crate::translation::context::TranslatorContext;
 use std::collections::BTreeSet;
 
 /// The result of the front end for the MSL emitter.

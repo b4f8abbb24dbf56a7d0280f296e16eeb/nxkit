@@ -1,7 +1,7 @@
 //! `InstEmitFlowControl.cs`.
 
 use super::cond::get_condition;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::ops::{FALSE, OperandType, regtype};
 use crate::maxwell::enums::Ccc;
 use crate::maxwell::insts::*;

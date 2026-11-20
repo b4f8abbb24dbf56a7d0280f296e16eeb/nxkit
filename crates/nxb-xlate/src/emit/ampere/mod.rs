@@ -14,7 +14,7 @@ mod surface;
 pub(crate) mod tensor;
 mod tex;
 
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::maxwell::ampere_table::AEmit;
 
 /// Run the emitter of the current op.

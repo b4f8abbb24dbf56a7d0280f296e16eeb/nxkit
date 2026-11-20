@@ -2,9 +2,9 @@
 
 use super::gaps_tests::msl;
 use super::tests::{B, compute};
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, StorageKind};
 use crate::structured::ast::BlockType;
-use crate::structured::types::AggType;
 
 /// `do { if (t == 3) break; if (t == 4) continue; store } while (atomicAdd(shm[t], 1) != 0)`. A plain condition when
 /// `atomic` is false.

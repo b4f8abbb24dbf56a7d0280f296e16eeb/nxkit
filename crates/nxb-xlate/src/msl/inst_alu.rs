@@ -2,8 +2,8 @@
 
 use super::emit::{Em, R, Val};
 use crate::ir::Inst;
+use crate::ir::agg::AggType;
 use crate::structured::ast::OpData;
-use crate::structured::types::AggType;
 
 const F: AggType = AggType::FP32;
 const S: AggType = AggType::S32;

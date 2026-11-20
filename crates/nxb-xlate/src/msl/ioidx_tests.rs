@@ -3,9 +3,9 @@
 use super::gaps_tests::{msl, translate};
 use super::tests::{B, F4};
 use crate::attr::Stage;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::structured::ast::A;
-use crate::structured::types::AggType;
 
 fn notes(b: &B) -> Vec<String> {
     translate(b).libraries[0]

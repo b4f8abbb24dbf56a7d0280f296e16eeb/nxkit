@@ -1,6 +1,6 @@
 //! `AggregateType` and `InstructionInfo` (the table of destination and source types of every instruction).
 
-use crate::ir::{Inst, OperandType};
+use super::{Inst, OperandType};
 
 /// `AggregateType` (a number, as the C# flags enum).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

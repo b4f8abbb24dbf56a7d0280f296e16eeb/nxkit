@@ -13,7 +13,7 @@ pub fn for_each_node(info: &StructInfo, f: &mut dyn FnMut(A, &Kind)) {
     }
 }
 
-pub(super) fn visit(info: &StructInfo, a: A, f: &mut dyn FnMut(A, &Kind)) {
+pub(crate) fn visit(info: &StructInfo, a: A, f: &mut dyn FnMut(A, &Kind)) {
     let kind = info.ast.kind(a);
     f(a, kind);
     match kind {
@@ -41,7 +41,7 @@ pub(super) fn visit(info: &StructInfo, a: A, f: &mut dyn FnMut(A, &Kind)) {
 /// True when a reachable operand or operation is 64 bit floating point.
 pub fn uses_float64(info: &StructInfo) -> bool {
     use crate::ir::Inst;
-    use crate::structured::types::AggType;
+    use crate::ir::agg::AggType;
     let mut found = false;
     for_each_node(info, &mut |_, k| match k {
         Kind::Operand { var_type, .. } => {

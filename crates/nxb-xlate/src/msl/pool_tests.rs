@@ -5,10 +5,10 @@ use super::gaps_tests::{msl, translate};
 use super::tests::{B, F4};
 use crate::attr::Stage;
 use crate::driver::TexInfo;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::TextureDef;
 use crate::structured::ast::{AstTex, BlockType};
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 
 /// A pixel shader that samples element `idx` of an array of `len` textures. `discard` adds a discard.

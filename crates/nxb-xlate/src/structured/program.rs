@@ -2,8 +2,8 @@
 
 use super::ast::{A, AstTex, Kind};
 use super::context::Context;
-use super::types::*;
 use super::{StructInfo, StructResources, goto, helper, optimizer};
+use crate::ir::agg::*;
 use crate::ir::*;
 use crate::props::Definitions;
 

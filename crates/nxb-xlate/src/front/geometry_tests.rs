@@ -1,12 +1,12 @@
 //! Synthetic tests of the geometry compute emulation front end.
 #![cfg(test)]
 
-use super::context::TranslatorContext;
 use super::emit_test_util::{PRED7, RET};
 use super::geometry::{structure_geometry_compute, structure_geometry_reader};
 use super::pipeline::options_of;
 use crate::accessor::Accessor;
 use crate::job::{Job, parse_jobs};
+use crate::translation::context::TranslatorContext;
 
 /// `OUT.EMIT_THEN_CUT RZ, RZ, 0` and friends: the type is the two bits at 39.
 fn out_i(ty: u64) -> u64 {
@@ -118,7 +118,7 @@ fn geometry_compute_writes_the_index_buffer() {
 
 #[test]
 fn input_vertex_counts_follow_the_topology() {
-    use super::definitions::{Definitions, topo};
+    use crate::translation::definitions::{Definitions, topo};
     let job = gs_job(3);
     let (tc, _) = context(&job, &[out_i(3)]);
     let mut d: Definitions = tc.definitions.clone();

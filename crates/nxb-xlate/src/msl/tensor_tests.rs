@@ -2,8 +2,8 @@
 #![cfg(test)]
 
 use super::{Context, translate};
+use crate::front::emit_test_util::AEXIT;
 use crate::job::parse_jobs;
-use crate::translation::emit_test_util::AEXIT;
 
 /// The instruction waits on every scoreboard (control bits 116..121).
 fn waiting((lo, hi): (u64, u64)) -> (u64, u64) {

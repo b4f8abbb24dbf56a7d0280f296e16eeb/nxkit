@@ -1,8 +1,8 @@
 //! `EmitterContext`: the operation list being built for one function, with the labels of its blocks.
 
-use super::inst::{Inst, StorageKind};
-use super::ops::{Ir, NodeId, Opd};
 use crate::accessor::Accessor;
+use crate::ir::inst::{Inst, StorageKind};
+use crate::ir::ops::{Ir, NodeId, Opd};
 use crate::maxwell::decoder::{Block as DecodedBlock, DecodedFunction};
 use crate::maxwell::table::InstOp;
 use crate::translation::context::TranslatorContext;
@@ -195,7 +195,7 @@ impl<'a, 'b> EmitterContext<'a, 'b> {
 
     /// `Copy(d, a)` (the C# overload with a destination.`copy(a)` makes a new local): nothing for a constant destination.
     pub fn copy_to(&mut self, d: Opd, a: Opd) {
-        if self.ir.ty(d) == super::ops::OperandType::Constant {
+        if self.ir.ty(d) == crate::ir::ops::OperandType::Constant {
             return;
         }
         self.add_op(Inst::Copy, StorageKind::None, Some(d), &[a]);

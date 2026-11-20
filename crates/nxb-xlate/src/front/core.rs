@@ -1,17 +1,17 @@
 //! The front end of a translation: the context of a job to its structured program, and the typed program interface
 //! (descriptors) the back end reads.
 
-use super::context::TranslatorContext;
 use super::pipeline::run_to_xform;
-use super::props as tp;
-use super::resources::ResourceManager;
 use crate::accessor::Accessor;
 use crate::attr::feature;
 use crate::driver::{BufferInfo, Program, TexInfo};
+use crate::ir::agg::AggType;
 use crate::props::{self as cp, Props};
 use crate::structured::program::{FunctionIn, make_structured_program};
-use crate::structured::types::AggType;
 use crate::structured::{StructInfo, StructResources};
+use crate::translation::context::TranslatorContext;
+use crate::translation::props as tp;
+use crate::translation::resources::ResourceManager;
 use crate::types::AttributeType;
 use AggType as Agg;
 
@@ -47,7 +47,7 @@ pub(super) fn definitions_of(tc: &TranslatorContext) -> cp::Definitions {
     definitions_for(&tc.definitions)
 }
 
-pub(super) fn definitions_for(d: &super::definitions::Definitions) -> cp::Definitions {
+pub(super) fn definitions_for(d: &crate::translation::definitions::Definitions) -> cp::Definitions {
     let elem = |t: AttributeType| match t {
         AttributeType::Float => Agg::FP32,
         AttributeType::Sint => Agg::S32,
@@ -150,7 +150,7 @@ pub(super) fn properties_of(rm: &ResourceManager) -> cp::Properties {
 }
 
 pub(super) fn host_caps(acc: &Accessor) -> cp::HostCaps {
-    use super::host as h;
+    use crate::translation::host as h;
     cp::HostCaps {
         reduced_precision: acc.query_host_reduced_precision(),
         supports_fragment_shader_interlock: h::SUPPORTS_FRAGMENT_SHADER_INTERLOCK,
@@ -205,9 +205,8 @@ pub fn structure_context(
     debug_mode: bool,
 ) -> Result<(StructInfo, Props, Program), String> {
     let mut t = run_to_xform(tc, acc)?;
-    let mut user: Vec<crate::translation::pipeline::TransformedFunction> =
-        std::mem::take(&mut t.funcs);
-    let mut helpers: Vec<crate::xform::helper::Function> = t
+    let mut user: Vec<crate::front::pipeline::TransformedFunction> = std::mem::take(&mut t.funcs);
+    let mut helpers: Vec<crate::helper::Function> = t
         .hfm
         .functions
         .iter_mut()

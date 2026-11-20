@@ -1,8 +1,8 @@
 //! `InstEmitFloatComparison.cs`, `InstEmitFloatMinMax.cs`.
 
 use super::helper::*;
+use crate::emit::emitter::{EmitterContext, FP32, FP64};
 use crate::emit::helper::*;
-use crate::ir::emitter::{EmitterContext, FP32, FP64};
 use crate::ir::inst::Inst;
 use crate::ir::ops::{Opd, regtype};
 use crate::maxwell::enums::*;

@@ -4,8 +4,8 @@ use super::Env;
 use super::gts_fn::{
     bit_offset, finish_function, function_name, inst_name, is_atomic, is_small_int,
 };
+use crate::helper::{B, Function};
 use crate::ir::{Inst, Opd, StorageKind};
-use crate::xform::helper::{B, Function};
 
 type R<T> = Result<T, String>;
 

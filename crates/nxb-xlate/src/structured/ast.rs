@@ -4,7 +4,7 @@
 //! Use and def sets of operands are not kept: only the expression propagation of the optimiser reads them and it is skipped
 //! in debug mode, which the translator always runs in.
 
-use super::types::AggType;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, OperandType, StorageKind};
 use crate::types::SamplerType;
 

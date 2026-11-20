@@ -105,7 +105,7 @@ impl Spill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::structured::types::AggType;
+    use crate::ir::agg::AggType;
 
     fn mem(id: i32, n: i32) -> MemoryDef {
         MemoryDef {

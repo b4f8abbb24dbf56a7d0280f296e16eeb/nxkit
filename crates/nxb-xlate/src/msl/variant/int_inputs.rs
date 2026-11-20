@@ -6,13 +6,13 @@
 //! format.
 
 use super::super::usage::const_of;
-use super::super::walk::for_each_node;
 use crate::ir::OperandType;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::Props;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind};
-use crate::structured::types::AggType;
+use crate::structured::walk::for_each_node;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One conversion the emitter made: the node, the requested type and the type the node has.

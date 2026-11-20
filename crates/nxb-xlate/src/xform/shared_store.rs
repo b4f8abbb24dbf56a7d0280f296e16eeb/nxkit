@@ -3,7 +3,7 @@
 //! threads write neighbouring bytes. The MSL emitter replaces the body of the helper with one byte or half word store
 //! (`msl/shared_store.rs`).
 use super::XformCtx;
-use super::helper::{B, Function};
+use crate::helper::{B, Function};
 use crate::ir::{Block, Inst, Ir, StorageKind};
 
 type R<T> = Result<T, String>;
@@ -84,8 +84,8 @@ pub fn run_pass(ir: &mut Ir, blocks: &mut [Block], ctx: &mut XformCtx) -> R<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::helper::Hfm;
     use crate::translation::props::ShaderStage;
-    use crate::xform::helper::Hfm;
 
     fn store(ir: &mut Ir, kind: StorageKind, mem: i32) -> crate::ir::NodeId {
         let (m, off, v) = (ir.const_(mem), ir.const_(6), ir.const_(7));

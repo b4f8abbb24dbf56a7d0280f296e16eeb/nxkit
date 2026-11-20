@@ -1,6 +1,6 @@
 //! MSL type names, literals and casts between the scalar types of the structured program.
 
-use crate::structured::types::AggType;
+use crate::ir::agg::AggType;
 
 /// The MSL name of an aggregate type (scalar or vector, no arrays).
 pub fn msl_type(t: AggType) -> Result<String, String> {

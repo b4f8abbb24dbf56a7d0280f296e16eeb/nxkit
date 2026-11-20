@@ -1,8 +1,8 @@
 //! Produced by tools/gen_xlate_emitter_insts.py from EmitterContextInsts.cs: do not edit.
 #![allow(clippy::too_many_arguments, clippy::needless_lifetimes)]
 use super::emitter::{EmitterContext, FP32};
-use super::inst::{Inst, StorageKind};
-use super::ops::Opd;
+use crate::ir::inst::{Inst, StorageKind};
+use crate::ir::ops::Opd;
 
 impl EmitterContext<'_, '_> {
     pub fn fp_modulo(&mut self, a: Opd, b: Opd) -> Opd {

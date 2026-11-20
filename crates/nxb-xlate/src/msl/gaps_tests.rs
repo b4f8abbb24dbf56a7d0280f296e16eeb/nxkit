@@ -7,10 +7,10 @@ use super::tests::{B, compute};
 use super::{Context, Translated};
 use crate::attr::Stage;
 use crate::driver::BufferInfo;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::{BufferDef, Field, MemoryDef};
 use crate::structured::ast::{A, BlockType};
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 
 pub(super) fn translate(b: &B) -> Translated {

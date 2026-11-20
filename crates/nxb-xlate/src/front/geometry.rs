@@ -1,21 +1,21 @@
 //! The geometry shader front end of the compute emulation: `Translate(asCompute: true)` of a geometry shader and
 //! `GenerateVertexPassthroughForCompute`, up to the structured program. The back ends consume the result.
 
-use super::context::TranslatorContext;
 use super::core::{StructRes, buf_info, definitions_for, host_caps, properties_of, tex_info};
 use super::pipeline::{Transformed, run_to_xform_mode};
-use super::props::{BufferDefinition, BufferLayout, ShaderStage};
-use super::resources::ResourceManager;
-use super::vac::{compute_definitions, float_array_struct, get_resource_reservations};
 use crate::accessor::Accessor;
 use crate::attr::{Stage, feature};
 use crate::driver::Program;
+use crate::helper::B;
 use crate::ir::{Inst, IoVariable, Ir, StorageKind};
 use crate::props::{self as cp, Props};
 use crate::structured::StructInfo;
 use crate::structured::program::{FunctionIn, make_structured_program};
+use crate::translation::context::TranslatorContext;
+use crate::translation::props::{BufferDefinition, BufferLayout, ShaderStage};
+use crate::translation::resources::ResourceManager;
 use crate::translation::resources_res::ResourceReservations;
-use crate::xform::helper::B;
+use crate::translation::vac::{compute_definitions, float_array_struct, get_resource_reservations};
 
 /// The compute emulation of a geometry shader (`Translate(asCompute: true)`): the structured program of the compute
 /// shader with the definitions of a 32 by 32 (or 32 by 1 with a fixed input) work group, the properties of the
@@ -76,7 +76,7 @@ fn structure_functions(
     debug_mode: bool,
 ) -> Result<StructInfo, String> {
     let mut user = std::mem::take(&mut t.funcs);
-    let mut helpers: Vec<crate::xform::helper::Function> = t
+    let mut helpers: Vec<crate::helper::Function> = t
         .hfm
         .functions
         .iter_mut()

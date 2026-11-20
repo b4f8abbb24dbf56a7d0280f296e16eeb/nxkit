@@ -2,20 +2,18 @@
 #![allow(missing_docs)]
 
 pub mod geometry_to_compute;
-pub mod helper;
 pub mod shared_store;
 pub mod shuffle;
-pub mod softfloat;
 pub mod tensor;
 pub mod texture;
 mod uniformity;
 
 use crate::accessor::Accessor;
+use crate::helper::Hfm;
 use crate::ir::{Block, Inst, Ir, OperandType};
 use crate::opt::Env;
 use crate::translation::definitions::Definitions;
 use crate::translation::props::ShaderStage;
-use helper::Hfm;
 
 type R<T> = Result<T, String>;
 

@@ -6,10 +6,10 @@ use super::tests::{B, F4, fragment};
 use super::{Context, Translated};
 use crate::attr::Stage;
 use crate::driver::TexInfo;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::{BufferDef, Field, TextureDef};
 use crate::structured::ast::{A, AstTex};
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 use nxb_pyjson::Value;
 
@@ -393,7 +393,7 @@ fn a_scaled_texture_binding_names_its_render_scale_entry() {
     let mut b = base();
     let (u, v) = (varying(&mut b, 0), varying(&mut b, 1));
     sample(&mut b, u, v, 0);
-    b.s.program.scaled.push(crate::xform::helper::ScaleUse {
+    b.s.program.scaled.push(crate::helper::ScaleUse {
         image: false,
         binding: 0,
         index: 2,

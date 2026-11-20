@@ -42,7 +42,7 @@ mod misc;
 pub(crate) mod mov;
 pub(crate) mod video;
 
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::maxwell::names::Emit;
 
 /// `None` when this family does not handle `emit`.

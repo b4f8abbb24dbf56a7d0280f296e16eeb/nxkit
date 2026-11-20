@@ -20,7 +20,7 @@ the answer table (`shader_facts.tsv`) and the options. The job writer is `nxb_sh
 | crate | content |
 |---|---|
 | `nxb-maxwell` | the decoders for Maxwell and Ampere |
-| `nxb-xlate` | the translation and the MSL back end `nxb_xlate::msl` |
+| `nxb-xlate` | the translation and the MSL back end `nxb_xlate::msl`, in module layers from `ir` up to `msl` (W28, refer to [architecture.md](architecture.md#module-layers-inside-a-crate)) |
 | `nxb-shader` | the job writer, the chain version, the guards and the side library cut |
 | `nxb-stages` | the shader step: it calls the translator, compiles the libraries and writes the files |
 
@@ -166,7 +166,7 @@ A call passes each argument as a variable, because the parameters are references
 ## Pixel shader depth output
 
 A pixel shader reads its colours from four registers for each render target with any component enabled. Component c of the n-th such target is in R(4n + c). The sample mask register follows, then the depth.
-The depth register is 4 times the number of enabled targets plus 1 (`depth_register` in `ir/emitter_ret.rs`).
+The depth register is 4 times the number of enabled targets plus 1 (`depth_register` in `emit/emitter_ret.rs`).
 
 ## Tensor cores
 

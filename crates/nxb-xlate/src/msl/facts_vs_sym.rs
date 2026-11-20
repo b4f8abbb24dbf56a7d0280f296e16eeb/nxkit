@@ -9,11 +9,11 @@ use super::io::Plan;
 use super::types::scalar;
 use super::usage::const_of;
 use crate::ir::OperandType;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::Props;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind, OpData};
-use crate::structured::types::AggType;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 

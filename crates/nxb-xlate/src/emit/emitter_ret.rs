@@ -2,8 +2,8 @@
 //! feedback emulation). The geometry and vertex-as-compute parts are in `emitter_geom.rs`.
 
 use super::emitter::EmitterContext;
-use super::inst::{IoVariable, StorageKind};
 use crate::attr::{Stage, feature};
+use crate::ir::inst::{IoVariable, StorageKind};
 use crate::translation::definitions::Definitions;
 use crate::translation::host;
 

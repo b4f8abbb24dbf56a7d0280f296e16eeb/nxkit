@@ -1,12 +1,11 @@
 //! The translation pipeline up to the phase dumps of the probe, used by the corpus tests (`emit` now, later `ssa`, `opt`...).
 
-use super::context::{Options, TranslatorContext};
 use super::emit_shader::{emit_shader, emit_shader_mode};
-use super::resources::ResourceManager;
 use crate::accessor::Accessor;
-use crate::attr::{Stage, feature};
 use crate::ir::{Ir, text};
 use crate::job::Job;
+use crate::translation::context::{Options, TranslatorContext, set_current_memories};
+use crate::translation::resources::ResourceManager;
 
 /// `Options` of a job as `dmsh_xlate` builds the flags.
 pub fn options_of(job: &Job) -> Options {
@@ -22,16 +21,6 @@ pub fn create_resource_manager(tc: &TranslatorContext, acc: &mut Accessor) -> Re
     let mut rm = ResourceManager::new(tc.stage().into(), None);
     set_current_memories(tc, acc, &mut rm);
     rm
-}
-
-/// The local and shared memory set-up of `Translate`, after `CreateResourceManager`.
-pub fn set_current_memories(tc: &TranslatorContext, acc: &mut Accessor, rm: &mut ResourceManager) {
-    let uses_local = tc.program.used_features & feature::LOCAL_MEMORY != 0;
-    rm.set_current_local_memory(tc.local_memory_size, uses_local);
-    if tc.stage() == Stage::Compute {
-        let uses_shared = tc.program.used_features & feature::SHARED_MEMORY != 0;
-        rm.set_current_shared_memory(acc.query_compute_shared_memory_size(), uses_shared);
-    }
 }
 
 /// The text of the `emit` phase for a job (what `Probe.Ops("emit", ...)` prints for the first attempt).
@@ -140,7 +129,7 @@ pub struct Transformed {
     pub funcs: Vec<TransformedFunction>,
     pub rm: ResourceManager,
     pub used_features: u32,
-    pub hfm: crate::xform::helper::Hfm,
+    pub hfm: crate::helper::Hfm,
 }
 
 /// Decode, emit, CFG, SSA, optimiser and transforms of a shader (`Translate` up to `StructuredProgram`).
@@ -155,11 +144,12 @@ pub fn run_to_xform_mode(
     as_compute: bool,
 ) -> Result<Transformed, String> {
     use crate::cfg::{Cfg, register_usage, ssa};
+    use crate::helper::Hfm;
     use crate::opt::{Env, PassCtx};
     use crate::translation::props::ShaderStage;
-    use crate::xform::{XformCtx, helper::Hfm};
+    use crate::xform::XformCtx;
     let mut rm = if as_compute {
-        super::vac::create_geometry_resource_manager(tc, acc)?
+        crate::translation::vac::create_geometry_resource_manager(tc, acc)?
     } else {
         create_resource_manager(tc, acc)
     };

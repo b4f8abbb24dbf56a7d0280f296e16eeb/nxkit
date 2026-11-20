@@ -2,9 +2,9 @@
 //! geometry passthrough emulation, and `EmitVertex` / `EndPrimitive`.
 
 use super::emitter::EmitterContext;
-use super::inst::{Inst, IoVariable, StorageKind};
-use super::ops::Opd;
 use crate::attr::Stage;
+use crate::ir::inst::{Inst, IoVariable, StorageKind};
+use crate::ir::ops::Opd;
 use crate::translation::resources_res::ResourceReservations;
 use crate::translation::vac::vertex_info::{GEOMETRY_COUNTS, VERTEX_COUNTS};
 use crate::types::SamplerType;

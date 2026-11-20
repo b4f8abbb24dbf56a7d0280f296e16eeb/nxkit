@@ -19,7 +19,6 @@ nxb-shader: job mesh
 nxb-split: bahs engines glslc mgfx misc monolith raw retro shaders sumo
 nxb-stages: build build_finish build_partial build_shared build_xlate
 nxb-stages: own_front own_raw
-nxb-xlate: cfg driver emit ir msl opt props structured translation xform
 nxkit-gpu: barriers bindless copyback coverage detail diag draws encode gatediag geometry gmem gpu health icbs images indirect lum mesh meshvis nanscan native native_ndsr native_ndve overlap passes passprof pipelines private programs pull queries rename scaled snapshot stats textures translate upload
 nxkit-gpu: overlay pools
 nxkit-hos: arbiter kernel svc sysevent
