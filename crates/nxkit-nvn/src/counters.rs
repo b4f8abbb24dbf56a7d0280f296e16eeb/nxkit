@@ -75,7 +75,7 @@ pub fn source(kind: u32) -> Source {
 /// Whether the host emulates the GPU counters (`NXKIT_COUNTERS` is not `0`).
 pub fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_COUNTERS").map_or(true, |v| v != "0"))
+    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_COUNTERS").map_or(true, |v| v != "0"))
 }
 
 /// The place of a report in a frame: the queue and the number of the report among the reports of the queue. A game

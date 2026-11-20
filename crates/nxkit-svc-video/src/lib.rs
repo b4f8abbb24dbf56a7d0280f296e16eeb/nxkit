@@ -77,6 +77,8 @@ pub struct Config {
     pub sink: Option<Arc<dyn TextureSink>>,
 }
 
+// Process-wide (W26): the configuration of `movie::Decoder`, which the game calls through a C function with no Rust
+// context.
 static CONFIG: RwLock<Option<Config>> = RwLock::new(None);
 
 /// Gives the service its settings. The host calls it once before the game starts.
@@ -88,6 +90,7 @@ pub fn init(config: &Config) {
 
 /// Who learns that the service wrote guest memory itself (a picture into a native image), so that the GPU loads the
 /// texture over it again. The GPU front end sets it; without it the GPU keeps the texture it uploaded first.
+// Process-wide (W26): the decoder threads that the guest starts tell the GPU about written pictures through it.
 static GUEST_WRITE: std::sync::OnceLock<fn(u64, u64)> = std::sync::OnceLock::new();
 
 /// Sets the function that is told `(address, length)` of every guest range the service writes.

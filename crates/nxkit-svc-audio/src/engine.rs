@@ -162,6 +162,8 @@ pub(crate) struct Mixer {
     notifier: Mutex<bool>,
 }
 
+// Process-wide (W26): the mixer that the AUHAL callback (a CoreAudio thread with no context) and the guest exports
+// share.
 static MIXER: OnceLock<Arc<Mixer>> = OnceLock::new();
 
 /// The mixer of the process.

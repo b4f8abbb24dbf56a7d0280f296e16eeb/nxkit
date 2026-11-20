@@ -28,6 +28,8 @@ pub struct Host {
     pub fatal: fn(&str),
 }
 
+// Process-wide (W26): the host functions of the audio take-overs; the game calls in through a C function with no Rust
+// context.
 static HOST: OnceLock<Host> = OnceLock::new();
 
 /// Sets the host seams. Returns false if they were set before.

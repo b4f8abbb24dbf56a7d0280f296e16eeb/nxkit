@@ -22,7 +22,7 @@ pub(crate) fn on() -> bool {
     }
     static ON: OnceLock<bool> = OnceLock::new();
     SETTING.load(std::sync::atomic::Ordering::Relaxed)
-        || *ON.get_or_init(|| std::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))
+        || *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_OVERLAP").is_ok_and(|v| v == "1"))
         || crate::knob("overlap")
 }
 

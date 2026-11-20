@@ -30,7 +30,8 @@ pub(crate) fn diag(cat: &str) -> bool {
 pub(crate) fn diag_dir() -> &'static PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
-        std::env::var_os("NXKIT_DIAG_DIR").map_or_else(|| PathBuf::from("/tmp/fmap"), PathBuf::from)
+        nxkit_abi::env::var_os("NXKIT_DIAG_DIR")
+            .map_or_else(|| PathBuf::from("/tmp/fmap"), PathBuf::from)
     })
 }
 
@@ -189,9 +190,9 @@ fn knobs() -> &'static Knobs {
     static K: OnceLock<Knobs> = OnceLock::new();
     K.get_or_init(|| Knobs {
         flags: AtomicU64::new(set_pass_options(parse_knobs(
-            &std::env::var("NXKIT_KNOB").unwrap_or_default(),
+            &nxkit_abi::env::var("NXKIT_KNOB").unwrap_or_default(),
         ))),
-        file: std::env::var_os("NXKIT_KNOB_FILE").map(PathBuf::from),
+        file: nxkit_abi::env::var_os("NXKIT_KNOB_FILE").map(PathBuf::from),
     })
 }
 
@@ -264,7 +265,7 @@ pub(crate) fn refresh_knobs() {
 pub(crate) fn paint_programs() -> &'static [String] {
     static KEYS: OnceLock<Vec<String>> = OnceLock::new();
     KEYS.get_or_init(|| {
-        std::env::var("NXKIT_PAINT_FS")
+        nxkit_abi::env::var("NXKIT_PAINT_FS")
             .map(|v| {
                 v.split(',')
                     .map(|s| s.trim().to_owned())
@@ -280,7 +281,7 @@ pub(crate) fn paint_programs() -> &'static [String] {
 pub(crate) fn fs_programs() -> &'static [String] {
     static KEYS: OnceLock<Vec<String>> = OnceLock::new();
     KEYS.get_or_init(|| {
-        std::env::var("NXKIT_DIAG_FS")
+        nxkit_abi::env::var("NXKIT_DIAG_FS")
             .map(|v| {
                 v.split(',')
                     .map(|s| s.trim().to_owned())
@@ -303,7 +304,7 @@ struct TexFilter {
 fn tex_filter() -> Option<&'static TexFilter> {
     static F: OnceLock<Option<TexFilter>> = OnceLock::new();
     F.get_or_init(|| {
-        let v = std::env::var("NXKIT_DIAG_TEX").ok()?;
+        let v = nxkit_abi::env::var("NXKIT_DIAG_TEX").ok()?;
         let mut f = TexFilter::default();
         for part in v.split('/').map(str::trim).filter(|p| !p.is_empty()) {
             let nums: Vec<u32> = part.split('x').filter_map(|n| n.parse().ok()).collect();
@@ -377,7 +378,7 @@ pub(crate) fn first(counter: &AtomicU32, max: u32) -> bool {
 pub(crate) fn watched(id: TexId) -> bool {
     static IDS: OnceLock<Vec<u32>> = OnceLock::new();
     IDS.get_or_init(|| {
-        std::env::var("NXKIT_WATCH_TEX")
+        nxkit_abi::env::var("NXKIT_WATCH_TEX")
             .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
             .unwrap_or_default()
     })
@@ -387,7 +388,7 @@ pub(crate) fn watched(id: TexId) -> bool {
 /// `NXKIT_GPU_LABELS=1`: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
 pub(crate) fn gpu_labels() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_GPU_LABELS").is_ok_and(|v| v == "1"))
+    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_GPU_LABELS").is_ok_and(|v| v == "1"))
 }
 
 /// Whether `NXKIT_SKIP_PROGRAMS` names a key or `NXKIT_SKIP_FILE` is set. One load of a cached value, so the check
@@ -396,8 +397,8 @@ pub(crate) fn skip_list_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         skip_list_set(
-            std::env::var("NXKIT_SKIP_PROGRAMS").ok().as_deref(),
-            std::env::var_os("NXKIT_SKIP_FILE").is_some(),
+            nxkit_abi::env::var("NXKIT_SKIP_PROGRAMS").ok().as_deref(),
+            nxkit_abi::env::var_os("NXKIT_SKIP_FILE").is_some(),
         )
     })
 }
@@ -427,7 +428,7 @@ pub(crate) fn skipped_program(key: &str) -> bool {
     }
     static KEYS: OnceLock<Vec<String>> = OnceLock::new();
     let keys = KEYS.get_or_init(|| {
-        std::env::var("NXKIT_SKIP_PROGRAMS")
+        nxkit_abi::env::var("NXKIT_SKIP_PROGRAMS")
             .map(|v| parse(&v))
             .unwrap_or_default()
     });
@@ -435,7 +436,7 @@ pub(crate) fn skipped_program(key: &str) -> bool {
         return true;
     }
     static FILE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
-    let Some(path) = FILE.get_or_init(|| std::env::var_os("NXKIT_SKIP_FILE").map(Into::into))
+    let Some(path) = FILE.get_or_init(|| nxkit_abi::env::var_os("NXKIT_SKIP_FILE").map(Into::into))
     else {
         return false;
     };
@@ -483,7 +484,7 @@ pub(crate) fn tiny_words(bytes: &[u8]) -> String {
 pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
     static R: OnceLock<Vec<(u64, usize)>> = OnceLock::new();
     R.get_or_init(|| {
-        let Ok(v) = std::env::var("NXKIT_DIAG_WATCH") else {
+        let Ok(v) = nxkit_abi::env::var("NXKIT_DIAG_WATCH") else {
             return Vec::new();
         };
         v.split(',')

@@ -167,6 +167,8 @@ struct Shared {
     notices: Vec<Notice>,
 }
 
+// Process-wide (W26): the pacing state of `nn::vi` and of the frame step stubs; the game calls in through a C function
+// with no Rust context.
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
 
 #[cfg(test)]
@@ -232,6 +234,8 @@ pub fn on_display_tick() -> Result<(), Error> {
 }
 
 /// The refresh rate of the screen that shows the game, 120 until the host sets it.
+// Process-wide (W26): set by the host for every title, also without the pacing service, and read by the NVN present of
+// `nxkit-rt`.
 static SCREEN_HZ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(120);
 
 /// Sets the refresh rate of the screen that shows the game. A rate that is not a multiple of the step rate (144 Hz)

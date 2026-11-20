@@ -216,8 +216,8 @@ impl Walker {
             track: cache::Track::new(),
             invalidations: Arc::new(Invalidations::default()),
             scratch_ranges: Vec::new(),
-            cache_on: cfg!(test) || std::env::var("NXKIT_WALK_CACHE").is_ok_and(|v| v == "1"),
-            verify: cfg!(test) || std::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
+            cache_on: cfg!(test) || nxkit_abi::env::var("NXKIT_WALK_CACHE").is_ok_and(|v| v == "1"),
+            verify: cfg!(test) || nxkit_abi::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
             bypass: false,
             undo: None,
         }

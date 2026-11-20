@@ -106,7 +106,7 @@ mod imp {
     /// Logs the transport and the IO buffer of the device, sets the buffer from `NXKIT_AUDIO_DEVICE_FRAMES`, and listens
     /// for overloads of the device.
     fn watch_device(device: u32) {
-        if let Some(frames) = std::env::var("NXKIT_AUDIO_DEVICE_FRAMES")
+        if let Some(frames) = nxkit_abi::env::var("NXKIT_AUDIO_DEVICE_FRAMES")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
         {

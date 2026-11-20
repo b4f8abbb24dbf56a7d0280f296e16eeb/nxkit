@@ -289,7 +289,7 @@ pub struct Ctx<'a, M: GuestMem> {
 fn watch_addr() -> Option<u64> {
     static ADDR: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     *ADDR.get_or_init(|| {
-        let v = std::env::var("NXKIT_WATCH_ADDR").ok()?;
+        let v = nxkit_abi::env::var("NXKIT_WATCH_ADDR").ok()?;
         u64::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()
     })
 }

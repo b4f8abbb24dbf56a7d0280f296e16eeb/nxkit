@@ -77,6 +77,7 @@ struct Threads {
     live: Vec<(u64, GuestThread, Arc<AtomicBool>)>,
 }
 
+// Process-wide (W26): the guest threads of the audio and video services, reached through bare `fn` seams.
 static THREADS: Mutex<Threads> = Mutex::new(Threads {
     next: 1,
     live: Vec::new(),

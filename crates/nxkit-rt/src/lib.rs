@@ -180,6 +180,7 @@ fn mapped(
 }
 
 /// The mask of enabled services. Zero before init.
+// Process-wide (W26): the service mask that `nxkit_init` (C ABI) sets and the export lookup reads.
 static SERVICES: AtomicU64 = AtomicU64::new(0);
 
 /// Finds `name` in `table`. Only a service in `mask` is found. Functions that need the big stack are not found.

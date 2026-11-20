@@ -34,6 +34,7 @@ mod submit;
 
 /// Called when a batch completes on the GPU: `(batch number, command buffers, GPU start, GPU end)`, the times in
 /// seconds of the host clock. For the diagnostics of the host; set once.
+// Process-wide (W26): called from the Metal completion handlers, which have no context.
 static DONE_HOOK: std::sync::OnceLock<fn(u64, usize, f64, f64)> = std::sync::OnceLock::new();
 
 /// Sets the hook of `DONE_HOOK`. The first call wins.

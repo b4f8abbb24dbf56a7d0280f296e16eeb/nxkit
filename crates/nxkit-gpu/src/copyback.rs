@@ -103,14 +103,14 @@ const LOG_TEXTURES: usize = 300;
 /// False when `NXKIT_COPYBACK=0`.
 pub(crate) fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_COPYBACK").map_or(true, |v| v.trim() != "0"))
+    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_COPYBACK").map_or(true, |v| v.trim() != "0"))
 }
 
 /// The storage bytes that one frame may copy back.
 pub(crate) fn budget() -> u64 {
     static MB: OnceLock<u64> = OnceLock::new();
     *MB.get_or_init(|| {
-        std::env::var("NXKIT_COPYBACK_MAX_MB")
+        nxkit_abi::env::var("NXKIT_COPYBACK_MAX_MB")
             .ok()
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(128)

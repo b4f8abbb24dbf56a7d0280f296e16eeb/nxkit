@@ -7,7 +7,7 @@
 //! encoder (the main thread of the host). The first `update` comes after a second of waiting, so a start that is
 //! quick shows nothing; `finish` comes once when the wait ends, if `update` was called.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 /// What the host shows while the start makes the pipelines of the list.
 pub trait PrewarmScreen: Send + Sync {
@@ -17,18 +17,20 @@ pub trait PrewarmScreen: Send + Sync {
     fn finish(&self);
 }
 
-static SCREEN: Mutex<Option<Arc<dyn PrewarmScreen>>> = Mutex::new(None);
+/// The screen of the start as the settings carry it: the host gives it to [`GpuSettings`](crate::GpuSettings), and the
+/// start of the runtime cache shows it while it waits. Before W26 this was a process-wide value that the host set and
+/// removed around the making of the encoder.
+#[derive(Clone, Default)]
+pub struct ScreenHook(pub Option<Arc<dyn PrewarmScreen>>);
 
-/// Sets (or, with `None`, removes) the screen of the start. The host calls it before it makes the encoder.
-pub fn set_prewarm_screen(screen: Option<Arc<dyn PrewarmScreen>>) {
-    *SCREEN.lock().unwrap_or_else(PoisonError::into_inner) = screen;
-}
-
-pub(super) fn current() -> Option<Arc<dyn PrewarmScreen>> {
-    SCREEN
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
+impl std::fmt::Debug for ScreenHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "ScreenHook(screen)"
+        } else {
+            "ScreenHook(none)"
+        })
+    }
 }
 
 #[cfg(test)]
@@ -47,14 +49,14 @@ mod tests {
     }
 
     #[test]
-    fn the_host_sets_and_removes_the_screen() {
+    fn the_hook_carries_the_screen() {
         let c = Arc::new(Count(AtomicUsize::new(0)));
-        set_prewarm_screen(Some(c.clone()));
-        let s = current().expect("a screen");
+        let hook = ScreenHook(Some(c.clone()));
+        let s = hook.clone().0.expect("a screen");
         s.update(5, 10);
         s.finish();
         assert_eq!(c.0.load(Ordering::Relaxed), 1005);
-        set_prewarm_screen(None);
-        assert!(current().is_none());
+        assert_eq!(format!("{hook:?}"), "ScreenHook(screen)");
+        assert_eq!(format!("{:?}", ScreenHook::default()), "ScreenHook(none)");
     }
 }

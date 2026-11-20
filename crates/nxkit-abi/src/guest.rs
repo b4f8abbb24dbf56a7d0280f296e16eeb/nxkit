@@ -10,6 +10,8 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
+// Process-wide (W26): the guest range: every guest access of every crate checks it, and the svc gate and the SDK take-
+// overs carry no context.
 static BASE: AtomicU64 = AtomicU64::new(0);
 static END: AtomicU64 = AtomicU64::new(0);
 
@@ -35,6 +37,7 @@ impl std::fmt::Display for Fault {
 impl std::error::Error for Fault {}
 
 /// The hook of [`before_host_access`], as the address of an `fn(u64, u64, u32)`; 0 for none.
+// Process-wide (W26): the trap of the private pages (`nxkit-metal`) is a signal handler, which has no context.
 static ACCESS_HOOK: AtomicUsize = AtomicUsize::new(0);
 
 /// [`before_host_access`]: the host reads the range.

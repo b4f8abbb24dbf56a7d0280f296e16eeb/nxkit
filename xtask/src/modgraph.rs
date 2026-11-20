@@ -20,6 +20,8 @@ pub(crate) struct Graph {
     pub(crate) modules: BTreeSet<String>,
     /// Each edge with every place that makes it.
     pub(crate) edges: BTreeMap<(String, String), Vec<Site>>,
+    /// Every source file of the crate with its tokens, test code left out.
+    pub(crate) files: Vec<(PathBuf, Vec<(Tok, usize)>)>,
 }
 
 /// A path that leaves the current module: `crate::..` (`up` is `None`) or `super::` repeated `up` times.
@@ -46,6 +48,8 @@ struct Parsed {
     refs: Vec<Ref>,
     /// Root `use` items: (first path segment, the name the item gets).
     uses: Vec<(String, String)>,
+    /// The tokens of the file without the items under `#[cfg(test)]`.
+    kept: Vec<(Tok, usize)>,
 }
 
 /// Builds the graph of the crate whose sources are in `src`. A crate without `lib.rs` or `main.rs` has no modules.
@@ -84,6 +88,7 @@ struct Walk<'a> {
 
 impl Walk<'_> {
     fn file(&mut self, file: &Path, mod_rs: bool, modpath: &[String], p: &Parsed) {
+        self.g.files.push((file.to_path_buf(), p.kept.clone()));
         for r in &p.refs {
             let full: Vec<String> = modpath.iter().chain(&r.inline).cloned().collect();
             let Some(from) = full.first() else { continue };
@@ -287,9 +292,12 @@ fn parse(text: &str, root: bool) -> Parsed {
         if pending_test {
             pending_test = false;
             pending_path = None;
-            i = skip_item(&t, i);
+            let end = skip_item(&t, i);
+            // the attributes before the item stay in `kept`; they carry no call
+            i = end;
             continue;
         }
+        p.kept.push(t[i].clone());
         let names: Vec<String> = inline.iter().map(|(n, _)| n.clone()).collect();
         match &t[i].0 {
             Tok::Ident(kw) if kw == "mod" => {

@@ -40,7 +40,7 @@ fn the_keys_of_real_entries_are_the_recorded_keys() {
 #[test]
 #[ignore = "needs NXKIT_SEEN_FILE, a pipelines.seen written by an earlier host"]
 fn every_entry_of_a_recorded_list_keeps_its_key() {
-    let Ok(path) = std::env::var("NXKIT_SEEN_FILE") else {
+    let Ok(path) = nxkit_abi::env::var("NXKIT_SEEN_FILE") else {
         eprintln!("NXKIT_SEEN_FILE is not set: nothing checked");
         return;
     };

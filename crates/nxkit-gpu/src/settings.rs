@@ -34,6 +34,27 @@ pub struct GpuSettings {
     pub runtime_cache: Option<PathBuf>,
     /// A number that changes with the app build: a runtime cache of another one is dropped.
     pub build_id: u64,
+    /// The pipeline cache compiles the unspecialized pipeline of a base that the archive lacks and specializes it per
+    /// colour state (`ArchiveConfig::compile_bases`): off unless `NXKIT_PIPELINE_BASES=1`. In Ocarina of Time every
+    /// base was as rare as its pipelines (the vertex layout is part of it), an unspecialized compile took 0.1 to 10 s
+    /// where the full compile took 1 to 6 ms, and text of the title screen went missing.
+    pub compile_bases: bool,
+    /// The pipeline cache specializes the unspecialized pipelines of the archive (`ArchiveConfig::exact_only` off):
+    /// on unless `NXKIT_PIPELINE_SPECIALIZE=0`, which looks up and compiles exact pipelines only.
+    pub specialize: bool,
+    /// What the start shows while it makes the pipelines of the runtime cache (the host's loading screen).
+    pub prewarm_screen: crate::ScreenHook,
+}
+
+/// [`GpuSettings::compile_bases`] from the settings of the host (`NXKIT_PIPELINE_BASES`).
+pub fn pipeline_bases(env: &nxkit_abi::env::Env) -> bool {
+    env.var("NXKIT_PIPELINE_BASES").is_ok_and(|v| v == "1")
+}
+
+/// [`GpuSettings::specialize`] from the settings of the host (`NXKIT_PIPELINE_SPECIALIZE`).
+pub fn pipeline_specialize(env: &nxkit_abi::env::Env) -> bool {
+    env.var("NXKIT_PIPELINE_SPECIALIZE")
+        .map_or(true, |v| v != "0")
 }
 
 impl Default for GpuSettings {
@@ -51,6 +72,9 @@ impl Default for GpuSettings {
             gob_order: GobOrder::Tegra,
             runtime_cache: None,
             build_id: 0,
+            compile_bases: pipeline_bases(nxkit_abi::env::get()),
+            specialize: pipeline_specialize(nxkit_abi::env::get()),
+            prewarm_screen: crate::ScreenHook::default(),
         }
     }
 }
@@ -70,13 +94,14 @@ impl GpuSettings {
                 shards: self.archive_shards.clone(),
                 open_shards: self.open_shards,
                 collect: self.collect_archive,
-                compile_bases: crate::pipelines::bases_on(),
-                exact_only: !crate::pipelines::specialize_on(),
+                compile_bases: self.compile_bases,
+                exact_only: !self.specialize,
                 runtime: Vec::new(),
             },
             gob_order: self.gob_order,
             runtime_cache: self.runtime_cache.clone(),
             build_id: self.build_id,
+            prewarm_screen: self.prewarm_screen.clone(),
         }
     }
 }

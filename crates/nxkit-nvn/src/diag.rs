@@ -17,7 +17,7 @@ pub fn on(cat: &str) -> bool {
     /// `None` for `all`, else the categories. Parsed once: the call comes once per draw on some paths.
     static V: OnceLock<Option<Vec<String>>> = OnceLock::new();
     let v = V.get_or_init(|| {
-        let raw = std::env::var("NXKIT_DIAG").unwrap_or_default();
+        let raw = nxkit_abi::env::var("NXKIT_DIAG").unwrap_or_default();
         let list: Vec<String> = raw
             .split(',')
             .map(str::trim)

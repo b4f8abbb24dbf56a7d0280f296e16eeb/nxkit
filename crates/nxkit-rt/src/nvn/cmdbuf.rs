@@ -27,8 +27,6 @@ mod seam;
 mod set;
 mod xfer;
 
-use std::sync::OnceLock;
-
 pub(crate) use seam::{Seam, set_seam};
 
 /// Whether a recording waited for a sync or an event, or signalled an event: the submits then go through the gate of
@@ -46,16 +44,9 @@ pub struct CommandSettings {
     pub ignore_null_stream_binds: bool,
 }
 
-static SETTINGS: OnceLock<CommandSettings> = OnceLock::new();
-
-/// Sets the settings of the group. False when they are set already. Call it before the game runs.
-pub fn set_command_settings(s: CommandSettings) -> bool {
-    SETTINGS.set(s).is_ok()
-}
-
-/// The settings. A load, no lock.
+/// The settings of the installed context (`Settings::commands`, W26), the default before `install`.
 fn settings() -> CommandSettings {
-    SETTINGS.get().copied().unwrap_or_default()
+    super::ctx::installed().map_or_else(CommandSettings::default, |g| g.settings().commands)
 }
 
 /// The functions of the group.

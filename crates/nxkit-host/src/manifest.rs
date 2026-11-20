@@ -199,9 +199,9 @@ impl Memory {
     /// stack and alias regions and the driver wires all of it, so each GiB less is a GiB of RAM; a region smaller than
     /// the game's peak makes its `SetHeapSize` or `MapPhysicalMemory` fail (the host prints the peaks at the end of a
     /// run).
-    pub fn with_env(self) -> Result<Memory> {
+    pub fn with_env(self, env: &nxkit_abi::env::Env) -> Result<Memory> {
         let size = |name: &str| -> Result<Option<u64>> {
-            std::env::var(name).ok().map_or(Ok(None), |v| {
+            env.var(name).ok().map_or(Ok(None), |v| {
                 parse_size(&v)
                     .map(Some)
                     .ok_or_else(|| bad(format!("{name}={v} is not a size")))
@@ -239,11 +239,11 @@ fn main_thread(v: &Value) -> Result<MainThread> {
 
 impl Game {
     /// Reads `<root>/game.json`.
-    pub fn read(root: &Path) -> Result<Game> {
+    pub fn read(root: &Path, env: &nxkit_abi::env::Env) -> Result<Game> {
         let path = root.join("game.json");
         let src = std::fs::read_to_string(&path).map_err(|e| HostError::io(&path, &e))?;
         let mut game = Game::parse(root, &src)?;
-        game.memory = game.memory.with_env()?;
+        game.memory = game.memory.with_env(env)?;
         Ok(game)
     }
 

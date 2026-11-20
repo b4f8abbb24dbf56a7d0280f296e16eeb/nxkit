@@ -15,7 +15,12 @@ pub(super) fn weights_of(plan: &PassPlan) -> Vec<u32> {
 /// a frame are committed as soon as they are encoded, while the others are encoded.
 pub(super) fn stream_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| !matches!(std::env::var("NXKIT_STREAM_COMMIT").as_deref(), Ok("0")))
+    *ON.get_or_init(|| {
+        !matches!(
+            nxkit_abi::env::var("NXKIT_STREAM_COMMIT").as_deref(),
+            Ok("0")
+        )
+    })
 }
 
 /// The share of the weight of a frame that its lead chunk takes at least: one in this many.

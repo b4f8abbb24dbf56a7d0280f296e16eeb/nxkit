@@ -192,17 +192,24 @@ window, and connects them. No other crate reads the process environment or decid
 
 - **Context instead of globals.** A subsystem keeps its state in an object that it owns: the kernel in `Kernel`, a
   service in its `Service` objects, the GPU backend in `Gpu`. A caller gets the object passed in.
-- **Injection instead of setters.** A part that calls another part gets that dependency as a typed value when it is
-  built (a trait object or a struct of function pointers, `Seams`), from the host. A crate offers one `install` call
-  with all its dependencies, not one setter per dependency.
+- **Injection instead of setters.** A part gets its dependencies as typed values when it is built, from the host:
+  the loading screen of the start is `GpuSettings::prewarm_screen`, the command settings of NVN are
+  `nxkit_rt::nvn::Settings::commands`, the analyses of the encoder are `nxkit-gpu`'s `probe` hooks. No new setter
+  between crates.
 - **The guest boundary.** The game calls the host through C functions with the Switch ABI (the svc gate, the SDK
-  take-overs, the NVN functions). Such a call carries no Rust context. Its state is a process-wide value that the host
-  installs once at start (a `OnceLock` of the crate's context). Every such static says at its definition why it is
-  process-wide. Counters of the diagnostics are atomics next to the code they count.
-- **One source of settings.** `nxkit_abi::env::Env` is a snapshot of the `NXKIT_*` variables. The host takes it once
-  at start (`Env::capture`) and installs it before it builds any part. Each part reads its typed settings from it
-  (`GpuSettings::from_env`, the NVN and host settings). No crate calls `std::env::var` for an `NXKIT_*` name, and
-  `xtask settings` checks this (W27). [diagnostics.md](diagnostics.md) lists the variables.
+  take-overs, the NVN procs). Such a call carries no Rust context, and neither does a signal handler, a Metal
+  completion handler or the AUHAL callback. Their state is a process-wide value that the host installs once at start
+  (a `OnceLock` of the crate's context). The anchor of each crate says why at its definition (`// Process-wide
+  (W26): ...`), and `xtask statics` keeps the count of each runtime crate from growing (`xtask/statics.txt`, 443 on
+  0.11). Counters and once-guards of the diagnostics are atomics next to the code they count.
+- **One source of settings.** `nxkit_abi::env::Env` is a snapshot of the `NXKIT_*` variables. `nxkit-host` takes it
+  first thing in `run` (`Env::capture`), installs it, and passes it to what it sets up: the memory profile, the guest
+  pages, the memory report, the refresh plan, the services (the console language), the crash report and
+  `GpuSettings` (archive shards, encode threads, scale, the pipeline bases and specialization). Code with no context
+  to carry it (a guest export, a switch deep in the encoder, an AppKit callback) reads the installed snapshot through
+  `nxkit_abi::env::var`. No runtime crate reads an `NXKIT_*` variable from the process, and `xtask settings` checks
+  this (W27). The one exception is the allocator hook of `nxkit-host` (`NXKIT_MEM_ALLOC`), which runs inside an
+  allocation and uses libc `getenv`. [diagnostics.md](diagnostics.md) describes the variables of the diagnostics.
 
 ## Data flow of the stages
 

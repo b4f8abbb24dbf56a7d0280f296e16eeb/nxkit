@@ -9,18 +9,18 @@ pub(super) fn env_name(net: &str, suffix: &str) -> String {
 
 /// `NXKIT_<NAME>=0` turns a network off.
 pub(super) fn enabled(net: &str) -> bool {
-    std::env::var(env_name(net, "")).map_or(true, |v| v != "0")
+    nxkit_abi::env::var(env_name(net, "")).map_or(true, |v| v != "0")
 }
 
 /// `NXKIT_<NAME>_COMPARE=1` runs the game's chain next to the plan on a sampled frame.
 pub(super) fn compare_on(net: &str) -> bool {
-    std::env::var(env_name(net, "_COMPARE")).is_ok_and(|v| v == "1")
+    nxkit_abi::env::var(env_name(net, "_COMPARE")).is_ok_and(|v| v == "1")
 }
 
 /// Whether a network that can run on the Neural Engine does, with the plan as the fallback. On unless
 /// `NXKIT_<NAME>_ANE=0`; only networks with an offload (NDVE) use it.
 pub(super) fn ane_on(net: &str) -> bool {
-    std::env::var(env_name(net, "_ANE")).map_or(true, |v| v != "0")
+    nxkit_abi::env::var(env_name(net, "_ANE")).map_or(true, |v| v != "0")
 }
 
 /// The storage buffer binding of a compute dispatch at `slot`.
@@ -80,7 +80,7 @@ pub(super) fn run_commands(cmds: &[Cmd], run: Run) -> Option<(usize, usize)> {
 /// (dynamic resolution makes a new size now and then), so the cache is small and drops the least recently used.
 /// `NXKIT_NATIVE_CACHE=<n>` changes it.
 pub(super) fn cache_max() -> usize {
-    std::env::var("NXKIT_NATIVE_CACHE")
+    nxkit_abi::env::var("NXKIT_NATIVE_CACHE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(4)

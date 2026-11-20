@@ -65,8 +65,12 @@ fn check_kernel_service(mask: u64) -> Result<()> {
 
 /// Runs the game. It returns when the window or the game has stopped.
 pub fn run(opts: &Options) -> Result<()> {
-    sys::crashsig::install();
-    let game = Game::read(&opts.root)?;
+    // The one read of the `NXKIT_*` environment (W27). The parts that the host builds here get it passed in; code that
+    // has no context to carry it reads the installed snapshot.
+    let env = nxkit_abi::env::Env::capture();
+    nxkit_abi::env::install(env.clone());
+    sys::crashsig::install(&env);
+    let game = Game::read(&opts.root, &env)?;
     let mask = loader::service_mask(&game.services)?;
     check_kernel_service(mask)?;
     let placed = place::place(&game)?;
@@ -76,15 +80,15 @@ pub fn run(opts: &Options) -> Result<()> {
     // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
-    mem.keep_gpu_pages();
+    mem.keep_gpu_pages(&env);
     mem.seal()?;
-    crate::memreport::start(&ctx, &layout);
+    crate::memreport::start(&ctx, &layout, &env);
 
     nxkit_rt::nxkit_init(mask);
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
     seams::register_kernel()?;
     seams::register_server(mask)?;
-    seams::init_services(&placed.game, mask)?;
+    seams::init_services(&placed.game, mask, &env)?;
 
     let mut loaded = loader::load(placed, mask)?;
     eprintln!(
@@ -108,8 +112,8 @@ pub fn run(opts: &Options) -> Result<()> {
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
-    crate::refresh::configure(crate::refresh::Request::from_settings(&settings));
-    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings)?;
+    crate::refresh::configure(crate::refresh::Request::from_settings(&settings, &env));
+    let hooks = seams::frame_hooks(&ctx, &gpu_memory, &opts.root, &settings, &env)?;
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,

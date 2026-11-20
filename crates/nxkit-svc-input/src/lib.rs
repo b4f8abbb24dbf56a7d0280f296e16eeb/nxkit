@@ -44,6 +44,8 @@ pub use touch::Touch;
 
 use state::Input;
 
+// Process-wide (W26): the controller state that the `nn::hid` take-overs read; the game calls in through a C function
+// with no Rust context.
 static INPUT: OnceLock<Mutex<Input>> = OnceLock::new();
 
 fn cell() -> &'static Mutex<Input> {

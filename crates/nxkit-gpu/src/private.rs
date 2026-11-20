@@ -142,7 +142,7 @@ pub(crate) fn mode() -> Mode {
         return m;
     }
     static MODE: OnceLock<Mode> = OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("NXKIT_PRIVATE") {
+    *MODE.get_or_init(|| match nxkit_abi::env::var("NXKIT_PRIVATE") {
         Ok(v) if v == "track" => Mode::Track,
         Ok(v) if v == "1" => Mode::Mirror,
         Ok(v) if !v.is_empty() && v != "0" => {
@@ -438,7 +438,7 @@ pub(crate) fn early() -> bool {
 pub(crate) fn run_ahead() -> u64 {
     static N: OnceLock<u64> = OnceLock::new();
     *N.get_or_init(|| {
-        std::env::var("NXKIT_PRIVATE_AHEAD")
+        nxkit_abi::env::var("NXKIT_PRIVATE_AHEAD")
             .ok()
             .and_then(|v| v.trim().parse::<u64>().ok())
             .unwrap_or(1)
@@ -450,7 +450,7 @@ pub(crate) fn run_ahead() -> u64 {
 /// to bytes a frame in flight writes waits for the frame again).
 pub(crate) fn late_results() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| !std::env::var("NXKIT_PRIVATE_LATE").is_ok_and(|v| v.trim() == "0"))
+    *ON.get_or_init(|| !nxkit_abi::env::var("NXKIT_PRIVATE_LATE").is_ok_and(|v| v.trim() == "0"))
 }
 
 /// A fence wait was answered at the flush.

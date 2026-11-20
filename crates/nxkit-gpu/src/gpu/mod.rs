@@ -91,6 +91,8 @@ pub struct GpuConfig {
     pub runtime_cache: Option<PathBuf>,
     /// A number that changes with the app build, so a cache of another build is dropped.
     pub build_id: u64,
+    /// What the start shows while it makes the pipelines of the runtime cache.
+    pub prewarm_screen: crate::ScreenHook,
 }
 
 impl Default for GpuConfig {
@@ -104,6 +106,7 @@ impl Default for GpuConfig {
             gob_order: GobOrder::default(),
             runtime_cache: None,
             build_id: 0,
+            prewarm_screen: crate::ScreenHook::default(),
         }
     }
 }
@@ -176,7 +179,7 @@ impl Gpu {
         );
         let pipelines = Pipelines::new(ctx, &archive)?;
         if let Some(plan) = cache_plan {
-            pipelines.runtime_start(plan, &config.shader_dir);
+            pipelines.runtime_start(plan, &config.shader_dir, &config.prewarm_screen);
         }
         let transfer = Transfer::new(ctx, pipelines.cache(), config.gob_order)?;
         let rename = Arc::new(crate::rename::Renamer::new(ctx, guest.clone()));

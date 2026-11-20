@@ -1950,6 +1950,7 @@ name = "nxkit-nvn"
 version = "0.10.3"
 dependencies = [
  "foldhash",
+ "nxkit-abi",
 ]
 
 [[package]]

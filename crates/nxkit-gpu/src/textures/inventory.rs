@@ -423,7 +423,7 @@ pub fn latest() -> Option<Inventory> {
 
 /// True when `NXKIT_MEM_REPORT` asks for the memory report (the same rule as the host: a number above 0).
 pub(super) fn wanted() -> bool {
-    std::env::var("NXKIT_MEM_REPORT")
+    nxkit_abi::env::var("NXKIT_MEM_REPORT")
         .ok()
         .and_then(|v| v.trim().parse::<f64>().ok())
         .is_some_and(|s| s > 0.0)

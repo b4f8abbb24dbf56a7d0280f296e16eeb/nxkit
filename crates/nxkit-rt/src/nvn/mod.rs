@@ -41,7 +41,7 @@ pub(crate) mod texture;
 pub(crate) mod window;
 mod wire;
 
-pub use cmdbuf::{CommandSettings, set_command_settings};
+pub use cmdbuf::CommandSettings;
 pub use ctx::{InstallError, Settings, install};
 
 pub use device::{NVN2_API_MAJOR, NVN2_API_MINOR, scan_sdk_driver, sdk_item};

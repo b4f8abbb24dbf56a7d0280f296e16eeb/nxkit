@@ -181,8 +181,9 @@ fn game_env(settings: &Settings) -> Vec<(String, String)> {
 
 /// The console language: `NXKIT_LANGUAGE` (a tag such as `de` or `en-GB`) when it is set, else the first of the Mac's
 /// preferred languages that the console has, else `en-US`.
-fn console_language() -> String {
-    let env = std::env::var("NXKIT_LANGUAGE")
+fn console_language(vars: &nxkit_abi::env::Env) -> String {
+    let env = vars
+        .var("NXKIT_LANGUAGE")
         .ok()
         .filter(|v| !v.trim().is_empty());
     let mac = crate::sys::preferred_languages();
@@ -202,7 +203,7 @@ fn console_language() -> String {
 /// parameter, the display version, the shared font facts and the DLC folder, input the pad layout, the focus and the
 /// input files (`input_file.rs`), audio and video their host seams and pacing the step mode with the state page. The
 /// lookup of the game's own symbols is set in all of them (`guestsym.rs`).
-pub fn init_services(game: &Game, mask: u64) -> Result<()> {
+pub fn init_services(game: &Game, mask: u64, env: &nxkit_abi::env::Env) -> Result<()> {
     let s = &game.settings;
     let handheld = s.op_mode == "handheld";
     wire::set_handheld(handheld);
@@ -245,7 +246,7 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
                 .filter(|p| p.is_file()),
             shared_font_decode: s.shared_font_decode,
             sf_services: s.sf_services.clone(),
-            language: console_language(),
+            language: console_language(env),
             ..nxkit_svc_system::Config::default()
         });
         nxkit_svc_system::set_seams(wire::system_seams());
@@ -291,7 +292,7 @@ pub fn init_services(game: &Game, mask: u64) -> Result<()> {
 pub fn focus_changed(focused: bool) {
     static PAUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let pause =
-        *PAUSE.get_or_init(|| std::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"));
+        *PAUSE.get_or_init(|| nxkit_abi::env::var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"));
     if pause || focused {
         let focus = if focused {
             nxkit_svc_system::Focus::InFocus
@@ -335,6 +336,7 @@ pub fn frame_hooks(
     memory: &Arc<GuestMemory>,
     root: &std::path::Path,
     settings: &Settings,
+    env: &nxkit_abi::env::Env,
 ) -> Result<Arc<dyn FrameHooks>> {
-    crate::frames::install(ctx, memory, root, settings)
+    crate::frames::install(ctx, memory, root, settings, env)
 }

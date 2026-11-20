@@ -20,6 +20,7 @@ This document gives the architecture rules for a change to the workspace. Read [
 - Each stage crate has one owner. A change touches only the files of its own concern.
 - `cargo run -p xtask -- layers` and `cargo run -p xtask -- limits` examine these rules.
 - `cargo run -p xtask -- modules` makes sure that the module cycles inside a crate do not grow (W24). When you break a cycle, shrink `xtask/module-cycles.txt` as the command tells you. `cargo run -p xtask -- graph <crate>` shows the edges of each cycle.
+- A runtime crate reads its settings from `nxkit_abi::env` and never an `NXKIT_*` variable from the process (W27, `xtask settings`). A new process-wide static in a runtime crate needs a reason at the static and a higher number in `xtask/statics.txt` in the same commit (W26, `xtask statics`).
 
 ## Errors, determinism and safety
 
@@ -47,7 +48,7 @@ Other additions follow the same pattern. A new container is one module and one r
 ## Quality gates
 
 Do `tools/check.sh` before a commit. It runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, all tests,
-`rustdoc` with warnings denied, `xtask layers`, `xtask limits` and `xtask modules`. CI runs the same script on macOS.
+`rustdoc` with warnings denied, `xtask layers`, `xtask limits`, `xtask modules`, `xtask settings` and `xtask statics`. CI runs the same script on macOS.
 `tools/no-game-data.sh` examines the tree for game data. `CARGO_BUILD_JOBS` limits the compiler processes.
 `CARGO_TARGET_DIR` moves the build output.
 

@@ -194,7 +194,7 @@ fn global() -> &'static ScriptFile {
     static FILE: OnceLock<ScriptFile> = OnceLock::new();
     FILE.get_or_init(|| {
         ScriptFile::new(
-            std::env::var_os("NXKIT_INPUT_FILE")
+            nxkit_abi::env::var_os("NXKIT_INPUT_FILE")
                 .filter(|v| !v.is_empty())
                 .map(PathBuf::from),
         )

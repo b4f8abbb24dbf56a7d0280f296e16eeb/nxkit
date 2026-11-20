@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// The presents that the ring remembers. The frame step reads the one 8 presents back.
 const RING: usize = 32;
 
+// Process-wide (W26): the present ring: written by the Metal completion handlers (no context) and read by the NVN
+// present of the guest.
 static SHOWN: [AtomicU64; RING] = [const { AtomicU64::new(0) }; RING];
 static TAG: [AtomicU64; RING] = [const { AtomicU64::new(0) }; RING];
 static HOLD: [AtomicU64; RING] = [const { AtomicU64::new(0) }; RING];
@@ -112,7 +114,8 @@ static PACE: std::sync::Mutex<PaceSpread> = std::sync::Mutex::new(PaceSpread::ne
 
 fn pace_note(secs: f64) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if secs <= 0.0 || !*ON.get_or_init(|| std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1"))
+    if secs <= 0.0
+        || !*ON.get_or_init(|| nxkit_abi::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1"))
     {
         return;
     }

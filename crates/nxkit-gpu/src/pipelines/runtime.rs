@@ -47,11 +47,11 @@ const MAX_GAP: Duration = Duration::from_secs(600);
 
 /// `name` is set and not `0`.
 pub(super) fn env_on(name: &str) -> bool {
-    std::env::var(name).map_or(true, |v| v != "0")
+    nxkit_abi::env::var(name).map_or(true, |v| v != "0")
 }
 
 pub(super) fn env_num(name: &str, default: u64) -> u64 {
-    std::env::var(name)
+    nxkit_abi::env::var(name)
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|n| *n > 0)
@@ -302,7 +302,7 @@ impl Session {
 impl Pipelines {
     /// Starts the runtime cache: makes the pipelines of the list from the archives (see `prewarm.rs`), and starts the
     /// thread that writes the cache every 30 s. Logs one line with the counts.
-    pub(crate) fn runtime_start(&self, plan: Plan, shader_dir: &Path) {
+    pub(crate) fn runtime_start(&self, plan: Plan, shader_dir: &Path, screen: &super::ScreenHook) {
         eprintln!(
             "nxkit-gpu: runtime pipeline cache {}: {} archives ({} MiB), {} pipelines listed{}",
             plan.dir.display(),
@@ -340,6 +340,7 @@ impl Pipelines {
                 shader_dir,
                 marker,
                 Some(Box::new(move || s.flush(true, false))),
+                screen.0.clone(),
             );
         }
         let spawned = std::thread::Builder::new()

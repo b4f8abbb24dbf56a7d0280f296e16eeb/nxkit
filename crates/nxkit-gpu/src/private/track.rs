@@ -32,7 +32,7 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                         pages.set_emulation(!off);
                         if !off && late_results() {
                             pages.set_late(true);
-                            if !std::env::var("NXKIT_PRIVATE_READOPEN")
+                            if !nxkit_abi::env::var("NXKIT_PRIVATE_READOPEN")
                                 .is_ok_and(|v| v.trim() == "0")
                             {
                                 pages.set_read_open(true);

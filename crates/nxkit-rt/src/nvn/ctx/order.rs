@@ -40,7 +40,7 @@ fn diag() -> bool {
 
 /// Whether waits hold work: on unless `NXKIT_QUEUE_ORDER=0`.
 pub(super) fn ordering_on() -> bool {
-    std::env::var("NXKIT_QUEUE_ORDER").map_or(true, |v| v != "0")
+    nxkit_abi::env::var("NXKIT_QUEUE_ORDER").map_or(true, |v| v != "0")
 }
 
 /// The flush after a release: `NXKIT_RELEASE_FLUSH` (on unless `0`) and `NXKIT_RELEASE_FLUSH_MIN`, the least work (draws,
@@ -53,8 +53,8 @@ pub(super) struct ReleaseFlush {
 
 pub(super) fn release_flush_config() -> ReleaseFlush {
     ReleaseFlush {
-        on: std::env::var("NXKIT_RELEASE_FLUSH").map_or(true, |v| v != "0"),
-        min_work: std::env::var("NXKIT_RELEASE_FLUSH_MIN")
+        on: nxkit_abi::env::var("NXKIT_RELEASE_FLUSH").map_or(true, |v| v != "0"),
+        min_work: nxkit_abi::env::var("NXKIT_RELEASE_FLUSH_MIN")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(64),

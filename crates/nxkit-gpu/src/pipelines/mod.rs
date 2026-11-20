@@ -22,7 +22,7 @@ mod tests;
 pub(crate) use keys::KEY_SCHEME;
 pub use runtime::flush_runtime_cache;
 pub(crate) use runtime::plan as runtime_plan;
-pub use screen::{PrewarmScreen, set_prewarm_screen};
+pub use screen::{PrewarmScreen, ScreenHook};
 pub(crate) use stats::frame_done;
 
 use std::cell::RefCell;
@@ -146,20 +146,6 @@ impl Drop for Pipelines {
     fn drop(&mut self) {
         self.builds.close();
     }
-}
-
-/// Whether the pipeline cache compiles the unspecialized pipeline of a base that the archive lacks and specializes it
-/// per colour state (`ArchiveConfig::compile_bases`): off unless `NXKIT_PIPELINE_BASES=1`. In Ocarina of Time every
-/// base was as rare as its pipelines (the vertex layout is part of it), an unspecialized compile took 0.1 to 10 s
-/// where the full compile took 1 to 6 ms, and text of the title screen went missing.
-pub(crate) fn bases_on() -> bool {
-    std::env::var("NXKIT_PIPELINE_BASES").is_ok_and(|v| v == "1")
-}
-
-/// Whether the pipeline cache specializes the unspecialized pipelines of the archive (`ArchiveConfig::exact_only`
-/// off): on unless `NXKIT_PIPELINE_SPECIALIZE=0`, which looks up and compiles exact pipelines only.
-pub(crate) fn specialize_on() -> bool {
-    std::env::var("NXKIT_PIPELINE_SPECIALIZE").map_or(true, |v| v != "0")
 }
 
 /// The point size fallback of [`build_render`] has this key.

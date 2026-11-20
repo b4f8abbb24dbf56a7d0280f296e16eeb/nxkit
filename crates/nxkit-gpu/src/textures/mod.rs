@@ -591,5 +591,5 @@ impl TextureStore {
 /// every frame that uses it.
 fn in_place_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NXKIT_TEX_INPLACE").map_or(true, |v| v != "0"))
+    *ON.get_or_init(|| nxkit_abi::env::var("NXKIT_TEX_INPLACE").map_or(true, |v| v != "0"))
 }

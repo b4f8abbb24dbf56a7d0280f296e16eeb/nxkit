@@ -38,7 +38,7 @@ const SHADERS: &str = "shaders";
 
 /// The settings of the GPU backend, from the keys of `game.json` that the encoder uses. `enc_thread` moves the encode
 /// of each frame to a thread of its own. A game of the Switch 2 gets its order inside a GOB.
-pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
+pub fn gpu_settings(root: &Path, settings: &Settings, env: &nxkit_abi::env::Env) -> GpuSettings {
     GpuSettings {
         shader_dir: root.join(SHADERS),
         // The archive is loaded whenever the build made one: `pso_mtl4` came from the engine's profiles, and a title
@@ -52,28 +52,37 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
         // for the first pipeline in it. `NXKIT_ARCHIVE_SHARDS=0` ignores them and loads the single archive, if any.
         archive_shards: {
             let dir = root.join(SHARDS);
-            let on = std::env::var("NXKIT_ARCHIVE_SHARDS").is_ok_and(|v| v == "0" || v == "off");
+            let on = env
+                .var("NXKIT_ARCHIVE_SHARDS")
+                .is_ok_and(|v| v == "0" || v == "off");
             (!on && dir.join(nxkit_abi::shards::INDEX_FILE).is_file()).then_some(dir)
         },
         // `NXKIT_SHARD_LRU` sets how many shards stay open. Zero is 32.
-        open_shards: std::env::var("NXKIT_SHARD_LRU")
+        open_shards: env
+            .var("NXKIT_SHARD_LRU")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
-        threads: std::env::var("NXKIT_ENCODE_THREADS")
+        threads: env
+            .var("NXKIT_ENCODE_THREADS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
         // Scaling is off until every attachment of a pass gets the same scale decision.
-        scale: std::env::var("NXKIT_SCALE")
+        scale: env
+            .var("NXKIT_SCALE")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(1.0),
+        compile_bases: nxkit_gpu::pipeline_bases(env),
+        specialize: nxkit_gpu::pipeline_specialize(env),
+        // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
+        prewarm_screen: nxkit_gpu::ScreenHook(Some(Arc::new(crate::sys::loading::LoadingScreen))),
         enc_thread: settings.enc_thread,
         overlap: settings.overlap,
         // The runtime pipeline cache: what this run compiles is kept for the next start (`crate::pipecache`).
-        runtime_cache: crate::pipecache::folder(root),
+        runtime_cache: crate::pipecache::folder(root, env),
         build_id: crate::pipecache::build_id(root),
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
@@ -99,6 +108,9 @@ fn nvn_settings(settings: &Settings) -> nvn::Settings {
     if let Some((major, minor)) = settings.nvn_api {
         (s.api_major, s.api_minor) = (major, minor);
     }
+    s.commands = CommandSettings {
+        ignore_null_stream_binds: settings.vertex_stream_null_bind,
+    };
     let (offset, length) = settings.shader_key_skip;
     if length > 0 {
         s.shader_key_skip = u32::try_from(offset).ok().zip(u32::try_from(length).ok());
@@ -175,22 +187,13 @@ pub fn install(
     memory: &Arc<GuestMemory>,
     root: &Path,
     settings: &Settings,
+    env: &nxkit_abi::env::Env,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
-    // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
-    nxkit_gpu::set_prewarm_screen(Some(Arc::new(crate::sys::loading::LoadingScreen)));
-    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings));
-    nxkit_gpu::set_prewarm_screen(None);
+    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings, env));
     let backend = backend.map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
     nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))
         .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
-    if !nvn::set_command_settings(CommandSettings {
-        ignore_null_stream_binds: settings.vertex_stream_null_bind,
-    }) {
-        return Err(HostError::App(
-            "the NVN command settings came after the first command buffer".into(),
-        ));
-    }
     let plan = choose_present_plan(&PolicyInput {
         title: None,
         frame_step: false,

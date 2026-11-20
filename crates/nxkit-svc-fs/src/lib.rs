@@ -52,6 +52,8 @@ pub struct Config {
 /// function the SDK has under that name, not the address of an export of this crate.
 pub type GuestSym = fn(&str) -> Option<u64>;
 
+// Process-wide (W26): the file system of the `nn::fs` take-overs; the game calls in through a C function with no Rust
+// context.
 static FS: OnceLock<Fs> = OnceLock::new();
 static GUEST_SYM: OnceLock<GuestSym> = OnceLock::new();
 

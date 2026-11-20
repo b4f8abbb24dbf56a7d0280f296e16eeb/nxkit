@@ -121,7 +121,7 @@ fn pick(jobs: impl Iterator<Item = (u64, u64, u64)>) -> Option<u64> {
 /// The threads that compile pipelines in the background: `NXKIT_PIPELINE_THREADS`, else half the cores, 2 to 8. A
 /// thread waits on the system's compiler service most of the time, and that service compiles requests side by side.
 fn compile_threads() -> usize {
-    std::env::var("NXKIT_PIPELINE_THREADS")
+    nxkit_abi::env::var("NXKIT_PIPELINE_THREADS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|n| *n > 0)
@@ -134,7 +134,7 @@ fn compile_threads() -> usize {
 /// pending pipeline leaves draws out of the frame on screen, and at the utility class the service ran on the
 /// efficiency cores. `NXKIT_PIPELINE_QOS=utility` brings back the old class.
 fn set_compile_qos() {
-    if std::env::var("NXKIT_PIPELINE_QOS").is_ok_and(|v| v == "utility") {
+    if nxkit_abi::env::var("NXKIT_PIPELINE_QOS").is_ok_and(|v| v == "utility") {
         nxkit_metal::thread::set_utility();
     } else {
         nxkit_metal::thread::set_user_initiated();
@@ -148,7 +148,7 @@ pub(super) fn async_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // The unit tests build synchronously, so a call returns its pipeline.
     *ON.get_or_init(|| {
-        !cfg!(test) && std::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0")
+        !cfg!(test) && nxkit_abi::env::var("NXKIT_PIPELINE_ASYNC").map_or(true, |v| v != "0")
     })
 }
 

@@ -97,6 +97,8 @@ pub struct Settings {
     /// clock of the host (`mach_absolute_time` in nanoseconds), the base of the system tick and of the GPU times in
     /// the reports.
     pub clock_ns: fn() -> u64,
+    /// What the command buffer group does differently for the title.
+    pub commands: super::CommandSettings,
 }
 
 impl Default for Settings {
@@ -107,6 +109,7 @@ impl Default for Settings {
             shader_key_skip: None,
             gpu_code: (1, 16),
             clock_ns: nxkit_hos::sys::monotonic_ns,
+            commands: super::CommandSettings::default(),
         }
     }
 }
@@ -131,6 +134,7 @@ impl fmt::Display for InstallError {
 
 impl std::error::Error for InstallError {}
 
+// Process-wide (W26): the NVN context root: every NVN proc is a C function of the guest and finds its state here.
 static GPU: OnceLock<Gpu> = OnceLock::new();
 
 /// Installs the GPU context. The host calls it once, after `nxkit_abi::guest::set_range`.

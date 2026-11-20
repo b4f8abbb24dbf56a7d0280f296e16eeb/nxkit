@@ -42,7 +42,7 @@ pub(crate) type Block = [u8; BYTES];
 /// Whether the host draws vertex shaders through their `_bp` library: only with `NXKIT_PULL=1`. Read once.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| enabled(std::env::var("NXKIT_PULL").ok().as_deref()))
+    *ON.get_or_init(|| enabled(nxkit_abi::env::var("NXKIT_PULL").ok().as_deref()))
 }
 
 /// The value of `NXKIT_PULL` that turns pulling on: `1`. Unset, `0` or anything else keeps stage_in.

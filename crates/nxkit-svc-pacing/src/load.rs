@@ -389,7 +389,7 @@ fn kmax_diag(cfg: &LoadConfig, hz: i32, cap: u32) -> String {
 
 fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
     let k = fs.k;
-    if std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1")
+    if nxkit_abi::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1")
         && shown > f64::from(k.max(1)) + 0.25
     {
         let ms = std::time::SystemTime::now()
@@ -403,7 +403,7 @@ fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
     use std::sync::{Mutex, OnceLock};
     static ON: OnceLock<bool> = OnceLock::new();
     static SUM: Mutex<[f64; 5]> = Mutex::new([0.0; 5]);
-    if !*ON.get_or_init(|| std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1")) {
+    if !*ON.get_or_init(|| nxkit_abi::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1")) {
         return;
     }
     let Ok(mut a) = SUM.lock() else { return };

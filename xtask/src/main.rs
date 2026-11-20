@@ -12,13 +12,18 @@
 //!   `xtask/module-cycles.txt`; a new or larger group fails, and so does a group that got smaller until the file is
 //!   shrunk. `graph <crate>...` prints the groups of a crate and the edges inside them with their first place.
 //!
-//! Usage: `cargo run -p xtask -- [layers] [limits] [modules]` (all three when no argument is given), or
+//! - `settings`: no runtime crate reads an `NXKIT_*` variable from the process; the snapshot `nxkit_abi::env` is the one
+//!   source (ADR W27).
+//! - `statics`: the process-wide statics of each runtime crate do not grow (ADR W26, `xtask/statics.txt`).
+//!
+//! Usage: `cargo run -p xtask -- [layers] [limits] [modules] [settings] [statics]` (all when no argument is given), or
 //! `cargo run -p xtask -- graph <crate>...`. Std only, the TOML reading is a deliberately small line parser for the
 //! fields above, and the module graph comes from a small tokenizer (`lex`).
 
 mod lex;
 mod modgraph;
 mod modules;
+mod runtime;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -293,6 +298,29 @@ fn check_modules(root: &Path, all: &[Krate]) -> (Vec<String>, String) {
     (modules::compare(&now, &base), note)
 }
 
+/// The crates of the runtime world (layers `R0` to `R4`), as (name, folder).
+fn runtime_crates(all: &[Krate]) -> impl Iterator<Item = (&str, &Path)> {
+    all.iter()
+        .filter(|k| k.layer.starts_with('R'))
+        .map(|k| (k.name.as_str(), k.dir.as_path()))
+}
+
+/// The static errors, and the count of process-wide statics of the runtime crates.
+fn check_statics(root: &Path, all: &[Krate]) -> (Vec<String>, String) {
+    let base = match fs::read_to_string(root.join(runtime::STATICS_BASELINE)) {
+        Ok(t) => runtime::parse_statics(&t),
+        Err(e) => {
+            return (
+                vec![format!("{}: {e}", runtime::STATICS_BASELINE)],
+                String::new(),
+            );
+        }
+    };
+    let now = runtime::count_statics(runtime_crates(all));
+    let note = format!(", {} process-wide statics", now.values().sum::<usize>());
+    (runtime::compare_statics(&now, &base), note)
+}
+
 fn graph(root: &Path, all: &[Krate], names: &[String]) -> ExitCode {
     let mut failed = false;
     for n in names {
@@ -318,7 +346,9 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        args = vec!["layers".into(), "limits".into(), "modules".into()];
+        args = ["layers", "limits", "modules", "settings", "statics"]
+            .map(String::from)
+            .to_vec();
     }
     let all = match crates(&root) {
         Ok(c) => c,
@@ -336,8 +366,15 @@ fn main() -> ExitCode {
             "layers" => (check_layers(&all), String::new()),
             "limits" => (check_limits(&all), String::new()),
             "modules" => check_modules(&root, &all),
+            "settings" => (
+                runtime::check_settings(runtime_crates(&all), &root),
+                String::new(),
+            ),
+            "statics" => check_statics(&root, &all),
             other => (
-                vec![format!("unknown check {other:?} (layers, limits, modules)")],
+                vec![format!(
+                    "unknown check {other:?} (layers, limits, modules, settings, statics)"
+                )],
                 String::new(),
             ),
         };
@@ -470,5 +507,10 @@ mod tests {
         assert_eq!(check_layers(&all), Vec::<String>::new());
         assert_eq!(check_limits(&all), Vec::<String>::new());
         assert_eq!(check_modules(&root, &all).0, Vec::<String>::new());
+        assert_eq!(
+            runtime::check_settings(runtime_crates(&all), &root),
+            Vec::<String>::new()
+        );
+        assert_eq!(check_statics(&root, &all).0, Vec::<String>::new());
     }
 }

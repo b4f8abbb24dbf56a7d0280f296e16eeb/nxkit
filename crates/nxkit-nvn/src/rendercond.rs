@@ -102,7 +102,7 @@ fn stale_mode() -> u8 {
     }
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(
-        || match std::env::var("NXKIT_RENDERCOND_STALE").as_deref() {
+        || match nxkit_abi::env::var("NXKIT_RENDERCOND_STALE").as_deref() {
             Ok("0") => 0,
             Ok("addr") => 1,
             _ => 2,
