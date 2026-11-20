@@ -35,7 +35,7 @@ pub(crate) fn set_on() {
 }
 
 use crate::detail::{DrawArgs, FrameDetail, UboDetail};
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 
 const PAGE: u64 = 16 * 1024;
 /// A page stays dynamic for this many frames after a flush named it.

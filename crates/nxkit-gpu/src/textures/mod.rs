@@ -16,9 +16,10 @@ pub mod inventory;
 mod supersede;
 #[cfg(test)]
 mod tests;
+mod uses;
 mod views;
 
-use crate::draws::{FastMap, FastSet};
+use crate::fastmap::{FastMap, FastSet};
 use std::sync::{Mutex, PoisonError};
 
 use nxkit_metal::{
@@ -26,13 +27,16 @@ use nxkit_metal::{
 };
 
 pub(crate) use self::blocks::BlockTarget;
+pub(crate) use self::uses::collect_uses;
+use self::views::format_key;
 use nxkit_nvn::format::{Aspects, format_info};
 use nxkit_nvn::layout::Target;
 use nxkit_nvn::resource::{Residency, TexId, TextureRecord};
 use nxkit_nvn::tic::Tic;
 
 use crate::format_map::{Mapped, texture_format};
-use crate::stats::{EncodeStats, Skip};
+use crate::skip::Skip;
+use crate::stats::EncodeStats;
 
 /// A texture of the store as the encoder sees it.
 #[derive(Clone)]
@@ -304,7 +308,7 @@ impl TextureStore {
         let pools = self.pools.as_ref()?;
         let stride = rec.layout.size / u64::from(desc.height.max(1));
         let (mem, offset) =
-            crate::upload::locate(pools.as_ref(), rec.address.get(), rec.layout.size).ok()?;
+            crate::pools::locate(pools.as_ref(), rec.address.get(), rec.layout.size).ok()?;
         let mut d = *desc;
         d.storage = Storage::Shared;
         let align = Texture::linear_alignment(&self.ctx, d.format);
@@ -588,11 +592,4 @@ impl TextureStore {
 fn in_place_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("NXKIT_TEX_INPLACE").map_or(true, |v| v != "0"))
-}
-
-fn format_key(f: Format) -> u32 {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    f.hash(&mut h);
-    h.finish() as u32
 }

@@ -38,7 +38,7 @@ use nxkit_metal::{
 
 use crate::detail::{AttributeDetail, BlendDetail, DrawDetail, ProgramRef};
 use crate::programs::StageProgram;
-use crate::stats::Skip;
+use crate::skip::Skip;
 use crate::translate;
 
 use builds::{Builds, Job, JobKind, MeshJob, RenderJob, async_on};

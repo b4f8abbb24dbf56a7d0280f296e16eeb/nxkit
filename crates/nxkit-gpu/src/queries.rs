@@ -20,7 +20,8 @@ use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::{PassKind, PassPlan};
 
 use crate::detail::{DrawArgs, FrameDetail};
-use crate::draws::{FastMap, Ordinal};
+use crate::fastmap::FastMap;
+use crate::ordinal::Ordinal;
 
 /// The visibility buffers that wait for a frame, at most this many.
 const POOL: usize = 8;
@@ -267,7 +268,7 @@ impl FrameQueries {
     }
 
     /// The state that mesh draw `n` really used.
-    pub(crate) fn mesh_note(&self, n: u32, p: &crate::draws::Prep) {
+    pub(crate) fn mesh_note(&self, n: u32, p: &crate::drawctx::Prep) {
         if let Some(m) = &self.mesh {
             m.note(n, p);
         }

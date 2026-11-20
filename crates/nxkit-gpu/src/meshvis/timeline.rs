@@ -9,7 +9,7 @@ use nxkit_nvn::passes::{LoadAction, PassKind, PassPlan};
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::{CopyKind, FrameDetail};
-use crate::draws::Ordinal;
+use crate::ordinal::Ordinal;
 
 /// The most time lines of a frame.
 pub(crate) const MAX_LINES: usize = 120;

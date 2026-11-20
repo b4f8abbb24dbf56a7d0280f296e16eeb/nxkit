@@ -5,7 +5,7 @@
 //! network it knows, and builds a [`Plan`] of native passes. The plan holds buffers, kernels, grids and bindings. This
 //! module checks the run, caches the verdict and the built plan, and encodes the plan in place of the run. If anything
 //! does not match, the game's own dispatches run as they do without this module. The interface names no network.
-//! `native_ndve` is the first user.
+//! `ndve` is the first user.
 //!
 //! The steps of a frame:
 //!
@@ -31,6 +31,8 @@ mod conv;
 mod feed;
 mod iface;
 mod matching;
+mod ndsr;
+mod ndve;
 mod offload;
 mod print;
 mod prof;
@@ -68,10 +70,12 @@ use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::{DispatchDetail, FrameDetail, Stage, TextureBind, UboDetail};
-use crate::draws::{FastMap, Shared};
+use crate::drawctx::Shared;
+use crate::fastmap::FastMap;
 use crate::pipelines::Pipelines;
+use crate::skip::Skip;
 use crate::snapshot::EncodeView;
-use crate::stats::{EncodeStats, Skip};
+use crate::stats::EncodeStats;
 use crate::textures::Res;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -101,16 +105,6 @@ enum Verdict {
 /// The addresses where the blobs start, a hash of all their bytes and the shape's tag (the picture sizes of a network
 /// whose plan follows them).
 type Key = (Vec<u64>, u64, Vec<u32>);
-
-/// The plans the cache keeps. A plan of a network holds tens of MB of scratch, and the game uses one or two at a time
-/// (dynamic resolution makes a new size now and then), so the cache is small and drops the least recently used.
-/// `NXKIT_NATIVE_CACHE=<n>` changes it.
-fn cache_max() -> usize {
-    std::env::var("NXKIT_NATIVE_CACHE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(4)
-}
 
 /// Why a frame keeps the game's dispatches: a counted reason and a sentence for the diagnostics.
 struct Refusal(&'static str, String);
@@ -142,10 +136,7 @@ pub(crate) struct Native {
 
 impl Native {
     pub(crate) fn new() -> Self {
-        Self::with(vec![
-            Box::new(crate::native_ndve::Ndve),
-            Box::new(crate::native_ndsr::Ndsr),
-        ])
+        Self::with(vec![Box::new(ndve::Ndve), Box::new(ndsr::Ndsr)])
     }
 
     fn with(nets: Vec<Box<dyn Replacement>>) -> Self {
@@ -161,7 +152,7 @@ impl Native {
             ane: HashMap::new(),
             copies: trace::Copies::default(),
             nets,
-            cache: Lru::new(cache_max()),
+            cache: Lru::new(util::cache_max()),
             captured: HashSet::new(),
             blobs: Vec::new(),
             ready_frames: 0,

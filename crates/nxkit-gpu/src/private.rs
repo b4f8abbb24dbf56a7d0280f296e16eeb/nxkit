@@ -28,7 +28,7 @@
 //! - the pages a frame writes lose all access at its flush and stay tagged: guest memory is stale. A CPU access
 //!   waits for the batch if it still runs, then copies the page from the mirror and goes on (`nxkit-metal` `pages`);
 //! - every site that turns a guest address into a GPU address finds the mirror through the overlay of the frame's pool
-//!   snapshot ([`crate::overlay`], [`crate::pools::PoolSnapshot::resolve`]); the table of raw global memory is split at
+//!   snapshot ([`crate::pools::overlay`], [`crate::pools::PoolSnapshot::resolve`]); the table of raw global memory is split at
 //!   the member pages.
 //!
 //! Step 3 answers the waits for fences when the flush has run, not when the GPU is done (`GpuBackend::wait_early`): the
@@ -63,11 +63,11 @@ use nxkit_metal::{
 };
 
 use crate::detail::{CopyKind, DrawArgs, FrameDetail, Stage, StreamDetail};
-use crate::draws::FastMap;
-use crate::overlay::{LateCopies, Overlay, PAGE, Run, Staged};
+use crate::fastmap::FastMap;
 use crate::pipelines::Pipelines;
+use crate::pools::overlay::{LateCopies, Overlay, PAGE, Run, Staged};
 use crate::programs::{BindKind, Programs};
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 mod copyin;
 mod early;

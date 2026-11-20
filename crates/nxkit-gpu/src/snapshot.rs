@@ -13,7 +13,7 @@ use nxkit_nvn::resource::{ResourceTable, TexId, TextureRecord};
 use nxkit_nvn::tic::Tsc;
 
 use crate::detail::FrameDetail;
-use crate::gpu::collect_uses;
+use crate::textures::collect_uses;
 
 /// The reads of the encoder: a texture record by id and a texture handle by value.
 pub trait EncodeView: Sync {
@@ -80,11 +80,11 @@ impl EncodeView for Live<'_> {
 /// A copy of the records and handles that one frame uses.
 #[derive(Debug, Default)]
 pub struct Snapshot {
-    records: crate::draws::FastMap<TexId, TextureRecord>,
-    handles: crate::draws::FastMap<u64, (TextureSlot, Option<Tsc>)>,
+    records: crate::fastmap::FastMap<TexId, TextureRecord>,
+    handles: crate::fastmap::FastMap<u64, (TextureSlot, Option<Tsc>)>,
     /// The ids that the pool table needs, and the slots of those that name a texture.
     pool_ids: Vec<u32>,
-    pool_slots: crate::draws::FastMap<u32, TextureSlot>,
+    pool_slots: crate::fastmap::FastMap<u32, TextureSlot>,
     texture_limit: Option<u32>,
     sampler_epoch: u64,
     /// The registered samplers, when the sampler table did not hold them at the flush.
@@ -107,7 +107,7 @@ impl Snapshot {
         pool_ids: &[u32],
         samplers_done: u64,
     ) -> Self {
-        let mut records = crate::draws::FastMap::default();
+        let mut records = crate::fastmap::FastMap::default();
         let mut keep = |id: TexId| {
             if let Ok(r) = table.get(id) {
                 records.insert(id, *r);
@@ -116,7 +116,7 @@ impl Snapshot {
         for id in collect_uses(frame, plan).into_keys() {
             keep(id);
         }
-        let mut handles = crate::draws::FastMap::default();
+        let mut handles = crate::fastmap::FastMap::default();
         let wanted = detail
             .draws
             .iter()
@@ -138,7 +138,7 @@ impl Snapshot {
                 handles.insert(handle, (*slot, sampler.copied()));
             }
         }
-        let mut pool_slots = crate::draws::FastMap::default();
+        let mut pool_slots = crate::fastmap::FastMap::default();
         for &id in pool_ids {
             if let Ok(slot) = descriptors.texture(id) {
                 keep(slot.texture);

@@ -36,7 +36,7 @@ use nxkit_nvn::format::{Aspects, format_info};
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::resource::{TexId, TextureRecord};
 
-use crate::draws::FastSet;
+use crate::fastmap::FastSet;
 use crate::poolreg::Registry;
 use crate::textures::Res;
 use crate::upload::Dirty;
@@ -129,7 +129,7 @@ pub(crate) struct CopyBack {
     /// The textures that the diagnostic named.
     seen: FastSet<TexId>,
     /// The last decision for each texture (`NXKIT_DIAG=copyback` only). `candidate` takes `&self`.
-    decided: std::sync::Mutex<crate::draws::FastMap<TexId, Why>>,
+    decided: std::sync::Mutex<crate::fastmap::FastMap<TexId, Why>>,
     /// Frames with a copy-back, textures and bytes copied back, for the diagnostic.
     frames: u64,
     textures: u64,

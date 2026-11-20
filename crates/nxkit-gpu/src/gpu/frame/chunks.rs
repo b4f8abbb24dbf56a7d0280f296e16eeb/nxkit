@@ -1,6 +1,7 @@
 //! The cut of a frame into chunks (`weights_of`, `lead_chunk`) and the encode of one chunk (`run_chunk`).
 
 use super::*;
+use crate::encode::EncodeCtx;
 
 /// The weight of each pass of the plan for the cut into chunks: its commands and one.
 pub(super) fn weights_of(plan: &PassPlan) -> Vec<u32> {
@@ -49,7 +50,7 @@ pub(super) fn lead_chunk(weights: &[u32], ends: &mut Vec<usize>, max_buffers: us
 }
 
 pub(super) fn run_chunk(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     scratch: &Scratch,
     keep: &Arc<Keep>,
@@ -59,7 +60,7 @@ pub(super) fn run_chunk(
 }
 
 pub(super) fn run_chunk_inner(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     scratch: &Scratch,
     keep: &Arc<Keep>,

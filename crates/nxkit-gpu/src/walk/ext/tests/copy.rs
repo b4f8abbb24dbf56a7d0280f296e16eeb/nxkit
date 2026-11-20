@@ -353,6 +353,6 @@ fn the_walker_and_the_decoder_count_the_same_copies() {
     assert_eq!(detail.copies.len(), cmds);
     let kinds: Vec<_> = detail.copies.iter().map(|c| c.kind).collect();
     assert_eq!(kinds, list.iter().map(|(_, k)| *k).collect::<Vec<_>>());
-    let ords = crate::draws::ordinals(f.frame());
+    let ords = crate::ordinal::ordinals(f.frame());
     assert_eq!(ords.last().map(|o| o.copy), Some(cmds as u32 - 1));
 }

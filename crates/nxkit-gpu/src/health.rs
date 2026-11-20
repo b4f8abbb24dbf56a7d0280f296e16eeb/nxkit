@@ -4,7 +4,8 @@
 
 use nxkit_nvn::diag::{Reason, frame_end, note_n};
 
-use crate::stats::{EncodeStats, Skip};
+use crate::skip::Skip;
+use crate::stats::EncodeStats;
 
 /// The reason of the report for each [`Skip`], indexed by `Skip as usize`.
 const SKIPS: [Reason; Skip::COUNT] = [

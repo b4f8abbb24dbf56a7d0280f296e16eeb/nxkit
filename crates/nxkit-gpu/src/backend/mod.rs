@@ -47,9 +47,9 @@ use crate::detail::FrameDetail;
 use crate::encthread::{Encoder, Job, Msg, Reply, TableUpdate};
 use crate::guest::GuestView;
 use crate::guestpools::{GuestPoolSet, GuestPools};
+use crate::report::EncodeReport;
 use crate::settings::GpuSettings;
 use crate::snapshot::{EncodeView, Live, Snapshot};
-use crate::stats::EncodeReport;
 use crate::walk::{Invalidations, Walker};
 use util::{drop_later, fail, matches, overlap_diag, report_refused, stats_diag, take_due};
 
@@ -424,7 +424,7 @@ impl GpuBackend {
             self.copied_fence.fetch_max(fence.0, Ordering::AcqRel);
             self.drain(None);
         }
-        let synced: crate::draws::FastSet<TexId> = report
+        let synced: crate::fastmap::FastSet<TexId> = report
             .deswizzled
             .iter()
             .chain(&report.mirrored)

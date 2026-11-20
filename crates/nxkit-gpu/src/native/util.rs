@@ -75,3 +75,13 @@ pub(super) fn run_commands(cmds: &[Cmd], run: Run) -> Option<(usize, usize)> {
     }
     first.zip(last)
 }
+
+/// The plans the cache keeps. A plan of a network holds tens of MB of scratch, and the game uses one or two at a time
+/// (dynamic resolution makes a new size now and then), so the cache is small and drops the least recently used.
+/// `NXKIT_NATIVE_CACHE=<n>` changes it.
+pub(super) fn cache_max() -> usize {
+    std::env::var("NXKIT_NATIVE_CACHE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4)
+}

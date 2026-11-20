@@ -9,6 +9,28 @@
 //! the pass multiplies them by the scale of the frame. The walker converts the viewport direction for the device
 //! origin and the supported viewport swizzle. Scissor coordinates still name the same memory rows.
 
+/// What the encoding of one frame reads: the planning context [`Shared`] and what only the encoder uses, the indirect
+/// command buffers, the native plan, the GPU counters and the pass profile. It derefs to [`Shared`], so the planning
+/// functions take it as it is (W29).
+pub(crate) struct EncodeCtx<'a> {
+    pub(crate) sh: crate::drawctx::Shared<'a>,
+    pub(crate) icbs: &'a std::sync::Mutex<crate::icbs::Icbs>,
+    /// The run of dispatches that a native plan replaces in this frame, when there is one.
+    pub(crate) native: Option<&'a crate::native::Prepared>,
+    /// The visibility offsets and counted draws of the GPU counters of the frame (`queries`).
+    pub(crate) queries: Option<&'a crate::queries::FrameQueries>,
+    /// The pass profile of this frame (`NXKIT_DIAG=passprof`).
+    pub(crate) prof: Option<&'a crate::passprof::FrameProf>,
+}
+
+impl<'a> std::ops::Deref for EncodeCtx<'a> {
+    type Target = crate::drawctx::Shared<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.sh
+    }
+}
+
 use std::sync::PoisonError;
 
 use nxkit_metal::{
@@ -23,10 +45,12 @@ use nxkit_nvn::resource::TexId;
 
 use crate::bindless::{ArgsMemo, ScratchSink};
 use crate::detail::{ClearDetail, DrawArgs, DynamicDetail, RecordingRun};
-use crate::draws::{Geom, PassCtx, Prep, Shared, prepare};
+use crate::drawctx::{Geom, PassCtx, Prep};
+use crate::draws::prepare;
 use crate::indirect::Prepass;
 use crate::pipelines::Targets;
-use crate::stats::{EncodeStats, Skip};
+use crate::skip::Skip;
+use crate::stats::EncodeStats;
 use crate::textures::BlockTarget;
 use crate::translate;
 
@@ -65,7 +89,7 @@ impl Tables {
     }
 }
 
-pub(super) fn draw_range(sh: &Shared<'_>, pass: &Pass) -> std::ops::Range<u32> {
+pub(super) fn draw_range(sh: &EncodeCtx<'_>, pass: &Pass) -> std::ops::Range<u32> {
     let first = sh
         .ordinals
         .get(pass.cmds.start as usize)
@@ -80,7 +104,11 @@ pub(super) fn draw_range(sh: &Shared<'_>, pass: &Pass) -> std::ops::Range<u32> {
 
 /// Which draws of `range` (the draws of `pass`) a false render condition leaves out, by their place in the range.
 /// None when the frame has no such command.
-fn disabled_draws(sh: &Shared<'_>, pass: &Pass, range: &std::ops::Range<u32>) -> Option<Vec<bool>> {
+fn disabled_draws(
+    sh: &EncodeCtx<'_>,
+    pass: &Pass,
+    range: &std::ops::Range<u32>,
+) -> Option<Vec<bool>> {
     if sh.frame.disabled.is_empty() {
         return None;
     }
@@ -118,7 +146,7 @@ fn set_counting(
 
 /// Encodes one render pass into `cb`.
 pub(crate) fn render_pass(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     tables: &Tables,
     scratch: &Scratch,

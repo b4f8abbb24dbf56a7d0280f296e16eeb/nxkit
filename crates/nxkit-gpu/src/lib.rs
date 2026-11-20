@@ -14,7 +14,8 @@
 #![cfg(target_os = "macos")]
 
 mod diag;
-pub(crate) use diag::{buf_skip, diag, knob, nobar, nobar_range, refresh_knobs, tex_skip, watched};
+pub(crate) use diag::{diag, knob, nobar, nobar_range, refresh_knobs, watched};
+pub(crate) use skip::{buf_skip, tex_skip};
 
 mod backend;
 mod barr;
@@ -25,9 +26,11 @@ mod clear;
 mod copyback;
 mod coverage;
 pub mod detail;
+mod drawctx;
 mod draws;
 mod encode;
 mod encthread;
+mod fastmap;
 mod format_map;
 mod gatediag;
 mod geometry;
@@ -47,10 +50,8 @@ mod mesh;
 mod meshvis;
 mod nanscan;
 mod native;
-mod native_ndsr;
-mod native_ndve;
+mod ordinal;
 mod overlap;
-mod overlay;
 mod passes;
 mod passprof;
 mod pipelines;
@@ -61,8 +62,10 @@ mod programs;
 mod pull;
 mod queries;
 mod rename;
+mod report;
 mod scaled;
 mod settings;
+mod skip;
 pub mod snapshot;
 pub mod stats;
 mod textures;
@@ -78,7 +81,9 @@ pub use pools::{
     Backing, BadRange, Drained, Loc, MakeBacking, MetalPoolSet, Miss, PAGE, PagePins, PoolBuffer,
     PoolEntry, PoolSet, PoolSnapshot, PoolStats,
 };
+pub use report::EncodeReport;
 pub use settings::GpuSettings;
+pub use skip::Skip;
 pub use snapshot::{EncodeView, Live, Snapshot};
-pub use stats::{DrawClass, EncodeReport, EncodeStats, KindStats, Skip};
+pub use stats::{DrawClass, EncodeStats, KindStats};
 pub use textures::inventory;

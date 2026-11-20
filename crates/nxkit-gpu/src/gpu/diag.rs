@@ -7,7 +7,7 @@ use super::*;
 pub(super) fn pass_shape_diag(
     frame: &nxkit_nvn::frame::Frame,
     plan: &nxkit_nvn::passes::PassPlan,
-    textures: &crate::draws::FastMap<nxkit_nvn::resource::TexId, Res>,
+    textures: &crate::fastmap::FastMap<nxkit_nvn::resource::TexId, Res>,
 ) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
@@ -238,7 +238,7 @@ pub(super) fn kpass_diag(
     frame: &Frame,
     plan: &PassPlan,
     detail: &FrameDetail,
-    ords: &[crate::draws::Ordinal],
+    ords: &[crate::ordinal::Ordinal],
     textures: &FastMap<TexId, Res>,
 ) {
     use nxkit_metal::Format as F;

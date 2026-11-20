@@ -1,93 +1,7 @@
 //! Counters of one encoded frame (R16) and the report that the caller applies to its tables.
 
-use nxkit_nvn::resource::TexId;
-
 use crate::detail::DrawArgs;
-
-/// Why a draw, copy or dispatch was not encoded. The encoder counts each reason, so a missing feature shows up as a
-/// number and not as a silent hole in the picture.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Skip {
-    /// The frame has no detail for the command.
-    Detail,
-    /// The shader library or the reflection is missing or not readable.
-    Program,
-    /// The reflection has a binding kind that the encoder does not fill.
-    Binding,
-    /// The primitive type has no Metal equivalent (fan, quads, adjacency, patches).
-    Primitive,
-    /// The index type has no Metal equivalent (byte indices).
-    Index,
-    /// A vertex or texture format has no Metal equivalent.
-    Format,
-    /// The render targets leave a gap between colour slots, or the pass has no target.
-    Target,
-    /// Front and back faces are both culled.
-    Cull,
-    /// A texture could not be created or resolved.
-    Texture,
-    /// The pipeline did not compile.
-    Pipeline,
-    /// A buffer address is outside guest memory, or the scratch buffer is full.
-    Buffer,
-    /// A copy between a scaled and an unscaled texture, or between different formats.
-    Copy,
-    /// A texture upload or copy-back failed.
-    Transfer,
-    /// Metal refused an encoded command.
-    Encode,
-    /// The pipeline is still compiling on a background thread. The draw is left out until it is ready.
-    Pending,
-    /// The draw's program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`.
-    Listed,
-}
-
-impl Skip {
-    /// The number of reasons.
-    pub const COUNT: usize = 16;
-
-    /// Every reason, in index order.
-    pub const ALL: [Self; Self::COUNT] = [
-        Self::Detail,
-        Self::Program,
-        Self::Binding,
-        Self::Primitive,
-        Self::Index,
-        Self::Format,
-        Self::Target,
-        Self::Cull,
-        Self::Texture,
-        Self::Pipeline,
-        Self::Buffer,
-        Self::Copy,
-        Self::Transfer,
-        Self::Encode,
-        Self::Pending,
-        Self::Listed,
-    ];
-
-    /// The reason as a short name for logs.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Detail => "detail",
-            Self::Program => "program",
-            Self::Binding => "binding",
-            Self::Primitive => "primitive",
-            Self::Index => "index",
-            Self::Format => "format",
-            Self::Target => "target",
-            Self::Cull => "cull",
-            Self::Texture => "texture",
-            Self::Pipeline => "pipeline",
-            Self::Buffer => "buffer",
-            Self::Copy => "copy",
-            Self::Transfer => "transfer",
-            Self::Encode => "encode",
-            Self::Pending => "pending",
-            Self::Listed => "listed",
-        }
-    }
-}
+use crate::skip::Skip;
 
 /// The draws that the GPU drives or that run a mesh pipeline. [`KindStats`] counts them apart from the other draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -333,28 +247,4 @@ impl EncodeStats {
         self.render_cond_draws += o.render_cond_draws;
         self.render_cond_other += o.render_cond_other;
     }
-}
-
-/// The result of `Gpu::encode_frame`. The `nxkit-nvn` front end owns the resource table, so the caller applies it.
-#[derive(Clone, Debug, Default)]
-pub struct EncodeReport {
-    /// The number of the submitted batch, or 0 when the frame had nothing to submit.
-    pub batch: u64,
-    /// Textures that the frame deswizzled from guest memory. The caller calls `ResourceTable::synced` for each.
-    pub deswizzled: Vec<TexId>,
-    /// Textures that the GPU wrote (render targets, copy destinations, dispatch outputs). The caller calls
-    /// `ResourceTable::gpu_wrote` for each.
-    pub gpu_wrote: Vec<TexId>,
-    /// Textures that the frame swizzled back to guest memory for a CPU read. The caller calls
-    /// `ResourceTable::synced` for each after `Gpu::wait`.
-    pub copied_back: Vec<TexId>,
-    /// Textures that the GPU wrote and that the end of the frame copies back into guest memory, because their storage
-    /// lies in a memory pool the CPU can access. The copy runs on the GPU after the passes of the frame, so the caller
-    /// calls `ResourceTable::synced_at` (after `gpu_wrote_at`) for each without a wait: any later GPU read of the
-    /// guest memory, and any CPU read after a fence wait, sees the copy.
-    pub mirrored: Vec<TexId>,
-    /// The counters.
-    pub stats: EncodeStats,
-    /// The GPU counters of the frame, which the backend writes when the GPU finished it.
-    pub(crate) queries: Option<std::sync::Arc<crate::queries::FrameQueries>>,
 }

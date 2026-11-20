@@ -245,7 +245,7 @@ fn the_plan_books_its_writes_in_the_pass_of_the_anchor() {
         addrs: vec![],
     };
     assert_eq!(p.writes(), vec![TexId(7)]);
-    let ords = crate::draws::ordinals(&frame);
+    let ords = crate::ordinal::ordinals(&frame);
     let mut images = vec![crate::images::PassImages::default(); plan.passes.len()];
     book_writes(&p, &frame, &plan, &ords, &mut images);
     for (i, x) in images.iter().enumerate() {

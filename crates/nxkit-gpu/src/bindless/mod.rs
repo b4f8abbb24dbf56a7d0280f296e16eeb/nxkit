@@ -7,6 +7,8 @@
 //! resource IDs by descriptor id and one of sampler resource IDs by sampler id.
 
 mod args;
+#[cfg(test)]
+pub(crate) use args::{C0_ROW, C0_SSBO_MS, C0_SSBO_TS, storage_table};
 mod changes;
 pub(crate) mod marks;
 #[cfg(test)]
@@ -25,7 +27,7 @@ use nxkit_nvn::tic::Tsc;
 
 use crate::detail::{Stage, TextureBind, UboDetail};
 use crate::programs::{BindKind, StageProgram};
-use crate::stats::Skip;
+use crate::skip::Skip;
 use crate::translate;
 use nxkit_nvn::diag::{Reason, note_n};
 
@@ -77,12 +79,12 @@ pub(crate) struct Resolved {
 /// The handles that a frame resolved, and the Metal objects behind them. The command buffers keep the textures alive.
 #[derive(Default)]
 pub(crate) struct Handles {
-    pub(crate) map: crate::draws::FastMap<u64, Resolved>,
+    pub(crate) map: crate::fastmap::FastMap<u64, Resolved>,
     pub(crate) keep: Vec<Texture>,
     /// Views of a handle in the texture type that a shader declares, where it differs from the descriptor's.
-    pub(crate) fits: crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
+    pub(crate) fits: crate::fastmap::FastMap<(u64, nxkit_metal::TextureKind), u64>,
     /// The storage image views the shaders of the frame need.
-    pub(crate) images: crate::draws::FastMap<ImageKey, ImageRes>,
+    pub(crate) images: crate::fastmap::FastMap<ImageKey, ImageRes>,
 }
 
 /// The resource ID of a storage image view, and whether its texture is stored at the render scale. An `id` of 0 means
@@ -101,7 +103,7 @@ pub(crate) type ImageKey = (u64, nxkit_metal::TextureKind, u8);
 /// The host tables and the sampler cache.
 pub(crate) struct Bindless {
     ctx: Context,
-    samplers: crate::draws::FastMap<u64, Sampler>,
+    samplers: crate::fastmap::FastMap<u64, Sampler>,
     default_sampler: Sampler,
     /// The copies of the two tables, one per batch slot in flight. A frame binds the copy of its own slot, so an earlier
     /// frame that still runs never sees an element that a later frame wrote ([`Bindless::sync`]).
@@ -114,11 +116,11 @@ pub(crate) struct Bindless {
     tex_seen: Arc<DataBuffer>,
     samp_seen: Arc<DataBuffer>,
     /// The master of the texture table: the non-zero resource ID of each element. All writes go here.
-    tex_mirror: crate::draws::FastMap<u32, u64>,
+    tex_mirror: crate::fastmap::FastMap<u32, u64>,
     /// The master of the sampler table.
-    samp_mirror: crate::draws::FastMap<u32, u64>,
+    samp_mirror: crate::fastmap::FastMap<u32, u64>,
     /// The texture and Metal texture (store generation) behind each element of the texture table that is not 0.
-    tex_owner: crate::draws::FastMap<u32, (TexId, u64)>,
+    tex_owner: crate::fastmap::FastMap<u32, (TexId, u64)>,
     /// `n` of the two master tables.
     tex_n: u32,
     samp_n: u32,
@@ -149,8 +151,7 @@ const STATIC_BYTES: u64 = 0x10000;
 /// The offset of `render_scale[0]` in the support buffer (Ryujinx `SupportBuffer`, each field 16 byte aligned). The
 /// support constants follow `nxb-xlate` `abi.rs`.
 const SUPPORT_RENDER_SCALE: u64 = 192;
-/// The entries of `render_scale`: entry 0 is the scale of the pass, entry `1 + i` the scale of descriptor `i`.
-pub(crate) const SUPPORT_SCALES: u32 = 73;
+pub(crate) use crate::programs::SUPPORT_SCALES;
 const SUPPORT_RENDER_SCALES: u64 = SUPPORT_SCALES as u64;
 /// The bytes of the support buffer the shader may read. `frag_scale_count` (byte 176) stays 0.
 const SUPPORT_SIZE: usize = 1392;
@@ -401,7 +402,7 @@ impl Bindless {
 fn sync_table(
     table: &DataBuffer,
     pending: changes::Pending<'_>,
-    master: &crate::draws::FastMap<u32, u64>,
+    master: &crate::fastmap::FastMap<u32, u64>,
     n: u32,
     synced_n: &mut u32,
 ) {

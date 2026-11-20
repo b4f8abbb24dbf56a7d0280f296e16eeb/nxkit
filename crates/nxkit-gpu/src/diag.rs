@@ -20,8 +20,6 @@ use std::sync::{Mutex, OnceLock};
 use nxkit_metal::Format;
 use nxkit_nvn::resource::TexId;
 
-use crate::stats::Skip;
-
 /// Whether `NXKIT_DIAG` names `cat` or `all`.
 pub(crate) fn diag(cat: &str) -> bool {
     nxkit_nvn::diag::on(cat)
@@ -373,28 +371,6 @@ pub(crate) fn sample_budget(budget: &AtomicU64, max: u32) -> bool {
 /// True for the first `max` calls with `counter`.
 pub(crate) fn first(counter: &AtomicU32, max: u32) -> bool {
     nxkit_nvn::diag::first(counter, max)
-}
-
-/// Prints a line of category `tex` (at most 300) and gives back `Skip::Texture`. The health report keeps it as an
-/// example of the skip.
-pub(crate) fn tex_skip(what: std::fmt::Arguments<'_>) -> Skip {
-    static SHOWN: AtomicU32 = AtomicU32::new(0);
-    nxkit_nvn::diag::example(nxkit_nvn::diag::Reason::SkipTexture, what);
-    if diag("tex") && first(&SHOWN, 300) {
-        eprintln!("DIAG tex {what}");
-    }
-    Skip::Texture
-}
-
-/// Prints a line of category `buf` (at most 300) and gives back `Skip::Buffer`. The health report keeps it as an
-/// example of the skip.
-pub(crate) fn buf_skip(what: std::fmt::Arguments<'_>) -> Skip {
-    static SHOWN: AtomicU32 = AtomicU32::new(0);
-    nxkit_nvn::diag::example(nxkit_nvn::diag::Reason::SkipBuffer, what);
-    if diag("buf") && first(&SHOWN, 300) {
-        eprintln!("DIAG buf {what}");
-    }
-    Skip::Buffer
 }
 
 /// Whether `NXKIT_WATCH_TEX` (a comma separated list of texture ids) names `id`.

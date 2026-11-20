@@ -19,6 +19,7 @@
 //! - Order: the kernel runs in the copy pass in command order between two barriers. The pass table has textures
 //!   slots for it (`Tables::copy`).
 
+use crate::encode::EncodeCtx;
 use nxkit_metal::{
     ComputeCommand, ComputePass, SampleType, Scratch, Texture, TextureDesc, TextureKind,
     TextureRegion, ViewDesc,
@@ -26,8 +27,7 @@ use nxkit_metal::{
 use nxkit_nvn::diag::Reason;
 
 use super::copy::copy_skip;
-use crate::draws::Shared;
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 /// The bit of the copy flags that asks for linear filtering (`NVN_COPY_FLAGS_LINEAR_FILTER_BIT`).
 pub(crate) const LINEAR_FILTER_BIT: u32 = 1;
@@ -208,7 +208,7 @@ pub(super) fn mirror_lost(
 /// Encodes the stretch of `src_box` of `src` onto `dst_box` of `dst` for `count` layers into the copy pass `cp`. The
 /// regions are already scaled by the render factor and checked against the textures. `flags` are the copy flags.
 pub(super) fn encode(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     src: &Texture,

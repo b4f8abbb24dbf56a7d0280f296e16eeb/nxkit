@@ -4,13 +4,13 @@
 //! host kernel (`scale`, filter from the copy flags). Mirrored copies also use that kernel. The other copies are blits,
 //! and so is a mirrored copy of an equal size that the kernel cannot take (it loses the mirror, `copy.mirror-lost`).
 
+use crate::encode::EncodeCtx;
 use nxkit_metal::{ComputeCommand, ComputePass, Scratch, TextureDesc, TextureKind, TextureRegion};
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::{CopyDetail, CopyKind};
-use crate::draws::Shared;
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 fn scaled(v: [u32; 3], s: f32) -> [u32; 3] {
     [
@@ -94,7 +94,7 @@ const CLEAR_BLOCK_BYTES: usize = 64 * 1024;
 /// Encodes `nvnCommandBufferClearTexture` as blits of the clear colour. The colour is packed into one texel, repeated
 /// into a block of rows in the scratch buffer, and the box is filled block by block (and slice by slice) from it.
 fn clear_texture(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     cmd: Cmd,
@@ -158,7 +158,7 @@ fn clear_texture(
 /// stays `InSync` or `GpuNewer`, so a later sample of it does not see the new bytes. The CPU reads the bytes as they
 /// are in guest memory once the frame is done.
 fn copy_buffer(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     cmd: Cmd,
     c: &CopyDetail,
@@ -224,7 +224,7 @@ fn copy_buffer(
     let len = u64::from(bytes_per_image) * (images - 1)
         + u64::from(bytes_per_row) * image.div_ceil(row.max(1));
     // The buffer of the pool that holds the whole range, and the offset in it.
-    let Ok((guest, offset)) = crate::upload::locate(sh.pools, c.buffer, len) else {
+    let Ok((guest, offset)) = crate::pools::locate(sh.pools, c.buffer, len) else {
         return Err(copy_skip(format_args!(
             "buffer address {:#x} + {len} is not in one pool",
             c.buffer
@@ -266,7 +266,7 @@ fn copy_buffer(
 }
 
 pub(super) fn copy(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     cmd: Cmd,

@@ -12,6 +12,7 @@ mod indirect_dispatch;
 mod scale;
 
 use self::copy::copy;
+use crate::encode::EncodeCtx;
 
 use nxkit_metal::{
     CommandBuffer, ComputeCommand, ComputePass, Dependency, Scope, Scratch, Stages, Visibility,
@@ -22,12 +23,12 @@ use nxkit_nvn::resource::{Residency, TexId};
 
 use crate::bindless::{ScratchSink, StageInputs, fill_args};
 use crate::detail::Stage;
-use crate::draws::Shared;
 use crate::encode::Tables;
-use crate::stats::{EncodeStats, Skip};
+use crate::skip::Skip;
+use crate::stats::EncodeStats;
 
 fn dispatch(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     n: u32,
@@ -82,7 +83,7 @@ fn dispatch(
 
 /// Encodes a compute pass (dispatches) or a copy pass (copies and downsamples).
 pub(crate) fn compute_pass(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     tables: &Tables,
     scratch: &Scratch,
@@ -216,7 +217,7 @@ pub(crate) fn compute_pass(
 /// Encodes the copy-back of the textures that a CPU read pass names. A texture is copied when the table says the GPU
 /// wrote it earlier or when an earlier pass of this frame writes it. Returns the textures that were copied.
 pub(crate) fn cpu_read(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cb: &mut CommandBuffer,
     scratch: &Scratch,
     index: usize,
@@ -257,7 +258,7 @@ pub(crate) fn cpu_read(
 
 /// `DIAG ubodump`: the 64-bit values at byte offsets 192 to 448 (step 16) of each uniform buffer of a dispatch, and
 /// its push constants. At most 64 lines per frame.
-fn ubo_dump(sh: &Shared<'_>, pass: usize, cmd: u32, dd: &crate::detail::DispatchDetail) {
+fn ubo_dump(sh: &EncodeCtx<'_>, pass: usize, cmd: u32, dd: &crate::detail::DispatchDetail) {
     use std::sync::atomic::AtomicU64;
     static BUDGET: AtomicU64 = AtomicU64::new(0);
     let max = if crate::knob("ubodumpall") { 400 } else { 64 };

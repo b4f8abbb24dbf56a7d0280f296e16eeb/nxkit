@@ -68,7 +68,10 @@ fn a_range_that_a_binding_reaches_into_a_member_makes_its_pages_members_too() {
     let pools = pools_of(&g, o);
     let loc = pools.resolve(VA + 20 * page - 0x100, 0x200).unwrap();
     assert_ne!(loc.run, crate::pools::NO_RUN);
-    assert_eq!(crate::overlay::partial(), crate::overlay::partial());
+    assert_eq!(
+        crate::pools::overlay::partial(),
+        crate::pools::overlay::partial()
+    );
     encoded(1, None);
     FORCE.with(|f| f.set(None));
 }

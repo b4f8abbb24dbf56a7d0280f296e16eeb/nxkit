@@ -19,10 +19,12 @@ use nxkit_nvn::resource::TexId;
 
 use crate::bindless::{Handles, ImageRes};
 use crate::detail::{FrameDetail, Stage, TextureBind};
-use crate::draws::{FastMap, FastSet, Ordinal};
+use crate::fastmap::{FastMap, FastSet};
+use crate::ordinal::Ordinal;
 use crate::programs::{BindKind, ImgDecl, Programs};
+use crate::skip::Skip;
 use crate::snapshot::EncodeView;
-use crate::stats::{EncodeStats, Skip};
+use crate::stats::EncodeStats;
 use crate::textures::{Res, TextureStore};
 
 /// An `img` member of a shader.

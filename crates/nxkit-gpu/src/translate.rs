@@ -216,28 +216,12 @@ fn dst_reads_source_rgb(dst_rgb: u32) -> bool {
     matches!(dst_rgb, 3 | 4)
 }
 
-/// The blend word of a draw for the pixel shader `fs`: 3 bits per colour target, the kind of its source RGB factor
-/// (see [`blend_zero_kind`]). The shader writes RGB 0 for a pixel whose factor is exactly 0, because the console's
-/// blender gives 0 for `0 x NaN` and Metal's gives NaN. The word is 0 for the knob `nobz`.
-pub(crate) fn blend_zero_word(
-    d: &DrawDetail,
-    fs: &crate::programs::StageProgram,
-    targets: &crate::pipelines::Targets,
-) -> u32 {
-    blend_zero_bits(
-        &d.blend,
-        &targets.colors,
-        fs.colors.as_deref(),
-        crate::knob("nobz"),
-    )
-}
-
-/// [`blend_zero_word`] over its parts. `written` lists the colours that the shader writes, `None` when it is not
+/// `crate::drawctx::blend_zero_word` over its parts. `written` lists the colours that the shader writes, `None` when it is not
 /// known (all of them). A target has kind 0 unless it blends, has a float format, is written, has an equation
 /// other than MIN and MAX and its destination RGB factor does not read the source RGB ([`dst_reads_source_rgb`]).
 /// The alpha blend needs no condition: its equation reads the source alpha only (`color_target` maps the alpha
 /// factors to Metal's alpha channel), and the rule never changes alpha. The kinds 4 and 5 (the second source) are never set: the host runs no dual source shader.
-fn blend_zero_bits(
+pub(crate) fn blend_zero_bits(
     blend: &[BlendDetail],
     colors: &[Option<Format>],
     written: Option<&[u8]>,

@@ -21,7 +21,7 @@ use nxkit_metal::{
 
 use super::Capture;
 use crate::pipelines::Pipelines;
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 /// The threads of a threadgroup.
 const GROUP: u32 = 64;

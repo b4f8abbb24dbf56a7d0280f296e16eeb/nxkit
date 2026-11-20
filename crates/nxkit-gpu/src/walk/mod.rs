@@ -37,7 +37,7 @@ use crate::detail::{
     ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage,
     TextureBind, UboDetail,
 };
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 use objects::{Blends, Raster, StencilValues};
 use programs::Programs;
 

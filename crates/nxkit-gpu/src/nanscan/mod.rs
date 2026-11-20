@@ -40,7 +40,7 @@ use nxkit_nvn::passes::{Pass, Slot, StoreAction};
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::Stage;
-use crate::draws::Shared;
+use crate::drawctx::Shared;
 pub(crate) use compute::compute_before;
 use kernel::{ENTRY_2D, ENTRY_3D, ENTRY_ARRAY, LIBRARY, MSL, WORDS};
 use text::{Counts, Subject};

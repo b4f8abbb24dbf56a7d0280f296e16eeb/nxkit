@@ -10,7 +10,7 @@
 //! 5. It cuts the passes into runs and encodes each run into its own command buffer on its own thread.
 //! 6. It commits the command buffers in order.
 
-use crate::draws::{FastMap, FastSet};
+use crate::fastmap::{FastMap, FastSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -28,16 +28,19 @@ use crate::barriers::{BarrierState, touch};
 use crate::bindless::{Bindless, Env, Handles, Resolved};
 use crate::copyback::CopyBack;
 use crate::detail::{DrawArgs, FrameDetail, RecordingRun};
-use crate::draws::{Shared, ordinals};
+use crate::drawctx::Shared;
 use crate::encode::{Tables, render_pass};
 use crate::guestpools::GuestPools;
 use crate::icbs::Icbs;
 use crate::jobs;
+use crate::ordinal::ordinals;
 use crate::passes::{compute_pass, cpu_read};
 use crate::pipelines::Pipelines;
 use crate::programs::Programs;
+use crate::report::EncodeReport;
+use crate::skip::Skip;
 use crate::snapshot::EncodeView;
-use crate::stats::{EncodeReport, EncodeStats, Skip};
+use crate::stats::EncodeStats;
 use crate::textures::{Res, TextureStore, Use};
 use crate::upload::{Dirty, Transfer};
 
@@ -53,7 +56,7 @@ use diag::*;
 use timing::*;
 use uses::*;
 
-pub(crate) use uses::collect_uses;
+pub(crate) use crate::textures::collect_uses;
 
 /// The chunks of passes that the encoder makes for each thread (see `jobs::run_all`).
 const CHUNKS_PER_THREAD: usize = 1;

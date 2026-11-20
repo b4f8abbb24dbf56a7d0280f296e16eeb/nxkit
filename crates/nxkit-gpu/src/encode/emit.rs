@@ -1,5 +1,6 @@
 //! The encoding of draws and of replayed recordings.
 
+use super::EncodeCtx;
 use super::*;
 
 /// What a GPU driven draw needs besides its [`Prep`]: the table of the object stage and the records that the pre-pass
@@ -306,7 +307,7 @@ fn target_state(pc: &PassCtx, d: &crate::detail::DrawDetail) -> String {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     pc: &PassCtx,
     rp: &mut RenderPass<'_>,
     tr: &mut Tracker,
@@ -448,7 +449,7 @@ pub(super) fn draw(
 
 /// Runs a replayed recording as one ICB. Returns false when the run gets no ICB and the caller encodes it draw by draw.
 pub(super) fn run_icb(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     pc: &PassCtx,
     rp: &mut RenderPass<'_>,
     tr: &mut Tracker,

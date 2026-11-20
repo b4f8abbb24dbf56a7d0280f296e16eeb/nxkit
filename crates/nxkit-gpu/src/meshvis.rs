@@ -25,7 +25,9 @@ use nxkit_nvn::passes::{PassKind, PassPlan, Slot};
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::{DrawArgs, FrameDetail};
-use crate::draws::{FastMap, FastSet, Ordinal, Prep};
+use crate::drawctx::Prep;
+use crate::fastmap::{FastMap, FastSet};
+use crate::ordinal::Ordinal;
 use crate::textures::Res;
 
 #[cfg(test)]

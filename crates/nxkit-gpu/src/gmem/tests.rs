@@ -240,7 +240,7 @@ impl Backing for Fake {
 
 #[test]
 fn a_pool_is_split_at_its_member_pages_with_the_delta_of_the_mirror_run() {
-    use crate::overlay::{Overlay, PAGE, Run};
+    use crate::pools::overlay::{Overlay, PAGE, Run};
     const VA: u64 = 0xc0_0000_0000;
     let snap = PoolSnapshot::whole(VA, 64 * PAGE, Fake(0x9000_0000_0000));
     // Pages 10, 11 and 14 are members; the run for them starts at page 8.
