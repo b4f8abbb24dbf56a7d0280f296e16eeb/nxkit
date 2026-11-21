@@ -7,6 +7,11 @@ use nxb_pyjson::Value;
 /// The control section's magic (`34127698` in the record).
 const CTL_MAGIC: [u8; 4] = [0x34, 0x12, 0x76, 0x98];
 
+// Offsets in the NVN1 domain shader control section, not in the shader program header.
+const NVN1_TESS_PRIMITIVE_OFFSET: usize = 0x738;
+const NVN1_TESS_SPACING_OFFSET: usize = 0x73c;
+const NVN1_TESS_WINDING_OFFSET: usize = 0x744;
+
 /// A job that stops the build (Python's `sys.exit('[RED] …')`), or a record the port does not handle.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobError(pub String);
@@ -303,6 +308,21 @@ pub fn job_for(
     if !nvn2 && stage == "ps" && early_fragment_tests(ctl, &code) {
         extra.push(("early_fragment_tests", Value::Bool(true)));
     }
+    // The answer table can augment resources, not replace the original domain control.
+    let domain_stage = stage == "ds";
+    let domain_mode = if domain_stage && !nvn2 {
+        [
+            NVN1_TESS_PRIMITIVE_OFFSET,
+            NVN1_TESS_SPACING_OFFSET,
+            NVN1_TESS_WINDING_OFFSET,
+        ]
+        .into_iter()
+        .map(|at| u32_at(ctl, at).map(|word| Value::Int(i64::from(word))))
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+    } else {
+        None
+    };
     let mesh_job = extra.iter().any(|(k, _)| *k == "mesh_stage");
     let mut j = Value::obj([
         ("key", Value::str(key)),
@@ -325,10 +345,17 @@ pub fn job_for(
         None => j.set("no_facts", Value::Bool(true)),
         Some(Value::Object(m)) => {
             for (k, v) in m {
-                j.set(k, v.clone());
+                if k != "nvn_domain_mode"
+                    && !(domain_stage && matches!(k.as_str(), "stage" | "arch"))
+                {
+                    j.set(k, v.clone());
+                }
             }
         }
         Some(_) => {}
+    }
+    if let Some(mode) = domain_mode {
+        j.set("nvn_domain_mode", mode);
     }
     Ok(Job {
         code,

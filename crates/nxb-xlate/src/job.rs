@@ -21,6 +21,8 @@ pub struct Job {
     pub nvn2_cs: Option<Vec<i32>>,
     pub stage_memory: Option<Vec<i32>>,
     pub geometry_topology: Option<i32>,
+    /// Original NVN1 domain primitive, spacing and winding enums, not shader facts.
+    pub nvn_domain_mode: Option<[u32; 3]>,
     /// A task or mesh shader, written as a compute job with its SPH taken off.
     pub mesh_stage: Option<MeshStage>,
     /// The transform feedback layout of a vertex or geometry shader. Other stages ignore it.
@@ -259,6 +261,16 @@ impl Job {
                 .get("geometry_topology")
                 .and_then(Value::as_i64)
                 .map(|x| x as i32),
+            nvn_domain_mode: v
+                .get("nvn_domain_mode")
+                .and_then(Value::as_list)
+                .and_then(|words| {
+                    let [primitive, spacing, winding] = words else {
+                        return None;
+                    };
+                    let word = |v: &Value| u32::try_from(v.as_i64()?).ok();
+                    Some([word(primitive)?, word(spacing)?, word(winding)?])
+                }),
             mesh_stage: v.get("mesh_stage").and_then(mesh_stage),
             tf: transform_feedback(v.get("tf")).map_err(|e| format!("job {key}: {e}"))?,
             early_fragment_tests: truthy(v.get("early_fragment_tests")),

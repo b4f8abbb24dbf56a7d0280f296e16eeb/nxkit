@@ -128,7 +128,7 @@ fn emit_outputs_initialization(ctx: &mut EmitterContext<'_, '_>) -> Result<(), S
         // dual source blend is off in the job's graphics state
         return Ok(());
     }
-    if stage == Stage::Vertex {
+    if matches!(stage, Stage::Vertex | Stage::TessellationEvaluation) {
         for c in 0..4 {
             let v = ctx.ir.const_f(if c == 3 { 1.0 } else { 0.0 });
             let ci = ctx.ir.const_(c);
@@ -156,7 +156,10 @@ fn emit_outputs_initialization(ctx: &mut EmitterContext<'_, '_>) -> Result<(), S
         }
     }
     // NextInputAttributesComponents, per-patch and fixed function attributes only exist after SetNextStage (never called).
-    if !matches!(stage, Stage::Vertex | Stage::Geometry) {
+    if !matches!(
+        stage,
+        Stage::Vertex | Stage::Geometry | Stage::TessellationEvaluation
+    ) {
         return Err("unported: output initialisation for this stage".into());
     }
     Ok(())

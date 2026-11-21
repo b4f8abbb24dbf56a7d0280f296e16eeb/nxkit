@@ -92,6 +92,14 @@ impl Em<'_> {
     pub(super) fn place(&mut self, inst: Inst, o: &OpData) -> R<Place> {
         let trailing = usize::from(inst == Inst::Store || is_atomic(inst));
         let n = o.sources.len();
+        if self.plan.domain
+            && matches!(
+                o.storage_kind,
+                StorageKind::Input | StorageKind::InputPerPatch
+            )
+        {
+            return self.domain_input(inst, o);
+        }
         match o.storage_kind {
             StorageKind::GlobalMemory => {
                 let lo = self.get(AggType::U32, self.src(o, 0)?)?.s;

@@ -22,6 +22,7 @@ mod bind_tests;
 pub mod buffers;
 pub mod control;
 mod decls;
+mod domain;
 pub mod emit;
 pub mod entry;
 pub mod facts;
@@ -215,6 +216,9 @@ fn options(stage: &str, code: &[u8], ctx: &Context<'_>) -> Options {
 /// Translate one shader from its job and machine code to its libraries.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
     let stage = job.stage.as_str();
+    if stage == "ds" && domain::supported(job) {
+        return domain::translate_native(job, code, ctx);
+    }
     if matches!(stage, "hs" | "ds") {
         let kind = if stage == "hs" {
             "control"
