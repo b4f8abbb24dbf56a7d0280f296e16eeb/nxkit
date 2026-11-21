@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-21
+
 ### Added
 
 - Vulkan games build and run: Hades (`0100535012974000`, 1.0.38233) shows its title screen and plays at about 60 fps.
