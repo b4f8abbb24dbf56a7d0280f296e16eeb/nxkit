@@ -372,11 +372,31 @@ pub(crate) fn split(all: &mut [Block], left: usize, right: usize) -> Result<(), 
         all[right].sync_targets.push((k, v));
     }
     all[left].sync_targets.clear();
-    for i in 0..all[left].push_ops.len() {
-        if all[left].push_ops[i].op.address >= raddr {
-            let tail: Vec<PushOpInfo> = all[left].push_ops.split_off(i);
-            all[right].push_ops.extend(tail);
-            break;
+    // the old successors have the right block as their predecessor now
+    for s in all[right].succs.clone() {
+        for p in &mut all[s].preds {
+            if *p == left {
+                *p = right;
+            }
+        }
+    }
+    if let Some(cut) = all[left]
+        .push_ops
+        .iter()
+        .position(|p| p.op.address >= raddr)
+    {
+        let tail: Vec<PushOpInfo> = all[left].push_ops.split_off(cut);
+        let base = all[right].push_ops.len();
+        all[right].push_ops.extend(tail);
+        // A split after the push ops were propagated (a BRX target found in a later round) moves push ops that
+        // sync targets of any block already name by (block, index): they follow the push op to the right block.
+        // Before, they kept the index into the left block, past its end or at another push op.
+        for b in all.iter_mut() {
+            for (_, st) in &mut b.sync_targets {
+                if st.push.0 == left && st.push.1 >= cut {
+                    st.push = (right, st.push.1 - cut + base);
+                }
+            }
         }
     }
     Ok(())

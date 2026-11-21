@@ -15,5 +15,7 @@ pub mod ampere_decode;
 pub mod ampere_table;
 pub mod attr;
 pub mod decoder;
+#[cfg(test)]
+mod decoder_tests;
 pub mod flow;
 pub mod table;
