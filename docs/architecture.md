@@ -41,8 +41,8 @@ flowchart TD
 ```mermaid
 flowchart TD
   R4["R4 composition root: nxkit-host (unsafe only in sys, gate and bigstack)"]
-  R3["R3 adapters: nxkit-rt (the C ABI of the guest, unsafe code), nxkit-gpu (the NVN backend on Metal 4)"]
-  R2["R2 subsystems: nxkit-hos (kernel), nxkit-ipc, nxkit-nvn, nxkit-svc-*, nxkit-ndve, nxkit-ndsr"]
+  R3["R3 adapters: nxkit-rt (the C ABI of the guest, unsafe code), nxkit-gpu (the NVN backend on Metal 4), nxkit-vk-gpu (the Vulkan backend on Metal 4)"]
+  R2["R2 subsystems: nxkit-hos (kernel), nxkit-ipc, nxkit-nvn, nxkit-vk, nxkit-svc-*, nxkit-ndve, nxkit-ndsr"]
   R1["R1 platform bindings: nxkit-metal, nxkit-coreml (unsafe code, macOS only)"]
   R0["R0 contract: nxkit-abi (guest ABI, shared formats), nxkit-native-plan"]
   R4 --> R3 --> R2 --> R1 --> R0
@@ -118,7 +118,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxkit-coreml | R1 | no | impl | Core ML on the Neural Engine over IOSurface tensors (`objc2-core-ml`). It knows nothing about the network. Refer to [plans/ndve-ane.md](plans/ndve-ane.md) |
 | nxkit-abi | R0 | no | impl | the shared contract of the host: guest memory access (`guest`, `unsafe` only there), the export type, the IPC service trait and its request and response types, the registration of the kernel and the IPC server, the console platform, the shared formats that the build writes and the host reads (the shard index of the pipeline archive, `shards`, and the shader table of a Vulkan game, `vk_table`) and the settings snapshot (`env`) |
 | nxkit-metal | R1 | no | impl | the Metal 4 binding of the host, macOS only: device, queue, compiler and residency, the guest memory as one no-copy `MTLBuffer`, pipelines and archives, command buffers, ICBs, the presenter and the display link, and the page traps of the private memory. All `unsafe` Metal calls are here |
-| nxkit-rt | R3 | no | impl | the C ABI that the guest calls: `nxkit_init`, the export lookup (`nxkit_hle_find`), the kernel start and the svc entry, the NVN procs over `nxkit-nvn` and the SDK functions around NVN (`gfx`). `unsafe` code |
+| nxkit-rt | R3 | no | impl | the C ABI that the guest calls: `nxkit_init`, the export lookup (`nxkit_hle_find`), the kernel start and the svc entry, the NVN procs over `nxkit-nvn` the Vulkan exports over `nxkit-vk` (`vk`, only in the table of a Vulkan game: `entries_for`) and the SDK functions around NVN (`gfx`). `unsafe` code |
 | nxkit-host | R4 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
 | nxkit-svc-system | R2 | no | impl | the system services as `Service` objects: `set`, `set:sys`, `apm`, `time:*`, `acc:*`, `appletOE`, `appletAE`, `pctl*`, `nifm:u`, `friend:u`, `prepo:u`, `lm`, `psm`, `ssl`, `bcat:u` and `aoc:u` (R37), and the SDK exports of the take-overs (R38a). The module `sys` holds the clock, time zone and guest call functions |
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
@@ -133,7 +133,9 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host`. For a game on Vulkan the shader stage makes `vk_shaders.metallib` and `vk_shaders.tsv` with `nxb-spirv` (`standalone::vk_shaders`), with no shader split and no pipeline archive |
 | nxkit-nvn | R2 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
+| nxkit-vk | R2 | no | impl | the Vulkan front end of the nxkit host (R64): the device the game sees (Tegra X1, Vulkan 1.1), formats, handles and objects, descriptor sets, typed recorded commands and the `Backend` seam for `nxkit-vk-gpu`. Pure Rust, no Metal, no C ABI |
 | nxkit-gpu | R3 | no | impl | the frame encoder of the nxkit host, macOS only: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
+| nxkit-vk-gpu | R3 | no | impl | the Vulkan backend of the nxkit host, macOS only: `nxkit_vk::Backend` on `nxkit-metal`. Device memory below `1 << 39` as no-copy buffers, textures, pipelines from `vk_shaders.metallib` and its `vk_table` rows, one command buffer per submit, and the swapchain images through the `Pacer` as a `TickSink`. No `unsafe` code |
 | nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |
 | nxtitles | L1 | no | impl | the registry: one cargo feature per family and title module |
 | nxfamily-agl | T | no | impl | the family of Nintendo EPD games on sead, agl and gsys |

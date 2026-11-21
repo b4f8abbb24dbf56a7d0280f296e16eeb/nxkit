@@ -21,6 +21,7 @@ use nxkit_metal::Context;
 
 use crate::boot::Boot;
 use crate::error::{HostError, Result};
+use crate::graphics::Graphics;
 use crate::manifest::Game;
 use crate::sys::appkit::{self, AppEvents, MouseEvent, MouseMode, WindowConfig};
 use crate::{guestsym, loader, place, seams, stop, sys, thread};
@@ -125,15 +126,19 @@ pub fn run(opts: &Options) -> Result<()> {
     guestsym::set(std::mem::take(&mut loaded.exports));
     let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
 
-    let hooks = seams::frame_hooks(
-        &ctx,
-        &gpu_memory,
-        &opts.root,
-        &settings,
-        &run,
-        &screen,
-        &refresh,
-    )?;
+    // Only the layer of the game's graphics API is made (R64).
+    let hooks = match loaded.game.graphics {
+        Graphics::Nvn => seams::frame_hooks(
+            &ctx,
+            &gpu_memory,
+            &opts.root,
+            &settings,
+            &run,
+            &screen,
+            &refresh,
+        )?,
+        Graphics::Vulkan => seams::vulkan_frame_hooks(&ctx, &opts.root, &settings, &refresh)?,
+    };
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,

@@ -68,10 +68,10 @@ pub fn register_server(mask: u64) -> Result<()> {
     Ok(())
 }
 
-/// The names of the exports of the selected services that run on a big stack. The loader puts a big-stack stub
-/// (`bigstack.rs`) into the import slots of these.
-pub fn big_stack_exports(mask: u64) -> HashSet<String> {
-    nxkit_rt::entries()
+/// The names of the exports of the selected services in `table` (`nxkit_rt::entries_for` the graphics API of the
+/// game) that run on a big stack. The loader puts a big-stack stub (`bigstack.rs`) into the import slots of these.
+pub fn big_stack_exports(table: &[nxkit_rt::Entry], mask: u64) -> HashSet<String> {
+    table
         .iter()
         .filter(|e| e.big_stack && has(mask, e.service))
         .map(|e| e.name.to_owned())
@@ -344,4 +344,15 @@ pub fn frame_hooks(
     refresh: &Arc<Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::frames::install(ctx, memory, root, settings, run, screen, refresh)
+}
+
+/// The hooks of the display link for a game on Vulkan: the backend of `nxkit-vk-gpu` behind the Vulkan front end of
+/// `nxkit-rt`, with the same pacer. The work is in `frames.rs`.
+pub fn vulkan_frame_hooks(
+    ctx: &Context,
+    root: &std::path::Path,
+    settings: &Settings,
+    refresh: &Arc<Refresh>,
+) -> Result<Arc<dyn FrameHooks>> {
+    crate::frames::install_vulkan(ctx, root, settings, refresh)
 }

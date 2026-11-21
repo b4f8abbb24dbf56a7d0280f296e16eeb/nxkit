@@ -3,6 +3,9 @@
 //! `frame_hooks` in `seams.rs` calls [`install`]. The backend of `nxkit-gpu` answers the NVN front end of `nxkit-rt`.
 //! It encodes each flushed frame and queues each presented frame. The [`Pacer`] of `nxkit-metal` picks, on each tick of
 //! the display link, which queued frame to show, and the backend blits it into the drawable.
+//!
+//! A game on Vulkan gets [`install_vulkan`] instead: the backend of `nxkit-vk-gpu` answers the Vulkan front end of
+//! `nxkit-rt`, and the same pacer and display hooks show its swapchain images. Only the layer of the game's API is made.
 
 use crate::hostenv::RunSettings;
 use nxkit_nvn::screen::Screen;
@@ -178,8 +181,17 @@ impl FrameHooks for Ticks {
 /// A present was shown at `secs` (`CACurrentMediaTime`). The variable frame step takes the time of the display from it,
 /// on the clock of the starts of frames. It does nothing unless variable refresh turned it on.
 pub(crate) fn shown_to_step(_present: u64, secs: f64) {
+    shown_on(nxkit_rt::nvn::clock_ns(), secs);
+}
+
+/// [`shown_to_step`] on the clock of the Vulkan layer.
+fn shown_to_step_vk(_present: u64, secs: f64) {
+    shown_on(nxkit_rt::vk::clock_ns(), secs);
+}
+
+fn shown_on(now_ns: u64, secs: f64) {
     let ago_ns = ((nxkit_metal::media_time() - secs).max(0.0) * 1e9) as u64;
-    nxkit_svc_pacing::frame_shown(nxkit_rt::nvn::clock_ns().saturating_sub(ago_ns));
+    nxkit_svc_pacing::frame_shown(now_ns.saturating_sub(ago_ns));
 }
 
 /// Makes the backend, installs it in the NVN front end and returns the hooks for the display link.
@@ -207,6 +219,62 @@ pub fn install(
         nvn_settings(settings, run, screen),
     )
     .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
+    let pacer = Pacer::new(present_plan(), backend.clone());
+    backend.set_pacer(pacer.clone());
+    Ok(ticks(pacer, refresh))
+}
+
+/// The surface the Vulkan game sees: 1920x1080 docked, 1280x720 handheld (`op_mode`).
+fn surface_extent(settings: &Settings) -> (u32, u32) {
+    if settings.op_mode == "handheld" {
+        (1280, 720)
+    } else {
+        (1920, 1080)
+    }
+}
+
+/// Makes the Vulkan backend, installs it in the Vulkan front end and returns the hooks for the display link. Runs on the
+/// loader thread before the game threads start, as the big-stack stubs need.
+pub fn install_vulkan(
+    ctx: &Context,
+    root: &Path,
+    settings: &Settings,
+    refresh: &Arc<crate::refresh::Refresh>,
+) -> Result<Arc<dyn FrameHooks>> {
+    crate::sys::exitflush::install();
+    let backend = nxkit_vk_gpu::VkGpu::new(
+        ctx,
+        nxkit_vk_gpu::VkGpuSettings {
+            shader_dir: root.join(SHADERS),
+            surface_extent: surface_extent(settings),
+            timed_present: Some(refresh.timed_present()),
+            on_shown: Some(Arc::new(shown_to_step_vk)),
+        },
+    )
+    .map_err(|e| HostError::App(format!("the Vulkan backend: {e:?}")))?;
+    // `vkGet*ProcAddr` hands out the big-stack stub of a function that has one; the loader wraps the imports itself.
+    let mut stubs = std::collections::HashMap::new();
+    for e in nxkit_rt::entries_for(nxkit_rt::Graphics::Vulkan) {
+        if e.big_stack && e.name.starts_with("vk") {
+            let stub = crate::bigstack::wrap(e.addr as u64)?;
+            stubs.insert(e.addr, stub as usize);
+        }
+    }
+    nxkit_rt::vk::install(
+        backend.clone() as Arc<dyn nxkit_vk::Backend>,
+        nxkit_rt::vk::Settings {
+            stubs,
+            ..nxkit_rt::vk::Settings::default()
+        },
+    )
+    .map_err(|e| HostError::App(format!("the Vulkan front end: {e:?}")))?;
+    let pacer = Pacer::new(present_plan(), backend.clone());
+    backend.set_pacer(pacer.clone());
+    Ok(ticks(pacer, refresh))
+}
+
+/// The present plan of a game without frame step data: 60 game frames on the 120 Hz link.
+fn present_plan() -> nxkit_metal::PresentPlan {
     let plan = choose_present_plan(&PolicyInput {
         title: None,
         frame_step: false,
@@ -218,15 +286,16 @@ pub fn install(
         "nxkit-host: present plan {:?} ({})",
         plan.source, plan.reason
     );
-    // Set once; a second install in the same process keeps the first hook, which is the same function.
-    let pacer = Pacer::new(plan, backend.clone());
-    backend.set_pacer(pacer.clone());
-    Ok(Arc::new(Ticks {
+    plan
+}
+
+fn ticks(pacer: Arc<Pacer>, refresh: &Arc<crate::refresh::Refresh>) -> Arc<dyn FrameHooks> {
+    Arc::new(Ticks {
         pacer,
         refresh: refresh.clone(),
         applied: Mutex::new((0, 0)),
         rate: Mutex::new(RateTracker::new()),
         ticks: AtomicU64::new(0),
         seen: AtomicU64::new(0),
-    }))
+    })
 }

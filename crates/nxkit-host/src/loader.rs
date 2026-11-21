@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nxkit_abi::platform::{self, Platform};
-use nxkit_rt::{entries, find_big_in, find_in};
+use nxkit_rt::{Entry, entries_for, find_big_in, find_in};
 
 use crate::bigstack;
 use crate::error::{HostError, Result};
@@ -83,6 +83,8 @@ fn collect_exports(game: &Game, lists: &[Lists]) -> HashMap<String, u64> {
 
 /// Finds what an import or a relocation needs.
 struct Resolver<'a> {
+    /// The functions of the runtime for the graphics API of the game.
+    table: &'static [Entry],
     mask: u64,
     exports: &'a HashMap<String, u64>,
     big: &'a HashSet<String>,
@@ -92,12 +94,12 @@ impl Resolver<'_> {
     /// The function of a service. One that is in `big` is reached through a big-stack stub.
     fn service(&self, name: &str) -> Result<Option<u64>> {
         if self.big.contains(name) {
-            return match find_big_in(entries(), self.mask, name.as_bytes()) {
+            return match find_big_in(self.table, self.mask, name.as_bytes()) {
                 Some(a) => bigstack::wrap(a as u64).map(Some),
                 None => Ok(None),
             };
         }
-        Ok(find_in(entries(), self.mask, name.as_bytes()).map(|a| a as u64))
+        Ok(find_in(self.table, self.mask, name.as_bytes()).map(|a| a as u64))
     }
 
     /// A service function, or else an export of a module.
@@ -305,7 +307,8 @@ fn find_platform(game: &Game) {
 
 /// Finishes the load of every module, fills the imports and installs the gates.
 ///
-/// `mask` is the set of enabled services.
+/// `mask` is the set of enabled services. The functions of the services come from the table of the graphics API of
+/// the game (`game.json` `"graphics"`), so only that API's layer answers the imports (R64).
 pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     let Placed {
         game,
@@ -317,8 +320,10 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     let keys = thread::create_keys()?;
     let lists = read_lists(&game)?;
     let exports = collect_exports(&game, &lists);
-    let big = seams::big_stack_exports(mask);
+    let table = entries_for(game.graphics.layer());
+    let big = seams::big_stack_exports(table, mask);
     let resolver = Resolver {
+        table,
         mask,
         exports: &exports,
         big: &big,

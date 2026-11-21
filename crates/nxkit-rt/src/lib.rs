@@ -54,6 +54,7 @@ mod kernel;
 mod layer;
 pub mod nvn;
 pub mod settings;
+pub mod vk;
 
 pub use audio::{NxkitAudioConfig, NxkitAudioHost, nxkit_audio_init};
 pub use guestos::{
@@ -128,44 +129,72 @@ pub struct Entry {
     pub big_stack: bool,
 }
 
-/// The functions of the runtime, built once. The addresses of functions are not constants, so it is not a `static` slice.
-/// The SDK take-overs of the kernel service come after the offline entries.
+/// The graphics API of a game: the layer whose functions the table of [`entries_for`] holds (R64). The host reads it
+/// from `game.json` (`"graphics"`) and installs that layer only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Graphics {
+    /// NVN: `nvnBootstrapLoader` and the NVN functions behind it ([`nvn`]).
+    #[default]
+    Nvn,
+    /// Vulkan: the `vk*` functions ([`vk`]).
+    Vulkan,
+}
+
+/// The functions of the runtime for a game on `graphics`, built once per API. The addresses of functions are not
+/// constants, so it is not a `static` slice. The rows of the services are the same for both. The `gpu` service adds
+/// the API's layer (for NVN the loader, for Vulkan every `vk*` function) and the SDK take-overs of `gfx`, which do not
+/// depend on the API. The SDK take-overs of the kernel service come after the offline entries.
+pub fn entries_for(graphics: Graphics) -> &'static [Entry] {
+    // Process-wide (W26): one table per graphics API; the loader and the C lookups read them.
+    static TABLES: [OnceLock<Vec<Entry>>; 2] = [OnceLock::new(), OnceLock::new()];
+    TABLES[graphics as usize].get_or_init(|| table(graphics))
+}
+
+/// The functions of the runtime for an NVN game: the table of the C lookups ([`nxkit_hle_find`]), which serve the
+/// NVN games of the engine. The host's loader asks [`entries_for`] with the API of the game.
 pub fn entries() -> &'static [Entry] {
-    static TABLE: OnceLock<Vec<Entry>> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut table = Vec::new();
-        table.extend(mapped(nxkit_svc_fs::exports(), Service::Fs, false));
-        table.extend(mapped(nxkit_svc_fs::big_stack_exports(), Service::Fs, true));
-        table.extend(mapped(
-            nxkit_svc_offline::exports(),
-            Service::Offline,
-            false,
-        ));
-        table.extend(mapped(nxkit_svc_input::exports(), Service::Input, false));
-        table.extend(mapped(nxkit_svc_video::exports(), Service::Video, false));
-        table.extend(mapped(nxkit_svc_audio::exports(), Service::Audio, false));
-        table.extend(mapped(
-            nxkit_svc_audio::big_stack_exports(),
-            Service::Audio,
-            true,
-        ));
-        table.extend(mapped(nxkit_svc_pacing::exports(), Service::Pacing, false));
-        table.extend(mapped(nxkit_svc_system::exports(), Service::System, false));
-        table.extend(mapped(
-            nxkit_svc_system::big_stack_exports(),
-            Service::System,
-            true,
-        ));
-        table.push(Entry {
+    entries_for(Graphics::Nvn)
+}
+
+fn table(graphics: Graphics) -> Vec<Entry> {
+    let mut table = Vec::new();
+    table.extend(mapped(nxkit_svc_fs::exports(), Service::Fs, false));
+    table.extend(mapped(nxkit_svc_fs::big_stack_exports(), Service::Fs, true));
+    table.extend(mapped(
+        nxkit_svc_offline::exports(),
+        Service::Offline,
+        false,
+    ));
+    table.extend(mapped(nxkit_svc_input::exports(), Service::Input, false));
+    table.extend(mapped(nxkit_svc_video::exports(), Service::Video, false));
+    table.extend(mapped(nxkit_svc_audio::exports(), Service::Audio, false));
+    table.extend(mapped(
+        nxkit_svc_audio::big_stack_exports(),
+        Service::Audio,
+        true,
+    ));
+    table.extend(mapped(nxkit_svc_pacing::exports(), Service::Pacing, false));
+    table.extend(mapped(nxkit_svc_system::exports(), Service::System, false));
+    table.extend(mapped(
+        nxkit_svc_system::big_stack_exports(),
+        Service::System,
+        true,
+    ));
+    match graphics {
+        Graphics::Nvn => table.push(Entry {
             name: nvn::BOOTSTRAP_LOADER_NAME,
             service: Service::Gpu,
             addr: nvn::nvn_bootstrap_loader as extern "C" fn(u64) -> u64 as usize,
             big_stack: false,
-        });
-        table.extend(mapped(gfx::exports(), Service::Gpu, false));
-        table.extend(mapped(nxkit_hos::exports(), Service::Kernel, false));
-        table
-    })
+        }),
+        Graphics::Vulkan => {
+            table.extend(mapped(vk::exports(false), Service::Gpu, false));
+            table.extend(mapped(vk::exports(true), Service::Gpu, true));
+        }
+    }
+    table.extend(mapped(gfx::exports(), Service::Gpu, false));
+    table.extend(mapped(nxkit_hos::exports(), Service::Kernel, false));
+    table
 }
 
 /// The exports of one service crate as entries of `service`.

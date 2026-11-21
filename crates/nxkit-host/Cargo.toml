@@ -32,10 +32,12 @@ nxkit-svc-audio = { workspace = true }
 nxkit-svc-pacing = { workspace = true }
 nxkit-svc-system = { workspace = true }
 nxkit-nvn = { workspace = true }
+nxkit-vk = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nxkit-metal = { path = "../nxkit-metal" }
 nxkit-gpu = { workspace = true }
+nxkit-vk-gpu = { workspace = true }
 objc2 = { workspace = true, features = ["std"] }
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSCursor", "NSEvent", "NSControl", "NSGraphics", "NSProgressIndicator", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextField", "NSView", "NSWindow", "objc2-core-foundation", "objc2-quartz-core"] }
 objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes"] }

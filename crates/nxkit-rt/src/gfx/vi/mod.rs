@@ -54,6 +54,12 @@ fn addr<T>(object: &'static T) -> u64 {
     object as *const T as u64
 }
 
+/// The native window handle of the one layer, as `GetNativeWindow` gives it: the window of a Vulkan surface
+/// (`vkCreateViSurfaceNN`).
+pub(crate) fn native_window() -> u64 {
+    addr(&NATIVE)
+}
+
 /// The guest clock in nanoseconds: the clock of the NVN context, 0 before there is one.
 fn guest_ns() -> u64 {
     crate::nvn::ctx::settings_if_installed().map_or(0, |s| (s.clock_ns)())

@@ -19,6 +19,7 @@ nxb-model = { workspace = true }
 nxkit-abi = { workspace = true }
 nxkit-hos = { workspace = true }
 nxkit-nvn = { workspace = true }
+nxkit-vk.workspace = true
 nxkit-svc-fs = { workspace = true }
 nxkit-svc-offline = { workspace = true }
 nxkit-svc-input = { workspace = true }

@@ -2075,6 +2075,8 @@ dependencies = [
  "nxkit-svc-pacing",
  "nxkit-svc-system",
  "nxkit-svc-video",
+ "nxkit-vk",
+ "nxkit-vk-gpu",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
@@ -2147,6 +2149,7 @@ dependencies = [
  "nxkit-svc-pacing",
  "nxkit-svc-system",
  "nxkit-svc-video",
+ "nxkit-vk",
  "nxtitle",
 ]
 
@@ -2220,6 +2223,15 @@ version = "0.11.0"
 dependencies = [
  "nxb-model",
  "nxkit-abi",
+]
+
+[[package]]
+name = "nxkit-vk-gpu"
+version = "0.11.0"
+dependencies = [
+ "nxkit-abi",
+ "nxkit-metal",
+ "nxkit-vk",
 ]
 
 [[package]]
