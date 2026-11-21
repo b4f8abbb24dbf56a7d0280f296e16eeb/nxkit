@@ -207,6 +207,7 @@ nxb-shader = { path = "crates/nxb-shader" }
 nxb-codec = { path = "crates/nxb-codec" }
 nxb-a64 = { path = "crates/nxb-a64" }
 nxb-romfs = { path = "crates/nxb-romfs" }
+nxb-font = { path = "crates/nxb-font" }
 nxb-rewrite = { path = "crates/nxb-rewrite" }
 nxb-split = { path = "crates/nxb-split" }
 nxb-obs = { path = "crates/nxb-obs" }

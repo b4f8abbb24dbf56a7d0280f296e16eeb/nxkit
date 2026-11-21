@@ -467,6 +467,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxb-font"
+version = "0.13.0"
+
+[[package]]
 name = "nxb-maxwell"
 version = "0.13.0"
 

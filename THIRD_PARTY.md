@@ -159,6 +159,43 @@ https://github.com/LNPANDY/NX2Apple, MIT licence, Copyright (c) 2026 seedds, jha
 The look of its screens (`sys/homeviews.rs`) takes the colours, sizes and type of NX2Apple's design tokens
 (`frontend/design-tokens/tokens.json`) and of its console mode's question card. The Rust code is written anew.
 
+The shared font stand-ins of `nxb-font` port NX2Apple's `engine/dm/tools/make_shared_fonts.py` and
+`engine/dm/tools/make_ext_font.py`: the character set of each type, the names of the fonts, the choice of the source fonts,
+and the shapes, sizes and code points of the button icons. The cut follows the behaviour of the fontTools subsetter that the
+script calls (MIT licence, Copyright (c) 2017 Just van Rossum), and the icons follow its pens. No fontTools code is copied.
+`tools/gen_font_charsets.py` reads the character sets from Python's codecs and the Unicode blocks of the OS/2 range bits from
+fontTools. The per-type font files that `nxkit-svc-system` reads follow `engine/dm/host/hle_sdk16.c`. The notice of NX2Apple
+follows. It applies to the parts listed in this section.
+
+```
+MIT License
+
+Copyright (c) 2026 seedds
+Copyright (c) 2026 jhaizhou
+Copyright (c) 2026 LNPANDY and NX2Apple contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The fonts themselves are not in this repository or in a release. `nxb build` makes them on the Mac from the macOS system
+fonts Arial Unicode and Arial Rounded Bold (Monotype), and they stay in the app on that Mac.
+
 ## Manrope
 
 `nxkit-host` contains the Manrope typeface (`crates/nxkit-host/assets/Manrope.ttf`, Copyright 2018 The Manrope Project
