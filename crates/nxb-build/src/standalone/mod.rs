@@ -21,6 +21,9 @@ mod manifest;
 mod modules;
 mod npdm;
 mod nvn;
+mod nxnative;
+#[cfg(test)]
+mod nxnative_tests;
 mod pipelist;
 #[cfg(test)]
 mod replace_tests;
@@ -150,12 +153,11 @@ fn gpus(a: &Args, work: &Path, profile: &Path) -> Result<Vec<String>, String> {
 /// Refuses to replace something that is not an app a build made: an app of nxkit, or one of the old engine
 /// (nxnative), which a launcher such as NX2Apple built at the same place before the game moved to nxkit. The old
 /// engine keeps the save outside the app (`~/Library/Application Support/nxnative/<title id>/save` or the
-/// library folder's `save/<title id>`), so replacing its app loses no save.
+/// library folder's `save/<title id>`), so replacing its app loses no save: the stage `bundle` copies it into the new
+/// app (`nxnative.rs`).
 fn replaceable(out: &Path) -> Result<(), String> {
     let nxkit = out.join("Contents/MacOS/nxkit-host").is_file();
-    let nxnative =
-        out.join("Contents/MacOS/nxnative").is_file() && out.join("Contents/Resources/dm").is_dir();
-    if !out.exists() || nxkit || nxnative {
+    if !out.exists() || nxkit || nxnative::is_app(out) {
         return Ok(());
     }
     Err(crate::exit::fail(
@@ -509,6 +511,13 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 "save: kept from the old app ({})",
                 new_save.display()
             ));
+        } else if nxnative::is_app(&out) && !run_dir.join("save").exists() {
+            // the old engine's save is outside its app: a copy goes into the new app, the old one stays
+            if let Some(home) = std::env::var_os("HOME")
+                && let Some(m) = nxnative::carry(Path::new(&home), &out, t.id, &run_dir)?
+            {
+                p.say(&m);
+            }
         }
         // the lists of the recorded pipelines go with the save: the new app starts with them
         let carried = pipelist::carry(
