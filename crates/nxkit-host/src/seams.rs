@@ -14,7 +14,7 @@ use nxkit_rt::Service;
 use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
-use crate::manifest::Game;
+use crate::manifest::{self, Game, Import};
 use crate::refresh::Refresh;
 use crate::settings::Settings;
 use crate::sys::appkit::{MouseEvent, MouseMode};
@@ -92,6 +92,20 @@ fn aoc_root(game: &Game) -> Option<PathBuf> {
     game.aoc_dirs()
         .first()
         .and_then(|(_, dir)| dir.parent().map(Path::to_path_buf))
+}
+
+/// Whether the device save has its own folder. That is the case when the main module imports
+/// `nn::fs::MountSaveData`, so the game mounts an account save next to its device save (R35).
+fn separate_device_save(game: &Game) -> Result<bool> {
+    let main = game.main_module()?;
+    let imports = manifest::read_imports(&game.path(&main.imports))?;
+    Ok(imports_account_save(&imports))
+}
+
+fn imports_account_save(imports: &[Import]) -> bool {
+    imports
+        .iter()
+        .any(|i| i.name.starts_with("_ZN2nn2fs13MountSaveData"))
 }
 
 /// The version that the game shows for the build ID of its main module.
@@ -229,7 +243,7 @@ pub fn init_services(
             save,
             temp,
             aoc: aoc_root(game),
-            separate_device_save: false,
+            separate_device_save: separate_device_save(game)?,
         });
     }
     if has(mask, Service::System) {
@@ -383,4 +397,26 @@ pub fn vulkan_frame_hooks(
     refresh: &Arc<Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::frames::install_vulkan(ctx, root, settings, refresh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::imports_account_save;
+    use crate::manifest::parse_imports;
+
+    fn imports(names: &[&str]) -> Vec<crate::manifest::Import> {
+        let list: Vec<String> = names
+            .iter()
+            .map(|n| format!(r#"{{"name": "{n}", "slot": 0, "addend": 0, "weak": false}}"#))
+            .collect();
+        parse_imports(&format!("[{}]", list.join(","))).unwrap()
+    }
+
+    #[test]
+    fn the_device_save_is_separate_only_next_to_an_account_save() {
+        let device = "_ZN2nn2fs19MountDeviceSaveDataEPKc";
+        let account = "_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE";
+        assert!(imports_account_save(&imports(&[device, account])));
+        assert!(!imports_account_save(&imports(&[device])));
+    }
 }
