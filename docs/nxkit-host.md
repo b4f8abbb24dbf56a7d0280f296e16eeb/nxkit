@@ -75,7 +75,7 @@ One row for each rewritten site, with four tab-separated columns: the return add
 
 The title module and its family module answer the settings through their `nxtitle` hooks. The build writes them here. The host types the keys that name a mechanism of the core and gives them to the part that uses them (see Seams). It does not use them itself.
 
-Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
+Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target` (`NXKIT_FPS_TARGET` wins where the title offers the rate, see launcher.json), `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
 Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
@@ -96,6 +96,7 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 | variable | kind | values | default |
 |---|---|---|---|
 | `NXKIT_OP_MODE` | choice | `docked`, `handheld` | the mode of the title module: `handheld` for a touch screen game, else `docked` |
+| `NXKIT_FPS_TARGET` | choice | `30`, `60`, `120` up to `fps_max` of the title module, and its own `fps_target`. A title with `fps_target` 0 or with one rate gets no row. | the `fps_target` of the title module |
 | `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
 | `NXKIT_LANGUAGE` | choice | empty (the Mac's language) and the languages of `SupportedLanguageFlag` in the game's `control.nacp`, all 16 without a NACP. A game with one language gets no row. | empty |
 | `NXKIT_PAUSE_UNFOCUSED` | toggle | `1`, `0` | `0` |

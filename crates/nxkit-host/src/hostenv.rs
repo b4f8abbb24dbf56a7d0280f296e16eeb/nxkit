@@ -61,6 +61,9 @@ pub struct HostEnv {
     pub rumble_min: f32,
     /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
     pub metal_hud: bool,
+    /// `NXKIT_FPS_TARGET` (a whole number, a launch option): the frame rate over `fps_target` of the title module.
+    /// `Settings::with_env` keeps it only when the title offers it.
+    pub fps_target: Option<u32>,
     /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
@@ -143,6 +146,10 @@ impl HostEnv {
             rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
             rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
             metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
+            fps_target: env
+                .var(launch::FPS_TARGET)
+                .ok()
+                .and_then(|v| v.trim().parse::<u32>().ok()),
             handheld: env.var(launch::OP_MODE).ok().and_then(|v| match v.trim() {
                 "handheld" => Some(true),
                 "docked" => Some(false),
@@ -357,8 +364,8 @@ mod tests {
                     assert_ne!(read(a), read(b), "{}: {a} and {b} read the same", o.env);
                 }
             }
-            // the default of the console mode is the title's, which the host has from game.json
-            if o.env != launch::OP_MODE {
+            // the defaults of the console mode and the frame rate are the title's, which the host has from game.json
+            if o.env != launch::OP_MODE && o.env != launch::FPS_TARGET {
                 assert_eq!(
                     read(o.default),
                     HostEnv::default(),

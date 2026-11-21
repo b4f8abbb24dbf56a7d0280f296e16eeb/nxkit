@@ -60,6 +60,9 @@ pub const RUMBLE_MIN: &str = "NXKIT_RUMBLE_MIN";
 /// `1`: the Metal performance HUD is shown over the game.
 pub const METAL_HUD: &str = "NXKIT_METAL_HUD";
 
+/// `30`, `60` or `120`: the frame rate in place of `fps_target` of the title module. Unset: the title's.
+pub const FPS_TARGET: &str = "NXKIT_FPS_TARGET";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
@@ -105,7 +108,8 @@ pub struct Opt {
     pub label: &'static str,
     /// The English note under the label, can be empty.
     pub note: &'static str,
-    /// The default value. The build puts the mode of the title module in place of the default of [`OP_MODE`].
+    /// The default value. The build puts the mode and the frame rate of the title module in place of the defaults of
+    /// [`OP_MODE`] and [`FPS_TARGET`].
     pub default: &'static str,
     /// The section of the launcher: `Game`, `Controls` or `Performance`.
     pub section: &'static str,
@@ -171,6 +175,24 @@ pub fn game_languages(flags: u32) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// The options of [`FPS_TARGET`]. The build lists only the rates of the title ([`game_fps_targets`]).
+pub const FPS_TARGETS: &[(&str, &str)] = &[("30", "30 fps"), ("60", "60 fps"), ("120", "120 fps")];
+
+/// The options of [`FPS_TARGET`] for a title module with `fps_target` and `fps_max`: the rates up to `fps_max` and
+/// the title's own. None when the title has no target (0): the game keeps its own frame limit and has nothing to
+/// choose.
+pub fn game_fps_targets(fps_target: u32, fps_max: u32) -> Vec<(&'static str, &'static str)> {
+    if fps_target == 0 {
+        return Vec::new();
+    }
+    let top = fps_max.max(fps_target);
+    FPS_TARGETS
+        .iter()
+        .filter(|(v, _)| v.parse::<u32>().is_ok_and(|fps| fps <= top))
+        .copied()
+        .collect()
+}
+
 const ON_OFF: Kind = Kind::Toggle { on: "1", off: "0" };
 
 /// The launch options of the host, in the order of the launcher.
@@ -182,6 +204,16 @@ pub const OPTIONS: &[Opt] = &[
         note: "The mode the game sees: the TV picture of the docked console or the screen of the handheld. Games \
                made for the touch screen work best in handheld mode.",
         default: "docked",
+        section: "Game",
+        basic: true,
+        needs: None,
+    },
+    Opt {
+        env: FPS_TARGET,
+        kind: Kind::Choice(FPS_TARGETS),
+        label: "Frame rate",
+        note: "",
+        default: "60",
         section: "Game",
         basic: true,
         needs: None,
@@ -368,6 +400,21 @@ mod tests {
         );
         assert_eq!(game_languages(0).len(), LANGUAGES.len());
         assert_eq!(game_languages(1 << 15).last().map(|l| l.0), Some("pt-BR"));
+    }
+
+    #[test]
+    fn the_frame_rates_follow_the_title() {
+        let values = |t, max| {
+            game_fps_targets(t, max)
+                .iter()
+                .map(|r| r.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(values(60, 60), ["30", "60"]);
+        assert_eq!(values(30, 120), ["30", "60", "120"]);
+        assert_eq!(values(120, 60), ["30", "60", "120"], "the title's own rate");
+        assert_eq!(values(30, 30), ["30"]);
+        assert!(values(0, 120).is_empty(), "no target: the game's own limit");
     }
 
     #[test]

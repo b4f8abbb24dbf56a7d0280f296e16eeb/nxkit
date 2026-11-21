@@ -441,7 +441,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         };
         put("game.json", manifest::game_json(&m).as_bytes())?;
         let nacp = std::fs::read(ver_dir.join("control.nacp")).ok();
-        let options = launcher::launcher_json(t.id, m.settings.op_mode, nacp.as_deref());
+        let options = launcher::launcher_json(t.id, &m.settings, nacp.as_deref());
         put(nxkit_abi::launch::FILE, options.as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         put("main.npdm", &npdm_bytes)?;

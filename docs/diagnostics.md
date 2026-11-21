@@ -57,6 +57,7 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_LANGUAGE=<tag>` | The console language of the game, for example `de` or `en-GB`. Without it the first preferred language of the Mac that the console has, else `en-US`. |
 | `NXKIT_OP_MODE=docked\|handheld` | The operation mode that the game sees, over the `op_mode` of the title module. A launch option (`docs/nxkit-host.md`, launcher.json). Another value is ignored. |
 | `NXKIT_RUMBLE=0`, `NXKIT_RUMBLE_GAIN=<0..3>`, `NXKIT_RUMBLE_MIN=<0..0.9>` | No rumble; the factor on the rumble of the game (1.0); the rumble below which a controller does not move (0). A value outside the range is ignored. Launch options. |
+| `NXKIT_FPS_TARGET=30\|60\|120` | The frame rate over the `fps_target` of the title module. Only a rate up to `fps_max` (or the title's own) of a title whose `fps_target` is not 0 is taken. Another value is refused with a line in the log and the title's stays. A launch option. |
 | `NXKIT_METAL_HUD=1` | The Metal performance HUD over the game, through `developerHUDProperties` of the window's `CAMetalLayer` (`mode` `default`). A launch option. `MTL_HUD_ENABLED=1` of Metal does the same. |
 | `NXKIT_SAVED_CHOICES=0` | The host ignores the saved choices of the launch options in the preferences of the app (`launcher.<env>`). |
 | `NXKIT_FULLSCREEN=1` | The window starts in full screen, as `--fullscreen`. Any value that is not blank and not `0` turns it on. For a launcher that opens the app bundle, which starts the host with no arguments (`docs/nxkit-host.md`). |

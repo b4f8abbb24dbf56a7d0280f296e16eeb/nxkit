@@ -273,10 +273,29 @@ impl Settings {
 }
 
 impl Settings {
-    /// Puts the launch options of the environment over the title's: `NXKIT_OP_MODE` sets `op_mode`.
+    /// Puts the launch options of the environment over the title's: `NXKIT_OP_MODE` sets `op_mode` and
+    /// `NXKIT_FPS_TARGET` sets `fps_target` when the title offers that rate.
     pub fn with_env(&mut self, env: &crate::hostenv::HostEnv) {
         if let Some(handheld) = env.handheld {
             self.op_mode = if handheld { "handheld" } else { "docked" }.to_owned();
+        }
+        if let Some(fps) = env.fps_target {
+            self.choose_fps(fps);
+        }
+    }
+
+    /// Sets `fps_target` to `fps` when it is one of the rates of the launch option for this title
+    /// (`launch::game_fps_targets`). Another rate is refused and the title's stays.
+    fn choose_fps(&mut self, fps: u32) {
+        let offered = nxkit_abi::launch::game_fps_targets(self.fps_target, self.fps_max);
+        if offered.iter().any(|(v, _)| v.parse() == Ok(fps)) {
+            self.fps_target = fps;
+        } else {
+            eprintln!(
+                "nxkit-host: NXKIT_FPS_TARGET={fps} refused: this game offers {:?}, so its fps_target {} stays",
+                offered.iter().map(|r| r.0).collect::<Vec<_>>(),
+                self.fps_target
+            );
         }
     }
 }
@@ -362,6 +381,30 @@ mod tests {
         assert_eq!(s.op_mode, "handheld");
         s.with_env(&env("docked"));
         assert_eq!(s.op_mode, "docked");
+    }
+
+    #[test]
+    fn the_frame_rate_of_the_launcher_wins_where_the_title_offers_it() {
+        let env = |v: &str| {
+            crate::hostenv::HostEnv::from_env(&nxkit_abi::env::Env::from_pairs([(
+                "NXKIT_FPS_TARGET",
+                v,
+            )]))
+        };
+        let title = |fps_target, fps_max| Settings {
+            fps_target,
+            fps_max,
+            ..Settings::default()
+        };
+        let chosen = |mut s: Settings, v: &str| {
+            s.with_env(&env(v));
+            s.fps_target
+        };
+        assert_eq!(chosen(title(60, 60), "30"), 30);
+        assert_eq!(chosen(title(30, 120), "120"), 120);
+        assert_eq!(chosen(title(60, 60), "120"), 60, "above fps_max");
+        assert_eq!(chosen(title(60, 60), "45"), 60, "not a rate of the option");
+        assert_eq!(chosen(title(0, 120), "30"), 0, "the game's own limit stays");
     }
 
     #[test]
