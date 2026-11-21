@@ -206,6 +206,7 @@ version = "0.11.0"
 dependencies = [
  "msl-lex",
  "msl-parse",
+ "msl-sema",
 ]
 
 [[package]]
