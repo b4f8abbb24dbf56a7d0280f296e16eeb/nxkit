@@ -154,8 +154,21 @@ pub(super) extern "C" fn ensure_save(_uid: u64) -> u32 {
     OK
 }
 
-pub(super) extern "C" fn is_save_existing_of(app: u64, _uid: u64) -> u32 {
-    u32::from(crate::fs().is_some_and(|fs| fs.cfg.title_id == app))
+/// The uid at the guest address `addr`, the zero uid for a null pointer.
+fn uid_at(addr: u64) -> Option<[u64; 2]> {
+    if addr == 0 {
+        return Some([0, 0]);
+    }
+    Some([guest::read_u64(addr).ok()?, guest::read_u64(addr + 8).ok()?])
+}
+
+/// The user of the uid at `addr`, or `None` for a uid that is not a registered user.
+fn user_at(fs: &Fs, addr: u64) -> Option<usize> {
+    uid_at(addr).and_then(|uid| fs.user(uid))
+}
+
+pub(super) extern "C" fn is_save_existing_of(app: u64, uid: u64) -> u32 {
+    u32::from(crate::fs().is_some_and(|fs| fs.cfg.title_id == app && user_at(fs, uid).is_some()))
 }
 
 pub(super) extern "C" fn is_save_existing(_uid: u64) -> u32 {
@@ -169,8 +182,12 @@ pub(super) extern "C" fn mount_save_read_only(_name: u64, app: u64, _uid: u64) -
     TARGET_NOT_FOUND
 }
 
-pub(super) extern "C" fn mount_save(name: u64, _uid: u64) -> u32 {
-    run_text(name, |fs, n| fs.mount_save(n, &fs.save_dir()))
+/// `MountSaveData(name, uid)`: each registered user has a save of its own. Another uid has none.
+pub(super) extern "C" fn mount_save(name: u64, uid: u64) -> u32 {
+    run_text(name, |fs, n| match user_at(fs, uid) {
+        Some(slot) => fs.mount_save(n, &fs.user_save_dir(slot)),
+        None => TARGET_NOT_FOUND,
+    })
 }
 
 pub(super) extern "C" fn mount_device_save(name: u64) -> u32 {

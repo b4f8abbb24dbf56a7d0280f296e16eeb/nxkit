@@ -8,7 +8,7 @@ use crate::Config;
 use crate::commit::Txn;
 use crate::files::{Dir, File};
 use crate::names::{self, IndexCache};
-use crate::result::{FAIL, FsResult, OK, PATH_NOT_FOUND, TARGET_NOT_FOUND, from_io};
+use crate::result::{FAIL, FsResult, OK, PATH_EXISTS, PATH_NOT_FOUND, TARGET_NOT_FOUND, from_io};
 use crate::table::{Table, lock};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -79,9 +79,27 @@ impl Fs {
 
     /// Mounts `root` as `name` unless `name` is mounted. The result is success in both cases.
     fn mount_with(&self, name: &[u8], make: impl FnOnce() -> FsResult<Mount>) -> u32 {
+        self.mount_backed(name, None, make)
+    }
+
+    /// As `mount_with`. With `backing`, a mount of `name` that has another folder behind it gives "path exists", so
+    /// the save of another user is never reached under the name of the first one, as in `dm/host/hle_fs.c`.
+    fn mount_backed(
+        &self,
+        name: &[u8],
+        backing: Option<&Path>,
+        make: impl FnOnce() -> FsResult<Mount>,
+    ) -> u32 {
         let _gate = lock(&self.mount_gate);
-        if self.find(name).is_some() {
-            return OK;
+        if let Some(m) = self.find(name) {
+            let behind = m
+                .txn
+                .as_ref()
+                .map_or(m.root.as_path(), |t| t.commit.as_path());
+            return match backing {
+                Some(dir) if dir != behind => PATH_EXISTS,
+                _ => OK,
+            };
         }
         match make() {
             Ok(m) => {
@@ -172,7 +190,7 @@ impl Fs {
     /// Mounts the save folder `dir` as `name`, with the transaction of the layout in R13. When the file system cannot
     /// clone folders the save is mounted read-only, and the log says so.
     pub(crate) fn mount_save(&self, name: &[u8], dir: &Path) -> u32 {
-        self.mount_with(name, || {
+        self.mount_backed(name, Some(dir), || {
             let shared = self.snapshot().iter().find_map(|m| m.txn.as_ref().filter(|t| t.commit == dir).cloned());
             let txn = match shared {
                 Some(t) => t,
@@ -207,6 +225,31 @@ impl Fs {
             self.cfg.save.clone()
         } else {
             PathBuf::from(trimmed)
+        }
+    }
+
+    /// The user of the uid `uid`, or `None` for a uid that is not a registered user. The zero uid is the host's own
+    /// way to the save of user 1.
+    pub(crate) fn user(&self, uid: [u64; 2]) -> Option<usize> {
+        match self.cfg.user_of {
+            Some(f) if uid != [0, 0] => f(uid),
+            _ => Some(0),
+        }
+    }
+
+    /// The save folder of the user `slot`: the account save folder for user 1, `<save>_user<n>` for user `n`.
+    pub(crate) fn user_save_dir(&self, slot: usize) -> PathBuf {
+        match slot {
+            0 => self.save_dir(),
+            n => with_suffix(&self.save_dir(), &format!("_user{}", n + 1)),
+        }
+    }
+
+    /// The mount name of the account save of the user `slot` over IPC.
+    pub(crate) fn user_mount_name(slot: usize) -> Vec<u8> {
+        match slot {
+            0 => b"@save".to_vec(),
+            n => format!("@save_user{}", n + 1).into_bytes(),
         }
     }
 
@@ -288,6 +331,36 @@ mod tests {
         let fs = Fs::new(cfg);
         assert!(!fs.save_dir().to_string_lossy().ends_with('/'));
         assert!(fs.device_save_dir().to_string_lossy().ends_with("_device"));
+    }
+
+    #[test]
+    fn each_user_has_a_save_folder_of_its_own() {
+        fn two_users(uid: [u64; 2]) -> Option<usize> {
+            [[1, 1], [2, 1]].iter().position(|u| *u == uid)
+        }
+        let mut cfg = config("mount-users");
+        cfg.user_of = Some(two_users);
+        let fs = Fs::new(cfg);
+        assert_eq!(
+            (fs.user([1, 1]), fs.user([2, 1]), fs.user([3, 1])),
+            (Some(0), Some(1), None)
+        );
+        assert_eq!(fs.user([0, 0]), Some(0));
+        assert_eq!(fs.user_save_dir(0), fs.save_dir());
+        assert!(fs.user_save_dir(1).to_string_lossy().ends_with("_user2"));
+        assert_eq!(Fs::user_mount_name(2), b"@save_user3");
+        assert_eq!(Fs::new(config("mount-nousers")).user([9, 9]), Some(0));
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn a_name_of_one_save_does_not_reach_another() {
+        let fs = Fs::new(config("mount-other"));
+        assert_eq!(fs.mount_save(b"save", &fs.user_save_dir(0)), OK);
+        assert_eq!(fs.mount_save(b"save", &fs.user_save_dir(0)), OK);
+        assert_eq!(fs.mount_save(b"save", &fs.user_save_dir(1)), PATH_EXISTS);
+        assert_eq!(fs.mount_save(b"save2", &fs.user_save_dir(1)), OK);
+        assert!(fs.user_save_dir(1).is_dir());
     }
 
     #[test]

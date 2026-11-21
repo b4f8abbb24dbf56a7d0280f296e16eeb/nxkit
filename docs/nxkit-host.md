@@ -187,8 +187,20 @@ The save of a game is outside the app (R67). The committed save of user 1 is the
 | `<save>` | the committed save of user 1 |
 | `<save>.work`, `<save>.new` | the work folder of the running game and the next committed version (`nxkit-svc-fs`, `commit.rs`) |
 | `<save>_device` | the device save, for a game that mounts it next to an account save |
+| `<save>_user<n>` | the committed save of user `n`, 2 to 8, with its own `.work` and `.new` |
+| `<save>.users` | the user registry |
 
 The temporary storage is `~/Library/Application Support/nxkit/<title id>/temp`, and the cache storages are its siblings `temp_cache<index>`. It stays there when `NXKIT_SAVE` is set. Without a home folder both stay in the run folder, where an older build had them. The log says `nxkit-host: save <folder>` at every start.
+
+### Users
+
+A game sees up to eight local users (R68), as in `dm/host/hle_account.c` of the old engine. User 1 has the uid of the one user of older builds and the save `<save>`, so its save does not move. User `n` has the uid `{0x78626c0000000001 + n - 1, 0x53574e4154495645}` and the save `<save>_user<n>`, a save transaction of its own. A uid that is not a registered user has no save: `MountSaveData` answers "target not found". A mount name that holds the save of one user gives "path exists" for the save of another.
+
+The registry is the file `<save>.users`, in the format of the old engine: `nxnative-users-1 <mask>` and a newline, the mask in hex with one bit per user (bit 0 is user 1, which is always there). A missing file means user 1 alone. A launcher lists the profiles from this file. A file that cannot be read stays as it is: user 1 plays and no user is added.
+
+The launcher chooses the user with `NXKIT_USER=<n>`, 1 to 8. That user is the preselected user that the game opens at its start. A user that is not in the registry is added before the game runs: the new mask goes to a file beside the registry, which is synced and renamed over it. So a launcher creates a profile by starting the game with a new number. `NXKIT_NICK` names user 1. The other users are `Player <n>`. The host has no window for the user selector of the game: `ShowUserSelector` picks the launch user, or the first registered user that the game did not exclude, and `ShowUserCreator` adds nobody. `ListOpenUsers` lists the users with an open session, and `CloseUser` ends one.
+
+### An old save in the app
 
 An app of an older build kept the save in its run folder, `save/<title id>`. `nxb build` moves that folder into the new app, and it copies the save of an app of the old engine there too. At its start the host moves that save and its device save to the new place, once, with one line in the log (`saveplace.rs`). A folder on the same volume is renamed. On another volume it is copied with its attributes, and the old folder is removed after both copies are complete. An existing save is never replaced: when the new place holds a save, the old one stays in the app and the log says so. When a step fails, the old save stays where it was.
 

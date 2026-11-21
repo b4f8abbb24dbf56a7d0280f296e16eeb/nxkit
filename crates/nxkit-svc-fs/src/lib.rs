@@ -47,7 +47,13 @@ pub struct Config {
     /// True when the game imports `nn::fs::MountSaveData` and `nn::fs::MountDeviceSaveData` both. The device save
     /// then has its own folder `<save>_device`. Otherwise both functions mount the account save.
     pub separate_device_save: bool,
+    /// The user of a uid: 0 for user 1, `None` for a uid that is not a registered user (R68). User `n + 1` has the save
+    /// `<save>_user<n + 1>`. `None` here makes every uid user 1.
+    pub user_of: Option<UserOf>,
 }
+
+/// The lookup of the user of a uid, which the account service owns.
+pub type UserOf = fn([u64; 2]) -> Option<usize>;
 
 /// The lookup of a symbol of the guest's own SDK code, by its mangled name. It returns the entry address of the
 /// function the SDK has under that name, not the address of an export of this crate.

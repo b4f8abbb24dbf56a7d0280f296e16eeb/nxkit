@@ -89,6 +89,14 @@ pub const KEYMAP: &str = "NXKIT_KEYMAP";
 /// elsewhere sets it.
 pub const SAVE: &str = "NXKIT_SAVE";
 
+/// `1` to `8`: the user that the game starts with, as the preselected user. A user that is not in the registry yet is
+/// added at the start, with a save of its own. Unset: user 1. Not a row of [`OPTIONS`]: a launcher that offers profiles
+/// sets it. The old engine has no such variable, its players choose in the game's user selector.
+pub const USER: &str = "NXKIT_USER";
+
+/// The nickname of user 1, as `DM_NICK` of the old engine. Unset: `Player`. Not a row of [`OPTIONS`].
+pub const NICK: &str = "NXKIT_NICK";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {

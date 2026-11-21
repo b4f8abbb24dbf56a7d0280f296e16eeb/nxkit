@@ -17,6 +17,11 @@ const TYPE_ACCOUNT: u8 = 1;
 const TYPE_DEVICE: u8 = 3;
 const TYPE_CACHE: u8 = 5;
 
+/// A little-endian `u64` of 8 bytes.
+fn read_u64(b: &[u8]) -> u64 {
+    b.iter().rev().fold(0, |v, x| v << 8 | u64::from(*x))
+}
+
 /// The `fsp-srv` service.
 pub(crate) struct FspSrv {
     image: OnceLock<Option<Arc<Image>>>,
@@ -68,8 +73,16 @@ impl FspSrv {
             return answer(rsp, FAIL);
         };
         let (kind, index) = (attr[0x20], u16::from_le_bytes([attr[0x22], attr[0x23]]));
+        let uid = [read_u64(&attr[0x08..0x10]), read_u64(&attr[0x10..0x18])];
         let (name, r) = match kind {
-            TYPE_ACCOUNT => (b"@save".to_vec(), fs.mount_save(b"@save", &fs.save_dir())),
+            TYPE_ACCOUNT => match fs.user(uid) {
+                Some(slot) => {
+                    let name = Fs::user_mount_name(slot);
+                    let r = fs.mount_save(&name, &fs.user_save_dir(slot));
+                    (name, r)
+                }
+                None => return answer(rsp, TARGET_NOT_FOUND),
+            },
             TYPE_DEVICE if fs.cfg.separate_device_save => (
                 b"@device".to_vec(),
                 fs.mount_save(b"@device", &fs.device_save_dir()),

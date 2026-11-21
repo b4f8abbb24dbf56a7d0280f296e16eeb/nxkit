@@ -34,6 +34,7 @@ mod state;
 mod sys;
 mod time;
 mod tz;
+mod users;
 mod util;
 
 pub use sdk::quit;
@@ -52,8 +53,12 @@ pub struct Config {
     /// The language tag of the console, for example `en-US`. It sets the language list, the region and the desired
     /// language of the game.
     pub language: String,
-    /// The nickname of the one user.
+    /// The nickname of user 1. The other users are `Player <n>`.
     pub nickname: String,
+    /// The user registry, `<save>.users` next to the save of user 1 (R68). `None` keeps user 1 alone.
+    pub users_file: Option<PathBuf>,
+    /// The user that the game starts with, 0 for user 1. A new one is added to the registry at [`init`].
+    pub launch_user: usize,
     /// Whether the console is in handheld mode. A docked console is the default.
     pub handheld: bool,
     /// Whether the performance mode is the boost mode. The default follows the operation mode.
@@ -88,6 +93,8 @@ impl Default for Config {
         Config {
             language: "en-US".to_owned(),
             nickname: "Player".to_owned(),
+            users_file: None,
+            launch_user: 0,
             handheld: false,
             boost: false,
             fixed_time: None,
@@ -112,7 +119,14 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 /// uses the defaults.
 pub fn init(config: &Config) {
     let _ = CONFIG.set(config.clone());
+    users::init(config.users_file.as_deref(), config.launch_user);
     sdk::mark_start();
+}
+
+/// The user of a registered uid, 0 for user 1, or `None` for a uid that is not a registered user. The fs service
+/// names the save of a user by it.
+pub fn user_of(uid: [u64; 2]) -> Option<usize> {
+    users::users().user(uid)
 }
 
 /// The configuration that `init` set, or the defaults.

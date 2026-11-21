@@ -108,6 +108,11 @@ pub struct HostEnv {
     pub save: Option<PathBuf>,
     /// `HOME`: the home folder, which holds `Library/Application Support/nxkit`.
     pub home: Option<PathBuf>,
+    /// `NXKIT_USER` (1 to 8, set by the launcher, no launch option): the user the game starts with, as a slot from 0.
+    /// Another value is user 1.
+    pub user: usize,
+    /// `NXKIT_NICK` (not blank, set by the launcher, no launch option): the nickname of user 1.
+    pub nick: Option<String>,
 }
 
 impl Default for HostEnv {
@@ -208,6 +213,13 @@ impl HostEnv {
                 .var_os("HOME")
                 .filter(|h| !h.is_empty())
                 .map(PathBuf::from),
+            user: env
+                .var(launch::USER)
+                .ok()
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .filter(|n| (1..=8).contains(n))
+                .map_or(0, |n| n - 1),
+            nick: not_blank(env, launch::NICK),
         }
     }
 }
@@ -431,6 +443,13 @@ mod tests {
         let given = Some("A=B,B=A".to_owned());
         assert_eq!(read("A=B,B=A"), (given.clone(), given));
         assert_eq!(read(" "), (None, None));
+    }
+
+    #[test]
+    fn the_user_is_a_slot_from_zero() {
+        let user = |v: &str| HostEnv::from_env(&Env::from_pairs([("NXKIT_USER", v)])).user;
+        assert_eq!((user("1"), user("3"), user(" 8")), (0, 2, 7));
+        assert_eq!((user("0"), user("9"), user("x")), (0, 0, 0));
     }
 
     #[test]

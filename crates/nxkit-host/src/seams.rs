@@ -275,23 +275,15 @@ pub fn init_services(
     })
     .map_err(HostError::App)?;
 
-    if has(mask, Service::Fs) {
-        let places = save_places(game, env)?;
-        for dir in [&places.save, &places.temp] {
-            std::fs::create_dir_all(dir).map_err(|e| HostError::io(dir, &e))?;
-        }
-        nxkit_svc_fs::init(&nxkit_svc_fs::Config {
-            title_id: title_id(game)?,
-            romfs: game.path(&game.romfs),
-            save: places.save,
-            temp: places.temp,
-            aoc: aoc_root(game),
-            separate_device_save: separate_device_save(game)?,
-        });
-    }
-    if has(mask, Service::System) {
+    let places = save_places(game, env)?;
+    // The account service owns the users, so it starts first: the fs service asks it for the user of a uid.
+    let system = has(mask, Service::System);
+    if system {
         let fonts = game.root.join("font");
         nxkit_svc_system::init(&nxkit_svc_system::Config {
+            nickname: env.nick.clone().unwrap_or_else(|| "Player".to_owned()),
+            users_file: Some(saveplace::sibling(&places.save, ".users")),
+            launch_user: env.user,
             handheld,
             boost: s.perf_boost,
             launch_parameter: (!s.launch_param.is_empty())
@@ -310,6 +302,20 @@ pub fn init_services(
             ..nxkit_svc_system::Config::default()
         });
         nxkit_svc_system::set_seams(wire::system_seams());
+    }
+    if has(mask, Service::Fs) {
+        for dir in [&places.save, &places.temp] {
+            std::fs::create_dir_all(dir).map_err(|e| HostError::io(dir, &e))?;
+        }
+        nxkit_svc_fs::init(&nxkit_svc_fs::Config {
+            title_id: title_id(game)?,
+            romfs: game.path(&game.romfs),
+            save: places.save,
+            temp: places.temp,
+            aoc: aoc_root(game),
+            separate_device_save: separate_device_save(game)?,
+            user_of: system.then_some(nxkit_svc_system::user_of as nxkit_svc_fs::UserOf),
+        });
     }
     if has(mask, Service::Input) {
         let mut config = nxkit_svc_input::Config {

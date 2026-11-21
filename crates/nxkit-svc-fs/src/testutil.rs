@@ -30,6 +30,7 @@ pub(crate) fn config(tag: &str) -> Config {
         temp: base.join("temp"),
         aoc: Some(base.join("aoc")),
         separate_device_save: false,
+        user_of: None,
     }
 }
 

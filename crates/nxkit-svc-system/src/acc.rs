@@ -3,7 +3,8 @@
 //!
 //! IDs and layouts are from libnx `acc.c` and switchbrew `Account services`. The values follow the engine
 //! `dm/host/hle_account.c`:
-//! - One local user with the uid [`UID`]. The nickname is `Config::nickname`.
+//! - The registered local users of `users.rs`. User 1 has the uid of the one user before, and the nickname
+//!   `Config::nickname`. The others are `Player <n>`. The preselected user is the launch user.
 //! - The profile image is the plain 256x256 JPEG of the engine (`k_profile_jpeg`, 670 bytes).
 //! - Every online call fails with `RES_FAIL` (the network service account is out of scope).
 //! - Save data thumbnails are accepted and dropped.
@@ -25,12 +26,10 @@
 //! as `AsyncContext`.
 
 use crate::config;
+use crate::users::{self, users};
 use crate::util::{Event, RES_FAIL, fail, padded, write_out};
 use nxkit_abi::ipc::{Handled, Request, Response, Service};
 use std::sync::Arc;
-
-/// The uid of the one user, `{0x78626c0000000001, 0x53574e4154495645}` in the engine.
-pub(crate) const UID: [u64; 2] = [0x7862_6c00_0000_0001, 0x5357_4e41_5449_5645];
 
 /// The slots of a uid list in the guest.
 const LIST_SLOTS: usize = 8;
@@ -72,10 +71,11 @@ pub(crate) fn profile_jpeg() -> Vec<u8> {
     v
 }
 
-fn uid_bytes() -> [u8; 16] {
+fn uid_bytes(slot: usize) -> [u8; 16] {
+    let uid = users::uid(slot);
     let mut b = [0u8; 16];
-    b[..8].copy_from_slice(&UID[0].to_le_bytes());
-    b[8..].copy_from_slice(&UID[1].to_le_bytes());
+    b[..8].copy_from_slice(&uid[0].to_le_bytes());
+    b[8..].copy_from_slice(&uid[1].to_le_bytes());
     b
 }
 
@@ -84,18 +84,20 @@ fn uid_at(req: &Request<'_>, offset: usize) -> Option<[u64; 2]> {
     Some([req.u64_at(offset)?, req.u64_at(offset + 8)?])
 }
 
-/// The uid list of the guest: the user, then zeros up to the size of the buffer (at most 8 slots).
-fn uid_list() -> Vec<u8> {
+/// The uid list of the guest: the users, then zeros up to the size of the buffer (at most 8 slots).
+fn uid_list(slots: &[usize]) -> Vec<u8> {
     let mut v = vec![0u8; 16 * LIST_SLOTS];
-    v[..16].copy_from_slice(&uid_bytes());
+    for (i, &slot) in slots.iter().take(LIST_SLOTS).enumerate() {
+        v[16 * i..16 * i + 16].copy_from_slice(&uid_bytes(slot));
+    }
     v
 }
 
-/// `ProfileBase`: the uid, the time of the last edit and the nickname.
-fn profile_base() -> [u8; 0x38] {
+/// `ProfileBase` of a user: the uid, the time of the last edit and the nickname.
+fn profile_base(slot: usize) -> [u8; 0x38] {
     let mut b = [0u8; 0x38];
-    b[..16].copy_from_slice(&uid_bytes());
-    b[24..].copy_from_slice(&padded::<0x20>(&config().nickname));
+    b[..16].copy_from_slice(&uid_bytes(slot));
+    b[24..].copy_from_slice(&padded::<0x20>(&users::nickname(slot, &config().nickname)));
     b
 }
 
@@ -111,17 +113,23 @@ impl Service for Account {
 
     fn handle(&self, req: &Request<'_>, rsp: &mut Response) -> Handled {
         match req.command {
-            0 => rsp.push_u32(1),
-            1 => rsp.push_bytes(&[u8::from(uid_at(req, 0) == Some(UID))]),
-            2 | 3 | 141 => {
-                let _ = write_out(req, 0, &uid_list());
+            0 => rsp.push_u32(users().registered().len() as u32),
+            1 => rsp.push_bytes(&[u8::from(
+                uid_at(req, 0).and_then(|u| users().user(u)).is_some(),
+            )]),
+            2 | 141 => {
+                let _ = write_out(req, 0, &uid_list(&users().registered()));
             }
-            4 | 51 | 52 => rsp.push_bytes(&uid_bytes()),
+            3 => {
+                let _ = write_out(req, 0, &uid_list(&users().opened()));
+            }
+            4 => rsp.push_bytes(&uid_bytes(users().last())),
+            51 | 52 => rsp.push_bytes(&uid_bytes(users().launch())),
             5 => {
-                if uid_at(req, 0) != Some(UID) {
+                let Some(slot) = uid_at(req, 0).and_then(|u| users().user(u)) else {
                     return fail(rsp, RES_FAIL);
-                }
-                rsp.objects.push(Arc::new(Profile));
+                };
+                rsp.objects.push(Arc::new(Profile { slot }));
             }
             50 | 150 => rsp.push_bytes(&[0]),
             100 | 140 | 110 | 111 => {}
@@ -135,8 +143,10 @@ impl Service for Account {
     }
 }
 
-/// `nn::account::detail::IProfile`.
-struct Profile;
+/// `nn::account::detail::IProfile` of one user.
+struct Profile {
+    slot: usize,
+}
 
 impl Service for Profile {
     fn name(&self) -> &'static str {
@@ -147,9 +157,9 @@ impl Service for Profile {
         match req.command {
             0 => {
                 let _ = write_out(req, 0, &[0u8; 0x80]);
-                rsp.push_bytes(&profile_base());
+                rsp.push_bytes(&profile_base(self.slot));
             }
-            1 => rsp.push_bytes(&profile_base()),
+            1 => rsp.push_bytes(&profile_base(self.slot)),
             10 => rsp.push_u32(profile_jpeg().len() as u32),
             11 => {
                 let image = profile_jpeg();
@@ -224,14 +234,22 @@ mod tests {
 
     #[test]
     fn the_uid_has_two_words() {
-        let b = uid_bytes();
+        let b = uid_bytes(0);
         assert_eq!(&b[..8], &0x7862_6c00_0000_0001u64.to_le_bytes());
         assert_eq!(&b[8..], &0x5357_4e41_5449_5645u64.to_le_bytes());
     }
 
     #[test]
     fn the_profile_base_ends_with_the_nickname() {
-        let b = profile_base();
-        assert_eq!(&b[24..30], b"Player");
+        assert_eq!(&profile_base(0)[24..30], b"Player");
+        assert_eq!(&profile_base(1)[24..32], b"Player 2");
+    }
+
+    #[test]
+    fn the_uid_list_holds_the_users_in_order() {
+        let v = uid_list(&[0, 2]);
+        assert_eq!(&v[..16], &uid_bytes(0));
+        assert_eq!(&v[16..32], &uid_bytes(2));
+        assert!(v[32..].iter().all(|b| *b == 0));
     }
 }

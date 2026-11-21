@@ -26,9 +26,9 @@
 //!
 //! The storage that `PopLaunchParameter` returns: 0 `Open` gives the accessor with 0 `GetSize`, 10 `Write` and 11 `Read`.
 
-use crate::acc::UID;
 use crate::config;
 use crate::set::language_code;
+use crate::users::{self, users};
 use crate::util::{Event, RES_FAIL, fail, padded, result, write_out};
 use nxkit_abi::ipc::{Handled, Request, Response, Service};
 use std::sync::Arc;
@@ -133,13 +133,14 @@ impl Service for LibraryAppletCreator {
     }
 }
 
-/// The 0x88 bytes of the launch parameter of the preselected user.
+/// The 0x88 bytes of the launch parameter of the preselected user, the launch user.
 fn preselected_user() -> Vec<u8> {
+    let uid = users::uid(users().launch());
     let mut b = vec![0u8; 0x88];
     b[..4].copy_from_slice(&PRESELECTED_MAGIC.to_le_bytes());
     b[4..8].copy_from_slice(&1u32.to_le_bytes());
-    b[8..16].copy_from_slice(&UID[0].to_le_bytes());
-    b[16..24].copy_from_slice(&UID[1].to_le_bytes());
+    b[8..16].copy_from_slice(&uid[0].to_le_bytes());
+    b[16..24].copy_from_slice(&uid[1].to_le_bytes());
     b
 }
 
@@ -253,7 +254,7 @@ mod tests {
         let b = preselected_user();
         assert_eq!(b.len(), 0x88);
         assert_eq!(&b[..4], &0xc794_97cau32.to_le_bytes());
-        assert_eq!(&b[8..16], &UID[0].to_le_bytes());
+        assert_eq!(&b[8..16], &users::uid(0)[0].to_le_bytes());
     }
 
     #[test]
