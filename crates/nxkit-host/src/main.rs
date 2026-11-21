@@ -1,5 +1,6 @@
 //! `nxkit-host <run folder> [--fullscreen]` runs a game. `nxkit-host probe <run folder>` prints the R18 measurements.
-//! With no arguments, the host uses the run folder in its application bundle.
+//! With no arguments, the host uses the run folder in its application bundle. `--save-sync-report` and
+//! `--save-sync-send` are the cloud save entries for a launcher (`savesync.rs`).
 
 #[cfg(any(target_os = "macos", test))]
 fn bundled_run_folder(executable: &std::path::Path) -> Result<std::path::PathBuf, String> {
@@ -45,7 +46,11 @@ fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let usage = "usage: nxkit-host [--fullscreen] <run folder>\n       nxkit-host probe <run folder>\n       \
-         nxkit-host home-preview <folder>";
+         nxkit-host home-preview <folder>\n       nxkit-host --save-sync-report[=<ms>] [<run folder>]\n       \
+         nxkit-host --save-sync-send [<run folder>]";
+    if let Some(code) = save_sync(&args, usage) {
+        std::process::exit(code);
+    }
     let result = match args
         .iter()
         .map(String::as_str)
@@ -100,6 +105,46 @@ fn main() {
         Ok(()) => std::process::exit(0),
         Err(e) => nxkit_host::stop::fatal(&e.to_string()),
     }
+}
+
+/// The cloud save entries: `--save-sync-report[=<ms>]` prints the report line, `--save-sync-send` sends what the game
+/// left. Both use the run folder of the bundle unless one is given. `None` for other arguments.
+#[cfg(target_os = "macos")]
+fn save_sync(args: &[String], usage: &str) -> Option<i32> {
+    use std::path::PathBuf;
+    let first = args.first()?;
+    let report = first.strip_prefix("--save-sync-report");
+    if report.is_none() && first != "--save-sync-send" {
+        return None;
+    }
+    let root = match args.get(1..) {
+        Some([root]) => Ok(PathBuf::from(root)),
+        Some([]) => std::env::current_exe()
+            .map_err(|e| format!("Cannot locate nxkit-host: {e}"))
+            .and_then(|executable| bundled_run_folder(&executable)),
+        _ => Err(String::new()),
+    };
+    let root = match root {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("nxkit-host: {e}\n{usage}");
+            return Some(64);
+        }
+    };
+    let env = nxkit_host::hostenv::HostEnv::from_env(&nxkit_abi::env::Env::capture());
+    Some(match report {
+        Some("") => nxkit_host::savesync::report_cli(&root, &env, std::time::Duration::ZERO),
+        Some(ms) => match ms.strip_prefix('=').and_then(|m| m.parse::<u64>().ok()) {
+            Some(ms) => {
+                nxkit_host::savesync::report_cli(&root, &env, std::time::Duration::from_millis(ms))
+            }
+            None => {
+                eprintln!("{usage}");
+                64
+            }
+        },
+        None => nxkit_host::savesync::send_cli(&root, &env),
+    })
 }
 
 #[cfg(not(target_os = "macos"))]

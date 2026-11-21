@@ -1,8 +1,9 @@
-//! The write of the runtime pipeline cache when the process ends.
+//! The write of the runtime pipeline cache and the last send of the cloud saves when the process ends.
 //!
 //! The host ends with `std::process::exit` (the main thread, the watchdog of `stop.rs`, a guest `ExitProcess`), which
 //! runs the C library's `atexit` handlers but no destructor of the GPU backend. One handler writes what the run has
-//! compiled (`nxkit_gpu::flush_runtime_cache`), so the next start finds it.
+//! compiled (`nxkit_gpu::flush_runtime_cache`), so the next start finds it, and sends the committed save that the
+//! cloud does not have yet (`savesync::at_exit`).
 
 use std::sync::Once;
 
@@ -13,6 +14,7 @@ unsafe extern "C" {
 extern "C" fn at_exit() {
     // A panic must not unwind out of an `extern "C"` function.
     let _ = std::panic::catch_unwind(nxkit_gpu::flush_runtime_cache);
+    let _ = std::panic::catch_unwind(crate::savesync::at_exit);
 }
 
 /// Registers the handler, once.

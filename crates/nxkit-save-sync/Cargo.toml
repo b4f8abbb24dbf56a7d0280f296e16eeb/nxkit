@@ -1,0 +1,31 @@
+[package]
+name = "nxkit-save-sync"
+description = "Cloud saves of the nxkit host: the save of a game packed into one file in a cloud folder, byte-compatible with save_sync.c of the old engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "R2"
+in_v = false
+
+[dependencies]
+nxb-model = { workspace = true }
+
+# Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which calls the swap,
+# clone, attribute, local time and model functions of the system.
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"

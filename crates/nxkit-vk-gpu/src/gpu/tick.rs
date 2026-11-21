@@ -33,13 +33,17 @@ impl TickSink for VkGpu {
         };
         let mut blit = locked(&self.blit);
         if blit.is_none() {
-            *blit = Blit::new(&self.ctx, self.settings.timed_present.as_ref())
-                .inspect_err(|e| {
-                    if !self.blit_failed.swap(true, Ordering::Relaxed) {
-                        eprintln!("[vk] [RED] the present blit cannot be made: {e}");
-                    }
-                })
-                .ok();
+            *blit = Blit::new(
+                &self.ctx,
+                self.settings.timed_present.as_ref(),
+                self.settings.present_upscale,
+            )
+            .inspect_err(|e| {
+                if !self.blit_failed.swap(true, Ordering::Relaxed) {
+                    eprintln!("[vk] [RED] the present blit cannot be made: {e}");
+                }
+            })
+            .ok();
         }
         let Some(b) = blit.as_mut() else {
             return;

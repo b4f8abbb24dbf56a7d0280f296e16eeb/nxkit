@@ -8,10 +8,13 @@
 nxkit-host [--fullscreen] <run folder>
 nxkit-host probe <run folder>
 nxkit-host home-preview <folder>
+nxkit-host --save-sync-report[=<ms>] [<run folder>]
+nxkit-host --save-sync-send [<run folder>]
 ```
 
 The run folder is `Contents/Resources/nxkit/` of the app bundle. `probe` prints the measurements of R18 and starts no game. The app bundle starts `nxkit-host` with no arguments, so a launcher that opens the app asks for full screen with `NXKIT_FULLSCREEN=1` in the environment, the same as `--fullscreen`.
 The run folder is `Contents/Resources/nxkit/` of the app bundle. `probe` prints the measurements of R18 and starts no game. The app bundle starts `nxkit-host` with no arguments, so a launcher that opens the app asks for full screen with `NXKIT_FULLSCREEN=1` in the environment, the same as `--fullscreen`. `home-preview` draws the screens of the Home button (below) into PNG files in the folder, wide and compact, so the look can be checked without a game or a controller.
+`--save-sync-report` and `--save-sync-send` are the cloud save entries for a launcher (Saves, below). Without a run folder they use the one of the bundle.
 
 ## The run folder
 
@@ -103,6 +106,7 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 | `NXKIT_FPS_TARGET` | choice | `30`, `60`, `120` up to `fps_max` of the title module, and its own `fps_target`. A title with `fps_target` 0 or with one rate gets no row. | the `fps_target` of the title module |
 | `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
 | `NXKIT_LANGUAGE` | choice | empty (the Mac's language) and the languages of `SupportedLanguageFlag` in the game's `control.nacp`, all 16 without a NACP. A game with one language gets no row. | empty |
+| `NXKIT_PRESENT_UPSCALE` | choice | `off` (Standard), `metalfx` (MetalFX): how the present scales a picture that is smaller than the window (R70) | `off` |
 | `NXKIT_PAUSE_UNFOCUSED` | toggle | `1`, `0` | `0` |
 | `NXKIT_RUMBLE` | toggle | `1`, `0` | `1` |
 | `NXKIT_RUMBLE_GAIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 3, step 0.1 | `1.0` |
@@ -177,6 +181,53 @@ The default layout:
 | M | Minus |
 | 1 2 3 4 | D-pad up, right, down, left |
 | arrows | D-pad |
+
+## Saves
+
+The save of a game is outside the app (R67). The committed save of user 1 is the folder `~/Library/Application Support/nxkit/<title id>/save`. The title ID has 16 hex digits in capitals, as the folders of the old engine. A launcher that keeps the save elsewhere sets `NXKIT_SAVE=<folder>`. That folder is the committed save, as `DM_SAVE` of the old engine. The host passes it to the fs service as `Config.save`. The layout of the folders next to it is the one of `dm/host/hle_fs.c`:
+
+| folder | what it holds |
+|---|---|
+| `<save>` | the committed save of user 1 |
+| `<save>.work`, `<save>.new` | the work folder of the running game and the next committed version (`nxkit-svc-fs`, `commit.rs`) |
+| `<save>_device` | the device save, for a game that mounts it next to an account save |
+| `<save>_user<n>` | the committed save of user `n`, 2 to 8, with its own `.work` and `.new` |
+| `<save>.users` | the user registry |
+| `<save>.sync`, `<save>.pull`, `<save>.sync-tmp`, `<save>-backups` | the state of the cloud saves, the journal of a pull, its staging folder and the backups |
+
+The temporary storage is `~/Library/Application Support/nxkit/<title id>/temp`, and the cache storages are its siblings `temp_cache<index>`. It stays there when `NXKIT_SAVE` is set. Without a home folder both stay in the run folder, where an older build had them. The log says `nxkit-host: save <folder>` at every start.
+
+### Users
+
+A game sees up to eight local users (R68), as in `dm/host/hle_account.c` of the old engine. User 1 has the uid of the one user of older builds and the save `<save>`, so its save does not move. User `n` has the uid `{0x78626c0000000001 + n - 1, 0x53574e4154495645}` and the save `<save>_user<n>`, a save transaction of its own. A uid that is not a registered user has no save: `MountSaveData` answers "target not found". A mount name that holds the save of one user gives "path exists" for the save of another.
+
+The registry is the file `<save>.users`, in the format of the old engine: `nxnative-users-1 <mask>` and a newline, the mask in hex with one bit per user (bit 0 is user 1, which is always there). A missing file means user 1 alone. A launcher lists the profiles from this file. A file that cannot be read stays as it is: user 1 plays and no user is added.
+
+Cloud saves (below) hold the save of user 1 and the device save, as in the old engine.
+
+The launcher chooses the user with `NXKIT_USER=<n>`, 1 to 8. That user is the preselected user that the game opens at its start. A user that is not in the registry is added before the game runs: the new mask goes to a file beside the registry, which is synced and renamed over it. So a launcher creates a profile by starting the game with a new number. `NXKIT_NICK` names user 1. The other users are `Player <n>`. The host has no window for the user selector of the game: `ShowUserSelector` picks the launch user, or the first registered user that the game did not exclude, and `ShowUserCreator` adds nobody. `ListOpenUsers` lists the users with an open session, and `CloseUser` ends one.
+
+### Cloud saves
+
+The Mac app and the iPhone app of one game play on from the same save through a cloud folder (R69). The crate `nxkit-save-sync` is a port of `dm/host/save_sync.c` of the old engine and writes the same files, so an app of either engine on any device shares the save. It holds the save of user 1 and the device save. The saves of the other users stay on the Mac.
+
+| variable | value | meaning |
+|---|---|---|
+| `NXKIT_SAVE_SYNC` | a folder, `icloud`, or `0` | The cloud saves folder, as `DM_SAVE_SYNC`. The file is `<folder>/<title id>/save.dmsync`, or `<folder>/save.dmsync` when the folder is named after the title ID. `icloud` is `~/Library/Mobile Documents/com~apple~CloudDocs/nxnative Saves`, the folder of the old engine. Unset or `0`: off. |
+| `NXKIT_SAVE_SYNC_CHOICE` | `ask`, `cloud:<hash>`, `local:<hash>`, `local:none`, `offline` | The player's choice before the start, as `DM_SAVE_SYNC_CHOICE`. |
+
+The file packs both folders with their guest names and the dates of their files, and a hash over the paths, the guest names and the contents. `<save>.sync` holds the hash of the save last known to be the same here and in the cloud. At the first mount of the save of user 1 or of the device save, before the work folder is cloned, the host compares the three. Only the cloud's save changed: it comes in. Only this one changed: it goes out. Both changed: without `NXKIT_SAVE_SYNC_CHOICE` the newer one wins. With a choice for the cloud save that is there now, the chosen save wins. With `ask`, or a choice made on another cloud save, neither replaces the other, the game plays with this Mac's save and nothing is sent. `offline` does not wait for the cloud. A cloud file that does not come within 10 seconds is not used, and this Mac's save is not sent before the next start compared the two. Each save that is replaced, here or in the cloud, is kept first in `<save>-backups/<date> <side>`, and the newest 10 of each side stay. A pull writes the journal `<save>.pull` first. When a pull fails or the app is killed in it, the next start puts this Mac's save back before anything else. When that is not possible, the host stops with a message and does not mount a save that is half one and half the other.
+
+A commit wakes a sender thread. It waits until the game did not commit for 3 seconds, clones the committed save while no commit can swap it (`nxkit_svc_fs::clone_committed`), packs it and stores the file in the cloud folder as a whole. The game never waits for it. A send replaces only what the start compared against. At the exit the host sends what is left, for half a second, and waits for a send that is running.
+
+A launcher calls two entries of the app, with the environment it starts the game with:
+
+- Before the start, `Contents/MacOS/nxkit-host --save-sync-report[=<ms>]` prints one line in the format of `save_sync_report`: `sync=<0|1> cloud=<1|0|-1> local=<hash|-> saved=<secs> files=<n> size=<bytes> chash=<hash|-> csaved=<secs> cfiles=<n> csize=<bytes> cdevice=<model|-> sametitle=<0|1> conflict=<0|1> pull=<0|1>`. `cloud` is 1 when the cloud's file was read, 0 when there is none or it is damaged, and -1 when it did not come within `<ms>` (10 seconds without it). With `conflict=1` the launcher shows both saves and starts the game with `NXKIT_SAVE_SYNC_CHOICE=local:<chash>` (`local:none` when `chash` is `-`) or `cloud:<chash>`. Without a conflict it passes `ask`, and with `cloud=-1` it passes `offline`. The exit code is 1 when the save of this Mac cannot be read.
+- After the game ended, a crash included, `Contents/MacOS/nxkit-host --save-sync-send` sends what the game committed and did not send. The exit code is 0 when the save is in step with the cloud or sync is off.
+
+### An old save in the app
+
+An app of an older build kept the save in its run folder, `save/<title id>`. `nxb build` moves that folder into the new app, and it copies the save of an app of the old engine there too. At its start the host moves that save and its device save to the new place, once, with one line in the log (`saveplace.rs`). A folder on the same volume is renamed. On another volume it is copied with its attributes, and the old folder is removed after both copies are complete. An existing save is never replaced: when the new place holds a save, the old one stays in the app and the log says so. When a step fails, the old save stays where it was.
 
 ## Guest memory
 
@@ -374,7 +425,7 @@ ring (`Screen`) and the refresh plan (`Refresh`), and passes them to the service
 | `attach_main_thread` | Attaches the `guest-main` thread with the NPDM priority and core, which the kernel got at its start. |
 | `big_stack_exports` | Collects the names of the big-stack entries of the enabled services from `nxkit_rt::entries()`. |
 | `register_server` | Builds the IPC server from the `services()` of the enabled service crates and registers it with `set_server`. |
-| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
+| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders (Saves, above) and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
 | `focus_changed` | Tells the `system` and `input` services about the focus of the window. |
 | `mouse` | Passes the motion, buttons and wheel of the held mouse to the input service. |
 | `mouse_mode` | When the window holds the mouse: never when `input.json` turns it off, on a click while a controller is connected, else whenever the window is key. |

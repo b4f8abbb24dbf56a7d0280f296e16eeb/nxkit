@@ -1,13 +1,16 @@
 //! Shows a swapchain image on a drawable of the display: one full-screen triangle reads the image and writes the
 //! drawable. The layer is `Bgra8Unorm`, so an image in an sRGB format gets its encode here. A size that differs from
-//! the drawable is read by nearest texel. A Vulkan image has its first row at the top.
+//! the drawable is read by nearest texel. A Vulkan image has its first row at the top. With
+//! [`PresentUpscale::MetalFx`] (R70) an image smaller than the drawable is scaled by MetalFX first
+//! ([`PresentUpscaler`]), and the triangle reads the scaled image one to one.
 
 use std::sync::Arc;
 
 use nxkit_metal::{
     ArchiveConfig, ArgumentTable, ColorAttachment, Context, Drawable, Format, FrameRing,
-    LoadAction, PRESENT_FORMAT, PipelineCache, Primitive, RenderCommand, RenderPassDesc,
-    RenderPipeline, RenderPipelineDesc, Result, ShaderLibrary, StoreAction, Texture, TimedPresent,
+    LoadAction, PRESENT_FORMAT, PipelineCache, PresentUpscale, PresentUpscaler, Primitive,
+    RenderCommand, RenderPassDesc, RenderPipeline, RenderPipelineDesc, Result, ShaderLibrary,
+    StoreAction, Texture, TimedPresent,
 };
 
 const MSL: &str = r#"
@@ -38,15 +41,21 @@ fragment float4 vk_blit_srgb(V in [[stage_in]], texture2d<float, access::read> t
 
 /// The present blit, made at the first tick that shows a frame.
 pub(crate) struct Blit {
+    ctx: Context,
     ring: FrameRing,
     plain: RenderPipeline,
     srgb: RenderPipeline,
     table: ArgumentTable,
+    upscaler: PresentUpscaler,
 }
 
 impl Blit {
     /// Makes the pipelines and the frame ring of the blit.
-    pub(crate) fn new(ctx: &Context, timed: Option<&Arc<TimedPresent>>) -> Result<Self> {
+    pub(crate) fn new(
+        ctx: &Context,
+        timed: Option<&Arc<TimedPresent>>,
+        upscale: PresentUpscale,
+    ) -> Result<Self> {
         let cache = PipelineCache::new(ctx, &ArchiveConfig::default())?;
         let lib = ShaderLibrary::from_source(ctx, "nxkit_vk_blit", MSL)?;
         let pipe = |key, fs| {
@@ -61,9 +70,11 @@ impl Blit {
         }
         Ok(Self {
             ring,
+            ctx: ctx.clone(),
             plain: pipe(1, "vk_blit_plain")?,
             srgb: pipe(2, "vk_blit_srgb")?,
             table: ArgumentTable::new(ctx, 1, 1)?,
+            upscaler: PresentUpscaler::new(ctx, upscale),
         })
     }
 
@@ -76,6 +87,15 @@ impl Blit {
         at: Option<f64>,
     ) -> Result<()> {
         let mut frame = self.ring.begin()?;
+        let (d, target) = (src.desc(), drawable.texture().desc());
+        let scaled = self.upscaler.encode(
+            &self.ctx,
+            frame.commands(),
+            src,
+            [0, 0, d.width, d.height],
+            (target.width, target.height),
+        );
+        let src = scaled.as_ref().unwrap_or(src);
         let pipeline = match src.desc().format {
             Format::Rgba8UnormSrgb | Format::Bgra8UnormSrgb => self.srgb.clone(),
             _ => self.plain.clone(),

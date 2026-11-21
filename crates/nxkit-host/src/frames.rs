@@ -69,8 +69,10 @@ pub fn gpu_settings(
         open_shards: run.host.shard_lru,
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
         threads: run.host.encode_threads,
-        // Scaling is off until every attachment of a pass gets the same scale decision.
+        // `NXKIT_SCALE` is a diagnostic: a pass can mix scaled and native attachments (R70).
         scale: run.host.scale,
+        // `NXKIT_PRESENT_UPSCALE`, a launch option: MetalFX in the present (R70).
+        present_upscale: run.host.present_upscale,
         compile_bases: run.gpu_bases,
         specialize: run.gpu_specialize,
         // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
@@ -241,6 +243,7 @@ pub fn install_vulkan(
     root: &Path,
     settings: &Settings,
     refresh: &Arc<crate::refresh::Refresh>,
+    present_upscale: nxkit_metal::PresentUpscale,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
     let backend = nxkit_vk_gpu::VkGpu::new(
@@ -250,6 +253,7 @@ pub fn install_vulkan(
             surface_extent: surface_extent(settings),
             timed_present: Some(refresh.timed_present()),
             on_shown: Some(Arc::new(shown_to_step_vk)),
+            present_upscale,
         },
     )
     .map_err(|e| HostError::App(format!("the Vulkan backend: {e:?}")))?;

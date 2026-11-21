@@ -67,6 +67,9 @@ pub struct HostEnv {
     pub rumble_min: f32,
     /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
     pub metal_hud: bool,
+    /// `NXKIT_PRESENT_UPSCALE` (`metalfx` or `1` for MetalFX, off otherwise, a launch option): how the present scales a
+    /// picture that is smaller than the window.
+    pub present_upscale: nxkit_metal::PresentUpscale,
     /// `NXKIT_FPS_TARGET` (a whole number, a launch option): the frame rate over `fps_target` of the title module.
     /// `Settings::with_env` keeps it only when the title offers it.
     pub fps_target: Option<u32>,
@@ -109,6 +112,21 @@ pub struct HostEnv {
     /// `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in
     /// with its first picture and gives the launcher the progress of the start (`sys/present.rs`).
     pub overlay: bool,
+    /// `NXKIT_SAVE` (not blank, set by the launcher, no launch option): the save folder of user 1 in place of the one
+    /// under Application Support (`saveplace.rs`).
+    pub save: Option<PathBuf>,
+    /// `HOME`: the home folder, which holds `Library/Application Support/nxkit`.
+    pub home: Option<PathBuf>,
+    /// `NXKIT_USER` (1 to 8, set by the launcher, no launch option): the user the game starts with, as a slot from 0.
+    /// Another value is user 1.
+    pub user: usize,
+    /// `NXKIT_NICK` (not blank, set by the launcher, no launch option): the nickname of user 1.
+    pub nick: Option<String>,
+    /// `NXKIT_SAVE_SYNC` (not blank, set by the launcher, no launch option): the cloud saves folder, `icloud` or `0`,
+    /// as given. `nxkit-save-sync` reads it.
+    pub save_sync: Option<String>,
+    /// `NXKIT_SAVE_SYNC_CHOICE` (set by the launcher, no launch option): the player's choice, as given.
+    pub save_sync_choice: Option<String>,
 }
 
 impl Default for HostEnv {
@@ -172,6 +190,10 @@ impl HostEnv {
             rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
             rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
             metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
+            present_upscale: match env.var(launch::PRESENT_UPSCALE).as_deref().map(str::trim) {
+                Ok("metalfx" | "1") => nxkit_metal::PresentUpscale::MetalFx,
+                _ => nxkit_metal::PresentUpscale::Off,
+            },
             fps_target: env
                 .var(launch::FPS_TARGET)
                 .ok()
@@ -209,6 +231,20 @@ impl HostEnv {
                 .var("NXKIT_CURSOR_HIDDEN")
                 .is_ok_and(|v| v.trim() == "1"),
             overlay: env.var("NXKIT_OVERLAY").is_ok_and(|v| v.trim() == "1"),
+            save: not_blank(env, launch::SAVE).map(PathBuf::from),
+            home: env
+                .var_os("HOME")
+                .filter(|h| !h.is_empty())
+                .map(PathBuf::from),
+            user: env
+                .var(launch::USER)
+                .ok()
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .filter(|n| (1..=8).contains(n))
+                .map_or(0, |n| n - 1),
+            nick: not_blank(env, launch::NICK),
+            save_sync: not_blank(env, launch::SAVE_SYNC).map(|v| v.trim().to_owned()),
+            save_sync_choice: not_blank(env, launch::SAVE_SYNC_CHOICE).map(|v| v.trim().to_owned()),
         }
     }
 }
@@ -377,6 +413,20 @@ mod tests {
             (Some(true), Some(false), None)
         );
         assert_eq!(d.handheld, None);
+        let up = |v: &str| {
+            HostEnv::from_env(&Env::from_pairs([("NXKIT_PRESENT_UPSCALE", v)])).present_upscale
+        };
+        assert_eq!(d.present_upscale, nxkit_metal::PresentUpscale::Off);
+        assert_eq!(
+            (up("metalfx"), up(" 1"), up("off"), up("0"), up("fsr")),
+            (
+                nxkit_metal::PresentUpscale::MetalFx,
+                nxkit_metal::PresentUpscale::MetalFx,
+                nxkit_metal::PresentUpscale::Off,
+                nxkit_metal::PresentUpscale::Off,
+                nxkit_metal::PresentUpscale::Off
+            )
+        );
         assert_eq!(
             (d.launcher_pid, d.cursor_hide, d.cursor_hidden),
             (None, 3.0, false)
@@ -438,6 +488,13 @@ mod tests {
         let given = Some("A=B,B=A".to_owned());
         assert_eq!(read("A=B,B=A"), (given.clone(), given));
         assert_eq!(read(" "), (None, None));
+    }
+
+    #[test]
+    fn the_user_is_a_slot_from_zero() {
+        let user = |v: &str| HostEnv::from_env(&Env::from_pairs([("NXKIT_USER", v)])).user;
+        assert_eq!((user("1"), user("3"), user(" 8")), (0, 2, 7));
+        assert_eq!((user("0"), user("9"), user("x")), (0, 0, 0));
     }
 
     #[test]

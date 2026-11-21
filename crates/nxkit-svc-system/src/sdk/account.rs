@@ -1,43 +1,96 @@
 //! `nn::account` take-overs.
 //!
-//! The host has one fixed local user. The online accounts fail, and the completion event of an asynchronous context
-//! fires at once. The nickname comes from the configuration.
+//! The host has the local users of `users.rs` (R68). The preselected user is the launch user. Each open of a user is a
+//! session until it is closed. The user selector has no window, so it picks the launch user, or the first registered
+//! user that the game did not exclude. The online accounts fail, and the completion event of an asynchronous context
+//! fires at once. The nickname of user 1 comes from the configuration.
 
 use super::oe_state::AppletGuard;
 use super::{RES_FAIL, fail, fatal, get_u64, nothing, ok, put_bytes, put_u8, put_u32, put_u64};
-use crate::acc::{UID, profile_jpeg};
+use crate::acc::profile_jpeg;
 use crate::config;
 use crate::event;
+use crate::users::{self, USERS, users};
 
 /// `"USERHNDL"`, the tag in the third word of a `UserHandle`.
 const HANDLE_MAGIC: u64 = 0x5553_4552_484e_444c;
 
-fn put_uid(addr: u64) {
-    put_u64(addr, UID[0]);
-    put_u64(addr + 8, UID[1]);
+/// `ResultCancelledByUser` of the account applet (module 124, description 1).
+const RES_CANCELED: u32 = 124 | 1 << 9;
+
+fn put_uid(addr: u64, uid: [u64; 2]) {
+    put_u64(addr, uid[0]);
+    put_u64(addr + 8, uid[1]);
+}
+
+fn get_uid(addr: u64) -> [u64; 2] {
+    [get_u64(addr), get_u64(addr + 8)]
 }
 
 fn put_handle(addr: u64, uid: [u64; 2]) {
-    put_u64(addr, uid[0]);
-    put_u64(addr + 8, uid[1]);
+    put_uid(addr, uid);
     put_u64(addr + 16, HANDLE_MAGIC);
 }
 
-/// `ListOpenUsers`, `ListAllUsers` and `ListQualifiedUsers`: the one user.
-extern "C" fn list_users(count: u64, out: u64, max: u32) -> u32 {
-    put_u32(count, 0);
-    if max as i32 > 0 && out != 0 {
-        put_uid(out);
-        put_u32(count, 1);
+/// Writes the uids of `slots` to `out`, at most `max`, and their number to `count`.
+fn put_users(count: u64, out: u64, max: u32, slots: &[usize]) -> u32 {
+    let max = usize::try_from(max as i32).unwrap_or(0);
+    let n = if out == 0 { 0 } else { slots.len().min(max) };
+    for (i, &slot) in slots[..n].iter().enumerate() {
+        put_uid(out + 16 * i as u64, users::uid(slot));
     }
+    put_u32(count, n as u32);
     0
 }
 
-/// `ShowUserSelector`: the host picks the local user.
-extern "C" fn show_selector(out: u64, _settings: u64) -> u32 {
+/// `ListAllUsers` and `ListQualifiedUsers`: the registered users.
+extern "C" fn list_users(count: u64, out: u64, max: u32) -> u32 {
+    put_users(count, out, max, &users().registered())
+}
+
+/// `ListOpenUsers`: the users with an open session.
+extern "C" fn list_open_users(count: u64, out: u64, max: u32) -> u32 {
+    put_users(count, out, max, &users().opened())
+}
+
+/// The users that `UserSelectionSettings` excludes: eight uids at its start.
+fn excluded(settings: u64) -> u8 {
+    if settings == 0 {
+        return 0;
+    }
+    (0..USERS as u64)
+        .filter_map(|k| users::slot_of(get_uid(settings + 16 * k)))
+        .fold(0, |m, slot| m | 1 << slot)
+}
+
+/// The pick of the selector without a window: the launch user, else the first registered user, unless excluded.
+fn pick(registered: u8, excluded: u8, launch: usize) -> Option<usize> {
+    let eligible = registered & !excluded;
+    std::iter::once(launch)
+        .chain(0..USERS)
+        .find(|&i| eligible & (1 << i) != 0)
+}
+
+/// `ShowUserSelector`: a game that requires a Nintendo Account gets a failure, as no local user has one.
+extern "C" fn show_selector(out: u64, settings: u64) -> u32 {
     let _applet = AppletGuard::new("user selector");
-    put_uid(out);
-    0
+    let mut flags = [0u8; 5];
+    for (i, f) in flags.iter_mut().enumerate() {
+        if settings != 0 {
+            *f = super::get_u8(settings + 0x80 + i as u64);
+        }
+    }
+    if flags[1] != 0 && flags[4] == 0 {
+        return RES_FAIL;
+    }
+    let u = users();
+    match pick(u.mask(), excluded(settings), u.launch()) {
+        Some(slot) => {
+            put_uid(out, users::uid(slot));
+            0
+        }
+        None => RES_CANCELED,
+    }
 }
 
 /// `PopOpenUsers`: the system opened none, so the game falls back to the preselected user.
@@ -45,28 +98,41 @@ extern "C" fn pop_open_users(count: u64) {
     put_u32(count, 0);
 }
 
+/// Opens a session of the user `uid` into `handle`.
+fn open(handle: u64, uid: [u64; 2]) -> u32 {
+    if users().open(uid).is_none() {
+        return RES_FAIL;
+    }
+    put_handle(handle, uid);
+    0
+}
+
 /// `TryOpenPreselectedUser`: gives a `bool`.
 extern "C" fn try_open_preselected(handle: u64) -> u32 {
-    put_handle(handle, UID);
-    1
+    u32::from(open(handle, users::uid(users().launch())) == 0)
 }
 
 /// `OpenPreselectedUser`: SDK 6 returns a Result, SDK 7 and later ignore it.
 extern "C" fn open_preselected(handle: u64) -> u32 {
-    put_handle(handle, UID);
-    0
+    open(handle, users::uid(users().launch()))
 }
 
 /// `GetLastOpenedUser`.
 extern "C" fn last_opened(out: u64) -> u32 {
-    put_uid(out);
+    put_uid(out, users::uid(users().last()));
     0
 }
 
-/// `OpenUser`: the handle holds the uid itself.
+/// `OpenUser`: a registered user only. The handle holds the uid itself.
 extern "C" fn open_user(handle: u64, uid: u64) -> u32 {
-    put_handle(handle, [get_u64(uid), get_u64(uid + 8)]);
-    0
+    open(handle, get_uid(uid))
+}
+
+/// `CloseUser`: closes one session of the user of the handle.
+extern "C" fn close_user(handle: u64) {
+    if handle != 0 {
+        users().close(get_uid(handle));
+    }
 }
 
 /// `GetUserId`: a handle that the host did not issue stops the game.
@@ -77,37 +143,36 @@ extern "C" fn user_id(out: u64, handle: u64) -> u32 {
             "account::GetUserId: the handle was not issued by the host ({magic:#x})"
         ));
     }
-    put_u64(out, get_u64(handle));
-    put_u64(out + 8, get_u64(handle + 8));
+    put_uid(out, get_uid(handle));
     0
 }
 
 /// `GetNickname(Nickname*, const Uid&)`: 33 bytes of UTF-8.
-extern "C" fn nickname(out: u64, _uid: u64) -> u32 {
+extern "C" fn nickname(out: u64, uid: u64) -> u32 {
+    let Some(slot) = users().user(get_uid(uid)) else {
+        return RES_FAIL;
+    };
     let mut b = [0u8; 33];
-    let name = config().nickname.as_bytes();
+    let name = users::nickname(slot, &config().nickname);
     let n = name.len().min(32);
-    b[..n].copy_from_slice(&name[..n]);
+    b[..n].copy_from_slice(&name.as_bytes()[..n]);
     put_bytes(out, &b);
     0
 }
 
 /// `GetUserCount`.
 extern "C" fn user_count(out: u64) -> u32 {
-    put_u32(out, 1);
+    put_u32(out, users().registered().len() as u32);
     0
 }
 
-/// `GetUserExistence`: true for the local user.
+/// `GetUserExistence`: true for a registered user.
 extern "C" fn user_existence(out: u64, uid: u64) -> u32 {
-    put_u8(
-        out,
-        u8::from(get_u64(uid) == UID[0] && get_u64(uid + 8) == UID[1]),
-    );
+    put_u8(out, u8::from(users().user(get_uid(uid)).is_some()));
     0
 }
 
-/// `ShowUserCreator`: the host already has its user.
+/// `ShowUserCreator`: the host has no window to add a user in. The launcher adds one (`NXKIT_USER`).
 extern "C" fn show_creator() -> u32 {
     let _applet = AppletGuard::new("user creator");
     0
@@ -161,7 +226,7 @@ extern "C" fn move_assign(this: u64, _other: u64) -> u64 {
 
 table! {
     "_ZN2nn7account10InitializeEv" => nothing,
-    "_ZN2nn7account13ListOpenUsersEPiPNS0_3UidEi" => list_users,
+    "_ZN2nn7account13ListOpenUsersEPiPNS0_3UidEi" => list_open_users,
     "_ZN2nn7account12ListAllUsersEPiPNS0_3UidEi" => list_users,
     "_ZN2nn7account16ShowUserSelectorEPNS0_3UidERKNS0_21UserSelectionSettingsE" => show_selector,
     "_ZN2nn7account12PopOpenUsersEPiPNS0_10UserHandleEi" => pop_open_users,
@@ -197,7 +262,7 @@ table! {
     "_ZN2nn7account27StoreSaveDataThumbnailImageERKNS0_3UidEPKvm" => ok,
     "_ZN2nn7account28DeleteSaveDataThumbnailImageERKNS0_3UidE" => ok,
     "_ZN2nn7account32IsNetworkServiceAccountAvailableEPbRKNS0_10UserHandleE" => network_account_available,
-    "_ZN2nn7account9CloseUserERKNS0_10UserHandleE" => nothing,
+    "_ZN2nn7account9CloseUserERKNS0_10UserHandleE" => close_user,
     "_ZN2nn7account12AsyncContext6CancelEv" => ok,
     "_ZN2nn7account12AsyncContext7HasDoneEPb" => has_done,
     "_ZN2nn7account12AsyncContextD1Ev" => nothing,
@@ -211,5 +276,13 @@ mod tests {
     #[test]
     fn the_handle_tag_spells_userhndl() {
         assert_eq!(&HANDLE_MAGIC.to_be_bytes(), b"USERHNDL");
+    }
+
+    #[test]
+    fn the_selector_picks_the_launch_user_unless_excluded() {
+        assert_eq!(pick(0b101, 0, 2), Some(2));
+        assert_eq!(pick(0b101, 0b100, 2), Some(0));
+        assert_eq!(pick(0b001, 0b001, 0), None);
+        assert_eq!(RES_CANCELED, 0x27c);
     }
 }

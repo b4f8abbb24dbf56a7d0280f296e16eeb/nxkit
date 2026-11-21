@@ -497,7 +497,8 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {
-        // The game's save lives in the app's run folder: it moves into the new app before the old one goes, and a
+        // The host keeps the save under Application Support and moves a save that an older build left in the run
+        // folder there at its first start (R67). Such a save moves into the new app before the old one goes, and a
         // failed move stops the build with the old app and its save in place.
         let old_save = out.join("Contents/Resources/nxkit/save");
         if old_save.is_dir() {
@@ -514,7 +515,8 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 new_save.display()
             ));
         } else if nxnative::is_app(&out) && !run_dir.join("save").exists() {
-            // the old engine's save is outside its app: a copy goes into the new app, the old one stays
+            // the old engine's save is outside its app: a copy goes into the new app, the old one stays. The host
+            // moves the copy to its own save folder at the first start, unless a save is there already (R67).
             if let Some(home) = std::env::var_os("HOME")
                 && let Some(m) = nxnative::carry(Path::new(&home), &out, t.id, &run_dir)?
             {

@@ -133,6 +133,9 @@ impl Fs {
         let r = txn.commit();
         if r == OK {
             self.commits.fetch_add(1, Ordering::Relaxed);
+            if let Some(h) = &self.cfg.hooks {
+                h.committed(&txn.commit);
+            }
         }
         r
     }

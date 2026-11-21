@@ -42,7 +42,7 @@ flowchart TD
 flowchart TD
   R4["R4 composition root: nxkit-host (unsafe only in sys, gate and bigstack)"]
   R3["R3 adapters: nxkit-rt (the C ABI of the guest, unsafe code), nxkit-gpu (the NVN backend on Metal 4), nxkit-vk-gpu (the Vulkan backend on Metal 4)"]
-  R2["R2 subsystems: nxkit-hos (kernel), nxkit-ipc, nxkit-nvn, nxkit-vk, nxkit-svc-*, nxkit-ndve, nxkit-ndsr"]
+  R2["R2 subsystems: nxkit-hos (kernel), nxkit-ipc, nxkit-nvn, nxkit-vk, nxkit-svc-*, nxkit-save-sync, nxkit-ndve, nxkit-ndsr"]
   R1["R1 platform bindings: nxkit-metal, nxkit-coreml (unsafe code, macOS only)"]
   R0["R0 contract: nxkit-abi (guest ABI, shared formats), nxkit-native-plan"]
   R4 --> R3 --> R2 --> R1 --> R0
@@ -57,7 +57,7 @@ The rules:
 2. L1 does no I/O. Its crates are pure functions over bytes and text that return `Result`. L1 can call `nxb-sys` only for pure calculations.
 3. L2 runs tasks, keeps blobs, starts child processes and writes events. `nxb-tool` also wraps the Metal tools and the shader front ends.
 4. L2 does not make output bytes of the shader step.
-5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-coreml`, `nxkit-svc-video`, the module `sys` of `nxkit-hos`, of `nxkit-svc-fs`, of `nxkit-svc-offline`, of `nxkit-svc-system`, of `nxkit-svc-input` and of `nxkit-svc-audio`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid or deny `unsafe_code` in the lint settings of their `Cargo.toml`.
+5. Only `nxb-sys`, `nxkit-rt`, `nxkit-metal`, `nxkit-coreml`, `nxkit-svc-video`, the module `sys` of `nxkit-hos`, of `nxkit-svc-fs`, of `nxkit-svc-offline`, of `nxkit-svc-system`, of `nxkit-svc-input`, of `nxkit-svc-audio` and of `nxkit-save-sync`, the modules `sys`, `gate` and `bigstack` of `nxkit-host`, and the module `guest` of `nxkit-abi` contain `unsafe` code. The reason in `nxkit-host` is calls into libc, dyld, Mach and AppKit in `sys`, and the assembly of the svc gate, the thread entry and the big-stack entry in `gate` and `bigstack`. All other crates forbid or deny `unsafe_code` in the lint settings of their `Cargo.toml`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `nxb-xlatedev`, `nxb-profile`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
@@ -114,6 +114,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxkit-svc-audio | R2 | no | impl | the audio service of the nxkit host: SDK take-overs, `audout:u`, `audren:u`, `IAudioDevice`, and a mixer in the AUHAL callback (R41, R42). It is not compiled or tested yet |
 | nxkit-ue | R2 | no | impl | the Unreal Engine take-overs: the engine heap in place of FMallocBinned3 (a size-class and best-fit allocator over the arena the kernel keeps at the end of the alias region, behind a vtable of the guest's layout) and the cap of the engine region. No `unsafe` code; the vtable's slots are `extern "C"` functions over one process-wide heap |
 | nxkit-svc-pacing | R2 | no | impl | the `pacing` service: the `Pacer` for present intervals and the frame pace profile |
+| nxkit-save-sync | R2 | no | impl | the cloud saves (R69): the save of user 1 and the device save packed into one file in a cloud folder, byte-compatible with `dm/host/save_sync.c` of the old engine, the decision at the first mount with the journal of a pull, the sender after commits and the report for a launcher. It works on folders and knows nothing of the fs service. `unsafe` only in `sys` (`renamex_np`, `clonefile`, the guest-name attribute, `localtime_r`, `sysctlbyname`) |
 | nxkit-native-plan | R0 | no | impl | the native passes as data (`Plan`, `Step`, `GameResource`, `Binding`), shared by the networks that `nxkit-gpu` runs natively. No Metal code |
 | nxkit-ndve | R2 | no | impl | the movie network of `nn::ndve` run natively: file reader, weight packing, the plan and Metal kernels, and the `ane` module that writes the Core ML model for the Neural Engine. Refer to [plans/ndve-native.md](plans/ndve-native.md) |
 | nxkit-ndsr | R2 | no | impl | the agl upscaler NDSR run natively: network table and fingerprint of the packs `vr` and `vr_light`, pack reader, CPU reference, kernels and plan. Refer to [plans/ndsr-native.md](plans/ndsr-native.md) |

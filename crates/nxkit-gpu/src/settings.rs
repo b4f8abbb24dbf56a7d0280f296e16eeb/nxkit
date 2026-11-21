@@ -52,6 +52,8 @@ pub struct GpuSettings {
     pub timed_present: std::sync::Arc<nxkit_metal::TimedPresent>,
     /// What the screen showed of the presents. The backend writes it, the NVN present reads it (W26).
     pub screen: std::sync::Arc<nxkit_nvn::screen::Screen>,
+    /// How the present scales a picture that is smaller than the drawable (R70).
+    pub present_upscale: nxkit_metal::PresentUpscale,
 }
 
 /// [`GpuSettings::compile_bases`] from the settings of the host (`NXKIT_PIPELINE_BASES`).
@@ -86,6 +88,7 @@ impl Default for GpuSettings {
             batch_hooks: None,
             timed_present: std::sync::Arc::default(),
             screen: std::sync::Arc::default(),
+            present_upscale: nxkit_metal::PresentUpscale::Off,
         }
     }
 }

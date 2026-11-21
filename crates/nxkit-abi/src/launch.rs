@@ -67,6 +67,10 @@ pub const RUMBLE_MIN: &str = "NXKIT_RUMBLE_MIN";
 /// `1`: the Metal performance HUD is shown over the game.
 pub const METAL_HUD: &str = "NXKIT_METAL_HUD";
 
+/// `off` or `metalfx`: how the present scales a picture that is smaller than the window, as `DM_PRESENT_UPSCALE` of
+/// the old engine. `metalfx` scales it through MetalFX's spatial scaler, `off` by nearest pixel.
+pub const PRESENT_UPSCALE: &str = "NXKIT_PRESENT_UPSCALE";
+
 /// `30`, `60` or `120`: the frame rate in place of `fps_target` of the title module. Unset: the title's.
 pub const FPS_TARGET: &str = "NXKIT_FPS_TARGET";
 
@@ -89,6 +93,30 @@ pub const PAD_MAP: &str = "NXKIT_PAD_MAP";
 /// Functions on other keys, as `DM_KEYMAP` of the old engine: `<function>=<macOS key code>,…`. Not a row of
 /// [`OPTIONS`]: a launcher sets it from its own key map editor. `nxkit_svc_input::KeyMap` parses it.
 pub const KEYMAP: &str = "NXKIT_KEYMAP";
+
+/// The save folder of the game, as `DM_SAVE` of the old engine: the folder that is the committed save of user 1. Its
+/// siblings hold the work folder, the device save, the other users' saves and the sync state. Unset: the folder
+/// `~/Library/Application Support/nxkit/<title id>/save`. Not a row of [`OPTIONS`]: a launcher that keeps the save
+/// elsewhere sets it.
+pub const SAVE: &str = "NXKIT_SAVE";
+
+/// `1` to `8`: the user that the game starts with, as the preselected user. A user that is not in the registry yet is
+/// added at the start, with a save of its own. Unset: user 1. Not a row of [`OPTIONS`]: a launcher that offers profiles
+/// sets it. The old engine has no such variable, its players choose in the game's user selector.
+pub const USER: &str = "NXKIT_USER";
+
+/// The nickname of user 1, as `DM_NICK` of the old engine. Unset: `Player`. Not a row of [`OPTIONS`].
+pub const NICK: &str = "NXKIT_NICK";
+
+/// The cloud saves folder, as `DM_SAVE_SYNC` of the old engine: a folder, `icloud` for `iCloud Drive/nxnative Saves`,
+/// or `0` and unset for off. The save of user 1 and the device save go there as `<folder>/<title id>/save.dmsync`, the
+/// file of the old engine. Not a row of [`OPTIONS`]: the launcher sets the folder the player chose.
+pub const SAVE_SYNC: &str = "NXKIT_SAVE_SYNC";
+
+/// The player's choice before the start when both saves changed, as `DM_SAVE_SYNC_CHOICE` of the old engine: `ask`,
+/// `cloud:<hash>`, `local:<hash>`, `local:none` or `offline`. Not a row of [`OPTIONS`]: the launcher sets it from the
+/// report of `nxkit-host --save-sync-report`.
+pub const SAVE_SYNC_CHOICE: &str = "NXKIT_SAVE_SYNC_CHOICE";
 
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -202,6 +230,9 @@ pub fn game_languages(flags: u32) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// The options of [`PRESENT_UPSCALE`], with the labels of the old engine.
+pub const PRESENT_UPSCALES: &[(&str, &str)] = &[("off", "Standard"), ("metalfx", "MetalFX")];
+
 /// The options of [`FPS_TARGET`]. The build lists only the rates of the title ([`game_fps_targets`]).
 pub const FPS_TARGETS: &[(&str, &str)] = &[("30", "30 fps"), ("60", "60 fps"), ("120", "120 fps")];
 
@@ -270,6 +301,17 @@ pub const OPTIONS: &[Opt] = &[
         default: "",
         section: "Game",
         basic: true,
+        needs: None,
+    },
+    Opt {
+        env: PRESENT_UPSCALE,
+        kind: Kind::Choice(PRESENT_UPSCALES),
+        label: "Upscaling",
+        note: "MetalFX sharpens the picture where the window is larger than the game renders it. Uses more GPU time and \
+               can increase heat.",
+        default: "off",
+        section: "Game",
+        basic: false,
         needs: None,
     },
     Opt {
@@ -458,6 +500,8 @@ mod tests {
     fn a_value_is_checked_as_the_launcher_checks_it() {
         let op = option(OP_MODE).unwrap();
         assert!(op.accepts("handheld") && op.accepts("docked") && !op.accepts("console"));
+        let up = option(PRESENT_UPSCALE).unwrap();
+        assert!(up.accepts("off") && up.accepts("metalfx") && !up.accepts("1"));
         let full = option(FULLSCREEN).unwrap();
         assert!(full.accepts("1") && full.accepts("0") && !full.accepts("yes"));
         let r = Opt {
