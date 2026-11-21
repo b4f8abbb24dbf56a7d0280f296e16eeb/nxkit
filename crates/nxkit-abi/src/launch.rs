@@ -45,6 +45,21 @@ pub const HOME_MENU: &str = "NXKIT_HOME_MENU";
 /// `0`: holding the Home button does not open the quit prompt.
 pub const HOME_QUIT: &str = "NXKIT_HOME_QUIT";
 
+/// A console language tag such as `de` or `en-GB`. Empty or unset: the Mac's language.
+pub const LANGUAGE: &str = "NXKIT_LANGUAGE";
+
+/// `0`: the controllers do not rumble.
+pub const RUMBLE: &str = "NXKIT_RUMBLE";
+
+/// 0 to 3: the factor on the rumble of the game, 1 plays it as it is.
+pub const RUMBLE_GAIN: &str = "NXKIT_RUMBLE_GAIN";
+
+/// 0 to 0.9: the rumble below which a controller does not move.
+pub const RUMBLE_MIN: &str = "NXKIT_RUMBLE_MIN";
+
+/// `1`: the Metal performance HUD is shown over the game.
+pub const METAL_HUD: &str = "NXKIT_METAL_HUD";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
@@ -96,6 +111,8 @@ pub struct Opt {
     pub section: &'static str,
     /// Whether the launcher shows the row first (`"level": "basic"`).
     pub basic: bool,
+    /// `(env, value)`: a sub-setting, which the launcher shows only while the row of `env` has `value` (`"needs"`).
+    pub needs: Option<(&'static str, &'static str)>,
 }
 
 impl Opt {
@@ -119,6 +136,41 @@ impl Opt {
 /// The options of [`OP_MODE`].
 pub const OP_MODES: &[(&str, &str)] = &[("docked", "TV (docked)"), ("handheld", "Handheld")];
 
+/// The options of [`LANGUAGE`]: the empty value for the Mac's language, then the console languages in the order of
+/// the bits of `SupportedLanguageFlag` in the game's `control.nacp` (bit 0 American English to bit 15 Brazilian
+/// Portuguese), each with its name in its own language. The build lists only the languages of the game.
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("", "Same as the Mac"),
+    ("en-US", "English (US)"),
+    ("en-GB", "English (UK)"),
+    ("ja", "日本語"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+    ("es-419", "Español (Latinoamérica)"),
+    ("es", "Español (España)"),
+    ("it", "Italiano"),
+    ("nl", "Nederlands"),
+    ("fr-CA", "Français (Canada)"),
+    ("pt", "Português"),
+    ("ru", "Русский"),
+    ("ko", "한국어"),
+    ("zh-Hant", "繁體中文"),
+    ("zh-Hans", "简体中文"),
+    ("pt-BR", "Português (Brasil)"),
+];
+
+/// The options of [`LANGUAGE`] for a game whose `control.nacp` has the `SupportedLanguageFlag` `flags`: the Mac's
+/// language and the languages of the game. A game without flags gets every language.
+pub fn game_languages(flags: u32) -> Vec<(&'static str, &'static str)> {
+    let all = flags & 0xffff == 0;
+    LANGUAGES
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i == 0 || all || flags & (1 << (i - 1)) != 0)
+        .map(|(_, l)| *l)
+        .collect()
+}
+
 const ON_OFF: Kind = Kind::Toggle { on: "1", off: "0" };
 
 /// The launch options of the host, in the order of the launcher.
@@ -132,6 +184,7 @@ pub const OPTIONS: &[Opt] = &[
         default: "docked",
         section: "Game",
         basic: true,
+        needs: None,
     },
     Opt {
         env: FULLSCREEN,
@@ -141,6 +194,17 @@ pub const OPTIONS: &[Opt] = &[
         default: "0",
         section: "Game",
         basic: true,
+        needs: None,
+    },
+    Opt {
+        env: LANGUAGE,
+        kind: Kind::Choice(LANGUAGES),
+        label: "Game language",
+        note: "",
+        default: "",
+        section: "Game",
+        basic: true,
+        needs: None,
     },
     Opt {
         env: PAUSE_UNFOCUSED,
@@ -150,6 +214,45 @@ pub const OPTIONS: &[Opt] = &[
         default: "0",
         section: "Game",
         basic: false,
+        needs: None,
+    },
+    Opt {
+        env: RUMBLE,
+        kind: ON_OFF,
+        label: "Rumble",
+        note: "",
+        default: "1",
+        section: "Controls",
+        basic: true,
+        needs: None,
+    },
+    Opt {
+        env: RUMBLE_GAIN,
+        kind: Kind::Range {
+            min: 0.0,
+            max: 3.0,
+            step: 0.1,
+        },
+        label: "Rumble strength",
+        note: "",
+        default: "1.0",
+        section: "Controls",
+        basic: false,
+        needs: Some((RUMBLE, "1")),
+    },
+    Opt {
+        env: RUMBLE_MIN,
+        kind: Kind::Range {
+            min: 0.0,
+            max: 0.9,
+            step: 0.05,
+        },
+        label: "Lightest rumble",
+        note: "A rumble weaker than this does not move the controller.",
+        default: "0",
+        section: "Controls",
+        basic: false,
+        needs: Some((RUMBLE, "1")),
     },
     Opt {
         env: HOME_MENU,
@@ -159,6 +262,7 @@ pub const OPTIONS: &[Opt] = &[
         default: "1",
         section: "Controls",
         basic: false,
+        needs: None,
     },
     Opt {
         env: HOME_QUIT,
@@ -168,6 +272,17 @@ pub const OPTIONS: &[Opt] = &[
         default: "1",
         section: "Controls",
         basic: false,
+        needs: None,
+    },
+    Opt {
+        env: METAL_HUD,
+        kind: ON_OFF,
+        label: "Performance HUD",
+        note: "Metal's HUD over the game: frame rate, frame time and GPU time.",
+        default: "0",
+        section: "Performance",
+        basic: false,
+        needs: None,
     },
 ];
 
@@ -231,9 +346,40 @@ mod tests {
             assert!(!r.accepts(bad), "{bad:?}");
         }
         assert_eq!(saved_key(OP_MODE), "launcher.NXKIT_OP_MODE");
+        let lang = option(LANGUAGE).unwrap();
+        assert!(
+            lang.accepts("")
+                && lang.accepts("de")
+                && lang.accepts("zh-Hant")
+                && !lang.accepts("de-DE")
+        );
         assert_eq!(
             (op_mode_value("console"), op_mode_value("handheld")),
             ("docked", "handheld")
         );
+    }
+
+    #[test]
+    fn the_languages_follow_the_nacp_bits() {
+        let de_en = game_languages(1 << 0 | 1 << 4);
+        assert_eq!(
+            de_en.iter().map(|l| l.0).collect::<Vec<_>>(),
+            ["", "en-US", "de"]
+        );
+        assert_eq!(game_languages(0).len(), LANGUAGES.len());
+        assert_eq!(game_languages(1 << 15).last().map(|l| l.0), Some("pt-BR"));
+    }
+
+    #[test]
+    fn a_sub_setting_names_a_row_and_its_value() {
+        for o in OPTIONS {
+            if let Some((env, value)) = o.needs {
+                assert!(
+                    option(env).is_some_and(|p| p.accepts(value)),
+                    "{}: needs {env}={value}",
+                    o.env
+                );
+            }
+        }
     }
 }

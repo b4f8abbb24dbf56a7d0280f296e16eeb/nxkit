@@ -91,15 +91,20 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 
 ### launcher.json
 
-The launch options of the host, for a launcher such as NX2Apple. The host does not read the file. The table is `nxkit_abi::launch::OPTIONS`, the one definition that the build writes and the host reads. The file has the schema 1 of the old engine's `dm/launcher.json`: `{"schema": 1, "game": "<title id>", "settings": [...]}`. Each row has `env` (the variable), `kind` (`choice` with `options` as `[value, label]` pairs, `toggle` with `on` and `off`, or `range` with `min`, `max` and `step`), `label` and `note` in English, `default`, `section` (`Game`, `Controls` or `Performance`) and `level` `basic` for a row that the launcher shows first. A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<env>.note` and `launch.opt.<env>.<value>`.
+The launch options of the host, for a launcher such as NX2Apple. The host does not read the file. The table is `nxkit_abi::launch::OPTIONS`, the one definition that the build writes and the host reads. The file has the schema 1 of the old engine's `dm/launcher.json`: `{"schema": 1, "game": "<title id>", "settings": [...]}`. Each row has `env` (the variable), `kind` (`choice` with `options` as `[value, label]` pairs, `toggle` with `on` and `off`, or `range` with `min`, `max` and `step`), `label` and `note` in English, `default`, `section` (`Game`, `Controls` or `Performance`), `level` `basic` for a row that the launcher shows first, and `needs` (`<env>=<value>`) for a sub-setting that the launcher shows only while that row has that value. A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<env>.note` and `launch.opt.<env>.<value>`.
 
 | variable | kind | values | default |
 |---|---|---|---|
 | `NXKIT_OP_MODE` | choice | `docked`, `handheld` | the mode of the title module: `handheld` for a touch screen game, else `docked` |
 | `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
+| `NXKIT_LANGUAGE` | choice | empty (the Mac's language) and the languages of `SupportedLanguageFlag` in the game's `control.nacp`, all 16 without a NACP. A game with one language gets no row. | empty |
 | `NXKIT_PAUSE_UNFOCUSED` | toggle | `1`, `0` | `0` |
+| `NXKIT_RUMBLE` | toggle | `1`, `0` | `1` |
+| `NXKIT_RUMBLE_GAIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 3, step 0.1 | `1.0` |
+| `NXKIT_RUMBLE_MIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 0.9, step 0.05 | `0` |
 | `NXKIT_HOME_MENU` | toggle | `1`, `0` | `1` |
 | `NXKIT_HOME_QUIT` | toggle | `1`, `0` | `1` |
+| `NXKIT_METAL_HUD` | toggle | `1`, `0` | `0` |
 
 The launcher keeps the choice of the player for a row as the string `launcher.<env>` in the preferences domain of the app, the bundle identifier, only when it is not the default. At the start the host reads these strings before it reads any setting (`sys/prefs.rs`, `hostenv::with_saved`). A choice that the row does not accept is ignored, and the environment wins over a choice. The log gets one line for each choice. `NXKIT_SAVED_CHOICES=0` ignores the choices. A run outside an app bundle has none. So a start from Finder or the Dock gets the choices too. A new option is one row in the table and its read in `hostenv.rs`. The test `every_value_of_a_launch_option_is_read` fails when the host does not read a value of the table.
 

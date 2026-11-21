@@ -162,6 +162,7 @@ pub fn run(opts: &Options) -> Result<()> {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,
         fullscreen: opts.fullscreen || env.fullscreen,
+        metal_hud: env.metal_hud,
         home: crate::home::Setup::new(
             env.home_menu,
             env.home_quit,

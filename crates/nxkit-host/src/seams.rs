@@ -258,6 +258,9 @@ pub fn init_services(
         let mut config = nxkit_svc_input::Config {
             handheld,
             pad_layout: s.pad_layout.clone(),
+            rumble: env.rumble,
+            rumble_gain: env.rumble_gain,
+            rumble_min: env.rumble_min,
             ..nxkit_svc_input::Config::default()
         };
         let (file, warnings) = crate::input_file::load(&game.root, &game.title_id);

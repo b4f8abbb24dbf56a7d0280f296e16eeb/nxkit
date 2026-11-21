@@ -20,7 +20,8 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSActivityOptions, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo, NSString,
+    NSActivityOptions, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo,
+    NSString,
 };
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
@@ -98,6 +99,8 @@ pub struct WindowConfig {
     pub size: Option<(f64, f64)>,
     /// Enter full screen at start.
     pub fullscreen: bool,
+    /// The Metal performance HUD over the game (`developerHUDProperties` of the layer).
+    pub metal_hud: bool,
     /// The Home button of the controllers (`home.rs`), `None` when it is off.
     pub home: Option<crate::home::Setup>,
 }
@@ -442,6 +445,16 @@ pub fn run(
     let game_view = GameView::new(mtm, rect);
     let view: Retained<NSView> = Retained::into_super(game_view);
     let layer = CAMetalLayer::new();
+    if cfg.metal_hud {
+        let (key, mode) = (NSString::from_str("mode"), NSString::from_str("default"));
+        let hud = NSDictionary::from_slices(&[&*key], &[&*mode]);
+        // SAFETY: a dictionary of strings is a dictionary of objects, and the HUD takes string keys and values
+        // (`mode` = `default` shows it).
+        unsafe {
+            let hud: Retained<NSDictionary> = Retained::cast_unchecked(hud);
+            layer.setDeveloperHUDProperties(Some(&hud));
+        }
+    }
     let as_layer: &CALayer = &layer;
     view.setLayer(Some(as_layer));
     view.setWantsLayer(true);

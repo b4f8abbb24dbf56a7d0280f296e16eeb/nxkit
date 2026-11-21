@@ -53,6 +53,14 @@ pub struct HostEnv {
     /// `NXKIT_OP_MODE` (`docked` or `handheld`, a launch option): handheld (`true`) or docked over the mode of the
     /// title module. Another value is ignored.
     pub handheld: Option<bool>,
+    /// `NXKIT_RUMBLE` (on unless `0`, a launch option): the controllers rumble.
+    pub rumble: bool,
+    /// `NXKIT_RUMBLE_GAIN` (0 to 3, 1.0 otherwise, a launch option): the factor on the rumble of the game.
+    pub rumble_gain: f32,
+    /// `NXKIT_RUMBLE_MIN` (0 to 0.9, 0 otherwise, a launch option): the rumble below which a controller does not move.
+    pub rumble_min: f32,
+    /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
+    pub metal_hud: bool,
     /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
@@ -112,7 +120,7 @@ impl HostEnv {
             encode_threads: parsed(env, "NXKIT_ENCODE_THREADS").unwrap_or(0),
             scale: parsed(env, "NXKIT_SCALE").unwrap_or(1.0),
             language: env
-                .var("NXKIT_LANGUAGE")
+                .var(launch::LANGUAGE)
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
             mem_report: env
@@ -121,6 +129,10 @@ impl HostEnv {
                 .and_then(|v| v.trim().parse().ok()),
             crash_report_off: env.var("NXKIT_CRASH_REPORT").is_ok_and(|v| v == "0"),
             pause_unfocused: env.var(launch::PAUSE_UNFOCUSED).is_ok_and(|v| v == "1"),
+            rumble: env.var(launch::RUMBLE).map_or(true, |v| v.trim() != "0"),
+            rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
+            rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
+            metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
             handheld: env.var(launch::OP_MODE).ok().and_then(|v| match v.trim() {
                 "handheld" => Some(true),
                 "docked" => Some(false),
@@ -171,6 +183,11 @@ pub fn with_saved(env: &mut Env, saved: impl Fn(&str) -> Option<String>) -> Vec<
         }
     }
     log
+}
+
+/// The value of `key` as a number from `min` to `max`, None when it is unset, not a number or outside.
+fn in_range(env: &Env, key: &str, min: f32, max: f32) -> Option<f32> {
+    parsed::<f32>(env, key).filter(|v| (min..=max).contains(v))
 }
 
 /// The value of `key` parsed as `T`, None when it is unset or not a `T`.

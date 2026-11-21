@@ -56,6 +56,8 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_AV1_FRAMES=<n>` | The frames in flight of the rav1d worker, 1 to 8 (default 2). With one frame the worker waits for each picture; with more a picture comes out on a later send. |
 | `NXKIT_LANGUAGE=<tag>` | The console language of the game, for example `de` or `en-GB`. Without it the first preferred language of the Mac that the console has, else `en-US`. |
 | `NXKIT_OP_MODE=docked\|handheld` | The operation mode that the game sees, over the `op_mode` of the title module. A launch option (`docs/nxkit-host.md`, launcher.json). Another value is ignored. |
+| `NXKIT_RUMBLE=0`, `NXKIT_RUMBLE_GAIN=<0..3>`, `NXKIT_RUMBLE_MIN=<0..0.9>` | No rumble; the factor on the rumble of the game (1.0); the rumble below which a controller does not move (0). A value outside the range is ignored. Launch options. |
+| `NXKIT_METAL_HUD=1` | The Metal performance HUD over the game, through `developerHUDProperties` of the window's `CAMetalLayer` (`mode` `default`). A launch option. `MTL_HUD_ENABLED=1` of Metal does the same. |
 | `NXKIT_SAVED_CHOICES=0` | The host ignores the saved choices of the launch options in the preferences of the app (`launcher.<env>`). |
 | `NXKIT_FULLSCREEN=1` | The window starts in full screen, as `--fullscreen`. Any value that is not blank and not `0` turns it on. For a launcher that opens the app bundle, which starts the host with no arguments (`docs/nxkit-host.md`). |
 | `NXKIT_HOME_MENU=0` | No Home menu on a short press of a controller's Home button (`docs/nxkit-host.md`, The Home button). |
