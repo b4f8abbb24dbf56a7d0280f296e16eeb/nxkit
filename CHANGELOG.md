@@ -4,6 +4,18 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.11.1 - 2026-11-21
+
+### Added
+
+- `mslcheck --sema` checks Metal source with nxkit's own parser and semantic analyzer, without emitting AIR or
+  compiling. It finds what the syntax check misses (a 2D-array `gradient2d` sample parses, the analyzer refuses it).
+  The default, parser-only output and its JSON stay as they were (#37).
+- The shader step translates NVN tessellation evaluation shaders for triangle patches with fractional-odd spacing and
+  counterclockwise winding, read from the control record of the shader, and refuses the other modes and conflicting
+  stage data. Before, every tessellation evaluation shader was refused and a build could stop on it. The runtime does
+  not draw patches yet (#38).
+
 ### Fixed
 
 - `nxkit-gpu` fills the binding kinds `tex_ubo` and `samp_ubo`: a bindless texture whose handle the shader reads from a
@@ -12,6 +24,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   foreground were missing and the scene showed only the fog colour. The host reads the handle word of each draw and
   dispatch before the frame resolves its handles and binds it as a texture slot of its own (`ubotex.rs`). A handle word
   that cannot be read is counted as `tex.ubo-handle-unread`.
+- The vsync test `the_wait_ends_on_the_nth_tick` drives the display ticks itself. On a busy runner it timed out and
+  failed (#39).
 
 ## 0.11.0 - 2026-11-20
 
