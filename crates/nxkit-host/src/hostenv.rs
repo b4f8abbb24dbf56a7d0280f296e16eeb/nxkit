@@ -23,6 +23,9 @@ pub struct HostEnv {
     /// `NXKIT_UE_HEAP` as given: the arena of the Unreal heap at the end of the alias region, in place of 40 % of it
     /// (a size as `parse_size` reads it; only for a main that names Unreal's FMallocBinned3).
     pub ue_heap: Option<String>,
+    /// `NXKIT_STALL_DUMP` (seconds above 0): with no present on screen for that long, the report of every guest
+    /// thread is printed, once per stall.
+    pub stall_dump: Option<f64>,
     /// `NXKIT_GUEST_KEEP` (on unless `0`): the kernel pins the pages under the GPU buffer.
     pub guest_keep: bool,
     /// `NXKIT_GUEST_WIRE` (off unless set and not `0`): the guest range is wired with `mlock`.
@@ -121,6 +124,10 @@ impl HostEnv {
             mem_reserve: env.var("NXKIT_MEM_RESERVE").ok(),
             mem_alias: env.var("NXKIT_MEM_ALIAS").ok(),
             ue_heap: env.var("NXKIT_UE_HEAP").ok(),
+            stall_dump: env
+                .var("NXKIT_STALL_DUMP")
+                .ok()
+                .and_then(|v| v.trim().parse::<f64>().ok()),
             guest_keep: env.var("NXKIT_GUEST_KEEP").map_or(true, |v| v != "0"),
             guest_wire: env.var("NXKIT_GUEST_WIRE").is_ok_and(|v| v != "0"),
             pipeline_cache_dir: env
@@ -386,7 +393,7 @@ mod tests {
     }
 
     /// The host reads every launch option, and every value of an option changes what it reads: the table and the
-    /// reads cannot drift apart.
+    /// reads cannot drift apart. The audio options are read by the settings of `nxkit-svc-audio`.
     #[test]
     fn every_value_of_a_launch_option_is_read() {
         for o in launch::OPTIONS {
@@ -395,7 +402,13 @@ mod tests {
                 launch::Kind::Toggle { on, off } => vec![on.into(), off.into()],
                 launch::Kind::Range { min, max, .. } => vec![min.to_string(), max.to_string()],
             };
-            let read = |v: &str| HostEnv::from_env(&Env::from_pairs([(o.env, v)]));
+            let read = |v: &str| {
+                let env = Env::from_pairs([(o.env, v)]);
+                (
+                    HostEnv::from_env(&env),
+                    nxkit_svc_audio::settings::AudioSettings::from_env(&env),
+                )
+            };
             for (i, a) in values.iter().enumerate() {
                 for b in &values[i + 1..] {
                     assert_ne!(read(a), read(b), "{}: {a} and {b} read the same", o.env);
@@ -405,7 +418,7 @@ mod tests {
             if o.env != launch::OP_MODE && o.env != launch::FPS_TARGET {
                 assert_eq!(
                     read(o.default),
-                    HostEnv::default(),
+                    Default::default(),
                     "{}: the default is not the unset value",
                     o.env
                 );

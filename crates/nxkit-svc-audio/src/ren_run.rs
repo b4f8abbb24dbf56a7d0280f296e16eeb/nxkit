@@ -9,6 +9,7 @@ use crate::host::{self, sym, sym_opt};
 use crate::ren_cmd::{FRAME_MAX, capture};
 use crate::ren_scan::{LOCK_MUTEX, SDK_LOCK, SDK_UNLOCK, UNLOCK_MUTEX, impl_sys_off, update_lock};
 use crate::ren_state::{AR_MAX, CQ, Ren, Sym, T_AR, lk, of_sys, slot};
+use crate::settings::width;
 use crate::sys::call::{call, call_pair};
 use crate::sys::mem;
 use crate::sys::sem::Sem;
@@ -178,12 +179,12 @@ fn render_once(a: &Ren, sys: u64, want: bool, out: &mut Vec<i16>) -> u32 {
             st.layout.set_sink_id(r.sink_id);
             st.sink_set = true;
         }
-        out.resize(FRAME_MAX * 2, 0);
+        out.resize(FRAME_MAX * width(), 0);
         let nout = mem::with_host(cl, n, |s| {
             let mut cap = lk(&a.cap);
             capture(&mut st.layout, &mut cap, a.idx, s, out)
         });
-        out.truncate(nout * 2);
+        out.truncate(nout * width());
     }
     let d = t0.elapsed();
     st.sum += d;
@@ -235,11 +236,11 @@ pub(crate) extern "C" fn h_ars_exec(sys: u64) -> u32 {
     ar_exec(sys)
 }
 
-/// Copies `f` into `blk`, or silence when `f` is empty. Returns the number of stereo frames.
-fn fill(blk: &mut [i16], f: &[i16]) -> usize {
-    let want = if f.is_empty() { 240 } else { f.len() / 2 };
-    let n = want.min(blk.len() / 2);
-    for (i, d) in blk.iter_mut().take(n * 2).enumerate() {
+/// Copies `f` into `blk`, or silence when `f` is empty. Returns the number of frames of `w` channels.
+fn fill(blk: &mut [i16], f: &[i16], w: usize) -> usize {
+    let want = if f.is_empty() { 240 } else { f.len() / w };
+    let n = want.min(blk.len() / w);
+    for (i, d) in blk.iter_mut().take(n * w).enumerate() {
         *d = f.get(i).copied().unwrap_or(0);
     }
     n
@@ -251,7 +252,8 @@ extern "C" fn render_main(idx: u64) {
     T_AR.with(|t| *t.borrow_mut() = Some(a.clone()));
     let wake = WAKES[a.idx].get_or_init(Sem::new);
     let m = mixer();
-    let Some(out) = m.open(2, Notify::Wake(wake)) else {
+    let w = width();
+    let Some(out) = m.open(w as u32, Notify::Wake(wake)) else {
         eprintln!(
             "nxkit-audio: warning: audren: no free output for renderer {}: it makes no sound",
             a.idx
@@ -259,7 +261,7 @@ extern "C" fn render_main(idx: u64) {
         return;
     };
     let mut blocks: Vec<Box<[i16]>> = (0..4)
-        .map(|_| vec![0i16; FRAME_MAX * 2].into_boxed_slice())
+        .map(|_| vec![0i16; FRAME_MAX * w].into_boxed_slice())
         .collect();
     let mut free: Vec<usize> = (0..blocks.len()).collect();
     m.start(out);
@@ -287,19 +289,19 @@ extern "C" fn render_main(idx: u64) {
         let from_queue_flag = from_queue.is_some();
         let blk = &mut blocks[bi];
         let n = match from_queue {
-            Some(f) => fill(blk, &f),
+            Some(f) => fill(blk, &f, w),
             None => {
                 lk(&a.frame).clear();
                 call(exec, args(&[a.h0, a.h1]));
                 let f = lk(&a.frame);
-                fill(blk, &f)
+                fill(blk, &f, w)
             }
         };
-        clicks.check(&blk[..n * 2], from_queue_flag);
+        clicks.check(&blk[..n * w], w, from_queue_flag);
         let b = Buf {
             token: bi as u64,
             addr: blk.as_ptr() as u64,
-            size: (n * 4) as u64,
+            size: (n * 2 * w) as u64,
             host: true,
         };
         if !m.append(out, b) {
@@ -352,7 +354,7 @@ fn catch_up(a: &Ren, sys: u64) {
     } else {
         // A catch-up frame happens only when the game updated twice without a render in between, so this allocation is
         // off the steady path.
-        let mut frame = Vec::with_capacity(FRAME_MAX * 2);
+        let mut frame = Vec::with_capacity(FRAME_MAX * width());
         render_once(a, sys, true, &mut frame);
         lk(&a.cq).push_back(frame);
     }
@@ -403,16 +405,15 @@ struct Clicks {
 }
 
 impl Clicks {
-    fn check(&mut self, blk: &[i16], catch_up: bool) {
-        if !crate::settings::settings().clicks || blk.len() < 4 {
+    /// Checks the front left and front right of `blk`, which has `w` channels per frame.
+    fn check(&mut self, blk: &[i16], w: usize, catch_up: bool) {
+        if !crate::settings::settings().clicks || blk.len() < 2 * w {
             return;
         }
         let now = Instant::now();
         let inner = blk
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .zip(blk.as_chunks::<2>().0.iter().skip(1))
+            .chunks_exact(w)
+            .zip(blk.chunks_exact(w).skip(1))
             .map(|(a, b)| {
                 (i32::from(b[0]) - i32::from(a[0]))
                     .abs()
@@ -437,7 +438,8 @@ impl Clicks {
                 );
             }
         }
-        self.last = Some([blk[blk.len() - 2], blk[blk.len() - 1]]);
+        let end = blk.len() - w;
+        self.last = Some([blk[end], blk[end + 1]]);
         self.at = Some(now);
     }
 }

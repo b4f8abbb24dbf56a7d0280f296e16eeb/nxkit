@@ -8,4 +8,6 @@ pub(crate) mod call;
 pub(crate) mod mem;
 pub(crate) mod ring;
 pub(crate) mod sem;
+#[cfg(target_vendor = "apple")]
+pub(crate) mod spatial;
 pub(crate) mod vdsp;

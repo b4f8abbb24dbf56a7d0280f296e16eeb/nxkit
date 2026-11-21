@@ -56,6 +56,11 @@ pub(crate) fn info_plist(name: &str, bundle_id: &str, version: &str) -> String {
         ("CFBundleShortVersionString", version),
         ("LSMinimumSystemVersion", "14.0"),
         ("LSApplicationCategoryType", "public.app-category.games"),
+        // Head tracking of spatial audio (`NXKIT_HEAD_TRACKING`) reads the motion sensors of AirPods.
+        (
+            "NSMotionUsageDescription",
+            "Spatial audio follows the movement of your head.",
+        ),
     ];
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n",

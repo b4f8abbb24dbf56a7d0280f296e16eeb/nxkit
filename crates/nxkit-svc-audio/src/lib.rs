@@ -10,6 +10,7 @@
 //!
 //! `unsafe` is in the module `sys` only.
 
+mod chans;
 mod engine;
 mod host;
 mod ipc_out;

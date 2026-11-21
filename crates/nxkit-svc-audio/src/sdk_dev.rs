@@ -1,5 +1,5 @@
 //! The SDK take-overs of the audio device functions of `hle_audren.c`: names, channel count, volume and notifications.
-//! The host has one built-in speaker with two channels.
+//! The host has one built-in speaker with two channels, or six (5.1) with spatial audio.
 
 use crate::host;
 use crate::util::ex;
@@ -32,7 +32,7 @@ extern "C" fn active_name(name: u64) {
 }
 
 extern "C" fn channels() -> i32 {
-    2
+    crate::settings::width() as i32
 }
 
 extern "C" fn set_volume(_name: u64, v: f32) {
