@@ -32,13 +32,17 @@ pub(crate) fn needs_default_vertex(d: &DrawDetail, inputs: &[(u32, VertexFormat)
     })
 }
 
-/// `NVNdrawPrimitive` to the Metal primitive and its topology class.
+/// `NVN_DRAW_PRIMITIVE_QUADS`.
+pub(crate) const QUADS: u32 = 7;
+
+/// `NVNdrawPrimitive` to the Metal primitive and its topology class. Quads draw as triangles, and
+/// `crate::geometry::geometry` writes the indices of two triangles for each quad.
 pub(crate) fn primitive(nvn: u32) -> Option<(Primitive, TopologyClass)> {
     Some(match nvn {
         0 => (Primitive::Point, TopologyClass::Point),
         1 => (Primitive::Line, TopologyClass::Line),
         3 => (Primitive::LineStrip, TopologyClass::Line),
-        4 => (Primitive::Triangle, TopologyClass::Triangle),
+        4 | QUADS => (Primitive::Triangle, TopologyClass::Triangle),
         5 => (Primitive::TriangleStrip, TopologyClass::Triangle),
         _ => return None,
     })
@@ -443,7 +447,7 @@ mod tests {
     fn primitives() {
         assert_eq!(primitive(4).map(|p| p.1), Some(TopologyClass::Triangle));
         assert!(primitive(6).is_none());
-        assert!(primitive(7).is_none());
+        assert_eq!(primitive(QUADS).map(|p| p.0), Some(Primitive::Triangle));
     }
 
     #[test]

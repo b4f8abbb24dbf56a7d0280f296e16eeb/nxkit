@@ -122,3 +122,12 @@ fn indirect_arguments_need_a_pool_and_four_byte_alignment() {
         Some(Skip::Buffer)
     );
 }
+
+#[test]
+fn quads_become_two_triangles_each_and_a_short_last_quad_is_left_out() {
+    assert_eq!(
+        quad_list(10, 9),
+        vec![10, 11, 12, 10, 12, 13, 14, 15, 16, 14, 16, 17]
+    );
+    assert_eq!(quad_triangles(&[7, 3, 9, 1, 5]), vec![7, 3, 9, 7, 9, 1]);
+}

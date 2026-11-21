@@ -120,6 +120,9 @@ pub(crate) fn geometry(
     primitive: Primitive,
     sink: &mut dyn Sink,
 ) -> Result<(Geom, u32), Skip> {
+    if d.topology == translate::QUADS {
+        return quads(sh, d, sink);
+    }
     Ok(match d.args {
         DrawArgs::Arrays {
             first,
@@ -243,4 +246,97 @@ fn widen_u8_indices(
         .flat_map(|&b| u16::from(b).to_le_bytes())
         .collect();
     sink.put(&wide)
+}
+
+/// A quad draw as a list of triangles. Metal has no quads, so the indices of two triangles for each quad, (0, 1, 2)
+/// and (0, 2, 3), go into the sink as 32-bit indices. A direct draw only: the vertex count of an indirect draw is on
+/// the GPU (Patrick's Parabox, Unity, draws its blits and its interface as quads).
+fn quads(sh: &Shared<'_>, d: &DrawDetail, sink: &mut dyn Sink) -> Result<(Geom, u32), Skip> {
+    let (indices, instances, base_vertex, base_instance) = match d.args {
+        DrawArgs::Arrays {
+            first,
+            count,
+            instances,
+            base_instance,
+        } => (quad_list(first, count), instances, 0, base_instance),
+        DrawArgs::Indexed {
+            index_type,
+            address,
+            count,
+            instances,
+            base_vertex,
+            base_instance,
+        } => {
+            let width = match index_type {
+                0 => 1,
+                1 => 2,
+                2 => 4,
+                _ => return Err(Skip::Index),
+            };
+            let bytes = u64::from(count) * width;
+            sh.guest_offset(address, bytes).ok_or_else(|| {
+                crate::buf_skip(format_args!("quad index addr {address:#x} count {count}"))
+            })?;
+            let mut raw = vec![0u8; bytes as usize];
+            if !sh.read_guest(address, &mut raw) {
+                return Err(crate::buf_skip(format_args!(
+                    "quad index addr {address:#x} count {count}: unreadable"
+                )));
+            }
+            let read: Vec<u32> = match width {
+                1 => raw.iter().map(|&b| u32::from(b)).collect(),
+                2 => raw
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| u32::from(u16::from_le_bytes(*c)))
+                    .collect(),
+                _ => raw
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| u32::from_le_bytes(*c))
+                    .collect(),
+            };
+            (quad_triangles(&read), instances, base_vertex, base_instance)
+        }
+        _ => return Err(Skip::Primitive),
+    };
+    let count = u32::try_from(indices.len()).map_err(|_| Skip::Primitive)?;
+    let bytes: Vec<u8> = indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+    let address = sink.put(&bytes)?;
+    Ok((
+        Geom::Indexed {
+            primitive: Primitive::Triangle,
+            index_type: IndexType::U32,
+            address,
+            loc: None,
+            count,
+            instances,
+            base_vertex,
+            base_instance,
+        },
+        base_instance,
+    ))
+}
+
+/// The triangle indices of `count` vertices from `first` drawn as quads. A last quad with fewer than four vertices is
+/// left out, as NVN does.
+fn quad_list(first: u32, count: u32) -> Vec<u32> {
+    (0..count / 4)
+        .flat_map(|q| {
+            let v = first + 4 * q;
+            [v, v + 1, v + 2, v, v + 2, v + 3]
+        })
+        .collect()
+}
+
+/// The triangle indices of the quads that `indices` give, four for each quad.
+fn quad_triangles(indices: &[u32]) -> Vec<u32> {
+    indices
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|q| [q[0], q[1], q[2], q[0], q[2], q[3]])
+        .collect()
 }
