@@ -194,7 +194,10 @@ mod tests {
         assert_eq!(l.main_stack.start, l.stack.start);
         assert!(l.main_stack.end() <= l.stack.end());
         let body = l.main_stack_body();
-        assert_eq!((body.start, body.len), (l.main_stack.start + PAGE, 0x10_0000));
+        assert_eq!(
+            (body.start, body.len),
+            (l.main_stack.start + PAGE, 0x10_0000)
+        );
         assert_eq!(body.end(), l.main_stack.end());
         assert_eq!(l.alias.start, l.stack.end());
         assert_eq!(l.all.end(), l.alias.end());
