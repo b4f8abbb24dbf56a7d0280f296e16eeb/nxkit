@@ -55,6 +55,8 @@ use super::program::ProgramRecord;
 
 mod gate;
 mod order;
+mod vpools;
+pub(crate) use vpools::VMode;
 
 /// Guest memory for the front end: the range that the host named with `nxkit_abi::guest::set_range`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -210,6 +212,8 @@ pub(crate) struct Gpu {
     /// True when `pending_writes` or `pending_recorded` may hold a range. Keeps the common case of [`Gpu::lock`] to one
     /// atomic load.
     writes_dirty: AtomicBool,
+    /// The virtual memory pools (`vpools`).
+    vpools: vpools::VPools,
     /// The guest address of an initialised `NVNtexture` to its id in the resource table. The texture group maintains it.
     pub(crate) textures: Registry<TexId>,
     /// The guest address of an initialised `NVNprogram` to its stages. The program group maintains it.
@@ -232,6 +236,7 @@ impl Gpu {
     /// A context over `space`. [`install`] builds the space from the guest range.
     pub(crate) fn new(space: LinearSpace, backend: Arc<dyn Backend>, settings: Settings) -> Self {
         let env = settings.env;
+        let vpools = vpools::VPools::new(backend.virtual_window());
         Self {
             front: Mutex::new(FrontEnd::new(space, GuestMemory)),
             space,
@@ -247,6 +252,7 @@ impl Gpu {
             pending_writes: Mutex::new(Vec::new()),
             pending_recorded: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),
+            vpools,
             textures: Registry::new(),
             programs: Registry::new(),
             #[cfg(test)]
@@ -304,6 +310,7 @@ impl Gpu {
                     );
                 }
             }
+            self.vpool_apply(&mut front);
         }
         front
     }
@@ -334,6 +341,7 @@ impl Gpu {
     /// next [`Gpu::lock`] applies the range, in the order of the calls.
     pub(crate) fn guest_wrote_deferred(&self, start: u64, len: u64) {
         self.invalidated(start, len);
+        self.vpool_wrote(start, len);
         self.pending_writes
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -413,9 +421,13 @@ impl Gpu {
             self.backend.forced_waits(fence, &forced);
         }
         let (frame, plan, table, descriptors) = front.flush_parts();
-        let sent =
-            self.backend
-                .flush_frame(frame, plan, reason, fence, FlushCx { table, descriptors });
+        let vpools = self.vpool_snapshot();
+        let cx = FlushCx {
+            table,
+            descriptors,
+            vpools,
+        };
+        let sent = self.backend.flush_frame(frame, plan, reason, fence, cx);
         front.begin_frame();
         self.flushed.store(fence.0, Ordering::Release);
         sent?;

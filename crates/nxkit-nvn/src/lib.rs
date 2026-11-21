@@ -41,6 +41,7 @@ pub mod settings;
 pub mod space;
 pub mod swizzle;
 pub mod tic;
+pub mod vspace;
 
 // Parts of a larger module, kept at their old paths (W24): a frame carries its GPU counters and render conditions,
 // the decoder its recording cache, a record its extensions, the front end the texture lifetimes.

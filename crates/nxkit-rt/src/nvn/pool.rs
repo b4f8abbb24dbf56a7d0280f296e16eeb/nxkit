@@ -17,18 +17,25 @@
 //! The pool builder is 0x40 bytes in the headers. The host writes the first 0x1C bytes: device at 0, storage at 8,
 //! size at 16, flags (u32) at 24.
 //!
-//! A virtual pool (flag 0x200) has no storage of its own. `nvnMemoryPoolMapVirtual` points it at a part of a physical
-//! pool, and only a mapping that keeps the offsets of the physical pool is possible (the virtual pool is then a window
-//! on the physical one). A request that needs a second, different base ends the game with the name of the function.
-//! The window is also told to the backend (`Backend::map_pool_window`), so that the copy-back judges a texture in it
-//! by the flags of the virtual pool. A sparse pool with holes and a virtual pool without a physical one are not implemented.
+//! A virtual pool (flag 0x200) has no storage of its own. At its initialisation it gets a range of GPU addresses of its
+//! own in the window of the backend (`Backend::virtual_window`, `ctx/vpools.rs`), so the game can make textures in it
+//! before it maps anything. The first `nvnMemoryPoolMapVirtual` decides what it is:
+//! - an alias, when the first request keeps the offsets of a physical pool and no address of the range has left the
+//!   host (no texture made in it, no `GetBufferAddress`): the range goes back and the pool is a window on the physical
+//!   one, as before (offset 8 holds the physical memory). The window is also told to the backend
+//!   (`Backend::map_pool_window`), so that the copy-back judges a texture in it by the flags of the virtual pool. A
+//!   later request that needs a second, different base ends the game with the name of the function.
+//! - sparse otherwise: every request (map or unmap, at 4 KiB) goes into the page table of the pool
+//!   (`nxkit_nvn::vspace`), offset 8 stays 0, and the backend reads a texture of the pool through the table.
+//!   Only textures use the range: a buffer, an event or command memory in a sparse pool finds no storage, and the CPU
+//!   cannot map the pool (`nvnMemoryPoolMap` gives 0).
 
 use nxkit_abi::guest;
 use nxkit_nvn::backend::PoolInfo;
 use nxkit_nvn::pools;
 
 use super::abi::{AbiResult, Obj, guard, log_once, magic, other, ret_bool, table, used};
-use super::ctx::gpu;
+use super::ctx::{VMode, gpu};
 
 /// The magic of an initialised pool.
 pub(super) const POOL: u32 = magic(b'P', b'O', b'O', b'L');
@@ -68,6 +75,14 @@ impl PoolView {
     pub(crate) fn is_virtual(self) -> bool {
         self.flags & FLAG_VIRTUAL != 0
     }
+}
+
+/// The first GPU address of the range of the virtual pool at `pool` that `v` shows, for an object made in it: the
+/// address leaves the host, so the pool stays sparse (`ctx/vpools.rs`). None for a pool with storage.
+pub(crate) fn own_range(pool: u64, v: PoolView) -> Option<u64> {
+    (v.mem == 0 && v.is_virtual())
+        .then(|| gpu("nvnMemoryPoolGetBufferAddress").vpool_take(pool))
+        .flatten()
 }
 
 /// Reads the pool at the guest address `pool`.
@@ -134,6 +149,13 @@ pub(crate) extern "C" fn pool_initialize(p: u64, b: u64) -> u32 {
             eprintln!(
                 "nxkit-rt: warning: NVN nvnMemoryPoolInitialize: a pool that is not virtual has no storage (flags {flags:#x}, size {len:#x})"
             );
+        } else if mem == 0 && gpu("nvnMemoryPoolInitialize").vpool_init(p, len).is_none() {
+            log_once(
+                "nvnMemoryPoolInitialize-virtual",
+                format_args!(
+                    "nvnMemoryPoolInitialize: a virtual pool without storage gets no GPU addresses of its own (flags {flags:#x}, size {len:#x}); it works only as a window on a physical pool"
+                ),
+            );
         }
         Ok(1)
     })
@@ -151,6 +173,9 @@ pub(crate) extern "C" fn pool_finalize(p: u64) {
             gpu("nvnMemoryPoolFinalize")
                 .backend()
                 .unmap_pool_window(v.mem, v.size);
+        }
+        if v.is_virtual() {
+            gpu("nvnMemoryPoolFinalize").vpool_finalize(p);
         }
         Obj(p).set_u32(0, 0)
     });
@@ -182,6 +207,10 @@ extern "C" fn pool_invalidate_mapped_range(_p: u64, _off: i64, _n: u64) {}
 extern "C" fn pool_get_buffer_address(p: u64) -> u64 {
     guard("nvnMemoryPoolGetBufferAddress", || {
         let v = view(p)?;
+        // A virtual pool with a range of its own: the address stays its own from now on.
+        if let Some(base) = own_range(p, v) {
+            return Ok(base);
+        }
         if v.mem == 0 {
             log_once(
                 "nvnMemoryPoolGetBufferAddress",
@@ -256,6 +285,11 @@ extern "C" fn pool_map_virtual(p: u64, n: i32, requests: u64) -> u32 {
     guard("nvnMemoryPoolMapVirtual", || {
         let o = Obj(p);
         let pool_size = o.u64(OFF_SIZE)?;
+        if let Some(mode) = decide(p, n, requests, pool_size)?
+            && mode == VMode::Sparse
+        {
+            return map_sparse(p, n, requests, pool_size);
+        }
         for i in 0..n.max(0) as u64 {
             let r = read_request(Obj(requests).at(i * REQUEST_SIZE))?;
             if r.phys == 0 {
@@ -305,6 +339,65 @@ extern "C" fn pool_map_virtual(p: u64, n: i32, requests: u64) -> u32 {
         }
         Ok(ret_bool(true))
     })
+}
+
+/// The mode of a virtual pool with a range of its own after the first request of a call (`ctx/vpools.rs`). The first
+/// mapping decides: a request that keeps the offsets of a physical pool makes an alias when no address of the range
+/// left the host, anything else makes the pool sparse. None for a pool without a range of its own.
+fn decide(p: u64, n: i32, requests: u64, pool_size: u64) -> AbiResult<Option<VMode>> {
+    let g = gpu("nvnMemoryPoolMapVirtual");
+    let Some(v) = g.vpool(p) else {
+        return Ok(None);
+    };
+    if v.mode != VMode::Own || n <= 0 {
+        return Ok(Some(v.mode));
+    }
+    let r = read_request(Obj(requests))?;
+    let alias = r.phys != 0 && {
+        let phys = view(r.phys)?;
+        phys.mem != 0 && matches!(classify(&r, pool_size, phys, 0), Mapping::Base(_))
+    };
+    Ok(g.vpool_decide(p, alias))
+}
+
+/// The requests of a call on a sparse pool: each one goes into its page table. A request that the table refuses (out
+/// of range, not on the 4 KiB grid, a physical pool without storage) fails the call; the requests before it stay.
+fn map_sparse(p: u64, n: i32, requests: u64, pool_size: u64) -> AbiResult<u32> {
+    let g = gpu("nvnMemoryPoolMapVirtual");
+    let Some(v) = g.vpool(p) else {
+        return Ok(ret_bool(false));
+    };
+    for i in 0..n.max(0) as u64 {
+        let r = read_request(Obj(requests).at(i * REQUEST_SIZE))?;
+        let phys = if r.phys == 0 {
+            None
+        } else {
+            let pv = view(r.phys)?;
+            if pv.mem == 0 || r.poff < 0 || (r.poff as u64).saturating_add(r.size) > pv.size {
+                eprintln!(
+                    "nxkit-rt: warning: NVN nvnMemoryPoolMapVirtual: the physical pool {:#x} ({:#x} bytes, storage {:#x}) cannot supply {:#x}+{:#x}",
+                    r.phys, pv.size, pv.mem, r.poff, r.size
+                );
+                return Ok(ret_bool(false));
+            }
+            Some(pv.mem + r.poff as u64)
+        };
+        if r.voff < 0 || (r.voff as u64).saturating_add(r.size) > pool_size {
+            eprintln!(
+                "nxkit-rt: warning: NVN nvnMemoryPoolMapVirtual: request {:#x}+{:#x} is past the virtual pool of {pool_size:#x} bytes",
+                r.voff, r.size
+            );
+            return Ok(ret_bool(false));
+        }
+        if let Err(e) = g.vpool_map(v.base, r.voff as u64, r.size, phys) {
+            eprintln!(
+                "nxkit-rt: warning: NVN nvnMemoryPoolMapVirtual: request {:#x}+{:#x} (physical {:#x}+{:#x}) refused: {e}",
+                r.voff, r.size, r.phys, r.poff
+            );
+            return Ok(ret_bool(false));
+        }
+    }
+    Ok(ret_bool(true))
 }
 
 /// The functions of the group.

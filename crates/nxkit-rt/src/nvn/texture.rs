@@ -30,6 +30,7 @@ mod view;
 use nxkit_abi::guest;
 use nxkit_nvn::layout::{Target, TextureDesc};
 use nxkit_nvn::resource::TexId;
+use nxkit_nvn::space::GpuAddr;
 
 use super::abi::{AbiResult, Obj, guard, magic, other, ret_bool, table, used};
 use super::ctx::gpu;
@@ -189,7 +190,8 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
         }
         let p = memory_pool::view(built.pool)?;
         let layout = built.desc.layout()?;
-        if p.mem == 0 {
+        let own = memory_pool::own_range(built.pool, p);
+        if p.mem == 0 && own.is_none() {
             eprintln!(
                 "nxkit-rt: warning: NVN {name}: the memory pool has no storage (pool {:#x}, flags {:#x})",
                 built.pool, p.flags
@@ -207,10 +209,15 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
             );
             return Ok(0);
         }
-        let host = p.mem + built.off as u64;
+        // A texture of a virtual pool with a range of its own has no host storage (`nxkit_nvn::vspace`).
+        let off = built.off as u64;
+        let host = own.map_or(p.mem + built.off as u64, |_| 0);
         let g = gpu(name);
         let (id, address) = g.with_front(|f| {
-            let (id, shared) = f.create_texture_shared(built.desc, host)?;
+            let (id, shared) = match own {
+                Some(at) => f.create_texture_shared_at(built.desc, GpuAddr::new(at + off)?)?,
+                None => f.create_texture_shared(built.desc, host)?,
+            };
             let record = f.resources().get(id)?;
             // A shared record is a texture that the backend has, with contents that must stay.
             if !shared {
@@ -219,7 +226,7 @@ extern "C" fn initialize(t: u64, b: u64) -> u32 {
             Ok((id, record.address.get()))
         })?;
         g.textures.insert(t, id);
-        if built.desc.packaged_block.is_some() && built.packaged_data != 0 {
+        if built.desc.packaged_block.is_some() && built.packaged_data != 0 && host != 0 {
             guest::with_slice(built.packaged_data, layout.size, |data| {
                 guest::write(host, data)
             })??;

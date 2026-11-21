@@ -63,6 +63,9 @@ pub struct FlushCx<'a> {
     pub table: &'a mut ResourceTable,
     /// The descriptor pools.
     pub descriptors: &'a Descriptors,
+    /// The page tables of the virtual memory pools at the flush, None when the game has none. A texture whose address
+    /// lies in one is read through its table (`crate::vspace`).
+    pub vpools: Option<std::sync::Arc<crate::vspace::PageTables>>,
 }
 
 /// A wait of a held submit for the signal of an event that the CPU gives. A flush that had to run the submit before the
@@ -172,6 +175,13 @@ pub trait Backend: Send + Sync {
     /// `nxkit_abi::guest`. `None` means that the buffer covers the guest range, and `gpu_base` is its first byte. The
     /// host maps the buffer behind the memory of the modules, so it answers `Some`.
     fn host_range(&self) -> Option<(u64, u64)> {
+        None
+    }
+
+    /// The window of guest GPU addresses that the virtual memory pools take their ranges from, as `(start, len)`. It
+    /// must lie outside the mapped guest memory and below `1 << 40`, and the backend must resolve an address in it
+    /// through the page tables of [`FlushCx::vpools`]. The default, None, has no virtual pools without storage.
+    fn virtual_window(&self) -> Option<(u64, u64)> {
         None
     }
 

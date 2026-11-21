@@ -271,6 +271,9 @@ pub struct PoolSnapshot<B: Backing = GuestMemory> {
     entries: Vec<PoolEntry<B>>,
     /// The mirror of this flush (`NXKIT_PRIVATE=1`): member pages resolve to it.
     overlay: Option<Arc<Overlay<B>>>,
+    /// The page tables of the virtual memory pools at this flush: a texture there is read through them
+    /// (`upload::sparse`).
+    vpools: Option<Arc<nxkit_nvn::vspace::PageTables>>,
 }
 
 impl<B: Backing> PoolSnapshot<B> {
@@ -280,6 +283,7 @@ impl<B: Backing> PoolSnapshot<B> {
             generation: 0,
             entries: Vec::new(),
             overlay: None,
+            vpools: None,
         }
     }
 
@@ -305,6 +309,7 @@ impl<B: Backing> PoolSnapshot<B> {
             generation: 0,
             entries: vec![entry],
             overlay: None,
+            vpools: None,
         }
     }
 
@@ -316,7 +321,25 @@ impl<B: Backing> PoolSnapshot<B> {
             generation: self.generation,
             entries: self.entries.clone(),
             overlay: Some(overlay),
+            vpools: self.vpools.clone(),
         }
+    }
+
+    /// The same pools with the page tables of the virtual memory pools of one flush. The entries are cloned, so the
+    /// flush attaches them only when the game has a virtual pool.
+    #[must_use]
+    pub fn with_vpools(&self, vpools: Arc<nxkit_nvn::vspace::PageTables>) -> Self {
+        Self {
+            generation: self.generation,
+            entries: self.entries.clone(),
+            overlay: self.overlay.clone(),
+            vpools: Some(vpools),
+        }
+    }
+
+    /// The page tables of the virtual memory pools, if the flush had any.
+    pub fn vpools(&self) -> Option<&nxkit_nvn::vspace::PageTables> {
+        self.vpools.as_deref()
     }
 
     /// The mirror of this snapshot, if it has one.

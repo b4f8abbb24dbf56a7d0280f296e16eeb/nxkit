@@ -402,3 +402,84 @@ fn a_texture_across_the_end_of_its_pool_is_not_uploaded() {
     let back = transfer.copy_back_many(frame.commands(), &scratch, &pools, &items);
     assert_eq!(back, vec![Err(Skip::Buffer)]);
 }
+
+#[test]
+fn a_texture_of_a_virtual_pool_is_uploaded_through_its_page_table() {
+    let ctx = match Context::system_default() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("skipped: no usable Metal 4 device ({e})");
+            return;
+        }
+    };
+    let guest = Arc::new(GuestMemory::allocate(&ctx, 1024 * 1024).unwrap());
+    let va = |off: u64| GpuAddr::new(nxkit_metal::GUEST_VA_BASE + off).unwrap();
+    let desc = nxkit_nvn::layout::TextureDesc {
+        target: Target::D2,
+        format: 0x06,
+        flags: 0,
+        samples: 0,
+        width: 64,
+        height: 64,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let (window, len) = virtual_window(nxkit_metal::GUEST_VA_BASE, guest.len()).unwrap();
+    let mut space = nxkit_nvn::vspace::VirtualSpace::new(window, len).unwrap();
+    let base = space.reserve(0x2_0000).unwrap();
+    let mut resources = ResourceTable::new();
+    let sparse = resources.create(desc, base).unwrap();
+    let rec = *resources.get(sparse).unwrap();
+    let size = rec.layout.size as usize;
+    assert_eq!(size, 0x2000);
+    // The first page of the texture comes from physical 0x10000, the second stays unmapped.
+    let pattern: Vec<u8> = (0..0x1000).map(|i| (i * 13 + i / 97) as u8 | 1).collect();
+    guest.write(0x1_0000, &pattern).unwrap();
+    guest.write(0x1_1000, &[0xEE; 0x1000]).unwrap();
+    space.map(base, 0, 0x1000, Some(va(0x1_0000))).unwrap();
+    let pools = whole(&guest).with_vpools(space.snapshot());
+    // The same texture over plain guest memory takes the copy-back of what the sparse one holds.
+    let plain = resources.create(desc, va(0x4_0000)).unwrap();
+    let plain = *resources.get(plain).unwrap();
+    let mut store = crate::textures::TextureStore::new(&ctx);
+    let res = store
+        .ensure(
+            &rec,
+            1.0,
+            crate::textures::Use::default(),
+            &mut Default::default(),
+        )
+        .unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let transfer = Transfer::new(&ctx, &cache, GobOrder::Tegra).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let scratch = frame.scratch();
+    transfer
+        .upload(frame.commands(), &scratch, &pools, &rec, &res, false)
+        .unwrap();
+    ctx.commit_residency();
+    frame.submit().unwrap().wait().unwrap();
+    // A copy-back of the sparse texture itself has no guest bytes to go to.
+    let mut frame = ring.begin().unwrap();
+    let scratch = frame.scratch();
+    let results = transfer.copy_back_many(
+        frame.commands(),
+        &scratch,
+        &pools,
+        &[(&rec, &res, &Dirty::All), (&plain, &res, &Dirty::All)],
+    );
+    assert!(results[0].is_err(), "{results:?}");
+    assert!(results[1].is_ok(), "{results:?}");
+    ctx.commit_residency();
+    frame.submit().unwrap().wait().unwrap();
+    let mut out = vec![0xAA; size];
+    guest.read(0x4_0000, &mut out).unwrap();
+    assert_eq!(&out[..0x1000], &pattern[..]);
+    assert!(
+        out[0x1000..].iter().all(|&b| b == 0),
+        "the unmapped page is not 0"
+    );
+}

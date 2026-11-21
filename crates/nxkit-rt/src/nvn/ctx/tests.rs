@@ -13,11 +13,16 @@ struct Spy {
     idle: AtomicU64,
     /// The flushes that reached the backend: reason, fence and commands of the frame.
     flushes: Mutex<Vec<(FlushReason, Fence, usize)>>,
+    /// The window of the virtual memory pools.
+    window: Option<(u64, u64)>,
 }
 
 impl Backend for Spy {
     fn gpu_base(&self) -> u64 {
         0x10_0000_0000
+    }
+    fn virtual_window(&self) -> Option<(u64, u64)> {
+        self.window
     }
     fn register_pool(&self, _: PoolInfo) -> BackendResult<()> {
         Ok(())
@@ -210,4 +215,108 @@ fn a_release_flush_leaves_the_held_ops_held() {
     assert_eq!(g.gate().held.len(), 1, "the op that waits stays held");
     // Held work is work of the next flush: its fence is the next number.
     assert_eq!(g.fence_now(), Fence(2));
+}
+
+fn residency(g: &Gpu, id: TexId) -> nxkit_nvn::resource::Residency {
+    g.lock().resources().get(id).expect("record").residency
+}
+
+#[test]
+fn a_sparse_pool_maps_pages_and_its_textures_load_again_when_they_change() {
+    use nxkit_nvn::resource::Residency::{GuestNewer, InSync};
+    let spy = Arc::new(Spy {
+        window: Some((0x20_0000_0000, 0x100_0000)),
+        ..Spy::default()
+    });
+    let g = gpu_with(spy);
+    // the guest address of the NVNmemoryPool, a key only
+    let pool = 0x5000;
+    let base = g.vpool_init(pool, 0x2_0000).expect("a range");
+    assert_eq!(base, 0x20_0000_0000);
+    assert_eq!(g.vpool_take(pool), Some(base));
+    // An address of the range left the host: a request that keeps the offsets of a physical pool makes it sparse.
+    assert_eq!(g.vpool_decide(pool, true), Some(VMode::Sparse));
+    let desc = nxkit_nvn::layout::TextureDesc {
+        target: nxkit_nvn::layout::Target::D2,
+        format: 0x06,
+        flags: 0,
+        samples: 0,
+        width: 64,
+        height: 64,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let id = g
+        .with_front(|f| {
+            let at = nxkit_nvn::space::GpuAddr::new(base + 0x1_0000)?;
+            Ok(f.create_texture_shared_at(desc, at)?.0)
+        })
+        .expect("texture");
+    let synced = |g: &Gpu| g.lock().resources_mut().synced(id).expect("synced");
+    synced(&g);
+    // a mapping in the range of the texture
+    g.vpool_map(base, 0x1_0000, 0x1000, Some(0x1000_8000))
+        .expect("map");
+    assert_eq!(residency(&g, id), GuestNewer);
+    let tables = g.vpool_snapshot().expect("tables");
+    assert_eq!(
+        tables.resolve(base + 0x1_0010),
+        Some(0x10_0000_8010),
+        "the page table holds the GPU address of the physical page"
+    );
+    synced(&g);
+    // a mapping outside it
+    g.vpool_map(base, 0, 0x1000, Some(0x1000_2000))
+        .expect("map");
+    assert_eq!(residency(&g, id), InSync);
+    // a CPU write to the physical page behind it, and one to a page behind nothing
+    g.guest_wrote_deferred(0x1000_9000, 0x10);
+    assert_eq!(residency(&g, id), InSync);
+    g.guest_wrote_deferred(0x1000_8800, 0x10);
+    assert_eq!(residency(&g, id), GuestNewer);
+    synced(&g);
+    // an unmap
+    g.vpool_map(base, 0x1_0000, 0x1000, None).expect("unmap");
+    assert_eq!(residency(&g, id), GuestNewer);
+    assert_eq!(
+        g.vpool_snapshot().expect("tables").resolve(base + 0x1_0010),
+        None
+    );
+    assert_eq!(
+        tables.resolve(base + 0x1_0010),
+        Some(0x10_0000_8010),
+        "a snapshot stays"
+    );
+    // A request off the 4 KiB grid is refused.
+    assert!(g.vpool_map(base, 0x800, 0x1000, Some(0x1000_2000)).is_err());
+    g.vpool_finalize(pool);
+    assert_eq!(g.vpool(pool), None);
+    assert!(g.vpool_snapshot().is_none());
+}
+
+#[test]
+fn a_virtual_pool_whose_range_never_left_the_host_becomes_an_alias() {
+    let spy = Arc::new(Spy {
+        window: Some((0x20_0000_0000, 0x100_0000)),
+        ..Spy::default()
+    });
+    let g = gpu_with(spy);
+    let base = g.vpool_init(0x5000, 0x1_0000).expect("a range");
+    assert_eq!(g.vpool_decide(0x5000, true), Some(VMode::Alias));
+    assert_eq!(
+        g.vpool_take(0x5000),
+        None,
+        "an alias has no range of its own"
+    );
+    // the range went back: the next pool gets the one after it (the ring), and a request that does not keep the
+    // offsets makes a pool sparse
+    let next = g.vpool_init(0x6000, 0x1_0000).expect("a range");
+    assert_eq!(next, base + 0x1_0000);
+    assert_eq!(g.vpool_decide(0x6000, false), Some(VMode::Sparse));
+    // no window: no range
+    let g = gpu_with(Arc::new(Spy::default()));
+    assert_eq!(g.vpool_init(0x5000, 0x1_0000), None);
+    assert_eq!(g.vpool_decide(0x5000, true), None);
 }

@@ -12,6 +12,10 @@ impl Backend for GpuBackend {
         Some((self.guest.host_base(), self.guest.len()))
     }
 
+    fn virtual_window(&self) -> Option<(u64, u64)> {
+        crate::upload::virtual_window(self.guest.address_map().gpu_base(), self.guest.len())
+    }
+
     fn register_pool(&self, pool: PoolInfo) -> BackendResult<()> {
         let map = self.guest.address_map();
         let gpu_addr = map.gpu_address(pool.host, pool.len).map_err(fail)?;
@@ -159,6 +163,10 @@ impl Backend for GpuBackend {
         let pools = match overlay {
             Some(o) => Arc::new(self.pools.current().with_overlay(o)),
             None => self.pools.current(),
+        };
+        let pools = match cx.vpools.clone() {
+            Some(t) => Arc::new(pools.with_vpools(t)),
+            None => pools,
         };
         if let Some(enc) = &self.enc {
             let settled = enc.settle();

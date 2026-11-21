@@ -16,7 +16,8 @@ An address outside the mapping is an error. An address that does not fit in 40 b
 ## Textures
 
 - `format` knows the size of a block and the aspects of an NVN format.
-- `layout` computes the storage size, alignment, block height and level offsets. The algorithm comes from deko3d. Sparse textures are not supported and return an error.
+- `layout` computes the storage size, alignment, block height and level offsets. The algorithm comes from deko3d. A sparse texture (`NVN_TEXTURE_FLAGS_SPARSE`) has 64 KiB tiles and a packed mip tail (`layout/sparse.rs`).
+- `vspace` models the virtual memory pools: each gets a range of guest GPU addresses of its own in a window that the backend names (`Backend::virtual_window`, outside the guest memory), and a page table at 4 KiB with the guest GPU address of the physical page behind each virtual page and the generation of the request that set it. `PageTables::gather` reads a range through the table (contiguous physical pages in one read, an unmapped page as 0); `VirtualSpace::aliases` gives the virtual ranges behind a physical write. A flush hands an immutable snapshot of the tables to the backend (`FlushCx::vpools`, copy on write). A mapping request in the range of a texture, or a CPU write to a physical page behind it, makes the record `GuestNewer` (`FrontEnd::virtual_changed`), so the texture loads again through the table.
 - `swizzle` has a CPU reference for block-linear to linear and back. It is byte-by-byte and slow on purpose. It is the fallback and the reference for tests. Both GOB orders exist, Tegra X1 and Switch 2.
 - `tic` encodes and decodes a texture header (TIC) and a sampler header (TSC) of 32 bytes. The words follow the structure of the Maxwell headers, but the bit positions are nxkit's own encoding. No bit position is checked against hardware, because no deko3d or Mesa header is on the development machine. The game never reads the headers, so the encoding has to be lossless and nothing more. Refer to [TIC and TSC](#tic-and-tsc).
 - `descriptors` holds the texture pools and sampler pools. A handle is `texture_id | sampler_id << 20`. All pools share one id space.
@@ -236,7 +237,7 @@ Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN th
 - A texture in a record is named by its GPU address. When two textures start at the same address, the newest one wins.
 - A callee that sets state is assumed to leave it set for the caller.
 - A recording that overwrites the memory of another recording while it is still being written is found at its end, not before.
-- Sparse textures are not supported. A sparse texture stops the game at `nvnTextureInitialize`.
+- A sparse virtual pool serves textures only. A buffer, an event or command memory in it has no storage, and the CPU cannot map it. A texture of such a pool is read through the page table on the CPU at each upload; a GPU write to it stays in Metal and is never copied back.
 - A stencil view or a stencil texture is registered as its depth view, because `TextureView` has no depth-stencil mode. The first one is logged.
 - `nvnTextureReadTexels` of a texture that the GPU wrote last stops the game, because `Backend` has no readback.
 - `nvnMultisampleStateSetSampleLocations` ignores the positions and logs the first call. The host does not use custom sample locations.

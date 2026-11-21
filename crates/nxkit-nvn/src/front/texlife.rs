@@ -221,10 +221,29 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     ) -> Result<(TexId, bool)> {
         let size = desc.layout()?.size;
         let address = self.space.gpu_address(host_address, size)?;
+        self.create_texture_shared_at(desc, address)
+    }
+
+    /// [`FrontEnd::create_texture_shared`] for a texture at a GPU address that no host memory backs: a texture of a
+    /// virtual memory pool (`crate::vspace`).
+    pub fn create_texture_shared_at(
+        &mut self,
+        desc: TextureDesc,
+        address: crate::space::GpuAddr,
+    ) -> Result<(TexId, bool)> {
         let (id, shared) = self.table.create_shared(desc, address)?;
         self.life.init(id, shared);
         self.life.table(&self.table);
         Ok((id, shared))
+    }
+
+    /// The bytes at `[start, start + len)` of a virtual memory pool changed: a mapping request, or a CPU write to a
+    /// physical page behind them. Every texture there loads again, also one that the GPU wrote last, because the
+    /// change replaces its texels.
+    pub fn virtual_changed(&mut self, start: crate::space::GpuAddr, len: u64) -> &[TexId] {
+        self.hit.clear();
+        self.table.texels_written(start, len, &mut self.hit);
+        &self.hit
     }
 
     /// Destroys a texture. This is `nvnTextureFinalize`.

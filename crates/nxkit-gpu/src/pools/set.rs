@@ -185,6 +185,7 @@ impl<B: Backing> PoolSet<B> {
             generation: st.generation,
             entries,
             overlay: None,
+            vpools: None,
         });
     }
 

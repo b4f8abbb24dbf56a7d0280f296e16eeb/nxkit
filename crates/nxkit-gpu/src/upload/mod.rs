@@ -6,11 +6,13 @@
 
 mod buffered;
 mod dirty;
+mod sparse;
 mod staging;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use self::dirty::Dirty;
+pub(crate) use self::sparse::virtual_window;
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -137,6 +139,20 @@ impl Transfer {
         })
     }
 
+    /// The buffer that holds the guest bytes of `rec` and the offset of the first byte in it. A texture of a virtual
+    /// pool is gathered through the page table into a buffer of its own (`sparse`).
+    fn source(
+        &self,
+        rec: &TextureRecord,
+        pools: &GuestPools,
+    ) -> Result<(Arc<GuestMemory>, u64), Skip> {
+        if let Some(tables) = sparse::tables_of(rec, pools) {
+            return Ok((sparse::gather(&self.ctx, tables, rec, pools)?, 0));
+        }
+        let (guest, base) = guest_offset(rec, pools)?;
+        Ok((guest.clone(), base))
+    }
+
     /// Starts a frame of scaled uploads.
     pub(crate) fn begin_frame(&self) {
         self.scaled
@@ -224,7 +240,8 @@ impl Transfer {
         wait: bool,
     ) -> Result<(), Skip> {
         let surf = surface(rec, res, self.order)?;
-        let (guest, base) = guest_offset(rec, pools)?;
+        let (guest, base) = self.source(rec, pools)?;
+        let guest = &guest;
         let d = res.desc;
         tiny_upload(rec, res, guest, base);
         let buffered = buffered::via_buffer(d.format);
@@ -339,8 +356,8 @@ impl Transfer {
         wait: bool,
     ) -> Result<(), Skip> {
         let d = res.desc;
-        let (guest, base) = guest_offset(rec, pools)?;
-        tiny_upload(rec, res, guest, base);
+        let (guest, base) = self.source(rec, pools)?;
+        tiny_upload(rec, res, &guest, base);
         let mut pass = cb
             .begin_compute_pass(self.deswizzler.table())
             .map_err(|_| Skip::Transfer)?;
