@@ -124,6 +124,7 @@ fn a_scaled_image_gets_its_entry() {
         atomic: false,
         signed: false,
         buffer: false,
+        float: true,
     };
     let mut img = bind(BindKind::Img, 0, Some(3));
     img.dim = Some(TextureKind::D2);
@@ -135,6 +136,7 @@ fn a_scaled_image_gets_its_entry() {
         ImageRes {
             id: 9,
             scaled: true,
+            words: 0,
         },
     );
     let mut b = Vec::new();

@@ -14,11 +14,15 @@ pub(super) fn declared_img(msl_type: &str, atomic: bool) -> ImgDecl {
     };
     let signed = args.trim_start().starts_with("int") || args.trim_start().starts_with("short");
     let buffer = msl_type.starts_with("texture_buffer");
+    let float = ["float", "half"]
+        .iter()
+        .any(|t| args.trim_start().starts_with(t));
     ImgDecl {
         access,
         atomic,
         signed,
         buffer,
+        float,
     }
 }
 

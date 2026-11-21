@@ -159,13 +159,33 @@ impl Em<'_> {
         }
         let args = args.join(", ");
         let inside = Self::inside(&img, t.ty, &coord, c.get(1).map(|_| layer.as_str()))?;
-        let body = if f == "compare" {
+        let body = if ty == SamplerType::TEXTURE_BUFFER {
+            // Metal has no atomics on a texture buffer: they go to its texels as device words over the same bytes.
+            let words = format!("&{img}{}[{coord}]", super::args::WORDS_SUFFIX);
+            if f == "compare" {
+                let cmp = self.tsrc(o, &mut i, comp)?.s;
+                self.pre
+                    .push(format!("{cty} t{n}x = {cmp}; {cty} t{n}e = t{n}x;"));
+                format!(
+                    "while (!atomic_compare_exchange_weak_explicit({words}, &t{n}x, {value}, memory_order_relaxed, memory_order_relaxed) && t{n}x == t{n}e) {{}} t{n} = t{n}x;"
+                )
+            } else {
+                let one = matches!(t.flags & ATOMIC_MASK, x if x == 3 << 16 || x == 4 << 16);
+                let arg = if one { literal(comp, 1) } else { value };
+                let call = if f == "exchange" {
+                    "atomic_exchange_explicit".to_string()
+                } else {
+                    format!("atomic_fetch_{f}_explicit")
+                };
+                format!("t{n} = {call}({words}, {arg}, memory_order_relaxed);")
+            }
+        } else if f == "compare" {
             let cmp = self.tsrc(o, &mut i, comp)?.s;
             // a weak exchange may fail with the expected value still in the image: try again
             self.pre
-                .push(format!("{v4} t{n}x = {v4}({cmp}); {v4} t{n}c = t{n}x;"));
+                .push(format!("{v4} t{n}x = {v4}({cmp}); {v4} t{n}e = t{n}x;"));
             format!(
-                "while (!{img}.atomic_compare_exchange_weak({args}, &t{n}x, {v4}({value})) && all(t{n}x == t{n}c)) {{}} t{n} = t{n}x.x;"
+                "while (!{img}.atomic_compare_exchange_weak({args}, &t{n}x, {v4}({value})) && all(t{n}x == t{n}e)) {{}} t{n} = t{n}x.x;"
             )
         } else {
             let one = matches!(t.flags & ATOMIC_MASK, x if x == 3 << 16 || x == 4 << 16);

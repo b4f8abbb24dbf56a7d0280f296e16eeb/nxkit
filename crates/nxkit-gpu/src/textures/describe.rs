@@ -144,7 +144,14 @@ pub(crate) fn describe(
         } else {
             Storage::Private
         },
-        shader_atomic: u.atomic && exact && !depth_like && !compressed && !memoryless,
+        // The atomics of a texture buffer go to its guest bytes as words (`img_words`), so its texture needs none and
+        // can lie over those bytes.
+        shader_atomic: u.atomic
+            && exact
+            && !depth_like
+            && !compressed
+            && !memoryless
+            && d.target != Target::Buffer,
     };
     Ok((desc, !exact))
 }

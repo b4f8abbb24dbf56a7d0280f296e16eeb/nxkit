@@ -576,10 +576,12 @@ fn a_buffer_image_lies_over_the_guest_bytes_at_an_aligned_offset() {
     let mut table = ResourceTable::new();
     let at = |off: u64| GpuAddr::new(nxkit_metal::GUEST_VA_BASE + off).unwrap();
     let id = table.create(buffer, at(0x1000)).unwrap();
-    let t = store
+    let (t, words) = store
         .buffer_image(table.get(id).unwrap(), Format::Rgba8Unorm, true)
         .unwrap();
     assert_eq!(t.desc().width, 300);
+    // the texels as words for the atomics: the real address of the first texel in the pool buffer
+    assert_eq!(words, _guest.real_base() + 0x1000);
     // an offset Metal refuses, and a buffer past the end of the pool
     let odd = table.create(buffer, at(0x2004)).unwrap();
     assert!(

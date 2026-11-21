@@ -74,6 +74,9 @@ pub struct Res {
     pub early: bool,
 }
 
+/// The suffix of the member that holds the texels of a texture buffer image as atomic words.
+pub const WORDS_SUFFIX: &str = "_words";
+
 /// The number in `<lowercase>_<letter><digits>`.
 pub fn bank_name(nm: &str, letter: char) -> Option<i64> {
     let low = nm.bytes().take_while(u8::is_ascii_lowercase).count();
@@ -400,6 +403,12 @@ impl Builder<'_> {
         dec.apply(b);
         b.atomic = u.atomic;
         b.rscale = rscale;
+        if u.atomic && d.ty == SamplerType::TEXTURE_BUFFER && d.array_length == 1 {
+            // No atomics on a texture buffer in Metal: its texels as device words (`img_words`, the image's slot).
+            let (reg, ty) = (b.reg, format!("device atomic_{comp}*"));
+            let name = format!("{}{WORDS_SUFFIX}", d.name);
+            self.member(&ty, &name, 1, Kind::ImgWords).reg = reg;
+        }
         if self.usage.interlock && (u.write || u.atomic) {
             self.ordered();
         }

@@ -330,13 +330,23 @@ fn one(
         let rec = view
             .record(id)
             .map_err(|e| crate::tex_skip(format_args!("image {id:?}: {e:?}")))?;
-        store.buffer_image(rec, res.desc.format, d.img.writes())?
+        // The texel type the shader declares: the bits of the texture's format in a float format for a float
+        // declaration (`describe`), the integer format itself for an integer one (its atomics, `img_words`).
+        let format = match crate::format_map::texture_format(rec.desc.format) {
+            Some(m) if !d.img.float => m.format(),
+            _ => res.desc.format,
+        };
+        let (tex, words) = store.buffer_image(rec, format, d.img.writes())?;
+        (tex, words)
     } else {
-        store.image_view(id, res, &slot.header, d.dim, d.img.atomic_code(), stats)?
+        let tex = store.image_view(id, res, &slot.header, d.dim, d.img.atomic_code(), stats)?;
+        (tex, 0)
     };
+    let (tex, words) = tex;
     let r = ImageRes {
         id: tex.gpu_resource_id(),
         scaled: res.scaled,
+        words,
     };
     handles.keep.push(tex);
     Ok(r)
@@ -415,6 +425,7 @@ mod tests {
                 atomic: false,
                 signed: false,
                 buffer: true,
+                float: true,
             },
         };
         assert_eq!(s[0].handle(&decl(true)), Some(7));
@@ -430,18 +441,21 @@ mod tests {
             atomic: false,
             signed: false,
             buffer: false,
+            float: true,
         };
         let rw = ImgDecl {
             access: ImgAccess::ReadWrite,
             atomic: false,
             signed: false,
             buffer: false,
+            float: true,
         };
         let atomic = ImgDecl {
             access: ImgAccess::Read,
             atomic: true,
             signed: true,
             buffer: false,
+            float: true,
         };
         assert!(!read.writes());
         assert!(rw.writes());

@@ -457,6 +457,20 @@ fn build_args_in(
                     a => a,
                 }
             }
+            // The atomics of a texture buffer image go to its texels as words over the same bytes.
+            BindKind::ImgWords => image_of(b.reg)
+                .and_then(|h| {
+                    (0..=2u8).find_map(|code| {
+                        env.images
+                            .get(&(h, nxkit_metal::TextureKind::D2, code))
+                            .map(|r| r.words)
+                            .filter(|&w| w != 0)
+                    })
+                })
+                .unwrap_or_else(|| {
+                    note_n(Reason::ImgUnbound, 1);
+                    env.statics.1
+                }),
             BindKind::C1 if p.c1.is_empty() => env.statics.1,
             BindKind::C1 => sink.put(&p.c1)?,
         };

@@ -290,17 +290,29 @@ fn an_image_atomic_stays_inside_the_image() {
 
 #[test]
 fn a_signed_atomic_uses_the_signed_image_and_a_compare_swaps() {
+    // Metal has no atomics on a texture buffer: the atomic goes to its texels as device words.
     let m = msl(&image_atomic(SamplerType::TEXTURE_BUFFER, 12, 9 << 16, 1));
     assert!(m.contains("texture_buffer<int, access::read_write>"), "{m}");
+    assert!(m.contains("device atomic_int* fp_i_2_words"), "{m}");
     assert!(
         m.contains("if (t0c < spvDescriptorSet0.fp_i_2.get_width())"),
         "{m}"
     );
     assert!(
-        m.contains("while (!")
+        m.contains("int t0x = 6; int t0e = t0x;")
             && m.contains(
-                ".atomic_compare_exchange_weak(t0c, &t0x, int4(5)) && all(t0x == t0c)) {}"
+                "while (!atomic_compare_exchange_weak_explicit(&spvDescriptorSet0.fp_i_2_words[t0c], &t0x, 5, memory_order_relaxed, memory_order_relaxed) && t0x == t0e) {}"
             ),
+        "{m}"
+    );
+}
+
+#[test]
+fn an_exchange_on_a_buffer_image_is_a_device_atomic() {
+    let m = msl(&image_atomic(SamplerType::TEXTURE_BUFFER, 11, 8 << 16, 1));
+    assert!(m.contains("device atomic_uint* fp_i_2_words"), "{m}");
+    assert!(
+        m.contains("t0 = atomic_exchange_explicit(&spvDescriptorSet0.fp_i_2_words[t0c], 5u, memory_order_relaxed);"),
         "{m}"
     );
 }

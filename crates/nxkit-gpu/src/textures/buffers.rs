@@ -12,7 +12,8 @@ use super::TextureStore;
 use crate::skip::Skip;
 
 impl TextureStore {
-    /// The texture buffer of `rec` in `format`, over its guest bytes, written by shaders when `write`. Fails when the store has no pools for the frame
+    /// The texture buffer of `rec` in `format`, over its guest bytes, written by shaders when `write`, and the real GPU
+    /// address of its first texel (for the atomics, `img_words`). Fails when the store has no pools for the frame
     /// (the mirror of `NXKIT_PRIVATE=1`, or `NXKIT_TEX_INPLACE=0`), when the bytes lie in no pool buffer or when Metal
     /// refuses the offset (it must be a multiple of `minimumTextureBufferAlignmentForPixelFormat`).
     pub(crate) fn buffer_image(
@@ -20,7 +21,7 @@ impl TextureStore {
         rec: &TextureRecord,
         format: Format,
         write: bool,
-    ) -> Result<Texture, Skip> {
+    ) -> Result<(Texture, u64), Skip> {
         let pools = self.pools.as_ref().ok_or_else(|| {
             crate::tex_skip(format_args!(
                 "image buffer {:?}: no pool buffers for this frame",
@@ -29,6 +30,7 @@ impl TextureStore {
         })?;
         let (mem, offset) =
             crate::pools::locate(pools.as_ref(), rec.address.get(), rec.layout.size)?;
+        let words = mem.real_base() + offset;
         Texture::buffer_over_guest(
             &self.ctx,
             mem,
@@ -37,6 +39,7 @@ impl TextureStore {
             format,
             write,
         )
+        .map(|t| (t, words))
         .map_err(|why| {
             crate::tex_skip(format_args!(
                 "image buffer {:?} {format:?} x{} at {:#x}: {why:?}",

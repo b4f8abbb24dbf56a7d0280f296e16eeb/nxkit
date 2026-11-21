@@ -213,7 +213,7 @@ impl TextureStore {
             || scaled
             || widened
             || u.attachment
-            || u.atomic
+            || (u.atomic && rec.desc.target != nxkit_nvn::layout::Target::Buffer)
             || desc.storage == Storage::Memoryless
             || self.no_place.contains(&rec.id)
         {

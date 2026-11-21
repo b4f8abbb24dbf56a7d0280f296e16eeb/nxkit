@@ -57,6 +57,8 @@ pub(crate) enum BindKind {
     GmemMap,
     /// `gmem_log`: the address of a zeroed write log for the draw or dispatch (`gmem.rs`).
     GmemLog,
+    /// `img_words`: the texels of the texture buffer image in slot `reg` as device words, for its atomics.
+    ImgWords,
 }
 
 /// How a shader accesses a storage image (`access::` of its `msl_type`).
@@ -81,6 +83,8 @@ pub(crate) struct ImgDecl {
     pub(crate) signed: bool,
     /// A `texture_buffer`: the image is a texture buffer over the guest bytes (`images.rs`).
     pub(crate) buffer: bool,
+    /// The texel type is `float` or `half` (not an integer).
+    pub(crate) float: bool,
 }
 
 impl ImgDecl {
@@ -352,6 +356,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             "img" => BindKind::Img,
             "gmem_map" => BindKind::GmemMap,
             "gmem_log" => BindKind::GmemLog,
+            "img_words" => BindKind::ImgWords,
             other => {
                 // The reason names the kind, so the health report says which one is missing.
                 nxkit_nvn::diag::example(

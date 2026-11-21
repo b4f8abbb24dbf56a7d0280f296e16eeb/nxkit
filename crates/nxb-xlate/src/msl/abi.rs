@@ -60,6 +60,7 @@ pub enum Kind {
     GmemMap,
     /// `gmem_log`: the write log of untraced global memory.
     GmemLog,
+    ImgWords,
 }
 
 impl Kind {
@@ -94,6 +95,7 @@ impl Kind {
             Kind::BlendZ => "blendz",
             Kind::GmemMap => "gmem_map",
             Kind::GmemLog => "gmem_log",
+            Kind::ImgWords => "img_words",
         }
     }
 }

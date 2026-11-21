@@ -98,6 +98,9 @@ pub(crate) struct ImageRes {
     pub(crate) id: u64,
     /// The texture is stored at the render scale.
     pub(crate) scaled: bool,
+    /// For a texture buffer: the real GPU address of its first texel, where its `img_words` member points (0 for
+    /// none).
+    pub(crate) words: u64,
 }
 
 /// The key of an image view: the handle, the texture type the shader declares and `ImgDecl::atomic_code`.
