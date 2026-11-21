@@ -88,6 +88,14 @@ pub(super) fn overlay_window(mtm: MainThreadMarker, frame: CGRect) -> Retained<N
     window
 }
 
+/// Puts the overlay on the screen before it shows: transparent, clicks go to the launcher under it, and the application
+/// stays inactive. The display link of the window's layer ticks only while the window is on a screen, and the fade-in
+/// waits for a tick: a window kept off the screen until then never showed.
+fn order_in(window: &NSWindow) {
+    window.setIgnoresMouseEvents(true);
+    window.orderFrontRegardless();
+}
+
 /// The background of either window: black, so nothing white shows before the first picture. The views over it draw
 /// nothing of their own.
 pub(super) fn black(window: &NSWindow) {
@@ -107,8 +115,11 @@ thread_local! {
     static PRESENT: RefCell<Option<Present>> = const { RefCell::new(None) };
 }
 
-/// Sets up the appearing of `window`, an overlay when `overlay`.
+/// Sets up the appearing of `window`, an overlay when `overlay`. An overlay goes on the screen now (`order_in`).
 pub(super) fn install(window: Retained<NSWindow>, overlay: bool) {
+    if overlay {
+        order_in(&window);
+    }
     PRESENT.with(|p| {
         *p.borrow_mut() = Some(Present {
             window,
@@ -158,6 +169,7 @@ pub(super) fn tick(mtm: MainThreadMarker) {
             NSApplicationPresentationOptions::HideDock
                 | NSApplicationPresentationOptions::HideMenuBar,
         );
+        p.window.setIgnoresMouseEvents(false);
         p.window.makeKeyAndOrderFront(None);
         app.activate();
         fade(&p.window, 1.0);
