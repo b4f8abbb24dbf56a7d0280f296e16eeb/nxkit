@@ -61,8 +61,10 @@ pub(super) fn current_save(home: &Path, app: &Path, id: u64) -> Option<PathBuf> 
 }
 
 /// Copies the save of the nxnative app `app` into the run folder `run` of the new app: `<run>/save/<title id>` and its
-/// device save. The old save stays where it is, because an older build may still read it. Returns what to tell the
-/// player, or `None` when there is no save. The caller checks that the new app has no save yet.
+/// device save. The old save stays where it is, because an older build may still read it. The host of the new app
+/// moves the copy to `~/Library/Application Support/nxkit/<title id>/save` at its first start, when no save is there
+/// (R67). Returns what to tell the player, or `None` when there is no save. The caller checks that the new app has no
+/// save yet.
 pub(super) fn carry(
     home: &Path,
     app: &Path,

@@ -2066,6 +2066,7 @@ dependencies = [
 name = "nxkit-host"
 version = "0.14.0"
 dependencies = [
+ "nxb-sys",
  "nxkit-abi",
  "nxkit-gpu",
  "nxkit-hos",

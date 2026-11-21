@@ -33,6 +33,7 @@ nxkit-svc-pacing = { workspace = true }
 nxkit-svc-system = { workspace = true }
 nxkit-nvn = { workspace = true }
 nxkit-vk = { workspace = true }
+nxb-sys = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nxkit-metal = { path = "../nxkit-metal" }

@@ -83,6 +83,12 @@ pub const PAD_MAP: &str = "NXKIT_PAD_MAP";
 /// [`OPTIONS`]: a launcher sets it from its own key map editor. `nxkit_svc_input::KeyMap` parses it.
 pub const KEYMAP: &str = "NXKIT_KEYMAP";
 
+/// The save folder of the game, as `DM_SAVE` of the old engine: the folder that is the committed save of user 1. Its
+/// siblings hold the work folder, the device save, the other users' saves and the sync state. Unset: the folder
+/// `~/Library/Application Support/nxkit/<title id>/save`. Not a row of [`OPTIONS`]: a launcher that keeps the save
+/// elsewhere sets it.
+pub const SAVE: &str = "NXKIT_SAVE";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {

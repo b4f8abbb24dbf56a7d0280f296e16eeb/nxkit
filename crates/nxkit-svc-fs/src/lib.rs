@@ -37,7 +37,8 @@ pub struct Config {
     pub title_id: u64,
     /// The romfs folder of the run, with the base, update and DLC layers merged.
     pub romfs: PathBuf,
-    /// The save folder of the account, for example `<run>/save/<title id>`. Its work and new folders are siblings.
+    /// The committed save folder of user 1, for example `~/Library/Application Support/nxkit/<title id>/save`. Its work
+    /// and new folders are siblings.
     pub save: PathBuf,
     /// The folder of the temporary storage. The cache storages are siblings of it.
     pub temp: PathBuf,

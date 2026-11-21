@@ -103,6 +103,11 @@ pub struct HostEnv {
     /// `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in
     /// with its first picture and gives the launcher the progress of the start (`sys/present.rs`).
     pub overlay: bool,
+    /// `NXKIT_SAVE` (not blank, set by the launcher, no launch option): the save folder of user 1 in place of the one
+    /// under Application Support (`saveplace.rs`).
+    pub save: Option<PathBuf>,
+    /// `HOME`: the home folder, which holds `Library/Application Support/nxkit`.
+    pub home: Option<PathBuf>,
 }
 
 impl Default for HostEnv {
@@ -198,6 +203,11 @@ impl HostEnv {
                 .var("NXKIT_CURSOR_HIDDEN")
                 .is_ok_and(|v| v.trim() == "1"),
             overlay: env.var("NXKIT_OVERLAY").is_ok_and(|v| v.trim() == "1"),
+            save: not_blank(env, launch::SAVE).map(PathBuf::from),
+            home: env
+                .var_os("HOME")
+                .filter(|h| !h.is_empty())
+                .map(PathBuf::from),
         }
     }
 }

@@ -178,6 +178,20 @@ The default layout:
 | 1 2 3 4 | D-pad up, right, down, left |
 | arrows | D-pad |
 
+## Saves
+
+The save of a game is outside the app (R67). The committed save of user 1 is the folder `~/Library/Application Support/nxkit/<title id>/save`. The title ID has 16 hex digits in capitals, as the folders of the old engine. A launcher that keeps the save elsewhere sets `NXKIT_SAVE=<folder>`. That folder is the committed save, as `DM_SAVE` of the old engine. The host passes it to the fs service as `Config.save`. The layout of the folders next to it is the one of `dm/host/hle_fs.c`:
+
+| folder | what it holds |
+|---|---|
+| `<save>` | the committed save of user 1 |
+| `<save>.work`, `<save>.new` | the work folder of the running game and the next committed version (`nxkit-svc-fs`, `commit.rs`) |
+| `<save>_device` | the device save, for a game that mounts it next to an account save |
+
+The temporary storage is `~/Library/Application Support/nxkit/<title id>/temp`, and the cache storages are its siblings `temp_cache<index>`. It stays there when `NXKIT_SAVE` is set. Without a home folder both stay in the run folder, where an older build had them. The log says `nxkit-host: save <folder>` at every start.
+
+An app of an older build kept the save in its run folder, `save/<title id>`. `nxb build` moves that folder into the new app, and it copies the save of an app of the old engine there too. At its start the host moves that save and its device save to the new place, once, with one line in the log (`saveplace.rs`). A folder on the same volume is renamed. On another volume it is copied with its attributes, and the old folder is removed after both copies are complete. An existing save is never replaced: when the new place holds a save, the old one stays in the app and the log says so. When a step fails, the old save stays where it was.
+
 ## Guest memory
 
 One reservation holds all guest memory. It is the guest range of `nxkit_abi::guest`. The no-copy buffer of R3 covers the part behind the modules. In address order it holds:
@@ -370,7 +384,7 @@ ring (`Screen`) and the refresh plan (`Refresh`), and passes them to the service
 | `attach_main_thread` | Attaches the `guest-main` thread with the NPDM priority and core, which the kernel got at its start. |
 | `big_stack_exports` | Collects the names of the big-stack entries of the enabled services from `nxkit_rt::entries()`. |
 | `register_server` | Builds the IPC server from the `services()` of the enabled service crates and registers it with `set_server`. |
-| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
+| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders (Saves, above) and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
 | `focus_changed` | Tells the `system` and `input` services about the focus of the window. |
 | `mouse` | Passes the motion, buttons and wheel of the held mouse to the input service. |
 | `mouse_mode` | When the window holds the mouse: never when `input.json` turns it off, on a click while a controller is connected, else whenever the window is key. |

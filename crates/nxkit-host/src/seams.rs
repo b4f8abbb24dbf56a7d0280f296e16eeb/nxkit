@@ -20,7 +20,7 @@ use crate::manifest::{self, Game, Import};
 use crate::refresh::Refresh;
 use crate::settings::Settings;
 use crate::sys::appkit::{MouseEvent, MouseMode};
-use crate::{guestsym, wire};
+use crate::{guestsym, saveplace, wire};
 
 fn has(mask: u64, service: Service) -> bool {
     mask & service.bit() != 0
@@ -87,6 +87,32 @@ fn title_id(game: &Game) -> Result<u64> {
             game.title_id
         ))
     })
+}
+
+/// The save and temporary folders of the game (`saveplace.rs`). The save that an older build kept in the run folder
+/// moves to the new place first, once.
+fn save_places(game: &Game, env: &crate::hostenv::HostEnv) -> Result<saveplace::Places> {
+    let places = saveplace::places(
+        env.home.as_deref(),
+        env.save.as_deref(),
+        &game.root,
+        title_id(game)?,
+        &game.title_id,
+    );
+    match saveplace::migrate(&places.bundled, &places.save) {
+        saveplace::Migration::Nothing => {}
+        saveplace::Migration::Moved => eprintln!(
+            "nxkit-host: the save moved from the app {} to {}",
+            places.bundled.display(),
+            places.save.display()
+        ),
+        saveplace::Migration::Kept(why) => eprintln!(
+            "nxkit-host: the save in the app {} stays there and is not used: {why}",
+            places.bundled.display()
+        ),
+    }
+    eprintln!("nxkit-host: save {}", places.save.display());
+    Ok(places)
 }
 
 /// The folder that holds the `<index>` folders of the DLC.
@@ -250,16 +276,15 @@ pub fn init_services(
     .map_err(HostError::App)?;
 
     if has(mask, Service::Fs) {
-        let save = game.root.join("save").join(&game.title_id);
-        let temp = game.root.join("temp");
-        for dir in [&save, &temp] {
+        let places = save_places(game, env)?;
+        for dir in [&places.save, &places.temp] {
             std::fs::create_dir_all(dir).map_err(|e| HostError::io(dir, &e))?;
         }
         nxkit_svc_fs::init(&nxkit_svc_fs::Config {
             title_id: title_id(game)?,
             romfs: game.path(&game.romfs),
-            save,
-            temp,
+            save: places.save,
+            temp: places.temp,
             aoc: aoc_root(game),
             separate_device_save: separate_device_save(game)?,
         });
