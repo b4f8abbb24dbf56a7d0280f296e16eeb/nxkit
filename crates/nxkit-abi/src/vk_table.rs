@@ -3,7 +3,7 @@
 //!
 //! The build translates each SPIR-V module of the game to a Metal function `vk_<key>` (the key is the first 8 bytes of
 //! the SHA-256 of the module's bytes, as the game hands them to `vkCreateShaderModule`) and writes one row per module
-//! with [`write`]. The host reads the table with [`parse`], hashes each module the game creates and finds its row.
+//! with [`write()`]. The host reads the table with [`parse`], hashes each module the game creates and finds its row.
 //!
 //! The text has the rows of the old engine's table (`dm/gfx/tools/vk_shaders.py`). Lines that start with `#` are
 //! comments. A row has four fields, separated by tabs:
@@ -28,7 +28,7 @@ pub const FILE: &str = "vk_shaders.tsv";
 /// The file name of the Metal library with the functions of the table, beside it.
 pub const LIBRARY: &str = "vk_shaders.metallib";
 
-/// The first line of a table that [`write`] gives, without its `# `.
+/// The first line of a table that [`write()`] gives, without its `# `.
 pub const HEAD: &str = "Vulkan shaders: key = sha256(SPIR-V)[:16], Metal function vk_<key>; stage vert/frag/comp:x,y,z; resources kind:set.binding=slot[*count] (u uniform buffer, b storage buffer, t image, s sampler, c combined, p push constants)";
 
 /// The descriptor sets a resource can name: 0 to 7.
