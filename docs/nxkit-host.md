@@ -113,6 +113,19 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 
 The launcher keeps the choice of the player for a row as the string `launcher.<env>` in the preferences domain of the app, the bundle identifier, only when it is not the default. At the start the host reads these strings before it reads any setting (`sys/prefs.rs`, `hostenv::with_saved`). A choice that the row does not accept is ignored, and the environment wins over a choice. The log gets one line for each choice. `NXKIT_SAVED_CHOICES=0` ignores the choices. A run outside an app bundle has none. So a start from Finder or the Dock gets the choices too. A new option is one row in the table and its read in `hostenv.rs`. The test `every_value_of_a_launch_option_is_read` fails when the host does not read a value of the table.
 
+Two more variables come from the launcher, but they are no rows of the table (R66). A launcher with its own button map editor sets them when it starts the app. They have the format of `DM_PAD_MAP` and `DM_KEYMAP` of the old engine, so a launcher passes the same text to both engines. Neither has a saved choice, so a start from Finder or the Dock has no map.
+
+| variable | value | meaning |
+|---|---|---|
+| `NXKIT_PAD_MAP` | `<button>=<button>,…`, for example `A=B,B=A` | The button of a controller that sends the first button by default, by its position, sends the second one. `none` sends nothing. Buttons that are not named stay. |
+| `NXKIT_KEYMAP` | `<function>=<key code>,…`, for example `A=40,B=38` | Puts a function on the key with that macOS virtual key code (`NSEvent.keyCode`, decimal, below 128), or on no key for `none`. The function leaves every key that held it, and the old function of the key leaves that key. |
+
+The buttons are `A`, `B`, `X`, `Y`, `LS`, `RS`, `L`, `R`, `ZL`, `ZR`, `Plus`, `Minus`, `Left`, `Up`, `Right` and `Down`. A key map function is also a direction of a stick, `LUp`, `LDown`, `LLeft`, `LRight`, `RUp`, `RDown`, `RLeft` and `RRight`. The names are case-insensitive. A trailing comma is allowed. `Shake` is accepted so that a value of the old engine parses whole. nxkit has no shake, so a `Shake` entry of the key map changes nothing and a button mapped to `Shake` sends nothing.
+
+A value is taken whole or not at all. A blank value is no value. If one entry is malformed, the log gets one line that names the bad entries, and the default stays. A key code of a key that nxkit does not read (the keypad, F13 and above, the ISO and JIS keys) puts the function on no key, with a line in the log.
+
+The pad map changes the controllers only, not the keyboard. The host reads Home and the buttons of the Home menu before the pad map, so they keep the printed buttons. The key map changes the keys only. A mouse button or the wheel keeps its function.
+
 ### input.json
 
 The keyboard and mouse layout of player 1 (R63) can be changed in `input.json`. The host reads `~/Library/Application Support/nxkit/input.json` first and `input.json` of the run folder second, each if it exists. A later value wins. Each file has a top-level section and an optional `titles` object with a section per title ID, which follows the top-level one. A file or key that does not parse gives a warning on stderr and is skipped.
@@ -134,6 +147,8 @@ The keyboard and mouse layout of player 1 (R63) can be changed in `input.json`. 
 | `mouse.deadzone` | The stick value of the smallest mouse motion, 0 to 0.9, to get past the dead zone of the game. Default 0.12. |
 | `mouse.capture` | The window may hold the mouse. `false` turns the mouse off for the game. |
 | `bind` | `key: action` pairs, applied in key order. A pair replaces the action of that key. `none` removes it. |
+
+The layout is built in three steps. The default layout comes first. `NXKIT_KEYMAP` of the launcher changes it. The `bind` pairs of the input files change the result. So `bind` wins for every key that it names, and the key map wins for the other keys.
 
 Keys: `a` to `z`, `0` to `9`, `f1` to `f12`, `space`, `enter`, `tab`, `backspace`, `delete`, `escape`, `up`, `down`, `left`, `right`, `shift`, `ctrl`, `alt` (both sides; `lshift`, `rshift`, `lctrl`, `rctrl`, `lalt`, `ralt` for one), `capslock`, `minus`, `equal`, `lbracket`, `rbracket`, `backslash`, `semicolon`, `quote`, `grave`, `comma`, `period`, `slash`, `mouse_left`, `mouse_right`, `mouse_middle`, `mouse4`, `mouse5`, `wheel`, `wheel_up`, `wheel_down`. Actions: `a`, `b`, `x`, `y`, `l`, `r`, `zl`, `zr`, `plus`, `minus`, `lstick`, `rstick` (the stick clicks), `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `ls_up`, `ls_down`, `ls_left`, `ls_right`, `rs_up`, `rs_down`, `rs_left`, `rs_right`, `walk` (half deflection of the left stick) and `none`.
 

@@ -195,10 +195,11 @@ impl Input {
         merge(&pads)
     }
 
-    /// The controller in `slot` with the dead zones of its sticks.
+    /// The controller in `slot` with the pad map on its buttons and the dead zones of its sticks.
     fn read_pad(&self, slot: usize) -> Option<RawPad> {
         let pad = self.platform.read_pad(slot)?;
-        Some(self.config.deadzones().apply(pad))
+        let buttons = self.config.pad_map.apply(pad.buttons);
+        Some(self.config.deadzones().apply(RawPad { buttons, ..pad }))
     }
 
     /// The state of the npad `id` read as `style`. Without a controller of that style it is all zero, attributes

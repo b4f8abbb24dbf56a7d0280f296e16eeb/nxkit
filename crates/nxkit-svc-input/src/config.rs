@@ -2,6 +2,7 @@
 
 use crate::bind::Bindings;
 use crate::deadzone::Deadzones;
+use crate::input_map::{KeyMap, PadMap};
 use crate::look::LookConfig;
 use crate::motion::MotionMap;
 
@@ -46,6 +47,12 @@ pub struct Config {
     /// A new controller becomes a player at its first button press, the lowest player that is free. With
     /// [`Config::pad_merge`] it has no effect.
     pub pad_press_to_join: bool,
+    /// What the buttons of a controller send (`NXKIT_PAD_MAP`). The buttons that the host reads itself, Home and the
+    /// buttons of the Home menu, are read before it.
+    pub pad_map: PadMap,
+    /// The functions that `NXKIT_KEYMAP` moves to other keys. It applies on top of the PC layout, and
+    /// [`Config::binds`] applies on top of it.
+    pub key_map: KeyMap,
 }
 
 impl Default for Config {
@@ -68,14 +75,17 @@ impl Default for Config {
             stick_deadzone_r: 0,
             pad_merge: false,
             pad_press_to_join: false,
+            pad_map: PadMap::default(),
+            key_map: KeyMap::default(),
         }
     }
 }
 
 impl Config {
-    /// The PC layout with the changes of `binds`.
+    /// The PC layout with the changes of `key_map`, then those of `binds`.
     pub(crate) fn bindings(&self) -> Bindings {
         let mut b = Bindings::pc();
+        self.key_map.apply(&mut b);
         let _ = b.rebind_all(&self.binds);
         b
     }
@@ -158,6 +168,23 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(c.motion_map(), MotionMap::default());
+    }
+
+    #[test]
+    fn the_input_file_binds_win_over_the_key_map() {
+        use crate::bind::{Action, Source};
+        use crate::keys::usage;
+        use crate::npad::btn;
+        let c = Config {
+            key_map: KeyMap::parse("A=40,X=37").unwrap(),
+            binds: vec![("k".to_owned(), "zr".to_owned())],
+            ..Config::default()
+        };
+        let b = c.bindings();
+        let key = |c| b.get(Source::Key(usage::letter(c)));
+        assert_eq!(key(b'k'), Some(Action::Button(btn::ZR)));
+        assert_eq!(key(b'l'), Some(Action::Button(btn::X)));
+        assert_eq!(key(b'e'), None, "A left E");
     }
 
     #[test]

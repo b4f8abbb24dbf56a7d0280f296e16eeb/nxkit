@@ -73,6 +73,12 @@ pub struct HostEnv {
     pub pad_merge: bool,
     /// `NXKIT_PAD_PRESS_TO_JOIN=1` (a launch option): a new controller becomes a player at its first button press.
     pub pad_press_to_join: bool,
+    /// `NXKIT_PAD_MAP` (not blank, set by the launcher, no launch option): what the buttons of a controller send, as
+    /// given. `nxkit_svc_input::PadMap::parse` reads it.
+    pub pad_map: Option<String>,
+    /// `NXKIT_KEYMAP` (not blank, set by the launcher, no launch option): functions on other keys, as given.
+    /// `nxkit_svc_input::KeyMap::parse` reads it.
+    pub key_map: Option<String>,
     /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
@@ -165,6 +171,8 @@ impl HostEnv {
             pad_press_to_join: env
                 .var(launch::PAD_PRESS_TO_JOIN)
                 .is_ok_and(|v| v.trim() == "1"),
+            pad_map: not_blank(env, launch::PAD_MAP),
+            key_map: not_blank(env, launch::KEYMAP),
             handheld: env.var(launch::OP_MODE).ok().and_then(|v| match v.trim() {
                 "handheld" => Some(true),
                 "docked" => Some(false),
@@ -233,6 +241,11 @@ fn in_range(env: &Env, key: &str, min: f32, max: f32) -> Option<f32> {
 /// The value of `key` as a whole percent from 0 to 50, 0 when it is unset, not a whole number or above 50.
 fn percent(env: &Env, key: &str) -> u8 {
     parsed::<u8>(env, key).filter(|p| *p <= 50).unwrap_or(0)
+}
+
+/// The value of `key` as given, None when it is unset or blank.
+fn not_blank(env: &Env, key: &str) -> Option<String> {
+    env.var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
 /// The value of `key` parsed as `T`, None when it is unset or not a `T`.
@@ -394,6 +407,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_input_maps_are_kept_as_given_unless_blank() {
+        let read = |v: &str| {
+            let e = HostEnv::from_env(&Env::from_pairs([
+                ("NXKIT_PAD_MAP", v),
+                ("NXKIT_KEYMAP", v),
+            ]));
+            (e.pad_map, e.key_map)
+        };
+        let given = Some("A=B,B=A".to_owned());
+        assert_eq!(read("A=B,B=A"), (given.clone(), given));
+        assert_eq!(read(" "), (None, None));
     }
 
     #[test]

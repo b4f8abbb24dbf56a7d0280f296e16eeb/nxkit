@@ -75,6 +75,14 @@ pub const PAD_MERGE: &str = "NXKIT_PAD_MERGE";
 /// `1`: a new controller becomes a player at its first button press, the lowest player that is free.
 pub const PAD_PRESS_TO_JOIN: &str = "NXKIT_PAD_PRESS_TO_JOIN";
 
+/// What the buttons of a controller send, as `DM_PAD_MAP` of the old engine: `<button>=<button>,…`. Not a row of
+/// [`OPTIONS`]: a launcher sets it from its own button map editor. `nxkit_svc_input::PadMap` parses it.
+pub const PAD_MAP: &str = "NXKIT_PAD_MAP";
+
+/// Functions on other keys, as `DM_KEYMAP` of the old engine: `<function>=<macOS key code>,…`. Not a row of
+/// [`OPTIONS`]: a launcher sets it from its own key map editor. `nxkit_svc_input::KeyMap` parses it.
+pub const KEYMAP: &str = "NXKIT_KEYMAP";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {

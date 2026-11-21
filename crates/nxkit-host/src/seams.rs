@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use nxkit_abi::ipc::Named;
+use nxkit_abi::launch;
 use nxkit_metal::{Context, FrameHooks, GuestMemory};
 use nxkit_rt::Service;
+use nxkit_svc_input::{KeyMap, PadMap};
 use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
@@ -209,6 +211,22 @@ fn console_language(vars: &crate::hostenv::HostEnv) -> String {
     lang.to_owned()
 }
 
+/// The map of the variable `name` from its `value`. A value that does not parse whole is ignored with one line in the
+/// log, and the default stays.
+fn input_map<T: Default, E: std::fmt::Display>(
+    name: &str,
+    value: Option<&str>,
+    parse: impl FnOnce(&str) -> std::result::Result<T, E>,
+) -> T {
+    let Some(value) = value else {
+        return T::default();
+    };
+    parse(value).unwrap_or_else(|e| {
+        eprintln!("nxkit-host: {name}: {e}, the value is ignored");
+        T::default()
+    })
+}
+
 /// Starts the service crates with the configuration of the game. The services are the names in `game.services`.
 ///
 /// Every crate gets typed values from `game.json`: fs the romfs, the title ID and the DLC folder, system the launch
@@ -279,8 +297,16 @@ pub fn init_services(
             stick_deadzone_r: env.stick_deadzone_r,
             pad_merge: env.pad_merge,
             pad_press_to_join: env.pad_press_to_join,
+            pad_map: input_map(launch::PAD_MAP, env.pad_map.as_deref(), PadMap::parse),
+            key_map: input_map(launch::KEYMAP, env.key_map.as_deref(), KeyMap::parse),
             ..nxkit_svc_input::Config::default()
         };
+        for code in config.key_map.unread_codes() {
+            eprintln!(
+                "nxkit-host: {}: key code {code} is a key that nxkit does not read, its function is on no key",
+                launch::KEYMAP
+            );
+        }
         let (file, warnings) = crate::input_file::load(&game.root, &game.title_id);
         for w in warnings {
             eprintln!("nxkit-host: input: {w}");

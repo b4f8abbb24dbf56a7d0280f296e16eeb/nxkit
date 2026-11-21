@@ -28,7 +28,12 @@ pub(crate) mod usage {
     pub(crate) const SLASH: u8 = 0x38;
     pub(crate) const CAPS_LOCK: u8 = 0x39;
     pub(crate) const F1: u8 = 0x3a;
+    pub(crate) const INSERT: u8 = 0x49;
+    pub(crate) const HOME: u8 = 0x4a;
+    pub(crate) const PAGE_UP: u8 = 0x4b;
     pub(crate) const DELETE_FORWARD: u8 = 0x4c;
+    pub(crate) const END: u8 = 0x4d;
+    pub(crate) const PAGE_DOWN: u8 = 0x4e;
     pub(crate) const RIGHT: u8 = 0x4f;
     pub(crate) const LEFT: u8 = 0x50;
     pub(crate) const DOWN: u8 = 0x51;
