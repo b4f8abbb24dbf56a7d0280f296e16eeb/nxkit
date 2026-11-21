@@ -179,10 +179,10 @@ fn space_to_depth_orders_the_channels() {
     }
     let t = space_to_depth(&img).unwrap();
     assert_eq!((t.width, t.height, t.channels), (1, 1, 16));
-    for k in 0..16 {
+    for (k, &d) in img.data.iter().enumerate() {
         assert_eq!(
             t.pixel(0, 0)[k],
-            from_f32(f32::from(img.data[k]) / 255.0),
+            from_f32(f32::from(d) / 255.0),
             "channel {k}"
         );
     }
