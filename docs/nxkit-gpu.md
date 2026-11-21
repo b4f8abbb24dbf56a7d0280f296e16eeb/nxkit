@@ -65,7 +65,7 @@ An argument buffer that a recorded ICB keeps holds the address of the table of t
 A translated shader has one argument buffer per stage at `[[buffer(0)]]`. Member `arg_id` is at byte `8 * arg_id` and holds a GPU address or a resource ID. The encoder writes into it:
 
 - A `cbuf` binding gets the GPU address of the uniform buffer in guest memory (R3). A buffer that the guest rewrote in the same frame is copied into the per-batch `Scratch` first, because the frame is encoded after the guest wrote all versions. Every other buffer is bound by its guest address.
-- A `tex` binding gets the resource ID of the texture view that the handle names (`texture_id | sampler_id << 20`). A `samp` binding gets the resource ID of the sampler. A `samp_tex` binding gets both.
+- A `tex` binding gets the resource ID of the texture view that the handle names (`texture_id | sampler_id << 20`). A `tex` binding with `reg` 128 or more reads separate texture `reg - 128` (`nvnCommandBufferBindSeparateTexture`). A `samp` binding gets the resource ID of the separate sampler in slot `reg` (`nvnCommandBufferBindSeparateSampler`), from the sampler table. Without one it takes the sampler of the combined handle in that slot. A `samp_tex` binding gets the sampler of the combined handle.
 - A `tex_pool` or `samp_pool` binding gets the address of a host table that maps descriptor ids to resource IDs. The encoder writes the entries of every handle that the frame uses, the textures that shaders read through the table and every registered sampler (see "The pool tables" below).
 - A `drvcb` binding gets the driver constant block: the combined texture handles, the base instance and, for compute, the dispatch size and the uniform buffers.
 

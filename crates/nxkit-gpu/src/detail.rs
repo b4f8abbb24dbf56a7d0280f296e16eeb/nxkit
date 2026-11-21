@@ -248,6 +248,9 @@ pub struct UboDetail {
     pub snapshot: Option<Arc<[u8]>>,
 }
 
+/// The texture slot of separate texture 0: `nxb-xlate` puts the separate texture table after the combined slots.
+pub const SEPARATE_TEXTURE_SLOT0: u32 = 128;
+
 /// A texture handle bound to a texture slot of a stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextureBind {
@@ -257,6 +260,17 @@ pub struct TextureBind {
     pub slot: u32,
     /// The handle: `texture_id | sampler_id << 20`.
     pub handle: u64,
+}
+
+/// A separate sampler (`nvnCommandBufferBindSeparateSampler`) bound to a sampler slot of a stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SamplerBind {
+    /// The stage.
+    pub stage: Stage,
+    /// The slot (`reg` of a `samp` binding).
+    pub slot: u32,
+    /// The sampler id in the sampler table.
+    pub id: u32,
 }
 
 /// The state that an ICB does not hold. The encoder sets it outside the ICB.
@@ -301,8 +315,11 @@ pub struct DrawDetail {
     pub ubos: Vec<UboDetail>,
     /// The bound storage buffers. `snapshot` is always `None`.
     pub sbufs: Vec<UboDetail>,
-    /// The textures.
+    /// The textures. A separate texture (`nvnCommandBufferBindSeparateTexture`) has the slot
+    /// [`SEPARATE_TEXTURE_SLOT0`] + its index, as `reg` of the reflection.
     pub textures: Vec<TextureBind>,
+    /// The separate samplers.
+    pub samplers: Vec<SamplerBind>,
     /// The storage images (`BindImage`) of the vertex and fragment stages, by `slot` of the `img` binding.
     pub images: Vec<TextureBind>,
     /// The state outside an ICB.
@@ -412,8 +429,10 @@ pub struct DispatchDetail {
     pub ubos: Vec<UboDetail>,
     /// The bound storage buffers. `snapshot` is always `None`.
     pub sbufs: Vec<UboDetail>,
-    /// The textures.
+    /// The textures, as in [`DrawDetail::textures`].
     pub textures: Vec<TextureBind>,
+    /// The separate samplers.
+    pub samplers: Vec<SamplerBind>,
     /// The storage images (`BindImage`), by `slot` of the `img` binding. `handle` is the texture id of the
     /// descriptor, without a sampler.
     pub images: Vec<TextureBind>,

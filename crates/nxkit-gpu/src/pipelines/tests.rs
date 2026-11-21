@@ -63,6 +63,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         ubos: vec![],
         sbufs: vec![],
         textures: vec![],
+        samplers: Vec::new(),
         images: vec![],
         dynamic: Default::default(),
     };

@@ -331,6 +331,7 @@ mod tests {
             ubos: vec![],
             sbufs: vec![],
             textures: vec![],
+            samplers: Vec::new(),
             images: vec![bind(Stage::Compute, 1, 9)],
         });
         detail.dispatches.push(DispatchDetail {
@@ -341,6 +342,7 @@ mod tests {
             ubos: vec![],
             sbufs: vec![],
             textures: vec![],
+            samplers: Vec::new(),
             images: vec![bind(Stage::Compute, 0, 3)],
         });
         let s = sites(&detail);

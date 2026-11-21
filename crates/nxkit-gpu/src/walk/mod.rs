@@ -34,8 +34,8 @@ use nxkit_nvn::mem::GuestMem;
 use nxkit_nvn::record::{NO_HANDLE, Record, deferred_handle};
 
 use crate::detail::{
-    ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage,
-    TextureBind, UboDetail,
+    ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef,
+    SEPARATE_TEXTURE_SLOT0, SamplerBind, Stage, TextureBind, UboDetail,
 };
 use crate::fastmap::FastMap;
 use objects::{Blends, Raster, StencilValues};
@@ -84,6 +84,10 @@ pub(super) struct State {
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
     texture: [u64; TEXTURE_SLOTS],
+    /// The separate texture handles by slot, in the bank layout of `texture`.
+    separate_texture: [u64; TEXTURE_SLOTS],
+    /// The separate sampler ids by slot, in the bank layout of `texture`. 0 is none.
+    separate_sampler: [u32; TEXTURE_SLOTS],
     /// The image handles by slot, in the bank layout of `texture`.
     image: [u64; TEXTURE_SLOTS],
     /// `SetCopyRowStride` and `SetCopyImageStride` of the command buffer. 0 is tightly packed.
@@ -113,6 +117,8 @@ impl Default for State {
             scissor: None,
             blend_color: [0.0; 4],
             texture: [NO_HANDLE; TEXTURE_SLOTS],
+            separate_texture: [NO_HANDLE; TEXTURE_SLOTS],
+            separate_sampler: [0; TEXTURE_SLOTS],
             image: [NO_HANDLE; TEXTURE_SLOTS],
             copy_strides: [0; 2],
             push: [None, None],
@@ -455,6 +461,7 @@ impl Walker {
             ubos: self.ubos(mem, st, 2, Stage::Compute),
             sbufs: sbufs(st, 2, Stage::Compute),
             textures: textures(st, 2, Stage::Compute),
+            samplers: samplers(st, 2, Stage::Compute),
             images,
         }
     }
@@ -492,6 +499,7 @@ pub(crate) fn empty_draw() -> DrawDetail {
         ubos: Vec::new(),
         sbufs: Vec::new(),
         textures: Vec::new(),
+        samplers: Vec::new(),
         images: Vec::new(),
         dynamic: Default::default(),
     }
@@ -527,37 +535,68 @@ pub(super) fn sbufs(st: &State, bank: usize, stage: Stage) -> Vec<UboDetail> {
     out
 }
 
-/// The 32 texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages).
-fn bank(st: &State, bank: usize) -> &[u64] {
-    st.texture.get(bank * 32..bank * 32 + 32).unwrap_or(&[])
+/// The 32 slots of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) in a table of the bank layout.
+fn bank<T>(table: &[T; TEXTURE_SLOTS], bank: usize) -> &[T] {
+    table.get(bank * 32..bank * 32 + 32).unwrap_or(&[])
 }
 
-/// The number of texture handles of the bank that are bound.
+/// The number of texture handles of the bank that are bound, separate textures included.
 pub(super) fn texture_count(st: &State, bank_index: usize) -> usize {
-    bank(st, bank_index)
+    bank(&st.texture, bank_index)
         .iter()
+        .chain(bank(&st.separate_texture, bank_index))
         .filter(|h| **h != NO_HANDLE)
         .count()
 }
 
-/// Adds the texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) that are bound to `out`.
+/// Adds the texture handles of the bank (0 vertex, 1 fragment, 2 compute, 3 the other stages) that are bound to `out`,
+/// the separate textures from [`SEPARATE_TEXTURE_SLOT0`].
 pub(super) fn textures_into(
     st: &State,
     bank_index: usize,
     stage: Stage,
     out: &mut Vec<TextureBind>,
 ) {
-    out.extend(
-        bank(st, bank_index)
+    let bound = |table, first: u32| {
+        bank(table, bank_index)
             .iter()
             .enumerate()
             .filter(|(_, h)| **h != NO_HANDLE)
-            .map(|(i, handle)| TextureBind {
+            .map(move |(i, handle)| TextureBind {
+                stage,
+                slot: first + i as u32,
+                handle: *handle,
+            })
+    };
+    out.extend(bound(&st.texture, 0));
+    out.extend(bound(&st.separate_texture, SEPARATE_TEXTURE_SLOT0));
+}
+
+/// Adds the separate samplers of the bank that are bound to `out`.
+pub(super) fn samplers_into(
+    st: &State,
+    bank_index: usize,
+    stage: Stage,
+    out: &mut Vec<SamplerBind>,
+) {
+    out.extend(
+        bank(&st.separate_sampler, bank_index)
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| **id != 0)
+            .map(|(i, id)| SamplerBind {
                 stage,
                 slot: i as u32,
-                handle: *handle,
+                id: *id,
             }),
     );
+}
+
+/// The separate samplers of the bank that are bound.
+fn samplers(st: &State, bank_index: usize, stage: Stage) -> Vec<SamplerBind> {
+    let mut out = Vec::new();
+    samplers_into(st, bank_index, stage, &mut out);
+    out
 }
 
 /// Adds the image handles of the bank (same layout as the textures) that are bound to `out`.

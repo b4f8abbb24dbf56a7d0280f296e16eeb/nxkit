@@ -25,7 +25,7 @@ use nxkit_metal::{Context, DataBuffer, Sampler, Scratch, Texture};
 use nxkit_nvn::resource::TexId;
 use nxkit_nvn::tic::Tsc;
 
-use crate::detail::{Stage, TextureBind, UboDetail};
+use crate::detail::{SamplerBind, Stage, TextureBind, UboDetail};
 use crate::programs::{BindKind, StageProgram};
 use crate::skip::Skip;
 use crate::translate;
@@ -234,6 +234,11 @@ impl Bindless {
             samp_n: 0,
             marks: Default::default(),
         })
+    }
+
+    /// The resource IDs of the sampler table by sampler id, as the frame published them.
+    pub(crate) fn sampler_table(&self) -> &crate::fastmap::FastMap<u32, u64> {
+        &self.samp_mirror
     }
 
     /// The resource ID of the sampler that a missing sampler header gets.

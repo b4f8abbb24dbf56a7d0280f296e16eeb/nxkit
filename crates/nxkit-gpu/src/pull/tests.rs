@@ -163,6 +163,7 @@ fn draw(attributes: Vec<AttributeDetail>, streams: Vec<StreamDetail>) -> DrawDet
         ubos: vec![],
         sbufs: vec![],
         textures: vec![],
+        samplers: Vec::new(),
         images: vec![],
         dynamic: Default::default(),
     }

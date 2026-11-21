@@ -10,7 +10,7 @@ use super::objects::{self, Blends, StencilValues, write_masks};
 use super::programs::Kind;
 use super::{
     ATTRIBUTES, MAX_COLOR, MESH, MESH_TEXTURES, STREAMS, State, TASK, UBOS, Walker, bound_count,
-    empty_draw, images_into, sbufs_into, texture_count, textures_into,
+    empty_draw, images_into, samplers_into, sbufs_into, texture_count, textures_into,
 };
 use crate::detail::{
     AttributeDetail, ClearDetail, CopyDetail, CopyKind, DrawArgs, DrawDetail, DynamicDetail,

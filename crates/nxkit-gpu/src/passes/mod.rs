@@ -48,6 +48,7 @@ fn dispatch(
         ubos: &dd.ubos,
         sbufs: &dd.sbufs,
         textures: &dd.textures,
+        samplers: &dd.samplers,
         images: &dd.images,
         base_instance: 0,
         groups: Some(dd.groups),

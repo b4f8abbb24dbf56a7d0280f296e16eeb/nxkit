@@ -384,6 +384,7 @@ impl Gpu {
                     rename: &rename_map,
                     guest_pools: pools,
                     default_sampler: self.bindless.default_sampler_id(),
+                    samplers: self.bindless.sampler_table(),
                     statics: self.bindless.statics(),
                     scale,
                 },

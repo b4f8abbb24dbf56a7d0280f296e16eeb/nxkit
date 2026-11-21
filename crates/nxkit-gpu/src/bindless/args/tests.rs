@@ -26,6 +26,8 @@ fn env<'a>(
 ) -> Env<'a> {
     static NO_POOLS: std::sync::OnceLock<crate::guestpools::GuestPools> =
         std::sync::OnceLock::new();
+    static NO_SAMPLERS: std::sync::OnceLock<crate::fastmap::FastMap<u32, u64>> =
+        std::sync::OnceLock::new();
     Env {
         handles,
         fits,
@@ -35,6 +37,7 @@ fn env<'a>(
         rename: &NO_RENAME,
         guest_pools: NO_POOLS.get_or_init(crate::guestpools::GuestPools::empty),
         default_sampler: 0,
+        samplers: NO_SAMPLERS.get_or_init(Default::default),
         statics: (0, 0),
         scale: 2.0,
     }
@@ -207,6 +210,7 @@ fn a_uniform_word_is_real_and_c0_stays_virtual() {
         ubos: &ubos,
         sbufs: &[],
         textures: &[],
+        samplers: &[],
         images: &[],
         base_instance: 0,
         groups: Some([1, 1, 1]),
@@ -349,4 +353,32 @@ fn a_blend_word_puts_four_bytes() {
     let at = blend_word(word, 0x77, &mut sink).unwrap();
     assert_eq!(at, 0x1010);
     assert_eq!(sink.0, [word.to_le_bytes().to_vec()]);
+}
+
+#[test]
+fn a_samp_binding_reads_the_separate_sampler_of_its_stage_and_slot() {
+    let samplers = [
+        SamplerBind {
+            stage: Stage::Vertex,
+            slot: 1,
+            id: 7,
+        },
+        SamplerBind {
+            stage: Stage::Fragment,
+            slot: 1,
+            id: 9,
+        },
+    ];
+    let mut table = crate::fastmap::FastMap::default();
+    table.insert(9, 0x900);
+    assert_eq!(
+        separate_sampler(&samplers, &table, Stage::Fragment, 1),
+        Some(0x900)
+    );
+    // A slot with no separate sampler, or one whose id the table does not hold, keeps the combined sampler.
+    assert_eq!(
+        separate_sampler(&samplers, &table, Stage::Fragment, 0),
+        None
+    );
+    assert_eq!(separate_sampler(&samplers, &table, Stage::Vertex, 1), None);
 }

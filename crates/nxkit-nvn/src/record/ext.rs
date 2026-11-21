@@ -47,7 +47,8 @@ pub enum ExtCode {
     /// A chunk of vertex attribute (argument 0) or vertex stream (argument 1) states. Words: first entry, entry
     /// count of the chunk, the bytes of the entries.
     VertexState,
-    /// `BindSeparateSampler`. The argument is `stage << 8 | index`. Words: the sampler id.
+    /// `BindSeparateSampler`. The argument is the slot, `bank * 32 + index` as for
+    /// [`Record::BindTexture`](crate::record::Record::BindTexture). Words: the sampler id.
     SeparateSampler,
     /// The view of a render target. The argument is the slot, 8 means depth and stencil. Words: the 16 bytes of the view.
     TargetView,
@@ -107,9 +108,13 @@ pub enum ExtCode {
     ViewportSwizzle,
     /// `WaitEvent`. Words: event address (2), wait mode, value.
     WaitEvent,
+    /// `BindSeparateTexture`. The argument is the slot, as for [`ExtCode::SeparateSampler`]. Words: the texture
+    /// handle (2), its sampler id 0. A shader reads it from the separate texture table, apart from the combined
+    /// textures of [`Record::BindTexture`](crate::record::Record::BindTexture).
+    SeparateTexture,
 }
 
-const CODES: [ExtCode; 37] = [
+const CODES: [ExtCode; 38] = [
     ExtCode::Setting,
     ExtCode::Program,
     ExtCode::VertexBuffer,
@@ -147,6 +152,7 @@ const CODES: [ExtCode; 37] = [
     ExtCode::TransformFeedback,
     ExtCode::ViewportSwizzle,
     ExtCode::WaitEvent,
+    ExtCode::SeparateTexture,
 ];
 
 impl ExtCode {

@@ -109,6 +109,8 @@ impl Walker {
             .reserve_exact(texture_count(st, 0) + texture_count(st, 1));
         textures_into(st, 0, Stage::Vertex, &mut d.textures);
         textures_into(st, 1, Stage::Fragment, &mut d.textures);
+        samplers_into(st, 0, Stage::Vertex, &mut d.samplers);
+        samplers_into(st, 1, Stage::Fragment, &mut d.samplers);
         images_into(st, 0, Stage::Vertex, &mut d.images);
         images_into(st, 1, Stage::Fragment, &mut d.images);
         if !d.images.is_empty() {
@@ -175,6 +177,7 @@ impl Walker {
                 MESH_TEXTURES
             };
             textures_into(st, textures, stage, &mut d.textures);
+            samplers_into(st, textures, stage, &mut d.samplers);
             images_into(st, textures, stage, &mut d.images);
         }
         if !d.images.is_empty() {

@@ -148,14 +148,16 @@ fn bind_handle(c: u64, kind: Kind, st: u16, index: i32, h: u64, b: Bases) -> Abi
                 handle: adjust(h, b, true, true),
             },
         ),
-        Kind::Separate => emit_rec(
-            name,
-            c,
-            Record::BindTexture {
-                slot,
-                handle: adjust(h, b, true, false),
-            },
-        ),
+        Kind::Separate => {
+            let handle = adjust(h, b, true, false);
+            emit(
+                "nvnCommandBufferBindSeparateTexture",
+                c,
+                ExtCode::SeparateTexture,
+                u16::from(slot),
+                &[lo(handle), hi(handle)],
+            );
+        }
         Kind::Image => emit_rec(
             name,
             c,
@@ -246,23 +248,23 @@ extern "C" fn bind_separate_textures(c: u64, st: i32, first: i32, n: i32, h: u64
     });
 }
 
-fn bind_sampler(name: &'static str, c: u64, s: u16, index: u32, h: u64, b: Bases) {
-    let id = adjust(h, b, false, true) as u32;
+fn bind_sampler(name: &'static str, c: u64, s: u16, index: u32, h: u64, b: Bases) -> AbiResult<()> {
+    let id = (adjust(h, b, false, true) >> 20) as u32;
     emit(
         name,
         c,
         ExtCode::SeparateSampler,
-        s << 8 | index as u16,
+        u16::from(slot(s, index as i32)?),
         &[id],
     );
+    Ok(())
 }
 
 extern "C" fn bind_separate_sampler(c: u64, st: i32, i: i32, h: u64) {
     let name = "nvnCommandBufferBindSeparateSampler";
     guard(name, || {
         let (i, _) = span(i, 1, HANDLES)?;
-        bind_sampler(name, c, stage(st)?, i, h, bases(c)?);
-        Ok(())
+        bind_sampler(name, c, stage(st)?, i, h, bases(c)?)
     });
 }
 
@@ -274,7 +276,7 @@ extern "C" fn bind_separate_samplers(c: u64, st: i32, first: i32, n: i32, handle
         let b = bases(c)?;
         for k in 0..n {
             let h = Obj(handles + u64::from(k) * 8).u64(0)?;
-            bind_sampler(name, c, s, first + k, h, b);
+            bind_sampler(name, c, s, first + k, h, b)?;
         }
         Ok(())
     });

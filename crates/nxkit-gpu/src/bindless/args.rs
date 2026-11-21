@@ -15,6 +15,7 @@ pub(crate) struct StageInputs<'a> {
     pub(crate) ubos: &'a [UboDetail],
     pub(crate) sbufs: &'a [UboDetail],
     pub(crate) textures: &'a [TextureBind],
+    pub(crate) samplers: &'a [SamplerBind],
     pub(crate) images: &'a [TextureBind],
     pub(crate) base_instance: u32,
     pub(crate) groups: Option<[u32; 3]>,
@@ -39,10 +40,25 @@ pub(crate) struct Env<'a> {
     /// The memory pools at the flush of the frame.
     pub(crate) guest_pools: &'a crate::guestpools::GuestPools,
     pub(crate) default_sampler: u64,
+    /// The resource IDs of the sampler table by sampler id ([`Bindless::sampler_table`]).
+    pub(crate) samplers: &'a crate::fastmap::FastMap<u32, u64>,
     /// The support buffer and the zero buffer, from [`Bindless::statics`].
     pub(crate) statics: (u64, u64),
     /// The render scale of a scaled texture (`GpuSettings.scale`, 1 when nothing is scaled).
     pub(crate) scale: f32,
+}
+
+/// The resource ID of the separate sampler that `stage` binds in `slot`, when it binds one that the sampler table holds.
+fn separate_sampler(
+    samplers: &[SamplerBind],
+    table: &crate::fastmap::FastMap<u32, u64>,
+    stage: Stage,
+    slot: u32,
+) -> Option<u64> {
+    samplers
+        .iter()
+        .find(|s| s.stage == stage && s.slot == slot)
+        .and_then(|s| table.get(&s.id).copied())
 }
 
 fn put_u64(buf: &mut [u8], at: usize, v: u64) {
@@ -353,7 +369,16 @@ fn build_args_in(
                     .or_else(|| env.handles.get(&h).map(|r| r.texture))
                     .unwrap_or(0)
             }),
-            BindKind::Samp | BindKind::SampTex => handle_of(b.reg)
+            // `samp` reads the separate sampler table of the stage. A game that binds no separate sampler there keeps
+            // the sampler of the combined handle in the same slot, as before.
+            BindKind::Samp => separate_sampler(inp.samplers, env.samplers, inp.stage, b.reg)
+                .or_else(|| {
+                    handle_of(b.reg)
+                        .and_then(|h| env.handles.get(&h))
+                        .map(|r| r.sampler)
+                })
+                .unwrap_or(env.default_sampler),
+            BindKind::SampTex => handle_of(b.reg)
                 .and_then(|h| env.handles.get(&h))
                 .map_or(env.default_sampler, |r| r.sampler),
             BindKind::TexPool => {

@@ -315,3 +315,47 @@ fn an_event_signal_becomes_an_event_report_with_the_counter_word() {
     );
     assert!(reports.iter().all(crate::detail::CounterReport::is_event));
 }
+
+#[test]
+fn separate_textures_and_samplers_keep_their_own_slots() {
+    let map = AddressMap::new(0x1000, 0x2000, 0x100).unwrap();
+    let mut w = Walker::new(Default::default(), map);
+    let mut mem = VecMem::new(0x1000, 0x100);
+    let mut st = State::default();
+    // Slot 33 is index 1 of the fragment bank, in the combined and in the separate table.
+    w.apply(
+        &mut mem,
+        &mut st,
+        nxkit_nvn::record::Record::BindTexture {
+            slot: 33,
+            handle: 0x40,
+        },
+    );
+    w.ext(
+        &mut mem,
+        &mut st,
+        &copy_ext(ExtCode::SeparateTexture, 33, &[0x55, 0]),
+    );
+    w.ext(
+        &mut mem,
+        &mut st,
+        &copy_ext(ExtCode::SeparateSampler, 32, &[3]),
+    );
+    let mut textures = Vec::new();
+    textures_into(&st, 1, Stage::Fragment, &mut textures);
+    let slots: Vec<(u32, u64)> = textures.iter().map(|t| (t.slot, t.handle)).collect();
+    assert_eq!(
+        slots,
+        vec![(1, 0x40), (crate::detail::SEPARATE_TEXTURE_SLOT0 + 1, 0x55)]
+    );
+    let mut samplers = Vec::new();
+    samplers_into(&st, 1, Stage::Fragment, &mut samplers);
+    assert_eq!(
+        samplers,
+        vec![crate::detail::SamplerBind {
+            stage: Stage::Fragment,
+            slot: 0,
+            id: 3,
+        }]
+    );
+}

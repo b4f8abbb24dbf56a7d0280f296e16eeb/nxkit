@@ -78,6 +78,7 @@ fn three_passes(
         ubos: Vec::new(),
         sbufs: vec![ubo(at)],
         textures: Vec::new(),
+        samplers: Vec::new(),
         images: Vec::new(),
     };
     let d = Cmd::Dispatch {

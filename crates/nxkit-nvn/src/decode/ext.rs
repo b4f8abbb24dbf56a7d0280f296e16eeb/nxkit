@@ -115,6 +115,15 @@ impl Builder {
                     addr: x.word64(1),
                 });
             }
+            // The pass analysis needs the textures a draw samples, not the table they come from. A separate texture
+            // takes the combined slot of the same number here.
+            ExtCode::SeparateTexture if x.arg < 128 => self.apply(
+                cx,
+                Record::BindTexture {
+                    slot: x.arg as u8,
+                    handle: x.word64(0),
+                },
+            ),
             ExtCode::State => self.patch_state(x),
             ExtCode::Scissor if x.arg == FIRST_SCISSOR => self.scissor(cx, x),
             _ => {}

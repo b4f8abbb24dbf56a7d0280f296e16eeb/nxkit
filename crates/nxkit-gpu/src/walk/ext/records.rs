@@ -124,6 +124,20 @@ impl Walker {
                 ]);
                 self.track.write(cache::scalar_bit(sc::SCISSOR));
             }
+            // The template cache does not follow the separate tables, so a recording that binds one is not a
+            // template, as for an image bind.
+            ExtCode::SeparateTexture => {
+                if let Some(t) = st.separate_texture.get_mut(usize::from(x.arg)) {
+                    *t = x.word64(0);
+                }
+                self.track.truncated();
+            }
+            ExtCode::SeparateSampler => {
+                if let Some(t) = st.separate_sampler.get_mut(usize::from(x.arg)) {
+                    *t = x.word(0);
+                }
+                self.track.truncated();
+            }
             ExtCode::State => self.state_object(st, x),
             ExtCode::TargetView if crate::diag("target") => {
                 static VIEWS: std::sync::Mutex<Vec<(u16, [u32; 4])>> =

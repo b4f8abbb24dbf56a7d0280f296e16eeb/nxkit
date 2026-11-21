@@ -38,6 +38,7 @@ fn the_written_ranges_cover_stores_copies_and_learned_pools() {
             ubos: Vec::new(),
             sbufs: vec![ubo(0x1000, 64, 0), ubo(0x2000, 64, 1)],
             textures: Vec::new(),
+            samplers: Vec::new(),
             images: Vec::new(),
         }],
         copies: vec![
@@ -113,6 +114,7 @@ fn dispatch(addr: u64, size: u32) -> FrameDetail {
             ubos: vec![ubo(addr + 0x8000, 64, 0)],
             sbufs: vec![ubo(addr, size, 0)],
             textures: Vec::new(),
+            samplers: Vec::new(),
             images: Vec::new(),
         }],
         ..Default::default()
