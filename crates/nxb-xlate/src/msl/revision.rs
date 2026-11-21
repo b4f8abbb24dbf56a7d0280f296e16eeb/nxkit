@@ -125,13 +125,18 @@ fn uses_surface(job: &Job, code: &[u8]) -> bool {
 
 /// Whether `code` holds an instruction that `wanted` names. Every 64-bit word of Maxwell code and every 128-bit word
 /// of Ampere code is looked at, the header and the scheduling words included (an over-approximation).
-fn uses_inst(job: &Job, code: &[u8], wanted: impl Fn(nxb_maxwell::names::InstName) -> bool) -> bool {
+fn uses_inst(
+    job: &Job,
+    code: &[u8],
+    wanted: impl Fn(nxb_maxwell::names::InstName) -> bool,
+) -> bool {
     if job.arch_sm86 {
         let (words, _) = code.as_chunks::<16>();
         return words.iter().any(|w| {
             let mut lo = [0u8; 8];
             lo.copy_from_slice(&w[..8]);
-            ampere_table::lookup((u64::from_le_bytes(lo) & 0xfff) as usize).is_some_and(|e| wanted(e.name))
+            ampere_table::lookup((u64::from_le_bytes(lo) & 0xfff) as usize)
+                .is_some_and(|e| wanted(e.name))
         });
     }
     let (words, _) = code.as_chunks::<8>();

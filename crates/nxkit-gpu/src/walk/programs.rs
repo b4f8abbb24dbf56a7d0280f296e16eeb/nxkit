@@ -21,6 +21,9 @@ pub(super) enum Kind {
     Task,
     /// An NVN2 mesh shader.
     Mesh,
+    /// A geometry shader that may only pick the layer of a triangle: triangles in, at most 3 vertices out, one
+    /// invocation. The encoder folds it into the layer entry of the vertex shader (`pipelines::render`).
+    Geometry,
     Other,
 }
 
@@ -144,9 +147,19 @@ impl Programs {
             "cs" => Kind::Compute,
             "ts" => Kind::Task,
             "ms" => Kind::Mesh,
+            "gs" if slice_geometry(&json) => Kind::Geometry,
             _ => Kind::Other,
         })
     }
+}
+
+/// Whether the `geometry` of a geometry shader's reflection allows a shader that only picks the layer: at most 3
+/// vertices out of one invocation. The translator does not say what the shader does; a geometry shader that emits other
+/// triangles is not drawn either way (the encoder has no geometry stage).
+fn slice_geometry(json: &Json) -> bool {
+    let g = json.get("geometry");
+    let n = |k: &str| g.and_then(|g| g.get(k)).and_then(Json::as_i64);
+    matches!(n("vertices"), Some(1..=3)) && n("invocations") == Some(1)
 }
 
 #[cfg(test)]
@@ -194,5 +207,18 @@ mod tests {
         p.release(7);
         assert_eq!(p.find(7, Kind::Vertex).map(|k| &**k), None);
         assert!(p.epoch() > epoch && p.generation(7) > 0);
+    }
+
+    #[test]
+    fn a_geometry_shader_of_one_triangle_may_only_pick_the_layer() {
+        let gs = |g: &str| parse(&format!("{{\"stage\": \"gs\", \"geometry\": {g}}}")).unwrap();
+        assert!(slice_geometry(&gs("{\"vertices\": 3, \"invocations\": 1}")));
+        assert!(!slice_geometry(&gs(
+            "{\"vertices\": 18, \"invocations\": 1}"
+        )));
+        assert!(!slice_geometry(&gs(
+            "{\"vertices\": 3, \"invocations\": 6}"
+        )));
+        assert!(!slice_geometry(&parse("{\"stage\": \"gs\"}").unwrap()));
     }
 }

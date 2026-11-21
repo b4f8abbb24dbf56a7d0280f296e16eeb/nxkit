@@ -482,6 +482,7 @@ pub(crate) fn empty_draw() -> DrawDetail {
             fragment: None,
             task: None,
             mesh: None,
+            geometry: None,
         },
         blend: Default::default(),
         write_masks: [0xf; 8],

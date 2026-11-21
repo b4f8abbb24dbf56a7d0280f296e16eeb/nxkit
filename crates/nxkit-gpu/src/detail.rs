@@ -37,6 +37,9 @@ pub struct ProgramRef {
     pub task: Option<Arc<str>>,
     /// The key of the mesh shader of a mesh draw. `None` for every other draw.
     pub mesh: Option<Arc<str>>,
+    /// The key of a geometry shader that may only pick the layer (`walk::programs::Kind::Geometry`). The encoder
+    /// draws the layer entry of the vertex shader in a layered pass instead.
+    pub geometry: Option<Arc<str>>,
 }
 
 /// The blend state of one colour target (`NVNblendFunc` and `NVNblendEquation` values).

@@ -9,6 +9,8 @@ pub(super) struct Setup {
     /// The colour attachments that render the blocks of a compressed texture into a shadow, and whether the pass loads
     /// (true) the old blocks and stores (second) the new ones.
     pub(super) blocks: Vec<(BlockTarget, bool, bool)>,
+    /// The layers of a layered pass (`CommandBuffer::layer_next_pass`), 0 for a pass that is not layered.
+    pub(super) layers: u32,
 }
 
 pub(super) fn load(a: LoadAction, memoryless: bool) -> MLoad {
@@ -347,6 +349,7 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
         formats[usize::from(n)] = Some(c.texture.desc().format);
         desc.colors[usize::from(n)] = Some(c);
     }
+    let layers = layers_of(sh, pass, &mut desc);
     let pc = PassCtx {
         targets: Targets {
             colors: formats,
@@ -357,7 +360,53 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
         has_depth: desc.depth.is_some(),
         has_stencil,
     };
-    Ok(Setup { desc, pc, blocks })
+    Ok(Setup {
+        desc,
+        pc,
+        blocks,
+        layers,
+    })
+}
+
+/// The layers of a pass that draws through the layer entry of a vertex shader (`pipelines::render::layered`): the
+/// depth planes of its 3D colour attachments, which then start at plane 0, and the vertex function picks the plane. A
+/// pass whose attachments are not all 3D colour targets stays unlayered (its layered draws land in the attached plane,
+/// as before), with a note.
+fn layers_of(sh: &EncodeCtx<'_>, pass: &Pass, desc: &mut RenderPassDesc) -> u32 {
+    let layered = draw_range(sh, pass).any(|n| {
+        sh.detail.draws.get(n as usize).is_some_and(|d| {
+            d.program.geometry.is_some()
+                && sh
+                    .programs
+                    .stage(&d.program.vertex, true)
+                    .is_ok_and(|vs| crate::pipelines::layered(d, &vs))
+        })
+    });
+    if !layered {
+        return 0;
+    }
+    let colors: Vec<&mut ColorAttachment> = desc.colors.iter_mut().flatten().collect();
+    if colors.is_empty()
+        || desc.depth.is_some()
+        || colors
+            .iter()
+            .any(|c| c.texture.desc().kind != nxkit_metal::TextureKind::D3)
+    {
+        nxkit_nvn::diag::note(
+            nxkit_nvn::diag::Reason::StageIgnored,
+            format_args!(
+                "layered draws into attachments that are not 3D colour targets, cmds {:?}",
+                pass.cmds
+            ),
+        );
+        return 0;
+    }
+    let mut layers = u32::MAX;
+    for c in colors {
+        layers = layers.min(c.texture.desc().depth);
+        c.depth_plane = 0;
+    }
+    layers
 }
 
 /// NVN may bind a texture to several slots and select the writer with channel masks. Metal gives each attachment

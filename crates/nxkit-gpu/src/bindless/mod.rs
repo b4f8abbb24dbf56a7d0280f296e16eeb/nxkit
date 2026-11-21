@@ -100,6 +100,9 @@ pub(crate) struct ImageRes {
 /// The key of an image view: the handle, the texture type the shader declares and `ImgDecl::atomic_code`.
 pub(crate) type ImageKey = (u64, nxkit_metal::TextureKind, u8);
 
+/// The code of a sampled texture buffer in an [`ImageKey`], beside `ImgDecl::atomic_code` (0 to 2) (`images.rs`).
+pub(crate) const SAMPLED_BUFFER: u8 = 0x10;
+
 /// The host tables and the sampler cache.
 pub(crate) struct Bindless {
     ctx: Context,

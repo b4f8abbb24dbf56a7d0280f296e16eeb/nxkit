@@ -45,6 +45,8 @@ pub struct CommandBuffer {
     pub(crate) encode_passes: u32,
     /// The pass descriptor that every render pass of this command buffer fills again, and what it holds.
     pub(crate) pass_desc: Option<crate::passdesc::PassDescriptor>,
+    /// The layers of the next render pass (`renderTargetArrayLength`), 0 for a pass that is not layered.
+    pub(crate) next_pass_layers: u32,
 }
 
 // SAFETY: a Metal 4 command buffer may be encoded on any thread, one thread at a time. `CommandBuffer` is not `Sync`,
@@ -59,7 +61,15 @@ impl CommandBuffer {
             after: Vec::new(),
             encode_passes: 0,
             pass_desc: None,
+            next_pass_layers: 0,
         }
+    }
+
+    /// Makes the next render pass that this command buffer begins layered: a vertex function that writes
+    /// `[[render_target_array_index]]` picks one of `layers` layers (the depth planes of a 3D attachment, the slices of
+    /// an array). The pass after it is not layered again.
+    pub fn layer_next_pass(&mut self, layers: u32) {
+        self.next_pass_layers = layers;
     }
 
     pub(crate) fn raw(&self) -> &RawCommandBuffer {

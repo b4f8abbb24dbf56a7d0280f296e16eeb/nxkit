@@ -262,7 +262,11 @@ impl Texture {
             MTLResourceOptions,
         };
         let d = self.inner.desc;
-        if d.format.bytes_per_pixel() != 4 || d.format.is_compressed() || d.width == 0 || d.height == 0 {
+        if d.format.bytes_per_pixel() != 4
+            || d.format.is_compressed()
+            || d.width == 0
+            || d.height == 0
+        {
             return None;
         }
         let row = 4 * d.width as usize;

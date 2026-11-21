@@ -17,6 +17,9 @@ use crate::detail::{
     ProgramRef, Stage, StreamDetail, UboDetail,
 };
 
+/// The stage index of `NVNshaderStage` for geometry.
+const GEOMETRY: usize = 2;
+
 /// The `NVNshaderStage` values that have uniform buffers here, as the slot in `State::ubo`. The recorder writes the
 /// task and mesh stages as 3 and 4, the stages of tessellation, which the encoder does not run.
 fn ubo_stage(stage: u16) -> Option<usize> {

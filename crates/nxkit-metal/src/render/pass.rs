@@ -80,6 +80,8 @@ impl CommandBuffer {
             pd.raw
                 .setVisibilityResultBuffer(visibility.map(|v| &*v.raw))
         };
+        pd.raw
+            .setRenderTargetArrayLength(std::mem::take(&mut self.next_pass_layers) as usize);
         pd.raw.setVisibilityResultType(if visibility.is_some() {
             MTLVisibilityResultType::Accumulate
         } else {

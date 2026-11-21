@@ -113,7 +113,7 @@ impl Pipelines {
             None
         };
         let mut desc = RenderPipelineDesc::new(
-            (&vs.lib, vs.entry.as_str()),
+            (&vs.lib, vertex_entry(d, vs)),
             paint_lib
                 .as_ref()
                 .map(|lib| {
@@ -148,8 +148,16 @@ impl Pipelines {
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;
         desc.support_icb = icb;
+        // The layer entry is another vertex function: its pipelines have keys of their own.
+        let layered_key;
+        let vertex_key: &str = if layered(d, vs) {
+            layered_key = format!("{}:layer", d.program.vertex);
+            &layered_key
+        } else {
+            &d.program.vertex
+        };
         let key = render_key(&RenderKey {
-            vertex: &d.program.vertex,
+            vertex: vertex_key,
             fragment: d.program.fragment.as_deref(),
             targets,
             icb,
@@ -293,5 +301,30 @@ impl Pipelines {
         record::mesh(key, &job.desc(), source);
         crate::pipelines::coverage::record(&self.cache, source, None, &what());
         Ok((p, key))
+    }
+}
+
+/// True when the draw has a geometry shader that may only pick the layer and its vertex shader has a layer entry: the
+/// draw runs the layer entry in a layered pass and no geometry stage (`docs/nxkit-gpu.md`, "Geometry shaders that only
+/// pick the layer").
+pub(crate) fn layered(d: &DrawDetail, vs: &StageProgram) -> bool {
+    d.program.geometry.is_some() && vs.entry_layer.is_some()
+}
+
+/// The vertex function of the draw: the layer entry for a [`layered`] draw, the base entry otherwise.
+pub(super) fn vertex_entry<'a>(d: &DrawDetail, vs: &'a StageProgram) -> &'a str {
+    match (&d.program.geometry, &vs.entry_layer) {
+        (Some(_), Some(l)) => l,
+        (Some(g), None) => {
+            nxkit_nvn::diag::note(
+                nxkit_nvn::diag::Reason::StageIgnored,
+                format_args!(
+                    "geometry stage {g} of vertex {} without a layer entry",
+                    d.program.vertex
+                ),
+            );
+            &vs.entry
+        }
+        _ => &vs.entry,
     }
 }

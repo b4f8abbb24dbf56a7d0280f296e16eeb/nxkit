@@ -157,6 +157,8 @@ pub(crate) struct StageProgram {
     /// Bit-preserving unsigned and mixed output variants, when the translator supplied them.
     pub(crate) entry_uint: Option<String>,
     pub(crate) entry_mixed: Option<(String, u8)>,
+    /// The entry of a vertex shader that writes its layer (`entry_layer`, `[[render_target_array_index]]`).
+    pub(crate) entry_layer: Option<String>,
     /// The members of the argument buffer.
     pub(crate) binds: Vec<Bind>,
     /// The size of the argument buffer in bytes.
@@ -500,6 +502,10 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .and_then(Json::as_str)
             .zip(json.get("uint_mask_m").and_then(Json::as_i64))
             .map(|(entry, mask)| (entry.to_owned(), mask as u8)),
+        entry_layer: json
+            .get("entry_layer")
+            .and_then(Json::as_str)
+            .map(str::to_owned),
         binds,
         arg_bytes,
         inputs,

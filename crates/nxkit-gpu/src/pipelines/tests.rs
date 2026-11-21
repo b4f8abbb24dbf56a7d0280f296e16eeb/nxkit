@@ -28,6 +28,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         entry: entry.into(),
         entry_uint: None,
         entry_mixed: None,
+        entry_layer: None,
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -45,6 +46,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
             fragment: Some("fs".into()),
             task: None,
             mesh: None,
+            geometry: None,
         },
         push: None,
         blend: Default::default(),
@@ -115,4 +117,43 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
     pipelines
         .render(&draw, &vs, Some(&fs), &mixed, false)
         .unwrap();
+}
+
+#[test]
+fn a_draw_with_a_layer_picking_geometry_shader_runs_the_layer_entry() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let lib = ShaderLibrary::from_source(
+        &ctx,
+        "layer",
+        "#include <metal_stdlib>\nusing namespace metal;\nvertex float4 vs() { return float4(0); }\n",
+    )
+    .unwrap();
+    let mut vs = StageProgram {
+        lib,
+        entry: "vs".into(),
+        entry_uint: None,
+        entry_mixed: None,
+        entry_layer: None,
+        binds: vec![],
+        arg_bytes: 0,
+        inputs: vec![],
+        pull: false,
+        colors: None,
+        threadgroup: [1; 3],
+        c1: vec![],
+        mesh: None,
+    };
+    let mut d = crate::walk::empty_draw();
+    assert!(!layered(&d, &vs));
+    d.program.geometry = Some("gs".into());
+    // Without a layer entry the geometry stage stays ignored.
+    assert!(!layered(&d, &vs));
+    assert_eq!(render::vertex_entry(&d, &vs), "vs");
+    vs.entry_layer = Some("vs_l".into());
+    assert!(layered(&d, &vs));
+    assert_eq!(render::vertex_entry(&d, &vs), "vs_l");
+    d.program.geometry = None;
+    assert_eq!(render::vertex_entry(&d, &vs), "vs");
 }

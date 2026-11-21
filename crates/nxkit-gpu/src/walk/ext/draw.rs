@@ -45,12 +45,17 @@ impl Walker {
             return d;
         };
         self.track.program(1, st.program[1]);
+        self.track.program(GEOMETRY, st.program[GEOMETRY]);
         self.track.read(&cache::DRAW_READS);
         d.program = ProgramRef {
             vertex: vertex.clone(),
             fragment: self.programs.find(st.program[1], Kind::Fragment).cloned(),
             task: None,
             mesh: None,
+            geometry: self
+                .programs
+                .find(st.program[GEOMETRY], Kind::Geometry)
+                .cloned(),
         };
         d.topology = topology;
         d.args = args;
@@ -156,6 +161,7 @@ impl Walker {
             fragment,
             task,
             mesh: Some(mesh),
+            geometry: None,
         };
         d.args = args;
         fixed_function(st, &mut d);

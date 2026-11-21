@@ -251,6 +251,7 @@ pub(crate) fn render_pass(
     let vis = sh.queries.and_then(|q| Some((q, q.pass(index)?)));
     let visibility = vis.as_ref().map(|(_, v)| v.buffer);
     let scan = (sh.probes.render)(sh, cb, index, pass, range.clone(), &s.desc);
+    cb.layer_next_pass(s.layers);
     let Ok(mut rp) =
         cb.begin_render_pass_counted(&s.desc, &tables.vertex, &tables.fragment, visibility)
     else {

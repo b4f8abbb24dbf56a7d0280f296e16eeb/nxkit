@@ -32,8 +32,7 @@ use crate::snapshot::EncodeView;
 use crate::stats::EncodeStats;
 use crate::textures::{Res, TextureStore};
 
-/// The code of a sampled texture buffer in an image key, beside `ImgDecl::atomic_code` (0 to 2).
-pub(crate) const SAMPLED_BUFFER: u8 = 0x10;
+pub(crate) use crate::bindless::SAMPLED_BUFFER;
 
 /// An `img` member of a shader, or a `tex` member declared as a `texture_buffer` (`sampled`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

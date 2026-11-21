@@ -20,6 +20,7 @@ mod tests;
 
 pub(crate) use crate::prewarm_screen::{PrewarmScreen, ScreenHook};
 pub(crate) use keys::KEY_SCHEME;
+pub(crate) use render::layered;
 pub use runtime::flush_runtime_cache;
 pub(crate) use runtime::plan as runtime_plan;
 pub(crate) use stats::frame_done;
