@@ -151,6 +151,9 @@ fn settings(m: &Manifest) -> Value {
     if let Some(font) = t.shared_font {
         f.push(("shared_font", s(font)));
     }
+    if !t.optional_imports.is_empty() {
+        f.push(("optional_imports", list(t.optional_imports)));
+    }
     if let Some((major, minor)) = t.nvn_api {
         f.push((
             "nvn_api",

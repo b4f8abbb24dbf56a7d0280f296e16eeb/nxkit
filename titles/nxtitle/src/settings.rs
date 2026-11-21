@@ -97,6 +97,9 @@ pub struct Settings {
     pub upscaler_keys: &'static [&'static str],
     /// `device_api`: the NVN API (major, minor) that `nvnDeviceGetInteger` reports. `None`: by the SDK version.
     pub nvn_api: Option<(u32, u32)>,
+    /// Imports that may stay 0 (`optional_imports` of `game.json`): the game never calls them, or checks them before it
+    /// calls them. Any other import that nothing provides stops the load.
+    pub optional_imports: &'static [&'static str],
 }
 
 impl Settings {
@@ -143,5 +146,6 @@ impl Settings {
         shader_key_skip: (0, 0),
         upscaler_keys: &[],
         nvn_api: None,
+        optional_imports: &[],
     };
 }

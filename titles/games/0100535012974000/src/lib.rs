@@ -32,6 +32,51 @@ const GAME_TSV: Evidence = Evidence::Recorded {
     read: "2026-11-21",
 };
 
+/// The Epic Online Services functions that `main` imports (39 names, read from the imports of `main` 1.0.38233). On the
+/// console they come from `/nro/EOSSDK-Switch-Shipping.nro` through `nn::ro`. The host refuses an NRR that registers only
+/// online SDKs, so the game never loads the module and never calls them (the engine's notes): they stay 0.
+const EOS_IMPORTS: &[&str] = &[
+    "EOS_Auth_CopyUserAuthToken",
+    "EOS_Auth_DeletePersistentAuth",
+    "EOS_Auth_GetLoggedInAccountByIndex",
+    "EOS_Auth_GetLoggedInAccountsCount",
+    "EOS_Auth_GetLoginStatus",
+    "EOS_Auth_Login",
+    "EOS_Auth_Logout",
+    "EOS_Auth_Token_Release",
+    "EOS_Connect_AddNotifyAuthExpiration",
+    "EOS_Connect_CreateUser",
+    "EOS_Connect_GetLoggedInUserByIndex",
+    "EOS_Connect_GetLoggedInUsersCount",
+    "EOS_Connect_GetLoginStatus",
+    "EOS_Connect_Login",
+    "EOS_Connect_RemoveNotifyAuthExpiration",
+    "EOS_EResult_IsOperationComplete",
+    "EOS_EResult_ToString",
+    "EOS_EpicAccountId_IsValid",
+    "EOS_Initialize",
+    "EOS_Logging_SetCallback",
+    "EOS_Logging_SetLogLevel",
+    "EOS_Platform_Create",
+    "EOS_Platform_GetAuthInterface",
+    "EOS_Platform_GetConnectInterface",
+    "EOS_Platform_GetPlayerDataStorageInterface",
+    "EOS_Platform_Release",
+    "EOS_Platform_Tick",
+    "EOS_PlayerDataStorageFileTransferRequest_CancelRequest",
+    "EOS_PlayerDataStorageFileTransferRequest_Release",
+    "EOS_PlayerDataStorage_CopyFileMetadataAtIndex",
+    "EOS_PlayerDataStorage_DeleteCache",
+    "EOS_PlayerDataStorage_DeleteFile",
+    "EOS_PlayerDataStorage_FileMetadata_Release",
+    "EOS_PlayerDataStorage_QueryFileList",
+    "EOS_PlayerDataStorage_ReadFile",
+    "EOS_PlayerDataStorage_WriteFile",
+    "EOS_ProductUserId_IsValid",
+    "EOS_ProductUserId_ToString",
+    "EOS_Shutdown",
+];
+
 /// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The display
 /// version is the one of the build row of v589824. The memory partition is Link's Awakening's (the game's README: not
 /// measured for this game).
@@ -46,6 +91,7 @@ const SETTINGS: Fact<Settings> = Fact::new(
         },
         display_versions: &[("d41357a3da356b09fa400b90f303b564", "1.0.38233")],
         pad_layout: "full",
+        optional_imports: EOS_IMPORTS,
         ..Settings::DEFAULT
     },
     GAME_TSV,
@@ -153,6 +199,9 @@ mod tests {
         assert!(s.romfs_marker.starts_with('/'));
         assert!(s.settings.evidence.is_checked());
         assert_eq!(s.settings.value.display_versions[0].0, s.modules[0].1);
+        let eos = s.settings.value.optional_imports;
+        assert_eq!(eos.len(), 39);
+        assert!(eos.iter().all(|n| n.starts_with("EOS_")));
     }
 
     #[test]
