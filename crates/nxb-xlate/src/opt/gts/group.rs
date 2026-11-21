@@ -309,14 +309,6 @@ pub(super) fn plan_group(
         .min()
         .map_or(ends, |p| p.min(ends));
     let members: Vec<(NodeId, u32)> = members.into_iter().map(|m| (m.0, m.1)).collect();
-    let Some(map_binding) = env.rm.try_get_storage_buffer_binding(
-        env.acc,
-        super::super::gts_raw::GMEM_MAP_CB_SLOT,
-        0,
-        false,
-    ) else {
-        return Ok(false);
-    };
     let (Some(min_k), Some(max_k)) = (
         members.iter().map(|m| m.1).min(),
         members.iter().map(|m| m.1).max(),
@@ -324,15 +316,15 @@ pub(super) fn plan_group(
         return Ok(false);
     };
     let span = max_k - min_k + 4;
-    let range_id = match ctx.range_fn {
-        Some(id) => id,
+    let (range_id, range_last) = match ctx.range_fn {
+        Some(r) => r,
         None => {
-            let Some(f) = super::super::gts_raw::raw_range(ir, env)? else {
+            let Some((f, last)) = super::super::gts_raw::raw_range(ir, env)? else {
                 return Ok(false);
             };
-            let id = hfm.add_function(f);
-            ctx.range_fn = Some(id);
-            id
+            let r = (hfm.add_function(f), last);
+            ctx.range_fn = Some(r);
+            r
         }
     };
     if ctx.load_fn.is_none() {
@@ -363,16 +355,14 @@ pub(super) fn plan_group(
         StorageKind::None,
         &[c_fn, base_lo, base_hi, c_min, c_span],
     );
-    let c_words = ir.const_(super::super::gts_raw::GMEM_MAP_ENTRY_WORDS);
-    let at = add(ir, Inst::Multiply, StorageKind::None, &[entry, c_words]);
-    let mut table_word = |ir: &mut Ir, word: i32| -> Opd {
-        let c_w = ir.const_(word);
-        let idx = add(ir, Inst::Add, StorageKind::None, &[at, c_w]);
-        let (c_b, c0) = (ir.const_(map_binding), ir.const_(0));
-        add(ir, Inst::Load, StorageKind::StorageBuffer, &[c_b, c0, idx])
+    // The resolve leaves the chosen entry's delta in its last-entry memory: no table read waits between the resolve
+    // and the loads
+    let mut last_word = |ir: &mut Ir, word: i32| -> Opd {
+        let (c_last, c_w) = (ir.const_(range_last), ir.const_(word));
+        add(ir, Inst::Load, StorageKind::LocalMemory, &[c_last, c_w])
     };
-    let delta_low = table_word(ir, 4);
-    let delta_high = table_word(ir, 5);
+    let delta_low = last_word(ir, super::super::gts_raw::LAST_DELTA);
+    let delta_high = last_word(ir, super::super::gts_raw::LAST_DELTA + 1);
     let resolved = Resolved {
         entry,
         delta_low,

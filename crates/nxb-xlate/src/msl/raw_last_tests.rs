@@ -1,4 +1,5 @@
-//! Raw global memory lookups that start from the entry they chose last (`GlobalToStorage.TryGenerateRawStorageOp`).
+//! Raw global memory lookups that start from the entry they chose last, whose range and delta the invocation keeps
+//! (`GlobalToStorage.TryGenerateRawStorageOp`).
 #![cfg(test)]
 
 use super::{Context, translate};
@@ -45,28 +46,60 @@ fn msl() -> String {
     t.libraries[0].msl.clone()
 }
 
-#[test]
-fn two_loads_share_one_zeroed_word() {
-    let m = msl();
+/// The kernel's zeroed last-entry arrays (`uint lmN[7] = {};`) by name.
+fn last_arrays(m: &str) -> Vec<String> {
     let main = &m[m.find("kernel void main0").expect("entry")..];
-    let decls: Vec<&str> = main
-        .lines()
-        .filter(|l| l.starts_with("    uint lm") && l.ends_with(" = {};"))
-        .collect();
-    assert_eq!(decls.len(), 1, "{m}");
-    let word = decls[0]
-        .trim_start_matches("    uint ")
-        .trim_end_matches(" = {};");
-    // The helper takes the word, reads it before the chunk's hint and records the hint's or the search's choice
-    let head = format!("thread uint& {word}");
-    let at = m.find(&head).expect("the helper takes the word");
+    main.lines()
+        .filter(|l| l.starts_with("    uint lm") && l.ends_with("[7] = {};"))
+        .map(|l| {
+            l.trim_start_matches("    uint ")
+                .trim_end_matches("[7] = {};")
+                .to_string()
+        })
+        .collect()
+}
+
+/// The body of the helper that takes the array `word`.
+fn helper<'a>(m: &'a str, word: &str) -> &'a str {
+    let head = format!("thread uint (&{word})[7]");
+    let at = m.find(&head).expect("the helper takes the array");
     let body = &m[at..];
-    let body = &body[..body.find("\n}\n").expect("helper end")];
-    let first = body.find(&format!("({word})")).expect("the word is read");
+    &body[..body.find("\n}\n").expect("helper end")]
+}
+
+#[test]
+fn two_loads_share_one_zeroed_array() {
+    let m = msl();
+    let words = last_arrays(&m);
+    assert_eq!(words.len(), 1, "{m}");
+    let word = &words[0];
+    let body = helper(&m, word);
+    // The helper checks the range it copied last before the chunk's hint: the start and the end words
     let hint = body
         .find(">> 21u")
         .or_else(|| body.find(">> 21"))
         .expect("the hint");
-    assert!(first < hint, "{body}");
-    assert!(body.contains(&format!("    {word} = ")), "{body}");
+    for w in 1..=4 {
+        let at = body
+            .find(&format!("({word}[{w}])"))
+            .unwrap_or_else(|| panic!("word {w} is read\n{body}"));
+        assert!(at < hint, "{body}");
+    }
+    // A miss records the index and copies the entry's six words
+    for w in 0..=6 {
+        assert!(body.contains(&format!("    {word}[{w}] = ")), "{body}");
+    }
+}
+
+#[test]
+fn a_hit_reads_the_delta_from_the_copy() {
+    let m = msl();
+    let word = &last_arrays(&m)[0];
+    let body = helper(&m, word);
+    // The host address adds the copied delta: after the last copy into the array no table word is read
+    let filled = body.rfind(&format!("    {word}[6] = ")).expect("the fill");
+    let rest = &body[filled..];
+    assert!(rest.contains(&format!("({word}[5])")), "{rest}");
+    assert!(rest.contains(&format!("({word}[6])")), "{rest}");
+    assert!(!rest.contains("._m0["), "{rest}");
 }

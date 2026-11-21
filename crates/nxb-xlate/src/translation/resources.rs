@@ -170,10 +170,12 @@ impl ResourceManager {
     }
 
     /// `AddRawLastEntryMemory`: the pool table entry a raw global memory helper chose last in this invocation, one
-    /// word for each helper, zero at the start.
-    pub fn add_raw_last_entry_memory(&mut self) -> i32 {
+    /// array of `words` words for each helper (the entry's index and a copy of its range and delta, see
+    /// `opt/gts_raw.rs`), zero at the start.
+    pub fn add_raw_last_entry_memory(&mut self, words: i32) -> i32 {
         let name = format!("gmem_last_{}", self.properties.local_memories.len());
-        let mut m = MemoryDefinition::new(&name, AggregateType::U32, 1);
+        let mut m =
+            MemoryDefinition::new(&name, AggregateType::ARRAY.or(AggregateType::U32), words);
         m.zero_init = true;
         self.properties.add_local_memory(m)
     }

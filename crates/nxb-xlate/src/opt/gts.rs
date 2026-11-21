@@ -62,8 +62,8 @@ struct Gts {
     entries: Vec<Entry>,
     /// The raw word loads of a group, by node.
     members: HashMap<NodeId, Resolved>,
-    /// The helper that resolves a range and the one that loads in it, once made.
-    range_fn: Option<i32>,
+    /// The helper that resolves a range (with its last-entry memory) and the one that loads in it, once made.
+    range_fn: Option<(i32, i32)>,
     load_fn: Option<i32>,
     /// The immediate dominator of each block, made when the first group looks across blocks.
     idom: Option<Vec<Option<usize>>>,

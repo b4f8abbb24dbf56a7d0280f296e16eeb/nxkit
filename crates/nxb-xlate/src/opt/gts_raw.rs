@@ -12,9 +12,34 @@ type R<T> = Result<T, String>;
 /// `GmemMapCbSlot`: the sentinel constant buffer slot of the memory pool table and the write log.
 pub(super) const GMEM_MAP_CB_SLOT: i32 = 0xff;
 const GMEM_MAP_LOG2: i32 = 13;
-pub(super) const GMEM_MAP_ENTRY_WORDS: i32 = 8;
+const GMEM_MAP_ENTRY_WORDS: i32 = 8;
 const GMEM_HINT_SHIFT: i32 = 21;
 const GMEM_LOG_CB_OFFSET: i32 = 1;
+/// Words of a helper's last-entry memory: the index of the entry it chose last in this invocation, then that entry's
+/// start, end and delta as the table holds them (low word first). A helper whose address lies in that range reads
+/// nothing from the table: the range and the delta are already in the invocation's registers.
+pub(super) const LAST_WORDS: i32 = 7;
+const LAST_INDEX: i32 = 0;
+const LAST_START: i32 = 1;
+const LAST_END: i32 = 3;
+/// The first of the two delta words of a last-entry memory.
+pub(super) const LAST_DELTA: i32 = 5;
+
+/// Word `word` of the last-entry memory `last_id`.
+pub(super) fn last_word(b: &mut B, last_id: i32, word: i32) -> Opd {
+    let (c_last, w) = (b.ir.const_(last_id), b.ir.const_(word));
+    b.op_kind(Inst::Load, StorageKind::LocalMemory, &[c_last, w])
+}
+
+fn set_last_word(b: &mut B, last_id: i32, word: i32, value: Opd) {
+    let (c_last, w) = (b.ir.const_(last_id), b.ir.const_(word));
+    b.raw(
+        Inst::Store,
+        StorageKind::LocalMemory,
+        None,
+        &[c_last, w, value],
+    );
+}
 
 fn map_word(b: &mut B, binding: i32, entry: Opd, word: i32) -> Opd {
     let (c_b, c0) = (b.ir.const_(binding), b.ir.const_(0));
@@ -60,8 +85,10 @@ pub(super) fn raw_load_in_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Opti
 }
 
 /// The entry of the table that holds all of `[base + min_offset, base + min_offset + span)`, or 0 when no single entry
-/// holds it. The helper takes `base_low`, `base_high`, `min_offset` and `span` (4 or more, below 2^31).
-pub(super) fn raw_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Option<Function>> {
+/// holds it. The helper takes `base_low`, `base_high`, `min_offset` and `span` (4 or more, below 2^31). Returns the
+/// helper and its last-entry memory: after a call that answered an entry, the words `LAST_DELTA` and `LAST_DELTA + 1`
+/// of that memory hold the entry's delta.
+pub(super) fn raw_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Option<(Function, i32)>> {
     let Some(map_binding) =
         env.rm
             .try_get_storage_buffer_binding(env.acc, GMEM_MAP_CB_SLOT, 0, false)
@@ -69,7 +96,7 @@ pub(super) fn raw_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Option<Funct
         return Ok(None);
     };
     env.rm.properties.uses_physical_pointers = true;
-    let last_id = env.rm.add_raw_last_entry_memory();
+    let last_id = env.rm.add_raw_last_entry_memory(LAST_WORDS);
     let mut b = B::new(ir);
     let base_low = b.ir.argument(0);
     let base_high = b.ir.argument(1);
@@ -93,10 +120,8 @@ pub(super) fn raw_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Option<Funct
         chosen,
     );
     b.mark_label(chosen);
-    let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
-    let found = b.op(Inst::Multiply, &[selected, cw]);
-    let end_high = map_word(&mut b, map_binding, found, 3);
-    let end_low = map_word(&mut b, map_binding, found, 2);
+    let end_high = last_word(&mut b, last_id, LAST_END + 1);
+    let end_low = last_word(&mut b, last_id, LAST_END);
     // The entry starts at or below the first byte, so it holds the range when its end is above the last byte
     let first_in = below(&mut b, end_high, end_low, start_low, start_high);
     let last_in = below(&mut b, end_high, end_low, last_low, last_high);
@@ -104,7 +129,10 @@ pub(super) fn raw_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Option<Funct
     let z = b.ir.const_(0);
     let r = b.op(Inst::ConditionalSelect, &[both, selected, z]);
     b.ret(Some(r));
-    Ok(Some(finish_function(b, "LoadMultiRawRange", true, 4)?))
+    Ok(Some((
+        finish_function(b, "LoadMultiRawRange", true, 4)?,
+        last_id,
+    )))
 }
 
 /// `{low, high} + addend` of a 64 bit address and a 32 bit unsigned addend.
@@ -119,7 +147,7 @@ fn add64(b: &mut B, low: Opd, high: Opd, addend: Opd) -> (Opd, Opd) {
 
 /// The table entry that holds the address, or an entry that ends below it: the last entry of this invocation when it
 /// holds the address (the `chosen` label, left for the caller to mark), else the hint's or the search's. `selected`
-/// is that entry's index at the end.
+/// is that entry's index at the end, and the last-entry memory holds its index, range and delta.
 #[allow(clippy::too_many_arguments)]
 fn lookup(
     b: &mut B,
@@ -134,22 +162,21 @@ fn lookup(
     // The entry this helper chose last in this invocation, if it holds the address. A shader reads a structure word
     // after word from one pool, so all but the first access of a run choose the entry the first one chose. The
     // table's ranges are disjoint and the host binds one table for a whole draw or dispatch, so the search below would
-    // choose the same entry. The word starts at 0, the empty entry.
-    let c_last = b.ir.const_(last_id);
-    let last = b.op_kind(Inst::Load, StorageKind::LocalMemory, &[c_last]);
-    let c_words = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
-    let last_entry = b.op(Inst::Multiply, &[last, c_words]);
-    let start_high = map_word(b, map_binding, last_entry, 1);
-    let start_low = map_word(b, map_binding, last_entry, 0);
+    // choose the same entry. Its range is a copy in the invocation's registers, so this check waits for no load. The
+    // memory starts at 0: the range [0, 0) holds nothing.
+    let start_high = last_word(b, last_id, LAST_START + 1);
+    let start_low = last_word(b, last_id, LAST_START);
     let from = at_or_below(b, start_high, start_low, addr_low, addr_high);
-    let end_high = map_word(b, map_binding, last_entry, 3);
-    let end_low = map_word(b, map_binding, last_entry, 2);
+    let end_high = last_word(b, last_id, LAST_END + 1);
+    let end_low = last_word(b, last_id, LAST_END);
     let to = below(b, end_high, end_low, addr_low, addr_high);
     let last_holds = b.op(Inst::BitwiseAnd, &[from, to]);
+    let last = last_word(b, last_id, LAST_INDEX);
     b.raw(Inst::Copy, StorageKind::None, Some(selected), &[last]);
     b.branch_if_true(chosen, last_holds);
     // The hint of the address's 2 MiB chunk names an entry holding the whole chunk. An address too high for the tag
     // searches.
+    let c_words = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
     let c_up = b.ir.const_(32 - GMEM_HINT_SHIFT);
     let chunk_hi = b.op(Inst::ShiftLeft, &[addr_high, c_up]);
     let c_sh = b.ir.const_(GMEM_HINT_SHIFT);
@@ -187,13 +214,14 @@ fn lookup(
     }
     b.raw(Inst::Copy, StorageKind::None, Some(selected), &[index]);
     b.mark_label(found_label);
-    let c_last = b.ir.const_(last_id);
-    b.raw(
-        Inst::Store,
-        StorageKind::LocalMemory,
-        None,
-        &[c_last, selected],
-    );
+    // One read of the entry's start, end and delta (six adjacent words) fills the last-entry memory
+    set_last_word(b, last_id, LAST_INDEX, selected);
+    let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
+    let at = b.op(Inst::Multiply, &[selected, cw]);
+    let words: Vec<Opd> = (0..6).map(|w| map_word(b, map_binding, at, w)).collect();
+    for (w, v) in words.into_iter().enumerate() {
+        set_last_word(b, last_id, LAST_START + w as i32, v);
+    }
 }
 
 /// `raw_target`, or with `fast` the load that goes with a resolved range (see `raw_load_in_range`).
@@ -243,7 +271,7 @@ fn raw_op(
     } else {
         2
     };
-    let last_id = env.rm.add_raw_last_entry_memory();
+    let last_id = env.rm.add_raw_last_entry_memory(LAST_WORDS);
     let mut b = B::new(ir);
     let addr_low = b.ir.argument(0);
     let addr_high = b.ir.argument(1);
@@ -282,18 +310,14 @@ fn raw_op(
         found_label,
         chosen,
     );
-    let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
-    let found = b.op(Inst::Multiply, &[selected, cw]);
-    let end_high = map_word(&mut b, map_binding, found, 3);
-    let end_low = map_word(&mut b, map_binding, found, 2);
+    let end_high = last_word(&mut b, last_id, LAST_END + 1);
+    let end_low = last_word(&mut b, last_id, LAST_END);
     // An address in no pool: the entry below it ends below it
     let in_pool = below(&mut b, end_high, end_low, addr_low, addr_high);
     let skip = b.ir.label();
     b.branch_if_false(skip, in_pool);
     // The last entry's range held it, or the hint's or the search's entry does
     b.mark_label(chosen);
-    let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
-    let found = b.op(Inst::Multiply, &[selected, cw]);
     if writes {
         // The write log is a bitmap of the table entries the stores and atomics wrote through. A bit is set once, so a
         // store usually costs a load and no atomic.
@@ -324,12 +348,12 @@ fn raw_op(
     } else {
         addr_low
     };
-    let delta_low = map_word(&mut b, map_binding, found, 4);
+    let delta_low = last_word(&mut b, last_id, LAST_DELTA);
     let host_low = b.op(Inst::Add, &[word_low, delta_low]);
     let wrapped = b.op(Inst::CompareLessU32, &[host_low, word_low]);
     let (k1, k0) = (b.ir.const_(1), b.ir.const_(0));
     let carry = b.op(Inst::ConditionalSelect, &[wrapped, k1, k0]);
-    let delta_high = map_word(&mut b, map_binding, found, 5);
+    let delta_high = last_word(&mut b, last_id, LAST_DELTA + 1);
     let sum = b.op(Inst::Add, &[addr_high, delta_high]);
     let host_high = b.op(Inst::Add, &[sum, carry]);
     let mut result = None;

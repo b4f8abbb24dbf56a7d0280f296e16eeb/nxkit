@@ -150,3 +150,20 @@ fn two_far_loads_are_not_one_group() {
     let m = msl(&[0, 4096]);
     assert!(with_args(&m, 4).is_none(), "{m}");
 }
+
+#[test]
+fn the_group_takes_the_delta_from_the_resolve_without_a_table_read() {
+    let m = msl(&[0, 4, 8]);
+    let (range, _) = with_args(&m, 4).expect("the range helper");
+    let (load, _) = with_args(&m, 5).expect("the load helper");
+    let main = &m[m.find("kernel void main0").expect("entry")..];
+    let call = main.find(&format!(" = {range}(")).expect("the resolve");
+    let first_load = main.find(&format!(" = {load}(")).expect("the first load");
+    let between = &main[call..first_load];
+    // The two delta words of the range helper's array, and no word of the pool table
+    assert!(
+        between.contains("[5])") && between.contains("[6])"),
+        "{between}"
+    );
+    assert!(!between.contains("._m0["), "{between}");
+}

@@ -137,8 +137,11 @@ The feature revision `blendz` (now 1) is in the key of every pixel shader that i
 Bit 76 of `LDG` and `STG` and bit 71 of `ATOMG` and `RED` mark the uniform register as a memory descriptor. A descriptor is not added to the address.
 
 A raw global access whose buffer is not known at translation time looks up the bound storage buffers at run time (`opt/gts_raw.rs`).
-Each lookup keeps the entry it chose last in a zeroed local word `gmem_last_N`. The next access first checks that entry.
-When the address is outside it, the lookup tries the hint and then searches all entries. The end of the chosen entry is checked once more after the search.
+Each lookup keeps the entry it chose last in a zeroed local array `gmem_last_N` of 7 words: the entry's index, then its start, end and delta (low word first) as the table holds them.
+The next access first checks the start and the end in that array. These are registers of the invocation, so an access in the same pool reads nothing from the table and adds the copied delta.
+When the address is outside it, the lookup tries the hint and then searches all entries, and one read of the chosen entry's six words fills the array again. The end of the chosen entry is checked once more after the search.
+A group of loads near one base (`LoadMultiRawRange`) takes the delta from the array of the range helper after its call, so no table read lies between the resolve and the loads.
+Before, a hit read the entry's start and end, then its end again after the join, then its delta: three dependent table reads before the data.
 
 ## Ampere ALU details
 
@@ -213,7 +216,7 @@ The effect on a sample of 190 shaders of Ocarina of Time: the `_b` text is 44% s
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.21`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.22`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 A change that alters the MSL only of shaders that use one feature of `nxb_xlate::msl::revision::FEATURES` (now `hmma`, `meshpos` and `blendz`) increases that feature's revision instead of `TRANSLATOR_ID`. The key of a shader whose code uses the feature has the field `features` (`hmma=1`, `meshpos=1`, `blendz=1`), so only these shaders translate again. A shader that uses no feature has no such field.
