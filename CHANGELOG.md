@@ -4,6 +4,15 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- Vulkan games build and run: Hades (`0100535012974000`, 1.0.38233) shows its title screen and plays at about 60 fps.
+  - The title says its API (`BuildHooks::graphics_api`, `game.json` `"graphics"`), and the host installs only that layer.
+  - `nxb-spirv` translates the game's SPIR-V with naga (D21); the build writes `shaders/vk_shaders.metallib` and
+    `vk_shaders.tsv` (`nxkit_abi::vk_table`). A Vulkan game has no shader split and no pipeline archive.
+  - `nxkit-vk` (R2) is the Vulkan model, `nxkit-rt::vk` the exports, `nxkit-vk-gpu` (R3) the backend on Metal (R64).
+  - `Settings::optional_imports` lets a title name imports that stay 0.
+
 ## 0.11.1 - 2026-11-21
 
 ### Added

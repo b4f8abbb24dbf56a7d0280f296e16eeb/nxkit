@@ -134,6 +134,28 @@ the engine tree at `b91cb749`, read 2026-11-12.
 - The engine played the game with a shader table of v0 and v327680 together (`shader_versions v0 v327680`). The build
   splits only the shaders of v327680.
 
+## Hades (`0100535012974000`)
+
+The Nintendo Switch game on **Vulkan**, update 1.0.38233 (v589824), SDK 9.3.0, Supergiant Games' engine on The Forge
+renderer. The records are the game notes in the engine tree at `034e91a8`, read 2026-11-21.
+
+- `BuildHooks::graphics_api` is `Vulkan`, so `game.json` says `"graphics": "vulkan"` and the host installs the Vulkan
+  layer (`nxkit-vk`, `nxkit-rt::vk`, `nxkit-vk-gpu`, R64) and no NVN layer. `main` holds 126 `vk*` names (imports and
+  names it fetches through `vkGet*ProcAddr`); each one has an export.
+- The modules are `main` and `sdk`. `subsdk0` (the Vulkan loader) and `subsdk1` (NVIDIA's driver) are replaced by the
+  host's layer, so the build row of the rules names neither.
+- The shaders are the 74 SPIR-V files of `Content/EffectsForgeSwitch` (`romfs_marker` is `Default.vert`). The build
+  translates them with `nxb-spirv` into `shaders/vk_shaders.metallib` and its table `vk_shaders.tsv` (D21); the table
+  equals the engine's row for row. The game has no NVN shaders, no shader split and no pipeline archive.
+- The rules are the build row and the engine's SDK-wide rules for `sdk`: both match this sdk (the node area at
+  `0xd2240`, implementation 2 of 8; the 2 MB alignment at `0xd2434`, implementation 1 of 4).
+- `main` imports 39 `EOS_*` functions (Epic Online Services, from an NRO through `nn::ro`). The host refuses an NRR that
+  registers only online SDKs, so the game never loads the module; the names are `optional_imports` and stay 0.
+- The memory partition is the engine's (Link's Awakening's, not measured for this game), `pad_layout full`.
+- Checked on 2026-11-21 (MacBook Pro, `nxb build` to `/Volumes/NX/nxkit-work/Hades.app`): the game shows the title
+  screen and plays a room of Tartarus at about 60 presents a second, 0 skipped draws. The layer logs one gap: texel
+  buffer views (`R32_UINT`), which nothing on screen needed in that run.
+
 ## The games of the engine tree
 
 The engine tree at `034e91a8` (read 2026-11-12) has 163 game folders. Each game it plays has a title module now: 149 new
@@ -337,7 +359,8 @@ The folders without a module:
   game of its own; it runs its code through nn::jit, which nxkit stops.
 - `010049900F546002` Super Mario 3D All-Stars: Super Mario Sunshine: a program of Super Mario 3D All-Stars (program_of),
   not a game of its own.
-- `0100535012974000` Hades: Vulkan game (The Forge): nxkit has no Vulkan layer, nxb builds only NVN games.
-- `010099C022B96000` Super Mario Galaxy: Vulkan game (recompiled PowerPC Wii layer): nxkit has no Vulkan layer.
+- `010099C022B96000` Super Mario Galaxy: Vulkan game (recompiled PowerPC Wii layer): the Vulkan layer of nxkit does not have what the engine added for it (triangle fans, the
+  geometry viewport stage, the stride repair of `fix_strides`, wide points and lines).
 - `0100CD801CE5E000` Balatro: OpenGL game (LOVE): nxkit has no OpenGL layer.
-- `0100FD8022DAA000` Super Mario Galaxy 2: Vulkan game (recompiled PowerPC Wii layer): nxkit has no Vulkan layer.
+- `0100FD8022DAA000` Super Mario Galaxy 2: Vulkan game (recompiled PowerPC Wii layer): the Vulkan layer of nxkit does not have what the engine added for it (triangle fans, the
+  geometry viewport stage, the stride repair of `fix_strides`, wide points and lines).
