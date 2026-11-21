@@ -9,7 +9,7 @@ nxkit-host [--fullscreen] <run folder>
 nxkit-host probe <run folder>
 ```
 
-The run folder is `Contents/Resources/nxkit/` of the app bundle. `probe` prints the measurements of R18 and starts no game.
+The run folder is `Contents/Resources/nxkit/` of the app bundle. `probe` prints the measurements of R18 and starts no game. The app bundle starts `nxkit-host` with no arguments, so a launcher that opens the app asks for full screen with `NXKIT_FULLSCREEN=1` in the environment, the same as `--fullscreen`.
 
 ## The run folder
 
@@ -236,7 +236,7 @@ A game can give a thread a small stack, and a service function that builds host 
 
 ## The window
 
-AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` that has the pixels of the main display, so the game renders at the native resolution, for example 4K on a 4K display. The display link runs at the highest rate of the screen, 120 Hz where the screen has it. The game runs on its own threads. A window close, a lost application or ExitProcess sets a stop flag. The next display tick ends the loop. A watchdog ends the process after 5 seconds if the loop does not. `--fullscreen` starts in full screen.
+AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` that has the pixels of the main display, so the game renders at the native resolution, for example 4K on a 4K display. The display link runs at the highest rate of the screen, 120 Hz where the screen has it. The game runs on its own threads. A window close, a lost application or ExitProcess sets a stop flag. The next display tick ends the loop. A watchdog ends the process after 5 seconds if the loop does not. `--fullscreen` or `NXKIT_FULLSCREEN=1` starts in full screen (`sys/fullscreen.rs`). A launcher can open the game from its own full-screen Space, and macOS leaves that Space while the game starts. The request waits until the application is active and the window is on the active Space, and a refused request is asked once more. A full-screen change by the player while the start waits ends the request. When the game ends, the full-screen Space closes and the launcher gets the front again.
 
 The content view takes the key events, so AppKit plays no alert sound, and passes the mouse events to `sys/mouse.rs`. The window holds the mouse for the camera (R63): the cursor is hidden and does not move, and each motion goes to the input service. It takes the mouse when it becomes the key window while no controller is connected, and on a click, which does not reach the game. Escape, Cmd+Tab or any other loss of the key focus, and a controller that connects let go. The display tick follows the controllers.
 

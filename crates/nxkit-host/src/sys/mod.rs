@@ -8,6 +8,7 @@ pub mod appkit;
 pub mod crashsig;
 mod dylib;
 pub mod exitflush;
+mod fullscreen;
 mod kernel;
 pub mod loading;
 mod mouse;

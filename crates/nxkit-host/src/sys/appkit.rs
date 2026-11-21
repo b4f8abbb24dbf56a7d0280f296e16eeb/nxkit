@@ -2,7 +2,7 @@
 //!
 //! The module is in `sys` because AppKit calls and the delegate class need `unsafe`.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -26,6 +26,7 @@ use objc2_foundation::{
 };
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
+use super::fullscreen::{self, Startup};
 use super::mouse;
 use crate::error::{HostError, Result};
 use crate::refresh::{Refresh, ScreenFacts};
@@ -91,15 +92,20 @@ pub struct WindowConfig {
     pub fullscreen: bool,
 }
 
-/// The screen of the window: `NXKIT_SCREEN` names it by its index in the screen list (0 is the built-in one) or by a part
-/// of its name, for example `XB273U`. Without it, or when nothing matches, it is the main screen.
+/// The screen of the window: `NXKIT_SCREEN` names it by its index in the screen list (0 is the built-in one), by `id:`
+/// and its CoreGraphics display id (`NSScreenNumber`, what a launcher knows of the screen it is on), or by a part of
+/// its name, for example `XB273U`. Without it, or when nothing matches, it is the main screen.
 fn target_screen(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
     if let Some(want) = crate::hostenv::host().screen.clone() {
         let screens = NSScreen::screens(mtm);
-        let found = match want.parse::<usize>() {
-            Ok(i) if i < screens.count() => Some(screens.objectAtIndex(i)),
-            Ok(_) => None,
-            Err(_) => {
+        let by_id = want
+            .strip_prefix("id:")
+            .map(|id| id.trim().parse::<u32>().ok());
+        let found = match (by_id, want.parse::<usize>()) {
+            (Some(id), _) => id.and_then(|id| screens.iter().find(|s| display_id(s) == Some(id))),
+            (None, Ok(i)) if i < screens.count() => Some(screens.objectAtIndex(i)),
+            (None, Ok(_)) => None,
+            (None, Err(_)) => {
                 let want = want.to_lowercase();
                 screens
                     .iter()
@@ -297,6 +303,7 @@ define_class!(
         view: OnceCell<Retained<NSView>>,
         link: OnceCell<Rc<DisplayLink>>,
         refresh: OnceCell<Arc<Refresh>>,
+        startup: Cell<Startup>,
     }
 
     // SAFETY: `NSObjectProtocol` has no extra requirements.
@@ -328,6 +335,26 @@ define_class!(
             }
         }
 
+        #[unsafe(method(windowWillEnterFullScreen:))]
+        fn window_will_enter_full_screen(&self, _n: &NSNotification) {
+            self.with_startup(Startup::will_transition);
+        }
+
+        #[unsafe(method(windowWillExitFullScreen:))]
+        fn window_will_exit_full_screen(&self, _n: &NSNotification) {
+            self.with_startup(Startup::will_transition);
+        }
+
+        #[unsafe(method(windowDidEnterFullScreen:))]
+        fn window_did_enter_full_screen(&self, _n: &NSNotification) {
+            self.with_startup(Startup::entered);
+        }
+
+        #[unsafe(method(windowDidFailToEnterFullScreen:))]
+        fn window_did_fail_to_enter_full_screen(&self, window: &NSWindow) {
+            fullscreen::refused(MainThreadMarker::from(self), self, window, self.startup());
+        }
+
         #[unsafe(method(windowDidChangeScreen:))]
         fn window_did_change_screen(&self, _n: &NSNotification) {
             self.replan();
@@ -353,6 +380,11 @@ define_class!(
             true
         }
 
+        #[unsafe(method(applicationDidBecomeActive:))]
+        fn application_did_become_active(&self, _n: &NSNotification) {
+            self.enter_full_screen();
+        }
+
         // A change of the display mode, the arrangement or the screens comes here.
         #[unsafe(method(applicationDidChangeScreenParameters:))]
         fn application_did_change_screen_parameters(&self, _n: &NSNotification) {
@@ -368,9 +400,34 @@ define_class!(
             }
         }
     }
+
+    impl AppDelegate {
+        #[unsafe(method(nxkitEnterFullScreen))]
+        fn enter_full_screen_later(&self) {
+            self.enter_full_screen();
+        }
+
+        #[unsafe(method(nxkitActiveSpaceDidChange:))]
+        fn active_space_did_change(&self, _n: &NSNotification) {
+            self.enter_full_screen();
+        }
+    }
 );
 
 impl AppDelegate {
+    /// Full screen at start, when the application is active and the window on the active Space (`fullscreen.rs`).
+    fn enter_full_screen(&self) {
+        if let Some(window) = self.window().get() {
+            fullscreen::try_enter(MainThreadMarker::from(self), window, self.startup());
+        }
+    }
+
+    fn with_startup(&self, f: impl FnOnce(&mut Startup)) {
+        let mut s = self.startup().get();
+        f(&mut s);
+        self.startup().set(s);
+    }
+
     /// The window moved to another screen, or the mode of a screen changed: read the refresh rate of the screen the
     /// window is on now, plan again and set the rate of the display link.
     fn replan(&self) {
@@ -484,6 +541,7 @@ pub fn run(
         view: OnceCell::from(view.clone()),
         link: OnceCell::new(),
         refresh: OnceCell::from(refresh.clone()),
+        startup: Cell::new(Startup::new(cfg.fullscreen)),
     });
     // SAFETY: `init` of `NSObject` on a freshly allocated instance whose ivars are set.
     let delegate: Retained<AppDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -510,10 +568,11 @@ pub fn run(
         _ => window.center(),
     }
     window.makeKeyAndOrderFront(None);
-    if cfg.fullscreen {
-        window.toggleFullScreen(None);
-    }
     app.activate();
+    if cfg.fullscreen {
+        fullscreen::observe_spaces(&delegate, true);
+        fullscreen::later(&delegate);
+    }
     // The window is on its screen now, which may not be the one that was planned for.
     delegate.replan();
 
@@ -526,6 +585,9 @@ pub fn run(
     );
     ready()?;
     app.run();
+    if cfg.fullscreen {
+        fullscreen::observe_spaces(&delegate, false);
+    }
     nxkit_metal::display::restore_active();
     Ok(())
 }

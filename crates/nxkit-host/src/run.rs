@@ -142,7 +142,7 @@ pub fn run(opts: &Options) -> Result<()> {
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,
-        fullscreen: opts.fullscreen,
+        fullscreen: opts.fullscreen || env.fullscreen,
     };
     let stack_top = layout.main_stack.end();
     let result = appkit::run(
