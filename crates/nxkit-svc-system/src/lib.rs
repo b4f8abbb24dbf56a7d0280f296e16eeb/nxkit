@@ -68,9 +68,10 @@ pub struct Config {
     pub previous_program: Option<i32>,
     /// The directory of the add-on content. Each numeric sub directory is the RomFS of one DLC. `None` owns none.
     pub aoc_dir: Option<PathBuf>,
-    /// The directory with the shared font files (`standard.ttf`, `nintendo_ext.ttf`). `None` uses the paths below.
+    /// The directory with the shared font files, one for each type (`standard.ttf` to `korean.ttf`,
+    /// `nintendo_ext.ttf`). `None` uses the paths below.
     pub font_dir: Option<PathBuf>,
-    /// The file of the standard shared font. It wins over `font_dir`.
+    /// The file of the standard shared font, and the one font of types 0 to 4. It wins over `font_dir`.
     pub shared_font: Option<PathBuf>,
     /// The file of the extended shared font. It wins over `font_dir`.
     pub shared_font_ext: Option<PathBuf>,

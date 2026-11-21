@@ -13,11 +13,16 @@ mod fullscreen;
 pub mod homepreview;
 mod homeui;
 mod homeviews;
+mod hud;
 mod kernel;
 pub mod loading;
+mod look;
 mod mouse;
+mod notify;
 pub mod paging;
+mod pointer;
 mod prefs;
+mod present;
 mod screen;
 pub mod vm;
 
@@ -33,6 +38,11 @@ pub fn saved_choices(env: &mut nxkit_abi::env::Env) {
     for line in crate::hostenv::with_saved(env, |key| prefs.string(key)) {
         eprintln!("nxkit-host: {line}");
     }
+}
+
+/// The game's picture shows something: an overlay window may show (`present.rs`). Any thread.
+pub fn present_picture_done() {
+    present::picture_done();
 }
 
 /// The user's preferred languages of macOS (`NSLocale.preferredLanguages`), best first, such as `de-DE`.

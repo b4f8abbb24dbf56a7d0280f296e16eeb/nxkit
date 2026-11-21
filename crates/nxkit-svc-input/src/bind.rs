@@ -258,6 +258,18 @@ impl Bindings {
         Ok(())
     }
 
+    /// Takes `action` off every key. Mouse buttons and the wheel keep it.
+    pub(crate) fn unbind_keys_of(&mut self, action: Action) {
+        self.list
+            .retain(|(s, a)| !(matches!(s, Source::Key(_)) && *a == action));
+    }
+
+    /// Puts `action` on the key with the usage id `key`. The old action of the key goes.
+    pub(crate) fn bind_key(&mut self, key: u8, action: Action) {
+        self.list.retain(|(s, _)| *s != Source::Key(key));
+        self.list.push((Source::Key(key), action));
+    }
+
     /// Applies the pairs of an input file in order. Each pair that does not parse is skipped and its message is
     /// returned.
     pub(crate) fn rebind_all(&mut self, pairs: &[(String, String)]) -> Vec<String> {

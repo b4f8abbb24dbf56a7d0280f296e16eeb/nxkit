@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "titles/nxtitle", "titles/nxtitles", "titles/families/*", "titles/games/*", "xtask"]
 
 [workspace.package]
-version = "0.12.0"
+version = "0.14.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -207,6 +207,7 @@ nxb-shader = { path = "crates/nxb-shader" }
 nxb-codec = { path = "crates/nxb-codec" }
 nxb-a64 = { path = "crates/nxb-a64" }
 nxb-romfs = { path = "crates/nxb-romfs" }
+nxb-font = { path = "crates/nxb-font" }
 nxb-rewrite = { path = "crates/nxb-rewrite" }
 nxb-split = { path = "crates/nxb-split" }
 nxb-obs = { path = "crates/nxb-obs" }

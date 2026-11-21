@@ -75,7 +75,7 @@ One row for each rewritten site, with four tab-separated columns: the return add
 
 The title module and its family module answer the settings through their `nxtitle` hooks. The build writes them here. The host types the keys that name a mechanism of the core and gives them to the part that uses them (see Seams). It does not use them itself.
 
-Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
+Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target` (`NXKIT_FPS_TARGET` wins where the title offers the rate, see launcher.json), `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
 Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
@@ -89,6 +89,10 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 
 `romfs/`, `shaders/` and `pipelines/` (the pipeline archive shards and `index.nxpi`, or the single `pipelines.mtl4archive` of an older build) are read by the services and the GPU backend, not by the loader.
 
+### font/
+
+The stand-ins for the console's six shared fonts, one file for each type: `standard.ttf` (0), `chinese_simplified.ttf` (1), `chinese_simplified_ext.ttf` (2), `chinese_traditional.ttf` (3), `korean.ttf` (4) and `nintendo_ext.ttf` (5, the button icons). `nxb build` makes them with `nxb-font` from the macOS system fonts, and `nxb fonts <app>` makes them for an app of an older build. The system service loads a type when the game first asks for it. A type without its file uses `standard.ttf`, and without `standard.ttf` the host uses macOS's Arial Unicode as it is, which the font engine of some games cannot load. Without `nintendo_ext.ttf` the game draws its button icons as "?". The setting `shared_font` names one font for types 0 to 4.
+
 ### launcher.json
 
 The launch options of the host, for a launcher such as NX2Apple. The host does not read the file. The table is `nxkit_abi::launch::OPTIONS`, the one definition that the build writes and the host reads. The file has the schema 1 of the old engine's `dm/launcher.json`: `{"schema": 1, "game": "<title id>", "settings": [...]}`. Each row has `env` (the variable), `kind` (`choice` with `options` as `[value, label]` pairs, `toggle` with `on` and `off`, or `range` with `min`, `max` and `step`), `label` and `note` in English, `default`, `section` (`Game`, `Controls` or `Performance`), `level` `basic` for a row that the launcher shows first, and `needs` (`<env>=<value>`) for a sub-setting that the launcher shows only while that row has that value. A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<env>.note` and `launch.opt.<env>.<value>`.
@@ -96,17 +100,35 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 | variable | kind | values | default |
 |---|---|---|---|
 | `NXKIT_OP_MODE` | choice | `docked`, `handheld` | the mode of the title module: `handheld` for a touch screen game, else `docked` |
+| `NXKIT_FPS_TARGET` | choice | `30`, `60`, `120` up to `fps_max` of the title module, and its own `fps_target`. A title with `fps_target` 0 or with one rate gets no row. | the `fps_target` of the title module |
 | `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
 | `NXKIT_LANGUAGE` | choice | empty (the Mac's language) and the languages of `SupportedLanguageFlag` in the game's `control.nacp`, all 16 without a NACP. A game with one language gets no row. | empty |
 | `NXKIT_PAUSE_UNFOCUSED` | toggle | `1`, `0` | `0` |
 | `NXKIT_RUMBLE` | toggle | `1`, `0` | `1` |
 | `NXKIT_RUMBLE_GAIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 3, step 0.1 | `1.0` |
 | `NXKIT_RUMBLE_MIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 0.9, step 0.05 | `0` |
+| `NXKIT_STICK_DEADZONE_L` | range | 0 to 50, step 1 (percent) | `0` |
+| `NXKIT_STICK_DEADZONE_R` | range | 0 to 50, step 1 (percent) | `0` |
+| `NXKIT_PAD_MERGE` | toggle | `1`, `0` | `0` |
+| `NXKIT_PAD_PRESS_TO_JOIN` | toggle | `1`, `0` | `0` |
 | `NXKIT_HOME_MENU` | toggle | `1`, `0` | `1` |
 | `NXKIT_HOME_QUIT` | toggle | `1`, `0` | `1` |
 | `NXKIT_METAL_HUD` | toggle | `1`, `0` | `0` |
 
 The launcher keeps the choice of the player for a row as the string `launcher.<env>` in the preferences domain of the app, the bundle identifier, only when it is not the default. At the start the host reads these strings before it reads any setting (`sys/prefs.rs`, `hostenv::with_saved`). A choice that the row does not accept is ignored, and the environment wins over a choice. The log gets one line for each choice. `NXKIT_SAVED_CHOICES=0` ignores the choices. A run outside an app bundle has none. So a start from Finder or the Dock gets the choices too. A new option is one row in the table and its read in `hostenv.rs`. The test `every_value_of_a_launch_option_is_read` fails when the host does not read a value of the table.
+
+Two more variables come from the launcher, but they are no rows of the table (R66). A launcher with its own button map editor sets them when it starts the app. They have the format of `DM_PAD_MAP` and `DM_KEYMAP` of the old engine, so a launcher passes the same text to both engines. Neither has a saved choice, so a start from Finder or the Dock has no map.
+
+| variable | value | meaning |
+|---|---|---|
+| `NXKIT_PAD_MAP` | `<button>=<button>,…`, for example `A=B,B=A` | The button of a controller that sends the first button by default, by its position, sends the second one. `none` sends nothing. Buttons that are not named stay. |
+| `NXKIT_KEYMAP` | `<function>=<key code>,…`, for example `A=40,B=38` | Puts a function on the key with that macOS virtual key code (`NSEvent.keyCode`, decimal, below 128), or on no key for `none`. The function leaves every key that held it, and the old function of the key leaves that key. |
+
+The buttons are `A`, `B`, `X`, `Y`, `LS`, `RS`, `L`, `R`, `ZL`, `ZR`, `Plus`, `Minus`, `Left`, `Up`, `Right` and `Down`. A key map function is also a direction of a stick, `LUp`, `LDown`, `LLeft`, `LRight`, `RUp`, `RDown`, `RLeft` and `RRight`. The names are case-insensitive. A trailing comma is allowed. `Shake` is accepted so that a value of the old engine parses whole. nxkit has no shake, so a `Shake` entry of the key map changes nothing and a button mapped to `Shake` sends nothing.
+
+A value is taken whole or not at all. A blank value is no value. If one entry is malformed, the log gets one line that names the bad entries, and the default stays. A key code of a key that nxkit does not read (the keypad, F13 and above, the ISO and JIS keys) puts the function on no key, with a line in the log.
+
+The pad map changes the controllers only, not the keyboard. The host reads Home and the buttons of the Home menu before the pad map, so they keep the printed buttons. The key map changes the keys only. A mouse button or the wheel keeps its function.
 
 ### input.json
 
@@ -129,6 +151,8 @@ The keyboard and mouse layout of player 1 (R63) can be changed in `input.json`. 
 | `mouse.deadzone` | The stick value of the smallest mouse motion, 0 to 0.9, to get past the dead zone of the game. Default 0.12. |
 | `mouse.capture` | The window may hold the mouse. `false` turns the mouse off for the game. |
 | `bind` | `key: action` pairs, applied in key order. A pair replaces the action of that key. `none` removes it. |
+
+The layout is built in three steps. The default layout comes first. `NXKIT_KEYMAP` of the launcher changes it. The `bind` pairs of the input files change the result. So `bind` wins for every key that it names, and the key map wins for the other keys.
 
 Keys: `a` to `z`, `0` to `9`, `f1` to `f12`, `space`, `enter`, `tab`, `backspace`, `delete`, `escape`, `up`, `down`, `left`, `right`, `shift`, `ctrl`, `alt` (both sides; `lshift`, `rshift`, `lctrl`, `rctrl`, `lalt`, `ralt` for one), `capslock`, `minus`, `equal`, `lbracket`, `rbracket`, `backslash`, `semicolon`, `quote`, `grave`, `comma`, `period`, `slash`, `mouse_left`, `mouse_right`, `mouse_middle`, `mouse4`, `mouse5`, `wheel`, `wheel_up`, `wheel_down`. Actions: `a`, `b`, `x`, `y`, `l`, `r`, `zl`, `zr`, `plus`, `minus`, `lstick`, `rstick` (the stick clicks), `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `ls_up`, `ls_down`, `ls_left`, `ls_right`, `rs_up`, `rs_down`, `rs_left`, `rs_right`, `walk` (half deflection of the left stick) and `none`.
 
@@ -272,7 +296,13 @@ A controller's Home button gets a menu and a quit prompt over the game, as the d
 - Back to the launcher pauses the game in the background: the game is told it is in the background, the window leaves full screen, the launcher gets the activation and the application hides. A game that keeps running in the background focus (most pause there, as on the console) keeps its sound. The game comes back when it is active again (the launcher activates it, the Dock, Command-Tab), when it is shown again, or on the distributed notification `org.nxkit.resume.<pid>`, and goes back to full screen if it was there. `org.nxkit.quit.<pid>` quits it. The host posts `org.nxkit.paused.<pid>` and `org.nxkit.resumed.<pid>`.
 - `NXKIT_HOME_MENU=0` turns the menu off, `NXKIT_HOME_QUIT=0` the hold. `NXKIT_HOME_TEXT` gives the texts in the player's language, one per line, in the order of the dm front end's `DM_HOME_QUIT_TEXT`: the hold, the prompt's title, its note, Quit, Cancel, Resume, Back to the launcher and the menu's title. A missing or empty line is the English one.
 
-With the Home button on, the window's content view is a plain view that holds the game's view (its `CAMetalLayer`) and the screens above it.
+With the Home button on, the window's content view is a plain view that holds the game's view (its `CAMetalLayer`) and the screens above it. Under the Home screens the game's picture is blurred (`NSVisualEffectView` within the window) and dimmed.
+
+### Over a launcher
+
+With `NXKIT_OVERLAY=1` (NX2Apple's console mode) the game does not open a Space of its own (`sys/present.rs`). Its window is borderless, covers the screen of `NXKIT_SCREEN` and joins every Space, the launcher's full-screen Space too (`fullScreenAuxiliary`, floating level), so it opens over the launcher with no Space change. It stays transparent until the game's picture shows something, then fades in (0.3 s), asks for the front and posts `org.nxkit.shown.<pid>`. A game presents black pictures while it boots: while the host waits, each present of an NVN game copies an 8 by 5 grid of the picture into a small shared texture and reads it when the GPU is done (`nxkit-gpu` `shown.rs`); two texels brighter than nearly black end the wait. A Vulkan game shows with its first finished frame, and any game shows at the latest 45 s after its window opened. The application asks for the front only when it shows: active with no window on the launcher's Space, macOS would take the player to the desktop. The start shows no loading window: the progress goes to the launcher as `org.nxkit.loading.<pid>` (`done` and `total`), which shows it on its own starting screen. When the game ends, the window fades out before the application quits, and the launcher is right under it.
+
+Without it, the loading window is a small dark card in the same look (`sys/loading.rs`): the game's name, "Preparing pipelines: x of y" and a cream bar. Both windows have a black background, so nothing white shows before the first picture. The pointer over the game hides after `NXKIT_CURSOR_HIDE` seconds without movement (3) and shows again with the next movement (`sys/pointer.rs`).
 
 ## The frame path
 

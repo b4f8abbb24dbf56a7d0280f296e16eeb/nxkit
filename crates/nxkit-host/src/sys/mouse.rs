@@ -148,6 +148,7 @@ pub(crate) fn tick() {
 
 /// A mouse motion event.
 pub(crate) fn moved(event: &NSEvent) {
+    super::pointer::activity();
     with(|h| {
         if h.since.is_some_and(|t| t.elapsed() >= SETTLE) {
             h.events.mouse(MouseEvent::Moved {
@@ -162,6 +163,7 @@ pub(crate) fn moved(event: &NSEvent) {
 pub(crate) fn button(event: &NSEvent, down: bool) {
     let number = u8::try_from(event.buttonNumber()).unwrap_or(u8::MAX);
     let bit = 1u32.checked_shl(u32::from(number)).unwrap_or(0);
+    super::pointer::activity();
     with(|h| {
         if down && !h.held() {
             h.take();
@@ -183,6 +185,7 @@ pub(crate) fn button(event: &NSEvent, down: bool) {
 /// A scroll event. Only a wheel notch or the start of a trackpad scroll matters, the service makes it a short
 /// press.
 pub(crate) fn wheel(event: &NSEvent) {
+    super::pointer::activity();
     with(|h| {
         let dy = event.scrollingDeltaY();
         if h.held() && dy != 0.0 {

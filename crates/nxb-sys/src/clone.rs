@@ -14,7 +14,8 @@ pub enum CloneKind {
 }
 
 /// Clone `src` (a file, or a whole directory tree) to `dst`, which must not exist. Falls back to a copy when the file
-/// system cannot clone (other volume, not APFS). Symlinks inside a tree are copied as links.
+/// system cannot clone (other volume, not APFS). Symlinks inside a tree are copied as links. The copy keeps the extended
+/// attributes of files and folders, as a clone does (a save keeps the guest name of a folder in one).
 pub fn clone_or_copy(src: &Path, dst: &Path) -> io::Result<CloneKind> {
     if imp::clone(src, dst)? {
         return Ok(CloneKind::Cloned);
@@ -32,6 +33,7 @@ fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_dir() {
         fs::create_dir(dst)?;
+        imp::copy_attrs(src, dst)?;
         for e in fs::read_dir(src)? {
             let e = e?;
             copy_tree(&e.path(), &dst.join(e.file_name()))?;
@@ -65,8 +67,23 @@ mod imp {
     const EXDEV: i32 = 18;
     const ENOTSUP: i32 = 45;
 
+    const COPYFILE_XATTR: u32 = 1 << 2;
+
     unsafe extern "C" {
         fn clonefile(src: *const c_char, dst: *const c_char, flags: u32) -> i32;
+        fn copyfile(from: *const c_char, to: *const c_char, state: *mut u8, flags: u32) -> i32;
+    }
+
+    /// The extended attributes of the folder `src` on the folder `dst` (`fs::copy` keeps those of a file).
+    pub(super) fn copy_attrs(src: &Path, dst: &Path) -> io::Result<()> {
+        let s = CString::new(src.as_os_str().as_bytes())?;
+        let d = CString::new(dst.as_os_str().as_bytes())?;
+        // SAFETY: both pointers are NUL-terminated strings alive for the call; a null state is allowed.
+        if unsafe { copyfile(s.as_ptr(), d.as_ptr(), std::ptr::null_mut(), COPYFILE_XATTR) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
     }
 
     /// `Ok(false)`: this file system cannot clone, copy instead.
@@ -93,6 +110,10 @@ mod imp {
     pub(super) fn clone(_src: &Path, _dst: &Path) -> io::Result<bool> {
         Ok(false)
     }
+
+    pub(super) fn copy_attrs(_src: &Path, _dst: &Path) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +139,40 @@ mod tests {
         #[cfg(target_os = "macos")]
         assert_eq!(k, CloneKind::Cloned);
         let _ = k;
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    /// The copy (another volume) keeps the attributes of folders and files.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn copy_keeps_extended_attributes() {
+        use std::process::Command;
+        let base = std::env::temp_dir().join(format!("nxb-copy-attr-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src/.dm-case-1")).unwrap();
+        fs::write(base.join("src/.dm-case-1/f"), b"x").unwrap();
+        let set = |name: &str, p: &Path| {
+            let ok = Command::new("/usr/bin/xattr")
+                .args(["-w", "org.test.name", name])
+                .arg(p)
+                .status();
+            assert!(ok.unwrap().success());
+        };
+        set("Dir", &base.join("src/.dm-case-1"));
+        set("File", &base.join("src/.dm-case-1/f"));
+        copy_tree(&base.join("src"), &base.join("dst")).unwrap();
+        let get = |p: &Path| {
+            let o = Command::new("/usr/bin/xattr")
+                .args(["-p", "org.test.name"])
+                .arg(p)
+                .output();
+            String::from_utf8(o.unwrap().stdout)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        assert_eq!(get(&base.join("dst/.dm-case-1")), "Dir");
+        assert_eq!(get(&base.join("dst/.dm-case-1/f")), "File");
         fs::remove_dir_all(base).unwrap();
     }
 }

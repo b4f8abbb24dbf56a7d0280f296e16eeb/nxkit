@@ -1,11 +1,12 @@
 //! `nn::pl` shared font and `nn::fontll::ScalableFontEngine` take-overs. Source: The engine `dm/host/hle_sdk16.c`, the
 //! `pl` and `fontll` sections.
 //!
-//! The console fonts are not in the game. The host loads a stand-in TrueType font into guest memory once, behind a
-//! `OnceLock`, so a call after the first is a plain load. The standard font comes from `Config::shared_font`, else
-//! `standard.ttf` in `Config::font_dir`. The extended font (button icons, shared font type 5) comes from
-//! `Config::shared_font_ext`, else `nintendo_ext.ttf` in the font directory, and without it type 5 uses the standard
-//! font. A missing font gives a null address.
+//! The console fonts are not in the game. The host loads a stand-in TrueType font for each type into guest memory
+//! once, behind a `OnceLock`, so a call after the first is a plain load. Each type has its file in `Config::font_dir`
+//! (`FILES`, made by `nxb build`). The standard font (type 0) comes from `Config::shared_font`, else `standard.ttf`,
+//! else macOS's Arial Unicode as it is. `Config::shared_font` is the one font of types 0 to 4. The extended font
+//! (button icons, type 5) comes from `Config::shared_font_ext`, else `nintendo_ext.ttf`. A type without a font of its
+//! own uses the standard font. A missing standard font gives a null address.
 //!
 //! A font in guest memory is the 8-byte BFTTF header `{u32 0x18029a7f, u32 bswap32(size ^ 0x49621806)}` and the TTF.
 //! A game reads the font in one of two forms, and `Config::shared_font_decode` tells which. A game that decodes the
@@ -76,37 +77,60 @@ fn first(configured: Option<&PathBuf>, file: &str, fallback: Option<&str>) -> Fo
     Font::default()
 }
 
-static STANDARD: OnceLock<Font> = OnceLock::new();
-static EXTENDED: OnceLock<Font> = OnceLock::new();
+/// The file of each shared font type in the font directory: standard, Simplified Chinese, its extension, Traditional
+/// Chinese, Korean and the Nintendo extension (button icons).
+const FILES: [&str; 6] = [
+    "standard.ttf",
+    "chinese_simplified.ttf",
+    "chinese_simplified_ext.ttf",
+    "chinese_traditional.ttf",
+    "korean.ttf",
+    "nintendo_ext.ttf",
+];
 
-fn standard() -> Font {
-    *STANDARD.get_or_init(|| {
-        let f = first(config().shared_font.as_ref(), "standard.ttf", Some("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"));
-        if f.addr == 0 {
-            log("cannot open the standard shared font: set Config::shared_font or put standard.ttf in Config::font_dir");
-        }
-        f
-    })
-}
+/// The font of each type as it was opened, a null font where the type has none of its own.
+static FONTS: [OnceLock<Font>; 6] = [const { OnceLock::new() }; 6];
 
-fn extended() -> Font {
-    *EXTENDED.get_or_init(|| {
-        let f = first(config().shared_font_ext.as_ref(), "nintendo_ext.ttf", None);
-        if f.addr == 0 {
-            log("the extended shared font is missing: button icons draw as a question mark");
+fn open(kind: usize) -> Font {
+    let c = config();
+    match kind {
+        0 => {
+            let f = first(
+                c.shared_font.as_ref(),
+                FILES[0],
+                Some("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+            );
+            if f.addr == 0 {
+                log(
+                    "cannot open the standard shared font: set Config::shared_font or put standard.ttf in Config::font_dir",
+                );
+            }
+            f
         }
-        f
-    })
-}
-
-fn font(kind: u32) -> Font {
-    if kind == 5 {
-        let e = extended();
-        if e.addr != 0 {
-            return e;
+        5 => {
+            let f = first(c.shared_font_ext.as_ref(), FILES[5], None);
+            if f.addr == 0 {
+                log("the extended shared font is missing: button icons draw as a question mark");
+            }
+            f
         }
+        _ if c.shared_font.is_some() => Font::default(),
+        _ => first(None, FILES[kind], None),
     }
-    standard()
+}
+
+/// The font of a type: its own, else the standard font. A type out of range is the standard font.
+fn font(kind: u32) -> Font {
+    let k = if (kind as usize) < FILES.len() {
+        kind as usize
+    } else {
+        0
+    };
+    let f = *FONTS[k].get_or_init(|| open(k));
+    if f.addr != 0 || k == 0 {
+        return f;
+    }
+    *FONTS[0].get_or_init(|| open(0))
 }
 
 /// How far the address of a font moves past the header: 0 for a game that decodes the header, else 8.
@@ -180,10 +204,9 @@ extern "C" fn begin_vr() -> u32 {
 
 /// The font engine takes the TTF itself, so the base of a host font gets the header cut off.
 fn payload(data: u64) -> u64 {
-    let known = [STANDARD.get(), EXTENDED.get()];
-    if known
+    if FONTS
         .iter()
-        .flatten()
+        .filter_map(OnceLock::get)
         .any(|f| f.addr != 0 && f.addr == data)
     {
         data + HEADER

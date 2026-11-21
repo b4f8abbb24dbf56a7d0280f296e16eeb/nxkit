@@ -6,6 +6,7 @@
 //! | `nxb` command | calls |
 //! |---|---|
 //! | `build` | `nxb_build::main` |
+//! | `fonts` | `nxb_build::fonts_main` |
 //! | `extract` | `nxb_extract::cli::main` |
 //! | `split` | `nxb_extract::split_cli::main` |
 //! | `shaders guards\|own-verdicts\|build` | this crate (the shader-step command line) |
@@ -119,6 +120,7 @@ pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Writ
         "build" if bin == Binary::Shaderbuild => return build::main(rest, out, err),
         // the whole build (ADR W19: nxb-build is the orchestrator crate)
         "build" if bin == Binary::Nxb => return nxb_build::main(rest),
+        "fonts" if bin == Binary::Nxb => return nxb_build::fonts_main(rest),
         // the shader step under its own name
         "shaders" if bin == Binary::Nxb => return shaders(rest, out, err),
         // a title's shader and pipeline cache as a store export

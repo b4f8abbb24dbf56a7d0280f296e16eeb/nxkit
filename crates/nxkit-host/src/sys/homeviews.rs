@@ -5,8 +5,9 @@
 //! The controller's focus is a ring of 2 points, cream (black on the cream capsule), as `PadFocus` draws it. A window
 //! narrower than 650 points gets the compact sizes of the console mode.
 //!
-//! The views are AppKit views, so they draw while the game presents. The scrim is flipped, so the layout goes down from
-//! the top, and it keeps the mouse from the game's view.
+//! The views are AppKit views, so they draw while the game presents. Under the card the game's picture is blurred
+//! (`NSVisualEffectView` within the window) and dimmed. The scrim is flipped, so the layout goes down from the top, and
+//! it keeps the mouse from the game's view.
 
 use std::cell::Cell;
 
@@ -14,49 +15,16 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSAnimationContext, NSAutoresizingMaskOptions, NSBezierPath, NSBox, NSBoxType, NSColor,
-    NSEvent, NSFontWeightLight, NSImage, NSImageSymbolConfiguration, NSImageView, NSLineBreakMode,
-    NSLineCapStyle, NSResponder, NSTextAlignment, NSTextField, NSTitlePosition, NSView,
+    NSAnimationContext, NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua,
+    NSBezierPath, NSEvent, NSFontWeightLight, NSImage, NSImageSymbolConfiguration, NSImageView,
+    NSLineBreakMode, NSLineCapStyle, NSResponder, NSTextAlignment, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSObject, NSString};
 
 use super::font::{self, Weight};
-
-/// The colours of NX2Apple's tokens (`color.*`), as `0xRRGGBB` and an alpha.
-mod tokens {
-    /// `color.background`: the page, and the scrim at 70 %.
-    pub(super) const BACKGROUND: u32 = 0x0E0E0F;
-    /// `color.surface`: a card.
-    pub(super) const SURFACE: u32 = 0x1A1A1C;
-    /// `color.accent`: the cream of the one primary action, of a selection and of the focus.
-    pub(super) const ACCENT: u32 = 0xFFF0D6;
-    /// `color.accentOn`: text and the focus ring on the cream.
-    pub(super) const ACCENT_ON: u32 = 0x000000;
-    /// White, for the text and the quiet fills at their alphas.
-    pub(super) const WHITE: u32 = 0xFFFFFF;
-    /// The scrim over the game (`ConsoleView`: the background at 0.7).
-    pub(super) const SCRIM: f64 = 0.7;
-    /// `color.text.primary`.
-    pub(super) const TEXT_PRIMARY: f64 = 0.90;
-    /// `color.text.secondary`.
-    pub(super) const TEXT_SECONDARY: f64 = 0.60;
-    /// The fill of a quiet capsule.
-    pub(super) const QUIET_FILL: f64 = 0.09;
-    /// The label of a quiet capsule.
-    pub(super) const QUIET_TEXT: f64 = 0.90;
-    /// The card's hairline.
-    pub(super) const HAIRLINE: f64 = 0.10;
-    /// `LauncherPalette.focusRingWidth`.
-    pub(super) const FOCUS_RING: f64 = 2.0;
-    /// `motion.standard`, in seconds.
-    pub(super) const MOTION: f64 = 0.2;
-}
-
-fn rgb(hex: u32, alpha: f64) -> Retained<NSColor> {
-    let c = |shift: u32| f64::from((hex >> shift) & 0xFF) / 255.0;
-    NSColor::colorWithSRGBRed_green_blue_alpha(c(16), c(8), c(0), alpha)
-}
+use super::look::{fills_parent, label, rect, rgb, surface, tokens};
 
 /// The sizes of `ConsoleQuestion`, wide or compact.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -121,12 +89,6 @@ define_class!(
             true
         }
 
-        #[unsafe(method(drawRect:))]
-        fn draw_rect(&self, rect: CGRect) {
-            rgb(tokens::BACKGROUND, tokens::SCRIM).setFill();
-            NSBezierPath::fillRect(rect);
-        }
-
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, _e: &NSEvent) {}
 
@@ -159,6 +121,28 @@ define_class!(
         #[unsafe(method(isFlipped))]
         fn is_flipped(&self) -> bool {
             true
+        }
+
+        #[unsafe(method(hitTest:))]
+        fn hit_test(&self, _point: CGPoint) -> *mut NSView {
+            std::ptr::null_mut()
+        }
+    }
+);
+
+define_class!(
+    // SAFETY: as `Scrim`.
+    /// The dim of the scrim, over the blur.
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NxkitHomeDim"]
+    struct Dim;
+
+    impl Dim {
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, rect: CGRect) {
+            rgb(tokens::BACKGROUND, tokens::SCRIM).setFill();
+            NSBezierPath::fillRect(rect);
         }
 
         #[unsafe(method(hitTest:))]
@@ -218,6 +202,13 @@ impl Scrim {
     }
 }
 
+impl Dim {
+    fn new(mtm: MainThreadMarker, frame: CGRect) -> Retained<Self> {
+        // SAFETY: as `Scrim::new`.
+        unsafe { msg_send![Self::alloc(mtm), initWithFrame: frame] }
+    }
+}
+
 impl Pane {
     fn new(mtm: MainThreadMarker, frame: CGRect) -> Retained<Self> {
         // SAFETY: as `Scrim::new`.
@@ -241,62 +232,6 @@ impl HoldRing {
             self.setNeedsDisplay(true);
         }
     }
-}
-
-fn rect(x: f64, y: f64, w: f64, h: f64) -> CGRect {
-    CGRect::new(
-        CGPoint::new(x.round(), y.round()),
-        CGSize::new(w.round(), h.round()),
-    )
-}
-
-fn fills_parent(view: &NSView) {
-    view.setAutoresizingMask(
-        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
-    );
-}
-
-/// A label of `text`: wrapped to `width`, or on one line. Its size comes with it.
-fn label(
-    mtm: MainThreadMarker,
-    text: &str,
-    font: &objc2_app_kit::NSFont,
-    color: &NSColor,
-    width: f64,
-    wrap: bool,
-) -> (Retained<NSTextField>, CGSize) {
-    let s = NSString::from_str(text);
-    let t = if wrap {
-        NSTextField::wrappingLabelWithString(&s, mtm)
-    } else {
-        NSTextField::labelWithString(&s, mtm)
-    };
-    t.setFont(Some(font));
-    t.setTextColor(Some(color));
-    if wrap {
-        t.setPreferredMaxLayoutWidth(width);
-    }
-    let size = t.fittingSize();
-    (t, CGSize::new(size.width.min(width), size.height))
-}
-
-/// A rounded box of `fill` with a border of `border` (none at width 0).
-fn surface(
-    mtm: MainThreadMarker,
-    frame: CGRect,
-    fill: &NSColor,
-    radius: f64,
-    border: (&NSColor, f64),
-) -> Retained<NSBox> {
-    let b = NSBox::new(mtm);
-    b.setBoxType(NSBoxType::Custom);
-    b.setTitlePosition(NSTitlePosition::NoTitle);
-    b.setFillColor(fill);
-    b.setBorderColor(border.0);
-    b.setBorderWidth(border.1);
-    b.setCornerRadius(radius);
-    b.setFrame(frame);
-    b
 }
 
 /// A capsule with its label centred, cream when `primary`, with the focus ring when `focused`. The label gets a
@@ -372,11 +307,29 @@ pub(super) struct Card<'a> {
     pub(super) focused: usize,
 }
 
-/// The scrim over `bounds` and the card in its middle.
+/// A blur of what is under `bounds` in the window: the game's picture under the Home screens.
+fn blur(mtm: MainThreadMarker, bounds: CGRect) -> Retained<NSVisualEffectView> {
+    let v = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), bounds);
+    v.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
+    v.setMaterial(NSVisualEffectMaterial::FullScreenUI);
+    v.setState(NSVisualEffectState::Active);
+    // SAFETY: `NSAppearanceNameDarkAqua` is a constant of AppKit.
+    let dark = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua });
+    v.setAppearance(dark.as_deref());
+    fills_parent(&v);
+    v
+}
+
+/// The scrim over `bounds`: the blurred game, dimmed, and the card in its middle.
 pub(super) fn card(mtm: MainThreadMarker, bounds: CGRect, c: &Card<'_>) -> Retained<NSView> {
     let look = Look::for_width(bounds.size.width);
     let scrim = Scrim::new(mtm, bounds);
     fills_parent(&scrim);
+    let local = CGRect::new(CGPoint::new(0.0, 0.0), bounds.size);
+    let dim = Dim::new(mtm, local);
+    fills_parent(&dim);
+    scrim.addSubview(&blur(mtm, local));
+    scrim.addSubview(&dim);
     let width = look.card_width(bounds.size.width);
     let (pad, gap) = (look.padding(), look.spacing());
     let inner = width - 2.0 * pad;

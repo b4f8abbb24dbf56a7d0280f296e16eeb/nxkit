@@ -61,6 +61,24 @@ pub struct HostEnv {
     pub rumble_min: f32,
     /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
     pub metal_hud: bool,
+    /// `NXKIT_FPS_TARGET` (a whole number, a launch option): the frame rate over `fps_target` of the title module.
+    /// `Settings::with_env` keeps it only when the title offers it.
+    pub fps_target: Option<u32>,
+    /// `NXKIT_STICK_DEADZONE_L` (0 to 50, a whole number, 0 otherwise, a launch option): the dead zone of the left
+    /// stick of a controller in percent.
+    pub stick_deadzone_l: u8,
+    /// `NXKIT_STICK_DEADZONE_R` (as the left one, a launch option): the dead zone of the right stick.
+    pub stick_deadzone_r: u8,
+    /// `NXKIT_PAD_MERGE=1` (a launch option): every controller is player 1.
+    pub pad_merge: bool,
+    /// `NXKIT_PAD_PRESS_TO_JOIN=1` (a launch option): a new controller becomes a player at its first button press.
+    pub pad_press_to_join: bool,
+    /// `NXKIT_PAD_MAP` (not blank, set by the launcher, no launch option): what the buttons of a controller send, as
+    /// given. `nxkit_svc_input::PadMap::parse` reads it.
+    pub pad_map: Option<String>,
+    /// `NXKIT_KEYMAP` (not blank, set by the launcher, no launch option): functions on other keys, as given.
+    /// `nxkit_svc_input::KeyMap::parse` reads it.
+    pub key_map: Option<String>,
     /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
@@ -75,6 +93,16 @@ pub struct HostEnv {
     pub launcher: Option<String>,
     /// `NXKIT_HOME_TEXT`: the texts of the Home button in the player's language, one per line (`home::Texts`).
     pub home_text: Option<String>,
+    /// `NXKIT_LAUNCHER_PID`: the process of the launcher that started the game. Back to the launcher activates this
+    /// process, so it reaches the right one when two copies of a launcher run; else the first with the bundle id.
+    pub launcher_pid: Option<i32>,
+    /// `NXKIT_CURSOR_HIDE` (3): the seconds without movement after which the pointer over the game hides, `0` never.
+    pub cursor_hide: f64,
+    /// `NXKIT_CURSOR_HIDDEN=1`: the pointer starts hidden (the launcher's own was hidden when it started the game).
+    pub cursor_hidden: bool,
+    /// `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in
+    /// with its first picture and gives the launcher the progress of the start (`sys/present.rs`).
+    pub overlay: bool,
 }
 
 impl Default for HostEnv {
@@ -133,6 +161,18 @@ impl HostEnv {
             rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
             rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
             metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
+            fps_target: env
+                .var(launch::FPS_TARGET)
+                .ok()
+                .and_then(|v| v.trim().parse::<u32>().ok()),
+            stick_deadzone_l: percent(env, launch::STICK_DEADZONE_L),
+            stick_deadzone_r: percent(env, launch::STICK_DEADZONE_R),
+            pad_merge: env.var(launch::PAD_MERGE).is_ok_and(|v| v.trim() == "1"),
+            pad_press_to_join: env
+                .var(launch::PAD_PRESS_TO_JOIN)
+                .is_ok_and(|v| v.trim() == "1"),
+            pad_map: not_blank(env, launch::PAD_MAP),
+            key_map: not_blank(env, launch::KEYMAP),
             handheld: env.var(launch::OP_MODE).ok().and_then(|v| match v.trim() {
                 "handheld" => Some(true),
                 "docked" => Some(false),
@@ -150,6 +190,14 @@ impl HostEnv {
                 .map(|v| v.trim().to_owned())
                 .filter(|v| !v.is_empty()),
             home_text: env.var("NXKIT_HOME_TEXT").ok(),
+            launcher_pid: parsed::<i32>(env, "NXKIT_LAUNCHER_PID").filter(|p| *p > 0),
+            cursor_hide: parsed::<f64>(env, "NXKIT_CURSOR_HIDE")
+                .filter(|s| s.is_finite() && *s >= 0.0)
+                .unwrap_or(3.0),
+            cursor_hidden: env
+                .var("NXKIT_CURSOR_HIDDEN")
+                .is_ok_and(|v| v.trim() == "1"),
+            overlay: env.var("NXKIT_OVERLAY").is_ok_and(|v| v.trim() == "1"),
         }
     }
 }
@@ -188,6 +236,16 @@ pub fn with_saved(env: &mut Env, saved: impl Fn(&str) -> Option<String>) -> Vec<
 /// The value of `key` as a number from `min` to `max`, None when it is unset, not a number or outside.
 fn in_range(env: &Env, key: &str, min: f32, max: f32) -> Option<f32> {
     parsed::<f32>(env, key).filter(|v| (min..=max).contains(v))
+}
+
+/// The value of `key` as a whole percent from 0 to 50, 0 when it is unset, not a whole number or above 50.
+fn percent(env: &Env, key: &str) -> u8 {
+    parsed::<u8>(env, key).filter(|p| *p <= 50).unwrap_or(0)
+}
+
+/// The value of `key` as given, None when it is unset or blank.
+fn not_blank(env: &Env, key: &str) -> Option<String> {
+    env.var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
 /// The value of `key` parsed as `T`, None when it is unset or not a `T`.
@@ -308,6 +366,19 @@ mod tests {
             (Some(true), Some(false), None)
         );
         assert_eq!(d.handheld, None);
+        assert_eq!(
+            (d.launcher_pid, d.cursor_hide, d.cursor_hidden),
+            (None, 3.0, false)
+        );
+        let c = HostEnv::from_env(&Env::from_pairs([
+            ("NXKIT_LAUNCHER_PID", "4242"),
+            ("NXKIT_CURSOR_HIDE", "0"),
+            ("NXKIT_CURSOR_HIDDEN", "1"),
+        ]));
+        assert_eq!(
+            (c.launcher_pid, c.cursor_hide, c.cursor_hidden),
+            (Some(4242), 0.0, true)
+        );
     }
 
     /// The host reads every launch option, and every value of an option changes what it reads: the table and the
@@ -326,8 +397,8 @@ mod tests {
                     assert_ne!(read(a), read(b), "{}: {a} and {b} read the same", o.env);
                 }
             }
-            // the default of the console mode is the title's, which the host has from game.json
-            if o.env != launch::OP_MODE {
+            // the defaults of the console mode and the frame rate are the title's, which the host has from game.json
+            if o.env != launch::OP_MODE && o.env != launch::FPS_TARGET {
                 assert_eq!(
                     read(o.default),
                     HostEnv::default(),
@@ -336,6 +407,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_input_maps_are_kept_as_given_unless_blank() {
+        let read = |v: &str| {
+            let e = HostEnv::from_env(&Env::from_pairs([
+                ("NXKIT_PAD_MAP", v),
+                ("NXKIT_KEYMAP", v),
+            ]));
+            (e.pad_map, e.key_map)
+        };
+        let given = Some("A=B,B=A".to_owned());
+        assert_eq!(read("A=B,B=A"), (given.clone(), given));
+        assert_eq!(read(" "), (None, None));
+    }
+
+    #[test]
+    fn a_dead_zone_is_a_whole_percent_up_to_50() {
+        let dz = |v: &str| {
+            HostEnv::from_env(&Env::from_pairs([("NXKIT_STICK_DEADZONE_L", v)])).stick_deadzone_l
+        };
+        assert_eq!((dz("15"), dz("50"), dz("0")), (15, 50, 0));
+        assert_eq!((dz("51"), dz("-3"), dz("12.5"), dz("x")), (0, 0, 0, 0));
     }
 
     #[test]

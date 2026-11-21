@@ -176,6 +176,8 @@ pub(crate) struct Layout {
     pub(crate) ids: u32,
     /// Bit `p` is set when player `p` has a controller.
     pub(crate) connected: u8,
+    /// Every controller is player 1 (`Config::pad_merge`): no other player shows up.
+    pub(crate) merged: bool,
 }
 
 impl Layout {
@@ -184,9 +186,14 @@ impl Layout {
         if self.handheld { ID_HANDHELD } else { 0 }
     }
 
-    /// True when player `p` shows up as connected. Player 1 always does.
+    /// True when player `p` shows up as connected. Player 1 always does, the others not when the controllers are
+    /// merged.
     pub(crate) fn reported(&self, p: usize) -> bool {
-        p == 0 || (p < PLAYERS && self.connected >> p & 1 == 1 && self.ids & id_bit(p as u32) != 0)
+        p == 0
+            || (!self.merged
+                && p < PLAYERS
+                && self.connected >> p & 1 == 1
+                && self.ids & id_bit(p as u32) != 0)
     }
 
     /// The player behind an npad id, if the id is in use.
@@ -214,9 +221,10 @@ impl Layout {
         Self::style_for(id, self.player_of(id))
     }
 
-    /// True when the game supports no player but the first. Controllers of other slots then feed player 1.
+    /// True when the game supports no player but the first or the controllers are merged. Controllers of other
+    /// slots then feed player 1.
     pub(crate) fn one_player(&self) -> bool {
-        self.ids & 0xfe == 0
+        self.merged || self.ids & 0xfe == 0
     }
 
     /// The number of players that show up as connected.
@@ -283,6 +291,7 @@ mod tests {
             handheld,
             ids,
             connected,
+            merged: false,
         }
     }
 
@@ -311,6 +320,20 @@ mod tests {
         assert_eq!(layout(false, 0x3ff, 1).player_of(1), None);
         assert_eq!(layout(false, 0x3ff, 0b11).player_of(1), Some(1));
         assert_eq!(layout(false, 0x001, 0b11).player_of(1), None);
+    }
+
+    #[test]
+    fn merged_controllers_are_all_player_one() {
+        let l = Layout {
+            merged: true,
+            ..layout(false, 0x3ff, 0b111)
+        };
+        assert!(l.one_player());
+        assert_eq!(
+            (l.player_of(0), l.player_of(1), l.player_of(2)),
+            (Some(0), None, None)
+        );
+        assert_eq!(l.reported_count(), 1);
     }
 
     #[test]

@@ -4,6 +4,71 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.14.0 - 2026-11-21
+
+### Added
+
+- `nxb build` puts the stand-ins for the console's six shared fonts into every app (`Contents/Resources/nxkit/font/`,
+  new crate `nxb-font`). Type 5 holds the controller button icons, so a game shows its button prompts instead of "?"
+  (Super Mario Bros. Wonder, Ocarina of Time). Types 0 to 4 are unhinted cuts of macOS's Arial Unicode with the
+  characters of each type. The fonts are those of NX2Apple's `make_shared_fonts.py`, made in Rust from the macOS
+  system fonts at build time. `nxb fonts <app>` adds them to an app of an older build.
+- Launch options `NXKIT_FPS_TARGET` (30, 60 or 120, the rates the title offers), `NXKIT_STICK_DEADZONE_L` and
+  `NXKIT_STICK_DEADZONE_R` (a radial dead zone per stick, 0 to 50 %), `NXKIT_PAD_MERGE` (every controller is player 1)
+  and `NXKIT_PAD_PRESS_TO_JOIN` (a new controller gets a player when one of its buttons is pressed), as the `DM_*`
+  switches of the old engine (R65).
+- The button map `NXKIT_PAD_MAP` and the key map `NXKIT_KEYMAP`, in the value format of `DM_PAD_MAP` and `DM_KEYMAP`
+  of the old engine. A launcher sets them (R66).
+
+### Changed
+
+- The system service loads each shared font type from its own file in the font folder, as the old engine does. A type
+  without its file uses the standard font.
+
+### Fixed
+
+- A game started with `NXKIT_OVERLAY=1` ran with sound but never showed its window. The window now goes on the screen
+  at once, transparent, because its display link ticks only while the window is on a screen.
+- A game that mounts both saves (Mario Kart 8 Deluxe) gets its device save in a folder of its own, so it reads the
+  `_device` save that `nxb build` copies over (R35).
+
+## 0.13.0 - 2026-11-21
+
+### Added
+
+- The app owns its launch options (R65). `nxb build` writes them as `Contents/Resources/nxkit/launcher.json` in the
+  schema of the old engine's launcher, so NX2Apple draws the rows without knowing them, and the host fills the unset
+  ones from the saved choices `launcher.<env>` in the app's preferences (`NXKIT_SAVED_CHOICES=0` ignores them). The
+  options are `NXKIT_OP_MODE` (docked or handheld, the title's mode by default), `NXKIT_FULLSCREEN`,
+  `NXKIT_PAUSE_UNFOCUSED`, `NXKIT_HOME_MENU`, `NXKIT_HOME_QUIT`, `NXKIT_LANGUAGE` (the Mac's language or one of the
+  game's, from `control.nacp`), `NXKIT_RUMBLE`, `NXKIT_RUMBLE_GAIN`, `NXKIT_RUMBLE_MIN` and `NXKIT_METAL_HUD`.
+- `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in with
+  its first picture that is not black and out when it ends, and gives the launcher the progress of its start
+  (`org.nxkit.loading.<pid>`, `org.nxkit.shown.<pid>`). NX2Apple's console mode uses it. `nxkit_gpu::when_shown`
+  tells the host when a presented picture first shows something.
+- The Home screens blur the game's picture under the card. The pointer over the game hides after 3 seconds without
+  movement (`NXKIT_CURSOR_HIDE`, `NXKIT_CURSOR_HIDDEN`). `NXKIT_LAUNCHER_PID` names the launcher by its process.
+
+### Changed
+
+- The loading window of the start is a dark card in the look of NX2Apple's console mode, and the game's window is black
+  before its first picture, so nothing white shows.
+- The game asks for the front again once it has launched, so it comes forward when a launcher hands the front over.
+- The shader step makes smaller GPU code: `air-bc` removes every result that no side effect needs, also cycles of
+  phis that only feed each other (one forward lighting shader had 5444 phis, Apple's library 231). A raw global memory
+  lookup keeps the pool it hit last, so a hit in the same pool reads nothing from the table (`TRANSLATOR_ID` msl-2.22).
+
+### Fixed
+
+- The shader step no longer panics in `emit/alu/flow.rs` when a jump table target found late splits a block with
+  SSY/PBK/PCNT push ops: the sync targets now follow the push ops into the new block. Xenoblade Chronicles 3 lost 89
+  shaders to it (#42).
+- `-o` may name an app that NX2Apple built at the same place with the old engine (nxnative). Before, `nxb build`
+  stopped with "exists and is not an app this build made". The new app gets a copy of the old engine's save, which
+  stays in its place (#43).
+- The main stack is mapped without its guard page, as on the console. Patrick's Parabox (Unity's GC scans the whole
+  main stack) read the guard page and stopped with SIGBUS.
+
 ## 0.12.0 - 2026-11-21
 
 ### Added

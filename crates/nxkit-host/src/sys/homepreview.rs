@@ -59,6 +59,11 @@ pub fn run(dir: &Path) -> Result<Vec<PathBuf>, String> {
             out.push(path);
         }
     }
+    let card = super::loading::preview(mtm, "Super Mario Bros. Wonder", 1240, 3400);
+    let bounds = card.frame();
+    let path = dir.join("loading.png");
+    write(mtm, bounds, &card, &path)?;
+    out.push(path);
     Ok(out)
 }
 

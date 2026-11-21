@@ -9,12 +9,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use nxkit_abi::ipc::Named;
+use nxkit_abi::launch;
 use nxkit_metal::{Context, FrameHooks, GuestMemory};
 use nxkit_rt::Service;
+use nxkit_svc_input::{KeyMap, PadMap};
 use nxkit_svc_pacing::{LoadConfig, StepMode};
 
 use crate::error::{HostError, Result};
-use crate::manifest::Game;
+use crate::manifest::{self, Game, Import};
 use crate::refresh::Refresh;
 use crate::settings::Settings;
 use crate::sys::appkit::{MouseEvent, MouseMode};
@@ -92,6 +94,20 @@ fn aoc_root(game: &Game) -> Option<PathBuf> {
     game.aoc_dirs()
         .first()
         .and_then(|(_, dir)| dir.parent().map(Path::to_path_buf))
+}
+
+/// Whether the device save has its own folder. That is the case when the main module imports
+/// `nn::fs::MountSaveData`, so the game mounts an account save next to its device save (R35).
+fn separate_device_save(game: &Game) -> Result<bool> {
+    let main = game.main_module()?;
+    let imports = manifest::read_imports(&game.path(&main.imports))?;
+    Ok(imports_account_save(&imports))
+}
+
+fn imports_account_save(imports: &[Import]) -> bool {
+    imports
+        .iter()
+        .any(|i| i.name.starts_with("_ZN2nn2fs13MountSaveData"))
 }
 
 /// The version that the game shows for the build ID of its main module.
@@ -195,6 +211,22 @@ fn console_language(vars: &crate::hostenv::HostEnv) -> String {
     lang.to_owned()
 }
 
+/// The map of the variable `name` from its `value`. A value that does not parse whole is ignored with one line in the
+/// log, and the default stays.
+fn input_map<T: Default, E: std::fmt::Display>(
+    name: &str,
+    value: Option<&str>,
+    parse: impl FnOnce(&str) -> std::result::Result<T, E>,
+) -> T {
+    let Some(value) = value else {
+        return T::default();
+    };
+    parse(value).unwrap_or_else(|e| {
+        eprintln!("nxkit-host: {name}: {e}, the value is ignored");
+        T::default()
+    })
+}
+
 /// Starts the service crates with the configuration of the game. The services are the names in `game.services`.
 ///
 /// Every crate gets typed values from `game.json`: fs the romfs, the title ID and the DLC folder, system the launch
@@ -229,7 +261,7 @@ pub fn init_services(
             save,
             temp,
             aoc: aoc_root(game),
-            separate_device_save: false,
+            separate_device_save: separate_device_save(game)?,
         });
     }
     if has(mask, Service::System) {
@@ -261,8 +293,20 @@ pub fn init_services(
             rumble: env.rumble,
             rumble_gain: env.rumble_gain,
             rumble_min: env.rumble_min,
+            stick_deadzone_l: env.stick_deadzone_l,
+            stick_deadzone_r: env.stick_deadzone_r,
+            pad_merge: env.pad_merge,
+            pad_press_to_join: env.pad_press_to_join,
+            pad_map: input_map(launch::PAD_MAP, env.pad_map.as_deref(), PadMap::parse),
+            key_map: input_map(launch::KEYMAP, env.key_map.as_deref(), KeyMap::parse),
             ..nxkit_svc_input::Config::default()
         };
+        for code in config.key_map.unread_codes() {
+            eprintln!(
+                "nxkit-host: {}: key code {code} is a key that nxkit does not read, its function is on no key",
+                launch::KEYMAP
+            );
+        }
         let (file, warnings) = crate::input_file::load(&game.root, &game.title_id);
         for w in warnings {
             eprintln!("nxkit-host: input: {w}");
@@ -383,4 +427,26 @@ pub fn vulkan_frame_hooks(
     refresh: &Arc<Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::frames::install_vulkan(ctx, root, settings, refresh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::imports_account_save;
+    use crate::manifest::parse_imports;
+
+    fn imports(names: &[&str]) -> Vec<crate::manifest::Import> {
+        let list: Vec<String> = names
+            .iter()
+            .map(|n| format!(r#"{{"name": "{n}", "slot": 0, "addend": 0, "weak": false}}"#))
+            .collect();
+        parse_imports(&format!("[{}]", list.join(","))).unwrap()
+    }
+
+    #[test]
+    fn the_device_save_is_separate_only_next_to_an_account_save() {
+        let device = "_ZN2nn2fs19MountDeviceSaveDataEPKc";
+        let account = "_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE";
+        assert!(imports_account_save(&imports(&[device, account])));
+        assert!(!imports_account_save(&imports(&[device])));
+    }
 }

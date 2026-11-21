@@ -25,7 +25,7 @@ its own world, plus the sideways edges in the table below, plus the shared point
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 build runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-xlate, nxb-spirv, nxb-codec, nxb-a64, nxb-romfs, nxb-rewrite, nxb-split, nxtitle, nxtitles"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-xlate, nxb-spirv, nxb-codec, nxb-a64, nxb-romfs, nxb-font, nxb-rewrite, nxb-split, nxtitle, nxtitles"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code)"]
   LT["T families and titles: nxfamily-agl, nxgame-* (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
@@ -103,6 +103,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-rewrite | L1 | no | impl | the code rewrite: NSO and NRO load, rules as data, the five tables |
 | nxb-codec | L1 | no | impl | the ZBIC decoder (`nxb_codec::zbic`). The other decoders of the build live in `nxb-split` and `nxb-rewrite` (W30). |
 | nxb-romfs | L1 | no | impl | the index of a `DMROMFS1` image (read, move files) and a SARC member search. The RomFS tables and the layout plan are in `nxb-extract` |
+| nxb-font | L1 | no | impl | the stand-ins for the console's shared fonts: unhinted cuts of a TrueType font for types 0 to 4 and the button icons of type 5, as NX2Apple's `make_shared_fonts.py` makes them. An own TrueType reader and writer, no I/O. `nxb-build` writes the fonts into each app |
 | nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports many container families (refer to [pipeline-stages.md](pipeline-stages.md)). Formats that are not ported stop with a named `Unsupported` error and exit code 4. |
 | nxkit-hos | R2 | no | impl | the Horizon kernel: objects, handles, events, threads, `WaitSynchronization`, the lock, condition variable and address arbiters, the process memory and its svcs, IPC sessions and the SDK take-overs of the kernel side. Guest memory and the host's pages sit behind traits, so the crate has no `unsafe` code outside `sys`. Refer to [nxkit-hos.md](nxkit-hos.md). It uses `nxkit-abi` and the standard library |
 | nxkit-ipc | R2 | no | impl | the IPC server of the nxkit host: HIPC and CMIF parsing, domains, the service manager `sm:`, per-command counters and the stop on an unknown command. No `unsafe` code, no global lock on the request path |

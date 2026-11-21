@@ -15,10 +15,13 @@
 
 mod bind;
 mod config;
+mod deadzone;
 mod exports;
+mod input_map;
 mod ipc;
 mod keys;
 mod look;
+mod mac_keycodes;
 mod motion;
 mod npad;
 mod pointer;
@@ -40,6 +43,7 @@ use nxkit_abi::export::Export;
 use nxkit_abi::ipc::Named;
 
 pub use config::Config;
+pub use input_map::{KeyMap, MapError, PadMap};
 pub use look::LookConfig;
 pub use seam::{SystemEventHooks, set_system_event_hooks};
 pub use system::{SystemButtons, claim_home, set_blocked, system_buttons};

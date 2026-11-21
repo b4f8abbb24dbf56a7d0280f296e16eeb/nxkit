@@ -37,6 +37,12 @@ pub const NXB: &[Cmd] = &[
         "usage: nxb build <folder of packages | .nup file> [-k prod.keys] [-o OUT.app] [--work-dir D] [--platform mac|mac-app] [--progress json|bar] [--dry-run]\n  inputs: NSP, NSZ, XCI, XCZ and merged packages in a folder (--title-id or --app picks a game), --nup FILE, --aoc DLC_PACKAGE (repeatable)\n  options: --app-name --bundle-id --gpu ARCH|none --pipeline-list FILE --threads N --load-limit PERCENT --own-front on|off|VERDICTS --shader-manifest FILE [--partial] --allow-damaged\n  title resource patches: --resource-patch OPTION=VALUE|stock (repeatable; Ocarina of Time v131072: resolution-scale=S, 0 < S <= 1, pins the dynamic resolution; an archive of another version is left stock with a warning)\n  --auto-analyze: metadata-driven NSP/NSZ/XCI/XCZ/folder or NUP, --update FILE_OR_FOLDER (repeatable), --base-package FILE for NUP data updates, explicit resource patches only (experimental, 256 MiB extracted limit)\n  by default only a game with a title module is built, into an app with nxkit-host as its program (NXB_NXKIT_HOST names another host file)\n  exit codes: 0 done, 1 error, 2 bad arguments, 3 damaged data, 4 not supported, 6 missing key, 130 interrupted",
     ),
     c(
+        "fonts",
+        "Whole build",
+        "the stand-ins for the console's shared fonts, into an app or a folder",
+        "usage: nxb fonts <OUT.app | folder>\n  makes the six shared fonts from the macOS system fonts into Contents/Resources/nxkit/font of an app of nxkit, else into the folder. nxb build does this for every app",
+    ),
+    c(
         "extract",
         "Stages",
         "extract a package (NSP, NSZ, XCI, NUP, merged)",

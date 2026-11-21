@@ -215,7 +215,7 @@ fn write_picture(cmd: u32, id: TexId, format: Format, g: [u32; 2], px: &[Vec<u8>
     let _ = file.write_all(&bytes);
 }
 
-fn half(h: u16) -> f32 {
+pub(crate) fn half(h: u16) -> f32 {
     let s = if h >> 15 != 0 { -1.0 } else { 1.0 };
     let e = i32::from(h >> 10 & 0x1f);
     let m = f32::from(h & 0x3ff);
@@ -226,7 +226,7 @@ fn half(h: u16) -> f32 {
     }
 }
 
-fn small_float(bits: u32, mant: u32) -> f32 {
+pub(crate) fn small_float(bits: u32, mant: u32) -> f32 {
     let e = (bits >> mant) as i32;
     let m = (bits & ((1 << mant) - 1)) as f32 / (1u32 << mant) as f32;
     if e == 0 {

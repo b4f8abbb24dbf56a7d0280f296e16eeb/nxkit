@@ -162,6 +162,7 @@ impl Input {
             handheld: self.config.handheld,
             ids: self.ids,
             connected: self.slots.mask(),
+            merged: self.config.pad_merge,
         }
     }
 
@@ -185,13 +186,20 @@ impl Input {
         if crate::system::blocked() {
             return RawPad::default();
         }
-        let own = self.platform.read_pad(player).unwrap_or_default();
+        let own = self.read_pad(player).unwrap_or_default();
         if player != 0 || !one_player {
             return own;
         }
         let mut pads = vec![own];
-        pads.extend((1..PLAYERS).filter_map(|slot| self.platform.read_pad(slot)));
+        pads.extend((1..PLAYERS).filter_map(|slot| self.read_pad(slot)));
         merge(&pads)
+    }
+
+    /// The controller in `slot` with the pad map on its buttons and the dead zones of its sticks.
+    fn read_pad(&self, slot: usize) -> Option<RawPad> {
+        let pad = self.platform.read_pad(slot)?;
+        let buttons = self.config.pad_map.apply(pad.buttons);
+        Some(self.config.deadzones().apply(RawPad { buttons, ..pad }))
     }
 
     /// The state of the npad `id` read as `style`. Without a controller of that style it is all zero, attributes
