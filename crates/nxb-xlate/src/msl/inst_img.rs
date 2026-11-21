@@ -43,6 +43,9 @@ impl Em<'_> {
         // A cube image takes the texel and then the face. The face is the third coordinate.
         let mut out = match (mask, c.pop()) {
             (5, Some(face)) => vec![vec_of("uint", &c), format!("uint({face})")],
+            // One coordinate (a 1D or buffer image) is cast like the vectors: a plain `int` is ambiguous between the
+            // `ushort` and `uint` overloads of `texture_buffer::write`, and the shader did not compile.
+            (_, Some(last)) if c.is_empty() => vec![format!("uint({last})")],
             (_, Some(last)) => {
                 c.push(last);
                 vec![vec_of("uint", &c)]

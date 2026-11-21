@@ -6,13 +6,17 @@
 
 mod buffered;
 mod dirty;
+#[cfg(test)]
+mod layout_tests;
 mod sparse;
 mod staging;
+mod surface;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use self::dirty::Dirty;
 pub(crate) use self::sparse::virtual_window;
+use self::surface::surface;
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -21,7 +25,6 @@ use nxkit_metal::{
     GuestMemory, PipelineCache, Scratch, SurfaceLayout, Swizzler, TextureDesc, TextureKind,
     TextureRegion,
 };
-use nxkit_nvn::format::format_info;
 use nxkit_nvn::layout::Target;
 use nxkit_nvn::resource::TextureRecord;
 
@@ -53,99 +56,39 @@ fn upload_failed(what: std::fmt::Arguments<'_>) {
     }
 }
 
-/// The block-linear layout of a record, in blocks.
-fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLayout, Skip> {
-    if rec.layout.linear {
-        return Err(Skip::Transfer);
-    }
-    let d = &rec.desc;
-    let info = format_info(d.format).map_err(|_| Skip::Format)?;
-    let (bw, bh) = (
-        u32::from(info.block_w).max(1),
-        u32::from(info.block_h).max(1),
-    );
-    let (width, height, depth, layers) = match d.target {
-        Target::D1 => (d.width, 1, 1, 1),
-        Target::D1Array => (d.width, 1, 1, d.height.max(1)),
-        Target::D3 => (d.width, d.height, d.depth.max(1), 1),
-        Target::D2Array | Target::D2MultisampleArray => (d.width, d.height, 1, d.depth.max(1)),
-        Target::CubemapArray => (d.width, d.height, 1, d.depth.max(6)),
-        Target::Cubemap => (d.width, d.height, 1, 6),
-        _ => (d.width, d.height, 1, 1),
-    };
-    Ok(SurfaceLayout {
-        bytes_per_block: u32::from(info.bytes_per_block),
-        width: width.div_ceil(bw),
-        height: height.div_ceil(bh),
-        depth,
-        mip_levels: res.desc.mip_levels,
-        layers,
-        block_height: 1 << u32::from(rec.layout.tile_h).min(5),
-        block_depth: 1 << u32::from(rec.layout.tile_d).min(5),
-        order,
-        levels: None,
-    }
-    .with_guest_levels(rec))
-}
-
-/// The levels of the guest layout where they differ from the rules of `nxkit_metal`: a sparse texture pads its tiled
-/// levels to whole 64 KiB tiles and its layers to whole tiles, which the rules do not know. Read with the rules, every
-/// row of blocks of a padded level slid sideways by the padding (Octopath Traveler's portraits and its language
-/// notice: bands about one tile high, shifted against each other, with pieces of the padding between them).
-trait GuestLevels {
-    fn with_guest_levels(self, rec: &TextureRecord) -> SurfaceLayout;
-}
-
-impl GuestLevels for SurfaceLayout {
-    fn with_guest_levels(mut self, rec: &TextureRecord) -> SurfaceLayout {
-        let d = &rec.desc;
-        let n = self.mip_levels as usize;
-        if d.samples > 1 || n > nxkit_metal::MAX_TABLE_LEVELS {
-            return self;
-        }
-        let mut t = nxkit_metal::LevelTable {
-            offsets: [0; nxkit_metal::MAX_TABLE_LEVELS],
-            gobs: [0; nxkit_metal::MAX_TABLE_LEVELS],
-            layer_stride: rec.layout.layer_size,
-        };
-        for i in 0..n {
-            let (Ok(off), Ok(gobs)) = (d.level_offset(i as u32), d.level_gobs(i as u32)) else {
-                return self;
-            };
-            t.offsets[i] = off;
-            t.gobs[i] = gobs;
-        }
-        let same = (0..n).all(|i| {
-            self.level(i as u32)
-                .is_ok_and(|l| l.offset == t.offsets[i] && l.row_bytes.div_ceil(64) == t.gobs[i])
-        }) && (self.layers == 1 || self.layer_stride().ok() == Some(t.layer_stride));
-        if !same {
-            self.levels = Some(t);
-        }
-        if crate::diag("upload") && (d.is_sparse() || !same) {
-            eprintln!(
-                "DIAG upload layout {:?} format {:#x} {}x{}x{} levels {} flags {:#x} packaged {:?} block 2^{}: {}",
-                rec.id,
-                d.format,
-                d.width,
-                d.height,
-                d.depth,
-                d.levels,
-                d.flags,
-                d.packaged_block,
-                rec.layout.tile_h,
-                if same {
-                    "as the rules".to_string()
-                } else {
-                    format!("guest levels {:?}", &t.gobs[..n])
-                }
-            );
-        }
-        self
-    }
-}
-
 pub(crate) use crate::pools::locate;
+
+use crate::textures::row_pitch;
+
+/// The regions of a pitch-linear texture that hold guest bytes, each with the offset of its first byte from the first
+/// byte of the texture. A texture buffer of several rows ends in a short row: its full rows are one region and the
+/// texels of the last row another, so a copy never reaches past the bytes of the buffer.
+fn linear_parts(rec: &TextureRecord, d: &TextureDesc) -> Vec<(TextureRegion, u64)> {
+    let whole = TextureRegion::whole(0, 0, extent(d, 0));
+    if rec.desc.target != Target::Buffer || d.height <= 1 {
+        return vec![(whole, 0)];
+    }
+    let full = d.height - 1;
+    let last = rec.desc.width - full * d.width;
+    let mut parts = vec![(
+        TextureRegion {
+            size: [d.width, full, 1],
+            ..whole
+        },
+        0,
+    )];
+    if last > 0 {
+        parts.push((
+            TextureRegion {
+                origin: [0, full, 0],
+                size: [last, 1, 1],
+                ..whole
+            },
+            u64::from(full) * u64::from(row_pitch(rec)),
+        ));
+    }
+    parts
+}
 
 /// The pool buffer that holds all bytes of the texture of `rec` and the offset of its first byte in it.
 fn guest_offset<'p, B: Backing>(
@@ -371,7 +314,7 @@ impl Transfer {
         if d.kind == TextureKind::D3
             || d.mip_levels != 1
             || d.array_layers != 1
-            || rec.desc.stride == 0
+            || row_pitch(rec) == 0
         {
             let what = format_args!(
                 "{:?} {:?} {}x{}x{} levels {} layers {} stride {}",
@@ -382,7 +325,7 @@ impl Transfer {
                 d.depth,
                 d.mip_levels,
                 d.array_layers,
-                rec.desc.stride
+                row_pitch(rec)
             );
             nxkit_nvn::diag::note(nxkit_nvn::diag::Reason::UploadLinearRefused, what);
             if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
@@ -393,14 +336,20 @@ impl Transfer {
         if crate::diag("upload") && crate::diag::first(&SHOWN, 300) {
             eprintln!(
                 "DIAG upload linear {:?} {}x{} stride {}",
-                d.format, d.width, d.height, rec.desc.stride
+                d.format,
+                d.width,
+                d.height,
+                row_pitch(rec)
             );
         }
         let r = self.copy_linear(cb, pools, rec, res, wait);
         if let Err(why) = r {
             upload_failed(format_args!(
                 "linear {:?} {}x{} stride {}: {why:?}",
-                d.format, d.width, d.height, rec.desc.stride
+                d.format,
+                d.width,
+                d.height,
+                row_pitch(rec)
             ));
         }
         r
@@ -424,16 +373,19 @@ impl Transfer {
             pass.end();
             return Err(Skip::Transfer);
         }
-        let r = pass
-            .encode(&ComputeCommand::CopyGuestToTexture {
-                guest: guest.clone(),
-                offset: base,
-                bytes_per_row: rec.desc.stride,
-                bytes_per_image: 0,
-                texture: res.tex.clone(),
-                region: TextureRegion::whole(0, 0, extent(&d, 0)),
-            })
-            .map_err(|_| Skip::Transfer);
+        let r = linear_parts(rec, &d)
+            .into_iter()
+            .try_for_each(|(region, off)| {
+                pass.encode(&ComputeCommand::CopyGuestToTexture {
+                    guest: guest.clone(),
+                    offset: base + off,
+                    bytes_per_row: row_pitch(rec),
+                    bytes_per_image: 0,
+                    texture: res.tex.clone(),
+                    region,
+                })
+                .map_err(|_| Skip::Transfer)
+            });
         pass.end();
         r
     }
@@ -562,20 +514,22 @@ impl Transfer {
             if d.kind == TextureKind::D3
                 || d.mip_levels != 1
                 || d.array_layers != 1
-                || rec.desc.stride == 0
+                || row_pitch(rec) == 0
             {
                 return Err(Skip::Transfer);
             }
-            pass.encode(&ComputeCommand::CopyTextureRegionToGuest {
-                texture: res.tex.clone(),
-                region: TextureRegion::whole(0, 0, extent(&d, 0)),
-                guest: guest.clone(),
-                offset: base,
-                bytes_per_row: rec.desc.stride,
-                bytes_per_image: 0,
-            })
-            .map_err(|_| Skip::Transfer)?;
-            return Ok(bytes(0));
+            for (region, off) in linear_parts(rec, &d) {
+                pass.encode(&ComputeCommand::CopyTextureRegionToGuest {
+                    texture: res.tex.clone(),
+                    region,
+                    guest: guest.clone(),
+                    offset: base + off,
+                    bytes_per_row: row_pitch(rec),
+                    bytes_per_image: 0,
+                })
+                .map_err(|_| Skip::Transfer)?;
+            }
+            return Ok(rec.layout.size.min(bytes(0)));
         }
         let surf = surface(rec, res, self.order)?;
         let slices = if d.kind == TextureKind::D3 {

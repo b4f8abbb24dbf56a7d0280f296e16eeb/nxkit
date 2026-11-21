@@ -297,7 +297,14 @@ fn one(
             res.desc.format
         )));
     }
-    let tex = store.image_view(id, res, &slot.header, d.dim, d.img.atomic_code(), stats)?;
+    let tex = if d.img.buffer {
+        let rec = view
+            .record(id)
+            .map_err(|e| crate::tex_skip(format_args!("image {id:?}: {e:?}")))?;
+        store.buffer_image(rec, res.desc.format)?
+    } else {
+        store.image_view(id, res, &slot.header, d.dim, d.img.atomic_code(), stats)?
+    };
     let r = ImageRes {
         id: tex.gpu_resource_id(),
         scaled: res.scaled,
@@ -360,16 +367,19 @@ mod tests {
             access: ImgAccess::Read,
             atomic: false,
             signed: false,
+            buffer: false,
         };
         let rw = ImgDecl {
             access: ImgAccess::ReadWrite,
             atomic: false,
             signed: false,
+            buffer: false,
         };
         let atomic = ImgDecl {
             access: ImgAccess::Read,
             atomic: true,
             signed: true,
+            buffer: false,
         };
         assert!(!read.writes());
         assert!(rw.writes());

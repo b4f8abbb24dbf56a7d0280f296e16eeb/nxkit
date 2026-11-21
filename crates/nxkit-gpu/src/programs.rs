@@ -12,6 +12,9 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use nxkit_metal::{Context, ShaderLibrary, VertexFormat};
 
+mod decl;
+use decl::{declared_dim, declared_img};
+
 use crate::json::{Json, parse};
 use crate::skip::Skip;
 
@@ -76,6 +79,8 @@ pub(crate) struct ImgDecl {
     pub(crate) atomic: bool,
     /// The texel type is signed integer (`texture2d<int, ...>`). Only matters with `atomic`.
     pub(crate) signed: bool,
+    /// A `texture_buffer`: the image is a texture buffer over the guest bytes (`images.rs`).
+    pub(crate) buffer: bool,
 }
 
 impl ImgDecl {
@@ -92,24 +97,6 @@ impl ImgDecl {
             (true, false) => 1,
             (true, true) => 2,
         }
-    }
-}
-
-/// Reads the access and the texel type from an MSL type such as `texture2d<uint, access::read_write>`.
-fn declared_img(msl_type: &str, atomic: bool) -> ImgDecl {
-    let args = msl_type.split_once('<').map_or("", |(_, r)| r);
-    let access = if args.contains("access::read_write") {
-        ImgAccess::ReadWrite
-    } else if args.contains("access::write") {
-        ImgAccess::Write
-    } else {
-        ImgAccess::Read
-    };
-    let signed = args.trim_start().starts_with("int") || args.trim_start().starts_with("short");
-    ImgDecl {
-        access,
-        atomic,
-        signed,
     }
 }
 
@@ -137,20 +124,6 @@ pub(crate) struct Bind {
     /// For a `tex_ubo` or `samp_ubo` member: the words of its handle. It is a `tex` or `samp_tex` member of the texture
     /// slot `reg` that [`crate::ubotex`] gives the source.
     pub(crate) ubo: Option<crate::ubotex::Source>,
-}
-
-/// The texture type of an MSL argument type such as `texture2d_array<float>`.
-fn declared_dim(msl_type: &str) -> Option<nxkit_metal::TextureKind> {
-    use nxkit_metal::TextureKind as K;
-    let base = msl_type.split('<').next()?.trim();
-    Some(match base {
-        "texture2d" | "depth2d" | "texture1d" => K::D2,
-        "texture2d_array" | "depth2d_array" | "texture1d_array" => K::D2Array,
-        "texturecube" | "depthcube" => K::Cube,
-        "texturecube_array" | "depthcube_array" => K::CubeArray,
-        "texture3d" => K::D3,
-        _ => return None,
-    })
 }
 
 /// Which mesh pipeline stage a task or mesh shader is.

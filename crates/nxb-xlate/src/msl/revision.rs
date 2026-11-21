@@ -34,6 +34,8 @@ pub struct Feature {
 /// `meshpos` 1: the position of a mesh shader is `invariant` (`msl/mesh.rs`), so two mesh shaders give equal depths.
 ///
 /// `blendz` 1: a pixel shader writes RGB 0 to a float colour whose blend factor is 0 (`msl/variant/pixel.rs`).
+///
+/// `surface` 1: the one coordinate of a 1D or buffer image load, store or atomic is a `uint` (`msl/inst_img.rs`).
 pub const FEATURES: &[Feature] = &[
     Feature {
         name: "hmma",
@@ -49,6 +51,11 @@ pub const FEATURES: &[Feature] = &[
         name: "blendz",
         revision: 1,
         uses: uses_blend_word,
+    },
+    Feature {
+        name: "surface",
+        revision: 1,
+        uses: uses_surface,
     },
 ];
 
@@ -75,6 +82,45 @@ fn uses_mesh_position(job: &Job, _code: &[u8]) -> bool {
 /// A pixel shader: every one reads the blend word, whether it writes a float colour or not.
 fn uses_blend_word(job: &Job, _code: &[u8]) -> bool {
     job.stage == "ps" && job.mesh_stage.is_none()
+}
+
+/// Code with a surface instruction (an image load, store, reduction or atomic). Every 64-bit word of Maxwell code and
+/// every 128-bit word of Ampere code is looked at, the header and the scheduling words included (an over-approximation).
+fn uses_surface(job: &Job, code: &[u8]) -> bool {
+    use nxb_maxwell::names::InstName as N;
+    let surface = |n: N| {
+        matches!(
+            n,
+            N::Suatom
+                | N::SuatomB
+                | N::SuatomB2
+                | N::SuatomCas
+                | N::SuatomCasB
+                | N::Suld
+                | N::SuldB
+                | N::SuldD
+                | N::SuldDB
+                | N::Sured
+                | N::SuredB
+                | N::Sust
+                | N::SustB
+                | N::SustD
+                | N::SustDB
+        )
+    };
+    if job.arch_sm86 {
+        let (words, _) = code.as_chunks::<16>();
+        return words.iter().any(|w| {
+            let mut lo = [0u8; 8];
+            lo.copy_from_slice(&w[..8]);
+            ampere_table::lookup((u64::from_le_bytes(lo) & 0xfff) as usize)
+                .is_some_and(|e| surface(e.name))
+        });
+    }
+    let (words, _) = code.as_chunks::<8>();
+    words
+        .iter()
+        .any(|w| surface(nxb_maxwell::table::get_op(0, u64::from_le_bytes(*w)).name))
 }
 
 /// The feature field of a shader's key over `features`: `name=revision` of each feature it uses, `;`-joined, empty
@@ -117,6 +163,17 @@ mod tests {
             ("arch", nxb_pyjson::Value::str(arch)),
         ]);
         Job::from_value(&v).expect("job")
+    }
+
+    #[test]
+    fn surface_instructions_are_found_in_maxwell_code() {
+        // `SUST.B` (opcode 1110 1011 0010 0x at bits 63..50) among plain words.
+        let sust: u64 = 0b11_1010_1100_1000 << 50;
+        let mut with = vec![0u8; 0x50];
+        with.extend_from_slice(&0u64.to_le_bytes());
+        with.extend_from_slice(&sust.to_le_bytes());
+        assert_eq!(tags(&job(false), &with), "surface=1");
+        assert_eq!(tags(&job(false), &[0u8; 0x60]), "");
     }
 
     #[test]

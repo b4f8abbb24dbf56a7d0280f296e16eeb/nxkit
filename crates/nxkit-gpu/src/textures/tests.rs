@@ -1,6 +1,7 @@
 //! Tests for the texture store.
 
 use super::*;
+use nxkit_nvn::layout::Target;
 use nxkit_nvn::{resource::ResourceTable, space::GpuAddr};
 
 #[test]
@@ -507,4 +508,89 @@ fn a_linear_attachment_keeps_its_copy() {
         .ensure(table.get(id).unwrap(), 1.0, u, &mut EncodeStats::default())
         .unwrap();
     assert_eq!((res.in_place, res.reupload), (None, false));
+}
+
+#[test]
+fn a_texture_buffer_is_a_2d_texture_of_one_row() {
+    let buffer = |width: u32| nxkit_nvn::layout::TextureDesc {
+        target: Target::Buffer,
+        format: 0x25,
+        flags: 0,
+        samples: 0,
+        width,
+        height: 1,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let mut table = ResourceTable::new();
+    let id = table
+        .create(buffer(5), GpuAddr::new(0x2000).unwrap())
+        .unwrap();
+    let rec = table.get(id).unwrap();
+    assert!(rec.layout.linear);
+    // A render scale never reaches a texture buffer.
+    let (d, _) = describe(rec, 2.0, Use::default()).unwrap();
+    assert_eq!(
+        (d.kind, d.width, d.height, d.mip_levels, d.array_layers),
+        (TextureKind::D2, 5, 1, 1, 1)
+    );
+    // Element x of a longer one is at (x & 0x3FFF, x >> 14), as the translator wraps a 1D fetch.
+    let wide = table
+        .create(buffer(40_000), GpuAddr::new(0x10_0000).unwrap())
+        .unwrap();
+    let rec = table.get(wide).unwrap();
+    let (d, _) = describe(rec, 1.0, Use::default()).unwrap();
+    assert_eq!((d.width, d.height), (16384, 3));
+    assert_eq!(row_pitch(rec), 16384 * 4);
+    assert_eq!(super::describe::buffer_rows(16384 * 16384 + 1), None);
+    // 32-bit integers are read through the float format of the same bits.
+    let mut ints = buffer(5);
+    ints.format = 0x2F;
+    let id = table
+        .create(ints, GpuAddr::new(0x20_0000).unwrap())
+        .unwrap();
+    let (d, _) = describe(table.get(id).unwrap(), 1.0, Use::default()).unwrap();
+    assert_eq!(d.format, Format::Rgba32Float);
+}
+
+#[test]
+fn a_buffer_image_lies_over_the_guest_bytes_at_an_aligned_offset() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let (store, _guest) = store_over_guest(&ctx);
+    let buffer = nxkit_nvn::layout::TextureDesc {
+        target: Target::Buffer,
+        format: 0x25,
+        flags: 0,
+        samples: 0,
+        width: 300,
+        height: 1,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let mut table = ResourceTable::new();
+    let at = |off: u64| GpuAddr::new(nxkit_metal::GUEST_VA_BASE + off).unwrap();
+    let id = table.create(buffer, at(0x1000)).unwrap();
+    let t = store
+        .buffer_image(table.get(id).unwrap(), Format::Rgba8Unorm)
+        .unwrap();
+    assert_eq!(t.desc().width, 300);
+    // an offset Metal refuses, and a buffer past the end of the pool
+    let odd = table.create(buffer, at(0x2004)).unwrap();
+    assert!(
+        store
+            .buffer_image(table.get(odd).unwrap(), Format::Rgba8Unorm)
+            .is_err()
+    );
+    let past = table.create(buffer, at(1024 * 1024 - 0x100)).unwrap();
+    assert!(
+        store
+            .buffer_image(table.get(past).unwrap(), Format::Rgba8Unorm)
+            .is_err()
+    );
 }

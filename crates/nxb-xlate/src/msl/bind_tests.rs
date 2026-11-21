@@ -219,6 +219,18 @@ fn a_plain_2d_image_is_unchanged() {
 }
 
 #[test]
+fn a_buffer_image_takes_a_uint_coordinate() {
+    // A plain `int` was ambiguous between the `ushort` and `uint` overloads of `texture_buffer::write`.
+    let m = msl(&image(SamplerType::TEXTURE_BUFFER, 1));
+    assert!(
+        m.contains("texture_buffer<float, access::read_write>"),
+        "{m}"
+    );
+    assert!(m.contains(".read(uint(1))"), "{m}");
+    assert!(m.contains("), uint(1));"), "{m}");
+}
+
+#[test]
 fn a_3d_image_array_drops_its_layer() {
     let ty = SamplerType(SamplerType::TEXTURE_3D.0 | SamplerType::ARRAY);
     let b = image(ty, 4);

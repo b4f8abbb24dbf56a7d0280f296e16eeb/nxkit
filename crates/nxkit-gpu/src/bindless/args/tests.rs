@@ -123,6 +123,7 @@ fn a_scaled_image_gets_its_entry() {
         access: ImgAccess::Write,
         atomic: false,
         signed: false,
+        buffer: false,
     };
     let mut img = bind(BindKind::Img, 0, Some(3));
     img.dim = Some(TextureKind::D2);

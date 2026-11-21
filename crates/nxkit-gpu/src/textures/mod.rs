@@ -11,6 +11,8 @@
 //! often and the GPU renders rarely (`Heat`): every write would need a staging upload and a scale.
 
 mod blocks;
+mod buffers;
+mod describe;
 mod evict;
 pub mod inventory;
 mod supersede;
@@ -27,10 +29,10 @@ use nxkit_metal::{
 };
 
 pub(crate) use self::blocks::BlockTarget;
+use self::describe::kind_of;
+pub(crate) use self::describe::{describe, row_pitch};
 pub(crate) use self::uses::collect_uses;
 use self::views::format_key;
-use nxkit_nvn::format::{Aspects, format_info};
-use nxkit_nvn::layout::Target;
 use nxkit_nvn::resource::{Residency, TexId, TextureRecord};
 use nxkit_nvn::tic::Tic;
 
@@ -154,21 +156,6 @@ pub(crate) struct TextureStore {
     no_place: FastSet<TexId>,
 }
 
-fn kind_of(t: Target) -> Option<TextureKind> {
-    Some(match t {
-        Target::D1 | Target::D2 | Target::Rectangle | Target::D2Multisample => TextureKind::D2,
-        Target::D1Array | Target::D2Array | Target::D2MultisampleArray => TextureKind::D2Array,
-        Target::D3 => TextureKind::D3,
-        Target::Cubemap => TextureKind::Cube,
-        Target::CubemapArray => TextureKind::CubeArray,
-        Target::Buffer => return None,
-    })
-}
-
-fn scaled_size(v: u32, scale: f32) -> u32 {
-    ((v as f32 * scale).round() as u32).max(1)
-}
-
 /// Whether the `life` category prints the creation or the end of a Metal texture of this description: it has to pass
 /// `NXKIT_DIAG_TEX`, and at most 300 lines are printed.
 fn life_diag(format: Format, width: u32, height: u32, layers: u32) -> bool {
@@ -176,79 +163,6 @@ fn life_diag(format: Format, width: u32, height: u32, layers: u32) -> bool {
     crate::diag("life")
         && crate::diag::tex_match(format, width, height, layers)
         && crate::diag::first(&SHOWN, 300)
-}
-
-/// The Metal description of a record at `scale` (1.0 for an unscaled texture).
-pub(crate) fn describe(
-    rec: &TextureRecord,
-    scale: f32,
-    u: Use,
-) -> Result<(TextureDesc, bool), Skip> {
-    let d = &rec.desc;
-    let unsupported = |what: &str| {
-        nxkit_nvn::diag::note(
-            nxkit_nvn::diag::Reason::FormatUnsupported,
-            format_args!(
-                "{what} {:?} {:?} {}x{}x{}",
-                d.format, d.target, d.width, d.height, d.depth
-            ),
-        );
-        Skip::Format
-    };
-    let mapped = texture_format(d.format).ok_or_else(|| unsupported("format"))?;
-    // Cube textures are 2D arrays of their faces, so that a shader may read them as a cube, a cube array or a 2D
-    // array: Metal makes a cube array view only of a 2D array.
-    let kind = match kind_of(d.target).ok_or_else(|| unsupported("target"))? {
-        TextureKind::Cube | TextureKind::CubeArray => TextureKind::D2Array,
-        k => k,
-    };
-    let format = mapped.format();
-    let info = format_info(d.format).map_err(|_| Skip::Format)?;
-    let depth_like = matches!(
-        info.aspects,
-        Aspects::Depth | Aspects::Stencil | Aspects::DepthStencil
-    );
-    let (width, height, depth, layers) = match d.target {
-        Target::D1 => (d.width, 1, 1, 1),
-        Target::D1Array => (d.width, 1, 1, d.height.max(1)),
-        Target::D2 | Target::Rectangle | Target::D2Multisample => (d.width, d.height, 1, 1),
-        Target::Cubemap => (d.width, d.height, 1, 6),
-        Target::D2Array | Target::D2MultisampleArray => (d.width, d.height, 1, d.depth.max(1)),
-        Target::D3 => (d.width, d.height, d.depth.max(1), 1),
-        Target::CubemapArray => (d.width, d.height, 1, (d.depth / 6).max(1) * 6),
-        Target::Buffer => return Err(unsupported("target")),
-    };
-    let (width, height) = (scaled_size(width, scale), scaled_size(height, scale));
-    let max_levels = 32 - width.max(height).max(depth).leading_zeros();
-    let compressed = matches!(format, Format::Bc(_) | Format::Astc { .. });
-    // A texture that the frame only samples can share storage with one that another frame renders into: the game
-    // makes texture objects for the same memory again, and the store shares a Metal texture between records only
-    // when their descriptions match. So every texture that Metal can render into gets the usage, and a record that
-    // is sampled first sees what a later render target of the same memory wrote.
-    // Metal cannot render into a compressed format: an attachment of one renders into a block shadow (`blocks`).
-    let render_target = !compressed && (u.attachment || format != Format::Rgb9E5Float);
-    let memoryless = u.memoryless && u.attachment && !u.cpu_read;
-    let exact = matches!(mapped, Mapped::Exact(_));
-    let desc = TextureDesc {
-        kind,
-        width,
-        height,
-        depth,
-        mip_levels: d.levels.max(1).min(max_levels),
-        array_layers: layers,
-        allow_views: true,
-        format,
-        shader_read: !memoryless,
-        shader_write: exact && !depth_like && !compressed && !memoryless,
-        render_target,
-        storage: if memoryless {
-            Storage::Memoryless
-        } else {
-            Storage::Private
-        },
-        shader_atomic: u.atomic && exact && !depth_like && !compressed && !memoryless,
-    };
-    Ok((desc, !exact))
 }
 
 impl TextureStore {
@@ -306,7 +220,7 @@ impl TextureStore {
             return None;
         }
         let pools = self.pools.as_ref()?;
-        let stride = rec.layout.size / u64::from(desc.height.max(1));
+        let stride = u64::from(row_pitch(rec));
         let (mem, offset) =
             crate::pools::locate(pools.as_ref(), rec.address.get(), rec.layout.size).ok()?;
         let mut d = *desc;

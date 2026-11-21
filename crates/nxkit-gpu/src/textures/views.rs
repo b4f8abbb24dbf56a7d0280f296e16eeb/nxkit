@@ -137,9 +137,12 @@ impl TextureStore {
         let first_level = u32::from(tic.view.base_level).min(d.mip_levels - 1);
         let level_count = levels.min(d.mip_levels - first_level).max(1);
         let slices = d.slice_count();
+        // A texture buffer keeps the format its texture was made in (`describe`: 32-bit integers as float bits).
+        let buffer = tic.target == nxkit_nvn::layout::Target::Buffer;
         let format = match tic.view.format.and_then(texture_format) {
             Some(Mapped::Exact(f))
-                if f.block_bytes() == d.format.block_bytes()
+                if !buffer
+                    && f.block_bytes() == d.format.block_bytes()
                     && f.is_compressed() == d.format.is_compressed()
                     && !res.widened =>
             {
