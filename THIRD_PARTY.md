@@ -151,6 +151,20 @@ freely, subject to the following restrictions:
 
 The header of that file also names digitalhivehub and MacNativeGames for the packaged texture layout. The Rust code does not copy their code.
 
+## NX2Apple
+
+The Home button of `nxkit-host` (`home.rs`, `sys/homeui.rs`) ports the logic of the Home menu, the quit prompt and the pause in
+the background from NX2Apple's patches of the dm front end (`engine/dm/host/home_quit.h`, `home_quit_mac.h` and `front_mac.m`,
+https://github.com/LNPANDY/NX2Apple, MIT licence, Copyright (c) 2026 seedds, jhaizhou, LNPANDY and NX2Apple contributors).
+The look of its screens (`sys/homeviews.rs`) takes the colours, sizes and type of NX2Apple's design tokens
+(`frontend/design-tokens/tokens.json`) and of its console mode's question card. The Rust code is written anew.
+
+## Manrope
+
+`nxkit-host` contains the Manrope typeface (`crates/nxkit-host/assets/Manrope.ttf`, Copyright 2018 The Manrope Project
+Authors, https://github.com/googlefonts/manrope) for the screens of the Home button. It is licensed under the SIL Open Font
+License 1.1. The full licence is in `crates/nxkit-host/assets/Manrope-OFL.txt`.
+
 ## Tools that nxkit starts and does not contain
 
 | tool | licence | use |

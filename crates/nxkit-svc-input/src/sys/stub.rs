@@ -36,4 +36,8 @@ impl Platform {
     }
 
     pub(crate) fn rumble(&mut self, _slot: usize, _levels: &PlayerLevels) {}
+
+    pub(crate) fn system_buttons(&self) -> crate::SystemButtons {
+        crate::SystemButtons::default()
+    }
 }

@@ -7,9 +7,11 @@
 ```text
 nxkit-host [--fullscreen] <run folder>
 nxkit-host probe <run folder>
+nxkit-host home-preview <folder>
 ```
 
 The run folder is `Contents/Resources/nxkit/` of the app bundle. `probe` prints the measurements of R18 and starts no game. The app bundle starts `nxkit-host` with no arguments, so a launcher that opens the app asks for full screen with `NXKIT_FULLSCREEN=1` in the environment, the same as `--fullscreen`.
+The run folder is `Contents/Resources/nxkit/` of the app bundle. `probe` prints the measurements of R18 and starts no game. The app bundle starts `nxkit-host` with no arguments, so a launcher that opens the app asks for full screen with `NXKIT_FULLSCREEN=1` in the environment, the same as `--fullscreen`. `home-preview` draws the screens of the Home button (below) into PNG files in the folder, wide and compact, so the look can be checked without a game or a controller.
 
 ## The run folder
 
@@ -239,6 +241,19 @@ A game can give a thread a small stack, and a service function that builds host 
 AppKit runs on the main thread. The host opens one window with a `CAMetalLayer` that has the pixels of the main display, so the game renders at the native resolution, for example 4K on a 4K display. The display link runs at the highest rate of the screen, 120 Hz where the screen has it. The game runs on its own threads. A window close, a lost application or ExitProcess sets a stop flag. The next display tick ends the loop. A watchdog ends the process after 5 seconds if the loop does not. `--fullscreen` or `NXKIT_FULLSCREEN=1` starts in full screen (`sys/fullscreen.rs`). A launcher can open the game from its own full-screen Space, and macOS leaves that Space while the game starts. The request waits until the application is active and the window is on the active Space, and a refused request is asked once more. A full-screen change by the player while the start waits ends the request. When the game ends, the full-screen Space closes and the launcher gets the front again.
 
 The content view takes the key events, so AppKit plays no alert sound, and passes the mouse events to `sys/mouse.rs`. The window holds the mouse for the camera (R63): the cursor is hidden and does not move, and each motion goes to the input service. It takes the mouse when it becomes the key window while no controller is connected, and on a click, which does not reach the game. Escape, Cmd+Tab or any other loss of the key focus, and a controller that connects let go. The display tick follows the controllers.
+
+### The Home button
+
+A controller's Home button gets a menu and a quit prompt over the game, as the dm front end of NX2Apple has them (`home.rs`, `sys/homeui.rs`). They look like the console mode of NX2Apple (`sys/homeviews.rs`): the question card of the console mode with the tokens of NX2Apple's `design-tokens/tokens.json`, Manrope from the binary, a dim scrim, the cream capsule of the one primary action and the cream focus ring of the controller. A window narrower than 650 points gets the compact sizes.
+
+- A short press of Home (let go within 0.5 s) opens the Home menu: Resume, Back to the launcher (only with `NXKIT_LAUNCHER_BUNDLE_ID`) and Quit. Up and down move the focus, A takes the focused row, B or Home resumes. Quit opens the quit prompt.
+- Holding Home for 2 s opens the quit prompt. A ring at the top fills from 0.3 s on. The focus starts on Cancel; left and right move it, A takes it, B or Home closes the prompt. Quit stops the game as a window close does.
+- A controller without Home counts `-` and `+` held together. A and B are the buttons by their printed labels. The host asks GameController for the Home button (`preferredSystemGestureState`); macOS 27 gives it to the app when the Home button setting for apps lets the app decide.
+- While a screen is up, the game gets no controller, keyboard or mouse input and is told it is out of focus, as under the console's HOME menu. It gets the input back once Home, A and B are up, so the B that closed a screen does not reach the game. A loss of the key focus closes whatever is shown.
+- Back to the launcher pauses the game in the background: the game is told it is in the background, the window leaves full screen, the launcher gets the activation and the application hides. A game that keeps running in the background focus (most pause there, as on the console) keeps its sound. The game comes back when it is active again (the launcher activates it, the Dock, Command-Tab), when it is shown again, or on the distributed notification `org.nxkit.resume.<pid>`, and goes back to full screen if it was there. `org.nxkit.quit.<pid>` quits it. The host posts `org.nxkit.paused.<pid>` and `org.nxkit.resumed.<pid>`.
+- `NXKIT_HOME_MENU=0` turns the menu off, `NXKIT_HOME_QUIT=0` the hold. `NXKIT_HOME_TEXT` gives the texts in the player's language, one per line, in the order of the dm front end's `DM_HOME_QUIT_TEXT`: the hold, the prompt's title, its note, Quit, Cancel, Resume, Back to the launcher and the menu's title. A missing or empty line is the English one.
+
+With the Home button on, the window's content view is a plain view that holds the game's view (its `CAMetalLayer`) and the screens above it.
 
 ## The frame path
 

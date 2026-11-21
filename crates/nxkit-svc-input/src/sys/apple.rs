@@ -92,6 +92,16 @@ key_table! {
 }
 
 /// True for the Nintendo pads, whose face buttons are named as on the Switch.
+/// Asks GameController to give a press of Home to the app, not to the system (`system::claim_home`).
+fn claim_home(gamepad: &GCExtendedGamepad) {
+    // SAFETY: a property read and a setter on a live `GCExtendedGamepad` and its Home button.
+    unsafe {
+        if let Some(home) = gamepad.buttonHome() {
+            home.setPreferredSystemGestureState(GCSystemGestureState::Disabled);
+        }
+    }
+}
+
 fn is_labelled(category: &str) -> bool {
     category == "Switch Pro Controller" || category.contains("Joy-Con")
 }
@@ -141,6 +151,9 @@ impl Platform {
                 )
             };
             let Some(gamepad) = gamepad else { continue };
+            if crate::system::home_claimed() {
+                claim_home(&gamepad);
+            }
             let Some(slot) = slots.take(owner, &name) else {
                 continue;
             };
@@ -278,6 +291,32 @@ impl Platform {
             }
         }
         Some(buttons)
+    }
+
+    /// Home, A and B by their printed labels, and the directions, of every controller together.
+    pub(crate) fn system_buttons(&self) -> crate::SystemButtons {
+        let mut out = crate::SystemButtons::default();
+        for pad in self.pads.iter().flatten() {
+            let g = &pad.gamepad;
+            // SAFETY: property reads on a live `GCExtendedGamepad` and the elements it returns.
+            unsafe {
+                let dpad = g.dpad();
+                let ls = g.leftThumbstick();
+                out.home |= crate::system::pad_home(
+                    down_opt(g.buttonHome()),
+                    down_opt(g.buttonOptions()),
+                    down(&g.buttonMenu()),
+                );
+                out.a |= down(&g.buttonA());
+                out.b |= down(&g.buttonB());
+                out.up |= down(&dpad.up());
+                out.down |= down(&dpad.down());
+                out.left |= down(&dpad.left());
+                out.right |= down(&dpad.right());
+                out.add_stick(value(&ls.xAxis()), value(&ls.yAxis()));
+            }
+        }
+        out
     }
 
     /// Plays the levels of a player on its controller.

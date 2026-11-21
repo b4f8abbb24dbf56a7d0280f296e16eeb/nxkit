@@ -56,6 +56,10 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_AV1_FRAMES=<n>` | The frames in flight of the rav1d worker, 1 to 8 (default 2). With one frame the worker waits for each picture; with more a picture comes out on a later send. |
 | `NXKIT_LANGUAGE=<tag>` | The console language of the game, for example `de` or `en-GB`. Without it the first preferred language of the Mac that the console has, else `en-US`. |
 | `NXKIT_FULLSCREEN=1` | The window starts in full screen, as `--fullscreen`. Any value that is not blank and not `0` turns it on. For a launcher that opens the app bundle, which starts the host with no arguments (`docs/nxkit-host.md`). |
+| `NXKIT_HOME_MENU=0` | No Home menu on a short press of a controller's Home button (`docs/nxkit-host.md`, The Home button). |
+| `NXKIT_HOME_QUIT=0` | No quit prompt when Home is held for 2 seconds. |
+| `NXKIT_LAUNCHER_BUNDLE_ID` | The bundle identifier of the launcher that started the game. The Home menu gets Back to the launcher, which pauses the game in the background and activates that application. |
+| `NXKIT_HOME_TEXT` | The texts of the Home menu and the quit prompt in the player's language, one per line: hold, title, note, quit, cancel, resume, back to the launcher, menu title. |
 | `NXKIT_PAUSE_UNFOCUSED=1` | Reports the loss of the key focus to the game (it pauses, as on the console). By default the game keeps running when another window gets the focus. |
 | `NXKIT_PIPELINE_ASYNC=0` | Builds a missing render pipeline in the encode, as before. By default it compiles on a background thread and the draw is left out until it is ready (`skip.pending`). |
 | `NXKIT_PIPELINE_THREADS=<n>` | The threads that compile pipelines in the background (default half the cores, 2 to 8). They take the job that a draw of the latest frame asked for first. |

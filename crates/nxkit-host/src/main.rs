@@ -44,8 +44,8 @@ fn main() {
     use nxkit_host::run::Options;
 
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage =
-        "usage: nxkit-host [--fullscreen] <run folder>\n       nxkit-host probe <run folder>";
+    let usage = "usage: nxkit-host [--fullscreen] <run folder>\n       nxkit-host probe <run folder>\n       \
+         nxkit-host home-preview <folder>";
     let result = match args
         .iter()
         .map(String::as_str)
@@ -69,14 +69,28 @@ fn main() {
             })
         }
         ["probe", root] => nxkit_host::probe::run(&PathBuf::from(*root)),
+        ["home-preview", dir] => match nxkit_host::sys::homepreview::run(&PathBuf::from(*dir)) {
+            Ok(files) => {
+                for f in files {
+                    println!("{}", f.display());
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("nxkit-host: {e}");
+                std::process::exit(1);
+            }
+        },
         ["--fullscreen", root] | [root, "--fullscreen"] => nxkit_host::run::run(&Options {
             root: PathBuf::from(*root),
             fullscreen: true,
         }),
-        [root] if *root != "probe" && !root.starts_with('-') => nxkit_host::run::run(&Options {
-            root: PathBuf::from(*root),
-            fullscreen: false,
-        }),
+        [root] if *root != "probe" && *root != "home-preview" && !root.starts_with('-') => {
+            nxkit_host::run::run(&Options {
+                root: PathBuf::from(*root),
+                fullscreen: false,
+            })
+        }
         _ => {
             eprintln!("{usage}");
             std::process::exit(64);

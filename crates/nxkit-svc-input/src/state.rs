@@ -182,6 +182,9 @@ impl Input {
 
     /// The reading of a player's controllers. A game with one player gets every controller as player 1.
     fn raw_pad(&self, player: usize, one_player: bool) -> RawPad {
+        if crate::system::blocked() {
+            return RawPad::default();
+        }
         let own = self.platform.read_pad(player).unwrap_or_default();
         if player != 0 || !one_player {
             return own;
@@ -203,7 +206,7 @@ impl Input {
             return NpadState::default();
         };
         let pad = self.raw_pad(player, layout.one_player());
-        let keys = if player == 0 {
+        let keys = if player == 0 && !crate::system::blocked() {
             self.player_one_keys()
         } else {
             None
@@ -478,6 +481,12 @@ impl Input {
     }
 
     /// Renews the rumble pulses. The host calls this on each display tick.
+    /// Home, A, B and the directions of every controller, for the host's own screens.
+    pub(crate) fn system_buttons(&mut self) -> crate::SystemButtons {
+        self.refresh();
+        self.platform.system_buttons()
+    }
+
     pub(crate) fn tick(&mut self) {
         self.refresh();
         for player in 0..PLAYERS {

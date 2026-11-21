@@ -53,6 +53,22 @@ impl AppEvents for Events {
     fn mouse_mode(&self) -> MouseMode {
         seams::mouse_mode()
     }
+
+    fn home_buttons(&self) -> crate::home::Buttons {
+        seams::home_buttons()
+    }
+
+    fn home_input(&self, blocked: bool) {
+        nxkit_svc_input::set_blocked(blocked);
+    }
+
+    fn game_focus(&self, focus: crate::home::GameFocus) {
+        seams::game_focus(focus);
+    }
+
+    fn quit(&self, why: &'static str) {
+        stop::request(why);
+    }
 }
 
 fn check_kernel_service(mask: u64) -> Result<()> {
@@ -143,7 +159,16 @@ pub fn run(opts: &Options) -> Result<()> {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,
         fullscreen: opts.fullscreen || env.fullscreen,
+        home: crate::home::Setup::new(
+            env.home_menu,
+            env.home_quit,
+            env.launcher.clone(),
+            env.home_text.as_deref(),
+            &loaded.game.name,
+        ),
     };
+    // The Home button reaches the app only on a controller that GameController gives it to.
+    nxkit_svc_input::claim_home(window.home.is_some());
     let stack_top = layout.main_stack.end();
     let result = appkit::run(
         &window,

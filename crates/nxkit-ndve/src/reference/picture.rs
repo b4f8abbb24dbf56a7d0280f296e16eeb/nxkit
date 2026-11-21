@@ -131,12 +131,12 @@ fn parse_block(bytes: &[u8]) -> Block {
                 }
             }
         }
-        for jj in 0..2 {
+        for (jj, w2) in b.w2[g].iter_mut().enumerate() {
             for s in 0..2 {
                 for i in 0..8 {
                     for n in 0..8 {
                         let off = 0x400 + 0x200 * g + 0x100 * jj + s * 0x80 + i * 16 + n * 2;
-                        b.w2[g][jj][(8 * s + i) * 8 + n] = h(off);
+                        w2[(8 * s + i) * 8 + n] = h(off);
                     }
                 }
             }

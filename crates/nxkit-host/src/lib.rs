@@ -13,6 +13,7 @@ mod fields;
 pub mod frames;
 pub mod gates;
 pub mod graphics;
+pub mod home;
 pub mod hostenv;
 pub mod input_file;
 pub mod json;
