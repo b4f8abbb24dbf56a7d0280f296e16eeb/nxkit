@@ -51,6 +51,15 @@ pub struct HostEnv {
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
     /// `--fullscreen`.
     pub fullscreen: bool,
+    /// `NXKIT_HOME_MENU` (on unless `0`): a short press of a controller's Home button opens the Home menu.
+    pub home_menu: bool,
+    /// `NXKIT_HOME_QUIT` (on unless `0`): holding Home for 2 seconds opens the quit prompt.
+    pub home_quit: bool,
+    /// `NXKIT_LAUNCHER_BUNDLE_ID` (not blank): the launcher that started the game. The Home menu gets Back to the
+    /// launcher, which pauses the game and shows that application.
+    pub launcher: Option<String>,
+    /// `NXKIT_HOME_TEXT`: the texts of the Home button in the player's language, one per line (`home::Texts`).
+    pub home_text: Option<String>,
 }
 
 impl Default for HostEnv {
@@ -109,6 +118,14 @@ impl HostEnv {
             fullscreen: env
                 .var("NXKIT_FULLSCREEN")
                 .is_ok_and(|v| !v.trim().is_empty() && v.trim() != "0"),
+            home_menu: env.var("NXKIT_HOME_MENU").map_or(true, |v| v.trim() != "0"),
+            home_quit: env.var("NXKIT_HOME_QUIT").map_or(true, |v| v.trim() != "0"),
+            launcher: env
+                .var("NXKIT_LAUNCHER_BUNDLE_ID")
+                .ok()
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty()),
+            home_text: env.var("NXKIT_HOME_TEXT").ok(),
         }
     }
 }
@@ -218,5 +235,12 @@ mod tests {
             |v: &str| HostEnv::from_env(&Env::from_pairs([("NXKIT_FULLSCREEN", v)])).fullscreen;
         assert!(full("1") && full("yes"));
         assert!(!full("0") && !full(" ") && !full(""));
+        assert!(d.home_menu && d.home_quit && d.launcher.is_none());
+        let h = HostEnv::from_env(&Env::from_pairs([
+            ("NXKIT_HOME_MENU", "0"),
+            ("NXKIT_LAUNCHER_BUNDLE_ID", " org.example.launcher "),
+        ]));
+        assert!(!h.home_menu && h.home_quit);
+        assert_eq!(h.launcher.as_deref(), Some("org.example.launcher"));
     }
 }

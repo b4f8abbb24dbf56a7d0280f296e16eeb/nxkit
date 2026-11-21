@@ -307,6 +307,31 @@ pub fn focus_changed(focused: bool) {
     nxkit_svc_input::set_focus(focused);
 }
 
+/// The buttons of every controller for the Home button, as the input service reads them apart from the game.
+pub fn home_buttons() -> crate::home::Buttons {
+    let b = nxkit_svc_input::system_buttons();
+    crate::home::Buttons {
+        home: b.home,
+        a: b.a,
+        b: b.b,
+        up: b.up,
+        down: b.down,
+        left: b.left,
+        right: b.right,
+    }
+}
+
+/// The focus a screen of the Home button gives the game: out of focus under the menu and the prompt, in the
+/// background while it is paused behind the launcher (the console's HOME menu and a suspended application).
+pub fn game_focus(focus: crate::home::GameFocus) {
+    let focus = match focus {
+        crate::home::GameFocus::In => nxkit_svc_system::Focus::InFocus,
+        crate::home::GameFocus::Out => nxkit_svc_system::Focus::OutOfFocus,
+        crate::home::GameFocus::Background => nxkit_svc_system::Focus::Background,
+    };
+    nxkit_svc_system::set_focus(focus);
+}
+
 /// The held mouse did something. The input service turns it into the camera stick and the mouse bindings.
 pub fn mouse(event: MouseEvent) {
     match event {

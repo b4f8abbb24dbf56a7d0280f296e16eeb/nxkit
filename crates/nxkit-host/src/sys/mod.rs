@@ -8,11 +8,16 @@ pub mod appkit;
 pub mod crashsig;
 mod dylib;
 pub mod exitflush;
+mod font;
 mod fullscreen;
+pub mod homepreview;
+mod homeui;
+mod homeviews;
 mod kernel;
 pub mod loading;
 mod mouse;
 pub mod paging;
+mod screen;
 pub mod vm;
 
 pub use dylib::{Dylib, Image};

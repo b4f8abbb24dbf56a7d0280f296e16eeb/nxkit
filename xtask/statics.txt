@@ -7,13 +7,13 @@
 nxkit-abi: 6
 nxkit-gpu: 121
 nxkit-hos: 19
-nxkit-host: 15
+nxkit-host: 16
 nxkit-metal: 19
 nxkit-nvn: 31
 nxkit-rt: 67
 nxkit-svc-audio: 19
 nxkit-svc-fs: 4
-nxkit-svc-input: 11
+nxkit-svc-input: 13
 nxkit-svc-offline: 1
 nxkit-svc-pacing: 3
 nxkit-svc-system: 54

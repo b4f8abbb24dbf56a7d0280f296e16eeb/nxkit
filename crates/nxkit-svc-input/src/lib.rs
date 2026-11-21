@@ -30,6 +30,7 @@ mod shmem;
 mod slots;
 mod state;
 mod sys;
+mod system;
 mod touch;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,6 +42,7 @@ use nxkit_abi::ipc::Named;
 pub use config::Config;
 pub use look::LookConfig;
 pub use seam::{SystemEventHooks, set_system_event_hooks};
+pub use system::{SystemButtons, claim_home, set_blocked, system_buttons};
 pub use touch::Touch;
 
 use state::Input;

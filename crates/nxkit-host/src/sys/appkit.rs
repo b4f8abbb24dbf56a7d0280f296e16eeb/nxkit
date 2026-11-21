@@ -9,16 +9,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use nxkit_metal::{
-    Context, DisplayLink, DisplayTick, FrameHooks, FrameInterval, LinkRate, Presenter,
-};
+use nxkit_metal::{Context, DisplayLink, DisplayTick, FrameHooks, Presenter};
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::runtime::ProtocolObject;
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSEvent, NSResponder, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowDelegate,
-    NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSAutoresizingMaskOptions,
+    NSBackingStoreType, NSEvent, NSResponder, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
@@ -27,9 +25,11 @@ use objc2_foundation::{
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
 use super::fullscreen::{self, Startup};
+use super::homeui;
 use super::mouse;
+use super::screen::{content_size, screen_interval, target_screen};
 use crate::error::{HostError, Result};
-use crate::refresh::{Refresh, ScreenFacts};
+use crate::refresh::Refresh;
 
 /// What the window reports to the host. The calls come on the main thread.
 pub trait AppEvents: Send + Sync {
@@ -41,6 +41,14 @@ pub trait AppEvents: Send + Sync {
     fn mouse(&self, event: MouseEvent);
     /// When the window holds the mouse. The display tick asks, so the answer may change at any time.
     fn mouse_mode(&self) -> MouseMode;
+    /// The buttons of every controller for the Home button (`sys/homeui.rs`).
+    fn home_buttons(&self) -> crate::home::Buttons;
+    /// A screen of the Home button has the controllers (`true`), or the game gets them back.
+    fn home_input(&self, blocked: bool);
+    /// The focus the game is told while a screen of the Home button is up.
+    fn game_focus(&self, focus: crate::home::GameFocus);
+    /// The player quit with the Home button, or the launcher asked. The game must stop.
+    fn quit(&self, why: &'static str);
 }
 
 /// What the held mouse did.
@@ -90,100 +98,8 @@ pub struct WindowConfig {
     pub size: Option<(f64, f64)>,
     /// Enter full screen at start.
     pub fullscreen: bool,
-}
-
-/// The screen of the window: `NXKIT_SCREEN` names it by its index in the screen list (0 is the built-in one), by `id:`
-/// and its CoreGraphics display id (`NSScreenNumber`, what a launcher knows of the screen it is on), or by a part of
-/// its name, for example `XB273U`. Without it, or when nothing matches, it is the main screen.
-fn target_screen(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
-    if let Some(want) = crate::hostenv::host().screen.clone() {
-        let screens = NSScreen::screens(mtm);
-        let by_id = want
-            .strip_prefix("id:")
-            .map(|id| id.trim().parse::<u32>().ok());
-        let found = match (by_id, want.parse::<usize>()) {
-            (Some(id), _) => id.and_then(|id| screens.iter().find(|s| display_id(s) == Some(id))),
-            (None, Ok(i)) if i < screens.count() => Some(screens.objectAtIndex(i)),
-            (None, Ok(_)) => None,
-            (None, Err(_)) => {
-                let want = want.to_lowercase();
-                screens
-                    .iter()
-                    .find(|s| s.localizedName().to_string().to_lowercase().contains(&want))
-            }
-        };
-        match found {
-            Some(s) => return Some(s),
-            None => eprintln!(
-                "nxkit-host: NXKIT_SCREEN={want} matches no screen, using the main screen"
-            ),
-        }
-    }
-    NSScreen::mainScreen(mtm)
-}
-
-/// The CoreGraphics display id of a screen (`NSScreenNumber` of its device description).
-fn display_id(screen: &NSScreen) -> Option<u32> {
-    // SAFETY: `deviceDescription` returns a dictionary and `objectForKey:` an optional `NSNumber`, both retained and
-    // valid for the calls below. `unsignedIntValue` is a method of `NSNumber`.
-    unsafe {
-        let desc: Retained<AnyObject> = msg_send![screen, deviceDescription];
-        let key = NSString::from_str("NSScreenNumber");
-        let number: Option<Retained<AnyObject>> = msg_send![&*desc, objectForKey: &*key];
-        let id: u32 = msg_send![&*number?, unsignedIntValue];
-        Some(id)
-    }
-}
-
-/// What the host reads of a screen. A screen whose refresh interval can change (ProMotion, adaptive sync) has a longest
-/// interval above its shortest. `NSScreen` documents both as equal for a screen that cannot.
-fn screen_facts(s: &NSScreen) -> ScreenFacts {
-    let (min, max) = (s.minimumRefreshInterval(), s.maximumRefreshInterval());
-    ScreenFacts {
-        name: s.localizedName().to_string(),
-        display: display_id(s),
-        max_fps: u32::try_from(s.maximumFramesPerSecond()).unwrap_or(0),
-        adaptive: min > 0.0 && max > min * 1.01,
-    }
-}
-
-/// The display link rate for the screen that shows the window. Before the window is on a screen it is the screen
-/// that `NXKIT_SCREEN` names, else the main one. The link rate is the refresh rate of the current mode of that screen
-/// (`refresh.rs`), not its highest one: the game's own pacing picks the frames it renders, and the link ticks at a rate
-/// that holds each frame an exact number of ticks. On an adaptive screen with a variable frame step it is a range
-/// (variable refresh, `crate::refresh::choose_presentation`).
-fn screen_interval(
-    mtm: MainThreadMarker,
-    window: Option<&NSWindow>,
-    refresh: &Refresh,
-) -> LinkRate {
-    match window
-        .and_then(|w| w.screen())
-        .or_else(|| target_screen(mtm))
-    {
-        Some(s) => {
-            let plan = refresh.apply(&screen_facts(&s));
-            // On an adaptive screen with a variable frame step the link gets a range, not one rate.
-            match refresh.vrr_range() {
-                Some(range) => LinkRate::Variable(range),
-                None => LinkRate::Fixed(FrameInterval::from_hz(plan.link_hz)),
-            }
-        }
-        None => LinkRate::Fixed(FrameInterval::Hz60),
-    }
-}
-
-fn content_size(mtm: MainThreadMarker, size: Option<(f64, f64)>) -> (f64, f64) {
-    if let Some(s) = size {
-        return s;
-    }
-    match target_screen(mtm) {
-        Some(s) => {
-            let f = s.visibleFrame();
-            (f.size.width, f.size.height)
-        }
-        None => (1280.0, 720.0),
-    }
+    /// The Home button of the controllers (`home.rs`), `None` when it is off.
+    pub home: Option<crate::home::Setup>,
 }
 
 fn drawable_size(window: &NSWindow, view: &NSView) -> (u32, u32) {
@@ -329,6 +245,7 @@ define_class!(
 
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _n: &NSNotification) {
+            homeui::focus_lost();
             mouse::focus(false);
             if let Some(e) = self.events().get() {
                 e.focus_changed(false);
@@ -383,6 +300,12 @@ define_class!(
         #[unsafe(method(applicationDidBecomeActive:))]
         fn application_did_become_active(&self, _n: &NSNotification) {
             self.enter_full_screen();
+            homeui::app_active();
+        }
+
+        #[unsafe(method(applicationDidUnhide:))]
+        fn application_did_unhide(&self, _n: &NSNotification) {
+            homeui::app_active();
         }
 
         // A change of the display mode, the arrangement or the screens comes here.
@@ -471,6 +394,7 @@ impl FrameHooks for StopHooks {
             return;
         }
         mouse::tick();
+        homeui::tick();
         self.inner.display_tick(tick);
     }
 }
@@ -521,7 +445,19 @@ pub fn run(
     let as_layer: &CALayer = &layer;
     view.setLayer(Some(as_layer));
     view.setWantsLayer(true);
-    window.setContentView(Some(&view));
+    // With the Home button, the content view is a plain view that holds the game's view and, above it, the screens of
+    // the Home button: a layer-hosting view must have no subviews of its own.
+    let overlay = cfg.home.as_ref().map(|_| {
+        let content = NSView::initWithFrame(NSView::alloc(mtm), rect);
+        content.setWantsLayer(true);
+        view.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        content.addSubview(&view);
+        content
+    });
+    window.setContentView(Some(overlay.as_deref().unwrap_or(&view)));
     window.makeFirstResponder(Some(&view));
     window.setAcceptsMouseMovedEvents(true);
 
@@ -534,6 +470,9 @@ pub fn run(
     presenter.resize(w, h);
 
     mouse::install(events.clone(), window.clone());
+    if let (Some(setup), Some(overlay)) = (cfg.home.clone(), overlay.as_ref()) {
+        homeui::install(mtm, &window, overlay, events.clone(), setup);
+    }
     let delegate = AppDelegate::alloc(mtm).set_ivars(Ivars::<AppDelegate> {
         events: OnceCell::from(events),
         presenter: OnceCell::from(presenter.clone()),
@@ -585,6 +524,7 @@ pub fn run(
     );
     ready()?;
     app.run();
+    homeui::shutdown();
     if cfg.fullscreen {
         fullscreen::observe_spaces(&delegate, false);
     }

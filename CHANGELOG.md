@@ -4,6 +4,16 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- A launcher can start a game in full screen with `NXKIT_FULLSCREEN=1` (the app bundle starts the host with no
+  arguments). The request waits until the game is active and on the active Space, so a game opened from a launcher in
+  full screen goes full screen too. `NXKIT_SCREEN=id:<n>` picks the screen by its display id.
+- A controller's Home button opens a Home menu (Resume, Back to the launcher, Quit) on a short press and a quit prompt
+  when held, in the look of NX2Apple's console mode. Back to the launcher pauses the game in the background and shows
+  the launcher (`NXKIT_LAUNCHER_BUNDLE_ID`); `org.nxkit.resume.<pid>` and `org.nxkit.quit.<pid>` resume or quit it.
+  `nxkit-host home-preview <folder>` draws the screens into PNG files.
+
 ## 0.11.1 - 2026-11-21
 
 ### Added
