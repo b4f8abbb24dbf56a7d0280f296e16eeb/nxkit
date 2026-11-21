@@ -410,6 +410,7 @@ dependencies = [
  "nxb-romfs",
  "nxb-sched",
  "nxb-shader",
+ "nxb-spirv",
  "nxb-split",
  "nxb-stages",
  "nxb-sys",

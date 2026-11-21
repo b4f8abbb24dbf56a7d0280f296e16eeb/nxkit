@@ -25,7 +25,7 @@ its own world, plus the sideways edges in the table below, plus the shared point
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 build runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-xlate, nxb-codec, nxb-a64, nxb-romfs, nxb-rewrite, nxb-split, nxtitle, nxtitles"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-xlate, nxb-spirv, nxb-codec, nxb-a64, nxb-romfs, nxb-rewrite, nxb-split, nxtitle, nxtitles"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code)"]
   LT["T families and titles: nxfamily-agl, nxgame-* (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
@@ -98,6 +98,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-pyjson | L1 | yes | impl | a JSON writer that gives the same bytes as Python `json.dumps`. Measured: byte-identical on 16,269 JSON files of the reference title. |
 | nxb-shader | L1 | yes | impl | the job writer, the chain version, guards, the header, the target conventions, the side library cut |
 | nxb-xlate | L1 | yes | impl | the Rust translator: decode, control flow, SSA, passes, structured IR and MSL with a typed `Reflection` (`nxb_xlate::msl::translate`). Refer to [translator.md](translator.md) |
+| nxb-spirv | L1 | no | impl | the shaders of a game on Vulkan (D21): one SPIR-V module to one MSL function with naga, the Metal slot of each descriptor (in (set, binding) order per class, as the old engine's `vk_shaders.py`), the dual-source variant, 1D images as one-row 2D images. Its own types, no host format: `nxb-build` names the functions and writes the rows of `nxkit_abi::vk_table` |
 | nxb-a64 | L1 | no | impl | an AArch64 decoder and the encoders for the rewrite step. It follows Capstone 5 for the fields that the rewriter uses |
 | nxb-rewrite | L1 | no | impl | the code rewrite: NSO and NRO load, rules as data, the five tables |
 | nxb-codec | L1 | no | impl | the ZBIC decoder (`nxb_codec::zbic`). The other decoders of the build live in `nxb-split` and `nxb-rewrite` (W30). |
@@ -115,7 +116,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxkit-ndve | R2 | no | impl | the movie network of `nn::ndve` run natively: file reader, weight packing, the plan and Metal kernels, and the `ane` module that writes the Core ML model for the Neural Engine. Refer to [plans/ndve-native.md](plans/ndve-native.md) |
 | nxkit-ndsr | R2 | no | impl | the agl upscaler NDSR run natively: network table and fingerprint of the packs `vr` and `vr_light`, pack reader, CPU reference, kernels and plan. Refer to [plans/ndsr-native.md](plans/ndsr-native.md) |
 | nxkit-coreml | R1 | no | impl | Core ML on the Neural Engine over IOSurface tensors (`objc2-core-ml`). It knows nothing about the network. Refer to [plans/ndve-ane.md](plans/ndve-ane.md) |
-| nxkit-abi | R0 | no | impl | the shared contract of the host: guest memory access (`guest`, `unsafe` only there), the export type, the IPC service trait and its request and response types, the registration of the kernel and the IPC server, the console platform, the shard index of the pipeline archive and the settings snapshot (`env`) |
+| nxkit-abi | R0 | no | impl | the shared contract of the host: guest memory access (`guest`, `unsafe` only there), the export type, the IPC service trait and its request and response types, the registration of the kernel and the IPC server, the console platform, the shared formats that the build writes and the host reads (the shard index of the pipeline archive, `shards`, and the shader table of a Vulkan game, `vk_table`) and the settings snapshot (`env`) |
 | nxkit-metal | R1 | no | impl | the Metal 4 binding of the host, macOS only: device, queue, compiler and residency, the guest memory as one no-copy `MTLBuffer`, pipelines and archives, command buffers, ICBs, the presenter and the display link, and the page traps of the private memory. All `unsafe` Metal calls are here |
 | nxkit-rt | R3 | no | impl | the C ABI that the guest calls: `nxkit_init`, the export lookup (`nxkit_hle_find`), the kernel start and the svc entry, the NVN procs over `nxkit-nvn` and the SDK functions around NVN (`gfx`). `unsafe` code |
 | nxkit-host | R4 | no | impl | the main program of the host (`nxkit-host`, plus a library): the guest memory reservation, the loader of `nxgame.dylib`, the svc and TLS gates, the big-stack entry, the game threads and the AppKit window. Its contract with the build stage is [nxkit-host.md](nxkit-host.md). It runs on macOS only. |
@@ -130,7 +131,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ and NUP. The commands are `nxb extract` and `nxb split` |
 | nxb-pack | L3 | no | impl | the ad-hoc signer and the staging of a file set into a bundle (`nxb sign`) |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
-| nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host` |
+| nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host`. For a game on Vulkan the shader stage makes `vk_shaders.metallib` and `vk_shaders.tsv` with `nxb-spirv` (`standalone::vk_shaders`), with no shader split and no pipeline archive |
 | nxkit-nvn | R2 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
 | nxkit-gpu | R3 | no | impl | the frame encoder of the nxkit host, macOS only: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
 | nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |

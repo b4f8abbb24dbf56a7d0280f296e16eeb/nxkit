@@ -181,11 +181,17 @@ pub(crate) fn packages(
         discard_images: false,
         allow_damaged: a.allow_damaged,
         manifest: false,
-        split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
+        split: b
+            .split
+            .then(|| (b.profile.0.join("game.tsv"), split_outputs(b))),
         progress: Some(counter.clone()),
         empty_romfs: false,
     };
-    p.say("extract and shader split in one pass (nxb-extract)");
+    p.say(if b.split {
+        "extract and shader split in one pass (nxb-extract)"
+    } else {
+        "extract without the shader split (nxb-extract): the game has no NVN shaders"
+    });
     let s = with_bytes(p, "extracting", &counter, || nxb_extract::extract(&req))
         .map_err(|e| damaged(p, &e))?;
     Ok((s.images.len(), s.split_unsupported.clone()))
@@ -211,11 +217,17 @@ pub(crate) fn nup_loose(
         threads: a.threads,
         mem_limit: 2 << 30,
         verify: true,
-        split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
+        split: b
+            .split
+            .then(|| (b.profile.0.join("game.tsv"), split_outputs(b))),
         progress: Some(counter.clone()),
         newest_dlc: false,
     };
-    p.say("unpack and shader split in one pass (nxb-extract, RomFS as a folder)");
+    p.say(if b.split {
+        "unpack and shader split in one pass (nxb-extract, RomFS as a folder)"
+    } else {
+        "unpack without the shader split (nxb-extract, RomFS as a folder): the game has no NVN shaders"
+    });
     let u = with_bytes(p, "unpacking", &counter, || {
         nxb_extract::nup::unpack_nup(&req)
     })

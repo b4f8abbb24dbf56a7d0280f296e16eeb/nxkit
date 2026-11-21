@@ -96,6 +96,7 @@ pub(super) fn extract(a: &Args, p: &Progress) -> Result<Extracted, String> {
         profile: (PathBuf::new(), Default::default()),
         shaders: PathBuf::new(),
         gpus: vec![],
+        split: true,
         pipeline_lists: vec![],
         src,
     };

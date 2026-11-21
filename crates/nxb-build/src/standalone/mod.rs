@@ -23,6 +23,7 @@ mod nvn;
 mod pipelist;
 mod romfs;
 mod shaders;
+mod vk_shaders;
 
 use crate::Args;
 use crate::events::{Progress, Update};
@@ -248,6 +249,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             .join("shader/cache")
             .join(format!("b-{}", nxb_shader::chain::standalone_version())),
         gpus: Vec::new(),
+        split: t.graphics == nxtitle::GraphicsApi::Nvn,
         pipeline_lists: pipelist::find(
             a.pipeline_list.as_deref(),
             &out,
@@ -275,10 +277,11 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
     p.plan(7);
     let nup = b.src.source == Source::Nup;
-    let what = if nup {
-        "NUP and shader split"
-    } else {
-        "packages and shader split"
+    let what = match (nup, b.split) {
+        (true, true) => "NUP and shader split",
+        (true, false) => "NUP",
+        (false, true) => "packages and shader split",
+        (false, false) => "packages",
     };
     stage(p, "extract", what, || {
         Ok(((), extract(a, &b, p, version, t.st.romfs_marker)?))
@@ -459,14 +462,22 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         })?;
         Ok(((), format!("{}, signed ad hoc", mib(n))))
     })?;
-    b.gpus = gpus(a, &work, &b.profile.0)?;
+    // a game on Vulkan has no NVN shaders and no pipeline archive
+    let vulkan = t.graphics == nxtitle::GraphicsApi::Vulkan;
+    if !vulkan {
+        b.gpus = gpus(a, &work, &b.profile.0)?;
+    }
     if !b.gpus.is_empty() {
         for l in &b.pipeline_lists {
             p.say(&format!("pipeline list: {}", l.display()));
         }
     }
     stage(p, "shaders", "shaders and pipeline archive", || {
-        let d = shaders::run(a, &b, p, &run_dir)?;
+        let d = if vulkan {
+            vk_shaders::run(a, &b, p, &run_dir)?
+        } else {
+            shaders::run(a, &b, p, &run_dir)?
+        };
         Ok(((), d.summary))
     })?;
     stage(p, "bundle", "app", || {

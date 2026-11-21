@@ -32,7 +32,8 @@ pub(super) fn extract(
     };
     let have = romfs
         && dir.join("ExeFS/main.npdm").is_file()
-        && std::fs::read_dir(b.work.join("shader/pkg")).is_ok_and(|mut d| d.next().is_some());
+        && (!b.split
+            || std::fs::read_dir(b.work.join("shader/pkg")).is_ok_and(|mut d| d.next().is_some()));
     let reused = have && std::fs::read_to_string(&key_file).is_ok_and(|k| k == key);
     let mut text = if reused {
         "reused".to_string()
