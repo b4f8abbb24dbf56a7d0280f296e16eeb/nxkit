@@ -10,7 +10,7 @@ use nxb_pyjson::{Value, dumps};
 use nxb_sched::{Budget, Executor, Report, SingleFlight, Task};
 use nxb_shader::{pch, target::MAC};
 use nxb_store::{Durability, Store};
-use nxb_tool::{Io, MetalTools, ProcessRegistry, Resolver, SdkRoots};
+use nxb_tool::{Io, MetalTools, ProcessRegistry, Resolver};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
@@ -154,21 +154,11 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
             }
         }
     }
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
     let registry = Arc::new(ProcessRegistry::new());
-    let resolver = Resolver {
-        xcrun: "/usr/bin/xcrun".into(),
-        developer_dir: std::env::var_os("DEVELOPER_DIR"),
-        home: home.clone(),
-    };
-    let roots =
-        SdkRoots::resolve(&resolver, &[MAC.target], &registry).map_err(|e| fatal("SDK", e))?;
-    let env = roots
-        .apple_env(MAC.target, &tmp, &home)
-        .map_err(|e| fatal("environment", e))?;
+    let resolver = Resolver::from_env();
     let tools = Arc::new(
-        MetalTools::resolve(&resolver, MAC.target, env, tmp.clone(), registry.clone())
-            .map_err(|e| fatal("metal", e))?,
+        MetalTools::for_target(&resolver, MAC.target, tmp.clone(), registry.clone())
+            .map_err(|e| fatal("tools", e))?,
     );
     let (ver, bld) = resolver
         .sdk_version(MAC.target, &registry)

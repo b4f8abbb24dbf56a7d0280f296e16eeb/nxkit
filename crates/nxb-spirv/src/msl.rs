@@ -102,11 +102,11 @@ fn with_helpers(src: &str) -> String {
     format!("{}{PRECISE}{}", &src[..at], &src[at..])
 }
 
-/// The dual-source variant of a fragment shader's MSL: function `name` becomes `name_d` and the output at location 1 becomes
+/// The dual-source variant of a fragment shader's MSL: function `name` becomes `dual` and the output at location 1 becomes
 /// the second blend source of attachment 0. None when the shader has no output at location 1.
-pub(crate) fn dual_source(src: &str, name: &str) -> Option<String> {
+pub(crate) fn dual_source(src: &str, name: &str, dual: &str) -> Option<String> {
     src.contains("[[color(1)]]").then(|| {
-        src.replace(&format!(" {name}("), &format!(" {name}_d("))
+        src.replace(&format!(" {name}("), &format!(" {dual}("))
             .replace("[[color(1)]]", "[[color(0), index(1)]]")
     })
 }

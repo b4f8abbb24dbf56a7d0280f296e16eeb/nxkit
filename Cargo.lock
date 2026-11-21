@@ -540,7 +540,6 @@ version = "0.11.0"
 dependencies = [
  "naga",
  "nxb-model",
- "nxkit-abi",
 ]
 
 [[package]]

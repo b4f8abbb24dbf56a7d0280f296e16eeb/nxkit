@@ -24,6 +24,15 @@ pub struct Resolver {
 }
 
 impl Resolver {
+    /// The resolver of this process: `/usr/bin/xcrun`, the caller's `DEVELOPER_DIR` and `HOME` (`/` without one).
+    pub fn from_env() -> Resolver {
+        Resolver {
+            xcrun: PathBuf::from("/usr/bin/xcrun"),
+            developer_dir: std::env::var_os("DEVELOPER_DIR"),
+            home: std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from),
+        }
+    }
+
     fn env(&self) -> EnvPolicy {
         let mut env = EnvPolicy::empty()
             .set("PATH", "/usr/bin:/bin")

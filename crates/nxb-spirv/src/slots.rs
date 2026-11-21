@@ -4,8 +4,8 @@
 //! push-constant block, textures for images and combined image samplers, samplers for samplers and combined image samplers.
 //! The sampler of a split combined image sampler has the binding with `crate::spirv::TWIN_BINDING` set and counts as part
 //! of its image's binding.
-//! An array of descriptors is an error for now: naga's MSL writer passes it in an argument buffer, and the table has no
-//! kind for one (the old engine's table gave it `k` consecutive slots, `*k`). A combined image sampler takes texture slot `n` and sampler slot
+//! An array of descriptors is an error for now: naga's MSL writer passes it in an argument buffer, and the host's table
+//! has no kind for one (the old engine's table gave it `k` consecutive slots, `*k`). A combined image sampler takes texture slot `n` and sampler slot
 //! `n`, the first `n` that is free in both classes. `vk_shaders.py` took the next texture slot, which could be a sampler
 //! slot that a separate sampler before it already had. The push-constant block gets the next buffer slot after the
 //! descriptor buffers.
@@ -16,9 +16,9 @@ use naga::back::msl::{BindSamplerTarget, BindTarget, EntryPointResources};
 use naga::{
     AddressSpace, GlobalVariable, Handle, Module, ResourceBinding, TypeInner, valid::ModuleInfo,
 };
-use nxkit_abi::vk_table::{Kind, Resource};
 
 use crate::spirv::TWIN_BINDING;
+use crate::{Kind, Resource};
 
 /// The highest slot count per class: 16 buffers (the vertex buffers take the slots above), 31 textures and 16 samplers.
 pub(crate) const LIMITS: (u32, u32, u32) = (16, 31, 16);
@@ -26,7 +26,7 @@ pub(crate) const LIMITS: (u32, u32, u32) = (16, 31, 16);
 /// One descriptor binding of the shader, its Metal slot and its globals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Res {
-    /// The binding and its slot, as the table gives them.
+    /// The binding and its slot.
     pub res: Resource,
     /// The globals of this binding: one, or the image and the sampler of a combined image sampler.
     pub globals: Vec<Handle<GlobalVariable>>,
@@ -103,11 +103,8 @@ pub(crate) fn assign(m: &Module, combined: &BTreeSet<(u32, u32)>) -> Result<Slot
         });
         if e.res.kind != kind {
             return Err(format!(
-                "set {} binding {} holds both a {} and a {}",
-                rb.group,
-                binding,
-                e.res.kind.letter(),
-                kind.letter()
+                "set {} binding {} holds both a {:?} and a {:?}",
+                rb.group, binding, e.res.kind, kind
             ));
         }
         e.globals.push(h);

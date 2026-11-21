@@ -261,6 +261,102 @@ impl MetalTools {
     }
 }
 
+impl MetalTools {
+    /// Resolve the tools of `target` with their environment: the target's `SDKROOT`, the Apple environment
+    /// (`SdkRoots::apple_env` with `tmp` and the resolver's home) and `metal` and `metallib`. An error names the step
+    /// that failed.
+    pub fn for_target(
+        resolver: &Resolver,
+        target: Target,
+        tmp: PathBuf,
+        registry: Arc<ProcessRegistry>,
+    ) -> Result<MetalTools, String> {
+        let roots = crate::SdkRoots::resolve(resolver, &[target], &registry)
+            .map_err(|e| format!("SDK: {e}"))?;
+        let env = roots
+            .apple_env(target, &tmp, &resolver.home)
+            .map_err(|e| format!("environment: {e}"))?;
+        MetalTools::resolve(resolver, target, env, tmp, registry).map_err(|e| format!("metal: {e}"))
+    }
+
+    /// Link several AIR modules into one metallib (the library of a Vulkan game holds one function per shader). The
+    /// modules go through temp files: `metallib` reads one module from stdin only.
+    pub fn link_many(&self, airs: &[Vec<u8>]) -> Result<(Vec<u8>, StepCost), ToolError> {
+        let lib = self.temp("metallib");
+        let mut files = Vec::with_capacity(airs.len());
+        let mut r = Ok(());
+        for air in airs {
+            let a = self.temp("air");
+            r = fs::write(&a, air).map_err(|e| io_err("metallib", e));
+            files.push(a);
+            if r.is_err() {
+                break;
+            }
+        }
+        let c = r.and_then(|()| {
+            self.metallib.run(
+                &self
+                    .inv(&self.metallib)
+                    .args(files.iter())
+                    .arg("-o")
+                    .arg(&lib),
+            )
+        });
+        for a in &files {
+            let _ = fs::remove_file(a);
+        }
+        let bytes = c.as_ref().ok().map(|_| fs::read(&lib));
+        let _ = fs::remove_file(&lib);
+        let c = c?;
+        let bytes = bytes
+            .unwrap_or_else(|| Ok(Vec::new()))
+            .map_err(|e| io_err("metallib", e))?;
+        Ok((bytes, StepCost::of(&c)))
+    }
+}
+
 fn io_err(tool: &str, e: std::io::Error) -> ToolError {
     ToolError::new(tool, ToolFailure::Io(e.kind())).with_stderr(e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Compiles two functions and links them into one library. Skipped where Xcode's Metal tools are missing.
+    #[test]
+    fn link_many_puts_several_modules_into_one_library() {
+        let tmp = std::env::temp_dir().join(format!("nxb-link-many-{}", std::process::id()));
+        fs::create_dir_all(&tmp).unwrap();
+        let tools = match MetalTools::for_target(
+            &Resolver::from_env(),
+            Target::Mac,
+            tmp.clone(),
+            Arc::new(ProcessRegistry::new()),
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("skipped: {e}");
+                return;
+            }
+        };
+        let flags = ["-c", "-O1"];
+        let air = |name: &str| {
+            let src = format!(
+                "#include <metal_stdlib>\nkernel void {name}(device float* o [[buffer(0)]]) {{ o[0] = 1.0; }}\n"
+            );
+            tools
+                .compile(&flags, None, src.as_bytes(), Io::Pipes)
+                .unwrap()
+                .0
+        };
+        let (a, b) = (air("first_fn"), air("second_fn"));
+        let (lib, _) = tools.link_many(&[a, b]).unwrap();
+        assert_eq!(&lib[..4], b"MTLB");
+        let has = |n: &str| lib.windows(n.len()).any(|w| w == n.as_bytes());
+        assert!(has("first_fn") && has("second_fn"));
+        // the temp files are gone
+        assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0);
+        fs::remove_dir_all(&tmp).unwrap();
+    }
 }

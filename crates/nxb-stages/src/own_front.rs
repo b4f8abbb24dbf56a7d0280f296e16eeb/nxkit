@@ -106,21 +106,11 @@ pub fn resolve(
 
 /// The Mac compiler identity as the build computes it (resolves `metal` and `metallib` through xcrun).
 pub fn mac_compiler_id(tmp: &Path) -> Result<String, String> {
-    use nxb_tool::{ProcessRegistry, SdkRoots};
+    use nxb_tool::ProcessRegistry;
     let target = nxb_shader::target::MAC.target;
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
     let registry = Arc::new(ProcessRegistry::new());
-    let resolver = Resolver {
-        xcrun: PathBuf::from("/usr/bin/xcrun"),
-        developer_dir: std::env::var_os("DEVELOPER_DIR"),
-        home: home.clone(),
-    };
-    let roots = SdkRoots::resolve(&resolver, &[target], &registry).map_err(|e| e.to_string())?;
-    let env = roots
-        .apple_env(target, tmp, &home)
-        .map_err(|e| e.to_string())?;
-    let tools = MetalTools::resolve(&resolver, target, env, tmp.to_path_buf(), registry.clone())
-        .map_err(|e| e.to_string())?;
+    let resolver = Resolver::from_env();
+    let tools = MetalTools::for_target(&resolver, target, tmp.to_path_buf(), registry.clone())?;
     let (ver, build) = resolver
         .sdk_version(target, &registry)
         .map_err(|e| e.to_string())?;

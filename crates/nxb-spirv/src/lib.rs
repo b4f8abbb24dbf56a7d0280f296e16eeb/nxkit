@@ -1,16 +1,16 @@
 //! Shaders of games that draw with Vulkan instead of NVN, translated to MSL for the host's Vulkan layer (D21).
 //!
 //! The game hands the words of a SPIR-V module to `vkCreateShaderModule`, so the host finds a shader again by the hash of
-//! those bytes. [`translate`] reads one module with naga's SPIR-V reader and writes one Metal function `vk_<key>` with
-//! naga's MSL writer, plus the row of `vk_shaders.tsv` ([`nxkit_abi::vk_table`]) that says where its descriptors go. The
-//! slots and rows follow the old engine's `dm/gfx/tools/vk_shaders.py`.
+//! those bytes ([`key_of`]). [`translate`] reads one module with naga's SPIR-V reader and writes one Metal function with
+//! naga's MSL writer, plus the Metal slot of each descriptor it takes. The slots follow the old engine's
+//! `dm/gfx/tools/vk_shaders.py`.
 //!
 //! Before naga reads a module, the crate fixes up its words: array strides on struct members, combined image samplers
 //! split into an image and a sampler, and 1D images made 2D (the host has no 1D textures). After it reads the module,
 //! array varyings become one varying per element, as Metal has no arrays in a stage's inputs or outputs.
 //!
-//! The crate does no I/O: the caller finds the modules, writes the table with [`nxkit_abi::vk_table::write`], compiles
-//! the MSL with Metal's tools and writes the files.
+//! The crate is pure and knows no file format of the host: the caller names the functions, writes the host's table,
+//! compiles the MSL with Metal's tools and writes the files.
 
 mod image1d;
 mod io;
@@ -23,18 +23,78 @@ pub use spirv::is_spirv;
 use std::collections::BTreeSet;
 
 use naga::valid::{Capabilities, ModuleInfo, ValidationFlags, Validator};
-use nxkit_abi::vk_table::{self, Key, Row, Stage};
 
 use crate::spirv::{DEC_BINDING, DEC_SET, Spv};
+
+/// The stage of a translated module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stage {
+    /// A vertex shader.
+    Vertex,
+    /// A fragment shader.
+    Fragment,
+}
+
+/// What a descriptor is, and which Metal slots it takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Kind {
+    /// A uniform buffer, at a buffer slot.
+    Uniform,
+    /// A storage buffer, at a buffer slot.
+    Storage,
+    /// A sampled or storage image, at a texture slot.
+    Texture,
+    /// A sampler, at a sampler slot.
+    Sampler,
+    /// A combined image sampler, at the texture slot and the sampler slot of the same number.
+    Combined,
+    /// The push-constant block, at a buffer slot. Its set and binding are 0.
+    Push,
+}
+
+impl Kind {
+    /// Whether the kind takes a buffer slot.
+    pub const fn is_buffer(self) -> bool {
+        matches!(self, Kind::Uniform | Kind::Storage | Kind::Push)
+    }
+
+    /// Whether the kind takes a texture slot.
+    pub const fn is_texture(self) -> bool {
+        matches!(self, Kind::Texture | Kind::Combined)
+    }
+
+    /// Whether the kind takes a sampler slot.
+    pub const fn is_sampler(self) -> bool {
+        matches!(self, Kind::Sampler | Kind::Combined)
+    }
+}
+
+/// One descriptor binding of the function and its first Metal slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Resource {
+    /// What the descriptor is.
+    pub kind: Kind,
+    /// The descriptor set in the SPIR-V.
+    pub set: u32,
+    /// The binding in the SPIR-V.
+    pub binding: u32,
+    /// The first Metal slot.
+    pub slot: u32,
+    /// The number of descriptors at the slots from `slot` on. It is 1 for now: an array of descriptors is an error.
+    pub count: u32,
+}
 
 /// One translated shader stage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shader {
-    /// The table row. Its `source` is empty: the caller sets it to where it found the module.
-    pub row: Row,
-    /// The MSL source with one entry point, [`vk_table::function`] of the key.
+    /// The stage.
+    pub stage: Stage,
+    /// The resources the function takes, in (set, binding) order and the push constants last.
+    pub resources: Vec<Resource>,
+    /// The MSL source with one entry point, the function named `entry` in [`translate`].
     pub msl: String,
-    /// The dual-source variant [`vk_table::dual_function`] of a fragment shader with an output at location 1.
+    /// For a fragment shader with an output at location 1: its dual-source variant, the function named `dual`, with that
+    /// output as the second blend source of attachment 0.
     pub msl_dual: Option<String>,
 }
 
@@ -47,14 +107,14 @@ pub enum Outcome {
     Skipped(&'static str),
 }
 
-/// The naga version and the revision of this crate's passes, for the table's second line and for cache keys. A change to the
+/// The naga version and the revision of this crate's passes, for the second line of the host's table and for cache keys. A change to the
 /// passes that changes the output raises the revision.
 pub fn translator_id() -> String {
-    "nxb-spirv 1, naga 30.0.1".to_string()
+    "nxb-spirv 2, naga 30.0.1".to_string()
 }
 
-/// The table key of a module: the first 8 bytes of the SHA-256 of the game's bytes, which the host hashes as well.
-pub fn key_of(bytes: &[u8]) -> Key {
+/// The key of a module: the first 8 bytes of the SHA-256 of the game's bytes, which the host hashes as well.
+pub fn key_of(bytes: &[u8]) -> [u8; 8] {
     let mut key = [0u8; 8];
     key.copy_from_slice(&nxb_model::sha256(bytes).as_bytes()[..8]);
     key
@@ -76,14 +136,14 @@ fn stage_name(model: u32) -> &'static str {
     }
 }
 
-/// Translates one SPIR-V module of a Vulkan game. The vertex shader's clip-space Y is negated, as Vulkan's points down and
-/// Metal's points up. Its depth range stays as it is. An error is a module the host cannot use.
-pub fn translate(bytes: &[u8]) -> Result<Outcome, String> {
-    let key = key_of(bytes);
+/// Translates one SPIR-V module of a Vulkan game into the Metal function `entry`, and a fragment shader with an output at
+/// location 1 also into its dual-source variant `dual`. The vertex shader's clip-space Y is negated, as Vulkan's points
+/// down and Metal's points up. Its depth range stays as it is. An error is a module the host cannot use.
+pub fn translate(bytes: &[u8], entry: &str, dual: &str) -> Result<Outcome, String> {
     let mut s = Spv::parse(bytes)?;
     let stage = match stage_name(s.execution_model()?) {
-        "vert" => Stage::Vert,
-        "frag" => Stage::Frag,
+        "vert" => Stage::Vertex,
+        "frag" => Stage::Fragment,
         other => return Ok(Outcome::Skipped(other)),
     };
     spirv::fix_strides(&mut s);
@@ -98,29 +158,16 @@ pub fn translate(bytes: &[u8]) -> Result<Outcome, String> {
             ))
         })
         .collect();
-    let name = vk_table::function(&key);
-    let (m, info) = to_ir(&s.words(), stage == Stage::Vert, &name)?;
+    let (m, info) = to_ir(&s.words(), stage == Stage::Vertex, entry)?;
     let slots = slots::assign(&m, &combined)?;
-    let resources = slots.used(&info, 0);
-    // the host refuses a row outside the table's limits (a set above 7 or a binding above 127)
-    if let Some(r) = resources.iter().find(|r| !r.is_valid()) {
-        return Err(format!(
-            "the resource {r} is outside the limits of {}",
-            vk_table::FILE
-        ));
-    }
-    let src = msl::write(&m, &info, &slots, &name)?;
+    let src = msl::write(&m, &info, &slots, entry)?;
     let msl_dual = match stage {
-        Stage::Frag => msl::dual_source(&src, &name),
-        _ => None,
+        Stage::Fragment => msl::dual_source(&src, entry, dual),
+        Stage::Vertex => None,
     };
     Ok(Outcome::Shader(Shader {
-        row: Row {
-            key,
-            stage,
-            resources,
-            source: String::new(),
-        },
+        stage,
+        resources: slots.used(&info, 0),
         msl: src,
         msl_dual,
     }))
