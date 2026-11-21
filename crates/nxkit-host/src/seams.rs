@@ -160,13 +160,26 @@ fn state_page(game: &Game) -> Option<u64> {
     main.base.checked_add(offset)
 }
 
+/// Whether the host can make the game run at `target` fps: only through the frame step state page that the game's frame
+/// step patch writes (the host wires no limit rule yet). Without it a load-driven step can only hold the presents longer,
+/// which the game does not see: a game that paces itself (Octopath Traveler at 30 with a target of 60) then had its hold
+/// flip between 1, 2 and 3 vsyncs. 0 asks for nothing.
+fn target_enforceable(target: u32, has_page: bool) -> bool {
+    target == 0 || has_page
+}
+
 fn pacing_config(game: &Game, refresh: &Refresh) -> Result<nxkit_svc_pacing::Config> {
     let s = &game.settings;
     let page = state_page(game);
     let target = s.fps_target;
     let mut variable = None;
+    if !target_enforceable(target, page.is_some()) {
+        eprintln!(
+            "nxkit-host: fps_target {target} has no way to be enforced (no frame step state page, no limit rule): the game runs at its own pace"
+        );
+    }
     let step = match (target, page.is_some()) {
-        (0, _) => StepMode::Own,
+        (0, _) | (_, false) => StepMode::Own,
         // The load-driven step decides the hold from the cost of the frames and writes the step into the state
         // page, so the game steps by the time each frame stays on screen (the engine's frame step).
         (30 | 60, true) => {
@@ -187,7 +200,7 @@ fn pacing_config(game: &Game, refresh: &Refresh) -> Result<nxkit_svc_pacing::Con
             variable = Some(t);
             StepMode::Load(load)
         }
-        (t, _) => {
+        (t, true) => {
             let mut load = LoadConfig::new(t).map_err(|e| HostError::Manifest(e.to_string()))?;
             load.hold = s.fps_hold;
             load.work = matches!(s.pace_profile.as_str(), "work" | "steady");
@@ -469,7 +482,7 @@ pub fn vulkan_frame_hooks(
 
 #[cfg(test)]
 mod tests {
-    use super::imports_account_save;
+    use super::{imports_account_save, target_enforceable};
     use crate::manifest::parse_imports;
 
     fn imports(names: &[&str]) -> Vec<crate::manifest::Import> {
@@ -486,5 +499,13 @@ mod tests {
         let account = "_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE";
         assert!(imports_account_save(&imports(&[device, account])));
         assert!(!imports_account_save(&imports(&[device])));
+    }
+
+    #[test]
+    fn a_target_needs_the_frame_step_page() {
+        assert!(target_enforceable(0, false));
+        assert!(target_enforceable(60, true));
+        assert!(!target_enforceable(60, false));
+        assert!(!target_enforceable(30, false));
     }
 }
