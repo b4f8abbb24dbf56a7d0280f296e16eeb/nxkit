@@ -106,6 +106,7 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 | `NXKIT_FPS_TARGET` | choice | `30`, `60`, `120` up to `fps_max` of the title module, and its own `fps_target`. A title with `fps_target` 0 or with one rate gets no row. | the `fps_target` of the title module |
 | `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
 | `NXKIT_LANGUAGE` | choice | empty (the Mac's language) and the languages of `SupportedLanguageFlag` in the game's `control.nacp`, all 16 without a NACP. A game with one language gets no row. | empty |
+| `NXKIT_PRESENT_UPSCALE` | choice | `off` (Standard), `metalfx` (MetalFX): how the present scales a picture that is smaller than the window (R70) | `off` |
 | `NXKIT_PAUSE_UNFOCUSED` | toggle | `1`, `0` | `0` |
 | `NXKIT_RUMBLE` | toggle | `1`, `0` | `1` |
 | `NXKIT_RUMBLE_GAIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 3, step 0.1 | `1.0` |

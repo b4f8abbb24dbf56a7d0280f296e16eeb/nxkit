@@ -461,9 +461,10 @@ pub fn vulkan_frame_hooks(
     ctx: &Context,
     root: &std::path::Path,
     settings: &Settings,
+    run: &crate::hostenv::RunSettings,
     refresh: &Arc<Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
-    crate::frames::install_vulkan(ctx, root, settings, refresh)
+    crate::frames::install_vulkan(ctx, root, settings, refresh, run.host.present_upscale)
 }
 
 #[cfg(test)]

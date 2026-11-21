@@ -4,13 +4,17 @@
 //! texture in an sRGB format gets its encode here. A size that differs from the drawable is read by nearest pixel. Only
 //! the window's crop is shown when the game set one (a 1080p picture in the top left of a 1440p window texture).
 //! The device origin captured with each image selects its row direction within that crop.
+//!
+//! With [`PresentUpscale::MetalFx`] (R70) a crop that is smaller than the drawable is scaled by MetalFX first
+//! ([`PresentUpscaler`]), and the triangle reads the scaled picture one to one.
 
 mod params;
 
 use nxkit_metal::{
     ArchiveConfig, ArgumentTable, ColorAttachment, Context, Drawable, Format, FrameRing,
-    LoadAction, PRESENT_FORMAT, PipelineCache, Primitive, RenderCommand, RenderPassDesc,
-    RenderPipeline, RenderPipelineDesc, Result, ShaderLibrary, StoreAction, Texture,
+    LoadAction, PRESENT_FORMAT, PipelineCache, PresentUpscale, PresentUpscaler, Primitive,
+    RenderCommand, RenderPassDesc, RenderPipeline, RenderPipelineDesc, Result, ShaderLibrary,
+    StoreAction, Texture,
 };
 
 const MSL: &str = r#"
@@ -47,12 +51,14 @@ pub(crate) struct Blit {
     plain: RenderPipeline,
     srgb: RenderPipeline,
     table: ArgumentTable,
+    upscaler: PresentUpscaler,
 }
 
 impl Blit {
     pub(crate) fn new(
         ctx: &Context,
         timed: &std::sync::Arc<nxkit_metal::TimedPresent>,
+        upscale: PresentUpscale,
     ) -> Result<Self> {
         let cache = PipelineCache::new(ctx, &ArchiveConfig::default())?;
         let lib = ShaderLibrary::from_source(ctx, "nxkit_blit", MSL)?;
@@ -70,6 +76,7 @@ impl Blit {
             plain: pipe(1, "blit_plain")?,
             srgb: pipe(2, "blit_srgb")?,
             table: ArgumentTable::new(ctx, 1, 1)?,
+            upscaler: PresentUpscaler::new(ctx, upscale),
         })
     }
 
@@ -84,15 +91,24 @@ impl Blit {
         at: Option<f64>,
     ) -> Result<()> {
         let mut frame = self.ring.begin()?;
+        let game = src;
+        let game_crop = [crop.x, crop.y, crop.width, crop.height];
+        let target = drawable.texture().desc();
+        let scaled = self.upscaler.encode(
+            &self.ctx,
+            frame.commands(),
+            game,
+            params::rect([game.desc().width, game.desc().height], game_crop),
+            (target.width, target.height),
+        );
+        // The scaled picture is the crop alone, with the rows of the game.
+        let crop = if scaled.is_some() { [0; 4] } else { game_crop };
+        let src = scaled.as_ref().unwrap_or(game);
         let desc = src.desc();
-        let words: Vec<u8> = params::source(
-            [desc.width, desc.height],
-            [crop.x, crop.y, crop.width, crop.height],
-            origin_lower_left,
-        )
-        .iter()
-        .flat_map(|v| v.to_le_bytes())
-        .collect();
+        let words: Vec<u8> = params::source([desc.width, desc.height], crop, origin_lower_left)
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
         let params_addr = frame.scratch().push(&words)?;
         let target = drawable.texture().clone();
         let pipeline = match src.desc().format {
@@ -136,8 +152,8 @@ impl Blit {
             pass.end();
         }
         // While the host waits for the first picture that shows something (`shown.rs`).
-        let crop = [crop.x, crop.y, crop.width, crop.height].map(|v| v.max(0) as u32);
-        crate::shown::probe(&self.ctx, frame.commands(), &self.table, src, crop);
+        let crop = game_crop.map(|v| v.max(0) as u32);
+        crate::shown::probe(&self.ctx, frame.commands(), &self.table, game, crop);
         match at {
             Some(at) => frame.present_at(drawable, at),
             None => frame.present(drawable),

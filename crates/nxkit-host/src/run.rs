@@ -157,7 +157,7 @@ pub fn run(opts: &Options) -> Result<()> {
             &screen,
             &refresh,
         )?,
-        Graphics::Vulkan => seams::vulkan_frame_hooks(&ctx, &opts.root, &settings, &refresh)?,
+        Graphics::Vulkan => seams::vulkan_frame_hooks(&ctx, &opts.root, &settings, &run, &refresh)?,
     };
     // Over a launcher the window shows with the first picture that is not black; an NVN game's presents tell it.
     let probed = env.overlay && matches!(loaded.game.graphics, Graphics::Nvn);

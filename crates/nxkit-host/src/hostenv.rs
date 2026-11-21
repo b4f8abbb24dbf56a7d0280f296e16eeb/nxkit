@@ -61,6 +61,9 @@ pub struct HostEnv {
     pub rumble_min: f32,
     /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
     pub metal_hud: bool,
+    /// `NXKIT_PRESENT_UPSCALE` (`metalfx` or `1` for MetalFX, off otherwise, a launch option): how the present scales a
+    /// picture that is smaller than the window.
+    pub present_upscale: nxkit_metal::PresentUpscale,
     /// `NXKIT_FPS_TARGET` (a whole number, a launch option): the frame rate over `fps_target` of the title module.
     /// `Settings::with_env` keeps it only when the title offers it.
     pub fps_target: Option<u32>,
@@ -176,6 +179,10 @@ impl HostEnv {
             rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
             rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
             metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
+            present_upscale: match env.var(launch::PRESENT_UPSCALE).as_deref().map(str::trim) {
+                Ok("metalfx" | "1") => nxkit_metal::PresentUpscale::MetalFx,
+                _ => nxkit_metal::PresentUpscale::Off,
+            },
             fps_target: env
                 .var(launch::FPS_TARGET)
                 .ok()
@@ -395,6 +402,20 @@ mod tests {
             (Some(true), Some(false), None)
         );
         assert_eq!(d.handheld, None);
+        let up = |v: &str| {
+            HostEnv::from_env(&Env::from_pairs([("NXKIT_PRESENT_UPSCALE", v)])).present_upscale
+        };
+        assert_eq!(d.present_upscale, nxkit_metal::PresentUpscale::Off);
+        assert_eq!(
+            (up("metalfx"), up(" 1"), up("off"), up("0"), up("fsr")),
+            (
+                nxkit_metal::PresentUpscale::MetalFx,
+                nxkit_metal::PresentUpscale::MetalFx,
+                nxkit_metal::PresentUpscale::Off,
+                nxkit_metal::PresentUpscale::Off,
+                nxkit_metal::PresentUpscale::Off
+            )
+        );
         assert_eq!(
             (d.launcher_pid, d.cursor_hide, d.cursor_hidden),
             (None, 3.0, false)

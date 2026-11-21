@@ -60,6 +60,10 @@ pub const RUMBLE_MIN: &str = "NXKIT_RUMBLE_MIN";
 /// `1`: the Metal performance HUD is shown over the game.
 pub const METAL_HUD: &str = "NXKIT_METAL_HUD";
 
+/// `off` or `metalfx`: how the present scales a picture that is smaller than the window, as `DM_PRESENT_UPSCALE` of
+/// the old engine. `metalfx` scales it through MetalFX's spatial scaler, `off` by nearest pixel.
+pub const PRESENT_UPSCALE: &str = "NXKIT_PRESENT_UPSCALE";
+
 /// `30`, `60` or `120`: the frame rate in place of `fps_target` of the title module. Unset: the title's.
 pub const FPS_TARGET: &str = "NXKIT_FPS_TARGET";
 
@@ -219,6 +223,9 @@ pub fn game_languages(flags: u32) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// The options of [`PRESENT_UPSCALE`], with the labels of the old engine.
+pub const PRESENT_UPSCALES: &[(&str, &str)] = &[("off", "Standard"), ("metalfx", "MetalFX")];
+
 /// The options of [`FPS_TARGET`]. The build lists only the rates of the title ([`game_fps_targets`]).
 pub const FPS_TARGETS: &[(&str, &str)] = &[("30", "30 fps"), ("60", "60 fps"), ("120", "120 fps")];
 
@@ -287,6 +294,17 @@ pub const OPTIONS: &[Opt] = &[
         default: "",
         section: "Game",
         basic: true,
+        needs: None,
+    },
+    Opt {
+        env: PRESENT_UPSCALE,
+        kind: Kind::Choice(PRESENT_UPSCALES),
+        label: "Upscaling",
+        note: "MetalFX sharpens the picture where the window is larger than the game renders it. Uses more GPU time and \
+               can increase heat.",
+        default: "off",
+        section: "Game",
+        basic: false,
         needs: None,
     },
     Opt {
@@ -454,6 +472,8 @@ mod tests {
     fn a_value_is_checked_as_the_launcher_checks_it() {
         let op = option(OP_MODE).unwrap();
         assert!(op.accepts("handheld") && op.accepts("docked") && !op.accepts("console"));
+        let up = option(PRESENT_UPSCALE).unwrap();
+        assert!(up.accepts("off") && up.accepts("metalfx") && !up.accepts("1"));
         let full = option(FULLSCREEN).unwrap();
         assert!(full.accepts("1") && full.accepts("0") && !full.accepts("yes"));
         let r = Opt {

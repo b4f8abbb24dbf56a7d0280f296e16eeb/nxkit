@@ -110,6 +110,8 @@ pub struct GpuBackend {
     pending: Mutex<Vec<Pending>>,
     freed: Condvar,
     blit: Mutex<Option<Blit>>,
+    /// How the blit scales a picture that is smaller than the drawable.
+    present_upscale: nxkit_metal::PresentUpscale,
     /// The minimum stay of the presents, which the host's refresh plan sets.
     timed: Arc<nxkit_metal::TimedPresent>,
     pacer: OnceLock<Arc<Pacer>>,
@@ -213,6 +215,7 @@ impl GpuBackend {
                 pending: Mutex::new(Vec::new()),
                 freed: Condvar::new(),
                 blit: Mutex::new(None),
+                present_upscale: settings.present_upscale,
                 timed: settings.timed_present.clone(),
                 pacer: OnceLock::new(),
                 reports: AtomicU64::new(0),

@@ -14,6 +14,18 @@ pub(super) fn source(size: [u32; 2], crop: [i32; 4], lower_left: bool) -> [f32; 
     [x, origin_y, w, extent_y, x, y, x + w - 1.0, y + h - 1.0]
 }
 
+/// The shown rectangle `[x, y, width, height]` in texels, with the clamp of [`source`]: a zero crop size selects the
+/// whole source, and a crop that runs past the source ends at its edge.
+pub(super) fn rect(size: [u32; 2], crop: [i32; 4]) -> [u32; 4] {
+    let [width, height] = size;
+    let [x, y, w, h] = crop.map(|v| v.max(0) as u32);
+    if w == 0 || h == 0 {
+        return [0, 0, width, height];
+    }
+    let (x, y) = (x.min(width), y.min(height));
+    [x, y, w.min(width - x), h.min(height - y)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +90,22 @@ mod tests {
         assert_eq!(
             source([9, 7], [7, 5, 8, 8], true),
             [7.0, 7.0, 2.0, -2.0, 7.0, 5.0, 8.0, 6.0]
+        );
+    }
+
+    #[test]
+    fn the_upscaled_rectangle_is_the_crop_inside_the_source() {
+        assert_eq!(rect([2560, 1440], [0; 4]), [0, 0, 2560, 1440]);
+        assert_eq!(rect([2560, 1440], [0, 0, 1920, 1080]), [0, 0, 1920, 1080]);
+        assert_eq!(
+            rect([9, 7], [7, 5, 8, 8]),
+            [7, 5, 2, 2],
+            "clamped as in source"
+        );
+        assert_eq!(
+            rect([9, 7], [12, 1, 4, 4]),
+            [9, 1, 0, 4],
+            "past the edge: nothing to scale"
         );
     }
 }

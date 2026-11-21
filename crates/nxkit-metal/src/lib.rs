@@ -25,6 +25,7 @@
 //! - [`PacingStats`]: present time, missed ticks and the interval histogram (R16).
 //! - [`Presenter`]: a `CAMetalLayer` drawable path, with `Frame::present_at` for a tick.
 //! - [`SpatialUpscaler`], [`FrameInterpolator`]: MetalFX spatial scaling and frame interpolation.
+//! - [`PresentUpscaler`], [`PresentUpscale`]: MetalFX spatial scaling of the shown picture in the present.
 //! - [`RenderScale`], [`choose_render_scale`]: the scale the host renders at.
 //! - [`Deswizzler`]: block-linear deswizzle from guest memory into a texture.
 //!
@@ -64,6 +65,7 @@ mod passdesc;
 mod pipeline;
 mod policy;
 mod present;
+mod present_upscale;
 mod rawcopy;
 mod render;
 mod resample;
@@ -123,6 +125,7 @@ pub use pipeline::{
 };
 pub use policy::{FrameSource, GameRate, PolicyInput, PresentPlan, choose_present_plan};
 pub use present::{Drawable, PRESENT_FORMAT, Presenter, TimedPresent, media_time};
+pub use present_upscale::{PresentUpscale, PresentUpscaler, REMAKE_PRESENTS};
 pub use render::{
     ColorAttachment, CullMode, DepthAttachment, RenderCommand, RenderPass, RenderPassDesc, Scissor,
     StencilAttachment, Viewport,

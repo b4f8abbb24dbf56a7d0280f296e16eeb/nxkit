@@ -19,6 +19,8 @@ pub struct VkGpuSettings {
     pub timed_present: Option<Arc<nxkit_metal::TimedPresent>>,
     /// Told when the display showed a present (the variable frame step, the screen state of the host).
     pub on_shown: Option<ShownHook>,
+    /// How the present scales an image that is smaller than the drawable (R70).
+    pub present_upscale: nxkit_metal::PresentUpscale,
 }
 
 impl Default for VkGpuSettings {
@@ -28,6 +30,7 @@ impl Default for VkGpuSettings {
             surface_extent: (1280, 720),
             timed_present: None,
             on_shown: None,
+            present_upscale: nxkit_metal::PresentUpscale::Off,
         }
     }
 }
@@ -39,6 +42,7 @@ impl std::fmt::Debug for VkGpuSettings {
             .field("surface_extent", &self.surface_extent)
             .field("timed_present", &self.timed_present.is_some())
             .field("on_shown", &self.on_shown.is_some())
+            .field("present_upscale", &self.present_upscale)
             .finish()
     }
 }
