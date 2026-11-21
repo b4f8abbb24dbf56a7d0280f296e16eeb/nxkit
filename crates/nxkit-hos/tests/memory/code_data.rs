@@ -31,6 +31,7 @@ pub(super) fn build_config(
             front_size: 0x10_0000,
             stack_size: 0x10_0000,
             alias_size: 0x10_0000,
+            arena: 0,
             app_pool: 0x40_0000,
             used_memory: 0x10_0000,
             system_resource: 0x20_0000,

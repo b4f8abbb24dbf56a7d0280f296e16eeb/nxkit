@@ -22,6 +22,7 @@ pub mod macho;
 pub mod manifest;
 pub mod module;
 pub mod npdm;
+pub mod obs;
 pub mod pipecache;
 pub mod reloc;
 pub mod settings;
@@ -45,6 +46,8 @@ pub mod loader;
 pub mod memory;
 #[cfg(target_os = "macos")]
 pub mod memreport;
+#[cfg(target_os = "macos")]
+pub mod obswire;
 #[cfg(target_os = "macos")]
 pub mod place;
 pub mod poolreport;

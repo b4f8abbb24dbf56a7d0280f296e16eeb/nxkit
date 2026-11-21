@@ -17,6 +17,7 @@ use std::cell::Cell;
 use std::sync::OnceLock;
 
 use crate::gates::{GateTable, Kind};
+use crate::obs::ObsTable;
 use crate::stop;
 
 /// The number of gate slots, one per guest thread that runs at the same time. It is the `.rept` count below.
@@ -212,17 +213,24 @@ unsafe extern "C" {
     fn nxkit_thread_leave(save: *mut u64) -> !;
 }
 
-static TABLE: OnceLock<GateTable> = OnceLock::new();
+/// The gates of all modules and the handlers of the observation gates.
+struct Gates {
+    table: GateTable,
+    obs: ObsTable,
+}
+
+static TABLE: OnceLock<Gates> = OnceLock::new();
 
 thread_local! {
     /// The save area of the `enter` that runs on this thread, or 0 outside guest code.
     static SAVE: Cell<usize> = const { Cell::new(0) };
 }
 
-/// Installs the gates of all modules. It runs once, before the first guest thread starts.
-pub fn install(table: GateTable) -> crate::error::Result<()> {
+/// Installs the gates of all modules and the handlers of the observation gates. It runs once, before the first guest
+/// thread starts.
+pub fn install(table: GateTable, obs: ObsTable) -> crate::error::Result<()> {
     TABLE
-        .set(table)
+        .set(Gates { table, obs })
         .map_err(|_| crate::error::HostError::Load("the gate table is installed twice".into()))
 }
 
@@ -376,10 +384,10 @@ pub unsafe extern "C" fn frame_context(frame: u64, out: *mut u64) {
 /// Called by the assembly on the gate stack. `ret` is the address the gate block returns to, `regs` the frame.
 #[unsafe(no_mangle)]
 extern "C" fn nxkit_gate_dispatch(ret: u64, regs: *mut u64) {
-    let Some(table) = TABLE.get() else {
+    let Some(gates) = TABLE.get() else {
         stop::fatal("a gate ran before the gate table was installed");
     };
-    match table.find(ret) {
+    match gates.table.find(ret) {
         Some(Kind::Svc(n)) => svc(n, regs, ret),
         Some(Kind::Counter(r)) => {
             // SAFETY: the assembly passes its own frame, which holds x0..x30 as 31 words. A counter gate does not
@@ -387,7 +395,13 @@ extern "C" fn nxkit_gate_dispatch(ret: u64, regs: *mut u64) {
             let regs = unsafe { std::slice::from_raw_parts_mut(regs, 31) };
             regs[usize::from(r)] = counter();
         }
-        Some(Kind::Obs) => {}
+        Some(Kind::Obs(arg)) => {
+            // SAFETY: the assembly passes its own frame, which holds x0..x30 as its first 31 words. An observation
+            // gate does not publish it to the kernel, so no other thread reads it. The handler gets x0..x28 only, so
+            // it cannot change the guest's x29 or the return point; the gate loads x0..x28 back but x18.
+            let regs = unsafe { std::slice::from_raw_parts_mut(regs, nxkit_abi::obs::REGS) };
+            gates.obs.run(arg, regs, ret);
+        }
         Some(Kind::Spin) => std::thread::yield_now(),
         None => stop::fatal(&format!("unknown gate at {ret:#x}")),
     }

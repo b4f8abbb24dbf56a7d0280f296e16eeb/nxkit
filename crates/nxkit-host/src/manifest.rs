@@ -145,7 +145,7 @@ fn heap_of(reserve: u64, alias: u64, stack: u64) -> Result<u64> {
 }
 
 /// A size in bytes: a number, a `0x` number, or a number with `M` (MiB) or `G` (GiB).
-fn parse_size(v: &str) -> Option<u64> {
+pub(crate) fn parse_size(v: &str) -> Option<u64> {
     let v = v.trim();
     let (n, unit) = match v.char_indices().last()? {
         (i, 'M' | 'm') => (&v[..i], 1 << 20),

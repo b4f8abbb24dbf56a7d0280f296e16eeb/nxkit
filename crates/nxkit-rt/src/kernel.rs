@@ -182,6 +182,9 @@ pub struct NxkitMemoryConfig {
     pub module_count: usize,
     /// Non-zero makes pages mapped by `MapPhysicalMemory` count against the pool.
     pub map_limit: u32,
+    /// The bytes at the end of the alias region that the host keeps for an allocator of its own, or 0
+    /// ([`nxkit_hos::MemoryConfig::arena`]).
+    pub arena: u64,
 }
 
 struct CLauncher {
@@ -411,6 +414,7 @@ unsafe fn read_memory(memory: *const NxkitMemoryConfig) -> Result<Option<MemoryC
         front_size: m.front_size,
         stack_size: m.stack_size,
         alias_size: m.alias_size,
+        arena: m.arena,
         app_pool: m.app_pool,
         used_memory: m.used_memory,
         system_resource: m.system_resource,

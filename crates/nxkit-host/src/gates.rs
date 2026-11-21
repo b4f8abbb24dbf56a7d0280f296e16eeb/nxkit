@@ -13,8 +13,9 @@ pub enum Kind {
     Svc(u32),
     /// `mrs xN, cntpct_el0` or `cntvct_el0`. The system tick goes into register `N`.
     Counter(u8),
-    /// An observation gate. Nothing observes yet, so the pass does nothing.
-    Obs,
+    /// An observation gate with its argument: the id in the low 8 bits, a parameter of the handler above them
+    /// (`nxkit_abi::obs`). The handler the host registered for the id runs; without one the pass does nothing.
+    Obs(u32),
     /// A pass of a spin wait. The thread yields.
     Spin,
 }
@@ -65,7 +66,9 @@ pub fn parse(src: &str, base: u64) -> Result<Vec<Gate>> {
                 }
                 Kind::Counter(r)
             }
-            "obs" => Kind::Obs,
+            "obs" => {
+                Kind::Obs(u32::try_from(arg).map_err(|_| bad(n, "obs argument out of range"))?)
+            }
             "spin" => Kind::Spin,
             other => return Err(bad(n, &format!("unknown gate kind {other}"))),
         };
@@ -156,6 +159,7 @@ mod tests {
         assert_eq!(g[0].kind, Kind::Svc(11));
         assert_eq!(g[1].ret, 0x1_0000_0000 - 0x20);
         assert_eq!(g[1].kind, Kind::Counter(19));
+        assert_eq!(g[2].kind, Kind::Obs(3), "an obs gate keeps its argument");
     }
 
     #[test]
@@ -181,7 +185,7 @@ mod tests {
         assert!(parse("0x10\tfoo\t1\t0x0\n", 0).is_err());
         let g = Gate {
             ret: 8,
-            kind: Kind::Obs,
+            kind: Kind::Obs(21),
         };
         assert!(GateTable::build(&[g, g]).is_err());
     }

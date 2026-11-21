@@ -11,6 +11,7 @@
 //! - [`export`]: one function that a service gives the game in place of an SDK function (R14).
 //! - [`ipc`]: the trait of a service that answers Horizon IPC requests, and the request and response types (R14, R15).
 //! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
+//! - [`obs`]: the ids of the observation gates of the rewritten code and the handler type of one.
 //! - [`shards`]: the index of the pipeline archive shards that the build writes and the host reads.
 //! - [`platform`]: the console the game was built for, the Switch or the Switch 2, set once by the host at load.
 //! - [`vk_table`]: the shader table of a Vulkan game, `vk_shaders.tsv`, that the build writes and the host reads.
@@ -21,6 +22,7 @@ pub mod guest;
 pub mod ipc;
 pub mod kernel;
 pub mod launch;
+pub mod obs;
 pub mod platform;
 pub mod shards;
 pub mod vk_table;

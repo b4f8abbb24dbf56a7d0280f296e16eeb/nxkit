@@ -51,10 +51,12 @@ pub fn kernel_thread_tls() -> Result<(u64, u64)> {
 /// Starts the kernel of `nxkit-rt`. `thread_entry` runs every guest thread that the game creates. The kernel gets the
 /// regions of the reservation, the memory profile and the main thread of the game. `core_rules` turns the core rules of
 /// Horizon on, for a title that needs the same-core preemption (`core_preempt`).
+/// `arena` is the size the kernel keeps at the end of the alias region for the host's own guest allocator.
 pub fn kernel_init(
     thread_entry: nxkit_rt::NxkitThreadEntry,
     layout: &Layout,
     game: &Game,
+    arena: u64,
 ) -> Result<()> {
     let program_id =
         u64::from_str_radix(game.title_id.trim_start_matches("0x"), 16).map_err(|_| {
@@ -92,6 +94,7 @@ pub fn kernel_init(
         modules: modules.as_ptr(),
         module_count: modules.len(),
         map_limit: u32::from(mem.map_limit),
+        arena,
     };
     let code = guest_code(game);
     let config = nxkit_rt::NxkitKernelConfig {

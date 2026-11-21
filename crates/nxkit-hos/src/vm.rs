@@ -57,6 +57,10 @@ pub struct MemoryConfig {
     pub stack_size: u64,
     /// The size of the alias region, at the end of the reservation.
     pub alias_size: u64,
+    /// The bytes at the end of the alias region that the host keeps for an allocator of its own (the arena), or 0.
+    /// `GetInfo` leaves them out of the alias region, so the SDK never makes an address region over them, and the
+    /// map holds them as normal memory, so `MapMemory` takes a thread stack from them.
+    pub arena: u64,
     /// The memory pool of the application in bytes (total memory in `GetInfo`).
     pub app_pool: u64,
     /// What the process uses besides its heap, in bytes. It counts as used memory in `GetInfo` and against the pool.
@@ -90,6 +94,8 @@ pub(crate) struct Layout {
     pub stack_end: u64,
     pub alias_base: u64,
     pub alias_end: u64,
+    /// The arena behind the alias region, up to `end`; empty when there is none.
+    pub arena_base: u64,
 }
 
 /// The map and the counters that change with it. One lock covers them, held for one update and never across a wait.
@@ -117,6 +123,8 @@ pub(crate) struct Vm {
     pub space: Mutex<Space>,
     tls_free: Mutex<Vec<u64>>,
     shared_next: AtomicU64,
+    /// The SDK's address regions in the alias region.
+    pub regions: crate::regions::Regions,
 }
 
 const fn align_up(v: u64, to: u64) -> u64 {
@@ -139,6 +147,13 @@ impl Vm {
         aligned("front_size", cfg.front_size)?;
         aligned("stack_size", cfg.stack_size)?;
         aligned("alias_size", cfg.alias_size)?;
+        aligned("arena", cfg.arena)?;
+        if cfg.arena >= cfg.alias_size {
+            return Err(format!(
+                "the arena {:#x} leaves nothing of the alias region {:#x}",
+                cfg.arena, cfg.alias_size
+            ));
+        }
         let fixed = cfg
             .front_size
             .checked_add(cfg.stack_size)
@@ -158,7 +173,8 @@ impl Vm {
             stack_base: cfg.base + cfg.size - cfg.alias_size - cfg.stack_size,
             stack_end: end - cfg.alias_size,
             alias_base: end - cfg.alias_size,
-            alias_end: end,
+            alias_end: end - cfg.arena,
+            arena_base: end - cfg.arena,
         };
         let front = cfg.base..layout.heap_base;
         let inside = |name: &str, (addr, size): (u64, u64)| {
@@ -230,6 +246,9 @@ impl Vm {
         if let Some((addr, size)) = cfg.main_stack {
             map.set(addr, addr + size, state::STACK, perm::RW, 0, 0);
         }
+        if cfg.arena > 0 {
+            map.set(layout.arena_base, end, state::NORMAL, perm::RW, 0, 0);
+        }
         let mut slots: Vec<u64> = (cfg.tls.0 + TLS_SLOT..cfg.tls.0 + cfg.tls.1 - TLS_SLOT + 1)
             .step_by(TLS_SLOT as usize)
             .collect();
@@ -245,6 +264,7 @@ impl Vm {
             }),
             tls_free: Mutex::new(slots),
             shared_next: AtomicU64::new(0),
+            regions: crate::regions::Regions::default(),
         })
     }
 

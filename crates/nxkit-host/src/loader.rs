@@ -353,7 +353,7 @@ pub fn load(placed: Placed, mask: u64) -> Result<Loaded> {
     drop(images);
     let main = game.main_module()?;
     tsd_check(mem, main, &keys)?;
-    gate::install(load_gates(&game)?)?;
+    gate::install(load_gates(&game)?, crate::obswire::table(&game)?)?;
     find_platform(&game);
     Ok(Loaded {
         inits,

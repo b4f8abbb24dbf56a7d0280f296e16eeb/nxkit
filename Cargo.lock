@@ -2080,6 +2080,7 @@ dependencies = [
  "nxkit-svc-pacing",
  "nxkit-svc-system",
  "nxkit-svc-video",
+ "nxkit-ue",
  "nxkit-vk",
  "nxkit-vk-gpu",
  "objc2",
@@ -2220,6 +2221,13 @@ dependencies = [
  "objc2-metal",
  "objc2-video-toolbox",
  "rav1d",
+]
+
+[[package]]
+name = "nxkit-ue"
+version = "0.14.0"
+dependencies = [
+ "nxkit-abi",
 ]
 
 [[package]]

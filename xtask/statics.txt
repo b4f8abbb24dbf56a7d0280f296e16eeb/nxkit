@@ -18,3 +18,4 @@ nxkit-svc-offline: 1
 nxkit-svc-pacing: 3
 nxkit-svc-system: 53
 nxkit-svc-video: 23
+nxkit-ue: 1

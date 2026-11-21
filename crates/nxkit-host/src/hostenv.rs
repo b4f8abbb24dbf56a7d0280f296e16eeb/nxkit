@@ -20,6 +20,9 @@ pub struct HostEnv {
     pub mem_reserve: Option<String>,
     /// `NXKIT_MEM_ALIAS` as given: the alias region in place of the title's.
     pub mem_alias: Option<String>,
+    /// `NXKIT_UE_HEAP` as given: the arena of the Unreal heap at the end of the alias region, in place of 40 % of it
+    /// (a size as `parse_size` reads it; only for a main that names Unreal's FMallocBinned3).
+    pub ue_heap: Option<String>,
     /// `NXKIT_GUEST_KEEP` (on unless `0`): the kernel pins the pages under the GPU buffer.
     pub guest_keep: bool,
     /// `NXKIT_GUEST_WIRE` (off unless set and not `0`): the guest range is wired with `mlock`.
@@ -117,6 +120,7 @@ impl HostEnv {
         HostEnv {
             mem_reserve: env.var("NXKIT_MEM_RESERVE").ok(),
             mem_alias: env.var("NXKIT_MEM_ALIAS").ok(),
+            ue_heap: env.var("NXKIT_UE_HEAP").ok(),
             guest_keep: env.var("NXKIT_GUEST_KEEP").map_or(true, |v| v != "0"),
             guest_wire: env.var("NXKIT_GUEST_WIRE").is_ok_and(|v| v != "0"),
             pipeline_cache_dir: env

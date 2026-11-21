@@ -33,6 +33,8 @@ mod os;
 mod pause;
 pub mod pinned;
 mod process;
+mod regions;
+mod regionsvc;
 mod result;
 mod role;
 mod shared;
@@ -57,6 +59,7 @@ pub use kernel::{
 };
 pub use memory::{FakeMemory, GuestMemory, HostSpace, PAGE_SIZE};
 pub use os::{OsConfig, exports, forced_names, init_os};
+pub use regions::ROOM_FOR_LATER;
 pub use result::{KResult, KResultOr};
 pub use role::{NameMatch, Qos, RoleRule, RoleTable, ThreadInfo, ThreadRole, qos_for_role};
 pub use stats::{StatsSnapshot, format_stats};

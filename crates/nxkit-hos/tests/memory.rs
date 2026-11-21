@@ -297,6 +297,7 @@ fn a_bad_layout_is_an_error_that_names_it() {
             front_size: 0x10_0000,
             stack_size: 0x10_0000,
             alias_size: 0x10_0000,
+            arena: 0,
             app_pool: 0,
             used_memory: 0,
             system_resource: 0,
@@ -583,6 +584,8 @@ fn unmap_physical_memory_gives_back_all_but_the_pinned_page() {
     assert_eq!(r.mem.load32(ALIAS + 0x1000), Some(0));
 }
 
+#[path = "memory/arena.rs"]
+mod arena;
 #[path = "memory/code_data.rs"]
 mod code_data;
 use code_data::build_modules;

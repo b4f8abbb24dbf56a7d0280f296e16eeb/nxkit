@@ -31,6 +31,7 @@ nxkit-svc-video = { workspace = true }
 nxkit-svc-audio = { workspace = true }
 nxkit-svc-pacing = { workspace = true }
 nxkit-svc-system = { workspace = true }
+nxkit-ue = { workspace = true }
 nxkit-nvn = { workspace = true }
 nxkit-vk = { workspace = true }
 

@@ -42,6 +42,7 @@ nxkit-native-plan = { path = "crates/nxkit-native-plan" }
 nxkit-ndve = { path = "crates/nxkit-ndve" }
 nxkit-ndsr = { path = "crates/nxkit-ndsr" }
 nxkit-svc-system = { path = "crates/nxkit-svc-system" }
+nxkit-ue = { path = "crates/nxkit-ue" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
 nxfamily-agl = { path = "titles/families/agl" }
