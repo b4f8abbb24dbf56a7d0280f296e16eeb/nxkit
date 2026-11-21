@@ -10,6 +10,9 @@ mod args;
 #[cfg(test)]
 pub(crate) use args::{C0_ROW, C0_SSBO_MS, C0_SSBO_TS, storage_table};
 mod changes;
+/// The code of a sampled texture buffer in an image key, beside `ImgDecl::atomic_code` (0 to 2). It lives here and
+/// not in `images`, which uses `bindless`, so the argument fill does not reach back into `images`.
+pub(crate) const SAMPLED_BUFFER: u8 = 0x10;
 pub(crate) mod marks;
 #[cfg(test)]
 mod pool_tests;
@@ -99,9 +102,6 @@ pub(crate) struct ImageRes {
 
 /// The key of an image view: the handle, the texture type the shader declares and `ImgDecl::atomic_code`.
 pub(crate) type ImageKey = (u64, nxkit_metal::TextureKind, u8);
-
-/// The code of a sampled texture buffer in an [`ImageKey`], beside `ImgDecl::atomic_code` (0 to 2) (`images.rs`).
-pub(crate) const SAMPLED_BUFFER: u8 = 0x10;
 
 /// The host tables and the sampler cache.
 pub(crate) struct Bindless {

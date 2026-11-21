@@ -8,7 +8,7 @@
 //!
 //! [`install`] puts a pipe in place of fd 2 (and of fd 1 when it is the same file). One thread reads the pipe into
 //! memory at once, another writes the memory to the original file. A game thread then only waits for a copy into the
-//! pipe. The memory holds at most [`MAX_QUEUED`] bytes; what comes beyond is dropped and counted. At the exit of the
+//! pipe. The memory holds at most `MAX_QUEUED` bytes; what comes beyond is dropped and counted. At the exit of the
 //! process [`flush`] puts the original file back and writes what is left. A crash report writes to the original file
 //! directly ([`direct_fd`]), because the writer thread does not run after a fatal signal.
 

@@ -1,7 +1,7 @@
 //! The storage layout of an NVN texture: block-linear (Tegra X1), linear and buffer.
 //!
 //! This is a port of `nvn_tex.c`, which ports the algorithm of deko3d (`dk_image.cpp`).
-//! Both notices are in `THIRD_PARTY.md`. The sparse parts are in [`sparse`].
+//! Both notices are in `THIRD_PARTY.md`. The sparse parts are in `sparse`.
 
 use crate::error::{NvnError, Result};
 use crate::format::{FormatInfo, format_info};

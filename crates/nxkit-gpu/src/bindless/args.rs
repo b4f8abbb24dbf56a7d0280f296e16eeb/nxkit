@@ -363,7 +363,7 @@ fn build_args_in(
                 .iter()
                 .find(|u| u.slot == b.reg)
                 .map_or(env.statics.1, |u| u.word),
-            // A texture buffer the shader fetches from (`SAMPLED_BUFFER`, `images.rs`).
+            // A texture buffer the shader fetches from (`SAMPLED_BUFFER`).
             BindKind::Tex if b.img.is_some_and(|i| i.buffer) => handle_of(b.reg).map_or(0, |h| {
                 env.images
                     .get(&(h, nxkit_metal::TextureKind::D2, super::SAMPLED_BUFFER))
