@@ -4,13 +4,10 @@
 use std::sync::Arc;
 
 use nxkit_metal::{
-    ColorAttachment, CommandBuffer, ComputeCommand, ComputePass, DepthAttachment, GuestMemory,
-    LoadAction, RenderCommand, RenderPassDesc, StencilAttachment, StoreAction, Texture,
-    TextureKind, TextureRegion, ViewDesc,
+    CommandBuffer, ComputeCommand, ComputePass, GuestMemory, Texture, TextureKind, TextureRegion,
 };
 use nxkit_vk::cmd::{BufferImageCopy, Cmd};
 use nxkit_vk::desc::{BufferRef, ImageRef};
-use nxkit_vk::format::{ClearColor, aspect};
 
 use super::{Replay, State};
 use crate::bind::{self, Bound};
@@ -24,7 +21,6 @@ pub(super) fn is_compute(c: &Cmd) -> bool {
             | Cmd::CopyImageToBuffer { .. }
             | Cmd::CopyImage { .. }
             | Cmd::BlitImage { .. }
-            | Cmd::ResolveImage { .. }
             | Cmd::FillBuffer { .. }
             | Cmd::UpdateBuffer { .. }
             | Cmd::Dispatch(_)
@@ -85,7 +81,7 @@ fn memory(r: &Replay<'_>, b: &BufferRef) -> Result<Arc<GuestMemory>, String> {
         .ok_or_else(|| "a buffer has no memory".to_string())
 }
 
-fn texture(r: &Replay<'_>, i: &ImageRef) -> Result<Texture, String> {
+pub(super) fn texture(r: &Replay<'_>, i: &ImageRef) -> Result<Texture, String> {
     r.objects
         .texture(i.texture)
         .cloned()
@@ -232,7 +228,6 @@ fn one(r: &mut Replay<'_>, st: &State, pass: &mut ComputePass<'_>, c: &Cmd) -> R
                 r.stats.copies += 1;
             }
         }
-        Cmd::ResolveImage { .. } => return Err("multisample images are not implemented".into()),
         Cmd::FillBuffer { dst, data } => {
             let len = dst.size & !3;
             let bytes: Vec<u8> = (0..len / 4).flat_map(|_| data.to_le_bytes()).collect();
@@ -382,110 +377,4 @@ fn dispatch_setup(
             .once(format!("dispatch {p}"), format_args!("[RED] dispatch: {p}"));
     }
     Ok(p.threads)
-}
-
-/// `vkCmdClearColorImage` and `vkCmdClearDepthStencilImage`: one render pass per level and layer that clears it.
-pub(super) fn clear_image(r: &mut Replay<'_>, cb: &mut CommandBuffer, c: &Cmd) {
-    let (image, ranges, color, depth, stencil) = match c {
-        Cmd::ClearColorImage {
-            image,
-            color,
-            ranges,
-        } => (image, ranges, Some(*color), 0.0, 0),
-        Cmd::ClearDepthStencilImage {
-            image,
-            depth,
-            stencil,
-            ranges,
-        } => (image, ranges, None, *depth, *stencil),
-        _ => return,
-    };
-    let Ok(tex) = texture(r, image) else {
-        return;
-    };
-    let d = tex.desc();
-    if d.kind == TextureKind::D3 || !d.render_target {
-        r.log.once(
-            "clear image",
-            "[RED] a clear of a 3D image or of an image that is no transfer destination is not implemented",
-        );
-        return;
-    }
-    let f = nxkit_vk::format::lookup(image.format);
-    for range in ranges {
-        for level in range.base_level..range.base_level + range.levels {
-            for layer in range.base_layer..range.base_layer + range.layers {
-                let v = ViewDesc {
-                    format: d.format,
-                    kind: TextureKind::D2,
-                    first_level: level,
-                    level_count: 1,
-                    first_slice: layer,
-                    slice_count: 1,
-                };
-                let Ok(view) = tex.view(&v) else {
-                    continue;
-                };
-                let mut desc = RenderPassDesc::default();
-                match color {
-                    Some(raw) => {
-                        let clear = match f.map(|f| f.clear_color(raw)) {
-                            Some(ClearColor::UInt(c)) => c.map(f64::from),
-                            Some(ClearColor::SInt(c)) => c.map(f64::from),
-                            Some(ClearColor::Float(c)) => c.map(f64::from),
-                            None => [0.0; 4],
-                        };
-                        desc.colors.push(Some(ColorAttachment {
-                            texture: view,
-                            depth_plane: 0,
-                            load: LoadAction::Clear,
-                            store: StoreAction::Store,
-                            clear,
-                            memoryless: false,
-                        }));
-                    }
-                    None => {
-                        let act = |bit: u32| {
-                            if range.aspect & bit != 0 {
-                                LoadAction::Clear
-                            } else {
-                                LoadAction::Load
-                            }
-                        };
-                        if d.format.is_depth() {
-                            desc.depth = Some(DepthAttachment {
-                                texture: view.clone(),
-                                load: act(aspect::DEPTH),
-                                store: StoreAction::Store,
-                                clear: f64::from(depth),
-                                memoryless: false,
-                            });
-                        }
-                        if d.format.has_stencil() {
-                            desc.stencil = Some(StencilAttachment {
-                                texture: view,
-                                load: act(aspect::STENCIL),
-                                store: StoreAction::Store,
-                                clear: stencil,
-                                memoryless: false,
-                            });
-                        }
-                    }
-                }
-                match cb.begin_render_pass(&desc, &r.tables.vertex) {
-                    Ok(mut p) => {
-                        let _ = p.encode(&RenderCommand::WaitForEarlierPasses);
-                        p.end();
-                        r.stats.passes += 1;
-                    }
-                    Err(e) => {
-                        r.log.once(
-                            "clear image pass",
-                            format_args!("[RED] a clear of an image: {e}"),
-                        );
-                    }
-                }
-            }
-        }
-    }
 }

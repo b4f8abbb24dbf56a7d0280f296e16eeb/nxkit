@@ -15,6 +15,7 @@ use crate::texture::{Storage, Texture};
 pub use pass::RenderPass;
 
 mod pass;
+mod resolve;
 
 /// A viewport.
 #[derive(Clone, Copy, Debug, PartialEq)]

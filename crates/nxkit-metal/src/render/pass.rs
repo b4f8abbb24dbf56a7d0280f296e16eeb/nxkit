@@ -26,7 +26,7 @@ impl CommandBuffer {
         desc: &RenderPassDesc,
         table: &ArgumentTable,
     ) -> Result<RenderPass<'_>> {
-        self.begin_render_pass_with(desc, table, None, None)
+        self.begin_render_pass_with(desc, table, None, None, &[])
     }
 
     /// Starts a render pass with one argument table per stage. A translated shader reads its argument buffer at
@@ -37,7 +37,7 @@ impl CommandBuffer {
         vertex_table: &ArgumentTable,
         fragment_table: &ArgumentTable,
     ) -> Result<RenderPass<'_>> {
-        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table), None)
+        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table), None, &[])
     }
 
     /// [`CommandBuffer::begin_render_pass_split`] with an optional visibility result buffer: the draws after a
@@ -51,15 +51,16 @@ impl CommandBuffer {
         fragment_table: &ArgumentTable,
         visibility: Option<&DataBuffer>,
     ) -> Result<RenderPass<'_>> {
-        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table), visibility)
+        self.begin_render_pass_with(desc, vertex_table, Some(fragment_table), visibility, &[])
     }
 
-    fn begin_render_pass_with(
+    pub(super) fn begin_render_pass_with(
         &mut self,
         desc: &RenderPassDesc,
         table: &ArgumentTable,
         fragment_table: Option<&ArgumentTable>,
         visibility: Option<&DataBuffer>,
+        resolves: &[Option<Texture>],
     ) -> Result<RenderPass<'_>> {
         let first = desc
             .colors
@@ -70,7 +71,9 @@ impl CommandBuffer {
             .or(desc.depth.as_ref().map(|d| &d.texture))
             .ok_or(MetalError::Invalid("a render pass needs an attachment"))?;
         let mut pd = self.pass_desc.take().unwrap_or_else(PassDescriptor::new);
-        let result = self.fill_pass(&mut pd, desc, first);
+        let result = self
+            .fill_pass(&mut pd, desc, first)
+            .and_then(|()| self.set_resolves(&pd, desc, resolves));
         // SAFETY: the buffer is a live shared buffer in the residency set. The GPU writes it while the pass runs; the
         // caller keeps it alive and reads it only after the command buffer finished.
         unsafe {

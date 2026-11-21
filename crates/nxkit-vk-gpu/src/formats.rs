@@ -156,18 +156,17 @@ pub(crate) fn vertex(v: V) -> Option<MV> {
 }
 
 /// The shape of a texture of `nxkit-metal` and its array length for a kind of `nxkit-vk` with `layers` Vulkan
-/// layers (6 per cube). None for the kinds that `nxkit-metal` cannot make: multisample and buffer textures.
+/// layers (6 per cube). A multisample kind is its 2D kind: the sample count makes it multisample
+/// (`Texture::new_multisample`). None for a buffer texture, which `nxkit-metal` cannot make.
 pub(crate) fn kind(k: TextureKind, layers: u32) -> Option<(nxkit_metal::TextureKind, u32)> {
     use nxkit_metal::TextureKind as M;
     Some(match k {
-        TextureKind::D2 => (M::D2, 1),
-        TextureKind::D2Array => (M::D2Array, layers.max(1)),
+        TextureKind::D2 | TextureKind::D2Multisample => (M::D2, 1),
+        TextureKind::D2Array | TextureKind::D2MultisampleArray => (M::D2Array, layers.max(1)),
         TextureKind::Cube => (M::Cube, 1),
         TextureKind::CubeArray => (M::CubeArray, (layers / 6).max(1)),
         TextureKind::D3 => (M::D3, 1),
-        TextureKind::D2Multisample | TextureKind::D2MultisampleArray | TextureKind::Buffer => {
-            return None;
-        }
+        TextureKind::Buffer => return None,
     })
 }
 
@@ -292,7 +291,12 @@ mod tests {
         assert_eq!(kind(TextureKind::D2Array, 4), Some((M::D2Array, 4)));
         assert_eq!(kind(TextureKind::CubeArray, 12), Some((M::CubeArray, 2)));
         assert_eq!(kind(TextureKind::Cube, 6), Some((M::Cube, 1)));
-        assert_eq!(kind(TextureKind::D2Multisample, 1), None);
+        assert_eq!(kind(TextureKind::D2Multisample, 1), Some((M::D2, 1)));
+        assert_eq!(
+            kind(TextureKind::D2MultisampleArray, 3),
+            Some((M::D2Array, 3))
+        );
+        assert_eq!(kind(TextureKind::Buffer, 1), None);
         assert_eq!(view_slices(M::CubeArray, 6, 12), (1, 2));
         assert_eq!(view_slices(M::D2, 3, 1), (3, 1));
         assert_eq!(view_slices(M::D3, 5, 1), (0, 1));

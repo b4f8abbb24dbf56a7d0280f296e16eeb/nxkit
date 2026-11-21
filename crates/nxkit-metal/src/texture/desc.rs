@@ -41,6 +41,16 @@ impl TextureKind {
             Self::CubeArray => MTLTextureType::TypeCubeArray,
         }
     }
+
+    /// The Metal type of a texture of `samples` samples per texel: a 2D texture or array of more than one sample is a
+    /// multisample one.
+    pub(super) fn to_mtl_samples(self, samples: u32) -> MTLTextureType {
+        match self {
+            Self::D2 if samples > 1 => MTLTextureType::Type2DMultisample,
+            Self::D2Array if samples > 1 => MTLTextureType::Type2DMultisampleArray,
+            k => k.to_mtl(),
+        }
+    }
 }
 
 /// What a texture is for.

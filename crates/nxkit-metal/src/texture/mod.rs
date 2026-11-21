@@ -34,6 +34,8 @@ struct Inner {
     atomic_raw: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
     /// The bytes of a texture with its own storage in the memory counters. None for views and drawables.
     _tracked: Option<Tracked>,
+    /// The samples per texel: 1, or 2, 4 or 8 for a multisample texture (`Texture::new_multisample`).
+    samples: u32,
 }
 
 // SAFETY: `MTLTexture` objects are thread safe reference counted objects and `Inner` never changes them.
@@ -60,6 +62,29 @@ pub struct Texture {
 impl Texture {
     /// Makes a texture. A texture with backing joins the residency set.
     pub fn new(ctx: &Context, desc: TextureDesc) -> Result<Self> {
+        Self::make(ctx, desc, 1)
+    }
+
+    /// Makes a multisample texture of `samples` (2, 4 or 8) samples per texel: a `D2` description becomes a
+    /// `Type2DMultisample` texture, a `D2Array` one a `Type2DMultisampleArray`. It has one level. Its views are
+    /// multisample too. Shaders read it as `texture2d_ms`, and a render pass resolves it
+    /// (`CommandBuffer::begin_render_pass_resolved`).
+    pub fn new_multisample(ctx: &Context, desc: TextureDesc, samples: u32) -> Result<Self> {
+        crate::state::check_sample_count(samples)?;
+        if !matches!(desc.kind, TextureKind::D2 | TextureKind::D2Array) || desc.mip_levels != 1 {
+            return Err(MetalError::Invalid(
+                "a multisample texture is a 2D texture or array of one level",
+            ));
+        }
+        Self::make(ctx, desc, samples)
+    }
+
+    /// The samples per texel.
+    pub fn sample_count(&self) -> u32 {
+        self.inner.samples
+    }
+
+    fn make(ctx: &Context, desc: TextureDesc, samples: u32) -> Result<Self> {
         desc.validate()?;
         if desc.storage == Storage::Memoryless && !desc.render_target {
             return Err(MetalError::Invalid(
@@ -67,15 +92,16 @@ impl Texture {
             ));
         }
         let d = MTLTextureDescriptor::new();
-        d.setTextureType(desc.kind.to_mtl());
+        d.setTextureType(desc.kind.to_mtl_samples(samples));
         d.setPixelFormat(desc.format.to_mtl());
-        // SAFETY: the sizes, levels and layers were checked by `validate`.
+        // SAFETY: the sizes, levels and layers were checked by `validate`, the sample count by `new_multisample`.
         unsafe {
             d.setWidth(desc.width as usize);
             d.setHeight(desc.height as usize);
             d.setDepth(desc.depth as usize);
             d.setMipmapLevelCount(desc.mip_levels as usize);
             d.setArrayLength(desc.array_layers as usize);
+            d.setSampleCount(samples.max(1) as usize);
         }
         let alias = desc.atomic_alias();
         let mut usage = MTLTextureUsage::empty();
@@ -127,7 +153,15 @@ impl Texture {
                 tracked,
             ));
         }
-        Ok(Self::wrap(ctx, raw, desc, resident, None, None, tracked))
+        Ok(Self::wrap(ctx, raw, desc, resident, None, None, tracked).with_samples(samples))
+    }
+
+    /// Records the sample count of a texture that was just made.
+    fn with_samples(mut self, samples: u32) -> Self {
+        if let Some(i) = Arc::get_mut(&mut self.inner) {
+            i.samples = samples.max(1);
+        }
+        self
     }
 
     /// Wraps a texture that Metal made, for example the texture of a drawable. It does not join the residency set.
@@ -157,6 +191,7 @@ impl Texture {
                 resident,
                 atomic_raw,
                 _tracked: tracked,
+                samples: 1,
             }),
         }
     }
@@ -326,7 +361,7 @@ impl Texture {
         let raw = unsafe {
             source.newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
                 v.format.to_mtl(),
-                v.kind.to_mtl(),
+                v.kind.to_mtl_samples(self.inner.samples),
                 NSRange::new(v.first_level as usize, v.level_count as usize),
                 NSRange::new(
                     first as usize,
@@ -366,7 +401,8 @@ impl Texture {
             Some(self.clone()),
             None,
             None,
-        ))
+        )
+        .with_samples(self.inner.samples))
     }
 
     /// Reads the pixels of level 0 into `out`, rows `bytes_per_row` apart. Only `Storage::Shared` textures can be

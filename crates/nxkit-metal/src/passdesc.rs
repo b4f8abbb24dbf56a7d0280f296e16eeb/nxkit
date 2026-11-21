@@ -31,6 +31,7 @@ impl PassDescriptor {
             // SAFETY: the index is a slot that an earlier pass set, so it is inside the attachment limit.
             let a = unsafe { slots.objectAtIndexedSubscript(i) };
             a.setTexture(None);
+            a.setResolveTexture(None);
         }
         if self.depth {
             self.raw.depthAttachment().setTexture(None);

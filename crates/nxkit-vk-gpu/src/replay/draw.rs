@@ -52,7 +52,13 @@ pub(super) fn segment(
         &actions,
     );
     let size = pass.size;
-    let mut rp = match cb.begin_render_pass_split(&d, &r.tables.vertex, &r.tables.fragment) {
+    let (vt, ft) = (&r.tables.vertex, &r.tables.fragment);
+    let begun = if pass.resolves.iter().any(Option::is_some) {
+        cb.begin_render_pass_resolved(&d, vt, ft, &pass.resolves)
+    } else {
+        cb.begin_render_pass_split(&d, vt, ft)
+    };
+    let mut rp = match begun {
         Ok(rp) => rp,
         Err(e) => {
             r.log.once(

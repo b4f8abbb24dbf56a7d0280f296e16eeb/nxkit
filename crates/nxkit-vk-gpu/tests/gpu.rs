@@ -374,3 +374,219 @@ fn a_submit_draws_into_an_image_and_copies_it_back() {
     assert!(gpu.acquire(TextureId(40), 1_000_000_000));
     gpu.destroy_memory(mem);
 }
+
+#[test]
+fn a_multisample_pass_resolves_and_a_resolve_image_copies() {
+    let Ok(ctx) = Context::system_default() else {
+        eprintln!("skipped: no usable Metal 4 device");
+        return;
+    };
+    let lib = ShaderLibrary::from_source(&ctx, "vk_test_ms", &msl()).unwrap();
+    let tsv = format!("{VS}\tvert\t\t/t.vert\n{FS}\tfrag\tu:0.0=0 p:0.0=1\t/t.frag\n");
+    let rows = nxkit_abi::vk_table::parse(&tsv).unwrap();
+    let gpu = VkGpu::with_shaders(
+        &ctx,
+        ShaderTable::new(Some(lib), rows),
+        VkGpuSettings::default(),
+    )
+    .unwrap();
+    let mem = MemoryId(1);
+    gpu.create_memory(mem, 4096, 1).unwrap();
+    let ms = ImageDesc {
+        kind: TextureKind::D2Multisample,
+        samples: 4,
+        ..image_desc(0x10 | 0x1, false)
+    };
+    gpu.create_image(TextureId(10), &ms).unwrap();
+    gpu.create_image(TextureId(12), &image_desc(0x10 | 0x1 | 0x2, false))
+        .unwrap();
+    gpu.create_image(TextureId(14), &image_desc(0x1 | 0x2, false))
+        .unwrap();
+    let whole = |kind| ViewDesc {
+        format: 37,
+        pixel: PixelFormat::Rgba8Unorm,
+        kind,
+        base_level: 0,
+        levels: 1,
+        base_layer: 0,
+        layers: 1,
+        swizzle: IDENTITY_SWIZZLE,
+        aspect: 1,
+        whole: true,
+    };
+    gpu.create_view(
+        TextureId(11),
+        TextureId(10),
+        &whole(TextureKind::D2Multisample),
+    )
+    .unwrap();
+    gpu.create_view(TextureId(13), TextureId(12), &whole(TextureKind::D2))
+        .unwrap();
+    let set_layout = Arc::new(SetLayoutDesc {
+        bindings: vec![LayoutBinding {
+            binding: 0,
+            ty: 6,
+            count: 1,
+            stages: 0x10,
+            base: 0,
+            dynamic: None,
+            immutable: vec![],
+        }],
+        total: 1,
+        dynamic_count: 0,
+    });
+    let mut p = pipeline(&set_layout);
+    p.state.samples = 4;
+    gpu.create_graphics_pipeline(PipelineId(20), &p).unwrap();
+    let uniform = BufferRef {
+        memory: mem,
+        offset: 0,
+        size: 16,
+    };
+    let att = |load, store| AttachmentDesc {
+        format: 37,
+        samples: 1,
+        load,
+        store,
+        stencil_load: 2,
+        stencil_store: 1,
+    };
+    let fa = |view, image, samples| FramebufferAttachment {
+        view: TextureId(view),
+        image: TextureId(image),
+        format: 37,
+        samples,
+        level: 0,
+        layer: 0,
+    };
+    let begin = RenderPassBegin {
+        pass: Arc::new(RenderPassDesc {
+            attachments: vec![
+                AttachmentDesc {
+                    samples: 4,
+                    ..att(1, 0)
+                },
+                att(2, 0),
+            ],
+            colors: vec![Some(0)],
+            resolves: vec![Some(1)],
+            depth: None,
+        }),
+        framebuffer: Arc::new(FramebufferDesc {
+            attachments: vec![fa(11, 10, 4), fa(13, 12, 1)],
+            width: 4,
+            height: 4,
+            layers: 1,
+        }),
+        area: Rect2D {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 4,
+        },
+        clear: vec![[0; 4], [0; 4]],
+    };
+    let image = |t| ImageRef {
+        texture: TextureId(t),
+        format: 37,
+        samples: 1,
+    };
+    let sub1 = SubresourceLayers {
+        aspect: 1,
+        level: 0,
+        base_layer: 0,
+        layers: 1,
+    };
+    let back = |t, offset| Cmd::CopyImageToBuffer {
+        src: image(t),
+        dst: BufferRef {
+            memory: mem,
+            offset,
+            size: 64,
+        },
+        regions: vec![BufferImageCopy {
+            buffer_offset: 0,
+            row_length: 0,
+            image_height: 0,
+            sub: sub1,
+            offset: [0; 3],
+            extent: [4, 4, 1],
+        }],
+    };
+    let cmds = vec![
+        Cmd::UpdateBuffer {
+            dst: uniform,
+            data: floats([0.25, 0.5, 0.0, 0.0]),
+        },
+        Cmd::BeginRenderPass(Arc::new(begin)),
+        Cmd::BindPipeline {
+            bind: BindPoint::Graphics,
+            pipeline: PipelineId(20),
+        },
+        Cmd::BindDescriptorSets {
+            bind: BindPoint::Graphics,
+            first: 0,
+            sets: vec![100],
+            dynamic_offsets: vec![],
+        },
+        Cmd::PushConstants {
+            stages: 0x10,
+            offset: 0,
+            data: floats([0.0, 0.0, 0.5, 1.0]),
+        },
+        Cmd::Draw {
+            vertices: 3,
+            instances: 1,
+            first_vertex: 0,
+            first_instance: 0,
+        },
+        Cmd::EndRenderPass,
+        Cmd::ResolveImage {
+            src: ImageRef {
+                samples: 4,
+                ..image(10)
+            },
+            dst: image(14),
+            regions: vec![nxkit_vk::cmd::ImageCopy {
+                src_sub: sub1,
+                src_offset: [1, 1, 0],
+                dst_sub: sub1,
+                dst_offset: [0, 0, 0],
+                extent: [2, 2, 1],
+            }],
+        },
+        back(12, 256),
+        back(14, 512),
+    ];
+    gpu.submit(&Submission {
+        serial: 1,
+        command_buffers: vec![CommandBufferSnapshot {
+            handle: 5,
+            cmds: Arc::from(cmds),
+        }],
+        secondaries: HashMap::new(),
+        sets: HashMap::from([(
+            100,
+            SetContents {
+                layout: set_layout.clone(),
+                descriptors: Arc::new(vec![Descriptor::Buffer(uniform)]),
+            },
+        )]),
+    })
+    .unwrap();
+    assert!(gpu.wait(1, 5_000_000_000));
+    let want = [64u8, 128, 128, 255];
+    let close = |p: &[u8]| p.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1);
+    let mut px = [0u8; 64];
+    assert!(gpu.read_memory(mem, 256, &mut px));
+    assert!(
+        px.as_chunks::<4>().0.iter().all(|p| close(p)),
+        "pass resolve {px:?}"
+    );
+    assert!(gpu.read_memory(mem, 512, &mut px));
+    // the 2x2 region went to the top left; the rest of the image is untouched
+    assert!(
+        close(&px[..4]) && close(&px[20..24]),
+        "resolve image {px:?}"
+    );
+}

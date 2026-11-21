@@ -99,12 +99,6 @@ pub(crate) fn image(
             converted: None,
         });
     }
-    if d.samples > 1 {
-        return Err(format!(
-            "multisample images ({} samples) are not implemented",
-            d.samples
-        ));
-    }
     let (kind, array_layers) = formats::kind(d.kind, d.layers)
         .ok_or_else(|| format!("images of kind {:?} are not implemented", d.kind))?;
     let plain = !format.is_compressed() && !format.is_depth() && !format.has_stencil();
@@ -127,15 +121,29 @@ pub(crate) fn image(
         format,
         shader_read: true,
         shader_write: plain && d.usage & usage::STORAGE != 0,
-        // a transfer destination may be cleared, which is a render pass; a compressed format draws no pass
-        render_target: !format.is_compressed() && (d.usage & attachment != 0 || d.swapchain),
+        // a transfer destination may be cleared, which is a render pass; a compressed format draws no pass. A
+        // multisample image is an attachment of the pass that resolves it.
+        render_target: !format.is_compressed()
+            && (d.usage & attachment != 0 || d.swapchain || d.samples > 1),
         storage: Storage::Private,
         shader_atomic: false,
     };
-    let texture = Texture::new(ctx, td).map_err(|e| {
+    let made = if d.samples > 1 {
+        Texture::new_multisample(
+            ctx,
+            TextureDesc {
+                mip_levels: 1,
+                ..td
+            },
+            d.samples,
+        )
+    } else {
+        Texture::new(ctx, td)
+    };
+    let texture = made.map_err(|e| {
         format!(
-            "cannot make image {w}x{h}x{depth} format {} levels {} layers {}: {e}",
-            d.format, d.levels, d.layers
+            "cannot make image {w}x{h}x{depth} format {} levels {} layers {} samples {}: {e}",
+            d.format, d.levels, d.layers, d.samples
         )
     })?;
     Ok(Tex {

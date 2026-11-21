@@ -13,6 +13,7 @@
 
 mod attach;
 mod draw;
+mod images;
 mod transfer;
 
 use std::collections::HashMap;
@@ -93,6 +94,8 @@ pub(crate) struct Pass {
     pub(crate) colors: Vec<Option<Texture>>,
     /// The texture of the depth-stencil attachment.
     pub(crate) depth: Option<Texture>,
+    /// The single-sample texture that each multisample colour attachment resolves into.
+    pub(crate) resolves: Vec<Option<Texture>>,
     /// The render target size: the framebuffer's, at most each attachment's.
     pub(crate) size: (u32, u32),
     /// A cut ended the Metal pass; the next draw resumes it.
@@ -129,6 +132,15 @@ impl Pass {
         };
         let colors = begin.pass.colors.iter().map(|c| tex(*c)).collect();
         let depth = tex(begin.pass.depth);
+        let resolves = begin
+            .pass
+            .resolves
+            .iter()
+            .map(|r| {
+                let at = fb.attachments.get((*r)? as usize)?;
+                objects.texture(at.view).cloned()
+            })
+            .collect();
         if broken {
             log.once(
                 "pass attachment",
@@ -139,6 +151,7 @@ impl Pass {
             begin: begin.clone(),
             colors,
             depth,
+            resolves,
             size,
             cut: false,
             broken,
@@ -334,7 +347,11 @@ pub(crate) fn primary(r: &mut Replay<'_>, cb: &mut CommandBuffer, cmds: &[&Cmd])
                 }
             },
             Cmd::ClearColorImage { .. } | Cmd::ClearDepthStencilImage { .. } => {
-                transfer::clear_image(r, cb, c);
+                images::clear_image(r, cb, c);
+                i += 1;
+            }
+            Cmd::ResolveImage { .. } => {
+                images::resolve_image(r, cb, c);
                 i += 1;
             }
             Cmd::ClearAttachments { .. } | Cmd::PipelineBarrier => i += 1,
