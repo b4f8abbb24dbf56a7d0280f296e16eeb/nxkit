@@ -11,6 +11,7 @@
 //! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
 //! - [`shards`]: the index of the pipeline archive shards that the build writes and the host reads.
 //! - [`platform`]: the console the game was built for, the Switch or the Switch 2, set once by the host at load.
+//! - [`vk_table`]: the shader table of a Vulkan game, `vk_shaders.tsv`, that the build writes and the host reads.
 
 pub mod export;
 pub mod guest;
@@ -18,3 +19,4 @@ pub mod ipc;
 pub mod kernel;
 pub mod platform;
 pub mod shards;
+pub mod vk_table;
