@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.14.0 - 2026-11-21
+
 ### Added
 
 - `nxb build` puts the stand-ins for the console's six shared fonts into every app (`Contents/Resources/nxkit/font/`,
@@ -11,11 +13,24 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   (Super Mario Bros. Wonder, Ocarina of Time). Types 0 to 4 are unhinted cuts of macOS's Arial Unicode with the
   characters of each type. The fonts are those of NX2Apple's `make_shared_fonts.py`, made in Rust from the macOS
   system fonts at build time. `nxb fonts <app>` adds them to an app of an older build.
+- Launch options `NXKIT_FPS_TARGET` (30, 60 or 120, the rates the title offers), `NXKIT_STICK_DEADZONE_L` and
+  `NXKIT_STICK_DEADZONE_R` (a radial dead zone per stick, 0 to 50 %), `NXKIT_PAD_MERGE` (every controller is player 1)
+  and `NXKIT_PAD_PRESS_TO_JOIN` (a new controller gets a player when one of its buttons is pressed), as the `DM_*`
+  switches of the old engine (R65).
+- The button map `NXKIT_PAD_MAP` and the key map `NXKIT_KEYMAP`, in the value format of `DM_PAD_MAP` and `DM_KEYMAP`
+  of the old engine. A launcher sets them (R66).
 
 ### Changed
 
 - The system service loads each shared font type from its own file in the font folder, as the old engine does. A type
   without its file uses the standard font.
+
+### Fixed
+
+- A game started with `NXKIT_OVERLAY=1` ran with sound but never showed its window. The window now goes on the screen
+  at once, transparent, because its display link ticks only while the window is on a screen.
+- A game that mounts both saves (Mario Kart 8 Deluxe) gets its device save in a folder of its own, so it reads the
+  `_device` save that `nxb build` copies over (R35).
 
 ## 0.13.0 - 2026-11-21
 
