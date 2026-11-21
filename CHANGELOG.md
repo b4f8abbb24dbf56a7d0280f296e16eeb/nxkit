@@ -4,6 +4,15 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- `nxkit-gpu` fills the binding kinds `tex_ubo` and `samp_ubo`: a bindless texture whose handle the shader reads from a
+  uniform buffer. Before, every program with such a member was refused and its draws were left out (`skip.binding`):
+  in Super Mario Bros. Wonder 3955 of 16268 programs, about 200 draws per frame, so the ground, the figures and the
+  foreground were missing and the scene showed only the fog colour. The host reads the handle word of each draw and
+  dispatch before the frame resolves its handles and binds it as a texture slot of its own (`ubotex.rs`). A handle word
+  that cannot be read is counted as `tex.ubo-handle-unread`.
+
 ## 0.11.0 - 2026-11-20
 
 ### Changed

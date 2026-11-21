@@ -115,6 +115,10 @@ reasons! {
     DecodeBadRecord => "decode.bad-record",
     /// Encoder: a texture handle has no descriptor or no texture record.
     HandleUnresolved => "tex.handle-unresolved",
+    /// Encoder: the word of a bindless handle that a shader reads from a uniform buffer (`tex_ubo`, `samp_ubo`) is
+    /// not readable: the slot is not bound, the offset lies past its end, or the guest memory cannot be read. The
+    /// member reads the null texture and the default sampler.
+    UboHandleUnread => "tex.ubo-handle-unread",
     /// Encoder: a texture format has no Metal equivalent.
     FormatUnsupported => "tex.format-unsupported",
     /// Encoder: Metal did not create a texture.

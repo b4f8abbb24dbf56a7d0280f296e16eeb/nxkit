@@ -13,6 +13,7 @@ fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
         rw: false,
         rscale,
         img: None,
+        ubo: None,
     }
 }
 

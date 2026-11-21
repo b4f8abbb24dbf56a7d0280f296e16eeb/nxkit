@@ -75,6 +75,7 @@ pub mod snapshot;
 pub mod stats;
 mod textures;
 mod translate;
+mod ubotex;
 mod upload;
 mod walk;
 

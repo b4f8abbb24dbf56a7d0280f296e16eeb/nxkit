@@ -43,6 +43,35 @@ impl Gpu {
         scale: f32,
     ) -> Result<EncodeReport> {
         crate::refresh_knobs();
+        // The handles that shaders read from uniform buffers become texture binds of their draws and dispatches
+        // (`ubotex`), so that everything after this resolves them as bound textures. The words are read as the frame
+        // sees guest memory, as `Shared::read_guest` does.
+        let augmented = {
+            let guest = &self.guest;
+            let map = guest.address_map();
+            let mut plain = |a: u64, part: &mut [u8]| {
+                a.checked_sub(map.gpu_base())
+                    .filter(|off| {
+                        off.checked_add(part.len() as u64)
+                            .is_some_and(|e| e <= map.len())
+                    })
+                    .is_some_and(|off| guest.read(off, part).is_ok())
+            };
+            let programs = &self.programs;
+            crate::ubotex::augment(
+                detail,
+                &mut |key, vertex, out| {
+                    if let Ok(p) = programs.stage(key, vertex) {
+                        out.extend(p.binds.iter().filter_map(|b| Some((b.reg, b.ubo?))));
+                    }
+                },
+                &mut |a, out| match pools.overlay() {
+                    Some(o) => o.read_with(a, out, &mut plain),
+                    None => plain(a, out),
+                },
+            )
+        };
+        let detail = augmented.as_ref().unwrap_or(detail);
         self.native.begin_frame();
         let diag_frame = crate::diag::begin_frame();
         let lum = crate::lum::begin();

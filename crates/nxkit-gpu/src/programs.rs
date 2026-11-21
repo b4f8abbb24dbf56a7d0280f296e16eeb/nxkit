@@ -134,6 +134,9 @@ pub(crate) struct Bind {
     pub(crate) rscale: Option<u32>,
     /// For an `img` member: what the shader declares.
     pub(crate) img: Option<ImgDecl>,
+    /// For a `tex_ubo` or `samp_ubo` member: the words of its handle. It is a `tex` or `samp_tex` member of the texture
+    /// slot `reg` that [`crate::ubotex`] gives the source.
+    pub(crate) ubo: Option<crate::ubotex::Source>,
 }
 
 /// The texture type of an MSL argument type such as `texture2d_array<float>`.
@@ -346,8 +349,18 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         .and_then(Json::as_bool)
         .unwrap_or(false);
     let mut arg_bytes = 0u32;
+    // The distinct sources of the `tex_ubo` and `samp_ubo` members; the index gives the texture slot.
+    let mut sources: Vec<crate::ubotex::Source> = Vec::new();
     for b in json.get("bindings").map(Json::as_arr).unwrap_or(&[]) {
-        let kind = match b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)? {
+        let kind_str = b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)?;
+        let ubo = match kind_str {
+            "tex_ubo" => crate::ubotex::source(b, false),
+            "samp_ubo" => crate::ubotex::source(b, true),
+            _ => None,
+        };
+        let kind = match kind_str {
+            "tex_ubo" if ubo.is_some() => BindKind::Tex,
+            "samp_ubo" if ubo.is_some() => BindKind::SampTex,
             "cbuf" => BindKind::Cbuf,
             "tex" => BindKind::Tex,
             "samp" => BindKind::Samp,
@@ -388,8 +401,19 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .and_then(Json::as_i64)
             .ok_or(Skip::Program)?;
         let arg_id = u32::try_from(arg_id).map_err(|_| Skip::Program)?;
-        let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
-        let reg = u32::try_from(reg).map_err(|_| Skip::Program)?;
+        let reg = match ubo {
+            Some(src) => {
+                let i = sources.iter().position(|s| *s == src).unwrap_or_else(|| {
+                    sources.push(src);
+                    sources.len() - 1
+                });
+                crate::ubotex::SLOT_BASE + i as u32
+            }
+            None => {
+                let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
+                u32::try_from(reg).map_err(|_| Skip::Program)?
+            }
+        };
         arg_bytes = arg_bytes.max(
             arg_id
                 .checked_add(1)
@@ -434,6 +458,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             rscale,
             img,
             bank,
+            ubo,
         });
     }
     let inputs = if vertex {
