@@ -86,8 +86,9 @@ pub fn kernel_init(
         tls_size: layout.tls.len,
         shared_addr: layout.shared.start,
         shared_size: layout.shared.len,
-        main_stack_addr: layout.main_stack.start,
-        main_stack_size: layout.main_stack.len,
+        // the stack the kernel maps leaves the guard page out, as the console does
+        main_stack_addr: layout.main_stack_body().start,
+        main_stack_size: layout.main_stack_body().len,
         modules: modules.as_ptr(),
         module_count: modules.len(),
         map_limit: u32::from(mem.map_limit),

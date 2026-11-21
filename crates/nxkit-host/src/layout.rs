@@ -67,6 +67,19 @@ pub struct Layout {
     pub alias: Range,
 }
 
+impl Layout {
+    /// The main stack without its guard page: what the kernel maps as stack memory. On the console the guard below a
+    /// stack is no part of it, and the SDK takes a thread's stack bounds from the memory block that holds its stack
+    /// pointer. A game that scans its whole stack (a conservative garbage collector, as Unity's) must not reach the
+    /// guard page.
+    pub fn main_stack_body(&self) -> Range {
+        Range {
+            start: self.main_stack.start + PAGE,
+            len: self.main_stack.len - PAGE,
+        }
+    }
+}
+
 fn align_up(v: u64, a: u64) -> Option<u64> {
     v.checked_add(a - 1).map(|x| x & !(a - 1))
 }
@@ -180,6 +193,9 @@ mod tests {
         assert_eq!(l.stack.start, l.heap.end());
         assert_eq!(l.main_stack.start, l.stack.start);
         assert!(l.main_stack.end() <= l.stack.end());
+        let body = l.main_stack_body();
+        assert_eq!((body.start, body.len), (l.main_stack.start + PAGE, 0x10_0000));
+        assert_eq!(body.end(), l.main_stack.end());
         assert_eq!(l.alias.start, l.stack.end());
         assert_eq!(l.all.end(), l.alias.end());
     }
