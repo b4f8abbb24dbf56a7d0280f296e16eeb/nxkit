@@ -2215,6 +2215,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxkit-vk"
+version = "0.11.0"
+dependencies = [
+ "nxb-model",
+ "nxkit-abi",
+]
+
+[[package]]
 name = "nxtitle"
 version = "0.11.0"
 dependencies = [

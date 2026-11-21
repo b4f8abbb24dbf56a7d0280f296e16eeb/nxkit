@@ -1,0 +1,19 @@
+[package]
+name = "nxkit-vk"
+description = "The Vulkan front end of the nxkit host: the device the game sees, its objects, recorded commands and the backend seam (std only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "R2"
+in_v = false
+
+[dependencies]
+nxb-model.workspace = true
+nxkit-abi.workspace = true
+
+[lints]
+workspace = true
