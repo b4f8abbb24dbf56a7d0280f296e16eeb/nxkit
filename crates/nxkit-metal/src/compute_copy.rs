@@ -159,6 +159,71 @@ impl ComputePass<'_> {
         self.cb.retain(texture.clone());
     }
 
+    /// Copies `size` bytes between two guest memories (or within one; Metal refuses overlapping ranges of one buffer).
+    pub(crate) fn copy_guest_to_guest(
+        &mut self,
+        src: &Arc<GuestMemory>,
+        src_offset: u64,
+        dst: &Arc<GuestMemory>,
+        dst_offset: u64,
+        size: u64,
+    ) -> Result<()> {
+        if size == 0 {
+            return Ok(());
+        }
+        src.gpu_address_of_offset(src_offset, size)?;
+        dst.gpu_address_of_offset(dst_offset, size)?;
+        // SAFETY: both ranges are inside their buffers (checked above), and both memories are retained below until the
+        // GPU is done.
+        unsafe {
+            self.enc
+                .copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(
+                    src.buffer(),
+                    src_offset as usize,
+                    dst.buffer(),
+                    dst_offset as usize,
+                    size as usize,
+                );
+        }
+        self.cb.retain(src.clone());
+        self.cb.retain(dst.clone());
+        Ok(())
+    }
+
+    /// Copies `len` bytes that lie in `scratch` at `address` (as [`Scratch::push`] returned it) into guest memory at
+    /// `offset`: the bytes of a `vkCmdUpdateBuffer` or the pattern of a fill, in the order of the pass.
+    pub fn copy_scratch_to_guest(
+        &mut self,
+        scratch: &Scratch,
+        address: u64,
+        guest: &Arc<GuestMemory>,
+        offset: u64,
+        len: u64,
+    ) -> Result<()> {
+        if len == 0 {
+            return Ok(());
+        }
+        let (buffer, from) = scratch.locate(address, len).ok_or(MetalError::Invalid(
+            "the scratch range is not in one buffer",
+        ))?;
+        guest.gpu_address_of_offset(offset, len)?;
+        // SAFETY: `locate` checked that `[from, from + len)` is inside `buffer`, and the guest range is inside the guest
+        // buffer (checked above). The scratch is not reused before the GPU is done with the pass, and the guest memory
+        // is retained below.
+        unsafe {
+            self.enc
+                .copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(
+                    &buffer,
+                    from as usize,
+                    guest.buffer(),
+                    offset as usize,
+                    len as usize,
+                );
+        }
+        self.cb.retain(guest.clone());
+        Ok(())
+    }
+
     pub(crate) fn copy_to_guest(
         &mut self,
         tex: &Texture,

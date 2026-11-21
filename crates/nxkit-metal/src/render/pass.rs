@@ -268,6 +268,18 @@ impl RenderPass<'_> {
                 self.table.set_texture(*index, texture)?;
                 self.cb.retain(texture.clone());
             }
+            RenderCommand::SetSampler { index, sampler } => {
+                self.table.set_sampler(*index, sampler)?;
+                self.cb.retain(sampler.clone());
+            }
+            RenderCommand::SetFragmentTexture { index, texture } => {
+                self.fragment()?.set_texture(*index, texture)?;
+                self.cb.retain(texture.clone());
+            }
+            RenderCommand::SetFragmentSampler { index, sampler } => {
+                self.fragment()?.set_sampler(*index, sampler)?;
+                self.cb.retain(sampler.clone());
+            }
             RenderCommand::SetFragmentBuffer { index, gpu_addr } => self
                 .fragment_table
                 .as_ref()
@@ -534,6 +546,13 @@ impl RenderPass<'_> {
         } else {
             Err(MetalError::Invalid("draw before a pipeline is set"))
         }
+    }
+
+    /// The fragment argument table of a split pass.
+    fn fragment(&self) -> Result<&ArgumentTable> {
+        self.fragment_table.as_ref().ok_or(MetalError::Invalid(
+            "the pass has no separate fragment argument table",
+        ))
     }
 
     /// Ends the pass.

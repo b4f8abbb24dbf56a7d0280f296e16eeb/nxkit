@@ -11,6 +11,7 @@ use objc2_metal::{MTL4ArgumentTable, MTL4ArgumentTableDescriptor, MTLDevice, MTL
 use crate::address::{GUEST_VA_BASE, GUEST_VA_MAX, is_guest_va};
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
+use crate::sampler::Sampler;
 use crate::texture::Texture;
 
 /// How many addresses from the window of virtual guest addresses reached Metal.
@@ -57,6 +58,7 @@ pub struct ArgumentTable {
     pub(crate) raw: Retained<ProtocolObject<dyn MTL4ArgumentTable>>,
     max_buffers: u32,
     max_textures: u32,
+    max_samplers: u32,
 }
 
 // SAFETY: the table is a Metal object that one thread fills while it encodes. A table is moved to the thread that
@@ -68,9 +70,21 @@ unsafe impl Sync for ArgumentTable {}
 impl ArgumentTable {
     /// Makes a table with `max_buffers` address slots and `max_textures` texture slots.
     pub fn new(ctx: &Context, max_buffers: u32, max_textures: u32) -> Result<Self> {
+        Self::with_samplers(ctx, max_buffers, max_textures, 0)
+    }
+
+    /// Makes a table with `max_buffers` address slots, `max_textures` texture slots and `max_samplers` sampler slots,
+    /// for shaders that take their samplers at `[[sampler(n)]]` and not from an argument buffer.
+    pub fn with_samplers(
+        ctx: &Context,
+        max_buffers: u32,
+        max_textures: u32,
+        max_samplers: u32,
+    ) -> Result<Self> {
         let d = MTL4ArgumentTableDescriptor::new();
         d.setMaxBufferBindCount(max_buffers as usize);
         d.setMaxTextureBindCount(max_textures as usize);
+        d.setMaxSamplerStateBindCount(max_samplers as usize);
         let raw = ctx
             .device()
             .newArgumentTableWithDescriptor_error(&d)
@@ -79,6 +93,7 @@ impl ArgumentTable {
             raw,
             max_buffers,
             max_textures,
+            max_samplers,
         })
     }
 
@@ -106,6 +121,21 @@ impl ArgumentTable {
         unsafe {
             self.raw
                 .setTexture_atIndex(texture.raw().gpuResourceID(), index as usize)
+        };
+        Ok(())
+    }
+
+    /// Binds a sampler to a sampler slot. As for a texture, the slot holds a resource id only, and the caller retains
+    /// the sampler on the command buffer that uses the binding.
+    pub(crate) fn set_sampler(&self, index: u32, sampler: &Sampler) -> Result<()> {
+        if index >= self.max_samplers {
+            return Err(MetalError::Invalid("sampler slot above the table size"));
+        }
+        // SAFETY: the index is below the table's sampler count (checked above) and the resource id comes from a
+        // sampler that the caller keeps alive until the GPU is done.
+        unsafe {
+            self.raw
+                .setSamplerState_atIndex(sampler.resource_id(), index as usize)
         };
         Ok(())
     }

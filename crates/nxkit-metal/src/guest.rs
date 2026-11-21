@@ -18,14 +18,65 @@ use crate::rawcopy::{copy_in, copy_out};
 /// The page size of Apple Silicon. A no-copy buffer needs a base and a length that are multiples of it.
 pub const PAGE_SIZE: u64 = 16 * 1024;
 
-/// Memory that `allocate` made. It is freed on drop.
-struct OwnedRegion(NonNull<u8>, Layout);
+/// Memory that `allocate` or `map_below` made. It is freed on drop.
+enum OwnedRegion {
+    /// From the allocator, with its layout.
+    Heap(NonNull<u8>, Layout),
+    /// An anonymous mapping of this many bytes.
+    Mapped(NonNull<u8>, usize),
+}
 
 impl Drop for OwnedRegion {
     fn drop(&mut self) {
-        // SAFETY: the pointer and the layout are those of the allocation in `GuestMemory::allocate`. It is freed once.
-        unsafe { dealloc(self.0.as_ptr(), self.1) };
+        match *self {
+            // SAFETY: the pointer and the layout are those of the allocation in `GuestMemory::allocate`. It is freed
+            // once.
+            Self::Heap(p, layout) => unsafe { dealloc(p.as_ptr(), layout) },
+            // SAFETY: the pointer and the length are those of the mapping in `GuestMemory::map_below`. It is unmapped
+            // once.
+            Self::Mapped(p, len) => unsafe {
+                munmap(p.as_ptr().cast(), len);
+            },
+        }
     }
+}
+
+const PROT_RW: i32 = 3;
+const MAP_PRIVATE: i32 = 0x2;
+const MAP_ANON: i32 = 0x1000;
+/// What `mmap` gives on failure.
+const MAP_FAILED: usize = usize::MAX;
+
+unsafe extern "C" {
+    fn mmap(
+        addr: *mut std::ffi::c_void,
+        len: usize,
+        prot: i32,
+        flags: i32,
+        fd: i32,
+        off: i64,
+    ) -> *mut std::ffi::c_void;
+    fn munmap(addr: *mut std::ffi::c_void, len: usize) -> i32;
+}
+
+/// Maps `len` zeroed bytes, read and write, with `hint` as the address hint (0 for none). The system may place the
+/// mapping elsewhere. None when the system has no memory.
+fn map_anon(hint: u64, len: usize) -> Option<NonNull<u8>> {
+    // SAFETY: an anonymous private mapping without `MAP_FIXED` replaces nothing; the hint is only a hint.
+    let p = unsafe {
+        mmap(
+            hint as *mut std::ffi::c_void,
+            len,
+            PROT_RW,
+            MAP_PRIVATE | MAP_ANON,
+            -1,
+            0,
+        )
+    };
+    if p as usize == MAP_FAILED {
+        return None;
+    }
+    NonNull::new(p.cast())
 }
 
 /// The guest memory of the host as seen by the GPU.
@@ -69,9 +120,40 @@ impl GuestMemory {
         // SAFETY: the layout has a non-zero size.
         let raw = unsafe { alloc_zeroed(layout) };
         let base = NonNull::new(raw).ok_or_else(|| create("guest memory", "out of memory"))?;
-        let owned = OwnedRegion(base, layout);
+        let owned = OwnedRegion::Heap(base, layout);
         // SAFETY: `base` is valid for `len` bytes until `owned` drops, which happens after the buffer is released.
         unsafe { Self::wrap(ctx, base, len, Some(owned), true) }
+    }
+
+    /// Maps `len` zeroed bytes (rounded up to whole pages) that end at or below `limit`, and wraps them. The memory is an
+    /// anonymous mapping of its own, outside every other mapping of the process, and it is unmapped on drop. The hints
+    /// are tried in order (0 lets the system choose); a mapping that ends above `limit` is given back and the next hint
+    /// is tried. A caller whose GPU addresses must fit an address space of its own (`1 << 39` for the Switch) uses it.
+    pub fn map_below(ctx: &Context, len: u64, limit: u64, hints: &[u64]) -> Result<Self> {
+        let len = len.max(1).div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let size =
+            usize::try_from(len).map_err(|_| MetalError::Invalid("length does not fit usize"))?;
+        for &hint in hints {
+            let Some(base) = map_anon(hint, size) else {
+                return Err(create(
+                    "guest memory",
+                    format!("mmap of {len} bytes failed"),
+                ));
+            };
+            let end = (base.as_ptr() as u64).saturating_add(len);
+            if end > limit {
+                // SAFETY: the mapping was made just above with this length and nothing else knows it.
+                unsafe { munmap(base.as_ptr().cast(), size) };
+                continue;
+            }
+            let owned = OwnedRegion::Mapped(base, size);
+            // SAFETY: `base` is valid for `len` bytes until `owned` drops, which happens after the buffer is released.
+            return unsafe { Self::wrap(ctx, base, len, Some(owned), true) };
+        }
+        Err(create(
+            "guest memory",
+            format!("no mapping of {len} bytes ends at or below {limit:#x} (hints {hints:#x?})"),
+        ))
     }
 
     /// Wraps memory that the caller owns, for example the mapping of the guest address space.

@@ -8,6 +8,7 @@ use crate::error::{MetalError, Result};
 use crate::format::{IndexType, LoadAction, Primitive, StoreAction};
 use crate::icb::IndirectCommandBuffer;
 use crate::pipeline::RenderPipeline;
+use crate::sampler::Sampler;
 use crate::state::{DepthBias, DepthClip, DepthStencilState, FillMode, Winding};
 use crate::texture::{Storage, Texture};
 
@@ -157,6 +158,28 @@ pub enum RenderCommand {
         index: u32,
         /// The texture.
         texture: Texture,
+    },
+    /// Binds a sampler to a sampler slot of the pass's argument table (made with
+    /// [`ArgumentTable::with_samplers`](crate::ArgumentTable::with_samplers)), for shaders that take `[[sampler(n)]]`.
+    SetSampler {
+        /// The slot.
+        index: u32,
+        /// The sampler.
+        sampler: Sampler,
+    },
+    /// Binds a texture to a texture slot of the fragment argument table of a split pass.
+    SetFragmentTexture {
+        /// The slot.
+        index: u32,
+        /// The texture.
+        texture: Texture,
+    },
+    /// Binds a sampler to a sampler slot of the fragment argument table of a split pass.
+    SetFragmentSampler {
+        /// The slot.
+        index: u32,
+        /// The sampler.
+        sampler: Sampler,
     },
     /// Binds a GPU address to a buffer slot of the fragment argument table of a split pass
     /// ([`CommandBuffer::begin_render_pass_split`](crate::encode::CommandBuffer::begin_render_pass_split)).

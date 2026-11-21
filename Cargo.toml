@@ -37,6 +37,7 @@ nxkit-svc-pacing = { path = "crates/nxkit-svc-pacing" }
 nxkit-metal = { path = "crates/nxkit-metal" }
 nxkit-coreml = { path = "crates/nxkit-coreml" }
 nxkit-gpu = { path = "crates/nxkit-gpu" }
+nxkit-vk-gpu = { path = "crates/nxkit-vk-gpu" }
 nxkit-native-plan = { path = "crates/nxkit-native-plan" }
 nxkit-ndve = { path = "crates/nxkit-ndve" }
 nxkit-ndsr = { path = "crates/nxkit-ndsr" }

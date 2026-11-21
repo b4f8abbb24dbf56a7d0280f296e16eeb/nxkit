@@ -184,4 +184,8 @@ impl Sampler {
     pub fn gpu_resource_id(&self) -> u64 {
         self.raw.gpuResourceID().to_raw()
     }
+
+    pub(crate) fn resource_id(&self) -> objc2_metal::MTLResourceID {
+        self.raw.gpuResourceID()
+    }
 }

@@ -18,6 +18,7 @@ use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};
 use crate::guest::GuestMemory;
 use crate::pipeline::ComputePipeline;
+use crate::sampler::Sampler;
 
 use crate::table::ArgumentTable;
 use crate::texture::{Texture, TextureRegion};
@@ -40,6 +41,27 @@ pub enum ComputeCommand {
         index: u32,
         /// The texture.
         texture: Texture,
+    },
+    /// Binds a sampler to a sampler slot of the pass's argument table (made with
+    /// [`ArgumentTable::with_samplers`]).
+    SetSampler {
+        /// The slot.
+        index: u32,
+        /// The sampler.
+        sampler: Sampler,
+    },
+    /// Copies bytes from one guest memory to another (or within one), as `copyFromBuffer:toBuffer:`.
+    CopyGuestToGuest {
+        /// The source memory.
+        src: Arc<GuestMemory>,
+        /// The first source byte, from the start of `src`.
+        src_offset: u64,
+        /// The destination memory.
+        dst: Arc<GuestMemory>,
+        /// The first destination byte, from the start of `dst`.
+        dst_offset: u64,
+        /// The bytes.
+        size: u64,
     },
     /// Runs whole threadgroups.
     DispatchThreadgroups {
@@ -232,6 +254,17 @@ impl ComputePass<'_> {
                 self.table.set_texture(*index, texture)?;
                 self.cb.retain(texture.clone());
             }
+            ComputeCommand::SetSampler { index, sampler } => {
+                self.table.set_sampler(*index, sampler)?;
+                self.cb.retain(sampler.clone());
+            }
+            ComputeCommand::CopyGuestToGuest {
+                src,
+                src_offset,
+                dst,
+                dst_offset,
+                size,
+            } => self.copy_guest_to_guest(src, *src_offset, dst, *dst_offset, *size)?,
             ComputeCommand::DispatchThreadgroups { groups, threads } => {
                 self.need_pipeline()?;
                 self.enc
