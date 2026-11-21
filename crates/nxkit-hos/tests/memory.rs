@@ -188,6 +188,19 @@ fn physical_memory_maps_only_in_the_alias_region() {
 }
 
 #[test]
+fn physical_memory_maps_around_the_locked_source_of_map_memory() {
+    let r = rig();
+    assert_eq!(r.svc(0x2C, &[ALIAS, 0x4000])[0], 0);
+    let src = ALIAS + 0x1000;
+    assert!(r.mem.store32(src, 0xABCD));
+    assert_eq!(r.svc(0x04, &[STACK, src, 0x1000])[0], 0);
+    assert_eq!(r.svc(0x2C, &[ALIAS, 0x8000])[0], 0);
+    assert_eq!(r.query(src), (src, 0x1000, 5, 1, 0));
+    assert_eq!(r.query(ALIAS + 0x2000), (ALIAS + 0x2000, 0x6000, 5, 0, 3));
+    assert_eq!(r.mem.load32(STACK), Some(0xABCD));
+}
+
+#[test]
 fn transfer_memory_locks_the_pages_until_the_handle_closes() {
     let r = rig();
     r.svc(0x01, &[0, MIB2]);

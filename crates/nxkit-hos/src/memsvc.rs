@@ -382,16 +382,13 @@ impl Kernel {
     }
 
     /// `MapPhysicalMemory`: the free pages of the range in the alias region become normal read and write memory. With
-    /// the map limit on, the pages count against the pool. Pages that are mapped already stay. The pages read as zero
-    /// when they were never mapped or were given back.
+    /// the map limit on, the pages count against the pool. Pages that are not free stay as they are, whatever their
+    /// state, permission and attribute, as in Horizon: a page that is the locked source of `MapMemory` does not refuse
+    /// the call. The pages read as zero when they were never mapped or were given back.
     pub(crate) fn map_physical_memory(&self, addr: u64, size: u64) -> KResultOr<()> {
         let vm = self.vm()?;
         let (start, end) = self.alias_range(addr, size)?;
         let mut sp = lock(&vm.space);
-        let usable = |b: &Block| b.state == state::FREE || is_plain_normal(b);
-        if !sp.map.all(start, end, usable) {
-            return Err(KResult::INVALID_CURRENT_MEMORY);
-        }
         let free: Vec<Block> = sp
             .map
             .blocks(start, end)
