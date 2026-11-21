@@ -89,6 +89,10 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 
 `romfs/`, `shaders/` and `pipelines/` (the pipeline archive shards and `index.nxpi`, or the single `pipelines.mtl4archive` of an older build) are read by the services and the GPU backend, not by the loader.
 
+### font/
+
+The stand-ins for the console's six shared fonts, one file for each type: `standard.ttf` (0), `chinese_simplified.ttf` (1), `chinese_simplified_ext.ttf` (2), `chinese_traditional.ttf` (3), `korean.ttf` (4) and `nintendo_ext.ttf` (5, the button icons). `nxb build` makes them with `nxb-font` from the macOS system fonts, and `nxb fonts <app>` makes them for an app of an older build. The system service loads a type when the game first asks for it. A type without its file uses `standard.ttf`, and without `standard.ttf` the host uses macOS's Arial Unicode as it is, which the font engine of some games cannot load. Without `nintendo_ext.ttf` the game draws its button icons as "?". The setting `shared_font` names one font for types 0 to 4.
+
 ### launcher.json
 
 The launch options of the host, for a launcher such as NX2Apple. The host does not read the file. The table is `nxkit_abi::launch::OPTIONS`, the one definition that the build writes and the host reads. The file has the schema 1 of the old engine's `dm/launcher.json`: `{"schema": 1, "game": "<title id>", "settings": [...]}`. Each row has `env` (the variable), `kind` (`choice` with `options` as `[value, label]` pairs, `toggle` with `on` and `off`, or `range` with `min`, `max` and `step`), `label` and `note` in English, `default`, `section` (`Game`, `Controls` or `Performance`), `level` `basic` for a row that the launcher shows first, and `needs` (`<env>=<value>`) for a sub-setting that the launcher shows only while that row has that value. A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<env>.note` and `launch.opt.<env>.<value>`.

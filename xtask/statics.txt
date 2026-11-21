@@ -16,5 +16,5 @@ nxkit-svc-fs: 4
 nxkit-svc-input: 13
 nxkit-svc-offline: 1
 nxkit-svc-pacing: 3
-nxkit-svc-system: 54
+nxkit-svc-system: 53
 nxkit-svc-video: 23

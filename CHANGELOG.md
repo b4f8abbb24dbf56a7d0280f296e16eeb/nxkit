@@ -12,6 +12,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   characters of each type. The fonts are those of NX2Apple's `make_shared_fonts.py`, made in Rust from the macOS
   system fonts at build time. `nxb fonts <app>` adds them to an app of an older build.
 
+### Changed
+
+- The system service loads each shared font type from its own file in the font folder, as the old engine does. A type
+  without its file uses the standard font.
+
 ## 0.13.0 - 2026-11-21
 
 ### Added
