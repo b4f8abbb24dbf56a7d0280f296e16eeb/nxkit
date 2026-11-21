@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-spirv"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "naga",
  "nxb-model",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "nxgame-hades"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "nxb-profile",
  "nxb-rewrite",
@@ -2219,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "nxkit-vk"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "nxb-model",
  "nxkit-abi",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "nxkit-vk-gpu"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "nxkit-abi",
  "nxkit-metal",
