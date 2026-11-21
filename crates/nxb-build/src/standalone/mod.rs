@@ -13,6 +13,7 @@ mod extract;
 mod files;
 pub(crate) mod fonts;
 mod generic;
+mod icon;
 mod image;
 mod launcher;
 mod layout;
@@ -534,6 +535,21 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Err(e) => p.say(&format!(
                 "warning: no shared fonts, button icons draw as \"?\": {e}"
             )),
+        }
+        // the cover of the game; an update's control data may have none, then the base's
+        let cover = [ver_dir.join("icon.jpg"), work.join("extract/v0/icon.jpg")]
+            .into_iter()
+            .find(|c| c.is_file());
+        match cover {
+            Some(c) => match icon::write(
+                &c,
+                &stage_dir.join("Contents/Resources"),
+                &work.join("icon"),
+            ) {
+                Ok(s) => p.say(&s),
+                Err(e) => p.say(&format!("warning: no app icon: {e}")),
+            },
+            None => p.say("warning: no app icon, the control data has no icon.jpg"),
         }
         let _ = std::fs::remove_dir_all(&out);
         std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;

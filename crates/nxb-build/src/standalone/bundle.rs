@@ -51,6 +51,8 @@ pub(crate) fn info_plist(name: &str, bundle_id: &str, version: &str) -> String {
         ("CFBundleName", name),
         ("CFBundleDisplayName", name),
         ("CFBundlePackageType", "APPL"),
+        // `Contents/Resources/AppIcon.icns`, the cover of the game (standalone::icon)
+        ("CFBundleIconFile", super::icon::NAME),
         ("CFBundleInfoDictionaryVersion", "6.0"),
         ("CFBundleVersion", version),
         ("CFBundleShortVersionString", version),
