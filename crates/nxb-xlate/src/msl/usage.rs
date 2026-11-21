@@ -1,9 +1,9 @@
 //! The resources and features a structured program uses, found by one walk over its nodes.
 
-use super::walk::for_each_node;
 use crate::ir::{Inst, IoVariable, OperandType, StorageKind};
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Ast, Kind};
+use crate::structured::walk::for_each_node;
 use crate::types::SamplerType;
 use std::collections::{BTreeMap, BTreeSet};
 

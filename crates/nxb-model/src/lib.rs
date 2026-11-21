@@ -7,7 +7,7 @@
 //! - [`ShaderKey`], [`TitleId`], [`VersionTag`], [`Target`], [`StageId`]: typed ids.
 //!
 //! No I/O beyond the generic `Write` wrapper. The only dependency is `nxb-sys` for the output-neutral hardware SHA-256
-//! path (workspace-layout ADR W17).
+//! path (decisions.md W17).
 
 mod digest;
 mod ids;

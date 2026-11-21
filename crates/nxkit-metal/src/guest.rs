@@ -13,7 +13,7 @@ use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
 use crate::address::{AddressMap, check_outside_window};
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
-use crate::space::{copy_in, copy_out};
+use crate::rawcopy::{copy_in, copy_out};
 
 /// The page size of Apple Silicon. A no-copy buffer needs a base and a length that are multiples of it.
 pub const PAGE_SIZE: u64 = 16 * 1024;

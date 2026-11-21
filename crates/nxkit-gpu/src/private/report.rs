@@ -95,7 +95,7 @@ pub(super) fn print_report(frame: u64) {
                 m.mirror.retired(),
             )
         });
-        let partial_now = crate::overlay::partial_table();
+        let partial_now = crate::pools::overlay::partial_table();
         let partial: u64 = partial_now.iter().flatten().sum::<u64>()
             - w.partial_base.iter().flatten().sum::<u64>();
         let sync = |o: FaultOrigin| {
@@ -128,7 +128,7 @@ pub(super) fn print_report(frame: u64) {
         );
     }
     if mirrored() {
-        let t = crate::overlay::partial_table();
+        let t = crate::pools::overlay::partial_table();
         let mut parts: Vec<String> = Vec::new();
         for (c, row) in t.iter().enumerate() {
             for (k, v) in row.iter().enumerate() {
@@ -136,8 +136,8 @@ pub(super) fn print_report(frame: u64) {
                 if d != 0 {
                     parts.push(format!(
                         "{} {}: {:.2}",
-                        crate::overlay::CLASS_NAMES[c],
-                        crate::overlay::SPLIT_NAMES[k],
+                        crate::pools::overlay::CLASS_NAMES[c],
+                        crate::pools::overlay::SPLIT_NAMES[k],
                         d as f64 / n
                     ));
                 }
@@ -151,8 +151,8 @@ pub(super) fn print_report(frame: u64) {
             } else {
                 parts.join(", ")
             },
-            crate::overlay::partial_range_count(),
-            crate::overlay::partial_repeats() - w.repeats_base
+            crate::pools::overlay::partial_range_count(),
+            crate::pools::overlay::partial_repeats() - w.repeats_base
         );
         let ms = |v: u64| v as f64 / n / 1e6;
         let handler = (now.handler_ns - base.handler_ns) as f64 / n / 1e6;
@@ -487,8 +487,8 @@ pub(super) fn print_report(frame: u64) {
     }
     *w = Window {
         base: now,
-        partial_base: crate::overlay::partial_table(),
-        repeats_base: crate::overlay::partial_repeats(),
+        partial_base: crate::pools::overlay::partial_table(),
+        repeats_base: crate::pools::overlay::partial_repeats(),
         ..Window::default()
     };
 }

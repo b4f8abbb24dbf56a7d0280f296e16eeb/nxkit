@@ -32,9 +32,7 @@ pub(crate) fn attach(ctx: &Context, host_base: u64, len: u64, va_base: u64) {
                         pages.set_emulation(!off);
                         if !off && late_results() {
                             pages.set_late(true);
-                            if !std::env::var("NXKIT_PRIVATE_READOPEN")
-                                .is_ok_and(|v| v.trim() == "0")
-                            {
+                            if crate::settings::env().private_read_open {
                                 pages.set_read_open(true);
                                 eprintln!(
                                     "nxkit-gpu: NXKIT_PRIVATE=1: a page whose guest bytes are a completed frame's stays readable while a \

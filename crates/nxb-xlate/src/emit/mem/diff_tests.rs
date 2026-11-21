@@ -1,6 +1,6 @@
 //! Debug test: `NXB_EM_DIFF=<InstName> [NXB_EM_N=3] cargo test -p nxb-xlate em_diff -- --nocapture` prints differing chunks.
 
-use crate::translation::pipeline::{chunks, emit_text_lenient};
+use crate::front::pipeline::{chunks, emit_text_lenient};
 
 #[test]
 fn em_diff() {

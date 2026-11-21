@@ -60,6 +60,7 @@ pub(crate) struct State {
     seen: AtomicU8,
 }
 
+// Process-wide (W26): the state of the system take-overs, reached from guest-called exports.
 static STATE: OnceLock<State> = OnceLock::new();
 
 /// The shared state. It is made from the [`config`] on first use.

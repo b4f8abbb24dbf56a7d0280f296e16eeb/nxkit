@@ -3,7 +3,7 @@
 use super::tex::*;
 use super::tex_misc::*;
 use super::texs::*;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::ops::texflags;
 use crate::maxwell::enums::Lod;
 use crate::maxwell::insts::*;

@@ -19,10 +19,12 @@ use nxkit_nvn::resource::TexId;
 
 use crate::bindless::{Handles, ImageRes};
 use crate::detail::{FrameDetail, Stage, TextureBind};
-use crate::draws::{FastMap, FastSet, Ordinal};
+use crate::fastmap::{FastMap, FastSet};
+use crate::ordinal::Ordinal;
 use crate::programs::{BindKind, ImgDecl, Programs};
+use crate::skip::Skip;
 use crate::snapshot::EncodeView;
-use crate::stats::{EncodeStats, Skip};
+use crate::stats::EncodeStats;
 use crate::textures::{Res, TextureStore};
 
 /// An `img` member of a shader.
@@ -279,7 +281,7 @@ fn one(
     })?;
     let id = slot.texture;
     if crate::diag("barr") || crate::diag("nanscan") {
-        crate::barr::note(handle, id);
+        crate::diag::note_handle(handle, id);
     }
     if let std::collections::hash_map::Entry::Vacant(e) = textures.entry(id) {
         let rec = view

@@ -4,8 +4,8 @@
 use super::mesh::{memory, own_shared};
 use super::mesh_pad_tests::reads;
 use super::{Context, Failure, StageInputs, Translated, translate};
+use crate::front::emit_test_util::{AEXIT, APT};
 use crate::job::{MeshStage, POINT_SIZE, parse_jobs};
-use crate::translation::emit_test_util::{AEXIT, APT};
 use nxb_pyjson::Value;
 
 pub(super) fn mesh(kind: &str) -> MeshStage {

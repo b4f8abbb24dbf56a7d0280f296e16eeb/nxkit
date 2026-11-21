@@ -12,8 +12,8 @@ use super::super::emit::{Em, R, Shader};
 use super::super::entry::{EntryName, Param, entry_text};
 use super::super::io::Plan;
 use super::vertex::emit_with;
+use crate::front::msl_entry::Structured;
 use crate::job::TransformFeedback;
-use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
 
 /// The capture state the host binds at `TF_STATE_SLOT`.

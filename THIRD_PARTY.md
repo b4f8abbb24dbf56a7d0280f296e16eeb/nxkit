@@ -1,8 +1,6 @@
 # Third-party notes
 
-The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-input` uses to bind GameController and Core Haptics on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
-The crate `rav1d` (BSD-2-Clause, the Rust port of dav1d by the rav1d developers and Prossimo) is the other external dependency. `nxkit-svc-video` uses it to decode AV1 on the CPU. `deps.toml` lists it and the small crates that it brings.
-The only external Rust dependencies are the `objc2` family of crates, which `nxkit-metal` uses to bind Metal and `nxkit-svc-video` uses to bind VideoToolbox, CoreVideo and CoreMedia on macOS. They are Zlib OR Apache-2.0 OR MIT. `deps.toml` lists them with their pinned commit. `Cargo.lock` lists the other crates of the workspace only.
+The external Rust dependencies are listed in `deps.toml` with their reason, licence and users. The `objc2` family and `block2` bind the Apple frameworks (Metal, GameController, Core Haptics, AppKit, Core Audio, VideoToolbox, CoreVideo, CoreMedia, Core ML) for the runtime crates. They are Zlib OR Apache-2.0 OR MIT. The crate `rav1d` (BSD-2-Clause, the Rust port of dav1d by the rav1d developers and Prossimo) decodes AV1 on the CPU in `nxkit-svc-video` and brings a few small crates. `foldhash` (Zlib) gives `nxkit-gpu` and `nxkit-nvn` a fast hasher. `libz-sys` (MIT OR Apache-2.0) binds zlib for `nxb-sys` on Windows.
 On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
 shader translator, see below. The other third-party material is the rewrite rule data below.
 
@@ -16,13 +14,13 @@ taken from other implementations.
 | Mach-O code signature (SuperBlob, CodeDirectory, requirements, entitlements, `CodeResources`) | `nxb-pack` | output of Apple `codesign` on test bundles, and public headers |
 | metallib container and AIR conventions | `air-bc`, `air-emit`, `air-lib` | observation of the output of Apple tools. No Apple code is copied |
 | LLVM 14 bitcode | `air-bc` | the public LLVM bitcode documentation |
-| NCA, NSP (PFS0), IVFC, BKTR, RomFS, NSO, NACP, SARC, BNSH, BAHS, Yaz0 | `nxb-extract`, `nxb-split`, `nxb-romfs`, `nxb-hos`, `nxb-rewrite` | public format documentation of the homebrew community. The `prod.keys` text format is the common `name = hex` layout |
-| zstd decoder | `nxb-split`, `nxb-codec` | RFC 8878 |
-| LZ4 block decoder | `nxb-codec`, `nxb-split` | the public LZ4 block format description |
+| NCA, NSP (PFS0), IVFC, BKTR, RomFS, NSO, NACP, SARC, BNSH, BAHS, Yaz0 | `nxb-extract`, `nxb-split`, `nxb-romfs`, `nxb-rewrite` | public format documentation of the homebrew community. The `prod.keys` text format is the common `name = hex` layout |
+| zstd decoder | `nxb-split`, and its ZBIC variant in `nxb-codec` | RFC 8878 |
+| LZ4 block decoder | `nxb-split`, `nxb-rewrite` | the public LZ4 block format description |
 | AES-128 (ECB, CTR, XTS with the console tweak) | `nxb-extract`, `nxb-sys` | FIPS 197, NIST SP 800-38A, IEEE 1619. The test vectors are the published ones |
 | SHA-1, SHA-256 | `nxb-model`, `nxb-sys` | FIPS 180-4. The test vectors are the published ones |
 | AArch64 decoding and patching | `nxb-a64`, `nxb-rewrite` | the Arm Architecture Reference Manual |
-| Property lists (XML and binary) | `nxb-plist`, `nxb-pack` | public Apple documentation and observed output |
+| Property lists (XML and binary) | `nxb-pack` | public Apple documentation and observed output |
 | Block-linear texture layout (mip block height, layer stride) | `nxkit-metal` | the layout rules of deko3d (`dk_image.cpp`). The code is written anew and no source is copied |
 | Core ML model package (`Model.proto` / `MIL.proto` messages, `weight.bin` layout) | `nxkit-ndve::ane` | the field numbers and enum values of the coremltools `.proto` files (BSD-3-Clause, Copyright (c) 2020, Apple Inc.) read from the published format, and the output of coremltools on a test model. The `.proto` files are not vendored; the encoder is written by hand |
 

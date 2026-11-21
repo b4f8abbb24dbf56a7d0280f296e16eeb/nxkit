@@ -52,6 +52,8 @@ pub trait Kernel: Send + Sync {
     fn close_handle(&self, handle: u32) -> Result<(), ResultCode>;
 }
 
+// Process-wide (W26): the kernel and the IPC server as the services see them; the game calls in through a C function
+// with no Rust context.
 static KERNEL: OnceLock<Arc<dyn Kernel>> = OnceLock::new();
 static SERVER: OnceLock<Arc<dyn Server>> = OnceLock::new();
 

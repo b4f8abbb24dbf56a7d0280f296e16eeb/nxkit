@@ -13,8 +13,8 @@ use super::pool;
 use super::refl::Binding;
 use super::usage::Usage;
 use crate::driver::{BufferInfo, Program, TexInfo};
+use crate::ir::agg::format_component_type;
 use crate::props::{BufferDef, Props, TextureDef};
-use crate::structured::types::format_component_type;
 use crate::types::SamplerType;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -384,8 +384,8 @@ impl Builder<'_> {
         let key = (d.set, d.binding);
         let u = self.usage.img.get(&key).copied().unwrap_or_default();
         let comp = match format_component_type(d.format) {
-            t if t == crate::structured::types::AggType::U32 => "uint",
-            t if t == crate::structured::types::AggType::S32 => "int",
+            t if t == crate::ir::agg::AggType::U32 => "uint",
+            t if t == crate::ir::agg::AggType::S32 => "int",
             _ => "float",
         };
         let acc = match (u.read || u.atomic, u.write || u.atomic) {

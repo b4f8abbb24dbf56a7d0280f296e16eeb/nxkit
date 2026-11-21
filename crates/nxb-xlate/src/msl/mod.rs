@@ -88,13 +88,12 @@ pub mod usage;
 pub mod variant;
 #[cfg(test)]
 mod verify_tests;
-pub mod walk;
 pub mod wide;
 #[cfg(test)]
 mod wide_tests;
 
+use crate::front::msl_entry::structure_job;
 use crate::job::Job;
-use crate::translation::msl_entry::structure_job;
 pub use emit::Options;
 pub use refl::Reflection;
 

@@ -5,23 +5,30 @@
 
 use crate::gate::CoreGates;
 use crate::handle::{CURRENT_THREAD, HandleTable, KObject};
-use crate::lend::LendGuard;
 use crate::memory::GuestMemory;
 use crate::result::{KResult, KResultOr};
 use crate::role::{Qos, RoleTable, ThreadInfo, ThreadRole, qos_for_role};
 use crate::stats::{StatsSnapshot, format_stats};
-use crate::svc::GuestLauncher;
+use crate::sync::lock;
 use crate::sys;
-use crate::sysevent::SystemEvents;
-use crate::thread::{Thread, ThreadState, Timeout, lock};
+use crate::thread::LendGuard;
+use crate::thread::{Thread, ThreadState, Timeout};
 use crate::vm::{MemoryConfig, Vm};
 use crate::waitq::WaitTable;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Instant;
+use sysevent::SystemEvents;
 
 mod spawn;
+mod sysevent;
+
+/// Makes the host thread body that enters guest code. The host implements it.
+pub trait GuestLauncher: Send + Sync {
+    /// The body of a guest thread that starts at `entry` with `arg` and the stack top `stack_top`.
+    fn body(&self, entry: u64, arg: u64, stack_top: u64) -> Box<dyn FnOnce() + Send>;
+}
 
 /// The most handles `WaitSynchronization` takes.
 pub const MAX_WAIT_HANDLES: usize = 64;

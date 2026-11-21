@@ -11,7 +11,7 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 ## Status
 
-The current release is [0.10.3](https://github.com/v0lumehi/nxkit/releases/tag/v0.10.3) (2026-11-19). It is early
+The current release is [0.11.0](https://github.com/v0lumehi/nxkit/releases/tag/v0.11.0) (2026-11-20). It is early
 software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
 macOS 26 build the app on macOS 26. The release ZIP holds `nxb` and `nxkit-host` for macOS 26 and newer (see "Install a release"). `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 
@@ -68,7 +68,7 @@ cargo build --release -p nxb-cli -p nxkit-host
 
 The programs are `target/release/nxb` and `target/release/nxkit-host`. `nxb` finds `nxkit-host` in its own folder, or
 in `NXB_NXKIT_HOST`. The release programs are built with `cargo build --profile dist` (fat LTO).
-`tools/check.sh` runs the formatter, the lints, the tests, the documentation and the layer and size checks.
+`tools/check.sh` runs the formatter, the lints, the tests, the documentation and the checks of `xtask` (layers, sizes, module cycles, settings, statics).
 
 ## Install a release
 
@@ -143,9 +143,11 @@ explains the frame pacing, and [docs/diagnostics.md](docs/diagnostics.md) lists 
 | `crates/nxkit-*` | the runtime: host, kernel, IPC, services, NVN, GPU, Metal 4 backend |
 | `titles/` | engine families and title modules |
 | `docs/` | the documentation. The index is [docs/README.md](docs/README.md) |
-| `xtask/` | developer tools, among them the layer check (`cargo run -p xtask -- layers`) |
+| `xtask/` | developer tools: the checks of the layers, the file sizes, the module cycles, the settings source and the statics of the runtime (`cargo run -p xtask`) |
 
-The crates are in layers, and dependencies point down only. Only a few modules hold `unsafe` code, all named in
+The crates are in layers, one set for the build and one for the runtime. Dependencies point down, except for a short list of sideways edges in the build. Inside a
+crate the module cycles may only shrink. `nxkit-host` is the one place that builds and connects the runtime, and it
+reads the `NXKIT_*` settings once. Only a few modules hold `unsafe` code, all named in
 [docs/architecture.md](docs/architecture.md).
 
 ## Contributing and security

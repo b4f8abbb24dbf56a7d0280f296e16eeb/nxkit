@@ -9,9 +9,9 @@ use super::facts_ps::{self, KILL};
 use super::io;
 use super::spill::Spill;
 use super::types::{msl_type, scalar};
+use crate::front::msl_entry::Structured;
+use crate::ir::agg::AggType;
 use crate::props::MemoryDef;
-use crate::structured::types::AggType;
-use crate::translation::msl_entry::Structured;
 use std::fmt::Write;
 
 /// One parameter of a function.

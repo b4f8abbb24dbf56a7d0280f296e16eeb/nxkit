@@ -131,8 +131,7 @@ fn full_opt_vs_dump() {
             host_supports_float64: true,
         };
         let mut out = String::new();
-        let mut hfm =
-            crate::xform::helper::Hfm::new(1, crate::translation::props::ShaderStage::Vertex);
+        let mut hfm = crate::helper::Hfm::new(1, crate::translation::props::ShaderStage::Vertex);
         match run_pass(&mut ir, &mut cfg.blocks, &mut env, &ctx, &mut hfm) {
             Ok(()) => text::print_blocks(&ir, 0, &cfg.blocks, &mut out),
             Err(m) => {

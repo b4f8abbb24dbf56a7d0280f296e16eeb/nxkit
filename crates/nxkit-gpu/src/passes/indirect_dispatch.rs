@@ -5,12 +5,12 @@
 //! workgroups, from the dispatch words of its driver block (`DRV_DISPATCH`). A one-thread kernel copies the three
 //! counts there right before the dispatch.
 
+use crate::encode::EncodeCtx;
 use nxkit_metal::{ComputeCommand, ComputePass, Dependency, Scope, Scratch, Stages, Visibility};
 
 use crate::bindless::{DRV_DISPATCH, PUSH_BANK};
-use crate::draws::Shared;
 use crate::programs::{BindKind, StageProgram};
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 /// The driver block pointers a job can patch.
 const SLOTS: usize = 8;
@@ -57,7 +57,7 @@ pub(super) fn job_bytes(args: u64, rec: u64, slots: &[u32]) -> [u8; JOB_BYTES] {
 /// Encodes the indirect dispatch of the counts at guest address `indirect`. The pipeline and the argument buffer `args`
 /// of the dispatch are bound by the caller's next commands, so this binds them itself after the size kernel ran.
 pub(super) fn encode(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     p: &StageProgram,

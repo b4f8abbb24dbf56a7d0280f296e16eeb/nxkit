@@ -14,9 +14,9 @@
 
 use crate::bindless::{Sink, StageInputs};
 use crate::detail::{DrawArgs, DrawDetail, Stage};
-use crate::draws::{Geom, PassCtx, Prep, Shared, cull_of, fixed};
+use crate::drawctx::{Geom, PassCtx, Prep, Shared, cull_of, fixed};
 use crate::programs::MeshKind;
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 /// The buffer slot of the first workgroup of the draw in the object and mesh functions (`nxb-xlate`
 /// `abi::MESH_FIRST_SLOT`).
@@ -30,35 +30,6 @@ pub(crate) const MAX_SPLITS: u32 = 64;
 /// The grids of an indirect draw without a task shader. The CPU does not know the count, so the pre-pass writes this
 /// many grids and the ones past the count are empty.
 pub(crate) const INDIRECT_SPLITS: u32 = 16;
-
-/// The storage buffer tables of the task and mesh stages in the driver constant segment c0 (`nxb-xlate`
-/// `abi::C0_SSBO_TS` and `C0_SSBO_MS`): a row of address (64 bits) and size (32 bits) for each of 16 slots.
-const C0_SSBO_TS: usize = 0x670;
-const C0_SSBO_MS: usize = 0x770;
-const C0_ROW: usize = 0x10;
-const C0_SSBO_SLOTS: u32 = 16;
-
-/// Writes the storage buffer table of a task or mesh stage into its driver block `b`. The shaders read the address of
-/// a storage buffer from there, and take offsets against it (the guest address, not the real one: the storage buffer
-/// itself reaches the shader through its argument word). Other stages are left as they are.
-pub(crate) fn storage_table(b: &mut [u8], inp: &StageInputs<'_>) {
-    let base = match inp.stage {
-        Stage::Task => C0_SSBO_TS,
-        Stage::Mesh => C0_SSBO_MS,
-        _ => return,
-    };
-    for s in inp
-        .sbufs
-        .iter()
-        .filter(|s| s.stage == inp.stage && s.slot < C0_SSBO_SLOTS)
-    {
-        let at = base + C0_ROW * s.slot as usize;
-        if let Some(row) = b.get_mut(at..at + 12) {
-            row[..8].copy_from_slice(&s.address.to_le_bytes());
-            row[8..].copy_from_slice(&s.size.to_le_bytes());
-        }
-    }
-}
 
 /// The number of grids of a direct draw of `count` workgroups.
 pub(crate) fn splits(count: u32, task: bool) -> u32 {
@@ -153,7 +124,7 @@ pub(crate) fn prepare(
         groups: None,
         push: d.push.as_deref(),
         blendz: match (&fs, stage) {
-            (Some(f), Stage::Fragment) => crate::translate::blend_zero_word(d, f, &pc.targets),
+            (Some(f), Stage::Fragment) => crate::drawctx::blend_zero_word(d, f, &pc.targets),
             _ => 0,
         },
     };
@@ -203,6 +174,7 @@ pub(crate) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bindless::{C0_ROW, C0_SSBO_MS, C0_SSBO_TS};
     use crate::detail::UboDetail;
 
     #[test]
@@ -244,7 +216,7 @@ mod tests {
             blendz: 0,
         };
         let mut b = vec![0u8; 0xA00];
-        storage_table(&mut b, &inp);
+        crate::bindless::storage_table(&mut b, &inp);
         let at = C0_SSBO_MS + 2 * C0_ROW;
         assert_eq!(&b[at..at + 8], &0x1234_5678_9abcu64.to_le_bytes());
         assert_eq!(&b[at + 8..at + 12], &0x40u32.to_le_bytes());

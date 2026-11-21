@@ -21,16 +21,17 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::Arc;
 
-use crate::draws::{FastMap, FastSet};
+use crate::fastmap::{FastMap, FastSet};
 
 use nxkit_metal::{GuestMemory, IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 
 use crate::bindless::Arena;
 use crate::detail::{DrawDetail, RecordingRun};
-use crate::draws::{Geom, PassCtx, Shared, prepare};
+use crate::drawctx::{Geom, PassCtx, Shared};
+use crate::draws::prepare;
 use crate::guestpools::GuestPools;
 use crate::pools::{Backing, Loc, PoolBuffer, PoolSnapshot};
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 #[cfg(test)]
 mod tests;

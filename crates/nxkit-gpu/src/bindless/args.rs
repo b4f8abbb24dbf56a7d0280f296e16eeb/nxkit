@@ -20,17 +20,17 @@ pub(crate) struct StageInputs<'a> {
     pub(crate) groups: Option<[u32; 3]>,
     /// The push constants of the draw or dispatch (bank 24), when it has any.
     pub(crate) push: Option<&'a [u8]>,
-    /// The blend word of a fragment stage (`translate::blend_zero_word`), 0 for every other stage.
+    /// The blend word of a fragment stage (`draws::blend_zero_word`), 0 for every other stage.
     pub(crate) blendz: u32,
 }
 
 /// What the argument buffers need besides the bindings.
 pub(crate) struct Env<'a> {
-    pub(crate) handles: &'a crate::draws::FastMap<u64, Resolved>,
+    pub(crate) handles: &'a crate::fastmap::FastMap<u64, Resolved>,
     /// The views of [`Handles::fits`].
-    pub(crate) fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
+    pub(crate) fits: &'a crate::fastmap::FastMap<(u64, nxkit_metal::TextureKind), u64>,
     /// The views of [`Handles::images`].
-    pub(crate) images: &'a crate::draws::FastMap<ImageKey, ImageRes>,
+    pub(crate) images: &'a crate::fastmap::FastMap<ImageKey, ImageRes>,
     /// The raw global memory table and logs.
     pub(crate) gmem: crate::gmem::GmemEnv<'a>,
     pub(crate) pools: (u64, u64),
@@ -68,7 +68,7 @@ fn drv_block(b: &mut Vec<u8>, inp: &StageInputs<'_>, ubos: &[UboWord]) {
         }
     }
     put_u32(b, DRV_BASE_INSTANCE, inp.base_instance);
-    crate::mesh::storage_table(b, inp);
+    storage_table(b, inp);
     if let Some(g) = inp.groups {
         for (i, v) in g.iter().enumerate() {
             put_u32(b, DRV_DISPATCH + 4 * i, *v);
@@ -191,7 +191,7 @@ fn ubo_words<B: Backing>(
                 guest: u.address,
                 size: u.size,
             },
-            None => match locate(pools, u.address, u.size, crate::overlay::UBO) {
+            None => match locate(pools, u.address, u.size, crate::pools::overlay::UBO) {
                 Some((real, size)) => UboWord {
                     slot: u.slot,
                     word: real,
@@ -231,10 +231,10 @@ fn sbuf_word<B: Backing>(
     }
     match &s.snapshot {
         Some(bytes) if !rw => put(bytes),
-        _ => {
-            Ok(locate(pools, s.address, s.size, crate::overlay::SBUF)
-                .map_or(zero, |(real, _)| real))
-        }
+        _ => Ok(
+            locate(pools, s.address, s.size, crate::pools::overlay::SBUF)
+                .map_or(zero, |(real, _)| real),
+        ),
     }
 }
 
@@ -432,4 +432,33 @@ fn build_args_in(
         put_u64(args, at, v);
     }
     sink.put(args)
+}
+
+/// The storage buffer tables of the task and mesh stages in the driver constant segment c0 (`nxb-xlate`
+/// `abi::C0_SSBO_TS` and `C0_SSBO_MS`): a row of address (64 bits) and size (32 bits) for each of 16 slots.
+pub(crate) const C0_SSBO_TS: usize = 0x670;
+pub(crate) const C0_SSBO_MS: usize = 0x770;
+pub(crate) const C0_ROW: usize = 0x10;
+pub(crate) const C0_SSBO_SLOTS: u32 = 16;
+
+/// Writes the storage buffer table of a task or mesh stage into its driver block `b`. The shaders read the address of
+/// a storage buffer from there, and take offsets against it (the guest address, not the real one: the storage buffer
+/// itself reaches the shader through its argument word). Other stages are left as they are.
+pub(crate) fn storage_table(b: &mut [u8], inp: &StageInputs<'_>) {
+    let base = match inp.stage {
+        Stage::Task => C0_SSBO_TS,
+        Stage::Mesh => C0_SSBO_MS,
+        _ => return,
+    };
+    for s in inp
+        .sbufs
+        .iter()
+        .filter(|s| s.stage == inp.stage && s.slot < C0_SSBO_SLOTS)
+    {
+        let at = base + C0_ROW * s.slot as usize;
+        if let Some(row) = b.get_mut(at..at + 12) {
+            row[..8].copy_from_slice(&s.address.to_le_bytes());
+            row[8..].copy_from_slice(&s.size.to_le_bytes());
+        }
+    }
 }

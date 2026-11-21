@@ -1,7 +1,7 @@
 //! `InstEmitNop.cs`, `InstEmitBarrier.cs`, `InstEmitBitfield.cs` and the not-implemented instructions of `InstEmit.cs`.
 
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper::*;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::Opd;
 use crate::maxwell::enums::*;
 use crate::maxwell::insts::*;

@@ -21,6 +21,7 @@ pub trait PictureSink: Send + Sync {
     fn read_nv12(&self, frame: u64, luma: u64, chroma: u64, width: u32, height: u32);
 }
 
+// Process-wide (W26): the Neural Engine feeder of `nxkit-gpu`; the decoder threads that the guest starts call it.
 static SINK: OnceLock<Arc<dyn PictureSink>> = OnceLock::new();
 
 /// Sets the sink. The first call counts, later ones are ignored.

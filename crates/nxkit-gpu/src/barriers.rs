@@ -9,7 +9,7 @@
 //! A barrier after queue stages also covers the passes of earlier command buffers on the same queue. This is assumed
 //! from the Metal 4 documentation and is not verified on hardware.
 
-use crate::draws::{FastMap, FastSet};
+use crate::fastmap::{FastMap, FastSet};
 
 use nxkit_metal::{Dependency, Scope, Stages, Visibility};
 use nxkit_nvn::frame::{Cmd, Frame};

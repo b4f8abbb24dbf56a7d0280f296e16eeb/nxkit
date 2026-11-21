@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 use crate::pools::{PagePins, PoolSet};
 
 #[derive(Clone)]

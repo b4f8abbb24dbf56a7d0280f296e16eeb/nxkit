@@ -97,6 +97,12 @@ pub struct Settings {
     /// clock of the host (`mach_absolute_time` in nanoseconds), the base of the system tick and of the GPU times in
     /// the reports.
     pub clock_ns: fn() -> u64,
+    /// What the command buffer group does differently for the title.
+    pub commands: super::CommandSettings,
+    /// The settings of the procs from the `NXKIT_*` environment.
+    pub env: crate::settings::RtSettings,
+    /// What the screen showed of the presents: the backend writes it, the present reads it (W26).
+    pub screen: std::sync::Arc<nxkit_nvn::screen::Screen>,
 }
 
 impl Default for Settings {
@@ -107,6 +113,9 @@ impl Default for Settings {
             shader_key_skip: None,
             gpu_code: (1, 16),
             clock_ns: nxkit_hos::sys::monotonic_ns,
+            commands: super::CommandSettings::default(),
+            env: crate::settings::RtSettings::default(),
+            screen: std::sync::Arc::default(),
         }
     }
 }
@@ -131,6 +140,7 @@ impl fmt::Display for InstallError {
 
 impl std::error::Error for InstallError {}
 
+// Process-wide (W26): the NVN context root: every NVN proc is a C function of the guest and finds its state here.
 static GPU: OnceLock<Gpu> = OnceLock::new();
 
 /// Installs the GPU context. The host calls it once, after `nxkit_abi::guest::set_range`.
@@ -142,14 +152,15 @@ pub fn install(backend: Arc<dyn Backend>, settings: Settings) -> Result<(), Inst
     let space = LinearSpace::new(base, backend.gpu_base(), len).map_err(InstallError::Space)?;
     GPU.set(Gpu::new(space, backend, settings))
         .map_err(|_| InstallError::AlreadyInstalled)?;
-    // The video service writes decoded pictures into native images itself; the textures over them load again.
-    nxkit_svc_video::set_guest_write_hook(|addr, len| {
-        if let Some(g) = GPU.get() {
-            g.guest_wrote_deferred(addr, len);
-        }
-    });
-    super::wire::wire();
     Ok(())
+}
+
+/// A service wrote `[addr, addr + len)` of guest memory itself: the textures over it load again. Nothing happens before
+/// [`install`]. The host gives it to the video service.
+pub fn guest_wrote(addr: u64, len: u64) {
+    if let Some(g) = GPU.get() {
+        g.guest_wrote_deferred(addr, len);
+    }
 }
 
 /// The installed context. A call before [`install`] ends the game with the name of the function.
@@ -184,6 +195,8 @@ pub(crate) struct Gpu {
     space: LinearSpace,
     backend: Arc<dyn Backend>,
     settings: Settings,
+    /// What the command buffer group needs of the texture and sampler groups (`nvn/wire.rs`).
+    pub(crate) seam: &'static dyn super::cmdbuf::Seam,
     flushed: AtomicU64,
     /// The work that waits for a signal of another queue (`gate`). Taken after the front lock, never before it.
     gate: Mutex<gate::Gate>,
@@ -218,14 +231,19 @@ impl fmt::Debug for Gpu {
 impl Gpu {
     /// A context over `space`. [`install`] builds the space from the guest range.
     pub(crate) fn new(space: LinearSpace, backend: Arc<dyn Backend>, settings: Settings) -> Self {
+        let env = settings.env;
         Self {
             front: Mutex::new(FrontEnd::new(space, GuestMemory)),
             space,
             backend,
             settings,
+            seam: &super::wire::WIRED,
             flushed: AtomicU64::new(0),
-            gate: Mutex::new(gate::Gate::new(order::ordering_on())),
-            release_flush: order::release_flush_config(),
+            gate: Mutex::new(gate::Gate::new(env.queue_order)),
+            release_flush: order::ReleaseFlush {
+                on: env.release_flush,
+                min_work: env.release_flush_min,
+            },
             pending_writes: Mutex::new(Vec::new()),
             pending_recorded: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),

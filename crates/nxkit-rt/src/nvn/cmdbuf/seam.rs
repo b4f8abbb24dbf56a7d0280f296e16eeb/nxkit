@@ -2,10 +2,8 @@
 //!
 //! The groups are filled by different parts of the host. The command buffer group reads three things from them: the id
 //! base of a descriptor pool, the GPU address of a texture and, for the draw state that the pass analysis follows,
-//! three bits of the guest state objects. This module names them. `install` sets one [`Seam`] with [`set_seam`]
-//! (refer to `nvn/wire.rs`). A call before that ends the game with the name of the missing piece (R15).
-
-use std::sync::OnceLock;
+//! three bits of the guest state objects. This module names them. the installed context holds one [`Seam`] (`Gpu::seam`,
+//! refer to `nvn/wire.rs`). A call before that ends the game with the name of the missing piece (R15).
 
 use crate::nvn::abi::{AbiResult, other};
 use crate::nvn::ctx::gpu;
@@ -43,16 +41,9 @@ impl Seam for Unwired {
     }
 }
 
-static SEAM: OnceLock<&'static dyn Seam> = OnceLock::new();
-
-/// Sets the seam. False when one is set already.
-pub(crate) fn set_seam(seam: &'static dyn Seam) -> bool {
-    SEAM.set(seam).is_ok()
-}
-
-/// The seam. A load, no lock.
+/// The seam of the installed context (`Gpu::seam`, set by `install`), or one that answers with an error before it.
 pub(super) fn seam() -> &'static dyn Seam {
-    SEAM.get().copied().unwrap_or(&Unwired)
+    crate::nvn::ctx::installed().map_or(&Unwired, |g| g.seam)
 }
 
 /// Checks that `len` bytes at the host address `host` are guest memory that the front end knows. Takes the lock of the

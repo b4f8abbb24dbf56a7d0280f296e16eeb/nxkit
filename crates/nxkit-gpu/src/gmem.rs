@@ -131,7 +131,10 @@ fn resolve_all<B: Backing>(
             continue;
         };
         let guest = at.real.wrapping_sub(s);
-        let Some(o) = snapshot.overlay().filter(|o| !o.off(crate::overlay::GMEM)) else {
+        let Some(o) = snapshot
+            .overlay()
+            .filter(|o| !o.off(crate::pools::overlay::GMEM))
+        else {
             out.push((s, e, guest));
             continue;
         };

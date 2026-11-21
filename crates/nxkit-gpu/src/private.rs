@@ -28,7 +28,7 @@
 //! - the pages a frame writes lose all access at its flush and stay tagged: guest memory is stale. A CPU access
 //!   waits for the batch if it still runs, then copies the page from the mirror and goes on (`nxkit-metal` `pages`);
 //! - every site that turns a guest address into a GPU address finds the mirror through the overlay of the frame's pool
-//!   snapshot ([`crate::overlay`], [`crate::pools::PoolSnapshot::resolve`]); the table of raw global memory is split at
+//!   snapshot ([`crate::pools::overlay`], [`crate::pools::PoolSnapshot::resolve`]); the table of raw global memory is split at
 //!   the member pages.
 //!
 //! Step 3 answers the waits for fences when the flush has run, not when the GPU is done (`GpuBackend::wait_early`): the
@@ -63,11 +63,11 @@ use nxkit_metal::{
 };
 
 use crate::detail::{CopyKind, DrawArgs, FrameDetail, Stage, StreamDetail};
-use crate::draws::FastMap;
-use crate::overlay::{LateCopies, Overlay, PAGE, Run, Staged};
+use crate::fastmap::FastMap;
 use crate::pipelines::Pipelines;
+use crate::pools::overlay::{LateCopies, Overlay, PAGE, Run, Staged};
 use crate::programs::{BindKind, Programs};
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 mod copyin;
 mod early;
@@ -142,10 +142,10 @@ pub(crate) fn mode() -> Mode {
         return m;
     }
     static MODE: OnceLock<Mode> = OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("NXKIT_PRIVATE") {
-        Ok(v) if v == "track" => Mode::Track,
-        Ok(v) if v == "1" => Mode::Mirror,
-        Ok(v) if !v.is_empty() && v != "0" => {
+    *MODE.get_or_init(|| match crate::settings::env().private.as_deref() {
+        Some("track") => Mode::Track,
+        Some("1") => Mode::Mirror,
+        Some(v) if !v.is_empty() && v != "0" => {
             eprintln!("nxkit-gpu: NXKIT_PRIVATE={v} is not a mode that exists, only `track` and `1` do; it stays off");
             Mode::Off
         }
@@ -436,21 +436,15 @@ pub(crate) fn early() -> bool {
 /// How many frames the CPU may run ahead of the GPU (`NXKIT_PRIVATE_AHEAD`, default 1, at most the batch ring): a wait for
 /// fence N returns once the flush of N is captured and frame N - n is complete. 0 is the honest wait.
 pub(crate) fn run_ahead() -> u64 {
-    static N: OnceLock<u64> = OnceLock::new();
-    *N.get_or_init(|| {
-        std::env::var("NXKIT_PRIVATE_AHEAD")
-            .ok()
-            .and_then(|v| v.trim().parse::<u64>().ok())
-            .unwrap_or(1)
-            .min(nxkit_metal::BATCHES_IN_FLIGHT as u64)
-    })
+    crate::settings::env()
+        .private_ahead
+        .min(nxkit_metal::BATCHES_IN_FLIGHT as u64)
 }
 
 /// True when the CPU sees the GPU's results one frame late (`NXKIT_PRIVATE_LATE`, default on; 0 turns it off and a CPU access
 /// to bytes a frame in flight writes waits for the frame again).
 pub(crate) fn late_results() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| !std::env::var("NXKIT_PRIVATE_LATE").is_ok_and(|v| v.trim() == "0"))
+    crate::settings::env().private_late
 }
 
 /// A fence wait was answered at the flush.

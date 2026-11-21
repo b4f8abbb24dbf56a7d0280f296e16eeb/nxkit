@@ -2,9 +2,9 @@
 //! operation (small integers, atomics that cannot be inlined, addresses that may point to several storage buffers).
 //! The raw form (address traced to no storage buffer, reads a memory pool table) stays fail-closed.
 use super::Env;
+use crate::helper::{B, Function};
 use crate::ir::{Inst, Opd, StorageKind};
 use crate::translation::host;
-use crate::xform::helper::{B, Function};
 
 type R<T> = Result<T, String>;
 

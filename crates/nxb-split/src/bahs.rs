@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::SplitError;
-use crate::shaders::{
+use crate::prim::{
     CS_MAGIC, CTL_MAGIC, Found, GFX_MAGIC, check, ctl_len, nvn2_ctl, sph_stage, u32le,
 };
 

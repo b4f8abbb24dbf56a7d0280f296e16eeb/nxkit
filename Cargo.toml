@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "titles/nxtitle", "titles/nxtitles", "titles/families/*", "titles/games/*", "xtask"]
 
 [workspace.package]
-version = "0.10.3"
+version = "0.11.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -39,7 +39,6 @@ nxkit-gpu = { path = "crates/nxkit-gpu" }
 nxkit-native-plan = { path = "crates/nxkit-native-plan" }
 nxkit-ndve = { path = "crates/nxkit-ndve" }
 nxkit-ndsr = { path = "crates/nxkit-ndsr" }
-nxkit-host = { path = "crates/nxkit-host" }
 nxkit-svc-system = { path = "crates/nxkit-svc-system" }
 nxtitle = { path = "titles/nxtitle" }
 nxtitles = { path = "titles/nxtitles" }
@@ -202,23 +201,15 @@ nxb-error = { path = "crates/nxb-error" }
 nxb-sys = { path = "crates/nxb-sys" }
 nxb-pyjson = { path = "crates/nxb-pyjson" }
 nxb-shader = { path = "crates/nxb-shader" }
-nxb-air = { path = "crates/nxb-air" }
-nxb-crypto = { path = "crates/nxb-crypto" }
 nxb-codec = { path = "crates/nxb-codec" }
 nxb-a64 = { path = "crates/nxb-a64" }
-nxb-plist = { path = "crates/nxb-plist" }
-nxb-hos = { path = "crates/nxb-hos" }
 nxb-romfs = { path = "crates/nxb-romfs" }
 nxb-rewrite = { path = "crates/nxb-rewrite" }
 nxb-split = { path = "crates/nxb-split" }
-nxb-bundle = { path = "crates/nxb-bundle" }
-nxb-zip = { path = "crates/nxb-zip" }
-nxb-pso = { path = "crates/nxb-pso" }
 nxb-obs = { path = "crates/nxb-obs" }
 nxb-tool = { path = "crates/nxb-tool" }
 nxb-store = { path = "crates/nxb-store" }
 nxb-sched = { path = "crates/nxb-sched" }
-nxb-io = { path = "crates/nxb-io" }
 nxb-stages = { path = "crates/nxb-stages" }
 nxb-testkit = { path = "crates/nxb-testkit" }
 nxb-extract = { path = "crates/nxb-extract" }
@@ -226,7 +217,6 @@ nxb-pack = { path = "crates/nxb-pack" }
 nxb-archive = { path = "crates/nxb-archive" }
 nxb-build = { path = "crates/nxb-build" }
 nxb-profile = { path = "crates/nxb-profile" }
-nxb-xlatedev = { path = "crates/nxb-xlatedev" }
 nxb-xlate = { path = "crates/nxb-xlate" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
 objc2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }

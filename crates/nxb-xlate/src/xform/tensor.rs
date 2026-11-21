@@ -8,9 +8,9 @@
 //! SIMD-group's registers from one call to the next and to load A where its LDSM read it. `MatrixLoad` (one matrix of
 //! an LDSM in a compute shader) becomes its per-lane code here, after `prepare` has seen which HMMAs it feeds.
 use super::XformCtx;
-use super::helper::{B, Function};
 use super::uniformity::Uniformity;
 use crate::emit::ampere::tensor::{LaneSink, ldsm_lane};
+use crate::helper::{B, Function};
 use crate::ir::{Block, Inst, IoVariable, Ir, NodeId, Opd, OperandType, StorageKind};
 use std::collections::HashMap;
 

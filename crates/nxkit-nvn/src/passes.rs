@@ -20,10 +20,9 @@ fn options() -> u8 {
     if v != OPT_UNSET {
         return v;
     }
-    let raw = std::env::var("NXKIT_KNOB").unwrap_or_default();
-    let has = |name: &str| raw.split(',').any(|k| k.trim() == name);
-    let v = (u8::from(has("nopassmerge")) * OPT_NO_MERGE)
-        | (u8::from(has("noloadstore")) * OPT_NO_LOADSTORE);
+    let s = crate::settings::settings();
+    let v = (u8::from(s.knob_no_pass_merge) * OPT_NO_MERGE)
+        | (u8::from(s.knob_no_loadstore) * OPT_NO_LOADSTORE);
     // A host that called `set_options` meanwhile wins.
     let _ = OPTIONS.compare_exchange(OPT_UNSET, v, Ordering::Relaxed, Ordering::Relaxed);
     OPTIONS.load(Ordering::Relaxed)

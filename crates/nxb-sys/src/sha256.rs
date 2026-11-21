@@ -1,7 +1,7 @@
 //! Hardware SHA-256 block compression (ARMv8 SHA2 instructions), detected at run time.
 //!
 //! Output-neutral: it computes exactly the FIPS 180-4 compression function, so it never changes a digest.`nxb-model`
-//! checks it against the same vectors as its scalar path (workspace-layout ADR W17). Callers fall back to their own
+//! checks it against the same vectors as its scalar path (decisions.md W17). Callers fall back to their own
 //! scalar code when [`compress_blocks`] returns `false`.
 
 /// True when this CPU has the SHA2 instructions (checked once).

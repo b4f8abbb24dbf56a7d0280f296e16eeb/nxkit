@@ -20,7 +20,7 @@ Use packages from your own dumps only.
 
 ### Rules for all readers
 
-- Only `nxb-sys` can contain `unsafe` code. All other crates use `forbid(unsafe_code)`.
+- Only the crates and modules that rule 5 of [architecture.md](architecture.md#layers) names can contain `unsafe` code. The other crates forbid or deny `unsafe_code` in their `Cargo.toml`.
 - Clippy denies `unwrap`, `expect` and `panic!` outside tests. A reader returns a typed error.
 - Integer reads from a byte slice go through helpers that return zero or an error when the slice is too short.
 

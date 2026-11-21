@@ -7,10 +7,10 @@ use super::Varying;
 use super::emit::{R, Shader};
 use super::ioidx;
 use super::types::msl_type;
+use crate::ir::agg::AggType;
 use crate::ir::{IoVariable, StorageKind};
 use crate::props::Props;
 use crate::structured::StructInfo;
-use crate::structured::types::AggType;
 use std::collections::BTreeSet;
 
 /// A built-in that is an entry parameter.

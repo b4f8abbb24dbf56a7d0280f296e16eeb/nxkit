@@ -6,10 +6,10 @@ use super::inst_tex::{DERIVATIVES, INT_COORDS, LOD_LEVEL, OFFSET};
 use super::tests::{B, F4};
 use crate::attr::Stage;
 use crate::driver::TexInfo;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::TextureDef;
 use crate::structured::ast::{A, AstTex};
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 
 const NAME: &str = "fp_t_3";

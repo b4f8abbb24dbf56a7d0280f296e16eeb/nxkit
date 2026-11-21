@@ -13,7 +13,11 @@ use std::sync::{Arc, PoisonError, RwLock};
 use nxkit_metal::{Context, ShaderLibrary, VertexFormat};
 
 use crate::json::{Json, parse};
-use crate::stats::Skip;
+use crate::skip::Skip;
+
+/// The entries of `render_scale` in the support buffer: entry 0 is the scale of the pass, entry `1 + i` the scale of
+/// descriptor `i`.
+pub(crate) const SUPPORT_SCALES: u32 = 73;
 
 /// What a binding of the argument buffer holds. The names are the `kind` strings of `_b.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,7 +42,7 @@ pub(crate) enum BindKind {
     Support,
     /// `border`: the border colour block.
     Border,
-    /// `blendz`: the blend word of the draw (`translate::blend_zero_word`), 4 bytes.
+    /// `blendz`: the blend word of the draw (`draws::blend_zero_word`), 4 bytes.
     BlendZ,
     /// `sbuf`: the GPU address of storage buffer `reg`.
     Sbuf,
@@ -196,7 +200,7 @@ pub(crate) struct StageProgram {
     pub(crate) mesh: Option<MeshInfo>,
 }
 
-type ProgramMap = crate::draws::FastMap<String, Result<Arc<StageProgram>, Skip>>;
+type ProgramMap = crate::fastmap::FastMap<String, Result<Arc<StageProgram>, Skip>>;
 
 /// Reads and caches the programs of one shader directory.
 pub(crate) struct Programs {
@@ -405,7 +409,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
                 .get("rscale")
                 .and_then(Json::as_i64)
                 .and_then(|v| u32::try_from(v).ok())
-                .filter(|v| *v < crate::bindless::SUPPORT_SCALES),
+                .filter(|v| *v < SUPPORT_SCALES),
             BindKind::Support => pass_scale.then_some(0),
             _ => None,
         };

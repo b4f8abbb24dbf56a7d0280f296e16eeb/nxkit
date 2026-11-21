@@ -56,7 +56,7 @@ pub(super) fn describe_pass(
     frame: &Frame,
     plan: &PassPlan,
     detail: &FrameDetail,
-    ords: &[crate::draws::Ordinal],
+    ords: &[crate::ordinal::Ordinal],
     textures: &FastMap<TexId, Res>,
     i: usize,
 ) -> String {

@@ -4,7 +4,7 @@
 //! Strings are escaped like Python's `json.dumps(..., ensure_ascii=False)`: non-ASCII stays as UTF-8, control characters
 //! become `\n`, `\t`, … or `\u00xx`. The front ends' existing stream (`stage`, `step`, `progress`, `stage_end`, `say`) is
 //! mapped from these events in `nxb-stages`, its byte format goes through `nxb-pyjson` when `nxb build` replaces the Python
-//! entry (workspace-layout 5.6).
+//! entry (decisions.md W5).
 //!
 //! Later in this crate: logfmt log, Chrome trace, `_b_build_metrics.json`.
 

@@ -7,8 +7,9 @@
 //! The gate acts at the points where a guest thread starts, wakes up or blocks. It cannot stop a thread that runs
 //! guest code without a svc, and it does not move threads between cores.
 
+use crate::sync::lock;
 use crate::sys;
-use crate::thread::{Thread, lock};
+use crate::thread::Thread;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;

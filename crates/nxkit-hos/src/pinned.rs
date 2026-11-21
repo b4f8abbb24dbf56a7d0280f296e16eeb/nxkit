@@ -20,7 +20,7 @@
 //! of the `k` hits. Both are `O(n)` at worst, which is a few thousand steps. `NXKIT_GUEST_KEEP=0` is read by the host
 //! (`nxkit-host`), which then pins nothing.
 
-use crate::thread::lock;
+use crate::sync::lock;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};

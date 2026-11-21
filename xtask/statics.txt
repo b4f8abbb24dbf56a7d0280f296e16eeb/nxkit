@@ -1,0 +1,20 @@
+# The process-wide statics of each runtime crate (W26): a `static` whose type names OnceLock, OnceCell, LazyLock, Mutex,
+# RwLock, Condvar or an Atomic*. `cargo run -p xtask -- statics` fails when a crate has more (own the state in a context,
+# or give the reason at the static and raise the number in the same commit) and when it has fewer (lower the number).
+# Most of them are reached from the guest boundary (a C function of the game has no Rust context), from a signal
+# handler or a Metal completion handler, or are counters and once-guards of the diagnostics.
+
+nxkit-abi: 6
+nxkit-gpu: 121
+nxkit-hos: 19
+nxkit-host: 15
+nxkit-metal: 19
+nxkit-nvn: 31
+nxkit-rt: 67
+nxkit-svc-audio: 19
+nxkit-svc-fs: 4
+nxkit-svc-input: 11
+nxkit-svc-offline: 1
+nxkit-svc-pacing: 3
+nxkit-svc-system: 54
+nxkit-svc-video: 23

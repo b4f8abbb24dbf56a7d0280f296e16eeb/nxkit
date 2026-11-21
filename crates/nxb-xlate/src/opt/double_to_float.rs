@@ -1,8 +1,8 @@
 //! `DoubleToFloat`: float64 operations become float32 ones when the host has no float64 support, and the packing and
 //! unpacking of doubles go through the soft float helper functions.
 use super::utils;
+use crate::helper::{HelperName, Hfm};
 use crate::ir::{Block, Inst, Ir, StorageKind};
-use crate::xform::helper::{HelperName, Hfm};
 
 type R<T> = Result<T, String>;
 

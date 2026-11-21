@@ -3,7 +3,7 @@
 
 use crate::SplitError;
 use crate::glslc::{glslc_shaders, stage};
-use crate::shaders::{Found, check, find_all, u32le};
+use crate::prim::{Found, check, find_all, u32le};
 
 fn red<T>(m: String) -> Result<T, SplitError> {
     Err(SplitError::Red(m))

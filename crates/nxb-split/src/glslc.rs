@@ -2,7 +2,7 @@
 //! `nvn2_stage` of `shader_split.py`): whole outputs found by their magic in any file no other reader takes.
 
 use crate::SplitError;
-use crate::shaders::{
+use crate::prim::{
     CS_MAGIC, CTL_MAGIC, Found, GFX_MAGIC, check, find_all, memfind, nvn2_ctl, sph_stage, u32le,
 };
 

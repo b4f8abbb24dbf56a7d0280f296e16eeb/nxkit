@@ -24,10 +24,21 @@ use std::fmt;
 use crate::cmdbuf::CommandHandle;
 use crate::descriptors::Descriptors;
 use crate::frame::Frame;
-use crate::front::FlushReason;
 use crate::passes::PassPlan;
 use crate::resource::{ResourceTable, TexId, TextureRecord};
 use crate::tic::Tsc;
+
+/// Why a frame ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlushReason {
+    /// The game presented.
+    Present,
+    /// The CPU waits for the GPU, for a fence, a finish or a read back.
+    CpuWait,
+    /// A CPU event signal released held submits with a lot of work: the frame goes to the GPU before the present, so the
+    /// encode starts earlier (`NXKIT_RELEASE_FLUSH`).
+    Release,
+}
 
 /// A failure that the backend reports. The text is for the log.
 #[derive(Clone, Debug, PartialEq, Eq)]

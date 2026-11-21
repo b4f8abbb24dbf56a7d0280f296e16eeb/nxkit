@@ -17,7 +17,7 @@ use nxkit_nvn::format::format_info;
 use nxkit_nvn::resource::TextureRecord;
 
 use super::{Transfer, staging};
-use crate::stats::Skip;
+use crate::skip::Skip;
 use crate::textures::Res;
 
 /// True for a format whose upload goes through a buffer: compressed formats and the depth and stencil formats that a

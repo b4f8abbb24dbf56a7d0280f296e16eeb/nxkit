@@ -1,8 +1,8 @@
 //! `InstEmitIntegerComparison.cs`, `InstEmitIntegerMinMax.cs`.
 
 use super::helper::*;
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper::*;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::inst::Inst;
 use crate::ir::ops::{FALSE, Opd, TRUE, regtype};
 use crate::maxwell::enums::*;

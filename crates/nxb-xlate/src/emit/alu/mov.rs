@@ -1,8 +1,8 @@
 //! `InstEmitMove.cs`.
 
 use crate::attr::Stage;
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper::*;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::inst::{IoVariable, StorageKind};
 use crate::ir::ops::{Opd, regtype};
 use crate::maxwell::enums::*;

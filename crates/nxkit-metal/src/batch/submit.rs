@@ -34,6 +34,7 @@ impl Batch {
             ctx: self.ctx.clone(),
             done: self.done.clone(),
             metrics: self.metrics.clone(),
+            hooks: self.hooks,
             remaining: AtomicUsize::new(bounds.len()),
             state: Mutex::new(SplitState {
                 finished: vec![false; bounds.len()],

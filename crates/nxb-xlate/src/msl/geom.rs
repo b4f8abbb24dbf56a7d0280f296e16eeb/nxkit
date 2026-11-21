@@ -12,8 +12,8 @@ use super::geom_reader;
 use super::library;
 use super::refl::Reflection;
 use super::{Context, Library, Translated};
+use crate::front::msl_entry::structure_job;
 use crate::job::Job;
-use crate::translation::msl_entry::structure_job;
 use nxb_pyjson::Value;
 
 /// The number of input topologies: points, lines, lines with adjacency, triangles, triangles with adjacency.

@@ -1,7 +1,7 @@
 //! `Translator.EmitOpsAmpere` and `DeferAmpereWrites`: guards and the scoreboard model with deferred register writes.
 
 use crate::emit;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::inst::{Inst, StorageKind};
 use crate::ir::ops::{OperandType, regtype};
 use crate::ir::{NodeId, Opd};

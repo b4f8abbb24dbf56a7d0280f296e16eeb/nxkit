@@ -1,6 +1,6 @@
 # The NVN front end (`nxkit-nvn`)
 
-`nxkit-nvn` is the first part of the GPU of the nxkit host. It is a pure Rust crate. It has no Metal code, no FFI and no dependency.
+`nxkit-nvn` is the first part of the GPU of the nxkit host. It is a pure Rust crate. It has no Metal code and no FFI. It depends only on `nxkit-abi` (the settings snapshot) and `foldhash`.
 It is not wired into `nxkit-rt` or the host yet. No game has run through it. Refer to [plans/nxkit-host.md](plans/nxkit-host.md) for the plan.
 
 ## Guest memory and GPU addresses
@@ -158,7 +158,7 @@ The group reads the guest state structs itself and writes the draw state patch i
 
 ### Title needs
 
-`set_command_settings` takes `CommandSettings`. The host sets it from the needs of the title before the game runs. `ignore_null_stream_binds` is the need `vertex_stream_null_bind`. When it is set, a bind of one null range at a stream of 16 or more is ignored. Otherwise a stream of 16 or more stops the game.
+`nvn::Settings::commands` holds the `CommandSettings`. The host fills it from the needs of the title and hands it to `nvn::install` before the game runs. `ignore_null_stream_binds` is the need `vertex_stream_null_bind`. When it is set, a bind of one null range at a stream of 16 or more is ignored. Otherwise a stream of 16 or more stops the game.
 
 ### Timestamps
 

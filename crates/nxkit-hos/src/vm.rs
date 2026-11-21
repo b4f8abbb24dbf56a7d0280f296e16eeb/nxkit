@@ -254,11 +254,11 @@ impl Vm {
     }
 
     pub(crate) fn tls_acquire(&self) -> Option<u64> {
-        crate::thread::lock(&self.tls_free).pop()
+        crate::sync::lock(&self.tls_free).pop()
     }
 
     pub(crate) fn tls_release(&self, slot: u64) {
-        crate::thread::lock(&self.tls_free).push(slot);
+        crate::sync::lock(&self.tls_free).push(slot);
     }
 
     /// Takes `size` bytes of the shared-memory backing, rounded up to whole host pages. `None` when it is used up.

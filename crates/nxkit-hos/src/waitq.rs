@@ -1,6 +1,7 @@
 //! Waiter lists per guest address, in a table of small locks. Two addresses in different shards never share a lock.
 
-use crate::thread::{Thread, lock};
+use crate::sync::lock;
+use crate::thread::Thread;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};

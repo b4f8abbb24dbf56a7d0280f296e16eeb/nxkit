@@ -4,6 +4,8 @@
 //! It encodes each flushed frame and queues each presented frame. The [`Pacer`] of `nxkit-metal` picks, on each tick of
 //! the display link, which queued frame to show, and the backend blits it into the drawable.
 
+use crate::hostenv::RunSettings;
+use nxkit_nvn::screen::Screen;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -38,7 +40,12 @@ const SHADERS: &str = "shaders";
 
 /// The settings of the GPU backend, from the keys of `game.json` that the encoder uses. `enc_thread` moves the encode
 /// of each frame to a thread of its own. A game of the Switch 2 gets its order inside a GOB.
-pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
+pub fn gpu_settings(
+    root: &Path,
+    settings: &Settings,
+    run: &RunSettings,
+    screen: &Arc<Screen>,
+) -> GpuSettings {
     GpuSettings {
         shader_dir: root.join(SHADERS),
         // The archive is loaded whenever the build made one: `pso_mtl4` came from the engine's profiles, and a title
@@ -52,28 +59,26 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
         // for the first pipeline in it. `NXKIT_ARCHIVE_SHARDS=0` ignores them and loads the single archive, if any.
         archive_shards: {
             let dir = root.join(SHARDS);
-            let on = std::env::var("NXKIT_ARCHIVE_SHARDS").is_ok_and(|v| v == "0" || v == "off");
+            let on = run.host.archive_shards_off;
             (!on && dir.join(nxkit_abi::shards::INDEX_FILE).is_file()).then_some(dir)
         },
         // `NXKIT_SHARD_LRU` sets how many shards stay open. Zero is 32.
-        open_shards: std::env::var("NXKIT_SHARD_LRU")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
+        open_shards: run.host.shard_lru,
         // Zero picks the number of encode threads from the cores. `NXKIT_ENCODE_THREADS` sets it by hand.
-        threads: std::env::var("NXKIT_ENCODE_THREADS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
+        threads: run.host.encode_threads,
         // Scaling is off until every attachment of a pass gets the same scale decision.
-        scale: std::env::var("NXKIT_SCALE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1.0),
+        scale: run.host.scale,
+        compile_bases: run.gpu_bases,
+        specialize: run.gpu_specialize,
+        // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
+        prewarm_screen: nxkit_gpu::ScreenHook(Some(Arc::new(crate::sys::loading::LoadingScreen))),
+        // The `frame` and `gateseq` traces of `nxkit-rt` time the batches of the encoder.
+        batch_hooks: nxkit_rt::nvn::batch_hooks(),
+        screen: screen.clone(),
         enc_thread: settings.enc_thread,
         overlap: settings.overlap,
         // The runtime pipeline cache: what this run compiles is kept for the next start (`crate::pipecache`).
-        runtime_cache: crate::pipecache::folder(root),
+        runtime_cache: crate::pipecache::folder(root, &run.host),
         build_id: crate::pipecache::build_id(root),
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
@@ -86,8 +91,12 @@ pub fn gpu_settings(root: &Path, settings: &Settings) -> GpuSettings {
 /// The settings of the NVN front end, from the keys of `game.json`. A game of the Switch 2 gets the API version of
 /// NVN2: 231 and the minor that the driver in its `sdk` answers, 39 when the `sdk` gives none. Games check it and make
 /// no graphics system on a mismatch. `nvn_api` of `game.json` wins over both.
-fn nvn_settings(settings: &Settings) -> nvn::Settings {
-    let mut s = nvn::Settings::default();
+fn nvn_settings(settings: &Settings, run: &RunSettings, screen: &Arc<Screen>) -> nvn::Settings {
+    let mut s = nvn::Settings {
+        env: run.rt,
+        screen: screen.clone(),
+        ..nvn::Settings::default()
+    };
     if platform::get() == Platform::Ounce {
         s.api_major = nvn::NVN2_API_MAJOR;
         s.api_minor = nvn::sdk_item(1).unwrap_or(nvn::NVN2_API_MINOR);
@@ -99,6 +108,9 @@ fn nvn_settings(settings: &Settings) -> nvn::Settings {
     if let Some((major, minor)) = settings.nvn_api {
         (s.api_major, s.api_minor) = (major, minor);
     }
+    s.commands = CommandSettings {
+        ignore_null_stream_binds: settings.vertex_stream_null_bind,
+    };
     let (offset, length) = settings.shader_key_skip;
     if length > 0 {
         s.shader_key_skip = u32::try_from(offset).ok().zip(u32::try_from(length).ok());
@@ -110,6 +122,8 @@ fn nvn_settings(settings: &Settings) -> nvn::Settings {
 /// pass the tick to the pacer. They also measure the real tick rate from the target times of the ticks.
 struct Ticks {
     pacer: Arc<Pacer>,
+    /// The refresh plan: whether frames show when ready, and the rate the link should tick at.
+    refresh: Arc<crate::refresh::Refresh>,
     /// The hold and the ticks per vsync that the pacer's source was made from.
     applied: Mutex<(u32, u32)>,
     rate: Mutex<RateTracker>,
@@ -122,8 +136,7 @@ impl FrameHooks for Ticks {
     fn display_tick(&self, tick: DisplayTick) {
         // Variable refresh (`refresh.rs`): the pacer shows a frame as soon as it is ready, on the drawable of the newest
         // tick, and ignores the hold below.
-        self.pacer
-            .set_immediate(crate::refresh::vrr_range().is_some());
+        self.pacer.set_immediate(self.refresh.vrr_range().is_some());
         nxkit_svc_input::tick();
         // `Err` means the pacing service is not initialised. The pacer then keeps the source of the plan.
         let _ = nxkit_svc_pacing::on_display_tick();
@@ -146,14 +159,14 @@ impl FrameHooks for Ticks {
         }
         let n = self.ticks.fetch_add(1, Ordering::Relaxed) + 1;
         let mut rate = self.rate.lock().unwrap_or_else(PoisonError::into_inner);
-        let generation = crate::refresh::generation();
+        let generation = self.refresh.generation();
         if self.seen.swap(generation, Ordering::Relaxed) != generation {
             rate.reset();
         }
         rate.tick(tick.target_presentation_timestamp);
         if n.is_multiple_of(60)
             && let Some(hz) = rate.hz()
-            && crate::refresh::note_measured(hz).is_some()
+            && self.refresh.note_measured(hz).is_some()
         {
             rate.reset();
         }
@@ -164,7 +177,7 @@ impl FrameHooks for Ticks {
 
 /// A present was shown at `secs` (`CACurrentMediaTime`). The variable frame step takes the time of the display from it,
 /// on the clock of the starts of frames. It does nothing unless variable refresh turned it on.
-fn shown_to_step(_present: u64, secs: f64) {
+pub(crate) fn shown_to_step(_present: u64, secs: f64) {
     let ago_ns = ((nxkit_metal::media_time() - secs).max(0.0) * 1e9) as u64;
     nxkit_svc_pacing::frame_shown(nxkit_rt::nvn::clock_ns().saturating_sub(ago_ns));
 }
@@ -175,22 +188,25 @@ pub fn install(
     memory: &Arc<GuestMemory>,
     root: &Path,
     settings: &Settings,
+    run: &RunSettings,
+    screen: &Arc<Screen>,
+    refresh: &Arc<crate::refresh::Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
-    // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
-    nxkit_gpu::set_prewarm_screen(Some(Arc::new(crate::sys::loading::LoadingScreen)));
-    let backend = GpuBackend::new(ctx, memory.clone(), &gpu_settings(root, settings));
-    nxkit_gpu::set_prewarm_screen(None);
+    let backend = GpuBackend::new(
+        ctx,
+        memory.clone(),
+        &nxkit_gpu::GpuSettings {
+            timed_present: refresh.timed_present(),
+            ..gpu_settings(root, settings, run, screen)
+        },
+    );
     let backend = backend.map_err(|e| HostError::App(format!("the GPU backend: {e}")))?;
-    nvn::install(backend.clone() as Arc<dyn Backend>, nvn_settings(settings))
-        .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
-    if !nvn::set_command_settings(CommandSettings {
-        ignore_null_stream_binds: settings.vertex_stream_null_bind,
-    }) {
-        return Err(HostError::App(
-            "the NVN command settings came after the first command buffer".into(),
-        ));
-    }
+    nvn::install(
+        backend.clone() as Arc<dyn Backend>,
+        nvn_settings(settings, run, screen),
+    )
+    .map_err(|e| HostError::App(format!("the NVN front end: {e:?}")))?;
     let plan = choose_present_plan(&PolicyInput {
         title: None,
         frame_step: false,
@@ -203,11 +219,11 @@ pub fn install(
         plan.source, plan.reason
     );
     // Set once; a second install in the same process keeps the first hook, which is the same function.
-    let _ = nxkit_nvn::screen::set_shown_hook(shown_to_step);
     let pacer = Pacer::new(plan, backend.clone());
     backend.set_pacer(pacer.clone());
     Ok(Arc::new(Ticks {
         pacer,
+        refresh: refresh.clone(),
         applied: Mutex::new((0, 0)),
         rate: Mutex::new(RateTracker::new()),
         ticks: AtomicU64::new(0),

@@ -261,3 +261,11 @@ impl TextureStore {
             .retain(|(generation, ..), _| live.contains(generation));
     }
 }
+
+/// A short key of a format for the view and block caches.
+pub(super) fn format_key(f: Format) -> u32 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    f.hash(&mut h);
+    h.finish() as u32
+}

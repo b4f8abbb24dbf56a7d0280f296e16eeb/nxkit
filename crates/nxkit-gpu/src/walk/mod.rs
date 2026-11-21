@@ -37,7 +37,7 @@ use crate::detail::{
     ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage,
     TextureBind, UboDetail,
 };
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 use objects::{Blends, Raster, StencilValues};
 use programs::Programs;
 
@@ -175,6 +175,8 @@ pub(crate) struct Walker {
     /// Whether every bound uniform buffer gets a copy (the overlap, not the `nosnap` knob). Read once per submit,
     /// because the knob lookup is a string search.
     copy_all: bool,
+    /// The `overlap` key of `game.json`.
+    game_overlap: bool,
     /// Whether the storage buffers of a draw get a copy too (the overlap, not the `nosnapsbuf` knob).
     snap_sbufs: bool,
     prof: prof::Prof,
@@ -209,6 +211,7 @@ impl Walker {
             frame_snaps: std::cell::RefCell::new(FastMap::default()),
             snap_tmp: std::cell::RefCell::new(Vec::new()),
             copy_all: false,
+            game_overlap: false,
             snap_sbufs: false,
             prof: prof::Prof::new(),
             update_bytes: Vec::new(),
@@ -216,8 +219,8 @@ impl Walker {
             track: cache::Track::new(),
             invalidations: Arc::new(Invalidations::default()),
             scratch_ranges: Vec::new(),
-            cache_on: cfg!(test) || std::env::var("NXKIT_WALK_CACHE").is_ok_and(|v| v == "1"),
-            verify: cfg!(test) || std::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
+            cache_on: cfg!(test) || crate::settings::env().walk_cache,
+            verify: cfg!(test) || crate::settings::env().verify_cache,
             bypass: false,
             undo: None,
         }
@@ -225,6 +228,12 @@ impl Walker {
     }
 
     /// Reads the switches that the snapshots depend on.
+    /// Takes the `overlap` key of `game.json`: the walk copies the bound ranges for the frame ahead.
+    pub(crate) fn set_game_overlap(&mut self, on: bool) {
+        self.game_overlap = on;
+        self.read_knobs();
+    }
+
     fn with_knobs(mut self) -> Self {
         self.read_knobs();
         self
@@ -233,7 +242,8 @@ impl Walker {
     fn read_knobs(&mut self) {
         // The CPU runs ahead of the GPU with the overlap, and with the early fences of `NXKIT_PRIVATE=1`: the bytes of
         // a bound range that is not private are copied when the work is submitted.
-        let ahead = crate::overlap::on() || (crate::private::early() && !crate::knob("privhonest"));
+        let ahead = crate::overlap::on(self.game_overlap)
+            || (crate::private::early() && !crate::knob("privhonest"));
         self.copy_all = ahead && !crate::knob("nosnap");
         self.snap_sbufs = ahead && !crate::knob("nosnapsbuf");
     }

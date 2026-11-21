@@ -208,7 +208,7 @@ fn generic_package_paths(path: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 fn generic_keys(a: &Args) -> Result<String, String> {
-    let keys = crate::extract_stage::keys(a)?;
+    let keys = super::keys(a)?;
     let key_text = std::fs::read_to_string(&keys).map_err(|e| {
         crate::exit::fail(
             6,

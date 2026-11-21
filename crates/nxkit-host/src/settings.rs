@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 
 use crate::error::Result;
+use crate::fields::{bad, field, num, text};
 use crate::json::Value;
-use crate::manifest::{bad, field, num, text};
 
 /// The keys that [`Settings`] types. Every other key of `settings` goes to `extra`.
 const TYPED: &[&str] = &[

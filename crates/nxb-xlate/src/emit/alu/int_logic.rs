@@ -1,8 +1,8 @@
 //! `InstEmitIntegerLogical.cs`, `Lop3Expression.cs`, `InstEmitShift.cs`, `InstEmitPredicate.cs`.
 
 use super::helper::*;
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper::*;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::{FALSE, Opd, TRUE, regtype};
 use crate::maxwell::enums::*;
 use crate::maxwell::insts::*;

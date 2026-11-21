@@ -1,7 +1,7 @@
 //! Thin wrappers over `emit/helper.rs` (`InstEmitHelper`) for the integer-register forms the memory family uses.
 
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::Opd;
 
 pub(super) fn get_dest(ctx: &mut EmitterContext<'_, '_>, rd: i32) -> Opd {

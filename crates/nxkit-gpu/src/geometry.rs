@@ -10,13 +10,16 @@ use nxkit_metal::{IndexType, Primitive};
 
 use crate::bindless::Sink;
 use crate::detail::{DrawArgs, DrawDetail, StreamDetail};
-use crate::draws::{Geom, Shared};
+use crate::drawctx::{Geom, Shared};
 use crate::pools::{Backing, Loc, Miss, PoolSnapshot};
-use crate::stats::Skip;
+use crate::skip::Skip;
 use crate::translate;
 
 #[cfg(test)]
 mod tests;
+
+/// The most draws of one multi-draw that the pre-pass copies. The rest are left out and counted.
+pub(crate) const MAX_MULTI: u32 = 4096;
 
 /// Why a range did not resolve, for the line of a skip.
 fn why(miss: Miss) -> String {
@@ -34,7 +37,7 @@ pub(crate) fn stream_loc<B: Backing>(
     s: &StreamDetail,
 ) -> Result<Loc, Skip> {
     pools
-        .resolve_start_c(s.address, crate::overlay::STREAM)
+        .resolve_start_c(s.address, crate::pools::overlay::STREAM)
         .map_err(|m| {
             crate::buf_skip(format_args!(
                 "stream {} addr {:#x} size {:#x}: {}",
@@ -54,7 +57,11 @@ pub(crate) fn index_loc<B: Backing>(
     width: u64,
 ) -> Result<Loc, Skip> {
     pools
-        .resolve_c(addr, u64::from(count) * width, crate::overlay::STREAM)
+        .resolve_c(
+            addr,
+            u64::from(count) * width,
+            crate::pools::overlay::STREAM,
+        )
         .map_err(|m| {
             crate::buf_skip(format_args!(
                 "index addr {addr:#x} count {count}: {}",
@@ -74,7 +81,7 @@ pub(crate) fn word_loc<B: Backing>(
         return Err("not 4 byte aligned".into());
     }
     let loc = pools
-        .resolve_c(addr, bytes, crate::overlay::STREAM)
+        .resolve_c(addr, bytes, crate::pools::overlay::STREAM)
         .map_err(why)?;
     if !loc.real.is_multiple_of(4) {
         return Err(format!("real address {:#x} not 4 byte aligned", loc.real));
@@ -102,7 +109,7 @@ pub(crate) fn index_room<B: Backing>(
     addr: u64,
 ) -> Result<(Loc, u64), Skip> {
     let loc = pools
-        .resolve_start_c(addr, crate::overlay::STREAM)
+        .resolve_start_c(addr, crate::pools::overlay::STREAM)
         .map_err(|m| crate::buf_skip(format_args!("index addr {addr:#x}: {}", why(m))))?;
     Ok((loc, loc.room.min(u64::from(u32::MAX))))
 }
@@ -204,7 +211,7 @@ pub(crate) fn geometry(
                 Geom::MultiIndirect {
                     primitive,
                     index,
-                    draws: max.min(crate::indirect::MAX_MULTI),
+                    draws: max.min(MAX_MULTI),
                 },
                 0,
             )

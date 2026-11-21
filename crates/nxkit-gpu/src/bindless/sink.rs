@@ -114,8 +114,8 @@ impl ArgsMemo {
 /// The per-batch scratch buffer as a sink.
 pub(crate) struct ScratchSink<'a> {
     scratch: &'a Scratch,
-    uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
-    preloaded: Option<&'a crate::draws::FastMap<usize, u64>>,
+    uploaded: &'a Mutex<crate::fastmap::FastMap<usize, u64>>,
+    preloaded: Option<&'a crate::fastmap::FastMap<usize, u64>>,
     memo: Option<&'a mut ArgsMemo>,
 }
 
@@ -124,7 +124,7 @@ impl<'a> ScratchSink<'a> {
     /// draws of one pass share argument buffers.
     pub(crate) fn new(
         scratch: &'a Scratch,
-        uploaded: &'a Mutex<crate::draws::FastMap<usize, u64>>,
+        uploaded: &'a Mutex<crate::fastmap::FastMap<usize, u64>>,
         memo: Option<&'a mut ArgsMemo>,
     ) -> Self {
         Self {
@@ -138,7 +138,7 @@ impl<'a> ScratchSink<'a> {
     /// Looks shared snapshots up in `preloaded` first, without a lock.
     pub(crate) fn with_preloaded(
         mut self,
-        preloaded: &'a crate::draws::FastMap<usize, u64>,
+        preloaded: &'a crate::fastmap::FastMap<usize, u64>,
     ) -> Self {
         self.preloaded = Some(preloaded);
         self

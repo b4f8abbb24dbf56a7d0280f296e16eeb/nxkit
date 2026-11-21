@@ -86,7 +86,7 @@ pub fn ast_text(info: &StructInfo) -> String {
             let k = ids.len();
             ids.insert(*l, k);
         }
-        let join = |v: &[super::types::AggType]| {
+        let join = |v: &[crate::ir::agg::AggType]| {
             v.iter()
                 .map(|x| x.0.to_string())
                 .collect::<Vec<_>>()

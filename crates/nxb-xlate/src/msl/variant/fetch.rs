@@ -10,6 +10,7 @@
 //! The engine's tools cut `_bf` from the one compile of the shader. Here `_bf` is a source of its own.
 
 use super::fetch_origin::{How, Tracer};
+use crate::front::msl_entry::Structured;
 use crate::msl::abi::Kind;
 use crate::msl::args::Res;
 use crate::msl::emit::{Em, Options, R, Shader, Shared};
@@ -19,10 +20,9 @@ use crate::msl::inst_tex::{
 };
 use crate::msl::io::{FragOut, Plan};
 use crate::msl::prelude;
-use crate::msl::walk::for_each_node;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, AstTex, Kind as NodeKind};
-use crate::translation::msl_entry::Structured;
+use crate::structured::walk::for_each_node;
 use crate::types::SamplerType;
 use nxb_pyjson::Value;
 use std::collections::{BTreeMap, BTreeSet};

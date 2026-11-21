@@ -136,10 +136,8 @@ pub const C0_SSBO_TS: u32 = 0x670;
 pub const C0_SSBO_MS: u32 = 0x770;
 /// A task or mesh function's buffer with the draw's first workgroup.
 pub const MESH_FIRST_SLOT: u32 = 29;
-/// Compute: the dispatch's workgroup counts in c0.
-pub const C0_DISPATCH: u32 = 0x200;
-/// NVN2 compute: the workgroup counts in c0.
-pub const C0_DISPATCH_NVN2: u32 = 4;
+// The emitter reads the two dispatch offsets too, so they live in `crate::types` (W28).
+pub use crate::types::{C0_DISPATCH, C0_DISPATCH_NVN2};
 /// Compute: uniform slot r's address and size at `C0_CS_UBO + 0x10 r`.
 pub const C0_CS_UBO: u32 = 0x210;
 /// Uniform slots of that table.

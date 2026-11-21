@@ -1,4 +1,5 @@
-//! Enums of the translator that the driver queries and prints.
+//! Enums and values of the translator that the driver queries and prints, and the two dispatch offsets of c0 that the
+//! emitter and the MSL back end share.
 
 /// `SamplerType` flags: the low byte is the dimension, bits 8 to 10 are flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -144,3 +145,8 @@ pub fn unpack_offsets(handle: i32) -> (i32, i32, HandleType) {
     };
     (handle & 0x3fff, (handle >> 14) & 0x3fff, t)
 }
+
+/// Compute (ABI of the MSL libraries, `msl::abi`): the dispatch's workgroup counts in c0.
+pub const C0_DISPATCH: u32 = 0x200;
+/// NVN2 compute: the workgroup counts in c0.
+pub const C0_DISPATCH_NVN2: u32 = 4;

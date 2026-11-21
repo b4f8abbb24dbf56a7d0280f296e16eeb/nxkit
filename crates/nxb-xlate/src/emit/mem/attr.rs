@@ -3,7 +3,7 @@
 use super::hlp::{REGISTER_ZERO_INDEX, get_dest, get_src_reg};
 use crate::attr::{Stage, consts};
 use crate::emit::attrmap;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::inst::{IoVariable, StorageKind};
 use crate::ir::ops::{Opd, regtype};
 use crate::maxwell::enums::{IpaOp, OutType};

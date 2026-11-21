@@ -15,6 +15,7 @@ use std::sync::OnceLock;
 /// The lookup: the entry address of the SDK function with this mangled name, or `None`.
 pub type GuestSymFn = fn(&str) -> Option<usize>;
 
+// Process-wide (W26): the symbol lookup of the guest, used by guest-called OS functions.
 static LOOKUP: OnceLock<GuestSymFn> = OnceLock::new();
 
 /// Sets the lookup. Only the first call wins. Returns false for a later call.

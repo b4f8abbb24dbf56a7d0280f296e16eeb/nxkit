@@ -24,96 +24,17 @@ use objc2::runtime::ProtocolObject;
 use objc2::{AllocAnyThread, Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_foundation::{NSDefaultRunLoopMode, NSRunLoop};
 use objc2_foundation::{NSObject, NSObjectProtocol};
-use objc2_quartz_core::{
-    CAFrameRateRange, CAMetalDisplayLink, CAMetalDisplayLinkDelegate, CAMetalDisplayLinkUpdate,
-};
+use objc2_quartz_core::{CAMetalDisplayLink, CAMetalDisplayLinkDelegate, CAMetalDisplayLinkUpdate};
 
 use crate::device::Context;
-use crate::metrics::FrameHooks;
 use crate::policy::{FrameSource, PresentPlan};
 use crate::present::{Drawable, Presenter};
 use crate::schedule::{Shown, TickAction, TickScheduler};
 use crate::stats::PacingStats;
 
-/// The target frame rate of a [`DisplayLink`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameInterval {
-    /// 60 frames per second.
-    Hz60,
-    /// 120 frames per second.
-    Hz120,
-    /// Any other whole rate, for example 72 or 144. [`FrameInterval::from_hz`] makes it.
-    Hz(u32),
-}
+pub use crate::interval::FrameInterval;
 
-impl FrameInterval {
-    /// The interval for a rate in Hz, at least 1.
-    pub fn from_hz(hz: u32) -> Self {
-        match hz {
-            60 => FrameInterval::Hz60,
-            120 => FrameInterval::Hz120,
-            other => FrameInterval::Hz(other.max(1)),
-        }
-    }
-
-    /// The frames per second.
-    pub fn hz(self) -> f32 {
-        match self {
-            FrameInterval::Hz60 => 60.0,
-            FrameInterval::Hz120 => 120.0,
-            FrameInterval::Hz(hz) => hz as f32,
-        }
-    }
-
-    /// The range of a fixed rate: minimum, maximum and preferred are the same.
-    pub fn range(self) -> RateRange {
-        let hz = self.hz();
-        RateRange {
-            min: hz,
-            max: hz,
-            preferred: hz,
-        }
-    }
-}
-
-/// The range of rates that the display link may run at, in frames per second.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RateRange {
-    /// The lowest rate the game needs.
-    pub min: f32,
-    /// The highest rate, usually the highest rate of the screen.
-    pub max: f32,
-    /// The rate the link asks for.
-    pub preferred: f32,
-}
-
-impl RateRange {
-    /// The range for variable refresh: from `floor_hz` (what the game needs at least) to `screen_max_hz`, with `target_hz`
-    /// preferred. The target is kept inside the screen's rates, and the floor never goes above the target.
-    pub fn plan(floor_hz: u32, screen_max_hz: u32, target_hz: u32) -> Self {
-        let max = screen_max_hz.max(1);
-        let preferred = target_hz.clamp(1, max);
-        let min = floor_hz.clamp(1, preferred);
-        Self {
-            min: min as f32,
-            max: max as f32,
-            preferred: preferred as f32,
-        }
-    }
-
-    /// Whether the range is wider than one rate.
-    pub fn is_variable(&self) -> bool {
-        self.max > self.min
-    }
-
-    fn to_ca(self) -> CAFrameRateRange {
-        CAFrameRateRange {
-            minimum: self.min,
-            maximum: self.max,
-            preferred: self.preferred,
-        }
-    }
-}
+pub use crate::interval::RateRange;
 
 /// What the display link is asked for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -140,18 +61,7 @@ impl From<FrameInterval> for LinkRate {
     }
 }
 
-/// What a display tick carries.
-pub struct DisplayTick {
-    /// The drawable for this tick.
-    pub drawable: Drawable,
-    /// The time the display wants the frame to be ready by, in seconds on the `CACurrentMediaTime` clock.
-    pub target_timestamp: f64,
-    /// The time the frame is shown, in seconds on the same clock.
-    pub target_presentation_timestamp: f64,
-    /// True in the immediate mode of the pacer: the frame is shown as soon as it is ready, so the times above are not
-    /// a target (a parked drawable can be some milliseconds old). Present with `Frame::present`, not `Frame::present_at`.
-    pub immediate: bool,
-}
+pub use crate::hooks::{DisplayTick, FrameHooks};
 
 /// Takes the decision of each tick. The host implements it.
 ///
