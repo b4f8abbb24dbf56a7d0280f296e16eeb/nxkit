@@ -536,51 +536,37 @@ fn local_refs<'a>(op: &'a Op, out: &mut Vec<&'a str>) {
     }
 }
 
-/// Removes results nobody uses, repeatedly: use counts and a work list instead of rounds over the function.
+/// Removes every result that no side effect needs (mark and sweep): the instructions with a side effect or without a
+/// result are live, and so is every instruction a live one uses; the rest goes. Unlike removing what has no uses, this
+/// also removes cycles of dead phis. mem2reg places a phi for every promoted variable at every join it reaches, also
+/// where the variable is dead, so a translated shader with its many function-scope temporaries and a loop got
+/// thousands of phis that only fed each other, and the GPU compiler kept them: the forward lighting shader of one
+/// title had 5444 phis (231 in Apple's library) and twice the GPU code of Apple's library.
 fn dce(f: &mut Function) {
     let removable = |i: &Inst| i.res.is_some() && !side_effect(&i.op);
-    let mut dead: Vec<Vec<bool>> = f.blocks.iter().map(|b| vec![false; b.1.len()]).collect();
+    let mut live: Vec<Vec<bool>> = f.blocks.iter().map(|b| vec![false; b.1.len()]).collect();
     {
-        let mut uses: HashMap<&str, u32> = HashMap::default();
         let mut def: HashMap<&str, (usize, usize)> = HashMap::default();
-        let mut buf: Vec<&str> = Vec::new();
+        let mut work: Vec<(usize, usize)> = Vec::new();
         for (b, (_, insts)) in f.blocks.iter().enumerate() {
             for (k, i) in insts.iter().enumerate() {
                 if let Some(r) = &i.res {
                     def.insert(r, (b, k));
                 }
-                buf.clear();
-                local_refs(&i.op, &mut buf);
-                for x in &buf {
-                    *uses.entry(x).or_default() += 1;
+                if !removable(i) {
+                    live[b][k] = true;
+                    work.push((b, k));
                 }
             }
         }
-        let mut work: Vec<(usize, usize)> = Vec::new();
-        for (b, (_, insts)) in f.blocks.iter().enumerate() {
-            for (k, i) in insts.iter().enumerate() {
-                if let (true, Some(r)) = (removable(i), &i.res) {
-                    if uses.get(r.as_str()).copied().unwrap_or(0) == 0 {
-                        work.push((b, k));
-                    }
-                }
-            }
-        }
+        let mut buf: Vec<&str> = Vec::new();
         while let Some((b, k)) = work.pop() {
-            if dead[b][k] {
-                continue;
-            }
-            dead[b][k] = true;
             buf.clear();
             local_refs(&f.blocks[b].1[k].op, &mut buf);
             for x in &buf {
-                let Some(c) = uses.get_mut(x) else { continue };
-                *c -= 1;
-                if *c > 0 {
-                    continue;
-                }
                 if let Some(&(b2, k2)) = def.get(x) {
-                    if !dead[b2][k2] && removable(&f.blocks[b2].1[k2]) {
+                    if !live[b2][k2] {
+                        live[b2][k2] = true;
                         work.push((b2, k2));
                     }
                 }
@@ -591,7 +577,7 @@ fn dce(f: &mut Function) {
         let mut k = 0;
         insts.retain(|_| {
             k += 1;
-            !dead[b][k - 1]
+            live[b][k - 1]
         });
     }
 }
@@ -745,6 +731,54 @@ attributes #0 = { nounwind }
             }
         }
         assert!(!used.iter().any(|x| x == "r" || x == "x"));
+        crate::writer::write(&m).expect("no dangling value");
+    }
+
+    /// A loop with a variable that nothing after it reads: its phi and its add only use each other.
+    const DEAD_LOOP_VAR: &str = r#"; ModuleID = '-'
+source_filename = "-"
+target triple = "air64-apple-macosx14.0.0"
+
+define i32 @g(i32 %n) #0 {
+entry:
+  %acc = alloca i32, align 4
+  %dead = alloca i32, align 4
+  %i = alloca i32, align 4
+  store i32 0, i32* %acc, align 4
+  store i32 0, i32* %dead, align 4
+  store i32 0, i32* %i, align 4
+  br label %loop
+loop:
+  %iv = load i32, i32* %i, align 4
+  %d = load i32, i32* %dead, align 4
+  %d2 = add nsw i32 %d, 1
+  store i32 %d2, i32* %dead, align 4
+  %a = load i32, i32* %acc, align 4
+  %a2 = add nsw i32 %a, %iv
+  store i32 %a2, i32* %acc, align 4
+  %iv2 = add nsw i32 %iv, 1
+  store i32 %iv2, i32* %i, align 4
+  %c = icmp slt i32 %iv2, %n
+  br i1 %c, label %loop, label %exit
+exit:
+  %r = load i32, i32* %acc, align 4
+  ret i32 %r
+}
+
+attributes #0 = { nounwind }
+"#;
+
+    #[test]
+    fn dead_phi_cycles_go() {
+        let mut m = crate::parse::parse(DEAD_LOOP_VAR).expect("subset");
+        optimize(&mut m);
+        let f = &m.functions[0];
+        let insts: Vec<&Inst> = f.blocks.iter().flat_map(|b| b.1.iter()).collect();
+        let phis = insts.iter().filter(|i| matches!(i.op, Op::Phi(..))).count();
+        // the phis of acc and i stay, the phi of dead and its add (a cycle with no other use) go
+        assert_eq!(phis, 2);
+        assert!(!insts.iter().any(|i| i.res.as_deref() == Some("d2")));
+        assert!(insts.iter().any(|i| i.res.as_deref() == Some("a2")));
         crate::writer::write(&m).expect("no dangling value");
     }
 }
