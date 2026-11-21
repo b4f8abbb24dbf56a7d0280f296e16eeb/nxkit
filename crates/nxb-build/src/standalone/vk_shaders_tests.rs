@@ -1,7 +1,6 @@
 use super::*;
 
-const VERT: &[u8] = include_bytes!("../../../nxb-spirv/tests/data/basic.vert.spv");
-const FRAG: &[u8] = include_bytes!("../../../nxb-spirv/tests/data/basic.frag.spv");
+include!("../../../nxb-spirv/tests/data/modules.rs");
 
 fn shader(bytes: &[u8]) -> (vk_table::Key, Shader) {
     let key = nxb_spirv::key_of(bytes);

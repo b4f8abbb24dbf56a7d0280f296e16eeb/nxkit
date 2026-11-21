@@ -152,7 +152,7 @@ renderer. The records are the game notes in the engine tree at `034e91a8`, read 
 - `main` imports 39 `EOS_*` functions (Epic Online Services, from an NRO through `nn::ro`). The host refuses an NRR that
   registers only online SDKs, so the game never loads the module; the names are `optional_imports` and stay 0.
 - The memory partition is the engine's (Link's Awakening's, not measured for this game), `pad_layout full`.
-- Checked on 2026-11-21 (MacBook Pro, `nxb build` to `/Volumes/NX/nxkit-work/Hades.app`): the game shows the title
+- Checked on 2026-11-21 (MacBook Pro, a fresh `nxb build` of the folder with both packages): the game shows the title
   screen and plays a room of Tartarus at about 60 presents a second, 0 skipped draws. The layer logs one gap: texel
   buffer views (`R32_UINT`), which nothing on screen needed in that run.
 

@@ -1,19 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The modules in `tests/data` are the GLSL files beside them, compiled with `glslangValidator -V -o <file>.spv <file>`.
+//! The modules in `tests/data/modules.rs` are the GLSL files beside them, compiled with `glslangValidator -V` and kept as
+//! words (`tests/data/words.py`): the tree holds no binary module.
+
+include!("../tests/data/modules.rs");
 
 use super::*;
 
 const ENTRY: &str = "vk_0123456789abcdef";
 const DUAL: &str = "vk_0123456789abcdef_d";
-
-pub(crate) const VERT: &[u8] = include_bytes!("../tests/data/basic.vert.spv");
-pub(crate) const FRAG: &[u8] = include_bytes!("../tests/data/basic.frag.spv");
-const ARRAYS: &[u8] = include_bytes!("../tests/data/arrays.frag.spv");
-const DESCRIPTOR_ARRAY: &[u8] = include_bytes!("../tests/data/descriptor_array.frag.spv");
-const RUNTIME_ARRAY: &[u8] = include_bytes!("../tests/data/runtime_array.frag.spv");
-pub(crate) const IMAGE1D: &[u8] = include_bytes!("../tests/data/image1d.frag.spv");
-pub(crate) const IMAGE1D_ARRAY: &[u8] = include_bytes!("../tests/data/image1d_array.frag.spv");
-const KERNEL: &[u8] = include_bytes!("../tests/data/kernel.comp.spv");
 
 fn tr(bytes: &[u8]) -> Result<Outcome, String> {
     translate(bytes, ENTRY, DUAL)
