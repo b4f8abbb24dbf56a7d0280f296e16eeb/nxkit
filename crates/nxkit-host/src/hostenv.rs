@@ -46,8 +46,11 @@ pub struct HostEnv {
     pub crash_report_off: bool,
     /// `NXKIT_PAUSE_UNFOCUSED=1`: the game pauses when the window loses the focus.
     pub pause_unfocused: bool,
-    /// `NXKIT_SCREEN`: the screen of the window, by index or a part of its name.
+    /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
+    /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
+    /// `--fullscreen`.
+    pub fullscreen: bool,
 }
 
 impl Default for HostEnv {
@@ -103,6 +106,9 @@ impl HostEnv {
             crash_report_off: env.var("NXKIT_CRASH_REPORT").is_ok_and(|v| v == "0"),
             pause_unfocused: env.var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"),
             screen: env.var("NXKIT_SCREEN").ok(),
+            fullscreen: env
+                .var("NXKIT_FULLSCREEN")
+                .is_ok_and(|v| !v.trim().is_empty() && v.trim() != "0"),
         }
     }
 }
@@ -191,7 +197,7 @@ mod tests {
     #[test]
     fn the_keys_parse_as_the_reads_did() {
         let d = HostEnv::default();
-        assert!(d.guest_keep && !d.guest_wire && d.vrr && !d.archive_shards_off);
+        assert!(d.guest_keep && !d.guest_wire && d.vrr && !d.archive_shards_off && !d.fullscreen);
         assert_eq!((d.shard_lru, d.encode_threads, d.scale), (0, 0, 1.0));
         let s = HostEnv::from_env(&Env::from_pairs([
             ("NXKIT_GUEST_WIRE", "1"),
@@ -208,5 +214,9 @@ mod tests {
         assert_eq!(s.scale, 2.0);
         assert_eq!(s.language, None);
         assert_eq!(s.pipeline_cache_dir, None);
+        let full =
+            |v: &str| HostEnv::from_env(&Env::from_pairs([("NXKIT_FULLSCREEN", v)])).fullscreen;
+        assert!(full("1") && full("yes"));
+        assert!(!full("0") && !full(" ") && !full(""));
     }
 }
