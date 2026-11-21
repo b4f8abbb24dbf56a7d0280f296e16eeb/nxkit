@@ -476,6 +476,7 @@ nvnWindowBuilderSetNativeWindow
 nvnWindowBuilderSetNumActiveTextures
 nvnWindowBuilderSetPresentInterval
 nvnWindowBuilderSetTextures
+nvnWindowFinalize
 nvnWindowGetCrop
 nvnWindowGetPresentInterval
 nvnWindowInitialize

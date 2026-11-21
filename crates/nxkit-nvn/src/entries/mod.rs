@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn the_lists_have_the_expected_sizes() {
         assert_eq!(parse_names(NVN_NAMES).count(), 743);
-        assert_eq!(parse_names(NVN_IMPLEMENTED).count(), 485);
+        assert_eq!(parse_names(NVN_IMPLEMENTED).count(), 486);
     }
 
     #[test]
@@ -324,7 +324,7 @@ mod tests {
             .filter(|n| op_of(n).is_none() && known.contains(*n))
             .count();
         assert_eq!(c.handled.len(), RECORDED.len() + ffi_only);
-        assert_eq!(c.handled.len() + c.unhandled.len(), 485);
+        assert_eq!(c.handled.len() + c.unhandled.len(), 486);
         assert!(c.unknown.is_empty());
     }
 }

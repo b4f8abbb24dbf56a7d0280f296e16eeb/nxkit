@@ -119,6 +119,7 @@ pub const FFI_GROUPS: &[(&str, &[&str])] = &[
             "nvnWindowBuilderSetPresentInterval",
             "nvnWindowBuilderGetPresentInterval",
             "nvnWindowInitialize",
+            "nvnWindowFinalize",
             "nvnWindowSetDebugLabel",
             "nvnWindowAcquireTexture",
             "nvnWindowSetNumActiveTextures",

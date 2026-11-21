@@ -194,6 +194,13 @@ extern "C" fn window_initialize(w: u64, b: u64) -> u32 {
     })
 }
 
+/// Ends the window. The host holds no state of its own for a window and the textures are the game's, so the window's
+/// bytes are cleared: a later `nvnWindowInitialize` on the same object starts afresh (Unreal Engine recreates its window
+/// after a change of the output size).
+extern "C" fn window_finalize(w: u64) {
+    guard("nvnWindowFinalize", || Obj(w).zero(used::WINDOW));
+}
+
 extern "C" fn window_set_debug_label(_w: u64, _label: u64) {}
 
 extern "C" fn window_acquire_texture(w: u64, sync: u64, idx: u64) -> u32 {
@@ -274,6 +281,7 @@ pub(super) fn procs() -> Vec<(&'static str, usize)> {
         "nvnWindowBuilderSetPresentInterval" => builder_set_present_interval as extern "C" fn(u64, i32),
         "nvnWindowBuilderGetPresentInterval" => builder_get_present_interval as extern "C" fn(u64) -> i32,
         "nvnWindowInitialize" => window_initialize as extern "C" fn(u64, u64) -> u32,
+        "nvnWindowFinalize" => window_finalize as extern "C" fn(u64),
         "nvnWindowSetDebugLabel" => window_set_debug_label as extern "C" fn(u64, u64),
         "nvnWindowAcquireTexture" => window_acquire_texture as extern "C" fn(u64, u64, u64) -> u32,
         "nvnWindowSetNumActiveTextures" => window_set_num_active_textures as extern "C" fn(u64, i32),
@@ -337,6 +345,16 @@ mod tests {
         assert_eq!((v.texture, v.interval), (0xABC0, 2));
         assert_eq!(present_view(w, 2).expect("view"), None);
         assert_eq!(present_view(w, -1).expect("view"), None);
+    }
+
+    #[test]
+    fn a_finalized_window_is_cleared() {
+        let w = testing::alloc(crate::nvn::abi::size::WINDOW);
+        Obj(w).set_u32(0, WIND).expect("magic");
+        Obj(w).set_i32(OFF_NTEX, 3).expect("n");
+        window_finalize(w);
+        assert_eq!(Obj(w).u32(0).expect("magic"), 0);
+        assert_eq!(Obj(w).i32(OFF_NTEX).expect("n"), 0);
     }
 
     #[test]
