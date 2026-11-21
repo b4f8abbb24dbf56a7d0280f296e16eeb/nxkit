@@ -36,6 +36,8 @@ impl KResult {
     pub const INVALID_ENUM_VALUE: KResult = KResult(0xF001);
     /// The object is in the wrong state for the call (125).
     pub const INVALID_STATE: KResult = KResult(0xFA01);
+    /// The call names the calling thread where it needs another one (122).
+    pub const BUSY: KResult = KResult(0xF401);
     /// The call is not implemented (33).
     pub const NOT_IMPLEMENTED: KResult = KResult(0x4201);
     /// A size is zero, not aligned or too large (101).
@@ -88,6 +90,8 @@ mod tests {
             (KResult::CANCELLED, 118),
             (KResult::INVALID_HANDLE, 114),
             (KResult::INVALID_STATE, 125),
+            (KResult::BUSY, 122),
+            (KResult::INVALID_ENUM_VALUE, 120),
             (KResult::INVALID_ADDRESS, 102),
             (KResult::INVALID_CURRENT_MEMORY, 106),
             (KResult::NOT_IMPLEMENTED, 33),

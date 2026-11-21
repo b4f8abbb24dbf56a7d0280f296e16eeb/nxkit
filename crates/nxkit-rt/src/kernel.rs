@@ -6,7 +6,8 @@
 
 use nxkit_hos::{
     Config, GuestLauncher, Kernel, MAX_PRIORITY, MainThread, MemoryConfig, Module, NameMatch,
-    RoleRule, RoleTable, SvcRegs, Thread, ThreadRole, current_thread, sys,
+    RoleRule, RoleTable, SvcRegs, Thread, ThreadContext, ThreadControl, ThreadRole, current_thread,
+    sys,
 };
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::atomic::Ordering;
@@ -66,6 +67,64 @@ pub struct NxkitKernelConfig {
     /// The cores the process may use, one bit per core, from the NPDM's thread info capability, or 0 for the
     /// default (cores 0 to 2, as on the Switch). Switch 2 programs may use more.
     pub core_mask: u64,
+    /// Writes the guest registers that the svc gate saved in a register frame (the `frame` of [`nxkit_svc_frame`]) to
+    /// `out` as the 100 words of Horizon's `ThreadContext`. NULL: `SetThreadActivity` and `GetThreadContext3` are not
+    /// answered.
+    pub gate_context: Option<unsafe extern "C" fn(frame: u64, out: *mut u64)>,
+    /// The guest's code as `code_count` ranges: the text and patch segments of every module. A pause stops a thread
+    /// that is outside a svc only at a pc in them.
+    pub code: *const NxkitRange,
+    /// The number of ranges at `code`.
+    pub code_count: usize,
+}
+
+/// The bytes `start..end` of the address space.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NxkitRange {
+    /// The first byte.
+    pub start: u64,
+    /// The byte after the last.
+    pub end: u64,
+}
+
+/// The thread control of the host for the pause svcs: the gate frame reader and the code ranges, sorted.
+struct CThreads {
+    context: unsafe extern "C" fn(u64, *mut u64),
+    code: Vec<NxkitRange>,
+}
+
+impl ThreadControl for CThreads {
+    fn gate_context(&self, frame: u64) -> ThreadContext {
+        let mut w = [0u64; 100];
+        // SAFETY: the kernel passes the frame of a thread that waits in `nxkit_svc_frame` and holds it in the gate while
+        // it reads, and `w` has the 100 words the host writes.
+        unsafe { (self.context)(frame, w.as_mut_ptr()) };
+        ThreadContext::from_words(&w)
+    }
+
+    fn is_guest_code(&self, pc: u64) -> bool {
+        let i = self.code.partition_point(|r| r.end <= pc);
+        self.code.get(i).is_some_and(|r| r.start <= pc)
+    }
+}
+
+/// The thread control of `c`, or none without a frame reader.
+///
+/// # Safety
+///
+/// `c.code` points to `c.code_count` ranges, or `c.code_count` is 0.
+unsafe fn read_threads(c: &NxkitKernelConfig) -> Option<Arc<dyn ThreadControl>> {
+    let context = c.gate_context?;
+    let mut code = if c.code.is_null() || c.code_count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: the caller promises `code_count` ranges at `code`.
+        unsafe { std::slice::from_raw_parts(c.code, c.code_count) }.to_vec()
+    };
+    code.retain(|r| r.start < r.end);
+    code.sort_unstable_by_key(|r| r.start);
+    Some(Arc::new(CThreads { context, code }))
 }
 
 /// One module (an NSO) in the front region of the reservation.
@@ -224,6 +283,8 @@ pub unsafe extern "C" fn nxkit_kernel_init(config: *const NxkitKernelConfig) -> 
     if c.process_id != 0 {
         cfg.process_id = c.process_id;
     }
+    // SAFETY: the caller promises a valid configuration.
+    cfg.threads = unsafe { read_threads(c) };
     if let Some(exit) = c.process_exit {
         // The hook is set once. A second kernel is refused below, so the first hook stays the one that runs.
         let _ = PROCESS_EXIT.set(exit);
@@ -407,6 +468,28 @@ pub unsafe extern "C" fn nxkit_kernel_thread_tls(tlr: *mut u64, tls: *mut u64) -
 /// `regs` points to eight writable `uint64_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nxkit_svc(number: u32, regs: *mut u64) -> i32 {
+    // SAFETY: the caller promises eight writable registers.
+    unsafe { run_svc(number, regs, false) }
+}
+
+/// [`nxkit_svc`] for the svc gate. `frame` is the gate's register frame, which starts with x0 to x7 and is what
+/// `gate_context` of [`NxkitKernelConfig`] reads. While the svc runs the thread counts as paused for
+/// `SetThreadActivity`, and a paused thread waits in this call until it is resumed.
+///
+/// # Safety
+///
+/// `frame` points to a register frame of the gate that stays valid and unchanged, apart from x0 to x7, until the call
+/// returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nxkit_svc_frame(number: u32, frame: *mut u64) -> i32 {
+    // SAFETY: the caller promises a live gate frame, which starts with eight writable registers.
+    unsafe { run_svc(number, frame, true) }
+}
+
+/// # Safety
+///
+/// `regs` is NULL or points to eight writable `uint64_t`, and to a live gate frame when `frame` is true.
+unsafe fn run_svc(number: u32, regs: *mut u64, frame: bool) -> i32 {
     if regs.is_null() || crate::SERVICES.load(Ordering::Acquire) & crate::Service::Kernel.bit() == 0
     {
         return 0;
@@ -417,11 +500,17 @@ pub unsafe extern "C" fn nxkit_svc(number: u32, regs: *mut u64) -> i32 {
     let Some(cur) = caller(kernel) else {
         return 0;
     };
+    if frame {
+        kernel.gate_enter(&cur, regs as u64);
+    }
     // SAFETY: the caller promises eight writable registers.
-    let regs = unsafe { &mut *regs.cast::<SvcRegs>() };
-    let args = *regs;
-    let handled = kernel.dispatch_svc(&cur, number, regs);
-    svc_diag(number, &args, regs, handled);
+    let r = unsafe { &mut *regs.cast::<SvcRegs>() };
+    let args = *r;
+    let handled = kernel.dispatch_svc(&cur, number, r);
+    svc_diag(number, &args, r, handled);
+    if frame {
+        kernel.gate_leave(&cur);
+    }
     i32::from(handled)
 }
 

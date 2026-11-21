@@ -13,9 +13,11 @@ use std::time::Duration;
 
 mod call;
 mod release;
+mod suspend;
 
 pub use call::{GuestFn, random_fill};
 pub(crate) use call::{drop_spawn_arg, run_spawned, spawn_arg};
+pub(crate) use suspend::{HostRegs, HostThread};
 
 /// Why a wait returned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

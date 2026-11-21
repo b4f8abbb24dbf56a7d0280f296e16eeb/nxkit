@@ -62,9 +62,9 @@ pub use guestos::{
     nxkit_kernel_set_deterministic, nxkit_kernel_set_guest_sym,
 };
 pub use kernel::{
-    NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRoleRule, NxkitThreadEntry,
+    NxkitKernelConfig, NxkitMemoryConfig, NxkitModule, NxkitRange, NxkitRoleRule, NxkitThreadEntry,
     attach_main_thread, kernel, nxkit_kernel_dump_stats, nxkit_kernel_init,
-    nxkit_kernel_set_thread_name, nxkit_kernel_thread_tls, nxkit_svc,
+    nxkit_kernel_set_thread_name, nxkit_kernel_thread_tls, nxkit_svc, nxkit_svc_frame,
 };
 
 /// A service that nxkit can run. The bit of a service in the mask is its index in `nxtitle::Service::ALL`.
@@ -281,12 +281,13 @@ pub unsafe extern "C" fn nxkit_hle_find_big(name: *const c_char) -> *const c_voi
 }
 
 /// The names of the exported C symbols. The header has one declaration for each.
-pub const EXPORTS: [&str; 13] = [
+pub const EXPORTS: [&str; 14] = [
     "nxkit_init",
     "nxkit_hle_find",
     "nxkit_hle_find_big",
     "nxkit_audio_init",
     "nxkit_svc",
+    "nxkit_svc_frame",
     "nxkit_kernel_init",
     "nxkit_kernel_set_thread_name",
     "nxkit_kernel_dump_stats",

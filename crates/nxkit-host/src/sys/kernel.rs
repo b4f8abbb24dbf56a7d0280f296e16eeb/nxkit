@@ -93,6 +93,7 @@ pub fn kernel_init(
         module_count: modules.len(),
         map_limit: u32::from(mem.map_limit),
     };
+    let code = guest_code(game);
     let config = nxkit_rt::NxkitKernelConfig {
         thread_entry: Some(thread_entry),
         user: std::ptr::null_mut(),
@@ -106,11 +107,41 @@ pub fn kernel_init(
         process_exit: None,
         memory: &memory,
         core_mask: crate::npdm::core_mask(game).unwrap_or(0),
+        gate_context: Some(crate::gate::frame_context),
+        code: code.as_ptr(),
+        code_count: code.len(),
     };
-    // SAFETY: `config`, `memory` and `modules` are valid for the call and there are no rules. The reservation is mapped
+    // SAFETY: `config`, `memory`, `modules` and `code` are valid for the call and there are no rules. The reservation is mapped
     // and registered with `nxkit_abi::guest` before any svc runs.
     match unsafe { nxkit_rt::nxkit_kernel_init(&config) } {
         0 => Ok(()),
         r => Err(HostError::App(format!("nxkit_kernel_init returned {r}"))),
     }
+}
+
+/// The guest's code: the `r-x` segments of every module (the text, the read-only data and the patch area), for the
+/// pause of a thread (`SetThreadActivity`). A module without segments counts as a whole.
+fn guest_code(game: &Game) -> Vec<nxkit_rt::NxkitRange> {
+    let mut code = Vec::new();
+    for m in &game.modules {
+        let exec: Vec<_> = m
+            .segments
+            .iter()
+            .filter(|s| s.prot == crate::module::Prot::Exec)
+            .collect();
+        if exec.is_empty() {
+            code.push(nxkit_rt::NxkitRange {
+                start: m.start(),
+                end: m.end(),
+            });
+        }
+        for s in exec {
+            let start = m.base.wrapping_add_signed(s.offset);
+            code.push(nxkit_rt::NxkitRange {
+                start,
+                end: start.saturating_add(s.size),
+            });
+        }
+    }
+    code
 }

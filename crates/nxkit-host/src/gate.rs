@@ -303,9 +303,10 @@ extern "C" fn nxkit_gate_nested(sp: u64) -> ! {
     ))
 }
 
-fn svc(number: u32, regs: &mut [u64], ret: u64) {
-    // SAFETY: `regs` holds 31 registers and `nxkit_svc` reads and writes the first eight.
-    let answered = unsafe { nxkit_rt::nxkit_svc(number, regs.as_mut_ptr()) };
+fn svc(number: u32, frame: *mut u64, ret: u64) {
+    // SAFETY: `frame` is the live frame of this gate, which stays until the gate returns. `nxkit_svc_frame` reads and
+    // writes its first eight words, and `frame_context` reads the rest while the thread waits in the call.
+    let answered = unsafe { nxkit_rt::nxkit_svc_frame(number, frame) };
     match number {
         SVC_EXIT_THREAD if answered != 0 => leave(),
         SVC_EXIT_PROCESS => {
@@ -331,19 +332,94 @@ fn counter() -> u64 {
     r[0]
 }
 
+/// The words of the register frame of the gate: x0..x30 (x29 is the guest's, x30 the return point of the gate
+/// block), q0..q31 from word 32, nzcv, fpsr and fpcr at words 96 to 98 and the sp of the gate block at word 99. The
+/// block saved the guest's x29 and x30 at that sp, and the guest's sp is 16 bytes above it.
+const FRAME_WORDS: usize = 100;
+
+/// Writes the guest registers that the gate saved in `frame` to `out`, as the 100 words of Horizon's `ThreadContext`
+/// (`NxkitKernelConfig::gate_context`). The kernel calls it on another thread while the owner of the frame waits in
+/// `nxkit_svc_frame`. x0 to x18 are left zero: the dispatcher writes x0 to x7 meanwhile, and Horizon reports none of
+/// them for a thread in a svc. The pc is the return point of the gate block, where the guest goes on after the svc.
+///
+/// # Safety
+///
+/// `frame` is 0 or a live register frame of the gate whose owner waits in `nxkit_svc_frame`, and `out` is NULL or
+/// points to 100 writable words.
+pub unsafe extern "C" fn frame_context(frame: u64, out: *mut u64) {
+    if frame == 0 || out.is_null() {
+        return;
+    }
+    let f = frame as usize as *const u64;
+    // SAFETY: the kernel passes the frame of a thread that waits in `nxkit_svc_frame` and keeps it from leaving the
+    // gate while it reads, so the frame is live. Words 19 and up are not written while the thread waits.
+    let word = |i: usize| unsafe { f.add(i).read() };
+    // SAFETY: the kernel passes 100 writable words.
+    let out = unsafe { std::slice::from_raw_parts_mut(out, FRAME_WORDS) };
+    out.fill(0);
+    for (i, o) in out.iter_mut().enumerate().take(29).skip(19) {
+        *o = word(i);
+    }
+    let block = word(99);
+    out[29] = word(29);
+    // SAFETY: the gate block stored the guest's x30 at its sp + 8 on the guest stack, which stays mapped.
+    out[30] = unsafe { ((block + 8) as usize as *const u64).read() };
+    out[31] = block + 16;
+    out[32] = word(30);
+    out[33] = word(96) & 0xFFFF_FFFF;
+    for i in 0..64 {
+        out[34 + i] = word(32 + i);
+    }
+    out[98] = (word(98) & 0xFFFF_FFFF) | (word(97) & 0xFFFF_FFFF) << 32;
+}
+
 /// Called by the assembly on the gate stack. `ret` is the address the gate block returns to, `regs` the frame.
 #[unsafe(no_mangle)]
 extern "C" fn nxkit_gate_dispatch(ret: u64, regs: *mut u64) {
-    // SAFETY: the assembly passes its own frame, which holds x0..x30 as 31 words and is not shared.
-    let regs = unsafe { std::slice::from_raw_parts_mut(regs, 31) };
     let Some(table) = TABLE.get() else {
         stop::fatal("a gate ran before the gate table was installed");
     };
     match table.find(ret) {
         Some(Kind::Svc(n)) => svc(n, regs, ret),
-        Some(Kind::Counter(r)) => regs[usize::from(r)] = counter(),
+        Some(Kind::Counter(r)) => {
+            // SAFETY: the assembly passes its own frame, which holds x0..x30 as 31 words. A counter gate does not
+            // publish it to the kernel, so no other thread reads it.
+            let regs = unsafe { std::slice::from_raw_parts_mut(regs, 31) };
+            regs[usize::from(r)] = counter();
+        }
         Some(Kind::Obs) => {}
         Some(Kind::Spin) => std::thread::yield_now(),
         None => stop::fatal(&format!("unknown gate at {ret:#x}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_frame_gives_the_registers_of_the_guest_as_horizon_lays_them_out() {
+        // The guest stack of the gate block: the guest's x29 and x30 at its sp.
+        let stack = [0x29u64, 0x30, 0, 0];
+        let block = stack.as_ptr() as u64;
+        let mut frame = [0u64; FRAME_WORDS];
+        for (i, w) in frame.iter_mut().enumerate() {
+            *w = 0x1000 + i as u64;
+        }
+        frame[96] = 0x6000_0000;
+        (frame[97], frame[98], frame[99]) = (0x10, 0x0300_0000, block);
+        let mut out = [u64::MAX; FRAME_WORDS];
+        // SAFETY: `frame` is a whole frame over a live stack, and `out` has 100 words.
+        unsafe { frame_context(frame.as_ptr() as u64, out.as_mut_ptr()) };
+        assert_eq!(out[..19], [0; 19]);
+        assert_eq!(out[19..29], frame[19..29]);
+        assert_eq!(out[29], frame[29], "fp");
+        assert_eq!(out[30], 0x30, "lr from the gate block");
+        assert_eq!(out[31], block + 16, "sp above the gate block");
+        assert_eq!(out[32], frame[30], "pc at the return point");
+        assert_eq!(out[33], 0x6000_0000);
+        assert_eq!(out[34..98], frame[32..96], "q0 to q31");
+        assert_eq!(out[98], 0x0300_0000 | 0x10 << 32, "fpcr, then fpsr");
+        assert_eq!(out[99], 0, "tpidr comes from the kernel");
     }
 }

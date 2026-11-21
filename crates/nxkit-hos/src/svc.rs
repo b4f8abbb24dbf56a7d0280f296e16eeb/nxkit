@@ -37,13 +37,14 @@
 //! | 0x2C | MapPhysicalMemory | done, `memsvc.rs` |
 //! | 0x2D | UnmapPhysicalMemory | done, `memsvc.rs` |
 //! | 0x30, 0x31, 0x37 | GetResourceLimit limit, current and peak value | done per Horizon, not in the engine |
-//! | 0x32 | SetThreadActivity | not answered, returns false. It needs a signal to pause a host thread |
-//! | 0x33 | GetThreadContext3 | not answered, returns false. It needs a paused thread |
+//! | 0x32 | SetThreadActivity | done per Horizon, not in the engine, `pause.rs`. A thread in a svc waits at its end, a thread in guest code is stopped with `thread_suspend` |
+//! | 0x33 | GetThreadContext3 | done per Horizon, not in the engine, `pause.rs`. The registers of a paused thread from the gate frame or the suspended thread |
 //! | 0x34, 0x35 | WaitForAddress, SignalToAddress | done |
 //! | 0x45 | CreateEvent | done |
 //!
 //! The memory, IPC and `GetInfo` svcs need the memory model ([`Config::memory`](crate::kernel::Config::memory)).
-//! Without it they return false.
+//! Without it they return false. 0x32 and 0x33 need the thread control of the host
+//! ([`Config::threads`](crate::kernel::Config::threads)). Without it they return false.
 
 use crate::arbiter::{ArbitrationType, SignalType};
 use crate::kernel::{Kernel, ThreadSpec};
@@ -77,6 +78,9 @@ impl Kernel {
     /// goes on with its own handler. `ExitThread` returns true and the host then ends the host thread.
     pub fn dispatch_svc(&self, cur: &Arc<Thread>, number: u32, regs: &mut SvcRegs) -> bool {
         if self.vm.is_none() && NEEDS_MEMORY.contains(&number) {
+            return false;
+        }
+        if self.config.threads.is_none() && matches!(number, 0x32 | 0x33) {
             return false;
         }
         let w = |i: usize| regs[i] as u32;
@@ -227,6 +231,8 @@ impl Kernel {
                 Ok(id) => (regs[0], regs[1]) = (0, id),
                 Err(e) => regs[0] = u64::from(e.raw()),
             },
+            0x32 => set(regs, self.set_thread_activity(cur, w(0), w(1))),
+            0x33 => set(regs, self.get_thread_context3_to(cur, regs[0], w(1))),
             0x34 => {
                 let r = ArbitrationType::from_raw(w(1)).and_then(|ty| {
                     self.wait_for_address(cur, regs[0], ty, regs[2] as i64, Timeout::from_ns(ns))

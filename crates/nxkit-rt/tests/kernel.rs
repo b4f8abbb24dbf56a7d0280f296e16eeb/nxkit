@@ -33,6 +33,9 @@ fn svc_calls_reach_the_kernel_only_when_the_service_is_on() {
         process_exit: None,
         memory: std::ptr::null(),
         core_mask: 0,
+        gate_context: None,
+        code: std::ptr::null(),
+        code_count: 0,
     };
     assert_eq!(init(&cfg), 0);
     assert_eq!(init(&cfg), 1, "a second kernel is refused");

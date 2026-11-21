@@ -38,7 +38,18 @@ The host's thread entry reads both values with `nxkit_kernel_thread_tls` and set
 
 ## The svc table
 
-The table is in `crates/nxkit-hos/src/svc.rs`. It lists every svc number that a game can call and the state of each here. A number that the table does not answer returns false and the host goes on with its own handler. Two numbers are not done: 0x32 SetThreadActivity and 0x33 GetThreadContext3, because they need a signal that pauses a host thread. 0x20 SendSyncRequestLight is also not answered.
+The table is in `crates/nxkit-hos/src/svc.rs`. It lists every svc number that a game can call and the state of each here. A number that the table does not answer returns false and the host goes on with its own handler. 0x20 SendSyncRequestLight is not answered. 0x32 SetThreadActivity and 0x33 GetThreadContext3 need `Config::threads` and are not answered without it.
+
+## Pausing a thread
+
+A garbage collector stops the world with `SetThreadActivity(thread, Paused)`, reads the registers of each thread with `GetThreadContext3` and resumes it with `SetThreadActivity(thread, Runnable)` (Unity's Boehm GC through `nn::os::SuspendThread`, Patrick's Parabox). The code is `pause.rs` and `thread/activity.rs`. A pause must not stop a thread while it holds a lock of the host, or the pausing thread stops at its next svc. So the kernel pauses a thread only where it holds none:
+
+- In a svc. The host's gate calls `nxkit_svc_frame`, which calls `Kernel::gate_enter` with the gate's register frame before the svc and `Kernel::gate_leave` after it. A pause of a thread in a svc returns at once. The svc runs on, and at its end the thread waits on its state word until it is resumed. A thread that blocks in a svc is paused that way. A thread that exits in the svc does not wait, and its context is zero, as Horizon gives for a terminated thread.
+- In guest code. The kernel stops the host thread with `thread_suspend` (`sys::HostThread`, a send right from `mach_thread_self`) and reads `ARM_THREAD_STATE64` and `ARM_NEON_STATE64`. When the pc is not in the guest's code (`ThreadControl::is_guest_code`: the `r-x` segments of the modules), the thread is in host code that the guest reached with a plain branch, such as an SDK take-over. The kernel lets it run again for a moment and tries again until it is in guest code or in a svc. While the thread is stopped there, the kernel allocates nothing and takes no lock. When the thread does not get there within `Config::pause_budget` (10 seconds), the process stops with the thread and its last pc.
+
+The thread itself takes no lock on this path, only atomics on its state word (`IN_GATE`, `REQUESTED`, `READING`). The pausing thread holds the thread's activity lock, which only other pausing threads take. The results follow Mesosphere: an activity other than 0 and 1 is `InvalidEnumValue`, a handle that is not a thread `InvalidHandle`, the calling thread (also as the pseudo handle) `Busy`, a thread that is not started or has exited `InvalidState`, a second pause and a resume or context read of a thread that is not paused `InvalidState`, and an output that cannot be written `InvalidPointer`.
+
+`GetThreadContext3` writes the 0x320 bytes of `svc::ThreadContext`: x0 to x28, fp, lr, sp, pc, pstate (the condition flags), v0 to v31, fpcr, fpsr and tpidr. For a thread in a svc, x0 to x18 are zero as on Horizon, x19 to x30 and the vector registers come from the gate frame, sp is the guest's sp before the gate block, and pc is the return point of the gate block in the patch area. For a suspended thread all registers come from Mach. tpidr is the TLS block of the kernel's model in both cases.
 
 An unknown svc does not return success (R15).
 
@@ -79,6 +90,7 @@ There are no scheduling helpers for hand-off between threads, because the core g
 | `Config.process_exit`, `process_id` | the host's exit and the process id |
 | `OsConfig.game_env`, `alloc_big_align` | the profile of the game |
 | `set_guest_sym` | the lookup in the game's symbol table |
+| `Config.threads` | the gate frame reader of `gate.rs` and the `r-x` segments of the modules (`NxkitKernelConfig::gate_context` and `code`) |
 
 ## Not verified
 
@@ -93,3 +105,6 @@ There are no scheduling helpers for hand-off between threads, because the core g
 - The clear mode values of a `SystemEvent` (0 manual, 1 auto).
 - Calls of Switch SDK functions through `extern "C"` pointers with the Apple AAPCS64 convention.
 - The thread names of Breath of the Wild. On 2026-11-07 no extracted main NSO was found.
+- The pc that `GetThreadContext3` gives for a thread in a svc. Horizon gives the address after the `svc`, the kernel gives the return point of the gate block.
+- The guest `x18` of a suspended thread. The rewritten code keeps it in the `K18` slot, and Mach reports the host's `x18`.
+- Code that the game loads at run time (NRO modules) is not in the guest's code ranges, so a pause of a thread that runs there does not end.

@@ -97,6 +97,11 @@ typedef struct nxkit_memory_config {
     uint32_t map_limit;       /* non-zero: MapPhysicalMemory counts against the pool */
 } nxkit_memory_config;
 
+typedef struct nxkit_range {
+    uint64_t start;
+    uint64_t end;    /* the byte after the last */
+} nxkit_range;
+
 typedef struct nxkit_kernel_config {
     nxkit_thread_entry thread_entry; /* without it CreateThread is not answered */
     void *user;
@@ -109,6 +114,12 @@ typedef struct nxkit_kernel_config {
     uint64_t process_id;             /* GetProcessId, 0 for the default 0x80 */
     void (*process_exit)(uint32_t code); /* ends the process for ExitProcess and Break, or NULL for exit(code) */
     const nxkit_memory_config *memory; /* NULL: no memory svc, GetInfo or IPC svc */
+    uint64_t core_mask;              /* cores of the process, one bit each, or 0 for cores 0 to 2 */
+    /* writes the guest registers that the gate saved in a frame of nxkit_svc_frame to out, as the 100 words of
+     * Horizon's ThreadContext. NULL: SetThreadActivity and GetThreadContext3 are not answered */
+    void (*gate_context)(uint64_t frame, uint64_t *out);
+    const nxkit_range *code;         /* the guest's code: text and patch segments; a pause stops a thread only there */
+    size_t code_count;
 } nxkit_kernel_config;
 
 /* Creates the process-wide kernel. 0 on success, 1 when it exists already, -1 for a bad configuration.
@@ -119,6 +130,11 @@ int32_t nxkit_kernel_init(const nxkit_kernel_config *config);
 /* Runs svc `number` with x0 to x7 in regs (read and written). Returns 1 when nxkit answered and 0 when the host
  * goes on with its own handler. After ExitThread (0x0A) it returns 1 and the host ends the host thread. */
 int32_t nxkit_svc(uint32_t number, uint64_t *regs);
+
+/* nxkit_svc for the svc gate: frame is the gate's register frame, starting with x0 to x7, and stays valid until the
+ * call returns. The thread counts as paused for SetThreadActivity while the svc runs, and a paused thread waits in
+ * this call until it is resumed. */
+int32_t nxkit_svc_frame(uint32_t number, uint64_t *frame);
 
 /* Names a thread so its role is chosen again. Returns the Horizon result code. */
 uint32_t nxkit_kernel_set_thread_name(uint32_t handle, const char *name);

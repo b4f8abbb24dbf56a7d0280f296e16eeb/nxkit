@@ -53,6 +53,7 @@ impl Kernel {
             return Err(e);
         }
         CURRENT.with(|c| *c.borrow_mut() = Some(t.clone()));
+        let _ = t.activity.host.set(sys::HostThread::current());
         t.lend.open(sys::current_host_thread());
         self.apply_qos(&t);
         self.gates.enter(&t);
@@ -120,6 +121,7 @@ impl Kernel {
                     ));
                     return;
                 }
+                let _ = th.activity.host.set(sys::HostThread::current());
                 th.lend.open(sys::current_host_thread());
                 kernel.apply_qos(&th);
                 kernel.gates.enter(&th);

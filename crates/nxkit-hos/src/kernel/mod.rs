@@ -12,13 +12,13 @@ use crate::stats::{StatsSnapshot, format_stats};
 use crate::sync::lock;
 use crate::sys;
 use crate::thread::LendGuard;
-use crate::thread::{Thread, ThreadState, Timeout};
+use crate::thread::{Thread, ThreadControl, ThreadState, Timeout};
 use crate::vm::{MemoryConfig, Vm};
 use crate::waitq::WaitTable;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use sysevent::SystemEvents;
 
 mod spawn;
@@ -76,6 +76,12 @@ pub struct Config {
     pub process_id: u64,
     /// Told the value of each handle that `CloseHandle` closed, after the kernel dropped it.
     pub on_close: Option<fn(u32)>,
+    /// The svc gate and the guest's code, for `SetThreadActivity` and `GetThreadContext3`. Without it those svcs are
+    /// not answered.
+    pub threads: Option<Arc<dyn ThreadControl>>,
+    /// How long a pause may wait for a thread that runs host code to reach guest code or a svc. After that the process
+    /// stops with the place of the thread.
+    pub pause_budget: Duration,
 }
 
 impl Default for Config {
@@ -98,6 +104,8 @@ impl Default for Config {
             // Unverified: the process id of a title is not read anywhere. The SDK only passes it back.
             process_id: 0x80,
             on_close: None,
+            threads: None,
+            pause_budget: Duration::from_secs(10),
         }
     }
 }

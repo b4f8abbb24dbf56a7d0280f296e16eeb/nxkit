@@ -1,5 +1,6 @@
 //! Guest threads, the parker a blocked thread waits on, and the objects a thread can wait for.
 
+mod activity;
 mod lend;
 
 use crate::result::KResult;
@@ -7,6 +8,8 @@ use crate::role::{Qos, ThreadRole};
 use crate::stats::ThreadStats;
 use crate::sync::lock;
 use crate::sys::{self, WaitStatus};
+pub(crate) use activity::{Activity, Held, IN_GATE, REQUESTED};
+pub use activity::{THREAD_CONTEXT_SIZE, ThreadContext, ThreadControl};
 use lend::Lend;
 pub(crate) use lend::LendGuard;
 use std::sync::atomic::{
@@ -188,6 +191,7 @@ pub struct Thread {
     pub(crate) stats: ThreadStats,
     pub(crate) gate_slot: Mutex<Option<(usize, i32)>>,
     pub(crate) body: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    pub(crate) activity: Activity,
 }
 
 impl Thread {
@@ -222,6 +226,7 @@ impl Thread {
             stats: ThreadStats::default(),
             gate_slot: Mutex::new(None),
             body: Mutex::new(None),
+            activity: Activity::default(),
         }
     }
 
