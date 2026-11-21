@@ -48,7 +48,10 @@ const SETTINGS: Fact<Settings> = Fact::new(
             ..Settings::DEFAULT.memory
         },
         display_versions: &[("67dacc049ceee8585b1583336c565b43", "1.0.5")],
-        fps_target: 60,
+        // The engine's 60 fps came from the host writing t.MaxFPS 60 into Unreal's console variable; nxkit does not write
+        // it yet, so the game keeps its own 30 and a target of 60 made the load-driven step flip between holds of 1, 2
+        // and 3 (a frame cost exactly 2 vsyncs). 0: the game's own pace, as for a game whose target needs a missing part.
+        fps_target: 0,
         fps_cvar: Some("t.MaxFPS"),
         tex_flush_upload: true,
         tex_dirty_upload: true,
