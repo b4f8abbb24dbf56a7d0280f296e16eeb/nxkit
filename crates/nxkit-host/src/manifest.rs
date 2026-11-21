@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{HostError, Result};
+use crate::graphics::Graphics;
 use crate::json::{self, Value};
 use crate::module::{self, Module};
 use crate::settings::{self, Aoc, Settings};
@@ -67,6 +68,8 @@ pub struct Game {
     pub modules: Vec<Module>,
     /// The names of the enabled services, as `nxtitle::Service::id` values.
     pub services: Vec<String>,
+    /// The graphics API.
+    pub graphics: Graphics,
     /// The romfs folder.
     pub romfs: PathBuf,
     /// The patch data of the title module, if the build wrote any.
@@ -279,6 +282,7 @@ impl Game {
                 .map_err(|_| bad("\"version_number\" is out of range"))?,
             modules,
             services,
+            graphics: Graphics::parse(v.get("graphics"))?,
             romfs: PathBuf::from(text(&v, "romfs", ctx)?),
             patches: opt_path("patches"),
             main_thread: main_thread(field(&v, "main_thread", ctx)?)?,
@@ -451,6 +455,14 @@ mod tests {
         assert_eq!((g.version.as_str(), g.version_number), ("1.6.0", 1_114_112));
         assert_eq!(g.settings.fps_target, 30);
         assert_eq!(g.main_module().map(|m| m.name.as_str()).ok(), Some("main"));
+        assert_eq!(g.graphics, Graphics::Nvn);
+    }
+
+    #[test]
+    fn the_graphics_api_is_read() {
+        let g = parse(r#""graphics": "vulkan","#).map(|g| g.graphics).ok();
+        assert_eq!(g, Some(Graphics::Vulkan));
+        assert!(parse(r#""graphics": "gl","#).is_err());
     }
 
     #[test]

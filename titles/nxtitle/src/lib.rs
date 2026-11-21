@@ -30,7 +30,7 @@ pub use catalog::{Catalog, FamilyFrom, Resolved};
 pub use evidence::{Evidence, Fact};
 pub use facts::{Match, TitleFacts};
 pub use hooks::{
-    BuildHooks, LimitKind, LimitRow, LimitRule, LimitSite, Need, PaceProfile, Pacing,
+    BuildHooks, GraphicsApi, LimitKind, LimitRow, LimitRule, LimitSite, Need, PaceProfile, Pacing,
     PresentInterval, ReflectLayout, ReflectedLimit, RuntimeHooks, Seed, ShaderRole, ShaderStage,
     ShaderView, Standalone, Upscaler,
 };

@@ -70,6 +70,8 @@ struct Game {
     st: Standalone,
     rules: &'static str,
     services: Vec<&'static str>,
+    /// The graphics API the game renders with (`BuildHooks::graphics_api`).
+    graphics: nxtitle::GraphicsApi,
     shared_font_decode: bool,
     sf_services: Vec<&'static str>,
     /// The title needs the command buffer to ignore a bind of one null range at a stream of 16 or more.
@@ -97,6 +99,7 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
             .into_iter()
             .map(nxtitle::Service::id)
             .collect(),
+        graphics: r.graphics_api(),
         shared_font_decode: r.shared_font_decode().is_some_and(|f| f.value),
         sf_services: r.sf_services().into_iter().map(|f| f.value).collect(),
         vertex_stream_null_bind: r.needs().iter().any(|n| {
@@ -387,8 +390,10 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             version_name: shown_version(&t),
             modules: &mods,
             services: t.services.clone(),
-            // an empty list in the title module: the names the modules hold
+            graphics: t.graphics.id(),
+            // an empty list in the title module: the names the modules hold. A game on another API has none.
             nvn_functions: match manifest::nvn_list(t.st.nvn_functions.value) {
+                _ if t.graphics != nxtitle::GraphicsApi::Nvn => Vec::new(),
                 l if l.is_empty() => nvn::names(&mods),
                 l => l,
             },

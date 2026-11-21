@@ -1,8 +1,9 @@
 //! The catalog: families and titles, and how they are composed for one game.
 
 use crate::{
-    BuildHooks, Fact, Family, LimitRule, Match, Need, PaceProfile, Pacing, ResourcePatch, Runtime,
-    RuntimeHooks, Seed, Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
+    BuildHooks, Fact, Family, GraphicsApi, LimitRule, Match, Need, PaceProfile, Pacing,
+    ResourcePatch, Runtime, RuntimeHooks, Seed, Service, ShaderRole, ShaderView, Standalone, Title,
+    TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -157,6 +158,14 @@ impl Resolved {
     /// The data of a build without the engine: the title's, then the family's.
     pub fn standalone(&self) -> Option<Standalone> {
         self.build_hooks().find_map(|h| h.standalone())
+    }
+
+    /// The graphics API: the title's answer, then the family's, then [`GraphicsApi::Nvn`].
+    pub fn graphics_api(&self) -> GraphicsApi {
+        self.build_hooks()
+            .find_map(|h| h.graphics_api())
+            .map(|f| f.value)
+            .unwrap_or_default()
     }
 
     /// The title's own rewriter rules (the family's are not in it), as TOML text.

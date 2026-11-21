@@ -23,6 +23,27 @@ pub enum ShaderStage {
     Mesh,
 }
 
+/// The graphics API a game renders with. The host runs the layer of that API and no other.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GraphicsApi {
+    /// NVN, the API of the Switch SDK. The core default.
+    #[default]
+    Nvn,
+    /// Vulkan 1.1: `main` imports `vk*` functions, which the SDK's loader (`subsdk0`) and NVIDIA's driver (`subsdk1`)
+    /// supply on the Switch. The host answers them, so a module list leaves the two out.
+    Vulkan,
+}
+
+impl GraphicsApi {
+    /// The name in `game.json` (`"graphics"`).
+    pub const fn id(self) -> &'static str {
+        match self {
+            GraphicsApi::Nvn => "nvn",
+            GraphicsApi::Vulkan => "vulkan",
+        }
+    }
+}
+
 /// A shader as the hooks see it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShaderView<'a> {
@@ -253,6 +274,10 @@ pub struct Standalone {
 pub trait BuildHooks: Sync {
     /// What a build without the engine needs. `None`: the title still builds through the engine.
     fn standalone(&self) -> Option<Standalone> {
+        None
+    }
+    /// The graphics API the game renders with. `None`: the next layer, then [`GraphicsApi::Nvn`].
+    fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
         None
     }
     /// The role of a shader, when this layer knows it.

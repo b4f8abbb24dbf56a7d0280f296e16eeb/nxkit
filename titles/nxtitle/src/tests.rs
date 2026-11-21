@@ -83,6 +83,9 @@ impl Family for Fam {
 
 struct Game(u64, Option<&'static str>);
 impl BuildHooks for Game {
+    fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
+        (self.0 == 2).then_some(Fact::new(GraphicsApi::Vulkan, REC))
+    }
     fn seeds(&self) -> &'static [Seed] {
         &[
             Seed {
@@ -172,6 +175,20 @@ fn title_wins_then_family_then_core() {
         archive: Some("up.bnsh"),
     };
     assert!(r.shader_role(&up).is_some());
+}
+
+#[test]
+fn the_graphics_api_is_the_titles_or_nvn() {
+    let c = catalog();
+    assert_eq!(
+        c.resolve(&TitleFacts::new(TitleId(1))).graphics_api(),
+        GraphicsApi::Nvn
+    );
+    assert_eq!(
+        c.resolve(&TitleFacts::new(TitleId(2))).graphics_api(),
+        GraphicsApi::Vulkan
+    );
+    assert_eq!(GraphicsApi::Vulkan.id(), "vulkan");
 }
 
 #[test]

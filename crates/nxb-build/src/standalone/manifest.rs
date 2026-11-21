@@ -32,6 +32,8 @@ pub(crate) struct Manifest<'a> {
     pub modules: &'a [(Built, u64)],
     /// The `Service::id` of every service nxkit runs.
     pub services: Vec<&'static str>,
+    /// The graphics API the game renders with (`nxtitle::GraphicsApi::id`).
+    pub graphics: &'static str,
     /// The names the NVN FFI answers.
     pub nvn_functions: Vec<String>,
     /// Whether the title has patch rules (`patches.toml`).
@@ -234,6 +236,7 @@ pub(crate) fn game_json(m: &Manifest) -> String {
             "services",
             Value::List(m.services.iter().map(|v| s(v)).collect()),
         ),
+        ("graphics", s(m.graphics)),
         (
             "nvn_functions",
             Value::List(m.nvn_functions.iter().map(|v| s(v)).collect()),

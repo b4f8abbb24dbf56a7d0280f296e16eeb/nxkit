@@ -25,6 +25,7 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `version_number` | The version as the number of the update. |
 | `modules` | The modules, in load order. |
 | `services` | The enabled services, by lowercase name: `fs`, `input`, `audio`, `video`, `system`, `offline`, `pacing`, `kernel`, `gpu`. `kernel` is required. |
+| `graphics` | The graphics API: `nvn` or `vulkan`. The host installs the layer of that API. An app without the key renders with NVN. |
 | `romfs` | The romfs folder. |
 | `patches` | The patch data of the title module. It may be absent. The host does not apply it, because the build applied the patches (R2). |
 | `main_thread` | `priority`, `core` and `stack_size` from the NPDM of the game. |
