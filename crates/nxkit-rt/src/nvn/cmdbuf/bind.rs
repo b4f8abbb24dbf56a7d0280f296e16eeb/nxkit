@@ -453,9 +453,7 @@ extern "C" fn bind_multisample_state(c: u64, st: u64) {
 extern "C" fn set_texture_pool(c: u64, pool: u64) {
     let name = "nvnCommandBufferSetTexturePool";
     guard(name, || {
-        // A null pool binds none (Unreal Engine 4.18 sets one while it resets a command buffer): ids count from 0, as
-        // for a command buffer that never bound a pool. A pool that is not initialised stays an error.
-        let base = if pool == 0 { 0 } else { seam().texture_pool_base(pool)? };
+        let base = seam().texture_pool_base(pool)?;
         Obj(c).set_u32(O_TEX_BASE, base)?;
         emit(
             name,
@@ -471,8 +469,7 @@ extern "C" fn set_texture_pool(c: u64, pool: u64) {
 extern "C" fn set_sampler_pool(c: u64, pool: u64) {
     let name = "nvnCommandBufferSetSamplerPool";
     guard(name, || {
-        // A null pool binds none, as for the texture pool above.
-        let base = if pool == 0 { 0 } else { seam().sampler_pool_base(pool)? };
+        let base = seam().sampler_pool_base(pool)?;
         Obj(c).set_u32(O_SAMP_BASE, base)?;
         emit(
             name,
