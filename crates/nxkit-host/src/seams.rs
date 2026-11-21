@@ -310,11 +310,17 @@ pub fn init_services(
         nxkit_svc_fs::init(&nxkit_svc_fs::Config {
             title_id: title_id(game)?,
             romfs: game.path(&game.romfs),
-            save: places.save,
+            save: places.save.clone(),
             temp: places.temp,
             aoc: aoc_root(game),
             separate_device_save: separate_device_save(game)?,
             user_of: system.then_some(nxkit_svc_system::user_of as nxkit_svc_fs::UserOf),
+            hooks: Some(crate::savesync::start(crate::savesync::config(
+                &places.save,
+                title_id(game)?,
+                env,
+                Arc::new(nxkit_svc_fs::clone_committed),
+            ))),
         });
     }
     if has(mask, Service::Input) {

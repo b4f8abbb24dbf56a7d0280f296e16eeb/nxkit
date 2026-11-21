@@ -113,6 +113,11 @@ pub struct HostEnv {
     pub user: usize,
     /// `NXKIT_NICK` (not blank, set by the launcher, no launch option): the nickname of user 1.
     pub nick: Option<String>,
+    /// `NXKIT_SAVE_SYNC` (not blank, set by the launcher, no launch option): the cloud saves folder, `icloud` or `0`,
+    /// as given. `nxkit-save-sync` reads it.
+    pub save_sync: Option<String>,
+    /// `NXKIT_SAVE_SYNC_CHOICE` (set by the launcher, no launch option): the player's choice, as given.
+    pub save_sync_choice: Option<String>,
 }
 
 impl Default for HostEnv {
@@ -220,6 +225,8 @@ impl HostEnv {
                 .filter(|n| (1..=8).contains(n))
                 .map_or(0, |n| n - 1),
             nick: not_blank(env, launch::NICK),
+            save_sync: not_blank(env, launch::SAVE_SYNC).map(|v| v.trim().to_owned()),
+            save_sync_choice: not_blank(env, launch::SAVE_SYNC_CHOICE).map(|v| v.trim().to_owned()),
         }
     }
 }

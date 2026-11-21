@@ -2074,6 +2074,7 @@ dependencies = [
  "nxkit-metal",
  "nxkit-nvn",
  "nxkit-rt",
+ "nxkit-save-sync",
  "nxkit-svc-audio",
  "nxkit-svc-fs",
  "nxkit-svc-input",
@@ -2157,6 +2158,13 @@ dependencies = [
  "nxkit-svc-video",
  "nxkit-vk",
  "nxtitle",
+]
+
+[[package]]
+name = "nxkit-save-sync"
+version = "0.14.0"
+dependencies = [
+ "nxb-model",
 ]
 
 [[package]]

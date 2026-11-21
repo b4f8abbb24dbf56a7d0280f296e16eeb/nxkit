@@ -97,6 +97,16 @@ pub const USER: &str = "NXKIT_USER";
 /// The nickname of user 1, as `DM_NICK` of the old engine. Unset: `Player`. Not a row of [`OPTIONS`].
 pub const NICK: &str = "NXKIT_NICK";
 
+/// The cloud saves folder, as `DM_SAVE_SYNC` of the old engine: a folder, `icloud` for `iCloud Drive/nxnative Saves`,
+/// or `0` and unset for off. The save of user 1 and the device save go there as `<folder>/<title id>/save.dmsync`, the
+/// file of the old engine. Not a row of [`OPTIONS`]: the launcher sets the folder the player chose.
+pub const SAVE_SYNC: &str = "NXKIT_SAVE_SYNC";
+
+/// The player's choice before the start when both saves changed, as `DM_SAVE_SYNC_CHOICE` of the old engine: `ask`,
+/// `cloud:<hash>`, `local:<hash>`, `local:none` or `offline`. Not a row of [`OPTIONS`]: the launcher sets it from the
+/// report of `nxkit-host --save-sync-report`.
+pub const SAVE_SYNC_CHOICE: &str = "NXKIT_SAVE_SYNC_CHOICE";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {

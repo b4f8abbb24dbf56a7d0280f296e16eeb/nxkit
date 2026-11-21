@@ -25,6 +25,7 @@ pub mod npdm;
 pub mod pipecache;
 pub mod reloc;
 pub mod saveplace;
+pub mod savesync;
 pub mod settings;
 pub mod stop;
 

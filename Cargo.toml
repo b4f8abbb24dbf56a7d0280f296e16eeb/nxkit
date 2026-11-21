@@ -34,6 +34,7 @@ nxkit-svc-input = { path = "crates/nxkit-svc-input" }
 nxkit-svc-video = { path = "crates/nxkit-svc-video" }
 nxkit-svc-audio = { path = "crates/nxkit-svc-audio" }
 nxkit-svc-pacing = { path = "crates/nxkit-svc-pacing" }
+nxkit-save-sync = { path = "crates/nxkit-save-sync" }
 nxkit-metal = { path = "crates/nxkit-metal" }
 nxkit-coreml = { path = "crates/nxkit-coreml" }
 nxkit-gpu = { path = "crates/nxkit-gpu" }

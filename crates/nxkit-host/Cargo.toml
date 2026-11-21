@@ -34,6 +34,7 @@ nxkit-svc-system = { workspace = true }
 nxkit-nvn = { workspace = true }
 nxkit-vk = { workspace = true }
 nxb-sys = { workspace = true }
+nxkit-save-sync = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nxkit-metal = { path = "../nxkit-metal" }

@@ -191,10 +191,9 @@ impl Fs {
     /// clone folders the save is mounted read-only, and the log says so.
     pub(crate) fn mount_save(&self, name: &[u8], dir: &Path) -> u32 {
         self.mount_backed(name, Some(dir), || {
-            let shared = self.snapshot().iter().find_map(|m| m.txn.as_ref().filter(|t| t.commit == dir).cloned());
-            let txn = match shared {
+            let txn = match self.txn_of(dir) {
                 Some(t) => t,
-                None => match Txn::open(dir) {
+                None => match self.open_txn(dir) {
                     Ok(t) => Arc::new(t),
                     Err(e) => {
                         let why = if crate::sys::is_unsupported(&e) {
@@ -215,6 +214,24 @@ impl Fs {
                 cache: IndexCache::new(),
             })
         })
+    }
+
+    /// The transaction of a mounted save folder.
+    pub(crate) fn txn_of(&self, dir: &Path) -> Option<Arc<Txn>> {
+        self.snapshot()
+            .iter()
+            .find_map(|m| m.txn.as_ref().filter(|t| t.commit == dir).cloned())
+    }
+
+    /// Opens the transaction of `dir`. The hook of the first mount runs before, for the save of user 1 and the device
+    /// save.
+    fn open_txn(&self, dir: &Path) -> std::io::Result<Txn> {
+        if let Some(h) = &self.cfg.hooks
+            && (dir == self.save_dir() || dir == self.device_save_dir())
+        {
+            h.first_mount(&self.save_dir());
+        }
+        Txn::open(dir)
     }
 
     /// The account save folder: `Config.save` without trailing slashes.
@@ -361,6 +378,35 @@ mod tests {
         assert_eq!(fs.mount_save(b"save", &fs.user_save_dir(1)), PATH_EXISTS);
         assert_eq!(fs.mount_save(b"save2", &fs.user_save_dir(1)), OK);
         assert!(fs.user_save_dir(1).is_dir());
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn the_hooks_see_the_first_mount_and_the_commits_of_user_one() {
+        #[derive(Debug, Default)]
+        struct Seen(Mutex<Vec<String>>);
+        impl crate::SaveHooks for Seen {
+            fn first_mount(&self, save: &Path) {
+                lock(&self.0).push(format!("mount {}", save.display()));
+            }
+            fn committed(&self, dir: &Path) {
+                lock(&self.0).push(format!("commit {}", dir.display()));
+            }
+        }
+        let seen = Arc::new(Seen::default());
+        let mut cfg = config("mount-hooks");
+        cfg.hooks = Some(seen.clone());
+        let fs = Fs::new(cfg);
+        let save = fs.save_dir();
+        assert_eq!(fs.mount_save(b"save", &save), OK);
+        assert_eq!(fs.mount_save(b"again", &save), OK);
+        assert_eq!(fs.mount_save(b"other", &fs.user_save_dir(1)), OK);
+        assert_eq!(fs.commit(b"save"), OK);
+        let want = [
+            format!("mount {}", save.display()),
+            format!("commit {}", save.display()),
+        ];
+        assert_eq!(*lock(&seen.0), want);
     }
 
     #[test]

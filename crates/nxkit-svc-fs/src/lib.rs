@@ -50,6 +50,18 @@ pub struct Config {
     /// The user of a uid: 0 for user 1, `None` for a uid that is not a registered user (R68). User `n + 1` has the save
     /// `<save>_user<n + 1>`. `None` here makes every uid user 1.
     pub user_of: Option<UserOf>,
+    /// What the host runs around the save of user 1 and the device save, the cloud saves (R69). `None` runs nothing.
+    pub hooks: Option<Arc<dyn SaveHooks>>,
+}
+
+/// The hooks of the host around the save of user 1 and the device save. The fs service knows nothing of what they do.
+pub trait SaveHooks: Send + Sync + std::fmt::Debug {
+    /// The first mount of the save of user 1 or of the device save, before its work folder is cloned from the committed
+    /// save. `save` is the committed save folder of user 1. Called again for each such mount of a new name, so the hook
+    /// keeps the answer of the first. The hook may stop the process when the save must not be mounted.
+    fn first_mount(&self, save: &std::path::Path);
+    /// A commit of the committed save folder `dir` went through.
+    fn committed(&self, dir: &std::path::Path);
 }
 
 /// The lookup of the user of a uid, which the account service owns.
@@ -97,6 +109,14 @@ pub(crate) fn fs() -> Option<&'static Fs> {
         }
     }
     fs
+}
+
+/// Clones the committed save folder `dir` to the new folder `to` while no commit can swap it, so the clone is one whole
+/// committed version. A folder that no mount holds is cloned as it is.
+pub fn clone_committed(dir: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let txn = FS.get().and_then(|fs| fs.txn_of(dir));
+    let _no_commit = txn.as_ref().map(|t| t.writing());
+    sys::clone_dir(dir, to)
 }
 
 /// The number of save commits since the start, for the exit report of the host.
