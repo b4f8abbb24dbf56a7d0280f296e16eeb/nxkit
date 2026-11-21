@@ -325,10 +325,15 @@ impl Gpu {
                 && crate::diag::first(&UPLOADS, 200)
             {
                 eprintln!(
-                    "DIAG upload {id:?} {:?} {}x{} residency {:?} scaled {} linear {}: {:?}",
+                    "DIAG upload {id:?} {:?} {}x{} levels {} at {:#x} flags {:#x} packaged {:?} block 2^{} residency {:?} scaled {} linear {}: {:?}",
                     res.desc.format,
                     res.desc.width,
                     res.desc.height,
+                    res.desc.mip_levels,
+                    rec.address.get(),
+                    rec.desc.flags,
+                    rec.desc.packaged_block,
+                    rec.layout.tile_h,
                     rec.residency,
                     res.scaled,
                     rec.layout.linear,

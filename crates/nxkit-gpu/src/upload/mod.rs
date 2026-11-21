@@ -83,7 +83,66 @@ fn surface(rec: &TextureRecord, res: &Res, order: GobOrder) -> Result<SurfaceLay
         block_height: 1 << u32::from(rec.layout.tile_h).min(5),
         block_depth: 1 << u32::from(rec.layout.tile_d).min(5),
         order,
-    })
+        levels: None,
+    }
+    .with_guest_levels(rec))
+}
+
+/// The levels of the guest layout where they differ from the rules of `nxkit_metal`: a sparse texture pads its tiled
+/// levels to whole 64 KiB tiles and its layers to whole tiles, which the rules do not know. Read with the rules, every
+/// row of blocks of a padded level slid sideways by the padding (Octopath Traveler's portraits and its language
+/// notice: bands about one tile high, shifted against each other, with pieces of the padding between them).
+trait GuestLevels {
+    fn with_guest_levels(self, rec: &TextureRecord) -> SurfaceLayout;
+}
+
+impl GuestLevels for SurfaceLayout {
+    fn with_guest_levels(mut self, rec: &TextureRecord) -> SurfaceLayout {
+        let d = &rec.desc;
+        let n = self.mip_levels as usize;
+        if d.samples > 1 || n > nxkit_metal::MAX_TABLE_LEVELS {
+            return self;
+        }
+        let mut t = nxkit_metal::LevelTable {
+            offsets: [0; nxkit_metal::MAX_TABLE_LEVELS],
+            gobs: [0; nxkit_metal::MAX_TABLE_LEVELS],
+            layer_stride: rec.layout.layer_size,
+        };
+        for i in 0..n {
+            let (Ok(off), Ok(gobs)) = (d.level_offset(i as u32), d.level_gobs(i as u32)) else {
+                return self;
+            };
+            t.offsets[i] = off;
+            t.gobs[i] = gobs;
+        }
+        let same = (0..n).all(|i| {
+            self.level(i as u32)
+                .is_ok_and(|l| l.offset == t.offsets[i] && l.row_bytes.div_ceil(64) == t.gobs[i])
+        }) && (self.layers == 1 || self.layer_stride().ok() == Some(t.layer_stride));
+        if !same {
+            self.levels = Some(t);
+        }
+        if crate::diag("upload") && (d.is_sparse() || !same) {
+            eprintln!(
+                "DIAG upload layout {:?} format {:#x} {}x{}x{} levels {} flags {:#x} packaged {:?} block 2^{}: {}",
+                rec.id,
+                d.format,
+                d.width,
+                d.height,
+                d.depth,
+                d.levels,
+                d.flags,
+                d.packaged_block,
+                rec.layout.tile_h,
+                if same {
+                    "as the rules".to_string()
+                } else {
+                    format!("guest levels {:?}", &t.gobs[..n])
+                }
+            );
+        }
+        self
+    }
 }
 
 pub(crate) use crate::pools::locate;

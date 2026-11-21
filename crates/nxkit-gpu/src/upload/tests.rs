@@ -483,3 +483,106 @@ fn a_texture_of_a_virtual_pool_is_uploaded_through_its_page_table() {
         "the unmapped page is not 0"
     );
 }
+
+#[test]
+fn a_sparse_texture_is_read_with_its_tiled_levels_padded_to_whole_tiles() {
+    let ctx = match Context::system_default() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("skipped: no usable Metal 4 device ({e})");
+            return;
+        }
+    };
+    let guest = Arc::new(GuestMemory::allocate(&ctx, 4 * 1024 * 1024).unwrap());
+    let pools = whole(&guest);
+    let va = |off: u64| GpuAddr::new(nxkit_metal::GUEST_VA_BASE + off).unwrap();
+    // RGBA8: a 64 KiB tile is 128x128 texels (8 GOBs of 16-GOB blocks). 192 texels are 12 GOBs, padded to 16 in the
+    // tiled level 0; level 1 (96 texels) is the mip tail and keeps its 6 GOBs.
+    let sparse = nxkit_nvn::layout::TextureDesc {
+        target: Target::D2,
+        format: 0x25,
+        flags: nxkit_nvn::layout::FLAG_SPARSE,
+        samples: 0,
+        width: 192,
+        height: 256,
+        depth: 1,
+        levels: 2,
+        stride: 0,
+        packaged_block: None,
+    };
+    assert_eq!(sparse.level_gobs(0).unwrap(), 16);
+    let plain = nxkit_nvn::layout::TextureDesc { flags: 0, ..sparse };
+    let mut resources = ResourceTable::new();
+    let id = resources.create(sparse, va(0x1_0000)).unwrap();
+    let rec = *resources.get(id).unwrap();
+    let id = resources.create(plain, va(0x20_0000)).unwrap();
+    let back = *resources.get(id).unwrap();
+    // The guest bytes: each level's texels, swizzled by the CPU reference of the guest layout.
+    let texels = |level: u32| -> Vec<u8> {
+        let (w, h) = (192 >> level, 256 >> level);
+        (0..w * h * 4)
+            .map(|i| (i * 7 + i / 509 + level * 3) as u8)
+            .collect()
+    };
+    let mut storage = vec![0u8; rec.layout.size as usize];
+    for level in 0..2 {
+        let pitch = (192 >> level) * 4;
+        nxkit_nvn::swizzle::swizzle_level(
+            &sparse,
+            nxkit_nvn::swizzle::GobOrder::Tegra,
+            (level, 0),
+            &texels(level),
+            pitch as usize,
+            &mut storage,
+        )
+        .unwrap();
+    }
+    guest.write(0x1_0000, &storage).unwrap();
+    let mut store = crate::textures::TextureStore::new(&ctx);
+    let res = store
+        .ensure(
+            &rec,
+            1.0,
+            crate::textures::Use::default(),
+            &mut Default::default(),
+        )
+        .unwrap();
+    let cache = PipelineCache::new(&ctx, &ArchiveConfig::default()).unwrap();
+    let transfer = Transfer::new(&ctx, &cache, GobOrder::Tegra).unwrap();
+    let mut ring = FrameRing::new(&ctx).unwrap();
+    let mut frame = ring.begin().unwrap();
+    let scratch = frame.scratch();
+    transfer
+        .upload(frame.commands(), &scratch, &pools, &rec, &res, false)
+        .unwrap();
+    ctx.commit_residency();
+    frame.submit().unwrap().wait().unwrap();
+    // Copied back into the plain layout and read with the CPU reference, each level is the image it started as.
+    let mut frame = ring.begin().unwrap();
+    let scratch = frame.scratch();
+    let results = transfer.copy_back_many(
+        frame.commands(),
+        &scratch,
+        &pools,
+        &[(&back, &res, &Dirty::All)],
+    );
+    assert!(results[0].is_ok(), "{results:?}");
+    ctx.commit_residency();
+    frame.submit().unwrap().wait().unwrap();
+    let mut out = vec![0u8; back.layout.size as usize];
+    guest.read(0x20_0000, &mut out).unwrap();
+    for level in 0..2 {
+        let pitch = (192 >> level) * 4;
+        let mut lin = vec![0u8; texels(level).len()];
+        nxkit_nvn::swizzle::deswizzle_level(
+            &plain,
+            nxkit_nvn::swizzle::GobOrder::Tegra,
+            (level, 0),
+            &out,
+            &mut lin,
+            pitch as usize,
+        )
+        .unwrap();
+        assert!(lin == texels(level), "level {level} differs");
+    }
+}

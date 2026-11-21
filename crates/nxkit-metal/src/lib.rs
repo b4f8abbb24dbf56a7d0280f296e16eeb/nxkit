@@ -90,7 +90,7 @@ pub use batch::{
     BATCH_SCRATCH_BYTES, BATCH_SCRATCH_MAX_BYTES, BATCHES_IN_FLIGHT, Batch, BatchRing,
     SubmittedBatch,
 };
-pub use blocklinear::{GobOrder, LevelLayout, SurfaceLayout};
+pub use blocklinear::{GobOrder, LevelLayout, LevelTable, MAX_TABLE_LEVELS, SurfaceLayout};
 pub use compute::{ComputeCommand, ComputePass};
 pub use compute_icb::{
     ComputeIcbCommand, ComputeIcbDesc, ComputeIndirectCommandBuffer, ExecutionRange,

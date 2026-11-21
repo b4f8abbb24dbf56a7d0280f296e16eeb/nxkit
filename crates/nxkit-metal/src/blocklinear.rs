@@ -11,6 +11,10 @@
 //! - A level takes `gobs_x * blocks_y * blocks_z` blocks of `512 * block_height * block_depth` bytes.
 //! - The levels follow each other. The layers of an array follow each other too, and the size of a layer is
 //!   rounded up to a multiple of one block of level 0.
+//!
+//! A surface whose levels the guest lays out otherwise (a sparse texture pads its tiled levels to whole 64 KiB tiles
+//! and its layers to whole tiles) carries a [`LevelTable`] from the caller's layout: the offset and the width in GOBs
+//! of each level, and the layer stride. The block heights and depths still follow the rules above.
 
 use crate::error::{MetalError, Result};
 use crate::format::Format;
@@ -46,6 +50,22 @@ pub struct SurfaceLayout {
     pub block_depth: u32,
     /// The GOB order.
     pub order: GobOrder,
+    /// The offsets, widths in GOBs and the layer stride of a layout that differs from the rules, None for the rules.
+    pub levels: Option<LevelTable>,
+}
+
+/// The most levels a [`LevelTable`] holds.
+pub const MAX_TABLE_LEVELS: usize = 16;
+
+/// The levels of a surface as the guest lays them out, where that differs from the rules of this module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LevelTable {
+    /// The offset of each level from the start of its layer.
+    pub offsets: [u64; MAX_TABLE_LEVELS],
+    /// The width of each level in GOBs, at least the GOBs of its row of blocks.
+    pub gobs: [u32; MAX_TABLE_LEVELS],
+    /// The bytes from one layer to the next.
+    pub layer_stride: u64,
 }
 
 /// One level of a layer.
@@ -57,7 +77,8 @@ pub struct LevelLayout {
     pub height: u32,
     /// The depth in blocks.
     pub depth: u32,
-    /// The bytes of one row of blocks, without padding.
+    /// The bytes of one row of blocks, without padding. With a [`LevelTable`] whose width pads the level, the bytes of
+    /// its padded width: the pitch the kernels address with.
     pub row_bytes: u32,
     /// The block height in GOBs after the shrink.
     pub block_height: u32,
@@ -105,6 +126,7 @@ impl SurfaceLayout {
             block_height,
             block_depth: 1,
             order,
+            levels: None,
         }
     }
 
@@ -135,6 +157,25 @@ impl SurfaceLayout {
     }
 
     fn walk(&self, level: u32) -> LevelLayout {
+        let mut l = self.walk_rules(level);
+        let Some(t) = &self.levels else {
+            return l;
+        };
+        let i = level as usize;
+        if let (Some(&offset), Some(&gobs)) = (t.offsets.get(i), t.gobs.get(i)) {
+            l.offset = offset;
+            if gobs > l.row_bytes.div_ceil(64) {
+                let unit = 512 * u64::from(l.block_height) * u64::from(l.block_depth);
+                let blocks_y = u64::from(l.height.div_ceil(8 * l.block_height));
+                let blocks_z = u64::from(l.depth.div_ceil(l.block_depth));
+                l.row_bytes = gobs * 64;
+                l.bytes = u64::from(gobs) * blocks_y * blocks_z * unit;
+            }
+        }
+        l
+    }
+
+    fn walk_rules(&self, level: u32) -> LevelLayout {
         let mut offset = 0u64;
         let mut i = 0;
         loop {
@@ -176,6 +217,9 @@ impl SurfaceLayout {
     /// The bytes from one layer to the next.
     pub fn layer_stride(&self) -> Result<u64> {
         self.validate()?;
+        if let Some(t) = &self.levels {
+            return Ok(t.layer_stride);
+        }
         let last = self.walk(self.mip_levels - 1);
         let total = last.offset + last.bytes;
         if self.layers == 1 {
@@ -244,6 +288,7 @@ mod tests {
             block_height: bh,
             block_depth: bd,
             order: GobOrder::Tegra,
+            levels: None,
         }
     }
 
@@ -285,5 +330,27 @@ mod tests {
         assert!(surface(64, 64, 1, 8, 1, 1, 1).validate().is_err());
         assert!(surface(64, 64, 1, 1, 1, 3, 1).validate().is_err());
         assert!(surface(64, 64, 1, 2, 1, 1, 1).level(2).is_err());
+    }
+
+    #[test]
+    fn a_level_table_pads_the_levels_and_sets_the_layer_stride() {
+        // 96 texels of 4 bytes are 6 GOBs; a sparse layout pads level 0 to 8 (one 64 KiB tile is 8 GOBs of 16-GOB
+        // blocks) and keeps level 1 (3 GOBs) as it is.
+        let mut s = surface(96, 256, 1, 2, 2, 16, 1);
+        let plain = s.level(0).unwrap();
+        let mut t = LevelTable {
+            offsets: [0; MAX_TABLE_LEVELS],
+            gobs: [0; MAX_TABLE_LEVELS],
+            layer_stride: 0x2_0000,
+        };
+        t.gobs[0] = 8;
+        t.offsets[1] = 0x1_0000;
+        t.gobs[1] = 3;
+        s.levels = Some(t);
+        let (a, b) = (s.level(0).unwrap(), s.level(1).unwrap());
+        assert_eq!((plain.row_bytes, a.row_bytes), (384, 512));
+        assert_eq!(a.bytes, 8 * 2 * 512 * 16);
+        assert_eq!((b.offset, b.row_bytes), (0x1_0000, 192));
+        assert_eq!(s.layer_stride().unwrap(), 0x2_0000);
     }
 }

@@ -178,6 +178,7 @@ fn array_with_mips_deswizzles_and_swizzles_back() {
         block_height: 4,
         block_depth: 1,
         order: GobOrder::Tegra,
+        levels: None,
     };
     assert_eq!(s.layer_stride().unwrap(), layer_stride(&s));
     for l in 0..5 {
@@ -263,6 +264,7 @@ fn volume_with_mips_deswizzles() {
         block_height: 2,
         block_depth: 4,
         order: GobOrder::Switch2,
+        levels: None,
     };
     let total = s.total_bytes().unwrap() as usize;
     let data = pattern(total, 11);
