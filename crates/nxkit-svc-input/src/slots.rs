@@ -1,7 +1,7 @@
 //! The eight controller slots, a port of the engine `pad_slots.h` (MIT).
 //!
 //! A slot keeps the name of its last controller after the controller left. A controller that comes back gets its old
-//! slot, so player numbers stay where they were.
+//! slot, so player numbers stay where they were. With press to join a controller takes the lowest free slot instead.
 
 use crate::npad::PLAYERS;
 
@@ -42,6 +42,21 @@ impl Slots {
             .or_else(|| is_free(0).then_some(0))
             .or_else(|| (0..PLAYERS).find(|&p| is_free(p) && this.name[p].is_empty()))
             .or_else(|| (0..PLAYERS).find(|&p| is_free(p)))?;
+        self.owner[p] = owner;
+        self.name[p] = name.to_owned();
+        Some(p)
+    }
+
+    /// Gives `owner` the lowest free slot, whatever slot its name held before (press to join). A held slot wins.
+    /// `None` when all eight are taken.
+    pub(crate) fn take_lowest(&mut self, owner: usize, name: &str) -> Option<usize> {
+        if owner == 0 {
+            return None;
+        }
+        if let Some(p) = self.slot_of(owner) {
+            return Some(p);
+        }
+        let p = (0..PLAYERS).find(|&p| self.owner[p] == 0)?;
         self.owner[p] = owner;
         self.name[p] = name.to_owned();
         Some(p)
@@ -91,6 +106,18 @@ mod tests {
         s.free(10);
         assert_eq!(s.take(11, "c"), Some(0));
         assert_eq!(s.take(12, "d"), Some(1));
+    }
+
+    #[test]
+    fn press_to_join_takes_the_lowest_free_slot_whatever_the_name() {
+        let mut s = Slots::default();
+        s.take_lowest(10, "a");
+        s.take_lowest(11, "b");
+        s.free(10);
+        s.free(11);
+        assert_eq!(s.take_lowest(21, "b"), Some(0), "b held slot 1 before");
+        assert_eq!(s.take_lowest(21, "b"), Some(0));
+        assert_eq!(s.take_lowest(20, "a"), Some(1));
     }
 
     #[test]

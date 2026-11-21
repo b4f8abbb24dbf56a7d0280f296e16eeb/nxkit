@@ -275,6 +275,10 @@ pub fn init_services(
             rumble: env.rumble,
             rumble_gain: env.rumble_gain,
             rumble_min: env.rumble_min,
+            stick_deadzone_l: env.stick_deadzone_l,
+            stick_deadzone_r: env.stick_deadzone_r,
+            pad_merge: env.pad_merge,
+            pad_press_to_join: env.pad_press_to_join,
             ..nxkit_svc_input::Config::default()
         };
         let (file, warnings) = crate::input_file::load(&game.root, &game.title_id);

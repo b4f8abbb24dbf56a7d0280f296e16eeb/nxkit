@@ -15,6 +15,7 @@
 
 mod bind;
 mod config;
+mod deadzone;
 mod exports;
 mod ipc;
 mod keys;

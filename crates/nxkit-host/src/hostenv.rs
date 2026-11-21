@@ -64,6 +64,15 @@ pub struct HostEnv {
     /// `NXKIT_FPS_TARGET` (a whole number, a launch option): the frame rate over `fps_target` of the title module.
     /// `Settings::with_env` keeps it only when the title offers it.
     pub fps_target: Option<u32>,
+    /// `NXKIT_STICK_DEADZONE_L` (0 to 50, a whole number, 0 otherwise, a launch option): the dead zone of the left
+    /// stick of a controller in percent.
+    pub stick_deadzone_l: u8,
+    /// `NXKIT_STICK_DEADZONE_R` (as the left one, a launch option): the dead zone of the right stick.
+    pub stick_deadzone_r: u8,
+    /// `NXKIT_PAD_MERGE=1` (a launch option): every controller is player 1.
+    pub pad_merge: bool,
+    /// `NXKIT_PAD_PRESS_TO_JOIN=1` (a launch option): a new controller becomes a player at its first button press.
+    pub pad_press_to_join: bool,
     /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
@@ -150,6 +159,12 @@ impl HostEnv {
                 .var(launch::FPS_TARGET)
                 .ok()
                 .and_then(|v| v.trim().parse::<u32>().ok()),
+            stick_deadzone_l: percent(env, launch::STICK_DEADZONE_L),
+            stick_deadzone_r: percent(env, launch::STICK_DEADZONE_R),
+            pad_merge: env.var(launch::PAD_MERGE).is_ok_and(|v| v.trim() == "1"),
+            pad_press_to_join: env
+                .var(launch::PAD_PRESS_TO_JOIN)
+                .is_ok_and(|v| v.trim() == "1"),
             handheld: env.var(launch::OP_MODE).ok().and_then(|v| match v.trim() {
                 "handheld" => Some(true),
                 "docked" => Some(false),
@@ -213,6 +228,11 @@ pub fn with_saved(env: &mut Env, saved: impl Fn(&str) -> Option<String>) -> Vec<
 /// The value of `key` as a number from `min` to `max`, None when it is unset, not a number or outside.
 fn in_range(env: &Env, key: &str, min: f32, max: f32) -> Option<f32> {
     parsed::<f32>(env, key).filter(|v| (min..=max).contains(v))
+}
+
+/// The value of `key` as a whole percent from 0 to 50, 0 when it is unset, not a whole number or above 50.
+fn percent(env: &Env, key: &str) -> u8 {
+    parsed::<u8>(env, key).filter(|p| *p <= 50).unwrap_or(0)
 }
 
 /// The value of `key` parsed as `T`, None when it is unset or not a `T`.
@@ -374,6 +394,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_dead_zone_is_a_whole_percent_up_to_50() {
+        let dz = |v: &str| {
+            HostEnv::from_env(&Env::from_pairs([("NXKIT_STICK_DEADZONE_L", v)])).stick_deadzone_l
+        };
+        assert_eq!((dz("15"), dz("50"), dz("0")), (15, 50, 0));
+        assert_eq!((dz("51"), dz("-3"), dz("12.5"), dz("x")), (0, 0, 0, 0));
     }
 
     #[test]

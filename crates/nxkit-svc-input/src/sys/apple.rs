@@ -29,6 +29,8 @@ pub(crate) struct Platform {
     motion: bool,
     rumble: bool,
     keyboard: bool,
+    /// A new controller waits for its first button press, then takes the lowest free slot.
+    press_to_join: bool,
     keys: Vec<(u8, GCKeyCode)>,
 }
 
@@ -106,6 +108,42 @@ fn is_labelled(category: &str) -> bool {
     category == "Switch Pro Controller" || category.contains("Joy-Con")
 }
 
+/// The buttons of a gamepad in the `NpadButton` bits. `labelled`: the face buttons carry the Nintendo names, else
+/// the Xbox layout is turned into the Switch one.
+fn buttons(g: &GCExtendedGamepad, labelled: bool) -> u64 {
+    // SAFETY: property reads on a live `GCExtendedGamepad` and the elements it returns.
+    unsafe {
+        let (a, b, x, y) = if labelled {
+            (g.buttonA(), g.buttonB(), g.buttonX(), g.buttonY())
+        } else {
+            (g.buttonB(), g.buttonA(), g.buttonY(), g.buttonX())
+        };
+        let dpad = g.dpad();
+        let pairs = [
+            (down(&a), btn::A),
+            (down(&b), btn::B),
+            (down(&x), btn::X),
+            (down(&y), btn::Y),
+            (down_opt(g.leftThumbstickButton()), btn::STICK_L),
+            (down_opt(g.rightThumbstickButton()), btn::STICK_R),
+            (down(&g.leftShoulder()), btn::L),
+            (down(&g.rightShoulder()), btn::R),
+            (down(&g.leftTrigger()), btn::ZL),
+            (down(&g.rightTrigger()), btn::ZR),
+            (down(&g.buttonMenu()), btn::PLUS),
+            (down_opt(g.buttonOptions()), btn::MINUS),
+            (down(&dpad.left()), btn::LEFT),
+            (down(&dpad.up()), btn::UP),
+            (down(&dpad.right()), btn::RIGHT),
+            (down(&dpad.down()), btn::DOWN),
+        ];
+        pairs
+            .iter()
+            .filter(|(on, _)| *on)
+            .fold(0, |m, (_, b)| m | b)
+    }
+}
+
 impl Platform {
     pub(crate) fn new(config: &Config) -> Platform {
         Platform {
@@ -113,6 +151,7 @@ impl Platform {
             motion: config.motion,
             rumble: config.rumble,
             keyboard: config.keyboard,
+            press_to_join: config.press_to_join(),
             keys: if config.keyboard {
                 key_table()
             } else {
@@ -154,7 +193,7 @@ impl Platform {
             if crate::system::home_claimed() {
                 claim_home(&gamepad);
             }
-            let Some(slot) = slots.take(owner, &name) else {
+            let Some(slot) = self.join(slots, owner, &name, &gamepad) else {
                 continue;
             };
             self.pads[slot] = Some(Pad {
@@ -165,6 +204,22 @@ impl Platform {
                 gamepad,
             });
         }
+    }
+
+    /// The slot of a new controller. With press to join it gets none until a button of it is down.
+    fn join(
+        &self,
+        slots: &mut Slots,
+        owner: usize,
+        name: &str,
+        gamepad: &GCExtendedGamepad,
+    ) -> Option<usize> {
+        if !self.press_to_join {
+            return slots.take(owner, name);
+        }
+        (buttons(gamepad, true) != 0)
+            .then(|| slots.take_lowest(owner, name))
+            .flatten()
     }
 
     /// The motion sensors of a controller that has a gyro. Sensors that need activation are switched on.
@@ -189,45 +244,20 @@ impl Platform {
     pub(crate) fn read_pad(&self, slot: usize) -> Option<RawPad> {
         let pad = self.pads.get(slot)?.as_ref()?;
         let g = &pad.gamepad;
-        // SAFETY: property reads on a live `GCExtendedGamepad` and the elements it returns.
-        unsafe {
-            let (a, b, x, y) = if pad.labelled {
-                (g.buttonA(), g.buttonB(), g.buttonX(), g.buttonY())
-            } else {
-                (g.buttonB(), g.buttonA(), g.buttonY(), g.buttonX())
-            };
-            let dpad = g.dpad();
+        // SAFETY: property reads on a live `GCExtendedGamepad` and the sticks it returns.
+        let axes = unsafe {
             let (ls, rs) = (g.leftThumbstick(), g.rightThumbstick());
-            let pairs = [
-                (down(&a), btn::A),
-                (down(&b), btn::B),
-                (down(&x), btn::X),
-                (down(&y), btn::Y),
-                (down_opt(g.leftThumbstickButton()), btn::STICK_L),
-                (down_opt(g.rightThumbstickButton()), btn::STICK_R),
-                (down(&g.leftShoulder()), btn::L),
-                (down(&g.rightShoulder()), btn::R),
-                (down(&g.leftTrigger()), btn::ZL),
-                (down(&g.rightTrigger()), btn::ZR),
-                (down(&g.buttonMenu()), btn::PLUS),
-                (down_opt(g.buttonOptions()), btn::MINUS),
-                (down(&dpad.left()), btn::LEFT),
-                (down(&dpad.up()), btn::UP),
-                (down(&dpad.right()), btn::RIGHT),
-                (down(&dpad.down()), btn::DOWN),
-            ];
-            let buttons = pairs
-                .iter()
-                .filter(|(on, _)| *on)
-                .fold(0, |m, (_, b)| m | b);
-            let axes = [
+            [
                 value(&ls.xAxis()),
                 value(&ls.yAxis()),
                 value(&rs.xAxis()),
                 value(&rs.yAxis()),
-            ];
-            Some(RawPad { buttons, axes })
-        }
+            ]
+        };
+        Some(RawPad {
+            buttons: buttons(g, pad.labelled),
+            axes,
+        })
     }
 
     /// Acceleration in G and rotation rate in rad/s of the controller in `slot`. `None` for a controller without a

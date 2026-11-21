@@ -255,5 +255,7 @@ mod tests {
             find(&one, launch::FPS_TARGET).is_none(),
             "one rate: nothing to choose"
         );
+        let dz = find(&high, launch::STICK_DEADZONE_L).unwrap();
+        assert_eq!(dz.get("max"), Some(&Value::Float(50.0)));
     }
 }

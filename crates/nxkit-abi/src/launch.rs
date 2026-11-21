@@ -63,6 +63,18 @@ pub const METAL_HUD: &str = "NXKIT_METAL_HUD";
 /// `30`, `60` or `120`: the frame rate in place of `fps_target` of the title module. Unset: the title's.
 pub const FPS_TARGET: &str = "NXKIT_FPS_TARGET";
 
+/// 0 to 50: the radial dead zone of the left stick of a controller, in percent of its travel. 0: none.
+pub const STICK_DEADZONE_L: &str = "NXKIT_STICK_DEADZONE_L";
+
+/// 0 to 50: the radial dead zone of the right stick of a controller, in percent of its travel. 0: none.
+pub const STICK_DEADZONE_R: &str = "NXKIT_STICK_DEADZONE_R";
+
+/// `1`: every controller is player 1.
+pub const PAD_MERGE: &str = "NXKIT_PAD_MERGE";
+
+/// `1`: a new controller becomes a player at its first button press, the lowest player that is free.
+pub const PAD_PRESS_TO_JOIN: &str = "NXKIT_PAD_PRESS_TO_JOIN";
+
 /// How a launcher shows an option, and the values that it takes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
@@ -193,6 +205,13 @@ pub fn game_fps_targets(fps_target: u32, fps_max: u32) -> Vec<(&'static str, &'s
         .collect()
 }
 
+/// The stick dead zones in percent: 0 (none) to 50, in whole steps.
+const DEADZONE: Kind = Kind::Range {
+    min: 0.0,
+    max: 50.0,
+    step: 1.0,
+};
+
 const ON_OFF: Kind = Kind::Toggle { on: "1", off: "0" };
 
 /// The launch options of the host, in the order of the launcher.
@@ -285,6 +304,46 @@ pub const OPTIONS: &[Opt] = &[
         section: "Controls",
         basic: false,
         needs: Some((RUMBLE, "1")),
+    },
+    Opt {
+        env: STICK_DEADZONE_L,
+        kind: DEADZONE,
+        label: "Left stick dead zone",
+        note: "In percent of the stick's travel. A controller's left stick reads centred inside it.",
+        default: "0",
+        section: "Controls",
+        basic: false,
+        needs: None,
+    },
+    Opt {
+        env: STICK_DEADZONE_R,
+        kind: DEADZONE,
+        label: "Right stick dead zone",
+        note: "In percent of the stick's travel. A controller's right stick reads centred inside it.",
+        default: "0",
+        section: "Controls",
+        basic: false,
+        needs: None,
+    },
+    Opt {
+        env: PAD_MERGE,
+        kind: ON_OFF,
+        label: "All controllers are player 1",
+        note: "Every controller plays as player 1.",
+        default: "0",
+        section: "Controls",
+        basic: false,
+        needs: None,
+    },
+    Opt {
+        env: PAD_PRESS_TO_JOIN,
+        kind: ON_OFF,
+        label: "Press a button to join",
+        note: "A new controller becomes a player at its first button press, as the lowest free player.",
+        default: "0",
+        section: "Controls",
+        basic: false,
+        needs: None,
     },
     Opt {
         env: HOME_MENU,

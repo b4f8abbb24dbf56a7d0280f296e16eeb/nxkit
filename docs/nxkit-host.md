@@ -103,6 +103,10 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 | `NXKIT_RUMBLE` | toggle | `1`, `0` | `1` |
 | `NXKIT_RUMBLE_GAIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 3, step 0.1 | `1.0` |
 | `NXKIT_RUMBLE_MIN` | range, needs `NXKIT_RUMBLE=1` | 0 to 0.9, step 0.05 | `0` |
+| `NXKIT_STICK_DEADZONE_L` | range | 0 to 50, step 1 (percent) | `0` |
+| `NXKIT_STICK_DEADZONE_R` | range | 0 to 50, step 1 (percent) | `0` |
+| `NXKIT_PAD_MERGE` | toggle | `1`, `0` | `0` |
+| `NXKIT_PAD_PRESS_TO_JOIN` | toggle | `1`, `0` | `0` |
 | `NXKIT_HOME_MENU` | toggle | `1`, `0` | `1` |
 | `NXKIT_HOME_QUIT` | toggle | `1`, `0` | `1` |
 | `NXKIT_METAL_HUD` | toggle | `1`, `0` | `0` |
