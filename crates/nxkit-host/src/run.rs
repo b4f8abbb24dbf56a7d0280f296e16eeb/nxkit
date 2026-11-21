@@ -95,6 +95,7 @@ pub fn run(opts: &Options) -> Result<()> {
     let env = &run.host;
     sys::crashsig::install(env);
     let game = Game::read(&opts.root, env)?;
+    sys::loading::set_title(&game.name);
     let mask = loader::service_mask(&game.services)?;
     check_kernel_service(mask)?;
     let placed = place::place(&game)?;
@@ -158,6 +159,11 @@ pub fn run(opts: &Options) -> Result<()> {
         )?,
         Graphics::Vulkan => seams::vulkan_frame_hooks(&ctx, &opts.root, &settings, &refresh)?,
     };
+    // Over a launcher the window shows with the first picture that is not black; an NVN game's presents tell it.
+    let probed = env.overlay && matches!(loaded.game.graphics, Graphics::Nvn);
+    if probed {
+        nxkit_gpu::when_shown(crate::sys::present_picture_done);
+    }
     let window = WindowConfig {
         title: format!("nxkit {} {}", loaded.game.title_id, loaded.game.version),
         size: None,
@@ -167,9 +173,11 @@ pub fn run(opts: &Options) -> Result<()> {
             env.home_menu,
             env.home_quit,
             env.launcher.clone(),
+            env.launcher_pid,
             env.home_text.as_deref(),
             &loaded.game.name,
         ),
+        probed,
     };
     // The Home button reaches the app only on a controller that GameController gives it to.
     nxkit_svc_input::claim_home(window.home.is_some());

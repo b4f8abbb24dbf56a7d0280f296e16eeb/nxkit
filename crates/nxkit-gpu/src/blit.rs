@@ -42,6 +42,7 @@ fragment float4 blit_srgb(V in [[stage_in]], texture2d<float, access::read> t [[
 "#;
 
 pub(crate) struct Blit {
+    ctx: Context,
     ring: FrameRing,
     plain: RenderPipeline,
     srgb: RenderPipeline,
@@ -64,6 +65,7 @@ impl Blit {
         let mut ring = FrameRing::new(ctx)?;
         ring.set_timed_present(timed.clone());
         Ok(Self {
+            ctx: ctx.clone(),
             ring,
             plain: pipe(1, "blit_plain")?,
             srgb: pipe(2, "blit_srgb")?,
@@ -133,6 +135,9 @@ impl Blit {
             })?;
             pass.end();
         }
+        // While the host waits for the first picture that shows something (`shown.rs`).
+        let crop = [crop.x, crop.y, crop.width, crop.height].map(|v| v.max(0) as u32);
+        crate::shown::probe(&self.ctx, frame.commands(), &self.table, src, crop);
         match at {
             Some(at) => frame.present_at(drawable, at),
             None => frame.present(drawable),

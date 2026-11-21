@@ -60,6 +60,10 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_METAL_HUD=1` | The Metal performance HUD over the game, through `developerHUDProperties` of the window's `CAMetalLayer` (`mode` `default`). A launch option. `MTL_HUD_ENABLED=1` of Metal does the same. |
 | `NXKIT_SAVED_CHOICES=0` | The host ignores the saved choices of the launch options in the preferences of the app (`launcher.<env>`). |
 | `NXKIT_FULLSCREEN=1` | The window starts in full screen, as `--fullscreen`. Any value that is not blank and not `0` turns it on. For a launcher that opens the app bundle, which starts the host with no arguments (`docs/nxkit-host.md`). |
+| `NXKIT_OVERLAY=1` | The game opens over the launcher's full-screen Space instead of a Space of its own: a borderless window on every Space that fades in with the game's first picture and fades out when the game ends. No loading window shows; the launcher gets the progress (`org.nxkit.loading.<pid>`) and the first picture (`org.nxkit.shown.<pid>`). NX2Apple's console mode sets it. |
+| `NXKIT_CURSOR_HIDE` | The seconds without movement after which the pointer over the game hides (3). `0` never hides it. |
+| `NXKIT_CURSOR_HIDDEN=1` | The pointer starts hidden: the launcher's own pointer was hidden when it started the game. |
+| `NXKIT_LAUNCHER_PID` | The process of the launcher for Back to the launcher. It wins over `NXKIT_LAUNCHER_BUNDLE_ID`, so the game goes back to the copy that started it when two run. |
 | `NXKIT_HOME_MENU=0` | No Home menu on a short press of a controller's Home button (`docs/nxkit-host.md`, The Home button). |
 | `NXKIT_HOME_QUIT=0` | No quit prompt when Home is held for 2 seconds. |
 | `NXKIT_LAUNCHER_BUNDLE_ID` | The bundle identifier of the launcher that started the game. The Home menu gets Back to the launcher, which pauses the game in the background and activates that application. |

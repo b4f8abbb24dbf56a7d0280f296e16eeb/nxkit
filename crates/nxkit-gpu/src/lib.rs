@@ -70,6 +70,7 @@ mod rename;
 mod report;
 mod scaled;
 mod settings;
+mod shown;
 mod skip;
 pub mod snapshot;
 pub mod stats;
@@ -92,6 +93,7 @@ pub use report::EncodeReport;
 pub use settings::{
     GpuEnv, GpuSettings, NativeNet, install as install_env, pipeline_bases, pipeline_specialize,
 };
+pub use shown::when_shown;
 pub use skip::Skip;
 pub use snapshot::{EncodeView, Live, Snapshot};
 pub use stats::{DrawClass, EncodeStats, KindStats};

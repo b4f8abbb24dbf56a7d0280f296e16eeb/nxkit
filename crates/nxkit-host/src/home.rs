@@ -66,7 +66,7 @@ pub struct Options {
     pub menu: bool,
     /// Holding Home opens the quit prompt (`NXKIT_HOME_QUIT`, on unless `0`).
     pub hold: bool,
-    /// The menu has Back to the launcher (`NXKIT_LAUNCHER_BUNDLE_ID` is set).
+    /// The menu has Back to the launcher (`NXKIT_LAUNCHER_PID` or `NXKIT_LAUNCHER_BUNDLE_ID` is set).
     pub launcher: bool,
 }
 
@@ -91,6 +91,8 @@ pub struct Setup {
     pub texts: Texts,
     /// The bundle identifier of the launcher (`NXKIT_LAUNCHER_BUNDLE_ID`).
     pub launcher: Option<String>,
+    /// The process of the launcher (`NXKIT_LAUNCHER_PID`), which wins over the bundle identifier.
+    pub launcher_pid: Option<i32>,
 }
 
 impl Setup {
@@ -100,18 +102,20 @@ impl Setup {
         menu: bool,
         hold: bool,
         launcher: Option<String>,
+        launcher_pid: Option<i32>,
         text: Option<&str>,
         game: &str,
     ) -> Option<Setup> {
         let options = Options {
             menu,
             hold,
-            launcher: launcher.is_some(),
+            launcher: launcher.is_some() || launcher_pid.is_some(),
         };
         (menu || hold).then(|| Setup {
             options,
             texts: Texts::from_lines(text, game),
             launcher,
+            launcher_pid,
         })
     }
 }
@@ -465,10 +469,16 @@ mod tests {
 
     #[test]
     fn the_setup_names_the_launcher_row() {
-        let s = Setup::new(true, true, Some("org.example".into()), None, "Zelda");
+        let s = Setup::new(true, true, Some("org.example".into()), None, None, "Zelda");
         assert!(s.is_some_and(|s| s.options.launcher && s.texts.menu_title == "Zelda"));
-        assert!(Setup::new(true, false, None, None, "Zelda").is_some_and(|s| !s.options.launcher));
-        assert_eq!(Setup::new(false, false, None, None, "Zelda"), None);
+        assert!(
+            Setup::new(true, false, None, None, None, "Zelda").is_some_and(|s| !s.options.launcher)
+        );
+        assert!(
+            Setup::new(true, true, None, Some(42), None, "Zelda")
+                .is_some_and(|s| s.options.launcher)
+        );
+        assert_eq!(Setup::new(false, false, None, None, None, "Zelda"), None);
     }
 
     #[test]

@@ -2419,6 +2419,7 @@ version = "0.3.2"
 source = "git+https://github.com/madsmtm/objc2?rev=8a5abacd90d5403fc0463459a35826f892b9142e#8a5abacd90d5403fc0463459a35826f892b9142e"
 dependencies = [
  "bitflags",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",

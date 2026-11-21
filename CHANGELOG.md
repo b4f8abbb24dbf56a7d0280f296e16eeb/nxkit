@@ -4,6 +4,21 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in with
+  its first picture that is not black and out when it ends, and gives the launcher the progress of its start
+  (`org.nxkit.loading.<pid>`, `org.nxkit.shown.<pid>`). NX2Apple's console mode uses it. `nxkit_gpu::when_shown`
+  tells the host when a presented picture first shows something.
+- The Home screens blur the game's picture under the card. The pointer over the game hides after 3 seconds without
+  movement (`NXKIT_CURSOR_HIDE`, `NXKIT_CURSOR_HIDDEN`). `NXKIT_LAUNCHER_PID` names the launcher by its process.
+
+### Changed
+
+- The loading window of the start is a dark card in the look of NX2Apple's console mode, and the game's window is black
+  before its first picture, so nothing white shows.
+- The game asks for the front again once it has launched, so it comes forward when a launcher hands the front over.
+
 ## 0.12.0 - 2026-11-21
 
 ### Added

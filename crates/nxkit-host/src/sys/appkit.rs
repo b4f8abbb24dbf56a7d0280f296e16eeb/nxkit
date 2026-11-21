@@ -20,14 +20,14 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSActivityOptions, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo,
-    NSString,
+    NSActivityOptions, NSNotification, NSObject, NSObjectProtocol, NSProcessInfo, NSString,
 };
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
 use super::fullscreen::{self, Startup};
 use super::homeui;
 use super::mouse;
+use super::present;
 use super::screen::{content_size, screen_interval, target_screen};
 use crate::error::{HostError, Result};
 use crate::refresh::Refresh;
@@ -103,6 +103,9 @@ pub struct WindowConfig {
     pub metal_hud: bool,
     /// The Home button of the controllers (`home.rs`), `None` when it is off.
     pub home: Option<crate::home::Setup>,
+    /// The GPU tells when the picture first shows something (`nxkit_gpu::when_shown`, an NVN game); else the first
+    /// finished frame counts.
+    pub probed: bool,
 }
 
 fn drawable_size(window: &NSWindow, view: &NSView) -> (u32, u32) {
@@ -295,6 +298,23 @@ define_class!(
 
     // SAFETY: the methods have the signatures of the protocol.
     unsafe impl NSApplicationDelegate for AppDelegate {
+        // The activation asked for before the run loop started can get lost when a launcher hands the front over
+        // (`yieldActivation`, cooperative activation): it is asked again once the application has launched.
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn application_did_finish_launching(&self, _n: &NSNotification) {
+            let mtm = MainThreadMarker::from(self);
+            // An overlay asks for the front only when it shows (`present.rs`): an active application with no window
+            // on the launcher's Space would take the player to the desktop.
+            if present::is_overlay() {
+                return;
+            }
+            if let Some(w) = self.window().get() {
+                w.makeKeyAndOrderFront(None);
+            }
+            NSApplication::sharedApplication(mtm).activate();
+            self.enter_full_screen();
+        }
+
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
         fn should_terminate_after_last_window_closed(&self, _app: &NSApplication) -> bool {
             true
@@ -374,6 +394,8 @@ impl AppDelegate {
 struct StopHooks {
     inner: Arc<dyn FrameHooks>,
     stop: Arc<AtomicBool>,
+    /// The GPU reports the first picture that shows something, so a finished frame does not count.
+    probed: bool,
 }
 
 impl FrameHooks for StopHooks {
@@ -386,20 +408,50 @@ impl FrameHooks for StopHooks {
     }
 
     fn frame_complete(&self, stats: &nxkit_metal::CommandBufferStats) {
+        if !self.probed {
+            present::picture_done();
+        }
         self.inner.frame_complete(stats);
     }
 
     fn display_tick(&self, tick: DisplayTick) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         if self.stop.load(Ordering::Acquire) {
-            if let Some(mtm) = MainThreadMarker::new() {
+            // An overlay fades out first and ends a fade later (`present.rs`).
+            if present::may_end() {
                 NSApplication::sharedApplication(mtm).terminate(None);
             }
             return;
         }
+        present::tick(mtm);
         mouse::tick();
+        super::pointer::tick();
         homeui::tick();
         self.inner.display_tick(tick);
     }
+}
+
+/// The titled window of a game that has the desktop or its own full-screen Space.
+fn titled_window(mtm: MainThreadMarker, rect: CGRect, title: &str) -> Retained<NSWindow> {
+    let style = NSWindowStyleMask::Titled
+        | NSWindowStyleMask::Closable
+        | NSWindowStyleMask::Miniaturizable
+        | NSWindowStyleMask::Resizable;
+    // SAFETY: a fresh `NSWindow` with valid arguments, on the main thread.
+    let window = unsafe {
+        NSWindow::initWithContentRect_styleMask_backing_defer(
+            NSWindow::alloc(mtm),
+            rect,
+            style,
+            NSBackingStoreType::Buffered,
+            false,
+        )
+    };
+    window.setTitle(&NSString::from_str(title));
+    window.setCollectionBehavior(NSWindowCollectionBehavior::FullScreenPrimary);
+    window
 }
 
 /// Opens the window and runs the application loop on the calling thread, which must be the main thread.
@@ -421,46 +473,37 @@ pub fn run(
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 
-    let (width, height) = content_size(mtm, cfg.size);
-    let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height));
-    let style = NSWindowStyleMask::Titled
-        | NSWindowStyleMask::Closable
-        | NSWindowStyleMask::Miniaturizable
-        | NSWindowStyleMask::Resizable;
-    // SAFETY: a fresh `NSWindow` with valid arguments, on the main thread.
-    let window = unsafe {
-        NSWindow::initWithContentRect_styleMask_backing_defer(
-            NSWindow::alloc(mtm),
-            rect,
-            style,
-            NSBackingStoreType::Buffered,
-            false,
-        )
+    // `NXKIT_OVERLAY=1`: a borderless window over the launcher's full-screen Space (`present.rs`), else a titled one.
+    let over = crate::hostenv::host()
+        .overlay
+        .then(|| target_screen(mtm).map(|s| s.frame()))
+        .flatten();
+    let (window, rect) = match over {
+        Some(frame) => {
+            let rect = CGRect::new(CGPoint::new(0.0, 0.0), frame.size);
+            (present::overlay_window(mtm, frame), rect)
+        }
+        None => {
+            let (width, height) = content_size(mtm, cfg.size);
+            let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height));
+            (titled_window(mtm, rect, &cfg.title), rect)
+        }
     };
     // SAFETY: the window is kept in `Retained` and `AppDelegate`. AppKit must not release it again on close.
     unsafe { window.setReleasedWhenClosed(false) };
-    window.setTitle(&NSString::from_str(&cfg.title));
-    window.setCollectionBehavior(NSWindowCollectionBehavior::FullScreenPrimary);
+    present::black(&window);
+    let fullscreen = cfg.fullscreen && over.is_none();
 
     let game_view = GameView::new(mtm, rect);
     let view: Retained<NSView> = Retained::into_super(game_view);
     let layer = CAMetalLayer::new();
-    if cfg.metal_hud {
-        let (key, mode) = (NSString::from_str("mode"), NSString::from_str("default"));
-        let hud = NSDictionary::from_slices(&[&*key], &[&*mode]);
-        // SAFETY: a dictionary of strings is a dictionary of objects, and the HUD takes string keys and values
-        // (`mode` = `default` shows it).
-        unsafe {
-            let hud: Retained<NSDictionary> = Retained::cast_unchecked(hud);
-            layer.setDeveloperHUDProperties(Some(&hud));
-        }
-    }
+    super::hud::show(&layer, cfg.metal_hud);
     let as_layer: &CALayer = &layer;
     view.setLayer(Some(as_layer));
     view.setWantsLayer(true);
     // With the Home button, the content view is a plain view that holds the game's view and, above it, the screens of
     // the Home button: a layer-hosting view must have no subviews of its own.
-    let overlay = cfg.home.as_ref().map(|_| {
+    let content = cfg.home.as_ref().map(|_| {
         let content = NSView::initWithFrame(NSView::alloc(mtm), rect);
         content.setWantsLayer(true);
         view.setAutoresizingMask(
@@ -470,7 +513,7 @@ pub fn run(
         content.addSubview(&view);
         content
     });
-    window.setContentView(Some(overlay.as_deref().unwrap_or(&view)));
+    window.setContentView(Some(content.as_deref().unwrap_or(&view)));
     window.makeFirstResponder(Some(&view));
     window.setAcceptsMouseMovedEvents(true);
 
@@ -483,9 +526,12 @@ pub fn run(
     presenter.resize(w, h);
 
     mouse::install(events.clone(), window.clone());
-    if let (Some(setup), Some(overlay)) = (cfg.home.clone(), overlay.as_ref()) {
-        homeui::install(mtm, &window, overlay, events.clone(), setup);
+    let env = crate::hostenv::host();
+    super::pointer::install(window.clone(), env.cursor_hide, env.cursor_hidden);
+    if let (Some(setup), Some(content)) = (cfg.home.clone(), content.as_ref()) {
+        homeui::install(mtm, &window, content, events.clone(), setup);
     }
+    present::install(window.clone(), over.is_some());
     let delegate = AppDelegate::alloc(mtm).set_ivars(Ivars::<AppDelegate> {
         events: OnceCell::from(events),
         presenter: OnceCell::from(presenter.clone()),
@@ -493,7 +539,7 @@ pub fn run(
         view: OnceCell::from(view.clone()),
         link: OnceCell::new(),
         refresh: OnceCell::from(refresh.clone()),
-        startup: Cell::new(Startup::new(cfg.fullscreen)),
+        startup: Cell::new(Startup::new(fullscreen)),
     });
     // SAFETY: `init` of `NSObject` on a freshly allocated instance whose ivars are set.
     let delegate: Retained<AppDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -501,7 +547,11 @@ pub fn run(
     unsafe { window.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
-    let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks { inner: hooks, stop });
+    let link_hooks: Arc<dyn FrameHooks> = Arc::new(StopHooks {
+        inner: hooks,
+        stop,
+        probed: cfg.probed,
+    });
     let link = Rc::new(DisplayLink::new(
         mtm,
         &presenter,
@@ -511,6 +561,7 @@ pub fn run(
     let _ = delegate.link().set(link);
 
     match target_screen(mtm) {
+        _ if over.is_some() => {}
         Some(screen) if crate::hostenv::host().screen.is_some() => {
             let (v, f) = (screen.visibleFrame(), window.frame());
             let x = v.origin.x + (v.size.width - f.size.width).max(0.0) / 2.0;
@@ -519,9 +570,11 @@ pub fn run(
         }
         _ => window.center(),
     }
-    window.makeKeyAndOrderFront(None);
-    app.activate();
-    if cfg.fullscreen {
+    if over.is_none() {
+        window.makeKeyAndOrderFront(None);
+        app.activate();
+    }
+    if fullscreen {
         fullscreen::observe_spaces(&delegate, true);
         fullscreen::later(&delegate);
     }
@@ -538,7 +591,7 @@ pub fn run(
     ready()?;
     app.run();
     homeui::shutdown();
-    if cfg.fullscreen {
+    if fullscreen {
         fullscreen::observe_spaces(&delegate, false);
     }
     nxkit_metal::display::restore_active();

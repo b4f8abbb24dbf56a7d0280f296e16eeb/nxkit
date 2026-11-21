@@ -75,6 +75,16 @@ pub struct HostEnv {
     pub launcher: Option<String>,
     /// `NXKIT_HOME_TEXT`: the texts of the Home button in the player's language, one per line (`home::Texts`).
     pub home_text: Option<String>,
+    /// `NXKIT_LAUNCHER_PID`: the process of the launcher that started the game. Back to the launcher activates this
+    /// process, so it reaches the right one when two copies of a launcher run; else the first with the bundle id.
+    pub launcher_pid: Option<i32>,
+    /// `NXKIT_CURSOR_HIDE` (3): the seconds without movement after which the pointer over the game hides, `0` never.
+    pub cursor_hide: f64,
+    /// `NXKIT_CURSOR_HIDDEN=1`: the pointer starts hidden (the launcher's own was hidden when it started the game).
+    pub cursor_hidden: bool,
+    /// `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in
+    /// with its first picture and gives the launcher the progress of the start (`sys/present.rs`).
+    pub overlay: bool,
 }
 
 impl Default for HostEnv {
@@ -150,6 +160,14 @@ impl HostEnv {
                 .map(|v| v.trim().to_owned())
                 .filter(|v| !v.is_empty()),
             home_text: env.var("NXKIT_HOME_TEXT").ok(),
+            launcher_pid: parsed::<i32>(env, "NXKIT_LAUNCHER_PID").filter(|p| *p > 0),
+            cursor_hide: parsed::<f64>(env, "NXKIT_CURSOR_HIDE")
+                .filter(|s| s.is_finite() && *s >= 0.0)
+                .unwrap_or(3.0),
+            cursor_hidden: env
+                .var("NXKIT_CURSOR_HIDDEN")
+                .is_ok_and(|v| v.trim() == "1"),
+            overlay: env.var("NXKIT_OVERLAY").is_ok_and(|v| v.trim() == "1"),
         }
     }
 }
@@ -308,6 +326,19 @@ mod tests {
             (Some(true), Some(false), None)
         );
         assert_eq!(d.handheld, None);
+        assert_eq!(
+            (d.launcher_pid, d.cursor_hide, d.cursor_hidden),
+            (None, 3.0, false)
+        );
+        let c = HostEnv::from_env(&Env::from_pairs([
+            ("NXKIT_LAUNCHER_PID", "4242"),
+            ("NXKIT_CURSOR_HIDE", "0"),
+            ("NXKIT_CURSOR_HIDDEN", "1"),
+        ]));
+        assert_eq!(
+            (c.launcher_pid, c.cursor_hide, c.cursor_hidden),
+            (Some(4242), 0.0, true)
+        );
     }
 
     /// The host reads every launch option, and every value of an option changes what it reads: the table and the

@@ -6,9 +6,9 @@
 //! a window close.
 //!
 //! Back to the launcher pauses the game in the background: the game is told it is in the background, the window
-//! leaves full screen so its Space goes away, the launcher (`NXKIT_LAUNCHER_BUNDLE_ID`) gets the activation and the
-//! application hides. It comes back when it is active again (the launcher activates it, the Dock, Command-Tab), when it
-//! is shown again, or when the launcher posts `org.nxkit.resume.<pid>`; `org.nxkit.quit.<pid>` quits it. The state goes
+//! leaves full screen so its Space goes away, the launcher (`NXKIT_LAUNCHER_PID`, else `NXKIT_LAUNCHER_BUNDLE_ID`) gets
+//! the activation and the application hides. It comes back when it is active again (the launcher activates it, the
+//! Dock, Command-Tab), when it is shown again, or when the launcher posts `org.nxkit.resume.<pid>`; `org.nxkit.quit.<pid>` quits it. The state goes
 //! out as the distributed notifications `org.nxkit.paused.<pid>` and `org.nxkit.resumed.<pid>`.
 
 use std::cell::RefCell;
@@ -29,6 +29,7 @@ use objc2_foundation::{
 
 use super::appkit::AppEvents;
 use super::homeviews::{self, Card, HoldRing};
+use super::notify;
 use crate::home::{ANSWER_QUIT, GameFocus, HomeMenu, Phase, Row, Setup};
 
 /// Where the game is while it was sent to the launcher.
@@ -173,23 +174,6 @@ fn later(observer: &Observer, selector: objc2::runtime::Sel, delay: f64) {
     }
 }
 
-fn notification(what: &str) -> Retained<NSString> {
-    NSString::from_str(&format!("org.nxkit.{what}.{}", std::process::id()))
-}
-
-fn post(what: &str) {
-    let center = NSDistributedNotificationCenter::defaultCenter();
-    // SAFETY: a distributed notification with a name and no object or user info.
-    unsafe {
-        center.postNotificationName_object_userInfo_deliverImmediately(
-            &notification(what),
-            None,
-            None,
-            true,
-        );
-    }
-}
-
 /// Watches the window's exit from full screen (`on`), or stops.
 fn observe_exit(ui: &Ui, on: bool) {
     let center = NSNotificationCenter::defaultCenter();
@@ -226,13 +210,13 @@ pub(super) fn install(
         center.addObserver_selector_name_object(
             &observer,
             sel!(nxkitHomeResume:),
-            Some(&notification("resume")),
+            Some(&notify::name("resume")),
             None,
         );
         center.addObserver_selector_name_object(
             &observer,
             sel!(nxkitHomeQuit:),
-            Some(&notification("quit")),
+            Some(&notify::name("quit")),
             None,
         );
     }
@@ -481,39 +465,51 @@ fn hide(ui: &mut Ui, mtm: MainThreadMarker) {
         return;
     }
     let app = NSApplication::sharedApplication(mtm);
-    match &ui.setup.launcher {
-        Some(id) => {
-            let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(
-                &NSString::from_str(id),
-            );
-            match apps.firstObject() {
-                Some(launcher) => {
-                    app.yieldActivationToApplication(&launcher);
-                    let me = NSRunningApplication::currentApplication();
-                    let ok = launcher.activateFromApplication_options(
-                        &me,
-                        NSApplicationActivationOptions::ActivateAllWindows,
-                    );
-                    eprintln!(
-                        "nxkit-host: background: launcher {id} {}",
-                        if ok {
-                            "activated"
-                        } else {
-                            "did not take the activation"
-                        }
-                    );
-                }
-                None => eprintln!("nxkit-host: background: launcher {id} is not running"),
-            }
-        }
-        None => {
-            eprintln!("nxkit-host: background: no launcher, macOS shows the app behind the game")
-        }
-    }
+    activate_launcher(ui, &app);
     ui.away = Away::Hidden;
     app.hide(None);
     eprintln!("nxkit-host: paused in the background");
-    post("paused");
+    notify::post("paused");
+}
+
+/// Hands the front to the launcher: its process when it gave it (two copies of a launcher may run), else the first
+/// application with its bundle identifier.
+fn activate_launcher(ui: &Ui, app: &NSApplication) {
+    let s = &ui.setup;
+    let by_pid = s
+        .launcher_pid
+        .and_then(NSRunningApplication::runningApplicationWithProcessIdentifier);
+    let launcher = by_pid.or_else(|| {
+        let id = NSString::from_str(s.launcher.as_deref()?);
+        NSRunningApplication::runningApplicationsWithBundleIdentifier(&id).firstObject()
+    });
+    let name = match (s.launcher_pid, s.launcher.as_deref()) {
+        (Some(pid), _) => format!("process {pid}"),
+        (None, Some(id)) => id.to_owned(),
+        (None, None) => {
+            eprintln!("nxkit-host: background: no launcher, macOS shows the app behind the game");
+            return;
+        }
+    };
+    match launcher {
+        Some(launcher) => {
+            app.yieldActivationToApplication(&launcher);
+            let me = NSRunningApplication::currentApplication();
+            let ok = launcher.activateFromApplication_options(
+                &me,
+                NSApplicationActivationOptions::ActivateAllWindows,
+            );
+            eprintln!(
+                "nxkit-host: background: launcher {name} {}",
+                if ok {
+                    "activated"
+                } else {
+                    "did not take the activation"
+                }
+            );
+        }
+        None => eprintln!("nxkit-host: background: launcher {name} is not running"),
+    }
 }
 
 fn bring_forward(ui: &Ui, mtm: MainThreadMarker) {
@@ -539,5 +535,5 @@ fn resume(ui: &mut Ui, mtm: MainThreadMarker, why: &str) {
         later(&ui.observer, sel!(nxkitHomeFullScreen:), 0.25);
     }
     eprintln!("nxkit-host: resumed");
-    post("resumed");
+    notify::post("resumed");
 }
