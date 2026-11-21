@@ -19,9 +19,9 @@
 //! Setters and getters touch only the guest object. No setter takes a lock or allocates. [`Built::load`] reads the whole
 //! builder with one guest read, for `nvnTextureInitialize` and for the size queries.
 
-use nxkit_nvn::layout::{FLAG_SPARSE, Target, TextureDesc};
+use nxkit_nvn::layout::{Target, TextureDesc};
 
-use crate::nvn::abi::{AbiResult, Obj, guard, other, table, used};
+use crate::nvn::abi::{AbiResult, Obj, guard, table, used};
 
 const DEV: u64 = 0;
 const POOL: u64 = 8;
@@ -122,14 +122,20 @@ fn desc_of(b: u64) -> AbiResult<TextureDesc> {
     Ok(Built::load(b)?.desc)
 }
 
-/// The sparse tile layout of a texture: the tiled levels and the tile size, four i32. The host writes these 16 bytes and
-/// not the 16 reserved bytes after them. A texture that is not sparse has no tiled levels and no tile size. nxkit has
-/// no layout for a sparse texture, so a sparse one stops the game here instead of getting a made-up size.
+/// The sparse tile layout of a texture: the tiled levels and the tile size, four i32 (`numTiledLevels`, `tileWidth`,
+/// `tileHeight`, `tileDepth`, from `nxkit_nvn::layout`). The host writes these 16 bytes and not the 16 reserved bytes
+/// after them. A texture that is not sparse has no tiled levels and no tile size.
 pub(super) fn sparse_tile_layout(desc: &TextureDesc, out: u64) -> AbiResult<()> {
-    if desc.flags & FLAG_SPARSE != 0 && desc.target != Target::Buffer {
-        return Err(other("a sparse texture has no layout in nxkit"));
+    let t = desc.sparse_tiles()?;
+    let o = Obj(out);
+    o.zero(used::SPARSE_TILE_LAYOUT)?;
+    for (i, v) in [t.levels, t.width, t.height, t.depth]
+        .into_iter()
+        .enumerate()
+    {
+        o.set_i32(4 * i as u64, i32::try_from(v).unwrap_or(i32::MAX))?;
     }
-    Obj(out).zero(used::SPARSE_TILE_LAYOUT)
+    Ok(())
 }
 
 /// The bytes of a ZCull save area. The host runs no ZCull, but a game allocates the area from its own pool, so the size

@@ -1,10 +1,14 @@
 //! The storage layout of an NVN texture: block-linear (Tegra X1), linear and buffer.
 //!
 //! This is a port of `nvn_tex.c`, which ports the algorithm of deko3d (`dk_image.cpp`).
-//! Both notices are in `THIRD_PARTY.md`. Sparse textures return [`NvnError::Unsupported`].
+//! Both notices are in `THIRD_PARTY.md`. The sparse parts are in [`sparse`].
 
 use crate::error::{NvnError, Result};
 use crate::format::{FormatInfo, format_info};
+
+mod sparse;
+
+pub use sparse::{SPARSE_TILE, SparseTiles};
 
 /// `NVN_TEXTURE_FLAGS_LINEAR`.
 pub const FLAG_LINEAR: u32 = 0x10;
@@ -198,9 +202,6 @@ impl TextureDesc {
     }
 
     fn checked(&self) -> Result<FormatInfo> {
-        if self.flags & FLAG_SPARSE != 0 && self.target != Target::Buffer {
-            return Err(NvnError::Unsupported("sparse texture layout"));
-        }
         if self.width == 0 {
             return Err(NvnError::BadTexture("width is 0"));
         }
@@ -252,6 +253,7 @@ fn level_walk(
         u32::from(t.block_h),
         u32::from(t.bytes_per_block),
     );
+    let mut pad = sparse::TilePad::new(d, s, t, tile);
     let mut off = 0u64;
     let mut i = 0;
     loop {
@@ -264,7 +266,7 @@ fn level_walk(
         let ld = if s.dims >= 3 { mip(s.z, i) } else { 1 };
         let th = adjust_tile(tile.0, 8, lh);
         let td = adjust_tile(tile.1, 1, ld);
-        let wg = (lw * bpb).div_ceil(64);
+        let wg = pad.columns((lw * bpb).div_ceil(64), lw * bpb, lh, ld);
         if i == level {
             return (off, wg);
         }
@@ -277,6 +279,9 @@ fn level_walk(
 
 fn layer_bytes(d: &TextureDesc, s: &Shape, tile: (u32, u32), t: FormatInfo) -> u64 {
     let mut ls = level_walk(d, d.level_count(), s, tile, t).0;
+    if d.is_sparse() {
+        ls = ls.next_multiple_of(SPARSE_TILE);
+    }
     if s.layered {
         let hh = blocks(s.h, t.block_h.into());
         let (mut th, mut td) = tile;
@@ -348,6 +353,8 @@ impl TextureDesc {
             if s.dims == 3 {
                 tile.1 = u32::from(b >> 4);
             }
+        } else if let Some(t) = sparse::tile_of(self, &s, t) {
+            tile = t;
         } else if s.dims == 2 {
             tile.0 = pick_tile(blocks(s.h * sy, t.block_h.into()) * 3 / 16);
         } else if s.dims == 3 {
@@ -355,7 +362,10 @@ impl TextureDesc {
         }
         let mut ls = layer_bytes(self, &s, tile, t);
         // MINIMAL_LAYOUT keeps the automatic block shape only when it is not larger than 1-GOB blocks.
-        if self.flags & FLAG_MINIMAL_LAYOUT != 0 && self.packaged_block.is_none() && tile != (0, 0)
+        if self.flags & FLAG_MINIMAL_LAYOUT != 0
+            && self.packaged_block.is_none()
+            && !self.is_sparse()
+            && tile != (0, 0)
         {
             let one = layer_bytes(self, &s, (0, 0), t);
             if one != ls {
@@ -369,6 +379,11 @@ impl TextureDesc {
             tile_h: tile.0 as u8,
             tile_d: tile.1 as u8,
             linear: false,
+            align: if self.is_sparse() {
+                SPARSE_TILE as u32
+            } else {
+                base.align
+            },
             ..base
         })
     }
@@ -529,13 +544,11 @@ mod tests {
     }
 
     #[test]
-    fn sparse_and_bad_input_are_errors() {
+    fn a_small_sparse_texture_is_one_tile_and_bad_input_is_an_error() {
         let mut d = desc(64, 64, 0x25);
         d.flags = FLAG_SPARSE;
-        assert_eq!(
-            d.layout(),
-            Err(NvnError::Unsupported("sparse texture layout"))
-        );
+        let l = d.layout().unwrap();
+        assert_eq!((l.size, l.align), (SPARSE_TILE, SPARSE_TILE as u32));
         assert!(desc(0, 4, 0x25).layout().is_err());
         assert!(desc(4, 4, 0).layout().is_err());
         assert!(Target::from_raw(11).is_err());
