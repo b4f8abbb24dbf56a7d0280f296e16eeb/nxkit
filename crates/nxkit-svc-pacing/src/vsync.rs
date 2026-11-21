@@ -124,8 +124,6 @@ pub(crate) fn wait_vsync(clock: &TickClock, rates: &Rates, seen: &mut u64) -> Wa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::thread;
 
     #[test]
     fn a_display_of_120_hz_gives_a_game_vsync_of_60_every_second_tick() {
@@ -140,21 +138,24 @@ mod tests {
 
     #[test]
     fn the_wait_ends_on_the_nth_tick() {
-        let clock = Arc::new(TickClock::default());
-        let rates = Rates::new(120.0, 60.0);
-        let c = clock.clone();
-        let t = thread::spawn(move || {
-            for _ in 0..4 {
-                thread::sleep(Duration::from_millis(5));
-                c.tick();
-            }
-        });
+        let clock = TickClock::default();
+        // A zero timeout makes the probe deterministic even before the target tick.
+        let rates = Rates {
+            ticks_per_vsync: AtomicU32::new(ticks_per_vsync(120.0, 60.0)),
+            vsync_period_ns: AtomicU64::new(0),
+        };
         let mut seen = 0;
-        assert_eq!(wait_vsync(&clock, &rates, &mut seen), Wait::Ticked);
-        assert_eq!(seen, 2);
-        assert_eq!(wait_vsync(&clock, &rates, &mut seen), Wait::Ticked);
-        assert_eq!(seen, 4);
-        assert!(t.join().is_ok());
+        for target in [2, 4] {
+            clock.tick();
+            // The fallback advances its cursor; leave the actual vsync cursor unchanged.
+            let mut probe = seen;
+            assert_eq!(wait_vsync(&clock, &rates, &mut probe), Wait::SelfClocked);
+            assert_eq!(probe, target - 1);
+
+            clock.tick();
+            assert_eq!(wait_vsync(&clock, &rates, &mut seen), Wait::Ticked);
+            assert_eq!(seen, target);
+        }
     }
 
     #[test]
