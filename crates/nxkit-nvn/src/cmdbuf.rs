@@ -101,7 +101,9 @@ impl CommandBuffer {
         let end = start
             .checked_add(len)
             .ok_or_else(|| bad("the block ends past the address space"))?;
-        if self.recording {
+        // A recording that has no block yet (the game began it before it gave memory, and the memory callback gives
+        // the first block) starts in the new block, as a recording that began after the block was added.
+        if self.recording && !self.blocks.is_empty() {
             self.blocks.push(start..end);
         } else {
             self.blocks.clear();
@@ -145,7 +147,7 @@ impl CommandBuffer {
     fn fits(&self, need: u64) -> bool {
         self.blocks
             .get(self.current)
-            .is_some_and(|b| self.pos + need <= b.end)
+            .is_some_and(|b| self.pos >= b.start && self.pos + need <= b.end)
     }
 
     fn put(&mut self, mem: &mut impl GuestMem, bytes: &[u8]) -> Result<()> {
@@ -382,6 +384,24 @@ mod tests {
         let r = cb.end_recording(&mut mem).unwrap();
         assert_eq!(r.handle, CommandHandle(BASE + 0x100));
         assert_eq!(r.spans, vec![BASE + 0x100..BASE + 0x100 + 24]);
+    }
+
+    #[test]
+    fn a_recording_begun_without_memory_starts_in_the_first_block_that_the_game_adds() {
+        let (mut cb, mut mem) = setup();
+        cb.begin_recording().unwrap();
+        assert_eq!(
+            cb.write(&mut mem, Record::Draw),
+            Err(NvnError::OutOfCommandMemory { need: 24 })
+        );
+        // the memory callback of the game adds the first block during the recording
+        cb.add_command_memory(BASE + 0x200, 128).unwrap();
+        assert_eq!(cb.cursor().pos, BASE + 0x200);
+        cb.write(&mut mem, Record::Draw).unwrap();
+        let r = cb.end_recording(&mut mem).unwrap();
+        assert_eq!(r.handle, CommandHandle(BASE + 0x200));
+        assert_eq!(r.spans, vec![BASE + 0x200..BASE + 0x210]);
+        assert_eq!(Record::read(&mem, BASE + 0x200).unwrap().0, Record::Draw);
     }
 
     #[test]
