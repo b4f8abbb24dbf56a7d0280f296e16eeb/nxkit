@@ -22,6 +22,8 @@ mod modules;
 mod npdm;
 mod nvn;
 mod pipelist;
+#[cfg(test)]
+mod replace_tests;
 mod romfs;
 mod shaders;
 mod vk_shaders;
@@ -145,9 +147,15 @@ fn gpus(a: &Args, work: &Path, profile: &Path) -> Result<Vec<String>, String> {
     })
 }
 
-/// Refuses to replace something that is not an app a build made.
+/// Refuses to replace something that is not an app a build made: an app of nxkit, or one of the old engine
+/// (nxnative), which a launcher such as NX2Apple built at the same place before the game moved to nxkit. The old
+/// engine keeps the save outside the app (`~/Library/Application Support/nxnative/<title id>/save` or the
+/// library folder's `save/<title id>`), so replacing its app loses no save.
 fn replaceable(out: &Path) -> Result<(), String> {
-    if !out.exists() || out.join("Contents/MacOS/nxkit-host").is_file() {
+    let nxkit = out.join("Contents/MacOS/nxkit-host").is_file();
+    let nxnative =
+        out.join("Contents/MacOS/nxnative").is_file() && out.join("Contents/Resources/dm").is_dir();
+    if !out.exists() || nxkit || nxnative {
         return Ok(());
     }
     Err(crate::exit::fail(

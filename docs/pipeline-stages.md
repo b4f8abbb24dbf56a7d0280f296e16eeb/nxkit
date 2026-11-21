@@ -151,7 +151,7 @@ The earlier comparisons with the output of the Python rewriter (`patch_nso.py`) 
 
 ## The bundle
 
-`nxb build` writes the app as `<name>.app.partial` and renames it when all stages are done. `Contents/MacOS/nxkit-host` is the program of the app.
+`nxb build` writes the app as `<name>.app.partial` and renames it when all stages are done. `Contents/MacOS/nxkit-host` is the program of the app. A folder at `-o` is replaced only if it is an app of nxkit (`Contents/MacOS/nxkit-host`) or of the old engine (`Contents/MacOS/nxnative` and `Contents/Resources/dm/`), which a launcher such as NX2Apple built at the same place before. The old engine keeps the save outside the app, so no save is lost. Any other folder stops the build with exit code 2.
 The stage `bundle` adds `Info.plist`, signs `nxkit-host` ad hoc with the signer of `nxb-pack` and moves the app to its final path.
 The save of an old app moves into the new app. Refer to [build-botw.md](build-botw.md) for the stages and [nxkit-host.md](nxkit-host.md) for the layout of the bundle.
 
