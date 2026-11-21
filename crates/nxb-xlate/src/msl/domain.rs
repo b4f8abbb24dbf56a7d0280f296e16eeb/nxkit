@@ -3,10 +3,10 @@
 use super::emit::{Em, R};
 use super::entry::Param;
 use super::{Context, Failure, Translated, failure, library, options, structure_job};
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::job::Job;
 use crate::structured::ast::OpData;
-use crate::structured::types::AggType;
 
 /// Full logical capture (144 words per vertex), at render-stage buffer 26.
 const CAPTURE_SLOT: u32 = 26;
