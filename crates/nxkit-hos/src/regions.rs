@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
-/// What the regions made later keep of the alias region when [`Kernel::alias_room`] answers.
+/// What the regions made later keep of the alias region when [`Kernel::alias_room`](crate::Kernel::alias_room) answers.
 pub const ROOM_FOR_LATER: u64 = 0x1000_0000;
 /// The SDK's node area at the start of the alias region with the SDK-wide cut of the build (1 GiB → 62 MiB). It counts
 /// as used before the gate of its region is seen.

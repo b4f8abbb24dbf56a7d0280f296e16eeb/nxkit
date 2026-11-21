@@ -108,7 +108,7 @@ fn shot(ctx: &nxkit_metal::Context, texture: &nxkit_metal::Texture, n: u64) {
         nxkit_metal::Format::Bgra8Unorm | nxkit_metal::Format::Bgra8UnormSrgb
     );
     let mut out = format!("P6\n{} {}\n255\n", d.width, d.height).into_bytes();
-    for p in px.chunks_exact(4) {
+    for p in px.as_chunks::<4>().0 {
         if bgra {
             out.extend_from_slice(&[p[2], p[1], p[0]]);
         } else {
@@ -116,7 +116,8 @@ fn shot(ctx: &nxkit_metal::Context, texture: &nxkit_metal::Texture, n: u64) {
         }
     }
     let path = crate::diag::diag_dir().join(format!("shot-{n}.ppm"));
-    match std::fs::create_dir_all(crate::diag::diag_dir()).and_then(|()| std::fs::write(&path, out)) {
+    match std::fs::create_dir_all(crate::diag::diag_dir()).and_then(|()| std::fs::write(&path, out))
+    {
         Ok(()) => eprintln!("DIAG shot {}", path.display()),
         Err(e) => eprintln!("DIAG shot failed: {e}"),
     }

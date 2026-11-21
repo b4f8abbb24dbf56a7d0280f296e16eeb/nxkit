@@ -167,7 +167,9 @@ fn a_register_offset_of_a_fetch_adds_to_the_texel() {
 #[test]
 fn a_buffer_fetch_takes_a_uint_coordinate() {
     // A plain `int` was ambiguous between the `ushort` and `uint` overloads of `texture_buffer::read`.
-    let b = sample(SamplerType::TEXTURE_BUFFER, INT_COORDS, |b, _, _| vec![b.k(4)]);
+    let b = sample(SamplerType::TEXTURE_BUFFER, INT_COORDS, |b, _, _| {
+        vec![b.k(4)]
+    });
     let m = msl(&b);
     assert!(m.contains("texture_buffer<float>"), "{m}");
     assert!(m.contains(".read(uint(4))"), "{m}");
