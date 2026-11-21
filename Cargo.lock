@@ -402,6 +402,7 @@ version = "0.13.0"
 dependencies = [
  "nxb-archive",
  "nxb-extract",
+ "nxb-font",
  "nxb-model",
  "nxb-obs",
  "nxb-pack",

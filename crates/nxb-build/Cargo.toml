@@ -27,6 +27,8 @@ nxb-stages.workspace = true
 nxb-shader.workspace = true
 nxb-rewrite.workspace = true
 nxb-romfs.workspace = true
+# the stand-ins for the shared fonts (standalone::fonts)
+nxb-font.workspace = true
 nxb-split.workspace = true
 # the SPIR-V shaders of a game on Vulkan (standalone::vk_shaders)
 nxb-spirv.workspace = true

@@ -4,6 +4,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- `nxb build` puts the stand-ins for the console's six shared fonts into every app (`Contents/Resources/nxkit/font/`,
+  new crate `nxb-font`). Type 5 holds the controller button icons, so a game shows its button prompts instead of "?"
+  (Super Mario Bros. Wonder, Ocarina of Time). Types 0 to 4 are unhinted cuts of macOS's Arial Unicode with the
+  characters of each type. The fonts are those of NX2Apple's `make_shared_fonts.py`, made in Rust from the macOS
+  system fonts at build time. `nxb fonts <app>` adds them to an app of an older build.
+
 ## 0.13.0 - 2026-11-21
 
 ### Added

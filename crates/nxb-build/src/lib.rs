@@ -70,6 +70,26 @@ fn watch_interrupts(prog: std::sync::Arc<events::Progress>) {
 
 pub use args::{Args, parse};
 
+/// `nxb fonts <app or folder>`: makes the stand-ins for the console's shared fonts into
+/// `Contents/Resources/nxkit/font` of an app of nxkit, or into the folder. An app built before the fonts were part of
+/// `nxb build` gets them without a new build.
+pub fn fonts_main(argv: &[String]) -> i32 {
+    let [target] = argv else {
+        eprintln!("usage: nxb fonts <OUT.app | folder>");
+        return 2;
+    };
+    match standalone::fonts::write(&standalone::fonts::folder(std::path::Path::new(target))) {
+        Ok(s) => {
+            println!("{s}");
+            0
+        }
+        Err(e) => {
+            eprintln!("nxb: error: {e}");
+            1
+        }
+    }
+}
+
 /// Whether the command line asks for `--progress json`.
 fn wants_json(argv: &[String]) -> bool {
     argv.iter().any(|a| a == "--progress=json")

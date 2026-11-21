@@ -11,6 +11,7 @@ mod bundle;
 mod elf;
 mod extract;
 mod files;
+pub(crate) mod fonts;
 mod generic;
 mod image;
 mod launcher;
@@ -527,6 +528,12 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         );
         if carried > 0 {
             p.say(&format!("pipeline lists: {carried} kept in the new app"));
+        }
+        match fonts::write(&run_dir.join("font")) {
+            Ok(s) => p.say(&s),
+            Err(e) => p.say(&format!(
+                "warning: no shared fonts, button icons draw as \"?\": {e}"
+            )),
         }
         let _ = std::fs::remove_dir_all(&out);
         std::fs::rename(&stage_dir, &out).map_err(|e| io(&out, e))?;
