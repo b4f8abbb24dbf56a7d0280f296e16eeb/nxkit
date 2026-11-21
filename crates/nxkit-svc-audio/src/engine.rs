@@ -4,7 +4,9 @@
 //! in two lock-free queues per output: the buffers to play and the buffers that were played. A third thread, the notifier,
 //! signals the release events, because the callback must not call into the kernel.
 
+use crate::chans::convert;
 use crate::host;
+use crate::settings::width;
 use crate::sys::au;
 use crate::sys::mem;
 use crate::sys::ring::Ring;
@@ -182,33 +184,6 @@ pub(crate) fn mixer() -> &'static Arc<Mixer> {
     })
 }
 
-/// Reads `ch` interleaved PCM16 channels per frame from `bytes` into stereo `dst`, times `gain`.
-#[allow(
-    clippy::approx_constant,
-    reason = "0.7071 is the default downmix coefficient of the SDK, not 1/sqrt(2) to full precision"
-)]
-fn convert(bytes: &[u8], ch: usize, gain: f32, dst: &mut [f32]) {
-    let rd =
-        |f: &[u8], j: usize| -> f32 { f32::from(i16::from_le_bytes([f[2 * j], f[2 * j + 1]])) };
-    let frame = 2 * ch.max(1);
-    for (i, f) in bytes.chunks_exact(frame).enumerate() {
-        let (l, r) = match ch {
-            1 => (rd(f, 0), rd(f, 0)),
-            6 => {
-                // front left, front right, center, LFE, back left, back right, with the default downmix coefficients
-                let c = rd(f, 2) * 0.7071 + rd(f, 3) * 0.2512;
-                (
-                    rd(f, 0) + c + rd(f, 4) * 0.7071,
-                    rd(f, 1) + c + rd(f, 5) * 0.7071,
-                )
-            }
-            _ => (rd(f, 0), rd(f, 1)),
-        };
-        dst[2 * i] = l * gain;
-        dst[2 * i + 1] = r * gain;
-    }
-}
-
 impl Mixer {
     /// Sets the master gain and whether to skip the device.
     pub(crate) fn configure(&self, master: f32, silent: bool) {
@@ -369,15 +344,16 @@ impl Mixer {
             .map_or(1.0, |s| f32::from_bits(s.vol.load(Ordering::Relaxed)))
     }
 
-    /// Fills `out` (interleaved stereo) with the sum of the started outputs. Runs on the device thread: no lock, no
-    /// allocation.
+    /// Fills `out` (interleaved, [`width`] channels per frame) with the sum of the started outputs. Runs on the device
+    /// thread: no lock, no allocation.
     pub(crate) fn render(&self, out: &mut [f32]) {
         let master = f32::from_bits(self.master.load(Ordering::Relaxed));
-        let mut scratch = [0.0f32; CHUNK * 2];
-        for chunk in out.chunks_mut(CHUNK * 2) {
+        let w = width();
+        let mut scratch = [0.0f32; CHUNK * 6];
+        for chunk in out.chunks_mut(CHUNK * w) {
             chunk.fill(0.0);
             for s in &self.slots {
-                self.mix_slot(s, chunk, &mut scratch);
+                self.mix_slot(s, chunk, w, &mut scratch);
             }
             if master != 1.0 {
                 vdsp::scale(chunk, master);
@@ -386,7 +362,7 @@ impl Mixer {
         }
     }
 
-    fn mix_slot(&self, s: &Slot, chunk: &mut [f32], scratch: &mut [f32; CHUNK * 2]) {
+    fn mix_slot(&self, s: &Slot, chunk: &mut [f32], w: usize, scratch: &mut [f32; CHUNK * 6]) {
         if !s.open.load(Ordering::Acquire) || s.state.load(Ordering::Acquire) != STARTED {
             return;
         }
@@ -397,7 +373,7 @@ impl Mixer {
             return;
         }
         let n = chunk.len();
-        let frames = n / 2;
+        let frames = n / w;
         scratch[..n].fill(0.0);
         let ch = s.channels.load(Ordering::Relaxed) as usize;
         let fb = (2 * ch.max(1)) as u64;
@@ -425,13 +401,13 @@ impl Mixer {
             let mut finished = avail == 0;
             if !finished {
                 let k = (avail as usize).min(frames - done);
-                let dst = &mut scratch[done * 2..(done + k) * 2];
+                let dst = &mut scratch[done * w..(done + k) * w];
                 let len = k as u64 * fb;
                 let ok = if host {
-                    mem::with_host(addr + pos, len, |bytes| convert(bytes, ch, gain, dst));
+                    mem::with_host(addr + pos, len, |bytes| convert(bytes, ch, w, gain, dst));
                     true
                 } else {
-                    guest::with_slice(addr + pos, len, |bytes| convert(bytes, ch, gain, dst))
+                    guest::with_slice(addr + pos, len, |bytes| convert(bytes, ch, w, gain, dst))
                         .is_ok()
                 };
                 if ok {
@@ -481,9 +457,12 @@ impl Mixer {
             return;
         }
         let m = Arc::clone(mixer());
-        match au::Output::start(Box::new(move |buf| m.render(buf))) {
+        match au::Output::start(Box::new(move |buf| m.render(buf)), width()) {
             Ok(o) => {
-                eprintln!("nxkit-audio: the output unit runs at 48000 Hz stereo");
+                eprintln!(
+                    "nxkit-audio: the output unit runs at 48000 Hz, {}",
+                    o.mode()
+                );
                 *out = OutState::Device(o);
             }
             Err(e) => {
@@ -501,7 +480,7 @@ impl Mixer {
         let r = std::thread::Builder::new()
             .name("nxkit-audio-silent".into())
             .spawn::<_, ()>(move || {
-                let mut buf = vec![0.0f32; 480 * 2];
+                let mut buf = vec![0.0f32; 480 * width()];
                 let step = Duration::from_millis(10);
                 let mut next = Instant::now() + step;
                 loop {

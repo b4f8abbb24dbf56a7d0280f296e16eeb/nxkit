@@ -156,6 +156,8 @@ impl Layout {
 
 /// The state of one renderer's capture: the upsampler history and counters.
 pub(crate) struct Cap {
+    /// The channels of a captured frame: 2, or 6 with spatial audio.
+    w: usize,
     buf: Vec<i32>,
     pos: usize,
     st: Vec<i32>,
@@ -166,12 +168,18 @@ pub(crate) struct Cap {
 }
 
 impl Cap {
-    /// A capture state with a silent history.
+    /// A capture state with a silent history, for frames of [`crate::settings::width`] channels.
     pub(crate) fn new() -> Cap {
+        Cap::with_width(crate::settings::width())
+    }
+
+    /// A capture state for frames of `w` channels.
+    fn with_width(w: usize) -> Cap {
         Cap {
-            buf: vec![0; 2 * (RS_T - 1 + FRAME_MAX)],
+            w,
+            buf: vec![0; w * (RS_T - 1 + FRAME_MAX)],
             pos: 0,
-            st: vec![0; 2 * FRAME_MAX],
+            st: vec![0; w * FRAME_MAX],
             ch: vec![0; 6 * FRAME_MAX],
             frames: 0,
             nonsilent: 0,
@@ -214,29 +222,31 @@ fn taps() -> &'static [[f32; RS_T]; 3] {
     })
 }
 
-/// Resamples the `n` stereo samples in `cap.st` from 32 kHz to 48 kHz in place. Returns the output count.
+/// Resamples the `n` frames in `cap.st` from 32 kHz to 48 kHz in place. Returns the output count.
 fn up_3_2(cap: &mut Cap, n: usize) -> usize {
     let h = taps();
-    let off = 2 * (RS_T - 1);
-    cap.buf[off..off + 2 * n].copy_from_slice(&cap.st[..2 * n]);
+    let w = cap.w;
+    let off = w * (RS_T - 1);
+    cap.buf[off..off + w * n].copy_from_slice(&cap.st[..w * n]);
     let mut m = 0usize;
     let mut pos = cap.pos;
     while pos < 3 * n {
-        let base = 2 * (pos / 3);
+        let base = w * (pos / 3);
         let c = &h[pos % 3];
-        let mut l = 0f32;
-        let mut r = 0f32;
+        let mut acc = [0f32; 6];
         for (k, ck) in c.iter().enumerate() {
-            l += ck * cap.buf[base + 2 * k] as f32;
-            r += ck * cap.buf[base + 2 * k + 1] as f32;
+            for (j, a) in acc.iter_mut().take(w).enumerate() {
+                *a += ck * cap.buf[base + w * k + j] as f32;
+            }
         }
-        cap.st[2 * m] = l.round_ties_even() as i32;
-        cap.st[2 * m + 1] = r.round_ties_even() as i32;
+        for (j, a) in acc.iter().take(w).enumerate() {
+            cap.st[w * m + j] = a.round_ties_even() as i32;
+        }
         pos += 2;
         m += 1;
     }
     cap.pos = pos - 3 * n;
-    cap.buf.copy_within(2 * n..2 * n + off, 0);
+    cap.buf.copy_within(w * n..w * n + off, 0);
     m
 }
 
@@ -409,33 +419,21 @@ fn sink_out(
         let addr = h.mix.wrapping_add(*input as u64 * n as u64 * 4);
         read_i32s(addr, &mut cap.ch[j * FRAME_MAX..j * FRAME_MAX + n]);
     }
-    // Channel order: front left, front right, center, LFE, back left, back right. Q15 coefficients.
-    const CF: i64 = 32768;
-    const CC: i64 = 23167;
-    const CL: i64 = 8224;
-    const CB: i64 = 23167;
+    // Channel order: front left, front right, center, LFE, back left, back right.
+    let w = cap.w;
     {
         let ch = &cap.ch;
-        let st = &mut cap.st;
-        let at = |j: usize, s: usize| i64::from(ch[j * FRAME_MAX + s]);
-        for s in 0..n {
-            let (l, r) = if k >= 6 {
-                let c = at(2, s) * CC + at(3, s) * CL;
-                (
-                    (at(0, s) * CF + c + at(4, s) * CB) >> 15,
-                    (at(1, s) * CF + c + at(5, s) * CB) >> 15,
-                )
-            } else {
-                let l = at(0, s);
-                (l, if k > 1 { at(1, s) } else { l })
-            };
-            st[2 * s] = l as i32;
-            st[2 * s + 1] = r as i32;
+        let mut f = [0i64; 6];
+        for (s, o) in cap.st.chunks_exact_mut(w).take(n).enumerate() {
+            for (j, v) in f.iter_mut().enumerate().take(k) {
+                *v = i64::from(ch[j * FRAME_MAX + s]);
+            }
+            crate::chans::frames_i32(&f, k, w, o);
         }
     }
     let nout = if h.rate == 48000 { n } else { up_3_2(cap, n) };
     let mut loud = false;
-    for (d, v) in dst.iter_mut().zip(cap.st.iter().take(2 * nout)) {
+    for (d, v) in dst.iter_mut().zip(cap.st.iter().take(w * nout)) {
         let v = (*v).clamp(-32768, 32767);
         *d = v as i16;
         loud |= v != 0;
@@ -453,8 +451,8 @@ fn sink_out(
     nout
 }
 
-/// Reads the DeviceSink of the command list `cl` into `dst` as stereo 16-bit samples. Returns the number of stereo
-/// samples, or 0 when the list has no sound for the device. `dst` holds `FRAME_MAX * 2` values.
+/// Reads the DeviceSink of the command list `cl` into `dst` as 16-bit frames of [`crate::settings::width`] channels.
+/// Returns the number of frames, or 0 when the list has no sound for the device. `dst` holds `FRAME_MAX * 6` values.
 pub(crate) fn capture(
     lay: &mut Layout,
     cap: &mut Cap,
@@ -517,15 +515,19 @@ mod tests {
 
     #[test]
     fn upsample_keeps_dc() {
-        let mut cap = Cap::new();
-        let mut total = 0;
-        for _ in 0..4 {
-            for v in cap.st.iter_mut().take(320) {
-                *v = 1000;
+        for w in [2, 6] {
+            let mut cap = Cap::with_width(w);
+            let mut total = 0;
+            for _ in 0..4 {
+                for v in cap.st.iter_mut().take(160 * w) {
+                    *v = 1000;
+                }
+                total += up_3_2(&mut cap, 160);
             }
-            total += up_3_2(&mut cap, 160);
+            assert!((4 * 240 - 2..=4 * 240 + 2).contains(&total));
+            let mid = &cap.st[100 * w..101 * w];
+            assert!(mid.iter().all(|v| (v - 1000).abs() <= 2), "{w}: {mid:?}");
         }
-        assert!((4 * 240 - 2..=4 * 240 + 2).contains(&total));
     }
 
     #[test]

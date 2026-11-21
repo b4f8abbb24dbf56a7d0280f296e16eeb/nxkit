@@ -432,7 +432,7 @@ mod tests {
     }
 
     /// The host reads every launch option, and every value of an option changes what it reads: the table and the
-    /// reads cannot drift apart.
+    /// reads cannot drift apart. The audio options are read by the settings of `nxkit-svc-audio`.
     #[test]
     fn every_value_of_a_launch_option_is_read() {
         for o in launch::OPTIONS {
@@ -441,7 +441,13 @@ mod tests {
                 launch::Kind::Toggle { on, off } => vec![on.into(), off.into()],
                 launch::Kind::Range { min, max, .. } => vec![min.to_string(), max.to_string()],
             };
-            let read = |v: &str| HostEnv::from_env(&Env::from_pairs([(o.env, v)]));
+            let read = |v: &str| {
+                let env = Env::from_pairs([(o.env, v)]);
+                (
+                    HostEnv::from_env(&env),
+                    nxkit_svc_audio::settings::AudioSettings::from_env(&env),
+                )
+            };
             for (i, a) in values.iter().enumerate() {
                 for b in &values[i + 1..] {
                     assert_ne!(read(a), read(b), "{}: {a} and {b} read the same", o.env);
@@ -451,7 +457,7 @@ mod tests {
             if o.env != launch::OP_MODE && o.env != launch::FPS_TARGET {
                 assert_eq!(
                     read(o.default),
-                    HostEnv::default(),
+                    Default::default(),
                     "{}: the default is not the unset value",
                     o.env
                 );

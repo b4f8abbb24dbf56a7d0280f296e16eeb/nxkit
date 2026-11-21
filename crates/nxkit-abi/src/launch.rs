@@ -51,6 +51,13 @@ pub const LANGUAGE: &str = "NXKIT_LANGUAGE";
 /// `0`: the controllers do not rumble.
 pub const RUMBLE: &str = "NXKIT_RUMBLE";
 
+/// `1`: the game gets six channels (5.1), and the host plays them as spatial audio on the Mac's speakers and on
+/// headphones (`nxkit-svc-audio`).
+pub const SPATIAL_AUDIO: &str = "NXKIT_SPATIAL_AUDIO";
+
+/// `1`: spatial audio on AirPods follows the movement of the head.
+pub const HEAD_TRACKING: &str = "NXKIT_HEAD_TRACKING";
+
 /// 0 to 3: the factor on the rumble of the game, 1 plays it as it is.
 pub const RUMBLE_GAIN: &str = "NXKIT_RUMBLE_GAIN";
 
@@ -316,6 +323,27 @@ pub const OPTIONS: &[Opt] = &[
         section: "Game",
         basic: false,
         needs: None,
+    },
+    Opt {
+        env: SPATIAL_AUDIO,
+        kind: ON_OFF,
+        label: "Spatial audio",
+        note: "The game plays in 5.1 surround, and the Mac makes it spatial on its speakers and on headphones such \
+               as AirPods. Only games with surround sound gain from it.",
+        default: "0",
+        section: "Game",
+        basic: false,
+        needs: None,
+    },
+    Opt {
+        env: HEAD_TRACKING,
+        kind: ON_OFF,
+        label: "Head tracking",
+        note: "On AirPods, the sound stays in place when you turn your head.",
+        default: "0",
+        section: "Game",
+        basic: false,
+        needs: Some((SPATIAL_AUDIO, "1")),
     },
     Opt {
         env: RUMBLE,

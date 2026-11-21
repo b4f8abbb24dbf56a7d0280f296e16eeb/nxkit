@@ -5,16 +5,18 @@
 
 #![allow(unsafe_code)]
 
-/// The closure the device thread runs. It fills an interleaved stereo `f32` buffer with silence or sound.
+/// The closure the device thread runs. It fills an interleaved `f32` buffer, with the width that [`Output::start`]
+/// was given, with silence or sound.
 pub type Fill = Box<dyn FnMut(&mut [f32]) + Send>;
 
 #[cfg(target_vendor = "apple")]
 mod imp {
     use super::Fill;
+    use crate::sys::spatial::{self, Spatial};
     use objc2_audio_toolbox::{
         AudioComponentDescription, AudioComponentFindNext, AudioComponentInstance,
         AudioComponentInstanceNew, AudioOutputUnitStart, AudioUnitGetProperty, AudioUnitInitialize,
-        AudioUnitSetProperty,
+        AudioUnitRender, AudioUnitSetProperty,
     };
     use objc2_core_audio::{AudioObjectGetPropertyData, AudioObjectPropertyAddress};
     use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription};
@@ -28,8 +30,6 @@ mod imp {
     const PROP_SET_RENDER_CALLBACK: u32 = 23;
     const PROP_CURRENT_DEVICE: u32 = 2000;
     const PROP_OS_WORKGROUP: u32 = 2015;
-    const FORMAT_LINEAR_PCM: u32 = 0x6c70_636d;
-    const FLAGS_FLOAT_PACKED: u32 = 1 | 8;
     const SYSTEM_OBJECT: u32 = 1;
     const SELECTOR_DEFAULT_OUTPUT: u32 = 0x644f_7574;
     const SCOPE_HAL_GLOBAL: u32 = 0x676c_6f62;
@@ -160,6 +160,8 @@ mod imp {
     /// The callback context. It is boxed and never freed, because the unit runs until the process ends.
     struct Ctx {
         fill: Fill,
+        /// The spatial mixer that the callback renders, or null when `fill` plays straight to the device.
+        spatial: AudioComponentInstance,
         workgroup: AtomicPtr<c_void>,
         join_status: AtomicI32,
         joined: bool,
@@ -169,6 +171,7 @@ mod imp {
     /// The running output unit.
     pub struct Output {
         ctx: *const Ctx,
+        mode: &'static str,
     }
 
     // SAFETY: the context is only read through atomics from other threads, and the audio thread owns the rest.
@@ -189,17 +192,7 @@ mod imp {
         }
         // SAFETY: `refcon` is the leaked `Ctx` that `start` made. Only this thread touches the non-atomic fields.
         let ctx = unsafe { &mut *refcon.as_ptr().cast::<Ctx>() };
-        if !ctx.joined {
-            ctx.joined = true;
-            let wg = ctx.workgroup.load(Ordering::Acquire);
-            let status = if wg.is_null() {
-                -1
-            } else {
-                // SAFETY: `wg` is the live workgroup of the device and `token` has the room the call needs.
-                unsafe { os_workgroup_join(wg, ctx.token.as_mut_ptr()) }
-            };
-            ctx.join_status.store(status, Ordering::Release);
-        }
+        join(ctx);
         // SAFETY: the unit hands us a valid list that lives during this call.
         let list = unsafe { &*data };
         if list.mNumberBuffers == 0 {
@@ -214,6 +207,50 @@ mod imp {
         let out = unsafe { std::slice::from_raw_parts_mut(buf.mData.cast::<f32>(), len) };
         (ctx.fill)(out);
         0
+    }
+
+    /// The callback with spatial audio: the spatial mixer renders into the device's two buffers.
+    unsafe extern "C-unwind" fn render_spatial(
+        refcon: NonNull<c_void>,
+        flags: NonNull<objc2_audio_toolbox::AudioUnitRenderActionFlags>,
+        stamp: NonNull<objc2_core_audio_types::AudioTimeStamp>,
+        _bus: u32,
+        frames: u32,
+        data: *mut AudioBufferList,
+    ) -> i32 {
+        let Some(list) = NonNull::new(data) else {
+            return 0;
+        };
+        // SAFETY: as in `render`.
+        let ctx = unsafe { &mut *refcon.as_ptr().cast::<Ctx>() };
+        join(ctx);
+        // SAFETY: the mixer is initialized and renders into the list that the device gave this call. `flags` and
+        // `stamp` live during this call.
+        unsafe {
+            AudioUnitRender(
+                ctx.spatial,
+                Some(&mut *flags.as_ptr()),
+                stamp.as_ref(),
+                0,
+                frames,
+                list,
+            )
+        }
+    }
+
+    /// Joins the device thread to the workgroup of the device, once.
+    fn join(ctx: &mut Ctx) {
+        if !ctx.joined {
+            ctx.joined = true;
+            let wg = ctx.workgroup.load(Ordering::Acquire);
+            let status = if wg.is_null() {
+                -1
+            } else {
+                // SAFETY: `wg` is the live workgroup of the device and `token` has the room the call needs.
+                unsafe { os_workgroup_join(wg, ctx.token.as_mut_ptr()) }
+            };
+            ctx.join_status.store(status, Ordering::Release);
+        }
     }
 
     fn check(what: &str, status: i32) -> Result<(), String> {
@@ -251,10 +288,17 @@ mod imp {
     }
 
     impl Output {
-        /// Opens the default output device at 48 kHz stereo `f32`, joins its workgroup and starts it.
-        pub fn start(fill: Fill) -> Result<Output, String> {
+        /// Opens the default output device at 48 kHz `f32`, joins its workgroup and starts it. `fill` writes frames of
+        /// `width` channels: 2, or 6 (5.1), which play as spatial audio where the device has it and are mixed down
+        /// to stereo elsewhere.
+        pub fn start(fill: Fill, width: usize) -> Result<Output, String> {
             let device = default_device()?;
             watch_device(device);
+            let (fill, sp, mode) = if width == 6 {
+                route(device, fill)
+            } else {
+                (fill, None, "stereo")
+            };
             let desc = AudioComponentDescription {
                 componentType: 0x6175_6f75,
                 componentSubType: 0x6168_616c,
@@ -284,17 +328,8 @@ mod imp {
                     4,
                 )
             })?;
-            let fmt = AudioStreamBasicDescription {
-                mSampleRate: 48000.0,
-                mFormatID: FORMAT_LINEAR_PCM,
-                mFormatFlags: FLAGS_FLOAT_PACKED,
-                mBytesPerPacket: 8,
-                mFramesPerPacket: 1,
-                mBytesPerFrame: 8,
-                mChannelsPerFrame: 2,
-                mBitsPerChannel: 32,
-                mReserved: 0,
-            };
+            // The spatial mixer renders one buffer per channel.
+            let fmt = spatial::format(2, sp.is_none());
             let fmt_size =
                 u32::try_from(std::mem::size_of::<AudioStreamBasicDescription>()).unwrap_or(40);
             // SAFETY: `fmt` is a complete stream description of `fmt_size` bytes.
@@ -311,13 +346,19 @@ mod imp {
 
             let ctx: &'static mut Ctx = Box::leak(Box::new(Ctx {
                 fill,
+                spatial: sp.as_ref().map_or(std::ptr::null_mut(), |s| s.unit),
                 workgroup: AtomicPtr::new(std::ptr::null_mut()),
                 join_status: AtomicI32::new(i32::MIN),
                 joined: false,
                 token: [0; 8],
             }));
+            let proc_ = if sp.is_some() {
+                render_spatial as *const c_void
+            } else {
+                render as *const c_void
+            };
             let cb = CallbackStruct {
-                proc_: render as *const c_void,
+                proc_,
                 refcon: std::ptr::from_mut(ctx).cast::<c_void>(),
             };
             // SAFETY: `cb` has the layout of `AURenderCallbackStruct` and `render` has the callback signature.
@@ -362,7 +403,13 @@ mod imp {
             })?;
             Ok(Output {
                 ctx: std::ptr::from_ref(ctx),
+                mode,
             })
+        }
+
+        /// How the frames reach the device, for the log.
+        pub fn mode(&self) -> &'static str {
+            self.mode
         }
 
         /// The result of `os_workgroup_join` once the first callback ran, or `None` before that.
@@ -371,6 +418,46 @@ mod imp {
             let v = unsafe { (*self.ctx).join_status.load(Ordering::Acquire) };
             if v == i32::MIN { None } else { Some(v) }
         }
+    }
+
+    /// Puts 5.1 frames on `device`: through a spatial mixer where the device has spatial audio, else through the
+    /// SDK's stereo downmix. Returns the fill of the device, the mixer and the mode for the log.
+    fn route(device: u32, fill: Fill) -> (Fill, Option<Spatial>, &'static str) {
+        let head = crate::settings::settings().head_tracking;
+        let fill = match spatial::output_type(device) {
+            Some(kind) => match Spatial::new(kind, head, fill) {
+                Ok(sp) => {
+                    let mode = if kind == spatial::HEADPHONES {
+                        "5.1 as spatial audio for headphones"
+                    } else {
+                        "5.1 as spatial audio for the built-in speakers"
+                    };
+                    let none: Fill = Box::new(|out: &mut [f32]| out.fill(0.0));
+                    return (none, Some(sp), mode);
+                }
+                Err((e, fill)) => {
+                    eprintln!("nxkit-audio: warning: no spatial audio ({e}), 5.1 is mixed down");
+                    fill
+                }
+            },
+            None => fill,
+        };
+        let mut fill = fill;
+        let mut six = vec![0.0f32; spatial::MAX_FRAMES * 6].into_boxed_slice();
+        let down: Fill = Box::new(move |out: &mut [f32]| {
+            let n = out.len() / 2;
+            if n * 6 > six.len() {
+                out.fill(0.0);
+                return;
+            }
+            fill(&mut six[..n * 6]);
+            crate::chans::downmix(&six[..n * 6], out);
+        });
+        (
+            down,
+            None,
+            "5.1 mixed down to stereo (the device has no spatial audio)",
+        )
     }
 
     /// The layout of `AURenderCallbackStruct`.
@@ -390,8 +477,13 @@ mod imp {
 
     impl Output {
         /// Always fails: this platform has no output unit.
-        pub fn start(_fill: Fill) -> Result<Output, String> {
+        pub fn start(_fill: Fill, _width: usize) -> Result<Output, String> {
             Err("this platform has no audio output unit".to_string())
+        }
+
+        /// Never started.
+        pub fn mode(&self) -> &'static str {
+            "none"
         }
 
         /// Never joined.
