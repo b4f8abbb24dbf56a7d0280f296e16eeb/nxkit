@@ -85,8 +85,8 @@ fn the_end_record_may_take_the_last_bytes() {
 fn wrong_calls_are_errors() {
     let (mut cb, mut mem) = setup();
     assert!(check_request(BASE, 32).is_err());
-    assert!(check_request(BASE + 4, 64).is_err());
-    assert!(check_request(BASE, 100).is_err());
+    assert!(check_request(BASE + 2, 64).is_err());
+    assert!(check_request(BASE, 102).is_err());
     assert!(cb.add_command_memory(BASE + 4, 64).is_err());
     assert!(cb.add_command_memory(BASE, 60).is_err());
     assert!(cb.begin_recording().is_ok());
@@ -163,16 +163,16 @@ fn an_encoded_record_goes_the_same_way_as_a_record() {
 
 #[test]
 fn the_refusal_names_the_rule_and_the_values() {
-    let e = check_request(BASE + 4, 512).unwrap_err();
+    let e = check_request(BASE + 2, 512).unwrap_err();
     assert_eq!(
         e,
         NvnError::BadCommandMemory {
-            start: BASE + 4,
+            start: BASE + 2,
             len: 512,
-            rule: "the start is not a multiple of 8"
+            rule: "the start is not a multiple of 4"
         }
     );
-    assert!(e.to_string().contains("0x70000004"));
+    assert!(e.to_string().contains("0x70000002"));
     assert!(e.to_string().contains("512 bytes"));
     assert!(check_request(BASE, 64).is_ok());
     assert!(check_request(BASE, 512).is_ok());
@@ -353,4 +353,13 @@ fn the_limit_of_a_short_block_is_never_below_the_position() {
     assert_eq!(cb.cursor().limit, BASE);
     cb.add_command_memory(BASE, 24).unwrap();
     assert_eq!(cb.cursor().limit, BASE + 8);
+}
+
+#[test]
+fn a_block_that_starts_at_4_is_moved_to_8() {
+    assert!(check_request(BASE + 4, 65536).is_ok());
+    assert_eq!(align_block(BASE + 4, 65536), (BASE + 8, 65528));
+    assert_eq!(align_block(BASE, 512), (BASE, 512));
+    assert_eq!(align_block(BASE + 4, 4), (BASE + 8, 0));
+    assert_eq!(align_block(BASE, 60), (BASE, 56));
 }

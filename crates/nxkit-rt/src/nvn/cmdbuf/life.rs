@@ -1,6 +1,6 @@
 //! The life of a command buffer: initialise, memory, callback, recording, call and copy, and the getters.
 
-use nxkit_nvn::cmdbuf::{check_request, clip_block};
+use nxkit_nvn::cmdbuf::{align_block, check_request, clip_block};
 use nxkit_nvn::record::Record;
 
 use super::rec::{
@@ -67,6 +67,8 @@ extern "C" fn add_command_memory(c: u64, memory_pool: u64, off: i64, n: u64) {
         // recorder writes only inside the given bytes, so the part past the pool is cut off. A block that is cut short holds
         // what fits and a record that does not fit goes the way it does when a block is full.
         let n = clip_block(n, v.size - off);
+        // NVN aligns command memory to 4 bytes, the host's records to 8: the block starts at the next multiple of 8.
+        let (host, n) = align_block(host, n);
         crate::diag!(
             "DIAG add cmdmem cb {c:#x} pool {memory_pool:#x} off {off:#x} host {host:#x} n {n:#x} poolmem {:#x} size {:#x} flags {:#x}",
             v.mem,

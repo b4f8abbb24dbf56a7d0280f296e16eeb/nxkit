@@ -29,13 +29,21 @@ pub fn check_request(start: u64, requested: u64) -> Result<()> {
     if requested < MIN_BLOCK_BYTES {
         return Err(bad("the request is smaller than the minimum block"));
     }
-    if !requested.is_multiple_of(8) {
-        return Err(bad("the requested length is not a multiple of 8"));
+    if !requested.is_multiple_of(4) {
+        return Err(bad("the requested length is not a multiple of 4"));
     }
-    if !start.is_multiple_of(8) {
-        return Err(bad("the start is not a multiple of 8"));
+    if !start.is_multiple_of(4) {
+        return Err(bad("the start is not a multiple of 4"));
     }
     Ok(())
+}
+
+/// The part of a block that the host records into: NVN aligns command memory to 4 bytes, the records of the host are 8
+/// byte aligned, so a start that is only 4-aligned moves up to the next multiple of 8 and the length shrinks by those
+/// bytes and is rounded down to a multiple of 8. Octopath Traveler (Unreal Engine 4.18) adds such blocks.
+pub fn align_block(start: u64, len: u64) -> (u64, u64) {
+    let at = start.next_multiple_of(8);
+    (at, len.saturating_sub(at - start) & !7)
 }
 
 /// The bytes of a requested block that the host uses when only `available` bytes are left in the pool. Games ask for
