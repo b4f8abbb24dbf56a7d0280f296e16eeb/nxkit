@@ -63,11 +63,12 @@ fn fatal(message: &str) {
     stop::fatal(message)
 }
 
-/// The bind of the pacing service: the event of the game's `SystemEventType`, and the handle of its writable end.
+/// The bind of the pacing service: the event of the game's `SystemEventType`, and the handle of its writable end. The
+/// vsync event clears itself when a wait ends, as libnx loads it (`viGetDisplayVsyncEvent`). A game that waits and
+/// never clears it, as Unity does, would otherwise run its frame loop without a wait.
 pub(crate) fn pacing_bind(event: u64) -> Result<u32, u32> {
     let k = kernel().ok_or(BIND_REFUSED)?;
-    k.bind_system_event(event, false)
-        .map_err(|_| BIND_REFUSED)?;
+    k.bind_system_event(event, true).map_err(|_| BIND_REFUSED)?;
     Ok(k.system_event_writable_handle(event))
 }
 
