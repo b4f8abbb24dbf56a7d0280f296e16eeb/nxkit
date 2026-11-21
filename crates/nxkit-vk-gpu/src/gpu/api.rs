@@ -87,11 +87,43 @@ impl Backend for VkGpu {
         })
     }
 
-    fn create_buffer_view(&self, _id: TextureId, desc: &BufferViewDesc) -> BackendResult<()> {
-        Err(BackendError(format!(
-            "texel buffer views (format {}) are not implemented",
-            desc.format
-        )))
+    fn create_buffer_view(&self, id: TextureId, desc: &BufferViewDesc) -> BackendResult<()> {
+        nxkit_metal::autorelease_pool(|| {
+            let format = formats::pixel(desc.pixel).ok_or_else(|| {
+                err(format!(
+                    "a texel buffer of format {} has no Metal format",
+                    desc.format
+                ))
+            })?;
+            let memory = locked(&self.objects)
+                .memories
+                .get(&desc.memory)
+                .cloned()
+                .ok_or_else(|| err("the buffer of the texel buffer view has no storage"))?;
+            // Storage texel buffers are written by shaders; a uniform one only read. Both are made writable, as the
+            // usage of the buffer is not in the description and the texture costs the same.
+            let texture = Texture::buffer_over_guest(
+                &self.ctx,
+                &memory,
+                desc.offset,
+                desc.elements,
+                format,
+                true,
+            )
+            .map_err(|why| {
+                err(format!(
+                    "a texel buffer of {} texels of format {} at {:#x}: {why:?}",
+                    desc.elements, desc.format, desc.offset
+                ))
+            })?;
+            let tex = crate::objects::Tex {
+                texture,
+                _memory: Some(memory),
+                converted: None,
+            };
+            locked(&self.objects).textures.insert(id, Arc::new(tex));
+            Ok(())
+        })
     }
 
     fn destroy_texture(&self, id: TextureId) {

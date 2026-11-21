@@ -5,7 +5,9 @@
 //! byte the CPU wrote is what the next sample reads.
 
 use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTLBuffer, MTLDevice, MTLStorageMode, MTLTextureDescriptor, MTLTextureUsage};
+use objc2_metal::{
+    MTLBuffer, MTLDevice, MTLResourceOptions, MTLStorageMode, MTLTextureDescriptor, MTLTextureUsage,
+};
 
 use super::{Storage, Texture, TextureDesc, TextureKind};
 use crate::device::Context;
@@ -121,6 +123,70 @@ impl Texture {
         let raw = buffer
             .newTextureWithDescriptor_offset_bytesPerRow(&d, offset as usize, stride as usize)
             .ok_or(InPlaceRefusal::Refused)?;
+        Ok(Self::wrap(ctx, raw, desc, false, None, None, None))
+    }
+
+    /// Makes a texture buffer (`MTLTextureType.textureBuffer`) of `elements` texels of `format` over the guest memory
+    /// `mem`, from byte `offset`: a shader reads (and with `shader_write` writes) the bytes in place. The offset must be a
+    /// multiple of `minimumTextureBufferAlignmentForPixelFormat`, and the texels must lie inside the memory. The texture
+    /// keeps the buffer alive; its memory is the buffer's, which is in the residency set.
+    pub fn buffer_over_guest(
+        ctx: &Context,
+        mem: &GuestMemory,
+        offset: u64,
+        elements: u64,
+        format: crate::Format,
+        shader_write: bool,
+    ) -> std::result::Result<Self, InPlaceRefusal> {
+        if format.is_compressed() || format.is_depth() || format.has_stencil() {
+            return Err(InPlaceRefusal::Format);
+        }
+        let align =
+            (ctx.device()
+                .minimumTextureBufferAlignmentForPixelFormat(format.to_mtl()) as u64)
+                .max(1);
+        if !offset.is_multiple_of(align) {
+            return Err(InPlaceRefusal::Alignment);
+        }
+        let bytes = elements.checked_mul(u64::from(format.bytes_per_pixel()));
+        let end = bytes.and_then(|b| b.checked_add(offset));
+        if elements == 0 || end.is_none_or(|e| e > mem.len()) {
+            return Err(InPlaceRefusal::Range);
+        }
+        let width = u32::try_from(elements).map_err(|_| InPlaceRefusal::Range)?;
+        let mut usage = MTLTextureUsage::ShaderRead;
+        if shader_write {
+            usage |= MTLTextureUsage::ShaderWrite;
+        }
+        // SAFETY: the width fits the buffer (checked above); the options are those of a shared buffer.
+        let d = unsafe {
+            MTLTextureDescriptor::textureBufferDescriptorWithPixelFormat_width_resourceOptions_usage(
+                format.to_mtl(),
+                width as usize,
+                MTLResourceOptions::StorageModeShared,
+                usage,
+            )
+        };
+        let row = bytes.unwrap_or(0).next_multiple_of(align);
+        let buffer: &ProtocolObject<dyn MTLBuffer> = mem.buffer();
+        let raw = buffer
+            .newTextureWithDescriptor_offset_bytesPerRow(&d, offset as usize, row as usize)
+            .ok_or(InPlaceRefusal::Refused)?;
+        let desc = TextureDesc {
+            kind: TextureKind::D2,
+            width,
+            height: 1,
+            depth: 1,
+            mip_levels: 1,
+            array_layers: 1,
+            format,
+            shader_read: true,
+            shader_write,
+            render_target: false,
+            allow_views: false,
+            storage: Storage::Shared,
+            shader_atomic: false,
+        };
         Ok(Self::wrap(ctx, raw, desc, false, None, None, None))
     }
 }
