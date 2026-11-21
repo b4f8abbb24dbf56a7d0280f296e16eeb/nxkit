@@ -13,6 +13,7 @@ mod extract;
 mod files;
 mod generic;
 mod image;
+mod launcher;
 mod layout;
 mod link;
 mod macho;
@@ -429,6 +430,8 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e))
         };
         put("game.json", manifest::game_json(&m).as_bytes())?;
+        let options = launcher::launcher_json(t.id, m.settings.op_mode);
+        put(nxkit_abi::launch::FILE, options.as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         put("main.npdm", &npdm_bytes)?;
         link::module_files(&run_dir, &mods, |done, total| {

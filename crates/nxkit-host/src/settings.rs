@@ -272,6 +272,15 @@ impl Settings {
     }
 }
 
+impl Settings {
+    /// Puts the launch options of the environment over the title's: `NXKIT_OP_MODE` sets `op_mode`.
+    pub fn with_env(&mut self, env: &crate::hostenv::HostEnv) {
+        if let Some(handheld) = env.handheld {
+            self.op_mode = if handheld { "handheld" } else { "docked" }.to_owned();
+        }
+    }
+}
+
 /// Reads the `aoc` list. A missing list means no DLC.
 pub fn parse_aoc(v: Option<&Value>) -> Result<Vec<Aoc>> {
     let Some(list) = v else {
@@ -333,6 +342,26 @@ mod tests {
             s.display_versions,
             vec![("ab".to_string(), "1.6.0".to_string())]
         );
+    }
+
+    #[test]
+    fn the_console_mode_of_the_launcher_wins() {
+        let mut s = Settings {
+            op_mode: "docked".into(),
+            ..Settings::default()
+        };
+        let env = |v: &str| {
+            crate::hostenv::HostEnv::from_env(&nxkit_abi::env::Env::from_pairs([(
+                "NXKIT_OP_MODE",
+                v,
+            )]))
+        };
+        s.with_env(&env("other"));
+        assert_eq!(s.op_mode, "docked");
+        s.with_env(&env("handheld"));
+        assert_eq!(s.op_mode, "handheld");
+        s.with_env(&env("docked"));
+        assert_eq!(s.op_mode, "docked");
     }
 
     #[test]

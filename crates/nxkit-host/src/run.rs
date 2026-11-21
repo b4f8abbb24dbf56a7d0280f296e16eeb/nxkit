@@ -85,8 +85,11 @@ fn check_kernel_service(mask: u64) -> Result<()> {
 pub fn run(opts: &Options) -> Result<()> {
     // The one read of the `NXKIT_*` environment (W27): every crate's typed settings come from this snapshot. The
     // crates that keep them for code with no context get them now, before any part exists; a crate that had them
-    // already or was read before stops the run. The rest is passed in below.
-    let run = RunSettings::from_env(&nxkit_abi::env::Env::capture());
+    // already or was read before stops the run. The rest is passed in below. The saved choices of the player in the
+    // preferences of the app fill the launch options that the environment leaves unset.
+    let mut snapshot = nxkit_abi::env::Env::capture();
+    sys::saved_choices(&mut snapshot);
+    let run = RunSettings::from_env(&snapshot);
     run.install()
         .map_err(|e| HostError::Settings(e.to_string()))?;
     let env = &run.host;

@@ -17,11 +17,23 @@ mod kernel;
 pub mod loading;
 mod mouse;
 pub mod paging;
+mod prefs;
 mod screen;
 pub mod vm;
 
 pub use dylib::{Dylib, Image};
 pub use kernel::*;
+
+/// Adds the saved choices of the player from the preferences of the app to `env` (`hostenv::with_saved`) and logs
+/// them. A run outside an app bundle has none.
+pub fn saved_choices(env: &mut nxkit_abi::env::Env) {
+    let Some(prefs) = prefs::Prefs::of_app() else {
+        return;
+    };
+    for line in crate::hostenv::with_saved(env, |key| prefs.string(key)) {
+        eprintln!("nxkit-host: {line}");
+    }
+}
 
 /// The user's preferred languages of macOS (`NSLocale.preferredLanguages`), best first, such as `de-DE`.
 pub fn preferred_languages() -> Vec<String> {

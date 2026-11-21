@@ -227,6 +227,7 @@ impl Game {
         let src = std::fs::read_to_string(&path).map_err(|e| HostError::io(&path, &e))?;
         let mut game = Game::parse(root, &src)?;
         game.memory = game.memory.with_env(env)?;
+        game.settings.with_env(env);
         Ok(game)
     }
 

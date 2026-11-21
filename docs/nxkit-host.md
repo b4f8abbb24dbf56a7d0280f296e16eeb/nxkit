@@ -75,7 +75,7 @@ One row for each rewritten site, with four tab-separated columns: the return add
 
 The title module and its family module answer the settings through their `nxtitle` hooks. The build writes them here. The host types the keys that name a mechanism of the core and gives them to the part that uses them (see Seams). It does not use them itself.
 
-Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode`, `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
+Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target`, `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
 Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
@@ -88,6 +88,20 @@ A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex stri
 ### Other files
 
 `romfs/`, `shaders/` and `pipelines/` (the pipeline archive shards and `index.nxpi`, or the single `pipelines.mtl4archive` of an older build) are read by the services and the GPU backend, not by the loader.
+
+### launcher.json
+
+The launch options of the host, for a launcher such as NX2Apple. The host does not read the file. The table is `nxkit_abi::launch::OPTIONS`, the one definition that the build writes and the host reads. The file has the schema 1 of the old engine's `dm/launcher.json`: `{"schema": 1, "game": "<title id>", "settings": [...]}`. Each row has `env` (the variable), `kind` (`choice` with `options` as `[value, label]` pairs, `toggle` with `on` and `off`, or `range` with `min`, `max` and `step`), `label` and `note` in English, `default`, `section` (`Game`, `Controls` or `Performance`) and `level` `basic` for a row that the launcher shows first. A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<env>.note` and `launch.opt.<env>.<value>`.
+
+| variable | kind | values | default |
+|---|---|---|---|
+| `NXKIT_OP_MODE` | choice | `docked`, `handheld` | the mode of the title module: `handheld` for a touch screen game, else `docked` |
+| `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
+| `NXKIT_PAUSE_UNFOCUSED` | toggle | `1`, `0` | `0` |
+| `NXKIT_HOME_MENU` | toggle | `1`, `0` | `1` |
+| `NXKIT_HOME_QUIT` | toggle | `1`, `0` | `1` |
+
+The launcher keeps the choice of the player for a row as the string `launcher.<env>` in the preferences domain of the app, the bundle identifier, only when it is not the default. At the start the host reads these strings before it reads any setting (`sys/prefs.rs`, `hostenv::with_saved`). A choice that the row does not accept is ignored, and the environment wins over a choice. The log gets one line for each choice. `NXKIT_SAVED_CHOICES=0` ignores the choices. A run outside an app bundle has none. So a start from Finder or the Dock gets the choices too. A new option is one row in the table and its read in `hostenv.rs`. The test `every_value_of_a_launch_option_is_read` fails when the host does not read a value of the table.
 
 ### input.json
 

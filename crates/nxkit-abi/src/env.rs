@@ -8,7 +8,7 @@
 //! settings and are read where they are used.
 //!
 //! Nothing sets an `NXKIT_*` variable while the host runs, so a value of the snapshot is the value that a read of the
-//! process gives. [`Env::var`] and [`Env::var_os`] answer like `std::env::var` and `std::env::var_os`.
+//! process gives, or a saved choice of the player for a variable that the process does not set ([`Env::fill`]). [`Env::var`] and [`Env::var_os`] answer like `std::env::var` and `std::env::var_os`.
 
 use std::collections::BTreeMap;
 use std::env::VarError;
@@ -55,6 +55,16 @@ impl Env {
     /// The value of `name` as `std::env::var_os` gives it.
     pub fn var_os(&self, name: impl AsRef<str>) -> Option<OsString> {
         self.vars.get(name.as_ref()).cloned()
+    }
+
+    /// Sets `name` to `value` when the snapshot has no value for it, for a saved choice of the player
+    /// ([`crate::launch`]). Returns whether it was set. A name without [`PREFIX`] is left out.
+    pub fn fill(&mut self, name: &str, value: impl Into<OsString>) -> bool {
+        if !name.starts_with(PREFIX) || self.vars.contains_key(name) {
+            return false;
+        }
+        self.vars.insert(name.to_owned(), value.into());
+        true
     }
 
     /// The names that are set, in order.
@@ -152,6 +162,18 @@ mod tests {
         );
         assert_eq!(env.var_os("NXKIT_A"), Some(OsString::from("1")));
         assert_eq!(env.names().collect::<Vec<_>>(), ["NXKIT_A", "NXKIT_B"]);
+    }
+
+    #[test]
+    fn a_fill_keeps_what_the_process_set() {
+        let mut env = Env::from_pairs([("NXKIT_A", "1"), ("NXKIT_B", "")]);
+        assert!(!env.fill("NXKIT_A", "2") && !env.fill("NXKIT_B", "2") && !env.fill("HOME", "/"));
+        assert!(env.fill("NXKIT_C", "3"));
+        assert_eq!(
+            (env.var("NXKIT_A"), env.var("NXKIT_C")),
+            (Ok("1".into()), Ok("3".into()))
+        );
+        assert_eq!(env.var("HOME"), Err(VarError::NotPresent));
     }
 
     #[test]

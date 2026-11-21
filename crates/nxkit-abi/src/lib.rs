@@ -7,6 +7,7 @@
 //!   guest address is a host address. The host reserves one range for all guest memory and names it once with
 //!   [`guest::set_range`]. Every access outside that range is a [`guest::Fault`].
 //! - [`env`](mod@env): the snapshot of the `NXKIT_*` variables, the one source of the host's settings (W27).
+//! - [`launch`]: the launch options of the host, the rows of `launcher.json` that the build writes for a launcher.
 //! - [`export`]: one function that a service gives the game in place of an SDK function (R14).
 //! - [`ipc`]: the trait of a service that answers Horizon IPC requests, and the request and response types (R14, R15).
 //! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
@@ -19,6 +20,7 @@ pub mod export;
 pub mod guest;
 pub mod ipc;
 pub mod kernel;
+pub mod launch;
 pub mod platform;
 pub mod shards;
 pub mod vk_table;

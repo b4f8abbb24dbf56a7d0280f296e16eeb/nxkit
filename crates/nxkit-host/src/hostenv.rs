@@ -4,10 +4,14 @@
 //! settings of every runtime crate, each built by the crate's own `from_env` from the one snapshot that `run` takes.
 //! [`RunSettings::install`] gives the crates that keep their settings for code with no context (the NVN front end, the
 //! encoder, the services) their settings, and the host passes the rest explicitly when it builds the parts.
+//!
+//! The launch options of `nxkit_abi::launch` are keys of this file, read by the names of that table. [`with_saved`]
+//! adds the saved choices of the player to the snapshot before anything reads it.
 
 use std::path::PathBuf;
 
 use nxkit_abi::env::{Env, Slot, SlotError};
+use nxkit_abi::launch;
 
 /// The settings of the host itself.
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +50,9 @@ pub struct HostEnv {
     pub crash_report_off: bool,
     /// `NXKIT_PAUSE_UNFOCUSED=1`: the game pauses when the window loses the focus.
     pub pause_unfocused: bool,
+    /// `NXKIT_OP_MODE` (`docked` or `handheld`, a launch option): handheld (`true`) or docked over the mode of the
+    /// title module. Another value is ignored.
+    pub handheld: Option<bool>,
     /// `NXKIT_SCREEN`: the screen of the window, by index, `id:` and its display id, or a part of its name.
     pub screen: Option<String>,
     /// `NXKIT_FULLSCREEN` (off unless set, not blank and not `0`): the window starts in full screen, as
@@ -113,13 +120,18 @@ impl HostEnv {
                 .ok()
                 .and_then(|v| v.trim().parse().ok()),
             crash_report_off: env.var("NXKIT_CRASH_REPORT").is_ok_and(|v| v == "0"),
-            pause_unfocused: env.var("NXKIT_PAUSE_UNFOCUSED").is_ok_and(|v| v == "1"),
+            pause_unfocused: env.var(launch::PAUSE_UNFOCUSED).is_ok_and(|v| v == "1"),
+            handheld: env.var(launch::OP_MODE).ok().and_then(|v| match v.trim() {
+                "handheld" => Some(true),
+                "docked" => Some(false),
+                _ => None,
+            }),
             screen: env.var("NXKIT_SCREEN").ok(),
             fullscreen: env
-                .var("NXKIT_FULLSCREEN")
+                .var(launch::FULLSCREEN)
                 .is_ok_and(|v| !v.trim().is_empty() && v.trim() != "0"),
-            home_menu: env.var("NXKIT_HOME_MENU").map_or(true, |v| v.trim() != "0"),
-            home_quit: env.var("NXKIT_HOME_QUIT").map_or(true, |v| v.trim() != "0"),
+            home_menu: env.var(launch::HOME_MENU).map_or(true, |v| v.trim() != "0"),
+            home_quit: env.var(launch::HOME_QUIT).map_or(true, |v| v.trim() != "0"),
             launcher: env
                 .var("NXKIT_LAUNCHER_BUNDLE_ID")
                 .ok()
@@ -128,6 +140,37 @@ impl HostEnv {
             home_text: env.var("NXKIT_HOME_TEXT").ok(),
         }
     }
+}
+
+/// Adds the saved choices of the player to `env`: for each launch option, `saved` gives the stored value of
+/// `launcher.<env>` in the preferences of the app, and a value that the option accepts is used when the environment
+/// does not set the variable. `NXKIT_SAVED_CHOICES=0` ignores the choices. Returns one line per choice for the log.
+pub fn with_saved(env: &mut Env, saved: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    if env
+        .var("NXKIT_SAVED_CHOICES")
+        .is_ok_and(|v| v.trim() == "0")
+    {
+        return vec!["saved choices ignored (NXKIT_SAVED_CHOICES=0)".into()];
+    }
+    let mut log = Vec::new();
+    for o in launch::OPTIONS {
+        let Some(v) = saved(&launch::saved_key(o.env)) else {
+            continue;
+        };
+        let name = o.env;
+        if !o.accepts(&v) {
+            log.push(format!(
+                "saved choice {name}={v} ignored: the host does not offer it"
+            ));
+        } else if let Ok(set) = env.var(name) {
+            log.push(format!(
+                "saved choice {name}={v} not used: the environment sets {name}={set}"
+            ));
+        } else if env.fill(name, &v) {
+            log.push(format!("{name}={v} (saved choice)"));
+        }
+    }
+    log
 }
 
 /// The value of `key` parsed as `T`, None when it is unset or not a `T`.
@@ -242,5 +285,58 @@ mod tests {
         ]));
         assert!(!h.home_menu && h.home_quit);
         assert_eq!(h.launcher.as_deref(), Some("org.example.launcher"));
+        let op = |v: &str| HostEnv::from_env(&Env::from_pairs([("NXKIT_OP_MODE", v)])).handheld;
+        assert_eq!(
+            (op("handheld"), op(" docked"), op("console")),
+            (Some(true), Some(false), None)
+        );
+        assert_eq!(d.handheld, None);
+    }
+
+    /// The host reads every launch option, and every value of an option changes what it reads: the table and the
+    /// reads cannot drift apart.
+    #[test]
+    fn every_value_of_a_launch_option_is_read() {
+        for o in launch::OPTIONS {
+            let values: Vec<String> = match o.kind {
+                launch::Kind::Choice(list) => list.iter().map(|(v, _)| v.to_string()).collect(),
+                launch::Kind::Toggle { on, off } => vec![on.into(), off.into()],
+                launch::Kind::Range { min, max, .. } => vec![min.to_string(), max.to_string()],
+            };
+            let read = |v: &str| HostEnv::from_env(&Env::from_pairs([(o.env, v)]));
+            for (i, a) in values.iter().enumerate() {
+                for b in &values[i + 1..] {
+                    assert_ne!(read(a), read(b), "{}: {a} and {b} read the same", o.env);
+                }
+            }
+            // the default of the console mode is the title's, which the host has from game.json
+            if o.env != launch::OP_MODE {
+                assert_eq!(
+                    read(o.default),
+                    HostEnv::default(),
+                    "{}: the default is not the unset value",
+                    o.env
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_saved_choice_fills_what_the_environment_leaves() {
+        let mut env = Env::from_pairs([("NXKIT_FULLSCREEN", "0")]);
+        let saved = |k: &str| match k {
+            "launcher.NXKIT_OP_MODE" => Some("handheld".to_string()),
+            "launcher.NXKIT_FULLSCREEN" => Some("1".to_string()),
+            "launcher.NXKIT_HOME_MENU" => Some("off".to_string()),
+            _ => None,
+        };
+        let log = with_saved(&mut env, saved);
+        assert_eq!(env.var("NXKIT_OP_MODE").as_deref(), Ok("handheld"));
+        assert_eq!(env.var("NXKIT_FULLSCREEN").as_deref(), Ok("0"));
+        assert!(env.var("NXKIT_HOME_MENU").is_err());
+        assert_eq!(log.len(), 3, "{log:?}");
+        let mut off = Env::from_pairs([("NXKIT_SAVED_CHOICES", "0")]);
+        with_saved(&mut off, saved);
+        assert!(off.var("NXKIT_OP_MODE").is_err());
     }
 }
