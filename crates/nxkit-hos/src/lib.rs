@@ -35,6 +35,7 @@ pub mod pinned;
 mod process;
 mod regions;
 mod regionsvc;
+mod report;
 mod result;
 mod role;
 mod shared;

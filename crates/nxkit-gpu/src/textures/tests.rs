@@ -577,20 +577,20 @@ fn a_buffer_image_lies_over_the_guest_bytes_at_an_aligned_offset() {
     let at = |off: u64| GpuAddr::new(nxkit_metal::GUEST_VA_BASE + off).unwrap();
     let id = table.create(buffer, at(0x1000)).unwrap();
     let t = store
-        .buffer_image(table.get(id).unwrap(), Format::Rgba8Unorm)
+        .buffer_image(table.get(id).unwrap(), Format::Rgba8Unorm, true)
         .unwrap();
     assert_eq!(t.desc().width, 300);
     // an offset Metal refuses, and a buffer past the end of the pool
     let odd = table.create(buffer, at(0x2004)).unwrap();
     assert!(
         store
-            .buffer_image(table.get(odd).unwrap(), Format::Rgba8Unorm)
+            .buffer_image(table.get(odd).unwrap(), Format::Rgba8Unorm, false)
             .is_err()
     );
     let past = table.create(buffer, at(1024 * 1024 - 0x100)).unwrap();
     assert!(
         store
-            .buffer_image(table.get(past).unwrap(), Format::Rgba8Unorm)
+            .buffer_image(table.get(past).unwrap(), Format::Rgba8Unorm, false)
             .is_err()
     );
 }

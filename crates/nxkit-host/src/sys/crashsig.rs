@@ -209,8 +209,8 @@ impl Write for Buf {
 
 impl Buf {
     fn flush(&mut self) {
-        // SAFETY: `b[..n]` is initialised; fd 2 is stderr.
-        unsafe { write(2, self.b.as_ptr().cast(), self.n) };
+        // SAFETY: `b[..n]` is initialised; the descriptor is stderr, or the file behind the log pipe.
+        unsafe { write(super::logpipe::direct_fd(), self.b.as_ptr().cast(), self.n) };
         self.n = 0;
     }
 }
@@ -283,6 +283,8 @@ extern "C" fn on_signal(sig: c_int, info: *mut SigInfo, uctx: *mut c_void) {
 }
 
 fn report(sig: c_int, idx: Option<usize>, info: *mut SigInfo, uctx: *mut c_void) {
+    // The lines logged before the crash first: the writer of the log pipe still runs on its own thread.
+    super::logpipe::settle(1500);
     let mut w = Buf { b: [0; 8192], n: 0 };
     let name = idx.map_or("signal", |i| SIGNALS[i].1);
     // SAFETY: the kernel passes a valid `siginfo_t` to an SA_SIGINFO handler.

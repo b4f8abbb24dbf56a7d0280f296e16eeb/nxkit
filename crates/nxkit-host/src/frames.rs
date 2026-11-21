@@ -190,6 +190,7 @@ fn shown_to_step_vk(_present: u64, secs: f64) {
 }
 
 fn shown_on(now_ns: u64, secs: f64) {
+    crate::stall::shown(now_ns);
     let ago_ns = ((nxkit_metal::media_time() - secs).max(0.0) * 1e9) as u64;
     nxkit_svc_pacing::frame_shown(now_ns.saturating_sub(ago_ns));
 }

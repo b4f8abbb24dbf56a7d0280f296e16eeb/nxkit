@@ -16,6 +16,7 @@ mod homeviews;
 mod hud;
 mod kernel;
 pub mod loading;
+pub mod logpipe;
 mod look;
 mod mouse;
 mod notify;

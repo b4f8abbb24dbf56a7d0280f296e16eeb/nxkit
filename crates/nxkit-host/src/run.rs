@@ -94,6 +94,8 @@ pub fn run(opts: &Options) -> Result<()> {
         .map_err(|e| HostError::Settings(e.to_string()))?;
     let env = &run.host;
     sys::crashsig::install(env);
+    // From here the log goes through a pipe, so a slow disk under stderr never holds a game thread (`logpipe`).
+    sys::logpipe::install();
     let game = Game::read(&opts.root, env)?;
     sys::loading::set_title(&game.name);
     let mask = loader::service_mask(&game.services)?;
@@ -126,6 +128,7 @@ pub fn run(opts: &Options) -> Result<()> {
     seams::init_services(&placed.game, mask, env, &refresh)?;
 
     let mut loaded = loader::load(placed, mask)?;
+    crate::stall::start(env.stall_dump);
     eprintln!(
         "nxkit-host: {} modules loaded ({:?}), {} exports",
         loaded.game.modules.len(),

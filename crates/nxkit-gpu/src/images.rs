@@ -11,6 +11,11 @@
 //!   dispatch needs no such list: the front end already puts every bound image into the `writes` of the dispatch.
 //! - [`resolve`] makes the view of each (handle, declared type, atomic) and gives its resource ID to the argument
 //!   buffers (`Env::images`).
+//!
+//! A texture a shader fetches from as a `texture_buffer` (a `tex` member) is entered here too, read only, from the
+//! texture binds of the stage and under the code [`SAMPLED_BUFFER`]: like a buffer image it is a Metal texture buffer
+//! over the guest bytes (`TextureStore::buffer_image`), while a sampled buffer declared as a `texture2d` reads the 2D
+//! rows of `textures::describe`.
 
 use nxkit_metal::TextureKind;
 use nxkit_nvn::frame::{Cmd, Frame};
@@ -27,11 +32,16 @@ use crate::snapshot::EncodeView;
 use crate::stats::EncodeStats;
 use crate::textures::{Res, TextureStore};
 
-/// An `img` member of a shader.
+/// The code of a sampled texture buffer in an image key, beside `ImgDecl::atomic_code` (0 to 2).
+pub(crate) const SAMPLED_BUFFER: u8 = 0x10;
+
+/// An `img` member of a shader, or a `tex` member declared as a `texture_buffer` (`sampled`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Decl {
-    /// The image slot (`reg`).
+    /// The image or texture slot (`reg`).
     pub(crate) reg: u32,
+    /// A sampled texture buffer: its handle is a texture bind, read only.
+    pub(crate) sampled: bool,
     /// The texture type that the shader declares.
     pub(crate) dim: TextureKind,
     /// The access and the atomic flag.
@@ -55,10 +65,14 @@ pub(crate) fn declared<'a>(
             .map(|p| {
                 p.binds
                     .iter()
-                    .filter(|b| b.kind == BindKind::Img)
+                    .filter(|b| {
+                        b.kind == BindKind::Img
+                            || (b.kind == BindKind::Tex && b.img.is_some_and(|i| i.buffer))
+                    })
                     .filter_map(|b| {
                         Some(Decl {
                             reg: b.reg,
+                            sampled: b.kind == BindKind::Tex,
                             dim: b.dim?,
                             img: b.img?,
                         })
@@ -77,15 +91,39 @@ pub(crate) struct Site<'a> {
     pub(crate) vertex: bool,
     pub(crate) stage: Stage,
     pub(crate) binds: &'a [TextureBind],
+    /// The texture binds of the stage, for the sampled texture buffers.
+    pub(crate) textures: &'a [TextureBind],
     /// The ordinal of the draw, `None` for a dispatch.
     pub(crate) draw: Option<u32>,
 }
 
-/// Every stage of the frame that has image binds.
+impl Site<'_> {
+    /// The handle bound to the slot of `d`: an image bind, or a texture bind for a sampled texture buffer.
+    fn handle(&self, d: &Decl) -> Option<u64> {
+        let binds = if d.sampled { self.textures } else { self.binds };
+        binds
+            .iter()
+            .find(|t| t.stage == self.stage && t.slot == d.reg)
+            .map(|t| t.handle)
+    }
+}
+
+impl Decl {
+    /// The third part of the key of its view (`ImageKey`).
+    pub(crate) fn code(&self) -> u8 {
+        if self.sampled {
+            SAMPLED_BUFFER
+        } else {
+            self.img.atomic_code()
+        }
+    }
+}
+
+/// Every stage of the frame that has image binds or texture binds.
 pub(crate) fn sites(detail: &FrameDetail) -> Vec<Site<'_>> {
     let mut out = Vec::new();
     for (n, d) in detail.draws.iter().enumerate() {
-        if d.images.is_empty() {
+        if d.images.is_empty() && d.textures.is_empty() {
             continue;
         }
         let stages = [
@@ -105,6 +143,7 @@ pub(crate) fn sites(detail: &FrameDetail) -> Vec<Site<'_>> {
                     vertex,
                     stage,
                     binds: &d.images,
+                    textures: &d.textures,
                     draw: Some(n as u32),
                 });
             }
@@ -113,13 +152,14 @@ pub(crate) fn sites(detail: &FrameDetail) -> Vec<Site<'_>> {
     for d in detail
         .dispatches
         .iter()
-        .filter(|d| !d.images.is_empty() && !d.program.is_empty())
+        .filter(|d| !(d.images.is_empty() && d.textures.is_empty()) && !d.program.is_empty())
     {
         out.push(Site {
             key: &d.program,
             vertex: false,
             stage: Stage::Compute,
             binds: &d.images,
+            textures: &d.textures,
             draw: None,
         });
     }
@@ -156,12 +196,7 @@ pub(crate) fn uses(
     let mut out = ImageUses::default();
     for site in sites(detail) {
         for d in declared(decls, programs, site.key, site.vertex) {
-            let Some(h) = site
-                .binds
-                .iter()
-                .find(|t| t.stage == site.stage && t.slot == d.reg)
-                .map(|t| t.handle)
-            else {
+            let Some(h) = site.handle(d) else {
                 continue;
             };
             let Some(id) = (h != 0)
@@ -242,15 +277,10 @@ pub(crate) fn resolve(
 ) {
     for site in sites(detail) {
         for d in declared(decls, programs, site.key, site.vertex) {
-            let Some(h) = site
-                .binds
-                .iter()
-                .find(|t| t.stage == site.stage && t.slot == d.reg)
-                .map(|t| t.handle)
-            else {
+            let Some(h) = site.handle(d) else {
                 continue;
             };
-            let key = (h, d.dim, d.img.atomic_code());
+            let key = (h, d.dim, d.code());
             if h == 0 || handles.images.contains_key(&key) {
                 continue;
             }
@@ -301,7 +331,7 @@ fn one(
         let rec = view
             .record(id)
             .map_err(|e| crate::tex_skip(format_args!("image {id:?}: {e:?}")))?;
-        store.buffer_image(rec, res.desc.format)?
+        store.buffer_image(rec, res.desc.format, d.img.writes())?
     } else {
         store.image_view(id, res, &slot.header, d.dim, d.img.atomic_code(), stats)?
     };
@@ -359,6 +389,39 @@ mod tests {
             ("cs", Stage::Compute, None)
         );
         assert_eq!(s[0].binds[0].handle, 9);
+    }
+
+    #[test]
+    fn a_sampled_texture_buffer_takes_its_handle_from_the_texture_binds() {
+        let mut detail = FrameDetail::default();
+        detail.dispatches.push(DispatchDetail {
+            program: "cs".into(),
+            push: None,
+            groups: [1; 3],
+            indirect: None,
+            ubos: vec![],
+            sbufs: vec![],
+            textures: vec![bind(Stage::Compute, 2, 7)],
+            samplers: Vec::new(),
+            images: vec![bind(Stage::Compute, 2, 9)],
+        });
+        let s = sites(&detail);
+        assert_eq!(s.len(), 1, "a stage with texture binds only is a site too");
+        let decl = |sampled| Decl {
+            reg: 2,
+            sampled,
+            dim: TextureKind::D2,
+            img: ImgDecl {
+                access: ImgAccess::Read,
+                atomic: false,
+                signed: false,
+                buffer: true,
+            },
+        };
+        assert_eq!(s[0].handle(&decl(true)), Some(7));
+        assert_eq!(s[0].handle(&decl(false)), Some(9));
+        assert_eq!(decl(true).code(), SAMPLED_BUFFER);
+        assert_eq!(decl(false).code(), 0);
     }
 
     #[test]

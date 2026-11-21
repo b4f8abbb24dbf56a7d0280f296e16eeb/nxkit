@@ -254,6 +254,50 @@ impl Texture {
         Some(bytes.chunks_exact(bpp).map(<[u8]>::to_vec).collect())
     }
 
+    /// Debugging only: all texels of level 0 and slice 0 of a texture of 4 bytes per texel, row by row, read back with a
+    /// blit and a wait. None for another format.
+    pub fn debug_read_all(&self, ctx: &Context) -> Option<Vec<u8>> {
+        use objc2_metal::{
+            MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
+            MTLResourceOptions,
+        };
+        let d = self.inner.desc;
+        if d.format.bytes_per_pixel() != 4 || d.format.is_compressed() || d.width == 0 || d.height == 0 {
+            return None;
+        }
+        let row = 4 * d.width as usize;
+        let len = row * d.height as usize;
+        let dev = ctx.device();
+        let queue = dev.newCommandQueue()?;
+        let buf = dev.newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)?;
+        let cb = queue.commandBuffer()?;
+        let enc = cb.blitCommandEncoder()?;
+        // SAFETY: the source box is level 0 of slice 0 and the destination holds `row * height` bytes.
+        unsafe {
+            enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                &self.inner.raw,
+                0,
+                0,
+                MTLOrigin { x: 0, y: 0, z: 0 },
+                MTLSize {
+                    width: d.width as usize,
+                    height: d.height as usize,
+                    depth: 1,
+                },
+                &buf,
+                0,
+                row,
+                len,
+            );
+        }
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        // SAFETY: the GPU is done with `buf` (waited above) and it holds `len` shared bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(buf.contents().cast::<u8>(), len) };
+        Some(bytes.to_vec())
+    }
+
     /// [`Texture::debug_read_raw`] for formats of 4 bytes per pixel.
     pub fn debug_read(&self, ctx: &Context, points: &[[u32; 2]]) -> Option<Vec<[u8; 4]>> {
         if self.inner.desc.format.bytes_per_pixel() != 4 {

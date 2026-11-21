@@ -36,6 +36,8 @@ pub struct Feature {
 /// `blendz` 1: a pixel shader writes RGB 0 to a float colour whose blend factor is 0 (`msl/variant/pixel.rs`).
 ///
 /// `surface` 1: the one coordinate of a 1D or buffer image load, store or atomic is a `uint` (`msl/inst_img.rs`).
+///
+/// `fetch1d` 1: the one coordinate of a buffer or 1D texel fetch is a `uint` (`msl/inst_tex.rs`).
 pub const FEATURES: &[Feature] = &[
     Feature {
         name: "hmma",
@@ -56,6 +58,11 @@ pub const FEATURES: &[Feature] = &[
         name: "surface",
         revision: 1,
         uses: uses_surface,
+    },
+    Feature {
+        name: "fetch1d",
+        revision: 1,
+        uses: uses_fetch,
     },
 ];
 
@@ -84,11 +91,17 @@ fn uses_blend_word(job: &Job, _code: &[u8]) -> bool {
     job.stage == "ps" && job.mesh_stage.is_none()
 }
 
+/// Code with a texel fetch (`TLD`, `TLD.B`, `TLDS`), Maxwell or Ampere, looked at as [`uses_surface`] does.
+fn uses_fetch(job: &Job, code: &[u8]) -> bool {
+    use nxb_maxwell::names::InstName as N;
+    uses_inst(job, code, |n| matches!(n, N::Tld | N::TldB | N::Tlds))
+}
+
 /// Code with a surface instruction (an image load, store, reduction or atomic). Every 64-bit word of Maxwell code and
 /// every 128-bit word of Ampere code is looked at, the header and the scheduling words included (an over-approximation).
 fn uses_surface(job: &Job, code: &[u8]) -> bool {
     use nxb_maxwell::names::InstName as N;
-    let surface = |n: N| {
+    uses_inst(job, code, |n| {
         matches!(
             n,
             N::Suatom
@@ -107,20 +120,24 @@ fn uses_surface(job: &Job, code: &[u8]) -> bool {
                 | N::SustD
                 | N::SustDB
         )
-    };
+    })
+}
+
+/// Whether `code` holds an instruction that `wanted` names. Every 64-bit word of Maxwell code and every 128-bit word
+/// of Ampere code is looked at, the header and the scheduling words included (an over-approximation).
+fn uses_inst(job: &Job, code: &[u8], wanted: impl Fn(nxb_maxwell::names::InstName) -> bool) -> bool {
     if job.arch_sm86 {
         let (words, _) = code.as_chunks::<16>();
         return words.iter().any(|w| {
             let mut lo = [0u8; 8];
             lo.copy_from_slice(&w[..8]);
-            ampere_table::lookup((u64::from_le_bytes(lo) & 0xfff) as usize)
-                .is_some_and(|e| surface(e.name))
+            ampere_table::lookup((u64::from_le_bytes(lo) & 0xfff) as usize).is_some_and(|e| wanted(e.name))
         });
     }
     let (words, _) = code.as_chunks::<8>();
     words
         .iter()
-        .any(|w| surface(nxb_maxwell::table::get_op(0, u64::from_le_bytes(*w)).name))
+        .any(|w| wanted(nxb_maxwell::table::get_op(0, u64::from_le_bytes(*w)).name))
 }
 
 /// The feature field of a shader's key over `features`: `name=revision` of each feature it uses, `;`-joined, empty
@@ -174,6 +191,15 @@ mod tests {
         with.extend_from_slice(&sust.to_le_bytes());
         assert_eq!(tags(&job(false), &with), "surface=1");
         assert_eq!(tags(&job(false), &[0u8; 0x60]), "");
+    }
+
+    #[test]
+    fn texel_fetches_are_found_in_maxwell_code() {
+        // `TLD.B` (opcode 1101 1101 at bits 63..56) among plain words.
+        let tld_b: u64 = 0b1101_1101 << 56;
+        let mut with = vec![0u8; 0x50];
+        with.extend_from_slice(&tld_b.to_le_bytes());
+        assert_eq!(tags(&job(false), &with), "fetch1d=1");
     }
 
     #[test]

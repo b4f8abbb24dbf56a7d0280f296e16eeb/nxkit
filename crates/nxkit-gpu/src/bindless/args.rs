@@ -363,6 +363,12 @@ fn build_args_in(
                 .iter()
                 .find(|u| u.slot == b.reg)
                 .map_or(env.statics.1, |u| u.word),
+            // A texture buffer the shader fetches from (`images::SAMPLED_BUFFER`).
+            BindKind::Tex if b.img.is_some_and(|i| i.buffer) => handle_of(b.reg).map_or(0, |h| {
+                env.images
+                    .get(&(h, nxkit_metal::TextureKind::D2, crate::images::SAMPLED_BUFFER))
+                    .map_or(0, |r| r.id)
+            }),
             BindKind::Tex => handle_of(b.reg).map_or(0, |h| {
                 b.dim
                     .and_then(|k| env.fits.get(&(h, k)).copied())

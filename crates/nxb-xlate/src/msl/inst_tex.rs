@@ -172,7 +172,11 @@ impl Em<'_> {
         } else {
             None
         };
-        let mut coord = if int_coords {
+        let mut coord = if int_coords && coords.len() == 1 {
+            // A buffer or 1D fetch: a plain `int` is ambiguous between the `ushort` and `uint` overloads of
+            // `texture_buffer::read`, and the shader did not compile.
+            format!("uint({})", coords[0])
+        } else if int_coords {
             vec_of("uint", &coords)
         } else {
             self.finite_coords(&coords)?

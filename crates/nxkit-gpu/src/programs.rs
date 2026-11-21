@@ -410,12 +410,13 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             BindKind::Support => pass_scale.then_some(0),
             _ => None,
         };
-        let img = (kind == BindKind::Img).then(|| {
+        // An image, or a sampled texture buffer: both bind a Metal texture buffer (`images.rs`).
+        let msl = b.get("msl_type").and_then(Json::as_str).unwrap_or("");
+        let img = (kind == BindKind::Img
+            || (kind == BindKind::Tex && msl.starts_with("texture_buffer")))
+        .then(|| {
             let atomic = b.get("atomic").and_then(Json::as_bool).unwrap_or(false);
-            declared_img(
-                b.get("msl_type").and_then(Json::as_str).unwrap_or(""),
-                atomic,
-            )
+            declared_img(msl, atomic)
         });
         let bank = b
             .get("bank")

@@ -56,6 +56,9 @@ impl TickSink for GpuBackend {
                 d.width, d.height, d.format
             );
         }
+        if crate::diag("shot") && number % 300 == 150 {
+            shot(&self.ctx, &texture, number);
+        }
         let mut blit = locked(&self.blit);
         if blit.is_none() {
             *blit = Blit::new(&self.ctx, &self.timed)
@@ -90,5 +93,31 @@ impl TickSink for GpuBackend {
         {
             eprintln!("nxkit-gpu: the present failed: {e}");
         }
+    }
+}
+
+/// `NXKIT_DIAG=shot`: the presented texture at full size, as `<NXKIT_DIAG_DIR>/shot-<present>.ppm` (a 4-byte colour
+/// format only, swapped to RGB for BGRA).
+fn shot(ctx: &nxkit_metal::Context, texture: &nxkit_metal::Texture, n: u64) {
+    let d = texture.desc();
+    let Some(px) = texture.debug_read_all(ctx) else {
+        return;
+    };
+    let bgra = matches!(
+        d.format,
+        nxkit_metal::Format::Bgra8Unorm | nxkit_metal::Format::Bgra8UnormSrgb
+    );
+    let mut out = format!("P6\n{} {}\n255\n", d.width, d.height).into_bytes();
+    for p in px.chunks_exact(4) {
+        if bgra {
+            out.extend_from_slice(&[p[2], p[1], p[0]]);
+        } else {
+            out.extend_from_slice(&p[..3]);
+        }
+    }
+    let path = crate::diag::diag_dir().join(format!("shot-{n}.ppm"));
+    match std::fs::create_dir_all(crate::diag::diag_dir()).and_then(|()| std::fs::write(&path, out)) {
+        Ok(()) => eprintln!("DIAG shot {}", path.display()),
+        Err(e) => eprintln!("DIAG shot failed: {e}"),
     }
 }

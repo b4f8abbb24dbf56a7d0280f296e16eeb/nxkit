@@ -127,12 +127,16 @@ impl Transfer {
                         .map_err(|_| Skip::Transfer)?;
                 } else {
                     let (tile_h, _) = rec.desc.level_tiles(level).map_err(|_| Skip::Transfer)?;
+                    // The pitch of the guest layout: a sparse texture pads its tiled levels to whole 64 KiB tiles, and
+                    // read at the unpadded width every row of blocks after the first slid sideways (Octopath
+                    // Traveler's BC notice panels, 25 GOBs padded to 32).
+                    let gobs = rec.desc.level_gobs(level).map_err(|_| Skip::Transfer)?;
                     let params = DeswizzleParams {
                         bytes_per_block: surf.bytes_per_block,
                         width: size[0],
                         height: size[1],
                         block_height: 1 << tile_h,
-                        pitch: 0,
+                        pitch: gobs * 64,
                         order: surf.order,
                     };
                     let offset = rec.desc.level_offset(level).map_err(|_| Skip::Transfer)?;
