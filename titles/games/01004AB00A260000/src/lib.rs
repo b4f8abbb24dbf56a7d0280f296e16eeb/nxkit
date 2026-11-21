@@ -14,7 +14,8 @@
 //! 62 MB and of the 2 MB alignment of large regions).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
+    Title, TitleId,
 };
 
 /// The title module.
@@ -161,11 +162,19 @@ mod tests {
         }
         assert_eq!(t.cuts.values().map(Vec::len).sum::<usize>(), 2);
         assert_eq!(t.caps.values().map(Vec::len).sum::<usize>(), 0);
-        let rules = |m: &str| t.rules.get("01004AB00A260000").and_then(|r| r.get(m)).map_or(0, Vec::len);
+        let rules = |m: &str| {
+            t.rules
+                .get("01004AB00A260000")
+                .and_then(|r| r.get(m))
+                .map_or(0, Vec::len)
+        };
         assert_eq!(rules("sdk"), 12);
         assert_eq!(rules("main") + rules("subsdk0") + rules("subsdk1"), 0);
         assert!(t.frame.is_empty());
-        assert_eq!(text.matches("evidence = \"engine tree ").count(), text.matches("[[rule]]").count());
+        assert_eq!(
+            text.matches("evidence = \"engine tree ").count(),
+            text.matches("[[rule]]").count()
+        );
     }
 
     #[test]

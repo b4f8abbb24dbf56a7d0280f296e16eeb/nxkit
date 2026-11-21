@@ -3,9 +3,8 @@
 
 use crate::SplitError;
 use crate::glslc::stage;
-use crate::misc::retro_lzss8;
+use crate::prim::{CTL_MAGIC, Found, check, find_all, memfind};
 use crate::rd::{red, sl, u32be, u32le, u64be, u64le, zlib_all};
-use crate::shaders::{CTL_MAGIC, Found, check, find_all, memfind};
 
 type R<T> = Result<T, SplitError>;
 
@@ -185,4 +184,34 @@ pub fn rfrm_shaders(d: &[u8], label: &str) -> R<Vec<Found>> {
         out.extend(snvn_shaders(&form, &format!("{label}/{id}"))?);
     }
     Ok(out)
+}
+
+/// `retro_lzss8`: the first `n` bytes of Retro's LZSS stream, or `None` when it runs out or points before its start.
+pub(crate) fn retro_lzss8(s: &[u8], n: usize) -> Option<Vec<u8>> {
+    let (mut out, mut i, mut flags, mut left) = (Vec::new(), 0usize, 0u8, 0u32);
+    while out.len() < n {
+        if left == 0 {
+            flags = *s.get(i)?;
+            i += 1;
+            left = 8;
+        }
+        if flags & 0x80 != 0 {
+            let (a, b) = (*s.get(i)? as usize, *s.get(i + 1)? as usize);
+            let (ln, dist) = ((a >> 4) + 3, (a & 0xf) << 8 | b);
+            i += 2;
+            if dist == 0 || dist > out.len() {
+                return None;
+            }
+            for _ in 0..ln {
+                out.push(out[out.len() - dist]);
+            }
+        } else {
+            out.push(*s.get(i)?);
+            i += 1;
+        }
+        flags <<= 1;
+        left -= 1;
+    }
+    out.truncate(n);
+    Some(out)
 }

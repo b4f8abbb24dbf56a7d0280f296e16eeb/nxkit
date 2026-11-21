@@ -1,14 +1,15 @@
-//! `nvnCommandBufferCopyTextureToTexture` with a destination region of another size than the source region.
+//! Scaled and mirrored `nvnCommandBufferCopyTextureToTexture` regions.
 //!
 //! The copy stretches the source region onto the destination region. The copy flags pick the filter: with
 //! `NVN_COPY_FLAGS_LINEAR_FILTER_BIT` the destination texel takes a bilinear mix of the four nearest source texels,
 //! without it the nearest texel. A host kernel does it, one dispatch for each layer, between two views of one level
 //! and layer of the textures. The kernel reads and writes with `read` and `write`, so the region edges are exact and
-//! no sampler state is involved.
+//! no sampler state is involved. `MIRROR_X` and `MIRROR_Y` reverse the source traversal within the region.
 //!
 //! - Mapping: the centre of destination texel `d` lies at `(d + 0.5) * src_size / dst_size` in source texels. The
 //!   nearest taker floors it (integer arithmetic, `nearest` is its CPU reference). The linear one interpolates between the texels
 //!   around `pos - 0.5` and clamps the taps to the source region (`taps` is its CPU reference), so the edge texels repeat.
+//!   A mirrored axis maps `dst_size - 1 - d` instead of `d`, before either filter runs.
 //! - Formats: float, unorm, snorm and sRGB colour formats go through `texture2d<float>`, so the value is the one a
 //!   shader sees (an sRGB source is filtered in linear light). Unsigned and signed integer formats take the nearest
 //!   texel, whatever the flag says, since a mix of codes means nothing. Depth, stencil and compressed formats are
@@ -18,6 +19,7 @@
 //! - Order: the kernel runs in the copy pass in command order between two barriers. The pass table has textures
 //!   slots for it (`Tables::copy`).
 
+use crate::encode::EncodeCtx;
 use nxkit_metal::{
     ComputeCommand, ComputePass, SampleType, Scratch, Texture, TextureDesc, TextureKind,
     TextureRegion, ViewDesc,
@@ -25,17 +27,49 @@ use nxkit_metal::{
 use nxkit_nvn::diag::Reason;
 
 use super::copy::copy_skip;
-use crate::draws::Shared;
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 /// The bit of the copy flags that asks for linear filtering (`NVN_COPY_FLAGS_LINEAR_FILTER_BIT`).
 pub(crate) const LINEAR_FILTER_BIT: u32 = 1;
+/// The copy flags that reverse source traversal along each axis.
+const MIRROR_X_BIT: u32 = 4;
+const MIRROR_Y_BIT: u32 = 8;
+
+/// True when a plain blit cannot preserve the copy's region mapping.
+pub(super) fn needs_kernel(src: &TextureRegion, dst: &TextureRegion, flags: u32) -> bool {
+    src.size != dst.size || flags & (MIRROR_X_BIT | MIRROR_Y_BIT) != 0
+}
+
+/// True when two textures over guest memory share real bytes. Each span is its real base and byte length.
+/// Private textures have no span here, even when their guest storage overlaps.
+pub(super) fn in_place_overlaps(src: Option<(u64, u64)>, dst: Option<(u64, u64)>) -> bool {
+    let (Some((s, sn)), Some((d, dn))) = (src, dst) else {
+        return false;
+    };
+    sn != 0 && dn != 0 && if s <= d { d - s < sn } else { s - d < dn }
+}
+
+/// True when the source and the destination of a copy within one backing texture touch the same texels: the same
+/// level, overlapping slice ranges of `count` layers and boxes that intersect. A copy between two levels (a mip
+/// chain downsample) or two disjoint boxes does not race.
+pub(super) fn regions_meet(src: &TextureRegion, dst: &TextureRegion, count: u32) -> bool {
+    let meet = |a: u32, an: u32, b: u32, bn: u32| {
+        a < b.saturating_add(bn) && b < a.saturating_add(an) && an != 0 && bn != 0
+    };
+    src.level == dst.level
+        && meet(src.slice, count, dst.slice, count)
+        && (0..3).all(|i| meet(src.origin[i], src.size[i], dst.origin[i], dst.size[i]))
+}
 
 /// The kernels, one for each sample type. The arithmetic is the one of [`nearest`] and [`taps`].
 const MSL: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
-struct params { uint2 so; uint2 ss; uint2 dof; uint2 ds; uint linear; };
+struct params { uint2 so; uint2 ss; uint2 dof; uint2 ds; uint linear; uint mirror_x; uint mirror_y; };
+static uint2 sample_at(uint2 gid, constant params &p) {
+    return uint2(p.mirror_x ? p.ds.x - 1 - gid.x : gid.x,
+                 p.mirror_y ? p.ds.y - 1 - gid.y : gid.y);
+}
 static uint near_at(uint d, uint s, uint n) {
     return min(uint(((ulong(d) * 2 + 1) * ulong(s)) / (ulong(n) * 2)), s - 1);
 }
@@ -52,15 +86,16 @@ kernel void nxkit_tcopy_float(texture2d<float, access::read> src [[texture(0)]],
                               constant params &p [[buffer(0)]],
                               uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= p.ds.x || gid.y >= p.ds.y) { return; }
+    uint2 d = sample_at(gid, p);
     float4 v;
     if (p.linear == 0) {
-        uint2 at = uint2(near_at(gid.x, p.ss.x, p.ds.x), near_at(gid.y, p.ss.y, p.ds.y));
+        uint2 at = uint2(near_at(d.x, p.ss.x, p.ds.x), near_at(d.y, p.ss.y, p.ds.y));
         v = src.read(p.so + at);
     } else {
         uint x0, x1, y0, y1;
         float tx, ty;
-        taps(gid.x, p.ss.x, p.ds.x, x0, x1, tx);
-        taps(gid.y, p.ss.y, p.ds.y, y0, y1, ty);
+        taps(d.x, p.ss.x, p.ds.x, x0, x1, tx);
+        taps(d.y, p.ss.y, p.ds.y, y0, y1, ty);
         float4 a = mix(src.read(p.so + uint2(x0, y0)), src.read(p.so + uint2(x1, y0)), tx);
         float4 b = mix(src.read(p.so + uint2(x0, y1)), src.read(p.so + uint2(x1, y1)), tx);
         v = mix(a, b, ty);
@@ -72,7 +107,8 @@ kernel void nxkit_tcopy_uint(texture2d<uint, access::read> src [[texture(0)]],
                              constant params &p [[buffer(0)]],
                              uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= p.ds.x || gid.y >= p.ds.y) { return; }
-    uint2 at = uint2(near_at(gid.x, p.ss.x, p.ds.x), near_at(gid.y, p.ss.y, p.ds.y));
+    uint2 d = sample_at(gid, p);
+    uint2 at = uint2(near_at(d.x, p.ss.x, p.ds.x), near_at(d.y, p.ss.y, p.ds.y));
     dst.write(src.read(p.so + at), p.dof + gid);
 }
 kernel void nxkit_tcopy_sint(texture2d<int, access::read> src [[texture(0)]],
@@ -80,10 +116,17 @@ kernel void nxkit_tcopy_sint(texture2d<int, access::read> src [[texture(0)]],
                              constant params &p [[buffer(0)]],
                              uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= p.ds.x || gid.y >= p.ds.y) { return; }
-    uint2 at = uint2(near_at(gid.x, p.ss.x, p.ds.x), near_at(gid.y, p.ss.y, p.ds.y));
+    uint2 d = sample_at(gid, p);
+    uint2 at = uint2(near_at(d.x, p.ss.x, p.ds.x), near_at(d.y, p.ss.y, p.ds.y));
     dst.write(src.read(p.so + at), p.dof + gid);
 }
 "#;
+
+/// The reference of the kernel's mirrored destination-local sample coordinate. `d` is inside `dst`.
+#[cfg(test)]
+fn sample_at(d: u32, dst: u32, mirror: bool) -> u32 {
+    if mirror { dst - 1 - d } else { d }
+}
 
 /// The reference of the kernel's mapping, to test it on the CPU: the source texel that destination texel `d` takes without filtering, for a source of `src` texels stretched onto
 /// `dst` texels: `floor((d + 0.5) * src / dst)`, at most `src - 1`.
@@ -111,8 +154,8 @@ pub(crate) fn taps(d: u32, src: u32, dst: u32) -> (u32, u32, f32) {
 }
 
 /// The bytes of the kernel parameters: the source origin and size, the destination origin and size (x and y of
-/// each) and the filter.
-fn params(src: &TextureRegion, dst: &TextureRegion, linear: bool) -> [u8; 48] {
+/// each), the filter and the mirror axes.
+fn params(src: &TextureRegion, dst: &TextureRegion, linear: bool, flags: u32) -> [u8; 48] {
     let words = [
         src.origin[0],
         src.origin[1],
@@ -123,8 +166,8 @@ fn params(src: &TextureRegion, dst: &TextureRegion, linear: bool) -> [u8; 48] {
         dst.size[0],
         dst.size[1],
         u32::from(linear),
-        0,
-        0,
+        u32::from(flags & MIRROR_X_BIT != 0),
+        u32::from(flags & MIRROR_Y_BIT != 0),
         0,
     ];
     let mut b = [0u8; 48];
@@ -134,7 +177,7 @@ fn params(src: &TextureRegion, dst: &TextureRegion, linear: bool) -> [u8; 48] {
     b
 }
 
-/// Why a pair of textures cannot take a scaling copy, or `None` when it can.
+/// Why a pair of textures cannot take a scaled or mirrored copy, or `None` when it can.
 fn refuse(s: &TextureDesc, d: &TextureDesc) -> Option<&'static str> {
     let fmt = d.format;
     if s.kind == TextureKind::D3 || d.kind == TextureKind::D3 {
@@ -152,10 +195,20 @@ fn refuse(s: &TextureDesc, d: &TextureDesc) -> Option<&'static str> {
     }
 }
 
+/// Why a copy that needs the kernel runs as a plain blit that loses the mirror instead: the kernel refuses the pair
+/// and the boxes have one size. `None` when it takes the kernel (a refused stretch is refused by [`encode`]).
+pub(super) fn mirror_lost(
+    (src, dst): (&TextureRegion, &TextureRegion),
+    s: &TextureDesc,
+    d: &TextureDesc,
+) -> Option<&'static str> {
+    refuse(s, d).filter(|_| src.size == dst.size)
+}
+
 /// Encodes the stretch of `src_box` of `src` onto `dst_box` of `dst` for `count` layers into the copy pass `cp`. The
 /// regions are already scaled by the render factor and checked against the textures. `flags` are the copy flags.
 pub(super) fn encode(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     src: &Texture,
@@ -167,12 +220,21 @@ pub(super) fn encode(
     let what = || {
         format!(
             "{:?} {}x{} {:?} -> {:?} {}x{} {:?}",
-            sd.format, src_box.size[0], src_box.size[1], src_box.origin,
-            dd.format, dst_box.size[0], dst_box.size[1], dst_box.origin
+            sd.format,
+            src_box.size[0],
+            src_box.size[1],
+            src_box.origin,
+            dd.format,
+            dst_box.size[0],
+            dst_box.size[1],
+            dst_box.origin
         )
     };
     if let Some(why) = refuse(&sd, &dd) {
-        return Err(copy_skip(format_args!("scaled copy {}: {why}", what())));
+        return Err(copy_skip(format_args!(
+            "scaled or mirrored copy {}: {why}",
+            what()
+        )));
     }
     let sample = sd.format.sample_type();
     let linear = flags & LINEAR_FILTER_BIT != 0 && sample == SampleType::Float;
@@ -183,8 +245,13 @@ pub(super) fn encode(
     };
     let pipeline = sh.pipelines.host_compute("nxkit-tcopy", MSL, entry)?;
     let address = scratch
-        .push(&params(&src_box, &dst_box, linear))
-        .map_err(|e| copy_skip(format_args!("scaled copy {}: scratch {e:?}", what())))?;
+        .push(&params(&src_box, &dst_box, linear, flags))
+        .map_err(|e| {
+            copy_skip(format_args!(
+                "scaled or mirrored copy {}: scratch {e:?}",
+                what()
+            ))
+        })?;
     let view = |t: &Texture, level: u32, slice: u32| {
         t.view(&ViewDesc {
             format: t.desc().format,
@@ -203,7 +270,7 @@ pub(super) fn encode(
         );
         let (Ok(sv), Ok(dv)) = (sv, dv) else {
             return Err(copy_skip(format_args!(
-                "scaled copy {}: no view of layer {i}",
+                "scaled or mirrored copy {}: no view of layer {i}",
                 what()
             )));
         };
@@ -233,9 +300,11 @@ pub(super) fn encode(
         cp.retain(sv);
         cp.retain(dv);
     }
-    nxkit_nvn::diag::note_n(Reason::CopyScaled, u64::from(count));
-    if linear {
-        nxkit_nvn::diag::note_n(Reason::CopyScaledLinear, u64::from(count));
+    if src_box.size != dst_box.size {
+        nxkit_nvn::diag::note_n(Reason::CopyScaled, u64::from(count));
+        if linear {
+            nxkit_nvn::diag::note_n(Reason::CopyScaledLinear, u64::from(count));
+        }
     }
     Ok(())
 }

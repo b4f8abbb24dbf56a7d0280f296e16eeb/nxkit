@@ -9,9 +9,9 @@ use super::inst_mem::{Place, Space, swizzle_or_index};
 use super::io::{Plan, varying};
 use super::types::scalar;
 use crate::ir::IoVariable;
+use crate::ir::agg::AggType;
 use crate::props::Definitions;
 use crate::structured::ast::OpData;
-use crate::structured::types::AggType;
 
 /// The length of the attribute array the shader sees.
 pub(super) const ATTRIBUTES: i32 = 16;

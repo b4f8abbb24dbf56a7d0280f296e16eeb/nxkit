@@ -196,8 +196,8 @@ pub(super) fn propagate_push_op(
         let count = all[current].push_ops.len();
         if count != 0 {
             push(&mut work, &visited, Pbs::PopPush(stack.len()));
-            for index in push_index..count {
-                let o = all[current].push_ops[index].op;
+            for p in &all[current].push_ops[push_index.min(count)..] {
+                let o = p.op;
                 stack.push((o.absolute_address(), merge_of_push(o.name)));
             }
         }

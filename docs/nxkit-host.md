@@ -244,8 +244,8 @@ The content view takes the key events, so AppKit plays no alert sound, and passe
 
 `frames.rs` builds the frame path. `seams::frame_hooks` calls it with the run folder.
 
-1. It makes the `GpuBackend` of `nxkit-gpu` over the guest memory. The shader folder is `<run folder>/shaders`. It holds `<key>_b.metallib`, `<key>_b.json` and `.tsv` files, one set per shader, with the 16 hex digit shader key as the name. The pipeline archive is `<run folder>/pipelines/` (one archive file for each build batch and `index.nxpi`, opened when the first pipeline in it is asked for, 32 open at most) or, in an app of an older build, `<run folder>/pipelines.mtl4archive` (read whole into memory), and is loaded when it exists or `pso_mtl4` is true. Refer to docs/shader-step.md, "The pipeline archive as shards". `enc_thread` false encodes on one thread, true picks the thread count from the cores. The render scale is 2.0.
-2. It installs the backend with `nxkit_rt::nvn::install`. The settings are `nvn_api` and `shader_key_skip`. It calls `nxkit_rt::nvn::set_command_settings` with `vertex_stream_null_bind`.
+1. It makes the `GpuBackend` of `nxkit-gpu` over the guest memory, with `GpuSettings` from `game.json` and the `NXKIT_*` snapshot, and with the loading screen of the start (`GpuSettings::prewarm_screen`). The shader folder is `<run folder>/shaders`. It holds `<key>_b.metallib`, `<key>_b.json` and `.tsv` files, one set per shader, with the 16 hex digit shader key as the name. The pipeline archive is `<run folder>/pipelines/` (one archive file for each build batch and `index.nxpi`, opened when the first pipeline in it is asked for, 32 open at most) or, in an app of an older build, `<run folder>/pipelines.mtl4archive` (read whole into memory), and is loaded when it exists or `pso_mtl4` is true. Refer to docs/shader-step.md, "The pipeline archive as shards". `enc_thread` false encodes on one thread, true picks the thread count from the cores. The render scale is 2.0.
+2. It installs the backend with `nxkit_rt::nvn::install`. The settings are `nvn_api`, `shader_key_skip` and the command settings (`Settings::commands`) with `vertex_stream_null_bind`.
 3. It asks `choose_present_plan` for the plan of a 60 Hz game on a 120 Hz display and makes the `Pacer` of `nxkit-metal` with the backend as its tick sink.
 4. The returned hooks run on each display tick. They call `nxkit_svc_pacing::on_display_tick`, which signals the vsync event of the game. They read `nxkit_svc_pacing::hold`. A hold above zero sets the source of the `Pacer` to `Hold { ticks_per_frame: hold * ticks_per_vsync }`. Then they pass the tick to the `Pacer`.
 
@@ -270,6 +270,12 @@ The main guest thread does the work of `rtld` and `nn::init::Start` (R57). The s
 The host finds the guest functions in the export lists of the modules. A missing symbol stops the host before the window opens. The message names the symbol (R15). When `nnMain` returns, the host stops.
 
 ## Startup order
+
+`nxkit-host` is the composition root of the runtime (W26): it builds every part and connects them. Before any step it
+takes the one snapshot of the `NXKIT_*` environment (`nxkit_abi::env`, W27) and parses it into the typed settings of
+every crate (`hostenv::RunSettings`). It installs those that code with no context reads, and an error there stops the
+run. It passes the rest to the steps below. After the placement it makes the objects of the frame path, the present
+ring (`Screen`) and the refresh plan (`Refresh`), and passes them to the services, the GPU backend and the window.
 
 1. Read `game.json`.
 2. Place the modules and call `nxkit_abi::guest::set_range`.
@@ -304,6 +310,7 @@ The host finds the guest functions in the export lists of the modules. A missing
 | `focus_changed` | Tells the `system` and `input` services about the focus of the window. |
 | `mouse` | Passes the motion, buttons and wheel of the held mouse to the input service. |
 | `mouse_mode` | When the window holds the mouse: never when `input.json` turns it off, on a click while a controller is connected, else whenever the window is key. |
+| `frame_hooks` | Gives the display link the hooks that encode and present a frame. It calls `frames::install` with the run folder, the settings and the `NXKIT_*` snapshot. |
 
 ### The symbol lookup
 
@@ -316,5 +323,3 @@ The host finds the guest functions in the export lists of the modules. A missing
 ### The display tick
 
 The hooks of the display link call `nxkit_svc_input::tick()` and `nxkit_svc_pacing::on_display_tick()` on each tick.
-| `frame_hooks` | Gives the display link the hooks that encode and present a frame, with the pacing and encoder settings. |
-| `frame_hooks` | Gives the display link the hooks that encode and present a frame. It calls `frames::install` with the run folder and the settings. |

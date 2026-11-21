@@ -1,7 +1,7 @@
 # Shader step
 
 The shader step changes the GPU machine code of a game into Metal libraries. The command is `nxb shaders`. The code is in
-`nxb-shader` (L1), `nxb-xlate` (L1), the runtime crates (L2) and `nxb-stages` (L3).
+`nxb-shader` (L1), `nxb-xlate` (L1), the build runtime crates (L2) and `nxb-stages` (L3).
 
 ## Rules
 
@@ -85,7 +85,7 @@ The rules for these identities:
 1. V comes from the host's shader chain files, not from the binary. No Rust source goes into V.
 2. `TRANSLATOR_ID` in `nxb-xlate` is a string. Increase it by hand for each change of the translator output. For a change that alters only the shaders of one feature (`HMMA`), increase that feature's revision in `nxb_xlate::msl::revision` instead.
    The crate version is in no key. V of a build without the engine and the front-end id `air-front@0.10.0+f<FORMAT>` keep a fixed base, so a release keeps the store.
-3. The runtime crates are not in V, and TOOL_FP does not contain BIN_ID. A new binary from the same sources keeps V and all cache keys.
+3. The build runtime crates (L2) and the nxkit runtime are not in V, and TOOL_FP does not contain BIN_ID. A new binary from the same sources keeps V and all cache keys.
 4. The design compares BIN_ID with a lock file at start, and a mismatch is a `[RED]` build error. The code does not have this check at this time. The command `nxb self-check` only finds the external tools and shows their versions.
 5. The reuse key of the build contains BIN_ID. After a runtime fix, the shader step runs one more time, with cache hits only.
 6. The own front end does not change V. The compiler identity `dmsh_mtlcache 2` (the `chain_compiler` field of the reflection) stays.
@@ -254,7 +254,7 @@ Start: before the first frame the host makes every pipeline of the list under it
 - The start waits up to 20 s (`NXKIT_PIPELINE_PREWARM_WAIT`); what is not done by then goes on in the background. A progress line comes every 2 s.
 - When the list is one that this app build has not made yet, the start waits for all of it, without the limit, and a progress line comes every second. This is the case after a rebuild (or the first start with an older list): the identity folder has no `prewarm.done`, the file that the last worker writes when every pipeline of the list is made. It costs time once; without it every pipeline that is neither in the shipped archive nor in an `rt-` archive compiled at its first draw, the frame stalled (up to 21 s measured) and the draw was skipped (`skip.pending`). The log line of the cache says `(this build has not made them yet)`.
 - Most of what the list holds is covered by the build: the archive has the plain bases and, when the build found the list of the old app, the bases of the recorded states that a plain base cannot serve (see [pipeline-stages.md](pipeline-stages.md#recorded-states)). Then the wait is specialization and lookup, not compiles.
-- Loading screen: after a second of waiting, the host shows a small window with a progress bar and the line `Preparing pipelines: x of y` (`nxkit-host`, `sys/loading.rs`). It closes when the wait ends, and the window of the game opens after that. The GPU crate calls the hook `PrewarmScreen` (`pipelines/screen.rs`) about ten times a second on the thread that waits (the main thread); the host sets it before it makes the encoder. The window is made of stock AppKit views, not of the present path of the game: the encoder is made before the game's window exists, and the screen needs no game code. A quick start shows no window. The window itself was not run in a test (only the text of its line is tested).
+- Loading screen: after a second of waiting, the host shows a small window with a progress bar and the line `Preparing pipelines: x of y` (`nxkit-host`, `sys/loading.rs`). It closes when the wait ends, and the window of the game opens after that. The GPU crate calls the hook `PrewarmScreen` (`pipelines/screen.rs`) about ten times a second on the thread that waits (the main thread); the host hands it in `GpuSettings::prewarm_screen` when it makes the encoder. The window is made of stock AppKit views, not of the present path of the game: the encoder is made before the game's window exists, and the screen needs no game code. A quick start shows no window. The window itself was not run in a test (only the text of its line is tested).
 
 Writes: the list every 30 s when it grew (`NXKIT_PIPELINE_CACHE_FLUSH`), an `rt-` file when pipelines were compiled since the last one (at most every 30 s first, then at doubling gaps up to 10 min, so a run makes few files), and both at the exit (an `atexit` handler: `process::exit` runs no destructor). Each is written to a temporary file and renamed. The folder is cut to `NXKIT_PIPELINE_CACHE_MB` (512) and 64 files, oldest first.
 

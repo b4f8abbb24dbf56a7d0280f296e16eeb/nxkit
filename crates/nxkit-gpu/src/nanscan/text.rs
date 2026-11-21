@@ -271,13 +271,22 @@ mod tests {
     fn a_format_without_alpha_prints_its_channels_only() {
         let c = Counts::from_words(&record());
         let rgb = target_line(1, 0, "p", &subject(Format::Rg11B10Float, None), &c, None);
-        assert!(rgb.contains("nonfinite 10 r 10 g 9 b 8 | nan r 4 g 3 b 2 inf+ 5 inf- 6 first"), "{rgb}");
+        assert!(
+            rgb.contains("nonfinite 10 r 10 g 9 b 8 | nan r 4 g 3 b 2 inf+ 5 inf- 6 first"),
+            "{rgb}"
+        );
         assert!(!rgb.contains(" a ") && !rgb.contains("alpha"), "{rgb}");
         assert!(!rgb.contains("at load"), "{rgb}");
         let rg = target_line(1, 0, "p", &subject(Format::Rg16Float, None), &c, None);
-        assert!(rg.contains("nonfinite 10 r 10 g 9 | nan r 4 g 3 inf+ 5 inf- 6 first"), "{rg}");
+        assert!(
+            rg.contains("nonfinite 10 r 10 g 9 | nan r 4 g 3 inf+ 5 inf- 6 first"),
+            "{rg}"
+        );
         let r = target_line(1, 0, "p", &subject(Format::R32Float, None), &c, None);
-        assert!(r.contains("nonfinite 10 r 10 | nan r 4 inf+ 5 inf- 6 first"), "{r}");
+        assert!(
+            r.contains("nonfinite 10 r 10 | nan r 4 inf+ 5 inf- 6 first"),
+            "{r}"
+        );
     }
 
     #[test]

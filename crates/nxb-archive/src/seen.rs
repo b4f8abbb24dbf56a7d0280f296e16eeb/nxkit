@@ -389,7 +389,7 @@ pub(crate) fn vertex_descriptor(attributes: &[Attribute], layouts: &[Layout]) ->
 }
 
 impl StateBase {
-    /// Why the compiler would refuse the vertex descriptor of this state, or none ([`layout_invalid`]).
+    /// Why the compiler would refuse the vertex descriptor of this state, or none (`layout_invalid`).
     pub fn invalid(&self, used: Option<&HashSet<u32>>) -> Option<String> {
         layout_invalid(&self.attributes, &self.layouts, used)
     }
@@ -530,7 +530,7 @@ impl<'a> Acceptor<'a> {
 }
 
 /// The bases of `states` that the archive can hold: those whose pair the plan accepts under the same rules as a plain
-/// base (see [`Acceptor`]) and that name functions of the libraries. The libraries of the pairs must be in
+/// base (see `Acceptor`) and that name functions of the libraries. The libraries of the pairs must be in
 /// `lib_dir`. A vertex shader with stage inputs is accepted here, which the plain plan leaves out. A state whose vertex
 /// descriptor the compiler would refuse ([`StateBase::invalid`]) is left out and comes back in the second list.
 pub fn usable(

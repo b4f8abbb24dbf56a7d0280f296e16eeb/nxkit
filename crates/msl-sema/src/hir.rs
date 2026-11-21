@@ -118,6 +118,8 @@ pub struct Local {
     pub name: Rc<str>,
     /// Type of the stored value.
     pub ty: Type,
+    /// Static workgroup storage owned by the declaring kernel.
+    pub threadgroup: bool,
 }
 
 /// A statement.

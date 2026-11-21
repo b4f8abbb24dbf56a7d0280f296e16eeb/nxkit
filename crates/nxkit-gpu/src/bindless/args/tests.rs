@@ -13,15 +13,16 @@ fn bind(kind: BindKind, reg: u32, rscale: Option<u32>) -> Bind {
         rw: false,
         rscale,
         img: None,
+        ubo: None,
     }
 }
 
 static NO_RENAME: crate::rename::RenameMap = crate::rename::RenameMap::new();
 
 fn env<'a>(
-    handles: &'a crate::draws::FastMap<u64, Resolved>,
-    fits: &'a crate::draws::FastMap<(u64, nxkit_metal::TextureKind), u64>,
-    images: &'a crate::draws::FastMap<ImageKey, ImageRes>,
+    handles: &'a crate::fastmap::FastMap<u64, Resolved>,
+    fits: &'a crate::fastmap::FastMap<(u64, nxkit_metal::TextureKind), u64>,
+    images: &'a crate::fastmap::FastMap<ImageKey, ImageRes>,
 ) -> Env<'a> {
     static NO_POOLS: std::sync::OnceLock<crate::guestpools::GuestPools> =
         std::sync::OnceLock::new();
@@ -64,7 +65,7 @@ fn native_size_needs_no_block() {
 
 #[test]
 fn the_pass_and_the_scaled_texture_get_their_entries() {
-    let mut h: crate::draws::FastMap<u64, Resolved> = Default::default();
+    let mut h: crate::fastmap::FastMap<u64, Resolved> = Default::default();
     h.insert(
         7,
         Resolved {
@@ -124,7 +125,7 @@ fn a_scaled_image_gets_its_entry() {
     img.dim = Some(TextureKind::D2);
     img.img = Some(decl);
     let (h, f) = Default::default();
-    let mut images: crate::draws::FastMap<ImageKey, ImageRes> = Default::default();
+    let mut images: crate::fastmap::FastMap<ImageKey, ImageRes> = Default::default();
     images.insert(
         (5, TextureKind::D2, 0),
         ImageRes {
@@ -318,7 +319,10 @@ fn a_renamed_range_reads_its_copy_whatever_the_binding_says() {
 #[test]
 fn the_identity_backing_gives_the_address_back() {
     let pools = PoolSnapshot::whole(GUEST, LEN, Shifted(GUEST));
-    assert_eq!(locate(&pools, GUEST + 0x123, 8, 0), Some((GUEST + 0x123, 8)));
+    assert_eq!(
+        locate(&pools, GUEST + 0x123, 8, 0),
+        Some((GUEST + 0x123, 8))
+    );
 }
 
 /// A sink that keeps what it gets.

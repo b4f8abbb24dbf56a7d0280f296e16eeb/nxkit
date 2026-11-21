@@ -2,7 +2,7 @@
 
 use super::hlp::{REGISTER_ZERO_INDEX, get_src_reg};
 use crate::accessor::SetBinding;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::inst::Inst;
 use crate::ir::ops::{Opd, regtype, texflags};
 use crate::maxwell::enums::{SuDim, SuSize, SuatomOp, SuatomSize};

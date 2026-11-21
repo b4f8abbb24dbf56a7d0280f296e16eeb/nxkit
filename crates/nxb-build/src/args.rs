@@ -28,6 +28,8 @@ pub struct Args {
     pub pipeline_list: Option<PathBuf>,
     /// `--progress`.
     pub progress: String,
+    /// `--auto-analyze`: use input metadata, with no title-specific patches.
+    pub auto_analyze: bool,
     /// `--dry-run`: print the plan and write nothing.
     pub dry_run: bool,
     /// Worker threads, `--threads N`. The default is this Mac's P-core equivalents, `round(P + 0.4 × E)`
@@ -49,6 +51,10 @@ pub struct Args {
     pub nup: Option<PathBuf>,
     /// `--aoc <package>` (repeatable): DLC packages outside the input folder.
     pub aoc: Vec<PathBuf>,
+    /// `--update <file-or-directory>` (repeatable), for `--auto-analyze`.
+    pub update_inputs: Vec<PathBuf>,
+    /// `--base-package <file>`: original encrypted backing for generic NUP updates.
+    pub base_package: Option<PathBuf>,
     /// `--resource-patch <option>=<value|stock>` (repeatable): a title's resource patch with its value, `stock` for none
     /// (`resolution-scale=0.75`).
     pub resource_patches: Vec<(String, String)>,
@@ -74,6 +80,8 @@ const VALUE: &[&str] = &[
     "--shader-manifest",
     "--nup",
     "--aoc",
+    "--update",
+    "--base-package",
     "--resource-patch",
 ];
 /// Switches without a value.
@@ -81,6 +89,7 @@ fn switch(a: &mut Args, k: &str) -> bool {
     match k {
         "--allow-damaged" => a.allow_damaged = true,
         "--partial" => a.partial = true,
+        "--auto-analyze" => a.auto_analyze = true,
         "--dry-run" => a.dry_run = true,
         _ => return false,
     }
@@ -99,6 +108,15 @@ fn gpu_list(g: &str) -> bool {
 
 /// The checks of option combinations (exit 2).
 fn validate(a: &Args) -> Result<(), (i32, String)> {
+    if a.base_package.is_some() && (!a.auto_analyze || a.update_inputs.is_empty()) {
+        return Err((
+            2,
+            "--base-package requires --auto-analyze and an explicit --update package".into(),
+        ));
+    }
+    if !a.auto_analyze && !a.update_inputs.is_empty() {
+        return Err((2, "--update requires --auto-analyze".into()));
+    }
     if let Some(g) = a.gpu.as_deref().map(str::trim).filter(|g| !g.is_empty())
         && !gpu_list(g)
     {
@@ -151,6 +169,8 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--title-id" | "--app" => a.title_id = Some(v),
                 "--nup" => a.nup = Some(v.into()),
                 "--aoc" => a.aoc.push(v.into()),
+                "--update" => a.update_inputs.push(v.into()),
+                "--base-package" => a.base_package = Some(v.into()),
                 "--resource-patch" => {
                     let (name, value) = v
                         .split_once('=')
@@ -226,6 +246,50 @@ mod tests {
     }
 
     #[test]
+    fn backing_requires_generic_mode_and_explicit_update() {
+        for args in [
+            vec!["game.nup", "--base-package", "base.nsp"],
+            vec!["game.nup", "--auto-analyze", "--base-package", "base.nsp"],
+            vec![
+                "game.nup",
+                "--base-package",
+                "base.nsp",
+                "--update",
+                "patch.nsp",
+            ],
+        ] {
+            assert!(parse(&v(&args)).is_err());
+        }
+        let a = parse(&v(&[
+            "game.nup",
+            "--auto-analyze",
+            "--base-package=base.nsp",
+            "--update",
+            "patch.nsp",
+        ]))
+        .unwrap();
+        assert_eq!(a.base_package, Some(PathBuf::from("base.nsp")));
+    }
+
+    #[test]
+    fn separate_updates_require_generic_mode() {
+        assert!(parse(&v(&["dir", "--update", "patch.nsz"])).is_err());
+        let a = parse(&v(&[
+            "dir",
+            "--auto-analyze",
+            "--update",
+            "patch.nsz",
+            "--update=updates",
+        ]))
+        .unwrap();
+        assert_eq!(
+            a.update_inputs,
+            vec![PathBuf::from("patch.nsz"), PathBuf::from("updates")]
+        );
+        assert!(parse(&v(&["dir", "--auto-analyze", "--update"])).is_err());
+    }
+
+    #[test]
     fn the_command_line() {
         let a = parse(&v(&[
             "dir",
@@ -268,6 +332,10 @@ mod tests {
         let a = parse(&v(&["dir", "--shader-manifest", "m.txt", "--partial"])).unwrap();
         assert!(a.partial && a.manifest.as_deref() == Some(std::path::Path::new("m.txt")));
         assert_eq!(code(&["dir", "--partial"]), Some(2));
+        assert!(
+            parse(&v(&["game.nsp", "--auto-analyze", "-k", "keys"])).is_ok_and(|a| a.auto_analyze)
+        );
+        assert!(!parse(&v(&["dir"])).unwrap().auto_analyze);
         assert_eq!(code(&[]), Some(2));
     }
 }

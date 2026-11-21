@@ -1,6 +1,6 @@
 //! The texture inventory for the memory report (`NXKIT_MEM_REPORT`, line `nxkit-mem tex`).
 //!
-//! Every [`SCAN_EVERY`](super::evict::SCAN_EVERY) frames, when the report is on, the store makes one pass over its
+//! Every `SCAN_EVERY` frames, when the report is on, the store makes one pass over its
 //! entries and publishes the totals here. The host reads them with [`latest`]. It measures only: nothing in the
 //! encoder looks at it, and nothing runs per draw or per bind.
 //!
@@ -423,10 +423,7 @@ pub fn latest() -> Option<Inventory> {
 
 /// True when `NXKIT_MEM_REPORT` asks for the memory report (the same rule as the host: a number above 0).
 pub(super) fn wanted() -> bool {
-    std::env::var("NXKIT_MEM_REPORT")
-        .ok()
-        .and_then(|v| v.trim().parse::<f64>().ok())
-        .is_some_and(|s| s > 0.0)
+    crate::settings::env().mem_report
 }
 
 impl TextureStore {

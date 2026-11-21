@@ -283,6 +283,7 @@ extern "C" fn gai_strerror(_e: i32) -> *const c_char {
 }
 
 /// The pending network request of nifm: queries that still answer "on hold" (0: none, or settled).
+// Process-wide (W26): the hold of a guest-called `nifm` export.
 static NIFM_HOLD: AtomicI32 = AtomicI32::new(0);
 
 /// The request is on hold for the first query after the submission and settled at the next.

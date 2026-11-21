@@ -20,7 +20,8 @@ use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::{PassKind, PassPlan};
 
 use crate::detail::{DrawArgs, FrameDetail};
-use crate::draws::{FastMap, Ordinal};
+use crate::fastmap::FastMap;
+use crate::ordinal::Ordinal;
 
 /// The visibility buffers that wait for a frame, at most this many.
 const POOL: usize = 8;
@@ -77,7 +78,7 @@ pub(crate) struct FrameQueries {
     encoded: Vec<AtomicU32>,
     cpu: Vec<CpuCount>,
     /// The mesh draws of `NXKIT_DIAG=meshvis`, with offsets after those of the reports.
-    mesh: Option<crate::meshvis::Plan>,
+    mesh: Option<Box<dyn crate::probe::MeshCounts>>,
 }
 
 impl std::fmt::Debug for FrameQueries {
@@ -136,10 +137,10 @@ pub(crate) fn prepare(
     plan: &PassPlan,
     detail: &FrameDetail,
     ords: &[Ordinal],
-    mut mesh: Option<crate::meshvis::Plan>,
+    mut mesh: Option<Box<dyn crate::probe::MeshCounts>>,
 ) -> Option<Arc<FrameQueries>> {
     let c = &frame.counters;
-    let extra = mesh.as_ref().map_or(0, crate::meshvis::Plan::wanted);
+    let extra = mesh.as_ref().map_or(0, |m| m.wanted());
     if c.writes.is_empty() && extra == 0 {
         return None;
     }
@@ -267,7 +268,7 @@ impl FrameQueries {
     }
 
     /// The state that mesh draw `n` really used.
-    pub(crate) fn mesh_note(&self, n: u32, p: &crate::draws::Prep) {
+    pub(crate) fn mesh_note(&self, n: u32, p: &crate::drawctx::Prep) {
         if let Some(m) = &self.mesh {
             m.note(n, p);
         }
@@ -289,7 +290,7 @@ impl FrameQueries {
     pub(crate) fn mesh_print(
         &self,
         guest: &GuestSpace,
-        place: &dyn Fn(u64) -> crate::meshvis::Where,
+        place: &dyn Fn(u64) -> crate::probe::Where,
     ) {
         let Some(m) = &self.mesh else { return };
         let read = |i: u64| {

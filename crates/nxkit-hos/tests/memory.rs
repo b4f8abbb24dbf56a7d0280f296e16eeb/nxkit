@@ -28,35 +28,7 @@ fn rig() -> Rig {
 
 #[allow(clippy::expect_used, reason = "a test helper")]
 fn build(host: Arc<dyn HostSpace>, guest: Arc<dyn GuestMemory>, mem: Arc<FakeMemory>) -> Rig {
-    let config = Config {
-        memory: Some(MemoryConfig {
-            host,
-            base: BASE,
-            size: SIZE,
-            front_size: 0x10_0000,
-            stack_size: 0x10_0000,
-            alias_size: 0x10_0000,
-            app_pool: 0x40_0000,
-            used_memory: 0x10_0000,
-            system_resource: 0x20_0000,
-            map_limit: false,
-            program_id: 0x0100_7EF0_0011_E000,
-            tls: (BASE, 0x1_0000),
-            shared: (BASE + 0x2_0000, 0x1_0000),
-            main_stack: None,
-            modules: Vec::new(),
-        }),
-        main_thread: Some(MainThread {
-            priority: 28,
-            core: 1,
-            stack_size: 0x10_0000,
-        }),
-        log: |_| {},
-        ..Config::default()
-    };
-    let kernel = Kernel::try_new(config, guest).expect("the layout fits");
-    let main = kernel.attach_main_thread("main").expect("attach");
-    Rig { kernel, mem, main }
+    build_modules(host, guest, mem, Vec::new())
 }
 
 impl Rig {
@@ -597,3 +569,10 @@ fn unmap_physical_memory_gives_back_all_but_the_pinned_page() {
     assert_eq!(r.svc(0x2C, &[ALIAS, 0x4000])[0], 0);
     assert_eq!(r.mem.load32(ALIAS + 0x1000), Some(0));
 }
+
+#[path = "memory/code_data.rs"]
+mod code_data;
+use code_data::build_modules;
+
+#[path = "memory/permissions.rs"]
+mod permissions;

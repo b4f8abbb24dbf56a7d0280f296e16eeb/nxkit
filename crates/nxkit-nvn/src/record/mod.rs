@@ -13,6 +13,7 @@
 //! real NVN sizes of these commands are not checked (R17), so a game may see a larger
 //! `nvnCommandBufferGetCommandMemoryUsed` than on the console.
 
+pub mod ext;
 use crate::error::{NvnError, Result};
 use crate::ext::{Ext, ExtCode, FIRST_EXT_OP};
 use crate::frame::{DrawState, MAX_COLOR};

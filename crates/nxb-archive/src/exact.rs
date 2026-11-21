@@ -296,7 +296,7 @@ impl ExactState {
         Some((v.to_string(), f.to_string()))
     }
 
-    /// Why the compiler would refuse this state, or none: the vertex descriptor ([`layout_invalid`]) and a sample count
+    /// Why the compiler would refuse this state, or none: the vertex descriptor (`layout_invalid`) and a sample count
     /// that Metal does not take.
     pub fn invalid(&self, used: Option<&HashSet<u32>>) -> Option<String> {
         if ![1, 2, 4, 8].contains(&self.samples) {

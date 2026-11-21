@@ -18,7 +18,8 @@
 //! needed no render condition and that the virtual gamepad starts in the 2D layout.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
+    Title, TitleId,
 };
 
 /// The title module.
@@ -182,6 +183,9 @@ mod tests {
             .filter(|s| SMBW.runtime(*s).map(|f| f.value) == Some(Runtime::Nxkit))
             .collect();
         assert_eq!(on, Service::ALL);
-        assert!(SMBW.shared_font_decode().is_some_and(|f| f.value && f.evidence.is_checked()));
+        assert!(
+            SMBW.shared_font_decode()
+                .is_some_and(|f| f.value && f.evidence.is_checked())
+        );
     }
 }

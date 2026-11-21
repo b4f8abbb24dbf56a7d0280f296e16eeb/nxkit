@@ -41,7 +41,9 @@ impl PoolTarget for Gpu {
             PoolOp::Register { addr, len, flags } => {
                 // The range was checked before the op was made, against the same address map.
                 if let Err(e) = self.register_memory_pool(addr, len, flags) {
-                    eprintln!("nxkit-gpu: a queued pool {addr:#x}+{len:#x} was not registered: {e}");
+                    eprintln!(
+                        "nxkit-gpu: a queued pool {addr:#x}+{len:#x} was not registered: {e}"
+                    );
                 }
             }
             PoolOp::Unregister { addr } => self.unregister_memory_pool(addr),
@@ -185,7 +187,14 @@ mod tests {
                 s.spawn(move || {
                     for i in 0..100u64 {
                         let addr = (t << 32) | (i << 12);
-                        ops.run(target, PoolOp::Register { addr, len: 1, flags: 0 });
+                        ops.run(
+                            target,
+                            PoolOp::Register {
+                                addr,
+                                len: 1,
+                                flags: 0,
+                            },
+                        );
                         ops.run(target, PoolOp::Unregister { addr });
                     }
                 });
@@ -205,7 +214,14 @@ mod tests {
             let want: Vec<_> = (0..100u64)
                 .flat_map(|i| {
                     let addr = (t << 32) | (i << 12);
-                    [PoolOp::Register { addr, len: 1, flags: 0 }, PoolOp::Unregister { addr }]
+                    [
+                        PoolOp::Register {
+                            addr,
+                            len: 1,
+                            flags: 0,
+                        },
+                        PoolOp::Unregister { addr },
+                    ]
                 })
                 .collect();
             assert_eq!(mine.into_iter().copied().collect::<Vec<_>>(), want);

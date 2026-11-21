@@ -52,6 +52,8 @@ struct OsState {
     big_align: bool,
 }
 
+// Process-wide (W26): the game's environment for the guest's `getenv` and allocator, which the game calls through a C
+// function with no Rust context.
 static STATE: OnceLock<OsState> = OnceLock::new();
 
 /// Sets the facts of the game. Call it once before the game starts. A later call is an error and changes nothing.

@@ -2,8 +2,8 @@
 
 use super::helper::*;
 use super::int_cmp::get_int_comparison;
+use crate::emit::emitter::EmitterContext;
 use crate::emit::helper::*;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::{Opd, regtype};
 use crate::maxwell::enums::*;
 use crate::maxwell::insts::*;

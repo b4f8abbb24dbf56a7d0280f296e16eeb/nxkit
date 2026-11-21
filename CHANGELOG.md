@@ -2,10 +2,101 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
-## 0.10.0 - Unreleased
+## Unreleased
+
+### Fixed
+
+- `nxkit-gpu` fills the binding kinds `tex_ubo` and `samp_ubo`: a bindless texture whose handle the shader reads from a
+  uniform buffer. Before, every program with such a member was refused and its draws were left out (`skip.binding`):
+  in Super Mario Bros. Wonder 3955 of 16268 programs, about 200 draws per frame, so the ground, the figures and the
+  foreground were missing and the scene showed only the fog colour. The host reads the handle word of each draw and
+  dispatch before the frame resolves its handles and binds it as a texture slot of its own (`ubotex.rs`). A handle word
+  that cannot be read is counted as `tex.ubo-handle-unread`.
+
+## 0.11.0 - 2026-11-20
+
+### Changed
+
+- Architecture: the workspace has two worlds of layers. The build crates keep L0 to L3, F, T and dev. The runtime
+  crates have their own layers R0 (contract: `nxkit-abi`, `nxkit-native-plan`) to R4 (the composition root
+  `nxkit-host`), and the 14 sideways edges that the old layers needed are gone (W25). `xtask layers` also checks the
+  macOS-only dependencies (`[target.'cfg(..)'.dependencies]`), which it did not read before.
+- Module cycles inside a crate are measured and may only shrink: `cargo run -p xtask -- modules` against
+  `xtask/module-cycles.txt`, and `cargo run -p xtask -- graph <crate>` shows the edges of a cycle (W24). From 34 cycle
+  groups with 159 modules on 0.10.3 to 21 groups with 70 modules.
+- `nxb-xlate` has module layers and no cycle group (was 10 of 16 modules): the pipeline of a translation is the module
+  `front`, the `EmitterContext` is in `emit`, the helper functions are `helper` (W28). No output changes and
+  `TRANSLATOR_ID` stays.
+- `nxkit-gpu` has module layers and no cycle group (was 38 of 54 modules): `drawctx` holds what the planning of a draw
+  reads, `encode::EncodeCtx` what only the encoder reads, and the encode path reaches the opt-in analyses (`nanscan`,
+  `lum`, `passprof`, `meshvis`) only through the observer interface `probe` (W29).
+- The smaller cycles of `nxb-split`, `nxb-rewrite`, `nxb-build`, `nxkit-hos`, `nxkit-host` and `nxkit-metal` are gone.
+  The shared parts moved into small modules of their own (`prim`, `options`, `sync`, `fields`, `rawcopy`, ...).
+- The runtime reads its `NXKIT_*` settings from one snapshot (`nxkit_abi::env`), taken once at the start of
+  `nxkit-host` and passed to the parts it builds (W27). `xtask settings` fails on a direct read in a runtime crate.
+  `xtask statics` counts the process-wide statics of each runtime crate (443) and lets the number only fall, and the
+  anchor static of each crate says why it is process-wide (W26).
+- Every runtime crate has typed settings in its `settings.rs`: the keys, the defaults, the parsing and the docs in one
+  place. `nxkit-host` parses all of them once from the snapshot (`RunSettings`) and passes them. Code with no context
+  reads its crate's settings through one accessor over `nxkit_abi::env::Slot`. A second install, or a read before the
+  install, stops the run with an error instead of taking a snapshot of its own. The global `nxkit_abi::env::var` is
+  gone, and `xtask settings` fails on any `NXKIT_*` read outside the settings modules (79 reads through the global
+  accessor before, 0 now).
+- The frame path is made of objects that the host owns: the present ring `nxkit_nvn::screen::Screen`, the refresh plan
+  `Refresh`, the timed presents `nxkit_metal::TimedPresent`, the command buffer seam of `nxkit-rt` and the present
+  diagnostics of the GPU backend. The batch hooks, the overlap key of `game.json` and the guest-write hook of the video
+  service are passed in when the parts are made. `set_done_hook`, `set_commit_hook`, `set_batch_hooks`,
+  `set_timed_present`, `set_screen_hz` and `set_guest_write_hook` are gone. The process-wide statics of the runtime fall
+  to 393 (`xtask/statics.txt` now also counts the settings slots). W33 says what may stay process-wide.
+- More module cycles are gone: the layer crop of `nxkit-rt` is its own module, `nxkit-metal` has small modules for the
+  frame interval, the drawable, the hooks, the timed presents and the pass descriptor, and `nxkit-nvn` moved the
+  counters, the render conditions, the decode cache, the record extensions and the texture life to their own places.
+  From 21 cycle groups with 70 modules to 14 groups with 48 modules.
+- `nxkit-gpu` takes the loading screen of the start in `GpuSettings::prewarm_screen` (`set_prewarm_screen` is gone), and
+  `nxkit-rt` takes the NVN command settings in `nvn::Settings::commands` (`set_command_settings` is gone).
+- The thread roles of a title are words of the title API (`nxtitle::threads`). The BotW title no longer depends on the
+  kernel crate.
+- `nxb-profile` is a dev crate (W31). `deps.toml` lists `foldhash` and is valid TOML again.
+
+### Removed
+
+- The skeleton crates `nxb-air`, `nxb-bundle`, `nxb-crypto`, `nxb-hos`, `nxb-plist`, `nxb-pso` and `nxb-zip`, the
+  unused crate `nxb-io`, the empty placeholder modules of `nxb-codec`, `nxb-romfs`, `nxb-shader` and `nxb-stages`, and
+  11 dependencies that no code used (W30).
+
+## 0.10.3 - 2026-11-19
 
 ### Added
 
+- The release workflow signs `SHA256SUMS` with Ed25519 and uploads the detached signature `SHA256SUMS.sig` (base64 of the 64 raw bytes) with the other assets. The release fails when the repository secret `NXKIT_SIGNING_KEY` is missing or does not belong to the public key in `release-signing.pub`. `tools/release-sign.py` makes keys, signs and verifies. A front end installs a release only when the signature checks against its built-in public key.
+- The own MSL front end compiles thread and threadgroup array references as helper parameters (the overload follows the address space of the argument), static `threadgroup` arrays at the top of a kernel body (internal `addrspace(3)` globals with clang's local names), `threadgroup_barrier(mem_flags::mem_threadgroup)` in kernels and fragment shaders (a vertex shader that reaches one is refused), `ulong(simd_ballot(b))`, `thread_index_in_threadgroup` on kernels, and relaxed `atomic_fetch_add_explicit`, `atomic_fetch_min_explicit` and `atomic_fetch_max_explicit` on a `threadgroup atomic_uint*` made from a `threadgroup uint*` (#33). Other forms (a cast between address spaces, a `const` array reference, an initialized threadgroup array, another memory order) are refused, so the build uses Apple's compiler for them.
+
+### Changed
+
+- Like Apple's front end with `-fwrapv`, the own front end writes no `inbounds` on device pointer offsets and on dynamic array indices in any address space. On the test shaders the function bodies after `air-opt -O1` are the same as Apple's. `air_front::FORMAT` is 11, so every shader library is built again.
+
+## 0.10.2 - 2026-11-19
+
+### Changed
+
+- The ZIP of a release holds `nxkit-host` beside `nxb`, built with the same `dist` profile, and a `MANIFEST.json` (version, platform, `macos_min` and the SHA-256 of the two programs). `SHA256SUMS` lists the ZIP and each file in it. A front end can download one ZIP, check it and build games without Rust. The release is built with `MACOSX_DEPLOYMENT_TARGET=26.0` (the host needs Metal 4), and `tools/release-package.sh` checks the value in both programs.
+
+## 0.10.1 - 2026-11-18
+
+### Changed
+
+- nxkit is licensed under MIT again (`LICENSE`, `license` in `Cargo.toml`). Releases 0.9.3 to 0.10.0 stay under GPL-3.0-only.
+
+### Fixed
+
+- `SetMemoryPermission` preserves neighbouring guest permissions on larger host pages, rejects writable-executable projections, and restores host permissions after failure. An incomplete rollback requests process termination.
+
+## 0.10.0 - 2026-11-16
+
+### Added
+
+- `nxb build --auto-analyze` (experimental, #23): prepares a Mac app for a game without a title module. The module order, build IDs, NPDM settings and NVN names come from the input, through the same extractor, rewriter and shader front end as the title builds. Inputs are NSP, NSZ, XCI, XCZ, a folder of packages or a NUP file, with `--update FILE_OR_FOLDER` (repeatable) and DLC. `--base-package FILE` backs the encrypted delta updates of a NUP, and a code-only update uses the base's resources. Resource patches apply only when asked for. The extracted data may be 256 MiB at most. The empty RomFS of a program without a data section and the newest-DLC rule of a NUP are only on in this path; a title build still refuses them as before. `nxkit-host` finds its run folder in the app bundle when Finder starts it, and `nxkit-hos` lets writable CODE_DATA back a MapMemory stack alias, as Horizon does.
+- `nxb` builds on Windows (x86-64, MSVC), and `nxb extract` runs there. `nxb-extract` reads and writes at offsets through its own `fileext::FileExt`, which is `std::os::unix::fs::FileExt` on Unix and uses `seek_read` and `seek_write` on Windows. `nxb-build` takes the modification time from `Metadata::modified`. `nxb-sys` links zlib statically through `libz-sys` on Windows, because Windows has no system zlib. On Unix nothing changes.
 - Title modules for every game the engine tree plays (at `034e91a8`): 149 new crates `nxgame-<short name>` under `titles/games/<title id>`, each behind its own cargo feature of `nxtitles`, and build data for Animal Crossing: New Horizons and Mario Tennis Fever. Each module gives `nxb build` the version, the modules and build IDs, the shader groups, the romfs marker and the run settings of the game's `game.tsv`, reads the NVN function names from the modules, runs every service on nxkit and has rewrite rules: the build row, the byte cuts, capabilities and function-matched rules of the game's `patches.py`, the sdk cuts of `sdk_patches.py`, the engine's SDK-wide rules for `sdk` and, for Unity 2018 games, the engine-wide ThreadedStreamBuffer rule. Ten games name the family `agl`. Frame step stubs and code stubs are left out (eight games), and a game whose `fps_target` needs a left-out stub gets 0. The Vulkan and OpenGL games (Hades, Super Mario Galaxy 1 and 2, Balatro, Well Dweller, Digimon Story Cyber Sleuth) and Super Mario 3D All-Stars get no module. The list is in `docs/titles.md`, "The games of the engine tree".
 - `nxb build` builds Super Mario Bros. Wonder (`010015100B514000`, update 1.2.1, v327680): the title module `nxgame-smbw` (family `agl`, cargo feature `smbw`) gives the build IDs of `main` and `sdk`, the shader groups, the romfs marker `System/HeapSize/Product.Nin_NX_NVN.HeapDef.byml.zs` and the run settings of the engine's `game.tsv` (the 5 GB guest layout with a 2.875 GB alias region), reads the NVN function names from the modules, runs every service on nxkit and decodes the shared font as BFTTF. Its rewrite rules are the build row and the engine's two SDK-wide rules for `sdk` (node area 62 MB, regions of 4 MB and more aligned to 2 MB), which match sdk build `e4bd58ca…` once.
 - `NXKIT_PRIVATE=1`, step 8: late results where the CPU reads them. `NXKIT_DIAG=private` says why a page lost its snapshot (`DIAG private snapshots`, by reason) and the completion of a frame now also copies the pages that the frame still tags (with `NXKIT_PRIVATE_AHEAD=1` frame N completes before N + 1 is flushed). A page whose guest bytes are a completed frame's stays readable while a frame writes it (`PROT_READ` instead of `PROT_NONE`; `NXKIT_PRIVATE_READOPEN=0` turns it off): a read takes no trap and gets the last completed frame's bytes, only stores fault, and a completion that drops the snapshot takes the access away. In Ocarina of Time the emulated loads per frame go from 16 700 to under 1. System call reads outside the written blocks of a page with a snapshot no longer wait (0.4 waits per frame), and `ST1`/`LD1` of one lane and accesses across the page border are emulated by the fault handler (the last waits for a writer, 0.5 per frame of 10 to 47 ms). The waits for a writer per frame go from 0.5 to 0.01.
@@ -103,6 +194,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
+- The published `nxb` is built with fat LTO (from relay4, #4): the release workflow builds the new cargo profile `dist` (`release` with `lto = "fat"`), which makes the binary about a fifth smaller (14.7 to 11.6 MB) and links for about two minutes. `cargo build --release` stays without LTO. `tools/release-package.sh` takes the binary of the profile in `PROFILE` (default `release`).
 - Memory pool calls no longer wait for an encode: `Backend::register_pool`, `unregister_pool`, `map_pool_window` and `unmap_pool_window` change the encoder state of `Gpu` at once when its lock is free and otherwise queue the change, which the next lock of `Gpu` applies first, in order (`backend/poolops.rs`, `GpuBackend::lock_gpu`). The range check runs before, so a bad range still fails at the call. In Ocarina of Time (about 10 pools made and finalized per frame) the render thread spent about 16 % of its time in `nvnMemoryPoolInitialize` waiting for the encode of the frame. `Gpu::pools` drops a pool when it is finalized (it grew by every pool at a new address). `NXKIT_DIAG=pools` counts the ops applied at once and queued: in one run 532 of 17 614 ops (3 %) found the lock taken. The effect on the frame time is not measured yet (the window was not on screen during the runs).
 - The runtime pipeline cache survives a new host build. Its folder was named by the size and time of the host executable, so every host build removed the cache and a game compiled all its pipelines again while it ran. The folder is now named by the app build, a constant for the key scheme (`KEY_SCHEME`), the macOS build and the GPU. Tests pin one key of each kind of pipeline, so a change of a key function cannot go unnoticed. The first start after this change has an empty cache.
 - Shaders compile with relaxed math on Mac too. Apple's compiler gets `-fmetal-math-mode=relaxed` (as on iOS) and the own front end writes no `nnan ninf` flags, because the shader code of the console relies on NaN and Inf (`0 x Inf` in `.FMZ`, the `isnan` guard of a texture coordinate) and fast math could fold both away, which let NaN into the frame (white blooms). The identity of every shader library changes, so the next build compiles all shaders again.
@@ -134,6 +226,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- On macOS 26 the own front end and the raw tier wrote Metal 4.1 libraries (macOS 27.2, AIR 2.9), which macOS 26 refuses to load ("language version 4.1 which is not supported on this OS"): the game showed a black screen and the Mac pipeline archive failed, so the app had no `pso` folder (issue 21). The macOS target now follows this Mac's major version as Apple's `metal` does: macOS 26 gets macOS 26.0, AIR 2.8 and Metal 4.0 (`air_emit::Target::macos_for`, `nxb_tool::airfront::mac_target`), macOS 27 and later keep the 27.2 target. The cache key of those libraries gets `+macosx26` (`key_id`), so they never mix with Metal 4.1 ones; the verdict and allow-list folders keep the plain front-end id.
 - Pitch-linear textures that the CPU writes in their pool without telling the GPU now show the writes: Super Mario Bros. Wonder rasterizes its menu glyphs on the CPU into a linear 2048x8192 R8 atlas in a CPU-visible pool and never flushes it, so after the first upload every new glyph stayed empty ("utzer   en" for "Nutzer wählen", `NXKIT_DIAG=stale`: `changed, residency InSync needs upload false`). A pitch-linear 2D texture of one level is now a Metal texture over the no-copy buffer of its pool (`Texture::over_guest`, `TextureStore::place_of`), as the console samples it from the pool: no upload, no memory of its own, every CPU write seen. One that cannot lie there (`NXKIT_PRIVATE=1`, a first byte or stride Metal cannot take, an attachment, `NXKIT_TEX_INPLACE=0`) is uploaded in every frame that uses it unless the GPU wrote it last. The menus of Super Mario Bros. Wonder show all letters; its sky ramps and a 256x256 sRGB texture lie in place too.
 - A GPU event signal (`nvnCommandBufferSignalEvent`) now reaches the counter word in guest memory. Before, only the queue gate of the runtime kept the new counter, so `nvnEventGetValue` saw the CPU's signals only and a game that polls an event the GPU signals waited for ever or read a stale value. The walk turns each signal into an event report with the address of the counter word (`REPORT_EVENT_WRITE`, `REPORT_EVENT_ADD`), and the completion of the frame's batch writes the signals of that frame and every older one in order (`backend::events`): ADD as an atomic add, every other mode as an atomic write, from a thread marked internal so `NXKIT_PRIVATE` serves it without a wait. Signals of held submits are written only once their work ran and finished. A GPU write is dropped when the CPU signalled the same word after a wait that returned before the frame was done (the early wait of `NXKIT_PRIVATE=1`, the overlap), since that CPU signal is newer on the console. `NXKIT_DIAG=events` counts the writes. See "GPU event signals" in `docs/nxkit-gpu.md`.
 - `NXKIT_PRIVATE=1` with late results (the default): a white haze covered most of the picture of Ocarina of Time in the Kokiri forest. The game reads a sum that a GPU pass adds up and resets it while the next frame runs; the completion of the frame kept the CPU's reset for the reader instead of the frame's sum, and copied the frame's bytes from the mirror, where the next frame had already copied in the reset. The GPU now copies the pages that game threads read late at the start and at the end of each frame (`Pages::late_copy_pages`, `Overlay::late`), the completion takes the frame's own bytes from the copy of its end, a block the CPU wrote that the frame changed gets the frame's bytes for the reader while the CPU's bytes still go into the mirror at the next flush (`stage_carry`), and a page without a copy that a newer frame tags loses its snapshot. `DIAG private late results` counts the copies and the blocks the frame won. Frame time unchanged (39.3 and 39.7 ms against 40 ms). See "Private GPU memory, step 9" in `docs/nxkit-gpu.md`.
@@ -160,6 +253,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - An attachment of a compressed texture renders into a block shadow that is copied into its blocks after the pass (GPU BC encoders such as the 3D BC4 noise of Ocarina of Time).
 - A texture handle of id 0 is an unbind, not unresolved, and `decode.unresolved` keeps the handle or address as an example. A draw or clear without a render target is left out and counted, not an error (the game stopped in `nvnQueuePresentTexture` after its opening movie).
 - A base of a point-size vertex function is made without a class, and the point size fallback is remembered per vertex function.
+- The NVN window origin reaches the picture. A draw under a lower-left device origin (`nvnDeviceSetWindowOriginMode`) gets a viewport of negative height from its bottom row (`walk/origin.rs`), the front face follows the origin its queue captured, the identity and `NEGATIVE_Y` viewport swizzles of viewport 0 compose with the origin in plain and cached walks (other swizzles are reported once and ignored), and a present keeps the origin of its image and flips Y within the crop. A submit captures the device origin when the game makes it, so a walk on the helper thread or of a held submit does not see a later mode change. The full-screen test of the `coverload` knob makes a flipped viewport upright first.
+- `nvnCommandBufferCopyTextureToTexture` honours `NVN_COPY_FLAGS_MIRROR_X_BIT` and `NVN_COPY_FLAGS_MIRROR_Y_BIT`: a mirrored copy runs on the stretch kernel of the copy pass (`passes/scale.rs`), which reverses the source within the region. A mirrored copy of an equal size that the kernel cannot take (depth, stencil, compressed or 3D, or no shader read or write) is still a blit, without the mirror, and counts as `copy.mirror-lost`. A stretched or mirrored copy within one backing texture is refused only when its source and destination share texels (the same level, slices and an intersecting box), so a mip chain downsample from level N to N+1 still runs; a copy between textures whose in-place bytes overlap is refused.
 
 ### Removed
 

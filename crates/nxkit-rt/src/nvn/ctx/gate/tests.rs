@@ -88,7 +88,11 @@ fn a_signal_in_held_work_counts_only_when_the_work_ran() {
     let _ = g.held.pop_front();
     g.ran(&held, &mem);
     assert_eq!(g.event_value(E, &mem), Some(1));
-    assert_eq!(mem.u32(E + 0x100), Some(0), "guest memory gets it when the GPU finished the work");
+    assert_eq!(
+        mem.u32(E + 0x100),
+        Some(0),
+        "guest memory gets it when the GPU finished the work"
+    );
 }
 
 #[test]

@@ -340,7 +340,11 @@ fn frame_work_counts_submitted_work_at_once_and_restarts_after_a_flush() {
     let mut f = fe();
     assert_eq!(f.frame_work(), 0);
     // The commands of a submit are in the frame as soon as the submit returns, not at the flush.
-    let a = record(&mut f, CMD, &[Record::Draw, Record::Draw, Record::Barrier(1)]);
+    let a = record(
+        &mut f,
+        CMD,
+        &[Record::Draw, Record::Draw, Record::Barrier(1)],
+    );
     f.submit(a).unwrap();
     assert_eq!(f.frame_work(), 2);
     assert!(!f.frame_is_empty());

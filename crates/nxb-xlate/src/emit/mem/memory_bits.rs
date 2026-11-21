@@ -1,7 +1,7 @@
 //! Address and small-integer helpers of the memory emitters (`InstEmitMemory.cs`).
 
 use super::hlp::REGISTER_ZERO_INDEX;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::ops::{Opd, regtype};
 use crate::maxwell::enums::LsSize;
 

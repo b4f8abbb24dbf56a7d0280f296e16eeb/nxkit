@@ -3,7 +3,7 @@
 
 use crate::SplitError;
 use crate::glslc::stage;
-use crate::shaders::{CTL_MAGIC, Found, GFX_MAGIC, STAGES, check, find_all, sph_stage, u32le};
+use crate::prim::{CTL_MAGIC, Found, GFX_MAGIC, STAGES, check, find_all, sph_stage, u32le};
 
 const NX: [u8; 16] = *b"Ninty_NX\0\0\0\0\0\0\0\0";
 

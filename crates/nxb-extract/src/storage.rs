@@ -2,8 +2,8 @@
 //! block cache, and BKTR indirect (relocation) storage. All are `Send + Sync` and read at offsets, so any number of
 //! workers read in parallel.
 
+use crate::fileext::FileExt;
 use std::fs::File;
-use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use crate::aes::Aes128;

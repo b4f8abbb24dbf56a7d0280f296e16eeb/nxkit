@@ -51,16 +51,8 @@ pub struct Loaded {
     pub dylib: Option<Dylib>,
 }
 
-/// The `DT_INIT` function of one module.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleInit {
-    /// The name of the module.
-    pub module: String,
-    /// The offset from the module base.
-    pub offset: u64,
-    /// The guest address.
-    pub addr: u64,
-}
+// The `DT_INIT` record belongs to the boot sequence that runs it; the loader only finds it.
+pub use crate::boot::ModuleInit;
 
 struct Lists {
     imports: Vec<Import>,

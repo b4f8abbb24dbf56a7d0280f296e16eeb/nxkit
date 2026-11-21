@@ -115,3 +115,13 @@ fn block_copies_put_each_shadow_at_an_aligned_offset() {
     );
     assert_eq!(blocks::offsets(&[]), (vec![], 0));
 }
+
+#[test]
+fn a_flipped_full_screen_viewport_still_holds_the_target() {
+    let size = [1280, 720];
+    assert!(setup::holds_target([0.0, 0.0, 1280.0, 720.0], size));
+    // A lower-left origin flips the viewport: y at the bottom row and a negative height.
+    assert!(setup::holds_target([0.0, 720.0, 1280.0, -720.0], size));
+    assert!(!setup::holds_target([0.0, 720.0, 1280.0, -360.0], size));
+    assert!(!setup::holds_target([0.0, 360.0, 1280.0, 360.0], size));
+}

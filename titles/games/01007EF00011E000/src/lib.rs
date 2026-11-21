@@ -20,7 +20,7 @@
 //! The pacing keys of the game's profile (`fps_target`, `fps_hold`, `present_snap`, `present_interval`) are the fact
 //! `PaceProfile`, with their evidence.
 
-use nxkit_hos::{NameMatch, RoleRule, RoleTable, ThreadRole};
+use nxtitle::threads::{NameMatch, RoleRule, ThreadRole};
 use nxtitle::{
     BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime,
     RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
@@ -207,9 +207,9 @@ pub const THREAD_ROLES: &[Fact<RoleRule>] = &[
     ),
 ];
 
-/// The table the kernel takes for this title. A thread no entry matches keeps the default role.
-pub fn role_table() -> RoleTable {
-    RoleTable::new(&THREAD_ROLES.iter().map(|f| f.value).collect::<Vec<_>>())
+/// The rules in the order they are checked. A thread no rule matches keeps the default role.
+pub fn role_rules() -> Vec<RoleRule> {
+    THREAD_ROLES.iter().map(|f| f.value).collect()
 }
 
 /// The game builds without the engine, so nxkit runs every service. The services' answers follow the engine's
@@ -283,12 +283,8 @@ mod tests {
     #[test]
     fn thread_roles_are_marked_unverified() {
         assert!(THREAD_ROLES.iter().all(|r| !r.evidence.is_checked()));
-        let info = nxkit_hos::ThreadInfo {
-            name: "AudioMain",
-            priority: 20,
-            entry: 0,
-        };
-        assert_eq!(role_table().classify(&info), Some(ThreadRole::Audio));
+        let role = nxtitle::threads::classify(&role_rules(), "AudioMain", 20, 0);
+        assert_eq!(role, Some(ThreadRole::Audio));
     }
 
     #[test]

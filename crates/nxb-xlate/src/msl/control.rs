@@ -3,8 +3,8 @@
 use super::emit::{Em, R};
 use super::types::{literal, msl_type};
 use crate::ir::OperandType;
+use crate::ir::agg::AggType;
 use crate::structured::ast::{A, BlockType, Kind};
-use crate::structured::types::AggType;
 use std::collections::BTreeSet;
 
 impl Em<'_> {

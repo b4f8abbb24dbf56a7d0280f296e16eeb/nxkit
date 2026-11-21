@@ -14,6 +14,7 @@ in_v = false
 [dependencies]
 msl-lex = { path = "../msl-lex" }
 msl-parse = { path = "../msl-parse" }
+msl-sema = { path = "../msl-sema" }
 
 [lints.rust]
 unsafe_code = "forbid"

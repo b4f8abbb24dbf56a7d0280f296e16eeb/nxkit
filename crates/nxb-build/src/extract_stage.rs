@@ -2,7 +2,6 @@
 //! container (RomFS as a folder, the split in the same pass), and the DLC images (`<work>/aoc/<index>.img`,
 //! index = DLC title ID - base title ID - 0x1000, the host mounts them by index).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -19,21 +18,6 @@ fn split_outputs(b: &Build) -> nxb_extract::split::SplitOutputs {
         pairs: b.work.join("shader/shader_pairs.tsv"),
         pso_pairs: b.work.join("shader/pso_pairs.tsv"),
     }
-}
-
-/// The keys file (`-k`): required and present for packages.
-pub(crate) fn keys(a: &Args) -> Result<PathBuf, String> {
-    let k = a
-        .keys
-        .clone()
-        .ok_or_else(|| crate::exit::fail(2, "-k/--keys is required to extract packages"))?;
-    if !k.is_file() {
-        return Err(crate::exit::fail(
-            6,
-            format!("the keys file {} does not exist (-k/--keys)", k.display()),
-        ));
-    }
-    Ok(k)
 }
 
 pub(crate) fn damaged(p: &Progress, e: &nxb_extract::ExtractError) -> String {
@@ -56,13 +40,15 @@ fn dlc_key(b: &Build) -> String {
         .iter()
         .map(|(t, v, path)| {
             let m = std::fs::metadata(path);
-            use std::os::unix::fs::MetadataExt;
             format!(
                 "{t:016x} {v} {} {} {}",
                 path.display(),
                 m.as_ref().map_or(0, |m| m.len()),
                 m.as_ref()
-                    .map_or(0, |m| m.mtime_nsec() + m.mtime() * 1_000_000_000)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos() as i64)
             )
         })
         .collect();
@@ -72,10 +58,16 @@ fn dlc_key(b: &Build) -> String {
 
 /// DLC packages into `<work>/aoc/<index>.img`. Reused while the packages are as at the last extraction.
 pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, String> {
-    if b.src.dlc.is_empty() || b.src.source != Source::Packages {
+    let dlc: Vec<_> = b
+        .src
+        .dlc
+        .iter()
+        .filter(|(_, _, path)| !nxb_extract::nup::is_nup(path))
+        .collect();
+    if dlc.is_empty() {
         return Ok(None);
     }
-    let keys = keys(a)?;
+    let keys = crate::inputs::keys(a)?;
     let (dst, tmp, kf) = (
         b.work.join("aoc"),
         b.work.join("aoc.partial"),
@@ -84,18 +76,17 @@ pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, S
     let key = dlc_key(b);
     let idx = |t: u64| t.wrapping_sub(b.src.app).wrapping_sub(0x1000);
     if std::fs::read_to_string(&kf).is_ok_and(|k| k == key)
-        && b.src
-            .dlc
+        && dlc
             .iter()
             .all(|d| dst.join(format!("{}.img", idx(d.0))).is_file())
     {
-        return Ok(Some(format!("{} DLC reused", b.src.dlc.len())));
+        return Ok(Some(format!("{} DLC reused", dlc.len())));
     }
     let _ = std::fs::remove_file(&kf);
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    let n = b.src.dlc.len() as u64;
-    for (i, (tid, _, pkg)) in b.src.dlc.iter().enumerate() {
+    let n = dlc.len() as u64;
+    for (i, (tid, _, pkg)) in dlc.into_iter().enumerate() {
         p.set(Update {
             step: Some("extracting DLC"),
             done: Some(i as u64),
@@ -120,7 +111,11 @@ pub(crate) fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, S
             ..nxb_extract::Request::default()
         };
         // a merged package or a card image holds more than one title: name the DLC
-        let id = b.src.app_flag.map(|_| *tid);
+        let id = if a.auto_analyze || b.src.source == Source::Nup {
+            Some(*tid)
+        } else {
+            b.src.app_flag.map(|_| *tid)
+        };
         let s = nxb_extract::aoc::aoc(&req, id).map_err(|e| damaged(p, &e))?;
         s.closing.wait();
         std::fs::rename(
@@ -167,7 +162,7 @@ pub(crate) fn packages(
     let out = |v: &str| b.work.join("extract").join(v);
     let counter = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::Request {
-        keys: keys(a)?,
+        keys: crate::inputs::keys(a)?,
         base: b.base.clone(),
         out_base: out("v0"),
         updates: b
@@ -188,6 +183,7 @@ pub(crate) fn packages(
         manifest: false,
         split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
         progress: Some(counter.clone()),
+        empty_romfs: false,
     };
     p.say("extract and shader split in one pass (nxb-extract)");
     let s = with_bytes(p, "extracting", &counter, || nxb_extract::extract(&req))
@@ -217,6 +213,7 @@ pub(crate) fn nup_loose(
         verify: true,
         split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
         progress: Some(counter.clone()),
+        newest_dlc: false,
     };
     p.say("unpack and shader split in one pass (nxb-extract, RomFS as a folder)");
     let u = with_bytes(p, "unpacking", &counter, || {

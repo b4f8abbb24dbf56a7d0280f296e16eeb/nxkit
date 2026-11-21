@@ -6,10 +6,10 @@ use super::inst_tex::{DERIVATIVES, INT_COORDS, LOD_LEVEL, OFFSET};
 use super::tests::{B, F4};
 use crate::attr::Stage;
 use crate::driver::TexInfo;
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::props::TextureDef;
 use crate::structured::ast::{A, AstTex};
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 
 const NAME: &str = "fp_t_3";
@@ -274,7 +274,10 @@ fn a_signed_atomic_uses_the_signed_image_and_a_compare_swaps() {
         "{m}"
     );
     assert!(
-        m.contains("while (!") && m.contains(".atomic_compare_exchange_weak(t0c, &t0x, int4(5)) && all(t0x == t0c)) {}"),
+        m.contains("while (!")
+            && m.contains(
+                ".atomic_compare_exchange_weak(t0c, &t0x, int4(5)) && all(t0x == t0c)) {}"
+            ),
         "{m}"
     );
 }

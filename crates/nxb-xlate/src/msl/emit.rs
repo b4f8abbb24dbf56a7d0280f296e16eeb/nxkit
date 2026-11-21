@@ -6,11 +6,11 @@
 use super::args::Res;
 use super::io::Plan;
 use super::types::{cast, literal, msl_type, scalar};
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, OperandType};
 use crate::props::Props;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind, OpData};
-use crate::structured::types::AggType;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The result type of the emitter functions.

@@ -817,7 +817,7 @@ There is one template, `ndsr_light`, with 15 instantiations (one per program, `L
 3. Each thread keeps the linear colour of its pixels in registers and writes their luma over the dead window.
 4. After one barrier come the sharpening, the encoding and the write.
 
-The plan refuses a push block whose tile (`w18, w19`) is not the kernel's grid. The hook (`native_ndsr.rs`) runs the
+The plan refuses a push block whose tile (`w18, w19`) is not the kernel's grid. The hook (`native/ndsr.rs`) runs the
 vr_light programs that have a kernel. It accepts RGB9E5 / R11G11B10F / float4 input, and for B and C an R11G11B10F,
 RGB10A2 or RGBA16F output. It tags plans by words 2 to 9 and 18 to 28.
 

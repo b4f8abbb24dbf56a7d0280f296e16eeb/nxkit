@@ -7,8 +7,8 @@ use super::pool;
 use super::texoff::{Level, Off, shifted};
 use super::types::scalar;
 use super::usage::is_plain_sample;
+use crate::ir::agg::AggType;
 use crate::structured::ast::{AstTex, OpData};
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 
 pub(super) const GATHER: u32 = 1 << 1;

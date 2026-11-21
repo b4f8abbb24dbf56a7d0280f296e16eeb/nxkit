@@ -2,7 +2,7 @@
 //! reads by entry ranges (`nxb_split::jobs`) are planned over every file, run on a pool, and merged in the
 //! reference's order (main, the jobs of each family, then the files).
 
-use std::os::unix::fs::FileExt;
+use crate::fileext::FileExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

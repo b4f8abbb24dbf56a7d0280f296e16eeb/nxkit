@@ -14,9 +14,9 @@ use crate::json;
 const PROBE: &str = ".nxkit-write-probe";
 
 /// The folder for the runtime cache, or none when there is no place to write.
-pub fn folder(root: &Path) -> Option<PathBuf> {
-    if let Some(d) = std::env::var_os("NXKIT_PIPELINE_CACHE_DIR").filter(|d| !d.is_empty()) {
-        return Some(PathBuf::from(d));
+pub fn folder(root: &Path, env: &crate::hostenv::HostEnv) -> Option<PathBuf> {
+    if let Some(d) = &env.pipeline_cache_dir {
+        return Some(d.clone());
     }
     if writable(&root.join("pipecache")) {
         return Some(root.to_path_buf());
@@ -105,9 +105,8 @@ mod tests {
     #[test]
     fn a_writable_run_folder_is_the_cache_root() {
         let d = tmp("root");
-        if std::env::var_os("NXKIT_PIPELINE_CACHE_DIR").is_none() {
-            assert_eq!(folder(&d).as_deref(), Some(d.as_path()));
-        }
+        let none = crate::hostenv::HostEnv::default();
+        assert_eq!(folder(&d, &none).as_deref(), Some(d.as_path()));
         // the probe file does not stay
         assert_eq!(std::fs::read_dir(d.join("pipecache")).unwrap().count(), 0);
         std::fs::remove_dir_all(&d).unwrap();

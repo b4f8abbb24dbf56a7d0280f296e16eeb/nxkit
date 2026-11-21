@@ -404,10 +404,7 @@ struct Clicks {
 
 impl Clicks {
     fn check(&mut self, blk: &[i16], catch_up: bool) {
-        static ON: OnceLock<bool> = OnceLock::new();
-        if !*ON.get_or_init(|| std::env::var("NXKIT_AUDIO_CLICKS").is_ok_and(|v| v == "1"))
-            || blk.len() < 4
-        {
+        if !crate::settings::settings().clicks || blk.len() < 4 {
             return;
         }
         let now = Instant::now();

@@ -1,7 +1,7 @@
 //! The `Backend` trait of [`GpuBackend`]: what the front end calls for queues, fences, memory and presents.
 
-use super::*;
 use super::poolops::PoolOp;
+use super::*;
 
 impl Backend for GpuBackend {
     fn gpu_base(&self) -> u64 {
@@ -61,18 +61,34 @@ impl Backend for GpuBackend {
 
     fn unmap_pool_window(&self, host: u64, len: u64) {
         if let Ok(gpu_addr) = self.guest.address_map().gpu_address(host, len) {
-            self.pool_ops.run(&self.gpu, PoolOp::Unmap { addr: gpu_addr, len });
+            self.pool_ops.run(
+                &self.gpu,
+                PoolOp::Unmap {
+                    addr: gpu_addr,
+                    len,
+                },
+            );
         }
+    }
+
+    fn device_modes(&self, origin_lower_left: bool, _depth_zero_to_one: bool) {
+        self.device_lower_left
+            .store(origin_lower_left, Ordering::Release);
     }
 
     fn submit<'a>(
         &'a self,
         queue: u64,
         handles: &'a [CommandHandle],
-        _origin_lower_left: bool,
+        origin_lower_left: bool,
     ) -> Option<Deferred<'a>> {
+        // The walk may run later (the helper thread, or a held submit from the gate pump): the draws take the device
+        // origin of the moment the game submitted, not that of a later `device_modes`.
+        let device = self.device_lower_left.load(Ordering::Acquire);
         Some(Box::new(move || {
             let mut walker = locked(&self.walker);
+            walker.device_origin(device);
+            walker.queue_origin(queue, origin_lower_left);
             let mut mem = GuestView(self.guest.clone());
             walker.submit(&mut mem, queue, handles);
         }))
@@ -90,12 +106,12 @@ impl Backend for GpuBackend {
         let mut detail = {
             let mut walker = locked(&self.walker);
             let counters = walker.take_counters();
-            if stats_diag() && self.reports.load(Ordering::Relaxed).is_multiple_of(30) {
+            if self.diag.stats && self.reports.load(Ordering::Relaxed).is_multiple_of(30) {
                 eprintln!("nxkit-gpu: walk: {counters:?}");
             }
             walker.take()
         };
-        if overlap_diag() {
+        if self.diag.overlap {
             self.overlap.frame(&detail, fence.0, &self.guest);
         }
         if !matches(frame, &detail) {
@@ -111,7 +127,7 @@ impl Backend for GpuBackend {
         }
         // The overlap: the ranges that this frame reads from a copy of its own take their bytes now, before the CPU
         // writes the next frame.
-        if crate::overlap::on() {
+        if crate::overlap::on(self.game_overlap) {
             let (capture, check) = self.rename.at_flush(&detail, fence.0);
             detail.rename = capture.map(Arc::new);
             detail.rename_check = check;
@@ -174,7 +190,7 @@ impl Backend for GpuBackend {
             }
         }
         let r = self.flush_sync(frame, plan, &pools, fence, &detail, cx);
-        drop_later(detail);
+        self.dropper.drop_later(detail);
         r
     }
 
@@ -213,11 +229,19 @@ impl Backend for GpuBackend {
     }
 
     fn present(&self, present: Present) -> BackendResult<()> {
-        encpace::asked();
+        self.diag.asked();
         self.asked.fetch_add(1, Ordering::AcqRel);
+        let origin_lower_left = self.device_lower_left.load(Ordering::Acquire);
         match &self.enc {
-            Some(enc) if enc.send(Msg::Present(present)) => Ok(()),
-            _ => self.present_now(present),
+            Some(enc)
+                if enc.send(Msg::Present {
+                    present,
+                    origin_lower_left,
+                }) =>
+            {
+                Ok(())
+            }
+            _ => self.present_now(present, origin_lower_left),
         }
     }
 
@@ -249,7 +273,7 @@ impl Backend for GpuBackend {
 
     fn recording_invalidated(&self, start: u64, end: u64) {
         self.invalidations.push(start, end);
-        if overlap_diag()
+        if self.diag.overlap
             && let Ok(gpu) = self
                 .guest
                 .address_map()
@@ -315,13 +339,16 @@ impl Backend for GpuBackend {
 impl GpuBackend {
     /// The wait of [`Backend::wait_fence`].
     fn wait_fence_now(&self, fence: Fence) -> WaitResult {
-        if fence.0 != 0 && crate::overlap::on() {
+        if fence.0 != 0 && crate::overlap::on(self.game_overlap) {
             self.rename.note_wait();
             self.rename.before_wait(fence.0);
         }
         if fence.0 == 0 || fence.0 <= self.done.load(Ordering::Acquire) {
             if fence.0 != 0 {
-                self.renamed_wait(fence.0, format_args!("wait done already for fence {}", fence.0));
+                self.renamed_wait(
+                    fence.0,
+                    format_args!("wait done already for fence {}", fence.0),
+                );
             }
             return WaitResult::AlreadyDone;
         }
@@ -334,7 +361,7 @@ impl GpuBackend {
         }
         // One frame of overlap: a wait for the newest frame waits for the one before it. A frame that copied back to
         // CPU memory waited in full when it was encoded, so `done` covers it already.
-        if crate::overlap::on()
+        if crate::overlap::on(self.game_overlap)
             && self.enc.is_none()
             && fence.0 == self.encoded.load(Ordering::Acquire)
             && fence.0 > 1
@@ -346,7 +373,8 @@ impl GpuBackend {
                 let result = self.lock_gpu().wait_older();
                 match result {
                     Ok(Some(stats)) => {
-                        nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                        self.screen
+                            .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                     }
                     Ok(None) => {}
                     Err(_) => return WaitResult::Failed,
@@ -355,14 +383,17 @@ impl GpuBackend {
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
                 if ok {
-                    self.renamed_wait(older, format_args!("wait older={older} for fence {}", fence.0));
+                    self.renamed_wait(
+                        older,
+                        format_args!("wait older={older} for fence {}", fence.0),
+                    );
                 }
             }
             return WaitResult::Done;
         }
         // The same with the encoder thread: the frame before the newest must be encoded and finished on the GPU. The
         // wait goes to the batch itself, not through the lock that the encoder holds while it encodes the newest frame.
-        if crate::overlap::on()
+        if crate::overlap::on(self.game_overlap)
             && let Some(enc) = &self.enc
             && fence.0 > 2
             && fence.0 == self.flushed.load(Ordering::Acquire)
@@ -383,15 +414,19 @@ impl GpuBackend {
                     return WaitResult::Failed;
                 }
                 if let Some((_, stats)) = finished.last() {
-                    nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                    self.screen
+                        .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
                 }
                 self.write_counters(older, &finished);
                 self.done.fetch_max(older, Ordering::AcqRel);
-                self.renamed_wait(older, format_args!("wait older={older} for fence {}", fence.0));
+                self.renamed_wait(
+                    older,
+                    format_args!("wait older={older} for fence {}", fence.0),
+                );
             }
             return WaitResult::Done;
         }
-        if crate::overlap::on() {
+        if crate::overlap::on(self.game_overlap) {
             self.rename.count_wait(fence.0, false);
         }
         if let Some(enc) = &self.enc {
@@ -467,7 +502,8 @@ impl GpuBackend {
                 return false;
             }
             if let Some((_, stats)) = finished.last() {
-                nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+                self.screen
+                    .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
             }
             self.write_counters(older, &finished);
             self.done.fetch_max(older, Ordering::AcqRel);
@@ -478,7 +514,8 @@ impl GpuBackend {
             return false;
         }
         if let Some((_, stats)) = finished.last() {
-            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            self.screen
+                .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         self.write_counters(older, &finished);
         self.done.fetch_max(older, Ordering::AcqRel);
@@ -495,7 +532,8 @@ impl GpuBackend {
         }
         let (finished, ok) = self.finish_batches(upto);
         if let Some((_, stats)) = finished.last() {
-            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            self.screen
+                .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         self.write_counters(upto, &finished);
         if ok {

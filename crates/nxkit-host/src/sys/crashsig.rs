@@ -122,8 +122,8 @@ static REPORTED: AtomicBool = AtomicBool::new(false);
 
 /// Installs the handler for the process and an alternate signal stack for this thread, once. Nothing with
 /// `NXKIT_CRASH_REPORT=0`.
-pub fn install() {
-    if std::env::var("NXKIT_CRASH_REPORT").is_ok_and(|v| v == "0") {
+pub fn install(env: &crate::hostenv::HostEnv) {
+    if env.crash_report_off {
         return;
     }
     let mut olds = [SigAction {

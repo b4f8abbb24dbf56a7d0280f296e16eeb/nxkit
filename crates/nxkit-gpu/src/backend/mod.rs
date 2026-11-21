@@ -13,13 +13,15 @@
 //! At most [`MAX_PENDING`] presented frames wait for a tick. `acquire` blocks the game while that many wait.
 
 mod api;
-mod encpace;
 mod events;
 mod gputs;
 mod poolops;
+mod presdiag;
+mod present;
 #[cfg(test)]
 mod tests;
 mod tick;
+mod util;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -45,10 +47,11 @@ use crate::detail::FrameDetail;
 use crate::encthread::{Encoder, Job, Msg, Reply, TableUpdate};
 use crate::guest::GuestView;
 use crate::guestpools::{GuestPoolSet, GuestPools};
+use crate::report::EncodeReport;
 use crate::settings::GpuSettings;
 use crate::snapshot::{EncodeView, Live, Snapshot};
-use crate::stats::EncodeReport;
 use crate::walk::{Invalidations, Walker};
+use util::{fail, matches, report_refused, take_due};
 
 /// The presented frames that may wait for a display tick.
 pub const MAX_PENDING: usize = 3;
@@ -64,6 +67,8 @@ struct Pending {
     texture: Texture,
     /// The part of the texture the game shows (`nvnWindowSetCrop`, or the vi layer crop); zero size is all of it.
     crop: nxkit_nvn::backend::Rect,
+    /// The device origin when this image was presented, not the current mode at the display tick.
+    origin_lower_left: bool,
 }
 
 /// The backend of the front end and the sink of the display ticks.
@@ -85,6 +90,14 @@ pub struct GpuBackend {
     invalidations: Arc<Invalidations>,
     /// The counters of `NXKIT_DIAG=overlap`.
     overlap: crate::overlap::Overlap,
+    /// The `overlap` key of `game.json`.
+    game_overlap: bool,
+    /// Frees the detail of a frame off the game's render thread.
+    dropper: util::Dropper,
+    /// The diagnostics of the present path.
+    diag: presdiag::PresentDiag,
+    /// What the screen showed of the presents, shared with the NVN present (W26).
+    screen: Arc<nxkit_nvn::screen::Screen>,
     /// The storage ranges that the overlap renames per frame: learned and captured at the flush, written back in a CPU
     /// wait (`rename`). The encoder owns the same object.
     rename: Arc<crate::rename::Renamer>,
@@ -97,6 +110,8 @@ pub struct GpuBackend {
     pending: Mutex<Vec<Pending>>,
     freed: Condvar,
     blit: Mutex<Option<Blit>>,
+    /// The minimum stay of the presents, which the host's refresh plan sets.
+    timed: Arc<nxkit_metal::TimedPresent>,
     pacer: OnceLock<Arc<Pacer>>,
     reports: AtomicU64,
     /// The timestamp reports of encoded frames that the GPU has not been seen to finish, with the fence of their
@@ -107,7 +122,12 @@ pub struct GpuBackend {
     queries: Mutex<Vec<(u64, Arc<crate::queries::FrameQueries>)>>,
     /// The last time written into a report (`gputs`). Its lock also orders the waits that write reports.
     ts: Mutex<gputs::Clock>,
+    /// The hook of the `frame` and `gateseq` traces for a batch kept for a fence.
+    batch_kept: Option<fn(u64, u64)>,
     blit_failed: AtomicBool,
+    /// The current device origin (`device_modes`). A submit and a present capture it when the game makes them, since
+    /// their walk or display runs later.
+    device_lower_left: AtomicBool,
     /// The encoder thread, when `enc_thread` is on.
     enc: Option<Encoder>,
     /// The newest fence that was flushed.
@@ -140,23 +160,23 @@ impl GpuBackend {
         guest: Arc<GuestMemory>,
         settings: &GpuSettings,
     ) -> nxkit_metal::Result<Arc<Self>> {
-        nxkit_metal::set_done_hook(nxkit_nvn::diag::batch_done);
-        nxkit_metal::set_commit_hook(nxkit_nvn::diag::batch_committed);
         let space = GuestSpace::over(&guest)?;
         let events = events::EventSignals::new(space.clone());
         let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
         let pool_hint = gpu.pool_hint();
         let rename = gpu.renamer();
-        let walker = Walker::new(settings.shader_dir.clone(), space.address_map());
+        let mut walker = Walker::new(settings.shader_dir.clone(), space.address_map());
+        walker.set_game_overlap(settings.overlap);
         let invalidations = walker.invalidations();
         let pools = crate::guestpools::whole(&guest);
-        if settings.overlap {
-            crate::overlap::set_on();
-        }
         // `NXKIT_PRIVATE`: the page tracker and, for `1`, the mirror. With the mirror the overlap and the renamer are off.
-        crate::private::attach(ctx, guest.host_base(), guest.len(), space.address_map().gpu_base());
-        let threaded =
-            settings.enc_thread || std::env::var("NXKIT_ENC_THREAD").is_ok_and(|v| v == "1");
+        crate::private::attach(
+            ctx,
+            guest.host_base(),
+            guest.len(),
+            space.address_map().gpu_base(),
+        );
+        let threaded = settings.enc_thread || crate::settings::env().enc_thread;
         Ok(Arc::new_cyclic(|weak: &Weak<Self>| {
             let enc = threaded
                 .then(|| {
@@ -181,7 +201,11 @@ impl GpuBackend {
                 walker: Mutex::new(walker),
                 invalidations,
                 overlap: crate::overlap::Overlap::default(),
+                game_overlap: settings.overlap,
+                dropper: util::Dropper::default(),
+                diag: presdiag::PresentDiag::default(),
                 rename,
+                screen: settings.screen.clone(),
                 scale: settings.scale,
                 encoded: AtomicU64::new(0),
                 done: AtomicU64::new(0),
@@ -189,12 +213,15 @@ impl GpuBackend {
                 pending: Mutex::new(Vec::new()),
                 freed: Condvar::new(),
                 blit: Mutex::new(None),
+                timed: settings.timed_present.clone(),
                 pacer: OnceLock::new(),
                 reports: AtomicU64::new(0),
                 counters: Mutex::new(Vec::new()),
                 queries: Mutex::new(Vec::new()),
                 ts: Mutex::new(gputs::Clock::default()),
+                batch_kept: settings.batch_hooks.map(|h| h.kept),
                 blit_failed: AtomicBool::new(false),
+                device_lower_left: AtomicBool::new(true),
                 enc,
                 flushed: AtomicU64::new(0),
                 asked: AtomicU64::new(0),
@@ -231,7 +258,8 @@ impl GpuBackend {
         let result = gpu.wait();
         drop(gpu);
         if let Ok(Some(stats)) = &result {
-            nxkit_nvn::screen::set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
+            self.screen
+                .set_gpu_ms((stats.gpu_end_s - stats.gpu_start_s) * 1e3);
         }
         let (finished, ok) = self.finish_batches(upto);
         self.write_counters(upto, &finished);
@@ -248,7 +276,7 @@ impl GpuBackend {
     /// The CPU waited for fence `waited` and the GPU is done with it: the renamed ranges of the frames up to it go back
     /// into guest memory, and the ranges that are judged read their bytes after the frame.
     fn renamed_wait(&self, waited: u64, who: std::fmt::Arguments<'_>) {
-        if !crate::overlap::on() {
+        if !crate::overlap::on(self.game_overlap) {
             return;
         }
         self.rename.after_wait(
@@ -283,31 +311,16 @@ impl GpuBackend {
     }
 }
 
-/// Takes the entries of the frames up to fence `upto` out of `held`.
-fn take_due<T>(held: &Mutex<Vec<(u64, T)>>, upto: u64) -> Vec<(u64, T)> {
-    let mut c = locked(held);
-    let (due, keep): (Vec<_>, Vec<_>) = c.drain(..).partition(|(f, _)| *f <= upto);
-    *c = keep;
-    due
-}
-
-/// A report whose 16 bytes are not in guest memory is not written. Said once.
-fn report_refused(addr: u64) {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        eprintln!(
-            "nxkit-gpu: a counter report at {addr:#x} is not in guest memory, it is not written"
-        );
-    });
-}
-
 impl GpuBackend {
     /// Serves one message on the encoder thread.
     fn serve(&self, msg: Msg) -> Reply {
         match msg {
             Msg::Job(job) => Reply::Job(self.encode_job(&job)),
-            Msg::Present(present) => {
-                if let Err(e) = self.present_now(present) {
+            Msg::Present {
+                present,
+                origin_lower_left,
+            } => {
+                if let Err(e) = self.present_now(present, origin_lower_left) {
                     eprintln!("nxkit-gpu: the present failed on the encoder thread: {e}");
                 }
                 Reply::Done
@@ -336,7 +349,8 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         crate::private::encoded(job.fence.0, submitted.as_ref());
-        self.events.hold(job.fence.0, &job.detail.reports, submitted.as_ref());
+        self.events
+            .hold(job.fence.0, &job.detail.reports, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(job.fence.0, b);
         }
@@ -402,7 +416,8 @@ impl GpuBackend {
             (r, gpu.last_submitted())
         };
         crate::private::encoded(fence.0, submitted.as_ref());
-        self.events.hold(fence.0, &detail.reports, submitted.as_ref());
+        self.events
+            .hold(fence.0, &detail.reports, submitted.as_ref());
         if let Some(b) = submitted {
             self.keep_batch(fence.0, b);
         }
@@ -423,7 +438,7 @@ impl GpuBackend {
             self.copied_fence.fetch_max(fence.0, Ordering::AcqRel);
             self.drain(None);
         }
-        let synced: crate::draws::FastSet<TexId> = report
+        let synced: crate::fastmap::FastSet<TexId> = report
             .deswizzled
             .iter()
             .chain(&report.mirrored)
@@ -470,9 +485,11 @@ impl GpuBackend {
         }
         if crate::diag("pools") && n.is_multiple_of(300) {
             let (direct, deferred) = self.pool_ops.counts();
-            eprintln!("DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}");
+            eprintln!(
+                "DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}"
+            );
         }
-        let diag = stats_diag();
+        let diag = self.diag.stats;
         if crate::diag("pixelall") && n.is_multiple_of(10) {
             let st = &report.stats;
             eprintln!(
@@ -493,7 +510,7 @@ impl GpuBackend {
             eprintln!("nxkit-gpu: frame {n}: {:?}", report.stats);
         }
         if diag && n.is_multiple_of(30) {
-            eprintln!("nxkit-gpu: {}", crate::coverage::describe());
+            eprintln!("nxkit-gpu: {}", crate::pipelines::coverage::describe());
         }
         // The mesh and indirect draws: every 30 frames under `stats` or `mesh`, and the first frame that has any.
         let kinds = &report.stats.kinds;
@@ -509,34 +526,6 @@ impl GpuBackend {
         }
     }
 
-    /// Keeps the Metal texture of the presented frame and tells the pacer. Runs after the encode of that frame.
-    fn present_now(&self, present: Present) -> BackendResult<()> {
-        // The number goes first, so that a present without a texture still counts as one of the game's presents.
-        let number = self.presented.fetch_add(1, Ordering::AcqRel) + 1;
-        let texture = self.lock_gpu()
-            .texture(present.texture)
-            .ok_or_else(|| BackendError("the presented texture has no Metal texture".into()))?;
-        encpace::ready(number);
-        if crate::diag("present") && number % 120 == 1 {
-            eprintln!(
-                "DIAG present id {:?} {}x{} {:?}",
-                present.texture,
-                texture.desc().width,
-                texture.desc().height,
-                texture.desc().format
-            );
-        }
-        locked(&self.pending).push(Pending {
-            number,
-            texture,
-            crop: present.crop,
-        });
-        if let Some(p) = self.pacer.get() {
-            p.game_frame_ready(number);
-        }
-        Ok(())
-    }
-
     /// Drops the Metal texture of `id`, in the order of the frames: on the encoder thread when there is one.
     fn retire(&self, id: TexId) {
         match &self.enc {
@@ -544,57 +533,4 @@ impl GpuBackend {
             _ => self.lock_gpu().texture_destroyed(id),
         }
     }
-}
-
-/// Drops `v` on a thread of its own. The detail of a frame holds thousands of draws; freeing them took about a millisecond
-/// of the game's render thread at the end of every frame.
-fn drop_later<T: Send + 'static>(v: T) {
-    type Sender = std::sync::mpsc::Sender<Box<dyn Send>>;
-    static TX: OnceLock<Option<Mutex<Sender>>> = OnceLock::new();
-    let tx = TX.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<Box<dyn Send>>();
-        let spawned = std::thread::Builder::new()
-            .name("nxkit-drop".into())
-            .spawn(move || rx.into_iter().for_each(drop));
-        spawned.ok().map(|_| Mutex::new(tx))
-    });
-    let v: Box<dyn Send> = Box::new(v);
-    match tx {
-        Some(tx) => {
-            if let Err(e) = locked(tx).send(v) {
-                drop(e.0);
-            }
-        }
-        None => drop(v),
-    }
-}
-
-/// Whether `NXKIT_DIAG` asks for the overlap counters.
-fn overlap_diag() -> bool {
-    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DIAG.get_or_init(|| crate::diag("overlap"))
-}
-
-/// Whether `NXKIT_DIAG` asks for the periodic counters.
-fn stats_diag() -> bool {
-    static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DIAG.get_or_init(|| crate::diag("stats"))
-}
-
-/// True when the detail has one entry for each command that needs one.
-fn matches(frame: &Frame, d: &FrameDetail) -> bool {
-    let (mut draws, mut clears, mut dispatches) = (0, 0, 0);
-    for c in &frame.cmds {
-        match c {
-            Cmd::Draw { .. } => draws += 1,
-            Cmd::ClearColor { .. } | Cmd::ClearDepthStencil { .. } => clears += 1,
-            Cmd::Dispatch { .. } => dispatches += 1,
-            _ => {}
-        }
-    }
-    d.draws.len() == draws && d.clears.len() == clears && d.dispatches.len() == dispatches
-}
-
-fn fail(e: impl std::fmt::Display) -> BackendError {
-    BackendError(e.to_string())
 }

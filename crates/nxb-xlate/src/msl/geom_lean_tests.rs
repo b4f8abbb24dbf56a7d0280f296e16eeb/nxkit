@@ -4,7 +4,7 @@
 use super::Translated;
 use super::geom_lean::lean;
 use super::geom_tests::{code, compile_metal, extra, job, run};
-use crate::translation::emit_test_util::PRED7;
+use crate::front::emit_test_util::PRED7;
 use nxb_pyjson::Value;
 
 /// `ALD R0, a[0x80]` of the vertex in RZ: generic attribute 0.x, capture word 16.

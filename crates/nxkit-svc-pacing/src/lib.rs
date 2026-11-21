@@ -44,6 +44,7 @@ pub mod load;
 pub mod mode;
 pub mod notice;
 pub mod refresh;
+pub mod settings;
 pub mod state;
 pub mod vstep;
 pub mod vsync;
@@ -151,6 +152,8 @@ pub struct Snapshot {
 }
 
 struct Shared {
+    /// Whether the variable step takes its time from the shown frames. Read without a lock by [`frame_shown`].
+    by_shown: std::sync::atomic::AtomicBool,
     bind: BindSystemEvent,
     clock: TickClock,
     rates: Rates,
@@ -167,6 +170,8 @@ struct Shared {
     notices: Vec<Notice>,
 }
 
+// Process-wide (W26): the pacing state of `nn::vi` and of the frame step stubs; the game calls in through a C function
+// with no Rust context.
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
 
 #[cfg(test)]
@@ -203,6 +208,7 @@ pub fn init(config: &Config) -> Result<(), Error> {
         cap = c;
     }
     let shared = Arc::new(Shared {
+        by_shown: std::sync::atomic::AtomicBool::new(false),
         bind: config.bind_system_event,
         clock: TickClock::default(),
         rates: Rates::new(config.display_hz, config.vsync_hz),
@@ -229,22 +235,6 @@ fn shared() -> Result<&'static Arc<Shared>, Error> {
 pub fn on_display_tick() -> Result<(), Error> {
     shared()?.clock.tick();
     Ok(())
-}
-
-/// The refresh rate of the screen that shows the game, 120 until the host sets it.
-static SCREEN_HZ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(120);
-
-/// Sets the refresh rate of the screen that shows the game. A rate that is not a multiple of the step rate (144 Hz)
-/// shows a frame on time one refresh longer now and then, which the frame step must not take for lateness.
-pub fn set_screen_hz(hz: u32) {
-    if hz > 0 {
-        SCREEN_HZ.store(hz, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-/// The refresh rate of the screen that shows the game.
-pub fn screen_hz() -> u32 {
-    SCREEN_HZ.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Sets the display rate and the vsync rate of the game. The host calls it when the plan changes.
@@ -283,21 +273,18 @@ pub fn frame_started(start_ns: u64) -> Result<(), Error> {
     }
 }
 
-/// Whether the variable step takes its time from the shown frames. Read without a lock by [`frame_shown`].
-static BY_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// Makes the variable step (`StepMode::Variable`) measure its time at the presentation: the step of a frame is the time
 /// between the last two frames the display showed ([`frame_shown`]), not the time between two frame starts. The host
 /// turns it on when frames are shown as soon as they are ready (variable refresh). The variable step starts again on a
 /// change. Does nothing without a state page.
 pub fn set_step_by_shown(on: bool) {
-    BY_SHOWN.store(on, Ordering::Relaxed);
-    if let Ok(s) = shared()
-        && let Some(st) = s
-            .stepper
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_mut()
+    let Ok(s) = shared() else { return };
+    s.by_shown.store(on, Ordering::Relaxed);
+    if let Some(st) = s
+        .stepper
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
     {
         st.set_by_shown(on);
     }
@@ -306,15 +293,15 @@ pub fn set_step_by_shown(on: bool) {
 /// The display showed a frame at `shown_ns`, a monotonic time in nanoseconds on the clock of [`frame_started`]. A cheap
 /// no-op while [`set_step_by_shown`] is off.
 pub fn frame_shown(shown_ns: u64) {
-    if !BY_SHOWN.load(Ordering::Relaxed) {
+    let Ok(s) = shared() else { return };
+    if !s.by_shown.load(Ordering::Relaxed) {
         return;
     }
-    if let Ok(s) = shared()
-        && let Some(st) = s
-            .stepper
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_mut()
+    if let Some(st) = s
+        .stepper
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
     {
         st.frame_shown(shown_ns);
     }

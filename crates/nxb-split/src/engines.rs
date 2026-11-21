@@ -4,7 +4,7 @@
 use crate::SplitError;
 use crate::bahs::BahsVar;
 use crate::glslc::nvn2_stage;
-use crate::shaders::{
+use crate::prim::{
     CS_MAGIC, CTL_MAGIC, Found, GFX_MAGIC, check, memfind, nvn2_ctl, span, sph_stage, u32le,
 };
 

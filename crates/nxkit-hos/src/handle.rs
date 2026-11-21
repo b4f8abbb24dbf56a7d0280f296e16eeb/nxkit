@@ -2,7 +2,8 @@
 //! its slot is reused.
 
 use crate::result::{KResult, KResultOr};
-use crate::thread::{SyncObject, Thread, lock};
+use crate::sync::lock;
+use crate::thread::{SyncObject, Thread};
 use nxkit_abi::kernel::Session;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

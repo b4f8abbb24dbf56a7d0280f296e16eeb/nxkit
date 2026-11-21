@@ -4,6 +4,10 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
 
+// Links the static zlib that `libz-sys` builds (Windows has none of its own).
+#[cfg(windows)]
+use libz_sys as _;
+
 #[repr(C)]
 struct ZStream {
     next_in: *const u8,
@@ -22,7 +26,7 @@ struct ZStream {
     reserved: c_ulong,
 }
 
-#[link(name = "z")]
+#[cfg_attr(unix, link(name = "z"))]
 unsafe extern "C" {
     fn zlibVersion() -> *const c_char;
     fn deflateInit2_(

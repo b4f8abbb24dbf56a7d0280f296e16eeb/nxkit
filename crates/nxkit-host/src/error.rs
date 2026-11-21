@@ -34,6 +34,8 @@ pub enum HostError {
     },
     /// A part that another crate provides is not connected yet. See `seams.rs`.
     Unwired(&'static str),
+    /// The typed settings of the run could not be installed: a crate had them already or was read before (W27).
+    Settings(String),
     /// The window or the Metal path failed.
     App(String),
 }
@@ -51,6 +53,7 @@ impl fmt::Display for HostError {
             HostError::Os { what, errno } => write!(f, "{what} failed, errno {errno}"),
             HostError::Unwired(what) => write!(f, "not connected yet: {what} (see seams.rs)"),
             HostError::App(m) => write!(f, "window: {m}"),
+            HostError::Settings(m) => write!(f, "settings: {m}"),
         }
     }
 }

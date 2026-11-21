@@ -19,6 +19,7 @@ mod guest_api;
 mod pacing;
 mod picture;
 mod planar;
+pub mod settings;
 mod vp9;
 mod yuv;
 
@@ -75,8 +76,13 @@ pub struct Config {
     pub host: Arc<dyn Host>,
     /// The texture hand-off. Without it a decoder in native texture mode is refused with a log line.
     pub sink: Option<Arc<dyn TextureSink>>,
+    /// Who learns that the service wrote guest memory itself (a picture into a native image), so that the GPU loads the
+    /// texture over it again: `(address, length)`. Without it the GPU keeps the texture it uploaded first.
+    pub guest_write: Option<fn(u64, u64)>,
 }
 
+// Process-wide (W26): the configuration of `movie::Decoder`, which the game calls through a C function with no Rust
+// context.
 static CONFIG: RwLock<Option<Config>> = RwLock::new(None);
 
 /// Gives the service its settings. The host calls it once before the game starts.
@@ -86,18 +92,14 @@ pub fn init(config: &Config) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.clone());
 }
 
-/// Who learns that the service wrote guest memory itself (a picture into a native image), so that the GPU loads the
-/// texture over it again. The GPU front end sets it; without it the GPU keeps the texture it uploaded first.
-static GUEST_WRITE: std::sync::OnceLock<fn(u64, u64)> = std::sync::OnceLock::new();
-
-/// Sets the function that is told `(address, length)` of every guest range the service writes.
-pub fn set_guest_write_hook(f: fn(u64, u64)) {
-    let _ = GUEST_WRITE.set(f);
-}
-
-/// Tells the hook that the service wrote `[addr, addr + len)`.
+/// Tells the hook of the configuration that the service wrote `[addr, addr + len)`.
 pub(crate) fn guest_wrote(addr: u64, len: u64) {
-    if let Some(f) = GUEST_WRITE.get() {
+    let hook = CONFIG
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(|c| c.guest_write);
+    if let Some(f) = hook {
         f(addr, len);
     }
 }

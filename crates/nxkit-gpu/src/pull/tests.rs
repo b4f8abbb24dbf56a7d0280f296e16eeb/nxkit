@@ -544,8 +544,12 @@ fn the_index_range_skips_restart_indices_but_not_widened_bytes() {
 /// Pulling stays off unless `NXKIT_PULL=1`.
 #[test]
 fn pulling_is_off_unless_asked_for() {
-    assert!(!enabled(None));
-    assert!(!enabled(Some("0")));
-    assert!(!enabled(Some("")));
-    assert!(enabled(Some("1")));
+    let pull = |v: Option<&str>| {
+        let env = nxkit_abi::env::Env::from_pairs(v.map(|v| ("NXKIT_PULL", v)));
+        crate::settings::GpuEnv::from_env(&env).pull
+    };
+    assert!(!pull(None));
+    assert!(!pull(Some("0")));
+    assert!(!pull(Some("")));
+    assert!(pull(Some("1")));
 }

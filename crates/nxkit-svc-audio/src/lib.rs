@@ -23,6 +23,7 @@ mod sdk_dev;
 mod sdk_out;
 mod sdk_ren;
 mod sdk_stream;
+pub mod settings;
 mod sys;
 mod util;
 

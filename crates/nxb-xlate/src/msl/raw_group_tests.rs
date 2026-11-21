@@ -2,8 +2,8 @@
 #![cfg(test)]
 
 use super::{Context, translate};
+use crate::front::emit_test_util::AEXIT;
 use crate::job::parse_jobs;
-use crate::translation::emit_test_util::AEXIT;
 
 /// `S2R Rd, SR_TID.X`.
 fn s2r_tid(rd: u64) -> (u64, u64) {

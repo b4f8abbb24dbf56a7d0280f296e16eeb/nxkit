@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::json::Value;
-use crate::manifest::bad;
+use crate::fields::bad;
 
 /// The graphics API of the game (`"graphics"`). An app of a build before the key renders with NVN.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::error::RewriteError;
 use crate::matchfn::{CutRow, Outcome, resolve};
+use crate::options::Options;
 use crate::patches::{Cut, PatchTable};
-use crate::rewrite::Options;
 use crate::rw::{R, Rw};
 
 pub(crate) fn cuts_for(

@@ -10,12 +10,12 @@ mod test_util;
 #[cfg(test)]
 mod tests;
 pub mod text;
-pub mod types;
+pub mod walk;
 
+use crate::ir::agg::AggType;
 use crate::ir::{IoVariable, StorageKind};
 pub use ast::{A, Ast, BlockType};
 pub use program::make_structured_program;
-use types::AggType;
 
 /// `StructuredFunction`.
 #[derive(Clone, Debug)]

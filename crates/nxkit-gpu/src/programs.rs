@@ -13,7 +13,11 @@ use std::sync::{Arc, PoisonError, RwLock};
 use nxkit_metal::{Context, ShaderLibrary, VertexFormat};
 
 use crate::json::{Json, parse};
-use crate::stats::Skip;
+use crate::skip::Skip;
+
+/// The entries of `render_scale` in the support buffer: entry 0 is the scale of the pass, entry `1 + i` the scale of
+/// descriptor `i`.
+pub(crate) const SUPPORT_SCALES: u32 = 73;
 
 /// What a binding of the argument buffer holds. The names are the `kind` strings of `_b.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,7 +42,7 @@ pub(crate) enum BindKind {
     Support,
     /// `border`: the border colour block.
     Border,
-    /// `blendz`: the blend word of the draw (`translate::blend_zero_word`), 4 bytes.
+    /// `blendz`: the blend word of the draw (`draws::blend_zero_word`), 4 bytes.
     BlendZ,
     /// `sbuf`: the GPU address of storage buffer `reg`.
     Sbuf,
@@ -130,6 +134,9 @@ pub(crate) struct Bind {
     pub(crate) rscale: Option<u32>,
     /// For an `img` member: what the shader declares.
     pub(crate) img: Option<ImgDecl>,
+    /// For a `tex_ubo` or `samp_ubo` member: the words of its handle. It is a `tex` or `samp_tex` member of the texture
+    /// slot `reg` that [`crate::ubotex`] gives the source.
+    pub(crate) ubo: Option<crate::ubotex::Source>,
 }
 
 /// The texture type of an MSL argument type such as `texture2d_array<float>`.
@@ -196,7 +203,7 @@ pub(crate) struct StageProgram {
     pub(crate) mesh: Option<MeshInfo>,
 }
 
-type ProgramMap = crate::draws::FastMap<String, Result<Arc<StageProgram>, Skip>>;
+type ProgramMap = crate::fastmap::FastMap<String, Result<Arc<StageProgram>, Skip>>;
 
 /// Reads and caches the programs of one shader directory.
 pub(crate) struct Programs {
@@ -342,8 +349,18 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         .and_then(Json::as_bool)
         .unwrap_or(false);
     let mut arg_bytes = 0u32;
+    // The distinct sources of the `tex_ubo` and `samp_ubo` members; the index gives the texture slot.
+    let mut sources: Vec<crate::ubotex::Source> = Vec::new();
     for b in json.get("bindings").map(Json::as_arr).unwrap_or(&[]) {
-        let kind = match b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)? {
+        let kind_str = b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)?;
+        let ubo = match kind_str {
+            "tex_ubo" => crate::ubotex::source(b, false),
+            "samp_ubo" => crate::ubotex::source(b, true),
+            _ => None,
+        };
+        let kind = match kind_str {
+            "tex_ubo" if ubo.is_some() => BindKind::Tex,
+            "samp_ubo" if ubo.is_some() => BindKind::SampTex,
             "cbuf" => BindKind::Cbuf,
             "tex" => BindKind::Tex,
             "samp" => BindKind::Samp,
@@ -384,8 +401,19 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .and_then(Json::as_i64)
             .ok_or(Skip::Program)?;
         let arg_id = u32::try_from(arg_id).map_err(|_| Skip::Program)?;
-        let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
-        let reg = u32::try_from(reg).map_err(|_| Skip::Program)?;
+        let reg = match ubo {
+            Some(src) => {
+                let i = sources.iter().position(|s| *s == src).unwrap_or_else(|| {
+                    sources.push(src);
+                    sources.len() - 1
+                });
+                crate::ubotex::SLOT_BASE + i as u32
+            }
+            None => {
+                let reg = b.get("reg").and_then(Json::as_i64).unwrap_or(0);
+                u32::try_from(reg).map_err(|_| Skip::Program)?
+            }
+        };
         arg_bytes = arg_bytes.max(
             arg_id
                 .checked_add(1)
@@ -405,7 +433,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
                 .get("rscale")
                 .and_then(Json::as_i64)
                 .and_then(|v| u32::try_from(v).ok())
-                .filter(|v| *v < crate::bindless::SUPPORT_SCALES),
+                .filter(|v| *v < SUPPORT_SCALES),
             BindKind::Support => pass_scale.then_some(0),
             _ => None,
         };
@@ -430,6 +458,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             rscale,
             img,
             bank,
+            ubo,
         });
     }
     let inputs = if vertex {

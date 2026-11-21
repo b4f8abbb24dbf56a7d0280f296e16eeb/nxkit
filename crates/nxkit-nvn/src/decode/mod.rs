@@ -7,6 +7,7 @@
 //! A call record plays another recording. The child summary is made with the state that the caller has at that point.
 //! The effects of the child go into the stream of the caller. State that the child sets stays set for the caller.
 
+pub mod cache;
 use std::ops::Range;
 
 use crate::cache::RecCache;
@@ -287,11 +288,7 @@ pub struct Ctx<'a, M: GuestMem> {
 /// The GPU address of `NXKIT_WATCH_ADDR` (hex, `0x` optional): the decoder prints the texture that each record word at
 /// that address resolves to. Diagnostics only.
 fn watch_addr() -> Option<u64> {
-    static ADDR: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
-    *ADDR.get_or_init(|| {
-        let v = std::env::var("NXKIT_WATCH_ADDR").ok()?;
-        u64::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()
-    })
+    crate::settings::settings().watch_addr
 }
 
 /// The bit where a record word keeps the texture id above the GPU address. Texture storage ends below 2^40.

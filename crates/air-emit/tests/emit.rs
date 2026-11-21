@@ -39,6 +39,113 @@ fn fragment_with_function_constant_gate_and_contraction() {
 }
 
 #[test]
+fn device_offsets_use_wrapping_pointer_arithmetic() {
+    let ir = emit(
+        "kernel void k(device uint* out [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+        out[1] = out[i];
+    }",
+    );
+    assert_eq!(
+        ir.matches("getelementptr i32, i32 addrspace(1)*").count(),
+        2,
+        "{ir}"
+    );
+    assert!(
+        !ir.contains("getelementptr inbounds i32, i32 addrspace(1)*"),
+        "{ir}"
+    );
+}
+
+#[test]
+fn dynamic_array_index_is_not_inbounds_in_any_space() {
+    let ir = emit(
+        "kernel void k(device uint* out [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+        uint loc[4]; loc[0] = out[2]; loc[1] = out[3]; loc[2] = out[4]; loc[3] = out[5];
+        out[1] = loc[i & 3u];
+    }",
+    );
+    assert_eq!(
+        ir.matches("getelementptr inbounds [4 x i32], [4 x i32]*")
+            .count(),
+        4,
+        "{ir}"
+    );
+    assert_eq!(
+        ir.matches("getelementptr [4 x i32], [4 x i32]*").count(),
+        1,
+        "{ir}"
+    );
+}
+
+#[test]
+fn thread_array_reference_parameter_indexes_the_callers_storage() {
+    let ir = emit(
+        "static void write(thread uint (&values)[4], uint i, uint v) { values[i] = v; }\n\
+         kernel void main0(device uint* out [[buffer(0)]]) {\n\
+             uint values[4]; write(values, 1u, out[0]); out[1] = values[1];\n\
+         }\n",
+    );
+    assert!(ir.contains("[4 x i32]*"), "{ir}");
+    assert!(ir.contains("getelementptr inbounds [4 x i32]"), "{ir}");
+    assert!(ir.contains("call void"), "{ir}");
+}
+
+#[test]
+fn address_space_value_without_array_reference_is_still_rejected() {
+    for parameter in ["thread uint value", "threadgroup uint value"] {
+        let src = format!("{PRE}static void write({parameter}) {{}}");
+        let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
+        assert!(
+            error
+                .key()
+                .starts_with("unsupported:rejected:addrspace-value:"),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn private_array_cannot_bind_to_threadgroup_reference() {
+    let src = format!(
+        "{PRE}static uint read_slot(threadgroup uint (&values)[4]) {{ return values[0]; }}\n\
+         kernel void main0(device uint* out [[buffer(0)]]) {{ uint values[4]; out[0] = read_slot(values); }}"
+    );
+    let error = compile_source(&src, &Target::macos(), "t").unwrap_err();
+    assert!(error.key().contains("overload-resolution"), "{error:?}");
+}
+
+#[test]
+fn const_array_reference_falls_back_instead_of_losing_the_qualifier() {
+    for space in ["thread", "threadgroup"] {
+        let source =
+            format!("{PRE}static uint read(const {space} uint (&a)[2]) {{ return a[0]; }}");
+        let error = compile_source(&source, &Target::macos(), "t").unwrap_err();
+        assert!(error.key().contains("const-array-reference"), "{error:?}");
+    }
+}
+
+#[test]
+fn array_reference_overload_follows_argument_address_space() {
+    let private = "static uint read_slot(thread uint (&a)[2]) { return a[0]; }";
+    let shared = "static uint read_slot(threadgroup uint (&a)[2]) { return a[1]; }";
+    for helpers in [[private, shared], [shared, private]] {
+        let ir = emit(&format!(
+            "{}\n{}\nkernel void k(device uint* out [[buffer(0)]]) {{ \
+             uint a[2]; threadgroup uint b[2]; a[0] = out[0]; b[1] = out[1]; \
+             out[0] = read_slot(a); out[1] = read_slot(b); }}",
+            helpers[0], helpers[1]
+        ));
+        let calls: Vec<_> = ir
+            .lines()
+            .filter(|l| l.contains("call i32 @") && l.contains("[2 x i32]"))
+            .collect();
+        assert_eq!(calls.len(), 2, "{ir}");
+        assert!(calls[0].contains("[2 x i32]*"), "{ir}");
+        assert!(calls[1].contains("[2 x i32] addrspace(3)*"), "{ir}");
+    }
+}
+
+#[test]
 fn unsupported_constructs_are_reported() {
     let e = compile_source(
         &format!("{PRE}kernel void k(device float* p [[buffer(0)]]) {{ p[0] = tan(p[1]); }}\n"),

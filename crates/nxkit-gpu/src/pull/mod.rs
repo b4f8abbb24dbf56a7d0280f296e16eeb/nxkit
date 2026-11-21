@@ -11,7 +11,6 @@
 //! it, see docs/diagnostics.md): `NXKIT_PULL=1` turns it on, otherwise every vertex shader draws with `_b` and the
 //! stage_in vertex layout. `NXKIT_DIAG=pull` checks the reads of pulled draws against guest memory ([`model`]).
 
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::detail::DrawDetail;
@@ -41,13 +40,7 @@ pub(crate) type Block = [u8; BYTES];
 
 /// Whether the host draws vertex shaders through their `_bp` library: only with `NXKIT_PULL=1`. Read once.
 pub(crate) fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| enabled(std::env::var("NXKIT_PULL").ok().as_deref()))
-}
-
-/// The value of `NXKIT_PULL` that turns pulling on: `1`. Unset, `0` or anything else keeps stage_in.
-pub(crate) fn enabled(v: Option<&str>) -> bool {
-    v == Some("1")
+    crate::settings::env().pull
 }
 
 /// The attribute word of `dm_fetch`: the NVN attribute state word, format in bits 0 to 7, offset in 8 to 26, stream
@@ -121,49 +114,6 @@ pub(crate) fn take() -> (u64, u64) {
         PULLED.swap(0, Ordering::Relaxed),
         STAGE_IN.swap(0, Ordering::Relaxed),
     )
-}
-
-/// Pulled reads outside guest memory that `NXKIT_DIAG=pull` found, in total.
-static STRAYS: AtomicU64 = AtomicU64::new(0);
-
-/// `NXKIT_DIAG=pull`: checks that every element a pulled draw reads lies in guest memory, for the draws whose vertex
-/// range the host knows (arrays, and indexed draws with readable indices), and prints the first reads that do not. A
-/// read outside makes the GPU fault; the command buffer then fails (`nxkit-metal: warning: frame ... failed`). The
-/// check works on guest addresses, so it builds its own block with the guest bases of the streams.
-pub(crate) fn diag_draw(sh: &crate::draws::Shared<'_>, d: &DrawDetail, inputs: &[u32]) {
-    let block = &layout(d, Some);
-    let indices = |index_type: u32, address: u64, count: u32| {
-        let size = 1u64 << index_type.min(2);
-        sh.guest_offset(address, u64::from(count) * size)?;
-        let mut bytes = vec![0u8; (u64::from(count) * size) as usize];
-        sh.read_guest(address, &mut bytes).then_some(())?;
-        index_range(index_type, &bytes)
-    };
-    let Some(ranges) = model::ranges(d, indices) else {
-        return;
-    };
-    let inside = |a: u64, n: u64| sh.guest_offset(a, n).is_some();
-    if let Some(s) = model::check(block, inputs, ranges, inside) {
-        let n = STRAYS.fetch_add(1, Ordering::Relaxed) + 1;
-        if n <= 32 {
-            let m = sh.guest.address_map();
-            eprintln!(
-                "DIAG pull stray read {n}: vs {} location {} reads {} bytes at {:#x}, guest {:#x}+{:#x}, vertices {:?} \
-                 instances {:?} args {:?} streams {:?} attributes {:?}",
-                d.program.vertex,
-                s.location,
-                s.element.bytes,
-                s.element.address,
-                m.gpu_base(),
-                m.len(),
-                ranges.0,
-                ranges.1,
-                d.args,
-                d.streams,
-                d.attributes
-            );
-        }
-    }
 }
 
 /// The lowest and highest index the GPU shades: 8-bit indices are widened to 16 bits, so 0xff is a vertex; 0xffff of

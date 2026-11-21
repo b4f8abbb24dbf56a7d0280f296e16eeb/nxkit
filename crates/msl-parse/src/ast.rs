@@ -191,6 +191,8 @@ pub enum SwitchEntry {
 pub struct Decl {
     pub ty: Ty,
     pub vars: Vec<DeclVar>,
+    /// Static workgroup storage, not a private stack allocation.
+    pub threadgroup: bool,
 }
 
 #[derive(Clone, Debug)]

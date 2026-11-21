@@ -16,9 +16,7 @@ const EVERY: u64 = 300;
 /// Whether the category is on. The hooks for the batches of the GPU are set by [`super::flushstat`].
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        nxkit_nvn::diag::on("gateseq")
-    })
+    *ON.get_or_init(|| nxkit_nvn::diag::on("gateseq"))
 }
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -61,7 +59,14 @@ fn batches<R>(f: impl FnOnce(&mut Batches) -> R) -> R {
     f(g.get_or_insert_with(Batches::default))
 }
 
-fn print_batch(number: u64, fence: u64, cbs: usize, start_s: f64, end_s: f64, flush: Option<String>) {
+fn print_batch(
+    number: u64,
+    fence: u64,
+    cbs: usize,
+    start_s: f64,
+    end_s: f64,
+    flush: Option<String>,
+) {
     let (s, e) = (start_s * 1e3, end_s * 1e3);
     let base = TRACE_START.load(Ordering::Relaxed) as f64 / 1e6;
     line(format_args!(
@@ -203,10 +208,9 @@ fn ago(t: u64) -> String {
 /// Who signalled the event counter at `word` last, for a line about a wait on it.
 pub(crate) fn last_event_signals(word: u64) -> String {
     last(|l| {
-        let g = l
-            .gpu
-            .get(&word)
-            .map_or("none".to_string(), |(q, t)| format!("q {q:#x} at {}", ago(*t)));
+        let g = l.gpu.get(&word).map_or("none".to_string(), |(q, t)| {
+            format!("q {q:#x} at {}", ago(*t))
+        });
         let c = l
             .cpu
             .get(&word)

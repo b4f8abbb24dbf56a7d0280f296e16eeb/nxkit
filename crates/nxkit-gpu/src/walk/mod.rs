@@ -20,6 +20,7 @@
 mod cache;
 mod ext;
 mod objects;
+mod origin;
 mod prof;
 mod programs;
 
@@ -36,7 +37,7 @@ use crate::detail::{
     ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef, Stage,
     TextureBind, UboDetail,
 };
-use crate::draws::FastMap;
+use crate::fastmap::FastMap;
 use objects::{Blends, Raster, StencilValues};
 use programs::Programs;
 
@@ -76,6 +77,9 @@ pub(super) struct State {
     stencil: StencilValues,
     raster: Raster,
     viewport: [f32; 4],
+    viewport_swizzle: [u32; 4],
+    /// The device origin at submit and the queue origin captured at queue creation.
+    origins: [bool; 2],
     depth_range: [f32; 2],
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
@@ -103,6 +107,8 @@ impl Default for State {
             stencil: StencilValues::default(),
             raster: Raster::default(),
             viewport: [0.0; 4],
+            viewport_swizzle: origin::IDENTITY,
+            origins: [true; 2],
             depth_range: [0.0, 1.0],
             scissor: None,
             blend_color: [0.0; 4],
@@ -152,6 +158,8 @@ pub(crate) struct Walker {
     counters: WalkCounters,
     programs: Programs,
     queues: FastMap<u64, State>,
+    /// The device origin that the submit being walked captured when the game made it. Its draws take it.
+    origin_lower_left: bool,
     out: FrameDetail,
     map: AddressMap,
     /// The GPU ranges that `UpdateUniformBuffer` wrote. A draw that binds an overlapping range gets a snapshot.
@@ -167,6 +175,8 @@ pub(crate) struct Walker {
     /// Whether every bound uniform buffer gets a copy (the overlap, not the `nosnap` knob). Read once per submit,
     /// because the knob lookup is a string search.
     copy_all: bool,
+    /// The `overlap` key of `game.json`.
+    game_overlap: bool,
     /// Whether the storage buffers of a draw get a copy too (the overlap, not the `nosnapsbuf` knob).
     snap_sbufs: bool,
     prof: prof::Prof,
@@ -192,6 +202,7 @@ impl Walker {
             counters: WalkCounters::default(),
             programs: Programs::new(shader_dir),
             queues: FastMap::default(),
+            origin_lower_left: true,
             out: FrameDetail::default(),
             map,
             updated: Vec::new(),
@@ -200,6 +211,7 @@ impl Walker {
             frame_snaps: std::cell::RefCell::new(FastMap::default()),
             snap_tmp: std::cell::RefCell::new(Vec::new()),
             copy_all: false,
+            game_overlap: false,
             snap_sbufs: false,
             prof: prof::Prof::new(),
             update_bytes: Vec::new(),
@@ -207,8 +219,8 @@ impl Walker {
             track: cache::Track::new(),
             invalidations: Arc::new(Invalidations::default()),
             scratch_ranges: Vec::new(),
-            cache_on: cfg!(test) || std::env::var("NXKIT_WALK_CACHE").is_ok_and(|v| v == "1"),
-            verify: cfg!(test) || std::env::var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
+            cache_on: cfg!(test) || crate::settings::env().walk_cache,
+            verify: cfg!(test) || crate::settings::env().verify_cache,
             bypass: false,
             undo: None,
         }
@@ -216,6 +228,12 @@ impl Walker {
     }
 
     /// Reads the switches that the snapshots depend on.
+    /// Takes the `overlap` key of `game.json`: the walk copies the bound ranges for the frame ahead.
+    pub(crate) fn set_game_overlap(&mut self, on: bool) {
+        self.game_overlap = on;
+        self.read_knobs();
+    }
+
     fn with_knobs(mut self) -> Self {
         self.read_knobs();
         self
@@ -224,7 +242,8 @@ impl Walker {
     fn read_knobs(&mut self) {
         // The CPU runs ahead of the GPU with the overlap, and with the early fences of `NXKIT_PRIVATE=1`: the bytes of
         // a bound range that is not private are copied when the work is submitted.
-        let ahead = crate::overlap::on() || (crate::private::early() && !crate::knob("privhonest"));
+        let ahead = crate::overlap::on(self.game_overlap)
+            || (crate::private::early() && !crate::knob("privhonest"));
         self.copy_all = ahead && !crate::knob("nosnap");
         self.snap_sbufs = ahead && !crate::knob("nosnapsbuf");
     }
@@ -235,6 +254,23 @@ impl Walker {
 
     pub(crate) fn program_released(&mut self, program: u64) {
         self.programs.release(program);
+    }
+
+    /// Sets the device origin for the next walks without changing the origin captured by a queue. The backend sets
+    /// the one its submit captured.
+    pub(crate) fn device_origin(&mut self, lower_left: bool) {
+        self.origin_lower_left = lower_left;
+    }
+
+    /// The device and queue origins that the last walk of `queue` used.
+    #[cfg(test)]
+    pub(crate) fn origins(&self, queue: u64) -> Option<[bool; 2]> {
+        self.queues.get(&queue).map(|st| st.origins)
+    }
+
+    /// Sets the origin captured when this queue was initialized.
+    pub(crate) fn queue_origin(&mut self, queue: u64, lower_left: bool) {
+        self.queues.entry(queue).or_default().origins[1] = lower_left;
     }
 
     /// Walks `handles` on `queue`.
@@ -252,6 +288,7 @@ impl Walker {
         // CPU writes between submits do not have UpdateUniform records to invalidate cached snapshots.
         self.snaps.get_mut().clear();
         let mut st = self.queues.remove(&queue).unwrap_or_default();
+        st.origins[0] = self.origin_lower_left;
         for h in handles {
             // The copy strides belong to one command buffer and start again at zero in each recording.
             st.copy_strides = [0; 2];

@@ -47,22 +47,35 @@ pub struct Target {
     pub sdk: (u32, u32),
     /// `-fmetal-math-mode=relaxed`: no `nnan ninf` flags, no `no-infs`/`no-nans` function attributes.
     pub relaxed: bool,
-    /// Metal before 4: vectors get the `omnipotent char` TBAA node, not their element's.
+    /// Metal before 4.1: vectors get the `omnipotent char` TBAA node, not their element's.
     pub vec_tbaa_char: bool,
-    /// AIR 2.9: texture reads take `air.get_read_sampler()` and a zero offset (AIR 2.7 has neither).
+    /// AIR 2.8 and later: texture reads take `air.get_read_sampler()` and a zero offset (AIR 2.7 has neither).
     pub read_sampler: bool,
 }
 
 impl Target {
     /// The macOS SDK default target of the installed toolchain (macOS 27.2, AIR 2.9, Metal 4.1).
     pub fn macos() -> Target {
+        Target::macos_for(27)
+    }
+
+    /// The macOS target that runs on macOS `major` and later, as `metal` targets the host by default:
+    /// macOS 26 gets AIR 2.8 and Metal 4.0 (it refuses Metal 4.1 libraries), 27 and later get [`Target::macos`].
+    /// Metal 4.0 still reads with `air.get_read_sampler()` but gives vectors the `omnipotent char` TBAA node.
+    pub fn macos_for(major: u32) -> Target {
+        let old = major < 27;
         Target {
-            triple: "air64_v29-apple-macosx27.2.0".into(),
-            air_version: (2, 9, 0),
-            language: (4, 1, 0),
+            triple: if old {
+                "air64_v28-apple-macosx26.0.0"
+            } else {
+                "air64_v29-apple-macosx27.2.0"
+            }
+            .into(),
+            air_version: (2, if old { 8 } else { 9 }, 0),
+            language: (4, if old { 0 } else { 1 }, 0),
             sdk: (27, 2),
             relaxed: true,
-            vec_tbaa_char: false,
+            vec_tbaa_char: old,
             read_sampler: true,
         }
     }
@@ -493,6 +506,22 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
     // globals
     let mut globals = String::new();
     globals.push_str(&const_globals);
+    for (fid, f) in m.funcs.iter().enumerate() {
+        for (lid, local) in f
+            .locals
+            .iter()
+            .enumerate()
+            .filter(|(_, local)| local.threadgroup)
+        {
+            let name = threadgroup_name(&cx.types, f, fid, lid);
+            let ty = llty(&cx.types, &local.ty, true);
+            let align = cx.types.layout(&local.ty).align;
+            let _ = writeln!(
+                globals,
+                "{name} = internal addrspace(3) global {ty} undef, align {align}"
+            );
+        }
+    }
     let mut fc_md = Vec::new();
     for (k, f) in m.fconsts.iter().enumerate() {
         let (shadow, init) = cx.fconst_names[k].clone();
@@ -901,6 +930,13 @@ fn emit_deferred(
         }
         Deferred::Pending => Ok(()),
     }
+}
+
+fn threadgroup_name(types: &Types, f: &msl_sema::hir::Func, fid: usize, lid: usize) -> String {
+    mangle::threadgroup_local(f, types, &f.locals[lid].name).map_or_else(
+        || format!("@__nxkit.tg.{fid}.{lid}"),
+        |name| format!("@{name}"),
+    )
 }
 
 /// Emits one function definition.

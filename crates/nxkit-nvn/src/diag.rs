@@ -14,19 +14,11 @@ use std::sync::{Mutex, OnceLock};
 
 /// Whether `NXKIT_DIAG` names `cat` or `all`.
 pub fn on(cat: &str) -> bool {
-    /// `None` for `all`, else the categories. Parsed once: the call comes once per draw on some paths.
-    static V: OnceLock<Option<Vec<String>>> = OnceLock::new();
-    let v = V.get_or_init(|| {
-        let raw = std::env::var("NXKIT_DIAG").unwrap_or_default();
-        let list: Vec<String> = raw
-            .split(',')
-            .map(str::trim)
-            .filter(|c| !c.is_empty())
-            .map(String::from)
-            .collect();
-        (!list.iter().any(|c| c == "all")).then_some(list)
-    });
-    v.as_ref().is_none_or(|list| list.iter().any(|c| c == cat))
+    // `None` for `all`, else the categories, parsed once by the settings (the call comes once per draw on some paths).
+    crate::settings::settings()
+        .diag
+        .as_ref()
+        .is_none_or(|list| list.iter().any(|c| c == cat))
 }
 
 /// True for the first `max` calls with `counter`: the rate limit of a print that can come once per draw or frame.
@@ -123,6 +115,10 @@ reasons! {
     DecodeBadRecord => "decode.bad-record",
     /// Encoder: a texture handle has no descriptor or no texture record.
     HandleUnresolved => "tex.handle-unresolved",
+    /// Encoder: the word of a bindless handle that a shader reads from a uniform buffer (`tex_ubo`, `samp_ubo`) is
+    /// not readable: the slot is not bound, the offset lies past its end, or the guest memory cannot be read. The
+    /// member reads the null texture and the default sampler.
+    UboHandleUnread => "tex.ubo-handle-unread",
     /// Encoder: a texture format has no Metal equivalent.
     FormatUnsupported => "tex.format-unsupported",
     /// Encoder: Metal did not create a texture.
@@ -200,6 +196,10 @@ reasons! {
     /// The stretched copies among them that filtered linearly (`NVN_COPY_FLAGS_LINEAR_FILTER_BIT`). A count, not a
     /// loss.
     CopyScaledLinear => "copy.scaled-linear",
+    /// Texture copies with `MIRROR_X` or `MIRROR_Y` that the mirroring kernel cannot take (depth, stencil, compressed
+    /// or 3D textures, or textures a shader cannot read or write). A copy of an equal size runs as a blit without the
+    /// mirror. The example names the textures and the reason.
+    CopyMirrorLost => "copy.mirror-lost",
     /// Overlap: ranges of storage buffers that the GPU read and wrote from a copy of their own in this frame's batch
     /// slot (`nxkit-gpu` `rename`), counted per range and frame. A count, not a loss.
     OverlapRenamed => "overlap.renamed",
@@ -409,9 +409,9 @@ mod tests {
     }
 }
 
-/// Hooks that the encoder's backend calls for the trace `gateseq` of the host: a batch was kept for a fence, and a batch
-/// completed on the GPU. The host sets them once; without them the calls do nothing.
-#[derive(Clone, Copy)]
+/// Hooks that the encoder's backend calls for the traces `frame` and `gateseq`: a batch was kept for a fence, a batch was
+/// committed and a batch completed on the GPU. The host passes them to the backend when it makes it (W26).
+#[derive(Clone, Copy, Debug)]
 pub struct BatchHooks {
     /// `(fence, batch number)`: the batch of a flush was committed.
     pub kept: fn(u64, u64),
@@ -420,32 +420,4 @@ pub struct BatchHooks {
     pub done: fn(u64, usize, f64, f64),
     /// `(batch number, host clock in ns)`: the first command buffers of a batch were committed (`CLOCK_UPTIME_RAW`).
     pub committed: fn(u64, u64),
-}
-
-static BATCH_HOOKS: OnceLock<BatchHooks> = OnceLock::new();
-
-/// Sets the hooks of the batches. The first call wins.
-pub fn set_batch_hooks(h: BatchHooks) {
-    let _ = BATCH_HOOKS.set(h);
-}
-
-/// A batch was committed for `fence`.
-pub fn batch_kept(fence: u64, number: u64) {
-    if let Some(h) = BATCH_HOOKS.get() {
-        (h.kept)(fence, number);
-    }
-}
-
-/// The first command buffers of a batch were committed.
-pub fn batch_committed(number: u64, ns: u64) {
-    if let Some(h) = BATCH_HOOKS.get() {
-        (h.committed)(number, ns);
-    }
-}
-
-/// A batch completed on the GPU.
-pub fn batch_done(number: u64, cbs: usize, start_s: f64, end_s: f64) {
-    if let Some(h) = BATCH_HOOKS.get() {
-        (h.done)(number, cbs, start_s, end_s);
-    }
 }

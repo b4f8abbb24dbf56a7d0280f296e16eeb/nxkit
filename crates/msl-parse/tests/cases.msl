@@ -166,7 +166,7 @@ void f(float& r) { }
 
 === addrspace-value
 expect: reject addrspace-value:threadgroup
-kernel void k() { threadgroup float x; }
+void f() { threadgroup float x; }
 
 === packed-scalar-crashes
 expect: crash:TypeError

@@ -1,0 +1,20 @@
+# The module cycles that are accepted today, one strongly connected group per line: `crate: module module ...`.
+# `cargo run -p xtask -- modules` fails on a new group, on a group that takes in a module, and on a group here that
+# got smaller or broke up (then write the smaller lines it prints). The file only shrinks. ADR W24.
+# `cargo run -p xtask -- graph <crate>` shows the edges of a group and where each one comes from.
+# Measured on 0.10.3 (d6c41991): 34 groups, 159 modules. After the refactor of 0.11: 21 groups, 70 modules; after the runtime round: 14 groups, 48 modules.
+
+air-emit: atomic func intrin
+nxb-archive: compute exact plan seen
+nxb-extract: bktr nca sparse
+nxb-extract: html manifest meta nup post run split split_out version write
+nxb-maxwell: ampere ampere_table table
+nxb-maxwell: ampere_decode decoder flow
+nxb-model: digest sha256
+nxb-shader: job mesh
+nxb-stages: build build_finish build_partial build_shared build_xlate
+nxb-stages: own_front own_raw
+nxkit-svc-fs: commit files mount
+nxkit-svc-input: shmem state
+nxkit-svc-pacing: load mode
+nxkit-svc-video: frame planar sys yuv

@@ -55,7 +55,7 @@ pub(crate) fn reach<T>(r: Result<T, encode::Reach>) -> R<T> {
 impl Rw {
     /// The name of the function starting at `fa` (its symbol), or its offset.
     pub(crate) fn function_name(&self, fa: i64) -> String {
-        crate::obs::defined(&self.img)
+        crate::dynsym::defined(&self.img)
             .into_iter()
             .find(|(_, (v, _))| *v == fa)
             .map_or_else(|| format!("at {fa:#x}"), |(n, _)| n)

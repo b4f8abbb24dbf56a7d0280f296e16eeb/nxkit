@@ -18,13 +18,13 @@
 //! pass starts with a barrier from all earlier work, has a barrier around each job, and the barrier plan makes the
 //! passes after it wait (see `barriers`).
 
+use crate::encode::EncodeCtx;
 use nxkit_metal::{ComputeCommand, ComputePass, Scratch};
 use nxkit_nvn::diag::Reason;
 
 use crate::detail::{CopyDetail, CopyKind};
-use crate::draws::Shared;
 use crate::pools::{Backing, PoolSnapshot};
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 /// The threads of a threadgroup.
 const GROUP: u32 = 64;
@@ -151,7 +151,7 @@ impl Job {
 /// The real address of `bytes` at the guest address `addr`, or why they do not lie whole in one pool.
 fn real<B: Backing>(pools: &PoolSnapshot<B>, addr: u64, bytes: u64) -> Result<u64, String> {
     pools
-        .resolve_c(addr, bytes, crate::overlay::COPY)
+        .resolve_c(addr, bytes, crate::pools::overlay::COPY)
         .map(|l| l.real)
         .map_err(|m| format!("{addr:#x} + {bytes:#x}: {m:?}"))
 }
@@ -195,7 +195,7 @@ fn print(c: &CopyDetail, what: &str) {
 
 /// Encodes a buffer copy or fill into the compute pass `cp`, between two barriers.
 pub(super) fn run(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     c: &CopyDetail,

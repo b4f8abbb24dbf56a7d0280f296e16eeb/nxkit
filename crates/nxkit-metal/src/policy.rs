@@ -6,7 +6,7 @@
 //!
 //! Every plan has a reason that the host logs, so no choice is silent (R15).
 
-use crate::pacing::FrameInterval;
+use crate::interval::FrameInterval;
 
 /// Who paces the game. It mirrors `nxtitle::Pacing`, which this crate does not depend on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

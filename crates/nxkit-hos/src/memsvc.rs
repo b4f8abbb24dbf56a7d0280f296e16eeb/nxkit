@@ -11,15 +11,52 @@
 
 use crate::kernel::Kernel;
 use crate::memory::{HostSpace, PAGE_SIZE};
+use crate::process::BREAK_EXIT_CODE;
 use crate::result::{KResult, KResultOr};
-use crate::space::{Block, attr, perm, state};
-use crate::thread::lock;
+use crate::space::{Block, MemoryMap, attr, perm, state};
+use crate::sync::lock;
 use crate::vm::View;
 
 /// `SetHeapSize` takes multiples of 2 MiB.
 const HEAP_ALIGN: u64 = 0x20_0000;
 /// The attribute bits that `SetMemoryAttribute` may change.
 const CHANGEABLE_ATTR: u32 = attr::UNCACHED | attr::PERMISSION_LOCKED;
+
+/// Project a guest permission change onto host pages without downgrading neighbours.
+fn permission_ranges(
+    map: &MemoryMap,
+    start: u64,
+    end: u64,
+    new: u32,
+    page: u64,
+) -> Vec<(u64, u64, u32)> {
+    let first = start & !(page - 1);
+    let last = (end - 1) & !(page - 1);
+    let mut ranges: Vec<(u64, u64, u32)> = Vec::new();
+    let mut at = first;
+    while at <= last {
+        let boundary = at == first || at == last;
+        let next = if boundary { at + page } else { last };
+        let mut access = new;
+        if boundary {
+            for block in map.blocks(at, next) {
+                if block.start.max(at) < start || block.end.min(next) > end {
+                    access |= block.perm;
+                }
+            }
+        }
+        if let Some(previous) = ranges.last_mut()
+            && previous.1 == at
+            && previous.2 == access
+        {
+            previous.1 = next;
+        } else {
+            ranges.push((at, next, access));
+        }
+        at = next;
+    }
+    ranges
+}
 
 /// Checks that `addr` and `size` name whole pages and do not wrap. Returns the range.
 pub(crate) fn page_range(addr: u64, size: u64) -> KResultOr<(u64, u64)> {
@@ -47,6 +84,11 @@ fn shares(host: &dyn HostSpace, d0: u64, s0: u64, size: u64) -> bool {
 
 fn is_free(b: &Block) -> bool {
     b.state == state::FREE
+}
+
+// Horizon FlagCanAlias is set for both modeled data states.
+fn can_alias(state: u32) -> bool {
+    matches!(state, state::NORMAL | state::CODE_DATA)
 }
 
 fn is_plain_normal(b: &Block) -> bool {
@@ -106,6 +148,7 @@ impl Kernel {
 
     /// `SetMemoryPermission`: the range must be normal or code-data memory that is not locked and has no permission
     /// lock. The new permission is none, read or read and write.
+    /// Host pages receive the union of their guest permissions to preserve access for neighbouring guest pages.
     pub(crate) fn set_memory_permission(&self, addr: u64, size: u64, new: u32) -> KResultOr<()> {
         let vm = self.vm()?;
         let (start, end) = page_range(addr, size)?;
@@ -120,8 +163,44 @@ impl Kernel {
         if !sp.map.all(start, end, ok) {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
-        if !vm.cfg.host.protect(start, size, new) {
-            return Err(self.host_failed("SetMemoryPermission"));
+        let page = vm.cfg.host.page_size();
+        let ranges = permission_ranges(&sp.map, start, end, new, page);
+        // A shared host page cannot safely represent writable and executable subpages.
+        if ranges
+            .iter()
+            .any(|&(_, _, access)| access & (perm::W | perm::X) == (perm::W | perm::X))
+        {
+            return Err(KResult::INVALID_NEW_MEMORY_PERMISSION);
+        }
+        for &(from, to, access) in &ranges {
+            if !vm.cfg.host.protect(from, to - from, access) {
+                // Restore the old projection, including a possibly partially changed failing span.
+                let mut at = ranges[0].0;
+                let mut restored = true;
+                while at < to {
+                    let old = sp
+                        .map
+                        .blocks(at, at + page)
+                        .iter()
+                        .fold(0, |p, b| p | b.perm);
+                    if old & (perm::W | perm::X) == (perm::W | perm::X)
+                        || !vm.cfg.host.protect(at, page, old)
+                    {
+                        self.host_failed("SetMemoryPermission rollback");
+                        restored = false;
+                    }
+                    at += page;
+                }
+                let result = self.host_failed("SetMemoryPermission");
+                if !restored {
+                    // Ask the host to end a guest whose host permissions no longer match its map.
+                    // Release the lock before invoking the host's process-exit callback.
+                    drop(sp);
+                    (self.config.log)("SetMemoryPermission rollback failed: ending the process");
+                    (self.config.process_exit)(BREAK_EXIT_CODE);
+                }
+                return Err(result);
+            }
         }
         sp.map.rewrite(start, end, |b| Block { perm: new, ..*b });
         Ok(())
@@ -180,7 +259,12 @@ impl Kernel {
             return Err(KResult::INVALID_MEMORY_REGION);
         }
         let mut sp = lock(&vm.space);
-        if !sp.map.all(d0, d1, is_free) || !sp.map.all(s0, s1, is_plain_normal) {
+        let source_state = sp.map.query(s0).state;
+        if !sp.map.all(d0, d1, is_free)
+            || !sp.map.all(s0, s1, |b| {
+                b.state == source_state && can_alias(b.state) && b.attr == 0 && b.perm == perm::RW
+            })
+        {
             return Err(KResult::INVALID_CURRENT_MEMORY);
         }
         let host = &vm.cfg.host;
@@ -218,8 +302,12 @@ impl Kernel {
         let (s0, s1) = page_range(src, size)?;
         let mut sp = lock(&vm.space);
         let b = sp.map.query(d0);
+        let source_state = sp.map.query(s0).state;
         let locked = |b: &Block| {
-            b.state == state::NORMAL && b.attr & attr::LOCKED != 0 && b.perm == perm::NONE
+            b.state == source_state
+                && can_alias(b.state)
+                && b.attr == attr::LOCKED
+                && b.perm == perm::NONE
         };
         if b.start != d0 || b.end != d1 || b.state != state::STACK || b.src != s0 {
             return Err(KResult::INVALID_CURRENT_MEMORY);
@@ -365,5 +453,51 @@ impl Kernel {
         sp.physical_used = sp.physical_used.saturating_sub(freed);
         crate::usage::physical(sp.physical_used);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permissions_preserve_neighbours_until_the_whole_host_page_changes() {
+        for page in [0x1000, 0x4000] {
+            let mut map = MemoryMap::new();
+            map.set(0x4000, 0xc000, state::CODE_DATA, perm::RW, 0, 0);
+            // A 12 KiB RELRO prefix must not seal the adjacent 4 KiB writable data.
+            assert_eq!(
+                permission_ranges(&map, 0x4000, 0x7000, perm::R, page),
+                if page == 0x4000 {
+                    vec![(0x4000, 0x8000, perm::RW)]
+                } else {
+                    vec![(0x4000, 0x7000, perm::R)]
+                }
+            );
+            for start in (0x4000..0x8000).step_by(0x1000) {
+                let ranges = permission_ranges(&map, start, start + 0x1000, perm::R, page);
+                let expected = if page == 0x4000 && start < 0x7000 {
+                    perm::RW
+                } else {
+                    perm::R
+                };
+                assert_eq!(
+                    ranges,
+                    vec![(start & !(page - 1), (start & !(page - 1)) + page, expected)]
+                );
+                map.rewrite(start, start + 0x1000, |b| Block {
+                    perm: perm::R,
+                    ..*b
+                });
+            }
+            assert_eq!(
+                permission_ranges(&map, 0x5000, 0x9000, perm::NONE, page),
+                if page == 0x4000 {
+                    vec![(0x4000, 0x8000, perm::R), (0x8000, 0xc000, perm::RW)]
+                } else {
+                    vec![(0x5000, 0x9000, perm::NONE)]
+                }
+            );
+        }
     }
 }

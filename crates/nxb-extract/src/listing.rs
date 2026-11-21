@@ -1,7 +1,7 @@
 //! The files of a `DMROMFS1` image with their paths, offsets and sizes.
 
+use crate::fileext::FileExt;
 use std::fs::File;
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use crate::error::{ExtractError, Result};

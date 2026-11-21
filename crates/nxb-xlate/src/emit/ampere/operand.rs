@@ -1,12 +1,12 @@
 //! ALU source operands of `InstEmitAmpere.cs`: a register, uniform register, immediate or constant buffer word.
 
+use crate::emit::emitter::EmitterContext;
 use crate::ir::Inst;
 use crate::ir::Opd;
-use crate::ir::emitter::EmitterContext;
 use crate::ir::ops::regtype;
 use crate::maxwell::ampere::AmpOp;
 use crate::maxwell::ampere_table::has_uniform_guard;
-use crate::msl::abi::{C0_DISPATCH, C0_DISPATCH_NVN2};
+use crate::types::{C0_DISPATCH, C0_DISPATCH_NVN2};
 
 pub type Ctx<'a, 'b> = EmitterContext<'a, 'b>;
 pub type R = Result<(), String>;

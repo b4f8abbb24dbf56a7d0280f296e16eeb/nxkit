@@ -103,6 +103,8 @@ impl Default for Config {
     }
 }
 
+// Process-wide (W26): the configuration of the SDK take-overs; the game calls in through a C function with no Rust
+// context.
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Sets the configuration and notes the start of the program. The first call wins. A service that runs before `init`

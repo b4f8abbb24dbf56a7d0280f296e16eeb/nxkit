@@ -23,7 +23,7 @@ use nxkit_nvn::rendercond::gate::Info;
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::FrameDetail;
-use crate::draws::Shared;
+use crate::drawctx::Shared;
 
 /// The most `gate` lines of a run.
 const MAX_GATES: u32 = 200;

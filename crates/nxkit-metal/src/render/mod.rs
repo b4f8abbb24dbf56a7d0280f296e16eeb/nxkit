@@ -11,7 +11,6 @@ use crate::pipeline::RenderPipeline;
 use crate::state::{DepthBias, DepthClip, DepthStencilState, FillMode, Winding};
 use crate::texture::{Storage, Texture};
 
-pub(crate) use pass::PassDescriptor;
 pub use pass::RenderPass;
 
 mod pass;

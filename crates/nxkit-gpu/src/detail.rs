@@ -5,8 +5,8 @@
 //! to the NVN command decoder) fills a [`FrameDetail`] next to the frame. The vectors are indexed by ordinal:
 //! the n-th `Cmd::Draw` of the frame uses `draws[n]`, the n-th `Cmd::Copy` uses `copies[n]`, and so on.
 //!
-//! Every number is the raw NVN value (`NVNblendFunc`, `NVNdepthFunc`, `NVNface` and others), so the recorder does no
-//! translation. `crate::translate` does it in one place.
+//! Enum values use NVN (`NVNblendFunc`, `NVNdepthFunc`, `NVNface` and others). The walker converts the viewport and
+//! front-face convention for the captured origin modes. `crate::translate` converts the remaining state.
 
 use std::sync::Arc;
 
@@ -97,7 +97,7 @@ pub struct DepthStencilDetail {
 pub struct RasterDetail {
     /// `NVNface`: 0 none, 1 front, 2 back, 3 front and back.
     pub cull: u32,
-    /// `NVNfrontFace`: 0 clockwise, 1 counter-clockwise.
+    /// The Metal front face after queue-origin conversion: 0 clockwise, 1 counter-clockwise.
     pub front_face: u32,
     /// `NVNpolygonMode`: 0 point, 1 line, 2 fill.
     pub polygon_mode: u32,
@@ -262,7 +262,7 @@ pub struct TextureBind {
 /// The state that an ICB does not hold. The encoder sets it outside the ICB.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DynamicDetail {
-    /// The viewport as x, y, width and height in NVN pixels of the render target.
+    /// The viewport as x, y, width and height in unscaled pixels, after origin and swizzle conversion.
     pub viewport: [f32; 4],
     /// The depth range as near and far.
     pub depth_range: [f32; 2],
@@ -449,7 +449,7 @@ pub struct FrameDetail {
     pub reports: Vec<CounterReport>,
     /// The storage ranges that this frame reads and writes from a copy of its own (`rename`), taken at the flush. Only
     /// with the overlap on.
-    pub(crate) rename: Option<Arc<crate::rename::Capture>>,
+    pub(crate) rename: Option<Arc<Capture>>,
     /// The storage bindings of the frame whose use (written or only read) the encoder has to look at; `None` means all of
     /// them. The flush places the others (`rename`).
     pub(crate) rename_check: Option<Vec<(u8, u32, u32)>>,
@@ -485,4 +485,54 @@ impl CounterReport {
     pub fn is_event(&self) -> bool {
         matches!(self.kind, REPORT_EVENT_WRITE | REPORT_EVENT_ADD)
     }
+}
+
+// The renamed ranges of a frame (`crate::rename`), which the frame detail carries from the flush to the encoder.
+
+/// How a frame binds a range that it has a copy of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Kind {
+    /// Written by the GPU, re-initialised by the CPU: the end value goes back in the wait.
+    Rename,
+    /// Only read: nothing goes back.
+    Snapshot,
+    /// The GPU merges the copy with guest memory at the start and the end of the frame.
+    Merge,
+    /// A written range in a judged frame: the GPU reads and writes a copy that it fills from guest memory at the start
+    /// (a second copy keeps the start state), and writes the words that it changed back at the end. Guest memory is
+    /// written by the CPU only while the frame runs, so the host can tell the CPU's words from the GPU's.
+    Probe,
+}
+
+/// A renamed range of one frame with the guest bytes at its flush.
+#[derive(Debug)]
+pub(crate) struct CapRange {
+    pub(crate) addr: u64,
+    /// The bytes of the range.
+    pub(crate) len: u32,
+    /// The bytes at the flush: the whole range for `Rename` and `Snapshot`, nothing for the others.
+    pub(crate) start: Vec<u8>,
+    pub(crate) kind: Kind,
+    /// For a merge range, one bit per word: `cmask` the words that the CPU writes in flight, `gmask` the words that only
+    /// the GPU writes (`P`: the kernel at the end of the frame writes these into guest memory) and `rmask` the words that
+    /// both write (`R`: the host writes the GPU's value back in the wait, if the CPU has not written the word since).
+    pub(crate) cmask: Vec<u32>,
+    pub(crate) gmask: Vec<u32>,
+    pub(crate) rmask: Vec<u32>,
+    /// For a merge range: the bytes of the words of `cmask` at the flush, packed, and for each block of 32 words the
+    /// number of such words before it.
+    pub(crate) cvals: Vec<u32>,
+    pub(crate) cprefix: Vec<u32>,
+}
+
+/// The renamed ranges of a frame, taken at its flush on the CPU thread.
+#[derive(Debug)]
+pub(crate) struct Capture {
+    /// The fence of the frame.
+    pub(crate) fence: u64,
+    pub(crate) ranges: Vec<CapRange>,
+    /// `NXKIT_DIAG=rename` prints this frame's capture and write-back.
+    pub(crate) sampled: bool,
+    /// The number of CPU waits so far at the flush. Two frames with the same number have no wait between them.
+    pub(crate) epoch: u64,
 }

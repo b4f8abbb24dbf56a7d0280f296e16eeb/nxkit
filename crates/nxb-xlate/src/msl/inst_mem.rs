@@ -5,9 +5,9 @@ use super::args::SET_NAME;
 use super::buffers;
 use super::emit::{Em, R, Shader, Val};
 use super::types::{msl_type, scalar};
+use crate::ir::agg::AggType;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::structured::ast::{A, Kind, OpData};
-use crate::structured::types::AggType;
 
 /// The address space of a place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +92,14 @@ impl Em<'_> {
     pub(super) fn place(&mut self, inst: Inst, o: &OpData) -> R<Place> {
         let trailing = usize::from(inst == Inst::Store || is_atomic(inst));
         let n = o.sources.len();
+        if self.plan.domain
+            && matches!(
+                o.storage_kind,
+                StorageKind::Input | StorageKind::InputPerPatch
+            )
+        {
+            return self.domain_input(inst, o);
+        }
         match o.storage_kind {
             StorageKind::GlobalMemory => {
                 let lo = self.get(AggType::U32, self.src(o, 0)?)?.s;
@@ -371,7 +379,8 @@ impl Em<'_> {
             let e = self.tmp;
             self.tmp += 1;
             // a weak exchange may fail with the expected value still in memory: it leaves t{e} as it was, so try again
-            self.pre.push(format!("{t} t{e} = {}; {t} t{e}c = t{e};", cmp.s));
+            self.pre
+                .push(format!("{t} t{e} = {}; {t} t{e}c = t{e};", cmp.s));
             self.pre.push(format!(
                 "while (!atomic_compare_exchange_weak_explicit({ptr}, &t{e}, {}, memory_order_relaxed, memory_order_relaxed) && t{e} == t{e}c) {{}}",
                 new.s

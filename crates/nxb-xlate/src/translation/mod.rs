@@ -1,26 +1,14 @@
-//! Translation context: header, definitions, host answers, resources.
+//! The state of one translation: header, definitions, host answers, shader properties, resources, attribute usage and
+//! the function patterns. The pipeline that runs a translation is `crate::front`.
 
-#[cfg(test)]
-mod calls_test;
 pub mod context;
-pub mod core;
 pub mod definitions;
-pub mod emit_shader;
-#[cfg(test)]
-pub mod emit_test_util;
-#[cfg(test)]
-mod emit_tests;
 pub mod fsi_match;
 #[cfg(test)]
 mod fsi_match_tests;
 pub mod fsi_patterns;
-pub mod geometry;
-#[cfg(test)]
-mod geometry_tests;
 pub mod header;
 pub mod host;
-pub mod msl_entry;
-pub mod pipeline;
 pub mod props;
 pub mod props_fmt;
 pub mod resources;

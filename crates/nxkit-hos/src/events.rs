@@ -3,7 +3,8 @@
 use crate::handle::{Event, KObject};
 use crate::kernel::{Kernel, MAX_WAIT_HANDLES};
 use crate::result::{KResult, KResultOr};
-use crate::thread::{Thread, Timeout, WaitKind, lock};
+use crate::sync::lock;
+use crate::thread::{Thread, Timeout, WaitKind};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;

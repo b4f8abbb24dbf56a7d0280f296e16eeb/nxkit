@@ -5,55 +5,220 @@
 //! GPU work every frame (Breath of the Wild) has that wait in the CPU time of its frames, so only what the screen shows
 //! says whether a frame was late.
 //!
+//! The host makes one [`Screen`] for the run and hands it to the backend, the NVN context and the refresh (W26). Before,
+//! these were process-wide statics.
+//!
 //! It also counts how many refreshes each shown frame stayed (`NXKIT_DIAG=judder`): on a screen that shows a frame for
 //! two refreshes every time, every shown frame is a 2x. A frame that stays 3 refreshes now and then is judder.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 /// The presents that the ring remembers. The frame step reads the one 8 presents back.
 const RING: usize = 32;
 
-static SHOWN: [AtomicU64; RING] = [const { AtomicU64::new(0) }; RING];
-static TAG: [AtomicU64; RING] = [const { AtomicU64::new(0) }; RING];
-static HOLD: [AtomicU64; RING] = [const { AtomicU64::new(0) }; RING];
-/// The GPU time in milliseconds as `f64` bits. `u64::MAX` is none yet.
-static GPU_MS: AtomicU64 = AtomicU64::new(u64::MAX);
+/// The presents per `NXKIT_PACE_DIAG` line of the interval between shown presents.
+const PACE_EVERY: u32 = 120;
+
+/// The bins of the judder histogram: a frame stayed 1, 2, 3, 4 or 5 and more refreshes, and the frames the display
+/// dropped.
+const BINS: usize = 6;
+/// The shown frames per `judder` line.
+const JUDDER_EVERY: u64 = 120;
+
+/// What the screen showed of the latest presents, the GPU time of the latest finished frame and the judder count.
+pub struct Screen {
+    shown: [AtomicU64; RING],
+    tag: [AtomicU64; RING],
+    hold: [AtomicU64; RING],
+    /// The GPU time in milliseconds as `f64` bits. `u64::MAX` is none yet.
+    gpu_ms: AtomicU64,
+    /// The function that [`Screen::shown`] calls for every present the display showed.
+    shown_hook: Option<fn(u64, f64)>,
+    pace: Mutex<PaceSpread>,
+    /// The refresh rate the screen shows, as `f64` bits. 0 is not known.
+    refresh_hz: AtomicU64,
+    /// The refresh rate of the current mode of the screen, rounded to Hz, for the frame step.
+    mode_hz: AtomicU32,
+    /// The time of the frame shown before, as `f64` bits. 0 is none.
+    prev_shown: AtomicU64,
+    bin: [AtomicU64; BINS],
+    /// The sum of the refreshes that the counted frames stayed, in thousandths.
+    stay_milli: AtomicU64,
+}
+
+impl std::fmt::Debug for Screen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Screen")
+            .field("gpu_ms", &self.gpu_ms())
+            .field(
+                "refresh_hz",
+                &f64::from_bits(self.refresh_hz.load(Ordering::Relaxed)),
+            )
+            .finish()
+    }
+}
+
+impl Default for Screen {
+    fn default() -> Self {
+        Screen::new(None)
+    }
+}
+
+impl Screen {
+    /// An empty record. `shown_hook` learns of every shown present: the host feeds the time of the display to the
+    /// variable frame step with it. It runs on a Metal thread and must be short.
+    pub fn new(shown_hook: Option<fn(u64, f64)>) -> Self {
+        Screen {
+            shown: [const { AtomicU64::new(0) }; RING],
+            tag: [const { AtomicU64::new(0) }; RING],
+            hold: [const { AtomicU64::new(0) }; RING],
+            gpu_ms: AtomicU64::new(u64::MAX),
+            shown_hook,
+            pace: Mutex::new(PaceSpread::new()),
+            refresh_hz: AtomicU64::new(0),
+            mode_hz: AtomicU32::new(120),
+            prev_shown: AtomicU64::new(0),
+            bin: [const { AtomicU64::new(0) }; BINS],
+            stay_milli: AtomicU64::new(0),
+        }
+    }
+
+    /// Present `present` (counted from 1) went on screen at `secs` on the host clock. A time of 0 or less means the
+    /// display dropped it, and a present that was replaced before a tick showed it is dropped too.
+    pub fn shown(&self, present: u64, secs: f64) {
+        let v = if secs.is_finite() && secs > 0.0 {
+            secs
+        } else {
+            -1.0
+        };
+        let i = slot(present);
+        self.shown[i].store(v.to_bits(), Ordering::Relaxed);
+        self.tag[i].store(present, Ordering::Release);
+        self.judder_note(v);
+        self.pace_note(v);
+        if v > 0.0
+            && let Some(hook) = self.shown_hook
+        {
+            hook(present, v);
+        }
+    }
+
+    fn pace_note(&self, secs: f64) {
+        if secs <= 0.0 || !crate::settings::settings().pace_diag {
+            return;
+        }
+        let line = self
+            .pace
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .note(secs);
+        if let Some(line) = line {
+            eprintln!("{line}");
+        }
+    }
+
+    /// When present `present` went on screen: negative when it was dropped, 0 when not known (yet).
+    pub fn shown_at(&self, present: u64) -> f64 {
+        let i = slot(present);
+        if present == 0 || self.tag[i].load(Ordering::Acquire) != present {
+            return 0.0;
+        }
+        f64::from_bits(self.shown[i].load(Ordering::Relaxed))
+    }
+
+    /// The frame step gave present `present` a hold of `vsyncs`.
+    pub fn set_hold(&self, present: u64, vsyncs: u32) {
+        self.hold[slot(present)]
+            .store(present << 8 | u64::from(vsyncs.min(255)), Ordering::Relaxed);
+    }
+
+    /// The hold of present `present`, 0 when not known.
+    pub fn hold(&self, present: u64) -> u32 {
+        let v = self.hold[slot(present)].load(Ordering::Relaxed);
+        if v >> 8 == present {
+            (v & 0xFF) as u32
+        } else {
+            0
+        }
+    }
+
+    /// The GPU took `ms` for the latest finished frame.
+    pub fn set_gpu_ms(&self, ms: f64) {
+        if ms.is_finite() && ms >= 0.0 {
+            self.gpu_ms.store(ms.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// The GPU time of the latest finished frame, when one finished.
+    pub fn gpu_ms(&self) -> Option<f64> {
+        let v = self.gpu_ms.load(Ordering::Relaxed);
+        (v != u64::MAX).then(|| f64::from_bits(v))
+    }
+
+    /// The refresh rate that a shown frame is measured against, in Hz. The host sets it from the screen (the rate of
+    /// the link on a screen that adapts its rate) and again when it changes.
+    pub fn set_refresh_hz(&self, hz: f64) {
+        if hz.is_finite() && hz > 0.0 {
+            self.refresh_hz.store(hz.to_bits(), Ordering::Relaxed);
+            self.prev_shown.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// Sets the refresh rate of the current mode of the screen. A rate that is not a multiple of the step rate (144 Hz)
+    /// shows a frame on time one refresh longer now and then, which the frame step must not take for lateness. Zero
+    /// keeps the rate before.
+    pub fn set_mode_hz(&self, hz: u32) {
+        if hz > 0 {
+            self.mode_hz.store(hz, Ordering::Relaxed);
+        }
+    }
+
+    /// The refresh rate of the current mode of the screen, 120 until the host sets it.
+    pub fn mode_hz(&self) -> u32 {
+        self.mode_hz.load(Ordering::Relaxed)
+    }
+
+    fn judder_note(&self, secs: f64) {
+        let hz = f64::from_bits(self.refresh_hz.load(Ordering::Relaxed));
+        if hz <= 0.0 {
+            return;
+        }
+        if secs <= 0.0 {
+            self.bin[5].fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let prev = f64::from_bits(self.prev_shown.swap(secs.to_bits(), Ordering::Relaxed));
+        if prev <= 0.0 || secs <= prev {
+            return;
+        }
+        let held = refreshes_held(secs - prev, hz);
+        self.bin[bin(held)].fetch_add(1, Ordering::Relaxed);
+        self.stay_milli.fetch_add(
+            ((secs - prev) * hz * 1000.0).round() as u64,
+            Ordering::Relaxed,
+        );
+        let counted: u64 = self.bin[..5]
+            .iter()
+            .map(|b| b.load(Ordering::Relaxed))
+            .sum();
+        if counted >= JUDDER_EVERY {
+            let b: Vec<u64> = self
+                .bin
+                .iter()
+                .map(|b| b.swap(0, Ordering::Relaxed))
+                .collect();
+            let mean = self.stay_milli.swap(0, Ordering::Relaxed) as f64 / 1000.0 / counted as f64;
+            if crate::diag::on("judder") {
+                eprintln!("{}", judder_line(hz, &b, mean));
+            }
+        }
+    }
+}
 
 fn slot(present: u64) -> usize {
     (present % RING as u64) as usize
 }
-
-/// Present `present` (counted from 1) went on screen at `secs` on the host clock. A time of 0 or less means the display
-/// dropped it, and a present that was replaced before a tick showed it is dropped too.
-pub fn shown(present: u64, secs: f64) {
-    let v = if secs.is_finite() && secs > 0.0 {
-        secs
-    } else {
-        -1.0
-    };
-    let i = slot(present);
-    SHOWN[i].store(v.to_bits(), Ordering::Relaxed);
-    TAG[i].store(present, Ordering::Release);
-    judder_note(v);
-    pace_note(v);
-    if v > 0.0
-        && let Some(hook) = SHOWN_HOOK.get()
-    {
-        hook(present, v);
-    }
-}
-
-/// The function that [`shown`] calls for every present the display showed, with the present number and the time.
-static SHOWN_HOOK: std::sync::OnceLock<fn(u64, f64)> = std::sync::OnceLock::new();
-
-/// Sets the function that learns of every shown present, once. The host uses it to feed the time of the display to the
-/// variable frame step. The function runs on a Metal thread and must be short.
-pub fn set_shown_hook(hook: fn(u64, f64)) -> bool {
-    SHOWN_HOOK.set(hook).is_ok()
-}
-
-/// The presents per `NXKIT_PACE_DIAG` line of the interval between shown presents.
-const PACE_EVERY: u32 = 120;
 
 /// The spread of the intervals between shown presents, for `NXKIT_PACE_DIAG=1`.
 #[derive(Debug)]
@@ -108,83 +273,6 @@ impl PaceSpread {
     }
 }
 
-static PACE: std::sync::Mutex<PaceSpread> = std::sync::Mutex::new(PaceSpread::new());
-
-fn pace_note(secs: f64) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if secs <= 0.0 || !*ON.get_or_init(|| std::env::var("NXKIT_PACE_DIAG").is_ok_and(|v| v == "1"))
-    {
-        return;
-    }
-    let line = PACE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .note(secs);
-    if let Some(line) = line {
-        eprintln!("{line}");
-    }
-}
-
-/// When present `present` went on screen: negative when it was dropped, 0 when not known (yet).
-pub fn shown_at(present: u64) -> f64 {
-    let i = slot(present);
-    if present == 0 || TAG[i].load(Ordering::Acquire) != present {
-        return 0.0;
-    }
-    f64::from_bits(SHOWN[i].load(Ordering::Relaxed))
-}
-
-/// The frame step gave present `present` a hold of `vsyncs`.
-pub fn set_hold(present: u64, vsyncs: u32) {
-    HOLD[slot(present)].store(present << 8 | u64::from(vsyncs.min(255)), Ordering::Relaxed);
-}
-
-/// The hold of present `present`, 0 when not known.
-pub fn hold(present: u64) -> u32 {
-    let v = HOLD[slot(present)].load(Ordering::Relaxed);
-    if v >> 8 == present {
-        (v & 0xFF) as u32
-    } else {
-        0
-    }
-}
-
-/// The GPU took `ms` for the latest finished frame.
-pub fn set_gpu_ms(ms: f64) {
-    if ms.is_finite() && ms >= 0.0 {
-        GPU_MS.store(ms.to_bits(), Ordering::Relaxed);
-    }
-}
-
-/// The GPU time of the latest finished frame, when one finished.
-pub fn gpu_ms() -> Option<f64> {
-    let v = GPU_MS.load(Ordering::Relaxed);
-    (v != u64::MAX).then(|| f64::from_bits(v))
-}
-
-/// The bins of the judder histogram: a frame stayed 1, 2, 3, 4 or 5 and more refreshes, and the frames the display
-/// dropped.
-const BINS: usize = 6;
-/// The shown frames per `judder` line.
-const JUDDER_EVERY: u64 = 120;
-
-/// The refresh rate the screen shows, as `f64` bits. 0 is not known.
-static REFRESH_HZ: AtomicU64 = AtomicU64::new(0);
-/// The time of the frame shown before, as `f64` bits. 0 is none.
-static PREV_SHOWN: AtomicU64 = AtomicU64::new(0);
-static BIN: [AtomicU64; BINS] = [const { AtomicU64::new(0) }; BINS];
-/// The sum of the refreshes that the counted frames stayed, in thousandths.
-static STAY_MILLI: AtomicU64 = AtomicU64::new(0);
-
-/// The refresh rate that a shown frame is measured against, in Hz. The host sets it from the screen (the rate of the
-/// link on a screen that adapts its rate) and again when it changes.
-pub fn set_refresh_hz(hz: f64) {
-    if hz.is_finite() && hz > 0.0 {
-        REFRESH_HZ.store(hz.to_bits(), Ordering::Relaxed);
-        PREV_SHOWN.store(0, Ordering::Relaxed);
-    }
-}
-
 /// The refreshes that a frame stayed when the next one came `gap_secs` later on a screen of `hz`, rounded to a whole
 /// number and at least 1.
 pub fn refreshes_held(gap_secs: f64, hz: f64) -> u32 {
@@ -197,35 +285,6 @@ pub fn refreshes_held(gap_secs: f64, hz: f64) -> u32 {
 /// The bin of a frame that stayed `held` refreshes.
 fn bin(held: u32) -> usize {
     (held.max(1) as usize - 1).min(4)
-}
-
-fn judder_note(secs: f64) {
-    let hz = f64::from_bits(REFRESH_HZ.load(Ordering::Relaxed));
-    if hz <= 0.0 {
-        return;
-    }
-    if secs <= 0.0 {
-        BIN[5].fetch_add(1, Ordering::Relaxed);
-        return;
-    }
-    let prev = f64::from_bits(PREV_SHOWN.swap(secs.to_bits(), Ordering::Relaxed));
-    if prev <= 0.0 || secs <= prev {
-        return;
-    }
-    let held = refreshes_held(secs - prev, hz);
-    BIN[bin(held)].fetch_add(1, Ordering::Relaxed);
-    STAY_MILLI.fetch_add(
-        ((secs - prev) * hz * 1000.0).round() as u64,
-        Ordering::Relaxed,
-    );
-    let counted: u64 = BIN[..5].iter().map(|b| b.load(Ordering::Relaxed)).sum();
-    if counted >= JUDDER_EVERY {
-        let b: Vec<u64> = BIN.iter().map(|b| b.swap(0, Ordering::Relaxed)).collect();
-        let mean = STAY_MILLI.swap(0, Ordering::Relaxed) as f64 / 1000.0 / counted as f64;
-        if crate::diag::on("judder") {
-            eprintln!("{}", judder_line(hz, &b, mean));
-        }
-    }
 }
 
 /// The `judder` line: the refresh rate, how many frames stayed 1, 2, 3, 4 and 5 or more refreshes, the frames dropped
@@ -271,14 +330,15 @@ mod tests {
 
     #[test]
     fn a_present_is_known_until_the_ring_comes_round() {
-        shown(1001, 5.5);
-        shown(1002, 0.0);
-        assert_eq!(shown_at(1001), 5.5);
-        assert_eq!(shown_at(1002), -1.0);
-        assert_eq!(shown_at(1001 + RING as u64), 0.0);
-        set_hold(1001, 3);
-        assert_eq!(hold(1001), 3);
-        assert_eq!(hold(1001 + RING as u64), 0);
+        let s = Screen::default();
+        s.shown(1001, 5.5);
+        s.shown(1002, 0.0);
+        assert_eq!(s.shown_at(1001), 5.5);
+        assert_eq!(s.shown_at(1002), -1.0);
+        assert_eq!(s.shown_at(1001 + RING as u64), 0.0);
+        s.set_hold(1001, 3);
+        assert_eq!(s.hold(1001), 3);
+        assert_eq!(s.hold(1001 + RING as u64), 0);
     }
 
     #[test]

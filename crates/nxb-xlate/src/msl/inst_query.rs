@@ -3,8 +3,8 @@
 use super::emit::{Em, R, Val};
 use super::inst_tex::dimensions;
 use crate::ir::Inst;
+use crate::ir::agg::AggType;
 use crate::structured::ast::OpData;
-use crate::structured::types::AggType;
 use crate::types::SamplerType;
 
 impl Em<'_> {

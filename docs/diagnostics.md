@@ -302,6 +302,7 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `decode.unresolved` | decoder | A texture handle or address in a recording names no texture. It counts once per decoded recording. A recording that the cache answers does not count again. A handle of texture id 0 is an unbind (NVN reserves the first descriptors) and does not count. The examples name the handle or address. |
 | `decode.bad-record` | decoder | A record could not be read. The rest of the recording is lost. |
 | `tex.handle-unresolved` | encoder | A texture handle has no descriptor or no texture record. This is the case of a pool slot that points to a dropped texture. |
+| `tex.ubo-handle-unread` | encoder | The handle word of a `tex_ubo` or `samp_ubo` member could not be read: its uniform slot is not bound, the word lies past the end of the buffer, or guest memory is not readable there. The member reads the null texture and the default sampler. |
 | `tex.format-unsupported` | encoder | A texture format or target that has no Metal equivalent. |
 | `tex.create-failed` | encoder | Metal did not create a texture. |
 | `tex.view-failed` | encoder | Metal did not create a view. For example, a view between a compressed and an uncompressed format, or a type that the texture cannot be seen as. |

@@ -48,7 +48,11 @@ impl Texture {
         len: u64,
         align: Option<u64>,
     ) -> std::result::Result<(), InPlaceRefusal> {
-        if desc.kind != TextureKind::D2 || desc.mip_levels != 1 || desc.array_layers != 1 || desc.depth != 1 {
+        if desc.kind != TextureKind::D2
+            || desc.mip_levels != 1
+            || desc.array_layers != 1
+            || desc.depth != 1
+        {
             return Err(InPlaceRefusal::Shape);
         }
         if desc.shader_atomic || desc.storage == Storage::Memoryless {
@@ -120,4 +124,3 @@ impl Texture {
         Ok(Self::wrap(ctx, raw, desc, false, None, None, None))
     }
 }
-

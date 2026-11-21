@@ -22,6 +22,7 @@ mod bind_tests;
 pub mod buffers;
 pub mod control;
 mod decls;
+mod domain;
 pub mod emit;
 pub mod entry;
 pub mod facts;
@@ -87,13 +88,12 @@ pub mod usage;
 pub mod variant;
 #[cfg(test)]
 mod verify_tests;
-pub mod walk;
 pub mod wide;
 #[cfg(test)]
 mod wide_tests;
 
+use crate::front::msl_entry::structure_job;
 use crate::job::Job;
-use crate::translation::msl_entry::structure_job;
 pub use emit::Options;
 pub use refl::Reflection;
 
@@ -216,6 +216,9 @@ fn options(stage: &str, code: &[u8], ctx: &Context<'_>) -> Options {
 /// Translate one shader from its job and machine code to its libraries.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
     let stage = job.stage.as_str();
+    if stage == "ds" && domain::supported(job) {
+        return domain::translate_native(job, code, ctx);
+    }
     if matches!(stage, "hs" | "ds") {
         let kind = if stage == "hs" {
             "control"

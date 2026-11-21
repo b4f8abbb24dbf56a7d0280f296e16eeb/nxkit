@@ -4,7 +4,7 @@ use super::hlp::{REGISTER_ZERO_INDEX, get_dest, get_src_reg};
 pub(crate) use super::memory_bits::{extract_small_int, get_bit_offset};
 use super::memory_bits::{get_40_bits_address, insert_small_int};
 use crate::attr::Stage;
-use crate::ir::emitter::EmitterContext;
+use crate::emit::emitter::EmitterContext;
 use crate::ir::inst::StorageKind;
 use crate::ir::ops::{Opd, OperandType, regtype};
 use crate::maxwell::enums::{AddressMode, AtomOp, AtomSize, AtomsSize, LsSize, LsSize2};

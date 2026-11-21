@@ -3,8 +3,8 @@
 use super::emit::{Em, R, Shader, Val};
 use super::types::literal;
 use crate::ir::Inst;
+use crate::ir::agg::AggType;
 use crate::structured::ast::{BlockType, OpData};
-use crate::structured::types::AggType;
 
 impl Em<'_> {
     /// Subgroup operations and barriers.

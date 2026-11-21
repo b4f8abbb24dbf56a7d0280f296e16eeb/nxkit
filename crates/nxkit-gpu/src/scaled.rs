@@ -14,8 +14,8 @@ use nxkit_metal::{
     TextureDesc,
 };
 
-use crate::draws::FastMap;
-use crate::stats::Skip;
+use crate::fastmap::FastMap;
+use crate::skip::Skip;
 use crate::textures::{Res, Use, describe};
 
 /// Pool entries that no frame used for this many frames are dropped.

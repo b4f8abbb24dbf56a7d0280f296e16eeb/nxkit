@@ -25,6 +25,7 @@ mod hooks;
 mod resources;
 mod runtime;
 mod settings;
+pub mod threads;
 
 pub use catalog::{Catalog, FamilyFrom, Resolved};
 pub use evidence::{Evidence, Fact};

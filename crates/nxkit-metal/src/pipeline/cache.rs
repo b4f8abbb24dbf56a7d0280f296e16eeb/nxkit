@@ -12,9 +12,8 @@ use objc2_foundation::{NSArray, NSURL};
 use objc2_metal::{
     MTL4AlphaToCoverageState, MTL4Archive, MTL4Compiler, MTL4CompilerDescriptor,
     MTL4CompilerTaskOptions, MTL4ComputePipelineDescriptor, MTL4IndirectCommandBufferSupportState,
-    MTL4LibraryDescriptor, MTL4MeshRenderPipelineDescriptor, MTL4PipelineDataSetSerializer,
-    MTL4PipelineDataSetSerializerConfiguration, MTL4PipelineDataSetSerializerDescriptor,
-    MTL4RenderPipelineDescriptor, MTLDevice,
+    MTL4PipelineDataSetSerializer, MTL4PipelineDataSetSerializerConfiguration,
+    MTL4PipelineDataSetSerializerDescriptor, MTL4RenderPipelineDescriptor, MTLDevice,
 };
 
 use crate::device::{Context, RawCompiler, ns};
@@ -22,17 +21,15 @@ use crate::error::{MetalError, Result, create};
 use crate::state::check_sample_count;
 
 use super::shards::{self, ShardSet};
-use super::{ComputePipeline, MeshPipelineDesc, RenderPipeline, RenderPipelineDesc, ShaderLibrary};
+use super::{ComputePipeline, RenderPipeline, RenderPipelineDesc, ShaderLibrary};
 pub use specialize::BaseStats;
 use specialize::Bases;
 
+mod archive;
+mod mesh;
 mod miss;
 mod specialize;
 mod stats;
-
-/// The empty fragment function of a depth-only mesh pipeline.
-const NOP_FRAGMENT: &str = "fragment void nxkit_mesh_nop() {}";
-const NOP_FRAGMENT_NAME: &str = "nxkit_mesh_nop";
 
 /// Where a pipeline cache reads and writes its archive.
 #[derive(Clone, Debug, Default)]
@@ -468,98 +465,6 @@ impl PipelineCache {
         Ok(d)
     }
 
-    /// The mesh render pipeline for `key`. The first call compiles it. The pipeline draws with
-    /// [`RenderCommand::DrawMeshThreadgroups`](crate::RenderCommand::DrawMeshThreadgroups) and its indirect form.
-    pub fn mesh(&self, key: u64, desc: &MeshPipelineDesc<'_>) -> Result<RenderPipeline> {
-        self.mesh_traced(key, desc).map(|r| r.0)
-    }
-
-    /// Like [`PipelineCache::mesh`], and tells where the pipeline came from. The build's archive has no mesh pipeline,
-    /// so the answer is `Cached` or `Compiled`.
-    pub fn mesh_traced(
-        &self,
-        key: u64,
-        desc: &MeshPipelineDesc<'_>,
-    ) -> Result<(RenderPipeline, Source)> {
-        if let Some(Entry::Render(p)) = self.lookup(key)? {
-            return Ok((p, Source::Cached));
-        }
-        let d = MTL4MeshRenderPipelineDescriptor::new();
-        if let Some((lib, name)) = desc.object {
-            let of = lib.function(name)?;
-            d.setObjectFunctionDescriptor(Some(&of));
-            d.setPayloadMemoryLength(desc.payload_bytes.max(16).next_multiple_of(16) as usize);
-            if desc.object_threads != 0 {
-                d.setMaxTotalThreadsPerObjectThreadgroup(desc.object_threads as usize);
-            }
-        }
-        let mf = desc.mesh.0.function(desc.mesh.1)?;
-        d.setMeshFunctionDescriptor(Some(&mf));
-        if desc.mesh_threads != 0 {
-            d.setMaxTotalThreadsPerMeshThreadgroup(desc.mesh_threads as usize);
-        }
-        let nop;
-        let (flib, fname) = match desc.fragment {
-            Some(f) => f,
-            None => {
-                nop = self.nop_fragment()?;
-                (&nop, NOP_FRAGMENT_NAME)
-            }
-        };
-        let ff = flib.function(fname)?;
-        d.setFragmentFunctionDescriptor(Some(&ff));
-        check_sample_count(desc.sample_count)?;
-        // SAFETY: the count was checked above and is a supported value.
-        unsafe { d.setRasterSampleCount(desc.sample_count as usize) };
-        d.setAlphaToCoverageState(if desc.alpha_to_coverage {
-            MTL4AlphaToCoverageState::Enabled
-        } else {
-            MTL4AlphaToCoverageState::Disabled
-        });
-        let colors = d.colorAttachments();
-        for (i, c) in desc.colors.iter().enumerate() {
-            let Some(c) = c else { continue };
-            // SAFETY: the index is a plain attachment slot. Metal checks the limit when it compiles.
-            let a = unsafe { colors.objectAtIndexedSubscript(i) };
-            a.setPixelFormat(c.format.to_mtl());
-            a.setWriteMask(c.mask());
-            a.setBlendingState(c.blend_state());
-            if let Some(b) = &c.blend {
-                a.setSourceRGBBlendFactor(b.src_rgb.to_mtl());
-                a.setDestinationRGBBlendFactor(b.dst_rgb.to_mtl());
-                a.setRgbBlendOperation(b.op_rgb.to_mtl());
-                a.setSourceAlphaBlendFactor(b.src_alpha.to_mtl());
-                a.setDestinationAlphaBlendFactor(b.dst_alpha.to_mtl());
-                a.setAlphaBlendOperation(b.op_alpha.to_mtl());
-            }
-        }
-        let t0 = Instant::now();
-        let raw = self
-            .generation()
-            .compiler
-            .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&d, Some(&self.options))
-            .map_err(|e| MetalError::Compile(e.localizedDescription().to_string()))?;
-        let took = t0.elapsed();
-        let p = RenderPipeline { raw };
-        self.insert(key, Entry::Render(p.clone()))?;
-        Ok((p, Source::Compiled(took)))
-    }
-
-    /// The library of the empty fragment function, compiled once.
-    fn nop_fragment(&self) -> Result<ShaderLibrary> {
-        let r = self.nop.get_or_init(|| {
-            let d = MTL4LibraryDescriptor::new();
-            d.setSource(Some(&ns(NOP_FRAGMENT)));
-            d.setName(Some(&ns("nxkit-mesh-nop")));
-            self.generation()
-                .compiler
-                .newLibraryWithDescriptor_error(&d)
-                .map(ShaderLibrary::tracked)
-                .map_err(|e| e.localizedDescription().to_string())
-        });
-        r.clone().map_err(MetalError::Compile)
-    }
-
     /// The render pipeline under `key` when the cache already holds it. Nothing is compiled.
     pub fn cached_render(&self, key: u64) -> Option<RenderPipeline> {
         match self.lookup(key) {
@@ -607,48 +512,5 @@ impl PipelineCache {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
-    }
-
-    /// Writes the archive of every pipeline the current serializer captured. The cache must have been made with
-    /// `collect`. A long run should use [`PipelineCache::rotate_archive`]: a serializer has a store of limited size.
-    pub fn save_archive(&self, path: &Path) -> Result<()> {
-        self.generation().write(path)
-    }
-
-    /// The pipelines the current serializer has captured, about: the count of pipelines inserted since it was made.
-    pub fn captured(&self) -> u64 {
-        self.captured.load(Ordering::Relaxed)
-    }
-
-    /// Hands the capture over: from now on new compiles run on a new compiler with a fresh serializer, the old
-    /// serializer waits (up to 20 s) until the compiles that were running on its compiler are done, and then writes its
-    /// archive to `path`. The serializer's internal store is limited (about 10 MB); a full one hands Metal nil data and
-    /// the compiler crashes, so the host rotates well before. If compiles are still running after the wait, nothing is
-    /// written (their capture is lost, but the serializer is not touched under them).
-    pub fn rotate_archive(&self, path: &Path) -> Result<()> {
-        if !self.collecting {
-            return Err(MetalError::Invalid("the cache was made without `collect`"));
-        }
-        let fresh = Arc::new(Generation::new(&self.ctx, true)?);
-        let old = std::mem::replace(
-            &mut *self.current.write().unwrap_or_else(PoisonError::into_inner),
-            fresh,
-        );
-        self.captured.store(0, Ordering::Relaxed);
-        let t0 = Instant::now();
-        while Arc::strong_count(&old) > 1 && t0.elapsed() < Duration::from_secs(20) {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let quiet = Arc::strong_count(&old) == 1;
-        let written = if quiet {
-            old.write(path)
-        } else {
-            Err(MetalError::Invalid("compiles were still running"))
-        };
-        self.retired
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(old);
-        written
     }
 }

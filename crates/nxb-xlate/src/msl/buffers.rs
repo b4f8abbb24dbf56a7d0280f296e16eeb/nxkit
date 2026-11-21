@@ -5,8 +5,8 @@
 //! a run time array of 32 bit words.
 
 use super::types::scalar;
+use crate::ir::agg::AggType;
 use crate::props::{BufferDef, Field};
-use crate::structured::types::AggType;
 
 /// The name of the scalar type of a field.
 fn base(f: &Field) -> Result<&'static str, String> {

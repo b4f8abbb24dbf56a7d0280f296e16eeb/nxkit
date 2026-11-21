@@ -11,11 +11,15 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 ## Status
 
-Version 0.10.0 is not released yet. It is early software. Mac on Apple silicon only.
+The current release is [0.11.0](https://github.com/v0lumehi/nxkit/releases/tag/v0.11.0) (2026-11-20). It is early
+software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
+macOS 26 build the app on macOS 26. The release ZIP holds `nxb` and `nxkit-host` for macOS 26 and newer (see "Install a release"). `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 
-A game runs on the runtime only when it has a title module in `titles/games/`. A title module holds what is specific
-to one game: its memory layout, thread roles, settings and code rules. Everything else is general. Refer to
-[docs/titles.md](docs/titles.md). The [CHANGELOG](CHANGELOG.md) lists every change.
+A game runs on the runtime when it has a title module in `titles/games/`. There are 154, one for each game of the engine
+tree. A title module holds what is specific to one game: its memory layout, thread roles, settings and code rules.
+Everything else is general. Refer to [docs/titles.md](docs/titles.md). For a game without a title module,
+`nxb build --auto-analyze` reads the module order, build IDs and settings from the game files (experimental).
+The [CHANGELOG](CHANGELOG.md) lists every change.
 
 ## How it works
 
@@ -62,8 +66,43 @@ You need Rust 1.99 or newer and Xcode with its command line tools.
 cargo build --release -p nxb-cli -p nxkit-host
 ```
 
-The programs are `target/release/nxb` and `target/release/nxkit-host`. `nxb` finds `nxkit-host` in its own folder.
-`tools/check.sh` runs the formatter, the lints, the tests, the documentation and the layer and size checks.
+The programs are `target/release/nxb` and `target/release/nxkit-host`. `nxb` finds `nxkit-host` in its own folder, or
+in `NXB_NXKIT_HOST`. The release programs are built with `cargo build --profile dist` (fat LTO).
+`tools/check.sh` runs the formatter, the lints, the tests, the documentation and the checks of `xtask` (layers, sizes, module cycles, settings, statics).
+
+## Install a release
+
+The ZIP of a release, `nxb-vX.Y.Z-macos-arm64.zip`, holds both programs, so you need no Rust to build a game. Check it
+against `SHA256SUMS` of the release, then unpack it:
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing
+unzip nxb-vX.Y.Z-macos-arm64.zip
+```
+
+The folder `nxb-vX.Y.Z-macos-arm64` holds `nxb`, `nxkit-host` (keep them in one folder), `MANIFEST.json`, `LICENSE` and
+`THIRD_PARTY.md`. `MANIFEST.json` names the version, the platform, `macos_min` and the SHA-256 of the two programs.
+`SHA256SUMS` lists the ZIP and each file in it. The programs have an ad-hoc signature. A file that you download in a
+browser carries the quarantine flag, so run `xattr -dr com.apple.quarantine <folder>` once.
+
+The release is for Macs with Apple silicon and macOS 26 or newer (`macos_min` is 26.0), because the host uses Metal 4.
+The programs are built with that deployment target, so an older macOS refuses to start them. There is one build for all
+supported versions. The shaders and the pipeline archives come from the Metal tools of your own Xcode when `nxb build`
+runs, so you still need Xcode on the Mac that builds the app.
+
+## Verify a release
+
+Each release has `SHA256SUMS.sig`. It is a detached Ed25519 signature of the exact bytes of `SHA256SUMS`, in base64 on one line.
+The public key is in `release-signing.pub`. Download `SHA256SUMS` and `SHA256SUMS.sig` into one folder, then run:
+
+```sh
+python3 -m pip install -r tools/requirements-release.txt
+python3 -I tools/release-sign.py verify SHA256SUMS --pub release-signing.pub
+```
+
+Then check the ZIP against `SHA256SUMS` as shown above. Front ends that update nxkit by themselves do the same two checks.
+
+The `format` field of `MANIFEST.json` changes only when the layout of the ZIP changes, because front ends check it.
 
 ## Build a game
 
@@ -74,8 +113,9 @@ nxb build "<folder with the game files>" -k <prod.keys> --platform mac \
 
 - `--dry-run` prints the plan and writes nothing. Check it first.
 - A Switch 2 package needs `--nup <file>` and no keys.
-- `nxb` builds only nxkit apps: a game that has a title module, into an app with `nxkit-host` as its program. There is no
-  iOS build, no `--engine` and no Python.
+- `nxb` builds only nxkit apps, with `nxkit-host` as their program. A game without a title module needs
+  `--auto-analyze`. There is no iOS build, no `--engine` and no Python.
+- Ocarina of Time can keep a fixed render scale: `--resource-patch resolution-scale=<0..1>`.
 - The work folder takes many GB. A second build with the same files reuses the finished stages. After a change of the
   translator, only the shaders whose MSL changed compile again (refer to [docs/early-cutoff.md](docs/early-cutoff.md)).
 - `--progress bar` shows one live line with the stage, a bar and the time left.
@@ -103,9 +143,11 @@ explains the frame pacing, and [docs/diagnostics.md](docs/diagnostics.md) lists 
 | `crates/nxkit-*` | the runtime: host, kernel, IPC, services, NVN, GPU, Metal 4 backend |
 | `titles/` | engine families and title modules |
 | `docs/` | the documentation. The index is [docs/README.md](docs/README.md) |
-| `xtask/` | developer tools, among them the layer check (`cargo run -p xtask -- layers`) |
+| `xtask/` | developer tools: the checks of the layers, the file sizes, the module cycles, the settings source and the statics of the runtime (`cargo run -p xtask`) |
 
-The crates are in layers, and dependencies point down only. Only a few modules hold `unsafe` code, all named in
+The crates are in layers, one set for the build and one for the runtime. Dependencies point down, except for a short list of sideways edges in the build. Inside a
+crate the module cycles may only shrink. `nxkit-host` is the one place that builds and connects the runtime, and it
+reads the `NXKIT_*` settings once. Only a few modules hold `unsafe` code, all named in
 [docs/architecture.md](docs/architecture.md).
 
 ## Contributing and security
@@ -114,6 +156,5 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. To repor
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE). Anyone may use nxkit. Whoever passes on a changed version must publish its source
-under the same license. Releases up to 0.9.2 were published under MIT and stay under MIT. Notes about formats, external
+MIT. See [LICENSE](LICENSE). Releases 0.9.3 to 0.10.0 were published under GPL-3.0-only. Notes about formats, external
 tools and third-party code are in [THIRD_PARTY.md](THIRD_PARTY.md).

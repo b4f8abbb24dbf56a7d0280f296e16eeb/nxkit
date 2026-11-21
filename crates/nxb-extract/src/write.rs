@@ -7,9 +7,9 @@
 //! the same order as each hasher consumes them, so the earliest pending file always has its memory and the pipeline
 //! cannot deadlock.
 
+use crate::fileext::FileExt;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;

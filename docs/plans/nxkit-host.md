@@ -23,7 +23,7 @@ The host follows the layers of the workspace and the title layer.
 
 | crate | function |
 |---|---|
-| `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code besides `nxb-sys`, `nxkit-metal` and the module `sys` of `nxkit-hos` |
+| `nxkit-rt` | the guest ABI, the entry points the host calls, with `unsafe` code (rule 5 of [architecture.md](../architecture.md) names every place) |
 | `nxkit-hos` | Horizon: kernel objects, the svc calls, handles, events, threads, the process memory (heap, stack, alias, shared and transfer memory, `QueryMemory`, `GetInfo`), IPC sessions and the thread-local areas. `nxkit-rt` exports `nxkit_svc`, which the host gates call, and the service `kernel` turns it on. The host fills `nxkit_kernel_config` with the reservation, the NPDM main thread and the memory profile, and implements the thread entry. Refer to [nxkit-hos.md](../nxkit-hos.md) |
 | `nxkit-ipc` | the IPC server: HIPC and CMIF, domains, the service manager `sm:`, the count of every command, the stop on an unknown command |
 | `nxkit-svc-*` | one crate per service: `fs`, `input`, `audio`, `system`, `video`, `offline`, `pacing`. Each has `exports()` and `services()`, and a service that needs the big stack has `big_stack_exports()`. `nxkit-svc-video` replaces `movie::Decoder` and the `nn::codec` video decoders and decodes VP9 with VideoToolbox. `nxkit-svc-system` holds the `Service` objects of the system services (R37) and the SDK exports of the take-overs (R38a). The host passes its seams (R38c) and wraps `big_stack_exports()` (R38b) |
@@ -57,7 +57,7 @@ A service answers at the level of the SDK functions, and only falls back to Hori
 
 ## Decisions
 
-The decisions of the host and their causes are R1 to R55 in [decisions.md](../decisions.md#part-3-runtime-decisions).
+The decisions of the host and their causes are R1 to R64 in [decisions.md](../decisions.md#part-3-runtime-decisions).
 
 ### The nxkit-host program
 
@@ -138,8 +138,8 @@ The route is one save and one path through the game: the title screen, loading t
 
 ## Sources
 
-- Code ported from MIT projects can go into nxkit, which is GPL-3.0-only. `THIRD_PARTY.md` names the ported parts and keeps the notices.
-- mush8 (`c22dev/mush8`, Mario Kart 8 Deluxe) is GPL-3.0. Its code can be ported with its notice in `THIRD_PARTY.md`.
+- Code ported from MIT projects can go into nxkit, which is MIT. `THIRD_PARTY.md` names the ported parts and keeps the notices.
+- mush8 (`c22dev/mush8`, Mario Kart 8 Deluxe) is GPL-3.0. Its code cannot be ported into nxkit; it can be read as a reference only.
 - The frame step brings Breath of the Wild above 60 fps and above 1080p. It is the reference for H4.
 
 ## Open questions

@@ -1,15 +1,16 @@
 //! Texture copies, clears and buffer copies of the copy passes, with the region helpers they share.
 //!
 //! A texture copy whose destination box has another size than the source box stretches the source onto it with a
-//! host kernel (`scale`, filter from the copy flags). The other copies are blits.
+//! host kernel (`scale`, filter from the copy flags). Mirrored copies also use that kernel. The other copies are blits,
+//! and so is a mirrored copy of an equal size that the kernel cannot take (it loses the mirror, `copy.mirror-lost`).
 
+use crate::encode::EncodeCtx;
 use nxkit_metal::{ComputeCommand, ComputePass, Scratch, TextureDesc, TextureKind, TextureRegion};
 use nxkit_nvn::frame::Cmd;
 use nxkit_nvn::resource::TexId;
 
 use crate::detail::{CopyDetail, CopyKind};
-use crate::draws::Shared;
-use crate::stats::Skip;
+use crate::skip::Skip;
 
 fn scaled(v: [u32; 3], s: f32) -> [u32; 3] {
     [
@@ -93,7 +94,7 @@ const CLEAR_BLOCK_BYTES: usize = 64 * 1024;
 /// Encodes `nvnCommandBufferClearTexture` as blits of the clear colour. The colour is packed into one texel, repeated
 /// into a block of rows in the scratch buffer, and the box is filled block by block (and slice by slice) from it.
 fn clear_texture(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     cmd: Cmd,
@@ -157,7 +158,7 @@ fn clear_texture(
 /// stays `InSync` or `GpuNewer`, so a later sample of it does not see the new bytes. The CPU reads the bytes as they
 /// are in guest memory once the frame is done.
 fn copy_buffer(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     cmd: Cmd,
     c: &CopyDetail,
@@ -223,7 +224,7 @@ fn copy_buffer(
     let len = u64::from(bytes_per_image) * (images - 1)
         + u64::from(bytes_per_row) * image.div_ceil(row.max(1));
     // The buffer of the pool that holds the whole range, and the offset in it.
-    let Ok((guest, offset)) = crate::upload::locate(sh.pools, c.buffer, len) else {
+    let Ok((guest, offset)) = crate::pools::locate(sh.pools, c.buffer, len) else {
         return Err(copy_skip(format_args!(
             "buffer address {:#x} + {len} is not in one pool",
             c.buffer
@@ -265,7 +266,7 @@ fn copy_buffer(
 }
 
 pub(super) fn copy(
-    sh: &Shared<'_>,
+    sh: &EncodeCtx<'_>,
     cp: &mut ComputePass<'_>,
     scratch: &Scratch,
     cmd: Cmd,
@@ -440,22 +441,42 @@ pub(super) fn copy(
     {
         return Ok(());
     }
-    if src_box.size != dst_box.size {
-        if src == dst {
-            return Err(copy_skip(format_args!(
-                "scaled copy {src:?} {:?} -> itself {:?}",
-                src_box.size, dst_box.size
-            )));
+    if super::scale::needs_kernel(&src_box, &dst_box, flags) {
+        let boxes = (&src_box, &dst_box);
+        if let Some(why) = super::scale::mirror_lost(boxes, &rs.tex.desc(), &rd.tex.desc()) {
+            // The kernel cannot take this pair, but a blit of an equal size keeps the data, without the mirror.
+            nxkit_nvn::diag::note(
+                nxkit_nvn::diag::Reason::CopyMirrorLost,
+                format_args!(
+                    "{src:?} -> {dst:?} {:?} flags {flags:#x}: {why}",
+                    rd.desc.format
+                ),
+            );
+        } else {
+            // Two NVN objects can share one backing texture, or in-place bytes. Reads and writes of the same texels
+            // in parallel threads race; other levels, slices or boxes of one backing do not.
+            let same = src == dst || rs.barrier_id == rd.barrier_id;
+            let overlap = super::scale::in_place_overlaps(
+                rs.in_place.map(|p| (p.real, rs.guest_size)),
+                rd.in_place.map(|p| (p.real, rd.guest_size)),
+            );
+            if (same && super::scale::regions_meet(&src_box, &dst_box, count)) || (!same && overlap)
+            {
+                return Err(copy_skip(format_args!(
+                    "scaled or mirrored copy {src:?} {:?} -> alias {dst:?} {:?}",
+                    src_box, dst_box
+                )));
+            }
+            return super::scale::encode(
+                sh,
+                cp,
+                scratch,
+                &rs.tex,
+                &rd.tex,
+                (src_box, dst_box, count),
+                flags,
+            );
         }
-        return super::scale::encode(
-            sh,
-            cp,
-            scratch,
-            &rs.tex,
-            &rd.tex,
-            (src_box, dst_box, count),
-            flags,
-        );
     }
     for i in 0..count {
         cp.encode(&ComputeCommand::CopyTexture {

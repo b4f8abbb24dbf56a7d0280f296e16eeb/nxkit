@@ -3,11 +3,15 @@
 //! The stages, in order: unpack the packages (base, update, DLC) or the NUP container, put the RomFS into the run
 //! folder, rewrite the modules, write `game.json`, link and sign `nxgame.dylib`, make the shaders and the pipeline
 //! archive, and close the bundle. A NUP gives the RomFS as a folder in the extract's one pass (with the shader split),
-//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. A title without a module is refused.
+//! and the romfs stage links its files into the app: no `RomFS.img`, no second copy. `--auto-analyze` uses the generic path.
 
+mod analysis;
+mod auto_shaders;
 mod bundle;
 mod elf;
+mod extract;
 mod files;
+mod generic;
 mod image;
 mod layout;
 mod link;
@@ -57,9 +61,19 @@ fn stage<T>(
 }
 
 fn identity(p: &Path) -> String {
-    use std::os::unix::fs::MetadataExt;
     std::fs::metadata(p)
-        .map(|m| format!("{}:{}:{}", p.display(), m.len(), m.mtime()))
+        .map(|m| {
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            format!(
+                "{}:{}:{}",
+                p.display(),
+                m.len(),
+                t.map_or(0, |d| d.as_secs())
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -172,6 +186,9 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
 
 /// Builds the app of a title that has a title module.
 pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
+    if a.auto_analyze {
+        return generic::run(a, p);
+    }
     let src = crate::inputs::discover(a)?;
     let Some(t) = module(&src)? else {
         return Err(crate::exit::fail(

@@ -2,8 +2,9 @@
 
 use super::definitions::Definitions;
 use super::header::ShaderHeader;
+use super::resources::ResourceManager;
 use crate::accessor::Accessor;
-use crate::attr::Stage;
+use crate::attr::{Stage, feature};
 use crate::maxwell::decoder::{DecodedProgram, decode};
 
 /// `TranslationOptions` flags the job driver sets (target is always Vulkan SPIR-V, Metal image atomics on).
@@ -90,5 +91,15 @@ impl From<Stage> for super::props::ShaderStage {
             Stage::Geometry => P::Geometry,
             Stage::Fragment => P::Fragment,
         }
+    }
+}
+
+/// The local and shared memory set-up of `Translate`, after `CreateResourceManager`.
+pub fn set_current_memories(tc: &TranslatorContext, acc: &mut Accessor, rm: &mut ResourceManager) {
+    let uses_local = tc.program.used_features & feature::LOCAL_MEMORY != 0;
+    rm.set_current_local_memory(tc.local_memory_size, uses_local);
+    if tc.stage() == Stage::Compute {
+        let uses_shared = tc.program.used_features & feature::SHARED_MEMORY != 0;
+        rm.set_current_shared_memory(acc.query_compute_shared_memory_size(), uses_shared);
     }
 }

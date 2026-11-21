@@ -10,7 +10,7 @@
 //! 5. It cuts the passes into runs and encodes each run into its own command buffer on its own thread.
 //! 6. It commits the command buffers in order.
 
-use crate::draws::{FastMap, FastSet};
+use crate::fastmap::{FastMap, FastSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -28,16 +28,19 @@ use crate::barriers::{BarrierState, touch};
 use crate::bindless::{Bindless, Env, Handles, Resolved};
 use crate::copyback::CopyBack;
 use crate::detail::{DrawArgs, FrameDetail, RecordingRun};
-use crate::draws::{Shared, ordinals};
+use crate::drawctx::Shared;
 use crate::encode::{Tables, render_pass};
 use crate::guestpools::GuestPools;
 use crate::icbs::Icbs;
 use crate::jobs;
+use crate::ordinal::ordinals;
 use crate::passes::{compute_pass, cpu_read};
 use crate::pipelines::Pipelines;
 use crate::programs::Programs;
+use crate::report::EncodeReport;
+use crate::skip::Skip;
 use crate::snapshot::EncodeView;
-use crate::stats::{EncodeReport, EncodeStats, Skip};
+use crate::stats::EncodeStats;
 use crate::textures::{Res, TextureStore, Use};
 use crate::upload::{Dirty, Transfer};
 
@@ -53,7 +56,22 @@ use diag::*;
 use timing::*;
 use uses::*;
 
-pub(crate) use uses::collect_uses;
+pub(crate) use crate::textures::collect_uses;
+
+/// The analyses that the encode path reports to (W29): `nanscan` before each pass, `lum` for the stored colour targets
+/// of the focused pass. Each one checks its own `NXKIT_DIAG` switch.
+pub(crate) const PROBES: crate::probe::Probes = crate::probe::Probes {
+    render: |sh, cb, index, pass, draws, desc| {
+        crate::nanscan::before(sh, cb, index, pass, draws, desc)
+            .map(|s| Box::new(s) as Box<dyn crate::probe::PassWatch>)
+    },
+    compute: |sh, cb, index, pass| {
+        crate::nanscan::compute_before(sh, cb, index, pass)
+            .map(|s| Box::new(s) as Box<dyn crate::probe::PassWatch>)
+    },
+    stored_on: crate::lum::active,
+    stored: crate::lum::capture,
+};
 
 /// The chunks of passes that the encoder makes for each thread (see `jobs::run_all`).
 const CHUNKS_PER_THREAD: usize = 1;
@@ -73,6 +91,44 @@ pub struct GpuConfig {
     pub runtime_cache: Option<PathBuf>,
     /// A number that changes with the app build, so a cache of another build is dropped.
     pub build_id: u64,
+    /// What the start shows while it makes the pipelines of the runtime cache.
+    pub prewarm_screen: crate::ScreenHook,
+    /// The hooks of the host's diagnostics for each batch.
+    pub batch_hooks: Option<nxkit_metal::BatchHooks>,
+    /// The CPU runs one frame ahead of the GPU (`game.json` key `overlap`).
+    pub overlap: bool,
+}
+
+impl crate::GpuSettings {
+    pub(crate) fn config(&self) -> GpuConfig {
+        let defaults = GpuConfig::default();
+        GpuConfig {
+            shader_dir: self.shader_dir.clone(),
+            threads: if self.threads > 0 {
+                self.threads
+            } else {
+                defaults.threads
+            },
+            archive: nxkit_metal::ArchiveConfig {
+                load: self.archive.clone(),
+                shards: self.archive_shards.clone(),
+                open_shards: self.open_shards,
+                collect: self.collect_archive,
+                compile_bases: self.compile_bases,
+                exact_only: !self.specialize,
+                runtime: Vec::new(),
+            },
+            gob_order: self.gob_order,
+            runtime_cache: self.runtime_cache.clone(),
+            build_id: self.build_id,
+            prewarm_screen: self.prewarm_screen.clone(),
+            overlap: self.overlap,
+            batch_hooks: self.batch_hooks.map(|h| nxkit_metal::BatchHooks {
+                done: h.done,
+                committed: h.committed,
+            }),
+        }
+    }
 }
 
 impl Default for GpuConfig {
@@ -86,6 +142,9 @@ impl Default for GpuConfig {
             gob_order: GobOrder::default(),
             runtime_cache: None,
             build_id: 0,
+            prewarm_screen: crate::ScreenHook::default(),
+            batch_hooks: None,
+            overlap: false,
         }
     }
 }
@@ -127,6 +186,8 @@ pub struct Gpu {
     barriers: BarrierState,
     ring: BatchRing,
     threads: usize,
+    /// The `overlap` key of `game.json`.
+    game_overlap: bool,
     last: Option<SubmittedBatch>,
     /// The batch before `last`, while it may still run: the frame that `wait_older` waits for.
     older: Option<SubmittedBatch>,
@@ -158,7 +219,7 @@ impl Gpu {
         );
         let pipelines = Pipelines::new(ctx, &archive)?;
         if let Some(plan) = cache_plan {
-            pipelines.runtime_start(plan, &config.shader_dir);
+            pipelines.runtime_start(plan, &config.shader_dir, &config.prewarm_screen);
         }
         let transfer = Transfer::new(ctx, pipelines.cache(), config.gob_order)?;
         let rename = Arc::new(crate::rename::Renamer::new(ctx, guest.clone()));
@@ -179,8 +240,16 @@ impl Gpu {
             transfer,
             icbs: Mutex::new(Icbs::default()),
             barriers: BarrierState::default(),
-            ring: BatchRing::new(ctx, threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS)?,
+            ring: {
+                let mut ring = BatchRing::new(
+                    ctx,
+                    threads * CHUNKS_PER_THREAD + 1 + crate::private::EARLY_CUTS,
+                )?;
+                ring.set_hooks(config.batch_hooks);
+                ring
+            },
             threads,
+            game_overlap: config.overlap,
             last: None,
             older: None,
             pools: Vec::new(),
