@@ -4,8 +4,16 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.13.0 - 2026-11-21
+
 ### Added
 
+- The app owns its launch options (R65). `nxb build` writes them as `Contents/Resources/nxkit/launcher.json` in the
+  schema of the old engine's launcher, so NX2Apple draws the rows without knowing them, and the host fills the unset
+  ones from the saved choices `launcher.<env>` in the app's preferences (`NXKIT_SAVED_CHOICES=0` ignores them). The
+  options are `NXKIT_OP_MODE` (docked or handheld, the title's mode by default), `NXKIT_FULLSCREEN`,
+  `NXKIT_PAUSE_UNFOCUSED`, `NXKIT_HOME_MENU`, `NXKIT_HOME_QUIT`, `NXKIT_LANGUAGE` (the Mac's language or one of the
+  game's, from `control.nacp`), `NXKIT_RUMBLE`, `NXKIT_RUMBLE_GAIN`, `NXKIT_RUMBLE_MIN` and `NXKIT_METAL_HUD`.
 - `NXKIT_OVERLAY=1`: the game opens over the launcher's full-screen Space instead of a Space of its own, fades in with
   its first picture that is not black and out when it ends, and gives the launcher the progress of its start
   (`org.nxkit.loading.<pid>`, `org.nxkit.shown.<pid>`). NX2Apple's console mode uses it. `nxkit_gpu::when_shown`
@@ -18,6 +26,20 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The loading window of the start is a dark card in the look of NX2Apple's console mode, and the game's window is black
   before its first picture, so nothing white shows.
 - The game asks for the front again once it has launched, so it comes forward when a launcher hands the front over.
+- The shader step makes smaller GPU code: `air-bc` removes every result that no side effect needs, also cycles of
+  phis that only feed each other (one forward lighting shader had 5444 phis, Apple's library 231). A raw global memory
+  lookup keeps the pool it hit last, so a hit in the same pool reads nothing from the table (`TRANSLATOR_ID` msl-2.22).
+
+### Fixed
+
+- The shader step no longer panics in `emit/alu/flow.rs` when a jump table target found late splits a block with
+  SSY/PBK/PCNT push ops: the sync targets now follow the push ops into the new block. Xenoblade Chronicles 3 lost 89
+  shaders to it (#42).
+- `-o` may name an app that NX2Apple built at the same place with the old engine (nxnative). Before, `nxb build`
+  stopped with "exists and is not an app this build made". The new app gets a copy of the old engine's save, which
+  stays in its place (#43).
+- The main stack is mapped without its guard page, as on the console. Patrick's Parabox (Unity's GC scans the whole
+  main stack) read the guard page and stopped with SIGBUS.
 
 ## 0.12.0 - 2026-11-21
 
