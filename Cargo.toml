@@ -92,6 +92,7 @@ nxgame-dsr = { path = "titles/games/01004AB00A260000" }
 nxgame-kirbyfl = { path = "titles/games/01004D300C5AE000" }
 nxgame-mt2 = { path = "titles/games/010051701FB46000" }
 nxgame-octo0 = { path = "titles/games/01005270232F2000" }
+nxgame-hades = { path = "titles/games/0100535012974000" }
 nxgame-unicornasia = { path = "titles/games/010054B01AD92000" }
 nxgame-fe3h = { path = "titles/games/010055D009F78000" }
 nxgame-nier = { path = "titles/games/010056B015FE8000" }

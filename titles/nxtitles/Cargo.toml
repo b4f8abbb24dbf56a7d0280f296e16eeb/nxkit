@@ -17,7 +17,7 @@ default = [
     "ryza", "mp4", "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick", "hwaoc",
     "celeste", "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac", "bastion",
     "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr", "kirbyfl",
-    "mt2", "octo0", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
+    "mt2", "octo0", "hades", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
     "hollowknight", "srwy", "deadcells", "mrkb", "unicorn", "blasphemous", "smt5v", "ssbu", "zla", "dq11s", "mlbs",
     "mps", "aisni", "d2r", "astral", "xc3", "bayo", "rdr", "bayo2", "peach", "portal", "kirbysa", "ballxpit", "ais",
     "swheist2", "steinsgate", "seaofstars", "zeow", "sentinelsasia", "rpop", "pkshield", "oriwotw", "pkviolet",
@@ -77,6 +77,7 @@ dsr = ["dep:nxgame-dsr"]
 kirbyfl = ["dep:nxgame-kirbyfl"]
 mt2 = ["dep:nxgame-mt2"]
 octo0 = ["dep:nxgame-octo0"]
+hades = ["dep:nxgame-hades"]
 unicornasia = ["dep:nxgame-unicornasia"]
 fe3h = ["dep:nxgame-fe3h"]
 nier = ["dep:nxgame-nier"]
@@ -235,6 +236,7 @@ nxgame-dsr = { workspace = true, optional = true }
 nxgame-kirbyfl = { workspace = true, optional = true }
 nxgame-mt2 = { workspace = true, optional = true }
 nxgame-octo0 = { workspace = true, optional = true }
+nxgame-hades = { workspace = true, optional = true }
 nxgame-unicornasia = { workspace = true, optional = true }
 nxgame-fe3h = { workspace = true, optional = true }
 nxgame-nier = { workspace = true, optional = true }

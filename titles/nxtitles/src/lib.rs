@@ -109,6 +109,8 @@ pub fn catalog() -> Result<Catalog, String> {
         &nxgame_mt2::MT2,
         #[cfg(feature = "octo0")]
         &nxgame_octo0::OCTO0,
+        #[cfg(feature = "hades")]
+        &nxgame_hades::HADES,
         #[cfg(feature = "unicornasia")]
         &nxgame_unicornasia::UNICORNASIA,
         #[cfg(feature = "fe3h")]
