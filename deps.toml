@@ -1,7 +1,7 @@
 # External dependencies of the nxkit workspace (CONTRIBUTING.md "Dependencies").
 # One table per crate: reason, licence, version, unsafe count, owner, which workspace crates may use it.
-# A new entry is its own commit. Besides std, only the objc2 family (macOS Metal and VideoToolbox backends) and rav1d (the
-# software AV1 decoder of nxkit-svc-video) are used.
+# A new entry is its own commit. Besides std, only the objc2 family (macOS Metal and VideoToolbox backends), rav1d (the
+# software AV1 decoder of nxkit-svc-video) and naga (SPIR-V to MSL at build time in nxb-spirv) are used.
 #
 # Expected first entries (designs): ruzstd (nxb-codec, O14), fancy-regex and closure (nxb-shader only, 1:1 regex port),
 # memchr, windows-sys (nxb-sys, Windows), libfuzzer-sys (dev only).
@@ -212,3 +212,12 @@ version = "8a5abacd90d5403fc0463459a35826f892b9142e"
 unsafe = "many: these are generated bindings, every call into Apple frameworks is unsafe. nxkit-coreml and nxkit-metal wrap them in a safe API"
 owner = "project team"
 used_by = ["nxkit-coreml", "nxkit-metal"]
+
+[naga]
+reason = "the SPIR-V of Vulkan games to MSL at build time (D21): nxb-spirv reads each module with naga's SPIR-V reader and writes one Metal function with its MSL writer. D20 removed spirv-cross, and naga builds with cargo and needs no external binary. Only nxb-spirv, a build crate (L1, no I/O), uses it: the host reads the table and the library, not naga"
+source = "crates.io, pinned to =30.0.1 in [workspace.dependencies]. Default features off, features spv-in and msl-out on. The packages that it brings (all at the versions of Cargo.lock): naga-types 30.0.2, arrayvec, bit-set, bit-vec, bitflags, cfg-if, codespan-reporting, unicode-width, half, num-traits, libm, zerocopy 0.8 and zerocopy-derive 0.8, hashbrown 0.17 and 0.15, foldhash 0.2 and 0.1, indexmap, equivalent, log, once_cell, petgraph, fixedbitset, rustc-hash 1, spirv 0.4, thiserror and thiserror-impl 2. Build only: autocfg, cfg_aliases, and the proc-macro crates proc-macro2, quote, syn 2 and 3, unicode-ident"
+licence = "MIT OR Apache-2.0 (naga, naga-types). The packages that it brings are MIT OR Apache-2.0, except: spirv and codespan-reporting Apache-2.0, libm and cfg_aliases MIT, foldhash Zlib, zerocopy and zerocopy-derive BSD-2-Clause OR Apache-2.0 OR MIT, unicode-ident (MIT OR Apache-2.0) AND Unicode-3.0"
+version = "30.0.1"
+unsafe = "0 in naga (#![forbid(unsafe_code)] in its lib.rs) and in naga-types, spirv, codespan-reporting, unicode-width, thiserror and rustc-hash. The containers and helpers use unsafe code for speed (counts of the word unsafe in their src, Cargo.lock versions): zerocopy 607, hashbrown 0.17 491 and 0.15 320, half 84, fixedbitset 78, arrayvec 58, libm 57, once_cell 51, petgraph 18, indexmap 12, foldhash 11 and 3, log 8, bit-vec 6, bitflags 3, bit-set 2, num-traits 1. nxb-spirv itself forbids unsafe code. naga reads the game's SPIR-V: a malformed module must give an error, not a panic. nxb-spirv checks the word structure first, and a panic inside naga is an open point"
+owner = "project team"
+used_by = ["nxb-spirv"]
