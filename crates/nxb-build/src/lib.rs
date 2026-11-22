@@ -2,7 +2,7 @@
 //! shader split) -> romfs -> rewrite -> manifest -> link -> shaders and pipeline archive -> bundle, with
 //! `nxkit-host` as the program of the app (`standalone`). Console events as `--progress json` NDJSON ([`events`]),
 //! exit codes 0 done, 1 error, 2 bad arguments, 3 damaged data, 4 not supported, 6 missing key, 130 interrupted.
-//! `--dry-run` prints the plan and writes nothing. `--auto-analyze` selects the generic path without a title module.
+//! `--dry-run` prints the plan and writes nothing. A game without a title module takes the generic path on its own, with a warning. `--auto-analyze` selects that path for any game.
 
 pub mod archive_layout;
 mod args;

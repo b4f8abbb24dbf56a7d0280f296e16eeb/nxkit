@@ -1,6 +1,10 @@
-//! Target-independent facts and rewritten modules from the input, without a title catalog.
+//! Target-independent facts and rewritten modules from the input, without a title catalog. The `sdk` module gets the
+//! SDK-wide rules, which match by function fingerprint and not by build ID.
 use super::{auto_shaders, extract, layout, manifest, modules, npdm, nvn};
 use std::collections::BTreeSet;
+
+/// The SDK-wide rules of the title modules, for the `sdk` module of any game (`sdk_rules.toml`).
+const SDK_RULES: &str = include_str!("sdk_rules.toml");
 
 pub(super) struct Analysis {
     pub modules: Vec<(modules::Built, u64)>,
@@ -58,7 +62,7 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
     let built = modules::rewrite_with_loader(
         &order,
         "generic",
-        "scope = \"generic\"",
+        SDK_RULES,
         &[],
         |name| {
             selected
@@ -122,6 +126,17 @@ impl Analysis {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_sdk_rules_parse_for_the_generic_scope() {
+        let t = nxb_rewrite::patches::PatchTable::from_toml(&[(
+            "generic.toml".to_owned(),
+            SDK_RULES.to_owned(),
+        )])
+        .unwrap();
+        assert_eq!(t.rules["generic"]["sdk"].len(), 12);
+        assert!(!t.rules["generic"].contains_key("main"));
+    }
+
     use super::*;
     fn u32b(b: &mut [u8], at: usize, n: u32) {
         b[at..at + 4].copy_from_slice(&n.to_le_bytes());

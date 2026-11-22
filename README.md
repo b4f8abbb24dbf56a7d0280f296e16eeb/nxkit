@@ -20,7 +20,7 @@ tree. A title module holds what is specific to one game: its memory layout, thre
 every game of an engine shares is in its engine family (`titles/engines/`), and what every game on a graphics API
 shares is in its graphics family (`titles/graphics/`). Everything else is general. Refer to
 [docs/titles.md](docs/titles.md#rules-for-a-module) for where a fact goes. For a game without a title module,
-`nxb build --auto-analyze` reads the module order, build IDs and settings from the game files (experimental).
+`nxb build --auto-analyze` reads the module order, build IDs and settings from the game files (experimental). A game without a title module takes this path on its own, with a warning: it has no title patches and can fail to run.
 The [CHANGELOG](CHANGELOG.md) lists every change.
 
 ## How it works
