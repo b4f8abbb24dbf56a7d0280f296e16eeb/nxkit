@@ -363,7 +363,7 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
     let pc = PassCtx {
         targets: Targets {
             colors: formats,
-            samples: 1,
+            samples: nxkit_pipestate::draw::PASS_SAMPLES,
         },
         size,
         scale,

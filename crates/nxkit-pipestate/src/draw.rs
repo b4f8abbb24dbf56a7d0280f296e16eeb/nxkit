@@ -8,6 +8,17 @@ use crate::nvn::{Blend, color_target, is_integer};
 use crate::program::{ENTRY_LAYER, ENTRY_LAYER_Z, ENTRY_Z};
 use crate::state::ColorTarget;
 
+/// The sample count of every pass the host draws (`nxkit-gpu` `encode/setup.rs`): a multisampled target of the game is
+/// drawn with one sample.
+pub const PASS_SAMPLES: u32 = 1;
+
+/// The colour formats of a pass as its pipelines see them: the slots up to the last one with an attachment. NVN allows
+/// empty slots between attachments, and they stay empty.
+pub fn pass_colors(slots: &[Option<Format>]) -> Vec<Option<Format>> {
+    let n = slots.iter().rposition(Option::is_some).map_or(0, |i| i + 1);
+    slots[..n].to_vec()
+}
+
 /// The fragment function for the colour formats of the targets: the unsigned variant when every written target is an
 /// integer format, the mixed variant when its mask is the integer targets, else the plain entry. `written` lists the
 /// colours the shader writes (`None`: all).
