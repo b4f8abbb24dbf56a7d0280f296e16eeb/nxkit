@@ -75,6 +75,8 @@ impl Gpu {
         self.native.begin_frame();
         let diag_frame = crate::diag::begin_frame();
         let lum = crate::lum::begin();
+        let capture = crate::inspect::begin(diag_frame);
+        let tracing = crate::inspect::trace_begin(&self.ctx);
         let scan = crate::nanscan::begin(&self.ctx);
         let t0 = Instant::now();
         MARKS.with(|m| m.borrow_mut().clear());
@@ -525,9 +527,11 @@ impl Gpu {
         let number = submitted.number();
         self.older = self.last.replace(submitted);
         self.copyback.submitted(number, &mirrored_ranges);
-        if lum || scan {
-            let _ = self.wait();
-        }
+        let waited = if lum || scan || capture {
+            self.wait().ok().flatten()
+        } else {
+            None
+        };
         if lum {
             crate::lum::dump(&self.ctx);
         }
@@ -546,6 +550,28 @@ impl Gpu {
             self.tiny_frame_end(view, &textures, &mirrored);
         }
         crate::health::frame(diag_frame, &stats);
+        if tracing {
+            crate::inspect::trace_end(|| {
+                let _ = self.wait();
+            });
+        }
+        crate::inspect::note_frame(
+            diag_frame,
+            &stats,
+            self.ring.metrics().snapshot().gpu_total_ns,
+        );
+        if capture {
+            crate::inspect::finish(
+                &self.ctx,
+                &crate::inspect::Finish {
+                    plan,
+                    frame,
+                    stats: &stats,
+                    gpu_ns: waited.map(|w| w.gpu_ns),
+                    texture: &|id| self.texture(id),
+                },
+            );
+        }
         Ok(EncodeReport {
             batch: number,
             deswizzled,

@@ -58,12 +58,16 @@ use uses::*;
 
 pub(crate) use crate::textures::collect_uses;
 
-/// The analyses that the encode path reports to (W29): `nanscan` before each pass, `lum` for the stored colour targets
+/// The analyses that the encode path reports to (W29): `nanscan` and `inspect` before each pass, `lum` for the stored colour targets
 /// of the focused pass. Each one checks its own `NXKIT_DIAG` switch.
 pub(crate) const PROBES: crate::probe::Probes = crate::probe::Probes {
     render: |sh, cb, index, pass, draws, desc| {
-        crate::nanscan::before(sh, cb, index, pass, draws, desc)
-            .map(|s| Box::new(s) as Box<dyn crate::probe::PassWatch>)
+        let scan = crate::nanscan::before(sh, cb, index, pass, draws.clone(), desc)
+            .map(|s| Box::new(s) as Box<dyn crate::probe::PassWatch>);
+        crate::probe::join(
+            scan,
+            crate::inspect::before(sh, cb, index, pass, draws, desc),
+        )
     },
     compute: |sh, cb, index, pass| {
         crate::nanscan::compute_before(sh, cb, index, pass)

@@ -15,7 +15,7 @@
 //! - [`watched`]: `NXKIT_WATCH_TEX` names texture ids whose passes and copies are printed.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use nxkit_metal::Format;
@@ -313,9 +313,25 @@ pub(crate) const SAMPLE_EVERY: u64 = 300;
 /// The number of the frame that the encoder works on.
 static FRAME: AtomicU64 = AtomicU64::new(0);
 
+/// A request of the control socket (`sample`) that the next frame is a sampled frame. A flag that the control thread
+/// sets and the encoder reads (W33, diagnostics).
+static FORCE_NEXT: AtomicBool = AtomicBool::new(false);
+
+/// The number of the frame that the request made a sampled frame. 0 when there is none.
+static FORCED: AtomicU64 = AtomicU64::new(0);
+
 /// Starts a frame for the diagnostics and gives its number.
 pub(crate) fn begin_frame() -> u64 {
-    FRAME.fetch_add(1, Ordering::Relaxed) + 1
+    let n = FRAME.fetch_add(1, Ordering::Relaxed) + 1;
+    if FORCE_NEXT.swap(false, Ordering::Relaxed) {
+        FORCED.store(n, Ordering::Relaxed);
+    }
+    n
+}
+
+/// Makes the next frame a sampled frame, once.
+pub(crate) fn force_sample() {
+    FORCE_NEXT.store(true, Ordering::Relaxed);
 }
 
 /// The number of the frame that the encoder works on.
@@ -324,9 +340,10 @@ pub(crate) fn frame() -> u64 {
 }
 
 /// True on the frames that the per-draw categories print: one frame out of [`SAMPLE_EVERY`], from the 150th on, so
-/// the first one is past the boot screens.
+/// the first one is past the boot screens. Also the frame that the `sample` verb asked for.
 pub(crate) fn sampled() -> bool {
-    frame() % SAMPLE_EVERY == SAMPLE_EVERY / 2
+    let f = frame();
+    f % SAMPLE_EVERY == SAMPLE_EVERY / 2 || f == FORCED.load(Ordering::Relaxed)
 }
 
 /// True for the first `max` calls with `budget` on the current frame. The budget starts again on the next frame.
@@ -349,9 +366,17 @@ pub(crate) fn watched(id: TexId) -> bool {
     crate::settings::live().watch_tex.contains(&id.0)
 }
 
-/// `NXKIT_GPU_LABELS=1`: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
+/// `NXKIT_GPU_LABELS=1`, or a running GPU trace: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
 pub(crate) fn gpu_labels() -> bool {
-    crate::settings::live().gpu_labels
+    crate::settings::live().gpu_labels || TRACING.load(Ordering::Relaxed)
+}
+
+/// True while a GPU trace of frames runs (`inspect::gpu_trace`): the passes get labels for these frames only.
+static TRACING: AtomicBool = AtomicBool::new(false);
+
+/// Turns the labels of a GPU trace on or off.
+pub(crate) fn set_tracing(on: bool) {
+    TRACING.store(on, Ordering::Relaxed);
 }
 
 /// Whether `NXKIT_SKIP_PROGRAMS` names a key or `NXKIT_SKIP_FILE` is set. One load of a cached value, so the check

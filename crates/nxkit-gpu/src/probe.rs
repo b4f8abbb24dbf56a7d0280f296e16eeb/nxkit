@@ -2,7 +2,7 @@
 //!
 //! The encode path reports what it does through these hooks and knows no analysis module. `Gpu` installs the
 //! analyses (`gpu::PROBES`): `nanscan` watches render and compute passes, `lum` captures stored colour targets,
-//! `passprof` stamps the end of each pass ([`PassClock`]) and `meshvis` counts mesh draws in the visibility buffer of
+//! `inspect` records the passes of a captured frame and copies their attachments, `passprof` stamps the end of each pass ([`PassClock`]) and `meshvis` counts mesh draws in the visibility buffer of
 //! the GPU counters ([`MeshCounts`]). Each analysis keeps its own `NXKIT_DIAG` switch, so an installed hook that is
 //! off returns at once, as the direct calls did.
 
@@ -20,6 +20,27 @@ use crate::drawctx::{Prep, Shared};
 pub(crate) trait PassWatch {
     /// Encodes what runs after the pass.
     fn after(self: Box<Self>, sh: &Shared<'_>, cb: &mut CommandBuffer);
+}
+
+/// Two watches of one pass, one after the other.
+struct Pair(Box<dyn PassWatch>, Box<dyn PassWatch>);
+
+impl PassWatch for Pair {
+    fn after(self: Box<Self>, sh: &Shared<'_>, cb: &mut CommandBuffer) {
+        self.0.after(sh, cb);
+        self.1.after(sh, cb);
+    }
+}
+
+/// The watch that runs both `a` and `b`, when there are any.
+pub(crate) fn join(
+    a: Option<Box<dyn PassWatch>>,
+    b: Option<Box<dyn PassWatch>>,
+) -> Option<Box<dyn PassWatch>> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(Box::new(Pair(a, b))),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Before render pass `index` with the draws `draws` and the Metal pass `desc`: what to run after it, if anything.
