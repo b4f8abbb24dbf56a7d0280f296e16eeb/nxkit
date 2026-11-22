@@ -102,6 +102,8 @@ pub struct GpuConfig {
     pub overlap: bool,
     /// The draws that the temporal upscale replaces (`temporal_upscale` of `game.json`, R72), or none.
     pub temporal_upscale: Option<crate::TemporalUpscale>,
+    /// The meeting point with the control socket for the shader hot swap (W36).
+    pub shader_hub: Option<crate::ShaderHub>,
 }
 
 impl crate::GpuSettings {
@@ -130,6 +132,7 @@ impl crate::GpuSettings {
             prewarm_screen: self.prewarm_screen.clone(),
             overlap: self.overlap,
             temporal_upscale: self.temporal_upscale.clone(),
+            shader_hub: self.shader_hub.clone(),
             batch_hooks: self.batch_hooks.map(|h| nxkit_metal::BatchHooks {
                 done: h.done,
                 committed: h.committed,
@@ -154,6 +157,7 @@ impl Default for GpuConfig {
             batch_hooks: None,
             overlap: false,
             temporal_upscale: None,
+            shader_hub: None,
         }
     }
 }
@@ -171,6 +175,8 @@ pub struct Gpu {
     ctx: Context,
     guest: GuestSpace,
     programs: Programs,
+    /// Follows the shader hot swap of the control socket (W36). None without a hub.
+    swaps: Option<crate::hotswap::Follower>,
     /// The texture types that each shader declares for its texture bindings, by program key (fragment and compute
     /// first, vertex second), for [`Gpu::fit_handles`].
     fit_decl: [FastMap<String, Vec<(u32, nxkit_metal::TextureKind)>>; 2],
@@ -238,6 +244,9 @@ impl Gpu {
         Ok(Self {
             ctx: ctx.clone(),
             guest,
+            swaps: config.shader_hub.clone().map(|h| {
+                crate::hotswap::Follower::new(h, ctx, &config.shader_dir, crate::pull::on())
+            }),
             programs: Programs::new(ctx, config.shader_dir),
             fit_decl: [FastMap::default(), FastMap::default()],
             pool_decl: [FastMap::default(), FastMap::default()],

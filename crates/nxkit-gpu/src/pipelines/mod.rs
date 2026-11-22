@@ -88,6 +88,8 @@ struct Last {
     write_masks: [u8; 8],
     /// The vertex function pulls: the attributes and streams are not part of the pipeline and stay empty.
     pull: bool,
+    /// The swaps of the vertex and the fragment program (`StageProgram::swap`). A new swap makes the memo miss.
+    swaps: (u32, u32),
     attributes: Vec<AttributeDetail>,
     /// The index, stride and divisor of each stream. The address does not matter for the pipeline.
     streams: Vec<(u32, u32, u32)>,
@@ -103,8 +105,10 @@ impl Last {
         targets: &Targets,
         icb: bool,
         zero_to_one: bool,
+        swaps: (u32, u32),
     ) -> bool {
         self.owner == owner
+            && self.swaps == swaps
             && self.icb == icb
             && self.zero_to_one == zero_to_one
             && self.topology == d.topology
@@ -159,6 +163,14 @@ impl Drop for Pipelines {
     fn drop(&mut self) {
         self.builds.close();
     }
+}
+
+/// The key of a pipeline whose vertex or fragment library was swapped at run time (W36): the key of the shipped state
+/// mixed with the numbers of the swaps. A new swap is a new key, so the pipeline is built again.
+pub(super) fn swapped_key(key: u64, vertex: u32, fragment: u32) -> u64 {
+    let mut h = DefaultHasher::new();
+    (key, "swap", vertex, fragment).hash(&mut h);
+    h.finish()
 }
 
 /// The point size fallback of [`build_render`] has this key.
@@ -288,6 +300,14 @@ impl Pipelines {
     /// The compute pipeline of a program.
     pub(crate) fn compute(&self, key: &str, p: &StageProgram) -> Result<ComputePipeline, Skip> {
         let key = compute_key(key);
+        if p.swap != 0 {
+            // A swapped library: a pipeline of its own, never kept (W36).
+            let key = swapped_key(key, p.swap, 0);
+            return self
+                .cache
+                .compute_scratch(key, &p.lib, &p.entry)
+                .map_err(|e| pipe_failed(format_args!("compute {} (swapped): {e}", p.entry)));
+        }
         let made = self.cache.compute(key, &p.lib, &p.entry);
         if made.is_ok() {
             record::compute(key, &p.lib, &p.entry);

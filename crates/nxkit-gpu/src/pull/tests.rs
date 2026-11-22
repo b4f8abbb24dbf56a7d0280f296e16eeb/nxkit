@@ -360,6 +360,7 @@ fragment float4 fs() { return float4(1); }
         threadgroup: [1; 3],
         c1: vec![],
         mesh: None,
+        swap: 0,
     };
     let (vs, fs) = (stage("vs", true), stage("fs", false));
     let targets = Targets {

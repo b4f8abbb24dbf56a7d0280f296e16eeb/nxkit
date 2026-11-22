@@ -42,6 +42,7 @@ mod gpu;
 mod guest;
 mod guestpools;
 mod health;
+mod hotswap;
 mod icbs;
 mod images;
 mod indirect;
@@ -84,6 +85,7 @@ mod walk;
 pub use backend::{GpuBackend, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use guestpools::GuestPools;
+pub use hotswap::ShaderHub;
 pub use pipelines::flush_runtime_cache;
 pub use pools::{
     Backing, BadRange, Drained, Loc, MakeBacking, MetalPoolSet, Miss, PAGE, PagePins, PoolBuffer,

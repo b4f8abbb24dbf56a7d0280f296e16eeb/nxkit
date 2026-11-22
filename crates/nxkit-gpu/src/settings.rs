@@ -60,6 +60,8 @@ pub struct GpuSettings {
     /// The draws that the temporal upscale replaces (`temporal_upscale` of `game.json`, R72), or none.
     /// `NXKIT_TEMPORAL_UPSCALE=0` turns it off.
     pub temporal_upscale: Option<TemporalUpscale>,
+    /// The meeting point with the control socket for the shader hot swap (W36), or none.
+    pub shader_hub: Option<crate::ShaderHub>,
 }
 
 /// The draws of a game that the temporal upscale replaces and how it reads their inputs (R72, `tupscale`). The
@@ -175,6 +177,7 @@ impl Default for GpuSettings {
             screen: std::sync::Arc::default(),
             present_upscale: nxkit_metal::PresentUpscale::Off,
             temporal_upscale: None,
+            shader_hub: None,
         }
     }
 }
