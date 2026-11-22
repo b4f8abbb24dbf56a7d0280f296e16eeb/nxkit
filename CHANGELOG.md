@@ -24,6 +24,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   Story Cyber Sleuth, Well Dweller, Balatro, Super Mario Galaxy and Galaxy 2. The OpenGL games build no app yet:
   `nxb build` stops with a note that nxkit has no OpenGL layer (`GraphicsApi::OpenGl`).
 - The pipeline seeds of 19 of the new titles, imported from their recorded `pso_manifest.tsv`.
+- `nxb build` builds a game without a title module on the generic path of `--auto-analyze` on its own, with a warning in
+  the log (#54). It was an error with exit code 4. The path reads the modules, build IDs, NPDM and NVN names from the
+  game and applies the SDK-wide rules (`sdk_rules.toml`, matched by function fingerprint) to the `sdk` module. The game
+  has no title patches and can fail to run.
 
 ## 0.15.2 - 2026-11-22
 
