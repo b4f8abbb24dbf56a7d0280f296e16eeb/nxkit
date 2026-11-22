@@ -487,3 +487,91 @@ fn console_vars_add_up_and_a_later_value_wins() {
             .is_none()
     );
 }
+
+/// A family that lists markers and leaves `detect` to the core.
+struct Marked(&'static str, &'static str, Option<&'static str>);
+impl BuildHooks for Marked {}
+impl RuntimeHooks for Marked {}
+impl Family for Marked {
+    fn id(&self) -> &'static str {
+        self.0
+    }
+    fn name(&self) -> &'static str {
+        "Marked"
+    }
+    fn layer(&self) -> Layer {
+        Layer::Engine
+    }
+    fn detect(&self, _: &TitleFacts) -> Match {
+        Match::Unknown
+    }
+    fn markers(&self) -> &'static [Marker] {
+        // one marker per family, its id the library it names
+        match self.1 {
+            "a" => &[Marker {
+                id: "a",
+                at: MarkerAt::Rodata,
+                pattern: "AA",
+                evidence: REC,
+            }],
+            _ => &[Marker {
+                id: "b",
+                at: MarkerAt::RomfsPath,
+                pattern: "Data/",
+                evidence: REC,
+            }],
+        }
+    }
+    fn refines(&self) -> Option<&'static str> {
+        self.2
+    }
+}
+
+fn libs(l: &[&str]) -> TitleFacts {
+    let mut f = TitleFacts::new(TitleId(9));
+    f.libraries = l.iter().map(|s| s.to_string()).collect();
+    f
+}
+
+#[test]
+fn markers_decide_the_engine_of_a_game_without_a_title() {
+    static ONE: Marked = Marked("one", "a", None);
+    static TWO: Marked = Marked("two", "b", None);
+    let c = Catalog::new(vec![&ONE, &TWO], vec![]).unwrap();
+    // nobody looked: no decision, no guess
+    assert_eq!(c.detect_engine(&libs(&[])), Detection::default());
+    // one hit: that family
+    let d = c.detect_engine(&libs(&["a"]));
+    assert_eq!((d.family, d.candidates), (Some("one"), vec!["one"]));
+    // a hit that no family names: none
+    assert_eq!(c.detect_engine(&libs(&["z"])).family, None);
+    // two families match and neither refines the other: no decision, both listed
+    let d = c.detect_engine(&libs(&["a", "b"]));
+    assert_eq!((d.family, d.candidates), (None, vec!["one", "two"]));
+    assert_eq!(c.resolve(&libs(&["a", "b"])).engine_from, EngineFrom::None);
+    assert_eq!(c.resolve(&libs(&["a"])).engine_from, EngineFrom::Detected);
+}
+
+#[test]
+fn a_refinement_settles_two_matches() {
+    static ONE: Marked = Marked("one", "a", None);
+    static TWO: Marked = Marked("two", "b", Some("one"));
+    let c = Catalog::new(vec![&ONE, &TWO], vec![]).unwrap();
+    let d = c.detect_engine(&libs(&["a", "b"]));
+    assert_eq!((d.family, d.candidates), (Some("two"), vec!["one", "two"]));
+}
+
+#[test]
+fn a_romfs_marker_matches_a_folder_or_the_end_of_a_path() {
+    let m = |p| Marker {
+        id: "x",
+        at: MarkerAt::RomfsPath,
+        pattern: p,
+        evidence: REC,
+    };
+    assert!(m("Data/").matches_path("Data/a.bin"));
+    assert!(m("Data/").matches_path("x/Data/a.bin"));
+    assert!(!m("Data/").matches_path("MetaData/a.bin"));
+    assert!(m("game.win").matches_path("sub/game.win"));
+    assert!(!m("game.win").matches_path("game.win.bak"));
+}

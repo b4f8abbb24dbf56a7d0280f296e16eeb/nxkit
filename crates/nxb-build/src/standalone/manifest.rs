@@ -56,6 +56,19 @@ pub(crate) struct Manifest<'a> {
     pub temporal_upscale: Option<(nxtitle::TemporalView, nxtitle::TemporalDraws)>,
     /// The need `vertex_stream_null_bind` of the title.
     pub vertex_stream_null_bind: bool,
+    /// Set for a game built without a title module: what the build found from the game's own files.
+    pub generic: Option<Generic>,
+}
+
+/// What a build without a title module found: it is written as `generic` and `engine` of `game.json`, for the host's
+/// start line and for a report.
+pub(crate) struct Generic {
+    /// The engine family that the markers settled, if one.
+    pub engine: Option<&'static str>,
+    /// The markers that hit (the libraries of the facts).
+    pub hits: Vec<&'static str>,
+    /// Every family that matched. More than one with no `engine` means that nothing settled it.
+    pub candidates: Vec<&'static str>,
 }
 
 fn s(v: &str) -> Value {
@@ -397,6 +410,19 @@ pub(crate) fn game_json(m: &Manifest) -> String {
     if !m.limits.is_empty() {
         f.push(("limits", Value::List(m.limits.iter().map(limit).collect())));
     }
+    if let Some(g) = &m.generic {
+        // The app has no title module: the host says so at its start and in a report.
+        f.push(("generic", Value::Bool(true)));
+        let list = |v: &[&str]| Value::List(v.iter().map(|x| s(x)).collect());
+        f.push((
+            "engine",
+            obj(vec![
+                ("family", g.engine.map_or(Value::Null, s)),
+                ("markers", list(&g.hits)),
+                ("candidates", list(&g.candidates)),
+            ]),
+        ));
+    }
     f.push(("dylib", s("nxgame.dylib")));
     f.push(("page_size", n(PAGE)));
     f.push((
@@ -463,6 +489,58 @@ pub(crate) fn nvn_list(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn manifest(generic: Option<Generic>) -> String {
+        game_json(&Manifest {
+            title_id: 1,
+            name: "g",
+            version: 0,
+            version_name: "0".into(),
+            modules: &[],
+            services: vec![],
+            graphics: "nvn",
+            nvn_functions: vec![],
+            patches: false,
+            main_thread: MainThread {
+                priority: 44,
+                core: 0,
+                stack_size: 0x100000,
+            },
+            aoc: &[],
+            settings: nxtitle::Settings::DEFAULT,
+            shared_font_decode: false,
+            sf_services: vec![],
+            limits: vec![],
+            render_args: None,
+            temporal_upscale: None,
+            vertex_stream_null_bind: false,
+            generic,
+        })
+    }
+
+    #[test]
+    fn a_build_without_a_title_module_says_so_with_its_evidence() {
+        let t = manifest(Some(Generic {
+            engine: Some("unity"),
+            hits: vec!["Unity"],
+            candidates: vec!["unity"],
+        }));
+        assert!(t.contains("\"generic\": true"), "{t}");
+        assert!(t.contains("\"family\": \"unity\""), "{t}");
+        assert!(t.contains("\"Unity\""), "{t}");
+        let none = manifest(Some(Generic {
+            engine: None,
+            hits: vec![],
+            candidates: vec![],
+        }));
+        assert!(none.contains("\"family\": null"), "{none}");
+        // a title module's build writes neither key
+        let title = manifest(None);
+        assert!(
+            !title.contains("\"generic\"") && !title.contains("\"engine\""),
+            "{title}"
+        );
+    }
 
     #[test]
     fn the_nvn_list_skips_blank_and_comment_lines() {

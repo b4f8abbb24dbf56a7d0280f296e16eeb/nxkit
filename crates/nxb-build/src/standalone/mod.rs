@@ -9,6 +9,9 @@ mod analysis;
 mod auto_shaders;
 mod bundle;
 mod elf;
+#[cfg(test)]
+mod engine_parity;
+mod engine_scan;
 mod extract;
 mod files;
 pub(crate) mod fonts;
@@ -100,6 +103,8 @@ struct Game {
     services: Vec<&'static str>,
     /// The graphics API the game renders with (`BuildHooks::graphics_api`).
     graphics: nxtitle::GraphicsApi,
+    /// The id of the title's engine family (`Title::engine`).
+    engine: &'static str,
     shared_font_decode: bool,
     sf_services: Vec<&'static str>,
     /// The frame limits of the family and the title (`RuntimeHooks::limits`).
@@ -142,6 +147,7 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
             .map(nxtitle::Service::id)
             .collect(),
         graphics: r.graphics_api(),
+        engine: t.engine(),
         shared_font_decode: r.shared_font_decode().is_some_and(|f| f.value),
         sf_services: r.sf_services().into_iter().map(|f| f.value).collect(),
         limits: r.limits().into_iter().map(|f| f.value).collect(),
@@ -449,14 +455,25 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             render_args: t.render_args,
             temporal_upscale: t.temporal_upscale,
             vertex_stream_null_bind: t.vertex_stream_null_bind,
+            generic: None,
         };
         let put = |n: &str, d: &[u8]| {
             std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e))
         };
         put("game.json", manifest::game_json(&m).as_bytes())?;
         let nacp = std::fs::read(ver_dir.join("control.nacp")).ok();
-        let options =
-            launcher::launcher_json(t.id, &m.settings, nacp.as_deref(), t.render_args.is_some());
+        let options = launcher::launcher_json_for(
+            t.id,
+            &m.settings,
+            nacp.as_deref(),
+            t.render_args.is_some(),
+            Some(&launcher::Build {
+                generic: false,
+                engine: Some(t.engine),
+                graphics: t.graphics.id(),
+                evidence: vec![],
+            }),
+        );
         put(nxkit_abi::launch::FILE, options.as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         for (family, text) in &t.family_rules {
@@ -506,7 +523,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     }
     stage(p, "shaders", "shaders and pipeline archive", || {
         let d = if vulkan {
-            vk_shaders::run(a, &b, p, &run_dir)?
+            vk_shaders::run(a, &b.work, p, &run_dir)?
         } else {
             shaders::run(a, &b, p, &run_dir)?
         };

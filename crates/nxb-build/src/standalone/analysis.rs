@@ -1,6 +1,9 @@
 //! Target-independent facts and rewritten modules from the input, without a title catalog. The `sdk` module gets the
 //! SDK-wide rules, which match by function fingerprint and not by build ID.
-use super::{auto_shaders, extract, layout, manifest, modules, npdm, nvn};
+use super::{
+    auto_shaders, elf, engine_scan, extract, graphics, layout, manifest, modules, npdm, nvn,
+};
+use nxtitle::GraphicsApi;
 use std::collections::BTreeSet;
 
 /// The SDK-wide rules of the title modules, for the `sdk` module of any game (`sdk_rules.toml`).
@@ -9,6 +12,18 @@ const SDK_RULES: &str = include_str!("sdk_rules.toml");
 pub(super) struct Analysis {
     pub modules: Vec<(modules::Built, u64)>,
     pub thread: npdm::MainThread,
+    /// The API the modules ask for by name. A game that names none is taken for NVN.
+    pub graphics: GraphicsApi,
+    /// The engine family found from the modules, as its id, and what it gives the manifest.
+    pub engine: Option<&'static str>,
+    /// The markers that hit, as library ids: the evidence of the engine answer.
+    pub engine_hits: Vec<&'static str>,
+    /// Every family that matched. More than one with no `engine` means that nothing settled it.
+    pub engine_candidates: Vec<&'static str>,
+    limits: Vec<nxtitle::LimitRule>,
+    render_args: Option<nxtitle::RenderArgs>,
+    /// The modules left out because the host's Vulkan layer replaces them (the loader and the driver).
+    pub replaced: Vec<String>,
     settings: nxtitle::Settings,
 }
 
@@ -41,9 +56,40 @@ fn ordered(input: &[(String, Vec<u8>)]) -> Result<Vec<&(String, Vec<u8>)>, Strin
     Ok(selected.into_iter().map(|(_, m)| m).collect())
 }
 
+/// The graphics API of the modules, from the names in their read-only data, and for Vulkan the modules that the host's
+/// layer replaces: a module besides `main` and `sdk` that exports `vk*` functions is the Vulkan loader or the driver.
+fn api_of(selected: &[&(String, Vec<u8>)]) -> Result<(GraphicsApi, Vec<String>), String> {
+    let mut ro = Vec::new();
+    let mut vulkan_modules = Vec::new();
+    for (name, data) in selected {
+        let m = nxb_rewrite::nso::load(data, name).map_err(|e| format!("module {name}: {e:?}"))?;
+        let (off, size) = m.segments[1];
+        ro.push(
+            m.image
+                .get(off..off.saturating_add(size))
+                .unwrap_or_default()
+                .to_vec(),
+        );
+        let exports_vk = elf::symbols(&m.image)
+            .is_ok_and(|s| s.exports.iter().any(|e| e.name.starts_with("vk")));
+        if exports_vk && !matches!(name.as_str(), "main" | "sdk") {
+            vulkan_modules.push(name.clone());
+        }
+    }
+    let api = graphics::detect(ro.iter().map(Vec::as_slice)).unwrap_or(GraphicsApi::Nvn);
+    let replaced = if api == GraphicsApi::Vulkan {
+        vulkan_modules
+    } else {
+        vec![]
+    };
+    Ok((api, replaced))
+}
+
 pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
     let thread = npdm::main_thread(&game.npdm)?;
-    let selected = ordered(&game.modules)?;
+    let mut selected = ordered(&game.modules)?;
+    let (graphics, replaced) = api_of(&selected)?;
+    selected.retain(|(name, _)| !replaced.contains(name));
     let ids = selected
         .iter()
         .map(|(name, data)| {
@@ -91,14 +137,74 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
         stdalloc_cap: 0,
         alloc_big_align: false,
     };
+    // The engine. The core finds the markers that the families name, in the read-only data of the modules and in the
+    // names of the RomFS files, and gives the hits to the families as libraries. The family decides. The library
+    // `UnrealEngine` is also named when the rewriter registered an engine console variable in `main`.
+    let catalog = nxtitles::catalog()?;
+    let ro: Vec<&[u8]> = built
+        .iter()
+        .filter_map(|m| {
+            m.image
+                .get(m.parts[1].0..m.parts[1].0.saturating_add(m.parts[1].1))
+        })
+        .collect();
+    let paths = game
+        .files
+        .iter()
+        .filter_map(|(n, _)| n.strip_prefix("romfs/"));
+    let mut found = engine_scan::hits(&catalog, ro, paths);
+    if built
+        .iter()
+        .any(|m| m.name == "main" && m.fixups.contains("UE_CVAR:"))
+        && !found.contains(&"UnrealEngine")
+    {
+        found.push("UnrealEngine");
+    }
+    let mut facts = nxtitle::TitleFacts::new(nxtitle::TitleId(game.title_id));
+    facts.version = Some(game.version);
+    facts.modules = built.iter().map(|m| m.name.clone()).collect();
+    facts.libraries = found.iter().map(|s| s.to_string()).collect();
+    let detection = catalog.detect_engine(&facts);
+    let resolved = catalog.resolve(&facts);
+    let engine = resolved.engine;
     Ok(Analysis {
+        engine: engine.map(|f| f.id()),
+        engine_hits: found,
+        engine_candidates: detection.candidates,
+        limits: engine
+            .map(|f| f.limits().iter().map(|l| l.value).collect())
+            .unwrap_or_default(),
+        render_args: engine.and_then(|f| f.render_args().map(|a| a.value)),
         modules: built.into_iter().zip(bases).collect(),
         thread,
+        graphics,
+        replaced,
         settings,
     })
 }
 
 impl Analysis {
+    /// The text of `launcher.json`: the options of the host with the default settings, and the object `build`.
+    pub(super) fn launcher(&self, game: &extract::Extracted) -> String {
+        let nacp = game
+            .files
+            .iter()
+            .find(|(n, _)| n == "control.nacp")
+            .map(|(_, b)| b.as_slice());
+        super::launcher::launcher_json_for(
+            game.title_id,
+            &self.settings,
+            nacp,
+            self.render_args.is_some(),
+            Some(&super::launcher::Build {
+                generic: true,
+                engine: self.engine,
+                graphics: self.graphics.id(),
+                evidence: self.engine_hits.clone(),
+            }),
+        )
+    }
+
     pub(super) fn manifest(&self, game: &extract::Extracted) -> String {
         manifest::game_json(&manifest::Manifest {
             title_id: game.title_id,
@@ -108,18 +214,28 @@ impl Analysis {
             modules: &self.modules,
             // Enable the available shared services. This is not a compatibility verdict.
             services: nxtitle::Service::ALL.iter().map(|s| s.id()).collect(),
-            graphics: nxtitle::GraphicsApi::Nvn.id(),
-            nvn_functions: nvn::names(&self.modules),
+            graphics: self.graphics.id(),
+            // Only a game on NVN fetches NVN functions
+            nvn_functions: if self.graphics == GraphicsApi::Nvn {
+                nvn::names(&self.modules)
+            } else {
+                vec![]
+            },
             patches: false,
             main_thread: self.thread,
             aoc: &game.aoc,
             settings: self.settings,
             shared_font_decode: false,
             sf_services: vec![],
-            limits: vec![],
-            render_args: None,
+            limits: self.limits.clone(),
+            render_args: self.render_args,
             temporal_upscale: None,
             vertex_stream_null_bind: false,
+            generic: Some(manifest::Generic {
+                engine: self.engine,
+                hits: self.engine_hits.clone(),
+                candidates: self.engine_candidates.clone(),
+            }),
         })
     }
 }

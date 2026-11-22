@@ -149,6 +149,8 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 
 A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<env>.note` and `launch.opt.<env>.<value>`.
 
+The file may have one more key, the object `build`: `{"profile": "title" | "generic", "engine": "<engine family id>" | null, "graphics": "nvn" | "vulkan" | "opengl" | null, "nxkit_version": "<version of the nxb that built the app>", "evidence": ["<short marker>", ...]}`. `nxkit_version` is written for both profiles. A build with a title module writes `"profile": "title"` with its engine family and graphics API, and no evidence. The generic path (a game with no title module) writes `"profile": "generic"`, the engine family that the markers settled (`null` when none did), the graphics API found in the modules and the short names of the markers that hit. A launcher can show it, and a launcher without the key treats the app as built with a title module. `game.json` of such a build has `generic` and `engine` too, and the host prints a line at its start.
+
 | variable | kind | values | default |
 |---|---|---|---|
 | `NXKIT_OP_MODE` | choice | `docked`, `handheld` | the mode of the title module: `handheld` for a touch screen game, else `docked` |

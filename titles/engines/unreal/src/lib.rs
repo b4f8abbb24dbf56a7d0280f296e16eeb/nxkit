@@ -1,7 +1,8 @@
 //! The engine family of games on Unreal Engine 4 and 5.
 //!
 //! A fact goes here when every Unreal game shows it. A title names this family with `engine() == "unreal"`.
-//! The core does not detect the engine from the modules, so the family is declared only.
+//! A title names it. A game without a title module gets it by detection: the library `UnrealEngine` of the facts, which
+//! the generic path of `nxb build` sets when the rewriter finds an engine console variable in `main`.
 //!
 //! The frame limit is the console variable `t.MaxFPS`. The rewriter finds each `TAutoConsoleVariable` by its registered
 //! name in any build and names its offset in the fixups of `main` (`# UE_CVAR:<name>`, `nxb-rewrite` `cvar_find_all`).
@@ -116,8 +117,27 @@ impl Family for Engine {
         Layer::Engine
     }
 
-    fn detect(&self, _facts: &TitleFacts) -> Match {
-        Match::Unknown
+    /// The core reads the library `UnrealEngine` from the modules: the rewriter's finder registered a console variable
+    /// of the engine (`t.MaxFPS` and others) in `main`. Empty libraries mean that nobody looked.
+    fn detect(&self, facts: &TitleFacts) -> Match {
+        if facts.libraries.is_empty() {
+            Match::Unknown
+        } else if facts.has_library("UnrealEngine") {
+            Match::Yes
+        } else {
+            Match::No
+        }
+    }
+
+    fn markers(&self) -> &'static [nxtitle::Marker] {
+        &[nxtitle::Marker {
+            id: "UnrealEngine",
+            at: nxtitle::MarkerAt::RomfsPath,
+            pattern: "Content/Paks/",
+            evidence: nxtitle::Evidence::Unverified {
+                note: "the engine's trace is believed from its public file layout and symbol names, not read from a game here: a parity run over a local game dump checks it (NXB_PARITY_ENGINE)",
+            },
+        }]
     }
 }
 
@@ -143,6 +163,16 @@ mod tests {
             }
         );
         assert_eq!((row.kind, row.copies), (LimitKind::FpsF32, 2));
+    }
+
+    #[test]
+    fn the_engine_is_detected_from_the_library() {
+        let mut f = TitleFacts::new(nxtitle::TitleId(0));
+        assert_eq!(ENGINE.detect(&f), Match::Unknown);
+        f.libraries = vec!["UnrealEngine".into()];
+        assert_eq!(ENGINE.detect(&f), Match::Yes);
+        f.libraries = vec!["sead".into()];
+        assert_eq!(ENGINE.detect(&f), Match::No);
     }
 
     #[test]

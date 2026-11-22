@@ -27,8 +27,20 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxb build` builds a game without a title module on the generic path of `--auto-analyze` on its own, with a warning in
   the log (#54). It was an error with exit code 4. The path reads the modules, build IDs, NPDM and NVN names from the
   game and applies the SDK-wide rules (`sdk_rules.toml`, matched by function fingerprint) to the `sdk` module. The game
-  has no title patches and can fail to run. The path finds the graphics API in the modules: a game on Vulkan or OpenGL
-  stops with exit code 4 and a note, where it was built as an NVN game.
+  has no title patches and can fail to run. The path finds the graphics API in the modules (`nvnBootstrapLoader`,
+  `vkCreateInstance`, the OpenGL entry points) and writes it into `game.json`. A game on OpenGL builds with no shader
+  step, and the host has no OpenGL layer to run it yet. A game on Vulkan leaves out the modules besides `main` and
+  `sdk` that export `vk*` functions (the loader and the driver, which the host's Vulkan layer replaces) and translates
+  its SPIR-V shaders. This is not checked on a Vulkan game.
+  The path also finds the engine family of the game. The family `unreal` detects it from the library `UnrealEngine`,
+  which the path names when the rewriter registered an engine console variable in `main`. The manifest then has the
+  family's frame limit and render size arguments, and the build logs the family.
+  The engine is found from markers that a family names (`Family::markers`, W40): byte strings in the modules and file
+  names in the RomFS, found in one pass. `Catalog::detect_engine` takes the one family that matches, or the one that
+  refines the others. Only `unreal` and `unity` have markers. `game.json` of such a build has `generic` and `engine`
+  (family, markers, candidates), and the host prints a line at its start.
+  `launcher.json` has the optional object `build` (`profile` title or generic, `engine`, `graphics`, `nxkit_version`, `evidence`) for a
+  launcher, and the generic path writes the file too.
 
 ## 0.15.2 - 2026-11-22
 

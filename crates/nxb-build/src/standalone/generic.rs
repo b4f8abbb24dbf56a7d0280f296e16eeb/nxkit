@@ -1,5 +1,5 @@
 //! Opt-in Mac producer built on the same title-independent analysis used by other targets.
-use super::{Say, analysis, auto_shaders, bundle, extract, graphics, io, link, stage};
+use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage, vk_shaders};
 use crate::Args;
 use std::path::Path;
 
@@ -100,14 +100,38 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
-    // A game on Vulkan or OpenGL would otherwise be built as an NVN game and fail in a way that names nothing.
-    graphics::generic_supported(graphics::detect(&analyzed.modules), game.title_id)
-        .map_err(|e| crate::exit::fail(4, e))?;
+    match (analyzed.engine, analyzed.engine_candidates.as_slice()) {
+        (Some(id), _) => p.say(&format!(
+            "engine family {id}, found from the markers {}: the family's frame limit and render size arguments apply",
+            analyzed.engine_hits.join(", ")
+        )),
+        (None, []) => p.say("no engine family found from the modules and the RomFS"),
+        (None, many) => p.say(&format!(
+            "no engine family: the markers {} fit {}, and nothing settles it",
+            analyzed.engine_hits.join(", "),
+            many.join(", ")
+        )),
+    }
+    let vulkan = analyzed.graphics == nxtitle::GraphicsApi::Vulkan;
+    if vulkan && !analyzed.replaced.is_empty() {
+        p.say(&format!(
+            "the Vulkan layer of the host replaces the modules {}: they are left out",
+            analyzed.replaced.join(", ")
+        ));
+    }
     let shaders = stage(
         p,
         "shaders",
         "discover and translate shaders for macOS",
         || {
+            // Only a game on NVN has NVN shaders to split and translate
+            if analyzed.graphics != nxtitle::GraphicsApi::Nvn {
+                // a game on Vulkan has its shaders translated after the RomFS is in the run folder
+                return Ok((
+                    vec![],
+                    format!("none: the game renders with {}", analyzed.graphics.id()),
+                ));
+            }
             let files = auto_shaders::discover(&game.modules, &game.files, false)?;
             let count = files
                 .iter()
@@ -124,13 +148,18 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
     }
     std::fs::create_dir(&partial).map_err(|e| io(&partial, e))?;
-    stage(p, "link", "make Mac app and sign guest dylib", || {
+    let run = stage(p, "link", "make Mac app and sign guest dylib", || {
         let run = bundle::skeleton(
             &partial,
             &host,
             &bundle::info_plist(&bundle::file_name(name), &id, &game.version.to_string()),
         )?;
         put(&run, "game.json", analyzed.manifest(&game).as_bytes())?;
+        put(
+            &run,
+            nxkit_abi::launch::FILE,
+            analyzed.launcher(&game).as_bytes(),
+        )?;
         put(&run, "main.npdm", &game.npdm)?;
         for dir in &game.directories {
             let rel =
@@ -142,8 +171,16 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         }
         link::module_files(&run, &analyzed.modules, |_, _| {})?;
         link::write_dylib(&run, &analyzed.modules, |_, _| {})?;
-        Ok(((), "Mac host and guest linked".into()))
+        Ok((run, "Mac host and guest linked".into()))
     })?;
+    if vulkan {
+        let scratch =
+            crate::host::TempDir::new_in(a.work_dir.as_deref().unwrap_or(&std::env::temp_dir()))?;
+        stage(p, "shaders", "translate the SPIR-V shaders", || {
+            let d = vk_shaders::run(a, scratch.path(), p, &run)?;
+            Ok(((), d.summary))
+        })?;
+    }
     stage(p, "bundle", "sign and publish new app", || {
         bundle::sign(&partial)?;
         publish(&partial, &out)?;
